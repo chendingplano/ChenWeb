@@ -74,6 +74,33 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 		out.Pareto = append([]ParetoPoint(nil), r.Pareto...)
 		sort.Slice(out.Pareto, func(i, j int) bool { return out.Pareto[i].Variant < out.Pareto[j].Variant })
 	}
+	if r.Slices != nil {
+		out.Slices = map[string][]AggregateRow{}
+		for k, v := range r.Slices {
+			x := append([]AggregateRow(nil), v...)
+			sort.Slice(x, func(i, j int) bool {
+				if x[i].Metric != x[j].Metric {
+					return x[i].Metric < x[j].Metric
+				}
+				return x[i].Component < x[j].Component
+			})
+			out.Slices[k] = x
+		}
+	}
+	if r.PrimaryVectors != nil {
+		out.PrimaryVectors = map[string][]AggregateRow{}
+		for k, v := range r.PrimaryVectors {
+			x := append([]AggregateRow(nil), v...)
+			sort.Slice(x, func(i, j int) bool { return x[i].Metric < x[j].Metric })
+			out.PrimaryVectors[k] = x
+		}
+	}
+	if r.PricingSnapshot != nil {
+		out.PricingSnapshot = map[string]string{}
+		for k, v := range r.PricingSnapshot {
+			out.PricingSnapshot[k] = v
+		}
+	}
 	return out
 }
 func RenderJSON(r BenchmarkReport) ([]byte, error) {
@@ -178,6 +205,37 @@ func RenderMarkdown(r BenchmarkReport) string {
 		}
 		if r.EstimatedCost != nil {
 			b.WriteString("- estimated cost: " + fmtFloat(*r.EstimatedCost) + "\n")
+		}
+	}
+	if len(r.PrimaryVectors) > 0 {
+		b.WriteString("\n## Processor vectors\n\n")
+		keys := make([]string, 0, len(r.PrimaryVectors))
+		for k := range r.PrimaryVectors {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("### " + mdEscape(k) + "\n\n")
+			for _, a := range r.PrimaryVectors[k] {
+				b.WriteString("- " + mdEscape(a.Metric) + ": " + fmtFloatPtr(a.Value) + "\n")
+			}
+		}
+	}
+	if len(r.PricingSnapshot) > 0 {
+		b.WriteString("\n## Pricing\n\n")
+		keys := make([]string, 0, len(r.PricingSnapshot))
+		for k := range r.PricingSnapshot {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("- " + mdEscape(k) + ": " + mdEscape(r.PricingSnapshot[k]) + "\n")
+		}
+	}
+	if len(r.Pareto) > 0 {
+		b.WriteString("\n## Pareto trade-offs\n\n")
+		for _, p := range r.Pareto {
+			b.WriteString("- " + mdEscape(p.Variant) + ": quality=" + fmtFloatPtr(p.Quality) + " latency=" + fmtFloatPtr(p.Latency) + " cost=" + fmtFloatPtr(p.Cost) + "\n")
 		}
 	}
 	return b.String()

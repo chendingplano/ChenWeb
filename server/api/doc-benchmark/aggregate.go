@@ -118,6 +118,7 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		vals := []float64{}
 		tp, fp, fn := 0, 0, 0
 		num, den := 0, 0
+		eligibleUnits := map[string]bool{}
 		sum := 0.0
 		any := 0
 		for _, u := range us {
@@ -140,6 +141,9 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 				case "matched_field_micro":
 					num += x.Numerator
 					den += x.Denominator
+					if x.Denominator > 0 {
+						eligibleUnits[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)] = true
+					}
 				case "raw_count":
 					n := x.Numerator
 					if n == 0 && x.Value != nil {
@@ -185,7 +189,7 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 			}
 		case "matched_field_micro":
 			if den > 0 {
-				a.NonNullUnits = len(us)
+				a.NonNullUnits = len(eligibleUnits)
 			}
 			if den > 0 {
 				v := float64(num) / float64(den)
@@ -342,14 +346,14 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 		b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)] = u
 	}
 	pairs := map[string][]float64{}
-	pooledA, pooledB := map[string][3]int{}, map[string][3]int{}
-	applicable := 0
+	type metricKey struct{ metric, component, kind string }
+	pooledA, pooledB := map[metricKey][3]int{}, map[metricKey][3]int{}
+	applicableByMetric := map[metricKey]int{}
 	for _, u := range c.Candidate {
 		if x, ok := b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)]; ok {
 			if !u.Applicable || !x.Applicable {
 				continue
 			}
-			pairApplicable := false
 			for _, r := range u.Scores {
 				for _, br := range x.Scores {
 					if r.Metric != br.Metric || r.Component != br.Component {
@@ -362,26 +366,24 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 						if x.UpstreamInvalid && br.ConditionalAttribution {
 							continue
 						}
-						pairApplicable = true
-						a := pooledA[r.Metric]
+						key := metricKey{r.Metric, r.Component, canonicalAggregationKind(r.AggregationKind)}
+						a := pooledA[key]
 						a[0] += br.TP
 						a[1] += br.FP
 						a[2] += br.FN
-						pooledA[r.Metric] = a
-						q := pooledB[r.Metric]
+						pooledA[key] = a
+						q := pooledB[key]
 						q[0] += r.TP
 						q[1] += r.FP
 						q[2] += r.FN
-						pooledB[r.Metric] = q
+						pooledB[key] = q
+						applicableByMetric[key]++
 					}
 					if r.Value != nil && br.Value != nil && !(u.UpstreamInvalid && r.ConditionalAttribution) && !(x.UpstreamInvalid && br.ConditionalAttribution) {
-						pairApplicable = true
-						pairs[r.Metric] = append(pairs[r.Metric], *r.Value-*br.Value)
+						// coverage for macro metrics is tracked independently below
+						pairs[r.Metric+"\x00"+r.Component] = append(pairs[r.Metric+"\x00"+r.Component], *r.Value-*br.Value)
 					}
 				}
-			}
-			if pairApplicable {
-				applicable++
 			}
 		}
 	}
@@ -393,15 +395,15 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 		}
 		mean /= float64(len(v))
 		med, sd := distribution(v)
-		out = append(out, PairedDelta{Metric: m, Delta: &mean, Median: med, PopulationSD: sd, AggregationKind: "paired_macro_diagnostic", PairedUnits: len(v), ApplicableUnits: applicable})
+		out = append(out, PairedDelta{Metric: m, Delta: &mean, Median: med, PopulationSD: sd, AggregationKind: "paired_macro_diagnostic", PairedUnits: len(v), ApplicableUnits: len(v)})
 	}
-	for m, a := range pooledA {
-		q := pooledB[m]
-		va := microValue(m, a[0], a[1], a[2])
-		vb := microValue(m, q[0], q[1], q[2])
+	for key, a := range pooledA {
+		q := pooledB[key]
+		va := microValue(key.metric, a[0], a[1], a[2])
+		vb := microValue(key.metric, q[0], q[1], q[2])
 		if va != nil && vb != nil {
 			d := *vb - *va
-			out = append(out, PairedDelta{Metric: m, Delta: &d, AggregationKind: "count_derived_micro", PairedUnits: applicable, ApplicableUnits: applicable})
+			out = append(out, PairedDelta{Metric: key.metric, Delta: &d, AggregationKind: key.kind, PairedUnits: applicableByMetric[key], ApplicableUnits: applicableByMetric[key]})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Metric < out[j].Metric })
