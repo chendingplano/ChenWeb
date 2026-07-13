@@ -1,4 +1,14 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-	"hello_world": "Hello, {name} from zh-cn!"
+	"hello_world": "Hello, {name} from zh-cn!",
+	"semos_nav_home": "首页",
+	"semos_nav_workspace": "工作台",
+	"semos_nav_knowledge_base": "知识库",
+	"semos_nav_about": "关于我们",
+	"semos_signup_login": "注册 / 登录",
+	"semos_get_started": "立即开始",
+	"semos_workspace_announcements": "公告",
+	"semos_workspace_recent": "最近活动",
+	"semos_workspace_alarms": "告警与错误",
+	"semos_workspace_apps": "应用"
 }
