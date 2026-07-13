@@ -383,6 +383,13 @@ func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
 	if err := a.validate(); err != nil {
 		return Artifact{}, err
 	}
+	own, err := a.Config.Store.LoadOwnership(a.Config.AttemptID)
+	if err != nil || own.Verified || own.Nonce != a.Config.Nonce || own.Workspace != a.WorkPath || own.EvidencePath != a.EvidencePath {
+		if err == nil {
+			err = errors.New("reverify: ownership is already verified or mismatched")
+		}
+		return Artifact{}, err
+	}
 	f, err := os.OpenFile(filepath.Join(a.EvidencePath, name), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return Artifact{}, err
@@ -404,21 +411,25 @@ func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
 	return art, nil
 }
 func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
-	if err := a.validate(); err != nil {
+	fail := func(err error) error {
+		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "error", err)
 		return err
+	}
+	if err := a.validate(); err != nil {
+		return fail(err)
 	}
 	own, err := a.Config.Store.LockOwnership(a.Config.AttemptID)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	if own.Nonce != a.Config.Nonce || own.Workspace != a.WorkPath || own.WorkRoot != a.Config.WorkRoot || own.EvidenceRoot != a.Config.EvidenceRoot {
-		return ErrUnsafePath
+		return fail(ErrUnsafePath)
 	}
 	if own.Verified && o.DiscardUnverified {
-		return ErrVerifiedImmutable
+		return fail(ErrVerifiedImmutable)
 	}
 	if !own.Verified && !o.DiscardUnverified {
-		return errors.New("cleanup requires verified evidence or explicit discard")
+		return fail(errors.New("cleanup requires verified evidence or explicit discard"))
 	}
 	if !own.Verified && o.DiscardUnverified {
 		ents, err := os.ReadDir(a.EvidencePath)
@@ -435,6 +446,10 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 				}
 			}
 		}
+	}
+	// Revalidate immediately before filesystem removal: DB work may have taken time.
+	if err := a.validate(); err != nil {
+		return fail(err)
 	}
 	if err := a.Config.Store.CleanupAdapters(a.Config.AttemptID); err != nil {
 		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "db_pending", err)
