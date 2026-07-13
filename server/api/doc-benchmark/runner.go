@@ -25,6 +25,8 @@ type ScorerError struct{ Err error }
 func (e *ScorerError) Error() string { return "scorer: " + e.Err.Error() }
 func (e *ScorerError) Unwrap() error { return e.Err }
 
+var errHeartbeat = errors.New("benchmark heartbeat lost")
+
 type RunnerConfig struct {
 	Owner                            string
 	Timeout, Heartbeat, AttemptLease time.Duration
@@ -75,8 +77,18 @@ func (r Runner) RunCase(ctx context.Context, caseRunID string) error {
 			r.Config.Heartbeat = time.Second
 		}
 	}
+	if r.Config.Heartbeat > time.Minute || r.Config.Heartbeat > r.Config.AttemptLease/3 {
+		return errors.New("runner: heartbeat must be <= 1m and <= attempt lease/3")
+	}
 	if r.Config.AttemptLease <= r.Config.Timeout {
 		return errors.New("runner: attempt lease must exceed timeout")
+	}
+	var applicability string
+	if err := r.Store.DB.QueryRowContext(ctx, `SELECT applicability FROM kb.benchmark_case_runs WHERE id=$1`, caseRunID).Scan(&applicability); err != nil {
+		return err
+	}
+	if applicability != "applicable" {
+		return nil
 	}
 	for {
 		claim, err := r.Store.ClaimAttempt(ctx, caseRunID, r.Config.Owner, r.now(), r.Config.AttemptLease, r.Config.MaxAttempts)
@@ -131,6 +143,7 @@ func (r Runner) runAttempt(parent context.Context, attempt AttemptRecord) error 
 	defer cancel()
 	var stopped atomic.Bool
 	done := make(chan struct{})
+	heartbeatErr := make(chan error, 1)
 	go func() {
 		t := time.NewTicker(r.Config.Heartbeat)
 		defer t.Stop()
@@ -140,7 +153,13 @@ func (r Runner) runAttempt(parent context.Context, attempt AttemptRecord) error 
 				if stopped.Load() {
 					return
 				}
-				_ = r.Store.HeartbeatAttempt(context.Background(), attempt.ID, r.Config.Owner, r.now().Add(r.Config.AttemptLease), map[string]any{"phase": "running"})
+				if e := r.Store.HeartbeatAttempt(context.Background(), attempt.ID, r.Config.Owner, r.now().Add(r.Config.AttemptLease), map[string]any{"phase": "running"}); e != nil {
+					select {
+					case heartbeatErr <- e:
+					default:
+					}
+					return
+				}
 			case <-done:
 				return
 			}
@@ -149,39 +168,58 @@ func (r Runner) runAttempt(parent context.Context, attempt AttemptRecord) error 
 	defer func() { stopped.Store(true); close(done) }()
 
 	var err error
+	var executionErr error
 	if attempt.Kind == "execution" {
 		if r.Work.Execute == nil {
 			err = errors.New("runner: missing executor")
 		} else {
-			err = r.Work.Execute(ctx, attempt)
+			executionErr = r.Work.Execute(ctx, attempt)
+			err = executionErr
 		}
-		if err == nil {
-			if r.Work.Capture == nil {
+		if r.Work.Capture == nil {
+			if err == nil {
 				err = errors.New("runner: missing capture")
 			}
 		}
-	} else if attempt.Kind != "rescore" {
+	} else if attempt.Kind == "rescore" {
+		if r.Work.Capture == nil {
+			err = errors.New("runner: missing capture")
+		}
+	} else {
 		err = fmt.Errorf("runner: unknown attempt kind %q", attempt.Kind)
 	}
 	var captured any
 	captureVerified := false
-	if err == nil {
-		// Capture returns only after the adapter has copied and hash-verified
-		// canonical evidence.  Keep that fact even when reconciliation or the
-		// scorer subsequently fails: those failures must rescore the evidence,
-		// never invoke the production controller again.
-		captured, err = r.Work.Capture(ctx, attempt)
-		captureVerified = err == nil
+	if (attempt.Kind == "execution" || attempt.Kind == "rescore") && r.Work.Capture != nil {
+		// Capture is intentionally attempted even after a processor error.  A
+		// durable, hash-verified partial output is useful for diagnosis and
+		// rescore; it never converts the processor failure into success.
+		var captureErr error
+		captured, captureErr = r.Work.Capture(ctx, attempt)
+		captureVerified = captureErr == nil
+		if captureErr != nil && err == nil {
+			err = captureErr
+		}
 	}
-	if err == nil && r.Work.Reconcile != nil {
+	if captureVerified && executionErr == nil && err == nil && r.Work.Reconcile != nil {
 		captured, err = r.Work.Reconcile(captured)
 	}
-	if err == nil && r.Work.Score != nil {
+	if captureVerified && executionErr == nil && err == nil && r.Work.Score != nil {
 		err = r.Work.Score(ctx, attempt, captured)
+	}
+	if executionErr != nil {
+		err = executionErr
+	}
+	select {
+	case hb := <-heartbeatErr:
+		if err == nil {
+			err = fmt.Errorf("%w: %v", errHeartbeat, hb)
+		}
+	default:
 	}
 	verified := captureVerified
 	lifecycle, failure := classifyAttemptError(ctx, parent, err)
-	if verified {
+	if verified && err == nil {
 		lifecycle, failure = "succeeded", ""
 	}
 	if e := r.Store.FinishAttempt(context.Background(), attempt.ID, r.Config.Owner, lifecycle, failure, max(0, time.Since(attempt.StartedAt.Time).Milliseconds()), verified); e != nil {
@@ -204,6 +242,9 @@ func classifyAttemptError(ctx, parent context.Context, err error) (string, strin
 	}
 	if errors.Is(parent.Err(), context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 		return "canceled", "canceled"
+	}
+	if errors.Is(err, errHeartbeat) {
+		return "failed", "stale_lease"
 	}
 	var pe *ProcessorError
 	if errors.As(err, &pe) {

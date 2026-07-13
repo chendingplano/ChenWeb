@@ -69,7 +69,7 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 		}
 		return Claim{Claimed: false}, nil
 	}
-	if _, e = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET lifecycle='failed',failure_kind='infrastructure_failed',finished_at=$2,lease_owner=NULL,lease_expires_at=NULL WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND (lease_expires_at IS NULL OR lease_expires_at < $2)`, caseRunID, now); e != nil {
+	if _, e = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET lifecycle='failed',failure_kind='stale_lease',finished_at=$2,lease_owner=NULL,lease_expires_at=NULL WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND (lease_expires_at IS NULL OR lease_expires_at < $2)`, caseRunID, now); e != nil {
 		return Claim{}, e
 	}
 	if maxAttempts > 0 && max >= maxAttempts {
@@ -100,7 +100,17 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 	if e = tx.Commit(); e != nil {
 		return Claim{}, e
 	}
-	return Claim{Claimed: true, Attempt: AttemptRecord{ID: id, CaseRunID: caseRunID, Number: n, Kind: kind, Lifecycle: "running", LeaseOwner: sql.NullString{String: owner, Valid: true}, LeaseExpiresAt: sql.NullTime{Time: exp, Valid: true}, CaptureVerified: verified}}, nil
+	var sourceID sql.NullString
+	if src != nil {
+		sourceID = sql.NullString{String: fmt.Sprint(src), Valid: true}
+	}
+	var inputID sql.NullInt64
+	if input != nil {
+		if v, ok := input.(int64); ok {
+			inputID = sql.NullInt64{Int64: v, Valid: true}
+		}
+	}
+	return Claim{Claimed: true, Attempt: AttemptRecord{ID: id, CaseRunID: caseRunID, Number: n, Kind: kind, SourceExecutionAttemptID: sourceID, InputRecordID: inputID, Lifecycle: "running", LeaseOwner: sql.NullString{String: owner, Valid: true}, LeaseExpiresAt: sql.NullTime{Time: exp, Valid: true}, CaptureVerified: verified}}, nil
 }
 func (s SQLStore) HeartbeatAttempt(ctx context.Context, id, owner string, until time.Time, telemetry any) error {
 	b, err := canonicalJSON(telemetry)
