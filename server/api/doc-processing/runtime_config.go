@@ -25,12 +25,15 @@ func promptConfig(path, ref, text string) map[string]any {
 	}
 	return v
 }
+func modelConfig(ref, path, name string, c structureModelConfig) map[string]any {
+	return map[string]any{"ref": ref, "path": path, "name": name, "definition_sha256": fileHash(path), "profile": c.ProfileName, "provider": c.BaseURL, "model": c.ModelName, "timeout_sec": c.TimeoutSec, "thinking_type": c.ThinkingType}
+}
 
 // RuntimeConfig returns the effective non-secret chunking settings.
 func (s *FixedSizeChunkingService) RuntimeConfig() map[string]any {
 	return map[string]any{"chunk_size": s.ChunkSize, "overlap_percent": s.OverlapPercent,
-		"model":          map[string]any{"ref": s.ModelRef, "path": s.ModelCfgPath, "name": s.ModelName},
-		"summary_model":  map[string]any{"ref": s.SummaryModelRef, "path": s.SummaryModelCfgPath, "name": s.SummaryModelName},
+		"model":          map[string]any{"ref": s.ModelRef, "path": s.ModelCfgPath, "name": s.ModelName, "definition_sha256": fileHash(s.ModelCfgPath)},
+		"summary_model":  map[string]any{"ref": s.SummaryModelRef, "path": s.SummaryModelCfgPath, "name": s.SummaryModelName, "definition_sha256": fileHash(s.SummaryModelCfgPath)},
 		"prompt":         promptConfig(s.PromptPath, s.PromptRef, s.PromptText),
 		"summary_prompt": promptConfig(s.SummaryPromptPath, s.SummaryPromptRef, s.SummaryPromptText),
 		"concurrency":    map[string]any{"summary_max_tasks": s.GenerateSummaryMaxTasks, "topics_max_tasks": s.ExtractTopicsMaxTasks}}
@@ -42,9 +45,9 @@ func (p *MetricsProcessor) RuntimeConfig() map[string]any {
 	return map[string]any{"mention_prompt": promptConfig(p.MentionPromptPath, p.MentionPromptRef, p.MentionPromptText),
 		"relation_prompt":      promptConfig(p.RelationPromptPath, p.RelationPromptRef, p.RelationPromptText),
 		"merge_resolve_prompt": promptConfig(p.MergeResolvePromptPath, p.MergeResolvePromptRef, p.MergeResolvePromptText),
-		"model":                map[string]any{"ref": p.ModelRef, "path": p.ModelCfgPath, "name": p.ModelName},
-		"mention_model":        map[string]any{"ref": p.MentionModelRef, "path": p.MentionModelCfgPath, "name": p.MentionModelName},
-		"relation_model":       map[string]any{"ref": p.RelationModelRef, "path": p.RelationModelCfgPath, "name": p.RelationModelName},
-		"merge_resolve_model":  map[string]any{"ref": p.MergeResolveModelRef, "path": p.MergeResolveModelCfgPath, "name": p.MergeResolveModelName},
+		"model":                modelConfig(p.ModelRef, p.ModelCfgPath, p.ModelName, p.RelationModelCfg),
+		"mention_model":        modelConfig(p.MentionModelRef, p.MentionModelCfgPath, p.MentionModelName, p.MentionModelCfg),
+		"relation_model":       modelConfig(p.RelationModelRef, p.RelationModelCfgPath, p.RelationModelName, p.RelationModelCfg),
+		"merge_resolve_model":  modelConfig(p.MergeResolveModelRef, p.MergeResolveModelCfgPath, p.MergeResolveModelName, p.MergeResolveModelCfg),
 		"enrich_group_size":    p.MetricEnrichGroupSize, "max_tasks": p.MaxTasks}
 }
