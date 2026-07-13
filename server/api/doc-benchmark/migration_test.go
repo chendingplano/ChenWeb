@@ -58,6 +58,7 @@ func assertBenchmarkCatalog(t *testing.T, db *sql.DB) {
 		"uq_benchmark_case_runs":                {"u", "UNIQUE (run_id, case_id, repetition)"},
 		"uq_benchmark_case_attempts":            {"u", "UNIQUE (case_run_id, attempt_number)"},
 		"uq_benchmark_case_attempt_owner":       {"u", "UNIQUE (id, case_run_id)"},
+		"fk_attempt_source_same_case":           {"f", "FOREIGN KEY (source_execution_attempt_id, case_run_id) REFERENCES kb.benchmark_case_attempts(id, case_run_id)"},
 		"ck_rescore_source":                     {"c", "CHECK (((kind = 'execution'::text) AND (source_execution_attempt_id IS NULL)) OR ((kind = 'rescore'::text) AND (source_execution_attempt_id IS NOT NULL)))"},
 		"ck_failure_kind":                       {"c", "CHECK (((lifecycle <> ALL (ARRAY['failed'::text])) AND (failure_kind IS NULL)) OR (lifecycle = 'failed'::text))"},
 		"fk_case_runs_selected_attempt":         {"f", "FOREIGN KEY (selected_attempt_id, id) REFERENCES kb.benchmark_case_attempts(id, case_run_id) DEFERRABLE INITIALLY DEFERRED"},
@@ -91,6 +92,13 @@ func assertBenchmarkCatalog(t *testing.T, db *sql.DB) {
 		if unique != exp.unique || strings.Join(strings.Fields(def), " ") != strings.Join(strings.Fields(exp.def), " ") {
 			t.Errorf("index %s=(%v,%s), want (%v,%s)", name, unique, def, exp.unique, exp.def)
 		}
+	}
+}
+
+func expectExecError(t *testing.T, db *sql.DB, stmt string, args ...any) {
+	t.Helper()
+	if _, err := db.Exec(stmt, args...); err == nil {
+		t.Fatalf("expected statement to fail: %s", stmt)
 	}
 }
 
@@ -193,6 +201,25 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if err = db.QueryRow(`INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind) VALUES ($1,1,'execution') RETURNING id`, cr2).Scan(&at2); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_workspaces(execution_attempt_id,canonical_dir,nonce) VALUES ($1,'/tmp/kind','kind')`, at2); err != nil {
+		t.Fatal(err)
+	}
+	expectExecError(t, db, `UPDATE kb.benchmark_case_attempts SET kind='rescore',source_execution_attempt_id=$1 WHERE id=$2`, at, at2)
+	// Provenance: source must exist in the same case and be an execution attempt.
+	var rs string
+	if err = db.QueryRow(`INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind,source_execution_attempt_id) VALUES ($1,2,'rescore',$2) RETURNING id`, cr, at).Scan(&rs); err != nil {
+		t.Fatal(err)
+	}
+	expectExecError(t, db, `INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind,source_execution_attempt_id) VALUES ($1,3,'rescore',$2)`, cr, rs)
+	expectExecError(t, db, `INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind,source_execution_attempt_id) VALUES ($1,3,'rescore',$2)`, cr, "00000000-0000-0000-0000-000000000000")
+	expectExecError(t, db, `INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind,source_execution_attempt_id) VALUES ($1,2,'rescore',$2)`, cr2, at)
+	// Named CHECK constraints and owner XORs.
+	expectExecError(t, db, `INSERT INTO kb.benchmark_case_runs(run_id,case_id,repetition) VALUES ($1,'bad',0)`, run)
+	expectExecError(t, db, `INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind) VALUES ($1,0,'execution')`, cr)
+	expectExecError(t, db, `INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind) VALUES ($1,9,'bogus')`, cr)
+	expectExecError(t, db, `INSERT INTO kb.benchmark_scores(processor,scorer,scorer_version,metric,slice,direction,aggregation_kind) VALUES ('p','s','1','bad','all','higher','mean')`)
+	expectExecError(t, db, `INSERT INTO kb.benchmark_scores(attempt_id,run_id,processor,scorer,scorer_version,metric,slice,direction,aggregation_kind) VALUES ($1,$2,'p','s','1','bad2','all','higher','mean')`, at, run)
+	expectExecError(t, db, `INSERT INTO kb.benchmark_artifacts(attempt_id,kind,path,sha256,size_bytes) VALUES ($1,'bad','neg','h',-1)`, at)
 	if _, err = db.Exec(`UPDATE kb.benchmark_case_runs SET selected_attempt_id=$1 WHERE id=$2`, at2, cr); err == nil {
 		t.Fatal("cross-case selected attempt accepted")
 	}
