@@ -93,6 +93,21 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if _, err = db.Exec(`INSERT INTO kb.benchmark_artifacts(attempt_id,kind,path,sha256,size_bytes) VALUES ($1,'log','x','h',1)`, at); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_artifacts(attempt_id,run_id,kind,path,sha256,size_bytes) VALUES ($1,$2,'bad','z','h',1)`, at, run); err == nil {
+		t.Fatal("artifact XOR owner check accepted")
+	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_artifacts(attempt_id,kind,path,sha256,size_bytes) VALUES ($1,'log','x','h',1)`, at); err == nil {
+		t.Fatal("artifact uniqueness check accepted")
+	}
+	if _, err = db.Exec(`UPDATE kb.benchmark_artifacts SET verified=true WHERE attempt_id=$1`, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE kb.benchmark_artifacts SET path='changed' WHERE attempt_id=$1`, at); err == nil {
+		t.Fatal("verified artifact update accepted")
+	}
+	if _, err = db.Exec(`DELETE FROM kb.benchmark_artifacts WHERE attempt_id=$1`, at); err == nil {
+		t.Fatal("verified artifact delete accepted")
+	}
 	if _, err = db.Exec(`UPDATE kb.benchmark_scores SET value=1 WHERE attempt_id=$1`, at); err == nil {
 		t.Fatal("selected score update accepted")
 	}
