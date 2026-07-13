@@ -65,20 +65,30 @@ func (s SQLStore) CreateRun(ctx context.Context, experimentID, variant string, r
 	vals := make([][]byte, 5)
 	inputs := []any{requested, resolved, config, prompt, scorer}
 	for i, v := range inputs {
-		vals[i], _ = canonicalJSON(v)
+		var err error
+		vals[i], err = canonicalJSON(v)
+		if err != nil {
+			return "", err
+		}
 	}
-	p, _ := canonicalJSON(pricing)
+	p, err := canonicalJSON(pricing)
+	if err != nil {
+		return "", err
+	}
 	var id string
-	err := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_runs (experiment_id,variant_name,requested_json,resolved_json,config_json,prompt_json,scorer_json,pricing_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (experiment_id,variant_name) DO UPDATE SET updated_at=kb.benchmark_runs.updated_at RETURNING id`, experimentID, variant, vals[0], vals[1], vals[2], vals[3], vals[4], p).Scan(&id)
+	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_runs (experiment_id,variant_name,requested_json,resolved_json,config_json,prompt_json,scorer_json,pricing_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (experiment_id,variant_name) DO UPDATE SET updated_at=kb.benchmark_runs.updated_at RETURNING id`, experimentID, variant, vals[0], vals[1], vals[2], vals[3], vals[4], p).Scan(&id)
 	return id, err
 }
 func (s SQLStore) CreateCaseRun(ctx context.Context, runID, caseID string, repetition int, applicability string, tags any, upstreamHash *string) (string, error) {
 	if err := checkDB(s); err != nil {
 		return "", err
 	}
-	b, _ := canonicalJSON(tags)
+	b, err := canonicalJSON(tags)
+	if err != nil {
+		return "", err
+	}
 	var id string
-	err := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_case_runs (run_id,case_id,repetition,applicability,tags_json,upstream_hash) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (run_id,case_id,repetition) DO UPDATE SET updated_at=kb.benchmark_case_runs.updated_at RETURNING id`, runID, caseID, repetition, applicability, b, upstreamHash).Scan(&id)
+	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_case_runs (run_id,case_id,repetition,applicability,tags_json,upstream_hash) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (run_id,case_id,repetition) DO UPDATE SET updated_at=kb.benchmark_case_runs.updated_at RETURNING id`, runID, caseID, repetition, applicability, b, upstreamHash).Scan(&id)
 	return id, err
 }
 func (s SQLStore) GetRun(ctx context.Context, id string) (RunRecord, error) {

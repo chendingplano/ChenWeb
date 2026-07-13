@@ -28,6 +28,9 @@ type Claim struct {
 }
 
 func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now time.Time, lease time.Duration, maxAttempts int) (Claim, error) {
+	if maxAttempts <= 0 {
+		return Claim{}, fmt.Errorf("maxAttempts must be positive")
+	}
 	if s.DB == nil {
 		return Claim{}, fmt.Errorf("nil database")
 	}
@@ -44,7 +47,25 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 		return Claim{}, e
 	}
 	now = utc(now)
-	_, _ = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET lifecycle='failed',failure_kind='stale_lease',finished_at=$2,lease_owner=NULL,lease_expires_at=NULL WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND lease_expires_at < $2`, caseRunID, now)
+	if selected.Valid {
+		if e = tx.Commit(); e != nil {
+			return Claim{}, e
+		}
+		return Claim{Claimed: false}, nil
+	}
+	var active int
+	if e = tx.QueryRowContext(txctx(ctx), `SELECT count(*) FROM kb.benchmark_case_attempts WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND (lease_expires_at IS NULL OR lease_expires_at >= $2)`, caseRunID, now).Scan(&active); e != nil {
+		return Claim{}, e
+	}
+	if active > 0 {
+		if e = tx.Commit(); e != nil {
+			return Claim{}, e
+		}
+		return Claim{Claimed: false}, nil
+	}
+	if _, e = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET lifecycle='failed',failure_kind='stale_lease',finished_at=$2,lease_owner=NULL,lease_expires_at=NULL WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND lease_expires_at < $2`, caseRunID, now); e != nil {
+		return Claim{}, e
+	}
 	if maxAttempts > 0 && max >= maxAttempts {
 		return Claim{Claimed: false}, tx.Commit()
 	}
@@ -81,6 +102,10 @@ func (s SQLStore) HeartbeatAttempt(ctx context.Context, id, owner string, until 
 	return affected(res)
 }
 func (s SQLStore) FinishAttempt(ctx context.Context, id, owner, lifecycle, failure string, runtimeMS int64, verified bool) error {
+	valid := map[string]bool{"succeeded": true, "failed": true, "cancelled": true}
+	if !valid[lifecycle] {
+		return fmt.Errorf("invalid terminal lifecycle %q", lifecycle)
+	}
 	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET lifecycle=$4,failure_kind=NULLIF($5,''),runtime_ms=$6,capture_verified=$7,finished_at=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1 AND lease_owner=$2 AND lifecycle IN ('leased','running')`, id, owner, utc(time.Now()), lifecycle, failure, runtimeMS, verified)
 	if e != nil {
 		return e
