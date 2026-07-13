@@ -47,7 +47,7 @@ func (s SQLStore) CreateExperiment(ctx context.Context, e Experiment) (string, e
 		return "", err
 	}
 	var id string
-	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_experiments (name,dataset_id,dataset_version,dataset_hash,raw_request_toml,raw_request_hash,resolved_experiment_json,resolved_file_hashes_json,resolved_case_set_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (raw_request_hash) DO UPDATE SET updated_at=kb.benchmark_experiments.updated_at RETURNING id`, e.Name, e.DatasetID, e.DatasetVersion, e.DatasetHash, string(e.RawTOML), e.RequestHash, b1, b2, b3).Scan(&id)
+	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_experiments (name,dataset_id,dataset_version,dataset_hash,raw_request_toml,raw_request_hash,resolved_experiment_json,resolved_file_hashes_json,resolved_case_set_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (raw_request_hash) DO UPDATE SET updated_at=kb.benchmark_experiments.updated_at WHERE kb.benchmark_experiments.name=$1 AND kb.benchmark_experiments.dataset_id=$2 AND kb.benchmark_experiments.dataset_version=$3 AND kb.benchmark_experiments.dataset_hash=$4 AND kb.benchmark_experiments.raw_request_toml=$5 AND kb.benchmark_experiments.resolved_experiment_json=$7 AND kb.benchmark_experiments.resolved_file_hashes_json=$8 AND kb.benchmark_experiments.resolved_case_set_json=$9 RETURNING id`, e.Name, e.DatasetID, e.DatasetVersion, e.DatasetHash, string(e.RawTOML), e.RequestHash, b1, b2, b3).Scan(&id)
 	return id, err
 }
 func (s SQLStore) GetExperimentByRequestHash(ctx context.Context, h string) (ExperimentRecord, error) {
