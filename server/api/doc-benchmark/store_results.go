@@ -25,7 +25,7 @@ type ArtifactRecord struct {
 }
 
 func (s SQLStore) ReportArtifacts(ctx context.Context, runID string) ([]ArtifactRecord, error) {
-	rows, e := s.DB.QueryContext(txctx(ctx), `SELECT a.id,a.attempt_id,a.run_id,a.kind,a.path,a.sha256,a.size_bytes,a.verified,a.metadata_json FROM kb.benchmark_artifacts a LEFT JOIN kb.benchmark_case_attempts at ON at.id=a.attempt_id LEFT JOIN kb.benchmark_case_runs c ON c.id=at.case_run_id WHERE a.run_id=$1 OR (c.run_id=$1 AND c.selected_attempt_id=a.attempt_id) ORDER BY a.kind,a.path,a.id`, runID)
+	rows, e := s.DB.QueryContext(txctx(ctx), `SELECT a.id,a.attempt_id,a.run_id,a.kind,a.path,a.sha256,a.size_bytes,a.verified,a.metadata_json FROM kb.benchmark_artifacts a LEFT JOIN kb.benchmark_case_attempts at ON at.id=a.attempt_id LEFT JOIN kb.benchmark_case_runs c ON c.id=at.case_run_id LEFT JOIN kb.benchmark_case_attempts src ON src.id=at.source_execution_attempt_id WHERE a.run_id=$1 OR (c.run_id=$1 AND (c.selected_attempt_id=a.attempt_id OR (c.selected_attempt_id=at.id AND at.kind='rescore' AND a.attempt_id=at.source_execution_attempt_id))) ORDER BY a.kind,a.path,a.id`, runID)
 	if e != nil {
 		return nil, e
 	}
