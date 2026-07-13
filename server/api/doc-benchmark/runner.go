@@ -225,7 +225,10 @@ func (r Runner) runAttempt(parent context.Context, attempt AttemptRecord) error 
 	if e := r.Store.FinishAttempt(context.Background(), attempt.ID, r.Config.Owner, lifecycle, failure, max(0, time.Since(attempt.StartedAt.Time).Milliseconds()), verified); e != nil {
 		return e
 	}
-	if verified && !r.Config.RetainWorkspaces && r.Work.Cleanup != nil {
+	// Keep verified evidence for every non-success terminal outcome so a
+	// scorer/reconcile failure can be retried as a rescore. Cleanup is only
+	// safe once the attempt has fully succeeded (or explicit retention is on).
+	if lifecycle == "succeeded" && verified && !r.Config.RetainWorkspaces && r.Work.Cleanup != nil {
 		if e := r.Work.Cleanup(context.Background(), attempt); e != nil {
 			return e
 		}
