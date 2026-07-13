@@ -67,6 +67,34 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if _, err = db.Exec(`UPDATE kb.benchmark_case_attempts SET lifecycle='running' WHERE id=$1`, at); err == nil {
 		t.Fatal("terminal attempt update unexpectedly succeeded")
 	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_runs(experiment_id,variant_name) VALUES ($1,'v')`, exp); err == nil {
+		t.Fatal("duplicate run variant accepted")
+	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind) VALUES ($1,1,'rescore')`, cr); err == nil {
+		t.Fatal("rescore without source accepted")
+	}
+	var cr2, at2 string
+	if err = db.QueryRow(`INSERT INTO kb.benchmark_case_runs(run_id,case_id,repetition) VALUES ($1,'other',1) RETURNING id`, run).Scan(&cr2); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind) VALUES ($1,1,'execution') RETURNING id`, cr2).Scan(&at2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE kb.benchmark_case_runs SET selected_attempt_id=$1 WHERE id=$2`, at2, cr); err == nil {
+		t.Fatal("cross-case selected attempt accepted")
+	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_workspaces(execution_attempt_id,canonical_dir,nonce) VALUES ($1,'/tmp/x','n')`, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_artifacts(attempt_id,kind,path,sha256,size_bytes) VALUES ($1,'log','x','h',1)`, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE kb.benchmark_scores SET value=1 WHERE attempt_id=$1`, at); err == nil {
+		t.Fatal("selected score update accepted")
+	}
+	if _, err = db.Exec(`DELETE FROM kb.benchmark_scores WHERE attempt_id=$1`, at); err == nil {
+		t.Fatal("selected score delete accepted")
+	}
 	if err = goose.Down(db, dir); err != nil {
 		t.Fatal(err)
 	}
