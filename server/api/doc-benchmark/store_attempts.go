@@ -60,7 +60,7 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 		return Claim{Claimed: false}, nil
 	}
 	var active int
-	if e = tx.QueryRowContext(txctx(ctx), `SELECT count(*) FROM kb.benchmark_case_attempts WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND (lease_expires_at IS NULL OR lease_expires_at >= $2)`, caseRunID, now).Scan(&active); e != nil {
+	if e = tx.QueryRowContext(txctx(ctx), `SELECT count(*) FROM kb.benchmark_case_attempts WHERE case_run_id=$1 AND lifecycle IN ('leased','running') AND lease_expires_at >= $2`, caseRunID, now).Scan(&active); e != nil {
 		return Claim{}, e
 	}
 	if active > 0 {
