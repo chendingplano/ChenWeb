@@ -18,21 +18,23 @@ CREATE TABLE kb.benchmark_artifacts (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), attempt_id uuid REFERENCES kb.benchmark_case_attempts(id) ON DELETE CASCADE, run_id uuid REFERENCES kb.benchmark_runs(id) ON DELETE CASCADE, kind text NOT NULL, path text NOT NULL, sha256 text NOT NULL, size_bytes bigint NOT NULL CHECK(size_bytes >= 0), verified boolean NOT NULL DEFAULT false, metadata_json jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT ck_artifact_owner_xor CHECK((attempt_id IS NOT NULL) <> (run_id IS NOT NULL)));
 CREATE UNIQUE INDEX uq_benchmark_artifacts_owner_kind_path ON kb.benchmark_artifacts (COALESCE(attempt_id,run_id),(attempt_id IS NULL),kind,path);
 
-CREATE OR REPLACE FUNCTION kb.benchmark_terminal_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_TABLE_NAME='benchmark_case_attempts' AND OLD.input_record_id_snapshot IS DISTINCT FROM NEW.input_record_id_snapshot THEN RAISE EXCEPTION 'input snapshot is immutable'; END IF; IF OLD.lifecycle IN ('succeeded','failed','cancelled') AND (NEW IS DISTINCT FROM OLD) THEN RAISE EXCEPTION 'terminal benchmark row is immutable'; END IF; RETURN NEW; END $$;
+CREATE OR REPLACE FUNCTION kb.benchmark_terminal_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_TABLE_NAME='benchmark_case_attempts' AND OLD.input_record_id_snapshot IS DISTINCT FROM NEW.input_record_id_snapshot THEN RAISE EXCEPTION 'input snapshot is immutable'; END IF; IF OLD.lifecycle IN ('success','processor_failed','timed_out','invalid_output','infrastructure_failed','scorer_failed','canceled','succeeded','failed','cancelled') AND (NEW IS DISTINCT FROM OLD) THEN RAISE EXCEPTION 'terminal benchmark row is immutable'; END IF; RETURN NEW; END $$;
 CREATE TRIGGER trg_benchmark_attempt_terminal BEFORE UPDATE ON kb.benchmark_case_attempts FOR EACH ROW EXECUTE FUNCTION kb.benchmark_terminal_guard();
 CREATE TRIGGER trg_benchmark_run_terminal BEFORE UPDATE ON kb.benchmark_runs FOR EACH ROW EXECUTE FUNCTION kb.benchmark_terminal_guard();
 CREATE TRIGGER trg_benchmark_case_run_terminal BEFORE UPDATE ON kb.benchmark_case_runs FOR EACH ROW EXECUTE FUNCTION kb.benchmark_terminal_guard();
-CREATE OR REPLACE FUNCTION kb.benchmark_score_guard() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE l text; BEGIN IF OLD.attempt_id IS NOT NULL THEN SELECT lifecycle INTO l FROM kb.benchmark_case_attempts WHERE id=OLD.attempt_id; ELSE SELECT lifecycle INTO l FROM kb.benchmark_runs WHERE id=OLD.run_id; END IF; IF l IN ('succeeded','failed','cancelled') THEN RAISE EXCEPTION 'scores immutable after terminal owner'; END IF; IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $$;
+CREATE OR REPLACE FUNCTION kb.benchmark_score_guard() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE l text; s uuid; BEGIN IF OLD.attempt_id IS NOT NULL THEN SELECT lifecycle INTO l FROM kb.benchmark_case_attempts WHERE id=OLD.attempt_id; SELECT selected_attempt_id INTO s FROM kb.benchmark_case_runs c WHERE c.id=(SELECT case_run_id FROM kb.benchmark_case_attempts WHERE id=OLD.attempt_id); IF s=OLD.attempt_id THEN RAISE EXCEPTION 'scores immutable after selected attempt'; END IF; ELSE SELECT lifecycle INTO l FROM kb.benchmark_runs WHERE id=OLD.run_id; END IF; IF l IN ('success','processor_failed','timed_out','invalid_output','infrastructure_failed','scorer_failed','canceled','succeeded','failed','cancelled') THEN RAISE EXCEPTION 'scores immutable after terminal owner'; END IF; IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $$;
 CREATE TRIGGER trg_benchmark_scores_guard BEFORE UPDATE OR DELETE ON kb.benchmark_scores FOR EACH ROW EXECUTE FUNCTION kb.benchmark_score_guard();
 CREATE OR REPLACE FUNCTION kb.benchmark_artifact_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.verified THEN RAISE EXCEPTION 'verified artifact immutable'; END IF; RETURN COALESCE(NEW,OLD); END $$;
 CREATE TRIGGER trg_benchmark_artifacts_guard BEFORE UPDATE OR DELETE ON kb.benchmark_artifacts FOR EACH ROW EXECUTE FUNCTION kb.benchmark_artifact_guard();
 CREATE INDEX idx_benchmark_case_runs_selected ON kb.benchmark_case_runs(selected_attempt_id);
+CREATE UNIQUE INDEX uq_benchmark_case_runs_selected_once ON kb.benchmark_case_runs(id, selected_attempt_id) WHERE selected_attempt_id IS NOT NULL;
 CREATE INDEX idx_benchmark_attempts_lifecycle_lease ON kb.benchmark_case_attempts(lifecycle,lease_expires_at);
 CREATE INDEX idx_benchmark_attempts_diagnostics ON kb.benchmark_case_attempts(failure_kind,provider,model);
 CREATE INDEX idx_benchmark_runs_comparisons ON kb.benchmark_runs(experiment_id,lifecycle,variant_name);
 CREATE INDEX idx_benchmark_workspaces_cleanup ON kb.benchmark_workspaces(cleanup_state,cleaned_at);
 CREATE INDEX idx_benchmark_scores_attempt ON kb.benchmark_scores(attempt_id);
 CREATE INDEX idx_benchmark_scores_run ON kb.benchmark_scores(run_id);
+CREATE INDEX idx_benchmark_scores_comparison ON kb.benchmark_scores(processor,metric,aggregation_kind,slice);
 CREATE INDEX idx_benchmark_artifacts_attempt ON kb.benchmark_artifacts(attempt_id);
 CREATE INDEX idx_benchmark_artifacts_run ON kb.benchmark_artifacts(run_id);
 
