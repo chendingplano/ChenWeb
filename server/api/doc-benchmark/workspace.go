@@ -340,6 +340,13 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 		return Artifact{}, err
 	}
 	artifact := Artifact{Path: final, SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}
+	locked, err := a.Config.Store.LockOwnership(a.Config.AttemptID)
+	if err != nil || locked.Verified || locked.Nonce != a.Config.Nonce {
+		if err == nil {
+			err = errors.New("capture: ownership CAS failed")
+		}
+		return Artifact{}, err
+	}
 	if err := a.Config.Store.MarkVerified(a.Config.AttemptID, artifact.SHA256, artifact.SizeBytes, a.Marker); err != nil {
 		return Artifact{}, err
 	}
@@ -405,6 +412,13 @@ func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
 		return Artifact{}, se
 	}
 	art := Artifact{Path: filepath.Join(a.EvidencePath, name), SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}
+	locked, err := a.Config.Store.LockOwnership(a.Config.AttemptID)
+	if err != nil || locked.Verified || locked.VerifiedMarker != "" {
+		if err == nil {
+			err = errors.New("reverify: ownership CAS failed")
+		}
+		return Artifact{}, err
+	}
 	if err := a.Config.Store.MarkVerified(a.Config.AttemptID, art.SHA256, art.SizeBytes, a.Marker); err != nil {
 		return Artifact{}, err
 	}
