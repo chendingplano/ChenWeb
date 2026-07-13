@@ -70,6 +70,13 @@ type OwnershipStore interface {
 	LoadOwnership(attemptID string) (Ownership, error)
 	SaveOwnership(Ownership) error
 }
+type VerifiedStore interface {
+	MarkVerified(attemptID string, artifact Artifact) error
+}
+type CleanupStore interface {
+	MarkCleanup(attemptID, state, message string) error
+	LockOwnership(attemptID string) error
+}
 
 func safeComponent(s string) bool {
 	if s == "" || s == "." || s == ".." || filepath.Base(s) != s {
@@ -229,9 +236,23 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 	partial := filepath.Join(a.EvidencePath, "."+a.Config.AttemptID+"."+name+".partial")
 	final := filepath.Join(a.EvidencePath, name)
 	if _, e := os.Lstat(final); e == nil {
-		return Artifact{}, ErrVerifiedImmutable
+		f, e := os.Open(final)
+		if e != nil {
+			return Artifact{}, e
+		}
+		h := sha256.New()
+		_, e = io.Copy(h, f)
+		st, e2 := f.Stat()
+		f.Close()
+		if e != nil {
+			return Artifact{}, e
+		}
+		if e2 != nil {
+			return Artifact{}, e2
+		}
+		return Artifact{Path: final, SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}, nil
 	}
-	f, err := os.OpenFile(partial, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(partial, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -292,7 +313,13 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 	if err != nil {
 		return Artifact{}, err
 	}
-	return Artifact{Path: final, SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}, nil
+	artifact := Artifact{Path: final, SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}
+	if vs, ok := a.Config.Store.(VerifiedStore); ok {
+		if err := vs.MarkVerified(a.Config.AttemptID, artifact); err != nil {
+			return Artifact{}, err
+		}
+	}
+	return artifact, nil
 }
 func (a *WorkspaceAllocation) validate() error {
 	if err := noSymlinks(a.WorkPath, a.Config.WorkRoot); err != nil {
@@ -322,6 +349,11 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 		return err
 	}
 	if a.Config.Store != nil {
+		if cs, ok := a.Config.Store.(CleanupStore); ok {
+			if err := cs.LockOwnership(a.Config.AttemptID); err != nil {
+				return err
+			}
+		}
 		own, err := a.Config.Store.LoadOwnership(a.Config.AttemptID)
 		if err != nil {
 			return err
@@ -334,11 +366,28 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 		}
 	}
 	if o.DiscardUnverified {
-		ents, _ := os.ReadDir(a.EvidencePath)
+		ents, err := os.ReadDir(a.EvidencePath)
+		if err != nil {
+			return err
+		}
 		for _, e := range ents {
 			if strings.HasSuffix(e.Name(), ".partial") {
-				os.Remove(filepath.Join(a.EvidencePath, e.Name()))
+				if !strings.HasPrefix(e.Name(), "."+a.Config.AttemptID+".") {
+					continue
+				}
+				if err := os.Remove(filepath.Join(a.EvidencePath, e.Name())); err != nil {
+					return err
+				}
 			}
+		}
+	}
+	if cs, ok := a.Config.Store.(CleanupStore); ok {
+		state := "cleaned"
+		if o.DiscardUnverified {
+			state = "discarded_unverified"
+		}
+		if err := cs.MarkCleanup(a.Config.AttemptID, state, ""); err != nil {
+			return err
 		}
 	}
 	return nil
