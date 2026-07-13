@@ -16,8 +16,8 @@ import (
 )
 
 const MetricScorerVersion = "metric-scorer-v1"
-const ExpectedMetricScorerHashV1 = "8f122ae8a7e75973e72c727a832e6d2c3b3ac7fb7d1144010ebd24e32ff2995a"
-const ExpectedMetricNormalizationHashV1 = "af7d665f7892e2d1d8f7813e9d635c02b08f9b6967bbff1fad27bb97db6957d4"
+const ExpectedMetricScorerHashV1 = "c30d4eb9b97a1ba293e9c05e5e59f67428436982c9ebce97c72166b65772f152"
+const ExpectedMetricNormalizationHashV1 = "e0f940b8c9669513a27b8520e8b2d9be9168786839db8f017657e39375e450b0"
 
 type MetricScoreInput struct {
 	Gold, Predictions []MetricRecord
@@ -88,6 +88,28 @@ type MetricScorerConfiguration struct {
 	MatchingComplexity   string                  `json:"matching_complexity"`
 	ScoreRows            []MetricScoreDefinition `json:"score_rows"`
 }
+type MetricNormalizationConfiguration struct {
+	NormalizationVersion string            `json:"normalization_version"`
+	UnitAliases          map[string]string `json:"unit_aliases"`
+	Rules                map[string]string `json:"rules"`
+	ResourceLimits       map[string]int    `json:"resource_limits"`
+}
+
+func MetricNormalizationConfigurationV1() MetricNormalizationConfiguration {
+	aliases := make(map[string]string, len(unitAliasesV1))
+	for k, v := range unitAliasesV1 {
+		aliases[k] = v
+	}
+	return MetricNormalizationConfiguration{NormalizationVersion: NormalizationVersion, UnitAliases: aliases, Rules: normalizationRulesV1(), ResourceLimits: normalizationResourceLimitsV1()}
+}
+func (c MetricNormalizationConfiguration) Hash() string {
+	raw, _ := json.Marshal(c)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+func normalizationResourceLimitsV1() map[string]int {
+	return map[string]int{"text_bytes_per_record": MaxMetricTextBytes, "source_lines_per_record": MaxMetricSourceLines, "stable_fields_per_record": MaxMetricStableFields, "stable_json_bytes_per_field": MaxMetricStableJSONBytes, "stable_json_depth": MaxMetricJSONDepth}
+}
 
 type MetricScoreDefinition struct {
 	Name, Direction, AggregationKind, NullableSemantics string
@@ -110,10 +132,14 @@ func MetricScorerConfigurationV1() MetricScorerConfiguration {
 	for k, v := range unitAliasesV1 {
 		aliases[k] = v
 	}
+	limits := normalizationResourceLimitsV1()
+	limits["gold"] = MaxMetricGold
+	limits["predictions"] = MaxMetricPredictions
+	limits["edges"] = MaxMetricEdges
 	return MetricScorerConfiguration{ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, NormalizationRules: normalizationRulesV1(), UnitAliases: aliases,
 		Weights:     map[string]string{"source": "7/20", "name": "1/5", "subject": "3/20", "value": "1/5", "unit": "1/10"},
 		Eligibility: "source_sets_intersect OR >=2 nonempty_present_exact(name,subject,value,unit)", Threshold: "3/5",
-		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ResourceLimits: map[string]int{"gold": MaxMetricGold, "predictions": MaxMetricPredictions, "edges": MaxMetricEdges, "text_bytes_per_record": MaxMetricTextBytes, "source_lines_per_record": MaxMetricSourceLines, "stable_fields_per_record": MaxMetricStableFields, "stable_json_bytes_per_field": MaxMetricStableJSONBytes, "stable_json_depth": MaxMetricJSONDepth}, MatchingComplexity: "O(E*N^3)_exact_rational_with_context_checks", ScoreRows: copyMetricScoreRegistry()}
+		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ResourceLimits: limits, MatchingComplexity: "O(E*N^3)_exact_rational_with_context_checks", ScoreRows: copyMetricScoreRegistry()}
 }
 func copyMetricScoreRegistry() []MetricScoreDefinition {
 	out := make([]MetricScoreDefinition, len(metricScoreRegistryV1))
@@ -132,13 +158,7 @@ func (c MetricScorerConfiguration) Hash() string {
 	return hex.EncodeToString(sum[:])
 }
 func normalizationHashV1() string {
-	raw, _ := json.Marshal(struct {
-		Version string
-		Aliases map[string]string
-		Rules   map[string]string
-	}{NormalizationVersion, MetricScorerConfigurationV1().UnitAliases, normalizationRulesV1()})
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	return MetricNormalizationConfigurationV1().Hash()
 }
 
 func ScoreMetricsContext(ctx context.Context, in MetricScoreInput) (MetricScore, error) {

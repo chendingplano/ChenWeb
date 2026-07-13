@@ -17,7 +17,7 @@ const MaxMetricEdges = 1024
 const MaxMetricTextBytes = 64 * 1024
 const MaxMetricSourceLines = 4096
 const MaxMetricStableFields = 128
-const MaxMetricStableJSONBytes = 64 * 1024
+const MaxMetricStableJSONBytes = 32 * 1024
 const MaxMetricJSONDepth = 32
 
 type MetricResourceLimitError struct {
@@ -173,19 +173,33 @@ func validateMetricRecord(ctx context.Context, r MetricRecord) error {
 		return &MetricResourceLimitError{"stable_fields", len(r.StableFields), MaxMetricStableFields}
 	}
 	total := 0
+	add := func(n int) error {
+		if n < 0 || n > MaxMetricTextBytes-total {
+			return &MetricResourceLimitError{"text_bytes", MaxMetricTextBytes + 1, MaxMetricTextBytes}
+		}
+		total += n
+		return nil
+	}
+	if err := add(len(r.GoldID)); err != nil {
+		return err
+	}
 	for _, v := range []*string{r.Name, r.NameEn, r.Subject, r.SubjectEn, r.Value, r.Unit, r.UnitEn, r.Desc, r.DescEn, r.Context, r.ContextEn, r.LocationType, r.ValueDataType, r.ValueRangeType, r.ValueClass, r.ValueClassEn, r.FormulaOrDefinition, r.ThresholdOrTarget, r.MeasurementFrequency, r.TableNameOrSection} {
 		if v != nil {
-			total += len(*v)
+			if err := add(len(*v)); err != nil {
+				return err
+			}
 		}
 	}
-	for _, raw := range r.StableFields {
+	for key, raw := range r.StableFields {
 		if len(raw) > MaxMetricStableJSONBytes {
 			return &MetricResourceLimitError{"stable_json_bytes", len(raw), MaxMetricStableJSONBytes}
 		}
-		total += len(raw)
-	}
-	if total > MaxMetricTextBytes {
-		return &MetricResourceLimitError{"text_bytes", total, MaxMetricTextBytes}
+		if err := add(len(key)); err != nil {
+			return err
+		}
+		if err := add(len(raw)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

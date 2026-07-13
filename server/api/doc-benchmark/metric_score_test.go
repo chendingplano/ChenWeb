@@ -135,6 +135,43 @@ func TestMetricRecordNormalizationLimits(t *testing.T) {
 		return err
 	}, "json_depth")
 }
+
+func TestMetricRecordTextLimitIncludesGoldIDAndStableFieldKeys(t *testing.T) {
+	id := strings.Repeat("g", MaxMetricTextBytes)
+	if _, err := MatchMetricsContext(context.Background(), []MetricRecord{{GoldID: id}}, nil); err != nil {
+		t.Fatalf("exact GoldID boundary: %v", err)
+	}
+	id += "g"
+	assertLimit(t, func() error {
+		_, err := MatchMetricsContext(context.Background(), []MetricRecord{{GoldID: id}}, nil)
+		return err
+	}, "text_bytes")
+	key := strings.Repeat("k", MaxMetricTextBytes-len(`null`))
+	fields := map[string]json.RawMessage{key: json.RawMessage(`null`)}
+	if _, err := MatchMetricsContext(context.Background(), []MetricRecord{{StableFields: fields}}, nil); err != nil {
+		t.Fatalf("exact key boundary: %v", err)
+	}
+	fields = map[string]json.RawMessage{key + "k": json.RawMessage(`null`)}
+	assertLimit(t, func() error {
+		_, err := MatchMetricsContext(context.Background(), []MetricRecord{{StableFields: fields}}, nil)
+		return err
+	}, "text_bytes")
+}
+
+func TestMetricNormalizationHashChangesWithEveryLimit(t *testing.T) {
+	base := MetricNormalizationConfigurationV1()
+	original := base.Hash()
+	for _, name := range []string{"text_bytes_per_record", "source_lines_per_record", "stable_fields_per_record", "stable_json_bytes_per_field", "stable_json_depth"} {
+		changed := MetricNormalizationConfigurationV1()
+		changed.ResourceLimits[name]++
+		if changed.Hash() == original {
+			t.Errorf("limit %s did not change normalization hash", name)
+		}
+	}
+	if MetricNormalizationConfigurationV1().Hash() != ExpectedMetricNormalizationHashV1 {
+		t.Fatal("normalization config mutation leaked globally")
+	}
+}
 func assertLimit(t *testing.T, fn func() error, resource string) {
 	t.Helper()
 	var limit *MetricResourceLimitError
