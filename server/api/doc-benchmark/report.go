@@ -158,12 +158,24 @@ func RenderMarkdown(r BenchmarkReport) string {
 		}
 		b.WriteString("\n")
 	}
-	if len(r.Completion) > 0 {
+	if len(r.Completion) > 0 || len(r.Failures) > 0 {
+		ck := make([]string, 0, len(r.Completion))
+		for k := range r.Completion {
+			ck = append(ck, k)
+		}
+		sort.Strings(ck)
+		fk := make([]string, 0, len(r.Failures))
+		for k := range r.Failures {
+			fk = append(fk, k)
+		}
+		sort.Strings(fk)
 		b.WriteString("## Completion and failures\n\n")
-		for k, v := range r.Completion {
+		for _, k := range ck {
+			v := r.Completion[k]
 			b.WriteString("- " + mdEscape(k) + ": " + fmt.Sprint(v) + "\n")
 		}
-		for k, v := range r.Failures {
+		for _, k := range fk {
+			v := r.Failures[k]
 			b.WriteString("- failure " + mdEscape(k) + ": " + fmt.Sprint(v) + "\n")
 		}
 		b.WriteString("\n")
@@ -202,7 +214,7 @@ func RenderMarkdown(r BenchmarkReport) string {
 			b.WriteString("- " + mdEscape(c.CaseID) + ": " + fmtFloatPtr(c.Score) + " artifacts=" + mdEscape(strings.Join(c.ArtifactLinks, ", ")) + " diagnostics=" + mdEscape(strings.Join(c.DiagnosticLinks, ", ")) + "\n")
 		}
 	}
-	if len(r.Telemetry) > 0 {
+	if len(r.Telemetry) > 0 || r.EstimatedCost != nil || len(r.PricingSnapshot) > 0 {
 		b.WriteString("\n## Telemetry and cost\n\n")
 		keys := make([]string, 0, len(r.Telemetry))
 		for k := range r.Telemetry {

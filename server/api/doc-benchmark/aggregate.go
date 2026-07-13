@@ -96,6 +96,9 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 				return nil, fmt.Errorf("duplicate score row %s/%s in %s", r.Metric, r.Component, u.CaseID)
 			}
 			seen[k] = true
+			if d, ok := defs[k]; ok && (canonicalAggregationKind(d.AggregationKind) != canonicalAggregationKind(r.AggregationKind) || d.Direction != r.Direction) {
+				return nil, fmt.Errorf("conflicting declaration for %s/%s", r.Metric, r.Component)
+			}
 			groups[k] = append(groups[k], u)
 			defs[k] = r
 		}
@@ -212,6 +215,15 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 					a.Numerator++
 				}
 			}
+		}
+		if a.Value != nil && (math.IsNaN(*a.Value) || math.IsInf(*a.Value, 0)) {
+			return nil, fmt.Errorf("aggregate %s overflow", a.Metric)
+		}
+		if a.Mean != nil && (math.IsNaN(*a.Mean) || math.IsInf(*a.Mean, 0)) {
+			return nil, fmt.Errorf("aggregate %s mean overflow", a.Metric)
+		}
+		if a.PopulationSD != nil && (math.IsNaN(*a.PopulationSD) || math.IsInf(*a.PopulationSD, 0)) {
+			return nil, fmt.Errorf("aggregate %s variance overflow", a.Metric)
 		}
 		out = append(out, a)
 	}
@@ -343,16 +355,30 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 	if c.BaselineUpstreamHash != c.CandidateUpstreamHash && c.AllowUpstreamVariation {
 		warnings = append(warnings, "end-to-end pipeline delta; isolated component claims suppressed")
 	}
-	b := map[string]ScoreUnit{}
+	type unitKey struct {
+		caseID     string
+		repetition int
+	}
+	b := map[unitKey]ScoreUnit{}
+	candidateSeen := map[unitKey]bool{}
 	for _, u := range c.Baseline {
-		b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)] = u
+		key := unitKey{u.CaseID, u.Repetition}
+		if _, ok := b[key]; ok {
+			return nil, nil, fmt.Errorf("duplicate baseline unit %s", u.CaseID)
+		}
+		b[key] = u
 	}
 	pairs := map[string][]float64{}
 	type metricKey struct{ metric, component, kind string }
 	pooledA, pooledB := map[metricKey][3]int{}, map[metricKey][3]int{}
 	applicableByMetric := map[metricKey]int{}
 	for _, u := range c.Candidate {
-		if x, ok := b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)]; ok {
+		keyUnit := unitKey{u.CaseID, u.Repetition}
+		if _, seen := candidateSeen[keyUnit]; seen {
+			return nil, nil, fmt.Errorf("duplicate candidate unit %s", u.CaseID)
+		}
+		candidateSeen[keyUnit] = true
+		if x, ok := b[keyUnit]; ok {
 			if !u.Applicable || !x.Applicable {
 				continue
 			}
