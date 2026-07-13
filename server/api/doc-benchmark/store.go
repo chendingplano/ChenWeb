@@ -19,6 +19,20 @@ func canonicalJSON(v any) ([]byte, error) {
 	if v == nil {
 		return []byte("{}"), nil
 	}
+	if b, ok := v.(json.RawMessage); ok {
+		var x any
+		if err := json.Unmarshal(b, &x); err != nil {
+			return nil, err
+		}
+		return json.Marshal(x)
+	}
+	if b, ok := v.([]byte); ok {
+		var x any
+		if err := json.Unmarshal(b, &x); err != nil {
+			return nil, err
+		}
+		return json.Marshal(x)
+	}
 	b, e := json.Marshal(v)
 	if e != nil {
 		return nil, e
