@@ -48,7 +48,10 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 	if r.AttemptID.Valid == r.RunID.Valid {
 		return "", fmt.Errorf("score requires exactly one owner")
 	}
-	b, _ := canonicalJSON(r.Metadata)
+	b, err := canonicalJSON(r.Metadata)
+	if err != nil {
+		return "", err
+	}
 	var id string
 	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_scores (attempt_id,run_id,processor,scorer,scorer_version,metric,slice,direction,aggregation_kind,value,additive_component,numerator,denominator,non_null,applicable,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, r.AttemptID, r.RunID, r.Processor, r.Scorer, r.ScorerVersion, r.Metric, r.Slice, r.Direction, r.AggregationKind, r.Value, r.AdditiveComponent, r.Numerator, r.Denominator, r.NonNull, r.Applicable, b).Scan(&id)
 	return id, e
@@ -60,7 +63,10 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 	if r.AttemptID.Valid == r.RunID.Valid {
 		return "", fmt.Errorf("artifact requires exactly one owner")
 	}
-	b, _ := canonicalJSON(r.Metadata)
+	b, err := canonicalJSON(r.Metadata)
+	if err != nil {
+		return "", err
+	}
 	var id string
 	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_artifacts (attempt_id,run_id,kind,path,sha256,size_bytes,verified,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, r.AttemptID, r.RunID, r.Kind, r.Path, r.SHA256, r.SizeBytes, r.Verified, b).Scan(&id)
 	return id, e

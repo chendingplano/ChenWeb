@@ -94,7 +94,10 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 	return Claim{Claimed: true, Attempt: AttemptRecord{ID: id, CaseRunID: caseRunID, Number: n, Kind: kind, Lifecycle: "running", LeaseOwner: sql.NullString{String: owner, Valid: true}, LeaseExpiresAt: sql.NullTime{Time: exp, Valid: true}, CaptureVerified: verified}}, nil
 }
 func (s SQLStore) HeartbeatAttempt(ctx context.Context, id, owner string, until time.Time, telemetry any) error {
-	b, _ := canonicalJSON(telemetry)
+	b, err := canonicalJSON(telemetry)
+	if err != nil {
+		return err
+	}
 	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET heartbeat_at=$3,lease_expires_at=$4,telemetry_json=$5 WHERE id=$1 AND lease_owner=$2 AND lifecycle IN ('leased','running')`, id, owner, utc(time.Now()), utc(until), b)
 	if e != nil {
 		return e
@@ -102,7 +105,7 @@ func (s SQLStore) HeartbeatAttempt(ctx context.Context, id, owner string, until 
 	return affected(res)
 }
 func (s SQLStore) FinishAttempt(ctx context.Context, id, owner, lifecycle, failure string, runtimeMS int64, verified bool) error {
-	valid := map[string]bool{"succeeded": true, "failed": true, "cancelled": true}
+	valid := map[string]bool{"succeeded": true, "failed": true, "canceled": true}
 	if !valid[lifecycle] {
 		return fmt.Errorf("invalid terminal lifecycle %q", lifecycle)
 	}
