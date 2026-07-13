@@ -47,9 +47,20 @@ func LoadDataset(root string) (*Dataset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("manifest.json: %w", err)
 	}
-	var manifest Manifest
-	if err := decodeStrict(manifestBytes, &manifest); err != nil {
+	var rawManifest manifestJSON
+	if err := decodeStrict(manifestBytes, &rawManifest); err != nil {
 		return nil, fmt.Errorf("manifest.json: %w", err)
+	}
+	manifest := Manifest{
+		SchemaVersion: rawManifest.SchemaVersion, DatasetID: rawManifest.DatasetID,
+		DatasetVersion: rawManifest.DatasetVersion, GeneratorVersion: rawManifest.GeneratorVersion,
+		seedPresent: rawManifest.Seed != nil, casesPresent: rawManifest.Cases != nil,
+	}
+	if rawManifest.Seed != nil {
+		manifest.Seed = *rawManifest.Seed
+	}
+	if rawManifest.Cases != nil {
+		manifest.Cases = *rawManifest.Cases
 	}
 	ds := &Dataset{Root: canonicalRoot, Manifest: manifest, ManifestBytes: manifestBytes, FileHashes: make(map[string]string)}
 	problems := validateManifest(ds)
@@ -129,6 +140,14 @@ func validateManifest(ds *Dataset) validationErrors {
 	}
 	if !semverRE.MatchString(m.GeneratorVersion) {
 		out = append(out, "generator_version: must be valid SemVer 2.0.0")
+	}
+	if !m.seedPresent {
+		out = append(out, "seed: required")
+	}
+	if !m.casesPresent {
+		out = append(out, "cases: required")
+	} else if len(m.Cases) == 0 {
+		out = append(out, "cases: must not be empty")
 	}
 	seenCases := make(map[string]struct{})
 	for i, c := range m.Cases {
@@ -280,6 +299,12 @@ func validateExpected(c DatasetCase, caseIndex int, out *validationErrors) {
 }
 
 func validateChunking(id string, c *ExpectedChunking, linePos map[int]int, out *validationErrors) {
+	normalAssignments := make(map[int][]int)
+	for chunkIndex, chunk := range c.Chunks {
+		for _, line := range chunk.NormalLines {
+			normalAssignments[line] = append(normalAssignments[line], chunkIndex)
+		}
+	}
 	groups := map[string]struct{}{}
 	for i, g := range c.ProtectedGroups {
 		base := fmt.Sprintf("expected.chunking.protected_groups[%d]", i)
@@ -296,6 +321,25 @@ func validateChunking(id string, c *ExpectedChunking, linePos map[int]int, out *
 			*out = append(*out, fieldError(id, base+".split_policy", "must be 'never' or 'expected'"))
 		}
 		validateLineRefs(id, base+".lines", g.Lines, linePos, true, out)
+		groupChunk := -1
+		policyMismatch := false
+		for lineIndex, line := range g.Lines {
+			assignments := normalAssignments[line]
+			if len(assignments) != 1 {
+				message := "must have exactly one expected normal-chunk assignment"
+				*out = append(*out, fieldError(id, fmt.Sprintf("%s.lines[%d]", base, lineIndex), message))
+				continue
+			}
+			if groupChunk == -1 {
+				groupChunk = assignments[0]
+			}
+			if g.SplitPolicy == "never" && assignments[0] != groupChunk {
+				policyMismatch = true
+			}
+		}
+		if policyMismatch {
+			*out = append(*out, fieldError(id, base+".split_policy", "'never' requires every group line in the same expected normal chunk"))
+		}
 	}
 	for i, ch := range c.Chunks {
 		base := fmt.Sprintf("expected.chunking.chunks[%d]", i)

@@ -39,6 +39,40 @@ func TestLoadDatasetAcceptsSemVerAndStableMetricFields(t *testing.T) {
 	}
 }
 
+func TestLoadDatasetRequiresSeedAndNonEmptyCases(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{"missing seed", func(m map[string]any) { delete(m, "seed") }, "seed: required"},
+		{"missing cases", func(m map[string]any) { delete(m, "cases") }, "cases: required"},
+		{"empty cases", func(m map[string]any) { m["cases"] = []any{} }, "cases: must not be empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var m map[string]any
+			json.Unmarshal(validManifest(), &m)
+			tt.mutate(m)
+			manifest, _ := json.Marshal(m)
+			_, err := LoadDataset(writeDataset(t, manifest, validInput(), validExpected()))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadDatasetAllowsPresentZeroSeed(t *testing.T) {
+	var m map[string]any
+	json.Unmarshal(validManifest(), &m)
+	m["seed"] = 0
+	manifest, _ := json.Marshal(m)
+	if _, err := LoadDataset(writeDataset(t, manifest, validInput(), validExpected())); err != nil {
+		t.Fatalf("present zero seed rejected: %v", err)
+	}
+}
+
 func TestLoadDatasetRejectsManifestAndFilesystemViolations(t *testing.T) {
 	tests := []struct {
 		name string
@@ -138,6 +172,54 @@ func TestValidateDatasetRejectsSemanticGoldViolations(t *testing.T) {
 			_, err := LoadDataset(root)
 			if err == nil || !strings.Contains(err.Error(), "metric-001") || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error=%v, want case ID and %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateProtectedGroupAssignments(t *testing.T) {
+	tests := []struct {
+		name      string
+		policy    string
+		chunks    []any
+		wantError string
+	}{
+		{
+			name: "never group split across normal chunks", policy: "never",
+			chunks:    []any{map[string]any{"sequence": 1, "overlap_lines": []any{}, "normal_lines": []any{1}}, map[string]any{"sequence": 2, "overlap_lines": []any{}, "normal_lines": []any{2}}},
+			wantError: "expected.chunking.protected_groups[0].split_policy",
+		},
+		{
+			name: "expected group line missing assignment", policy: "expected",
+			chunks:    []any{map[string]any{"sequence": 1, "overlap_lines": []any{}, "normal_lines": []any{1}}},
+			wantError: "expected.chunking.protected_groups[0].lines[1]",
+		},
+		{
+			name: "expected group split assignment is valid", policy: "expected",
+			chunks: []any{map[string]any{"sequence": 1, "overlap_lines": []any{}, "normal_lines": []any{1}}, map[string]any{"sequence": 2, "overlap_lines": []any{}, "normal_lines": []any{2}}},
+		},
+		{
+			name: "never group same chunk is valid", policy: "never",
+			chunks: []any{map[string]any{"sequence": 1, "overlap_lines": []any{}, "normal_lines": []any{1, 2}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var e map[string]any
+			json.Unmarshal(validExpected(), &e)
+			chunking := e["chunking"].(map[string]any)
+			chunking["protected_groups"].([]any)[0].(map[string]any)["split_policy"] = tt.policy
+			chunking["chunks"] = tt.chunks
+			expected, _ := json.Marshal(e)
+			_, err := LoadDataset(writeDataset(t, validManifest(), validInput(), expected))
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("valid protected group rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "metric-001") || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error=%v, want case ID and %q", err, tt.wantError)
 			}
 		})
 	}

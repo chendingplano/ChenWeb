@@ -16,6 +16,19 @@ type Manifest struct {
 	GeneratorVersion string         `json:"generator_version"`
 	Seed             int64          `json:"seed"`
 	Cases            []ManifestCase `json:"cases"`
+	seedPresent      bool
+	casesPresent     bool
+}
+
+// manifestJSON is presence-aware so required scalar and collection fields can
+// distinguish omission from valid zero and empty values during strict decoding.
+type manifestJSON struct {
+	SchemaVersion    int             `json:"schema_version"`
+	DatasetID        string          `json:"dataset_id"`
+	DatasetVersion   string          `json:"dataset_version"`
+	GeneratorVersion string          `json:"generator_version"`
+	Seed             *int64          `json:"seed"`
+	Cases            *[]ManifestCase `json:"cases"`
 }
 
 type ManifestCase struct {
