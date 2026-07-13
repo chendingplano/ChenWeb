@@ -12,5 +12,5 @@ func TestConcurrentClaim(t *testing.T) {
 	if os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("TEST_DATABASE_URL not set; PostgreSQL concurrent-claim prerequisite")
 	}
-	t.Skip("TEST_DATABASE_URL provided, but isolated benchmark fixture is required")
+	t.Fatalf("TEST_DATABASE_URL is set but isolated benchmark fixture/bootstrap is unavailable")
 }
