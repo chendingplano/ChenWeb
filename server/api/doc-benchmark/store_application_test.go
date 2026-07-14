@@ -25,7 +25,7 @@ func TestStoreAttachResolvedRuntimeAndFinalizeOnlyAfterAllCasesTerminal(t *testi
 		t.Fatalf("terminal=%v err=%v", terminal, err)
 	}
 	mock.ExpectQuery("SELECT count\\(\\*\\),count\\(\\*\\) FILTER").WithArgs("run").WillReturnRows(sqlmock.NewRows([]string{"total", "terminal"}).AddRow(2, 2))
-	mock.ExpectExec("UPDATE kb.benchmark_runs SET lifecycle=CASE").WithArgs("run", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.benchmark_runs SET lifecycle=CASE WHEN NOT EXISTS.*THEN 'succeeded'.*THEN 'canceled' ELSE 'failed' END").WithArgs("run", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	terminal, err = store.FinalizeRunIfComplete(context.Background(), "run")
 	if err != nil || !terminal {
 		t.Fatalf("terminal=%v err=%v", terminal, err)

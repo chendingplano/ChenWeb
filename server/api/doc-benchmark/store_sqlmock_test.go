@@ -24,6 +24,20 @@ func TestSQLStoreCreateCaseRunCanonicalJSON(t *testing.T) {
 	}
 }
 
+func TestCreateRunResumePreservesAuthoritativeResolvedSnapshot(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	query := `INSERT INTO kb.benchmark_runs .* ON CONFLICT \(experiment_id,variant_name\) DO UPDATE SET updated_at=kb.benchmark_runs.updated_at WHERE kb.benchmark_runs.requested_json=\$3 AND kb.benchmark_runs.prompt_json=\$6 AND kb.benchmark_runs.scorer_json=\$7 AND kb.benchmark_runs.pricing_json=\$8 RETURNING id`
+	m.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("existing-run"))
+	id, err := (SQLStore{DB: db}).CreateRun(context.Background(), "experiment", "variant", map[string]any{"name": "variant"}, map[string]any{"status": "pending_runtime_resolution"}, map[string]any{}, map[string]any{}, map[string]any{"version": "v1"}, map[string]any{})
+	if err != nil || id != "existing-run" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLStoreCreateCaseRunConflict(t *testing.T) {
 	db, m, _ := sqlmock.New()
 	defer db.Close()

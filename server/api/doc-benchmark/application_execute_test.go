@@ -107,7 +107,7 @@ func TestApplicationExecuteCaseWiresCallbacksAndCleansAfterTerminal(t *testing.T
 	if !reflect.DeepEqual(order[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("order=%v", order)
 	}
-	if order[len(order)-3] != "terminal" || order[len(order)-2] != "adapter.cleanup" || order[len(order)-1] != "workspace.cleanup" {
+	if order[len(order)-2] != "terminal" || order[len(order)-1] != "workspace.cleanup" {
 		t.Fatalf("cleanup ordering=%v", order)
 	}
 }

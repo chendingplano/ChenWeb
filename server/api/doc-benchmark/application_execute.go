@@ -348,13 +348,6 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 		if state.workspace == nil {
 			return nil
 		}
-		for i := len(processors) - 1; i >= 0; i-- {
-			if adapter := state.adapters[processors[i]]; adapter != nil {
-				if err := adapter.Cleanup(context.Background(), state.seeded.ID); err != nil {
-					return err
-				}
-			}
-		}
 		return state.workspace.Cleanup(CleanupOptions{Cleanup: func(tx CleanupTx) error {
 			if err := tx.DeleteProductionRows(); err != nil {
 				return err
@@ -362,7 +355,7 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 			if err := tx.DeleteInput(); err != nil {
 				return err
 			}
-			return tx.MarkState("db_cleaned", nil)
+			return tx.MarkState("files_pending", nil)
 		}})
 	}
 	runAttempt := a.Config.AttemptRunner

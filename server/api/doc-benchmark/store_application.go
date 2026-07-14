@@ -47,7 +47,7 @@ func (s SQLStore) FinalizeRunIfComplete(ctx context.Context, runID string) (bool
 		return false, nil
 	}
 	now := time.Now().UTC()
-	res, err := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_runs SET lifecycle=CASE WHEN NOT EXISTS (SELECT 1 FROM kb.benchmark_case_runs WHERE run_id=$1 AND lifecycle<>'success') THEN 'completed' ELSE 'incomplete' END,finished_at=$2,updated_at=$2 WHERE id=$1 AND lifecycle IN ('queued','running')`, runID, now)
+	res, err := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_runs SET lifecycle=CASE WHEN NOT EXISTS (SELECT 1 FROM kb.benchmark_case_runs WHERE run_id=$1 AND lifecycle<>'success') THEN 'succeeded' WHEN EXISTS (SELECT 1 FROM kb.benchmark_case_runs WHERE run_id=$1 AND lifecycle='canceled') THEN 'canceled' ELSE 'failed' END,finished_at=$2,updated_at=$2 WHERE id=$1 AND lifecycle IN ('queued','running')`, runID, now)
 	if err != nil {
 		return false, err
 	}
