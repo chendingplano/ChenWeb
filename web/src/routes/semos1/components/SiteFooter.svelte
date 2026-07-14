@@ -5,19 +5,15 @@
 
 	let { config }: { config: SiteConfig } = $props();
 
-	const quickLinks = [
+	// Nav links stay i18n-driven (they mirror the header); the rest of the
+	// footer's link columns and contact details come from site config.
+	const quickLinks = $derived([
 		{ label: m.semos_nav_home(), href: '/semos1' },
 		{ label: m.semos_nav_workspace(), href: '/semos1/workspace' },
-		{ label: 'Knowledge Base', href: '/home3/knowledge' },
-		{ label: 'Document Reviews', href: '/home3/inputs' }
-	];
+		...config.footer.quick_links
+	]);
 
-	const resources = [
-		{ label: 'Blog / Insights', href: '/semos1' },
-		{ label: 'Documentation', href: '/semos1' },
-		{ label: 'Pricing', href: '/semos1' },
-		{ label: 'Security & Trust', href: '/semos1' }
-	];
+	const resources = $derived(config.footer.resources);
 </script>
 
 <footer class="relative bg-[#0c0f1a]">
@@ -34,11 +30,9 @@
 				<p class="mt-4 text-sm leading-relaxed text-white/45">
 					{config.footer.text}
 				</p>
-				<p class="mt-4 text-sm text-white/45">
-					1-224 Knowledge Street<br />
-					Chicago, IL 60606<br />
-					United States
-				</p>
+				{#if config.footer.address}
+					<p class="mt-4 text-sm whitespace-pre-line text-white/45">{config.footer.address}</p>
+				{/if}
 			</div>
 
 			<!-- Column 2: Quick Links -->
@@ -87,7 +81,7 @@
 					Stay Connected
 				</h3>
 				<p class="mt-6 text-sm leading-relaxed text-white/45">
-									Get the latest on knowledge management and AI.
+					{config.footer.newsletter}
 				</p>
 				<div class="mt-5 flex gap-3">
 					<a href="/semos1" class="flex h-9 w-9 items-center justify-center rounded-full bg-white/8 text-white/50 transition-all duration-200 hover:bg-[#6b7aff]/20 hover:text-[#6b7aff]" aria-label="LinkedIn">
@@ -102,10 +96,10 @@
 				</div>
 				<div class="mt-6">
 					<a
-						href="mailto:hello@semos.ai"
+						href="mailto:{config.footer.email}"
 						class="text-sm text-white/60 underline underline-offset-2 decoration-white/20 transition-colors hover:text-white hover:decoration-white/50"
 					>
-						hello@semos.ai
+						{config.footer.email}
 					</a>
 				</div>
 			</div>

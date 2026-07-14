@@ -161,10 +161,10 @@
 <section class="border-t border-border/70 bg-accent/20">
 	<div use:reveal class="reveal mx-auto max-w-6xl px-6 py-24 md:py-32">
 		<h2 class="text-center text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-			Everything you need
+			{cfg.features_section.title}
 		</h2>
 		<p class="mt-3 text-center text-muted-foreground">
-			Four capabilities, one platform.
+			{cfg.features_section.subtitle}
 		</p>
 		<div class="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
 			{#each cfg.features as f, i (f.key)}

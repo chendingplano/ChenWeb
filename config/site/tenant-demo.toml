@@ -7,6 +7,7 @@ logo_text = "Demo Corp"
 powered_by = "Powered by SemOS"
 
 [hero]
+kicker = "Knowledge Management — AI Powered"
 slogan = "Demo Corp: Institutional Knowledge, On Tap"
 subtitle = "SemOS turns documents into searchable, reviewable, actionable knowledge — and lets you build AI applications on top of it."
 image = "/images/angleWalls.jpg"
@@ -66,6 +67,35 @@ href = "/home3"
 
 [footer]
 text = "SemOS — Knowledge Management AI Application System"
+address = """1-224 Knowledge Street
+Chicago, IL 60606
+United States"""
+newsletter = "Get the latest on knowledge management and AI."
+email = "hello@semos.ai"
+
+[[footer.quick_links]]
+label = "Knowledge Base"
+href = "/home3/knowledge"
+
+[[footer.quick_links]]
+label = "Document Reviews"
+href = "/home3/inputs"
+
+[[footer.resources]]
+label = "Blog / Insights"
+href = "#"
+
+[[footer.resources]]
+label = "Documentation"
+href = "#"
+
+[[footer.resources]]
+label = "Pricing"
+href = "#"
+
+[[footer.resources]]
+label = "Security & Trust"
+href = "#"
 
 [workspace]
 banner_title = "Your Workspace"
@@ -107,3 +137,31 @@ name = "Agents and Harness"
 description = "Build and run AI agents over your knowledge."
 href = "/home3"
 icon = "bot"
+
+# ── Main-page section copy (tenant-independent, ADR 2026071102) ──────────
+
+[features_section]
+kicker = "What SemOS Does"
+title = "Everything you need"
+subtitle = "Four capabilities. One platform. Your knowledge, your way."
+
+[cta]
+title = "Ready when you are."
+subtitle = "Bring your documents. SemOS turns them into working knowledge."
+
+# Stats band. PLACEHOLDER VALUES — replace with real figures before launch.
+[[stats]]
+label = "Documents Processed"
+value = "—"
+
+[[stats]]
+label = "Metrics Extracted"
+value = "—"
+
+[[stats]]
+label = "Enterprise Customers"
+value = "—"
+
+[[stats]]
+label = "Provisions Analyzed"
+value = "—"

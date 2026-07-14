@@ -20,12 +20,7 @@
 		app_dev: Bot
 	};
 
-	const stats = [
-		{ label: 'Documents Processed', value: '127K+' },
-		{ label: 'Metrics Extracted', value: '4.2M' },
-		{ label: 'Enterprise Customers', value: '180+' },
-		{ label: 'Provisions Analyzed', value: '960K' }
-	];
+	const stats = $derived(cfg.stats);
 
 	function reveal(node: HTMLElement) {
 		const observer = new IntersectionObserver(
@@ -63,7 +58,7 @@
 	<div class="relative mx-auto max-w-7xl px-6 pt-28 pb-32 md:pt-40 md:pb-44 lg:pt-48 lg:pb-56">
 		<div use:reveal class="reveal max-w-3xl">
 			<span class="inline-block rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-xs font-semibold tracking-wider uppercase text-white/90">
-				Knowledge Management · AI Powered
+				{cfg.hero.kicker}
 			</span>
 			<h1 class="mt-8 text-[clamp(2.8rem,6vw+1rem,5.25rem)] font-bold leading-[1.02] tracking-tight text-white">
 				{cfg.hero.slogan}
@@ -166,10 +161,10 @@
 	<div class="mx-auto max-w-7xl px-6 py-24 md:py-32">
 		<div use:reveal class="reveal max-w-2xl">
 			<h2 class="text-3xl font-bold tracking-tight text-[#1a1a1a] dark:text-[#e8e7e4]">
-				Everything you need
+				{cfg.features_section.title}
 			</h2>
 			<p class="mt-4 text-[#6b6b6b] dark:text-[#9a9aa0]">
-				Four capabilities. One platform. Your knowledge, your way.
+				{cfg.features_section.subtitle}
 			</p>
 		</div>
 
@@ -216,10 +211,10 @@
 	<div class="relative mx-auto max-w-7xl px-6 py-24 text-center md:py-32">
 		<div use:reveal class="reveal max-w-2xl mx-auto">
 			<h2 class="text-3xl font-bold tracking-tight text-white md:text-4xl">
-				Ready to get started?
+				{cfg.cta.title}
 			</h2>
 			<p class="mt-4 text-white/60">
-				Join teams that trust SemOS to manage, search, and act on their knowledge.
+				{cfg.cta.subtitle}
 			</p>
 			<div class="mt-10 flex flex-wrap items-center justify-center gap-4">
 				<a

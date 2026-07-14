@@ -25,6 +25,7 @@ type Branding struct {
 }
 
 type Hero struct {
+	Kicker            string `toml:"kicker" json:"kicker"`
 	Slogan            string `toml:"slogan" json:"slogan"`
 	Subtitle          string `toml:"subtitle" json:"subtitle"`
 	Image             string `toml:"image" json:"image"`
@@ -32,6 +33,25 @@ type Hero struct {
 	CTAPrimaryHref    string `toml:"cta_primary_href" json:"cta_primary_href"`
 	CTASecondaryLabel string `toml:"cta_secondary_label" json:"cta_secondary_label"`
 	CTASecondaryHref  string `toml:"cta_secondary_href" json:"cta_secondary_href"`
+}
+
+// SectionCopy is the heading block above a page section.
+type SectionCopy struct {
+	Kicker   string `toml:"kicker" json:"kicker"`
+	Title    string `toml:"title" json:"title"`
+	Subtitle string `toml:"subtitle" json:"subtitle"`
+}
+
+// Stat is one figure in the stats band.
+type Stat struct {
+	Label string `toml:"label" json:"label"`
+	Value string `toml:"value" json:"value"`
+}
+
+// FooterLink is one entry in a footer link column.
+type FooterLink struct {
+	Label string `toml:"label" json:"label"`
+	Href  string `toml:"href" json:"href"`
 }
 
 type Highlight struct {
@@ -48,7 +68,12 @@ type Feature struct {
 }
 
 type Footer struct {
-	Text string `toml:"text" json:"text"`
+	Text       string       `toml:"text" json:"text"`
+	Address    string       `toml:"address" json:"address"`
+	Newsletter string       `toml:"newsletter" json:"newsletter"`
+	Email      string       `toml:"email" json:"email"`
+	QuickLinks []FooterLink `toml:"quick_links" json:"quick_links"`
+	Resources  []FooterLink `toml:"resources" json:"resources"`
 }
 
 type WorkspaceApp struct {
@@ -66,12 +91,15 @@ type Workspace struct {
 }
 
 type SiteConfig struct {
-	Branding   Branding    `toml:"branding" json:"branding"`
-	Hero       Hero        `toml:"hero" json:"hero"`
-	Highlights []Highlight `toml:"highlights" json:"highlights"`
-	Features   []Feature   `toml:"features" json:"features"`
-	Footer     Footer      `toml:"footer" json:"footer"`
-	Workspace  Workspace   `toml:"workspace" json:"workspace"`
+	Branding        Branding    `toml:"branding" json:"branding"`
+	Hero            Hero        `toml:"hero" json:"hero"`
+	Highlights      []Highlight `toml:"highlights" json:"highlights"`
+	FeaturesSection SectionCopy `toml:"features_section" json:"features_section"`
+	Features        []Feature   `toml:"features" json:"features"`
+	Stats           []Stat      `toml:"stats" json:"stats"`
+	CTA             SectionCopy `toml:"cta" json:"cta"`
+	Footer          Footer      `toml:"footer" json:"footer"`
+	Workspace       Workspace   `toml:"workspace" json:"workspace"`
 }
 
 // LoadSiteConfig parses one complete site-config TOML file.

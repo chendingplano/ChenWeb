@@ -76,7 +76,7 @@
 			<div class="flex items-center gap-3">
 				<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
 				<span class="text-xs font-bold tracking-[0.22em] uppercase text-[#6f6c66] dark:text-[#a5a29b]">
-					Knowledge Management — AI Powered
+					{cfg.hero.kicker}
 				</span>
 			</div>
 
@@ -191,15 +191,15 @@
 			<div class="flex items-center justify-center gap-3">
 				<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
 				<span class="text-xs font-bold tracking-[0.22em] uppercase text-[#6f6c66] dark:text-[#a5a29b]">
-					What SemOS Does
+					{cfg.features_section.kicker}
 				</span>
 				<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
 			</div>
 			<h2 class="mt-5 text-3xl font-bold tracking-tight text-[#17181c] dark:text-[#e9e7e2]">
-				Everything you need
+				{cfg.features_section.title}
 			</h2>
 			<p class="mt-4 text-[#6f6c66] dark:text-[#a5a29b]">
-				Four capabilities. One platform. Your knowledge, your way.
+				{cfg.features_section.subtitle}
 			</p>
 		</div>
 
@@ -236,10 +236,10 @@
 		<div use:reveal class="reveal mx-auto max-w-xl">
 			{@render ornament()}
 			<h2 class="mt-8 text-3xl font-bold tracking-tight text-[#17181c] md:text-4xl dark:text-[#e9e7e2]">
-				Ready when you are.
+				{cfg.cta.title}
 			</h2>
 			<p class="mt-4 text-[#6f6c66] dark:text-[#a5a29b]">
-				Bring your documents. SemOS turns them into working knowledge.
+				{cfg.cta.subtitle}
 			</p>
 			<div class="mt-10 flex flex-wrap items-center justify-center gap-4">
 				<a

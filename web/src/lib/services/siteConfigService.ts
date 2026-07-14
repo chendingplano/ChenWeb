@@ -8,6 +8,7 @@ export interface SiteBranding {
 }
 
 export interface SiteHero {
+	kicker: string;
 	slogan: string;
 	subtitle: string;
 	image: string;
@@ -15,6 +16,25 @@ export interface SiteHero {
 	cta_primary_href: string;
 	cta_secondary_label: string;
 	cta_secondary_href: string;
+}
+
+/** Heading block above a page section. */
+export interface SectionCopy {
+	kicker: string;
+	title: string;
+	subtitle: string;
+}
+
+/** One figure in the stats band. */
+export interface SiteStat {
+	label: string;
+	value: string;
+}
+
+/** One entry in a footer link column. */
+export interface FooterLink {
+	label: string;
+	href: string;
 }
 
 export interface SiteHighlight {
@@ -44,12 +64,24 @@ export interface SiteWorkspace {
 	apps: WorkspaceApp[];
 }
 
+export interface SiteFooter {
+	text: string;
+	address: string;
+	newsletter: string;
+	email: string;
+	quick_links: FooterLink[];
+	resources: FooterLink[];
+}
+
 export interface SiteConfig {
 	branding: SiteBranding;
 	hero: SiteHero;
 	highlights: SiteHighlight[];
+	features_section: SectionCopy;
 	features: SiteFeature[];
-	footer: { text: string };
+	stats: SiteStat[];
+	cta: SectionCopy;
+	footer: SiteFooter;
 	workspace: SiteWorkspace;
 }
 

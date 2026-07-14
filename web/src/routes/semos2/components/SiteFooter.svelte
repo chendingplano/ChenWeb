@@ -5,19 +5,15 @@
 
 	let { config }: { config: SiteConfig } = $props();
 
-	const quickLinks = [
+	// Nav links stay i18n-driven (they mirror the header); the rest of the
+	// footer's link columns and contact details come from site config.
+	const quickLinks = $derived([
 		{ label: m.semos_nav_home(), href: '/semos2' },
 		{ label: m.semos_nav_workspace(), href: '/semos2/workspace' },
-		{ label: 'Knowledge Base', href: '/home3/knowledge' },
-		{ label: 'Document Reviews', href: '/home3/inputs' }
-	];
+		...config.footer.quick_links
+	]);
 
-	const resources = [
-		{ label: 'Blog / Insights', href: '/semos2' },
-		{ label: 'Documentation', href: '/semos2' },
-		{ label: 'Pricing', href: '/semos2' },
-		{ label: 'Security & Trust', href: '/semos2' }
-	];
+	const resources = $derived(config.footer.resources);
 </script>
 
 <footer class="relative bg-[#f3f1ec] dark:bg-[#15181e]">
@@ -43,11 +39,9 @@
 				<p class="mt-4 text-sm leading-relaxed text-[#6f6c66] dark:text-[#a5a29b]">
 					{config.footer.text}
 				</p>
-				<p class="mt-4 text-sm text-[#6f6c66] dark:text-[#a5a29b]">
-					1-224 Knowledge Street<br />
-					Chicago, IL 60606<br />
-					United States
-				</p>
+				{#if config.footer.address}
+					<p class="mt-4 text-sm whitespace-pre-line text-[#6f6c66] dark:text-[#a5a29b]">{config.footer.address}</p>
+				{/if}
 			</div>
 
 			<!-- Column 2: Quick Links -->
@@ -96,7 +90,7 @@
 					Stay Connected
 				</h3>
 				<p class="mt-6 text-sm leading-relaxed text-[#6f6c66] dark:text-[#a5a29b]">
-					Get the latest on knowledge management and AI.
+					{config.footer.newsletter}
 				</p>
 				<div class="mt-5 flex gap-3">
 					<a href="/semos2" class="flex h-9 w-9 items-center justify-center rounded-full bg-[#17181c]/6 text-[#17181c]/50 shadow-[inset_0_1px_1px_rgba(255,255,255,0.8),0_1px_3px_rgba(23,24,28,0.08)] transition-all duration-200 hover:bg-[#b08d57]/15 hover:text-[#b08d57] dark:bg-white/8 dark:text-white/50 dark:shadow-none dark:hover:bg-[#b08d57]/20" aria-label="LinkedIn">
@@ -111,10 +105,10 @@
 				</div>
 				<div class="mt-6">
 					<a
-						href="mailto:hello@semos.ai"
+						href="mailto:{config.footer.email}"
 						class="text-sm text-[#17181c]/60 underline decoration-[#b08d57]/40 underline-offset-2 transition-colors hover:text-[#17181c] hover:decoration-[#b08d57] dark:text-white/60 dark:hover:text-white"
 					>
-						hello@semos.ai
+						{config.footer.email}
 					</a>
 				</div>
 			</div>
