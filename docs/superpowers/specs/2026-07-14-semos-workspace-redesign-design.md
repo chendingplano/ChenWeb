@@ -153,11 +153,22 @@ All three config files get the new fields: `site-default.toml`,
 
 ### New i18n messages
 
-Added to all four catalogs (`en`, `zh-cn`, `ja`, `ko`):
+Added to every catalog that exists — `web/messages/en.json` and
+`web/messages/zh-cn.json`:
 
 - `semos_workspace_no_announcements`
 - `semos_workspace_no_activity`
 - `semos_workspace_no_alarms`
+
+**Discrepancy, not resolved here.** `project.inlang/settings.json` declares
+`locales: ["en", "zh-cn"]`, but the parent ADR records
+`[frontend].supported_languages = ["en", "zh-cn", "ja", "ko"]`. Only `en` and
+`zh-cn` catalogs exist on disk. This is a third instance of the
+language-configuration confusion the ADR already carries as an open question
+(`[frontend].supported_languages` vs. `config.local.toml`'s `[languages]`).
+This design adds messages to the catalogs that exist and does not create
+`ja.json` / `ko.json` — inventing Japanese and Korean translations is not a
+styling task. Logged as a carried-forward question below.
 
 ### Recent Activity and Alarms remain empty
 
@@ -190,10 +201,31 @@ Workspace page all consume it. This is the only refactor in scope.
 | `config/site/site-default.toml` | new `[workspace]` fields |
 | `config/site/site-default-zh-cn.toml` | new `[workspace]` fields |
 | `config/site/tenant-demo.toml` | new `[workspace]` fields |
-| `web/messages/{en,zh-cn,ja,ko}.json` | 3 new empty-state messages each |
+| `web/messages/{en,zh-cn}.json` | 3 new empty-state messages each |
+| `server/api/sitehandler/testdata/site-valid.toml` | fixture gains the new fields |
+| `server/api/sitehandler/sitehandler_test.go` | assert the new fields parse |
 
 No database migration. No new endpoint. `GET /api/site-config` carries the new
 fields automatically once the struct gains them.
+
+## Testing strategy
+
+The two layers have very different test affordances, and the plan must not
+pretend otherwise.
+
+**Go (config schema) — real TDD.** `sitehandler_test.go` already exists and
+loads `testdata/site-valid.toml` through `LoadSiteConfig`. The new `kicker`
+and `announcements` fields get a failing test first, then the struct change.
+
+**Svelte (the re-skin) — no unit tests.** The web project has **no test
+runner**: `.test.ts` files exist but `vitest` is absent from `package.json`
+and no test binary is installed, so they cannot run. Standing up a test
+runner is a separate concern from a visual re-skin and is out of scope here.
+The Svelte layer is verified by `bun run check` (svelte-check, catches the
+type errors that matter when the config interface changes) plus browser
+verification against the checklist below. Asserting Tailwind class strings in
+a unit test would be tautology, not verification — it would restate the
+implementation rather than test it.
 
 ## Verification
 
@@ -223,3 +255,9 @@ Per the workspace coding protocol:
 - Should nav labels move into config? Still open in the parent ADR.
 - `[[stats]]` figures are still placeholders.
 - Recent Activity and Alarms have no backing endpoint.
+- **`ja` / `ko` message catalogs do not exist** although the ADR lists them as
+  supported languages. Folds into the ADR's existing language-config open
+  question.
+- **The web project has no working test runner.** Pre-existing, not caused by
+  this work, but it means frontend changes here carry no automated regression
+  net beyond `svelte-check`.
