@@ -96,7 +96,7 @@ func TestMetricConversionsPreservePresenceEmptyStableJSONAndSourceLines(t *testi
 
 func TestScoreRecordConversionPersistsEveryMetricRowAndAdditiveComponent(t *testing.T) {
 	v := .75
-	rows := []ScoreRow{{Metric: "detection_f1", Direction: "higher", AggregationKind: "count_derived_micro", Value: &v, Numerator: 3, Denominator: 4}, {Metric: "detection", Component: "tp", Direction: "higher", AggregationKind: "additive", Value: &v, Numerator: 3, Denominator: 1}}
+	rows := []ScoreRow{{Metric: "detection_f1", Direction: "higher", AggregationKind: "count_derived_micro", Value: &v, Numerator: 3, Denominator: 4}, {Metric: "detection", Component: "tp", Direction: "higher", AggregationKind: "additive", Value: &v, Numerator: 3, Denominator: 1, ConditionalAttribution: true}}
 	records, err := metricScoreRecords("attempt-1", rows, json.RawMessage(`{"diagnostic":"ok"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestScoreRecordConversionPersistsEveryMetricRowAndAdditiveComponent(t *test
 	if len(records) != 2 || records[0].AttemptID.String != "attempt-1" || records[0].Processor != "extract_metrics" || records[0].ScorerVersion != MetricScorerVersion || !records[0].Value.Valid || records[0].Numerator.Float64 != 3 || !records[0].Applicable {
 		t.Fatalf("primary record=%#v", records[0])
 	}
-	if records[1].Metric != "detection" || records[1].Slice != "tp" || !records[1].AdditiveComponent.Valid || records[1].AdditiveComponent.Float64 != .75 {
+	if records[1].Metric != "detection" || records[1].Slice != "tp" || !records[1].AdditiveComponent.Valid || records[1].AdditiveComponent.Float64 != .75 || !records[1].Applicable {
 		t.Fatalf("additive record=%#v", records[1])
 	}
 }

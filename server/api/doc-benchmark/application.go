@@ -24,12 +24,32 @@ type ApplicationRuntime interface {
 
 type RuntimeFactory func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error)
 
+type AttemptWorkspace interface {
+	Path() string
+	Capture([]byte, string) (Artifact, error)
+	Cleanup(CleanupOptions) error
+	Close() error
+}
+type AttemptRunnerFunc func(context.Context, string, RunnerConfig, AttemptWork) error
+type EvidenceLoader func(context.Context, string) (EvidenceBundle, error)
+
 type ApplicationConfig struct {
 	DB                                                *sql.DB
 	DatasetRoot, WorkRoot, EvidenceRoot, ArtifactRoot string
 	Owner                                             string
+	TenantID                                          string
+	StoreID                                           int64
+	ParserName                                        string
 	Now                                               func() time.Time
 	RuntimeFactory                                    RuntimeFactory
+	AttemptRunner                                     AttemptRunnerFunc
+	AllocateWorkspace                                 func(WorkspaceConfig) (AttemptWorkspace, error)
+	Seed                                              func(context.Context, *sql.DB, SeedInputRequest) (SeededInput, error)
+	AdapterFactory                                    func(Processor, DatasetCase, SeededInput) Adapter
+	ControllerExecutor                                func(context.Context, ApplicationRuntime, []byte) error
+	InsertArtifact                                    func(context.Context, ArtifactRecord) error
+	InsertScore                                       func(context.Context, ScoreRecord) error
+	LoadEvidence                                      EvidenceLoader
 }
 
 type Application struct{ Config ApplicationConfig }
@@ -385,7 +405,7 @@ func metricScoreRecords(attemptID string, rows []ScoreRow, diagnostics json.RawM
 			AttemptID: sql.NullString{String: attemptID, Valid: true}, Processor: string(ProcessorExtractMetrics),
 			Scorer: "metric", ScorerVersion: MetricScorerVersion, Metric: row.Metric, Slice: row.Component,
 			Direction: row.Direction, AggregationKind: row.AggregationKind, NonNull: row.Value != nil,
-			Applicable: !row.ConditionalAttribution, Metadata: metadata,
+			Applicable: true, Metadata: metadata,
 			Numerator:   sql.NullFloat64{Float64: float64(row.Numerator), Valid: true},
 			Denominator: sql.NullFloat64{Float64: float64(row.Denominator), Valid: true},
 		}
