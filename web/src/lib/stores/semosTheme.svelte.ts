@@ -11,7 +11,10 @@ class SemosTheme {
 	 * itself is already applied by the blocking inline script in
 	 * app.html (before hydration, to avoid a flash) — this only syncs the
 	 * reactive `mode` state so the header's sun/moon icon matches on
-	 * first paint.
+	 * first paint. Depends on /semos being entered via a full page load
+	 * (true today, since the app is ssr=false and nothing links into
+	 * /semos from outside it) — an in-app SPA navigation into /semos would
+	 * skip app.html's script and need its own `.dark` application.
 	 */
 	init() {
 		const stored = localStorage.getItem(STORAGE_KEY);
