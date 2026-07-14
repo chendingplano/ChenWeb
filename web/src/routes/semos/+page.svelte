@@ -10,6 +10,7 @@
 		ArrowDown,
 		ArrowUpRight
 	} from '@lucide/svelte';
+	import Ornament from './components/Ornament.svelte';
 
 	let { data } = $props();
 	const cfg = $derived(data.siteConfig);
@@ -112,21 +113,6 @@
 </section>
 
 <!-- ═════════════════════════════════════════════════
-     ORNAMENT DIVIDER — a bronze diamond flanked by
-     dots. Marks the passage between blocks without
-     drawing a line.
-     ═════════════════════════════════════════════════ -->
-{#snippet ornament()}
-	<div class="flex items-center justify-center gap-3 py-2" aria-hidden="true">
-		<span class="h-1 w-1 rounded-full bg-[#b08d57]/40"></span>
-		<span class="h-1.5 w-1.5 rounded-full bg-[#b08d57]/60"></span>
-		<span class="inline-block h-2.5 w-2.5 rotate-45 bg-[#b08d57]"></span>
-		<span class="h-1.5 w-1.5 rounded-full bg-[#b08d57]/60"></span>
-		<span class="h-1 w-1 rounded-full bg-[#b08d57]/40"></span>
-	</div>
-{/snippet}
-
-<!-- ═════════════════════════════════════════════════
      HIGHLIGHTS — airy alternating rows on paper,
      images in floating 3-D frames
      ═════════════════════════════════════════════════ -->
@@ -135,7 +121,7 @@
 		{#each cfg.highlights as h, i (h.title)}
 			{#if i > 0}
 				<div use:reveal class="reveal py-14 md:py-20">
-					{@render ornament()}
+					<Ornament class="py-2" />
 				</div>
 			{/if}
 			<div
@@ -178,7 +164,7 @@
 
 <!-- Ornament between highlights and features -->
 <div use:reveal class="reveal py-12 md:py-16">
-	{@render ornament()}
+	<Ornament class="py-2" />
 </div>
 
 <!-- ═════════════════════════════════════════════════
@@ -234,7 +220,7 @@
 <section class="relative">
 	<div class="mx-auto max-w-7xl px-6 py-24 text-center md:py-32">
 		<div use:reveal class="reveal mx-auto max-w-xl">
-			{@render ornament()}
+			<Ornament class="py-2" />
 			<h2 class="mt-8 text-3xl font-bold tracking-tight text-[#17181c] md:text-4xl dark:text-[#e9e7e2]">
 				{cfg.cta.title}
 			</h2>

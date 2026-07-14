@@ -3,6 +3,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { ArrowUpRight } from '@lucide/svelte';
 	import LogoMark from './LogoMark.svelte';
+	import Ornament from './Ornament.svelte';
 
 	let { config }: { config: SiteConfig } = $props();
 
@@ -19,13 +20,7 @@
 
 <footer class="relative bg-[#f3f1ec] dark:bg-[#15181e]">
 	<!-- Ornament instead of a hard top border -->
-	<div class="flex items-center justify-center gap-3 pt-14" aria-hidden="true">
-		<span class="h-1 w-1 rounded-full bg-[#b08d57]/40"></span>
-		<span class="h-1.5 w-1.5 rounded-full bg-[#b08d57]/60"></span>
-		<span class="inline-block h-2.5 w-2.5 rotate-45 bg-[#b08d57]"></span>
-		<span class="h-1.5 w-1.5 rounded-full bg-[#b08d57]/60"></span>
-		<span class="h-1 w-1 rounded-full bg-[#b08d57]/40"></span>
-	</div>
+	<Ornament class="pt-14" />
 
 	<div class="mx-auto max-w-7xl px-6 py-14 md:py-16">
 		<div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
