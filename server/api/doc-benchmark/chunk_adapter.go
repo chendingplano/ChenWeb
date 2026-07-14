@@ -2,6 +2,7 @@ package docbenchmark
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -34,16 +35,18 @@ type ChunkDBRow struct {
 	UpdateTime     any      `json:"update_time"`
 }
 type ChunkCapture struct {
-	Rows     []ChunkDBRow
-	File     []byte
-	FileName string
-	Diff     map[string]any
+	Rows          []ChunkDBRow
+	File          []byte
+	FileName      string
+	Diff          map[string]any
+	SourceMaxLine int
 }
 type ChunkActual struct{ Chunks []ScoredChunk }
 type ChunkAdapter struct {
-	DB           *sql.DB
-	ArtifactDir  string
-	ArtifactPath func(int64) string
+	DB            *sql.DB
+	ArtifactDir   string
+	ArtifactPath  func(int64) string
+	SourceMaxLine int
 }
 
 func (a ChunkAdapter) Processor() Processor { return ProcessorChunking }
@@ -79,7 +82,14 @@ func jsonBytes(v any) ([]byte, error) {
 
 var lineRangeToken = regexp.MustCompile(`^([0-9]+)(?:-([0-9]+))?$`)
 
+const maxExpandedLineEntries = 1_000_000
+const maxProductionLineNumber = 10_000_000
+
 func parseLineRanges(raw string) ([]int, error) {
+	return parseLineRangesWithMax(raw, 0)
+}
+
+func parseLineRangesWithMax(raw string, sourceMax int) ([]int, error) {
 	raw = strings.TrimSpace(raw)
 	if len(raw) < 2 || raw[0] != '[' || raw[len(raw)-1] != ']' {
 		return nil, fmt.Errorf("invalid line range %q", raw)
@@ -106,6 +116,16 @@ func parseLineRanges(raw string) ([]int, error) {
 				return nil, fmt.Errorf("descending line range %q", token)
 			}
 		}
+		limit := maxProductionLineNumber
+		if sourceMax > 0 && sourceMax < limit {
+			limit = sourceMax
+		}
+		if end > limit {
+			return nil, fmt.Errorf("line number %d exceeds maximum %d", end, limit)
+		}
+		if end-start+1 > maxExpandedLineEntries || len(out) > maxExpandedLineEntries-(end-start+1) {
+			return nil, fmt.Errorf("line range expands beyond %d entries", maxExpandedLineEntries)
+		}
 		for n := start; n <= end; n++ {
 			if len(out) > 0 && n <= out[len(out)-1] {
 				return nil, fmt.Errorf("duplicate or unordered line %d", n)
@@ -116,7 +136,7 @@ func parseLineRanges(raw string) ([]int, error) {
 	return out, nil
 }
 
-func parseProductionLineArrays(v any) ([][]int, error) {
+func parseProductionLineArrays(v any, sourceMax int) ([][]int, error) {
 	b, err := jsonBytes(v)
 	if err != nil {
 		return nil, err
@@ -127,7 +147,7 @@ func parseProductionLineArrays(v any) ([][]int, error) {
 	}
 	out := make([][]int, len(encoded))
 	for i, raw := range encoded {
-		out[i], err = parseLineRanges(raw)
+		out[i], err = parseLineRangesWithMax(raw, sourceMax)
 		if err != nil {
 			return nil, fmt.Errorf("chunk %d: %w", i+1, err)
 		}
@@ -163,11 +183,11 @@ func (a ChunkAdapter) Capture(ctx context.Context, id int64) (any, error) {
 		if err := rows.Scan(&r.ID, &r.ChunkingMethod, &r.ChunkingSize, &r.OverlapPercent, &r.Notes, &ov, &nl, &cl, &r.CreateTime, &r.UpdateTime); err != nil {
 			return nil, err
 		}
-		r.OverlapLines, err = parseProductionLineArrays(ov)
+		r.OverlapLines, err = parseProductionLineArrays(ov, a.SourceMaxLine)
 		if err != nil {
 			return nil, fmt.Errorf("%w: overlap_lines: %v", ErrInvalidOutput, err)
 		}
-		r.NormalLines, err = parseProductionLineArrays(nl)
+		r.NormalLines, err = parseProductionLineArrays(nl, a.SourceMaxLine)
 		if err != nil {
 			return nil, fmt.Errorf("%w: normal_lines: %v", ErrInvalidOutput, err)
 		}
@@ -196,12 +216,14 @@ func (a ChunkAdapter) Capture(ctx context.Context, id int64) (any, error) {
 	}
 	c.File = b
 	c.FileName = p
+	c.SourceMaxLine = a.SourceMaxLine
 	return c, nil
 }
 
 type artifactChunk struct{ overlap, normal []int }
 
-func parseChunksFile(b []byte) ([]artifactChunk, error) {
+func parseChunksFile(b []byte) ([]artifactChunk, error) { return parseChunksFileWithMax(b, 0) }
+func parseChunksFileWithMax(b []byte, sourceMax int) ([]artifactChunk, error) {
 	s := bufio.NewScanner(strings.NewReader(string(b)))
 	var out []artifactChunk
 	var overlap, normal []int
@@ -230,7 +252,7 @@ func parseChunksFile(b []byte) ([]artifactChunk, error) {
 		if !ok {
 			return nil, fmt.Errorf("malformed chunks line %q", line)
 		}
-		arr, err := parseLineRanges(strings.TrimSpace(v))
+		arr, err := parseLineRangesWithMax(strings.TrimSpace(v), sourceMax)
 		if err != nil {
 			return nil, err
 		}
@@ -275,7 +297,7 @@ func (a ChunkAdapter) Reconcile(v any) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: invalid capture", ErrInvalidOutput)
 	}
-	parsed, err := parseChunksFile(c.File)
+	parsed, err := parseChunksFileWithMax(c.File, c.SourceMaxLine)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidOutput, err)
 	}
@@ -316,7 +338,73 @@ type SeededInput struct {
 
 const seedInputQuery = `INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
 
+func safeLeaf(s string) bool {
+	return s != "" && s != "." && s != ".." && filepath.Base(s) == s && !strings.ContainsAny(s, `/\`)
+}
+
+func canonicalSeedRoot(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, e := filepath.EvalSymlinks(abs); e == nil {
+		abs = resolved
+	}
+	return filepath.Clean(abs), nil
+}
+
+func pathWithin(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func writeNewFileDurable(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".benchmark-input-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err = tmp.Chmod(0o600); err == nil {
+		_, err = tmp.Write(data)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Link(tmpName, path); err != nil {
+		return fmt.Errorf("stage input without overwrite: %w", err)
+	}
+	if dir, e := os.Open(filepath.Dir(path)); e == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
+}
+
 func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInput, error) {
+	if !safeLeaf(req.ParserName) {
+		return SeededInput{}, fmt.Errorf("invalid parser name %q", req.ParserName)
+	}
+	workspace, err := canonicalSeedRoot(req.Workspace)
+	if err != nil {
+		return SeededInput{}, err
+	}
+	if req.ResultFilename != "" {
+		candidate := req.ResultFilename
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(workspace, candidate)
+		}
+		candidate, err = filepath.Abs(candidate)
+		if err != nil || !pathWithin(workspace, filepath.Clean(candidate)) {
+			return SeededInput{}, fmt.Errorf("result filename escapes workspace")
+		}
+	}
 	if db == nil {
 		return SeededInput{}, fmt.Errorf("nil database")
 	}
@@ -326,30 +414,29 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 	if req.AttemptID == "" || req.Workspace == "" || req.StoreID <= 0 {
 		return SeededInput{}, fmt.Errorf("invalid seed input request")
 	}
-	if req.ParserName == "" {
-		req.ParserName = "benchmark"
-	}
 	if req.Title == "" {
 		req.Title = req.Case.CaseID
 	}
-	if err := os.MkdirAll(req.Workspace, 0o700); err != nil {
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		return SeededInput{}, err
 	}
-	stagingMetadata := filepath.Join(req.Workspace, BenchmarkInputFilename)
+	stagingMetadata := filepath.Join(workspace, BenchmarkInputFilename)
 	resultMetadata := req.ResultFilename
 	if resultMetadata == "" {
-		resultMetadata = filepath.Join(req.Workspace, "result.txt")
+		resultMetadata = filepath.Join(workspace, "result.txt")
 	}
 	linePath, err := docprocessing.ResolveInputFilePath(docprocessing.LineFileGeneratedEvent{}, resultMetadata, req.ParserName, stagingMetadata)
 	if err != nil {
 		return SeededInput{}, err
 	}
-	if err := os.WriteFile(linePath, req.Case.InputBytes, 0o600); err != nil {
-		return SeededInput{}, err
+	linePath, err = filepath.Abs(linePath)
+	if err != nil || !pathWithin(workspace, filepath.Clean(linePath)) {
+		return SeededInput{}, fmt.Errorf("resolved line path escapes workspace")
 	}
+	created := false
 	ok := false
 	defer func() {
-		if !ok {
+		if !ok && created {
 			_ = os.Remove(linePath)
 		}
 	}()
@@ -358,13 +445,60 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 		return SeededInput{}, err
 	}
 	defer tx.Rollback()
+	var owned sql.NullInt64
+	if err = tx.QueryRowContext(ctx, `SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, req.AttemptID).Scan(&owned); err != nil {
+		return SeededInput{}, err
+	}
+	if owned.Valid {
+		var tenant, parser, staging, result, fileName, status string
+		var storeID int64
+		if err = tx.QueryRowContext(ctx, `SELECT tenant_id, ks_store_id, parser_name, staging_filename, result_filename, file_name, status::text FROM kb.inputs WHERE id=$1`, owned.Int64).Scan(&tenant, &storeID, &parser, &staging, &result, &fileName, &status); err != nil {
+			return SeededInput{}, err
+		}
+		if tenant != req.TenantID || storeID != req.StoreID || parser != req.ParserName || staging != stagingMetadata || result != linePath || fileName != BenchmarkInputFilename {
+			return SeededInput{}, fmt.Errorf("seed input retry metadata conflict")
+		}
+		existing, readErr := os.ReadFile(linePath)
+		if readErr != nil || !bytes.Equal(existing, req.Case.InputBytes) {
+			return SeededInput{}, fmt.Errorf("seed input retry bytes conflict")
+		}
+		if err = tx.Commit(); err != nil {
+			return SeededInput{}, err
+		}
+		ok = true
+		return SeededInput{ID: owned.Int64, ParserName: parser, StagingFilename: staging, ResultFilename: result, FileName: fileName}, nil
+	}
+	if err = writeNewFileDurable(linePath, req.Case.InputBytes); err != nil {
+		return SeededInput{}, err
+	}
+	created = true
 	var id int64
 	err = tx.QueryRowContext(ctx, seedInputQuery, req.TenantID, req.StoreID, "pdf", req.Title, req.ParserName, stagingMetadata, linePath, BenchmarkInputFilename, req.Status).Scan(&id)
 	if err != nil {
 		return SeededInput{}, err
 	}
-	if err = bindInputOwnershipTx(ctx, tx, req.AttemptID, id); err != nil {
+	result, err := tx.ExecContext(ctx, `UPDATE kb.benchmark_workspaces SET input_record_id=$2 WHERE execution_attempt_id=$1 AND input_record_id IS NULL`, req.AttemptID, id)
+	if err != nil {
 		return SeededInput{}, err
+	}
+	if n, e := result.RowsAffected(); e != nil || n != 1 {
+		return SeededInput{}, fmt.Errorf("benchmark: workspace input bind lost race")
+	}
+	var snapshot sql.NullInt64
+	if err = tx.QueryRowContext(ctx, `SELECT input_record_id_snapshot FROM kb.benchmark_case_attempts WHERE id=$1 AND kind='execution' FOR UPDATE`, req.AttemptID).Scan(&snapshot); err != nil {
+		return SeededInput{}, err
+	}
+	if snapshot.Valid && snapshot.Int64 != id {
+		return SeededInput{}, fmt.Errorf("attempt input snapshot conflict")
+	}
+	if !snapshot.Valid {
+		result, err = tx.ExecContext(ctx, `UPDATE kb.benchmark_case_attempts SET input_record_id_snapshot=$2 WHERE id=$1 AND kind='execution' AND input_record_id_snapshot IS NULL`, req.AttemptID, id)
+		if err != nil {
+			return SeededInput{}, err
+		}
+		if n, e := result.RowsAffected(); e != nil || n != 1 {
+			return SeededInput{}, fmt.Errorf("benchmark: attempt input bind lost race")
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return SeededInput{}, err
@@ -380,10 +514,21 @@ func ProductionArtifactPath(artifactDir string, recordID int64, stagingFilename,
 	if extension != ".chunks" && extension != ".metrics" {
 		return "", fmt.Errorf("unsupported artifact extension %q", extension)
 	}
+	if !safeLeaf(parserName) {
+		return "", fmt.Errorf("invalid parser name %q", parserName)
+	}
+	rootDir, err := canonicalSeedRoot(artifactDir)
+	if err != nil {
+		return "", err
+	}
 	root := strings.TrimSuffix(filepath.Base(strings.TrimSpace(stagingFilename)), filepath.Ext(strings.TrimSpace(stagingFilename)))
 	parser := strings.TrimSpace(parserName)
 	if root == "" || parser == "" {
 		return "", fmt.Errorf("invalid artifact filename inputs")
 	}
-	return filepath.Join(artifactDir, strconv.FormatInt(recordID/1000, 10), strconv.FormatInt(recordID, 10), root+"_"+parser+extension), nil
+	target := filepath.Join(rootDir, strconv.FormatInt(recordID/1000, 10), strconv.FormatInt(recordID, 10), root+"_"+parser+extension)
+	if !pathWithin(rootDir, target) {
+		return "", fmt.Errorf("artifact path escapes artifact directory")
+	}
+	return target, nil
 }

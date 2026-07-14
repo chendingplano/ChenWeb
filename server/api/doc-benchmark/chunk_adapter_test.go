@@ -125,3 +125,29 @@ func TestChunksArtifactRequiresExactProductionGrammar(t *testing.T) {
 		})
 	}
 }
+
+func TestChunkRangesRejectUnboundedExpansionAndSourceOverflow(t *testing.T) {
+	for _, raw := range []string{"[1-1000000000]", "[9223372036854775807]"} {
+		if _, err := parseLineRanges(raw); err == nil {
+			t.Fatalf("accepted dangerous range %s", raw)
+		}
+	}
+	if _, err := parseLineRangesWithMax("[1-11]", 10); err == nil {
+		t.Fatal("accepted line beyond source maximum")
+	}
+	if got, err := parseLineRangesWithMax("[1-10]", 10); err != nil || len(got) != 10 {
+		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestChunkAdapterRejectsLineBeyondKnownSource(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	path := filepath.Join(t.TempDir(), "x.chunks")
+	_ = os.WriteFile(path, []byte("overlap: []\nlines: [1-4]"), 0o600)
+	mock.ExpectQuery(`FROM kb\.chunks`).WillReturnRows(sqlmock.NewRows([]string{"id", "chunking_method", "chunking_size", "overlap_percent", "notes", "overlap_lines", "normal_lines", "chunk_lines", "create_time", "update_time"}).AddRow(1, "fixed", 1, 0, "", `["[]"]`, `["[1-4]"]`, `["x"]`, nil, nil))
+	_, err := (ChunkAdapter{DB: db, ArtifactPath: func(int64) string { return path }, SourceMaxLine: 3}).Capture(context.Background(), 1)
+	if !errors.Is(err, ErrInvalidOutput) {
+		t.Fatalf("err=%v", err)
+	}
+}
