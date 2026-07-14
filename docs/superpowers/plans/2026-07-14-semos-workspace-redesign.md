@@ -323,22 +323,35 @@ true. Extract it before adding a consumer.
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `Ornament.svelte`, default export, **no props**. Used as `<Ornament />`. It renders only the mark itself — it carries **no vertical padding**, so every caller controls its own spacing. This matters: the Main page wraps it in `py-14 md:py-20`, the footer in `pt-14`, and Task 4 will use tighter spacing. A component with baked-in padding could not serve all three.
+- Produces: `Ornament.svelte`, with one optional prop:
+  - `class?: string` — spacing classes applied to the ornament's own wrapper. Defaults to `''`.
+
+  Spacing is a prop rather than baked in because the three consumers space it
+  differently, and this task must be a **pure refactor** — every existing call
+  site has to render byte-identically to before. The current snippet in
+  `semos/+page.svelte` carries `py-2`; the footer's separate inline copy
+  carries `pt-14` and no `py-2`. A component with fixed padding could not
+  reproduce both, and would silently shift the Main page by 8px at three
+  places. Callers pass what they already had.
 
 - [ ] **Step 1: Create the component**
 
-Create `web/src/routes/semos/components/Ornament.svelte`. This markup is lifted verbatim from the `ornament` snippet in `semos/+page.svelte` — the bronze diamond flanked by two pairs of fading dots — with the wrapper's `py-2` removed so callers own their spacing:
+Create `web/src/routes/semos/components/Ornament.svelte`. The five spans are lifted verbatim from the `ornament` snippet in `semos/+page.svelte` — the bronze diamond flanked by two pairs of fading dots:
 
 ```svelte
-<!--
-	The bronze ornament: a rotated diamond flanked by fading dots. Used
-	instead of a horizontal rule wherever the paper-and-ink pages mark a
-	passage between blocks (ADR 2026071102).
+<script lang="ts">
+	// Spacing is the caller's business: the main page's dividers carry py-2,
+	// the footer carries pt-14, the workspace page uses its own rhythm. Baking
+	// a padding in would silently move whichever caller disagreed with it.
+	let { class: klass = '' }: { class?: string } = $props();
+</script>
 
-	Carries no vertical padding on purpose — the Main page, the footer and
-	the Workspace page each space it differently. Wrap it, don't pad it.
+<!--
+	The bronze ornament: a rotated diamond flanked by fading dots. Used instead
+	of a horizontal rule wherever the paper-and-ink pages mark a passage
+	between blocks (ADR 2026071102).
 -->
-<div class="flex items-center justify-center gap-3" aria-hidden="true">
+<div class="flex items-center justify-center gap-3 {klass}" aria-hidden="true">
 	<span class="h-1 w-1 rounded-full bg-[#b08d57]/40"></span>
 	<span class="h-1.5 w-1.5 rounded-full bg-[#b08d57]/60"></span>
 	<span class="inline-block h-2.5 w-2.5 rotate-45 bg-[#b08d57]"></span>
@@ -359,34 +372,31 @@ In `web/src/routes/semos/+page.svelte`:
 
 2. **Delete** the entire `{#snippet ornament()} ... {/snippet}` block (currently lines 119-127, including the `<!-- ORNAMENT DIVIDER -->` comment banner above it).
 
-3. Replace each of the three `{@render ornament()}` call sites with `<Ornament />`. The wrappers around them keep their padding exactly as-is. For example, the divider between highlights becomes:
+3. Replace each of the three `{@render ornament()}` call sites with `<Ornament class="py-2" />`. **The `py-2` is mandatory** — the deleted snippet's own wrapper carried it, so omitting it would shrink the Main page by 8px at each of these three places. The outer wrappers keep their padding exactly as-is.
+
+The divider between highlights becomes:
 
 ```svelte
 				{#if i > 0}
 					<div use:reveal class="reveal py-14 md:py-20">
-						<Ornament />
+						<Ornament class="py-2" />
 					</div>
 				{/if}
 ```
 
-and the one between highlights and features:
+the one between highlights and features:
 
 ```svelte
 <div use:reveal class="reveal py-12 md:py-16">
-	<Ornament />
+	<Ornament class="py-2" />
 </div>
 ```
 
 and the one in the closing CTA (inside `<div use:reveal class="reveal mx-auto max-w-xl">`):
 
 ```svelte
-				<Ornament />
+				<Ornament class="py-2" />
 ```
-
-Note the CTA's ornament previously rendered with the snippet's own `py-2`, and
-the `<h2>` beneath it already carries `mt-8`. Losing that `py-2` is a 8px
-tightening in one spot. Accept it — do not add a compensating wrapper. Confirm
-it looks right in Step 5.
 
 - [ ] **Step 3: Use it in the footer**
 
@@ -398,13 +408,13 @@ In `web/src/routes/semos/components/SiteFooter.svelte`:
 	import Ornament from './Ornament.svelte';
 ```
 
-2. Replace the inline ornament markup (currently lines 22-28 — the `<div class="flex items-center justify-center gap-3 pt-14">` and its five spans) with a padded wrapper around the component, preserving the `pt-14`:
+2. Replace the inline ornament markup (currently lines 22-28 — the `<div class="flex items-center justify-center gap-3 pt-14">` and its five spans) with:
 
 ```svelte
-	<div class="pt-14">
-		<Ornament />
-	</div>
+	<Ornament class="pt-14" />
 ```
+
+Note the footer's inline copy carried `pt-14` and **no** `py-2` — that is why spacing is a prop. Passing `pt-14` here reproduces the footer exactly, with no extra wrapper element.
 
 - [ ] **Step 4: Typecheck**
 

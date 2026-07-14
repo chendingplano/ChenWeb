@@ -1,0 +1,168 @@
+# Tenant-independent site config for the SemOS customer-facing frontend.
+# Named by [config].config_filename in config.local.toml (ADR 2026071102).
+
+[branding]
+site_name = "SemOS"
+logo_text = "SemOS"
+logo_image = "/images/logo-semos.svg"
+powered_by = "Powered by SemOS"
+
+[hero]
+kicker = "Knowledge Management — AI Powered"
+slogan = "Your Knowledge, Working for You"
+subtitle = "SemOS turns documents into searchable, reviewable, actionable knowledge — and lets you build AI applications on top of it."
+image = "/images/angleWalls.jpg"
+cta_primary_label = "Get Started"
+cta_primary_href = "/semos/workspace"
+cta_secondary_label = "Sign Up / Login"
+cta_secondary_href = "/login"
+
+[[highlights]]
+title = "知识冶炼：每一份文档，皆被彻悟"
+description = "不止于解析，更在于“理解”。SemOS 将 PDF、Word、PPT 等异构文档深度拆解，剥离出结构、逻辑与语义骨架。文字不再是孤立的字符，而是可推理、可关联的知识原矿。上传即冶炼，阅读即洞察——让机器真正读懂你的每一页沉淀。"
+image = "/images/kb-documents.jpg"
+
+[[highlights]]
+title = "知识平台：产出物，而非页码"
+description = "文档不再是翻不完的册子，而是可检索的知识立方。摘要、指标、合规条款、实体与关系、主题图谱……所有智能产出物均成为一等公民，可搜索、可关联、可追溯。你面对的不再是文件列表，而是一个不断自生长的活态知识网络。"
+image = "/images/kb-artifacts.jpg"
+
+[[highlights]]
+title = "企业搜索引擎：问你所想，得你所愿"
+description = "混合检索引擎融合 BM25 的精准、向量的语义泛化、图谱的关系推理与 SQL 的结构化查询，一次性穿透非结构化与结构化数据。无论模糊记忆还是精确条件，都能一步抵达。让企业信息不再沉睡，让每一次搜索都像与智者对话。"
+image = "/images/kb-search.jpg"
+
+[[highlights]]
+title = "文档审核：多维透视，智能把关"
+description = "合规性、技术先进性、指标合理性、条款严密性——审核不再是逐行扫读的人海战术。SemOS 自动对照法规库、行业标准与历史案例，生成风险热图与偏差报告，将主观判断转化为可量化的证据链，让审核从“找问题”升级为“建信任”。"
+image = "/images/kb-reviews.jpg"
+
+[[highlights]]
+title = "AI 应用开发平台：将智能嵌入业务血脉"
+description = "无需从零训练，无需复杂部署。基于已冶炼的知识工件，拖拽式构建智能问答、自动报告、异常预警、合规巡检等定制应用。开放 API 与低代码环境，让业务专家也能驾驭 AI，把创新从“想法”加速到“上线”，让每个岗位都拥有自己的数字智囊。"
+image = "/images/kb-appdev.jpg"
+
+[[features]]
+key = "knowledge_base"
+title = "Knowledge Base"
+description = "文档、片段、实体、关系、指标——所有知识资产不再散落于文件夹与网盘，而是汇聚于一处可治理、可权限管控的统一存储中。版本可溯、血缘可查、访问可审，让知识从“个人经验”进化为“组织资产”，为每一份智慧找到它的永久居所。"
+href = "/home3/knowledge"
+
+[[features]]
+key = "chat"
+title = "对话文档：问自然语言，得精准答案"
+description = "像与人交谈一样与文档对话。无需记住关键词，不必翻阅百页报告，只需用日常语言提出问题，SemOS 便从原文中锚定依据，给出可溯源、可核验的答案。让信息获取从“搜索”升维为“问答”，让每一份文档都变成随时待命的资深顾问。"
+href = "/home3"
+
+[[features]]
+key = "search"
+title = "知识检索：混合索引，一搜即达"
+description = "BM25 的精确匹配与向量语义理解的深度融合，配合图谱关系与结构化过滤，让检索不再依赖“猜对词”。无论你记得的是精确术语，还是模糊印象，系统都能穿透语义鸿沟，把最相关的内容送到眼前。搜索，从此不再是碰运气。"
+href = "/home3/knowledge"
+
+[[features]]
+key = "app_dev"
+title = "智能体与应用开发：让每个人都能创造 AI 能力"
+description = "不只是调用 AI，而是创造 AI。提供低代码编排工具、预置技能库与开放 API，让业务专家也能快速搭建智能问答、自动审阅、风险监测等专属应用。发布的每一个智能体，都是组织能力的延伸——让创新从少数人的专利，变成每个人的日常。"
+href = "/home3"
+
+[footer]
+text = "SemOS — Knowledge Management AI Application System"
+address = """1-224 Knowledge Street
+Chicago, IL 60606
+United States"""
+newsletter = "Get the latest on knowledge management and AI."
+email = "hello@semos.ai"
+
+[[footer.quick_links]]
+label = "Knowledge Base"
+href = "/home3/knowledge"
+
+[[footer.quick_links]]
+label = "Document Reviews"
+href = "/home3/inputs"
+
+[[footer.resources]]
+label = "Blog / Insights"
+href = "#"
+
+[[footer.resources]]
+label = "Documentation"
+href = "#"
+
+[[footer.resources]]
+label = "Pricing"
+href = "#"
+
+[[footer.resources]]
+label = "Security & Trust"
+href = "#"
+
+[workspace]
+banner_title = "Your Workspace"
+banner_subtitle = "Everything you need to work with your knowledge base, in one place."
+banner_image = "/images/angleWalls.jpg"
+
+[[workspace.apps]]
+name = "Knowledge Base"
+description = "Browse and manage documents and artifacts."
+href = "/home3/knowledge"
+icon = "database"
+
+[[workspace.apps]]
+name = "Chat with Your Knowledge Base"
+description = "Grounded Q&A over your documents."
+href = "/home3"
+icon = "message-circle"
+
+[[workspace.apps]]
+name = "Search Your Knowledge Base"
+description = "Hybrid keyword + semantic search."
+href = "/home3/knowledge"
+icon = "search"
+
+[[workspace.apps]]
+name = "Document Reviews"
+description = "Run and read document reviews with cited findings."
+href = "/home3/inputs"
+icon = "file-check"
+
+[[workspace.apps]]
+name = "Workflows"
+description = "Automate multi-step document processing."
+href = "/home3"
+icon = "workflow"
+
+[[workspace.apps]]
+name = "Agents and Harness"
+description = "Build and run AI agents over your knowledge."
+href = "/home3"
+icon = "bot"
+
+# ── Main-page section copy (tenant-independent, ADR 2026071102) ──────────
+
+[features_section]
+kicker = "What SemOS Does"
+title = "Everything you need"
+subtitle = "Four capabilities. One platform. Your knowledge, your way."
+
+[cta]
+title = "Ready when you are."
+subtitle = "Bring your documents. SemOS turns them into working knowledge."
+
+# Stats band. PLACEHOLDER VALUES — replace with real figures before launch.
+[[stats]]
+label = "Documents Processed"
+value = "—"
+
+[[stats]]
+label = "Metrics Extracted"
+value = "—"
+
+[[stats]]
+label = "Enterprise Customers"
+value = "—"
+
+[[stats]]
+label = "Provisions Analyzed"
+value = "—"
