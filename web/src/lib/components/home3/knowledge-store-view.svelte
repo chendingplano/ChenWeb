@@ -61,6 +61,11 @@
 	let successSoft = $derived(darkMode ? 'rgba(71,182,153,0.16)' : 'rgba(46,155,126,0.14)');
 	let danger = $derived(darkMode ? '#ff7d6b' : '#e85d47');
 	let dangerSoft = $derived(darkMode ? 'rgba(255,125,107,0.14)' : 'rgba(232,93,71,0.12)');
+	let neonSlab = $derived(darkMode ? 'rgba(7,10,18,0.96)' : 'rgba(255,255,255,0.94)');
+	let neonSlabSoft = $derived(darkMode ? 'rgba(7,10,18,0.94)' : 'rgba(247,249,253,0.92)');
+	let neonSlabRaised = $derived(darkMode ? 'rgba(7,10,18,0.98)' : 'rgba(255,255,255,0.97)');
+	let neonSlabRaisedSoft = $derived(darkMode ? 'rgba(7,10,18,0.95)' : 'rgba(247,249,253,0.95)');
+	let neonPillText = $derived(darkMode ? 'white 20%' : 'black 25%');
 
 	const emptyText = 'No active knowledge store selected yet. Click a card to make it the active knowledge store for this page.';
 	const CARD_STYLE_STORAGE_KEY = 'knowledge-store-card-style';
@@ -290,7 +295,7 @@
 	});
 </script>
 
-<div class="knowledge-store-view" style="--page-bg:{pageBg}; --shell-bg:{shellBg}; --card-bg:{cardBg}; --card-raised:{cardBgRaised}; --border:{borderColor}; --border-soft:{borderSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --accent:{accent}; --accent-soft:{accentSoft}; --success-soft:{successSoft}; --danger:{danger}; --danger-soft:{dangerSoft}; --user-card-color:{cardBackgroundColor};">
+<div class="knowledge-store-view" style="--page-bg:{pageBg}; --shell-bg:{shellBg}; --card-bg:{cardBg}; --card-raised:{cardBgRaised}; --border:{borderColor}; --border-soft:{borderSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --accent:{accent}; --accent-soft:{accentSoft}; --success-soft:{successSoft}; --danger:{danger}; --danger-soft:{dangerSoft}; --user-card-color:{cardBackgroundColor}; --neon-slab:{neonSlab}; --neon-slab-soft:{neonSlabSoft}; --neon-slab-raised:{neonSlabRaised}; --neon-slab-raised-soft:{neonSlabRaisedSoft}; --neon-pill-text:{neonPillText};">
 	<section class="hero-shell">
 		<div class="hero-copy">
 			<div class="eyebrow">Knowledge Stores</div>
@@ -882,7 +887,7 @@
 
 	.store-card.style-neon {
 		background:
-			linear-gradient(180deg, rgba(7, 10, 18, 0.96), rgba(7, 10, 18, 0.94)),
+			linear-gradient(180deg, var(--neon-slab), var(--neon-slab-soft)),
 			var(--card-bg);
 		box-shadow:
 			0 0 0 1px color-mix(in srgb, var(--user-card-color) 75%, #39d0ff 25%),
@@ -893,7 +898,7 @@
 	.store-card.style-neon:hover,
 	.store-card.style-neon.selected {
 		background:
-			linear-gradient(180deg, rgba(7, 10, 18, 0.98), rgba(7, 10, 18, 0.95)),
+			linear-gradient(180deg, var(--neon-slab-raised), var(--neon-slab-raised-soft)),
 			var(--card-raised);
 		box-shadow:
 			0 0 0 1px color-mix(in srgb, var(--user-card-color) 78%, #39d0ff 22%),
@@ -903,7 +908,7 @@
 
 	.store-card.style-neon .active-pill,
 	.store-card.style-neon .badge.accent {
-		color: color-mix(in srgb, var(--user-card-color) 80%, white 20%);
+		color: color-mix(in srgb, var(--user-card-color) 80%, var(--neon-pill-text));
 	}
 
 	.store-card:hover {
