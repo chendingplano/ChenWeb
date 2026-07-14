@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
 	CHUNK_PANEL_DEFAULT_SETTINGS,
+	CHUNK_LEGACY_BACKGROUNDS,
+	CHUNK_THEME_BACKGROUND,
 	clampChunkListWidth,
 	clampZoom,
 	createChunkPanelSettingsStorageKey,
@@ -82,4 +84,29 @@ test('readChunkPanelSettings falls back to defaults when JSON is invalid', () =>
 	};
 
 	assert.deepEqual(readChunkPanelSettings(storage, 'user-42'), CHUNK_PANEL_DEFAULT_SETTINGS);
+});
+
+test('chunk backgrounds follow the theme by default so the panels flip with light/dark', () => {
+	assert.equal(CHUNK_PANEL_DEFAULT_SETTINGS.chunkCardBackground, CHUNK_THEME_BACKGROUND);
+	assert.equal(CHUNK_PANEL_DEFAULT_SETTINGS.summaryBackground, CHUNK_THEME_BACKGROUND);
+	assert.equal(CHUNK_PANEL_DEFAULT_SETTINGS.contentBackground, CHUNK_THEME_BACKGROUND);
+});
+
+test('the legacy dark chunk backgrounds migrate back to theme-following', () => {
+	const merged = mergeChunkPanelSettings({
+		chunkCardBackground: CHUNK_LEGACY_BACKGROUNDS.chunkCardBackground,
+		summaryBackground: CHUNK_LEGACY_BACKGROUNDS.summaryBackground.toLowerCase(),
+		contentBackground: CHUNK_LEGACY_BACKGROUNDS.contentBackground
+	});
+	assert.equal(merged.chunkCardBackground, CHUNK_THEME_BACKGROUND);
+	assert.equal(merged.summaryBackground, CHUNK_THEME_BACKGROUND);
+	assert.equal(merged.contentBackground, CHUNK_THEME_BACKGROUND);
+});
+
+test('an explicit chunk background override survives and can be cleared', () => {
+	assert.equal(mergeChunkPanelSettings({ summaryBackground: '#123456' }).summaryBackground, '#123456');
+	assert.equal(
+		mergeChunkPanelSettings({ summaryBackground: CHUNK_THEME_BACKGROUND }).summaryBackground,
+		CHUNK_THEME_BACKGROUND
+	);
 });

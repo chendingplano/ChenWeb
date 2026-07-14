@@ -127,6 +127,11 @@
 	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
+	// Light-on-dark tints that only worked on the dark panel; the dark branch is
+	// unchanged, the light branch is the same hue at readable contrast on white.
+	let accentSoft = $derived(darkMode ? '#a7f3d0' : '#0f766e');
+	let errorTitle = $derived(darkMode ? '#fecaca' : '#991b1b');
+	let errorCopy = $derived(darkMode ? '#fca5a5' : '#b91c1c');
 	// The map center node is a high-contrast disc that reads as the focal
 	// point against the canvas in either theme (dark disc on light, light on dark).
 	let centerBg = $derived(darkMode ? '#e8edf7' : '#0e1729');
@@ -698,7 +703,7 @@
 <div
 	class="scene-shell"
 	class:resizing={resizing || focusResizing}
-	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --center-bg:${centerBg}; --center-ink:${centerInk};`}
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --center-bg:${centerBg}; --center-ink:${centerInk}; --accent-soft:${accentSoft}; --error-title:${errorTitle}; --error-copy:${errorCopy};`}
 	style:--focus-pdf-width={`${focusPdfWidth}px`}
 >
 	{#snippet pdfPanel(ctxItem: any | null)}
@@ -1374,7 +1379,7 @@
 	.tab.active {
 		border-color: rgba(34, 197, 94, 0.36);
 		background: rgba(34, 197, 94, 0.14);
-		color: #a7f3d0;
+		color: var(--accent-soft);
 	}
 	.tab.passive {
 		color: var(--muted);
@@ -1529,7 +1534,7 @@
 		font-weight: 700;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #a7f3d0;
+		color: var(--accent-soft);
 		background: rgba(34, 197, 94, 0.12);
 		border: 1px solid rgba(34, 197, 94, 0.25);
 	}
@@ -1854,13 +1859,13 @@
 	}
 	.error-title {
 		font-weight: 700;
-		color: #fecaca;
+		color: var(--error-title);
 		margin-bottom: 0.3rem;
 	}
 	.error-copy {
 		font-size: 0.85rem;
 		line-height: 1.5;
-		color: #fca5a5;
+		color: var(--error-copy);
 	}
 
 	.skeleton-row {

@@ -38,6 +38,7 @@
 
 	// ---------- Aesthetic tokens (archival reading room, blue/indigo accent) ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
+	let docFrameBg = $derived(darkMode ? '#0A0D14' : '#E4DED0');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
 	let panelBgAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
 	let inkLine = $derived(darkMode ? '#2A3140' : '#D7CFB8');
@@ -488,6 +489,7 @@
 	class="summary-tree"
 	style="
 		--page-bg:{pageBg};
+		--doc-frame-bg:{docFrameBg};
 		--panel-bg:{panelBg};
 		--panel-bg-alt:{panelBgAlt};
 		--ink-line:{inkLine};
@@ -1519,7 +1521,7 @@
 		min-width: 0;
 		min-height: 0;
 		border: 1px solid var(--ink-line);
-		background: #0a0d14;
+		background: var(--doc-frame-bg);
 	}
 	:global(.pdf-highlight) {
 		position: absolute;

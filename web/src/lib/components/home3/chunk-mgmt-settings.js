@@ -11,11 +11,29 @@ export const ZOOM_MAX = 3;
 export const ZOOM_DEFAULT = 0.5;
 export const ZOOM_STEP = 0.1;
 
-export const CHUNK_PANEL_DEFAULT_SETTINGS = {
-	chunkListWidth: CHUNK_LIST_DEFAULT_WIDTH,
+/**
+ * Empty means "follow the view's theme": the surface inherits its theme token and
+ * flips with light/dark. Only an explicit hex is a user override.
+ */
+export const CHUNK_THEME_BACKGROUND = '';
+
+/**
+ * The former defaults. Each is the dark-mode value of the token the surface was
+ * meant to be (panelBg, panelBgAlt, and the content slab), frozen as a constant, so
+ * they painted dark under theme-aware ink in light mode. A stored value equal to one
+ * of these was never chosen by anyone, so it migrates back to theme-following.
+ */
+export const CHUNK_LEGACY_BACKGROUNDS = {
 	chunkCardBackground: '#161A22',
 	summaryBackground: '#1C212C',
-	contentBackground: '#131720',
+	contentBackground: '#131720'
+};
+
+export const CHUNK_PANEL_DEFAULT_SETTINGS = {
+	chunkListWidth: CHUNK_LIST_DEFAULT_WIDTH,
+	chunkCardBackground: CHUNK_THEME_BACKGROUND,
+	summaryBackground: CHUNK_THEME_BACKGROUND,
+	contentBackground: CHUNK_THEME_BACKGROUND,
 	pdfZoom: ZOOM_DEFAULT
 };
 
@@ -66,14 +84,20 @@ export function mergeChunkPanelSettings(partial) {
 	if (typeof partial.chunkListWidth === 'number') {
 		merged.chunkListWidth = clampChunkListWidth(partial.chunkListWidth);
 	}
-	if (isHexColor(partial.chunkCardBackground)) {
-		merged.chunkCardBackground = partial.chunkCardBackground;
-	}
-	if (isHexColor(partial.summaryBackground)) {
-		merged.summaryBackground = partial.summaryBackground;
-	}
-	if (isHexColor(partial.contentBackground)) {
-		merged.contentBackground = partial.contentBackground;
+	for (const key of /** @type {const} */ ([
+		'chunkCardBackground',
+		'summaryBackground',
+		'contentBackground'
+	])) {
+		const value = partial[key];
+		if (value === CHUNK_THEME_BACKGROUND) {
+			merged[key] = CHUNK_THEME_BACKGROUND;
+		} else if (isHexColor(value)) {
+			merged[key] =
+				value.toUpperCase() === CHUNK_LEGACY_BACKGROUNDS[key]
+					? CHUNK_THEME_BACKGROUND
+					: value;
+		}
 	}
 	if (typeof partial.pdfZoom === 'number') {
 		merged.pdfZoom = clampZoom(partial.pdfZoom);

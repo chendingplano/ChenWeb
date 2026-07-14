@@ -43,6 +43,11 @@
 
 	// ---------- Aesthetic tokens: "archival reading room" ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
+	let docFrameBg = $derived(darkMode ? '#0A0D14' : '#E4DED0');
+	let tableHeadBg = $derived(darkMode ? '#181D27' : '#EBE4D3');
+	let dialogSectionBg = $derived(darkMode ? '#171C26' : '#F7F2E6');
+	let dialogInputBg = $derived(darkMode ? '#1A202B' : '#FFFFFF');
+	let dialogInputLine = $derived(darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(26,20,16,0.12)');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
 	let panelBgAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
 	let inkLine = $derived(darkMode ? '#2A3140' : '#D7CFB8');
@@ -1325,6 +1330,11 @@
 	class="metric-mgmt"
 	style="
 		--page-bg:{pageBg};
+		--doc-frame-bg:{docFrameBg};
+		--table-head-bg:{tableHeadBg};
+		--dialog-section-bg:{dialogSectionBg};
+		--dialog-input-bg:{dialogInputBg};
+		--dialog-input-line:{dialogInputLine};
 		--panel-bg:{panelBg};
 		--panel-bg-alt:{panelBgAlt};
 		--ink-line:{inkLine};
@@ -2301,7 +2311,7 @@
 	.prov-list-resizer.active .prov-list-resizer-grip,
 	.prov-list-resizer:hover .prov-list-resizer-grip,
 	.prov-list-resizer:focus-visible .prov-list-resizer-grip {
-		border-color: #22c55e;
+		border-color: var(--brass);
 	}
 
 	.error {
@@ -2714,7 +2724,7 @@
 		text-align: left;
 		padding: 10px 14px;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-		background: #181d27;
+		background: var(--table-head-bg);
 		white-space: nowrap;
 	}
 	.am-table tbody tr {
@@ -2779,7 +2789,7 @@
 		width: 100%;
 		min-width: 200px;
 		padding: 6px 10px;
-		background: #1a202b;
+		background: var(--dialog-input-bg);
 		border: 1px solid rgba(212, 162, 76, 0.35);
 		border-radius: 8px;
 		color: var(--text-primary);
@@ -3031,7 +3041,7 @@
 		min-width: 0;
 		min-height: 0;
 		border: 1px solid var(--ink-line);
-		background: #0a0d14;
+		background: var(--doc-frame-bg);
 	}
 	:global(.pdf-highlight) {
 		position: absolute;
@@ -3276,8 +3286,8 @@
 		flex-direction: column;
 		border-radius: 24px;
 		overflow: auto;
-		background: #111827;
-		color: #f3eedf;
+		background: var(--panel-bg);
+		color: var(--text-primary);
 		border: 1px solid rgba(148, 163, 184, 0.16);
 		box-shadow:
 			0 30px 80px rgba(0, 0, 0, 0.55),
@@ -3330,7 +3340,7 @@
 		border-radius: 20px;
 		padding: 14px;
 		background:
-			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)), #171c26;
+			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)), var(--dialog-section-bg);
 	}
 	.dialog-section-head {
 		display: flex;
@@ -3352,15 +3362,15 @@
 	}
 	.dialog-search-btn {
 		min-width: 140px;
-		background: #d4a24c !important;
-		color: #15110a !important;
-		border: 1px solid #e0b768 !important;
+		background: var(--brass) !important;
+		color: #1d1508 !important;
+		border: 1px solid var(--brass) !important;
 		box-shadow: 0 8px 20px rgba(212, 162, 76, 0.22);
 		opacity: 1 !important;
 	}
 	.dialog-search-btn:hover:not(:disabled) {
-		background: #e0b768 !important;
-		color: #15110a !important;
+		background: color-mix(in srgb, var(--brass), #fff 14%) !important;
+		color: #1d1508 !important;
 	}
 	.dialog-search-btn:disabled {
 		background: rgba(212, 162, 76, 0.35) !important;
@@ -3386,7 +3396,7 @@
 		justify-content: space-between;
 		align-items: center;
 		flex: 0 0 auto;
-		background: #171c26;
+		background: var(--dialog-section-bg);
 	}
 	.dialog-foot-hint {
 		font-family: var(--font-mono);

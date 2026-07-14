@@ -20,6 +20,7 @@
 		ZOOM_MAX,
 		ZOOM_STEP,
 		CHUNK_PANEL_DEFAULT_SETTINGS,
+		CHUNK_THEME_BACKGROUND,
 		clampChunkListWidth,
 		readChunkPanelSettings,
 		writeChunkPanelSettings
@@ -37,6 +38,20 @@
 	let textMuted = $derived(darkMode ? '#7C7560' : '#8F8472');
 	let brass = $derived(darkMode ? '#D4A24C' : '#B8801E');
 	let brassFaint = $derived(darkMode ? 'rgba(212,162,76,0.12)' : 'rgba(184,128,30,0.10)');
+	let contentSlab = $derived(darkMode ? '#131720' : '#FDFBF5');
+	let crimson = $derived(darkMode ? '#C8553D' : '#A23E26');
+	let errorBg = $derived(darkMode ? 'rgba(200,85,61,0.15)' : 'rgba(162,62,38,0.10)');
+	let errorText = $derived(darkMode ? '#F3B7AC' : '#8C2F1A');
+	let infoType = $derived(darkMode ? '#E8CE8A' : '#8A6A1F');
+	let dialogSectionBg = $derived(darkMode ? '#171C26' : '#F7F2E6');
+	let dialogFieldBg = $derived(darkMode ? '#1A202B' : '#FFFDF7');
+	let dialogFieldLine = $derived(darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(26,20,16,0.08)');
+	let dialogInputBg = $derived(darkMode ? '#2A3140' : '#FFFFFF');
+	let dialogInputLine = $derived(darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(26,20,16,0.12)');
+	let dialogInputText = $derived(darkMode ? '#F3EEDF' : '#1A1410');
+	let btnDisabledBg = $derived(darkMode ? '#4A4F5C' : '#DED6C4');
+	let btnDisabledText = $derived(darkMode ? '#AEB4C0' : '#8F8472');
+	let btnDisabledLine = $derived(darkMode ? '#636B79' : '#CBC2AC');
 
 	const fontSerif = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
@@ -394,9 +409,23 @@
 		--font-serif:{fontSerif};
 		--font-mono:{fontMono};
 		--font-sans:{fontSans};
-		--chunk-card-bg:{chunkCardBackground};
-		--chunk-summary-bg:{summaryBackground};
-		--chunk-content-bg:{contentBackground};
+		--crimson:{crimson};
+		--error-bg:{errorBg};
+		--error-text:{errorText};
+		--info-type:{infoType};
+		--dialog-section-bg:{dialogSectionBg};
+		--dialog-field-bg:{dialogFieldBg};
+		--dialog-field-line:{dialogFieldLine};
+		--dialog-input-bg:{dialogInputBg};
+		--dialog-input-line:{dialogInputLine};
+		--dialog-input-text:{dialogInputText};
+		--btn-disabled-bg:{btnDisabledBg};
+		--btn-disabled-text:{btnDisabledText};
+		--btn-disabled-line:{btnDisabledLine};
+		--content-slab:{contentSlab};
+		--chunk-card-bg:{chunkCardBackground || 'var(--panel-bg)'};
+		--chunk-summary-bg:{summaryBackground || 'var(--panel-bg-alt)'};
+		--chunk-content-bg:{contentBackground || 'var(--content-slab)'};
 	"
 >
 	<header class="header">
@@ -639,12 +668,21 @@
 									<input
 										class="settings-color-input"
 										type="color"
-										value={chunkPanelSettings.chunkCardBackground}
+										value={chunkPanelSettings.chunkCardBackground || panelBg}
 										oninput={(e) =>
 											applyChunkPanelSettings({
 												chunkCardBackground: (e.currentTarget as HTMLInputElement).value
 											})}
 									/>
+									<button
+										type="button"
+										class="settings-color-reset"
+										disabled={chunkPanelSettings.chunkCardBackground === CHUNK_THEME_BACKGROUND}
+										onclick={() =>
+											applyChunkPanelSettings({ chunkCardBackground: CHUNK_THEME_BACKGROUND })}
+									>
+										Follow theme
+									</button>
 								</div>
 							</label>
 							<label class="field dialog-field settings-field">
@@ -653,12 +691,21 @@
 									<input
 										class="settings-color-input"
 										type="color"
-										value={chunkPanelSettings.summaryBackground}
+										value={chunkPanelSettings.summaryBackground || panelBgAlt}
 										oninput={(e) =>
 											applyChunkPanelSettings({
 												summaryBackground: (e.currentTarget as HTMLInputElement).value
 											})}
 									/>
+									<button
+										type="button"
+										class="settings-color-reset"
+										disabled={chunkPanelSettings.summaryBackground === CHUNK_THEME_BACKGROUND}
+										onclick={() =>
+											applyChunkPanelSettings({ summaryBackground: CHUNK_THEME_BACKGROUND })}
+									>
+										Follow theme
+									</button>
 								</div>
 							</label>
 							<label class="field dialog-field settings-field">
@@ -667,12 +714,21 @@
 									<input
 										class="settings-color-input"
 										type="color"
-										value={chunkPanelSettings.contentBackground}
+										value={chunkPanelSettings.contentBackground || contentSlab}
 										oninput={(e) =>
 											applyChunkPanelSettings({
 												contentBackground: (e.currentTarget as HTMLInputElement).value
 											})}
 									/>
+									<button
+										type="button"
+										class="settings-color-reset"
+										disabled={chunkPanelSettings.contentBackground === CHUNK_THEME_BACKGROUND}
+										onclick={() =>
+											applyChunkPanelSettings({ contentBackground: CHUNK_THEME_BACKGROUND })}
+									>
+										Follow theme
+									</button>
 								</div>
 							</label>
 							<div class="field dialog-field settings-field settings-field-wide">
@@ -932,7 +988,7 @@
 		padding: 1px 6px;
 		border-radius: 999px;
 		background: rgba(212, 162, 76, 0.14);
-		color: #e8ce8a;
+		color: var(--info-type);
 	}
 	.info-topic { font-size: 12px; line-height: 1.5; color: var(--text-primary); }
 	.info-keywords { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
@@ -986,8 +1042,8 @@
 		padding: 8px 10px;
 		border-radius: 8px;
 		font-size: 12px;
-		background: rgba(200, 85, 61, 0.15);
-		color: #f3b7ac;
+		background: var(--error-bg);
+		color: var(--error-text);
 	}
 	.empty { padding: 18px 10px; text-align: center; color: var(--text-secondary); }
 	.empty-title { font-weight: 700; margin-bottom: 4px; }
@@ -1074,7 +1130,7 @@
 		padding: 14px;
 		background:
 			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
-			#171c26;
+			var(--dialog-section-bg);
 	}
 	.dialog-section-head {
 		display: flex;
@@ -1095,35 +1151,35 @@
 		margin: 0;
 		padding: 10px 10px 8px;
 		border-radius: 16px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
-		background: #1a202b;
+		border: 1px solid var(--dialog-field-line);
+		background: var(--dialog-field-bg);
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 	}
 	.dialog-field :global(input),
 	.dialog-field :global(select) {
-		background: #2a3140;
-		border-color: rgba(255, 255, 255, 0.08);
-		color: #f3eedf;
+		background: var(--dialog-input-bg);
+		border-color: var(--dialog-input-line);
+		color: var(--dialog-input-text);
 	}
 	.dialog-field :global(input:focus),
 	.dialog-field :global(select:focus) {
-		border-color: #d4a24c;
+		border-color: var(--brass);
 		box-shadow:
 			0 0 0 1px rgba(212, 162, 76, 0.28),
 			0 0 0 4px rgba(212, 162, 76, 0.08);
 	}
 	.dialog-select-btn {
 		min-width: 132px;
-		background: #d4a24c !important;
-		color: #15110a !important;
-		border: 1px solid #e0b768 !important;
+		background: var(--brass) !important;
+		color: #1d1508 !important;
+		border: 1px solid var(--brass) !important;
 		opacity: 1 !important;
 	}
-	.dialog-select-btn:hover:not(:disabled) { background: #e0b768 !important; color: #15110a !important; }
+	.dialog-select-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--brass), #fff 14%) !important; color: #1d1508 !important; }
 	.dialog-select-btn:disabled {
-		background: #4a4f5c !important;
-		color: #aeb4c0 !important;
-		border: 1px solid #636b79 !important;
+		background: var(--btn-disabled-bg) !important;
+		color: var(--btn-disabled-text) !important;
+		border: 1px solid var(--btn-disabled-line) !important;
 		box-shadow: none !important;
 		cursor: not-allowed !important;
 		opacity: 1 !important;
@@ -1134,7 +1190,7 @@
 		justify-content: space-between;
 		align-items: center;
 		flex: 0 0 auto;
-		background: #171c26;
+		background: var(--dialog-section-bg);
 	}
 	.dialog-foot-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 	.dialog-foot-buttons { display: flex; gap: 10px; }
@@ -1156,8 +1212,31 @@
 		resize: none;
 	}
 	.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-	.settings-field { background: #1a202b; }
+	.settings-field { background: var(--dialog-field-bg); }
 	.settings-field-wide { grid-column: 1 / -1; }
+	.settings-color-reset {
+		flex-shrink: 0;
+		height: 42px;
+		padding: 0 12px;
+		border: 1px solid var(--ink-line);
+		border-radius: 8px;
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+	.settings-color-reset:hover:not(:disabled) {
+		color: var(--brass);
+		border-color: var(--brass);
+		background: var(--brass-faint);
+	}
+	.settings-color-reset:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
 	.settings-color-row { display: flex; align-items: center; gap: 12px; }
 	.settings-color-input {
 		width: 52px;
@@ -1187,7 +1266,7 @@
 		width: 16px;
 		height: 16px;
 		border-radius: 50%;
-		background: #e8ce8a;
+		background: var(--brass);
 		border: 2px solid rgba(0, 0, 0, 0.3);
 		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 		cursor: pointer;
@@ -1196,7 +1275,7 @@
 		width: 16px;
 		height: 16px;
 		border-radius: 50%;
-		background: #e8ce8a;
+		background: var(--brass);
 		border: 2px solid rgba(0, 0, 0, 0.3);
 		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 		cursor: pointer;
