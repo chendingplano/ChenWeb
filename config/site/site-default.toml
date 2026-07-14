@@ -18,27 +18,27 @@ cta_secondary_href = "/login"
 [[highlights]]
 title = "Every document, understood"
 description = "Upload files or collect them from the web. SemOS parses PDF, Word, PPT and more, extracting structure, not just text."
-image = "/images/angleWalls.jpg"
+image = "/images/kb-documents.jpg"
 
 [[highlights]]
 title = "Artifacts, not just pages"
 description = "Metrics, compliance provisions, entities and relations are extracted automatically and become first-class, searchable objects."
-image = "/images/angleWalls.jpg"
+image = "/images/kb-artifacts.jpg"
 
 [[highlights]]
 title = "Search that actually finds"
 description = "Hybrid search combines BM25 keyword matching with semantic vector similarity, so you find what you meant, not just what you typed."
-image = "/images/angleWalls.jpg"
+image = "/images/kb-search.jpg"
 
 [[highlights]]
 title = "Reviews with receipts"
 description = "Document reviews cite their source lines. Every finding links back to the exact place in the original document."
-image = "/images/angleWalls.jpg"
+image = "/images/kb-reviews.jpg"
 
 [[highlights]]
 title = "Build your own AI apps"
 description = "A development environment for building and offering AI applications on top of your knowledge base."
-image = "/images/angleWalls.jpg"
+image = "/images/kb-appdev.jpg"
 
 [[features]]
 key = "knowledge_base"
