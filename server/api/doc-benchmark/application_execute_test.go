@@ -118,7 +118,9 @@ func TestApplicationExecuteCaseRescoreLoadsVerifiedEvidenceWithoutRuntimeCall(t 
 	run, unit, experiment := executionFixture()
 	capture := ChunkCapture{Rows: []ChunkDBRow{{NormalLines: [][]int{{1}}, OverlapLines: [][]int{{}}, ChunkLines: []string{"line"}}}, File: []byte("overlap: []\nlines: [1]\n"), SourceMaxLine: 1}
 	captureJSON, _ := canonicalJSON(capture)
-	bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: "source", InputSHA256: sha256Hex(run.Cases[unit].InputBytes), InputBytes: run.Cases[unit].InputBytes, ExpectedJSON: run.Cases[unit].ExpectedBytes, ConfigJSON: json.RawMessage(`{"chunk_size":100}`), ConfigHash: "cfg", ScorerHash: "scorer", Processors: map[string]EvidenceProcessor{"chunking": {Capture: captureJSON}}}
+	configJSON := json.RawMessage(`{"chunk_size":100}`)
+	scorerJSON, scorerHash := scorerSnapshot([]Processor{ProcessorChunking})
+	bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: "source", InputSHA256: sha256Hex(run.Cases[unit].InputBytes), InputBytes: run.Cases[unit].InputBytes, ExpectedJSON: run.Cases[unit].ExpectedBytes, ConfigJSON: configJSON, ConfigHash: sha256Hex(configJSON), ScorerJSON: scorerJSON, ScorerHash: scorerHash, Processors: map[string]EvidenceProcessor{"chunking": {Capture: captureJSON, Actual: json.RawMessage(`{"chunks":[]}`)}}}
 	app := Application{Config: ApplicationConfig{
 		DB: &sql.DB{}, Owner: "worker",
 		AttemptRunner: func(ctx context.Context, _ string, _ RunnerConfig, work AttemptWork) error {
@@ -140,7 +142,7 @@ func TestApplicationExecuteCaseRescoreLoadsVerifiedEvidenceWithoutRuntimeCall(t 
 		AdapterFactory: func(Processor, DatasetCase, SeededInput) Adapter { return fakeExecutionAdapter{order: &order} },
 		InsertScore:    func(context.Context, ScoreRecord) error { order = append(order, "score.insert"); return nil },
 	}}
-	if err := app.ExecuteCase(context.Background(), experiment, run, unit, VariantSession{Runtime: runtime, ConfigHash: "cfg"}); err != nil {
+	if err := app.ExecuteCase(context.Background(), experiment, run, unit, VariantSession{Runtime: runtime, ConfigJSON: configJSON, ConfigHash: sha256Hex(configJSON)}); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.calls != 0 || len(order) == 0 || order[0] != "evidence.load" {
@@ -153,7 +155,7 @@ func TestVariantWorkerInitializesRuntimeOnceAndAttachesSnapshot(t *testing.T) {
 	defer db.Close()
 	runtime := &fakeApplicationRuntime{allowed: map[string][]string{"chunking": nil}, snapshot: resolvedSnapshotForTest()}
 	factoryCalls := 0
-	app := Application{Config: ApplicationConfig{DB: db, Owner: "worker", RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) {
+	app := Application{Config: ApplicationConfig{DB: db, Owner: "worker", AllowUnverifiedRuntimeHash: true, RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) {
 		factoryCalls++
 		return runtime, nil
 	}}}
