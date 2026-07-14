@@ -2,6 +2,7 @@
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import { m } from '$lib/paraglide/messages.js';
 	import { ArrowUpRight } from '@lucide/svelte';
+	import LogoMark from './LogoMark.svelte';
 
 	let { config }: { config: SiteConfig } = $props();
 
@@ -31,10 +32,10 @@
 			<!-- Column 1: Company info -->
 			<div>
 				<div class="flex items-baseline gap-1.5">
-					<span class="inline-block h-2 w-2 rotate-45 rounded-[2px] bg-[#b08d57]"></span>
-					<span class="text-base font-bold tracking-tight text-[#17181c] dark:text-[#e9e7e2]">
-						{config.branding.logo_text}
-					</span>
+					<LogoMark
+						branding={config.branding}
+						textClass="text-base font-bold tracking-tight text-[#17181c] dark:text-[#e9e7e2]"
+					/>
 				</div>
 				<p class="mt-4 text-sm leading-relaxed text-[#6f6c66] dark:text-[#a5a29b]">
 					{config.footer.text}

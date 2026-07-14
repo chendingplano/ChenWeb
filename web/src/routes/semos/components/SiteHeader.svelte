@@ -5,6 +5,7 @@
 	import { Sun, Moon, Languages, Menu, X } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { slide } from 'svelte/transition';
+	import LogoMark from './LogoMark.svelte';
 
 	let { config }: { config: SiteConfig } = $props();
 
@@ -27,12 +28,12 @@
 	class="sticky top-0 z-50 w-full border-b border-[#17181c]/8 bg-[#faf9f7]/90 backdrop-blur-xl dark:border-white/10 dark:bg-[#101216]/90"
 >
 	<div class="mx-auto flex h-[4.25rem] max-w-7xl items-center justify-between px-6">
-		<!-- Wordmark with bronze tick, echoing a monogram without copying one -->
+		<!-- Wordmark: image logo if configured, else bronze-tick monogram + text -->
 		<a href="/semos" class="group flex items-baseline gap-1.5">
-			<span class="inline-block h-2.5 w-2.5 rotate-45 rounded-[2px] bg-[#b08d57] transition-transform duration-300 group-hover:rotate-[135deg]"></span>
-			<span class="text-[1.1rem] font-bold tracking-[0.02em] text-[#17181c] dark:text-[#e9e7e2]">
-				{config.branding.logo_text}
-			</span>
+			<LogoMark
+				branding={config.branding}
+				textClass="text-[1.1rem] font-bold tracking-[0.02em] text-[#17181c] dark:text-[#e9e7e2]"
+			/>
 		</a>
 
 		<nav class="hidden items-center gap-7 md:flex">
