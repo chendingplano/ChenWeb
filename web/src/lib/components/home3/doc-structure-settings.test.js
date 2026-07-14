@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
 	DOC_STRUCTURE_DEFAULT_SETTINGS,
+	DOC_STRUCTURE_LEGACY_RECORD_BACKGROUND,
+	DOC_STRUCTURE_RECORD_THEME_BACKGROUND,
 	clampDocStructureLineListWidth,
 	clampDocStructureRecordGap,
 	clampDocStructureRecordHeight,
@@ -42,6 +44,35 @@ test('mergeDocStructureSettings keeps defaults and sanitizes values', () => {
 		recordHeight: 32,
 		recordGap: 20
 	});
+});
+
+test('record background follows the theme by default so line cards flip with light/dark', () => {
+	assert.equal(
+		DOC_STRUCTURE_DEFAULT_SETTINGS.recordBackground,
+		DOC_STRUCTURE_RECORD_THEME_BACKGROUND
+	);
+});
+
+test('the legacy dark record background migrates back to theme-following', () => {
+	const merged = mergeDocStructureSettings({
+		recordBackground: DOC_STRUCTURE_LEGACY_RECORD_BACKGROUND
+	});
+	assert.equal(merged.recordBackground, DOC_STRUCTURE_RECORD_THEME_BACKGROUND);
+
+	// Case-insensitively: the picker persists lowercase hex.
+	const lowercased = mergeDocStructureSettings({
+		recordBackground: DOC_STRUCTURE_LEGACY_RECORD_BACKGROUND.toLowerCase()
+	});
+	assert.equal(lowercased.recordBackground, DOC_STRUCTURE_RECORD_THEME_BACKGROUND);
+});
+
+test('an explicit record background override is kept, and can be cleared back to the theme', () => {
+	assert.equal(mergeDocStructureSettings({ recordBackground: '#123456' }).recordBackground, '#123456');
+	assert.equal(
+		mergeDocStructureSettings({ recordBackground: DOC_STRUCTURE_RECORD_THEME_BACKGROUND })
+			.recordBackground,
+		DOC_STRUCTURE_RECORD_THEME_BACKGROUND
+	);
 });
 
 test('createDocStructureSettingsStorageKey scopes settings by user id', () => {

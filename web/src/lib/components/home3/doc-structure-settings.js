@@ -15,11 +15,22 @@ export const DOC_STRUCTURE_RECORD_GAP_MIN = 2;
 export const DOC_STRUCTURE_RECORD_GAP_MAX = 20;
 export const DOC_STRUCTURE_RECORD_GAP_DEFAULT = 6;
 
-export const DOC_STRUCTURE_RECORD_DEFAULT_BACKGROUND = '#1C212C';
+/**
+ * Empty means "follow the view's theme": the line cards inherit --panel-bg-alt and
+ * flip with light/dark. Only an explicit hex is a user override.
+ */
+export const DOC_STRUCTURE_RECORD_THEME_BACKGROUND = '';
+
+/**
+ * The former default. It is the dark-mode value of --panel-bg-alt, so it painted an
+ * opaque dark slab under theme-aware ink in light mode. A stored value equal to it was
+ * never actually chosen by anyone, so it is migrated back to theme-following.
+ */
+export const DOC_STRUCTURE_LEGACY_RECORD_BACKGROUND = '#1C212C';
 
 export const DOC_STRUCTURE_DEFAULT_SETTINGS = {
 	lineListWidth: DOC_STRUCTURE_LINE_LIST_DEFAULT_WIDTH,
-	recordBackground: DOC_STRUCTURE_RECORD_DEFAULT_BACKGROUND,
+	recordBackground: DOC_STRUCTURE_RECORD_THEME_BACKGROUND,
 	recordHeight: DOC_STRUCTURE_RECORD_DEFAULT_HEIGHT,
 	recordGap: DOC_STRUCTURE_RECORD_GAP_DEFAULT
 };
@@ -86,8 +97,13 @@ export function mergeDocStructureSettings(partial) {
 	if (typeof partial.lineListWidth === 'number') {
 		merged.lineListWidth = clampDocStructureLineListWidth(partial.lineListWidth);
 	}
-	if (isHexColor(partial.recordBackground)) {
-		merged.recordBackground = partial.recordBackground;
+	if (partial.recordBackground === DOC_STRUCTURE_RECORD_THEME_BACKGROUND) {
+		merged.recordBackground = DOC_STRUCTURE_RECORD_THEME_BACKGROUND;
+	} else if (isHexColor(partial.recordBackground)) {
+		merged.recordBackground =
+			partial.recordBackground.toUpperCase() === DOC_STRUCTURE_LEGACY_RECORD_BACKGROUND
+				? DOC_STRUCTURE_RECORD_THEME_BACKGROUND
+				: partial.recordBackground;
 	}
 	if (typeof partial.recordHeight === 'number') {
 		merged.recordHeight = clampDocStructureRecordHeight(partial.recordHeight);
