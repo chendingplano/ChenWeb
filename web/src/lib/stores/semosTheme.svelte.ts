@@ -6,7 +6,13 @@ const STORAGE_KEY = 'semos-theme';
 class SemosTheme {
 	mode = $state<'light' | 'dark'>('light');
 
-	/** Call once from the /semos layout (browser only). */
+	/**
+	 * Call once from the /semos layout (browser only). The `.dark` class
+	 * itself is already applied by the blocking inline script in
+	 * app.html (before hydration, to avoid a flash) — this only syncs the
+	 * reactive `mode` state so the header's sun/moon icon matches on
+	 * first paint.
+	 */
 	init() {
 		const stored = localStorage.getItem(STORAGE_KEY);
 		if (stored === 'dark' || stored === 'light') {
@@ -16,7 +22,6 @@ class SemosTheme {
 				? 'dark'
 				: 'light';
 		}
-		this.apply();
 	}
 
 	toggle() {
