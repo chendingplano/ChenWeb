@@ -32,7 +32,7 @@ func TestApplicationInitializeVariantValidatesRuntimeAllowlistAndReturnsRedacted
 		snapshot: docprocessing.ResolvedConfigSnapshot{Values: map[string]any{"chunk_size": 80}, CanonicalJSON: []byte(`{"chunk_size":80}`), Hash: "cfg-hash"},
 	}
 	factoryCalls := 0
-	app := Application{Config: ApplicationConfig{RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) {
+	app := Application{Config: ApplicationConfig{AllowUnverifiedRuntimeHash: true, RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) {
 		factoryCalls++
 		return runtime, nil
 	}}}
@@ -60,7 +60,7 @@ func TestApplicationInitializeVariantRejectsSecretShapedResolvedSnapshot(t *test
 		allowed:  map[string][]string{"chunking": nil},
 		snapshot: docprocessing.ResolvedConfigSnapshot{Values: map[string]any{"api_token": "do-not-store"}, CanonicalJSON: []byte(`{"api_token":"do-not-store"}`), Hash: "bad"},
 	}
-	app := Application{Config: ApplicationConfig{RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) { return runtime, nil }}}
+	app := Application{Config: ApplicationConfig{AllowUnverifiedRuntimeHash: true, RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) { return runtime, nil }}}
 	if _, err := app.InitializeVariant(context.Background(), ExperimentVariant{Name: "bad"}, []Processor{ProcessorChunking}); err == nil {
 		t.Fatal("secret-shaped snapshot accepted")
 	}
@@ -117,6 +117,12 @@ func TestApplicationRuntimeFactoryErrorIsReturned(t *testing.T) {
 	}
 }
 
+func TestApplicationRejectsResolvedRuntimeHashMismatch(t *testing.T) {
+	runtime := &fakeApplicationRuntime{allowed: map[string][]string{"chunking": nil}, snapshot: docprocessing.ResolvedConfigSnapshot{CanonicalJSON: []byte(`{"chunk_size":80}`), Hash: "wrong"}}
+	app := Application{Config: ApplicationConfig{RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) { return runtime, nil }}}
+	if _, err := app.InitializeVariant(context.Background(), ExperimentVariant{Name: "v"}, []Processor{ProcessorChunking}); err == nil || !strings.Contains(err.Error(), "hash mismatch") { t.Fatalf("error=%v", err) }
+}
+
 func TestLineFileGeneratedPayloadUsesExactSeededInputAndApplicableOperations(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "case.lines.txt")
 	payload, err := lineFileGeneratedPayload(91, filename, []Processor{ProcessorChunking, ProcessorExtractMetrics})
@@ -133,7 +139,8 @@ func TestLineFileGeneratedPayloadUsesExactSeededInputAndApplicableOperations(t *
 }
 
 func TestEvidenceBundleIsDeterministicSecretFreeAndReverifiedBeforeRescore(t *testing.T) {
-	bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: "a", InputSHA256: strings.Repeat("a", 64), InputBytes: []byte("input"), ExpectedJSON: json.RawMessage(`{"schema_version":1}`), ConfigHash: "cfg", ScorerHash: "score", Processors: map[string]EvidenceProcessor{"chunking": {Capture: json.RawMessage(`{"rows":[]}`)}}}
+	scorer := json.RawMessage(`{"chunking":{"version":"chunk-scorer-v1"}}`)
+	bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: "a", InputSHA256: sha256Hex([]byte("input")), InputBytes: []byte("input"), ExpectedJSON: json.RawMessage(`{"schema_version":1}`), ConfigJSON: json.RawMessage(`{"chunk_size":80}`), ConfigHash: sha256Hex([]byte(`{"chunk_size":80}`)), ScorerJSON: scorer, ScorerHash: sha256Hex(scorer), Processors: map[string]EvidenceProcessor{"chunking": {Capture: json.RawMessage(`{"rows":[]}`)}}}
 	one, err := bundle.CanonicalJSON()
 	if err != nil {
 		t.Fatal(err)
@@ -157,6 +164,11 @@ func TestEvidenceBundleIsDeterministicSecretFreeAndReverifiedBeforeRescore(t *te
 	if _, err := loadVerifiedEvidence(path, hash, int64(len(one))); err == nil {
 		t.Fatal("tampered source evidence accepted")
 	}
+}
+
+func TestEvidenceBundleRejectsScorerHashMismatch(t *testing.T) {
+	b := EvidenceBundle{SchemaVersion: 1, AttemptID: "a", InputBytes: []byte("x"), InputSHA256: sha256Hex([]byte("x")), ExpectedJSON: json.RawMessage(`{}`), ConfigJSON: json.RawMessage(`{}`), ConfigHash: sha256Hex([]byte(`{}`)), ScorerJSON: json.RawMessage(`{"version":"v1"}`), ScorerHash: "wrong", Processors: map[string]EvidenceProcessor{}}
+	if _, err := b.CanonicalJSON(); err == nil || !strings.Contains(err.Error(), "scorer hash") { t.Fatalf("error=%v", err) }
 }
 
 func TestChunkScoreRecordConversionPersistsAllScalarAndRuleRows(t *testing.T) {
