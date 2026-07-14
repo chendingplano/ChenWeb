@@ -5,8 +5,7 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<script>
 			(function () {
-				if (!location.pathname.startsWith('/semos')) return;
-				var stored = localStorage.getItem('semos-theme');
+				var stored = localStorage.getItem('chenweb-theme');
 				var dark = stored
 					? stored === 'dark'
 					: window.matchMedia('(prefers-color-scheme: dark)').matches;

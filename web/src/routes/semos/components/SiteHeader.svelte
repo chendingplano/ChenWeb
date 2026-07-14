@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SiteConfig } from '$lib/services/siteConfigService';
-	import { semosTheme } from '$lib/stores/semosTheme.svelte';
+	import { theme } from '$lib/stores/theme.svelte';
 	import { locales, getLocale, setLocale } from '$lib/paraglide/runtime';
 	import { Sun, Moon, Languages, Menu, X } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
@@ -60,9 +60,9 @@
 				type="button"
 				class="rounded-full p-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
 				aria-label="Toggle dark mode"
-				onclick={() => semosTheme.toggle()}
+				onclick={() => theme.toggle()}
 			>
-				{#if semosTheme.mode === 'dark'}
+				{#if theme.isDark}
 					<Sun class="h-4 w-4" />
 				{:else}
 					<Moon class="h-4 w-4" />

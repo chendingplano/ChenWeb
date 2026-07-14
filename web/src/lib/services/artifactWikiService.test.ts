@@ -8,22 +8,22 @@ test('buildArtifactWikiHref creates the generic artifact wiki route', () => {
 		buildArtifactWikiHref({
 			artifactType: 'metric',
 			artifactId: '5_mtc_3',
-			lang: 'en',
-			darkMode: true
+			lang: 'en'
 		}),
 		'/home3/knowledge?section=kb-artifact-wiki&artifact_type=metric&artifact_id=5_mtc_3&lang=en'
 	);
 });
 
-test('buildArtifactWikiHref preserves light mode via dark=0', () => {
+// Light/dark mode rides on the shared theme store, not the href — see
+// $lib/stores/theme.svelte.
+test('buildArtifactWikiHref carries no mode parameter', () => {
 	assert.equal(
 		buildArtifactWikiHref({
 			artifactType: 'topic',
 			artifactId: '7_tpc_1',
-			lang: 'zh-cn',
-			darkMode: false
+			lang: 'zh-cn'
 		}),
-		'/home3/knowledge?section=kb-artifact-wiki&artifact_type=topic&artifact_id=7_tpc_1&lang=zh-cn&dark=0'
+		'/home3/knowledge?section=kb-artifact-wiki&artifact_type=topic&artifact_id=7_tpc_1&lang=zh-cn'
 	);
 });
 

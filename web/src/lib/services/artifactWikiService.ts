@@ -22,7 +22,6 @@ export type BuildArtifactWikiHrefParams = {
 	artifactType: string;
 	artifactId: string;
 	lang?: string;
-	darkMode?: boolean;
 };
 
 export type BuildArtifactWikiApiUrlParams = {
@@ -35,8 +34,7 @@ export type BuildArtifactWikiApiUrlParams = {
 export function buildArtifactWikiHref({
 	artifactType,
 	artifactId,
-	lang = 'en',
-	darkMode = true
+	lang = 'en'
 }: BuildArtifactWikiHrefParams): string {
 	const params = new URLSearchParams({
 		section: 'kb-artifact-wiki',
@@ -44,7 +42,6 @@ export function buildArtifactWikiHref({
 		artifact_id: artifactId,
 		lang
 	});
-	if (!darkMode) params.set('dark', '0');
 	return `/home3/knowledge?${params.toString()}`;
 }
 

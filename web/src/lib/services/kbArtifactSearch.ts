@@ -95,19 +95,16 @@ export function parseKbSearchArtifactType(value: string | null | undefined): KbS
 export function buildKbSearchPageHref({
 	q,
 	page = 1,
-	artifactType = 'all',
-	darkMode = true
+	artifactType = 'all'
 }: {
 	q: string;
 	page?: number;
 	artifactType?: KbSearchArtifactType;
-	darkMode?: boolean;
 }): string {
 	const params = new URLSearchParams({ section: 'kb-search' });
 	if (q.trim()) params.set('q', q.trim());
 	if (page > 1) params.set('page', String(page));
 	if (artifactType !== 'all') params.set('scope', artifactType);
-	if (!darkMode) params.set('dark', '0');
 	return `${KB_SEARCH_PAGE_PATH}?${params.toString()}`;
 }
 

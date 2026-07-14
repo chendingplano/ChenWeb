@@ -1,12 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { semosTheme } from '$lib/stores/semosTheme.svelte';
 	import SiteHeader from './components/SiteHeader.svelte';
 	import SiteFooter from './components/SiteFooter.svelte';
 
 	let { data, children } = $props();
-
-	onMount(() => semosTheme.init());
 </script>
 
 <div

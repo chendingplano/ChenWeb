@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { theme } from '$lib/stores/theme.svelte';
 	import { onMount } from 'svelte';
 	import {
 		getReport,
@@ -16,7 +17,7 @@
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
 
-	let dark = $derived(page.url.searchParams.get('dark') !== '0');
+	let dark = $derived(theme.isDark);
 	let reportId = $derived(Number(page.params.id));
 
 	// Design tokens (mirror doc-review-results-view.svelte for visual parity).

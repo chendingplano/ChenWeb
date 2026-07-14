@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { theme } from '$lib/stores/theme.svelte';
 	import { goto } from '$app/navigation';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -248,7 +249,7 @@
 		window.removeEventListener('pointermove', onMenuResizeMove);
 	}
 
-	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
+	let darkMode = $derived(theme.isDark);
 	let initialSection = $derived(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);

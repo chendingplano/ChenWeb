@@ -94,10 +94,9 @@ test('search page href preserves non-default artifact scope', () => {
 		buildKbSearchPageHref({
 			q: '人工智能',
 			page: 3,
-			artifactType: 'metrics',
-			darkMode: false
+			artifactType: 'metrics'
 		}),
-		'/home3/knowledge?section=kb-search&q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&page=3&scope=metrics&dark=0'
+		'/home3/knowledge?section=kb-search&q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&page=3&scope=metrics'
 	);
 });
 
@@ -106,8 +105,7 @@ test('search page href omits default scope and first page noise', () => {
 		buildKbSearchPageHref({
 			q: 'battery',
 			page: 1,
-			artifactType: 'all',
-			darkMode: true
+			artifactType: 'all'
 		}),
 		'/home3/knowledge?section=kb-search&q=battery'
 	);

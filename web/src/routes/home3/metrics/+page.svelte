@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { page } from '$app/state';
+	import { theme } from '$lib/stores/theme.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 
-	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
+	let darkMode = $derived(theme.isDark);
 </script>
 
 <div class="metrics-standalone">

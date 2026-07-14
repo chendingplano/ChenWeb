@@ -145,8 +145,7 @@
 			return buildArtifactWikiHref({
 				artifactType: resolvedArtifactType,
 				artifactId: resolvedArtifactID,
-				lang: currentLocale,
-				darkMode
+				lang: currentLocale
 			});
 		}
 		return buildSearchUrl(submittedQuery, pageNumber);
@@ -156,8 +155,7 @@
 		return buildKbSearchPageHref({
 			q,
 			page: nextPage,
-			artifactType,
-			darkMode
+			artifactType
 		});
 	}
 

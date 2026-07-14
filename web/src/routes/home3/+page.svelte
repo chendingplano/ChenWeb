@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { theme } from '$lib/stores/theme.svelte';
 	import HeroHeader from '$lib/components/home3/hero-header.svelte';
 	import NavRail from '$lib/components/home3/nav-rail.svelte';
 	import ContentPanel from '$lib/components/home3/content-panel.svelte';
@@ -62,7 +63,7 @@
 	void _tokens;
 
 	// --- App state ---
-	let darkMode = $state(true);
+	let darkMode = $derived(theme.isDark);
 	let railWidth = $state(RAIL_WIDTH_DEFAULT); // expanded width, preserved across mode changes
 	let autoShrinkExpand = $state(false);
 	let railExpanded = $state(false);
@@ -152,7 +153,7 @@
 	}
 
 	function toggleDark() {
-		darkMode = !darkMode;
+		theme.toggle();
 	}
 
 	function handleMenuSelect(selection: ActiveSelection) {
