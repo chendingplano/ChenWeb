@@ -17,28 +17,28 @@ cta_secondary_label = "Sign Up / Login"
 cta_secondary_href = "/login"
 
 [[highlights]]
-title = "Every document, understood"
-description = "Upload files or collect them from the web. SemOS parses PDF, Word, PPT and more, extracting structure, not just text."
+title = "知识冶炼：每一份文档，皆被彻悟"
+description = "不止于解析，更在于“理解”。SemOS 将 PDF、Word、PPT 等异构文档深度拆解，剥离出结构、逻辑与语义骨架。文字不再是孤立的字符，而是可推理、可关联的知识原矿。上传即冶炼，阅读即洞察——让机器真正读懂你的每一页沉淀。"
 image = "/images/kb-documents.jpg"
 
 [[highlights]]
-title = "Artifacts, not just pages"
-description = "Metrics, compliance provisions, entities and relations are extracted automatically and become first-class, searchable objects."
+title = "知识平台：产出物，而非页码"
+description = "文档不再是翻不完的册子，而是可检索的知识立方。摘要、指标、合规条款、实体与关系、主题图谱……所有智能产出物均成为一等公民，可搜索、可关联、可追溯。你面对的不再是文件列表，而是一个不断自生长的活态知识网络。"
 image = "/images/kb-artifacts.jpg"
 
 [[highlights]]
-title = "Search that actually finds"
-description = "Hybrid search combines BM25 keyword matching with semantic vector similarity, so you find what you meant, not just what you typed."
+title = "企业搜索引擎：问你所想，得你所愿"
+description = "混合检索引擎融合 BM25 的精准、向量的语义泛化、图谱的关系推理与 SQL 的结构化查询，一次性穿透非结构化与结构化数据。无论模糊记忆还是精确条件，都能一步抵达。让企业信息不再沉睡，让每一次搜索都像与智者对话。"
 image = "/images/kb-search.jpg"
 
 [[highlights]]
-title = "Reviews with receipts"
-description = "Document reviews cite their source lines. Every finding links back to the exact place in the original document."
+title = "文档审核：多维透视，智能把关"
+description = "合规性、技术先进性、指标合理性、条款严密性——审核不再是逐行扫读的人海战术。SemOS 自动对照法规库、行业标准与历史案例，生成风险热图与偏差报告，将主观判断转化为可量化的证据链，让审核从“找问题”升级为“建信任”。"
 image = "/images/kb-reviews.jpg"
 
 [[highlights]]
-title = "Build your own AI apps"
-description = "A development environment for building and offering AI applications on top of your knowledge base."
+title = "AI 应用开发平台：将智能嵌入业务血脉"
+description = "无需从零训练，无需复杂部署。基于已冶炼的知识工件，拖拽式构建智能问答、自动报告、异常预警、合规巡检等定制应用。开放 API 与低代码环境，让业务专家也能驾驭 AI，把创新从“想法”加速到“上线”，让每个岗位都拥有自己的数字智囊。"
 image = "/images/kb-appdev.jpg"
 
 [[features]]
