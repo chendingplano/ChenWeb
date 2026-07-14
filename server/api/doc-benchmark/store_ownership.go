@@ -1,12 +1,55 @@
 package docbenchmark
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 )
 
 var _ OwnershipStore = SQLStore{}
+
+// PersistInputOwnership atomically binds a newly seeded production input to
+// its execution workspace and immutable attempt snapshot. Repeating the exact
+// binding is safe; an attempt or workspace cannot be rebound to another input.
+func (s SQLStore) PersistInputOwnership(ctx context.Context, attemptID string, inputID int64) error {
+	if err := checkDB(s); err != nil {
+		return err
+	}
+	if attemptID == "" || inputID <= 0 {
+		return errors.New("benchmark: invalid input ownership")
+	}
+	tx, err := s.DB.BeginTx(txctx(ctx), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var workspaceInput sql.NullInt64
+	if err = tx.QueryRowContext(txctx(ctx), `SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, attemptID).Scan(&workspaceInput); err != nil {
+		return err
+	}
+	if workspaceInput.Valid && workspaceInput.Int64 != inputID {
+		return &ConflictError{Resource: "workspace input ownership", Key: attemptID}
+	}
+	if !workspaceInput.Valid {
+		if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET input_record_id=$2 WHERE execution_attempt_id=$1 AND input_record_id IS NULL`, attemptID, inputID); err != nil {
+			return err
+		}
+	}
+	var snapshot sql.NullInt64
+	if err = tx.QueryRowContext(txctx(ctx), `SELECT input_record_id_snapshot FROM kb.benchmark_case_attempts WHERE id=$1 AND kind='execution' FOR UPDATE`, attemptID).Scan(&snapshot); err != nil {
+		return err
+	}
+	if snapshot.Valid && snapshot.Int64 != inputID {
+		return &ConflictError{Resource: "attempt input snapshot", Key: attemptID}
+	}
+	if !snapshot.Valid {
+		if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET input_record_id_snapshot=$2 WHERE id=$1 AND kind='execution' AND input_record_id_snapshot IS NULL`, attemptID, inputID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
 
 func (s SQLStore) LoadOwnership(attemptID string) (Ownership, error) {
 	if err := checkDB(s); err != nil {

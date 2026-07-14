@@ -33,29 +33,41 @@ func (s SQLStore) MarkVerifiedCAS(ctx context.Context, owner, nonce, markerHash,
 
 // sqlCleanupTx scopes cleanup statements to one execution attempt.
 type sqlCleanupTx struct {
-	tx    *sql.Tx
-	owner string
+	tx                    *sql.Tx
+	owner                 string
+	inputID               sql.NullInt64
+	productionRowsDeleted bool
+	inputDeleted          bool
 }
 
 func (c *sqlCleanupTx) DeleteProductionRows() error {
-	if _, err := c.tx.ExecContext(context.Background(), `DELETE FROM kb.benchmark_scores WHERE attempt_id=$1`, c.owner); err != nil {
+	if !c.inputID.Valid {
+		c.productionRowsDeleted = true
+		return nil
+	}
+	if _, err := c.tx.ExecContext(context.Background(), `DELETE FROM kb.metrics WHERE input_record_id=$1`, c.inputID.Int64); err != nil {
 		return err
 	}
-	// Verified artifacts are immutable and must remain available as evidence.
-	_, err := c.tx.ExecContext(context.Background(), `DELETE FROM kb.benchmark_artifacts WHERE attempt_id=$1 AND verified=false`, c.owner)
-	return err
+	if _, err := c.tx.ExecContext(context.Background(), `DELETE FROM kb.chunks WHERE source_record_id=$1`, c.inputID.Int64); err != nil {
+		return err
+	}
+	c.productionRowsDeleted = true
+	return nil
 }
 
 func (c *sqlCleanupTx) DeleteInput() error {
-	var inputID sql.NullInt64
-	if err := c.tx.QueryRowContext(context.Background(), `SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, c.owner).Scan(&inputID); err != nil {
-		return err
+	if !c.productionRowsDeleted {
+		return errors.New("benchmark: production rows must be deleted before input")
 	}
-	if !inputID.Valid {
+	if !c.inputID.Valid {
+		c.inputDeleted = true
 		return nil
 	}
-	_, err := c.tx.ExecContext(context.Background(), `DELETE FROM kb.inputs WHERE id=$1`, inputID.Int64)
-	return err
+	if _, err := c.tx.ExecContext(context.Background(), `DELETE FROM kb.inputs WHERE id=$1`, c.inputID.Int64); err != nil {
+		return err
+	}
+	c.inputDeleted = true
+	return nil
 }
 
 func (c *sqlCleanupTx) MarkState(state string, cause error) error {
@@ -80,11 +92,16 @@ func (s SQLStore) CleanupTransaction(ctx context.Context, owner string, fn func(
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(txctx(ctx), `SELECT id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, owner); err != nil {
+	var inputID sql.NullInt64
+	if err = tx.QueryRowContext(txctx(ctx), `SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, owner).Scan(&inputID); err != nil {
 		return err
 	}
-	if err = fn(&sqlCleanupTx{tx: tx, owner: owner}); err != nil {
+	cleanup := &sqlCleanupTx{tx: tx, owner: owner, inputID: inputID}
+	if err = fn(cleanup); err != nil {
 		return err
+	}
+	if inputID.Valid && !cleanup.inputDeleted {
+		return errors.New("benchmark: cleanup did not delete owned input")
 	}
 	return tx.Commit()
 }
