@@ -120,6 +120,53 @@ func TestBenchmarkWorkspaceExtensionRepairsPreviouslyAppliedSchema(t *testing.T)
 	}
 }
 
+func TestBenchmarkWorkspaceExtensionDownRestoresLegacyContract(t *testing.T) {
+	extension := benchmarkMigrationFile(t, "20260713000004_extend_benchmark_workspace_ownership.sql")
+	downMarker := strings.Index(extension, "-- +goose Down")
+	if downMarker < 0 {
+		t.Fatal("extension is missing Down migration")
+	}
+	down := extension[downMarker:]
+
+	ordered := []string{
+		"DROP TRIGGER IF EXISTS trg_benchmark_attempt_terminal ON kb.benchmark_case_attempts",
+		"DROP CONSTRAINT IF EXISTS benchmark_workspaces_cleanup_state_check",
+		"UPDATE kb.benchmark_workspaces SET cleanup_state='failed' WHERE cleanup_state='error'",
+		"UPDATE kb.benchmark_workspaces SET cleanup_state='pending' WHERE cleanup_state IN ('active','db_pending','files_pending')",
+		"ADD CONSTRAINT benchmark_workspaces_cleanup_state_check\n    CHECK (cleanup_state IN ('pending','cleaned','failed'))",
+		"DROP CONSTRAINT IF EXISTS benchmark_runs_lifecycle_check",
+		"UPDATE kb.benchmark_runs SET lifecycle='cancelled' WHERE lifecycle='canceled'",
+		"ADD CONSTRAINT benchmark_runs_lifecycle_check\n    CHECK (lifecycle IN ('queued','running','succeeded','failed','cancelled'))",
+		"DROP CONSTRAINT IF EXISTS benchmark_case_attempts_lifecycle_check",
+		"UPDATE kb.benchmark_case_attempts SET failure_kind='cancelled' WHERE failure_kind='canceled' AND lifecycle<>'canceled'",
+		"UPDATE kb.benchmark_case_attempts SET failure_kind=NULL WHERE lifecycle='canceled' AND failure_kind='canceled'",
+		"UPDATE kb.benchmark_case_attempts SET lifecycle='cancelled' WHERE lifecycle='canceled'",
+		"ADD CONSTRAINT benchmark_case_attempts_lifecycle_check\n    CHECK (lifecycle IN ('queued','leased','running','succeeded','failed','cancelled'))",
+		"ADD CONSTRAINT ck_failure_kind\n    CHECK ((lifecycle NOT IN ('failed') AND failure_kind IS NULL) OR lifecycle='failed')",
+		"CREATE OR REPLACE FUNCTION kb.benchmark_terminal_guard()",
+		"CREATE TRIGGER trg_benchmark_attempt_terminal BEFORE UPDATE ON kb.benchmark_case_attempts",
+		"DROP COLUMN IF EXISTS verified_marker",
+	}
+	last := -1
+	for _, fragment := range ordered {
+		at := strings.Index(down, fragment)
+		if at < 0 {
+			t.Fatalf("Down migration is missing %q", fragment)
+		}
+		if at <= last {
+			t.Fatalf("Down migration orders %q incorrectly", fragment)
+		}
+		last = at
+	}
+	legacyTerminalGuard := "OLD.input_record_id_snapshot IS DISTINCT FROM NEW.input_record_id_snapshot"
+	if !strings.Contains(down, legacyTerminalGuard) || !strings.Contains(down, "'canceled','succeeded','failed','cancelled'") {
+		t.Error("Down migration does not restore the legacy terminal guard")
+	}
+	if !strings.Contains(down, "CREATE OR REPLACE FUNCTION kb.benchmark_score_guard()") || !strings.Contains(down, "'canceled','succeeded','failed','cancelled') THEN RAISE EXCEPTION 'scores immutable after terminal owner'") {
+		t.Error("Down migration does not restore the legacy score guard")
+	}
+}
+
 func TestOwnershipReadsNullableVerifiedSizeFromExtendedRows(t *testing.T) {
 	columns := []string{"execution_attempt_id", "canonical_dir", "work_root", "evidence_path", "evidence_root", "nonce", "verified", "verified_hash", "verified_size", "verified_marker_hash", "cleanup_state"}
 	row := func() *sqlmock.Rows {
