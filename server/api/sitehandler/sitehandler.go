@@ -21,6 +21,7 @@ import (
 type Branding struct {
 	SiteName  string `toml:"site_name" json:"site_name"`
 	LogoText  string `toml:"logo_text" json:"logo_text"`
+	LogoImage string `toml:"logo_image" json:"logo_image"`
 	PoweredBy string `toml:"powered_by" json:"powered_by"`
 }
 
