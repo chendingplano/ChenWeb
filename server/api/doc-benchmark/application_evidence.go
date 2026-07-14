@@ -40,6 +40,9 @@ func (b EvidenceBundle) CanonicalJSON() ([]byte, error) {
 	if b.SchemaVersion != 1 || b.AttemptID == "" || b.InputSHA256 == "" {
 		return nil, fmt.Errorf("invalid evidence bundle identity")
 	}
+	if b.ScorerHash != sha256Hex(b.ScorerJSON) {
+		return nil, fmt.Errorf("evidence bundle scorer hash mismatch")
+	}
 	raw, err := canonicalJSON(b)
 	if err != nil {
 		return nil, err

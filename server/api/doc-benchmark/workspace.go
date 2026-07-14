@@ -143,6 +143,7 @@ type OwnershipStore interface {
 	CleanupTransaction(ctx context.Context, owner string, fn func(CleanupTx) error) error
 }
 
+/*
 func writeMarkerAtomic(path string, m AllocationMarker) error {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -174,6 +175,7 @@ func writeMarkerAtomic(path string, m AllocationMarker) error {
 	}
 	return err
 }
+*/
 
 // CleanupTx is the transaction-scoped cleanup capability for an attempt.
 // Implementations bind all operations to the owner supplied to

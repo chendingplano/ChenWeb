@@ -733,7 +733,7 @@
     </div>
 {/if}
 
-<KbInputSearchDialog bind:open={searchDialogOpen} onSelect={onSearchSelect} />
+<KbInputSearchDialog bind:open={searchDialogOpen} {darkMode} onSelect={onSearchSelect} />
 
 <!-- Validation dialog: blocks submission when something required is missing; confirming
      jumps the wizard back to the step that needs fixing (dialogTargetStep). -->

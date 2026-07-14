@@ -180,7 +180,8 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 			}
 			return loader(ctx, attempt.SourceExecutionAttemptID.String)
 		}
-		bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: attempt.ID, InputSHA256: sha256Hex(datasetCase.InputBytes), InputBytes: datasetCase.InputBytes, ExpectedJSON: datasetCase.ExpectedBytes, ConfigJSON: session.ConfigJSON, ConfigHash: session.ConfigHash, ScorerHash: scorerSnapshotHash(processors), Processors: map[string]EvidenceProcessor{}}
+		scorerJSON, scorerHash := scorerSnapshot(processors)
+		bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: attempt.ID, InputSHA256: sha256Hex(datasetCase.InputBytes), InputBytes: datasetCase.InputBytes, ExpectedJSON: datasetCase.ExpectedBytes, ConfigJSON: session.ConfigJSON, ConfigHash: session.ConfigHash, ScorerJSON: scorerJSON, ScorerHash: scorerHash, Processors: map[string]EvidenceProcessor{}}
 		for _, processor := range processors {
 			entry := EvidenceProcessor{}
 			adapter := adapterFor(processor, state.seeded)
@@ -388,7 +389,7 @@ func resolvedInt(raw json.RawMessage, key string) int {
 	return 0
 }
 
-func scorerSnapshotHash(processors []Processor) string {
+func scorerSnapshot(processors []Processor) (json.RawMessage, string) {
 	raw, _ := canonicalJSON(map[string]any{"processors": processors, "chunk": ChunkScorerVersion, "metric": MetricScorerVersion})
-	return sha256Hex(raw)
+	return json.RawMessage(raw), sha256Hex(raw)
 }

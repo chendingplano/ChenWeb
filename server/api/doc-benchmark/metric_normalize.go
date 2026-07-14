@@ -187,6 +187,7 @@ func exactPresentAgreement(a, b NormalizedField) bool {
 	return a.State == FieldValue && b.State == FieldValue && a.Text != "" && a.Text == b.Text
 }
 
+/*
 func fieldsEqual(a, b NormalizedField) bool {
 	if a.State != b.State {
 		return false
@@ -196,6 +197,7 @@ func fieldsEqual(a, b NormalizedField) bool {
 	}
 	return a.Text == b.Text
 }
+*/
 
 func sortedIntersectionCount(a, b []string) int {
 	i, j, n := 0, 0, 0

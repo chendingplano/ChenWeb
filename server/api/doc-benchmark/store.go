@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 )
 
@@ -50,11 +49,15 @@ func checkDB(s SQLStore) error {
 	}
 	return nil
 }
+
+/*
 func sortedStrings(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
 }
+*/
+
 func affected(res sql.Result) error {
 	n, e := res.RowsAffected()
 	if e != nil {

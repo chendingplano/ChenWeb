@@ -16,6 +16,7 @@
 	import {
 		createKnowledgeStore,
 		deleteKnowledgeStore,
+		getDefaultKnowledgeStore,
 		listKnowledgeStores,
 		updateKnowledgeStore
 	} from '$lib/services/kbService';
@@ -222,11 +223,25 @@
 			const result = await listKnowledgeStores();
 			stores = result.results ?? [];
 			knowledgeStoreState.syncActiveStore(stores);
+			await applyDefaultStore();
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load knowledge stores';
 		} finally {
 			loading = false;
 		}
+	}
+
+	// applyDefaultStore preselects the store named by
+	// [frontend].default_knowledge_store, but only when nothing is active yet so a
+	// user's manual choice is never overridden. When the config is missing or
+	// resolves to none/several stores, the backend returns status=false and no
+	// store is selected — the user picks one manually.
+	async function applyDefaultStore() {
+		if (knowledgeStoreState.activeStore) return;
+		const result = await getDefaultKnowledgeStore();
+		if (!result.status || !result.record) return;
+		const match = stores.find((store) => store.id === result.record?.id);
+		if (match) knowledgeStoreState.setActiveStore(match);
 	}
 
 	function selectStore(store: KnowledgeStoreRecord) {

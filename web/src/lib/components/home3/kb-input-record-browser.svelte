@@ -410,6 +410,7 @@
 		bind:open={searchOpen}
 		initialFilters={filters}
 		{scopeToActiveStore}
+		{darkMode}
 		onSelect={async (records, nextFilters) => {
 			recordIdInput = '';
 			applyFilters(nextFilters);

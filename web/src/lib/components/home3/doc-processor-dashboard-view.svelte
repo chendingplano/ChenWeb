@@ -1315,6 +1315,7 @@
 	<!-- Search dialog -->
 	<KbInputSearchDialog
 		bind:open={searchDialogOpen}
+		{darkMode}
 		onSelect={(records) => { selectedRecords = records; }}
 	/>
 

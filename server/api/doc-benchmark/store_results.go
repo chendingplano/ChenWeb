@@ -208,6 +208,7 @@ func guardAttemptOwnerTx(ctx context.Context, tx *sql.Tx, id string) error {
 	return nil
 }
 
+/*
 func (s SQLStore) guardRunOwner(ctx context.Context, id string) error {
 	var lifecycle string
 	if err := s.DB.QueryRowContext(txctx(ctx), `SELECT lifecycle FROM kb.benchmark_runs WHERE id=$1`, id).Scan(&lifecycle); err != nil {
@@ -236,6 +237,7 @@ func (s SQLStore) guardAttemptOwner(ctx context.Context, id string) error {
 	}
 	return nil
 }
+*/
 
 func nullArg(v sql.NullString) any {
 	if v.Valid {

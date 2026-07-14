@@ -199,7 +199,7 @@ func validateManifest(ds *Dataset) validationErrors {
 	return out
 }
 
-func validateReference(root, raw, field, caseID string, refs map[string]string, out *validationErrors) (string, bool) {
+func validateReference(_, raw, field, caseID string, refs map[string]string, out *validationErrors) (string, bool) {
 	if !restrictedASCII(raw, true) {
 		*out = append(*out, fieldError(caseID, field, "path must use only ASCII letters, digits, '.', '_', '-', and '/'"))
 		return "", false

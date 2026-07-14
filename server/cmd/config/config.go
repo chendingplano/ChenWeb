@@ -129,6 +129,14 @@ type LanguagesConfig struct {
 	Languages []string `mapstructure:"languages"`
 }
 
+type FrontendConfigSection struct {
+	// DefaultKnowledgeStore is the ks_name of the kb.knowledge_store row that
+	// /home3/knowledge selects on entry. It must match exactly one row; when it
+	// is empty or matches none/several rows, no store is selected and the user
+	// picks one manually.
+	DefaultKnowledgeStore string `mapstructure:"default_knowledge_store"`
+}
+
 type AppConfigDef struct {
 	AppTableNames struct {
 		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
@@ -157,6 +165,9 @@ type AppConfigDef struct {
 	// customer-facing frontend (ADR 2026071102). Tenant-dependent config
 	// filenames come from the site_tenants table, never from here.
 	SiteConfig SiteConfigSection `mapstructure:"config"`
+	// Frontend holds settings the frontend reads through dedicated endpoints.
+	// Configured via [frontend] in config.toml / config.local.toml.
+	Frontend FrontendConfigSection `mapstructure:"frontend"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review
@@ -325,6 +336,12 @@ func GetLanguages() []string {
 
 func GetSiteConfigFilename() string {
 	return AppConfig.SiteConfig.ConfigFilename
+}
+
+// GetDefaultKnowledgeStoreName returns [frontend].default_knowledge_store, or
+// "" when it is not configured.
+func GetDefaultKnowledgeStoreName() string {
+	return strings.TrimSpace(AppConfig.Frontend.DefaultKnowledgeStore)
 }
 
 func GetArtifactSearchConfig() ArtifactSearchConfig {

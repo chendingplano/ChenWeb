@@ -322,6 +322,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/stores", kbhandler.CreateKnowledgeStore)
 	apiGroup.PUT("/kb/stores/:id", kbhandler.UpdateKnowledgeStore)
 	apiGroup.DELETE("/kb/stores/:id", kbhandler.DeleteKnowledgeStore)
+	apiGroup.GET("/kb/default-store", kbhandler.GetDefaultKnowledgeStore)
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
 	apiGroup.GET("/kb/inputs/:id", kbhandler.GetInput)
 	apiGroup.PUT("/kb/inputs/:id", kbhandler.UpdateInput)

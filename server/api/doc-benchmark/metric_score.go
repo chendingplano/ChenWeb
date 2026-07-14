@@ -521,7 +521,7 @@ func canonicalStableValue(ctx context.Context, v any, depth int) (normalizedJSON
 		return normalizedJSONNode{}, fmt.Errorf("unsupported JSON type %T", x)
 	}
 }
-func (s *MetricScore) addDiff(g, p MetricRecord, m MetricMatch, field, expected, actual string) {
+func (s *MetricScore) addDiff(g, _ MetricRecord, m MetricMatch, field, expected, actual string) {
 	s.Diagnostics.FieldDifferences = append(s.Diagnostics.FieldDifferences, FieldDifference{GoldID: g.GoldID, Field: field, Expected: expected, Actual: actual, PredictionInputIndex: m.PredictionInputIndex})
 }
 func fieldDisplay(f NormalizedField) string {
@@ -530,6 +530,8 @@ func fieldDisplay(f NormalizedField) string {
 	}
 	return f.Text
 }
+
+/*
 func boolDisplay(v *bool) string {
 	if v == nil {
 		return "absent"
@@ -539,6 +541,8 @@ func boolDisplay(v *bool) string {
 	}
 	return "false"
 }
+*/
+
 func normalizedFieldValueEqual(a, b NormalizedField) bool {
 	if a.State != b.State {
 		return false

@@ -995,6 +995,7 @@
 
 <KbInputSearchDialog
 	bind:open={searchOpen}
+	{darkMode}
 	onSelect={applySearchFilters}
 />
 

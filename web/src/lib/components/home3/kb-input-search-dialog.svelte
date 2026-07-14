@@ -9,13 +9,71 @@
 		open = $bindable(false),
 		onSelect = () => {},
 		initialFilters = createDefaultRecordBrowserFilters(),
-		scopeToActiveStore = false
+		scopeToActiveStore = false,
+		darkMode = true
 	}: {
 		open?: boolean;
 		onSelect?: (records: KbInputRecord[], filters: RecordBrowserFilters) => void;
 		initialFilters?: RecordBrowserFilters;
 		scopeToActiveStore?: boolean;
+		darkMode?: boolean;
 	} = $props();
+
+	// Theme. This dialog is embedded in four hosts. The record-browser host (all nine
+	// /home3 views) supplies the letterpress design tokens (--panel-bg, --ink-line,
+	// --brass, …) and they cascade into these fixed overlays, so the dialog adopts its
+	// host's palette. The other three hosts (doc-processor dashboard, kb-import,
+	// document-review) define no such tokens, so the --sd-* aliases fall back to these
+	// theme-aware $derived values, driven by the darkMode prop. Every dark branch below
+	// equals the literal it replaced, so those three hosts are byte-identical in dark
+	// mode. See KnowledgeStore doc-2026071403 / doc-2026071404 for the pattern.
+	let panel = $derived(darkMode ? '#111827' : '#FBF8F0');
+	let panelAlt = $derived(darkMode ? '#171c26' : '#F0EADB');
+	let surface = $derived(darkMode ? '#1a202b' : '#F0EADB');
+	let line = $derived(darkMode ? 'rgba(148, 163, 184, 0.16)' : 'rgba(100, 116, 139, 0.18)');
+	let lineSoft = $derived(darkMode ? 'rgba(148, 163, 184, 0.12)' : 'rgba(100, 116, 139, 0.12)');
+	let text = $derived(darkMode ? '#f3eedf' : '#1A140A');
+	let muted = $derived(darkMode ? '#9ca3af' : '#6B6250');
+	let subtle = $derived(darkMode ? '#b5ae94' : '#6B6250');
+	let accent = $derived(darkMode ? '#d4a24c' : '#B8801E');
+	let accentBorder = $derived(darkMode ? '#e0b768' : '#C9922B');
+	let errText = $derived(darkMode ? '#fca5a5' : '#991b1b');
+	let scopeEmpty = $derived(darkMode ? '#ff7d6b' : '#A23E26');
+	let inputBg = $derived(darkMode ? '#2a3140' : '#FFFFFF');
+	let resultsBg = $derived(darkMode ? '#121720' : '#F6F1E6');
+	let thBg = $derived(darkMode ? '#181d27' : '#EFE8D8');
+	let rowHover = $derived(darkMode ? '#1d2330' : '#EDE6D6');
+	let ghostBg = $derived(darkMode ? 'rgba(15, 23, 42, 0.36)' : 'rgba(120, 110, 90, 0.10)');
+	let chipBg = $derived(darkMode ? 'rgba(255, 255, 255, 0.04)' : 'rgba(120, 110, 90, 0.10)');
+	let disabledBg = $derived(darkMode ? '#4a4f5c' : '#D8D2C4');
+	let disabledText = $derived(darkMode ? '#aeb4c0' : '#94897A');
+	let disabledLine = $derived(darkMode ? '#636b79' : '#C3BBA8');
+
+	// Aliases prefer the host's token and fall back to the theme-aware value above, so a
+	// letterpress host repaints the dialog to match while a token-less host still themes.
+	let tokenStyle = $derived(
+		`--sd-panel: var(--panel-bg, ${panel});` +
+		`--sd-panel-alt: var(--panel-bg-alt, ${panelAlt});` +
+		`--sd-surface: var(--panel-bg-alt, ${surface});` +
+		`--sd-line: var(--ink-line, ${line});` +
+		`--sd-line-soft: var(--ink-line-soft, ${lineSoft});` +
+		`--sd-text: var(--text-primary, ${text});` +
+		`--sd-muted: var(--text-secondary, ${muted});` +
+		`--sd-subtle: var(--text-secondary, ${subtle});` +
+		`--sd-accent: var(--brass, ${accent});` +
+		`--sd-error-text: var(--crimson, ${errText});` +
+		`--sd-scope-empty: var(--crimson, ${scopeEmpty});` +
+		`--sd-accent-border: ${accentBorder};` +
+		`--sd-input-bg: ${inputBg};` +
+		`--sd-results-bg: ${resultsBg};` +
+		`--sd-th-bg: ${thBg};` +
+		`--sd-row-hover: ${rowHover};` +
+		`--sd-ghost-bg: ${ghostBg};` +
+		`--sd-chip-bg: ${chipBg};` +
+		`--sd-disabled-bg: ${disabledBg};` +
+		`--sd-disabled-text: ${disabledText};` +
+		`--sd-disabled-line: ${disabledLine};`
+	);
 
 	const docTypeOptions = ['all', 'pdf', 'doc', 'excel', 'ppt', 'text', 'markdown'];
 	const parserNameOptions = ['', 'mineru', 'opendata', 'paddleocr', 'docling'];
@@ -269,7 +327,7 @@
 </script>
 
 {#if open}
-	<div class="dialog-overlay">
+	<div class="dialog-overlay" style={tokenStyle}>
 		<div
 			class="dialog"
 			onclick={(e) => e.stopPropagation()}
@@ -529,6 +587,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="view-dialog-overlay"
+		style={tokenStyle}
 		onmousedown={(e) => { if (e.target === e.currentTarget) closeStatusDialog(); }}
 		onkeydown={(e) => { if (e.key === 'Escape') closeStatusDialog(); }}
 		role="button"
@@ -634,15 +693,15 @@
 		flex-direction: column;
 		overflow: hidden;
 		border-radius: 24px;
-		border: 1px solid rgba(148, 163, 184, 0.16);
-		background: #111827;
-		color: #f3eedf;
+		border: 1px solid var(--sd-line);
+		background: var(--sd-panel);
+		color: var(--sd-text);
 		font-family: 'Inter Tight', system-ui, sans-serif;
 	}
 
 	.dialog-head {
 		padding: 28px 32px 20px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		border-bottom: 1px solid var(--sd-line-soft);
 	}
 
 	.dialog-eyebrow,
@@ -655,7 +714,7 @@
 		font-weight: 600;
 		letter-spacing: 0.16em;
 		text-transform: uppercase;
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	.dialog-title {
@@ -663,7 +722,7 @@
 		font-family: 'Cormorant Garamond', Georgia, serif;
 		font-size: 28px;
 		font-weight: 500;
-		color: #f3eedf;
+		color: var(--sd-text);
 	}
 
 	.dialog-subtitle {
@@ -671,7 +730,7 @@
 		max-width: 640px;
 		font-size: 13px;
 		line-height: 1.45;
-		color: #b5ae94;
+		color: var(--sd-subtle);
 	}
 
 	.scope-copy {
@@ -680,11 +739,11 @@
 		font-family: 'JetBrains Mono', monospace;
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	.scope-store {
-		color: #d4a24c;
+		color: var(--sd-accent);
 		font-weight: 600;
 	}
 
@@ -693,7 +752,7 @@
 	}
 
 	.scope-empty {
-		color: #ff7d6b;
+		color: var(--sd-scope-empty);
 		text-transform: none;
 		letter-spacing: 0;
 	}
@@ -721,7 +780,7 @@
 		padding: 14px;
 		background:
 			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
-			#171c26;
+			var(--sd-panel-alt);
 	}
 
 	.dialog-section-head {
@@ -735,7 +794,7 @@
 	.dialog-section-copy,
 	.dialog-toolbar-text {
 		font-size: 12px;
-		color: #b5ae94;
+		color: var(--sd-subtle);
 	}
 
 	.dialog-grid {
@@ -759,8 +818,8 @@
 		margin: 0;
 		padding: 10px 10px 8px;
 		border-radius: 16px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
-		background: #1a202b;
+		border: 1px solid var(--sd-line-soft);
+		background: var(--sd-surface);
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 	}
 
@@ -771,17 +830,17 @@
 	.dialog-field :global(input),
 	.dialog-field :global(select) {
 		height: 42px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		background: #2a3140;
+		border: 1px solid var(--sd-line);
+		background: var(--sd-input-bg);
 		padding: 0 12px;
-		color: #f3eedf;
+		color: var(--sd-text);
 		font-size: 14px;
 	}
 
 	.dialog-field :global(input:focus),
 	.dialog-field :global(select:focus) {
 		outline: none;
-		border-color: #d4a24c;
+		border-color: var(--sd-accent);
 		box-shadow:
 			0 0 0 1px rgba(212, 162, 76, 0.28),
 			0 0 0 4px rgba(212, 162, 76, 0.08);
@@ -809,21 +868,21 @@
 		gap: 0.5rem;
 		border-radius: 0;
 		padding: 0.8rem 1rem;
-		border: 1px solid rgba(148, 163, 184, 0.16);
+		border: 1px solid var(--sd-line);
 		cursor: pointer;
 	}
 
 	.btn-ghost {
-		background: rgba(15, 23, 42, 0.36);
-		color: #f3eedf;
+		background: var(--sd-ghost-bg);
+		color: var(--sd-text);
 	}
 
 	.btn-primary,
 	.dialog-search-btn,
 	.dialog-select-btn {
-		background: #d4a24c !important;
+		background: var(--sd-accent) !important;
 		color: #15110a !important;
-		border: 1px solid #e0b768 !important;
+		border: 1px solid var(--sd-accent-border) !important;
 	}
 
 	.dialog-search-btn {
@@ -838,16 +897,16 @@
 	}
 
 	.dialog-select-btn:disabled {
-		background: #4a4f5c !important;
-		color: #aeb4c0 !important;
-		border: 1px solid #636b79 !important;
+		background: var(--sd-disabled-bg) !important;
+		color: var(--sd-disabled-text) !important;
+		border: 1px solid var(--sd-disabled-line) !important;
 		box-shadow: none !important;
 		cursor: not-allowed !important;
 	}
 
 	.dialog-error {
 		margin: 0 32px 16px;
-		color: #fca5a5;
+		color: var(--sd-error-text);
 	}
 
 	.results-count {
@@ -855,23 +914,23 @@
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 11px;
 		letter-spacing: 0.08em;
-		color: #9ca3af;
-		background: #111827;
-		border-top: 1px solid #1f2530;
+		color: var(--sd-muted);
+		background: var(--sd-panel);
+		border-top: 1px solid var(--sd-line);
 		flex: 0 0 auto;
 	}
 
 	.results-count strong {
-		color: #d4a24c;
+		color: var(--sd-accent);
 		font-weight: 600;
 	}
 
 	.dialog-results {
 		flex: 1 1 320px;
-		border-top: 1px solid #1f2530;
-		border-bottom: 1px solid #1f2530;
+		border-top: 1px solid var(--sd-line);
+		border-bottom: 1px solid var(--sd-line);
 		min-height: 460px;
-		background: #121720;
+		background: var(--sd-results-bg);
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 		overflow: auto;
 	}
@@ -879,17 +938,17 @@
 	.dialog-empty {
 		padding: 72px 20px;
 		text-align: center;
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	.empty-glyph {
 		font-size: 48px;
-		color: #d4a24c;
+		color: var(--sd-accent);
 	}
 
 	.dialog-empty-title {
 		font-size: 18px;
-		color: #f3eedf;
+		color: var(--sd-text);
 		margin-top: 10px;
 	}
 
@@ -910,8 +969,8 @@
 		font-family: 'JetBrains Mono', monospace;
 		text-align: left;
 		padding: 12px 16px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-		background: #181d27;
+		border-bottom: 1px solid var(--sd-line-soft);
+		background: var(--sd-th-bg);
 		position: sticky;
 		top: 0;
 		z-index: 1;
@@ -926,18 +985,18 @@
 	.row-check {
 		width: 15px;
 		height: 15px;
-		accent-color: #d4a24c;
+		accent-color: var(--sd-accent);
 		cursor: pointer;
 	}
 
 	.result-table tbody tr {
-		border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+		border-bottom: 1px solid var(--sd-line-soft);
 		cursor: pointer;
 		transition: background 120ms;
 	}
 
 	.result-table tbody tr:hover {
-		background: #1d2330;
+		background: var(--sd-row-hover);
 	}
 
 	.result-table tbody tr.selected {
@@ -945,12 +1004,12 @@
 	}
 
 	.result-table tbody tr.selected td {
-		color: #f4ddb0;
+		color: var(--sd-text);
 	}
 
 	.result-table td {
 		padding: 11px 16px;
-		color: #f3eedf;
+		color: var(--sd-text);
 		vertical-align: top;
 	}
 
@@ -960,7 +1019,7 @@
 	}
 
 	.muted {
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	.ellipsis {
@@ -972,12 +1031,12 @@
 
 	.result-primary {
 		font-weight: 600;
-		color: #f3eedf;
+		color: var(--sd-text);
 	}
 
 	.result-secondary {
 		margin-top: 4px;
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	.status-stack {
@@ -990,9 +1049,9 @@
 	.status-chip {
 		padding: 2px 8px;
 		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		background: rgba(255, 255, 255, 0.04);
-		color: #d7cfbb;
+		border: 1px solid var(--sd-line);
+		background: var(--sd-chip-bg);
+		color: var(--sd-subtle);
 	}
 
 	.status-pill {
@@ -1003,7 +1062,7 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		background: rgba(124, 117, 96, 0.16);
-		color: #d1d5db;
+		color: var(--sd-muted);
 	}
 
 	.status-pill-success {
@@ -1022,13 +1081,13 @@
 		align-items: center;
 		gap: 12px;
 		padding: 14px 28px 18px;
-		background: #171c26;
+		background: var(--sd-panel-alt);
 	}
 
 	.dialog-foot-hint {
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 11px;
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	@media (max-width: 980px) {
@@ -1053,10 +1112,10 @@
 	.view-btn {
 		height: 24px;
 		padding: 0 10px;
-		border: 1px solid rgba(148, 163, 184, 0.16);
+		border: 1px solid var(--sd-line);
 		border-radius: 6px;
-		background: rgba(255, 255, 255, 0.04);
-		color: #9ca3af;
+		background: var(--sd-chip-bg);
+		color: var(--sd-muted);
 		font-size: 11px;
 		font-family: 'JetBrains Mono', monospace;
 		cursor: pointer;
@@ -1065,7 +1124,7 @@
 
 	.view-btn:hover {
 		background: rgba(212, 162, 76, 0.12);
-		color: #d4a24c;
+		color: var(--sd-accent);
 		border-color: rgba(212, 162, 76, 0.3);
 	}
 
@@ -1091,9 +1150,9 @@
 		min-width: 480px;
 		min-height: 200px;
 		border-radius: 20px;
-		border: 1px solid rgba(148, 163, 184, 0.16);
-		background: #111827;
-		color: #f3eedf;
+		border: 1px solid var(--sd-line);
+		background: var(--sd-panel);
+		color: var(--sd-text);
 		font-family: 'Inter Tight', system-ui, sans-serif;
 	}
 
@@ -1102,7 +1161,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 16px 24px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		border-bottom: 1px solid var(--sd-line-soft);
 		flex-shrink: 0;
 	}
 
@@ -1110,7 +1169,7 @@
 		margin: 0;
 		font-size: 15px;
 		font-weight: 600;
-		color: #f3eedf;
+		color: var(--sd-text);
 		font-family: 'JetBrains Mono', monospace;
 	}
 
@@ -1136,15 +1195,15 @@
 		font-weight: 600;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		color: #9ca3af;
+		color: var(--sd-muted);
 		margin-bottom: 6px;
 	}
 
 	.view-rows-box {
-		border: 1px solid rgba(148, 163, 184, 0.12);
+		border: 1px solid var(--sd-line-soft);
 		border-radius: 12px;
 		padding: 8px 12px;
-		background: #1a202b;
+		background: var(--sd-surface);
 	}
 
 	.view-row {
@@ -1160,18 +1219,18 @@
 		width: 140px;
 		flex-shrink: 0;
 		word-break: break-all;
-		color: #9ca3af;
+		color: var(--sd-muted);
 		font-family: 'JetBrains Mono', monospace;
 	}
 
 	.view-key-header {
-		color: #b5ae94;
+		color: var(--sd-subtle);
 		font-weight: 600;
 	}
 
 	.view-val {
 		font-size: 12px;
-		color: #f3eedf;
+		color: var(--sd-text);
 		word-break: break-word;
 		flex: 1;
 		min-width: 0;
@@ -1179,7 +1238,7 @@
 
 	.view-empty {
 		font-size: 12px;
-		color: #9ca3af;
+		color: var(--sd-muted);
 	}
 
 	.view-entries {
@@ -1189,16 +1248,16 @@
 	}
 
 	.view-entry {
-		border: 1px solid rgba(148, 163, 184, 0.12);
+		border: 1px solid var(--sd-line-soft);
 		border-radius: 12px;
 		padding: 8px 12px;
-		background: #1a202b;
+		background: var(--sd-surface);
 	}
 
 	.view-entry-head {
 		font-size: 12px;
 		font-weight: 600;
-		color: #f3eedf;
+		color: var(--sd-text);
 		margin-bottom: 6px;
 		font-family: 'JetBrains Mono', monospace;
 	}

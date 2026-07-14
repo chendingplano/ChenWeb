@@ -968,6 +968,23 @@ export async function listKnowledgeStores(): Promise<ListKnowledgeStoresResponse
 	);
 }
 
+export type DefaultKnowledgeStoreResponse = {
+	status: boolean;
+	record?: KnowledgeStoreRecord;
+	error_msg?: string;
+};
+
+// getDefaultKnowledgeStore resolves [frontend].default_knowledge_store. When the
+// config is missing or the name matches none/several stores, the backend returns
+// status=false with a reason instead of an error, and no store is preselected.
+export async function getDefaultKnowledgeStore(): Promise<DefaultKnowledgeStoreResponse> {
+	const response = await fetch(`${BASE}/default-store`, { credentials: 'same-origin' });
+	if (!response.ok) {
+		return { status: false, error_msg: `Failed to resolve default knowledge store (${response.status})` };
+	}
+	return response.json() as Promise<DefaultKnowledgeStoreResponse>;
+}
+
 export async function createKnowledgeStore(
 	payload: CreateKnowledgeStorePayload
 ): Promise<KnowledgeStoreResponse> {
