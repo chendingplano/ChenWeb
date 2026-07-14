@@ -24,6 +24,13 @@ func (s SQLStore) PersistInputOwnership(ctx context.Context, attemptID string, i
 		return err
 	}
 	defer tx.Rollback()
+	if err = bindInputOwnershipTx(ctx, tx, attemptID, inputID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func bindInputOwnershipTx(ctx context.Context, tx *sql.Tx, attemptID string, inputID int64) (err error) {
 	var workspaceInput sql.NullInt64
 	if err = tx.QueryRowContext(txctx(ctx), `SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, attemptID).Scan(&workspaceInput); err != nil {
 		return err
@@ -32,8 +39,12 @@ func (s SQLStore) PersistInputOwnership(ctx context.Context, attemptID string, i
 		return &ConflictError{Resource: "workspace input ownership", Key: attemptID}
 	}
 	if !workspaceInput.Valid {
-		if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET input_record_id=$2 WHERE execution_attempt_id=$1 AND input_record_id IS NULL`, attemptID, inputID); err != nil {
+		var result sql.Result
+		if result, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET input_record_id=$2 WHERE execution_attempt_id=$1 AND input_record_id IS NULL`, attemptID, inputID); err != nil {
 			return err
+		}
+		if n, e := result.RowsAffected(); e != nil || n != 1 {
+			return errors.New("benchmark: workspace input bind lost race")
 		}
 	}
 	var snapshot sql.NullInt64
@@ -44,11 +55,15 @@ func (s SQLStore) PersistInputOwnership(ctx context.Context, attemptID string, i
 		return &ConflictError{Resource: "attempt input snapshot", Key: attemptID}
 	}
 	if !snapshot.Valid {
-		if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET input_record_id_snapshot=$2 WHERE id=$1 AND kind='execution' AND input_record_id_snapshot IS NULL`, attemptID, inputID); err != nil {
+		var result sql.Result
+		if result, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET input_record_id_snapshot=$2 WHERE id=$1 AND kind='execution' AND input_record_id_snapshot IS NULL`, attemptID, inputID); err != nil {
 			return err
 		}
+		if n, e := result.RowsAffected(); e != nil || n != 1 {
+			return errors.New("benchmark: attempt input bind lost race")
+		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s SQLStore) LoadOwnership(attemptID string) (Ownership, error) {
