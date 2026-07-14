@@ -41,6 +41,37 @@ type ProductionRuntimeOptions struct {
 	RequiredProcessors []string
 }
 
+type productionRuntimeComponents struct {
+	inputStore DocMetadataStore
+	fixed      *FixedSizeChunkingService
+	processors []Processor
+	blocking   Processor
+}
+
+var buildProductionRuntimeComponents = defaultProductionRuntimeComponents
+
+func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRuntimeComponents {
+	newClient := func() *llmclients.OpenAIJSONClient {
+		return &llmclients.OpenAIJSONClient{HTTPClient: &http.Client{Timeout: 100 * time.Second}}
+	}
+	inputStore := DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
+	fixed := NewFixedSizeChunkingService(SQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger)
+	phase := []Processor{NewChunkingProcessor(inputStore, fixed, logger), NewGenerateSummariesProcessor(inputStore, fixed, logger), NewGenerateTopicsProcessor(inputStore, fixed, logger)}
+	all := []Processor{
+		NewStaticAnalyzerProcessor(inputStore, newClient(), logger), phase[0], phase[1], phase[2],
+		NewExtractDocMetadataProcessor(inputStore, newClient(), logger),
+		NewSemanticProjectionsProcessor(inputStore, SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewStructuredKnowledgeProcessor(inputStore, StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewEntityProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewRelationProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewInventoryItemsProcessor(inputStore, InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewMetricsProcessor(inputStore, MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewProvisionsProcessor(inputStore, ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewSceneBlocksProcessor(inputStore, SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+	}
+	return productionRuntimeComponents{inputStore: inputStore, fixed: fixed, processors: all, blocking: NewBlockingProcessor(inputStore, logger)}
+}
+
 // NewProductionRuntime builds the same dependency-ordered graph as the
 // doc-processor command. The optional logger argument is accepted as an any
 // value to keep this seam convenient for command and worker callers.
@@ -69,33 +100,18 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	} else if err := validateRequiredProcessors(required); err != nil {
 		return nil, err
 	}
-	newClient := func() *llmclients.OpenAIJSONClient {
-		return &llmclients.OpenAIJSONClient{HTTPClient: &http.Client{Timeout: 100 * time.Second}}
+	components := buildProductionRuntimeComponents(logger)
+	fixed := components.fixed
+	if fixed == nil {
+		return nil, fmt.Errorf("production runtime: missing chunking service")
 	}
-	inputStore := DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
-	fixed := NewFixedSizeChunkingService(SQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger)
 	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
 		return nil, err
 	}
-	for _, e := range []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr} {
-		if e != nil {
-			return nil, e
-		}
+	if err := validateFixedRuntimeConfig(fixed, required, explicitSelection); err != nil {
+		return nil, err
 	}
-	phase := []Processor{NewChunkingProcessor(inputStore, fixed, logger), NewGenerateSummariesProcessor(inputStore, fixed, logger), NewGenerateTopicsProcessor(inputStore, fixed, logger)}
-	all := []Processor{
-		NewStaticAnalyzerProcessor(inputStore, newClient(), logger), phase[0], phase[1], phase[2],
-		NewExtractDocMetadataProcessor(inputStore, newClient(), logger),
-		NewSemanticProjectionsProcessor(inputStore, SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewStructuredKnowledgeProcessor(inputStore, StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewEntityProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewRelationProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewInventoryItemsProcessor(inputStore, InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewMetricsProcessor(inputStore, MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewProvisionsProcessor(inputStore, ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewSceneBlocksProcessor(inputStore, SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-	}
-	control := &ControlService{Logger: logger, InputStore: inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: NewBlockingProcessor(inputStore, logger), Processors: filterProcessors(all, required)}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	for _, p := range control.Processors {
 		if err := processorInitError(p); err != nil {
 			return nil, err
@@ -119,6 +135,33 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	}
 	r.config = makeResolvedConfig(control, r.services)
 	return r, nil
+}
+
+func validateFixedRuntimeConfig(fixed *FixedSizeChunkingService, required []string, explicit bool) error {
+	if fixed == nil {
+		return fmt.Errorf("production runtime: missing chunking service")
+	}
+	var checks []error
+	if !explicit {
+		checks = []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr}
+	} else {
+		enabled := map[string]bool{}
+		for _, name := range resolveRequiredProcessors(required) {
+			enabled[name] = true
+		}
+		if enabled["generate_topics"] {
+			checks = append(checks, fixed.PromptErr, fixed.ModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr)
+		}
+		if enabled["generate_summaries"] {
+			checks = append(checks, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr)
+		}
+	}
+	for _, err := range checks {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func processorInitError(p Processor) error {
