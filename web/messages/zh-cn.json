@@ -10,5 +10,8 @@
 	"semos_workspace_announcements": "公告",
 	"semos_workspace_recent": "最近活动",
 	"semos_workspace_alarms": "告警与错误",
-	"semos_workspace_apps": "应用"
+	"semos_workspace_apps": "应用",
+	"semos_workspace_no_announcements": "暂无公告。",
+	"semos_workspace_no_activity": "暂无最近活动。",
+	"semos_workspace_no_alarms": "暂无告警，系统运行正常。"
 }

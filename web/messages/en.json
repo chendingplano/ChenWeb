@@ -10,5 +10,8 @@
 	"semos_workspace_announcements": "Announcements",
 	"semos_workspace_recent": "Recent Activities",
 	"semos_workspace_alarms": "Alarms and Errors",
-	"semos_workspace_apps": "Apps"
+	"semos_workspace_apps": "Apps",
+	"semos_workspace_no_announcements": "No announcements.",
+	"semos_workspace_no_activity": "No recent activity.",
+	"semos_workspace_no_alarms": "No alarms. Everything is running normally."
 }

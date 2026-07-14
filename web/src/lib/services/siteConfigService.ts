@@ -59,9 +59,11 @@ export interface WorkspaceApp {
 }
 
 export interface SiteWorkspace {
+	kicker: string;
 	banner_title: string;
 	banner_subtitle: string;
 	banner_image: string;
+	announcements: string[];
 	apps: WorkspaceApp[];
 }
 
