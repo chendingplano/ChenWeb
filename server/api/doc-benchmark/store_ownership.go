@@ -57,12 +57,16 @@ func (s SQLStore) LoadOwnership(attemptID string) (Ownership, error) {
 	}
 	var o Ownership
 	var marker, workRoot, evidencePath, evidenceRoot, verifiedHash sql.NullString
+	var verifiedSize sql.NullInt64
 	err := s.DB.QueryRow(`SELECT execution_attempt_id,canonical_dir,work_root,evidence_path,evidence_root,nonce,verified,verified_hash,verified_size,verified_marker_hash,cleanup_state FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1`, attemptID).
-		Scan(&o.AttemptID, &o.Workspace, &workRoot, &evidencePath, &evidenceRoot, &o.Nonce, &o.Verified, &verifiedHash, &o.VerifiedSize, &marker, &o.CleanupState)
+		Scan(&o.AttemptID, &o.Workspace, &workRoot, &evidencePath, &evidenceRoot, &o.Nonce, &o.Verified, &verifiedHash, &verifiedSize, &marker, &o.CleanupState)
 	if err != nil {
 		return Ownership{}, err
 	}
 	o.WorkRoot, o.EvidencePath, o.EvidenceRoot, o.VerifiedHash = workRoot.String, evidencePath.String, evidenceRoot.String, verifiedHash.String
+	if verifiedSize.Valid {
+		o.VerifiedSize = verifiedSize.Int64
+	}
 	if marker.Valid {
 		o.VerifiedMarker = marker.String
 	}
@@ -91,11 +95,15 @@ func (s SQLStore) LockOwnership(attemptID string) (Ownership, error) {
 	defer tx.Rollback()
 	var o Ownership
 	var marker, workRoot, evidencePath, evidenceRoot, verifiedHash sql.NullString
-	err = tx.QueryRow(`SELECT execution_attempt_id,canonical_dir,work_root,evidence_path,evidence_root,nonce,verified,verified_hash,verified_size,verified_marker_hash,cleanup_state FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, attemptID).Scan(&o.AttemptID, &o.Workspace, &workRoot, &evidencePath, &evidenceRoot, &o.Nonce, &o.Verified, &verifiedHash, &o.VerifiedSize, &marker, &o.CleanupState)
+	var verifiedSize sql.NullInt64
+	err = tx.QueryRow(`SELECT execution_attempt_id,canonical_dir,work_root,evidence_path,evidence_root,nonce,verified,verified_hash,verified_size,verified_marker_hash,cleanup_state FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`, attemptID).Scan(&o.AttemptID, &o.Workspace, &workRoot, &evidencePath, &evidenceRoot, &o.Nonce, &o.Verified, &verifiedHash, &verifiedSize, &marker, &o.CleanupState)
 	if err != nil {
 		return Ownership{}, err
 	}
 	o.WorkRoot, o.EvidencePath, o.EvidenceRoot, o.VerifiedHash = workRoot.String, evidencePath.String, evidenceRoot.String, verifiedHash.String
+	if verifiedSize.Valid {
+		o.VerifiedSize = verifiedSize.Int64
+	}
 	if marker.Valid {
 		o.VerifiedMarker = marker.String
 	}

@@ -57,8 +57,9 @@ func TestBenchmarkMigrationSQLMatchesPersistenceContract(t *testing.T) {
 			t.Errorf("cleanup_state does not accept %q", state)
 		}
 	}
-	if strings.Contains(sqlText, "cancelled") {
-		t.Error("migration uses cancelled; Runner lifecycle contract is canceled")
+	initialSchema := benchmarkMigrationFile(t, "20260713000003_create_doc_benchmark_tables.sql")
+	if strings.Contains(initialSchema, "cancelled") {
+		t.Error("initial schema uses cancelled; Runner lifecycle contract is canceled")
 	}
 	if !strings.Contains(sqlText, "REFERENCES kb.inputs(id) ON DELETE SET NULL") {
 		t.Error("workspace input ownership must use ON DELETE SET NULL")
@@ -81,6 +82,87 @@ func TestBenchmarkWorkspaceExtensionRepairsPreviouslyAppliedSchema(t *testing.T)
 			t.Errorf("extension does not repair existing schema: missing %q", fragment)
 		}
 	}
+	updates := []struct {
+		name, statement, addConstraint string
+	}{
+		{
+			name:          "workspace cleanup state",
+			statement:     "UPDATE kb.benchmark_workspaces SET cleanup_state='error' WHERE cleanup_state='failed'",
+			addConstraint: "ADD CONSTRAINT benchmark_workspaces_cleanup_state_check",
+		},
+		{
+			name:          "run lifecycle",
+			statement:     "UPDATE kb.benchmark_runs SET lifecycle='canceled' WHERE lifecycle='cancelled'",
+			addConstraint: "ADD CONSTRAINT benchmark_runs_lifecycle_check",
+		},
+		{
+			name:          "attempt lifecycle",
+			statement:     "UPDATE kb.benchmark_case_attempts SET lifecycle='canceled' WHERE lifecycle='cancelled'",
+			addConstraint: "ADD CONSTRAINT benchmark_case_attempts_lifecycle_check",
+		},
+		{
+			name:          "attempt failure kind",
+			statement:     "UPDATE kb.benchmark_case_attempts SET failure_kind='canceled' WHERE failure_kind='cancelled'",
+			addConstraint: "ADD CONSTRAINT ck_failure_kind",
+		},
+	}
+	for _, update := range updates {
+		t.Run(update.name, func(t *testing.T) {
+			updateAt := strings.Index(extension, update.statement)
+			constraintAt := strings.Index(extension, update.addConstraint)
+			if updateAt < 0 {
+				t.Fatalf("extension is missing data migration %q", update.statement)
+			}
+			if constraintAt < 0 || updateAt > constraintAt {
+				t.Fatalf("data migration must precede %q", update.addConstraint)
+			}
+		})
+	}
+}
+
+func TestOwnershipReadsNullableVerifiedSizeFromExtendedRows(t *testing.T) {
+	columns := []string{"execution_attempt_id", "canonical_dir", "work_root", "evidence_path", "evidence_root", "nonce", "verified", "verified_hash", "verified_size", "verified_marker_hash", "cleanup_state"}
+	row := func() *sqlmock.Rows {
+		return sqlmock.NewRows(columns).AddRow("attempt", "/work", "/root", "/evidence/file", "/evidence", "nonce", false, nil, nil, nil, "active")
+	}
+	t.Run("load", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		mock.ExpectQuery("SELECT execution_attempt_id,canonical_dir,work_root").WithArgs("attempt").WillReturnRows(row())
+		got, err := (SQLStore{DB: db}).LoadOwnership("attempt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.VerifiedSize != 0 || got.Verified {
+			t.Fatalf("ownership=%+v", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("lock", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		mock.ExpectBegin()
+		mock.ExpectQuery("SELECT execution_attempt_id,canonical_dir,work_root").WithArgs("attempt").WillReturnRows(row())
+		mock.ExpectCommit()
+		got, err := (SQLStore{DB: db}).LockOwnership("attempt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.VerifiedSize != 0 || got.Verified {
+			t.Fatalf("ownership=%+v", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 type inputOwnershipPersister interface {
