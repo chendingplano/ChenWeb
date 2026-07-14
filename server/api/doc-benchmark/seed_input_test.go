@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 func TestSeedInputStagesExactBytesAndBindsInInsertTransaction(t *testing.T) {
@@ -17,14 +18,21 @@ func TestSeedInputStagesExactBytesAndBindsInInsertTransaction(t *testing.T) {
 	workspace := t.TempDir()
 	body := []byte{0, 1, '\n', 0xff, 'x'}
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(seedInputQuery)).WithArgs("tenant", int64(44), "pdf", "case-a", "benchmark", filepath.Join(workspace, BenchmarkInputFilename), filepath.Join(workspace, BenchmarkInputFilename), BenchmarkInputFilename, "[]").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
+	const expectedSeedQuery = `INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
+	stagingMetadata := filepath.Join(workspace, BenchmarkInputFilename)
+	linePath := filepath.Join(workspace, "benchmark-input_benchmark.txt")
+	mock.ExpectQuery(regexp.QuoteMeta(expectedSeedQuery)).WithArgs("tenant", int64(44), "pdf", "case-a", "benchmark", stagingMetadata, linePath, BenchmarkInputFilename, "[]").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
 	expectSeedBinding(mock, "attempt", 91)
 	mock.ExpectCommit()
-	id, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
-	if err != nil || id != 91 {
-		t.Fatalf("id=%d err=%v", id, err)
+	seeded, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
+	if err != nil || seeded.ID != 91 {
+		t.Fatalf("seeded=%#v err=%v", seeded, err)
 	}
-	got, err := os.ReadFile(filepath.Join(workspace, BenchmarkInputFilename))
+	resolved, err := docprocessing.ResolveInputFilePath(docprocessing.LineFileGeneratedEvent{}, seeded.ResultFilename, seeded.ParserName, seeded.StagingFilename)
+	if err != nil {
+		t.Fatalf("ResolveInputFilePath: %v", err)
+	}
+	got, err := os.ReadFile(resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +49,7 @@ func TestSeedInputRollsBackInsertWhenBindingFails(t *testing.T) {
 	defer db.Close()
 	workspace := t.TempDir()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(seedInputQuery)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
+	mock.ExpectQuery(`INSERT INTO kb\.inputs \(tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status\) VALUES \(\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9::jsonb\) RETURNING id`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
 	mock.ExpectQuery("SELECT input_record_id FROM kb\\.benchmark_workspaces").WithArgs("attempt").WillReturnError(errors.New("forced bind failure"))
 	mock.ExpectRollback()
 	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: []byte("x")}})

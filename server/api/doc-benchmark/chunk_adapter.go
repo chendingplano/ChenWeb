@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 const ChunkRowsQuery = `SELECT id, chunking_method, chunking_size, overlap_percent, notes,
@@ -203,15 +205,17 @@ func parseChunksFile(b []byte) ([]artifactChunk, error) {
 	s := bufio.NewScanner(strings.NewReader(string(b)))
 	var out []artifactChunk
 	var overlap, normal []int
+	field := 0
 	flush := func() error {
 		if overlap == nil && normal == nil {
 			return nil
 		}
-		if overlap == nil || normal == nil {
+		if field != 2 || overlap == nil || normal == nil {
 			return fmt.Errorf("chunk missing overlap or lines")
 		}
 		out = append(out, artifactChunk{overlap: overlap, normal: normal})
 		overlap, normal = nil, nil
+		field = 0
 		return nil
 	}
 	for s.Scan() {
@@ -232,21 +236,26 @@ func parseChunksFile(b []byte) ([]artifactChunk, error) {
 		}
 		switch strings.TrimSpace(k) {
 		case "overlap":
-			if overlap != nil {
-				return nil, fmt.Errorf("duplicate overlap field")
+			if field != 0 {
+				return nil, fmt.Errorf("overlap field out of order")
 			}
 			overlap = arr
-		case "lines", "normal":
-			if normal != nil {
-				return nil, fmt.Errorf("duplicate lines field")
+			field = 1
+		case "lines":
+			if field != 1 {
+				return nil, fmt.Errorf("lines field out of order")
 			}
 			normal = arr
+			field = 2
 		default:
 			return nil, fmt.Errorf("unknown chunks field %q", strings.TrimSpace(k))
 		}
 	}
 	if err := flush(); err != nil {
 		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty chunks artifact")
 	}
 	return out, s.Err()
 }
@@ -300,17 +309,22 @@ type SeedInputRequest struct {
 	Case                                                                      DatasetCase
 }
 
+type SeededInput struct {
+	ID                                                    int64
+	ParserName, StagingFilename, ResultFilename, FileName string
+}
+
 const seedInputQuery = `INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
 
-func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (int64, error) {
+func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInput, error) {
 	if db == nil {
-		return 0, fmt.Errorf("nil database")
+		return SeededInput{}, fmt.Errorf("nil database")
 	}
 	if req.Status == "" {
 		req.Status = "[]"
 	}
 	if req.AttemptID == "" || req.Workspace == "" || req.StoreID <= 0 {
-		return 0, fmt.Errorf("invalid seed input request")
+		return SeededInput{}, fmt.Errorf("invalid seed input request")
 	}
 	if req.ParserName == "" {
 		req.ParserName = "benchmark"
@@ -319,39 +333,44 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (int64, er
 		req.Title = req.Case.CaseID
 	}
 	if err := os.MkdirAll(req.Workspace, 0o700); err != nil {
-		return 0, err
+		return SeededInput{}, err
 	}
-	stagingPath := filepath.Join(req.Workspace, BenchmarkInputFilename)
-	if req.ResultFilename == "" {
-		req.ResultFilename = stagingPath
+	stagingMetadata := filepath.Join(req.Workspace, BenchmarkInputFilename)
+	resultMetadata := req.ResultFilename
+	if resultMetadata == "" {
+		resultMetadata = filepath.Join(req.Workspace, "result.txt")
 	}
-	if err := os.WriteFile(stagingPath, req.Case.InputBytes, 0o600); err != nil {
-		return 0, err
+	linePath, err := docprocessing.ResolveInputFilePath(docprocessing.LineFileGeneratedEvent{}, resultMetadata, req.ParserName, stagingMetadata)
+	if err != nil {
+		return SeededInput{}, err
+	}
+	if err := os.WriteFile(linePath, req.Case.InputBytes, 0o600); err != nil {
+		return SeededInput{}, err
 	}
 	ok := false
 	defer func() {
 		if !ok {
-			_ = os.Remove(stagingPath)
+			_ = os.Remove(linePath)
 		}
 	}()
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return SeededInput{}, err
 	}
 	defer tx.Rollback()
 	var id int64
-	err = tx.QueryRowContext(ctx, seedInputQuery, req.TenantID, req.StoreID, "pdf", req.Title, req.ParserName, stagingPath, req.ResultFilename, BenchmarkInputFilename, req.Status).Scan(&id)
+	err = tx.QueryRowContext(ctx, seedInputQuery, req.TenantID, req.StoreID, "pdf", req.Title, req.ParserName, stagingMetadata, linePath, BenchmarkInputFilename, req.Status).Scan(&id)
 	if err != nil {
-		return 0, err
+		return SeededInput{}, err
 	}
 	if err = bindInputOwnershipTx(ctx, tx, req.AttemptID, id); err != nil {
-		return 0, err
+		return SeededInput{}, err
 	}
 	if err = tx.Commit(); err != nil {
-		return 0, err
+		return SeededInput{}, err
 	}
 	ok = true
-	return id, nil
+	return SeededInput{ID: id, ParserName: req.ParserName, StagingFilename: stagingMetadata, ResultFilename: linePath, FileName: BenchmarkInputFilename}, nil
 }
 
 func ProductionArtifactPath(artifactDir string, recordID int64, stagingFilename, parserName, extension string) (string, error) {

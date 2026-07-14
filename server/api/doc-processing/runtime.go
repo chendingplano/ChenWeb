@@ -65,6 +65,9 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	}
 	if !explicitSelection {
 		required = configuredNames()
+		required = append(required, "extract_doc_metadata")
+	} else if err := validateRequiredProcessors(required); err != nil {
+		return nil, err
 	}
 	newClient := func() *llmclients.OpenAIJSONClient {
 		return &llmclients.OpenAIJSONClient{HTTPClient: &http.Client{Timeout: 100 * time.Second}}
@@ -203,7 +206,7 @@ func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) err
 func configuredNames() []string { return viper.GetStringSlice("doc-processing.required_processors") }
 
 func resolveRequiredProcessors(requested []string) []string {
-	wanted := map[string]bool{"static_analyzer": true, "chunking": true, "extract_doc_metadata": true}
+	wanted := map[string]bool{"static_analyzer": true, "chunking": true}
 	for _, name := range requested {
 		wanted[normalizeRuntimeName(name)] = true
 	}
@@ -215,6 +218,23 @@ func resolveRequiredProcessors(requested []string) []string {
 		}
 	}
 	return out
+}
+
+func validateRequiredProcessors(requested []string) error {
+	known := map[string]bool{}
+	for _, name := range resolveRequiredProcessors(nil) {
+		known[name] = true
+	}
+	for _, name := range []string{"generate_summaries", "generate_topics", "extract_doc_metadata", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity", "extract_relation", "extract_inventory_items", "extract_metrics", "extract_provisions", "generate_scene_blocks"} {
+		known[name] = true
+	}
+	for _, raw := range requested {
+		name := normalizeRuntimeName(raw)
+		if !known[name] {
+			return fmt.Errorf("unknown required processor %q", raw)
+		}
+	}
+	return nil
 }
 
 func filterProcessors(processors []Processor, required []string) []Processor {

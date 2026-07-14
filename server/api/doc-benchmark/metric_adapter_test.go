@@ -20,7 +20,11 @@ func TestMetricAdapterUsesOrderedRowsAndReconcilesStableFields(t *testing.T) {
 	if err := os.WriteFile(file, []byte(rows), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(MetricRowsQuery)).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"row"}).
+	const expectedMetricQuery = `SELECT to_jsonb(m) AS row
+FROM kb.metrics AS m
+WHERE m.input_record_id = $1
+ORDER BY m.metric_id COLLATE "C" ASC NULLS LAST, m.id ASC`
+	mock.ExpectQuery(regexp.QuoteMeta(expectedMetricQuery)).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"row"}).
 		AddRow([]byte(`{"metric_id":"a","metric_name":"A","metric_subject":"S","metric_value":"1","metric_unit":"kg","is_explicit_metric":true,"source_line_spans":[1],"db_index":0}`)).
 		AddRow([]byte(`{"metric_id":"b","metric_name":"B","metric_subject":"T","metric_value":"2","metric_unit":"m","is_explicit_metric":false,"source_line_spans":[2],"db_index":1}`)))
 	a := MetricAdapter{DB: db, ArtifactPath: func(int64) string { return file }}
@@ -60,7 +64,7 @@ func TestMetricAdapterMissingOrDisagreementIsInvalidOutput(t *testing.T) {
 			if tc.write {
 				_ = os.WriteFile(file, []byte(tc.contents), 0o600)
 			}
-			mock.ExpectQuery(regexp.QuoteMeta(MetricRowsQuery)).WillReturnRows(sqlmock.NewRows([]string{"row"}).AddRow([]byte(`{"metric_id":"a"}`)))
+			mock.ExpectQuery(`SELECT to_jsonb\(m\) AS row\s+FROM kb\.metrics AS m\s+WHERE m\.input_record_id = \$1\s+ORDER BY m\.metric_id COLLATE "C" ASC NULLS LAST, m\.id ASC`).WillReturnRows(sqlmock.NewRows([]string{"row"}).AddRow([]byte(`{"metric_id":"a"}`)))
 			a := MetricAdapter{DB: db, ArtifactPath: func(int64) string { return file }}
 			v, err := a.Capture(context.Background(), 1)
 			if tc.write && err == nil {

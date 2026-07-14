@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -11,9 +12,9 @@ func TestProductionRuntimeSelectedProcessorDependencyClosure(t *testing.T) {
 		requested []string
 		want      []string
 	}{
-		{"chunking", []string{"chunking"}, []string{"static_analyzer", "chunking", "extract_doc_metadata"}},
-		{"metrics", []string{"extract_metrics"}, []string{"static_analyzer", "chunking", "extract_doc_metadata", "extract_metrics"}},
-		{"preserves optional selection", []string{"extract_entity", "extract_relation"}, []string{"static_analyzer", "chunking", "extract_doc_metadata", "extract_entity", "extract_relation"}},
+		{"chunking", []string{"chunking"}, []string{"static_analyzer", "chunking"}},
+		{"metrics", []string{"extract_metrics"}, []string{"static_analyzer", "chunking", "extract_metrics"}},
+		{"preserves optional selection", []string{"extract_entity", "extract_relation"}, []string{"static_analyzer", "chunking", "extract_entity", "extract_relation"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -29,5 +30,12 @@ func TestProductionRuntimeSelectedProcessorDependencyClosure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNewProductionRuntimeOptionsRejectUnknownExplicitProcessorBeforeInitialization(t *testing.T) {
+	_, err := NewProductionRuntime(ProductionRuntimeOptions{RequiredProcessors: []string{"not_a_processor"}})
+	if err == nil || !strings.Contains(err.Error(), "not_a_processor") {
+		t.Fatalf("err=%v", err)
 	}
 }
