@@ -8,9 +8,6 @@
 
 	let { config }: { config: SiteConfig } = $props();
 
-	// Recomputed on every mount. The default paraglide strategy reloads the
-	// page on setLocale, so this always reflects the active locale — no extra
-	// reactivity plumbing needed (matches src/routes/demo/paraglide/+page.svelte).
 	const nav = [
 		{ label: m.semos_nav_home(), href: '/semos' },
 		{ label: m.semos_nav_workspace(), href: '/semos/workspace' },
@@ -27,21 +24,22 @@
 </script>
 
 <header
-	class="sticky top-0 z-40 w-full border-b border-border/70 bg-background/80 backdrop-blur-md"
+	class="sticky top-0 z-50 w-full border-b border-[#17181c]/8 bg-[#faf9f7]/90 backdrop-blur-xl dark:border-white/10 dark:bg-[#101216]/90"
 >
-	<div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-		<a
-			href="/semos"
-			class="text-[1.05rem] font-semibold tracking-tight text-foreground transition-opacity hover:opacity-80"
-		>
-			{config.branding.logo_text}
+	<div class="mx-auto flex h-[4.25rem] max-w-7xl items-center justify-between px-6">
+		<!-- Wordmark with bronze tick, echoing a monogram without copying one -->
+		<a href="/semos" class="group flex items-baseline gap-1.5">
+			<span class="inline-block h-2.5 w-2.5 rotate-45 rounded-[2px] bg-[#b08d57] transition-transform duration-300 group-hover:rotate-[135deg]"></span>
+			<span class="text-[1.1rem] font-bold tracking-[0.02em] text-[#17181c] dark:text-[#e9e7e2]">
+				{config.branding.logo_text}
+			</span>
 		</a>
 
-		<nav class="hidden items-center gap-1 md:flex">
+		<nav class="hidden items-center gap-7 md:flex">
 			{#each nav as item (item.href + item.label)}
 				<a
 					href={item.href}
-					class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+					class="text-[0.9rem] font-medium text-[#17181c]/60 transition-colors duration-200 hover:text-[#17181c] dark:text-white/60 dark:hover:text-white"
 				>
 					{item.label}
 				</a>
@@ -51,7 +49,7 @@
 		<div class="flex items-center gap-1.5">
 			<button
 				type="button"
-				class="rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+				class="rounded-full p-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
 				aria-label="Switch language"
 				onclick={() => setLocale(nextLocale())}
 			>
@@ -59,7 +57,7 @@
 			</button>
 			<button
 				type="button"
-				class="rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+				class="rounded-full p-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
 				aria-label="Toggle dark mode"
 				onclick={() => semosTheme.toggle()}
 			>
@@ -71,13 +69,13 @@
 			</button>
 			<a
 				href={config.hero.cta_secondary_href}
-				class="ml-1 hidden items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-[opacity,transform] duration-200 hover:opacity-90 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none sm:inline-flex"
+				class="ml-2 hidden rounded-lg bg-[#17181c] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(23,24,28,0.2),0_6px_16px_rgba(23,24,28,0.18)] transition-all duration-200 hover:-translate-y-px hover:shadow-[0_2px_4px_rgba(23,24,28,0.2),0_10px_24px_rgba(23,24,28,0.22)] active:translate-y-0 sm:inline-flex dark:bg-white dark:text-[#17181c]"
 			>
 				{m.semos_signup_login()}
 			</a>
 			<button
 				type="button"
-				class="rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none md:hidden"
+				class="rounded-full p-2 text-[#17181c]/45 transition-colors hover:bg-[#17181c]/5 hover:text-[#17181c] md:hidden dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
 				aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
 				aria-expanded={mobileOpen}
 				aria-controls="semos-mobile-nav"
@@ -96,13 +94,13 @@
 		<nav
 			id="semos-mobile-nav"
 			transition:slide={{ duration: 200 }}
-			class="border-t border-border/70 bg-background md:hidden"
+			class="border-t border-[#17181c]/8 bg-[#faf9f7] md:hidden dark:border-white/10 dark:bg-[#101216]"
 		>
-			<div class="mx-auto flex max-w-6xl flex-col px-6 py-2">
+			<div class="mx-auto flex max-w-7xl flex-col px-6 py-2">
 				{#each nav as item (item.href + item.label)}
 					<a
 						href={item.href}
-						class="rounded-md px-2 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+						class="rounded-md px-2 py-2.5 text-sm font-medium text-[#17181c]/60 transition-colors hover:text-[#17181c] dark:text-white/60 dark:hover:text-white"
 						onclick={() => (mobileOpen = false)}
 					>
 						{item.label}
@@ -110,7 +108,7 @@
 				{/each}
 				<a
 					href={config.hero.cta_secondary_href}
-					class="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 sm:hidden"
+					class="mt-2 inline-flex items-center justify-center rounded-lg bg-[#17181c] px-4 py-2.5 text-sm font-semibold text-white sm:hidden dark:bg-white dark:text-[#17181c]"
 					onclick={() => (mobileOpen = false)}
 				>
 					{m.semos_signup_login()}
