@@ -2,10 +2,12 @@ package docbenchmark
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -137,6 +139,27 @@ func TestChunkRangesRejectUnboundedExpansionAndSourceOverflow(t *testing.T) {
 	}
 	if got, err := parseLineRangesWithMax("[1-10]", 10); err != nil || len(got) != 10 {
 		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestChunkParsingEnforcesCumulativeBudget(t *testing.T) {
+	encoded := make([]string, maxChunkCount+1)
+	for i := range encoded {
+		encoded[i] = "[]"
+	}
+	b, _ := json.Marshal(encoded)
+	if _, err := parseProductionLineArrays(b, 0); err == nil {
+		t.Fatal("accepted too many DB chunks")
+	}
+	var artifact strings.Builder
+	for i := 0; i < maxChunkCount+1; i++ {
+		if i > 0 {
+			artifact.WriteString("\n\n")
+		}
+		artifact.WriteString("overlap: []\nlines: []")
+	}
+	if _, err := parseChunksFile([]byte(artifact.String())); err == nil {
+		t.Fatal("accepted too many artifact chunks")
 	}
 }
 

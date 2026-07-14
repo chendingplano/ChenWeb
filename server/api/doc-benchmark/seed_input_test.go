@@ -3,6 +3,7 @@ package docbenchmark
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -138,5 +139,55 @@ func TestSeedAndArtifactPathsRejectEscape(t *testing.T) {
 	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "a", Workspace: workspace, TenantID: "t", StoreID: 1, ParserName: "safe", ResultFilename: filepath.Join(workspace, "..", "outside.txt")})
 	if err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("outside result err=%v", err)
+	}
+}
+
+func TestSeedAndArtifactPathsRejectSymlinkDescendant(t *testing.T) {
+	workspace, outside := t.TempDir(), t.TempDir()
+	workspace, _ = filepath.EvalSymlinks(workspace)
+	if err := os.Symlink(outside, filepath.Join(workspace, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	db, _, _ := sqlmock.New()
+	defer db.Close()
+	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "a", Workspace: workspace, TenantID: "t", StoreID: 1, ParserName: "safe", ResultFilename: filepath.Join(workspace, "linked", "missing.txt")})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("seed symlink err=%v", err)
+	}
+	artifactRoot := t.TempDir()
+	_ = os.Symlink(outside, filepath.Join(artifactRoot, "0"))
+	if _, err := ProductionArtifactPath(artifactRoot, 1, "x.pdf", "safe", ".chunks"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("artifact symlink err=%v", err)
+	}
+}
+
+func TestSeedInputAdoptsMatchingOrphanAndPreservesFileOnCommitError(t *testing.T) {
+	for _, commitErr := range []error{nil, errors.New("ambiguous commit")} {
+		t.Run(fmt.Sprint(commitErr), func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			workspace := t.TempDir()
+			workspace, _ = filepath.EvalSymlinks(workspace)
+			linePath := filepath.Join(workspace, "benchmark-input_benchmark.txt")
+			body := []byte("recoverable")
+			_ = os.WriteFile(linePath, body, 0o600)
+			mock.ExpectBegin()
+			mock.ExpectQuery(`SELECT input_record_id FROM kb\.benchmark_workspaces`).WillReturnRows(sqlmock.NewRows([]string{"input_record_id"}).AddRow(nil))
+			mock.ExpectQuery(`INSERT INTO kb\.inputs`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(92)))
+			expectSeedBinding(mock, "attempt", 92)
+			if commitErr == nil {
+				mock.ExpectCommit()
+			} else {
+				mock.ExpectCommit().WillReturnError(commitErr)
+			}
+			_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
+			if (err != nil) != (commitErr != nil) {
+				t.Fatalf("err=%v", err)
+			}
+			got, readErr := os.ReadFile(linePath)
+			if readErr != nil || string(got) != string(body) {
+				t.Fatalf("file lost: %q err=%v", got, readErr)
+			}
+		})
 	}
 }

@@ -84,12 +84,19 @@ var lineRangeToken = regexp.MustCompile(`^([0-9]+)(?:-([0-9]+))?$`)
 
 const maxExpandedLineEntries = 1_000_000
 const maxProductionLineNumber = 10_000_000
+const maxChunkCount = 10_000
+
+type lineParseBudget struct{ expanded, chunks int }
 
 func parseLineRanges(raw string) ([]int, error) {
 	return parseLineRangesWithMax(raw, 0)
 }
 
 func parseLineRangesWithMax(raw string, sourceMax int) ([]int, error) {
+	return parseLineRangesBudget(raw, sourceMax, &lineParseBudget{})
+}
+
+func parseLineRangesBudget(raw string, sourceMax int, budget *lineParseBudget) ([]int, error) {
 	raw = strings.TrimSpace(raw)
 	if len(raw) < 2 || raw[0] != '[' || raw[len(raw)-1] != ']' {
 		return nil, fmt.Errorf("invalid line range %q", raw)
@@ -123,9 +130,11 @@ func parseLineRangesWithMax(raw string, sourceMax int) ([]int, error) {
 		if end > limit {
 			return nil, fmt.Errorf("line number %d exceeds maximum %d", end, limit)
 		}
-		if end-start+1 > maxExpandedLineEntries || len(out) > maxExpandedLineEntries-(end-start+1) {
+		count := end - start + 1
+		if count > maxExpandedLineEntries || budget.expanded > maxExpandedLineEntries-count {
 			return nil, fmt.Errorf("line range expands beyond %d entries", maxExpandedLineEntries)
 		}
+		budget.expanded += count
 		for n := start; n <= end; n++ {
 			if len(out) > 0 && n <= out[len(out)-1] {
 				return nil, fmt.Errorf("duplicate or unordered line %d", n)
@@ -137,6 +146,10 @@ func parseLineRangesWithMax(raw string, sourceMax int) ([]int, error) {
 }
 
 func parseProductionLineArrays(v any, sourceMax int) ([][]int, error) {
+	return parseProductionLineArraysBudget(v, sourceMax, &lineParseBudget{}, true)
+}
+
+func parseProductionLineArraysBudget(v any, sourceMax int, budget *lineParseBudget, countChunks bool) ([][]int, error) {
 	b, err := jsonBytes(v)
 	if err != nil {
 		return nil, err
@@ -145,9 +158,15 @@ func parseProductionLineArrays(v any, sourceMax int) ([][]int, error) {
 	if err := json.Unmarshal(b, &encoded); err != nil {
 		return nil, err
 	}
+	if len(encoded) > maxChunkCount || (countChunks && budget.chunks > maxChunkCount-len(encoded)) {
+		return nil, fmt.Errorf("chunk count exceeds %d", maxChunkCount)
+	}
+	if countChunks {
+		budget.chunks += len(encoded)
+	}
 	out := make([][]int, len(encoded))
 	for i, raw := range encoded {
-		out[i], err = parseLineRangesWithMax(raw, sourceMax)
+		out[i], err = parseLineRangesBudget(raw, sourceMax, budget)
 		if err != nil {
 			return nil, fmt.Errorf("chunk %d: %w", i+1, err)
 		}
@@ -180,14 +199,15 @@ func (a ChunkAdapter) Capture(ctx context.Context, id int64) (any, error) {
 	for rows.Next() {
 		var r ChunkDBRow
 		var ov, nl, cl any
+		budget := &lineParseBudget{}
 		if err := rows.Scan(&r.ID, &r.ChunkingMethod, &r.ChunkingSize, &r.OverlapPercent, &r.Notes, &ov, &nl, &cl, &r.CreateTime, &r.UpdateTime); err != nil {
 			return nil, err
 		}
-		r.OverlapLines, err = parseProductionLineArrays(ov, a.SourceMaxLine)
+		r.OverlapLines, err = parseProductionLineArraysBudget(ov, a.SourceMaxLine, budget, true)
 		if err != nil {
 			return nil, fmt.Errorf("%w: overlap_lines: %v", ErrInvalidOutput, err)
 		}
-		r.NormalLines, err = parseProductionLineArrays(nl, a.SourceMaxLine)
+		r.NormalLines, err = parseProductionLineArraysBudget(nl, a.SourceMaxLine, budget, false)
 		if err != nil {
 			return nil, fmt.Errorf("%w: normal_lines: %v", ErrInvalidOutput, err)
 		}
@@ -228,6 +248,7 @@ func parseChunksFileWithMax(b []byte, sourceMax int) ([]artifactChunk, error) {
 	var out []artifactChunk
 	var overlap, normal []int
 	field := 0
+	budget := &lineParseBudget{}
 	flush := func() error {
 		if overlap == nil && normal == nil {
 			return nil
@@ -236,6 +257,10 @@ func parseChunksFileWithMax(b []byte, sourceMax int) ([]artifactChunk, error) {
 			return fmt.Errorf("chunk missing overlap or lines")
 		}
 		out = append(out, artifactChunk{overlap: overlap, normal: normal})
+		budget.chunks++
+		if budget.chunks > maxChunkCount {
+			return fmt.Errorf("chunk count exceeds %d", maxChunkCount)
+		}
 		overlap, normal = nil, nil
 		field = 0
 		return nil
@@ -252,7 +277,7 @@ func parseChunksFileWithMax(b []byte, sourceMax int) ([]artifactChunk, error) {
 		if !ok {
 			return nil, fmt.Errorf("malformed chunks line %q", line)
 		}
-		arr, err := parseLineRangesWithMax(strings.TrimSpace(v), sourceMax)
+		arr, err := parseLineRangesBudget(strings.TrimSpace(v), sourceMax, budget)
 		if err != nil {
 			return nil, err
 		}
@@ -358,6 +383,31 @@ func pathWithin(root, target string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
+func rejectSymlinkPath(root, target string) error {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || !pathWithin(root, target) {
+		return fmt.Errorf("path escapes root")
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink path component %q", current)
+		}
+	}
+	return nil
+}
+
 func writeNewFileDurable(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".benchmark-input-*")
 	if err != nil {
@@ -404,6 +454,9 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 		if err != nil || !pathWithin(workspace, filepath.Clean(candidate)) {
 			return SeededInput{}, fmt.Errorf("result filename escapes workspace")
 		}
+		if err := rejectSymlinkPath(workspace, filepath.Clean(candidate)); err != nil {
+			return SeededInput{}, err
+		}
 	}
 	if db == nil {
 		return SeededInput{}, fmt.Errorf("nil database")
@@ -433,10 +486,14 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 	if err != nil || !pathWithin(workspace, filepath.Clean(linePath)) {
 		return SeededInput{}, fmt.Errorf("resolved line path escapes workspace")
 	}
+	if err := rejectSymlinkPath(workspace, filepath.Clean(linePath)); err != nil {
+		return SeededInput{}, err
+	}
 	created := false
+	commitAttempted := false
 	ok := false
 	defer func() {
-		if !ok && created {
+		if !ok && created && !commitAttempted {
 			_ = os.Remove(linePath)
 		}
 	}()
@@ -468,10 +525,18 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 		ok = true
 		return SeededInput{ID: owned.Int64, ParserName: parser, StagingFilename: staging, ResultFilename: result, FileName: fileName}, nil
 	}
-	if err = writeNewFileDurable(linePath, req.Case.InputBytes); err != nil {
-		return SeededInput{}, err
+	if existing, readErr := os.ReadFile(linePath); readErr == nil {
+		if !bytes.Equal(existing, req.Case.InputBytes) {
+			return SeededInput{}, fmt.Errorf("staged orphan bytes conflict")
+		}
+	} else if os.IsNotExist(readErr) {
+		if err = writeNewFileDurable(linePath, req.Case.InputBytes); err != nil {
+			return SeededInput{}, err
+		}
+		created = true
+	} else {
+		return SeededInput{}, readErr
 	}
-	created = true
 	var id int64
 	err = tx.QueryRowContext(ctx, seedInputQuery, req.TenantID, req.StoreID, "pdf", req.Title, req.ParserName, stagingMetadata, linePath, BenchmarkInputFilename, req.Status).Scan(&id)
 	if err != nil {
@@ -500,6 +565,7 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 			return SeededInput{}, fmt.Errorf("benchmark: attempt input bind lost race")
 		}
 	}
+	commitAttempted = true
 	if err = tx.Commit(); err != nil {
 		return SeededInput{}, err
 	}
@@ -529,6 +595,9 @@ func ProductionArtifactPath(artifactDir string, recordID int64, stagingFilename,
 	target := filepath.Join(rootDir, strconv.FormatInt(recordID/1000, 10), strconv.FormatInt(recordID, 10), root+"_"+parser+extension)
 	if !pathWithin(rootDir, target) {
 		return "", fmt.Errorf("artifact path escapes artifact directory")
+	}
+	if err := rejectSymlinkPath(rootDir, target); err != nil {
+		return "", err
 	}
 	return target, nil
 }
