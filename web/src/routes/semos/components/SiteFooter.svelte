@@ -35,6 +35,7 @@
 					<LogoMark
 						branding={config.branding}
 						textClass="text-base font-bold tracking-tight text-[#17181c] dark:text-[#e9e7e2]"
+						dotClass="h-2 w-2"
 					/>
 				</div>
 				<p class="mt-4 text-sm leading-relaxed text-[#6f6c66] dark:text-[#a5a29b]">

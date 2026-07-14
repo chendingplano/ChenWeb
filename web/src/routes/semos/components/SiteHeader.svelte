@@ -29,7 +29,7 @@
 >
 	<div class="mx-auto flex h-[4.25rem] max-w-7xl items-center justify-between px-6">
 		<!-- Wordmark: image logo if configured, else bronze-tick monogram + text -->
-		<a href="/semos" class="group flex items-baseline gap-1.5">
+		<a href="/semos" class="flex items-baseline gap-1.5">
 			<LogoMark
 				branding={config.branding}
 				textClass="text-[1.1rem] font-bold tracking-[0.02em] text-[#17181c] dark:text-[#e9e7e2]"
