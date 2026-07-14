@@ -45,25 +45,25 @@ image = "/images/kb-appdev.jpg"
 [[features]]
 key = "knowledge_base"
 title = "Knowledge Base"
-description = "Centralize documents and extracted artifacts in one governed store."
+description = "文档、片段、实体、关系、指标——所有知识资产不再散落于文件夹与网盘，而是汇聚于一处可治理、可权限管控的统一存储中。版本可溯、血缘可查、访问可审，让知识从“个人经验”进化为“组织资产”，为每一份智慧找到它的永久居所。"
 href = "/home3/knowledge"
 
 [[features]]
 key = "chat"
-title = "Chat with Documents"
-description = "Ask questions in plain language; answers grounded in your documents."
+title = "对话文档：问自然语言，得精准答案"
+description = "像与人交谈一样与文档对话。无需记住关键词，不必翻阅百页报告，只需用日常语言提出问题，SemOS 便从原文中锚定依据，给出可溯源、可核验的答案。让信息获取从“搜索”升维为“问答”，让每一份文档都变成随时待命的资深顾问。"
 href = "/home3"
 
 [[features]]
 key = "search"
-title = "Search the Knowledge Base"
-description = "Hybrid BM25 + semantic search across everything you have ingested."
+title = "知识检索：混合索引，一搜即达"
+description = "BM25 的精确匹配与向量语义理解的深度融合，配合图谱关系与结构化过滤，让检索不再依赖“猜对词”。无论你记得的是精确术语，还是模糊印象，系统都能穿透语义鸿沟，把最相关的内容送到眼前。搜索，从此不再是碰运气。"
 href = "/home3/knowledge"
 
 [[features]]
 key = "app_dev"
-title = "Agent and App Development"
-description = "Develop, run, and offer your own AI applications and agents."
+title = "智能体与应用开发：让每个人都能创造 AI 能力"
+description = "不只是调用 AI，而是创造 AI。提供低代码编排工具、预置技能库与开放 API，让业务专家也能快速搭建智能问答、自动审阅、风险监测等专属应用。发布的每一个智能体，都是组织能力的延伸——让创新从少数人的专利，变成每个人的日常。"
 href = "/home3"
 
 [footer]
