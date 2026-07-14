@@ -57,15 +57,35 @@ func TestBenchmarkMigrationSQLMatchesPersistenceContract(t *testing.T) {
 			t.Errorf("cleanup_state does not accept %q", state)
 		}
 	}
-	initialSchema := benchmarkMigrationFile(t, "20260713000003_create_doc_benchmark_tables.sql")
-	if strings.Contains(initialSchema, "cancelled") {
-		t.Error("initial schema uses cancelled; Runner lifecycle contract is canceled")
-	}
 	if !strings.Contains(sqlText, "REFERENCES kb.inputs(id) ON DELETE SET NULL") {
 		t.Error("workspace input ownership must use ON DELETE SET NULL")
 	}
 	if !strings.Contains(sqlText, "OLD.input_record_id_snapshot IS NOT NULL AND OLD.input_record_id_snapshot IS DISTINCT FROM NEW.input_record_id_snapshot") {
 		t.Error("attempt input snapshot guard must permit its initial NULL-to-value binding")
+	}
+}
+
+func TestBenchmarkBaseMigrationRemainsLegacyContract(t *testing.T) {
+	base := benchmarkMigrationFile(t, "20260713000003_create_doc_benchmark_tables.sql")
+	for _, fragment := range []string{
+		"CHECK (lifecycle IN ('queued','running','succeeded','failed','cancelled'))",
+		"CHECK(lifecycle IN ('queued','leased','running','succeeded','failed','cancelled'))",
+		"CHECK(cleanup_state IN ('pending','cleaned','failed'))",
+		"CONSTRAINT ck_failure_kind CHECK((lifecycle NOT IN ('failed') AND failure_kind IS NULL) OR lifecycle='failed')",
+		"OLD.input_record_id_snapshot IS DISTINCT FROM NEW.input_record_id_snapshot",
+		"'canceled','succeeded','failed','cancelled'",
+	} {
+		if !strings.Contains(base, fragment) {
+			t.Errorf("00003 does not preserve legacy contract: missing %q", fragment)
+		}
+	}
+	for _, canonicalOnly := range []string{
+		"cleanup_state IN ('pending','active','error','db_pending','files_pending','cleaned')",
+		"OLD.input_record_id_snapshot IS NOT NULL AND OLD.input_record_id_snapshot IS DISTINCT FROM NEW.input_record_id_snapshot",
+	} {
+		if strings.Contains(base, canonicalOnly) {
+			t.Errorf("00003 contains 00004 canonical repair %q", canonicalOnly)
+		}
 	}
 }
 
