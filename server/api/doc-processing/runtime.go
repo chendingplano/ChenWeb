@@ -33,33 +33,29 @@ type ResolvedConfigSnapshot struct {
 	Hash          string         `json:"hash"`
 }
 
-// NewProductionRuntime builds the same dependency-ordered graph as the
-// doc-processor command. The optional logger argument is accepted as an any
-// value to keep this seam convenient for command and worker callers.
-func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
-	var logger ApiTypes.JimoLogger
-	var overrides map[string]string
-	for _, arg := range args {
-		if l, ok := arg.(ApiTypes.JimoLogger); ok {
-			logger = l
-		}
-		if m, ok := arg.(map[string]string); ok {
-			overrides = m
-		}
-	}
+// ProductionRuntimeOptions lets embedders select the processors they intend
+// to run without depending on command-global Viper state.
+type ProductionRuntimeOptions struct {
+	Logger             ApiTypes.JimoLogger
+	Overrides          map[string]string
+	RequiredProcessors []string
+}
+
+type productionRuntimeComponents struct {
+	inputStore DocMetadataStore
+	fixed      *FixedSizeChunkingService
+	processors []Processor
+	blocking   Processor
+}
+
+var buildProductionRuntimeComponents = defaultProductionRuntimeComponents
+
+func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRuntimeComponents {
 	newClient := func() *llmclients.OpenAIJSONClient {
 		return &llmclients.OpenAIJSONClient{HTTPClient: &http.Client{Timeout: 100 * time.Second}}
 	}
 	inputStore := DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
 	fixed := NewFixedSizeChunkingService(SQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger)
-	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
-		return nil, err
-	}
-	for _, e := range []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr} {
-		if e != nil {
-			return nil, e
-		}
-	}
 	phase := []Processor{NewChunkingProcessor(inputStore, fixed, logger), NewGenerateSummariesProcessor(inputStore, fixed, logger), NewGenerateTopicsProcessor(inputStore, fixed, logger)}
 	all := []Processor{
 		NewStaticAnalyzerProcessor(inputStore, newClient(), logger), phase[0], phase[1], phase[2],
@@ -73,7 +69,49 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 		NewProvisionsProcessor(inputStore, ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewSceneBlocksProcessor(inputStore, SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 	}
-	control := &ControlService{Logger: logger, InputStore: inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: NewBlockingProcessor(inputStore, logger), Processors: filterProcessors(all, configuredNames())}
+	return productionRuntimeComponents{inputStore: inputStore, fixed: fixed, processors: all, blocking: NewBlockingProcessor(inputStore, logger)}
+}
+
+// NewProductionRuntime builds the same dependency-ordered graph as the
+// doc-processor command. The optional logger argument is accepted as an any
+// value to keep this seam convenient for command and worker callers.
+func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
+	var logger ApiTypes.JimoLogger
+	var overrides map[string]string
+	var required []string
+	explicitSelection := false
+	for _, arg := range args {
+		if l, ok := arg.(ApiTypes.JimoLogger); ok {
+			logger = l
+		}
+		if m, ok := arg.(map[string]string); ok {
+			overrides = m
+		}
+		if names, ok := arg.([]string); ok {
+			required, explicitSelection = names, true
+		}
+		if opts, ok := arg.(ProductionRuntimeOptions); ok {
+			logger, overrides, required, explicitSelection = opts.Logger, opts.Overrides, opts.RequiredProcessors, true
+		}
+	}
+	if !explicitSelection {
+		required = configuredNames()
+		required = append(required, "extract_doc_metadata")
+	} else if err := validateRequiredProcessors(required); err != nil {
+		return nil, err
+	}
+	components := buildProductionRuntimeComponents(logger)
+	fixed := components.fixed
+	if fixed == nil {
+		return nil, fmt.Errorf("production runtime: missing chunking service")
+	}
+	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
+		return nil, err
+	}
+	if err := validateFixedRuntimeConfig(fixed, required, explicitSelection); err != nil {
+		return nil, err
+	}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	for _, p := range control.Processors {
 		if err := processorInitError(p); err != nil {
 			return nil, err
@@ -97,6 +135,33 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	}
 	r.config = makeResolvedConfig(control, r.services)
 	return r, nil
+}
+
+func validateFixedRuntimeConfig(fixed *FixedSizeChunkingService, required []string, explicit bool) error {
+	if fixed == nil {
+		return fmt.Errorf("production runtime: missing chunking service")
+	}
+	var checks []error
+	if !explicit {
+		checks = []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr}
+	} else {
+		enabled := map[string]bool{}
+		for _, name := range resolveRequiredProcessors(required) {
+			enabled[name] = true
+		}
+		if enabled["generate_topics"] {
+			checks = append(checks, fixed.PromptErr, fixed.ModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr)
+		}
+		if enabled["generate_summaries"] {
+			checks = append(checks, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr)
+		}
+	}
+	for _, err := range checks {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func processorInitError(p Processor) error {
@@ -183,15 +248,46 @@ func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) err
 
 func configuredNames() []string { return viper.GetStringSlice("doc-processing.required_processors") }
 
+func resolveRequiredProcessors(requested []string) []string {
+	wanted := map[string]bool{"static_analyzer": true, "chunking": true}
+	for _, name := range requested {
+		wanted[normalizeRuntimeName(name)] = true
+	}
+	productionOrder := []string{"static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity", "extract_relation", "extract_inventory_items", "extract_metrics", "extract_provisions", "generate_scene_blocks"}
+	out := make([]string, 0, len(wanted))
+	for _, name := range productionOrder {
+		if wanted[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func validateRequiredProcessors(requested []string) error {
+	known := map[string]bool{}
+	for _, name := range resolveRequiredProcessors(nil) {
+		known[name] = true
+	}
+	for _, name := range []string{"generate_summaries", "generate_topics", "extract_doc_metadata", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity", "extract_relation", "extract_inventory_items", "extract_metrics", "extract_provisions", "generate_scene_blocks"} {
+		known[name] = true
+	}
+	for _, raw := range requested {
+		name := normalizeRuntimeName(raw)
+		if !known[name] {
+			return fmt.Errorf("unknown required processor %q", raw)
+		}
+	}
+	return nil
+}
+
 func filterProcessors(processors []Processor, required []string) []Processor {
-	mandatory := map[string]bool{"static_analyzer": true, "chunking": true, "extract_doc_metadata": true}
 	enabled := map[string]bool{}
-	for _, n := range required {
+	for _, n := range resolveRequiredProcessors(required) {
 		enabled[normalizeRuntimeName(n)] = true
 	}
 	out := make([]Processor, 0, len(processors))
 	for _, p := range processors {
-		if p != nil && (mandatory[normalizeRuntimeName(p.Name())] || enabled[normalizeRuntimeName(p.Name())]) {
+		if p != nil && enabled[normalizeRuntimeName(p.Name())] {
 			out = append(out, p)
 		}
 	}

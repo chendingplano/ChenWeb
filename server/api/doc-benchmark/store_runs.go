@@ -79,7 +79,7 @@ func (s SQLStore) CreateRun(ctx context.Context, experimentID, variant string, r
 		return "", err
 	}
 	var id string
-	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_runs (experiment_id,variant_name,requested_json,resolved_json,config_json,prompt_json,scorer_json,pricing_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (experiment_id,variant_name) DO UPDATE SET updated_at=kb.benchmark_runs.updated_at WHERE kb.benchmark_runs.requested_json=$3 AND kb.benchmark_runs.resolved_json=$4 AND kb.benchmark_runs.config_json=$5 AND kb.benchmark_runs.prompt_json=$6 AND kb.benchmark_runs.scorer_json=$7 AND kb.benchmark_runs.pricing_json=$8 RETURNING id`, experimentID, variant, vals[0], vals[1], vals[2], vals[3], vals[4], p).Scan(&id)
+	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_runs (experiment_id,variant_name,requested_json,resolved_json,config_json,prompt_json,scorer_json,pricing_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (experiment_id,variant_name) DO UPDATE SET updated_at=kb.benchmark_runs.updated_at WHERE kb.benchmark_runs.requested_json=$3 AND kb.benchmark_runs.prompt_json=$6 AND kb.benchmark_runs.scorer_json=$7 AND kb.benchmark_runs.pricing_json=$8 RETURNING id`, experimentID, variant, vals[0], vals[1], vals[2], vals[3], vals[4], p).Scan(&id)
 	if err == sql.ErrNoRows {
 		return "", ErrConflict
 	}

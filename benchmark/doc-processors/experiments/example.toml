@@ -22,11 +22,11 @@ CHUNK_SIZE = "1024"
 [[variants]]
 name = "metrics-baseline"
 [variants.overrides]
-EXTRACT_METRIC_CANDIDATES_PROMPT = "extract-metrics-v1"
-EXTRACT_METRIC_CANDIDATES_MODEL_NAME = "baseline"
+EXTRACT_METRIC_CANDIDATES_PROMPT = "prompts/prompt-extract-metric-candidates-v3.md"
+EXTRACT_METRIC_CANDIDATES_MODEL_NAME = "deepseek-chat"
 
 [[variants]]
 name = "metrics-alt"
 [variants.overrides]
-EXTRACT_METRIC_CANDIDATES_PROMPT = "extract-metrics-v1-alt"
-EXTRACT_METRIC_CANDIDATES_MODEL_NAME = "baseline"
+EXTRACT_METRIC_CANDIDATES_PROMPT = "prompts/prompt-extract-metric-candidates-v4.md"
+EXTRACT_METRIC_CANDIDATES_MODEL_NAME = "deepseek-chat"
