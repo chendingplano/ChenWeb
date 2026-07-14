@@ -63,7 +63,9 @@ export interface SiteWorkspace {
 	banner_title: string;
 	banner_subtitle: string;
 	banner_image: string;
-	announcements: string[];
+	// Nullable: Go marshals a nil slice to `null`, so an omitted `announcements`
+	// key arrives as null rather than [].
+	announcements: string[] | null;
 	apps: WorkspaceApp[];
 }
 

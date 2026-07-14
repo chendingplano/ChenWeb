@@ -190,7 +190,7 @@
 						</div>
 					{:else}
 						<ul class="mt-5 space-y-2.5 text-sm leading-relaxed text-[#6f6c66] dark:text-[#a5a29b]">
-							{#each block.items as item (item)}
+							{#each block.items as item}
 								<li class="flex gap-2.5">
 									<span
 										class="mt-[0.45rem] inline-block h-1 w-1 shrink-0 rounded-full bg-[#b08d57]/50"
