@@ -94,6 +94,66 @@ func TestArtifactObjectStoreStoresEmptyArraysForNilSlices(t *testing.T) {
 	}
 }
 
+func TestArtifactObjectStoreUpdatesMetricExtInfoWithObjectName(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := ArtifactObjectSQLStore{DB: db}
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM kb.artifact_objects").
+		WithArgs(int64(42), "metric").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO kb.artifact_objects").
+		WithArgs(
+			int64(42),
+			int64(42),
+			"metric",
+			"42_mtc_1",
+			nil,
+			"patient",
+			nil,
+			nil,
+			nil,
+			"person",
+			"measured_object",
+			"[]",
+			"[]",
+			"[]",
+			nil,
+			nil,
+			"[]",
+			float64(0.91),
+			ObjectReconcilePending,
+			float64(0),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE kb.metrics m").
+		WithArgs(int64(42), "metric").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err = store.ReplaceObjectsForRecord(context.Background(), 42, "metric", []ArtifactObject{{
+		InputRecordID: 42,
+		ArtifactType:  "metric",
+		ArtifactID:    "42_mtc_1",
+		ObjectName:    "patient",
+		ObjectType:    "person",
+		ObjectRole:    "measured_object",
+		Confidence:    0.91,
+		ExtInfo:       map[string]any{},
+	}})
+	if err != nil {
+		t.Fatalf("ReplaceObjectsForRecord: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestNormalizeArtifactObjectsUsesExplicitObjectsAndDedupes(t *testing.T) {
 	metric := map[string]any{
 		"subject": "fallback subject",

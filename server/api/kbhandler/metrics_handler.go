@@ -49,6 +49,9 @@ type metricRecord struct {
 	MeasurementFreq     *string         `json:"measurement_frequency,omitempty"`
 	Confidence          *float64        `json:"confidence,omitempty"`
 	IsExplicitMetric    *bool           `json:"is_explicit_metric,omitempty"`
+	DocumentTitle       *string         `json:"document_title,omitempty"`
+	DocumentDocNo       *string         `json:"document_doc_no,omitempty"`
+	ObjectName          *string         `json:"object_name,omitempty"`
 	TableNameOrSection  *string         `json:"table_name_or_section,omitempty"`
 	ReasoningTags       json.RawMessage `json:"reasoning_tags,omitempty"`
 	CreatedAt           string          `json:"created_at,omitempty"`
@@ -63,6 +66,53 @@ type listMetricsResponse struct {
 type metricDetailResponse struct {
 	Status bool         `json:"status"`
 	Record metricRecord `json:"record"`
+}
+
+func firstMetricSourceLine(spans json.RawMessage) int {
+	if len(spans) == 0 {
+		return int(^uint(0) >> 1)
+	}
+	var raw []any
+	if err := json.Unmarshal(spans, &raw); err != nil || len(raw) == 0 {
+		return int(^uint(0) >> 1)
+	}
+	first := raw[0]
+	switch v := first.(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case string:
+		var digits strings.Builder
+		for _, r := range strings.TrimSpace(v) {
+			if r >= '0' && r <= '9' {
+				digits.WriteRune(r)
+				continue
+			}
+			break
+		}
+		if digits.Len() > 0 {
+			if n, err := strconv.Atoi(digits.String()); err == nil && n > 0 {
+				return n
+			}
+		}
+	case map[string]any:
+		for _, key := range []string{"line_number", "line", "line_no", "lineNo"} {
+			if val, ok := v[key]; ok {
+				switch vv := val.(type) {
+				case float64:
+					if vv > 0 {
+						return int(vv)
+					}
+				case string:
+					if n, err := strconv.Atoi(strings.TrimSpace(vv)); err == nil && n > 0 {
+						return n
+					}
+				}
+			}
+		}
+	}
+	return int(^uint(0) >> 1)
 }
 
 // ListMetrics handles GET /api/v1/kb/metrics?input_record_id=N
@@ -95,10 +145,25 @@ SELECT
     m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
-    m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
+    m.confidence, m.is_explicit_metric,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'title', i.title, '')), '') AS document_title,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
+    ao.object_name,
+    m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+LEFT JOIN LATERAL (
+    SELECT NULLIF(BTRIM(artifact.object_name), '') AS object_name
+    FROM kb.artifact_objects artifact
+    WHERE artifact.artifact_type = 'metric'
+      AND artifact.artifact_id = m.metric_id
+      AND NULLIF(BTRIM(artifact.object_name), '') IS NOT NULL
+    ORDER BY
+      CASE WHEN COALESCE(artifact.object_role, '') IN ('measured_object', 'self') THEN 0 ELSE 1 END,
+      artifact.id
+    LIMIT 1
+) ao ON TRUE
 WHERE m.input_record_id = $1
 ORDER BY m.id ASC
 `
@@ -130,7 +195,8 @@ ORDER BY m.id ASC
 			&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
 			&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 			&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
-			&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
+			&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
+			&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -167,6 +233,14 @@ ORDER BY m.id ASC
 			ErrorMsg: "failed to iterate kb metrics (CWB_KB_M_022)",
 		})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left := firstMetricSourceLine(out[i].SourceLineSpans)
+		right := firstMetricSourceLine(out[j].SourceLineSpans)
+		if left != right {
+			return left < right
+		}
+		return out[i].ID < out[j].ID
+	})
 
 	return c.JSON(http.StatusOK, listMetricsResponse{
 		Status:  true,
@@ -184,10 +258,25 @@ SELECT
     m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
-    m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
+    m.confidence, m.is_explicit_metric,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'title', i.title, '')), '') AS document_title,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
+    ao.object_name,
+    m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+LEFT JOIN LATERAL (
+    SELECT NULLIF(BTRIM(artifact.object_name), '') AS object_name
+    FROM kb.artifact_objects artifact
+    WHERE artifact.artifact_type = 'metric'
+      AND artifact.artifact_id = m.metric_id
+      AND NULLIF(BTRIM(artifact.object_name), '') IS NOT NULL
+    ORDER BY
+      CASE WHEN COALESCE(artifact.object_role, '') IN ('measured_object', 'self') THEN 0 ELSE 1 END,
+      artifact.id
+    LIMIT 1
+) ao ON TRUE
 WHERE m.id = $1
 `
 	var (
@@ -206,7 +295,8 @@ WHERE m.id = $1
 		&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
 		&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
-		&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
+		&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
+		&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 	)
 	if err != nil {
 		return metricRecord{}, err

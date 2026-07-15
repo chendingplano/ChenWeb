@@ -198,6 +198,9 @@ export type KbMetricRecord = {
 	measurement_frequency?: string;
 	confidence?: number;
 	is_explicit_metric?: boolean;
+	document_title?: string;
+	document_doc_no?: string;
+	object_name?: string;
 	table_name_or_section?: string;
 	reasoning_tags?: string[];
 	created_at?: string;

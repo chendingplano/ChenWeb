@@ -1274,6 +1274,9 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	store := MetricsSQLStore{DB: db}
+	mock.ExpectQuery(`SELECT\s+COALESCE\(NULLIF\(BTRIM\(doc_metadata->>'title'\), ''\), NULLIF\(BTRIM\(title\), ''\), ''\),\s+COALESCE\(NULLIF\(BTRIM\(doc_metadata->>'doc_no'\), ''\), NULLIF\(BTRIM\(doc_no\), ''\), ''\)\s+FROM kb\.inputs\s+WHERE id = \$1`).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"title", "doc_no"}).AddRow("Dynamic BP Spec", "T/JXAS 010—2021"))
 	inserted, err := store.SaveMetrics(context.Background(), SaveMetricsRequest{
 		InputRecordID: int64(42),
 		Language:      "zh",
@@ -1332,6 +1335,9 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 
 	store := MetricsSQLStore{DB: db}
 	mock.ExpectExec(`CREATE SCHEMA IF NOT EXISTS kb`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT\s+COALESCE\(NULLIF\(BTRIM\(doc_metadata->>'title'\), ''\), NULLIF\(BTRIM\(title\), ''\), ''\),\s+COALESCE\(NULLIF\(BTRIM\(doc_metadata->>'doc_no'\), ''\), NULLIF\(BTRIM\(doc_no\), ''\), ''\)\s+FROM kb\.inputs\s+WHERE id = \$1`).
+		WithArgs(int64(173)).
+		WillReturnRows(sqlmock.NewRows([]string{"title", "doc_no"}).AddRow("Latency Spec", "SPEC-173"))
 	mock.ExpectExec(`INSERT INTO kb\.metrics`).
 		WithArgs(sqlmock.AnyArg(), int64(173), "173_mtc_1", sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
