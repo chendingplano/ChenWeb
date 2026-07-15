@@ -55,12 +55,16 @@
 		browserInstanceKey?: string;
 	} = $props();
 
-	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
-	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
-	let border = $derived(darkMode ? '#2b3548' : '#dbe3f0');
-	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
-	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
-	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
+	// Letterpress palette — kept in lockstep with metric-mgmt-view so this view
+	// (and the record browser it hosts) matches the Metrics page in both themes.
+	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
+	let panelAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
+	let border = $derived(darkMode ? '#2A3140' : '#D7CFB8');
+	let borderSoft = $derived(darkMode ? '#1F2530' : '#E5DEC8');
+	let textMain = $derived(darkMode ? '#EDE7D3' : '#1A1410');
+	let textMuted = $derived(darkMode ? '#B5AE94' : '#5C5345');
+	let accent = $derived(darkMode ? '#D4A24C' : '#B8801E'); // brass
+	let crimson = $derived(darkMode ? '#C8553D' : '#A23E26'); // selected/active
 
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
@@ -446,7 +450,7 @@
 <div
 	class="tree-shell"
 	class:resizing
-	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted};`}
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:${borderSoft}; --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted}; --brass:${accent}; --crimson:${crimson};`}
 >
 	{#if errorDialogOpen && loadError}
 		<div
@@ -928,7 +932,7 @@
 		width: min(540px, 100%);
 		border-radius: 22px;
 		border: 1px solid rgba(248, 113, 113, 0.28);
-		background: #111827;
+		background: var(--panel);
 		padding: 1.25rem;
 		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
 	}
@@ -954,8 +958,8 @@
 		padding: 1.1rem 1.2rem;
 		border-radius: 24px;
 		background:
-			radial-gradient(circle at top right, rgba(34, 197, 94, 0.14), transparent 42%),
-			linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66));
+			radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 14%, transparent), transparent 42%),
+			linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 86%, transparent), color-mix(in srgb, var(--panel-alt) 66%, transparent));
 		border: 1px solid var(--border);
 	}
 
@@ -997,7 +1001,7 @@
 	}
 
 	.ghost {
-		background: rgba(15, 23, 42, 0.36);
+		background: color-mix(in srgb, var(--panel-alt) 36%, transparent);
 		color: var(--text);
 	}
 
@@ -1052,13 +1056,13 @@
 		border-radius: 14px;
 		padding: 0.72rem 0.9rem;
 		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.3);
+		background: color-mix(in srgb, var(--panel-alt) 30%, transparent);
 		font-weight: 700;
 	}
 	.tab.active {
-		border-color: rgba(34, 197, 94, 0.36);
-		background: rgba(13, 148, 136, 0.16);
-		color: #a7f3d0;
+		border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+		background: color-mix(in srgb, var(--accent) 16%, transparent);
+		color: var(--accent);
 	}
 	.tab.passive {
 		color: var(--muted);
@@ -1121,7 +1125,7 @@
 	.resize-handle.active .resize-grip,
 	.resize-handle:hover .resize-grip,
 	.resize-handle:focus-visible .resize-grip {
-		border-color: #22c55e;
+		border-color: var(--accent);
 	}
 	.detail-card,
 	.pdf-card {
@@ -1130,7 +1134,7 @@
 		min-height: 0;
 		border-radius: 20px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.26);
+		background: color-mix(in srgb, var(--panel-alt) 26%, transparent);
 		padding: 1rem;
 	}
 
@@ -1161,7 +1165,7 @@
 		position: relative;
 		border-radius: 16px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.34);
+		background: color-mix(in srgb, var(--panel-alt) 34%, transparent);
 		padding: 0.85rem;
 		text-align: left;
 		color: inherit;
@@ -1172,15 +1176,15 @@
 			transform 150ms ease;
 	}
 	.snippet:hover {
-		border-color: rgba(34, 197, 94, 0.34);
+		border-color: color-mix(in srgb, var(--accent) 34%, transparent);
 	}
 	.snippet.selected {
-		border-color: rgba(74, 222, 128, 0.58);
+		border-color: color-mix(in srgb, var(--crimson) 58%, transparent);
 		background:
-			linear-gradient(180deg, rgba(13, 148, 136, 0.14), rgba(13, 148, 136, 0.06)),
-			rgba(15, 23, 42, 0.9);
+			linear-gradient(180deg, color-mix(in srgb, var(--crimson) 14%, transparent), color-mix(in srgb, var(--crimson) 6%, transparent)),
+			color-mix(in srgb, var(--panel-alt) 90%, transparent);
 		box-shadow:
-			0 0 0 1px rgba(74, 222, 128, 0.18) inset,
+			0 0 0 1px color-mix(in srgb, var(--crimson) 18%, transparent) inset,
 			0 16px 36px rgba(15, 23, 42, 0.24);
 		transform: translateY(-1px);
 	}
@@ -1191,7 +1195,7 @@
 		line-height: 1.5;
 	}
 	.snippet.selected p {
-		color: #d1fae5;
+		color: var(--text);
 	}
 
 	.keyword-row {
@@ -1202,10 +1206,10 @@
 	.keyword {
 		border-radius: 999px;
 		padding: 0.18rem 0.48rem;
-		background: rgba(34, 197, 94, 0.14);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
 		font-size: 0.7rem;
 		font-weight: 600;
-		color: #4ade80;
+		color: var(--accent);
 	}
 	.snippet-id {
 		border-radius: 999px;
@@ -1226,10 +1230,10 @@
 	.snippet-type {
 		border-radius: 999px;
 		padding: 0.18rem 0.48rem;
-		background: rgba(251, 191, 36, 0.14);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
 		font-size: 0.68rem;
 		font-weight: 600;
-		color: #fbbf24;
+		color: var(--accent);
 		letter-spacing: 0.03em;
 	}
 	.snippet-page {
@@ -1274,7 +1278,7 @@
 		justify-content: center;
 		border-radius: 18px;
 		border: 1px dashed rgba(148, 163, 184, 0.2);
-		background: rgba(2, 6, 23, 0.28);
+		background: color-mix(in srgb, var(--panel-alt) 28%, transparent);
 		padding: 1rem;
 		text-align: center;
 		color: var(--muted);
@@ -1289,7 +1293,7 @@
 		margin-top: -1px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
 		border-radius: 0 0 16px 16px;
-		background: rgba(2, 6, 23, 0.28);
+		background: color-mix(in srgb, var(--panel-alt) 28%, transparent);
 	}
 
 	.topic-sidebar-block + .topic-sidebar-block {
@@ -1347,10 +1351,10 @@
 		align-items: center;
 		padding: 0.32rem 0.58rem;
 		border-radius: 999px;
-		border: 1px solid rgba(74, 222, 128, 0.22);
-		background: rgba(13, 148, 136, 0.12);
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
 		font-size: 0.78rem;
-		color: #6ee7b7;
+		color: var(--accent);
 	}
 	.category-path-list {
 		display: flex;
@@ -1430,18 +1434,18 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--accent);
-		border: 1px solid rgba(34, 197, 94, 0.3);
+		border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 		border-radius: 8px;
 		padding: 0.2rem 0.5rem;
-		background: rgba(34, 197, 94, 0.08);
+		background: color-mix(in srgb, var(--accent) 8%, transparent);
 		cursor: pointer;
 		transition:
 			background 150ms ease,
 			border-color 150ms ease;
 	}
 	.topic-edit-trigger:hover {
-		background: rgba(34, 197, 94, 0.16);
-		border-color: rgba(34, 197, 94, 0.5);
+		background: color-mix(in srgb, var(--accent) 16%, transparent);
+		border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 	}
 
 	.topic-sidebar-edit {
@@ -1465,7 +1469,7 @@
 	.topic-edit-textarea {
 		width: 100%;
 		box-sizing: border-box;
-		background: rgba(15, 23, 42, 0.6);
+		background: color-mix(in srgb, var(--panel-alt) 60%, transparent);
 		border: 1px solid rgba(148, 163, 184, 0.22);
 		border-radius: 10px;
 		padding: 0.5rem 0.65rem;
@@ -1479,7 +1483,7 @@
 	.topic-edit-input:focus,
 	.topic-edit-textarea:focus {
 		outline: none;
-		border-color: rgba(34, 197, 94, 0.5);
+		border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 	}
 	.topic-edit-textarea {
 		min-height: 72px;
@@ -1512,12 +1516,12 @@
 		cursor: not-allowed;
 	}
 	.topic-edit-btn-save {
-		background: rgba(34, 197, 94, 0.2);
-		border-color: rgba(34, 197, 94, 0.45);
-		color: #4ade80;
+		background: color-mix(in srgb, var(--accent) 20%, transparent);
+		border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+		color: var(--accent);
 	}
 	.topic-edit-btn-save:not(:disabled):hover {
-		background: rgba(34, 197, 94, 0.3);
+		background: color-mix(in srgb, var(--accent) 30%, transparent);
 	}
 	.topic-edit-btn-cancel {
 		background: rgba(148, 163, 184, 0.08);
@@ -1540,8 +1544,8 @@
 
 	:global(.pdf-highlight) {
 		position: absolute;
-		background: rgba(34, 197, 94, 0.25);
-		outline: 1px solid rgba(34, 197, 94, 0.8);
+		background: color-mix(in srgb, var(--accent) 25%, transparent);
+		outline: 1px solid color-mix(in srgb, var(--accent) 80%, transparent);
 		border-radius: 2px;
 	}
 

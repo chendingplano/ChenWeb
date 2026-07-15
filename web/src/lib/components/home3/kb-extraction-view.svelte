@@ -121,15 +121,18 @@
 		canvasMapLabel?: string;
 	} = $props();
 
-	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
-	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
-	let border = $derived(darkMode ? '#2b3548' : '#dbe3f0');
-	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
-	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
-	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
-	// Light-on-dark tints that only worked on the dark panel; the dark branch is
-	// unchanged, the light branch is the same hue at readable contrast on white.
-	let accentSoft = $derived(darkMode ? '#a7f3d0' : '#0f766e');
+	// Letterpress palette — kept in lockstep with metric-mgmt-view so this view
+	// (and the record browser it hosts) matches the Metrics page in both themes.
+	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
+	let panelAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
+	let border = $derived(darkMode ? '#2A3140' : '#D7CFB8');
+	let borderSoft = $derived(darkMode ? '#1F2530' : '#E5DEC8');
+	let textMain = $derived(darkMode ? '#EDE7D3' : '#1A1410');
+	let textMuted = $derived(darkMode ? '#B5AE94' : '#5C5345');
+	let accent = $derived(darkMode ? '#D4A24C' : '#B8801E'); // brass
+	let crimson = $derived(darkMode ? '#C8553D' : '#A23E26'); // selected/active
+	// Accent text sitting on a brass tint pill.
+	let accentSoft = $derived(darkMode ? '#D4A24C' : '#B8801E');
 	let errorTitle = $derived(darkMode ? '#fecaca' : '#991b1b');
 	let errorCopy = $derived(darkMode ? '#fca5a5' : '#b91c1c');
 	// The map center node is a high-contrast disc that reads as the focal
@@ -703,7 +706,7 @@
 <div
 	class="scene-shell"
 	class:resizing={resizing || focusResizing}
-	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --center-bg:${centerBg}; --center-ink:${centerInk}; --accent-soft:${accentSoft}; --error-title:${errorTitle}; --error-copy:${errorCopy};`}
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:${borderSoft}; --text-primary:${textMain}; --text-secondary:${textMuted}; --brass:${accent}; --crimson:${crimson}; --center-bg:${centerBg}; --center-ink:${centerInk}; --accent-soft:${accentSoft}; --error-title:${errorTitle}; --error-copy:${errorCopy};`}
 	style:--focus-pdf-width={`${focusPdfWidth}px`}
 >
 	{#snippet pdfPanel(ctxItem: any | null)}
@@ -1289,8 +1292,8 @@
 		border-radius: 24px;
 		border: 1px solid var(--border);
 		background:
-			radial-gradient(circle at top right, rgba(34, 197, 94, 0.13), transparent 44%),
-			linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.62));
+			radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 13%, transparent), transparent 44%),
+			linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 82%, transparent), color-mix(in srgb, var(--panel-alt) 62%, transparent));
 	}
 	.hero-copy {
 		min-width: 0;
@@ -1368,7 +1371,7 @@
 		border-radius: 14px;
 		padding: 0.6rem 0.9rem;
 		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.3);
+		background: color-mix(in srgb, var(--panel-alt) 30%, transparent);
 		font-size: 0.85rem;
 		font-weight: 700;
 		max-width: 30ch;
@@ -1377,8 +1380,8 @@
 		white-space: nowrap;
 	}
 	.tab.active {
-		border-color: rgba(34, 197, 94, 0.36);
-		background: rgba(34, 197, 94, 0.14);
+		border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
 		color: var(--accent-soft);
 	}
 	.tab.passive {
@@ -1400,7 +1403,7 @@
 		min-height: 0;
 		border-radius: 20px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.26);
+		background: color-mix(in srgb, var(--panel-alt) 26%, transparent);
 	}
 	.scene-card {
 		flex: 0 0 auto;
@@ -1465,7 +1468,7 @@
 		flex: 0 0 auto;
 		border: 1px solid rgba(148, 163, 184, 0.13);
 		border-radius: 16px;
-		background: rgba(2, 6, 23, 0.28);
+		background: color-mix(in srgb, var(--panel-alt) 28%, transparent);
 		overflow: hidden;
 		transition:
 			border-color 160ms ease,
@@ -1473,7 +1476,7 @@
 	}
 	.scene-block:hover {
 		border-color: color-mix(in srgb, var(--accent) 50%, transparent);
-		background: color-mix(in srgb, var(--accent) 6%, rgba(2, 6, 23, 0.3));
+		background: color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--panel-alt) 30%, transparent));
 	}
 	.scene-row {
 		display: grid;
@@ -1535,8 +1538,8 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--accent-soft);
-		background: rgba(34, 197, 94, 0.12);
-		border: 1px solid rgba(34, 197, 94, 0.25);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 	}
 	.row-title {
 		font-size: 0.95rem;
@@ -1668,7 +1671,7 @@
 		color: var(--accent);
 		padding: 0.06rem 0.36rem;
 		border-radius: 6px;
-		background: rgba(34, 197, 94, 0.12);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
 		flex-shrink: 0;
 	}
 	.act-body {
@@ -1753,7 +1756,7 @@
 		gap: 0.4rem;
 		padding: 0.65rem 0.75rem;
 		border-radius: 10px;
-		background: rgba(15, 23, 42, 0.4);
+		background: color-mix(in srgb, var(--panel-alt) 40%, transparent);
 		border: 1px solid rgba(148, 163, 184, 0.12);
 	}
 	.disc-intent {
@@ -1876,7 +1879,7 @@
 		padding: 0.95rem;
 		border-radius: 16px;
 		border: 1px solid rgba(148, 163, 184, 0.1);
-		background: rgba(2, 6, 23, 0.28);
+		background: color-mix(in srgb, var(--panel-alt) 28%, transparent);
 		animation: pulse 1.5s ease-in-out infinite;
 	}
 	.sk {
@@ -1998,7 +2001,7 @@
 		padding: 0.48rem 2rem 0.48rem 0.78rem;
 		border-radius: 12px;
 		border: 1px solid rgba(148, 163, 184, 0.22);
-		background: rgba(15, 23, 42, 0.42);
+		background: color-mix(in srgb, var(--panel-alt) 42%, transparent);
 		color: var(--text);
 		font-size: 0.82rem;
 		line-height: 1.2;
@@ -2596,8 +2599,8 @@
 	}
 	:global(.pdf-highlight) {
 		position: absolute;
-		background: rgba(34, 197, 94, 0.18);
-		outline: 1px solid rgba(34, 197, 94, 0.72);
+		background: color-mix(in srgb, var(--accent) 18%, transparent);
+		outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
 		border-radius: 2px;
 	}
 

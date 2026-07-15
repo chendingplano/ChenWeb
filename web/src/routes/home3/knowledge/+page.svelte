@@ -304,6 +304,7 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 	let hoverBg = $derived(darkMode ? 'rgba(45,51,72,0.6)' : 'rgba(228,230,235,0.7)');
+	let cardBg = $derived(darkMode ? 'rgba(255,255,255,0.03)' : '#FFFFFF');
 
 	let needsActiveStore = $derived(
 		activeSection !== 'kb-search' &&
@@ -468,9 +469,12 @@
 							<!-- Expanded: full collapsible parent -->
 							<div
 								class="rounded-lg"
-								style="background:{item.children?.some((child) => isChildActive(child.id))
-									? accentTint
-									: 'transparent'};"
+								style="
+									background:{cardBg};
+									border:1px solid {item.children?.some((child) => isChildActive(child.id))
+									? accent
+									: borderColor};
+								"
 							>
 								<button
 									type="button"
@@ -505,10 +509,21 @@
 												onclick={() => selectSection(child.id)}
 												class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
 												style="
-													background:{isChildActive(child.id) ? 'rgba(255,255,255,0.08)' : 'transparent'};
-													color:{isChildActive(child.id) ? textPrimary : textSecondary};
+													background:{isChildActive(child.id) ? accentTint : 'transparent'};
+													color:{isChildActive(child.id) ? accent : textSecondary};
 													border:none;
+													border-left:{isChildActive(child.id)
+													? '2px solid ' + accent
+													: '2px solid transparent'};
 												"
+												onmouseenter={(e) => {
+													if (!isChildActive(child.id))
+														(e.currentTarget as HTMLElement).style.background = hoverBg;
+												}}
+												onmouseleave={(e) => {
+													if (!isChildActive(child.id))
+														(e.currentTarget as HTMLElement).style.background = 'transparent';
+												}}
 											>
 												<span
 													style="font-size:12px; color:{isChildActive(child.id)
@@ -539,12 +554,16 @@
 								gap:{menuCollapsed ? '0' : '12px'};
 								padding:{menuCollapsed ? '9px 0' : '8px 10px'};
 								justify-content:{menuCollapsed ? 'center' : 'flex-start'};
-								background:{activeSection === item.id ? accentTint : 'transparent'};
+								background:{activeSection === item.id ? accentTint : menuCollapsed ? 'transparent' : cardBg};
 								color:{activeSection === item.id ? accent : textSecondary};
-								border:none;
+								border:{menuCollapsed
+								? 'none'
+								: '1px solid ' + (activeSection === item.id ? accent : borderColor)};
 								border-left:{!menuCollapsed && activeSection === item.id
 								? '2px solid ' + accent
-								: '2px solid transparent'};
+								: !menuCollapsed
+									? '1px solid ' + borderColor
+									: '2px solid transparent'};
 							"
 							title={menuCollapsed ? item.label : undefined}
 							aria-label={item.label}
