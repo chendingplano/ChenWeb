@@ -323,6 +323,27 @@
 		return out;
 	}
 
+	function firstMetricSourceLine(m: KbMetricRecord): number {
+		const raw = (m as { source_line_spans?: unknown })?.source_line_spans;
+		if (!Array.isArray(raw) || raw.length === 0) return Number.POSITIVE_INFINITY;
+		const first = raw[0];
+		if (typeof first === 'number' && Number.isFinite(first)) {
+			return Math.trunc(first);
+		}
+		if (typeof first === 'string') {
+			const match = first.trim().match(/^(\d+)/);
+			return match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
+		}
+		if (first && typeof first === 'object') {
+			const obj = first as Record<string, unknown>;
+			return (
+				toPositiveInt(obj.line_number ?? obj.line ?? obj.line_no ?? obj.lineNo) ??
+				Number.POSITIVE_INFINITY
+			);
+		}
+		return Number.POSITIVE_INFINITY;
+	}
+
 	let highlightKeys = $derived.by(() => {
 		const s = new Set<string>();
 		if (selectedMetricId == null) return s;
@@ -514,6 +535,20 @@
 
 		const context: AttrDef[] = [
 			textAttr(
+				'document_title',
+				'Document Title',
+				FileIcon,
+				fmt(m.document_title),
+				has(m.document_title)
+			),
+			textAttr(
+				'document_doc_no',
+				'Doc No',
+				HashIcon,
+				fmt(m.document_doc_no),
+				has(m.document_doc_no)
+			),
+			textAttr(
 				'table_section',
 				'Section',
 				ListIcon,
@@ -526,6 +561,7 @@
 
 		const metric: AttrDef[] = [
 			textAttr('subject', 'Subject', TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
+			textAttr('object_name', 'Object', FileIcon, fmt(m.object_name), has(m.object_name)),
 			textAttr(
 				'frequency',
 				'Frequency',
@@ -766,7 +802,11 @@
 				}
 			}
 		}
-		return result;
+		return [...result].sort((a, b) => {
+			const lineDiff = firstMetricSourceLine(a) - firstMetricSourceLine(b);
+			if (lineDiff !== 0) return lineDiff;
+			return a.id - b.id;
+		});
 	});
 
 	let metricSearchActive = $derived(

@@ -123,6 +123,48 @@ type MetricsStore interface {
 	UpsertMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
 }
 
+type metricExtInfoSeed struct {
+	Title string
+	DocNo string
+}
+
+func loadMetricExtInfoSeed(ctx context.Context, db *sql.DB, inputRecordID int64) (metricExtInfoSeed, error) {
+	if db == nil || inputRecordID <= 0 {
+		return metricExtInfoSeed{}, nil
+	}
+	const q = `
+SELECT
+	COALESCE(NULLIF(BTRIM(doc_metadata->>'title'), ''), NULLIF(BTRIM(title), ''), ''),
+	COALESCE(NULLIF(BTRIM(doc_metadata->>'doc_no'), ''), NULLIF(BTRIM(doc_no), ''), '')
+FROM kb.inputs
+WHERE id = $1`
+	var seed metricExtInfoSeed
+	err := db.QueryRowContext(ctx, q, inputRecordID).Scan(&seed.Title, &seed.DocNo)
+	if err == sql.ErrNoRows {
+		return metricExtInfoSeed{}, nil
+	}
+	if err != nil {
+		return metricExtInfoSeed{}, err
+	}
+	return seed, nil
+}
+
+func buildMetricExtInfo(language string, existing map[string]any, seed metricExtInfoSeed) map[string]any {
+	ext := map[string]any{}
+	for k, v := range existing {
+		ext[k] = v
+	}
+	ext["language"] = language
+	ext["schema_version"] = "2"
+	if strings.TrimSpace(seed.Title) != "" {
+		ext["title"] = strings.TrimSpace(seed.Title)
+	}
+	if strings.TrimSpace(seed.DocNo) != "" {
+		ext["doc_no"] = strings.TrimSpace(seed.DocNo)
+	}
+	return ext
+}
+
 type ArtifactObjectsStore interface {
 	ReplaceObjectsForRecord(ctx context.Context, recordID int64, artifactType string, objects []ArtifactObject) error
 }
@@ -2550,6 +2592,10 @@ func (s MetricsSQLStore) SaveMetrics(ctx context.Context, req SaveMetricsRequest
 	if len(req.Metrics) == 0 {
 		return 0, nil
 	}
+	extInfoSeed, err := loadMetricExtInfoSeed(ctx, s.DB, req.InputRecordID)
+	if err != nil {
+		return 0, err
+	}
 
 	const stmt = `
 INSERT INTO kb.metrics (
@@ -2608,10 +2654,7 @@ VALUES (
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
-		extInfo, _ := json.Marshal(map[string]any{
-			"language":       req.Language,
-			"schema_version": "2",
-		})
+		extInfo, _ := json.Marshal(buildMetricExtInfo(req.Language, nil, extInfoSeed))
 
 		var (
 			metricNameEn  any
@@ -2644,7 +2687,7 @@ VALUES (
 		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
 		categoryPathsEnJSON, _ := json.Marshal(metric["category_paths_en"])
 
-		_, err := s.DB.ExecContext(ctx, stmt,
+		_, err = s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
 			strings.TrimSpace(asString(metric["metric_id"])),
@@ -2703,6 +2746,10 @@ func (s MetricsSQLStore) UpsertMetrics(ctx context.Context, req SaveMetricsReque
 	if len(req.Metrics) == 0 {
 		return 0, nil
 	}
+	extInfoSeed, err := loadMetricExtInfoSeed(ctx, s.DB, req.InputRecordID)
+	if err != nil {
+		return 0, err
+	}
 
 	const stmt = `
 INSERT INTO kb.metrics (
@@ -2745,7 +2792,8 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
-		extInfo, _ := json.Marshal(metric["ext_info"])
+		existingExt, _ := metric["ext_info"].(map[string]any)
+		extInfo, _ := json.Marshal(buildMetricExtInfo(req.Language, existingExt, extInfoSeed))
 
 		var metricNameEn, subjectEn, descEn, contextEn, keywordsEnVal, unitEn, valueClassEn any
 		if !isEnglish {

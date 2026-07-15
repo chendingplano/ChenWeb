@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,16 @@ func newUpdateMetricContext(t *testing.T, id string, body string) (echo.Context,
 	c.SetPath("/api/v1/kb/metrics/:id")
 	c.SetParamNames("id")
 	c.SetParamValues(id)
+	return c, rec
+}
+
+func newListMetricsContext(t *testing.T, inputRecordID string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/metrics?input_record_id="+inputRecordID, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.QueryParams().Set("input_record_id", inputRecordID)
 	return c, rec
 }
 
@@ -195,10 +206,25 @@ SELECT
     m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
-    m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
+    m.confidence, m.is_explicit_metric,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'title', i.title, '')), '') AS document_title,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
+    ao.object_name,
+    m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+LEFT JOIN LATERAL (
+    SELECT NULLIF(BTRIM(artifact.object_name), '') AS object_name
+    FROM kb.artifact_objects artifact
+    WHERE artifact.artifact_type = 'metric'
+      AND artifact.artifact_id = m.metric_id
+      AND NULLIF(BTRIM(artifact.object_name), '') IS NOT NULL
+    ORDER BY
+      CASE WHEN COALESCE(artifact.object_role, '') IN ('measured_object', 'self') THEN 0 ELSE 1 END,
+      artifact.id
+    LIMIT 1
+) ao ON TRUE
 WHERE m.id = $1
 `)
 	rows := sqlmock.NewRows([]string{
@@ -208,13 +234,15 @@ WHERE m.id = $1
 		"location_type", "metric_unit", "metric_unit_en", "metric_value", "value_data_type",
 		"value_range_type", "value_class", "value_class_en", "formula_or_definition",
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
+		"document_title", "document_doc_no", "object_name",
 		"table_name_or_section", "reasoning_tags", "created_at",
 	}).AddRow(
-			int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
+		int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
 		"Metric context", "Metric context EN", `["energy","intensity"]`, `["energy","intensity"]`, "gpt-4.1",
 		"table", "kWh", "kWh", "12.3", "number", "exact", "performance", "performance",
-		"Definition", "Threshold", "monthly", 0.82, true, "Table 2", `["named_metric"]`,
+		"Definition", "Threshold", "monthly", 0.82, true, "Dynamic BP Spec", "T/JXAS 010—2021", "Adult patient",
+		"Table 2", `["named_metric"]`,
 		"2026-05-07T13:00:00+00:00",
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(11)).WillReturnRows(rows)
@@ -245,6 +273,15 @@ WHERE m.id = $1
 	if payload.Record.MetricName == nil || *payload.Record.MetricName != "Updated Metric" {
 		t.Fatalf("expected updated metric name, got %+v", payload.Record.MetricName)
 	}
+	if payload.Record.ObjectName == nil || *payload.Record.ObjectName != "Adult patient" {
+		t.Fatalf("expected object name, got %+v", payload.Record.ObjectName)
+	}
+	if payload.Record.DocumentTitle == nil || *payload.Record.DocumentTitle != "Dynamic BP Spec" {
+		t.Fatalf("expected document title, got %+v", payload.Record.DocumentTitle)
+	}
+	if payload.Record.DocumentDocNo == nil || *payload.Record.DocumentDocNo != "T/JXAS 010—2021" {
+		t.Fatalf("expected document doc_no, got %+v", payload.Record.DocumentDocNo)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
@@ -268,6 +305,107 @@ func TestUpdateMetricInvalidBoolean(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestListMetricsSortsByFirstSourceLineSpan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	query := regexp.QuoteMeta(`
+SELECT
+    m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
+    m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
+    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
+    m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
+    m.confidence, m.is_explicit_metric,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'title', i.title, '')), '') AS document_title,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
+    ao.object_name,
+    m.table_name_or_section, m.reasoning_tags,
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+FROM kb.metrics m
+LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+LEFT JOIN LATERAL (
+    SELECT NULLIF(BTRIM(artifact.object_name), '') AS object_name
+    FROM kb.artifact_objects artifact
+    WHERE artifact.artifact_type = 'metric'
+      AND artifact.artifact_id = m.metric_id
+      AND NULLIF(BTRIM(artifact.object_name), '') IS NOT NULL
+    ORDER BY
+      CASE WHEN COALESCE(artifact.object_role, '') IN ('measured_object', 'self') THEN 0 ELSE 1 END,
+      artifact.id
+    LIMIT 1
+) ao ON TRUE
+WHERE m.input_record_id = $1
+ORDER BY m.id ASC
+`)
+
+	cols := []string{
+		"id", "input_record_id", "metric_id", "event_id", "input_filename", "metric_name", "metric_name_en",
+		"source_line_spans", "metric_subject", "metric_subject_en", "metric_desc", "metric_desc_en",
+		"metric_context", "metric_context_en", "metric_keywords", "metric_keywords_en", "model_name",
+		"location_type", "metric_unit", "metric_unit_en", "metric_value", "value_data_type",
+		"value_range_type", "value_class", "value_class_en", "formula_or_definition",
+		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
+		"document_title", "document_doc_no", "object_name", "table_name_or_section", "reasoning_tags", "created_at",
+	}
+	addRow := func(rows *sqlmock.Rows, id int64, name string, spans string) *sqlmock.Rows {
+		return rows.AddRow(
+			id, int64(244), "metric-"+strconv.FormatInt(id, 10), "evt-"+strconv.FormatInt(id, 10), "input_244.pdf",
+			name, name, spans, "subject", "subject", "desc", "desc", "context", "context",
+			`[]`, `[]`, "model", "paragraph", "mmHg", "mmHg", "", "number", "exact", "class", "class",
+			"", "", "", 0.95, true, "title", "doc-no", "object", "section", `[]`, "2026-07-12T10:00:00+00:00",
+		)
+	}
+	rows := sqlmock.NewRows(cols)
+	rows = addRow(rows, 31135, "Metric 54", `["100"]`)
+	rows = addRow(rows, 31136, "Metric 55", `["94"]`)
+	rows = addRow(rows, 31137, "Metric 56", `["112"]`)
+	rows = addRow(rows, 31138, "Metric 57", `["113"]`)
+	rows = addRow(rows, 31139, "Metric 58", `["54"]`)
+	rows = addRow(rows, 31140, "Metric 59", `["37"]`)
+	rows = addRow(rows, 31141, "Metric 60", `["88"]`)
+	mock.ExpectQuery(query).WithArgs(int64(244)).WillReturnRows(rows)
+
+	c, rec := newListMetricsContext(t, "244")
+	if err := ListMetrics(c); err != nil {
+		t.Fatalf("ListMetrics returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload listMetricsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	got := make([]int64, 0, len(payload.Results))
+	for _, record := range payload.Results {
+		got = append(got, record.ID)
+	}
+	want := []int64{31140, 31139, 31141, 31136, 31135, 31137, 31138}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected result count: got %d want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected order at index %d: got %v want %v", i, got, want)
+		}
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

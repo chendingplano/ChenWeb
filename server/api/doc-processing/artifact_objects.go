@@ -422,6 +422,27 @@ INSERT INTO kb.artifact_objects (
 			return err
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(artifactType), searchArtifactMetric) {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE kb.metrics m
+SET ext_info = COALESCE(m.ext_info, '{}'::jsonb) || jsonb_build_object('object_name', linked.object_name)
+FROM (
+	SELECT DISTINCT ON (artifact_id)
+		artifact_id,
+		NULLIF(BTRIM(object_name), '') AS object_name
+	FROM kb.artifact_objects
+	WHERE source_record_id = $1
+	  AND artifact_type = $2
+	  AND NULLIF(BTRIM(object_name), '') IS NOT NULL
+	ORDER BY artifact_id,
+		CASE WHEN COALESCE(object_role, '') IN ('measured_object', 'self') THEN 0 ELSE 1 END,
+		id
+) linked
+WHERE m.input_record_id = $1
+  AND m.metric_id = linked.artifact_id`, recordID, strings.TrimSpace(artifactType)); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
