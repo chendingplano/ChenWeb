@@ -19,7 +19,12 @@ export default defineConfig({
 		devtoolsJson(),
 		paraglideVitePlugin({
 			project: './project.inlang',
-			outdir: './src/lib/paraglide'
+			outdir: './src/lib/paraglide',
+			// Default language is a configuration decision (baseLocale in
+			// project.inlang/settings.json), not something a browser cookie
+			// should be able to permanently override. "globalVariable" still
+			// lets the in-page language switcher work for the current visit.
+			strategy: ['globalVariable', 'baseLocale']
 		})
 	],
 	worker: {

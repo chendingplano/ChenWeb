@@ -3,10 +3,15 @@
   	import { goto } from '$app/navigation';
 	import { appAuthStore} from '@chendingplano/shared';
 
-  	onMount(() => {
+  	onMount(async () => {
+		await appAuthStore.ready();
 		if (appAuthStore.getIsLoggedIn()) {
-    		goto('/sidebar-07', { replaceState: true });
+			const norm_route = import.meta.env.VITE_DEFAULT_NORM_ROUTE;
+			const admin_route = import.meta.env.VITE_DEFAULT_ADMIN_ROUTE;
+			const destination = appAuthStore.getIsAdmin() ? admin_route : norm_route;
+			goto(destination, { replaceState: true });
+		} else {
+			goto('/login', { replaceState: true });
 		}
-		goto('/login')	
   	});
 </script>

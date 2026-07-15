@@ -5,6 +5,7 @@
 	import { Sun, Moon, Languages, Menu, X } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { slide } from 'svelte/transition';
+	import { appAuthStore } from '@chendingplano/shared';
 	import LogoMark from './LogoMark.svelte';
 
 	let { config }: { config: SiteConfig } = $props();
@@ -21,6 +22,10 @@
 	function nextLocale(): (typeof locales)[number] {
 		const idx = locales.indexOf(getLocale());
 		return locales[(idx + 1) % locales.length];
+	}
+
+	function handleLogout() {
+		appAuthStore.logout();
 	}
 </script>
 
@@ -50,11 +55,13 @@
 		<div class="flex items-center gap-1.5">
 			<button
 				type="button"
-				class="rounded-full p-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
+				class="flex items-center gap-1.5 rounded-full px-2.5 py-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
 				aria-label="Switch language"
 				onclick={() => setLocale(nextLocale())}
 			>
 				<Languages class="h-4 w-4" />
+				<span class="text-[0.8rem] font-medium">{getLocale() === 'zh-cn' ? '中文' : 'English'}</span
+				>
 			</button>
 			<button
 				type="button"
@@ -68,12 +75,22 @@
 					<Moon class="h-4 w-4" />
 				{/if}
 			</button>
-			<a
-				href={config.hero.cta_secondary_href}
-				class="ml-2 hidden rounded-lg bg-[#17181c] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(23,24,28,0.2),0_6px_16px_rgba(23,24,28,0.18)] transition-all duration-200 hover:-translate-y-px hover:shadow-[0_2px_4px_rgba(23,24,28,0.2),0_10px_24px_rgba(23,24,28,0.22)] active:translate-y-0 sm:inline-flex dark:bg-white dark:text-[#17181c]"
-			>
-				{m.semos_signup_login()}
-			</a>
+			{#if $appAuthStore.isLoggedIn}
+				<button
+					type="button"
+					onclick={handleLogout}
+					class="ml-2 hidden rounded-lg bg-[#17181c] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(23,24,28,0.2),0_6px_16px_rgba(23,24,28,0.18)] transition-all duration-200 hover:-translate-y-px hover:shadow-[0_2px_4px_rgba(23,24,28,0.2),0_10px_24px_rgba(23,24,28,0.22)] active:translate-y-0 sm:inline-flex dark:bg-white dark:text-[#17181c]"
+				>
+					{m.semos_logout()}
+				</button>
+			{:else}
+				<a
+					href={config.hero.cta_secondary_href}
+					class="ml-2 hidden rounded-lg bg-[#17181c] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(23,24,28,0.2),0_6px_16px_rgba(23,24,28,0.18)] transition-all duration-200 hover:-translate-y-px hover:shadow-[0_2px_4px_rgba(23,24,28,0.2),0_10px_24px_rgba(23,24,28,0.22)] active:translate-y-0 sm:inline-flex dark:bg-white dark:text-[#17181c]"
+				>
+					{m.semos_signup_login()}
+				</a>
+			{/if}
 			<button
 				type="button"
 				class="rounded-full p-2 text-[#17181c]/45 transition-colors hover:bg-[#17181c]/5 hover:text-[#17181c] md:hidden dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
@@ -107,13 +124,26 @@
 						{item.label}
 					</a>
 				{/each}
-				<a
-					href={config.hero.cta_secondary_href}
-					class="mt-2 inline-flex items-center justify-center rounded-lg bg-[#17181c] px-4 py-2.5 text-sm font-semibold text-white sm:hidden dark:bg-white dark:text-[#17181c]"
-					onclick={() => (mobileOpen = false)}
-				>
-					{m.semos_signup_login()}
-				</a>
+				{#if $appAuthStore.isLoggedIn}
+					<button
+						type="button"
+						class="mt-2 inline-flex items-center justify-center rounded-lg bg-[#17181c] px-4 py-2.5 text-sm font-semibold text-white sm:hidden dark:bg-white dark:text-[#17181c]"
+						onclick={() => {
+							mobileOpen = false;
+							handleLogout();
+						}}
+					>
+						{m.semos_logout()}
+					</button>
+				{:else}
+					<a
+						href={config.hero.cta_secondary_href}
+						class="mt-2 inline-flex items-center justify-center rounded-lg bg-[#17181c] px-4 py-2.5 text-sm font-semibold text-white sm:hidden dark:bg-white dark:text-[#17181c]"
+						onclick={() => (mobileOpen = false)}
+					>
+						{m.semos_signup_login()}
+					</a>
+				{/if}
 			</div>
 		</nav>
 	{/if}

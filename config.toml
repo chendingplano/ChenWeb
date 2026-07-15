@@ -151,5 +151,6 @@ keywords = 2.0
 
 [frontend]
 topic_types = ["封面/cover", "事实/fact", "范围/scope", "条款/compliance", "章节/heading", "过程/procedure", "表格/table", "需求/requirement", "公式/formula", "列表/list"]
-supported_languages = ["en", "zh-cn", "ja", "ko"]
+# supported_languages = ["en", "zh-cn", "ja", "ko"]
+supported_languages = ["en", "zh-cn"]
 default_language = ["zh-cn"]

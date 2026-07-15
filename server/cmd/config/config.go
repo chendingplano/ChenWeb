@@ -135,6 +135,12 @@ type FrontendConfigSection struct {
 	// is empty or matches none/several rows, no store is selected and the user
 	// picks one manually.
 	DefaultKnowledgeStore string `mapstructure:"default_knowledge_store"`
+	// EnableLoginWithGithub/EnableLoginWithGoogle control whether the
+	// respective OAuth buttons are shown on the login page. Pointers so an
+	// unset key can default to true. Configured via [frontend] in
+	// config.toml / config.local.toml.
+	EnableLoginWithGithub *bool `mapstructure:"enable_login_with_github"`
+	EnableLoginWithGoogle *bool `mapstructure:"enable_login_with_google"`
 }
 
 type AppConfigDef struct {
@@ -342,6 +348,24 @@ func GetSiteConfigFilename() string {
 // "" when it is not configured.
 func GetDefaultKnowledgeStoreName() string {
 	return strings.TrimSpace(AppConfig.Frontend.DefaultKnowledgeStore)
+}
+
+// GetEnableLoginWithGithub returns [frontend].enable_login_with_github,
+// defaulting to true when unset.
+func GetEnableLoginWithGithub() bool {
+	if AppConfig.Frontend.EnableLoginWithGithub == nil {
+		return true
+	}
+	return *AppConfig.Frontend.EnableLoginWithGithub
+}
+
+// GetEnableLoginWithGoogle returns [frontend].enable_login_with_google,
+// defaulting to true when unset.
+func GetEnableLoginWithGoogle() bool {
+	if AppConfig.Frontend.EnableLoginWithGoogle == nil {
+		return true
+	}
+	return *AppConfig.Frontend.EnableLoginWithGoogle
 }
 
 func GetArtifactSearchConfig() ArtifactSearchConfig {

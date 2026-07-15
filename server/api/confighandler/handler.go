@@ -10,12 +10,14 @@ import (
 
 // ConfigResponse represents the configuration data sent to the frontend
 type ConfigResponse struct {
-	AppName       string                  `json:"app_name"`
-	Debug         bool                    `json:"debug"`
-	Server        ServerConfig            `json:"server"`
-	Database      ApiTypes.DatabaseConfig `mapstructure:"database"`
-	AppTableNames AppTableNamesConfig     `json:"app_table_names"`
-	Auth          AuthConfig              `json:"auth"`
+	AppName               string                  `json:"app_name"`
+	Debug                 bool                    `json:"debug"`
+	Server                ServerConfig            `json:"server"`
+	Database              ApiTypes.DatabaseConfig `mapstructure:"database"`
+	AppTableNames         AppTableNamesConfig     `json:"app_table_names"`
+	Auth                  AuthConfig              `json:"auth"`
+	EnableLoginWithGithub bool                    `json:"enable_login_with_github"`
+	EnableLoginWithGoogle bool                    `json:"enable_login_with_google"`
 }
 
 type ServerConfig struct {
@@ -72,6 +74,8 @@ func GetConfig(c echo.Context) error {
 			// JWTSecret excluded for security
 			SessionDurationHours: ApiTypes.CommonConfig.Auth.SessionDurationHours,
 		},
+		EnableLoginWithGithub: config.GetEnableLoginWithGithub(),
+		EnableLoginWithGoogle: config.GetEnableLoginWithGoogle(),
 	}
 
 	return c.JSON(http.StatusOK, response)

@@ -126,12 +126,6 @@ func RegisterRoutes(e *echo.Echo) error {
 				return next(c)
 			}
 
-			// Let Echo handle / so we can redirect it
-			if path == "/" {
-				logger.Info("Root path, let Echo handle redirect")
-				return next(c)
-			}
-
 			// Other public paths should be served by frontend
 			if publicPaths[path] {
 				logger.Info("Public frontend URL", "path", path)
@@ -539,11 +533,6 @@ func RegisterRoutes(e *echo.Echo) error {
 	openMetadataGroup.Any("/", openmetadatahandler.Proxy)
 	openMetadataGroup.Any("/*", openmetadatahandler.Proxy)
 
-	// Redirects root (/) to /login (since / is public but should show login by default).
-	e.GET("/", func(c echo.Context) error {
-
-		return c.Redirect(http.StatusFound, "/login")
-	})
 	apiGroup.GET("/doc-review/aspects", docreviews.HandleListAspects)
 	apiGroup.GET("/doc-review/tiers", docreviews.HandleListTiers)
 	apiGroup.GET("/doc-review/languages", docreviews.HandleListLanguages)
