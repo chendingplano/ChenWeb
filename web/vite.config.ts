@@ -9,6 +9,7 @@ const APP_BASE_URL = process.env.APP_BASE_URL;
 if (typeof APP_BASE_URL !== "string" || APP_BASE_URL.length <= 0) {
 	console.error("missing APP_BASE_URL")
 }
+const APP_HOST = APP_BASE_URL ? new URL(APP_BASE_URL).hostname : undefined;
 
 export default defineConfig({
 	envDir: '..',
@@ -26,7 +27,7 @@ export default defineConfig({
 	},
 	server: {
 		port: 5173,
-		allowedHosts: ['macmini.deepdocs.me'],
+		allowedHosts: APP_HOST ? [APP_HOST] : [],
     	hmr: {
       		// Connect HMR WebSocket to :5173 directly
       		host: 'localhost',

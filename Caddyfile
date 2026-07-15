@@ -1,0 +1,14 @@
+dingbo.bzton.cn {
+	# Route Kratos identity/auth requests to the Kratos server.
+	# Strip the /kratos prefix before forwarding because Kratos listens
+	# on its own root (e.g. /self-service/...), not under /kratos/.
+	handle /kratos/* {
+		uri strip_prefix /kratos
+		reverse_proxy localhost:4433
+	}
+
+	# Reverse proxy everything else to the ChenWeb Go server.
+	handle {
+		reverse_proxy localhost:8080
+	}
+}

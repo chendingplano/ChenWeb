@@ -11,6 +11,21 @@
 	let password = $state('');
 	let mode = $state('login');
 
+	// Password recovery (Kratos code-based flow)
+	let recoveryFlowId = $state('');
+	let recoveryCode = $state('');
+	let newPassword = $state('');
+	let newPasswordConfirm = $state('');
+
+	async function getErrorMessage(res: Response): Promise<string> {
+		try {
+			const data = await res.json();
+			return data.message || res.statusText;
+		} catch {
+			return res.statusText;
+		}
+	}
+
 	async function handleEmailLogin(event: SubmitEvent) {
 		event.preventDefault();
 		try {
@@ -92,16 +107,57 @@
 
 	async function handleForgotPassword(event: SubmitEvent) {
 		event.preventDefault();
-		const res = await fetch('/auth/email/forgot', {
+		const res = await fetch('/auth/recovery', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ email, loc: 'ARX_LGN_090' })
+			credentials: 'include',
+			body: JSON.stringify({ email })
 		});
 		if (res.ok) {
-			alert('A password reset link has been sent to your email.');
+			const data = await res.json();
+			recoveryFlowId = data.flow_id;
+			mode = 'forgot-code';
+		} else {
+			alert(await getErrorMessage(res));
+		}
+	}
+
+	async function handleRecoveryCode(event: SubmitEvent) {
+		event.preventDefault();
+		const res = await fetch('/auth/recovery', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify({ email, flow_id: recoveryFlowId, code: recoveryCode })
+		});
+		if (res.ok) {
+			mode = 'forgot-reset';
+		} else {
+			alert(await getErrorMessage(res));
+		}
+	}
+
+	async function handleSetNewPassword(event: SubmitEvent) {
+		event.preventDefault();
+		if (newPassword !== newPasswordConfirm) {
+			alert('Passwords do not match.');
+			return;
+		}
+		const res = await fetch('/auth/recovery/settings', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify({ password: newPassword })
+		});
+		if (res.ok) {
+			alert('Your password has been reset. Please log in.');
+			recoveryFlowId = '';
+			recoveryCode = '';
+			newPassword = '';
+			newPasswordConfirm = '';
 			mode = 'login';
 		} else {
-			alert(await res.text());
+			alert(await getErrorMessage(res));
 		}
 	}
 
@@ -202,7 +258,7 @@
 			<button class="sign-up-link" onclick={switchToLogin}>Log in</button>
 		</p>
 	{:else if mode == 'forgot'}
-		<!-- Forgot Password -->
+		<!-- Forgot Password: request a recovery code -->
 		<form class="form" onsubmit={handleForgotPassword}>
 			<input
 				bind:value={email}
@@ -212,13 +268,52 @@
 				autocomplete="email"
 				required
 			/>
-			<button class="form-btn">Send Reset Link</button>
+			<button class="form-btn">Send Recovery Code</button>
 		</form>
 
 		<p class="sign-up-label">
 			Remember your password?
 			<button class="sign-up-link" onclick={switchToLogin}>Log in</button>
 		</p>
+	{:else if mode == 'forgot-code'}
+		<!-- Forgot Password: enter the code emailed to the user -->
+		<form class="form" onsubmit={handleRecoveryCode}>
+			<input
+				bind:value={recoveryCode}
+				type="text"
+				class="input"
+				placeholder="Enter the code from your email"
+				autocomplete="one-time-code"
+				required
+			/>
+			<button class="form-btn">Verify Code</button>
+		</form>
+
+		<p class="sign-up-label">
+			Remember your password?
+			<button class="sign-up-link" onclick={switchToLogin}>Log in</button>
+		</p>
+	{:else if mode == 'forgot-reset'}
+		<!-- Forgot Password: set a new password -->
+		<form class="form" onsubmit={handleSetNewPassword}>
+			<input
+				bind:value={newPassword}
+				type="password"
+				class="input"
+				placeholder="New password"
+				autocomplete="new-password"
+				required
+			/>
+			<input
+				bind:value={newPasswordConfirm}
+				type="password"
+				class="input"
+				placeholder="Confirm new password"
+				autocomplete="new-password"
+				required
+			/>
+			<button class="form-btn">Reset Password</button>
+		</form>
 	{/if}
 
 	<div class="buttons-container">
