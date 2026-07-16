@@ -75,6 +75,10 @@ newsletter = "Get the latest on knowledge management and AI."
 email = "hello@semos.ai"
 
 [[footer.quick_links]]
+label = "关于我们"
+href = "/semos/about"
+
+[[footer.quick_links]]
 label = "Knowledge Base"
 href = "/home3/knowledge"
 
@@ -168,3 +172,34 @@ value = "—"
 [[stats]]
 label = "Provisions Analyzed"
 value = "—"
+
+# ── 关于我们 (About) page copy ────────────────────────────────────────────
+
+[about]
+kicker = "关于我们"
+title = "让沉睡的文档，成为流动的智慧"
+lede = "知识通诞生于一个朴素的观察：组织最宝贵的知识，往往沉睡在无人翻阅的文档里。我们的全部工作，就是唤醒它们。"
+image = "/images/kb-documents.jpg"
+story_kicker = "我们的故事"
+story = [
+	"每一家企业都坐拥知识的金矿：标准、合同、报告、图纸、审阅意见。它们记录着组织走过的每一步，却被锁在格式各异的文件之中。检索靠猜，理解靠翻，传承靠人。人员流动之时，经验随之流失；决策关头，依据无从查证。",
+	"我们相信，问题不在于文档太多，而在于文档从未被真正读懂。于是我们建造了知识通：将异构文档深度拆解为结构、指标、条款、实体与关系，让每一页沉淀都成为可检索、可审阅、可追溯的知识资产。",
+	"今天，知识通服务于标准审查、合规审核、招投标与企业知识管理等场景。我们的目标始终未变：让机器承担逐行扫读的辛劳，让人专注于判断与创造。",
+]
+values_kicker = "我们的信念"
+values_title = "三个不妥协"
+contact_kicker = "联系我们"
+contact_title = "与我们聊聊"
+contact_text = "无论是产品演示、合作洽谈，还是一个尚不成形的想法，我们都乐意倾听。"
+
+[[about.values]]
+title = "证据，而非印象"
+description = "每一个答案都锚定原文，每一条结论都可以溯源。我们不输出无法核验的判断：AI 的价值不在于说得像，而在于站得住。"
+
+[[about.values]]
+title = "理解，而非索引"
+description = "文字不是孤立的字符。我们拆解结构、抽取指标、关联实体，让文档成为可推理的知识，而不是一串可搜索的字符。"
+
+[[about.values]]
+title = "辅佐，而非替代"
+description = "审核的最终签字权属于人。我们把机器擅长的穷举与比对做到极致，把判断与责任留给专业者本人。"

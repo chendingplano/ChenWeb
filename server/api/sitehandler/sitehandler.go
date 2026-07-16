@@ -77,6 +77,29 @@ type Footer struct {
 	Resources  []FooterLink `toml:"resources" json:"resources"`
 }
 
+// AboutValue is one numbered conviction on the About page.
+type AboutValue struct {
+	Title       string `toml:"title" json:"title"`
+	Description string `toml:"description" json:"description"`
+}
+
+// About holds all copy for the 关于我们 (About Us) page. Contact details
+// (email, address) are not duplicated here — the page reads them from Footer.
+type About struct {
+	Kicker        string       `toml:"kicker" json:"kicker"`
+	Title         string       `toml:"title" json:"title"`
+	Lede          string       `toml:"lede" json:"lede"`
+	Image         string       `toml:"image" json:"image"`
+	StoryKicker   string       `toml:"story_kicker" json:"story_kicker"`
+	Story         []string     `toml:"story" json:"story"`
+	ValuesKicker  string       `toml:"values_kicker" json:"values_kicker"`
+	ValuesTitle   string       `toml:"values_title" json:"values_title"`
+	ContactKicker string       `toml:"contact_kicker" json:"contact_kicker"`
+	ContactTitle  string       `toml:"contact_title" json:"contact_title"`
+	ContactText   string       `toml:"contact_text" json:"contact_text"`
+	Values        []AboutValue `toml:"values" json:"values"`
+}
+
 type WorkspaceApp struct {
 	Name        string `toml:"name" json:"name"`
 	Description string `toml:"description" json:"description"`
@@ -101,6 +124,7 @@ type SiteConfig struct {
 	Features        []Feature   `toml:"features" json:"features"`
 	Stats           []Stat      `toml:"stats" json:"stats"`
 	CTA             SectionCopy `toml:"cta" json:"cta"`
+	About           About       `toml:"about" json:"about"`
 	Footer          Footer      `toml:"footer" json:"footer"`
 	Workspace       Workspace   `toml:"workspace" json:"workspace"`
 }

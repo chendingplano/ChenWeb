@@ -51,6 +51,32 @@ export interface SiteFeature {
 	href: string;
 }
 
+/** One numbered conviction on the About page. */
+export interface AboutValue {
+	title: string;
+	description: string;
+}
+
+/**
+ * Copy for the 关于我们 (About Us) page. Contact details (email, address)
+ * are not duplicated here — the page reads them from SiteFooter.
+ * Nullable arrays: Go marshals nil slices to `null` (see announcements).
+ */
+export interface SiteAbout {
+	kicker: string;
+	title: string;
+	lede: string;
+	image: string;
+	story_kicker: string;
+	story: string[] | null;
+	values_kicker: string;
+	values_title: string;
+	contact_kicker: string;
+	contact_title: string;
+	contact_text: string;
+	values: AboutValue[] | null;
+}
+
 export interface WorkspaceApp {
 	name: string;
 	description: string;
@@ -86,6 +112,7 @@ export interface SiteConfig {
 	features: SiteFeature[];
 	stats: SiteStat[];
 	cta: SectionCopy;
+	about: SiteAbout;
 	footer: SiteFooter;
 	workspace: SiteWorkspace;
 }

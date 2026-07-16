@@ -168,3 +168,34 @@ value = "—"
 [[stats]]
 label = "Provisions Analyzed"
 value = "—"
+
+# ── About Us page copy ────────────────────────────────────────────────────
+
+[about]
+kicker = "Who We Are"
+title = "Sleeping documents, working knowledge"
+lede = "SemOS grew out of a plain observation: an organization's most valuable knowledge usually sleeps inside documents nobody reopens. Our entire job is to wake it up."
+image = "/images/kb-documents.jpg"
+story_kicker = "Our Story"
+story = [
+	"Every enterprise sits on a goldmine: standards, contracts, reports, drawings, review comments. They record every step the organization has taken, yet stay locked in files of every format. Retrieval runs on guesswork, understanding on page-flipping, continuity on memory. When people leave, experience leaves with them; when decisions loom, the evidence cannot be found.",
+	"We believe the problem is not that there are too many documents, but that documents have never truly been read. So we built SemOS: heterogeneous files are smelted into structure, metrics, provisions, entities and relations, turning every page of accumulated work into a searchable, reviewable, traceable knowledge asset.",
+	"Today SemOS serves standards review, compliance audit, bidding and enterprise knowledge management. The goal has never moved: let machines carry the line-by-line drudgery, so people can concentrate on judgment and creation.",
+]
+values_kicker = "What We Believe"
+values_title = "Three refusals"
+contact_kicker = "Contact"
+contact_title = "Talk to us"
+contact_text = "A product demo, a partnership, or an idea that has not quite taken shape yet: we want to hear it."
+
+[[about.values]]
+title = "Evidence, not impressions"
+description = "Every answer anchors to the source; every conclusion can be traced. We do not ship judgments that cannot be verified: the worth of AI is not sounding right, it is standing up to scrutiny."
+
+[[about.values]]
+title = "Understanding, not indexing"
+description = "Text is not a bag of characters. We decompose structure, extract metrics and connect entities, so documents become knowledge you can reason over, not strings you can merely search."
+
+[[about.values]]
+title = "Assistance, not replacement"
+description = "The final signature on a review belongs to a person. We push what machines do best, exhaustive comparison, to its limit, and leave judgment and responsibility with the professional."

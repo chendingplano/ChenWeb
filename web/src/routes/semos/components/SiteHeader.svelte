@@ -17,7 +17,7 @@
 		{ label: m.semos_nav_home(), href: '/semos' },
 		{ label: m.semos_nav_workspace(), href: '/semos/workspace', requiresAuth: true },
 		{ label: m.semos_nav_knowledge_base(), href: '/home3/knowledge', requiresAuth: true },
-		{ label: m.semos_nav_about(), href: '/semos' }
+		{ label: m.semos_nav_about(), href: '/semos/about' }
 	];
 
 	let mobileOpen = $state(false);
@@ -34,10 +34,7 @@
 	}
 
 	function isActive(item: (typeof nav)[number]): boolean {
-		// "关于我们" aliases the same href as "首页" (no dedicated About page), so
-		// match by first-in-array-order rather than href alone — otherwise both
-		// would highlight together whenever the href is the current path.
-		return nav.find((n) => n.href === page.url.pathname) === item;
+		return page.url.pathname === item.href;
 	}
 
 	function nextLocale(): (typeof locales)[number] {

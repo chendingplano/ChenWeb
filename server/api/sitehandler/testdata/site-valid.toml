@@ -167,3 +167,31 @@ value = "—"
 [[stats]]
 label = "Provisions Analyzed"
 value = "—"
+
+[about]
+kicker = "Who We Are"
+title = "Sleeping documents, working knowledge"
+lede = "SemOS exists to wake up the knowledge locked inside documents."
+image = "/images/kb-documents.jpg"
+story_kicker = "Our Story"
+story = [
+	"Every organization sits on a goldmine of documents.",
+	"We built SemOS so machines finally read them properly.",
+]
+values_kicker = "What We Believe"
+values_title = "Three refusals"
+contact_kicker = "Contact"
+contact_title = "Talk to us"
+contact_text = "Demos, partnerships, half-formed ideas: we want to hear them."
+
+[[about.values]]
+title = "Evidence, not vibes"
+description = "Every answer anchors to source lines."
+
+[[about.values]]
+title = "Understanding, not indexing"
+description = "Documents become reasoning-ready knowledge."
+
+[[about.values]]
+title = "Assist, not replace"
+description = "Judgment and sign-off stay with people."

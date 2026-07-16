@@ -36,6 +36,15 @@ func TestLoadSiteConfigValid(t *testing.T) {
 	if cfg.Hero.CTAPrimaryHref != "/semos/workspace" {
 		t.Errorf("CTAPrimaryHref = %q", cfg.Hero.CTAPrimaryHref)
 	}
+	if cfg.About.Kicker != "Who We Are" {
+		t.Errorf("About.Kicker = %q, want Who We Are", cfg.About.Kicker)
+	}
+	if len(cfg.About.Story) != 2 {
+		t.Errorf("len(About.Story) = %d, want 2", len(cfg.About.Story))
+	}
+	if len(cfg.About.Values) != 3 {
+		t.Errorf("len(About.Values) = %d, want 3", len(cfg.About.Values))
+	}
 }
 
 func TestLoadSiteConfigMissingFile(t *testing.T) {
