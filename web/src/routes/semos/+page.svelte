@@ -7,14 +7,30 @@
 		Bot,
 		Sparkles,
 		ArrowRight,
-		ArrowDown,
 		ArrowUpRight
 	} from '@lucide/svelte';
 	import { appAuthStore } from '@chendingplano/shared';
 	import Ornament from './components/Ornament.svelte';
+	import LoginPanel from '$lib/components/login-01.svelte';
+	import { loginPrompt } from './loginPrompt.svelte';
 
 	let { data } = $props();
 	const cfg = $derived(data.siteConfig);
+
+	function handleGetStarted(event: MouseEvent) {
+		if (!appAuthStore.getIsLoggedIn()) {
+			event.preventDefault();
+			loginPrompt.show();
+		}
+	}
+
+	function handleGetStartedFromBottom(event: MouseEvent) {
+		if (!appAuthStore.getIsLoggedIn()) {
+			event.preventDefault();
+			window.scrollTo({ top: 0, behavior: 'smooth' });
+			loginPrompt.show();
+		}
+	}
 
 	const featureIcons: Record<string, typeof Database> = {
 		knowledge_base: Database,
@@ -73,54 +89,56 @@
 	></div>
 
 	<div class="relative mx-auto max-w-7xl px-6 py-28 md:py-36 lg:py-44">
-		<div use:reveal class="reveal max-w-2xl">
-			<!-- Kicker with bronze diamond ornament -->
-			<div class="flex items-center gap-3">
-				<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
-				<span
-					class="text-xs font-bold tracking-[0.22em] text-[#6f6c66] uppercase dark:text-[#a5a29b]"
-				>
-					{cfg.hero.kicker}
-				</span>
-			</div>
-
-			<!-- Stacked headline -->
-			<h1
-				class="mt-7 text-[clamp(2.6rem,4.5vw+1rem,4.5rem)] leading-[1.08] font-bold tracking-tight text-[#17181c] dark:text-[#e9e7e2]"
-			>
-				{#each sloganLines as line (line)}
-					<span class="block">{line}</span>
-				{/each}
-			</h1>
-
-			<p
-				class="mt-7 max-w-[52ch] text-base leading-relaxed text-[#6f6c66] md:text-lg dark:text-[#a5a29b]"
-			>
-				{cfg.hero.subtitle}
-			</p>
-
-			<div class="mt-10 flex flex-wrap items-center gap-4">
-				<a
-					href={cfg.hero.cta_primary_href}
-					class="group inline-flex items-center gap-2 rounded-lg bg-[#17181c] px-7 py-3.5 text-sm font-semibold text-white shadow-[0_2px_4px_rgba(23,24,28,0.18),0_10px_28px_rgba(23,24,28,0.22)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(23,24,28,0.2),0_16px_36px_rgba(23,24,28,0.26)] focus-visible:ring-2 focus-visible:ring-[#17181c]/40 focus-visible:outline-none active:translate-y-0 dark:bg-white dark:text-[#17181c]"
-				>
-					{m.semos_get_started()}
-					<ArrowRight
-						class="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5"
-					/>
-				</a>
-				{#if !$appAuthStore.isLoggedIn}
-					<a
-						href={cfg.hero.cta_secondary_href}
-						class="group inline-flex items-center gap-2 rounded-lg border border-[#17181c]/15 bg-white/70 px-7 py-3.5 text-sm font-semibold text-[#17181c] shadow-[0_1px_2px_rgba(23,24,28,0.06),0_4px_12px_rgba(23,24,28,0.06)] backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#17181c]/30 hover:shadow-[0_2px_4px_rgba(23,24,28,0.08),0_8px_20px_rgba(23,24,28,0.1)] focus-visible:ring-2 focus-visible:ring-[#17181c]/30 focus-visible:outline-none active:translate-y-0 dark:border-white/20 dark:bg-white/10 dark:text-white"
+		<div
+			class={$appAuthStore.isLoggedIn || loginPrompt.open
+				? ''
+				: 'grid gap-12 lg:grid-cols-[1fr_auto] lg:items-center'}
+		>
+			<div use:reveal class="reveal max-w-2xl">
+				<!-- Kicker with bronze diamond ornament -->
+				<div class="flex items-center gap-3">
+					<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
+					<span
+						class="text-xs font-bold tracking-[0.22em] text-[#6f6c66] uppercase dark:text-[#a5a29b]"
 					>
-						{m.semos_signup_login()}
-						<ArrowDown
-							class="h-3.5 w-3.5 opacity-50 transition-transform duration-200 group-hover:translate-y-0.5"
+						{cfg.hero.kicker}
+					</span>
+				</div>
+
+				<!-- Stacked headline -->
+				<h1
+					class="mt-7 text-[clamp(2.6rem,4.5vw+1rem,4.5rem)] leading-[1.08] font-bold tracking-tight text-[#17181c] dark:text-[#e9e7e2]"
+				>
+					{#each sloganLines as line (line)}
+						<span class="block">{line}</span>
+					{/each}
+				</h1>
+
+				<p
+					class="mt-7 max-w-[52ch] text-base leading-relaxed text-[#6f6c66] md:text-lg dark:text-[#a5a29b]"
+				>
+					{cfg.hero.subtitle}
+				</p>
+
+				<div class="mt-10 flex flex-wrap items-center gap-4">
+					<a
+						href={cfg.hero.cta_primary_href}
+						onclick={handleGetStarted}
+						class="group inline-flex items-center gap-2 rounded-lg bg-[#17181c] px-7 py-3.5 text-sm font-semibold text-white shadow-[0_2px_4px_rgba(23,24,28,0.18),0_10px_28px_rgba(23,24,28,0.22)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(23,24,28,0.2),0_16px_36px_rgba(23,24,28,0.26)] focus-visible:ring-2 focus-visible:ring-[#17181c]/40 focus-visible:outline-none active:translate-y-0 dark:bg-white dark:text-[#17181c]"
+					>
+						{m.semos_get_started()}
+						<ArrowRight
+							class="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5"
 						/>
 					</a>
-				{/if}
+				</div>
 			</div>
+
+			{#if !$appAuthStore.isLoggedIn && !loginPrompt.open}
+				<div class="flex justify-center lg:justify-end lg:translate-x-[200px]">
+					<LoginPanel />
+				</div>
+			{/if}
 		</div>
 	</div>
 </section>
@@ -251,18 +269,20 @@
 			<div class="mt-10 flex flex-wrap items-center justify-center gap-4">
 				<a
 					href={cfg.hero.cta_primary_href}
+					onclick={handleGetStartedFromBottom}
 					class="inline-flex items-center gap-2 rounded-lg bg-[#17181c] px-7 py-3.5 text-sm font-semibold text-white shadow-[0_2px_4px_rgba(23,24,28,0.18),0_10px_28px_rgba(23,24,28,0.22)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(23,24,28,0.2),0_16px_36px_rgba(23,24,28,0.26)] active:translate-y-0 dark:bg-white dark:text-[#17181c]"
 				>
 					{m.semos_get_started()}
 					<ArrowRight class="h-4 w-4" />
 				</a>
 				{#if !$appAuthStore.isLoggedIn}
-					<a
-						href={cfg.hero.cta_secondary_href}
+					<button
+						type="button"
+						onclick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
 						class="inline-flex items-center rounded-lg border border-[#17181c]/15 px-7 py-3.5 text-sm font-semibold text-[#17181c] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#17181c]/30 dark:border-white/20 dark:text-white"
 					>
 						{m.semos_signup_login()}
-					</a>
+					</button>
 				{/if}
 			</div>
 		</div>

@@ -115,6 +115,7 @@ func RegisterRoutes(e *echo.Echo) error {
 			// IMPORTANT: need to load from a configuration file!
 			publicPaths := map[string]bool{
 				"/":               true,
+				"/semos":          true, // Main page - accessible pre-login
 				"/login":          true,
 				"/example-login":  true,
 				"/oauth/callback": true, // Public route for password reset and OAuth callbacks
@@ -143,14 +144,18 @@ func RegisterRoutes(e *echo.Echo) error {
 				path != "/_" &&
 				!strings.HasPrefix(path, "/_/") {
 
-				// Exclude development-related paths
+				// Exclude development-related paths and public static assets
+				// (needed to render pre-login pages such as Main and Login).
 				if strings.HasPrefix(path, "/node_modules/") ||
 					strings.HasPrefix(path, "/@") ||
 					strings.HasPrefix(path, "/src/") ||
 					strings.HasPrefix(path, "/.well-known") ||
 					(is_dev && strings.HasPrefix(path, "/.svelte-kit")) ||
-					strings.Contains(path, "/__") {
-					// Let these development assets pass through without auth check
+					strings.Contains(path, "/__") ||
+					strings.HasPrefix(path, "/_app/") ||
+					strings.HasPrefix(path, "/images/") ||
+					strings.HasPrefix(path, "/pdfjs-cmaps/") {
+					// Let these assets pass through without auth check
 					frontendHandler.ServeHTTP(c.Response(), c.Request())
 					return nil
 				}

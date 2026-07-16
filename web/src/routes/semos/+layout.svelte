@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SiteHeader from './components/SiteHeader.svelte';
 	import SiteFooter from './components/SiteFooter.svelte';
+	import LoginDialog from './components/LoginDialog.svelte';
 
 	let { data, children } = $props();
 </script>
@@ -14,3 +15,5 @@
 	</main>
 	<SiteFooter config={data.siteConfig} />
 </div>
+
+<LoginDialog />

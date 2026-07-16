@@ -5,27 +5,55 @@
 	import { Sun, Moon, Languages, Menu, X } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { slide } from 'svelte/transition';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { appAuthStore } from '@chendingplano/shared';
 	import LogoMark from './LogoMark.svelte';
+	import { loginPrompt } from '../loginPrompt.svelte';
 
 	let { config }: { config: SiteConfig } = $props();
 
 	const nav = [
 		{ label: m.semos_nav_home(), href: '/semos' },
-		{ label: m.semos_nav_workspace(), href: '/semos/workspace' },
-		{ label: m.semos_nav_knowledge_base(), href: '/home3/knowledge' },
+		{ label: m.semos_nav_workspace(), href: '/semos/workspace', requiresAuth: true },
+		{ label: m.semos_nav_knowledge_base(), href: '/home3/knowledge', requiresAuth: true },
 		{ label: m.semos_nav_about(), href: '/semos' }
 	];
 
 	let mobileOpen = $state(false);
+
+	async function handleNavClick(event: MouseEvent, item: (typeof nav)[number]) {
+		if (item.requiresAuth && !appAuthStore.getIsLoggedIn()) {
+			event.preventDefault();
+			if (page.url.pathname !== '/semos') {
+				await goto('/semos');
+			}
+			window.scrollTo({ top: 0, behavior: 'smooth' });
+			loginPrompt.show();
+		}
+	}
+
+	function isActive(item: (typeof nav)[number]): boolean {
+		// "关于我们" aliases the same href as "首页" (no dedicated About page), so
+		// match by first-in-array-order rather than href alone — otherwise both
+		// would highlight together whenever the href is the current path.
+		return nav.find((n) => n.href === page.url.pathname) === item;
+	}
 
 	function nextLocale(): (typeof locales)[number] {
 		const idx = locales.indexOf(getLocale());
 		return locales[(idx + 1) % locales.length];
 	}
 
-	function handleLogout() {
-		appAuthStore.logout();
+	async function handleLogout() {
+		// Not appAuthStore.logout() — that does a hard window.location redirect
+		// to '/login' (the backend's default redirect_url), which always wins
+		// over a subsequent goto('/semos'). The backend already tears down the
+		// Kratos session and app cookie synchronously, so it's safe to do our
+		// own POST + resync here and navigate with SvelteKit's router instead.
+		await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+		await appAuthStore.checkAuthStatus();
+		await goto('/semos');
 	}
 </script>
 
@@ -41,11 +69,16 @@
 			/>
 		</a>
 
-		<nav class="hidden items-center gap-7 md:flex">
+		<nav class="hidden items-center gap-1 md:flex">
 			{#each nav as item (item.href + item.label)}
 				<a
 					href={item.href}
-					class="text-[0.9rem] font-medium text-[#17181c]/60 transition-colors duration-200 hover:text-[#17181c] dark:text-white/60 dark:hover:text-white"
+					onclick={(e) => handleNavClick(e, item)}
+					class="rounded-md px-3 py-1.5 text-[0.9rem] font-medium transition-colors duration-200 {isActive(
+						item
+					)
+						? 'bg-[#17181c]/8 text-[#17181c] dark:bg-white/10 dark:text-white'
+						: 'text-[#17181c]/60 hover:text-[#17181c] dark:text-white/60 dark:hover:text-white'}"
 				>
 					{item.label}
 				</a>
@@ -83,13 +116,6 @@
 				>
 					{m.semos_logout()}
 				</button>
-			{:else}
-				<a
-					href={config.hero.cta_secondary_href}
-					class="ml-2 hidden rounded-lg bg-[#17181c] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(23,24,28,0.2),0_6px_16px_rgba(23,24,28,0.18)] transition-all duration-200 hover:-translate-y-px hover:shadow-[0_2px_4px_rgba(23,24,28,0.2),0_10px_24px_rgba(23,24,28,0.22)] active:translate-y-0 sm:inline-flex dark:bg-white dark:text-[#17181c]"
-				>
-					{m.semos_signup_login()}
-				</a>
 			{/if}
 			<button
 				type="button"
@@ -118,8 +144,13 @@
 				{#each nav as item (item.href + item.label)}
 					<a
 						href={item.href}
-						class="rounded-md px-2 py-2.5 text-sm font-medium text-[#17181c]/60 transition-colors hover:text-[#17181c] dark:text-white/60 dark:hover:text-white"
-						onclick={() => (mobileOpen = false)}
+						class="rounded-md px-2 py-2.5 text-sm font-medium transition-colors {isActive(item)
+							? 'bg-[#17181c]/8 text-[#17181c] dark:bg-white/10 dark:text-white'
+							: 'text-[#17181c]/60 hover:text-[#17181c] dark:text-white/60 dark:hover:text-white'}"
+						onclick={(e) => {
+							handleNavClick(e, item);
+							mobileOpen = false;
+						}}
 					>
 						{item.label}
 					</a>
@@ -135,14 +166,6 @@
 					>
 						{m.semos_logout()}
 					</button>
-				{:else}
-					<a
-						href={config.hero.cta_secondary_href}
-						class="mt-2 inline-flex items-center justify-center rounded-lg bg-[#17181c] px-4 py-2.5 text-sm font-semibold text-white sm:hidden dark:bg-white dark:text-[#17181c]"
-						onclick={() => (mobileOpen = false)}
-					>
-						{m.semos_signup_login()}
-					</a>
 				{/if}
 			</div>
 		</nav>

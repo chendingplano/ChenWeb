@@ -11,7 +11,7 @@
 			const destination = appAuthStore.getIsAdmin() ? admin_route : norm_route;
 			goto(destination, { replaceState: true });
 		} else {
-			goto('/login', { replaceState: true });
+			goto('/semos', { replaceState: true });
 		}
   	});
 </script>
