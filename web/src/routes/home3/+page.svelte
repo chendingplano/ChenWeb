@@ -20,6 +20,9 @@
 		childTitle?: string;
 	};
 
+	let { data } = $props();
+	const cfg = $derived(data.siteConfig);
+
 	// --- Layout dimensions (adjust here to change panel sizes) ---
 	const HERO_HEADER_HEIGHT = 200; // hero header height in px — increase for more visual impact
 	const RAIL_WIDTH_COLLAPSED = 56; // collapsed icon-rail width in px
@@ -238,7 +241,7 @@
 		: '#111827'};"
 >
 	<!-- Hero Header (fixed height) -->
-	<HeroHeader {darkMode} height={HERO_HEADER_HEIGHT} onToggleDark={toggleDark} />
+	<HeroHeader {darkMode} {cfg} height={HERO_HEADER_HEIGHT} onToggleDark={toggleDark} />
 
 	<!-- Main body: rail + content + shelf -->
 	<div class="flex flex-1 overflow-hidden select-none">

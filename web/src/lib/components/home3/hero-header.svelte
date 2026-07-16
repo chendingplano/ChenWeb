@@ -1,22 +1,29 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { locales, getLocale, setLocale } from '$lib/paraglide/runtime';
+	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import BrainCircuitIcon from '@lucide/svelte/icons/brain-circuit';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
+	import LanguagesIcon from '@lucide/svelte/icons/languages';
 
 	let {
 		darkMode = true,
 		height = 200,
+		cfg,
 		onToggleDark
 	}: {
 		darkMode: boolean;
 		height: number;
+		cfg: SiteConfig;
 		onToggleDark: () => void;
 	} = $props();
 
-	// --- Hero image configuration ---
-	const HERO_IMAGE_OPACITY = 0.85; // overall opacity of the centre illustration (0–1)
-	const HERO_IMAGE_ANIMATE = true; // set false to freeze animation (e.g. for reduced-motion users)
+	function nextLocale(): (typeof locales)[number] {
+		const idx = locales.indexOf(getLocale());
+		return locales[(idx + 1) % locales.length];
+	}
 
 	// --- Typography (adjust here to change fonts) ---
 	const fontUI   = "system-ui, -apple-system, 'Inter', sans-serif"; // all UI text
@@ -35,12 +42,6 @@
 	let auroraIndigo = $derived(darkMode ? 'rgba(99,102,241,0.22)'  : 'rgba(99,102,241,0.09)');
 	let auroraViolet = $derived(darkMode ? 'rgba(139,92,246,0.20)'  : 'rgba(139,92,246,0.08)');
 	let auroraCyan   = $derived(darkMode ? 'rgba(6,182,212,0.18)'   : 'rgba(6,182,212,0.07)');
-
-	// SVG fill/stroke derived from accent
-	let svgFillLow  = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.15)');
-	let svgFillMid  = $derived(darkMode ? 'rgba(129,140,248,0.7)'  : 'rgba(99,102,241,0.7)');
-	let svgStrokeLow = $derived(darkMode ? 'rgba(129,140,248,0.4)'  : 'rgba(99,102,241,0.4)');
-	let svgStrokeVeryLow = $derived(darkMode ? 'rgba(129,140,248,0.25)' : 'rgba(99,102,241,0.25)');
 </script>
 
 <style>
@@ -59,40 +60,9 @@
 		50%  { transform: translate(20px, 40px) scale(0.92); }
 		100% { transform: translate(-35px, -20px) scale(1.12); }
 	}
-	@keyframes ring-pulse {
-		0%   { transform: scale(1);   opacity: 0.5; }
-		100% { transform: scale(1.3); opacity: 0; }
-	}
-	@keyframes node-float-1 {
-		0%, 100% { transform: translateY(0px); }
-		50%       { transform: translateY(-6px); }
-	}
-	@keyframes node-float-2 {
-		0%, 100% { transform: translateY(0px); }
-		50%       { transform: translateY(6px); }
-	}
-	@keyframes node-float-3 {
-		0%, 100% { transform: translateY(0px); }
-		50%       { transform: translateY(-4px); }
-	}
-
 	.aurora-blob-1 { animation: aurora-drift-1 18s ease-in-out infinite alternate; }
 	.aurora-blob-2 { animation: aurora-drift-2 22s ease-in-out infinite alternate; }
 	.aurora-blob-3 { animation: aurora-drift-3 26s ease-in-out infinite alternate; }
-
-	.ring-animated { animation: ring-pulse 2.5s ease-out infinite; }
-	.ring-animated-delay { animation: ring-pulse 2.5s ease-out infinite 1.25s; }
-	.node-float-1 { animation: node-float-1 3s ease-in-out infinite; }
-	.node-float-2 { animation: node-float-2 4s ease-in-out infinite; }
-	.node-float-3 { animation: node-float-3 5s ease-in-out infinite; }
-
-	.no-animate .ring-animated,
-	.no-animate .ring-animated-delay,
-	.no-animate .node-float-1,
-	.no-animate .node-float-2,
-	.no-animate .node-float-3 {
-		animation: none;
-	}
 </style>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -100,6 +70,10 @@
 	class="flex-shrink-0 relative overflow-hidden"
 	style="height:{height}px; border-bottom:1px solid {borderColor};"
 >
+	<!-- Hero background image, lightened with a paper veil (same treatment as the Main page hero) -->
+	<img src={cfg.hero.image} alt="" class="absolute inset-0 h-full w-full object-cover" style="z-index:0;" />
+	<div class="absolute inset-0 bg-[#faf9f7]/70 dark:bg-[#101216]/70" style="z-index:0;"></div>
+
 	<!-- Aurora background (position absolute, z-index 0) -->
 	<div class="absolute inset-0 overflow-hidden" style="z-index:0;">
 		<div
@@ -119,11 +93,23 @@
 	<!-- Header content (position relative, z-index 1) -->
 	<div class="relative flex flex-col h-full" style="z-index:1;">
 
-		<!-- Three zones row -->
-		<div class="flex items-center flex-1 px-6 gap-4">
+		<!-- Three zones row: left spacer / centred branding / right controls -->
+		<div class="grid items-center flex-1 px-6 gap-4" style="grid-template-columns: 1fr auto 1fr;">
 
-			<!-- Left zone (~280px) -->
-			<div class="flex-shrink-0" style="width:280px; font-family:{fontUI};">
+			<!-- Left spacer (keeps centre column truly centred against the right zone) -->
+			<div></div>
+
+			<!-- Centre zone: company logo + wordmark, centred in the panel -->
+			<div class="flex flex-col items-center" style="font-family:{fontUI};">
+				<!-- Company logo (click to return to the Main page) -->
+				<button
+					type="button"
+					onclick={() => goto('/semos')}
+					class="block cursor-pointer border-0 bg-transparent p-0 mb-2"
+					aria-label="Go to Main page"
+				>
+					<img src={cfg.branding.logo_image} alt={cfg.branding.logo_text} class="h-7 w-auto" />
+				</button>
 				<!-- Logo + wordmark row -->
 				<div class="flex items-center gap-3 mb-1">
 					<div
@@ -144,86 +130,39 @@
 					</div>
 				</div>
 				<!-- Tagline -->
-				<p style="font-size:13px; color:{textSecondary}; margin-left:52px; font-family:{fontUI};">Your intelligent AI workspace</p>
+				<p style="font-size:13px; color:{textSecondary}; font-family:{fontUI};">Your intelligent AI workspace</p>
 			</div>
 
-			<!-- Centre zone (flex-1): SVG neural constellation -->
-			<div class="flex-1 flex items-center justify-center">
-				<div style="opacity:{HERO_IMAGE_OPACITY};">
-					<svg
-						width="300"
-						height="160"
-						viewBox="0 0 300 160"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-						class={HERO_IMAGE_ANIMATE ? '' : 'no-animate'}
-					>
-						<!-- Large glowing background circles -->
-						<circle cx="150" cy="80" r="55" fill={svgFillLow} stroke={svgStrokeLow} stroke-width="1.5" />
-						<circle cx="60"  cy="50" r="28" fill={svgFillLow} stroke={svgStrokeLow} stroke-width="1.5" />
-						<circle cx="245" cy="110" r="32" fill={svgFillLow} stroke={svgStrokeLow} stroke-width="1.5" />
-
-						<!-- Connection lines between nodes -->
-						<line x1="150" y1="80"  x2="60"  y2="50"  stroke={svgStrokeVeryLow} stroke-width="1.5" />
-						<line x1="150" y1="80"  x2="245" y2="110" stroke={svgStrokeVeryLow} stroke-width="1.5" />
-						<line x1="150" y1="80"  x2="100" y2="130" stroke={svgStrokeVeryLow} stroke-width="1.5" />
-						<line x1="150" y1="80"  x2="220" y2="35"  stroke={svgStrokeVeryLow} stroke-width="1.5" />
-						<line x1="60"  y1="50"  x2="30"  y2="110" stroke={svgStrokeVeryLow} stroke-width="1" />
-						<line x1="245" y1="110" x2="270" y2="55"  stroke={svgStrokeVeryLow} stroke-width="1" />
-						<line x1="100" y1="130" x2="245" y2="110" stroke={svgStrokeVeryLow} stroke-width="1" />
-						<line x1="220" y1="35"  x2="60"  y2="50"  stroke={svgStrokeVeryLow} stroke-width="1" />
-
-						<!-- Animated rings around central node -->
-						<circle class="ring-animated" cx="150" cy="80" r="28" fill="none" stroke={accent} stroke-width="1.5" />
-						<circle class="ring-animated-delay" cx="150" cy="80" r="28" fill="none" stroke={accent} stroke-width="1" />
-
-						<!-- Central node -->
-						<circle cx="150" cy="80" r="8" fill={accent} />
-						<circle cx="150" cy="80" r="4" fill="white" opacity="0.8" />
-
-						<!-- Satellite nodes (some animated) -->
-						<g class="node-float-1">
-							<circle cx="60" cy="50" r="6" fill={svgFillMid} stroke={accent} stroke-width="1.5" />
-						</g>
-						<g class="node-float-2">
-							<circle cx="245" cy="110" r="6" fill={svgFillMid} stroke={accent} stroke-width="1.5" />
-						</g>
-						<g class="node-float-3">
-							<circle cx="100" cy="130" r="5" fill={svgFillMid} stroke={accent} stroke-width="1.5" />
-						</g>
-						<circle cx="220" cy="35" r="5" fill={svgFillMid} stroke={accent} stroke-width="1.5" />
-						<circle cx="30"  cy="110" r="4" fill={svgFillMid} stroke={accent} stroke-width="1.5" />
-						<circle cx="270" cy="55"  r="4" fill={svgFillMid} stroke={accent} stroke-width="1.5" />
-
-						<!-- Small floating accent dots -->
-						<g class="node-float-1">
-							<circle cx="185" cy="55" r="3" fill={accent} opacity="0.6" />
-						</g>
-						<g class="node-float-2">
-							<circle cx="120" cy="115" r="3" fill={accent} opacity="0.7" />
-						</g>
-						<g class="node-float-3">
-							<circle cx="200" cy="140" r="2.5" fill={accent} opacity="0.5" />
-						</g>
-					</svg>
-				</div>
-			</div>
-
-			<!-- Right zone (~220px, text-right) -->
-			<div class="flex-shrink-0 flex flex-col items-end gap-2" style="width:220px; font-family:{fontUI};">
-				<!-- AI model pills -->
+			<!-- Right zone (text-right) -->
+			<div class="flex flex-col items-end gap-2 justify-self-end" style="font-family:{fontUI};">
+				<!-- Main / Workspace nav buttons -->
 				<div class="flex gap-2 flex-wrap justify-end">
-					<span
-						class="px-2.5 py-1 rounded-full text-xs"
+					<button
+						type="button"
+						onclick={() => goto('/semos')}
+						class="px-2.5 py-1 rounded-full text-xs cursor-pointer"
 						style="background:{accentTint}; color:{accent}; font-family:{fontMono}; border:1px solid {accent}30;"
-					>Claude Sonnet 4.6</span>
-					<span
-						class="px-2.5 py-1 rounded-full text-xs"
-						style="background:rgba(16,185,129,0.10); color:#10B981; font-family:{fontMono}; border:1px solid rgba(16,185,129,0.25);"
-					>GPT-4o</span>
+					>Main</button>
+					<button
+						type="button"
+						onclick={() => goto('/semos/workspace')}
+						class="px-2.5 py-1 rounded-full text-xs cursor-pointer"
+						style="background:{accentTint}; color:{accent}; font-family:{fontMono}; border:1px solid {accent}30;"
+					>Workspace</button>
 				</div>
-				<!-- Bell + toggle row -->
+				<!-- Language + bell + toggle row -->
 				<div class="flex items-center gap-3">
+					<!-- Language control -->
+					<button
+						type="button"
+						onclick={() => setLocale(nextLocale())}
+						class="flex items-center gap-1.5 h-8 px-2.5 rounded-lg cursor-pointer"
+						style="background:{accentTint}; color:{textSecondary};"
+						aria-label="Switch language"
+					>
+						<LanguagesIcon class="w-4 h-4" />
+						<span style="font-size:12px;">{getLocale() === 'zh-cn' ? '中文' : 'English'}</span>
+					</button>
 					<!-- Bell with notification dot -->
 					<div class="relative">
 						<button
