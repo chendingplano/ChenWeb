@@ -15,7 +15,6 @@
 		tabindex="0"
 	>
 		<div
-			class="flex flex-col items-center gap-4"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
@@ -23,14 +22,15 @@
 			aria-label="Login"
 			tabindex="0"
 		>
-			<LoginPanel />
-			<button
-				type="button"
-				onclick={() => loginPrompt.hide()}
-				class="text-sm font-semibold text-white/80 transition-colors hover:text-white"
-			>
-				Cancel
-			</button>
+			<LoginPanel>
+				<button
+					type="button"
+					onclick={() => loginPrompt.hide()}
+					class="mb-3 w-full rounded-[20px] bg-gray-200 py-2.5 text-center text-sm font-semibold text-[#747474] transition-colors hover:bg-gray-300 hover:text-black"
+				>
+					Cancel
+				</button>
+			</LoginPanel>
 		</div>
 	</div>
 {/if}

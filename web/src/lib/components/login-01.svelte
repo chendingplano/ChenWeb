@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { Snippet } from 'svelte';
 	import { appAuthStore } from '@chendingplano/shared';
+
+	let { children }: { children?: Snippet } = $props();
 
 	// This page implements three modes: login, signup, forgot password
 	// (or three pages). This is controlled by the "mode" variable.
@@ -225,6 +228,10 @@
 			<button class="form-btn">Log in</button>
 		</form>
 
+		{#if children}
+			{@render children()}
+		{/if}
+
 		<p class="sign-up-label">
 			Don't have an account?
 			<button class="sign-up-link" onclick={switchToSignup}>Sign up</button>
@@ -411,6 +418,10 @@
 				</button>
 			{/if}
 		</div>
+	{/if}
+
+	{#if children && mode !== 'login'}
+		{@render children()}
 	{/if}
 </div>
 
