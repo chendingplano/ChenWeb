@@ -1342,12 +1342,21 @@ export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
 // enabled on the frontend. See config.local.toml's [knowledge-menus] section.
 export type KbMenuConfig = Record<string, boolean>;
 
-export async function getKbMenuConfig(): Promise<KbMenuConfig> {
-	const response = await fetchOrThrow<{ status: boolean; menus: KbMenuConfig }>(
-		`${BASE}/menu-config`,
-		'Failed to load kb menu config'
-	);
-	return response.menus;
+// Wiki sidebar menu item id -> label override for the requested language.
+// Ids absent from the map keep their hardcoded default label. See
+// config/knowledge-menus/labels-<lang>.toml.
+export type KbMenuLabels = Record<string, string>;
+
+export async function getKbMenuConfig(
+	lang?: string
+): Promise<{ menus: KbMenuConfig; labels: KbMenuLabels }> {
+	const query = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+	const response = await fetchOrThrow<{
+		status: boolean;
+		menus: KbMenuConfig;
+		labels: KbMenuLabels;
+	}>(`${BASE}/menu-config${query}`, 'Failed to load kb menu config');
+	return { menus: response.menus, labels: response.labels };
 }
 
 export async function updateRecordTopic(

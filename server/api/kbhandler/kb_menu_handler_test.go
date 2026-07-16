@@ -65,3 +65,73 @@ func TestGetKbMenuConfigReturnsConfiguredOverrides(t *testing.T) {
 		t.Fatalf("kb-metrics=%v ok=%v", got, ok)
 	}
 }
+
+func TestGetKbMenuConfigOmittedLangReturnsEmptyLabels(t *testing.T) {
+	withKnowledgeMenusConfig(t, nil)
+	withKnowledgeMenuLabelsDir(t, map[string]string{
+		"labels-zh-cn.toml": `[labels]
+kb-metrics = "指标"`,
+	})
+
+	c, rec := newKnowledgeStoreContext(t, http.MethodGet, "/api/v1/kb/menu-config", "")
+	if err := GetKbMenuConfig(c); err != nil {
+		t.Fatalf("GetKbMenuConfig returned error: %v", err)
+	}
+
+	var payload kbMenuConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(payload.Labels) != 0 {
+		t.Fatalf("expected empty labels for omitted lang, got %v", payload.Labels)
+	}
+}
+
+func TestGetKbMenuConfigReturnsLabelsForConfiguredLang(t *testing.T) {
+	withKnowledgeMenusConfig(t, nil)
+	withKnowledgeMenuLabelsDir(t, map[string]string{
+		"labels-zh-cn.toml": `[labels]
+kb-metrics = "指标"
+kb-doc-wiki = "知识百科"`,
+	})
+
+	c, rec := newKnowledgeStoreContext(t, http.MethodGet, "/api/v1/kb/menu-config?lang=zh-cn", "")
+	if err := GetKbMenuConfig(c); err != nil {
+		t.Fatalf("GetKbMenuConfig returned error: %v", err)
+	}
+
+	var payload kbMenuConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(payload.Labels) != 2 {
+		t.Fatalf("expected 2 labels, got %d (%v)", len(payload.Labels), payload.Labels)
+	}
+	if payload.Labels["kb-metrics"] != "指标" {
+		t.Fatalf("kb-metrics label = %q", payload.Labels["kb-metrics"])
+	}
+}
+
+func TestGetKbMenuConfigLangWithNoMatchingFileReturnsEmptyLabels(t *testing.T) {
+	withKnowledgeMenusConfig(t, map[string]bool{"kb-metrics": false})
+	withKnowledgeMenuLabelsDir(t, map[string]string{
+		"labels-zh-cn.toml": `[labels]
+kb-metrics = "指标"`,
+	})
+
+	c, rec := newKnowledgeStoreContext(t, http.MethodGet, "/api/v1/kb/menu-config?lang=fr", "")
+	if err := GetKbMenuConfig(c); err != nil {
+		t.Fatalf("GetKbMenuConfig returned error: %v", err)
+	}
+
+	var payload kbMenuConfigResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(payload.Labels) != 0 {
+		t.Fatalf("expected empty labels for lang with no file, got %v", payload.Labels)
+	}
+	if got, ok := payload.Menus["kb-metrics"]; !ok || got != false {
+		t.Fatalf("expected menus unaffected by lang, kb-metrics=%v ok=%v", got, ok)
+	}
+}

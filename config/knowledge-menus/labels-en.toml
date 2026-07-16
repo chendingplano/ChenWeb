@@ -1,0 +1,15 @@
+# Per-language label overrides for the Wiki sidebar menu (/home3/knowledge).
+#
+# Each key under [labels] is a menu item id (see KbSectionId in
+# web/src/routes/home3/knowledge/+page.svelte for the current id list); the
+# value is the label shown when the site-wide language (Paraglide's
+# getLocale()) is "en".
+#
+# Ids not listed here keep their hardcoded default label. This file itself
+# is optional — if absent, every item uses its hardcoded default label for
+# "en", identical to the behavior before this file existed.
+#
+# This file does not control item visibility — that remains
+# [knowledge-menus] in config.local.toml, unaffected by language.
+
+[labels]

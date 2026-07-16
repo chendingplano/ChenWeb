@@ -43,8 +43,10 @@
 		getProvisionCategory,
 		listProvisionGraph,
 		getKbMenuConfig,
-		type KbMenuConfig
+		type KbMenuConfig,
+		type KbMenuLabels
 	} from '$lib/services/kbService';
+	import { getLocale } from '$lib/paraglide/runtime';
 	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
 	import {
 		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
@@ -219,32 +221,79 @@
 		}
 	];
 
+	// Every valid Wiki sidebar menu item id (top-level + children), the
+	// source of truth for [knowledge-menus]/labels-<lang>.toml ids. Used to
+	// detect config entries that don't match anything, which config loading
+	// otherwise treats as a silent no-op (see unknownMenuConfigIds below).
+	const knownMenuIds = new Set<string>(
+		menuItems.flatMap((item) => [item.id, ...(item.children?.map((child) => child.id) ?? [])])
+	);
+
 	// Wiki sidebar menu visibility, from [knowledge-menus] in
 	// config.toml / config.local.toml (GET /api/v1/kb/menu-config). Ids
 	// absent from the map default to enabled. Empty until the fetch
 	// resolves, so the full menu renders first paint (fail-open).
 	let menuConfig = $state<KbMenuConfig>({});
 
+	// Wiki sidebar menu label overrides for the site-wide language (Paraglide's
+	// getLocale()), from config/knowledge-menus/labels-<lang>.toml. Ids absent
+	// from the map keep their hardcoded default label (fail-open).
+	let menuLabels = $state<KbMenuLabels>({});
+
+	let menuConfigLang = $state(getLocale());
+
+	// Ids present in the fetched config/labels that don't match any real menu
+	// item id — almost always a typo in config.local.toml or a labels-<lang>.toml
+	// file (e.g. a label guessed from an item's display text instead of its
+	// real id). These entries are otherwise silently inert, so they're
+	// surfaced here rather than failing quietly.
+	let unknownMenuConfigIds = $derived(
+		Object.keys(menuConfig).filter((id) => !knownMenuIds.has(id))
+	);
+	let unknownMenuLabelIds = $derived(
+		Object.keys(menuLabels).filter((id) => !knownMenuIds.has(id))
+	);
+
+	$effect(() => {
+		if (unknownMenuConfigIds.length > 0) {
+			console.warn(
+				`[knowledge-menus] config.local.toml [knowledge-menus] has unrecognized menu id(s), ignored: ${unknownMenuConfigIds.join(', ')}`
+			);
+		}
+		if (unknownMenuLabelIds.length > 0) {
+			console.warn(
+				`[knowledge-menus] config/knowledge-menus/labels-${menuConfigLang}.toml has unrecognized menu id(s), ignored: ${unknownMenuLabelIds.join(', ')}`
+			);
+		}
+	});
+
 	onMount(() => {
-		getKbMenuConfig()
-			.then((cfg) => {
-				menuConfig = cfg;
+		menuConfigLang = getLocale();
+		getKbMenuConfig(menuConfigLang)
+			.then(({ menus, labels }) => {
+				menuConfig = menus;
+				menuLabels = labels;
 			})
 			.catch(() => {
-				// Keep the full menu on failure.
+				// Keep the full menu, with default labels, on failure.
 			});
 	});
 
 	// Filters menuItems against menuConfig: a disabled parent hides its whole
 	// subtree, a disabled child hides just that child, and a parent that had
-	// children but ends up with none visible is hidden too.
+	// children but ends up with none visible is hidden too. Surviving items'
+	// labels are then resolved against menuLabels (configured override, else
+	// the existing hardcoded default label).
 	let visibleMenuItems = $derived(
 		menuItems
 			.filter((item) => menuConfig[item.id] !== false)
 			.map((item) => {
-				if (!item.children) return item;
-				const children = item.children.filter((child) => menuConfig[child.id] !== false);
-				return { ...item, children };
+				const label = menuLabels[item.id] ?? item.label;
+				if (!item.children) return { ...item, label };
+				const children = item.children
+					.filter((child) => menuConfig[child.id] !== false)
+					.map((child) => ({ ...child, label: menuLabels[child.id] ?? child.label }));
+				return { ...item, label, children };
 			})
 			.filter((item) => !item.children || item.children.length > 0)
 	);
@@ -462,6 +511,37 @@
 				</button>
 			{/if}
 		</div>
+
+		{#if !menuCollapsed && (unknownMenuConfigIds.length > 0 || unknownMenuLabelIds.length > 0)}
+			<!-- Diagnostic: config.local.toml [knowledge-menus] or a labels-<lang>.toml
+			     file references an id that doesn't match any menu item. These entries
+			     are otherwise silently ignored, so surface them here instead of only
+			     to the console, since this page is the config's own audience. -->
+			<div class="flex-shrink-0 px-2 pt-2">
+				<div
+					class="rounded-lg px-3 py-2"
+					style="background:{darkMode
+						? 'rgba(217,119,6,0.12)'
+						: 'rgba(217,119,6,0.08)'}; border:1px solid {darkMode
+						? 'rgba(217,119,6,0.4)'
+						: 'rgba(217,119,6,0.35)'};"
+				>
+					<div style="font-size:11px; font-weight:600; color:{darkMode ? '#FBBF24' : '#B45309'};">
+						Unrecognized menu config id(s) — ignored
+					</div>
+					{#if unknownMenuConfigIds.length > 0}
+						<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
+							config.local.toml [knowledge-menus]: {unknownMenuConfigIds.join(', ')}
+						</div>
+					{/if}
+					{#if unknownMenuLabelIds.length > 0}
+						<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
+							labels-{menuConfigLang}.toml: {unknownMenuLabelIds.join(', ')}
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
 
 		<!-- Nav: always rendered; items adapt between icon-only and full -->
 		<nav

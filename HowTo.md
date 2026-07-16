@@ -4779,6 +4779,7 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 * Start Clickhose: cd ChenWeb; mise obs-up
 * Start cc-switch: cd ThirdParty/cc-switch; 
 * Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
+* Start Caddy: ch ChenWeb; sh start_caddy.sh
 
 About 'mitmproxy':
 Do not run 'mitmproxy' now since it causes probelsm.

@@ -1,0 +1,27 @@
+# Per-language label overrides for the Wiki sidebar menu (/home3/knowledge).
+# See labels-en.toml for the full format description.
+#
+# The entries below are illustrative starter translations for "zh-cn" —
+# add/edit/remove ids as needed. Ids not listed keep their hardcoded
+# (English) default label.
+
+[labels]
+kb-search = "知识库"
+kb-doc-wiki = "知识管理"
+kb-chunks = "文档处理"
+# kb-import is both the "Injestion" section header AND its single child
+# "Upload Files" row (a pre-existing id collision - see ADR 2026071601's
+# Risks section). Only one label can be configured for both; "上传文件"
+# was dropped here since kb-import can only hold one value.
+kb-import = "上传文件"
+kb-llm-wiki = "知识百科"
+kb-llm-wiki-v3 = "知识百科"
+kb-input-details = "文档信息"
+kb-doc-structure = "文档解析"
+kb-summary-tree = "文档摘要树"
+kb-semantic-projections = "文档语义树"
+kb-metrics = "指标"
+kb-scene-blocks = "场景"
+kb-provision-tree = "条款(标准)"
+kb-inventory-items = "产品/零部件"
+kb-object-manager = "本体关系图"
