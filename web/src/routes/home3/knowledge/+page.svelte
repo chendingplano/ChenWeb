@@ -304,6 +304,7 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 	let hoverBg = $derived(darkMode ? 'rgba(45,51,72,0.6)' : 'rgba(228,230,235,0.7)');
+	let childIdleBg = $derived(darkMode ? 'rgba(129,140,248,0.05)' : 'rgba(99,102,241,0.045)');
 	let cardBg = $derived(darkMode ? 'rgba(255,255,255,0.03)' : '#FFFFFF');
 
 	let needsActiveStore = $derived(
@@ -509,7 +510,7 @@
 												onclick={() => selectSection(child.id)}
 												class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
 												style="
-													background:{isChildActive(child.id) ? accentTint : 'transparent'};
+													background:{isChildActive(child.id) ? accentTint : childIdleBg};
 													color:{isChildActive(child.id) ? accent : textSecondary};
 													border:none;
 													border-left:{isChildActive(child.id)
@@ -522,7 +523,7 @@
 												}}
 												onmouseleave={(e) => {
 													if (!isChildActive(child.id))
-														(e.currentTarget as HTMLElement).style.background = 'transparent';
+														(e.currentTarget as HTMLElement).style.background = childIdleBg;
 												}}
 											>
 												<span

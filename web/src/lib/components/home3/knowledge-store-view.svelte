@@ -67,6 +67,11 @@
 	let neonSlabRaised = $derived(darkMode ? 'rgba(7,10,18,0.98)' : 'rgba(255,255,255,0.97)');
 	let neonSlabRaisedSoft = $derived(darkMode ? 'rgba(7,10,18,0.95)' : 'rgba(247,249,253,0.95)');
 	let neonPillText = $derived(darkMode ? 'white 20%' : 'black 25%');
+	let sourcePanelBg = $derived(
+		darkMode
+			? 'linear-gradient(180deg, rgba(12, 21, 35, 0.34), rgba(12, 21, 35, 0.18))'
+			: 'linear-gradient(180deg, rgba(215, 222, 232, 0.55), rgba(215, 222, 232, 0.28))'
+	);
 
 	const emptyText = 'No active knowledge store selected yet. Click a card to make it the active knowledge store for this page.';
 	const CARD_STYLE_STORAGE_KEY = 'knowledge-store-card-style';
@@ -310,7 +315,7 @@
 	});
 </script>
 
-<div class="knowledge-store-view" style="--page-bg:{pageBg}; --shell-bg:{shellBg}; --card-bg:{cardBg}; --card-raised:{cardBgRaised}; --border:{borderColor}; --border-soft:{borderSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --accent:{accent}; --accent-soft:{accentSoft}; --success-soft:{successSoft}; --danger:{danger}; --danger-soft:{dangerSoft}; --user-card-color:{cardBackgroundColor}; --neon-slab:{neonSlab}; --neon-slab-soft:{neonSlabSoft}; --neon-slab-raised:{neonSlabRaised}; --neon-slab-raised-soft:{neonSlabRaisedSoft}; --neon-pill-text:{neonPillText};">
+<div class="knowledge-store-view" style="--page-bg:{pageBg}; --shell-bg:{shellBg}; --card-bg:{cardBg}; --card-raised:{cardBgRaised}; --border:{borderColor}; --border-soft:{borderSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --accent:{accent}; --accent-soft:{accentSoft}; --success-soft:{successSoft}; --danger:{danger}; --danger-soft:{dangerSoft}; --user-card-color:{cardBackgroundColor}; --neon-slab:{neonSlab}; --neon-slab-soft:{neonSlabSoft}; --neon-slab-raised:{neonSlabRaised}; --neon-slab-raised-soft:{neonSlabRaisedSoft}; --neon-pill-text:{neonPillText}; --source-panel-bg:{sourcePanelBg};">
 	<section class="hero-shell">
 		<div class="hero-copy">
 			<div class="eyebrow">Knowledge Stores</div>
@@ -999,7 +1004,7 @@
 		border: 1px solid var(--border-soft);
 		border-radius: 1.1rem;
 		padding: 0.85rem 0.95rem;
-		background: linear-gradient(180deg, rgba(12, 21, 35, 0.34), rgba(12, 21, 35, 0.18));
+		background: var(--source-panel-bg);
 	}
 
 	.source-header,
