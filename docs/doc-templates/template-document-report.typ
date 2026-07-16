@@ -99,6 +99,13 @@
 //   errors      – description of the error(s) found
 //   explanation – detailed explanation of why it is an error
 //   correction  – recommended correction
+//   metric-fields / related-metric-fields – array of (label:, value:) dicts:
+//     name-value snapshot of the artifact under review, and of the matched/
+//     referenced artifact, for the metrics/provisions/inventory_items
+//     reviewers only (ADR 2026071603). Empty for other reviewers or legacy
+//     findings with no snapshot.
+//   metric-fields-label / related-metric-fields-label – localized section
+//     headers for the two blocks above (e.g. "Metric" / "Referenced Metric").
 #let review-finding(
   labels: (:),
   id: "",
@@ -107,6 +114,10 @@
   errors: [],
   explanation: [],
   correction: [],
+  metric-fields: (),
+  metric-fields-label: "",
+  related-metric-fields: (),
+  related-metric-fields-label: "",
 ) = {
   let label(key) = labels.at(key, default: key)
   block(
@@ -125,6 +136,37 @@
           if id.starts-with("F-") { label("finding") + " " + id } else { label("finding") + "-" + id }),
       )
       pad(x: 12pt, y: 10pt, {
+        // Errors
+        text(weight: "semibold", size: 9pt, fill: clr-error-fg, label("errors"))
+        v(3pt)
+        error-block(errors)
+        v(8pt)
+
+        // Explanation
+        text(weight: "semibold", size: 9pt, fill: clr-muted, label("explanation"))
+        v(3pt)
+        block(width: 100%, text(size: 9pt, explanation))
+        v(8pt)
+
+        // Recommended correction
+        text(weight: "semibold", size: 9pt, fill: rgb("#15803d"), label("recommended-correction"))
+        v(3pt)
+        recommendation-block(correction)
+        v(8pt)
+
+        // Metric/Provision/Inventory-Item fields (artifact under review)
+        if metric-fields.len() > 0 {
+          text(weight: "semibold", size: 9pt, fill: clr-muted, metric-fields-label)
+          v(3pt)
+          block(width: 100%, {
+            for f in metric-fields {
+              meta-row(f.at("label"), f.at("value"))
+              v(2pt)
+            }
+          })
+          v(8pt)
+        }
+
         // Source blocks (one per location group)
         text(weight: "semibold", size: 9pt, fill: clr-muted, label("related-source-lines"))
         v(3pt)
@@ -144,17 +186,18 @@
         }
         v(8pt)
 
-        // Errors
-        text(weight: "semibold", size: 9pt, fill: clr-error-fg, label("errors"))
-        v(3pt)
-        error-block(errors)
-        v(8pt)
-
-        // Explanation
-        text(weight: "semibold", size: 9pt, fill: clr-muted, label("explanation"))
-        v(3pt)
-        block(width: 100%, text(size: 9pt, explanation))
-        v(8pt)
+        // Referenced Metric/Provision/Inventory-Item fields (matched artifact)
+        if related-metric-fields.len() > 0 {
+          text(weight: "semibold", size: 9pt, fill: clr-muted, related-metric-fields-label)
+          v(3pt)
+          block(width: 100%, {
+            for f in related-metric-fields {
+              meta-row(f.at("label"), f.at("value"))
+              v(2pt)
+            }
+          })
+          v(8pt)
+        }
 
         if related-sources.len() > 0 {
           text(weight: "semibold", size: 9pt, fill: clr-muted, label("referenced-matching-metric-lines"))
@@ -173,13 +216,7 @@
             )
             if i < rel-n - 1 { v(6pt) }
           }
-          v(8pt)
         }
-
-        // Recommended correction
-        text(weight: "semibold", size: 9pt, fill: rgb("#15803d"), label("recommended-correction"))
-        v(3pt)
-        recommendation-block(correction)
       })
     },
   )

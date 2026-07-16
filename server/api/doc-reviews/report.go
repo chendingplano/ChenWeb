@@ -90,6 +90,12 @@ type ReportFinding struct {
 	ArtifactID string          `json:"artifact_id,omitempty"`
 	Sources    []SourceContext `json:"sources,omitempty"` // source blocks with before/after context
 	Related    []SourceContext `json:"related_sources,omitempty"`
+	// ArtifactFields/RelatedArtifactFields are the name-value snapshot of the
+	// artifact under review and the matched/referenced artifact (ADR
+	// 2026071603), rendered as the "Metric"/"Referenced Metric" report blocks
+	// for the metrics/provisions/inventory_items reviewers.
+	ArtifactFields        json.RawMessage `json:"artifact_fields,omitempty"`
+	RelatedArtifactFields json.RawMessage `json:"related_artifact_fields,omitempty"`
 }
 
 // ComplianceSummary captures compliance-related findings.
@@ -181,9 +187,11 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 				Pass: f.Pass, Aspect: f.Aspect, Severity: f.Severity,
 				FindingType: f.FindingType, Title: f.Title, Description: cleanReportDescription(f.Description, len(related) > 0),
 				Evidence: f.Evidence, Location: f.Location, Suggestion: f.Suggestion,
-				Confidence: f.Confidence,
-				ArtifactID: f.ArtifactID,
-				Related:    related,
+				Confidence:            f.Confidence,
+				ArtifactID:            f.ArtifactID,
+				Related:               related,
+				ArtifactFields:        f.ArtifactFields,
+				RelatedArtifactFields: f.RelatedArtifactFields,
 			}
 			rf.Sources = g.buildSources(lineIndex, f)
 			rfList = append(rfList, rf)

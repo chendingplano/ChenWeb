@@ -280,10 +280,23 @@ func (r *metricsReviewer) reviewMetric(
 	}
 
 	loc := strings.Join(dm.spans, ",")
+	artifactFields, _ := json.Marshal(dm.view)
+	matchedByID := make(map[string]metricView, len(ms))
+	for _, m := range ms {
+		if m.view.MetricID != "" {
+			matchedByID[m.view.MetricID] = m.view
+		}
+	}
 	for i := range findings {
 		findings[i].Pass = "P5"
 		findings[i].Aspect = "metrics"
 		findings[i].ArtifactID = dm.view.MetricID
+		findings[i].ArtifactFields = artifactFields
+		if matched, ok := matchedByID[findings[i].RelatedArtifactID]; ok {
+			if relatedFields, err := json.Marshal(matched); err == nil {
+				findings[i].RelatedArtifactFields = relatedFields
+			}
+		}
 		if findings[i].FindingType == "" {
 			findings[i].FindingType = "issue"
 		}

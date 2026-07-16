@@ -322,10 +322,184 @@ func copyLocalizedSources(dst, src *ReportSkeleton) {
 	}
 }
 
+// artifactTypeLabel returns the localized display name for the artifact type
+// of an artifact-anchored aspect (ADR 2026071603 DR5/DR6): used both as the
+// "Metric"/"Provision"/"Inventory Item" field-block header and as the
+// artifact-group section title prefix.
+func artifactTypeLabel(aspect, lang string) string {
+	zh := lang == "zh-cn" || lang == "zh" || lang == "zh-hans"
+	switch aspect {
+	case "metrics":
+		if zh {
+			return "指标"
+		}
+		return "Metric"
+	case "provisions":
+		if zh {
+			return "条款"
+		}
+		return "Provision"
+	case "inventory_items":
+		if zh {
+			return "产品/零部件"
+		}
+		return "Inventory Item"
+	default:
+		return aspect
+	}
+}
+
+// referencedArtifactLabel is the header for the "referenced artifact"
+// name-value block (ADR 2026071603 DR4/DR6).
+func referencedArtifactLabel(aspect, lang string) string {
+	typeLabel := artifactTypeLabel(aspect, lang)
+	if lang == "zh-cn" || lang == "zh" || lang == "zh-hans" {
+		return "引用的" + typeLabel + "说明"
+	}
+	return "Referenced " + typeLabel
+}
+
+// joinFieldValues renders a string slice as a single field value, dropping
+// blank entries.
+func joinFieldValues(items []string) string {
+	var out []string
+	for _, s := range items {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// addFieldRow appends (label, value) to rows when value is non-blank, using
+// the English or Chinese label per lang.
+func addFieldRow(rows [][2]string, enLabel, zhLabel, value, lang string) [][2]string {
+	if value == "" {
+		return rows
+	}
+	if lang == "zh-cn" || lang == "zh" || lang == "zh-hans" {
+		return append(rows, [2]string{zhLabel, value})
+	}
+	return append(rows, [2]string{enLabel, value})
+}
+
+// metricFieldRows converts a metricView into ordered (label, value) rows,
+// mirroring the metric_under_review payload shape (ADR 2026062203 §1.1.1).
+func metricFieldRows(v metricView, lang string) [][2]string {
+	var rows [][2]string
+	rows = addFieldRow(rows, "Metric ID", "指标ID", v.MetricID, lang)
+	rows = addFieldRow(rows, "Metric Name", "指标名称", v.MetricName, lang)
+	rows = addFieldRow(rows, "Metric Name (EN)", "指标名称（英文）", v.MetricNameEn, lang)
+	rows = addFieldRow(rows, "Subject", "对象", v.Subject, lang)
+	rows = addFieldRow(rows, "Subject (EN)", "对象（英文）", v.SubjectEn, lang)
+	rows = addFieldRow(rows, "Description", "描述", v.Description, lang)
+	rows = addFieldRow(rows, "Description (EN)", "描述（英文）", v.DescriptionEn, lang)
+	rows = addFieldRow(rows, "Context", "上下文", v.Context, lang)
+	rows = addFieldRow(rows, "Context (EN)", "上下文（英文）", v.ContextEn, lang)
+	rows = addFieldRow(rows, "Value", "数值", v.Value, lang)
+	rows = addFieldRow(rows, "Unit", "单位", v.Unit, lang)
+	rows = addFieldRow(rows, "Unit (EN)", "单位（英文）", v.UnitEn, lang)
+	rows = addFieldRow(rows, "Value Data Type", "数值类型", v.ValueDataType, lang)
+	rows = addFieldRow(rows, "Value Range Type", "取值范围类型", v.ValueRangeType, lang)
+	rows = addFieldRow(rows, "Value Class", "数值类别", v.ValueClass, lang)
+	rows = addFieldRow(rows, "Value Class (EN)", "数值类别（英文）", v.ValueClassEn, lang)
+	rows = addFieldRow(rows, "Formula / Definition", "公式/定义", v.FormulaDefinition, lang)
+	rows = addFieldRow(rows, "Threshold / Target", "阈值/目标", v.ThresholdTarget, lang)
+	rows = addFieldRow(rows, "Measurement Frequency", "测量频率", v.Frequency, lang)
+	rows = addFieldRow(rows, "Location Type", "位置类型", v.LocationType, lang)
+	rows = addFieldRow(rows, "Table / Section", "表格/章节", v.TableSection, lang)
+	rows = addFieldRow(rows, "Categories", "分类", joinFieldValues(v.Categories), lang)
+	rows = addFieldRow(rows, "Source Line Spans", "源行范围", joinFieldValues(v.SourceLineSpans), lang)
+	return rows
+}
+
+// provisionFieldRows converts a provisionView into ordered (label, value)
+// rows, mirroring the provision_under_review payload shape (ADR 2026062203
+// §1.1.2).
+func provisionFieldRows(v provisionView, lang string) [][2]string {
+	var rows [][2]string
+	rows = addFieldRow(rows, "Provision ID", "条款ID", v.ProvID, lang)
+	rows = addFieldRow(rows, "Provision Name", "条款名称", v.ProvName, lang)
+	rows = addFieldRow(rows, "Provision Type", "条款类型", v.Type, lang)
+	rows = addFieldRow(rows, "Provision Text", "条款内容", v.Provision, lang)
+	rows = addFieldRow(rows, "Subject", "对象", v.Subject, lang)
+	rows = addFieldRow(rows, "Category Paths", "分类路径", joinFieldValues(v.Categories), lang)
+	rows = addFieldRow(rows, "Source Line Spans", "源行范围", joinFieldValues(v.SourceLineSpans), lang)
+	return rows
+}
+
+// inventoryItemFieldRows converts an inventoryItemView into ordered
+// (label, value) rows, mirroring the inventory_item_under_review payload
+// shape (ADR 2026062203 §1.1.3).
+func inventoryItemFieldRows(v inventoryItemView, lang string) [][2]string {
+	var rows [][2]string
+	rows = addFieldRow(rows, "Item ID", "物项ID", v.ItemID, lang)
+	rows = addFieldRow(rows, "Item Name", "物项名称", v.ItemName, lang)
+	rows = addFieldRow(rows, "Canonical Name", "规范名称", v.CanonicalName, lang)
+	rows = addFieldRow(rows, "Manufacturer", "制造商", v.Manufacturer, lang)
+	rows = addFieldRow(rows, "Brand", "品牌", v.Brand, lang)
+	rows = addFieldRow(rows, "Model Number", "型号", v.ModelNumber, lang)
+	rows = addFieldRow(rows, "Part Number", "零件号", v.PartNumber, lang)
+	rows = addFieldRow(rows, "Item Categories", "物项分类", joinFieldValues(v.Categories), lang)
+	rows = addFieldRow(rows, "Standards", "标准", joinFieldValues(v.Standards), lang)
+	if specs := strings.TrimSpace(string(v.NormalizedSpecs)); specs != "" && specs != "null" {
+		rows = addFieldRow(rows, "Normalized Specs", "规范化规格", specs, lang)
+	}
+	rows = addFieldRow(rows, "Source Line Spans", "源行范围", joinFieldValues(v.SourceLineSpans), lang)
+	return rows
+}
+
+// artifactFieldRows decodes raw (the ArtifactFields/RelatedArtifactFields
+// snapshot persisted per ADR 2026071603) into ordered display rows, picking
+// the view type from aspect. Returns nil when raw is empty/undecodable
+// (legacy findings, or no matched artifact).
+func artifactFieldRows(aspect string, raw json.RawMessage, lang string) [][2]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	switch aspect {
+	case "metrics":
+		var v metricView
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil
+		}
+		return metricFieldRows(v, lang)
+	case "provisions":
+		var v provisionView
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil
+		}
+		return provisionFieldRows(v, lang)
+	case "inventory_items":
+		var v inventoryItemView
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil
+		}
+		return inventoryItemFieldRows(v, lang)
+	default:
+		return nil
+	}
+}
+
+// fieldRowsArg renders rows as a Typst array of (label:, value:) dicts.
+func fieldRowsArg(rows [][2]string) string {
+	if len(rows) == 0 {
+		return "()"
+	}
+	var b strings.Builder
+	b.WriteString("(\n")
+	for _, row := range rows {
+		fmt.Fprintf(&b, "          (label: %q, value: [%s]),\n", typStr(row[0]), typContent(row[1]))
+	}
+	b.WriteString("        )")
+	return b.String()
+}
+
 // buildFindingBlock renders one review-finding(...) Typst call for f, using
 // fid as its displayed id (either the DB finding id or an "F-NN" ordinal
-// fallback — see findingDisplayID).
-func buildFindingBlock(f ReportFinding, fid, labelsArg string) string {
+// fallback — see findingDisplayID). lang selects field-row/label
+// localization for the artifact/related-artifact blocks (ADR 2026071603).
+func buildFindingBlock(f ReportFinding, fid, labelsArg, lang string) string {
 	var blockB strings.Builder
 	fmt.Fprintf(&blockB, "      review-finding(\n")
 	fmt.Fprintf(&blockB, "        labels: %s,\n", labelsArg)
@@ -379,6 +553,15 @@ func buildFindingBlock(f ReportFinding, fid, labelsArg string) string {
 	fmt.Fprintf(&blockB, "        errors: [%s],\n", typContent(f.Title))
 	fmt.Fprintf(&blockB, "        explanation: [%s],\n", typContent(f.Description))
 	fmt.Fprintf(&blockB, "        correction: [%s],\n", typContent(f.Suggestion))
+
+	// Artifact/related-artifact name-value blocks (ADR 2026071603).
+	metricFields := artifactFieldRows(f.Aspect, f.ArtifactFields, lang)
+	fmt.Fprintf(&blockB, "        metric-fields: %s,\n", fieldRowsArg(metricFields))
+	fmt.Fprintf(&blockB, "        metric-fields-label: %q,\n", typStr(artifactTypeLabel(f.Aspect, lang)))
+	relatedMetricFields := artifactFieldRows(f.Aspect, f.RelatedArtifactFields, lang)
+	fmt.Fprintf(&blockB, "        related-metric-fields: %s,\n", fieldRowsArg(relatedMetricFields))
+	fmt.Fprintf(&blockB, "        related-metric-fields-label: %q,\n", typStr(referencedArtifactLabel(f.Aspect, lang)))
+
 	fmt.Fprintf(&blockB, "      ),")
 	return blockB.String()
 }
@@ -422,7 +605,7 @@ func isArtifactAnchoredAspect(aspect string) bool {
 // IDs) so "no conflict" comparisons are still visible (ADR 2026070602 / ADR
 // 2026062203 §1.2). findingIdx is the shared ordinal counter also used by the
 // flat-findings path, threaded by pointer so numbering stays continuous.
-func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]ProvisionAnalysis, aspect string, findingIdx *int, labelsArg string) string {
+func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]ProvisionAnalysis, aspect string, findingIdx *int, labelsArg, lang string) string {
 	artifactFindingMap := map[string][]ReportFinding{}
 	minFindingID := map[string]int64{}
 	var artifactIDs []string
@@ -464,7 +647,7 @@ func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]P
 		var findingBlocks []string
 		for _, f := range artifactFindingMap[artifactID] {
 			*findingIdx++
-			findingBlocks = append(findingBlocks, buildFindingBlock(f, findingDisplayID(f.ID, *findingIdx), labelsArg))
+			findingBlocks = append(findingBlocks, buildFindingBlock(f, findingDisplayID(f.ID, *findingIdx), labelsArg, lang))
 		}
 		var findingsArg string
 		if len(findingBlocks) > 0 {
@@ -483,9 +666,11 @@ func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]P
 			analysesArg = "\n" + strings.Join(analysisBlocks, "\n") + "\n      "
 		}
 
-		title := artifactID
-		if title == "" {
-			title = "(unidentified artifact)"
+		title := artifactTypeLabel(aspect, lang)
+		if artifactID != "" {
+			title += " (" + artifactID + ")"
+		} else {
+			title += " (unidentified artifact)"
 		}
 		groups = append(groups, fmt.Sprintf(
 			"      artifact-group(\n"+
@@ -605,7 +790,7 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 				}
 				findingIdx++
 				fid := findingDisplayID(f.ID, findingIdx)
-				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid, labelsArg))
+				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid, labelsArg, lex.language))
 			}
 
 			assessment := buildAssessment(len(af), aspectHighCount, lex.language)
@@ -614,7 +799,7 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 
 			var findingsArg, artifactGroupsArg string
 			if artifactAnchored {
-				artifactGroupsArg = buildArtifactGroupsArg(af, provisionAnalyses, aspect, &findingIdx, labelsArg)
+				artifactGroupsArg = buildArtifactGroupsArg(af, provisionAnalyses, aspect, &findingIdx, labelsArg, lex.language)
 			} else if len(findingBlocks) > 0 {
 				findingsArg = "\n" + strings.Join(findingBlocks, "\n") + "\n    "
 			}

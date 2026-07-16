@@ -50,6 +50,13 @@ type ReviewFinding struct {
 	// alongside findings in kb.doc_review_findings.
 	ResultKind           string `json:"result_kind,omitempty"`
 	AnalysisRelationship string `json:"analysis_relationship,omitempty"`
+
+	// ArtifactFields/RelatedArtifactFields are the name-value snapshot of the
+	// artifact under review and the matched/referenced artifact (ADR
+	// 2026071603), captured once at finding-creation time so the report
+	// renderer never has to requery kb.metrics/kb.provisions/kb.inventory_items.
+	ArtifactFields        json.RawMessage `json:"artifact_fields,omitempty"`
+	RelatedArtifactFields json.RawMessage `json:"related_artifact_fields,omitempty"`
 }
 
 // ReviewStrategy selects how a reviewer processes a document.

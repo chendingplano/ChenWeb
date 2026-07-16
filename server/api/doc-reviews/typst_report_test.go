@@ -244,11 +244,11 @@ func TestBuildTypstSourceGroupsMetricsFindingsByArtifactID(t *testing.T) {
 	if !strings.Contains(src, `artifact-group(`) {
 		t.Fatalf("typst source missing artifact-group(...) calls: %s", src)
 	}
-	if !strings.Contains(src, `title: "1001_m_7"`) || !strings.Contains(src, `title: "1001_m_9"`) {
+	if !strings.Contains(src, `title: "Metric (1001_m_7)"`) || !strings.Contains(src, `title: "Metric (1001_m_9)"`) {
 		t.Fatalf("typst source missing per-artifact titles: %s", src)
 	}
 	// Both findings for 1001_m_7 must land inside the SAME artifact-group call.
-	groupStart := strings.Index(src, `title: "1001_m_7"`)
+	groupStart := strings.Index(src, `title: "Metric (1001_m_7)"`)
 	nextGroup := strings.Index(src[groupStart+1:], "artifact-group(")
 	segment := src[groupStart:]
 	if nextGroup >= 0 {
@@ -301,7 +301,7 @@ func TestBuildTypstSourceRendersProvisionsAnalysesWithNoFindings(t *testing.T) {
 	if !strings.Contains(src, `title: "Provision Consistency"`) {
 		t.Fatalf("expected a provisions aspect-section even with zero findings: %s", src)
 	}
-	if !strings.Contains(src, `title: "1001_prv_3"`) {
+	if !strings.Contains(src, `title: "Provision (1001_prv_3)"`) {
 		t.Fatalf("expected an artifact-group for the analysis-only provision: %s", src)
 	}
 	if !strings.Contains(src, "Identical, no conflict.") {
@@ -318,7 +318,7 @@ func TestBuildFindingBlockRendersSourcesAndCorrection(t *testing.T) {
 		Sources:     []SourceContext{{Source: "115: source line"}},
 		Related:     []SourceContext{{Before: "85: before", Source: "87: matched metric", After: "88: after"}},
 	}
-	block := buildFindingBlock(f, "42", typstLabelsArg(reportLexiconForLanguage("en").labels))
+	block := buildFindingBlock(f, "42", typstLabelsArg(reportLexiconForLanguage("en").labels), "en")
 	if !strings.Contains(block, `id: "42"`) {
 		t.Fatalf("block missing id: %s", block)
 	}

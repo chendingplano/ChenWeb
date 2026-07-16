@@ -240,10 +240,23 @@ func (r *inventoryItemsReviewer) reviewItem(
 	}
 
 	loc := strings.Join(di.spans, ",")
+	artifactFields, _ := json.Marshal(di.view)
+	matchedByID := make(map[string]inventoryItemView, len(ms))
+	for _, m := range ms {
+		if m.view.ItemID != "" {
+			matchedByID[m.view.ItemID] = m.view
+		}
+	}
 	for i := range findings {
 		findings[i].Pass = "P5"
 		findings[i].Aspect = "inventory_items"
 		findings[i].ArtifactID = di.view.ItemID
+		findings[i].ArtifactFields = artifactFields
+		if matched, ok := matchedByID[findings[i].RelatedArtifactID]; ok {
+			if relatedFields, err := json.Marshal(matched); err == nil {
+				findings[i].RelatedArtifactFields = relatedFields
+			}
+		}
 		if findings[i].FindingType == "" {
 			findings[i].FindingType = "issue"
 		}

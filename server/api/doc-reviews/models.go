@@ -87,6 +87,12 @@ type FindingItem struct {
 	// referenced by this finding, when present in finding metadata.
 	RelatedArtifactID string `json:"related_artifact_id,omitempty"`
 	RelatedRecordID   int64  `json:"related_record_id,omitempty"`
+	// ArtifactFields/RelatedArtifactFields are the name-value snapshot of the
+	// artifact under review and the matched/referenced artifact (ADR
+	// 2026071603), captured at finding-creation time and read back verbatim
+	// by the report renderer.
+	ArtifactFields        json.RawMessage `json:"artifact_fields,omitempty"`
+	RelatedArtifactFields json.RawMessage `json:"related_artifact_fields,omitempty"`
 }
 
 // FindingLocalizedContent stores localized prose for one language.
@@ -124,6 +130,8 @@ var findingMetadataReservedKeys = map[string]bool{
 	"related_record_id":          true,
 	"result_kind":                true,
 	"analysis_relationship":      true,
+	"artifact_fields":            true,
+	"related_artifact_fields":    true,
 }
 
 // FindingMetadataEnvelope is stored in kb.doc_review_findings.metadata.
@@ -132,11 +140,13 @@ var findingMetadataReservedKeys = map[string]bool{
 // RelatedArtifactID/RelatedRecordID are the structured cross-document
 // reference of ADR 2026070201 AR5 §6 (zero values are omitted).
 type FindingMetadataEnvelope struct {
-	I18N                 FindingI18NMetadata
-	RelatedArtifactID    string
-	RelatedRecordID      int64
-	ResultKind           string
-	AnalysisRelationship string
+	I18N                  FindingI18NMetadata
+	RelatedArtifactID     string
+	RelatedRecordID       int64
+	ResultKind            string
+	AnalysisRelationship  string
+	ArtifactFields        json.RawMessage
+	RelatedArtifactFields json.RawMessage
 }
 
 func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
@@ -165,6 +175,12 @@ func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
 	}
 	if e.AnalysisRelationship != "" {
 		m["analysis_relationship"] = e.AnalysisRelationship
+	}
+	if len(e.ArtifactFields) > 0 {
+		m["artifact_fields"] = e.ArtifactFields
+	}
+	if len(e.RelatedArtifactFields) > 0 {
+		m["related_artifact_fields"] = e.RelatedArtifactFields
 	}
 	for lang, content := range e.I18N.Translations {
 		m[lang] = content
@@ -209,6 +225,12 @@ func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
 	if ar, ok := raw["analysis_relationship"]; ok {
 		_ = json.Unmarshal(ar, &e.AnalysisRelationship)
 	}
+	if af, ok := raw["artifact_fields"]; ok {
+		e.ArtifactFields = append(json.RawMessage(nil), af...)
+	}
+	if raf, ok := raw["related_artifact_fields"]; ok {
+		e.RelatedArtifactFields = append(json.RawMessage(nil), raf...)
+	}
 	for key, val := range raw {
 		if findingMetadataReservedKeys[key] {
 			continue
@@ -238,6 +260,8 @@ func applyFindingMetadata(f *FindingItem, data []byte) {
 	}
 	f.RelatedArtifactID = metadata.RelatedArtifactID
 	f.RelatedRecordID = metadata.RelatedRecordID
+	f.ArtifactFields = metadata.ArtifactFields
+	f.RelatedArtifactFields = metadata.RelatedArtifactFields
 }
 
 // FindingNormalization is the result of converting reviewer output into a

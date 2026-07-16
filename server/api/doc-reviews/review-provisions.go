@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -241,10 +242,23 @@ func (r *provisionsReviewer) reviewProvision(
 	}
 
 	loc := strings.Join(dp.spans, ",")
+	artifactFields, _ := json.Marshal(dp.view)
+	matchedByID := make(map[string]provisionView, len(ms))
+	for _, m := range ms {
+		if m.view.ProvID != "" {
+			matchedByID[m.view.ProvID] = m.view
+		}
+	}
 	for i := range findings {
 		findings[i].Pass = "P5"
 		findings[i].Aspect = "provisions"
 		findings[i].ArtifactID = dp.view.ProvID
+		findings[i].ArtifactFields = artifactFields
+		if matched, ok := matchedByID[findings[i].RelatedArtifactID]; ok {
+			if relatedFields, err := json.Marshal(matched); err == nil {
+				findings[i].RelatedArtifactFields = relatedFields
+			}
+		}
 		if findings[i].FindingType == "" {
 			findings[i].FindingType = "issue"
 		}
