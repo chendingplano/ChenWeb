@@ -1338,6 +1338,18 @@ export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
 	return response.config;
 }
 
+// Wiki sidebar menu item id -> enabled. Ids absent from the map default to
+// enabled on the frontend. See config.local.toml's [knowledge-menus] section.
+export type KbMenuConfig = Record<string, boolean>;
+
+export async function getKbMenuConfig(): Promise<KbMenuConfig> {
+	const response = await fetchOrThrow<{ status: boolean; menus: KbMenuConfig }>(
+		`${BASE}/menu-config`,
+		'Failed to load kb menu config'
+	);
+	return response.menus;
+}
+
 export async function updateRecordTopic(
 	payload: UpdateRecordTopicPayload
 ): Promise<{ status: boolean }> {

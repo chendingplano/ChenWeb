@@ -4,7 +4,7 @@
 [branding]
 site_name = "SemOS"
 logo_text = "SemOS"
-logo_image = "/images/logo-semos.svg"
+logo_image = "/images/logo-bzton.png"
 powered_by = "Powered by SemOS"
 
 [hero]

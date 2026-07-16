@@ -371,6 +371,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/record-topics", kbhandler.GetRecordTopics)
 	apiGroup.PUT("/kb/record-topic", kbhandler.UpdateRecordTopic)
 	apiGroup.GET("/kb/config", kbhandler.GetKbFrontendConfig)
+	apiGroup.GET("/kb/menu-config", kbhandler.GetKbMenuConfig)
 	apiGroup.GET("/kb/provision-graph", kbhandler.ListProvisionGraph)
 	apiGroup.GET("/kb/provision-category", kbhandler.GetProvisionCategory)
 	apiGroup.GET("/kb/record-provisions", kbhandler.GetRecordProvisions)

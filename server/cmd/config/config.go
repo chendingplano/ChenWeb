@@ -179,6 +179,11 @@ type AppConfigDef struct {
 	// in config.toml / config.local.toml. When empty, the Document Review
 	// feature falls back to its built-in priority-derived tiers.
 	DocReviews map[string][]string `mapstructure:"doc-reviews"`
+	// KnowledgeMenus maps a Wiki sidebar menu item id (e.g. "kb-doc-wiki") to
+	// whether it is shown. Configured via [knowledge-menus] in config.toml /
+	// config.local.toml. Ids absent from the map default to enabled. When
+	// empty, the full Wiki sidebar menu is shown.
+	KnowledgeMenus map[string]bool `mapstructure:"knowledge-menus"`
 }
 
 type PDFParserConfig struct {
@@ -317,6 +322,13 @@ func GetDocGenConfig() DocGenConfig {
 // case the Document Review feature uses its built-in defaults.
 func GetDocReviewsConfig() map[string][]string {
 	return AppConfig.DocReviews
+}
+
+// GetKnowledgeMenusConfig returns the configured Wiki sidebar menu id->enabled
+// mapping. Returns nil/empty when no [knowledge-menus] section is present, in
+// which case every menu item defaults to enabled.
+func GetKnowledgeMenusConfig() map[string]bool {
+	return AppConfig.KnowledgeMenus
 }
 
 func GetLanguages() []string {

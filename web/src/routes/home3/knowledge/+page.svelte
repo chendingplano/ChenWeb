@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { goto } from '$app/navigation';
@@ -38,7 +39,12 @@
 	import ObjectManagerView from '$lib/components/home3/object-manager-view.svelte';
 	import SemanticProjectionsView from '$lib/components/home3/semantic-projections-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
-	import { getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
+	import {
+		getProvisionCategory,
+		listProvisionGraph,
+		getKbMenuConfig,
+		type KbMenuConfig
+	} from '$lib/services/kbService';
 	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
 	import {
 		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
@@ -212,6 +218,36 @@
 			]
 		}
 	];
+
+	// Wiki sidebar menu visibility, from [knowledge-menus] in
+	// config.toml / config.local.toml (GET /api/v1/kb/menu-config). Ids
+	// absent from the map default to enabled. Empty until the fetch
+	// resolves, so the full menu renders first paint (fail-open).
+	let menuConfig = $state<KbMenuConfig>({});
+
+	onMount(() => {
+		getKbMenuConfig()
+			.then((cfg) => {
+				menuConfig = cfg;
+			})
+			.catch(() => {
+				// Keep the full menu on failure.
+			});
+	});
+
+	// Filters menuItems against menuConfig: a disabled parent hides its whole
+	// subtree, a disabled child hides just that child, and a parent that had
+	// children but ends up with none visible is hidden too.
+	let visibleMenuItems = $derived(
+		menuItems
+			.filter((item) => menuConfig[item.id] !== false)
+			.map((item) => {
+				if (!item.children) return item;
+				const children = item.children.filter((child) => menuConfig[child.id] !== false);
+				return { ...item, children };
+			})
+			.filter((item) => !item.children || item.children.length > 0)
+	);
 
 	let menuCollapsed = $state(false);
 	let menuCollapsedBeforeFocus = false;
@@ -432,7 +468,7 @@
 			class="flex-1 overflow-y-auto py-2"
 			style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 		>
-			{#each menuItems as item (item.id)}
+			{#each visibleMenuItems as item (item.id)}
 				<div class="mb-0.5 px-2">
 					{#if isCollapsibleParent(item)}
 						{#if menuCollapsed}
