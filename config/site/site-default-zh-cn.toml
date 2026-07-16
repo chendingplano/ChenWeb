@@ -8,9 +8,9 @@ logo_image = "/images/logo-bzton.png"
 powered_by = "Powered by SemOS"
 
 [hero]
-kicker = "Knowledge Management — AI Powered"
-slogan = "Your Knowledge, Working for You"
-subtitle = "SemOS turns documents into searchable, reviewable, actionable knowledge — and lets you build AI applications on top of it."
+kicker = "第二大脑 — AI Powered"
+slogan = "知识通 - 为AI时代的你保驾护航"
+subtitle = "知识通将文档转化为可搜索、可审阅、可操作、相互关联的知识海洋，构建 AI 的知识底座。"
 image = "/images/angleWalls.jpg"
 cta_primary_label = "Get Started"
 cta_primary_href = "/semos/workspace"
