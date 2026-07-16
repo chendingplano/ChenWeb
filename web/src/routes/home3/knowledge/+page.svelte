@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { PageData } from './$types';
 	import { page } from '$app/state';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { goto } from '$app/navigation';
@@ -46,7 +47,7 @@
 		type KbMenuConfig,
 		type KbMenuLabels
 	} from '$lib/services/kbService';
-	import { getLocale } from '$lib/paraglide/runtime';
+	import { getLocale, locales, setLocale } from '$lib/paraglide/runtime';
 	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
 	import {
 		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
@@ -57,6 +58,9 @@
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import LayersIcon from '@lucide/svelte/icons/layers';
+	import LanguagesIcon from '@lucide/svelte/icons/languages';
+	import Building2Icon from '@lucide/svelte/icons/building-2';
+	import LogoMark from '../../semos/components/LogoMark.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -97,6 +101,8 @@
 		icon: any;
 		children?: Array<{ id: KbSectionId; label: string; description: string }>;
 	};
+
+	let { data }: { data: PageData } = $props();
 
 	const menuItems: KbMenuItem[] = [
 		{
@@ -453,6 +459,11 @@
 			activeItem.label
 		);
 	}
+
+	function nextLocale(): (typeof locales)[number] {
+		const idx = locales.indexOf(getLocale());
+		return locales[(idx + 1) % locales.length];
+	}
 </script>
 
 <div class="kb-page flex overflow-hidden" style="background:{pageBg}; color:{textPrimary};">
@@ -467,6 +478,106 @@
 			transition:{menuResizing ? 'none' : 'width 200ms ease, flex-basis 200ms ease'};
 		"
 	>
+		<!-- Branding: company logo, language control, and Workspace link -->
+		<div
+			class="flex flex-shrink-0 items-center px-2"
+			style="height:{menuCollapsed ? 'auto' : '48px'}; border-bottom:1px solid {borderColor};"
+		>
+			{#if !menuCollapsed}
+				<div class="flex w-full items-center justify-between px-1">
+					<a href="/semos" class="flex items-baseline gap-1.5" aria-label="Go to semos home" title="semos">
+						<LogoMark
+							branding={data.siteConfig.branding}
+							textClass="text-[13px] font-bold tracking-[0.02em]"
+							dotClass="h-2 w-2"
+						/>
+					</a>
+					<div class="flex items-center gap-1">
+						<button
+							type="button"
+							onclick={() => setLocale(nextLocale())}
+							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+							style="border:none; background:transparent; color:{textMuted};"
+							onmouseenter={(e) => {
+								(e.currentTarget as HTMLElement).style.color = accent;
+							}}
+							onmouseleave={(e) => {
+								(e.currentTarget as HTMLElement).style.color = textMuted;
+							}}
+							aria-label="Switch language"
+							title="Switch language"
+						>
+							<LanguagesIcon class="h-4 w-4" />
+						</button>
+						<a
+							href="/semos/workspace"
+							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+							style="color:{textMuted};"
+							aria-label="Go to Workspace"
+							title="Go to Workspace"
+							onmouseenter={(e) => {
+								(e.currentTarget as HTMLElement).style.color = accent;
+							}}
+							onmouseleave={(e) => {
+								(e.currentTarget as HTMLElement).style.color = textMuted;
+							}}
+						>
+							<Building2Icon class="h-4 w-4" />
+						</a>
+					</div>
+				</div>
+			{:else}
+				<div class="flex w-full flex-col items-center gap-1 py-2">
+					<a
+						href="/semos"
+						class="flex h-8 w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+						style="color:{textMuted};"
+						aria-label="Go to semos home"
+						title="semos"
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = accent;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textMuted;
+						}}
+					>
+						<LogoMark branding={data.siteConfig.branding} textClass="hidden" dotClass="h-3 w-3" />
+					</a>
+					<button
+						type="button"
+						onclick={() => setLocale(nextLocale())}
+						class="flex h-8 w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+						style="border:none; background:transparent; color:{textMuted};"
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = accent;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textMuted;
+						}}
+						aria-label="Switch language"
+						title="Switch language"
+					>
+						<LanguagesIcon class="h-4 w-4" />
+					</button>
+					<a
+						href="/semos/workspace"
+						class="flex h-8 w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+						style="color:{textMuted};"
+						aria-label="Go to Workspace"
+						title="Go to Workspace"
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = accent;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textMuted;
+						}}
+					>
+						<Building2Icon class="h-4 w-4" />
+					</a>
+				</div>
+			{/if}
+		</div>
+
 		<!-- Header: matches nav-rail style -->
 		<div
 			class="flex flex-shrink-0 items-center px-2"
