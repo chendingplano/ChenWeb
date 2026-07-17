@@ -102,7 +102,6 @@ kicker = "Workspace"
 banner_title = "Your Workspace"
 banner_subtitle = "Everything you need to work with your knowledge base, in one place."
 banner_image = "/images/angleWalls.jpg"
-announcements = ["Welcome to your SemOS workspace."]
 
 [[workspace.apps]]
 key = "knowledge_base"

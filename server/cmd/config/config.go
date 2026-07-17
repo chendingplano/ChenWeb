@@ -141,6 +141,9 @@ type FrontendConfigSection struct {
 	// config.toml / config.local.toml.
 	EnableLoginWithGithub *bool `mapstructure:"enable_login_with_github"`
 	EnableLoginWithGoogle *bool `mapstructure:"enable_login_with_google"`
+	// AnnouncementsMax caps how many rows the workspace announcements list
+	// returns. Pointer so an unset key defaults to 5.
+	AnnouncementsMax *int `mapstructure:"announcements_max"`
 }
 
 type AppConfigDef struct {
@@ -391,6 +394,15 @@ func GetEnableLoginWithGoogle() bool {
 		return true
 	}
 	return *AppConfig.Frontend.EnableLoginWithGoogle
+}
+
+// GetAnnouncementsMax returns [frontend].announcements_max, defaulting to 5
+// when unset.
+func GetAnnouncementsMax() int {
+	if AppConfig.Frontend.AnnouncementsMax == nil {
+		return 5
+	}
+	return *AppConfig.Frontend.AnnouncementsMax
 }
 
 func GetArtifactSearchConfig() ArtifactSearchConfig {

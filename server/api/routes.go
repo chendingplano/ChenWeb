@@ -37,6 +37,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
+	"github.com/chendingplano/deepdoc/server/api/workspacelists"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -232,6 +233,23 @@ func RegisterRoutes(e *echo.Echo) error {
 	// /semos/workspace content visibility + i18n label overrides
 	// (ADR 2026071701, mirroring /kb/menu-config below).
 	apiGroup.GET("/workspace/content-config", sitehandler.GetWorkspaceContentConfig)
+
+	// /semos/workspace status lists (announcements, recent activities,
+	// alarms/errors) and their /semos/admin/* CRUD pages.
+	apiGroup.GET("/workspace/announcements", workspacelists.ListAnnouncements)
+	apiGroup.GET("/workspace/announcements/admin", workspacelists.ListAnnouncementsAdmin)
+	apiGroup.POST("/workspace/announcements", workspacelists.CreateAnnouncement)
+	apiGroup.PUT("/workspace/announcements/:group_id", workspacelists.UpdateAnnouncement)
+	apiGroup.DELETE("/workspace/announcements/:group_id", workspacelists.DeleteAnnouncement)
+
+	apiGroup.GET("/workspace/recent-activities", workspacelists.ListRecentActivities)
+	apiGroup.GET("/workspace/recent-activities/admin", workspacelists.ListRecentActivitiesAdmin)
+	apiGroup.POST("/workspace/recent-activities", workspacelists.CreateActivity)
+	apiGroup.PUT("/workspace/recent-activities/:group_id", workspacelists.UpdateActivity)
+	apiGroup.DELETE("/workspace/recent-activities/:group_id", workspacelists.DeleteActivity)
+
+	apiGroup.GET("/workspace/alarms", workspacelists.ListAlarms)
+	apiGroup.PATCH("/workspace/alarms/:id", workspacelists.UpdateAlarm)
 
 	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 

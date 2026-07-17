@@ -11,6 +11,14 @@
 		type WorkspaceContentLabels,
 		type WorkspaceContentDescriptions
 	} from '$lib/services/siteConfigService';
+	import {
+		fetchAnnouncements,
+		fetchRecentActivities,
+		fetchAlarms,
+		type Announcement,
+		type RecentActivity,
+		type Alarm
+	} from '$lib/services/workspaceListsService';
 	import Ornament from '../components/Ornament.svelte';
 	import { ArrowUpRight, AlertTriangle } from '@lucide/svelte';
 
@@ -111,6 +119,22 @@
 			.catch(() => {
 				// Keep the full page, with default labels/descriptions, on failure.
 			});
+
+		fetchAnnouncements(contentConfigLang)
+			.then((a) => (announcements = a))
+			.catch(() => {
+				// Keep the empty-state rendering on failure.
+			});
+		fetchRecentActivities(contentConfigLang)
+			.then((a) => (recentActivities = a))
+			.catch(() => {
+				// Keep the empty-state rendering on failure.
+			});
+		fetchAlarms()
+			.then((a) => (alarms = a))
+			.catch(() => {
+				// Keep the empty-state rendering on failure.
+			});
 	});
 
 	const showKicker = $derived(contentVisibility[WS_KICKER_ID] ?? true);
@@ -154,25 +178,45 @@
 		dateStyle: 'full'
 	}).format(new Date());
 
-	const announcements = $derived(cfg.workspace.announcements ?? []);
+	// Announcements, recent activities, and alarms/errors are DB-backed
+	// (kb.site_announcements, kb.recent_activities, alarms_errors — see
+	// openspec/changes/workspace-lists-live-data). Fetched once on mount for
+	// the site-wide language; empty until the fetch resolves.
+	let announcements = $state<Announcement[]>([]);
+	let recentActivities = $state<RecentActivity[]>([]);
+	let alarms = $state<Alarm[]>([]);
 
-	// Recent activity and alarms have no backing endpoint yet. They render an
-	// empty state rather than sample content: ADR 2026071102 records a prior
-	// pass that shipped invented figures, and demo data that reads as real is
-	// exactly that mistake. Wire these to a real feed when one exists.
-	const recentActivity: string[] = [];
-	const alarms: string[] = [];
+	function formatDateTime(iso: string): string {
+		try {
+			return new Intl.DateTimeFormat(getLocale() === 'zh-cn' ? 'zh-CN' : 'en-US', {
+				dateStyle: 'medium',
+				timeStyle: 'short'
+			}).format(new Date(iso));
+		} catch {
+			return iso;
+		}
+	}
 
 	const deskColumns = $derived([
 		{
 			title: m.semos_workspace_recent(),
-			items: recentActivity,
+			items: recentActivities.map((a) => ({
+				key: a.group_id,
+				time: formatDateTime(a.occurred_at),
+				label: a.activity_type,
+				text: a.text
+			})),
 			empty: m.semos_workspace_no_activity(),
 			alert: false
 		},
 		{
 			title: m.semos_workspace_alarms(),
-			items: alarms,
+			items: alarms.map((a) => ({
+				key: a.id,
+				time: formatDateTime(a.occurred_at),
+				label: a.severity,
+				text: a.message
+			})),
 			empty: m.semos_workspace_no_alarms(),
 			// An alarm count is a signal, not decoration: it is the one thing on
 			// this page allowed to break the bronze palette when it is non-zero.
@@ -335,15 +379,17 @@
 					</p>
 				{:else}
 					<ul class="border-t border-[#17181c]/10 dark:border-white/10">
-						{#each announcements as item (item)}
+						{#each announcements as item (item.group_id)}
 							<li
-								class="flex gap-3 border-b border-[#17181c]/10 py-4 leading-[1.8] text-[#3d3c38] dark:border-white/10 dark:text-[#c6c3bc]"
+								class="grid grid-cols-[7rem_5rem_1fr] items-baseline gap-x-4 border-b border-[#17181c]/10 py-4 leading-[1.8] text-[#3d3c38] dark:border-white/10 dark:text-[#c6c3bc]"
 							>
-								<span
-									class="mt-[0.55rem] inline-block h-1.5 w-1.5 shrink-0 rotate-45 bg-[#b08d57]"
-									aria-hidden="true"
-								></span>
-								<span>{item}</span>
+								<span class="text-xs tabular-nums text-[#6f6c66] dark:text-[#a5a29b]">
+									{formatDateTime(item.occurred_at)}
+								</span>
+								<span class="text-xs font-bold tracking-[0.1em] uppercase text-[#b08d57]">
+									{item.importance}
+								</span>
+								<span>{item.text}</span>
 							</li>
 						{/each}
 					</ul>
@@ -446,15 +492,15 @@
 						</div>
 					{:else}
 						<ul class="mt-5 border-t border-[#17181c]/10 text-sm dark:border-white/10">
-							{#each col.items as item (item)}
+							{#each col.items as row (row.key)}
 								<li
-									class="flex gap-3 border-b border-[#17181c]/10 py-3.5 leading-[1.8] text-[#6f6c66] dark:border-white/10 dark:text-[#a5a29b]"
+									class="grid grid-cols-[6rem_5rem_1fr] items-baseline gap-x-3 border-b border-[#17181c]/10 py-3.5 leading-[1.8] text-[#6f6c66] dark:border-white/10 dark:text-[#a5a29b]"
 								>
-									<span
-										class="mt-[0.5rem] inline-block h-1 w-1 shrink-0 rounded-full bg-[#b08d57]/50"
-										aria-hidden="true"
-									></span>
-									<span>{item}</span>
+									<span class="text-xs tabular-nums">{row.time}</span>
+									<span class="text-xs font-bold uppercase tracking-[0.1em] text-[#b08d57]"
+										>{row.label}</span
+									>
+									<span>{row.text}</span>
 								</li>
 							{/each}
 						</ul>

@@ -27,12 +27,6 @@ func TestLoadSiteConfigValid(t *testing.T) {
 	if cfg.Workspace.Kicker != "Workspace" {
 		t.Errorf("Workspace.Kicker = %q, want Workspace", cfg.Workspace.Kicker)
 	}
-	if len(cfg.Workspace.Announcements) != 1 {
-		t.Fatalf("len(Workspace.Announcements) = %d, want 1", len(cfg.Workspace.Announcements))
-	}
-	if cfg.Workspace.Announcements[0] != "Welcome to your SemOS workspace." {
-		t.Errorf("Announcements[0] = %q", cfg.Workspace.Announcements[0])
-	}
 	if cfg.Hero.CTAPrimaryHref != "/semos/workspace" {
 		t.Errorf("CTAPrimaryHref = %q", cfg.Hero.CTAPrimaryHref)
 	}

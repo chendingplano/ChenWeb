@@ -60,7 +60,7 @@ export interface AboutValue {
 /**
  * Copy for the 关于我们 (About Us) page. Contact details (email, address)
  * are not duplicated here — the page reads them from SiteFooter.
- * Nullable arrays: Go marshals nil slices to `null` (see announcements).
+ * Nullable arrays: Go marshals nil slices to `null` (see `story`/`values` below).
  */
 export interface SiteAbout {
 	kicker: string;
@@ -93,9 +93,6 @@ export interface SiteWorkspace {
 	banner_title: string;
 	banner_subtitle: string;
 	banner_image: string;
-	// Nullable: Go marshals a nil slice to `null`, so an omitted `announcements`
-	// key arrives as null rather than [].
-	announcements: string[] | null;
 	apps: WorkspaceApp[];
 }
 

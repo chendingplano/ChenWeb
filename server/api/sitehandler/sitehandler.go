@@ -117,7 +117,6 @@ type Workspace struct {
 	BannerTitle    string         `toml:"banner_title" json:"banner_title"`
 	BannerSubtitle string         `toml:"banner_subtitle" json:"banner_subtitle"`
 	BannerImage    string         `toml:"banner_image" json:"banner_image"`
-	Announcements  []string       `toml:"announcements" json:"announcements"`
 	Apps           []WorkspaceApp `toml:"apps" json:"apps"`
 }
 
