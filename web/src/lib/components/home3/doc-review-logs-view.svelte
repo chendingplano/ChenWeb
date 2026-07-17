@@ -27,6 +27,8 @@
 	let filterAspect = $state(''), filterUnitType = $state(''), filterOutcome = $state(''), filterUnitKey = $state('');
 	let filterStart = $state(''), filterEnd = $state('');
 	let modalOpen = $state(false), modalTitle = $state(''), modalValue = $state<unknown>(null), modalLoading = $state(false), modalError = $state('');
+	let modalElement = $state<HTMLDivElement | null>(null);
+	let returnFocusElement: HTMLElement | null = null;
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 
 	function toRFC3339(value: string) { return new Date(value).toISOString(); }
@@ -61,7 +63,26 @@
 		if (!entries.length) return `<span style="color:${textMuted}">—</span>`;
 		return entries.map(([key, child]) => `<div style="padding-left:${pad}px;margin:4px 0"><div style="display:flex;gap:12px;align-items:flex-start"><span style="color:${textMuted};font-family:monospace;min-width:120px;flex-shrink:0">${escapeHtml(Array.isArray(value) ? `[${key}]` : key)}</span><div style="min-width:0;flex:1">${child !== null && typeof child === 'object' ? renderValue(child, depth + 1) : renderValue(child)}</div></div></div>`).join('');
 	}
-	function openDetails(row: LogRow) { modalTitle = `Doc Review Log #${row.id}`; modalValue = { unit_location: row.unit_location, matched_units: row.matched_units, findings: row.findings, detail: row.detail }; modalError = ''; modalLoading = false; modalOpen = true; }
+	function openModal(title: string, value: unknown, loading = false) {
+		returnFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		modalTitle = title; modalValue = value; modalError = ''; modalLoading = loading; modalOpen = true;
+		requestAnimationFrame(() => modalElement?.focus());
+	}
+	function closeModal() {
+		modalOpen = false;
+		requestAnimationFrame(() => returnFocusElement?.focus());
+		returnFocusElement = null;
+	}
+	function handleModalKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') { event.preventDefault(); closeModal(); return; }
+		if (event.key !== 'Tab' || !modalElement) return;
+		const focusable = Array.from(modalElement.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+		if (!focusable.length) { event.preventDefault(); modalElement.focus(); return; }
+		const first = focusable[0], last = focusable[focusable.length - 1];
+		if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+		else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+	}
+	function openDetails(row: LogRow) { openModal(`Doc Review Log #${row.id}`, { unit_location: row.unit_location, matched_units: row.matched_units, findings: row.findings, detail: row.detail }); }
 	const artifactPattern = /^[1-9][0-9]*_(mtc|prv|inv)_[1-9][0-9]*$/;
 	function artifactType(key: string): string | null {
 		const match = key.match(artifactPattern);
@@ -70,8 +91,8 @@
 	}
 	async function openArtifact(key: string) {
 		const type = artifactType(key); if (!type) return;
-		modalTitle = `Artifact — ${key}`; modalValue = null; modalError = ''; modalLoading = true; modalOpen = true;
-		try { const response = await fetch(`/api/v1/kb/artifacts/wiki?artifact_type=${encodeURIComponent(type)}&artifact_id=${encodeURIComponent(key)}&include_article=0`, { credentials: 'same-origin' }); const data = await response.json(); if (!response.ok || !data.record) throw new Error(data.error_msg ?? data.message ?? 'Failed to load artifact'); modalValue = data.record; }
+		openModal(`Artifact — ${key}`, null, true);
+		try { const response = await fetch(`/api/v1/kb/artifacts/wiki?artifact_type=${encodeURIComponent(type)}&artifact_id=${encodeURIComponent(key)}&include_article=0`, { credentials: 'same-origin' }); const body = await response.text(); let data: Record<string, unknown> = {}; try { data = JSON.parse(body); } catch { if (!response.ok) throw new Error(body || 'Failed to load artifact'); throw new Error('Artifact response was not valid JSON'); } if (!response.ok || !data.record) throw new Error(String(data.error_msg ?? data.message ?? 'Failed to load artifact')); modalValue = data.record; }
 		catch (err) { modalError = err instanceof Error ? err.message : String(err); }
 		finally { modalLoading = false; }
 	}
@@ -101,4 +122,4 @@
 		{#if loading}<div class="px-5 py-8 text-center" style="color:{textMuted}">Loading…</div>{:else if !rows.length}<div class="px-5 py-8 text-center" style="color:{textMuted}">No document review logs found.</div>{:else}<div class="flex-1 min-h-0 overflow-auto"><table class="w-full text-sm" style="border-collapse:separate;border-spacing:0"><thead><tr style="background:{surface2}">{#each ['Input Record ID','Run ID','Unit Key','Aspect','Unit Type','Unit Location','Outcome','Pass','# Findings','Detail','Create Time'] as heading}<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}">{heading}</th>{/each}</tr></thead><tbody>{#each rows as row (row.id)}<tr class="hover:bg-white/5"><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{row.input_record_id ?? '—'}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{row.run_id ?? '—'}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};white-space:nowrap">{#if artifactType(row.unit_key)}<button onclick={() => openArtifact(row.unit_key)} class="cursor-pointer" style="color:{accent};background:none;border:none;font-family:monospace">{row.unit_key}</button>{:else}<span style="color:{textSecondary};font-family:monospace">{row.unit_key || '—'}</span>{/if}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{row.aspect || '—'}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{row.unit_type || '—'}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary};max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title={jsonText(row.unit_location)}>{compactJson(row.unit_location)}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{row.outcome || '—'}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{row.pass || '—'}</td><td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor};color:{textSecondary}">{findingsCount(row.findings)}</td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}"><button onclick={() => openDetails(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">Detail</button></td><td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textMuted};white-space:nowrap;font-size:12px">{formatTime(row.create_time)}</td></tr>{/each}</tbody></table></div>{/if}
 	</div>
 </div>
-{#if modalOpen}<div class="fixed inset-0 z-50 flex items-center justify-center p-6" style="background:{overlay}" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) modalOpen = false; }}><div class="rounded-xl flex flex-col" role="dialog" aria-modal="true" aria-label={modalTitle} style="background:{cardBg};border:1px solid {borderColor};width:min(900px,100%);max-height:80vh"><div class="flex justify-between px-5 py-4" style="border-bottom:1px solid {borderColor}"><span style="font-size:14px;font-weight:600;color:{textPrimary};font-family:monospace">{modalTitle}</span><button onclick={() => modalOpen = false} class="rounded p-1.5 cursor-pointer" style="background:{surface2};color:{textMuted};border:1px solid {borderColor}" aria-label="Close"><XIcon class="w-4 h-4" /></button></div><div class="flex-1 overflow-auto p-5">{#if modalLoading}<div class="text-center" style="color:{textMuted};padding:2rem">Loading…</div>{:else if modalError}<div class="rounded-lg p-4 flex gap-2" style="background:{danger}15;border:1px solid {danger}40;color:{danger}"><CircleAlertIcon class="w-4 h-4" /><span>{modalError}</span></div>{:else}<div class="text-xs" style="line-height:1.6;user-select:text">{@html renderValue(modalValue)}</div>{/if}</div></div></div>{/if}
+{#if modalOpen}<div class="fixed inset-0 z-50 flex items-center justify-center p-6" style="background:{overlay}" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) closeModal(); }}><div bind:this={modalElement} tabindex="-1" class="rounded-xl flex flex-col" role="dialog" aria-modal="true" aria-label={modalTitle} onkeydown={handleModalKeydown} style="background:{cardBg};border:1px solid {borderColor};width:min(900px,100%);max-height:80vh"><div class="flex justify-between px-5 py-4" style="border-bottom:1px solid {borderColor}"><span style="font-size:14px;font-weight:600;color:{textPrimary};font-family:monospace">{modalTitle}</span><button onclick={closeModal} class="rounded p-1.5 cursor-pointer" style="background:{surface2};color:{textMuted};border:1px solid {borderColor}" aria-label="Close"><XIcon class="w-4 h-4" /></button></div><div class="flex-1 overflow-auto p-5">{#if modalLoading}<div class="text-center" style="color:{textMuted};padding:2rem">Loading…</div>{:else if modalError}<div class="rounded-lg p-4 flex gap-2" style="background:{danger}15;border:1px solid {danger}40;color:{danger}"><CircleAlertIcon class="w-4 h-4" /><span>{modalError}</span></div>{:else}<div class="text-xs" style="line-height:1.6;user-select:text">{@html renderValue(modalValue)}</div>{/if}</div></div></div>{/if}
