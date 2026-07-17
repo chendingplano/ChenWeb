@@ -1,0 +1,69 @@
+package kbhandler
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/labstack/echo/v4"
+)
+
+func TestListDocReviewLogs_ReturnsRowsAndPagination(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_logs ")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
+	mock.ExpectQuery(`SELECT id, input_record_id, run_id, pass, aspect, unit_type, unit_key,.*FROM kb\.doc_review_logs\s+ORDER BY create_time DESC, id DESC\s+LIMIT \$1 OFFSET \$2`).
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "input_record_id", "run_id", "pass", "aspect", "unit_type", "unit_key", "unit_location", "matched_units", "findings", "outcome", "detail", "create_time"}).
+			AddRow(int64(5), int64(12), int64(3), "P5", "metrics", "metric", "12_mtc_1", `{"line":8}`, nil, `[]`, "no_findings", `{"reason":"ok"}`, "2026-07-17T10:30:00+00:00"))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-review-logs", nil)
+	rec := httptest.NewRecorder()
+	if err := ListDocReviewLogs(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListDocReviewLogs: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Status   bool              `json:"status"`
+		Results  []json.RawMessage `json:"results"`
+		Page     int               `json:"page"`
+		PageSize int               `json:"page_size"`
+		Total    int64             `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !response.Status || response.Page != 1 || response.PageSize != 50 || response.Total != 2 || len(response.Results) != 1 {
+		t.Fatalf("response=%s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestListDocReviewLogs_RejectsInvalidTimeRange(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-review-logs?create_start_time=2026-07-17T11:00:00Z&create_end_time=2026-07-17T10:00:00Z", nil)
+	rec := httptest.NewRecorder()
+	if err := ListDocReviewLogs(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListDocReviewLogs: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
