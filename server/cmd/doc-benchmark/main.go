@@ -159,6 +159,13 @@ func runBenchmark(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	jjChange := commandOutput(ctx, "jj", "log", "-r", "@", "--no-graph", "-T", "change_id")
 	store := docbenchmark.SQLStore{DB: db}
 	for _, name := range prepared.VariantOrder {
+		stored, err := store.GetRun(ctx, prepared.Runs[name].RunID)
+		if err != nil {
+			return err
+		}
+		if stored.Lifecycle == "succeeded" || stored.Lifecycle == "failed" || stored.Lifecycle == "canceled" {
+			continue
+		}
 		if err := store.AttachRunProvenance(ctx, prepared.Runs[name].RunID, gitCommit, jjChange, executable, executableHash, dirty, prepared.Experiment.MaxParallelCases); err != nil {
 			return err
 		}

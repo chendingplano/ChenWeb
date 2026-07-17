@@ -42,6 +42,7 @@ type VariantWorker struct {
 	Run         PreparedRun
 	Session     VariantSession
 	initialized bool
+	terminal    bool
 }
 
 func (w *VariantWorker) Initialize(ctx context.Context) error {
@@ -50,6 +51,14 @@ func (w *VariantWorker) Initialize(ctx context.Context) error {
 	}
 	if w.Experiment == nil {
 		return fmt.Errorf("variant worker: nil experiment")
+	}
+	var lifecycle string
+	if err := w.Application.Config.DB.QueryRowContext(ctx, `SELECT lifecycle FROM kb.benchmark_runs WHERE id=$1`, w.Run.RunID).Scan(&lifecycle); err != nil {
+		return err
+	}
+	if lifecycle == "succeeded" || lifecycle == "failed" || lifecycle == "canceled" {
+		w.initialized, w.terminal = true, true
+		return nil
 	}
 	session, err := w.Application.InitializeVariant(ctx, w.Run.Variant, w.Experiment.Processors)
 	if err != nil {
@@ -69,6 +78,9 @@ func (w *VariantWorker) Initialize(ctx context.Context) error {
 func (w *VariantWorker) RunCases(ctx context.Context) error {
 	if err := w.Initialize(ctx); err != nil {
 		return err
+	}
+	if w.terminal {
+		return nil
 	}
 	units := make([]CaseUnit, 0, len(w.Run.CaseRuns))
 	for unit := range w.Run.CaseRuns {

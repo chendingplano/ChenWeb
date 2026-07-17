@@ -160,6 +160,7 @@ func TestVariantWorkerInitializesRuntimeOnceAndAttachesSnapshot(t *testing.T) {
 		factoryCalls++
 		return runtime, nil
 	}}}
+	mock.ExpectQuery("SELECT lifecycle FROM kb.benchmark_runs").WithArgs("run").WillReturnRows(sqlmock.NewRows([]string{"lifecycle"}).AddRow("queued"))
 	mock.ExpectExec("UPDATE kb.benchmark_runs SET resolved_json").WithArgs("run", []byte(`{"chunk_size":100}`), "cfg").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE kb.benchmark_runs SET lifecycle='running'").WithArgs("run", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	worker := VariantWorker{Application: app, Experiment: &Experiment{Processors: []Processor{ProcessorChunking}}, Run: PreparedRun{RunID: "run", Variant: ExperimentVariant{Name: "base"}}}
