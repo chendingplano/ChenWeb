@@ -2,16 +2,22 @@
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { locales, getLocale, setLocale } from '$lib/paraglide/runtime';
-	import { Sun, Moon, Languages, Menu, X } from '@lucide/svelte';
+	import { Sun, Moon, Languages, ChevronDown, Menu, X } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { slide } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { appAuthStore } from '@chendingplano/shared';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import LogoMark from './LogoMark.svelte';
 	import { loginPrompt } from '../loginPrompt.svelte';
 
 	let { config }: { config: SiteConfig } = $props();
+
+	const localeLabels: Record<string, string> = {
+		en: 'English',
+		'zh-cn': '中文'
+	};
 
 	const nav = [
 		{ label: m.semos_nav_home(), href: '/semos' },
@@ -35,11 +41,6 @@
 
 	function isActive(item: (typeof nav)[number]): boolean {
 		return page.url.pathname === item.href;
-	}
-
-	function nextLocale(): (typeof locales)[number] {
-		const idx = locales.indexOf(getLocale());
-		return locales[(idx + 1) % locales.length];
 	}
 
 	async function handleLogout() {
@@ -83,16 +84,23 @@
 		</nav>
 
 		<div class="flex items-center gap-1.5">
-			<button
-				type="button"
-				class="flex items-center gap-1.5 rounded-full px-2.5 py-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
-				aria-label="Switch language"
-				onclick={() => setLocale(nextLocale())}
-			>
-				<Languages class="h-4 w-4" />
-				<span class="text-[0.8rem] font-medium">{getLocale() === 'zh-cn' ? '中文' : 'English'}</span
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger
+					class="flex items-center gap-1.5 rounded-full px-2.5 py-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
+					aria-label="Switch language"
 				>
-			</button>
+					<Languages class="h-4 w-4" />
+					<span class="text-[0.8rem] font-medium">{localeLabels[getLocale()] ?? getLocale()}</span>
+					<ChevronDown class="h-3 w-3" />
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Content align="end">
+					{#each locales as locale (locale)}
+						<DropdownMenu.Item onSelect={() => setLocale(locale)}>
+							{localeLabels[locale] ?? locale}
+						</DropdownMenu.Item>
+					{/each}
+				</DropdownMenu.Content>
+			</DropdownMenu.Root>
 			<button
 				type="button"
 				class="rounded-full p-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
