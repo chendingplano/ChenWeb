@@ -15,7 +15,18 @@ func (s SQLStore) AttachRunProvenance(ctx context.Context, runID, gitCommit, jjC
 	if err != nil {
 		return err
 	}
-	return affected(res)
+	if err := affected(res); err != nil {
+		var lifecycle string
+		var storedDirty bool
+		var storedHash sql.NullString
+		if qerr := s.DB.QueryRowContext(txctx(ctx), `SELECT lifecycle,dirty,executable_hash FROM kb.benchmark_runs WHERE id=$1`, runID).Scan(&lifecycle, &storedDirty, &storedHash); qerr == nil {
+			if (lifecycle == "queued" || lifecycle == "running") && storedHash.Valid && (storedHash.String != executableHash || storedDirty != dirty) {
+				return fmt.Errorf("benchmark run %s cannot resume: stored provenance dirty=%t executable_hash=%q does not match current dirty=%t executable_hash=%q; start a fresh experiment (for example by changing the experiment name) or delete the stale benchmark rows", runID, storedDirty, storedHash.String, dirty, executableHash)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (s SQLStore) AttachResolvedRuntime(ctx context.Context, runID string, snapshot []byte, hash string) error {

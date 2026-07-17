@@ -1,0 +1,32 @@
+name = "synthetic-v1-example-20260717-clean"
+dataset = "doc-processors-synthetic-core@1.0.0"
+processors = ["chunking", "extract_metrics"]
+repetitions = 1
+timeout = "2m"
+attempt_lease = "5m"
+max_attempts = 2
+max_parallel_cases = 2
+max_parallel_variants = 2
+allow_upstream_variation = false
+
+[[variants]]
+name = "chunk-small"
+[variants.overrides]
+CHUNK_SIZE = "512"
+
+[[variants]]
+name = "chunk-large"
+[variants.overrides]
+CHUNK_SIZE = "1024"
+
+[[variants]]
+name = "metrics-baseline"
+[variants.overrides]
+EXTRACT_METRIC_CANDIDATES_PROMPT = "prompts/prompt-extract-metric-candidates-v3.md"
+EXTRACT_METRIC_CANDIDATES_MODEL_NAME = "deepseek-chat"
+
+[[variants]]
+name = "metrics-alt"
+[variants.overrides]
+EXTRACT_METRIC_CANDIDATES_PROMPT = "prompts/prompt-extract-metric-candidates-v4.md"
+EXTRACT_METRIC_CANDIDATES_MODEL_NAME = "deepseek-chat"
