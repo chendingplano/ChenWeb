@@ -96,6 +96,9 @@ type FindingItem struct {
 	// ModelName is the LLM model that generated this finding (ADR 2026070201
 	// change log), read back from finding metadata.
 	ModelName string `json:"model_name,omitempty"`
+	// RunID is the review run that produced this finding, read back from
+	// finding metadata (mirrors the row's real run_id column).
+	RunID int64 `json:"run_id,omitempty"`
 }
 
 // FindingLocalizedContent stores localized prose for one language.
@@ -136,6 +139,7 @@ var findingMetadataReservedKeys = map[string]bool{
 	"artifact_fields":            true,
 	"related_artifact_fields":    true,
 	"model_name":                 true,
+	"run_id":                     true,
 }
 
 // FindingMetadataEnvelope is stored in kb.doc_review_findings.metadata.
@@ -152,6 +156,7 @@ type FindingMetadataEnvelope struct {
 	ArtifactFields        json.RawMessage
 	RelatedArtifactFields json.RawMessage
 	ModelName             string
+	RunID                 int64
 }
 
 func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
@@ -189,6 +194,9 @@ func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
 	}
 	if e.ModelName != "" {
 		m["model_name"] = e.ModelName
+	}
+	if e.RunID != 0 {
+		m["run_id"] = e.RunID
 	}
 	for lang, content := range e.I18N.Translations {
 		m[lang] = content
@@ -242,6 +250,9 @@ func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
 	if mn, ok := raw["model_name"]; ok {
 		_ = json.Unmarshal(mn, &e.ModelName)
 	}
+	if rid, ok := raw["run_id"]; ok {
+		_ = json.Unmarshal(rid, &e.RunID)
+	}
 	for key, val := range raw {
 		if findingMetadataReservedKeys[key] {
 			continue
@@ -274,6 +285,7 @@ func applyFindingMetadata(f *FindingItem, data []byte) {
 	f.ArtifactFields = metadata.ArtifactFields
 	f.RelatedArtifactFields = metadata.RelatedArtifactFields
 	f.ModelName = metadata.ModelName
+	f.RunID = metadata.RunID
 }
 
 // FindingNormalization is the result of converting reviewer output into a

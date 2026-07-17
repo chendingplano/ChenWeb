@@ -272,6 +272,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 		if confidence <= 0 {
 			confidence = 0.5
 		}
+		prepared.Metadata.RunID = runID
 		metadata, err := json.Marshal(prepared.Metadata)
 		if err != nil {
 			return inserted, fmt.Errorf("marshal finding metadata: %w", err)
