@@ -153,6 +153,16 @@ func runBenchmark(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if err != nil {
 		return err
 	}
+	executable, _ := os.Executable()
+	executableHash, _ := docbenchmark.ExecutableSHA256(executable)
+	gitCommit := commandOutput(ctx, "git", "rev-parse", "HEAD")
+	jjChange := commandOutput(ctx, "jj", "log", "-r", "@", "--no-graph", "-T", "change_id")
+	store := docbenchmark.SQLStore{DB: db}
+	for _, name := range prepared.VariantOrder {
+		if err := store.AttachRunProvenance(ctx, prepared.Runs[name].RunID, gitCommit, jjChange, executable, executableHash, dirty, prepared.Experiment.MaxParallelCases); err != nil {
+			return err
+		}
+	}
 	for _, name := range prepared.VariantOrder {
 		run := prepared.Runs[name]
 		worker := docbenchmark.VariantWorker{Application: app, Experiment: prepared.Experiment, Run: run}
@@ -302,6 +312,14 @@ func workingCopyDirty(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("jj status: %w", err)
 	}
 	return !strings.Contains(string(raw), "working copy has no changes"), nil
+}
+
+func commandOutput(ctx context.Context, name string, args ...string) string {
+	raw, err := exec.CommandContext(ctx, name, args...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func emitError(w io.Writer, code string, err error) {

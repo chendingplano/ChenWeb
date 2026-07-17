@@ -104,6 +104,13 @@ func (s SQLStore) BuildExperimentReport(ctx context.Context, experimentID, basel
 	report := BenchmarkReport{ID: experimentID, GeneratedAt: time.Now().UTC().Format(time.RFC3339), DatasetHash: datasetHash, ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, PrimaryVectors: map[string][]AggregateRow{}, Completion: map[string]int{}, Failures: map[string]int{}, Provenance: map[string]string{"case_set_hash": sha256Hex(caseSets)}, NonGating: true}
 	byName := map[string][]ScoreUnit{}
 	for _, run := range runs {
+		if run.ConfigHash.Valid {
+			report.Provenance[run.VariantName+".config_hash"] = run.ConfigHash.String
+		}
+		if run.ScorerHash.Valid {
+			report.Provenance[run.VariantName+".scorer_hash"] = run.ScorerHash.String
+		}
+		report.Provenance[run.VariantName+".lifecycle"] = run.Lifecycle
 		units, failures, err := s.reportUnits(ctx, run.ID)
 		if err != nil {
 			return BenchmarkReport{}, err

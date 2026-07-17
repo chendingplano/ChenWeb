@@ -7,6 +7,17 @@ import (
 	"time"
 )
 
+func (s SQLStore) AttachRunProvenance(ctx context.Context, runID, gitCommit, jjChange, executable, executableHash string, dirty bool, concurrency int) error {
+	if err := checkDB(s); err != nil {
+		return err
+	}
+	res, err := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_runs SET git_commit=NULLIF($2,''),jj_change=NULLIF($3,''),executable=NULLIF($4,''),executable_hash=NULLIF($5,''),dirty=$6,concurrency=$7,updated_at=now() WHERE id=$1 AND lifecycle IN ('queued','running') AND (executable_hash IS NULL OR (executable_hash=$5 AND dirty=$6))`, runID, gitCommit, jjChange, executable, executableHash, dirty, concurrency)
+	if err != nil {
+		return err
+	}
+	return affected(res)
+}
+
 func (s SQLStore) AttachResolvedRuntime(ctx context.Context, runID string, snapshot []byte, hash string) error {
 	if err := checkDB(s); err != nil {
 		return err
