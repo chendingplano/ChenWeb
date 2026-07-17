@@ -156,4 +156,16 @@ Database migration/concurrency tests use `TEST_DATABASE_URL` and otherwise skip 
 
 ## Out of scope for v1
 
-MLflow, LangSmith, Promptfoo, web UI/public API, CI/release gating, PDF parsing/OCR, human-annotated production documents, LLM-as-judge/open semantic grading/arbitrary unit conversion, combined pipeline-wide score, automatic prompt optimization, automatic retention/purge of verified evidence, processors beyond `chunking`/`extract_metrics`, and multi-host distributed scheduling.
+- MLflow
+- LangSmith
+- Promptfoo
+- web UI/public API
+- CI/release gating
+- PDF parsing/OCR
+- human-annotated production documents
+- LLM-as-judge/open semantic grading/arbitrary unit conversion
+- combined pipeline-wide score
+- automatic prompt optimization
+- automatic retention/purge of verified evidence
+- processors beyond `chunking`/`extract_metrics`
+- and multi-host distributed scheduling.

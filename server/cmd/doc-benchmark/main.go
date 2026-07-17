@@ -133,6 +133,13 @@ func runBenchmark(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if *experimentPath == "" || *artifactRoot == "" {
 		return fmt.Errorf("%w: --experiment and --artifact-root (or ARTIFACT_DIR) are required", errUsage)
 	}
+	// Production processors read ARTIFACT_DIR when their dependency graph is
+	// initialized. Keep that process-local value identical to the adapter root;
+	// otherwise the controller can write artifacts that the benchmark cannot
+	// reconcile.
+	if err := os.Setenv("ARTIFACT_DIR", filepath.Clean(*artifactRoot)); err != nil {
+		return fmt.Errorf("set ARTIFACT_DIR: %w", err)
+	}
 	dirty, err := workingCopyDirty(ctx)
 	if err != nil {
 		return err
