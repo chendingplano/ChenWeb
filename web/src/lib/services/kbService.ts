@@ -1338,13 +1338,14 @@ export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
 	return response.config;
 }
 
-// Wiki sidebar menu item id -> enabled. Ids absent from the map default to
-// enabled on the frontend. See config.local.toml's [knowledge-menus] section.
+// Knowledge page content id (Wiki sidebar menu item, masthead banner, etc.)
+// -> enabled. Ids absent from the map default to enabled on the frontend.
+// See config.local.toml's [knowledge-content] section.
 export type KbMenuConfig = Record<string, boolean>;
 
-// Wiki sidebar menu item id -> label override for the requested language.
+// Knowledge page content id -> label override for the requested language.
 // Ids absent from the map keep their hardcoded default label. See
-// config/knowledge-menus/labels-<lang>.toml.
+// config/knowledge-content/labels-<lang>.toml.
 export type KbMenuLabels = Record<string, string>;
 
 export async function getKbMenuConfig(

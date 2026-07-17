@@ -10,6 +10,6 @@
 # "en", identical to the behavior before this file existed.
 #
 # This file does not control item visibility — that remains
-# [knowledge-menus] in config.local.toml, unaffected by language.
+# [knowledge-content] in config.local.toml, unaffected by language.
 
 [labels]

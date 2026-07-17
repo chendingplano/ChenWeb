@@ -98,8 +98,6 @@
 		children?: Array<{ id: KbSectionId; label: string; description: string }>;
 	};
 
-	let { data }: { data: PageData } = $props();
-
 	const menuItems: KbMenuItem[] = [
 		{
 			id: 'kb-search',
@@ -224,21 +222,21 @@
 	];
 
 	// Every valid Wiki sidebar menu item id (top-level + children), the
-	// source of truth for [knowledge-menus]/labels-<lang>.toml ids. Used to
-	// detect config entries that don't match anything, which config loading
+	// source of truth for [knowledge-content]/labels-<lang>.toml menu ids. Used
+	// to detect config entries that don't match anything, which config loading
 	// otherwise treats as a silent no-op (see unknownMenuConfigIds below).
 	const knownMenuIds = new Set<string>(
 		menuItems.flatMap((item) => [item.id, ...(item.children?.map((child) => child.id) ?? [])])
 	);
 
-	// Wiki sidebar menu visibility, from [knowledge-menus] in
+	// Wiki sidebar menu visibility, from [knowledge-content] in
 	// config.toml / config.local.toml (GET /api/v1/kb/menu-config). Ids
 	// absent from the map default to enabled. Empty until the fetch
 	// resolves, so the full menu renders first paint (fail-open).
 	let menuConfig = $state<KbMenuConfig>({});
 
 	// Wiki sidebar menu label overrides for the site-wide language (Paraglide's
-	// getLocale()), from config/knowledge-menus/labels-<lang>.toml. Ids absent
+	// getLocale()), from config/knowledge-content/labels-<lang>.toml. Ids absent
 	// from the map keep their hardcoded default label (fail-open).
 	let menuLabels = $state<KbMenuLabels>({});
 
@@ -259,12 +257,12 @@
 	$effect(() => {
 		if (unknownMenuConfigIds.length > 0) {
 			console.warn(
-				`[knowledge-menus] config.local.toml [knowledge-menus] has unrecognized menu id(s), ignored: ${unknownMenuConfigIds.join(', ')}`
+				`[knowledge-content] config.local.toml [knowledge-content] has unrecognized menu id(s), ignored: ${unknownMenuConfigIds.join(', ')}`
 			);
 		}
 		if (unknownMenuLabelIds.length > 0) {
 			console.warn(
-				`[knowledge-menus] config/knowledge-menus/labels-${menuConfigLang}.toml has unrecognized menu id(s), ignored: ${unknownMenuLabelIds.join(', ')}`
+				`[knowledge-content] config/knowledge-content/labels-${menuConfigLang}.toml has unrecognized menu id(s), ignored: ${unknownMenuLabelIds.join(', ')}`
 			);
 		}
 	});
@@ -516,7 +514,7 @@
 		</div>
 
 		{#if !menuCollapsed && (unknownMenuConfigIds.length > 0 || unknownMenuLabelIds.length > 0)}
-			<!-- Diagnostic: config.local.toml [knowledge-menus] or a labels-<lang>.toml
+			<!-- Diagnostic: config.local.toml [knowledge-content] or a labels-<lang>.toml
 			     file references an id that doesn't match any menu item. These entries
 			     are otherwise silently ignored, so surface them here instead of only
 			     to the console, since this page is the config's own audience. -->
@@ -534,7 +532,7 @@
 					</div>
 					{#if unknownMenuConfigIds.length > 0}
 						<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
-							config.local.toml [knowledge-menus]: {unknownMenuConfigIds.join(', ')}
+							config.local.toml [knowledge-content]: {unknownMenuConfigIds.join(', ')}
 						</div>
 					{/if}
 					{#if unknownMenuLabelIds.length > 0}

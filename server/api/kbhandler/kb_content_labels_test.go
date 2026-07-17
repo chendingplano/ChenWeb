@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func withKnowledgeMenuLabelsDir(t *testing.T, files map[string]string) {
+func withKnowledgeContentLabelsDir(t *testing.T, files map[string]string) {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range files {
@@ -15,23 +15,23 @@ func withKnowledgeMenuLabelsDir(t *testing.T, files map[string]string) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	t.Setenv("KNOWLEDGE_MENU_LABELS_DIR", dir)
+	t.Setenv("KNOWLEDGE_CONTENT_LABELS_DIR", dir)
 }
 
-func TestLoadKnowledgeMenuLabelsMissingFileReturnsEmptyMap(t *testing.T) {
-	withKnowledgeMenuLabelsDir(t, nil)
+func TestLoadKnowledgeContentLabelsMissingFileReturnsEmptyMap(t *testing.T) {
+	withKnowledgeContentLabelsDir(t, nil)
 
-	got, err := LoadKnowledgeMenuLabels("en")
+	got, err := LoadKnowledgeContentLabels("en")
 	if err != nil {
-		t.Fatalf("LoadKnowledgeMenuLabels: %v", err)
+		t.Fatalf("LoadKnowledgeContentLabels: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty map, got %v", got)
 	}
 }
 
-func TestLoadKnowledgeMenuLabelsReadsLabelsTable(t *testing.T) {
-	withKnowledgeMenuLabelsDir(t, map[string]string{
+func TestLoadKnowledgeContentLabelsReadsLabelsTable(t *testing.T) {
+	withKnowledgeContentLabelsDir(t, map[string]string{
 		"labels-zh-cn.toml": `
 [labels]
 kb-metrics = "指标"
@@ -39,9 +39,9 @@ kb-doc-wiki = "知识百科"
 `,
 	})
 
-	got, err := LoadKnowledgeMenuLabels("zh-cn")
+	got, err := LoadKnowledgeContentLabels("zh-cn")
 	if err != nil {
-		t.Fatalf("LoadKnowledgeMenuLabels: %v", err)
+		t.Fatalf("LoadKnowledgeContentLabels: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 labels, got %d (%v)", len(got), got)
@@ -54,26 +54,26 @@ kb-doc-wiki = "知识百科"
 	}
 }
 
-func TestLoadKnowledgeMenuLabelsMalformedTomlReturnsError(t *testing.T) {
-	withKnowledgeMenuLabelsDir(t, map[string]string{
+func TestLoadKnowledgeContentLabelsMalformedTomlReturnsError(t *testing.T) {
+	withKnowledgeContentLabelsDir(t, map[string]string{
 		"labels-en.toml": `this is not valid toml [[[`,
 	})
 
-	_, err := LoadKnowledgeMenuLabels("en")
+	_, err := LoadKnowledgeContentLabels("en")
 	if err == nil {
 		t.Fatal("expected an error for malformed TOML, got nil")
 	}
 }
 
-func TestLoadKnowledgeMenuLabelsRejectsUnrecognizedLangShape(t *testing.T) {
-	withKnowledgeMenuLabelsDir(t, map[string]string{
+func TestLoadKnowledgeContentLabelsRejectsUnrecognizedLangShape(t *testing.T) {
+	withKnowledgeContentLabelsDir(t, map[string]string{
 		"labels-..%2f..%2fetc.toml": `[labels]
 x = "y"`,
 	})
 
-	got, err := LoadKnowledgeMenuLabels("../../etc/passwd")
+	got, err := LoadKnowledgeContentLabels("../../etc/passwd")
 	if err != nil {
-		t.Fatalf("LoadKnowledgeMenuLabels: %v", err)
+		t.Fatalf("LoadKnowledgeContentLabels: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty map for invalid lang shape, got %v", got)

@@ -55,10 +55,10 @@ func LoadWorkspaceContentOverrides(lang string) (labels map[string]string, descr
 
 // resolveWorkspaceContentLabelsPath finds
 // config/workspace-content/labels-<lang>.toml relative to the repo root,
-// located the same way resolveKnowledgeMenuLabelsPath locates
-// config/knowledge-menus/labels-<lang>.toml (walk up from cwd looking for
+// located the same way resolveKnowledgeContentLabelsPath locates
+// config/knowledge-content/labels-<lang>.toml (walk up from cwd looking for
 // config.toml). The WORKSPACE_CONTENT_LABELS_DIR env var overrides the
-// resolved repo root, mirroring KNOWLEDGE_MENU_LABELS_DIR's role (used by
+// resolved repo root, mirroring KNOWLEDGE_CONTENT_LABELS_DIR's role (used by
 // tests to avoid depending on the working directory).
 func resolveWorkspaceContentLabelsPath(lang string) string {
 	if v := strings.TrimSpace(os.Getenv("WORKSPACE_CONTENT_LABELS_DIR")); v != "" {

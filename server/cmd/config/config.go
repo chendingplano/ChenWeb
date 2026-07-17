@@ -182,11 +182,13 @@ type AppConfigDef struct {
 	// in config.toml / config.local.toml. When empty, the Document Review
 	// feature falls back to its built-in priority-derived tiers.
 	DocReviews map[string][]string `mapstructure:"doc-reviews"`
-	// KnowledgeMenus maps a Wiki sidebar menu item id (e.g. "kb-doc-wiki") to
-	// whether it is shown. Configured via [knowledge-menus] in config.toml /
-	// config.local.toml. Ids absent from the map default to enabled. When
-	// empty, the full Wiki sidebar menu is shown.
-	KnowledgeMenus map[string]bool `mapstructure:"knowledge-menus"`
+	// KnowledgeContent maps a Knowledge page (/home3/knowledge) content id
+	// (e.g. Wiki sidebar menu item "kb-doc-wiki", or masthead ids like
+	// "kb-banner-title") to whether it is shown. Configured via
+	// [knowledge-content] in config.toml / config.local.toml. Ids absent from
+	// the map default to enabled. When empty, all Knowledge page content is
+	// shown.
+	KnowledgeContent map[string]bool `mapstructure:"knowledge-content"`
 	// WorkspaceContent maps a /semos/workspace content item id (e.g.
 	// "ws-app-chat", "ws-announcements") to whether it is shown. Configured
 	// via [workspace-content] in config.toml / config.local.toml. Ids absent
@@ -333,11 +335,11 @@ func GetDocReviewsConfig() map[string][]string {
 	return AppConfig.DocReviews
 }
 
-// GetKnowledgeMenusConfig returns the configured Wiki sidebar menu id->enabled
-// mapping. Returns nil/empty when no [knowledge-menus] section is present, in
-// which case every menu item defaults to enabled.
-func GetKnowledgeMenusConfig() map[string]bool {
-	return AppConfig.KnowledgeMenus
+// GetKnowledgeContentConfig returns the configured Knowledge page content
+// id->enabled mapping. Returns nil/empty when no [knowledge-content] section
+// is present, in which case every content item defaults to enabled.
+func GetKnowledgeContentConfig() map[string]bool {
+	return AppConfig.KnowledgeContent
 }
 
 // GetWorkspaceContentConfig returns the configured /semos/workspace content

@@ -7,10 +7,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Verifies that GetKnowledgeMenusConfig returns an empty map when no
-// [knowledge-menus] section is present, so the Wiki sidebar menu defaults to
+// Verifies that GetKnowledgeContentConfig returns an empty map when no
+// [knowledge-content] section is present, so the Knowledge page defaults to
 // fully enabled.
-func TestGetKnowledgeMenusConfigDefaultsToEmpty(t *testing.T) {
+func TestGetKnowledgeContentConfigDefaultsToEmpty(t *testing.T) {
 	oldConfig := AppConfig
 	oldViper := appConfigViper
 	t.Cleanup(func() {
@@ -34,15 +34,15 @@ default_knowledge_store = "Research"
 	}
 	appConfigViper = viper.GetViper()
 
-	cfg := GetKnowledgeMenusConfig()
+	cfg := GetKnowledgeContentConfig()
 	if len(cfg) != 0 {
-		t.Fatalf("expected no configured menu ids, got %v", cfg)
+		t.Fatalf("expected no configured content ids, got %v", cfg)
 	}
 }
 
-// Verifies that a [knowledge-menus] TOML section unmarshals id->bool entries
-// into the KnowledgeMenus map and is returned by GetKnowledgeMenusConfig.
-func TestGetKnowledgeMenusConfigUnmarshalsIdBooleans(t *testing.T) {
+// Verifies that a [knowledge-content] TOML section unmarshals id->bool entries
+// into the KnowledgeContent map and is returned by GetKnowledgeContentConfig.
+func TestGetKnowledgeContentConfigUnmarshalsIdBooleans(t *testing.T) {
 	oldConfig := AppConfig
 	oldViper := appConfigViper
 	t.Cleanup(func() {
@@ -55,7 +55,7 @@ func TestGetKnowledgeMenusConfigUnmarshalsIdBooleans(t *testing.T) {
 	viper.SetConfigType("toml")
 
 	const sample = `
-[knowledge-menus]
+[knowledge-content]
 kb-doc-wiki = true
 kb-metrics = false
 `
@@ -67,9 +67,9 @@ kb-metrics = false
 	}
 	appConfigViper = viper.GetViper()
 
-	cfg := GetKnowledgeMenusConfig()
+	cfg := GetKnowledgeContentConfig()
 	if len(cfg) != 2 {
-		t.Fatalf("expected 2 configured menu ids, got %d (%v)", len(cfg), cfg)
+		t.Fatalf("expected 2 configured content ids, got %d (%v)", len(cfg), cfg)
 	}
 	if got, ok := cfg["kb-doc-wiki"]; !ok || got != true {
 		t.Fatalf("kb-doc-wiki=%v ok=%v", got, ok)
@@ -79,11 +79,11 @@ kb-metrics = false
 	}
 }
 
-// Verifies that a [knowledge-menus] value in a locally-merged config
+// Verifies that a [knowledge-content] value in a locally-merged config
 // (simulating config.local.toml being merged on top of config.toml, the
 // same viper.ReadInConfig + MergeInConfig flow used by LoadConfig) overrides
 // the base value, matching how config.local.toml takes precedence.
-func TestGetKnowledgeMenusConfigLocalOverrideWins(t *testing.T) {
+func TestGetKnowledgeContentConfigLocalOverrideWins(t *testing.T) {
 	oldConfig := AppConfig
 	oldViper := appConfigViper
 	t.Cleanup(func() {
@@ -96,12 +96,12 @@ func TestGetKnowledgeMenusConfigLocalOverrideWins(t *testing.T) {
 	viper.SetConfigType("toml")
 
 	const base = `
-[knowledge-menus]
+[knowledge-content]
 kb-metrics = true
 kb-doc-wiki = true
 `
 	const local = `
-[knowledge-menus]
+[knowledge-content]
 kb-metrics = false
 `
 	if err := viper.ReadConfig(strings.NewReader(base)); err != nil {
@@ -115,7 +115,7 @@ kb-metrics = false
 	}
 	appConfigViper = viper.GetViper()
 
-	cfg := GetKnowledgeMenusConfig()
+	cfg := GetKnowledgeContentConfig()
 	if got, ok := cfg["kb-metrics"]; !ok || got != false {
 		t.Fatalf("expected local override to disable kb-metrics, got %v ok=%v", got, ok)
 	}

@@ -8,17 +8,17 @@ import (
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
-// withKnowledgeMenusConfig points AppConfig.KnowledgeMenus at cfg for the
+// withKnowledgeContentConfig points AppConfig.KnowledgeContent at cfg for the
 // duration of the test.
-func withKnowledgeMenusConfig(t *testing.T, cfg map[string]bool) {
+func withKnowledgeContentConfig(t *testing.T, cfg map[string]bool) {
 	t.Helper()
-	old := appconfig.AppConfig.KnowledgeMenus
-	appconfig.AppConfig.KnowledgeMenus = cfg
-	t.Cleanup(func() { appconfig.AppConfig.KnowledgeMenus = old })
+	old := appconfig.AppConfig.KnowledgeContent
+	appconfig.AppConfig.KnowledgeContent = cfg
+	t.Cleanup(func() { appconfig.AppConfig.KnowledgeContent = old })
 }
 
 func TestGetKbMenuConfigReturnsEmptyMapWhenUnconfigured(t *testing.T) {
-	withKnowledgeMenusConfig(t, nil)
+	withKnowledgeContentConfig(t, nil)
 
 	c, rec := newKnowledgeStoreContext(t, http.MethodGet, "/api/v1/kb/menu-config", "")
 	if err := GetKbMenuConfig(c); err != nil {
@@ -41,7 +41,7 @@ func TestGetKbMenuConfigReturnsEmptyMapWhenUnconfigured(t *testing.T) {
 }
 
 func TestGetKbMenuConfigReturnsConfiguredOverrides(t *testing.T) {
-	withKnowledgeMenusConfig(t, map[string]bool{
+	withKnowledgeContentConfig(t, map[string]bool{
 		"kb-doc-wiki": false,
 		"kb-metrics":  true,
 	})
@@ -67,8 +67,8 @@ func TestGetKbMenuConfigReturnsConfiguredOverrides(t *testing.T) {
 }
 
 func TestGetKbMenuConfigOmittedLangReturnsEmptyLabels(t *testing.T) {
-	withKnowledgeMenusConfig(t, nil)
-	withKnowledgeMenuLabelsDir(t, map[string]string{
+	withKnowledgeContentConfig(t, nil)
+	withKnowledgeContentLabelsDir(t, map[string]string{
 		"labels-zh-cn.toml": `[labels]
 kb-metrics = "指标"`,
 	})
@@ -88,8 +88,8 @@ kb-metrics = "指标"`,
 }
 
 func TestGetKbMenuConfigReturnsLabelsForConfiguredLang(t *testing.T) {
-	withKnowledgeMenusConfig(t, nil)
-	withKnowledgeMenuLabelsDir(t, map[string]string{
+	withKnowledgeContentConfig(t, nil)
+	withKnowledgeContentLabelsDir(t, map[string]string{
 		"labels-zh-cn.toml": `[labels]
 kb-metrics = "指标"
 kb-doc-wiki = "知识百科"`,
@@ -113,8 +113,8 @@ kb-doc-wiki = "知识百科"`,
 }
 
 func TestGetKbMenuConfigLangWithNoMatchingFileReturnsEmptyLabels(t *testing.T) {
-	withKnowledgeMenusConfig(t, map[string]bool{"kb-metrics": false})
-	withKnowledgeMenuLabelsDir(t, map[string]string{
+	withKnowledgeContentConfig(t, map[string]bool{"kb-metrics": false})
+	withKnowledgeContentLabelsDir(t, map[string]string{
 		"labels-zh-cn.toml": `[labels]
 kb-metrics = "指标"`,
 	})
