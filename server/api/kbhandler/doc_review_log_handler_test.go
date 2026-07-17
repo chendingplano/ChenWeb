@@ -81,6 +81,7 @@ func TestListDocReviewLogs_RejectsMalformedPagination(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
+			assertDocReviewLogErrorResponse(t, rec)
 		})
 	}
 }
@@ -97,7 +98,22 @@ func TestListDocReviewLogs_RejectsInvalidNumericAndTimestampFilters(t *testing.T
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
+			assertDocReviewLogErrorResponse(t, rec)
 		})
+	}
+}
+
+func assertDocReviewLogErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var response struct {
+		Status   bool   `json:"status"`
+		ErrorMsg string `json:"error_msg"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if response.Status || response.ErrorMsg == "" {
+		t.Fatalf("response=%s", rec.Body.String())
 	}
 }
 
