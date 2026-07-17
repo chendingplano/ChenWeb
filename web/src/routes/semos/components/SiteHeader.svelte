@@ -23,6 +23,7 @@
 		{ label: m.semos_nav_home(), href: '/semos' },
 		{ label: m.semos_nav_workspace(), href: '/semos/workspace', requiresAuth: true },
 		{ label: m.semos_nav_knowledge_base(), href: '/home3/knowledge', requiresAuth: true },
+		{ label: m.semos_nav_development(), href: '/development', requiresAuth: true },
 		{ label: m.semos_nav_about(), href: '/semos/about' }
 	];
 
