@@ -168,7 +168,7 @@ Fields (`findings`):
 - `related_artifact_id` / `related_record_id`: the `inventory_item_id` and `source_record_id` of the matched item the finding is about, so the report can link it. Omit both only when the finding references no specific match (e.g. an extraction error against the source window).
 
 Output language rules:
-- Always write `title`, `description`, and `analyses[].summary` in English.
+- Always write `title`, `description`, and `analyses[].summary` in Chinese.
 - Keep item names, model/part numbers, spec values, and units exactly as they appear; do not translate or normalize them.
 
 # 7. Rules

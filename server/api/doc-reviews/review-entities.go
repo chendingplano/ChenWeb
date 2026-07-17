@@ -167,7 +167,7 @@ func (r *entitiesReviewer) reviewEntity(
 		return nil
 	}
 
-	findings := normalizeFindingsJSON(out)
+	findings := normalizeFindingsJSON(out, cfg.ModelName)
 	loc := strings.Join(de.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"

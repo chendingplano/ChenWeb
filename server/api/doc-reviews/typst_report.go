@@ -386,19 +386,30 @@ func addFieldRow(rows [][2]string, enLabel, zhLabel, value, lang string) [][2]st
 // metricFieldRows converts a metricView into ordered (label, value) rows,
 // mirroring the metric_under_review payload shape (ADR 2026062203 §1.1.1).
 func metricFieldRows(v metricView, lang string) [][2]string {
+	isZh := lang == "zh-cn" || lang == "zh" || lang == "zh-hans"
 	var rows [][2]string
 	rows = addFieldRow(rows, "Metric ID", "指标ID", v.MetricID, lang)
 	rows = addFieldRow(rows, "Metric Name", "指标名称", v.MetricName, lang)
-	rows = addFieldRow(rows, "Metric Name (EN)", "指标名称（英文）", v.MetricNameEn, lang)
+	if !isZh {
+		rows = addFieldRow(rows, "Metric Name (EN)", "指标名称（英文）", v.MetricNameEn, lang)
+	}
 	rows = addFieldRow(rows, "Subject", "对象", v.Subject, lang)
-	rows = addFieldRow(rows, "Subject (EN)", "对象（英文）", v.SubjectEn, lang)
-	rows = addFieldRow(rows, "Description", "描述", v.Description, lang)
-	rows = addFieldRow(rows, "Description (EN)", "描述（英文）", v.DescriptionEn, lang)
-	rows = addFieldRow(rows, "Context", "上下文", v.Context, lang)
-	rows = addFieldRow(rows, "Context (EN)", "上下文（英文）", v.ContextEn, lang)
+	if !isZh {
+		rows = addFieldRow(rows, "Subject (EN)", "对象（英文）", v.SubjectEn, lang)
+	}
+	if !isZh {
+		rows = addFieldRow(rows, "Description", "描述", v.Description, lang)
+		rows = addFieldRow(rows, "Description (EN)", "描述（英文）", v.DescriptionEn, lang)
+	}
+	if !isZh {
+		rows = addFieldRow(rows, "Context", "上下文", v.Context, lang)
+		rows = addFieldRow(rows, "Context (EN)", "上下文（英文）", v.ContextEn, lang)
+	}
 	rows = addFieldRow(rows, "Value", "数值", v.Value, lang)
 	rows = addFieldRow(rows, "Unit", "单位", v.Unit, lang)
-	rows = addFieldRow(rows, "Unit (EN)", "单位（英文）", v.UnitEn, lang)
+	if !isZh {
+		rows = addFieldRow(rows, "Unit (EN)", "单位（英文）", v.UnitEn, lang)
+	}
 	rows = addFieldRow(rows, "Value Data Type", "数值类型", v.ValueDataType, lang)
 	rows = addFieldRow(rows, "Value Range Type", "取值范围类型", v.ValueRangeType, lang)
 	rows = addFieldRow(rows, "Value Class", "数值类别", v.ValueClass, lang)

@@ -161,7 +161,7 @@ func (r *localizationReviewer) processWindow(
 		return nil
 	}
 
-	findings := normalizeFindingsJSON(payload)
+	findings := normalizeFindingsJSON(payload, cfg.ModelName)
 	for i := range findings {
 		findings[i].Pass = "P1"
 		findings[i].Aspect = "localization"

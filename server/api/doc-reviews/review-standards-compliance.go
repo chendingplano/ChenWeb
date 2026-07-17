@@ -141,7 +141,7 @@ func (r *standardsComplianceReviewer) processChunk(ctx context.Context, recordID
 				"record_id", recordID, "chunk", index, "error", err)
 			return nil
 		}
-		findings = normalizeFindingsJSON(payload)
+		findings = normalizeFindingsJSON(payload, cfg.ModelName)
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
@@ -223,7 +223,7 @@ func (r *standardsComplianceReviewer) processBlock(
 				"error", err)
 			return nil
 		}
-		findings = normalizeFindingsJSON(payload)
+		findings = normalizeFindingsJSON(payload, cfg.ModelName)
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}

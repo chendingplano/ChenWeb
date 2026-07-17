@@ -159,7 +159,7 @@ func (r *examplesReviewer) processWindow(
 		return nil
 	}
 
-	findings := normalizeFindingsJSON(payload)
+	findings := normalizeFindingsJSON(payload, cfg.ModelName)
 	for i := range findings {
 		findings[i].Pass = "P3"
 		findings[i].Aspect = "examples"

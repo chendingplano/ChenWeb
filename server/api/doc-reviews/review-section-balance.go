@@ -142,7 +142,7 @@ func (r *sectionBalanceReviewer) processBlock(
 		return nil
 	}
 
-	findings := normalizeFindingsJSON(payload)
+	findings := normalizeFindingsJSON(payload, cfg.ModelName)
 	for i := range findings {
 		findings[i].Pass = "P2"
 		findings[i].Aspect = "section_balance"

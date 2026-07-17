@@ -184,7 +184,7 @@
                     </div>
 
                     <!-- Aspect node chain (real per-aspect status) -->
-                    <div style="display:flex; align-items:flex-start; gap:0; overflow-x:auto; padding-bottom:4px;">
+                    <div style="display:flex; align-items:flex-start; gap:0; overflow-x:auto; padding-top:8px; padding-bottom:4px;">
                         {#each job.aspects as a, i}
                             {@const st = a.status as StageStatus}
                             <div style="position:relative; display:flex; flex-shrink:0; flex-direction:column; align-items:center; min-width:116px;" title={`${labelFor(a.aspect)}${a.error_message ? ' — ' + a.error_message : ''}`}>

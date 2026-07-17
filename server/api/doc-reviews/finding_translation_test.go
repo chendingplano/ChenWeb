@@ -340,7 +340,7 @@ func TestNormalizeFindingsJSONDefaultsLanguageToEnglish(t *testing.T) {
 				"suggestion":  "Suggestion",
 			},
 		},
-	})
+	}, "test")
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))
 	}

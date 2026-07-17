@@ -57,6 +57,10 @@ type ReviewFinding struct {
 	// renderer never has to requery kb.metrics/kb.provisions/kb.inventory_items.
 	ArtifactFields        json.RawMessage `json:"artifact_fields,omitempty"`
 	RelatedArtifactFields json.RawMessage `json:"related_artifact_fields,omitempty"`
+
+	// ModelName is the LLM model that generated this finding (ADR 2026070201
+	// change log), resolved from ReviewerConfig.ModelName at call time.
+	ModelName string `json:"model_name,omitempty"`
 }
 
 // ReviewStrategy selects how a reviewer processes a document.
@@ -1955,8 +1959,10 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 }
 
 // normalizeFindingsJSON extracts a []ReviewFinding from a raw JSON payload
-// returned by the LLM. Expected shape: {"findings": [...]}.
-func normalizeFindingsJSON(payload map[string]any) []ReviewFinding {
+// returned by the LLM. Expected shape: {"findings": [...]}. modelName is the
+// model that produced payload (ReviewerConfig.ModelName at the call site) and
+// is stamped onto every finding for attribution (ADR 2026070201 change log).
+func normalizeFindingsJSON(payload map[string]any, modelName string) []ReviewFinding {
 	if payload == nil {
 		return nil
 	}
@@ -1987,6 +1993,7 @@ func normalizeFindingsJSON(payload map[string]any) []ReviewFinding {
 			Confidence:        asFloat64(m["confidence"]),
 			RelatedArtifactID: strings.TrimSpace(asString(m["related_artifact_id"])),
 			RelatedRecordID:   int64(asFloat64(m["related_record_id"])),
+			ModelName:         modelName,
 		})
 	}
 	return out

@@ -132,6 +132,7 @@ func (r *assumptionsReviewer) processWindow(
 ) []ReviewFinding {
 	r.logger.Info("assumptions review window start",
 		"record_id", recordID,
+		"run_id", llmRunIDFromContext(ctx),
 		"window", index,
 		"lines", fmt.Sprintf("%d-%d", w.startLine, w.endLine),
 		"max_tool_turns", cfg.MaxToolTurns,
@@ -168,7 +169,7 @@ func (r *assumptionsReviewer) processWindow(
 				"record_id", recordID, "window", index, "error", err)
 			return nil
 		}
-		findings = normalizeFindingsJSON(payload)
+		findings = normalizeFindingsJSON(payload, cfg.ModelName)
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}

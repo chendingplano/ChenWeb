@@ -680,6 +680,7 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 			AnalysisRelationship:  finding.AnalysisRelationship,
 			ArtifactFields:        finding.ArtifactFields,
 			RelatedArtifactFields: finding.RelatedArtifactFields,
+			ModelName:             finding.ModelName,
 		},
 		Metadata: FindingMetadataEnvelope{
 			I18N: FindingI18NMetadata{
@@ -696,6 +697,7 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 			AnalysisRelationship:  finding.AnalysisRelationship,
 			ArtifactFields:        finding.ArtifactFields,
 			RelatedArtifactFields: finding.RelatedArtifactFields,
+			ModelName:             finding.ModelName,
 		},
 	}, nil
 }
@@ -736,6 +738,7 @@ func prepareFindingForStorageWithoutTranslation(finding ReviewFinding) preparedF
 			AnalysisRelationship:  finding.AnalysisRelationship,
 			ArtifactFields:        finding.ArtifactFields,
 			RelatedArtifactFields: finding.RelatedArtifactFields,
+			ModelName:             finding.ModelName,
 		},
 		Metadata: FindingMetadataEnvelope{
 			I18N: FindingI18NMetadata{
@@ -752,6 +755,7 @@ func prepareFindingForStorageWithoutTranslation(finding ReviewFinding) preparedF
 			AnalysisRelationship:  finding.AnalysisRelationship,
 			ArtifactFields:        finding.ArtifactFields,
 			RelatedArtifactFields: finding.RelatedArtifactFields,
+			ModelName:             finding.ModelName,
 		},
 	}
 }

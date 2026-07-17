@@ -193,7 +193,7 @@ func (r *metricsCompletenessReviewer) reviewObject(
 				"record_id", recordID, "object_index", index, "error", err)
 			return nil
 		}
-		findings = normalizeFindingsJSON(out)
+		findings = normalizeFindingsJSON(out, cfg.ModelName)
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}

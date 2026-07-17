@@ -227,7 +227,7 @@ func (r *provisionsReviewer) reviewProvision(
 				"record_id", recordID, "provision_index", index, "error", err)
 			return nil
 		}
-		findings = normalizeFindingsJSON(out)
+		findings = normalizeFindingsJSON(out, cfg.ModelName)
 		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)

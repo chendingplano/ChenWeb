@@ -165,7 +165,7 @@ func (r *technicalAccuracyReviewer) processWindow(
 				"record_id", recordID, "window", index, "error", err)
 			return nil
 		}
-		findings = normalizeFindingsJSON(payload)
+		findings = normalizeFindingsJSON(payload, cfg.ModelName)
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}

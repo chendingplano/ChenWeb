@@ -407,7 +407,7 @@ func TestNormalizeFindingsJSONRelatedArtifact(t *testing.T) {
 			},
 		},
 	}
-	findings := normalizeFindingsJSON(payload)
+	findings := normalizeFindingsJSON(payload, "test")
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))
 	}

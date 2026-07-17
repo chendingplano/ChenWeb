@@ -170,7 +170,7 @@ func (r *terminologyConsistencyReviewer) processBlock(
 			)
 			return nil
 		}
-		findings = normalizeFindingsJSON(payload)
+		findings = normalizeFindingsJSON(payload, cfg.ModelName)
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}

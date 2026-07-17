@@ -198,8 +198,8 @@ func runToolUseReviewWithPayload(
 		}
 
 		// No tool calls: the model is producing its final findings.
-		if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
-			logToolUseFindingsStatus(logger, "response", recordID, turn, findings)
+		if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content, modelName); ok {
+			logToolUseFindingsStatus(logger, "response", recordID, int(llmRunIDFromContext(ctx)), turn, findings)
 			return findings, payload, aggregateUsage, nil
 		}
 
@@ -274,11 +274,11 @@ func finalizeFindingsWithPayload(
 	totalUsage := &LLMUsage{}
 	addUsage(totalUsage, resp.Usage)
 	logLoopUsage(callReason, logger, modelName, -1, resp.Usage)
-	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
-		logToolUseFindingsStatus(logger, "finalize", recordID, -1, findings)
+	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content, modelName); ok {
+		logToolUseFindingsStatus(logger, "finalize", recordID, int(llmRunIDFromContext(ctx)), -1, findings)
 		return findings, payload, totalUsage, nil
 	}
-	_, _, _, parseReason := parseFindingsContentDetailedWithPayload(resp.Content)
+	_, _, _, parseReason := parseFindingsContentDetailedWithPayload(resp.Content, modelName)
 	if shouldRepairFindingsJSON(parseReason) {
 		repairFindings, repairPayload, repairUsage, repairErr := repairFinalFindingsJSONWithPayload(
 			ctx, client, modelName, recordID, messages, toolByName, resp.Content, parseReason, logger,
@@ -388,11 +388,11 @@ func callFinalFindingsRepairWithPayload(
 		return nil, nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
 	}
 	logLoopUsage(callReason, logger, modelName, -2, resp.Usage)
-	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
-		logToolUseFindingsStatus(logger, "finalize_repair", recordID, -2, findings)
+	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content, modelName); ok {
+		logToolUseFindingsStatus(logger, "finalize_repair", recordID, int(llmRunIDFromContext(ctx)), -2, findings)
 		return findings, payload, resp.Usage, nil
 	}
-	_, _, _, repairReason := parseFindingsContentDetailedWithPayload(resp.Content)
+	_, _, _, repairReason := parseFindingsContentDetailedWithPayload(resp.Content, modelName)
 	return nil, nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
 		ErrToolUseFinalizeUnparseable, recordID, repairReason, previewToolLogText(resp.Content))
 }
@@ -496,10 +496,17 @@ func previewToolLogText(s string) string {
 	return s[:maxLen] + "...(truncated)"
 }
 
-func logToolUseFindingsStatus(logger ApiTypes.JimoLogger, phase string, recordID int64, turn int, findings []ReviewFinding) {
+func logToolUseFindingsStatus(
+	logger ApiTypes.JimoLogger,
+	phase string,
+	recordID int64,
+	runID int,
+	turn int,
+	findings []ReviewFinding) {
 	if len(findings) == 0 {
 		logger.Info("tool-use returned no findings",
 			"record_id", recordID,
+			"run_id", runID,
 			"phase", phase,
 			"turn", turn,
 		)
@@ -507,6 +514,7 @@ func logToolUseFindingsStatus(logger ApiTypes.JimoLogger, phase string, recordID
 	}
 	logger.Info("tool-use returned findings",
 		"record_id", recordID,
+		"run_id", runID,
 		"phase", phase,
 		"turn", turn,
 		"findings", len(findings),
@@ -558,7 +566,7 @@ func parseFindingsContent(content string) ([]ReviewFinding, bool) {
 }
 
 func parseFindingsContentDetailed(content string) ([]ReviewFinding, bool, string) {
-	findings, _, ok, reason := parseFindingsContentDetailedWithPayload(content)
+	findings, _, ok, reason := parseFindingsContentDetailedWithPayload(content, "")
 	return findings, ok, reason
 }
 
@@ -566,7 +574,7 @@ func parseFindingsContentDetailed(content string) ([]ReviewFinding, bool, string
 // also returns the unmarshaled payload map, so callers whose prompt requires
 // sibling top-level keys alongside `findings` (e.g. the provisions reviewer's
 // mandatory per-match `analyses`) can recover them.
-func parseFindingsContentDetailedWithPayload(content string) ([]ReviewFinding, map[string]any, bool, string) {
+func parseFindingsContentDetailedWithPayload(content string, modelName string) ([]ReviewFinding, map[string]any, bool, string) {
 	obj, reason := extractJSONObjectDetailed(content)
 	if obj == "" {
 		return nil, nil, false, reason
@@ -587,7 +595,7 @@ checkFindingsKey:
 	if _, ok := payload["findings"]; !ok {
 		return nil, nil, false, "missing_findings_key"
 	}
-	return normalizeFindingsJSON(payload), payload, true, ""
+	return normalizeFindingsJSON(payload, modelName), payload, true, ""
 }
 
 // repairMalformedFindingsJSON tries the shared library's JSON-repair heuristics

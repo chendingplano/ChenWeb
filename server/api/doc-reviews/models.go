@@ -93,6 +93,9 @@ type FindingItem struct {
 	// by the report renderer.
 	ArtifactFields        json.RawMessage `json:"artifact_fields,omitempty"`
 	RelatedArtifactFields json.RawMessage `json:"related_artifact_fields,omitempty"`
+	// ModelName is the LLM model that generated this finding (ADR 2026070201
+	// change log), read back from finding metadata.
+	ModelName string `json:"model_name,omitempty"`
 }
 
 // FindingLocalizedContent stores localized prose for one language.
@@ -132,6 +135,7 @@ var findingMetadataReservedKeys = map[string]bool{
 	"analysis_relationship":      true,
 	"artifact_fields":            true,
 	"related_artifact_fields":    true,
+	"model_name":                 true,
 }
 
 // FindingMetadataEnvelope is stored in kb.doc_review_findings.metadata.
@@ -147,6 +151,7 @@ type FindingMetadataEnvelope struct {
 	AnalysisRelationship  string
 	ArtifactFields        json.RawMessage
 	RelatedArtifactFields json.RawMessage
+	ModelName             string
 }
 
 func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
@@ -181,6 +186,9 @@ func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
 	}
 	if len(e.RelatedArtifactFields) > 0 {
 		m["related_artifact_fields"] = e.RelatedArtifactFields
+	}
+	if e.ModelName != "" {
+		m["model_name"] = e.ModelName
 	}
 	for lang, content := range e.I18N.Translations {
 		m[lang] = content
@@ -231,6 +239,9 @@ func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
 	if raf, ok := raw["related_artifact_fields"]; ok {
 		e.RelatedArtifactFields = append(json.RawMessage(nil), raf...)
 	}
+	if mn, ok := raw["model_name"]; ok {
+		_ = json.Unmarshal(mn, &e.ModelName)
+	}
 	for key, val := range raw {
 		if findingMetadataReservedKeys[key] {
 			continue
@@ -262,6 +273,7 @@ func applyFindingMetadata(f *FindingItem, data []byte) {
 	f.RelatedRecordID = metadata.RelatedRecordID
 	f.ArtifactFields = metadata.ArtifactFields
 	f.RelatedArtifactFields = metadata.RelatedArtifactFields
+	f.ModelName = metadata.ModelName
 }
 
 // FindingNormalization is the result of converting reviewer output into a
