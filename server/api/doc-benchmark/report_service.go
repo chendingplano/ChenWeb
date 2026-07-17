@@ -94,9 +94,14 @@ func (s SQLStore) reportUnits(ctx context.Context, runID string) ([]ScoreUnit, m
 func (s SQLStore) BuildExperimentReport(ctx context.Context, experimentID, baseline, candidate string, allowIncompatible bool) (BenchmarkReport, error) {
 	var datasetHash string
 	var caseSets json.RawMessage
-	if err := s.DB.QueryRowContext(ctx, `SELECT dataset_hash,resolved_case_set_json FROM kb.benchmark_experiments WHERE id=$1`, experimentID).Scan(&datasetHash, &caseSets); err != nil {
+	var resolved json.RawMessage
+	if err := s.DB.QueryRowContext(ctx, `SELECT dataset_hash,resolved_case_set_json,resolved_experiment_json FROM kb.benchmark_experiments WHERE id=$1`, experimentID).Scan(&datasetHash, &caseSets, &resolved); err != nil {
 		return BenchmarkReport{}, err
 	}
+	var experimentPolicy struct {
+		AllowUpstreamVariation bool `json:"allow_upstream_variation"`
+	}
+	_ = json.Unmarshal(resolved, &experimentPolicy)
 	runs, err := s.ListRunsByExperiment(ctx, experimentID)
 	if err != nil {
 		return BenchmarkReport{}, err
@@ -132,7 +137,7 @@ func (s SQLStore) BuildExperimentReport(ctx context.Context, experimentID, basel
 			return BenchmarkReport{}, fmt.Errorf("baseline and candidate must name stored variants")
 		}
 		h := sha256Hex(caseSets)
-		deltas, warnings, err := CompareVariants(VariantComparison{Baseline: byName[baseline], Candidate: byName[candidate], DatasetHash: datasetHash, BaselineCaseSetHash: h, CandidateCaseSetHash: h, ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, AllowIncompatible: allowIncompatible})
+		deltas, warnings, err := CompareVariants(VariantComparison{Baseline: byName[baseline], Candidate: byName[candidate], DatasetHash: datasetHash, BaselineCaseSetHash: h, CandidateCaseSetHash: h, ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, BaselineUpstreamHash: reportUnitUpstreamHash(byName[baseline]), CandidateUpstreamHash: reportUnitUpstreamHash(byName[candidate]), AllowUpstreamVariation: experimentPolicy.AllowUpstreamVariation, AllowIncompatible: allowIncompatible})
 		if err != nil {
 			return BenchmarkReport{}, err
 		}
@@ -140,4 +145,14 @@ func (s SQLStore) BuildExperimentReport(ctx context.Context, experimentID, basel
 		report.Incompatible = len(warnings) > 0
 	}
 	return report, nil
+}
+
+func reportUnitUpstreamHash(units []ScoreUnit) string {
+	identity := make([]string, 0, len(units))
+	for _, unit := range units {
+		identity = append(identity, fmt.Sprintf("%s/%d=%s", unit.CaseID, unit.Repetition, unit.UpstreamChunkHash))
+	}
+	sort.Strings(identity)
+	raw, _ := canonicalJSON(identity)
+	return sha256Hex(raw)
 }

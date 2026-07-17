@@ -250,7 +250,7 @@ func clean(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	query := `SELECT a.id,c.case_id,c.run_id,w.work_root,w.evidence_root,w.nonce,w.cleanup_state FROM kb.benchmark_case_attempts a JOIN kb.benchmark_case_runs c ON c.id=a.case_run_id JOIN kb.benchmark_runs r ON r.id=c.run_id JOIN kb.benchmark_workspaces w ON w.execution_attempt_id=a.id WHERE ($1<>'' AND r.experiment_id=$1::uuid) OR ($2<>'' AND a.id=$2::uuid) ORDER BY a.id`
+	query := `SELECT a.id,c.case_id,c.run_id,w.work_root,w.evidence_root,w.nonce,w.cleanup_state FROM kb.benchmark_case_attempts a JOIN kb.benchmark_case_runs c ON c.id=a.case_run_id JOIN kb.benchmark_runs r ON r.id=c.run_id JOIN kb.benchmark_workspaces w ON w.execution_attempt_id=a.id WHERE (NULLIF($1,'')::uuid IS NOT NULL AND r.experiment_id=NULLIF($1,'')::uuid) OR (NULLIF($2,'')::uuid IS NOT NULL AND a.id=NULLIF($2,'')::uuid) ORDER BY a.id`
 	rows, err := db.QueryContext(ctx, query, *experimentID, *attemptID)
 	if err != nil {
 		return err
