@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildJsonSections, buildMatchedUnitsSections } from './doc-review-json-dialog';
+import {
+	buildJsonSections,
+	buildMatchedUnitsSections,
+	formatCompactContent
+} from './doc-review-json-dialog';
 
 test('buildMatchedUnitsSections flattens metric wrappers and preserves string arrays', () => {
 	const sections = buildMatchedUnitsSections([
@@ -51,4 +55,16 @@ test('buildJsonSections keeps findings as simple name-value pairs', () => {
 test('buildJsonSections handles scalar values and nulls', () => {
 	assert.deepEqual(buildJsonSections('ok'), [{ rows: [{ label: 'value', value: 'ok' }] }]);
 	assert.deepEqual(buildJsonSections(null), [{ rows: [{ label: 'value', value: 'null' }] }]);
+});
+
+test('formatCompactContent unwraps simple unit location wrappers', () => {
+	assert.equal(formatCompactContent({ line_spans: ['91'] }), '[91]');
+	assert.equal(formatCompactContent({ source_line_spans: [58, 91] }), '[58, 91]');
+});
+
+test('formatCompactContent keeps a JSON fallback for more complex objects', () => {
+	assert.equal(
+		formatCompactContent({ line_spans: ['91'], page: 3 }),
+		'{"line_spans":["91"],"page":3}'
+	);
 });

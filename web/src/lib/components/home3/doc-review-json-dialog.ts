@@ -63,3 +63,18 @@ export function buildJsonSections(value: unknown): JsonDialogSection[] {
 	if (isRecord(value)) return [{ rows: flattenRecord(value) }];
 	return [{ rows: [{ label: 'value', value: displayValue(value) }] }];
 }
+
+export function formatCompactContent(value: unknown): string {
+	if (isRecord(value)) {
+		const entries = Object.entries(value);
+		if (entries.length === 1) return formatCompactContent(entries[0][1]);
+	}
+
+	if (Array.isArray(value)) {
+		if (value.every((item) => item == null || typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) {
+			return `[${value.map((item) => item == null ? 'null' : String(item)).join(', ')}]`;
+		}
+	}
+
+	return displayValue(value);
+}

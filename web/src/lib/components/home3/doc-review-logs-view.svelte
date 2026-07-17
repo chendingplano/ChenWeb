@@ -3,7 +3,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { buildJsonSections, buildMatchedUnitsSections, type JsonDialogSection } from './doc-review-json-dialog.js';
+	import { buildJsonSections, buildMatchedUnitsSections, formatCompactContent, type JsonDialogSection } from './doc-review-json-dialog.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
@@ -58,7 +58,7 @@
 	function formatTime(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? value || '—' : parsed.toLocaleString(); }
 	function findingsCount(value: unknown) { return Array.isArray(value) ? value.length : 0; }
 	function jsonText(value: unknown) { try { return value == null ? 'null' : JSON.stringify(value); } catch { return String(value); } }
-	function compactJson(value: unknown) { const text = jsonText(value); return text.length > 120 ? `${text.slice(0, 119)}…` : text; }
+	function compactJson(value: unknown) { const text = formatCompactContent(value); return text.length > 120 ? `${text.slice(0, 119)}…` : text; }
 	function openModal(title: string, sections: JsonDialogSection[] = [], loading = false) {
 		returnFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		modalTitle = title; modalSections = sections; modalError = ''; modalLoading = loading; modalOpen = true;
