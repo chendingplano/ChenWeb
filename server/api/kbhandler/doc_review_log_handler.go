@@ -43,8 +43,14 @@ func ListDocReviewLogs(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	page := parsePositiveInt(c.QueryParam("page"), 1)
-	pageSize := parsePositiveInt(c.QueryParam("page_size"), defaultPageSize)
+	page, err := parseDocReviewLogPage(c.QueryParam("page"), 1)
+	if err != nil {
+		return docReviewLogBadRequest(c, "query param 'page' must be an integer (CWB_DRL_001)")
+	}
+	pageSize, err := parseDocReviewLogPage(c.QueryParam("page_size"), defaultPageSize)
+	if err != nil {
+		return docReviewLogBadRequest(c, "query param 'page_size' must be an integer (CWB_DRL_007)")
+	}
 	if pageSize > maxPageSize {
 		pageSize = maxPageSize
 	}
@@ -127,6 +133,21 @@ func parseOptionalInt64(raw string) (*int64, error) {
 		return nil, err
 	}
 	return &value, nil
+}
+
+func parseDocReviewLogPage(raw string, defaultValue int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if value < 1 {
+		return defaultValue, nil
+	}
+	return value, nil
 }
 
 func parseRFC3339Query(raw string) (*time.Time, error) {
