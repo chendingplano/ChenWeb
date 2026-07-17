@@ -101,6 +101,11 @@ type About struct {
 }
 
 type WorkspaceApp struct {
+	// Key is a stable identifier for this app tile (e.g. "knowledge_base"),
+	// independent of its display Name. It is the join key for
+	// [workspace-content] visibility and config/workspace-content/labels-<lang>.toml
+	// label overrides (ADR 2026071701), mirroring Feature.Key above.
+	Key         string `toml:"key" json:"key"`
 	Name        string `toml:"name" json:"name"`
 	Description string `toml:"description" json:"description"`
 	Href        string `toml:"href" json:"href"`

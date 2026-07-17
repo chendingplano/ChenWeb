@@ -1,8 +1,16 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
-	import { fetchTenantSiteConfig, type SiteConfig } from '$lib/services/siteConfigService';
+	import {
+		fetchTenantSiteConfig,
+		getWorkspaceContentConfig,
+		type SiteConfig,
+		type WorkspaceContentVisibility,
+		type WorkspaceContentLabels,
+		type WorkspaceContentDescriptions
+	} from '$lib/services/siteConfigService';
 	import Ornament from '../components/Ornament.svelte';
 	import { ArrowUpRight, AlertTriangle } from '@lucide/svelte';
 
@@ -24,10 +32,114 @@
 		}
 	});
 
+	// Fixed masthead content ids for [workspace-content] visibility and
+	// config/workspace-content/labels-<lang>.toml label overrides
+	// (ADR 2026071701). App tiles use their own `key` from site-config
+	// instead (see knownContentIds below).
+	const WS_KICKER_ID = 'ws-kicker';
+	const WS_BANNER_TITLE_ID = 'ws-banner-title';
+	const WS_BANNER_SUBTITLE_ID = 'ws-banner-subtitle';
+	const WS_ANNOUNCEMENTS_ID = 'ws-announcements';
+
+	// Every valid workspace content id (fixed masthead ids + current app
+	// keys), the source of truth for [workspace-content]/labels-<lang>.toml
+	// ids. Used to detect config entries that don't match anything, which
+	// config loading otherwise treats as a silent no-op (see
+	// unknownContentConfigIds below).
+	const knownContentIds = $derived(
+		new Set<string>([
+			WS_KICKER_ID,
+			WS_BANNER_TITLE_ID,
+			WS_BANNER_SUBTITLE_ID,
+			WS_ANNOUNCEMENTS_ID,
+			...cfg.workspace.apps.map((app) => app.key)
+		])
+	);
+
+	// Workspace content visibility, from [workspace-content] in
+	// config.toml / config.local.toml (GET /api/v1/workspace/content-config).
+	// Ids absent from the map default to enabled. Empty until the fetch
+	// resolves, so the full page renders first paint (fail-open).
+	let contentVisibility = $state<WorkspaceContentVisibility>({});
+
+	// Workspace content label overrides for the site-wide language
+	// (Paraglide's getLocale()), from config/workspace-content/labels-<lang>.toml.
+	// Ids absent from the map keep their site-config default label (fail-open).
+	let contentLabels = $state<WorkspaceContentLabels>({});
+
+	// App tile (app.key) description overrides for the same language, from
+	// the same file's [descriptions] table. Ids absent keep their site-config
+	// default description (fail-open).
+	let contentDescriptions = $state<WorkspaceContentDescriptions>({});
+
+	let contentConfigLang = $state(getLocale());
+
+	// Ids present in the fetched config/labels/descriptions that don't match
+	// any real content id — almost always a typo in config.local.toml or a
+	// labels-<lang>.toml file. These entries are otherwise silently inert,
+	// so they're surfaced here rather than failing quietly.
+	const unknownContentConfigIds = $derived(
+		Object.keys(contentVisibility).filter((id) => !knownContentIds.has(id))
+	);
+	const unknownContentLabelIds = $derived(
+		[...new Set([...Object.keys(contentLabels), ...Object.keys(contentDescriptions)])].filter(
+			(id) => !knownContentIds.has(id)
+		)
+	);
+
+	$effect(() => {
+		if (unknownContentConfigIds.length > 0) {
+			console.warn(
+				`[workspace-content] config.local.toml [workspace-content] has unrecognized content id(s), ignored: ${unknownContentConfigIds.join(', ')}`
+			);
+		}
+		if (unknownContentLabelIds.length > 0) {
+			console.warn(
+				`[workspace-content] config/workspace-content/labels-${contentConfigLang}.toml has unrecognized content id(s), ignored: ${unknownContentLabelIds.join(', ')}`
+			);
+		}
+	});
+
+	onMount(() => {
+		contentConfigLang = getLocale();
+		getWorkspaceContentConfig(contentConfigLang)
+			.then(({ visibility, labels, descriptions }) => {
+				contentVisibility = visibility;
+				contentLabels = labels;
+				contentDescriptions = descriptions;
+			})
+			.catch(() => {
+				// Keep the full page, with default labels/descriptions, on failure.
+			});
+	});
+
+	const showKicker = $derived(contentVisibility[WS_KICKER_ID] ?? true);
+	const showBannerTitle = $derived(contentVisibility[WS_BANNER_TITLE_ID] ?? true);
+	const showBannerSubtitle = $derived(contentVisibility[WS_BANNER_SUBTITLE_ID] ?? true);
+	const showAnnouncements = $derived(contentVisibility[WS_ANNOUNCEMENTS_ID] ?? true);
+
+	const kickerText = $derived(contentLabels[WS_KICKER_ID] ?? cfg.workspace.kicker);
+	const bannerTitleText = $derived(contentLabels[WS_BANNER_TITLE_ID] ?? cfg.workspace.banner_title);
+	const bannerSubtitleText = $derived(
+		contentLabels[WS_BANNER_SUBTITLE_ID] ?? cfg.workspace.banner_subtitle
+	);
+
+	// Apps grid filtered against contentVisibility (by app.key) with any
+	// configured label/description override applied to `name`/`description`.
+	const visibleApps = $derived(
+		cfg.workspace.apps
+			.filter((app) => contentVisibility[app.key] ?? true)
+			.map((app) => ({
+				...app,
+				name: contentLabels[app.key] ?? app.name,
+				description: contentDescriptions[app.key] ?? app.description
+			}))
+	);
+
 	// Stacked headline, same treatment as the About frontispiece: split on
 	// ASCII and CJK commas so tenant copy in either language stacks cleanly.
 	const titleLines = $derived(
-		cfg.workspace.banner_title
+		bannerTitleText
 			.split(/([,，]\s*)/)
 			.reduce<string[]>((lines, part, i) => {
 				if (i % 2 === 0) lines.push(part);
@@ -90,7 +202,7 @@
 </script>
 
 <svelte:head>
-	<title>{cfg.workspace.banner_title} — {cfg.branding.site_name}</title>
+	<title>{bannerTitleText} — {cfg.branding.site_name}</title>
 </svelte:head>
 
 <!-- ═════════════════════════════════════════════════
@@ -126,29 +238,58 @@
 				class="flex items-baseline justify-between gap-6 border-b border-[#17181c]/15 pb-4 dark:border-white/15"
 			>
 				<div class="flex items-center gap-3">
-					<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
-					<span
-						class="text-xs font-bold tracking-[0.22em] uppercase text-[#6f6c66] dark:text-[#a5a29b]"
-					>
-						{cfg.workspace.kicker}
-					</span>
+					{#if showKicker}
+						<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
+						<span
+							class="text-xs font-bold tracking-[0.22em] uppercase text-[#6f6c66] dark:text-[#a5a29b]"
+						>
+							{kickerText}
+						</span>
+					{/if}
 				</div>
 				<span class="text-xs tracking-[0.06em] tabular-nums text-[#6f6c66] dark:text-[#a5a29b]">
 					{dateline}
 				</span>
 			</div>
 
-			<h1
-				class="mt-7 max-w-3xl text-[clamp(2rem,3.2vw+0.6rem,3rem)] font-bold leading-[1.14] tracking-tight text-[#17181c] dark:text-[#e9e7e2]"
-			>
-				{#each titleLines as line (line)}
-					<span class="block">{line}</span>
-				{/each}
-			</h1>
+			{#if showBannerTitle}
+				<h1
+					class="mt-7 max-w-3xl text-[clamp(2rem,3.2vw+0.6rem,3rem)] font-bold leading-[1.14] tracking-tight text-[#17181c] dark:text-[#e9e7e2]"
+				>
+					{#each titleLines as line (line)}
+						<span class="block">{line}</span>
+					{/each}
+				</h1>
+			{/if}
 
-			<p class="mt-4 max-w-[56ch] leading-[1.9] text-[#6f6c66] dark:text-[#a5a29b]">
-				{cfg.workspace.banner_subtitle}
-			</p>
+			{#if showBannerSubtitle}
+				<p class="mt-4 max-w-[56ch] leading-[1.9] text-[#6f6c66] dark:text-[#a5a29b]">
+					{bannerSubtitleText}
+				</p>
+			{/if}
+
+			{#if unknownContentConfigIds.length > 0 || unknownContentLabelIds.length > 0}
+				<!-- Diagnostic: config.local.toml [workspace-content] or a
+				     labels-<lang>.toml file references an id that doesn't match any
+				     content item. These entries are otherwise silently ignored, so
+				     surface them here instead of only to the console, since this
+				     page is the config's own audience. -->
+				<div
+					class="mt-4 rounded-lg border px-3 py-2 text-xs border-amber-500/40 bg-amber-500/10 text-amber-800 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-300"
+				>
+					<div class="font-bold">Unrecognized workspace content id(s) — ignored</div>
+					{#if unknownContentConfigIds.length > 0}
+						<div class="mt-0.5">
+							config.local.toml [workspace-content]: {unknownContentConfigIds.join(', ')}
+						</div>
+					{/if}
+					{#if unknownContentLabelIds.length > 0}
+						<div class="mt-0.5">
+							labels-{contentConfigLang}.toml: {unknownContentLabelIds.join(', ')}
+						</div>
+					{/if}
+				</div>
+			{/if}
 
 			{#if tenantError}
 				<p class="mt-5 flex items-center gap-1.5 text-sm text-[#b4462f] dark:text-[#e08a76]">
@@ -166,49 +307,51 @@
      story spread's layout), hairline-ruled lines with
      diamond markers beside it.
      ═════════════════════════════════════════════════ -->
-<section class="relative">
-	<div class="mx-auto max-w-7xl px-6 pt-12 md:pt-16">
-		<div use:reveal class="reveal grid gap-6 md:grid-cols-[200px_1fr] md:gap-16 lg:grid-cols-[240px_1fr]">
-			<div class="flex items-center gap-3 self-start md:pt-4">
-				<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
-				<h2 class="text-xs font-bold tracking-[0.22em] uppercase text-[#b08d57]">
-					{m.semos_workspace_announcements()}
-				</h2>
-				{#if announcements.length > 0}
-					<span class="text-xs font-bold tabular-nums text-[#b08d57]/60">
-						{String(announcements.length).padStart(2, '0')}
-					</span>
+{#if showAnnouncements}
+	<section class="relative">
+		<div class="mx-auto max-w-7xl px-6 pt-12 md:pt-16">
+			<div use:reveal class="reveal grid gap-6 md:grid-cols-[200px_1fr] md:gap-16 lg:grid-cols-[240px_1fr]">
+				<div class="flex items-center gap-3 self-start md:pt-4">
+					<span class="inline-block h-1.5 w-1.5 rotate-45 bg-[#b08d57]"></span>
+					<h2 class="text-xs font-bold tracking-[0.22em] uppercase text-[#b08d57]">
+						{m.semos_workspace_announcements()}
+					</h2>
+					{#if announcements.length > 0}
+						<span class="text-xs font-bold tabular-nums text-[#b08d57]/60">
+							{String(announcements.length).padStart(2, '0')}
+						</span>
+					{/if}
+				</div>
+
+				{#if announcements.length === 0}
+					<p
+						class="flex items-center gap-3 border-y border-[#17181c]/10 py-4 text-sm text-[#6f6c66]/70 dark:border-white/10 dark:text-[#a5a29b]/60"
+					>
+						<span
+							class="inline-block h-1.5 w-1.5 shrink-0 rotate-45 bg-[#b08d57]/30"
+							aria-hidden="true"
+						></span>
+						{m.semos_workspace_no_announcements()}
+					</p>
+				{:else}
+					<ul class="border-t border-[#17181c]/10 dark:border-white/10">
+						{#each announcements as item (item)}
+							<li
+								class="flex gap-3 border-b border-[#17181c]/10 py-4 leading-[1.8] text-[#3d3c38] dark:border-white/10 dark:text-[#c6c3bc]"
+							>
+								<span
+									class="mt-[0.55rem] inline-block h-1.5 w-1.5 shrink-0 rotate-45 bg-[#b08d57]"
+									aria-hidden="true"
+								></span>
+								<span>{item}</span>
+							</li>
+						{/each}
+					</ul>
 				{/if}
 			</div>
-
-			{#if announcements.length === 0}
-				<p
-					class="flex items-center gap-3 border-y border-[#17181c]/10 py-4 text-sm text-[#6f6c66]/70 dark:border-white/10 dark:text-[#a5a29b]/60"
-				>
-					<span
-						class="inline-block h-1.5 w-1.5 shrink-0 rotate-45 bg-[#b08d57]/30"
-						aria-hidden="true"
-					></span>
-					{m.semos_workspace_no_announcements()}
-				</p>
-			{:else}
-				<ul class="border-t border-[#17181c]/10 dark:border-white/10">
-					{#each announcements as item (item)}
-						<li
-							class="flex gap-3 border-b border-[#17181c]/10 py-4 leading-[1.8] text-[#3d3c38] dark:border-white/10 dark:text-[#c6c3bc]"
-						>
-							<span
-								class="mt-[0.55rem] inline-block h-1.5 w-1.5 shrink-0 rotate-45 bg-[#b08d57]"
-								aria-hidden="true"
-							></span>
-							<span>{item}</span>
-						</li>
-					{/each}
-				</ul>
-			{/if}
 		</div>
-	</div>
-</section>
+	</section>
+{/if}
 
 <div use:reveal class="reveal py-12 md:py-16">
 	<Ornament />
@@ -232,12 +375,12 @@
 				</h2>
 			</div>
 			<span class="text-xs font-bold tabular-nums text-[#b08d57]/60">
-				{String(cfg.workspace.apps.length).padStart(2, '0')}
+				{String(visibleApps.length).padStart(2, '0')}
 			</span>
 		</div>
 
 		<div use:reveal class="reveal mt-10 grid border-t border-white/12 sm:grid-cols-2">
-			{#each cfg.workspace.apps as app, i (app.name)}
+			{#each visibleApps as app, i (app.key)}
 				<a
 					href={app.href}
 					class="group relative grid grid-cols-[3.25rem_1fr_auto] items-baseline gap-y-2.5 border-b border-white/12 px-2 py-8 transition-colors duration-200 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#b08d57]/60 sm:px-8 sm:py-10 sm:odd:border-r"

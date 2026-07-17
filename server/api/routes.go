@@ -229,6 +229,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	// placeholder until the follow-up auth ADR). ADR 2026071102.
 	apiGroup.GET("/site-config/tenant/:tenant_id", sitehandler.GetTenantSiteConfig)
 
+	// /semos/workspace content visibility + i18n label overrides
+	// (ADR 2026071701, mirroring /kb/menu-config below).
+	apiGroup.GET("/workspace/content-config", sitehandler.GetWorkspaceContentConfig)
+
 	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 
 	// Add the endpoint 'api/v1/button-click' (testing only)

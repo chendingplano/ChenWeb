@@ -1,0 +1,24 @@
+# Per-language label overrides for the /semos/workspace page.
+# See labels-en.toml for the full format description.
+#
+# The entries below are starter translations for "zh-cn" — add/edit/remove
+# ids as needed. Ids not listed keep their site-config default label.
+
+[labels]
+ws-kicker = "工作台"
+ws-banner-title = "我的工作台"
+ws-banner-subtitle = "管理你的知识库所需的一切。"
+knowledge_base = "知识库"
+chat = "对话知识库"
+search = "检索知识库"
+doc_reviews = "文档审核"
+workflows = "工作流"
+agents = "智能体与运行平台"
+
+[descriptions]
+knowledge_base = "浏览和管理文档与知识工件。"
+chat = "基于文档的可溯源问答。"
+search = "关键词与语义混合检索。"
+doc_reviews = "运行并查看带引用依据的文档审核。"
+workflows = "自动化多步骤文档处理流程。"
+agents = "基于知识构建并运行智能体。"

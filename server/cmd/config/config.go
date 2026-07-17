@@ -184,6 +184,12 @@ type AppConfigDef struct {
 	// config.local.toml. Ids absent from the map default to enabled. When
 	// empty, the full Wiki sidebar menu is shown.
 	KnowledgeMenus map[string]bool `mapstructure:"knowledge-menus"`
+	// WorkspaceContent maps a /semos/workspace content item id (e.g.
+	// "ws-app-chat", "ws-announcements") to whether it is shown. Configured
+	// via [workspace-content] in config.toml / config.local.toml. Ids absent
+	// from the map default to enabled. When empty, the full workspace page
+	// content is shown.
+	WorkspaceContent map[string]bool `mapstructure:"workspace-content"`
 }
 
 type PDFParserConfig struct {
@@ -329,6 +335,13 @@ func GetDocReviewsConfig() map[string][]string {
 // which case every menu item defaults to enabled.
 func GetKnowledgeMenusConfig() map[string]bool {
 	return AppConfig.KnowledgeMenus
+}
+
+// GetWorkspaceContentConfig returns the configured /semos/workspace content
+// id->enabled mapping. Returns nil/empty when no [workspace-content] section
+// is present, in which case every content item defaults to enabled.
+func GetWorkspaceContentConfig() map[string]bool {
+	return AppConfig.WorkspaceContent
 }
 
 func GetLanguages() []string {

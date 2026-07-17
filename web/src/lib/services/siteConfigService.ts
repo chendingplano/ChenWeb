@@ -78,6 +78,10 @@ export interface SiteAbout {
 }
 
 export interface WorkspaceApp {
+	// Stable identifier (e.g. "knowledge_base"), independent of `name`. Join
+	// key for [workspace-content] visibility and labels-<lang>.toml overrides
+	// (ADR 2026071701).
+	key: string;
 	name: string;
 	description: string;
 	href: string;
@@ -139,4 +143,39 @@ export function fetchTenantSiteConfig(
 		`/api/v1/site-config/tenant/${encodeURIComponent(tenantId)}`,
 		fetchFn
 	);
+}
+
+// /semos/workspace content item id -> enabled. Ids absent from the map
+// default to enabled on the frontend. See [workspace-content] in
+// config.local.toml (ADR 2026071701).
+export type WorkspaceContentVisibility = Record<string, boolean>;
+
+// /semos/workspace content item id -> label override for the requested
+// language. Ids absent from the map keep their site-config default label.
+// See config/workspace-content/labels-<lang>.toml (ADR 2026071701).
+export type WorkspaceContentLabels = Record<string, string>;
+
+// /semos/workspace app tile id (app.key) -> description override for the
+// requested language. Ids absent from the map keep their site-config default
+// description. See config/workspace-content/labels-<lang>.toml's
+// [descriptions] table (ADR 2026071701).
+export type WorkspaceContentDescriptions = Record<string, string>;
+
+/** Workspace content visibility + i18n label/description overrides — authenticated. */
+export async function getWorkspaceContentConfig(
+	lang?: string,
+	fetchFn: typeof fetch = fetch
+): Promise<{
+	visibility: WorkspaceContentVisibility;
+	labels: WorkspaceContentLabels;
+	descriptions: WorkspaceContentDescriptions;
+}> {
+	const query = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+	const response = await getJSON<{
+		status: boolean;
+		visibility: WorkspaceContentVisibility;
+		labels: WorkspaceContentLabels;
+		descriptions: WorkspaceContentDescriptions;
+	}>(`/api/v1/workspace/content-config${query}`, fetchFn);
+	return { visibility: response.visibility, labels: response.labels, descriptions: response.descriptions };
 }

@@ -1,0 +1,25 @@
+# Per-language label overrides for the /semos/workspace page.
+#
+# Each key under [labels] is a workspace content id: either one of the fixed
+# masthead ids (ws-kicker, ws-banner-title, ws-banner-subtitle), or an app
+# tile's `key` from [[workspace.apps]] in the active site-config TOML (e.g.
+# "knowledge_base", "chat" — see config/site/site-default.toml). The value is
+# the label shown when the site-wide language (Paraglide's getLocale()) is
+# "en".
+#
+# [descriptions] uses the same app tile `key`s to override that tile's
+# subtitle/description text (masthead ids and ws-announcements are not valid
+# here — only app tiles have a description).
+#
+# Ids not listed here keep their site-config default label/description. This
+# file itself is optional — if absent, every item uses its site-config
+# default text for "en", identical to the behavior before this file existed.
+#
+# This file does not control item visibility — that remains
+# [workspace-content] in config.local.toml, unaffected by language. It also
+# does not cover the announcements list, which stays entirely
+# site-config-driven (ADR 2026071701).
+
+[labels]
+
+[descriptions]

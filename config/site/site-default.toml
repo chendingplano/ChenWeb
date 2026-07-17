@@ -106,36 +106,42 @@ banner_image = "/images/angleWalls.jpg"
 announcements = ["Welcome to your SemOS workspace."]
 
 [[workspace.apps]]
+key = "knowledge_base"
 name = "Knowledge Base"
 description = "Browse and manage documents and artifacts."
 href = "/home3/knowledge"
 icon = "database"
 
 [[workspace.apps]]
+key = "chat"
 name = "Chat with Your Knowledge Base"
 description = "Grounded Q&A over your documents."
 href = "/home3"
 icon = "message-circle"
 
 [[workspace.apps]]
+key = "search"
 name = "Search Your Knowledge Base"
 description = "Hybrid keyword + semantic search."
 href = "/home3/knowledge"
 icon = "search"
 
 [[workspace.apps]]
+key = "doc_reviews"
 name = "Document Reviews"
 description = "Run and read document reviews with cited findings."
 href = "/home3/inputs"
 icon = "file-check"
 
 [[workspace.apps]]
+key = "workflows"
 name = "Workflows"
 description = "Automate multi-step document processing."
 href = "/home3"
 icon = "workflow"
 
 [[workspace.apps]]
+key = "agents"
 name = "Agents and Harness"
 description = "Build and run AI agents over your knowledge."
 href = "/home3"
