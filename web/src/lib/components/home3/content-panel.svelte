@@ -11,6 +11,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
+	import DocReviewLogsView from '$lib/components/home3/doc-review-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import DiaryView from '$lib/components/home3/diary-view.svelte';
@@ -131,7 +132,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		sectionId !== 'chat' &&
 		activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
 		activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
-		activeMenu?.childId !== 'sysadmin-doc-proc-logs'
+		activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
+		activeMenu?.childId !== 'sysadmin-doc-review-logs'
 	);
 </script>
 
@@ -206,6 +208,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<DocProcLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-usage-logs'}
 			<LLMUsageLogsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-review-logs'}
+			<DocReviewLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-model-profiles'}

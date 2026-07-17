@@ -181,7 +181,8 @@
 					id: 'sysadmin-logs', label: 'Logs',
 					children: [
 						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' },
-						{ id: 'sysadmin-llm-usage-logs', label: 'LLM Usage Logs' }
+						{ id: 'sysadmin-llm-usage-logs', label: 'LLM Usage Logs' },
+						{ id: 'sysadmin-doc-review-logs', label: 'Doc Review Logs' }
 					]
 				},
 				{
