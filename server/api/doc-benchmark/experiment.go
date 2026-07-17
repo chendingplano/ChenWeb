@@ -382,7 +382,11 @@ func validateVariants(raw []rawVariant, processors []Processor) ([]ExperimentVar
 			if _, ok := allowed[key]; !ok {
 				return nil, fmt.Errorf("variants[%d].overrides.%s: override is not allowed by the selected processor closure", i, key)
 			}
-			overrides[key] = variant.Overrides[key]
+			value, err := materializeOverrideValue(variant.Overrides[key])
+			if err != nil {
+				return nil, fmt.Errorf("variants[%d].overrides.%s: %w", i, key, err)
+			}
+			overrides[key] = value
 		}
 		encoded, err := json.Marshal(overrides)
 		if err != nil {
@@ -407,6 +411,21 @@ func allowedOverrides(processors []Processor) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func materializeOverrideValue(raw string) (string, error) {
+	if len(raw) >= 4 && strings.HasPrefix(raw, "${") && strings.HasSuffix(raw, "}") {
+		name := strings.TrimSpace(raw[2 : len(raw)-1])
+		if name == "" {
+			return "", fmt.Errorf("environment variable name must not be empty")
+		}
+		value := strings.TrimSpace(os.Getenv(name))
+		if value == "" {
+			return "", fmt.Errorf("environment variable %q is not set", name)
+		}
+		return value, nil
+	}
+	return raw, nil
 }
 
 func secretShaped(key string) bool {

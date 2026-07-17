@@ -238,6 +238,24 @@ func TestOverrideRejectsSecretShapedKeysRatherThanMasking(t *testing.T) {
 	}
 }
 
+func TestExperimentOverrideExpandsEnvVariableValues(t *testing.T) {
+	t.Setenv("DOC_BENCHMARK_METRICS_MODEL_NAME", "deepseek-flash-chen")
+	raw := []byte("name=\"x\"\ndataset=\"doc-processors-synthetic-core@1.0.0\"\nprocessors=[\"extract_metrics\"]\n[[variants]]\nname=\"base\"\n[variants.overrides]\nEXTRACT_METRIC_CANDIDATES_MODEL_NAME=\"${DOC_BENCHMARK_METRICS_MODEL_NAME}\"\n")
+	exp := resolveExperimentForTest(t, raw)
+	if got := exp.Variants[0].Overrides["EXTRACT_METRIC_CANDIDATES_MODEL_NAME"]; got != "deepseek-flash-chen" {
+		t.Fatalf("expanded override=%q", got)
+	}
+}
+
+func TestExperimentOverrideRejectsMissingEnvVariableValue(t *testing.T) {
+	t.Setenv("DOC_BENCHMARK_METRICS_MODEL_NAME", "")
+	raw := []byte("name=\"x\"\ndataset=\"doc-processors-synthetic-core@1.0.0\"\nprocessors=[\"extract_metrics\"]\n[[variants]]\nname=\"base\"\n[variants.overrides]\nEXTRACT_METRIC_CANDIDATES_MODEL_NAME=\"${DOC_BENCHMARK_METRICS_MODEL_NAME}\"\n")
+	_, err := ResolveExperiment(raw, staticDatasetResolver{loadValidDataset(t)})
+	if err == nil || !strings.Contains(err.Error(), "DOC_BENCHMARK_METRICS_MODEL_NAME") {
+		t.Fatalf("error=%v, want missing env var", err)
+	}
+}
+
 func TestSnapshotRetainsRequestedIntentAndDatasetProvenance(t *testing.T) {
 	raw := minimalExperiment(`["extract_metrics"]`, "base", "case_tags=[\"overlap\"]\n")
 	exp := resolveExperimentForTest(t, raw)
