@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -40,6 +42,7 @@ type VariantWorker struct {
 	Run         PreparedRun
 	Session     VariantSession
 	initialized bool
+	terminal    bool
 }
 
 func (w *VariantWorker) Initialize(ctx context.Context) error {
@@ -48,6 +51,14 @@ func (w *VariantWorker) Initialize(ctx context.Context) error {
 	}
 	if w.Experiment == nil {
 		return fmt.Errorf("variant worker: nil experiment")
+	}
+	var lifecycle string
+	if err := w.Application.Config.DB.QueryRowContext(ctx, `SELECT lifecycle FROM kb.benchmark_runs WHERE id=$1`, w.Run.RunID).Scan(&lifecycle); err != nil {
+		return err
+	}
+	if lifecycle == "succeeded" || lifecycle == "failed" || lifecycle == "canceled" {
+		w.initialized, w.terminal = true, true
+		return nil
 	}
 	session, err := w.Application.InitializeVariant(ctx, w.Run.Variant, w.Experiment.Processors)
 	if err != nil {
@@ -67,6 +78,9 @@ func (w *VariantWorker) Initialize(ctx context.Context) error {
 func (w *VariantWorker) RunCases(ctx context.Context) error {
 	if err := w.Initialize(ctx); err != nil {
 		return err
+	}
+	if w.terminal {
+		return nil
 	}
 	units := make([]CaseUnit, 0, len(w.Run.CaseRuns))
 	for unit := range w.Run.CaseRuns {
@@ -95,6 +109,13 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 	datasetCase, processors := run.Cases[unit], run.Processors[unit]
 	if experiment == nil || len(processors) == 0 {
 		return fmt.Errorf("case unit has no experiment or applicable processors")
+	}
+	if err := a.verifyCaseFiles(experiment, datasetCase); err != nil {
+		return err
+	}
+	captureProcessors := append([]Processor(nil), processors...)
+	if containsProcessor(processors, ProcessorExtractMetrics) && !containsProcessor(captureProcessors, ProcessorChunking) {
+		captureProcessors = append([]Processor{ProcessorChunking}, captureProcessors...)
 	}
 	state := &caseExecutionState{adapters: map[Processor]Adapter{}}
 	store := SQLStore{DB: a.Config.DB}
@@ -178,11 +199,21 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 			if loader == nil {
 				loader = store.LoadVerifiedEvidence
 			}
-			return loader(ctx, attempt.SourceExecutionAttemptID.String)
+			bundle, err := loader(ctx, attempt.SourceExecutionAttemptID.String)
+			if err != nil {
+				return nil, err
+			}
+			scorerJSON, scorerHash := scorerSnapshot(processors)
+			if bundle.InputSHA256 != sha256Hex(datasetCase.InputBytes) || !bytes.Equal(bundle.InputBytes, datasetCase.InputBytes) ||
+				!bytes.Equal(bundle.ExpectedJSON, datasetCase.ExpectedBytes) || !bytes.Equal(bundle.ConfigJSON, session.ConfigJSON) ||
+				bundle.ConfigHash != session.ConfigHash || !bytes.Equal(bundle.ScorerJSON, scorerJSON) || bundle.ScorerHash != scorerHash {
+				return nil, fmt.Errorf("rescore evidence identity does not match the prepared case and runtime")
+			}
+			return bundle, nil
 		}
 		scorerJSON, scorerHash := scorerSnapshot(processors)
 		bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: attempt.ID, InputSHA256: sha256Hex(datasetCase.InputBytes), InputBytes: datasetCase.InputBytes, ExpectedJSON: datasetCase.ExpectedBytes, ConfigJSON: session.ConfigJSON, ConfigHash: session.ConfigHash, ScorerJSON: scorerJSON, ScorerHash: scorerHash, Processors: map[string]EvidenceProcessor{}}
-		for _, processor := range processors {
+		for _, processor := range captureProcessors {
 			entry := EvidenceProcessor{}
 			adapter := adapterFor(processor, state.seeded)
 			if adapter == nil {
@@ -191,11 +222,6 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 				entry.CaptureError = err.Error()
 			} else {
 				entry.Capture, _ = canonicalJSON(captured)
-				if actual, reconcileErr := adapter.Reconcile(captured); reconcileErr != nil {
-					entry.Diagnostics, _ = canonicalJSON(map[string]any{"reconcile_error": reconcileErr.Error()})
-				} else {
-					entry.Actual, _ = canonicalJSON(actual)
-				}
 			}
 			bundle.Processors[string(processor)] = entry
 		}
@@ -224,32 +250,10 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 			return nil, fmt.Errorf("invalid evidence value")
 		}
 		result := reconciledEvidence{bundle: bundle, actuals: map[Processor]any{}}
-		for _, processor := range processors {
+		for _, processor := range captureProcessors {
 			entry, exists := bundle.Processors[string(processor)]
 			if !exists || entry.CaptureError != "" || len(entry.Capture) == 0 {
 				return result, fmt.Errorf("%w: %s capture unavailable: %s", ErrInvalidOutput, processor, entry.CaptureError)
-			}
-			if len(entry.Actual) > 0 {
-				var actual any
-				switch processor {
-				case ProcessorChunking:
-					actual = &ChunkActual{}
-				case ProcessorExtractMetrics:
-					actual = &MetricActual{}
-				}
-				if err := json.Unmarshal(entry.Actual, actual); err != nil {
-					return result, fmt.Errorf("%w: %v", ErrInvalidOutput, err)
-				}
-				switch value := actual.(type) {
-				case *ChunkActual:
-					result.actuals[processor] = *value
-				case *MetricActual:
-					result.actuals[processor] = *value
-				}
-				continue
-			}
-			if len(entry.Diagnostics) > 0 {
-				return result, fmt.Errorf("%w: %s reconciliation failed: %s", ErrInvalidOutput, processor, entry.Diagnostics)
 			}
 			var capturedValue any
 			switch processor {
@@ -321,7 +325,8 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 				if err != nil {
 					return &ScorerError{Err: err}
 				}
-				score, err := ScoreMetricsContext(ctx, MetricScoreInput{Gold: gold, Predictions: predictions, UpstreamValid: true})
+				_, upstreamValid := reconciled.actuals[ProcessorChunking].(ChunkActual)
+				score, err := ScoreMetricsContext(ctx, MetricScoreInput{Gold: gold, Predictions: predictions, UpstreamValid: upstreamValid})
 				if err != nil {
 					return &ScorerError{Err: err}
 				}
@@ -341,6 +346,14 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 				if err != nil {
 					return &ScorerError{Err: err}
 				}
+			}
+			success := ScoreRecord{AttemptID: sql.NullString{String: attempt.ID, Valid: true}, Processor: string(processor), Scorer: "harness", ScorerVersion: "processor-success-v1", Metric: "processor_success", Slice: string(processor), Direction: "higher", AggregationKind: "binary_macro", Value: sql.NullFloat64{Float64: 1, Valid: true}, Numerator: sql.NullFloat64{Float64: 1, Valid: true}, Denominator: sql.NullFloat64{Float64: 1, Valid: true}, NonNull: true, Applicable: true, Metadata: json.RawMessage(`{}`)}
+			if a.Config.InsertScore != nil {
+				if err := a.Config.InsertScore(ctx, success); err != nil {
+					return &ScorerError{Err: err}
+				}
+			} else if _, err := store.InsertScore(ctx, success); err != nil {
+				return &ScorerError{Err: err}
 			}
 		}
 		return nil
@@ -368,6 +381,39 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 	return runAttempt(ctx, caseRunID, RunnerConfig{Owner: a.Config.Owner, Timeout: experiment.Timeout, Heartbeat: benchmarkHeartbeat(experiment.AttemptLease), AttemptLease: experiment.AttemptLease, MaxAttempts: experiment.MaxAttempts, RetainWorkspaces: experiment.RetainWorkspaces, Now: a.Config.Now}, work)
 }
 
+func containsProcessor(processors []Processor, want Processor) bool {
+	for _, processor := range processors {
+		if processor == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (a Application) verifyCaseFiles(experiment *Experiment, datasetCase DatasetCase) error {
+	if a.Config.AllowUnverifiedFixtureFiles {
+		return nil
+	}
+	if a.Config.DatasetRoot == "" {
+		return fmt.Errorf("benchmark dataset root is required for case-file verification")
+	}
+	base := filepath.Join(a.Config.DatasetRoot, experiment.DatasetID, experiment.DatasetVersion)
+	checks := []struct {
+		path string
+		want []byte
+	}{{datasetCase.Input, datasetCase.InputBytes}, {datasetCase.Expected, datasetCase.ExpectedBytes}}
+	for _, check := range checks {
+		raw, err := os.ReadFile(filepath.Join(base, filepath.FromSlash(check.path)))
+		if err != nil {
+			return fmt.Errorf("benchmark case %s reverify %s: %w", datasetCase.CaseID, check.path, err)
+		}
+		if !bytes.Equal(raw, check.want) || experiment.FileHashes[check.path] != sha256Hex(raw) {
+			return fmt.Errorf("benchmark case %s file hash changed after preparation: %s", datasetCase.CaseID, check.path)
+		}
+	}
+	return nil
+}
+
 func benchmarkHeartbeat(lease time.Duration) time.Duration {
 	interval := lease / 4
 	if interval > time.Minute {
@@ -387,9 +433,4 @@ func resolvedInt(raw json.RawMessage, key string) int {
 		return n
 	}
 	return 0
-}
-
-func scorerSnapshot(processors []Processor) (json.RawMessage, string) {
-	raw, _ := canonicalJSON(map[string]any{"processors": processors, "chunk": ChunkScorerVersion, "metric": MetricScorerVersion})
-	return json.RawMessage(raw), sha256Hex(raw)
 }

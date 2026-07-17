@@ -50,10 +50,12 @@ type ApplicationConfig struct {
 	InsertArtifact                                    func(context.Context, ArtifactRecord) error
 	InsertScore                                       func(context.Context, ScoreRecord) error
 	LoadEvidence                                      EvidenceLoader
-	// AllowUnverifiedRuntimeHash tolerates a resolved-config hash that does not
-	// match the canonical bytes. Production owns the hash contract and leaves this
-	// false; test fakes that emit an opaque stable hash set it true.
+	// AllowUnverifiedRuntimeHash is a test-only seam for legacy fakes whose
+	// opaque hash predates the canonical ResolvedConfig hash contract.
 	AllowUnverifiedRuntimeHash bool
+	// AllowUnverifiedFixtureFiles is limited to unit tests that construct a
+	// DatasetCase in memory rather than loading an immutable dataset tree.
+	AllowUnverifiedFixtureFiles bool
 }
 
 type Application struct{ Config ApplicationConfig }
@@ -239,9 +241,6 @@ func (a Application) InitializeVariant(ctx context.Context, variant ExperimentVa
 	}
 	sum := sha256.Sum256(canonical)
 	if got := hex.EncodeToString(sum[:]); snapshot.Hash != got && !a.Config.AllowUnverifiedRuntimeHash {
-		// Production owns the hash contract; fakes that opt in via
-		// AllowUnverifiedRuntimeHash may use an opaque stable hash. The canonical
-		// bytes remain independently deterministic and secret-free either way.
 		return VariantSession{}, fmt.Errorf("variant %q resolved config hash mismatch: runtime reported %q, canonical bytes hash to %q", variant.Name, snapshot.Hash, got)
 	}
 	return VariantSession{Runtime: runtime, ConfigJSON: canonical, ConfigHash: snapshot.Hash}, nil

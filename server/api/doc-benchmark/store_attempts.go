@@ -73,7 +73,7 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 		return Claim{}, e
 	}
 	if maxAttempts > 0 && max >= maxAttempts {
-		if _, e = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs SET selected_attempt_id=(SELECT id FROM kb.benchmark_case_attempts WHERE case_run_id=$1 ORDER BY attempt_number DESC LIMIT 1), lifecycle='infrastructure_failed' WHERE id=$1 AND selected_attempt_id IS NULL`, caseRunID); e != nil {
+		if _, e = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs c SET selected_attempt_id=latest.id, lifecycle=CASE latest.lifecycle WHEN 'succeeded' THEN 'success' WHEN 'canceled' THEN 'canceled' ELSE CASE latest.failure_kind WHEN 'processor_failed' THEN 'processor_failed' WHEN 'timed_out' THEN 'timed_out' WHEN 'invalid_output' THEN 'invalid_output' WHEN 'scorer_failed' THEN 'scorer_failed' WHEN 'canceled' THEN 'canceled' ELSE 'infrastructure_failed' END END FROM (SELECT id,lifecycle,failure_kind FROM kb.benchmark_case_attempts WHERE case_run_id=$1 ORDER BY attempt_number DESC LIMIT 1) latest WHERE c.id=$1 AND c.selected_attempt_id IS NULL`, caseRunID); e != nil {
 			return Claim{}, e
 		}
 		return Claim{Claimed: false}, tx.Commit()
