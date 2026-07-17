@@ -92,7 +92,7 @@ func (s DocReviewLogSQLStore) ListDocReviewLogs(ctx context.Context, f DocReview
 	stmt := `
 SELECT id, input_record_id, run_id, pass, aspect, unit_type, unit_key,
        unit_location::text, matched_units::text, findings::text, outcome,
-       detail::text, COALESCE(to_char(create_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '')
+       detail::text, COALESCE(to_char(create_time, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), '')
 FROM kb.doc_review_logs
 ` + whereClause + `
 ORDER BY create_time DESC, id DESC
