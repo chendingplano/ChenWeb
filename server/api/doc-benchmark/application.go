@@ -53,6 +53,9 @@ type ApplicationConfig struct {
 	// AllowUnverifiedRuntimeHash is a test-only seam for legacy fakes whose
 	// opaque hash predates the canonical ResolvedConfig hash contract.
 	AllowUnverifiedRuntimeHash bool
+	// AllowUnverifiedFixtureFiles is limited to unit tests that construct a
+	// DatasetCase in memory rather than loading an immutable dataset tree.
+	AllowUnverifiedFixtureFiles bool
 }
 
 type Application struct{ Config ApplicationConfig }

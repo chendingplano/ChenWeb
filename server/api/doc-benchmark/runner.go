@@ -225,13 +225,13 @@ func (r Runner) runAttempt(parent context.Context, attempt AttemptRecord) error 
 	if e := r.Store.FinishAttempt(context.Background(), attempt.ID, r.Config.Owner, lifecycle, failure, max(0, time.Since(attempt.StartedAt.Time).Milliseconds()), verified); e != nil {
 		return e
 	}
-	// Keep verified evidence for every non-success terminal outcome so a
-	// scorer/reconcile failure can be retried as a rescore. Cleanup is only
-	// safe once the attempt has fully succeeded (or explicit retention is on).
-	if lifecycle == "succeeded" && verified && !r.Config.RetainWorkspaces && r.Work.Cleanup != nil {
-		if e := r.Work.Cleanup(context.Background(), attempt); e != nil {
-			return e
-		}
+	// Verified evidence is independent of disposable production state. Once
+	// the terminal attempt is committed, cleanup is safe for successful and
+	// failed executions alike; rescoring reads only the verified bundle.
+	// Cleanup records its own recoverable state, so its failure must not cause
+	// a completed processor invocation to be executed again.
+	if verified && !r.Config.RetainWorkspaces && r.Work.Cleanup != nil {
+		_ = r.Work.Cleanup(context.Background(), attempt)
 	}
 	return nil
 }

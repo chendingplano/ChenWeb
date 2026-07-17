@@ -57,7 +57,7 @@ func TestApplicationExecuteCaseWiresCallbacksAndCleansAfterTerminal(t *testing.T
 	runtime := &fakeApplicationRuntime{allowed: map[string][]string{"chunking": nil}, snapshot: resolvedSnapshotForTest()}
 	run, unit, experiment := executionFixture()
 	app := Application{Config: ApplicationConfig{
-		DB: &sql.DB{}, Owner: "worker", WorkRoot: "/work", EvidenceRoot: "/evidence", StoreID: 1,
+		DB: &sql.DB{}, Owner: "worker", WorkRoot: "/work", EvidenceRoot: "/evidence", StoreID: 1, AllowUnverifiedFixtureFiles: true,
 		AttemptRunner: func(ctx context.Context, caseRunID string, cfg RunnerConfig, work AttemptWork) error {
 			attempt := AttemptRecord{ID: "attempt", CaseRunID: caseRunID, Kind: "execution", StartedAt: sql.NullTime{Time: time.Now(), Valid: true}}
 			if err := work.Execute(ctx, attempt); err != nil {
@@ -104,7 +104,7 @@ func TestApplicationExecuteCaseWiresCallbacksAndCleansAfterTerminal(t *testing.T
 	if err := app.ExecuteCase(context.Background(), experiment, run, unit, session); err != nil {
 		t.Fatal(err)
 	}
-	wantPrefix := []string{"allocate", "seed", "runtime", "adapter.capture", "adapter.reconcile", "workspace.capture", "artifact.insert"}
+	wantPrefix := []string{"allocate", "seed", "runtime", "adapter.capture", "workspace.capture", "artifact.insert", "adapter.reconcile"}
 	if !reflect.DeepEqual(order[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("order=%v", order)
 	}
@@ -123,7 +123,7 @@ func TestApplicationExecuteCaseRescoreLoadsVerifiedEvidenceWithoutRuntimeCall(t 
 	scorerJSON, scorerHash := scorerSnapshot([]Processor{ProcessorChunking})
 	bundle := EvidenceBundle{SchemaVersion: 1, AttemptID: "source", InputSHA256: sha256Hex(run.Cases[unit].InputBytes), InputBytes: run.Cases[unit].InputBytes, ExpectedJSON: run.Cases[unit].ExpectedBytes, ConfigJSON: configJSON, ConfigHash: sha256Hex(configJSON), ScorerJSON: scorerJSON, ScorerHash: scorerHash, Processors: map[string]EvidenceProcessor{"chunking": {Capture: captureJSON, Actual: json.RawMessage(`{"chunks":[]}`)}}}
 	app := Application{Config: ApplicationConfig{
-		DB: &sql.DB{}, Owner: "worker",
+		DB: &sql.DB{}, Owner: "worker", AllowUnverifiedFixtureFiles: true,
 		AttemptRunner: func(ctx context.Context, _ string, _ RunnerConfig, work AttemptWork) error {
 			attempt := AttemptRecord{ID: "rescore", Kind: "rescore", SourceExecutionAttemptID: sql.NullString{String: "source", Valid: true}, InputRecordID: sql.NullInt64{Int64: 42, Valid: true}}
 			captured, err := work.Capture(ctx, attempt)
