@@ -17,23 +17,26 @@ The change adds a paginated, filterable API and a matching Svelte view in the ex
 
 ## API and data flow
 
-- Add an admin GET endpoint that reads `kb.doc_review_logs` with server-side pagination and filters matching the page controls.
-- Return scalar table fields plus the JSON fields needed for the dialogs: `unit_location`, `matched_units`, `findings`, and `detail`.
-- Order results newest first by `create_time` (with a stable ID tie-breaker).
-- The handler validates pagination and filters, then delegates SQL construction and scanning to a focused store function. It returns the row slice and total count.
-- The query uses only bound parameters for values and an allowlist for any selectable ordering values, consistent with existing log stores.
+- Register `GET /api/v1/kb/doc-review-logs` on the existing `/api/v1` group. The group already uses `authmiddleware.AuthMiddleware`, matching the protection of the adjacent System Admin log endpoints; no new authorization mechanism is introduced.
+- Accepted query parameters are `page` (1-based, default `1`), `page_size` (default `50`, capped at `500`), `input_record_id`, `run_id`, `pass`, `aspect`, `unit_type`, `outcome`, `unit_key`, `create_start_time`, and `create_end_time`.
+- `input_record_id` and `run_id` must be integers. `create_start_time` and `create_end_time` must be parseable RFC 3339 timestamps. Invalid supplied numeric or time values return HTTP 400 with the project-standard `{status:false,error_msg}` shape. Empty filter values mean no filter.
+- `pass`, `aspect`, `unit_type`, and `outcome` use exact matches. `unit_key` uses a case-insensitive contains match. The timestamp bounds are inclusive. Page values below one default to one; page sizes above 500 are capped, consistent with the existing document-processing log API.
+- A success response is `{status:true, results:[...], page, page_size, total}`. Each result exposes `id`, `input_record_id`, `run_id`, `pass`, `aspect`, `unit_type`, `unit_key`, `unit_location`, `matched_units`, `findings`, `outcome`, `detail`, and `create_time`.
+- Order results by `create_time DESC, id DESC` to make paging stable.
+- The handler validates query values then delegates SQL construction and scanning to a focused store function. The query uses bound parameters for values; ordering is fixed rather than request-selectable.
 
 ## Table behavior
 
 - `# Findings` is the size of `findings` when it is a JSON array; null, non-array, or empty values render as `0`.
-- `UNIT LOCATION` is a compact human-readable rendering of its JSON value. The complete value remains available in Detail.
-- `Detail` opens a modal containing the row JSON values rendered recursively as name-value entries. Arrays display indexed entries; scalar values display directly; null displays explicitly.
+- `UNIT LOCATION` is a safe text rendering of the JSON value, truncated to 120 characters in the table. It must not render supplied content as HTML. The complete value remains available in Detail.
+- `Detail` opens a modal containing `unit_location`, `matched_units`, `findings`, and `detail` rendered recursively as name-value entries. Arrays display indexed entries; scalar values display directly; null displays explicitly.
 
 ## Artifact interaction
 
-- Treat a Unit Key as an artifact ID only if it exactly matches `<record_id>_(mtc|prv|inv)_<seqno>`.
-- Only matching keys are interactive. Selecting one loads the artifact by that ID through the project’s existing artifact retrieval path and displays it in the same recursive name-value modal style.
-- If the artifact cannot be loaded, show an actionable error in the modal; the log row stays visible and usable. Nonmatching keys are plain text.
+- Treat a Unit Key as an artifact ID only if it exactly matches `^[0-9]+_(mtc|prv|inv)_[0-9]+$`. Both `record_id` and `seqno` are decimal integers.
+- Only matching keys are interactive. Map `mtc` to artifact type `metric`, `prv` to `provision`, and `inv` to `inventory_item`; request the existing authenticated endpoint `GET /api/v1/kb/artifacts/wiki?artifact_type=<mapped>&artifact_id=<unit_key>&include_article=0`.
+- Display the response `record` field in the same recursive name-value modal style. The page does not request or display wiki `article` or `source_document` content.
+- A non-OK response or malformed artifact response shows an actionable error in the modal; the log row stays visible and usable. Nonmatching keys are plain text.
 
 ## Error handling
 
@@ -43,8 +46,8 @@ The change adds a paginated, filterable API and a matching Svelte view in the ex
 
 ## Tests and verification
 
-- Add store and handler tests for pagination, ordering, filters, JSON row fields, and finding-count edge cases.
-- Add focused frontend checks or component-level tests for artifact-ID recognition, findings display, and dialog data preparation where the project tooling supports them.
+- Add SQL-mock store tests for pagination, stable ordering, every filter, and JSON row scanning; add handler tests for the response contract and invalid numeric/time filters.
+- Add focused frontend checks or component-level tests for the artifact-ID expression/type mapping, `findings` null/non-array/empty/array counts, unit-location escaping/truncation, recursive JSON dialog preparation, and artifact-load failure states where the project tooling supports them.
 - Run relevant Go tests and the web type/lint/build verification used by ChenWeb.
 
 ## Documentation impact
