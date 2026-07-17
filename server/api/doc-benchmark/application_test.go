@@ -120,7 +120,9 @@ func TestApplicationRuntimeFactoryErrorIsReturned(t *testing.T) {
 func TestApplicationRejectsResolvedRuntimeHashMismatch(t *testing.T) {
 	runtime := &fakeApplicationRuntime{allowed: map[string][]string{"chunking": nil}, snapshot: docprocessing.ResolvedConfigSnapshot{CanonicalJSON: []byte(`{"chunk_size":80}`), Hash: "wrong"}}
 	app := Application{Config: ApplicationConfig{RuntimeFactory: func(context.Context, ExperimentVariant, []Processor) (ApplicationRuntime, error) { return runtime, nil }}}
-	if _, err := app.InitializeVariant(context.Background(), ExperimentVariant{Name: "v"}, []Processor{ProcessorChunking}); err == nil || !strings.Contains(err.Error(), "hash mismatch") { t.Fatalf("error=%v", err) }
+	if _, err := app.InitializeVariant(context.Background(), ExperimentVariant{Name: "v"}, []Processor{ProcessorChunking}); err == nil || !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("error=%v", err)
+	}
 }
 
 func TestLineFileGeneratedPayloadUsesExactSeededInputAndApplicableOperations(t *testing.T) {
@@ -168,7 +170,9 @@ func TestEvidenceBundleIsDeterministicSecretFreeAndReverifiedBeforeRescore(t *te
 
 func TestEvidenceBundleRejectsScorerHashMismatch(t *testing.T) {
 	b := EvidenceBundle{SchemaVersion: 1, AttemptID: "a", InputBytes: []byte("x"), InputSHA256: sha256Hex([]byte("x")), ExpectedJSON: json.RawMessage(`{}`), ConfigJSON: json.RawMessage(`{}`), ConfigHash: sha256Hex([]byte(`{}`)), ScorerJSON: json.RawMessage(`{"version":"v1"}`), ScorerHash: "wrong", Processors: map[string]EvidenceProcessor{}}
-	if _, err := b.CanonicalJSON(); err == nil || !strings.Contains(err.Error(), "scorer hash") { t.Fatalf("error=%v", err) }
+	if _, err := b.CanonicalJSON(); err == nil || !strings.Contains(err.Error(), "scorer hash") {
+		t.Fatalf("error=%v", err)
+	}
 }
 
 func TestChunkScoreRecordConversionPersistsAllScalarAndRuleRows(t *testing.T) {

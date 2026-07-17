@@ -99,7 +99,8 @@ func TestApplicationExecuteCaseWiresCallbacksAndCleansAfterTerminal(t *testing.T
 			return nil
 		},
 	}}
-	session := VariantSession{Runtime: runtime, ConfigJSON: json.RawMessage(`{"chunk_size":100}`), ConfigHash: "cfg"}
+	configJSON := json.RawMessage(`{"chunk_size":100}`)
+	session := VariantSession{Runtime: runtime, ConfigJSON: configJSON, ConfigHash: sha256Hex(configJSON)}
 	if err := app.ExecuteCase(context.Background(), experiment, run, unit, session); err != nil {
 		t.Fatal(err)
 	}

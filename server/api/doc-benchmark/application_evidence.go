@@ -40,6 +40,15 @@ func (b EvidenceBundle) CanonicalJSON() ([]byte, error) {
 	if b.SchemaVersion != 1 || b.AttemptID == "" || b.InputSHA256 == "" {
 		return nil, fmt.Errorf("invalid evidence bundle identity")
 	}
+	if sha256Hex(b.InputBytes) != b.InputSHA256 {
+		return nil, fmt.Errorf("evidence input hash mismatch")
+	}
+	if len(b.ConfigJSON) == 0 || sha256Hex(b.ConfigJSON) != b.ConfigHash {
+		return nil, fmt.Errorf("evidence config hash mismatch")
+	}
+	if len(b.ScorerJSON) == 0 || sha256Hex(b.ScorerJSON) != b.ScorerHash {
+		return nil, fmt.Errorf("evidence scorer hash mismatch")
+	}
 	raw, err := canonicalJSON(b)
 	if err != nil {
 		return nil, err
@@ -52,6 +61,17 @@ func (b EvidenceBundle) CanonicalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("evidence bundle contains secret-shaped field %q", path)
 	}
 	return canonicalJSON(decoded)
+}
+
+func scorerSnapshot(processors []Processor) (json.RawMessage, string) {
+	selected := append([]Processor(nil), processors...)
+	sort.Slice(selected, func(i, j int) bool { return selected[i] < selected[j] })
+	raw, _ := canonicalJSON(map[string]any{
+		"processors":      selected,
+		"chunking":        map[string]any{"version": ChunkScorerVersion},
+		"extract_metrics": MetricScorerConfigurationV1(),
+	})
+	return json.RawMessage(raw), sha256Hex(raw)
 }
 
 func sha256Hex(raw []byte) string {

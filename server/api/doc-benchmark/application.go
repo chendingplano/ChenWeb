@@ -50,6 +50,9 @@ type ApplicationConfig struct {
 	InsertArtifact                                    func(context.Context, ArtifactRecord) error
 	InsertScore                                       func(context.Context, ScoreRecord) error
 	LoadEvidence                                      EvidenceLoader
+	// AllowUnverifiedRuntimeHash is a test-only seam for legacy fakes whose
+	// opaque hash predates the canonical ResolvedConfig hash contract.
+	AllowUnverifiedRuntimeHash bool
 }
 
 type Application struct{ Config ApplicationConfig }
@@ -234,9 +237,8 @@ func (a Application) InitializeVariant(ctx context.Context, variant ExperimentVa
 		return VariantSession{}, err
 	}
 	sum := sha256.Sum256(canonical)
-	if got := hex.EncodeToString(sum[:]); snapshot.Hash != got {
-		// Production owns the hash contract; fakes may use an opaque stable hash.
-		// The canonical bytes remain independently deterministic and secret-free.
+	if got := hex.EncodeToString(sum[:]); snapshot.Hash != got && !a.Config.AllowUnverifiedRuntimeHash {
+		return VariantSession{}, fmt.Errorf("variant %q resolved config hash mismatch: got %s want %s", variant.Name, snapshot.Hash, got)
 	}
 	return VariantSession{Runtime: runtime, ConfigJSON: canonical, ConfigHash: snapshot.Hash}, nil
 }
