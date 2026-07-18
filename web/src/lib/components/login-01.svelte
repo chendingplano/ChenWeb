@@ -429,6 +429,7 @@
 	.form-container {
 		width: 350px;
 		background-color: #fff;
+		color: #1a1a1a;
 		box-shadow: rgba(0, 0, 0, 0.35) 0px 5px 15px;
 		border-radius: 10px;
 		box-sizing: border-box;

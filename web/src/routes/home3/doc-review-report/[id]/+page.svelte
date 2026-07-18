@@ -220,7 +220,12 @@
 			const reviewers: ReviewerGroup[] = [];
 			let count = 0;
 			for (const [aspect, items] of byAspect) {
-				reviewers.push({ aspect, items });
+				const sorted = [...items].sort((a, b) => {
+					const aLine = parseLocationRange(a.location ?? '')[0] ?? Number.MAX_SAFE_INTEGER;
+					const bLine = parseLocationRange(b.location ?? '')[0] ?? Number.MAX_SAFE_INTEGER;
+					return aLine - bLine;
+				});
+				reviewers.push({ aspect, items: sorted });
 				count += items.length;
 			}
 			if (count === 0) return null;

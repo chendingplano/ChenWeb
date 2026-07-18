@@ -283,7 +283,7 @@ func finalizeFindingsWithPayload(
 	_, _, _, parseReason := parseFindingsContentDetailedWithPayload(resp.Content, modelName)
 	if shouldRepairFindingsJSON(parseReason) {
 		repairFindings, repairPayload, repairUsage, repairErr := repairFinalFindingsJSONWithPayload(
-			ctx, client, modelName, recordID, messages, toolByName, resp.Content, parseReason, logger,
+			ctx, client, modelName, promptName, recordID, messages, toolByName, resp.Content, parseReason, logger,
 		)
 		addUsage(totalUsage, repairUsage)
 		if repairErr == nil {
@@ -313,6 +313,7 @@ func repairFinalFindingsJSONWithPayload(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
+	promptName string,
 	recordID int64,
 	messages []LLMMessage,
 	toolByName map[string]ReviewTool,
@@ -357,7 +358,7 @@ func repairFinalFindingsJSONWithPayload(
 					"Do not call tools again. Return strict JSON only with the exact shape " +
 					`{"findings":[...]}. Return {"findings":[]} if the evidence does not support any finding.`,
 			})
-			return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, "review_tool_use_finalize_repair", logger)
+			return callFinalFindingsRepairWithPayload(ctx, client, modelName, promptName, recordID, repairMessages, "review_tool_use_finalize_repair", logger)
 		}
 	}
 	repairMessages = append(repairMessages,
@@ -367,13 +368,14 @@ func repairFinalFindingsJSONWithPayload(
 			Content: finalFindingsRepairPrompt(parseReason),
 		},
 	)
-	return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, "repair-final-findings", logger)
+	return callFinalFindingsRepairWithPayload(ctx, client, modelName, promptName, recordID, repairMessages, "repair-final-findings", logger)
 }
 
 func callFinalFindingsRepairWithPayload(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
+	promptName string,
 	recordID int64,
 	repairMessages []LLMMessage,
 	callReason string,
@@ -381,11 +383,12 @@ func callFinalFindingsRepairWithPayload(
 ) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	resp, err := client.Complete(ctx, LLMRequest{
 		Model:      modelName,
+		PromptName: promptName,
 		Messages:   repairMessages,
 		RecordID:   recordID,
 		RunID:      llmRunIDFromContext(ctx),
 		CallReason: "review_tool_use_finalize_repair",
-		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL-REPAIR",
+		CallLoc:    "MID-20260718-01",
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
