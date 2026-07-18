@@ -148,6 +148,7 @@ func runToolUseReviewWithPayload(
 			Tools:      toolDefs,
 			ToolChoice: "auto",
 			RecordID:   recordID,
+			RunID:      llmRunIDFromContext(ctx),
 			CallReason: callReason,
 			CallLoc:    callLoc,
 			Metadata:   turnMetadata,
@@ -265,6 +266,7 @@ func finalizeFindingsWithPayload(
 		PromptName: promptName,
 		Messages:   messages,
 		RecordID:   recordID,
+		RunID:      llmRunIDFromContext(ctx),
 		CallReason: "review_tool_use_finalize",
 		CallLoc:    "MID-20260712-01",
 	})
@@ -381,6 +383,7 @@ func callFinalFindingsRepairWithPayload(
 		Model:      modelName,
 		Messages:   repairMessages,
 		RecordID:   recordID,
+		RunID:      llmRunIDFromContext(ctx),
 		CallReason: "review_tool_use_finalize_repair",
 		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL-REPAIR",
 	})
@@ -694,6 +697,9 @@ func addUsage(total *LLMUsage, u *LLMUsage) {
 	total.TotalTokens += usageTotalTokens(u)
 	total.PromptCacheHitTokens += u.PromptCacheHitTokens
 	total.PromptCacheMissTokens += u.PromptCacheMissTokens
+	if u.EventID != "" {
+		total.EventIDs = append(total.EventIDs, u.EventID)
+	}
 }
 
 // logLoopUsage records per-call token usage including DeepSeek prompt-cache
@@ -716,5 +722,6 @@ func logLoopUsage(
 		"callReason", callReason,
 		"prompt_cache_hit_tokens", u.PromptCacheHitTokens,
 		"prompt_cache_miss_tokens", u.PromptCacheMissTokens,
+		"llm_usage_event_id", u.EventID,
 	)
 }

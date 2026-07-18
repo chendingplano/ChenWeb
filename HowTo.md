@@ -4816,3 +4816,23 @@ sudo security add-trusted-cert \
   -k /Library/Keychains/System.keychain \
   "$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
 ```
+
+# GPT Pricing
+
+Standard:
+| Model | Input | Cached input | Cache writes | Output |
+|---|---:|---:|---:|---:|
+| GPT‑5.6 Sol | $5.00 | $0.50 | $6.25 | $30.00 |
+| GPT‑5.6 Terra | $2.50 | $0.25 | $3.125 | $15.00 |
+| GPT‑5.6 Luna | $1.00 | $0.10 | $1.25 | $6.00 |
+| GPT‑5.5 | $5.00 | $0.50 | — | $30.00 |
+| GPT‑5.4 | $2.50 | $0.25 | — | $15.00 |
+
+Long-context pricing:
+| Model | Input | Cached input | Cache writes | Output |
+|---|---:|---:|---:|---:|
+| GPT‑5.6 Sol | $10.00 | $1.00 | $12.50 | $45.00 |
+| GPT‑5.6 Terra | $5.00 | $0.50 | $6.25 | $22.50 |
+| GPT‑5.6 Luna | $2.00 | $0.20 | $2.50 | $9.00 |
+| GPT‑5.5 | $10.00 | $1.00 | — | $45.00 |
+| GPT‑5.4 | $5.00 | $0.50 | — | $22.50 |

@@ -28,7 +28,7 @@ type Sink struct {
 	DefaultStatus int
 }
 
-func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord) error {
+func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord) (string, error) {
 	now := time.Now
 	if s.Now != nil {
 		now = s.Now
@@ -58,7 +58,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	if s.DB != nil && (record.AccountID == "" || record.ProfileID == "") {
 		accountID, profileID, err := s.resolveAccountProfileIDs(ctx, record)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if record.AccountID == "" {
 			record.AccountID = accountID
@@ -80,7 +80,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	}
 
 	if s.DB == nil {
-		return nil
+		return "", nil
 	}
 
 	paths := sharedllm.BuildUsageArchivePaths(s.ArchiveRoot, workspaceDay, record.AccountID, eventID)
@@ -89,13 +89,13 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 
 	if len(record.InputBody) > 0 {
 		if err := sharedllm.WriteGzipFile(paths.InputBodyPath, record.InputBody); err != nil {
-			return err
+			return "", err
 		}
 		inputRef = archiveRef(s.ArchiveRoot, paths.InputBodyPath)
 	}
 	if len(record.OutputBody) > 0 {
 		if err := sharedllm.WriteGzipFile(paths.OutputBodyPath, record.OutputBody); err != nil {
-			return err
+			return "", err
 		}
 		outputRef = archiveRef(s.ArchiveRoot, paths.OutputBodyPath)
 	}
@@ -110,7 +110,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	maps.Copy(metadata, record.Metadata)
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	const stmt = `INSERT INTO llm_usage_event (
@@ -118,18 +118,22 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc
+    record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24
+    $22, $23, $24, $25
 )`
 
 	var recordID any
 	if record.RecordID > 0 {
 		recordID = record.RecordID
+	}
+	var runID any
+	if record.RunID > 0 {
+		runID = record.RunID
 	}
 	var accountID any
 	if record.AccountID != "" {
@@ -167,8 +171,12 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		recordID,
 		record.CallReason,
 		record.CallLoc,
+		runID,
 	)
-	return err
+	if err != nil {
+		return "", err
+	}
+	return eventID, nil
 }
 
 func (s *Sink) resolveAccountProfileIDs(ctx context.Context, record sharedllm.UsageCaptureRecord) (accountID string, profileID string, err error) {

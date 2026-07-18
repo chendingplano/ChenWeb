@@ -59,6 +59,7 @@ func newLLMJSONInput(
 		ModelName:  modelName,
 		InputText:  inputText,
 		RecordID:   llmRecordIDFromContext(ctx),
+		RunID:      llmRunIDFromContext(ctx),
 		CallReason: callReason,
 		CallLoc:    callLoc,
 		// Document-first layout puts the repeated chunk/block input ahead of the

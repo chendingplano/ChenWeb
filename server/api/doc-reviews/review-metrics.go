@@ -230,6 +230,7 @@ func (r *metricsReviewer) reviewMetric(
 	var findings []ReviewFinding
 	var payload map[string]any
 	var cacheHitTokens, cacheMissTokens int
+	var llmEventIDs []string
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		// r.logger.Info("prompt", "promptName", cfg.PromptRef)
@@ -242,6 +243,7 @@ func (r *metricsReviewer) reviewMetric(
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
+			llmEventIDs = loopUsage.EventIDs
 		}
 		if loopErr != nil {
 			r.logger.Warn("metrics review tool-use loop failed; no findings for metric",
@@ -273,6 +275,9 @@ func (r *metricsReviewer) reviewMetric(
 		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
+		if usage := lastReviewJSONUsage(r.client); usage != nil && usage.EventID != "" {
+			llmEventIDs = []string{usage.EventID}
+		}
 	}
 
 	if analyses := parseMetricAnalysesJSON(payload); len(analyses) > 0 {
@@ -311,6 +316,9 @@ func (r *metricsReviewer) reviewMetric(
 	logEntry.Detail["cache_hit_tokens"] = cacheHitTokens
 	logEntry.Detail["cache_miss_tokens"] = cacheMissTokens
 	logEntry.Detail["ms_used"] = time.Since(start).Milliseconds()
+	if len(llmEventIDs) > 0 {
+		logEntry.Detail["llm_usage_event_ids"] = llmEventIDs
+	}
 	if truncated {
 		logEntry.Detail["context_truncated"] = true
 	}
@@ -331,6 +339,7 @@ func (r *metricsReviewer) reviewMetric(
 		"ms_used", time.Since(start).Milliseconds(),
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
+		"llm_usage_event_ids", llmEventIDs,
 	)
 	return findings
 }

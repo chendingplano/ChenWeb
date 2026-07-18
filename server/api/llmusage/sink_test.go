@@ -27,13 +27,13 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc
+    record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24
+    $22, $23, $24, $25
 )`)).
 		WithArgs(
 			"evt-test-1",
@@ -60,6 +60,7 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 			int64(901),
 			"extract_products",
 			"MID-CWB-TEST-SINK",
+			int64(902),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -91,9 +92,10 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 		RecordID:              901,
 		CallReason:            "extract_products",
 		CallLoc:               "MID-CWB-TEST-SINK",
+		RunID:                 902,
 	}
 
-	if err := sink.Capture(context.Background(), record); err != nil {
+	if _, err := sink.Capture(context.Background(), record); err != nil {
 		t.Fatalf("Capture() error = %v", err)
 	}
 
@@ -134,13 +136,13 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc
+    record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24
+    $22, $23, $24, $25
 )`)).
 		WithArgs(
 			"evt-test-meta",
@@ -167,6 +169,7 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 			int64(901),
 			"review-provision",
 			"MID-20260706-0001",
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -193,7 +196,7 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 		Metadata:          map[string]any{"run_id": int64(123), "provision_id": "244-prv-2"},
 	}
 
-	if err := sink.Capture(context.Background(), record); err != nil {
+	if _, err := sink.Capture(context.Background(), record); err != nil {
 		t.Fatalf("Capture() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -218,7 +221,7 @@ func TestSinkCaptureSkipsDatabaseInsertWhenAccountProfileMissing(t *testing.T) {
 		OutputBody:       []byte(`{"content":"hello"}`),
 	}
 
-	if err := sink.Capture(context.Background(), record); err != nil {
+	if _, err := sink.Capture(context.Background(), record); err != nil {
 		t.Fatalf("Capture() error = %v", err)
 	}
 
@@ -255,13 +258,13 @@ LIMIT 1`)).
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc
+    record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24
+    $22, $23, $24, $25
 )`)).
 		WithArgs(
 			"evt-test-3",
@@ -288,6 +291,7 @@ LIMIT 1`)).
 			nil,
 			"",
 			"",
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -317,7 +321,7 @@ LIMIT 1`)).
 		OutputBody:        []byte(`{"content":"hello"}`),
 	}
 
-	if err := sink.Capture(context.Background(), record); err != nil {
+	if _, err := sink.Capture(context.Background(), record); err != nil {
 		t.Fatalf("Capture() error = %v", err)
 	}
 
@@ -353,13 +357,13 @@ LIMIT 1`)).
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc
+    record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24
+    $22, $23, $24, $25
 )`)).
 		WithArgs(
 			"evt-test-4",
@@ -386,6 +390,7 @@ LIMIT 1`)).
 			nil,
 			"",
 			"",
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -415,7 +420,7 @@ LIMIT 1`)).
 		OutputBody:        []byte(`{"content":"hello"}`),
 	}
 
-	if err := sink.Capture(context.Background(), record); err != nil {
+	if _, err := sink.Capture(context.Background(), record); err != nil {
 		t.Fatalf("Capture() error = %v", err)
 	}
 
@@ -462,13 +467,13 @@ LIMIT 1`)).
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc
+    record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24
+    $22, $23, $24, $25
 )`)).
 		WithArgs(
 			"evt-test-5",
@@ -495,6 +500,7 @@ LIMIT 1`)).
 			nil,
 			"",
 			"",
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -524,7 +530,7 @@ LIMIT 1`)).
 		OutputBody:        []byte(`{"content":"hello"}`),
 	}
 
-	if err := sink.Capture(context.Background(), record); err != nil {
+	if _, err := sink.Capture(context.Background(), record); err != nil {
 		t.Fatalf("Capture() error = %v", err)
 	}
 
