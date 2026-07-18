@@ -592,15 +592,15 @@ func assembleMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A: semantically-similar metrics from the live hybrid search, keyed by doc
-	// metric index. The add() filter drops same-document and duplicate hits.
-	for docIdx, hits := range hybridMatches {
-		for _, h := range hits {
-			tm, ok := resolved[h.ArtifactID]
-			if !ok {
-				continue
-			}
-			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "hybrid_search", confidence: h.RRFScore})
+	// Branches are added in match-source priority order (object_anchor >
+	// metric_category > hybrid_search), so a metric reachable from several
+	// branches keeps the strongest provenance in its `via`.
+
+	// Branch C: object-anchored metrics, keyed directly by the metric-under-review
+	// index. Sharing the measured object is the strongest relevance signal.
+	for docIdx, peers := range objectMatches {
+		for _, tm := range peers {
+			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "object_anchor"})
 		}
 	}
 
@@ -624,22 +624,51 @@ func assembleMatches(
 		}
 	}
 
-	// Branch C: object-anchored metrics, keyed directly by the metric-under-review index.
-	for docIdx, peers := range objectMatches {
-		for _, tm := range peers {
-			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "object_anchor"})
+	// Branch A: semantically-similar metrics from the live hybrid search, keyed by doc
+	// metric index. The add() filter drops same-document and duplicate hits.
+	for docIdx, hits := range hybridMatches {
+		for _, h := range hits {
+			tm, ok := resolved[h.ArtifactID]
+			if !ok {
+				continue
+			}
+			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "hybrid_search", confidence: h.RRFScore})
 		}
 	}
 
-	// Cap each list to maxMatches, highest-confidence first.
+	// Sort each list by match-source priority, then confidence, and cap to
+	// maxMatches. limitMatchesToLLM later keeps a prefix of this order, so the
+	// strongest sources reach the LLM first and match_rank reflects it.
 	for idx, list := range matches {
-		sort.SliceStable(list, func(a, b int) bool { return list[a].confidence > list[b].confidence })
+		sort.SliceStable(list, func(a, b int) bool {
+			pa, pb := matchViaPriority(list[a].via), matchViaPriority(list[b].via)
+			if pa != pb {
+				return pa < pb
+			}
+			return list[a].confidence > list[b].confidence
+		})
 		if maxMatches > 0 && len(list) > maxMatches {
 			list = list[:maxMatches]
 		}
 		matches[idx] = list
 	}
 	return matches
+}
+
+// matchViaPriority ranks match sources for payload ordering: shared measured
+// object first, shared metric category second, live hybrid-search similarity
+// last (ADR 2026063002).
+func matchViaPriority(via string) int {
+	switch via {
+	case "object_anchor":
+		return 0
+	case "metric_category":
+		return 1
+	case "hybrid_search":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func (r *metricsReviewer) loadRecordMetrics(ctx context.Context, recordID int64) ([]docMetric, error) {

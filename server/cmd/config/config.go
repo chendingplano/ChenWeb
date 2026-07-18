@@ -129,6 +129,15 @@ type LanguagesConfig struct {
 	Languages []string `mapstructure:"languages"`
 }
 
+type DocReviewerConfig struct {
+	// MaxArtifactsPassedToLLM caps how many matched artifacts each artifact
+	// reviewer LLM call receives. Configured via
+	// [doc-reviewer].max_artifacts_passed_to_llm in config.toml /
+	// config.local.toml. 0/unset falls back to the MAX_MATCHES_TO_LLM env var,
+	// then the built-in default of 3.
+	MaxArtifactsPassedToLLM int `mapstructure:"max_artifacts_passed_to_llm"`
+}
+
 type FrontendConfigSection struct {
 	// DefaultKnowledgeStore is the ks_name of the kb.knowledge_store row that
 	// /home3/knowledge selects on entry. It must match exactly one row; when it
@@ -182,6 +191,9 @@ type AppConfigDef struct {
 	// in config.toml / config.local.toml. When empty, the Document Review
 	// feature falls back to its built-in priority-derived tiers.
 	DocReviews map[string][]string `mapstructure:"doc-reviews"`
+	// DocReviewer holds reviewer-engine tunables. Configured via [doc-reviewer]
+	// in config.toml / config.local.toml.
+	DocReviewer DocReviewerConfig `mapstructure:"doc-reviewer"`
 	// KnowledgeContent maps a Knowledge page (/home3/knowledge) content id
 	// (e.g. Wiki sidebar menu item "kb-doc-wiki", or masthead ids like
 	// "kb-banner-title") to whether it is shown. Configured via
@@ -333,6 +345,13 @@ func GetDocGenConfig() DocGenConfig {
 // case the Document Review feature uses its built-in defaults.
 func GetDocReviewsConfig() map[string][]string {
 	return AppConfig.DocReviews
+}
+
+// GetDocReviewerMaxArtifactsPassedToLLM returns
+// [doc-reviewer].max_artifacts_passed_to_llm, or 0 when unset (callers apply
+// their own fallback).
+func GetDocReviewerMaxArtifactsPassedToLLM() int {
+	return AppConfig.DocReviewer.MaxArtifactsPassedToLLM
 }
 
 // GetKnowledgeContentConfig returns the configured Knowledge page content

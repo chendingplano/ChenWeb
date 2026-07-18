@@ -82,22 +82,24 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 		{view: metricView{MetricID: "4_m_2", Categories: []string{"temp"}}, recordID: 4},
 	}
 
-	// No cap first: verify branch coverage + dedup + exclusion.
+	// No cap first: verify branch coverage + dedup + exclusion + source ordering.
 	got := assembleMatches(recordID, docMetrics, hybridMatches, objectMatches, resolved, siblings, 0)
 
-	// M1 (index 0): 2_m_9 (A) and 3_m_7 (A+C deduped) = 2 matches; 1_m_5 excluded.
+	// M1 (index 0): 3_m_7 (A+C deduped, object_anchor provenance wins) then
+	// 2_m_9 (A); 1_m_5 excluded. Object-anchored matches sort before hybrid.
 	if len(got[0]) != 2 {
 		t.Fatalf("M1 matches = %d, want 2 (%v)", len(got[0]), got[0])
 	}
-	ids := map[string]bool{}
 	for _, m := range got[0] {
-		ids[m.view.MetricID] = true
 		if m.recordID == recordID {
 			t.Errorf("M1 match %s is same-document, should be excluded", m.view.MetricID)
 		}
 	}
-	if !ids["2_m_9"] || !ids["3_m_7"] {
-		t.Errorf("M1 matches missing expected ids: %v", ids)
+	if got[0][0].view.MetricID != "3_m_7" || got[0][0].via != "object_anchor" {
+		t.Errorf("M1 first match = %s via %s, want 3_m_7 via object_anchor", got[0][0].view.MetricID, got[0][0].via)
+	}
+	if got[0][1].view.MetricID != "2_m_9" || got[0][1].via != "hybrid_search" {
+		t.Errorf("M1 second match = %s via %s, want 2_m_9 via hybrid_search", got[0][1].view.MetricID, got[0][1].via)
 	}
 
 	// M2 (index 1): 4_m_2 via category branch.
@@ -105,10 +107,54 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 		t.Fatalf("M2 matches = %v, want [4_m_2 via metric_category]", got[1])
 	}
 
-	// Cap = 1: M1 keeps only the highest-confidence match (2_m_9 @0.9).
+	// Cap = 1: M1 keeps only the highest-priority match (object-anchored 3_m_7).
 	capped := assembleMatches(recordID, docMetrics, hybridMatches, objectMatches, resolved, siblings, 1)
-	if len(capped[0]) != 1 || capped[0][0].view.MetricID != "2_m_9" {
-		t.Fatalf("capped M1 = %v, want [2_m_9]", capped[0])
+	if len(capped[0]) != 1 || capped[0][0].view.MetricID != "3_m_7" {
+		t.Fatalf("capped M1 = %v, want [3_m_7]", capped[0])
+	}
+}
+
+func TestAssembleMatches_SourcePriorityOrdering(t *testing.T) {
+	const recordID = int64(1)
+	docMetrics := []docMetric{
+		dm(11, "1_m_1", "pressure"), // index 0
+	}
+
+	// One match from every branch, hybrid added with the highest confidence to
+	// prove source priority outranks confidence.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_m_1", RecordID: 2, RRFScore: 0.9},
+			{ArtifactID: "5_m_2", RecordID: 5, RRFScore: 0.4},
+		},
+	}
+	resolved := map[string]resolvedMetric{
+		"2_m_1": {view: metricView{MetricID: "2_m_1"}, recordID: 2},
+		"5_m_2": {view: metricView{MetricID: "5_m_2"}, recordID: 5},
+	}
+	objectMatches := map[int][]resolvedMetric{
+		0: {{view: metricView{MetricID: "3_m_1"}, recordID: 3}},
+	}
+	siblings := []resolvedMetric{
+		{view: metricView{MetricID: "4_m_1", Categories: []string{"pressure"}}, recordID: 4},
+	}
+
+	got := assembleMatches(recordID, docMetrics, hybridMatches, objectMatches, resolved, siblings, 0)
+
+	want := []struct{ id, via string }{
+		{"3_m_1", "object_anchor"},
+		{"4_m_1", "metric_category"},
+		{"2_m_1", "hybrid_search"}, // hybrid hits keep confidence-desc order
+		{"5_m_2", "hybrid_search"},
+	}
+	if len(got[0]) != len(want) {
+		t.Fatalf("matches = %d, want %d (%v)", len(got[0]), len(want), got[0])
+	}
+	for i, w := range want {
+		if got[0][i].view.MetricID != w.id || got[0][i].via != w.via {
+			t.Errorf("match[%d] = %s via %s, want %s via %s",
+				i, got[0][i].view.MetricID, got[0][i].via, w.id, w.via)
+		}
 	}
 }
 

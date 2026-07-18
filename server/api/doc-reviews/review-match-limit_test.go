@@ -3,6 +3,8 @@ package docreviews
 import (
 	"slices"
 	"testing"
+
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
 func TestLimitMatchesToLLM_PreservesOrderAndCapsSlice(t *testing.T) {
@@ -10,6 +12,27 @@ func TestLimitMatchesToLLM_PreservesOrderAndCapsSlice(t *testing.T) {
 	want := []int{1, 2, 3}
 	if !slices.Equal(got, want) {
 		t.Fatalf("limitMatchesToLLM() = %v, want %v", got, want)
+	}
+}
+
+func TestMaxMatchesToLLM_ConfigOverridesEnvAndDefault(t *testing.T) {
+	old := appconfig.AppConfig.DocReviewer.MaxArtifactsPassedToLLM
+	t.Cleanup(func() { appconfig.AppConfig.DocReviewer.MaxArtifactsPassedToLLM = old })
+
+	t.Setenv("MAX_MATCHES_TO_LLM", "8")
+	appconfig.AppConfig.DocReviewer.MaxArtifactsPassedToLLM = 5
+	if got := maxMatchesToLLM(); got != 5 {
+		t.Fatalf("config=5 env=8: maxMatchesToLLM() = %d, want 5", got)
+	}
+
+	// Unset (0) and negative config values fall back to the env var.
+	appconfig.AppConfig.DocReviewer.MaxArtifactsPassedToLLM = 0
+	if got := maxMatchesToLLM(); got != 8 {
+		t.Fatalf("config=0 env=8: maxMatchesToLLM() = %d, want 8", got)
+	}
+	appconfig.AppConfig.DocReviewer.MaxArtifactsPassedToLLM = -1
+	if got := maxMatchesToLLM(); got != 8 {
+		t.Fatalf("config=-1 env=8: maxMatchesToLLM() = %d, want 8", got)
 	}
 }
 
