@@ -55,6 +55,10 @@ type metricRecord struct {
 	TableNameOrSection  *string         `json:"table_name_or_section,omitempty"`
 	ReasoningTags       json.RawMessage `json:"reasoning_tags,omitempty"`
 	CreatedAt           string          `json:"created_at,omitempty"`
+	// ObjectNodeCanonicalName is kb.object_nodes.canonical_name for the object
+	// this metric is linked to via kb.artifact_objects, when reconciled.
+	// Distinct from ObjectName (the raw extraction-time name).
+	ObjectNodeCanonicalName *string `json:"object_node_canonical_name,omitempty"`
 }
 
 type listMetricsResponse struct {

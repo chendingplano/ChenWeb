@@ -7,6 +7,26 @@ import (
 	"time"
 )
 
+// objectNodeCanonicalName looks up kb.object_nodes.canonical_name for an
+// artifact via its kb.artifact_objects link, mirroring the join pattern in
+// loadProvisionObjectLinks. Best-effort: returns nil (no error) when the
+// artifact has no reconciled object link, so callers can attach it to an
+// already-loaded artifact-wiki record without failing the whole fetch.
+func objectNodeCanonicalName(db *sql.DB, sourceRecordID int64, artifactType, artifactID string) *string {
+	const q = `
+SELECT onode.canonical_name
+FROM kb.artifact_objects ao
+LEFT JOIN kb.object_nodes onode ON onode.object_id = ao.object_id
+WHERE ao.source_record_id = $1 AND ao.artifact_type = $2 AND ao.artifact_id = $3
+  AND onode.canonical_name IS NOT NULL AND onode.canonical_name != ''
+LIMIT 1`
+	var name string
+	if err := db.QueryRow(q, sourceRecordID, artifactType, artifactID).Scan(&name); err != nil {
+		return nil
+	}
+	return &name
+}
+
 func fetchSemanticProjectionByID(db *sql.DB, artifactID string) (semanticProjectionRecord, error) {
 	const q = `
 SELECT
@@ -458,6 +478,7 @@ LIMIT 1`
 	r.MissingRequiredAttrs = jsonArrayOrEmpty(missingRequiredAttrs)
 	r.CreateTime = createTime.Format(time.RFC3339)
 	r.ModifyTime = modifyTime.Format(time.RFC3339)
+	r.ObjectNodeCanonicalName = objectNodeCanonicalName(db, inputID, "inventory_item", r.InventoryItemID)
 	return r, inputID, nil
 }
 
@@ -519,7 +540,38 @@ LIMIT 1`
 		v := needVerify.Bool
 		r.NeedVerify = &v
 	}
+	if objects, err := loadProvisionObjectLinksForArtifact(db, r.InputRecordID, r.ProvID); err == nil {
+		r.Objects = objects
+	}
 	return r, nil
+}
+
+// loadProvisionObjectLinksForArtifact is the single-artifact counterpart to
+// loadProvisionObjectLinks, scoped to one provision rather than every
+// provision on the input record.
+func loadProvisionObjectLinksForArtifact(db *sql.DB, inputID int64, provID string) ([]provisionObjectJSON, error) {
+	const query = `
+SELECT ao.object_name, COALESCE(onode.canonical_name, '')
+FROM kb.artifact_objects ao
+LEFT JOIN kb.object_nodes onode ON onode.object_id = ao.object_id
+WHERE ao.source_record_id = $1 AND ao.artifact_type = 'provision' AND ao.artifact_id = $2
+ORDER BY ao.id
+`
+	rows, err := db.Query(query, inputID, provID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []provisionObjectJSON
+	for rows.Next() {
+		var objectName, canonicalName string
+		if err := rows.Scan(&objectName, &canonicalName); err != nil {
+			return nil, err
+		}
+		out = append(out, provisionObjectJSON{ArtifactObject: objectName, ObjectNode: canonicalName})
+	}
+	return out, rows.Err()
 }
 
 type knowledgeRecord struct {

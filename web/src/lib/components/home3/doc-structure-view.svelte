@@ -1,5 +1,5 @@
 	<script lang="ts">
-	import { onMount, untrack, tick } from 'svelte';
+	import { onMount, untrack, tick, type Snippet } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
@@ -47,8 +47,9 @@
 
 	let {
 		darkMode = true,
-		lockedRecordId = null
-	}: { darkMode?: boolean; lockedRecordId?: number | null } = $props();
+		lockedRecordId = null,
+		sidebarOverride
+	}: { darkMode?: boolean; lockedRecordId?: number | null; sidebarOverride?: Snippet } = $props();
 
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
@@ -1121,6 +1122,9 @@
 		{/if}
 
 		<aside class="structure-sidebar" style={`width:${lineListWidth}px;`}>
+			{#if sidebarOverride}
+				{@render sidebarOverride()}
+			{:else}
 			<div class="left-meta">
 				{#if lockedRecordId == null}
 					<button
@@ -1383,6 +1387,7 @@
 					{/each}
 				{/if}
 			</div>
+			{/if}
 			<button
 				type="button"
 				class="line-list-resizer"

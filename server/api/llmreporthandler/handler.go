@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/llmreconcile"
@@ -24,6 +25,7 @@ type reportStore interface {
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
 	ListUsageEventsAdmin(ctx context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error)
 	GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error)
+	ListUsageEventsByIDs(ctx context.Context, ids []string) ([]UsageEventAdmin, error)
 }
 
 type reconciliationRunner interface {
@@ -220,6 +222,26 @@ func ListUsageEventsAdmin(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm usage events", "error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"events": rows, "total": total, "page": page, "page_size": pageSize})
+}
+
+// GetUsageEventsByIDs returns llm_usage_event rows for a comma-separated list
+// of ids, e.g. the ids recorded in kb.doc_review_logs.detail.llm_usage_event_ids.
+func GetUsageEventsByIDs(c echo.Context) error {
+	store := reportStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	var ids []string
+	for id := range strings.SplitSeq(c.QueryParam("ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	rows, err := store.ListUsageEventsByIDs(c.Request().Context(), ids)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to fetch llm usage events", "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"usage_events": rows})
 }
 
 func GetUsageEventBody(c echo.Context) error {

@@ -322,7 +322,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 			SELECT id, pass, aspect, severity, finding_type, title, description,
 			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
 			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-			       COALESCE(artifact_id,'')
+			       COALESCE(artifact_id,''), COALESCE(reference_doc, '{}'::jsonb)::text
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND run_id = $2
 			  AND ($3 = '' OR pass = $3)
@@ -337,14 +337,16 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		metadataByFindingID := map[int64][]byte{}
 		for rows.Next() {
 			var f FindingItem
-			var metadata string
+			var metadata, referenceDoc string
 			if err := rows.Scan(&f.ID, &f.Pass, &f.Aspect, &f.Severity, &f.FindingType,
 				&f.Title, &f.Description, &f.Evidence, &f.Location, &f.Suggestion,
-				&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID); err != nil {
+				&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID, &referenceDoc); err != nil {
 				return nil, fmt.Errorf("scan finding: %w", err)
 			}
 			metadataByFindingID[f.ID] = []byte(metadata)
 			applyFindingMetadata(&f, []byte(metadata))
+			f.Metadata = json.RawMessage(metadata)
+			f.ReferenceDoc = json.RawMessage(referenceDoc)
 			localized = append(localized, f)
 		}
 		if err := rows.Err(); err != nil {

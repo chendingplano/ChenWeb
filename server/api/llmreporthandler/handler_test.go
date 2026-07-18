@@ -13,11 +13,12 @@ import (
 )
 
 type stubReportStore struct {
-	daily []DailyReport
-	model []ModelActivityReport
-	usage []UsageEvent
-	bal   []CurrentBalance
-	sum   TodaySummary
+	daily      []DailyReport
+	model      []ModelActivityReport
+	usage      []UsageEvent
+	bal        []CurrentBalance
+	sum        TodaySummary
+	usageByIDs []UsageEventAdmin
 }
 
 func (s *stubReportStore) ListDailyReports(_ context.Context, limit int) ([]DailyReport, error) {
@@ -46,6 +47,10 @@ func (s *stubReportStore) ListUsageEventsAdmin(_ context.Context, page, pageSize
 
 func (s *stubReportStore) GetUsageEventBodyRefs(_ context.Context, id string) (string, string, error) {
 	return "", "", nil
+}
+
+func (s *stubReportStore) ListUsageEventsByIDs(_ context.Context, ids []string) ([]UsageEventAdmin, error) {
+	return s.usageByIDs, nil
 }
 
 type stubReconciliationRunner struct {

@@ -45,6 +45,33 @@ export type LLMUsageEvent = {
 	error_message: string;
 };
 
+// LLMUsageEventDetail mirrors the backend UsageEventAdmin shape, returned by
+// the usage-events-admin and usage-events/by-ids endpoints (more fields than
+// the plain LLMUsageEvent returned by the lightweight usage-events list).
+export type LLMUsageEventDetail = {
+	id: string;
+	account_id: string | null;
+	account_name: string | null;
+	profile_id: string | null;
+	record_id: number | null;
+	provider: string;
+	model_name: string;
+	prompt_name: string;
+	call_reason: string;
+	call_loc: string;
+	request_started_at: string;
+	input_tokens: number;
+	output_tokens: number;
+	total_tokens: number;
+	prompt_cache_hit_tokens: number;
+	prompt_cache_miss_tokens: number;
+	latency_ms: number;
+	error_message: string;
+	input_body_ref: string;
+	output_body_ref: string;
+	metadata_json: unknown;
+};
+
 export type LLMCurrentBalance = {
 	account_id: string;
 	account_name: string;
@@ -130,6 +157,15 @@ export function listLLMModelActivityReports(limit = 30): Promise<ListLLMModelAct
 
 export function listLLMUsageEvents(limit = 50): Promise<ListLLMUsageEventsResponse> {
 	return req<ListLLMUsageEventsResponse>(`/api/v1/llm/usage-events?limit=${limit}`);
+}
+
+// Fetches llm_usage_event rows for a set of ids, e.g. the ids recorded in
+// kb.doc_review_logs.detail.llm_usage_event_ids. Returns [] for an empty list.
+export function getLLMUsageEventsByIds(ids: string[]): Promise<LLMUsageEventDetail[]> {
+	if (ids.length === 0) return Promise.resolve([]);
+	return req<{ usage_events: LLMUsageEventDetail[] }>(
+		`/api/v1/llm/usage-events/by-ids?ids=${encodeURIComponent(ids.join(','))}`
+	).then((res) => res.usage_events || []);
 }
 
 export function listLLMCurrentBalances(limit = 20): Promise<ListLLMCurrentBalancesResponse> {

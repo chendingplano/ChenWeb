@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type DailyReport struct {
@@ -440,6 +442,61 @@ LIMIT $%d OFFSET $%d`, where, limitArg, offsetArg)
 		out = append(out, row)
 	}
 	return out, total, rows.Err()
+}
+
+// ListUsageEventsByIDs loads llm_usage_event rows for a set of ids, e.g. the
+// ids recorded in kb.doc_review_logs.detail.llm_usage_event_ids. Unknown ids
+// are silently omitted from the result rather than erroring.
+func (s *Store) ListUsageEventsByIDs(ctx context.Context, ids []string) ([]UsageEventAdmin, error) {
+	if len(ids) == 0 {
+		return []UsageEventAdmin{}, nil
+	}
+	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
+evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
+evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
+evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+FROM llm_usage_event evt
+LEFT JOIN llm_account acct ON acct.id = evt.account_id
+WHERE evt.id = ANY($1)
+ORDER BY evt.request_started_at DESC`
+
+	rows, err := s.db.QueryContext(ctx, query, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UsageEventAdmin{}
+	for rows.Next() {
+		var row UsageEventAdmin
+		var accountID, accountName, profileID sql.NullString
+		var recordID sql.NullInt64
+		var metadataJSON []byte
+		if err := rows.Scan(
+			&row.ID, &accountID, &accountName, &profileID, &recordID,
+			&row.Provider, &row.ModelName, &row.PromptName, &row.CallReason, &row.CallLoc,
+			&row.RequestStartedAt, &row.InputTokens, &row.OutputTokens, &row.TotalTokens,
+			&row.PromptCacheHitTokens, &row.PromptCacheMissTokens, &row.LatencyMS, &row.ErrorMessage,
+			&row.InputBodyRef, &row.OutputBodyRef, &metadataJSON,
+		); err != nil {
+			return nil, err
+		}
+		if accountID.Valid {
+			row.AccountID = &accountID.String
+		}
+		if accountName.Valid {
+			row.AccountName = &accountName.String
+		}
+		if profileID.Valid {
+			row.ProfileID = &profileID.String
+		}
+		if recordID.Valid {
+			row.RecordID = &recordID.Int64
+		}
+		row.MetadataJSON = json.RawMessage(metadataJSON)
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error) {

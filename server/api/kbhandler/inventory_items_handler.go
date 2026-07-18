@@ -41,6 +41,10 @@ type inventoryItemRecord struct {
 	PromptName           string          `json:"prompt_name"`
 	CreateTime           string          `json:"create_time"`
 	ModifyTime           string          `json:"modify_time"`
+	// ObjectNodeCanonicalName is kb.object_nodes.canonical_name for the object
+	// this item is linked to via kb.artifact_objects, when reconciled. Distinct
+	// from CanonicalName (the extraction-time name written onto this row).
+	ObjectNodeCanonicalName *string `json:"object_node_canonical_name,omitempty"`
 }
 
 type listInventoryItemsResponse struct {

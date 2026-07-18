@@ -321,6 +321,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/llm/balances/current", llmreporthandler.ListCurrentBalances)
 	apiGroup.GET("/llm/usage-events", llmreporthandler.ListUsageEvents)
 	apiGroup.GET("/llm/usage-events-admin", llmreporthandler.ListUsageEventsAdmin)
+	apiGroup.GET("/llm/usage-events/by-ids", llmreporthandler.GetUsageEventsByIDs)
 	apiGroup.GET("/llm/usage-events/:id/body", llmreporthandler.GetUsageEventBody)
 	apiGroup.GET("/llm/summary/today", llmreporthandler.GetTodaySummary)
 	apiGroup.POST("/llm/reconciliation/run", llmreporthandler.RunReconciliationNow)

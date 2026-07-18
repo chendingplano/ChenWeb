@@ -118,6 +118,9 @@ WHERE m.metric_id = $1
 			v := isExplicit.Bool
 			r.IsExplicitMetric = &v
 		}
+		if r.MetricID != nil {
+			r.ObjectNodeCanonicalName = objectNodeCanonicalName(db, r.InputRecordID, "metric", *r.MetricID)
+		}
 		return r, nil
 	}
 

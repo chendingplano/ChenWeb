@@ -4,6 +4,7 @@
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { buildJsonSections, buildMatchedUnitsSections, formatCompactContent, type JsonDialogSection } from './doc-review-json-dialog.js';
+	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
@@ -82,16 +83,11 @@
 	function openMatched(row: LogRow) { openModal(`Matched — Log #${row.id}`, buildMatchedUnitsSections(row.matched_units)); }
 	function openFindings(row: LogRow) { openModal(`Findings — Log #${row.id}`, buildJsonSections(row.findings)); }
 	function openLlmCall(row: LogRow) { openModal(`LLM Call — Log #${row.id}`, buildJsonSections(row.detail)); }
-	const artifactPattern = /^[1-9][0-9]*_(mtc|prv|inv)_[1-9][0-9]*$/;
-	function artifactType(key: string): string | null {
-		const match = key.match(artifactPattern);
-		if (!match) return null;
-		return { mtc: 'metric', prv: 'provision', inv: 'inventory_item' }[match[1] as 'mtc' | 'prv' | 'inv'];
-	}
+	const artifactType = artifactTypeFromKey;
 	async function openArtifact(key: string) {
 		const type = artifactType(key); if (!type) return;
 		openModal(`Artifact — ${key}`, [], true);
-		try { const response = await fetch(`/api/v1/kb/artifacts/wiki?artifact_type=${encodeURIComponent(type)}&artifact_id=${encodeURIComponent(key)}&include_article=0`, { credentials: 'same-origin' }); const body = await response.text(); let data: Record<string, unknown> = {}; try { data = JSON.parse(body); } catch { if (!response.ok) throw new Error(body || 'Failed to load artifact'); throw new Error('Artifact response was not valid JSON'); } if (!response.ok || !data.record) throw new Error(String(data.error_msg ?? data.message ?? 'Failed to load artifact')); modalSections = buildJsonSections(data.record); }
+		try { modalSections = buildJsonSections(await getArtifactWiki(type, key)); }
 		catch (err) { modalError = err instanceof Error ? err.message : String(err); }
 		finally { modalLoading = false; }
 	}

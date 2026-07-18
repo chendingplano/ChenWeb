@@ -99,6 +99,12 @@ type FindingItem struct {
 	// RunID is the review run that produced this finding, read back from
 	// finding metadata (mirrors the row's real run_id column).
 	RunID int64 `json:"run_id,omitempty"`
+	// Metadata is the raw kb.doc_review_findings.metadata JSONB blob, exposed
+	// verbatim for consumers (e.g. the Finding Details panel) that want the
+	// full record rather than the specific subfields decoded above.
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+	// ReferenceDoc is the raw kb.doc_review_findings.reference_doc JSONB blob.
+	ReferenceDoc json.RawMessage `json:"reference_doc,omitempty"`
 }
 
 // FindingLocalizedContent stores localized prose for one language.

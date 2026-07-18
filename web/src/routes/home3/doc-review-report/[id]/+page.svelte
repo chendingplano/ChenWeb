@@ -16,6 +16,7 @@
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
+	import FindingDetailsPanel from '$lib/components/home3/finding-details-panel.svelte';
 
 	let dark = $derived(theme.isDark);
 	let reportId = $derived(Number(page.params.id));
@@ -67,6 +68,8 @@
 	// DR16: live findings (with ids + review_status) drive the action buttons.
 	let baseFindings = $state<FindingItem[]>([]);
 	let findings = $state<FindingItem[]>([]);
+	// The finding shown in the Document Structure panel's Finding Details view.
+	let selectedFinding = $derived(findings.find((f) => String(f.id) === activeKey) ?? null);
 	let packages = $state<ReviewPackageInfo[]>([]);
 	let selectedLanguage = $state('en');
 	let supportedLanguages = $state<string[]>(['en']);
@@ -967,7 +970,11 @@
 	<!-- RIGHT: Document Structure (line list + PDF) -->
 	<section class="right-panel">
 		{#if inputRecordId != null}
-			<DocStructureView bind:this={structureView} darkMode={dark} lockedRecordId={inputRecordId} />
+			<DocStructureView bind:this={structureView} darkMode={dark} lockedRecordId={inputRecordId}>
+				{#snippet sidebarOverride()}
+					<FindingDetailsPanel finding={selectedFinding} {requestId} runId={reportRunId} {dark} />
+				{/snippet}
+			</DocStructureView>
 		{:else if !loading}
 			<div class="state">No source document linked to this report.</div>
 		{/if}

@@ -97,6 +97,10 @@ export type FindingItem = {
 	suggestion?: string;
 	confidence: number;
 	review_status: string;
+	artifact_id?: string;
+	run_id?: number;
+	metadata?: unknown;
+	reference_doc?: unknown;
 };
 
 export async function listAspects(): Promise<AspectInfo[]> {
@@ -161,6 +165,40 @@ export async function getRequest(
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load request');
 	return { request: data.request, findings: data.findings || [], aspect_statuses: data.aspect_statuses || [], packages: data.packages || [] };
+}
+
+// ── Finding Details panel: doc-review-logs lookup ──────────────────────────
+
+export type DocReviewLogRow = {
+	id: number;
+	input_record_id: number | null;
+	run_id: number | null;
+	pass: string | null;
+	aspect: string;
+	unit_type: string;
+	unit_key: string;
+	unit_location: unknown;
+	matched_units: unknown;
+	findings: unknown;
+	outcome: string;
+	detail: unknown;
+	create_time: string;
+};
+
+// Finds the kb.doc_review_logs row for a specific artifact within a specific
+// run. Log rows are keyed "<artifact_id>#<suffix>" (e.g. "244_mtc_1#31082"),
+// not the bare artifact id, so this matches on that exact artifact_id
+// followed by a '#' boundary (or a bare exact match, for unit_keys with no
+// suffix). GET /api/v1/kb/doc-review-logs matches unit_key with ILIKE '%...%'
+// (substring), so this filters the response client-side rather than relying
+// on the server-side match alone (which would also return e.g. "..._mtc_10#...").
+export async function getDocReviewLogsFor(unitKey: string, runId: number): Promise<DocReviewLogRow | null> {
+	const params = new URLSearchParams({ unit_key: unitKey, run_id: String(runId), page_size: '50' });
+	const res = await fetch(`/api/v1/kb/doc-review-logs?${params}`, { credentials: 'same-origin' });
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to load doc review logs');
+	const rows = (data.results || []) as DocReviewLogRow[];
+	return rows.find((row) => row.unit_key === unitKey || row.unit_key.startsWith(`${unitKey}#`)) ?? null;
 }
 
 export async function getReport(id: number): Promise<any> {
