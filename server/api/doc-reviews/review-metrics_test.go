@@ -356,8 +356,8 @@ func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
 				map[string]any{
 					"related_artifact_id": "2_m_9",
 					"related_record_id":   float64(2),
-					"relationship":        "same_subject",
-					"summary":             "Same quantity, unit-equivalent values, no conflict.",
+					"relationship":        "same_consistent",
+					"summary":             "Same quantity, same conditions, unit-equivalent values, no conflict.",
 				},
 			},
 		},
@@ -375,7 +375,7 @@ func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
 	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
-		PromptRef:  "prompt-review-metrics-v3.md",
+		PromptRef:  "prompt-review-metrics-v4.md",
 	}, doc, nil, "", false)
 
 	if len(findings) != 1 {
@@ -397,11 +397,11 @@ func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
 	if !strings.Contains(f.Title, "1_m_1") || !strings.Contains(f.Title, "2_m_9") {
 		t.Fatalf("analysis title = %q, want both metric ids", f.Title)
 	}
-	if f.Description != "Same quantity, unit-equivalent values, no conflict." {
+	if f.Description != "Same quantity, same conditions, unit-equivalent values, no conflict." {
 		t.Fatalf("analysis description = %q", f.Description)
 	}
-	if f.ResultKind != "metric_analysis" || f.AnalysisRelationship != "same_subject" {
-		t.Fatalf("analysis metadata = result_kind:%q relationship:%q, want metric_analysis/same_subject", f.ResultKind, f.AnalysisRelationship)
+	if f.ResultKind != "metric_analysis" || f.AnalysisRelationship != "same_consistent" {
+		t.Fatalf("analysis metadata = result_kind:%q relationship:%q, want metric_analysis/same_consistent", f.ResultKind, f.AnalysisRelationship)
 	}
 }
 
@@ -412,7 +412,7 @@ func TestParseMetricAnalysesJSON(t *testing.T) {
 			map[string]any{
 				"related_artifact_id": "2_m_9",
 				"related_record_id":   float64(2),
-				"relationship":        "same_subject",
+				"relationship":        "same_consistent",
 				"summary":             "Identical value, no conflict.",
 			},
 			map[string]any{
@@ -427,8 +427,8 @@ func TestParseMetricAnalysesJSON(t *testing.T) {
 		t.Fatalf("analyses = %d, want 1 (empty summary should be skipped): %+v", len(got), got)
 	}
 	a := got[0]
-	if a.RelatedArtifactID != "2_m_9" || a.RelatedRecordID != 2 || a.Relationship != "same_subject" {
-		t.Errorf("analysis = %+v, want related_artifact_id=2_m_9 related_record_id=2 relationship=same_subject", a)
+	if a.RelatedArtifactID != "2_m_9" || a.RelatedRecordID != 2 || a.Relationship != "same_consistent" {
+		t.Errorf("analysis = %+v, want related_artifact_id=2_m_9 related_record_id=2 relationship=same_consistent", a)
 	}
 }
 

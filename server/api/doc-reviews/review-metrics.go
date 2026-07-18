@@ -344,9 +344,14 @@ func (r *metricsReviewer) reviewMetric(
 	return findings
 }
 
-// MetricAnalysis is one entry of the metrics reviewer's mandatory per-match
-// comparison record (prompt-review-metrics-v3 `analyses`), converted into
-// first-class analysis rows in kb.doc_review_findings.
+// MetricAnalysis is one entry of the metrics reviewer's mandatory per-candidate
+// classification record (prompt-review-metrics-v4 `analyses`), converted into
+// first-class analysis rows in kb.doc_review_findings. Relationship is one of
+// the five classifications the prompt emits: "same_consistent", "same_conflict",
+// "related_distinct", "unrelated", "undetermined" (ADR 2026063002). The Go
+// pipeline treats it as opaque provenance — it is stored and rendered verbatim,
+// never branched on — so new/changed prompt vocabulary needs no code change
+// here, only in the prompt and this comment.
 type MetricAnalysis struct {
 	RelatedArtifactID string
 	RelatedRecordID   int64
