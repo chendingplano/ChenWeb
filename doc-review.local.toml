@@ -18,6 +18,9 @@
 max_findings = [10, 20, 30]
 max_analyses = [10, 20, 30]
 
+[doc-reviever]
+max_artifacts_passed_to_llm = 10
+
 [packages.P5]
 enabled = true
 name = "Technical & Compliance Standards"
@@ -321,7 +324,7 @@ checked = true
 group = "P5"
 input = "artifact"
 model = "deepseek-flash-chen"
-prompt = "prompt-review-metrics-v3.md"
+prompt = "prompt-review-metrics-v5.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
 tools = ["get_artifact_context", "get_document_metadata"]
