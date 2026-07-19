@@ -978,6 +978,7 @@
 						runId={reportRunId}
 						{dark}
 						onFocusMatchedUnit={(recordId, lineNumbers) => void structureView?.focusExternalArtifact(recordId, lineNumbers)}
+						onCloseMatchedUnits={() => structureView?.backToLockedRecord()}
 					/>
 				{/snippet}
 			</DocStructureView>

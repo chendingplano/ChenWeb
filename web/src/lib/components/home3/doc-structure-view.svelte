@@ -754,8 +754,13 @@
 		lockedRecordId != null && currentInput != null && currentInput.id !== lockedRecordId
 	);
 
-	function backToLockedRecord() {
-		if (lockedRecordId != null) void loadStructureForRecord(lockedRecordId);
+	// Exported so the report page can revert the panel when the matched_units
+	// dialog closes, mirroring the in-panel "Back to reviewed document" banner.
+	// No-ops (no reload/reset) when already on the locked record.
+	export function backToLockedRecord() {
+		if (lockedRecordId != null && currentInput?.id !== lockedRecordId) {
+			void loadStructureForRecord(lockedRecordId);
+		}
 	}
 
 	function adjustLineListWidth(delta: number) {

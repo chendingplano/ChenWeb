@@ -13,13 +13,15 @@
 		requestId,
 		runId,
 		dark = true,
-		onFocusMatchedUnit
+		onFocusMatchedUnit,
+		onCloseMatchedUnits
 	}: {
 		finding: FindingItem | null;
 		requestId: number | null;
 		runId: number | null;
 		dark?: boolean;
 		onFocusMatchedUnit?: (recordId: number, lineNumbers: number[]) => void;
+		onCloseMatchedUnits?: () => void;
 	} = $props();
 
 	let cardBg = $derived(dark ? '#1F2333' : '#FFFFFF');
@@ -96,6 +98,7 @@
 		dialog = { kind: 'llm-event', event };
 	}
 	function closeDialog() {
+		if (dialog?.kind === 'matched-units') onCloseMatchedUnits?.();
 		dialog = null;
 	}
 
