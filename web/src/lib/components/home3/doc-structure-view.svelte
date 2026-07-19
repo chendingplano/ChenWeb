@@ -715,7 +715,12 @@
 		if (!Array.isArray(lineNumbers) || lineNumbers.length === 0) return;
 		// Self-heal back to the reviewed document if a matched-unit jump
 		// (focusExternalArtifact) left the panel showing a different record.
-		if (lockedRecordId != null && currentInput?.id !== lockedRecordId) {
+		// Guarded on currentInput being already loaded (non-null): while the
+		// initial mount load is still in flight, currentInput is transiently
+		// null even though we're on the right (only) record, and firing a
+		// second concurrent loadStructureForRecord here would race the mount
+		// load and could leave the panel on the wrong page.
+		if (lockedRecordId != null && currentInput != null && currentInput.id !== lockedRecordId) {
 			await loadStructureForRecord(lockedRecordId);
 		}
 		await highlightLinesInCurrentRecord(lineNumbers);
