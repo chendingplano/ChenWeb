@@ -6,12 +6,14 @@
 	let {
 		title,
 		units,
+		initialSelected,
 		dark = true,
 		onclose,
 		onFocusUnit
 	}: {
 		title: string;
 		units: unknown[];
+		initialSelected?: number;
 		dark?: boolean;
 		onclose: () => void;
 		onFocusUnit?: (recordId: number, lineNumbers: number[]) => void;
@@ -27,13 +29,18 @@
 	let overlay = $derived(dark ? '#0D1117E6' : '#00000066');
 	let scrollThumb = $derived(dark ? '#2A3140' : '#D7CFB8');
 
-	let selected = $state<number | null>(null);
+	let selected = $state<number | null>(initialSelected ?? null);
 	let selectedRows = $derived(selected != null ? buildMatchedUnitRows(units[selected]) : []);
 	let dialogTitle = $derived(selected != null ? `Matched — ${matchedUnitLabel(units[selected], selected)}` : title);
 
 	function selectUnit(i: number) {
 		selected = i;
 		const target = matchedUnitFocusTarget(units[i]);
+		console.info('[matched-units-dialog] unit selected', {
+			index: i,
+			label: matchedUnitLabel(units[i], i),
+			focusTarget: target
+		});
 		if (target) onFocusUnit?.(target.recordId, target.lineNumbers);
 	}
 

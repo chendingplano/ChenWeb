@@ -2,7 +2,7 @@
 	import { getDocReviewLogsFor, type FindingItem, type DocReviewLogRow } from '$lib/services/docReviewService';
 	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 	import { getLLMUsageEventsByIds, type LLMUsageEventDetail } from './llm-activities-client.js';
-	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, type JsonDialogSection, type JsonTreeNode } from './doc-review-json-dialog.js';
+	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, matchedUnitFocusTarget, matchedUnitLabel, type JsonDialogSection, type JsonTreeNode } from './doc-review-json-dialog.js';
 	import JsonTreeDialog from './json-tree-dialog.svelte';
 	import JsonSectionsDialog from './json-sections-dialog.svelte';
 	import MatchedUnitsDialog from './matched-units-dialog.svelte';
@@ -53,11 +53,17 @@
 	let llmError = $state('');
 	let llmEvents = $state<LLMUsageEventDetail[]>([]);
 
+	// The matched_units array from the loaded log row ([] when null/non-array).
+	let matchedUnits = $derived.by(() => {
+		const value = logRow?.matched_units;
+		return Array.isArray(value) ? (value as unknown[]) : [];
+	});
+
 	// ── Dialog ───────────────────────────────────────────────────────────────
 	let dialog = $state<
 		| { kind: 'tree'; title: string; nodes: JsonTreeNode[] }
 		| { kind: 'sections'; title: string; sections: JsonDialogSection[] }
-		| { kind: 'matched-units'; title: string; units: unknown[] }
+		| { kind: 'matched-units'; title: string; units: unknown[]; initialSelected?: number }
 		| { kind: 'llm-event'; event: LLMUsageEventDetail }
 		| null
 	>(null);
@@ -65,10 +71,19 @@
 	function openMetadataDialog() {
 		dialog = { kind: 'tree', title: `Metadata — Finding #${finding?.id}`, nodes: buildJsonTree(finding?.metadata) };
 	}
-	function openMatchedUnitsDialog() {
+	// Opens the matched-units dialog drilled into unit `index`, and syncs the
+	// PDF panel to that unit's source document/lines.
+	function openMatchedUnit(index: number) {
 		if (!logRow) return;
-		const value = logRow.matched_units;
-		dialog = { kind: 'matched-units', title: `Matched — Log #${logRow.id}`, units: Array.isArray(value) ? value : [] };
+		const target = matchedUnitFocusTarget(matchedUnits[index]);
+		console.info('[finding-details-panel] matched unit clicked', {
+			logId: logRow.id,
+			index,
+			label: matchedUnitLabel(matchedUnits[index], index),
+			focusTarget: target
+		});
+		dialog = { kind: 'matched-units', title: `Matched — Log #${logRow.id}`, units: matchedUnits, initialSelected: index };
+		if (target) onFocusMatchedUnit?.(target.recordId, target.lineNumbers);
 	}
 	function openLogSections(kind: 'findings' | 'detail') {
 		if (!logRow) return;
@@ -110,6 +125,16 @@
 		logError = '';
 		try {
 			logRow = await getDocReviewLogsFor(artifactId, effectiveRunId);
+			const mu = logRow?.matched_units;
+			console.info('[finding-details-panel] doc review log loaded', {
+				artifactId,
+				runId: effectiveRunId,
+				logId: logRow?.id ?? null,
+				unitKey: logRow?.unit_key ?? null,
+				matchedUnitsIsArray: Array.isArray(mu),
+				matchedUnitsCount: Array.isArray(mu) ? mu.length : null,
+				matchedUnitsRaw: mu
+			});
 		} catch (e) {
 			logError = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -224,7 +249,15 @@
 							<div class="fd-row"><span class="fd-label">outcome</span><span class="fd-value">{logRow.outcome || '—'}</span></div>
 							<div class="fd-row">
 								<span class="fd-label">matched_units</span>
-								<button type="button" class="fd-btn" onclick={openMatchedUnitsDialog}>View matched_units</button>
+								{#if matchedUnits.length}
+									<div class="fd-unit-btns">
+										{#each matchedUnits as unit, i (i)}
+											<button type="button" class="fd-btn" onclick={() => openMatchedUnit(i)}>{matchedUnitLabel(unit, i)}</button>
+										{/each}
+									</div>
+								{:else}
+									<span class="fd-value">—</span>
+								{/if}
 							</div>
 							<div class="fd-row">
 								<span class="fd-label">findings</span>
@@ -281,7 +314,14 @@
 {:else if dialog?.kind === 'sections'}
 	<JsonSectionsDialog title={dialog.title} sections={dialog.sections} {dark} onclose={closeDialog} />
 {:else if dialog?.kind === 'matched-units'}
-	<MatchedUnitsDialog title={dialog.title} units={dialog.units} {dark} onclose={closeDialog} onFocusUnit={onFocusMatchedUnit} />
+	<MatchedUnitsDialog
+		title={dialog.title}
+		units={dialog.units}
+		initialSelected={dialog.initialSelected}
+		{dark}
+		onclose={closeDialog}
+		onFocusUnit={onFocusMatchedUnit}
+	/>
 {:else if dialog?.kind === 'llm-event'}
 	<LlmUsageEventDialog event={dialog.event} {dark} onclose={closeDialog} />
 {/if}
@@ -373,6 +413,12 @@
 		color: var(--fd-text-2);
 		word-break: break-word;
 		white-space: pre-wrap;
+	}
+	.fd-unit-btns {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		justify-self: start;
 	}
 	.fd-btn {
 		justify-self: start;

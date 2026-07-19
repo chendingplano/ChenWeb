@@ -733,6 +733,12 @@
 	 * lines, if any. Leaves the panel on that document; see backToLockedRecord.
 	 */
 	export async function focusExternalArtifact(recordId: number, lineNumbers: number[]) {
+		console.info('[doc-structure-view] focusExternalArtifact', {
+			recordId,
+			lineNumbers,
+			currentRecordId: currentInput?.id ?? null,
+			lockedRecordId
+		});
 		if (!recordId || recordId <= 0) return;
 		if (currentInput?.id !== recordId) {
 			await loadStructureForRecord(recordId);
