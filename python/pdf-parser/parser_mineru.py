@@ -31,6 +31,10 @@ log = logging.getLogger(__name__)
 # Matches "X/Y" in tqdm output like "Processing pages: 60%|██| 3/5 [00:06<00:04]"
 _PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
 
+_DEFAULT_MINERU_CLI_PATHS = [
+    os.path.expanduser("~/Workspace/ThirdParty/mineru/.venv/bin/mineru"),
+]
+
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
@@ -60,14 +64,22 @@ class MineruParser(ParserBackend):
         if self._initialized:
             return
 
-        cli = _env("MINERU_CLI") or shutil.which("mineru") or ""
-        if not cli:
+        cli = _env("MINERU_CLI")
+        if cli and os.path.isfile(cli):
+            self._cli = cli
+        else:
+            self._cli = shutil.which("mineru") or ""
+            if not self._cli:
+                for candidate in _DEFAULT_MINERU_CLI_PATHS:
+                    if os.path.isfile(candidate):
+                        self._cli = candidate
+                        break
+        if not self._cli:
             raise RuntimeError(
                 "MineruParser requires the `mineru` CLI on PATH. "
                 "Install via ~/Workspace/ThirdParty/mineru (`mise run install`) "
                 "or set MINERU_CLI."
             )
-        self._cli = cli
         self._backend = _env("MINERU_BACKEND")
 
         extra = _env("MINERU_EXTRA_ARGS")

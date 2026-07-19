@@ -118,7 +118,7 @@ PYTHONPATH=. .venv/bin/python pdf_parser.py
 
 | Variable | Default | Description |
 |---|---|---|
-| `MINERU_CLI` | auto-detected via `PATH` | Absolute path to the `mineru` executable. Set this when the CLI is not on `PATH` — e.g. the project-local uv venv at `~/Workspace/ThirdParty/mineru/.venv/bin/mineru`. |
+| `MINERU_CLI` | auto-detected via `PATH`, then `~/Workspace/ThirdParty/mineru/.venv/bin/mineru` | Absolute path to the `mineru` executable. Set this when you want to override auto-detection or when MinerU is installed outside the default workspace location. |
 | `MINERU_BACKEND` | `hybrid-auto-engine` (CLI default) | Passed as `-b` to the CLI. See the backend table below. |
 | `MINERU_EXTRA_ARGS` | | Extra whitespace-separated CLI args appended verbatim (e.g. `-l en`, `-m ocr`, `-u http://127.0.0.1:30000`). |
 
