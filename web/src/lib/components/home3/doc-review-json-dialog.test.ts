@@ -5,7 +5,8 @@ import {
 	buildJsonSections,
 	buildMatchedUnitsSections,
 	buildMetadataSections,
-	formatCompactContent
+	formatCompactContent,
+	matchedUnitFocusTarget
 } from './doc-review-json-dialog';
 
 test('buildMatchedUnitsSections flattens metric wrappers and preserves string arrays', () => {
@@ -108,4 +109,58 @@ test('formatCompactContent keeps a JSON fallback for more complex objects', () =
 		formatCompactContent({ line_spans: ['91'], page: 3 }),
 		'{"line_spans":["91"],"page":3}'
 	);
+});
+
+test('matchedUnitFocusTarget expands single and ranged source_line_spans across metric/provision/item keys', () => {
+	assert.deepEqual(
+		matchedUnitFocusTarget({
+			metric: { metric_id: '415_mtc_72', source_line_spans: ['27'] },
+			source_record_id: 415
+		}),
+		{ recordId: 415, lineNumbers: [27] }
+	);
+	assert.deepEqual(
+		matchedUnitFocusTarget({
+			provision: { prv_id: '415_prv_3', source_line_spans: ['53-56'] },
+			source_record_id: 415
+		}),
+		{ recordId: 415, lineNumbers: [53, 54, 55, 56] }
+	);
+	assert.deepEqual(
+		matchedUnitFocusTarget({
+			item: { inv_id: '415_inv_1', source_line_spans: ['10', '12:13'] },
+			source_record_id: 415
+		}),
+		{ recordId: 415, lineNumbers: [10, 12, 13] }
+	);
+});
+
+test('matchedUnitFocusTarget falls back to source_context line numbers when spans are absent', () => {
+	assert.deepEqual(
+		matchedUnitFocusTarget({
+			entity: { entity_id: '415_ent_1' },
+			source_record_id: 415,
+			source_context: [
+				{ line_number: 12, content: 'a' },
+				{ line_number: 14, content: 'b' }
+			]
+		}),
+		{ recordId: 415, lineNumbers: [12, 14] }
+	);
+});
+
+test('matchedUnitFocusTarget returns empty lineNumbers (but a valid recordId) when no location data exists', () => {
+	assert.deepEqual(
+		matchedUnitFocusTarget({ entity: { entity_id: '415_ent_1' }, source_record_id: 415 }),
+		{ recordId: 415, lineNumbers: [] }
+	);
+});
+
+test('matchedUnitFocusTarget returns null when source_record_id is missing or invalid', () => {
+	assert.equal(matchedUnitFocusTarget({ metric: { metric_id: '415_mtc_72' } }), null);
+	assert.equal(
+		matchedUnitFocusTarget({ metric: { metric_id: '415_mtc_72' }, source_record_id: 0 }),
+		null
+	);
+	assert.equal(matchedUnitFocusTarget('not an object'), null);
 });

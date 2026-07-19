@@ -12,8 +12,15 @@
 		finding,
 		requestId,
 		runId,
-		dark = true
-	}: { finding: FindingItem | null; requestId: number | null; runId: number | null; dark?: boolean } = $props();
+		dark = true,
+		onFocusMatchedUnit
+	}: {
+		finding: FindingItem | null;
+		requestId: number | null;
+		runId: number | null;
+		dark?: boolean;
+		onFocusMatchedUnit?: (recordId: number, lineNumbers: number[]) => void;
+	} = $props();
 
 	let cardBg = $derived(dark ? '#1F2333' : '#FFFFFF');
 	let borderColor = $derived(dark ? '#2D3348' : '#E4E6EB');
@@ -274,7 +281,7 @@
 {:else if dialog?.kind === 'sections'}
 	<JsonSectionsDialog title={dialog.title} sections={dialog.sections} {dark} onclose={closeDialog} />
 {:else if dialog?.kind === 'matched-units'}
-	<MatchedUnitsDialog title={dialog.title} units={dialog.units} {dark} onclose={closeDialog} />
+	<MatchedUnitsDialog title={dialog.title} units={dialog.units} {dark} onclose={closeDialog} onFocusUnit={onFocusMatchedUnit} />
 {:else if dialog?.kind === 'llm-event'}
 	<LlmUsageEventDialog event={dialog.event} {dark} onclose={closeDialog} />
 {/if}

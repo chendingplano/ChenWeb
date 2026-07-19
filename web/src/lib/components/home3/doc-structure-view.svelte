@@ -679,14 +679,11 @@
 		}
 	}
 
-	/**
-	 * Externally-driven focus used by the Document Review report's left panel.
-	 * Selects the first matching source line (driving the PDF page + highlight),
-	 * highlights every matching line (for multi-line findings), and scrolls the
-	 * Line List so the primary line is centered.
-	 */
-	export async function focusSourceLines(lineNumbers: number[]) {
-		if (!Array.isArray(lineNumbers) || lineNumbers.length === 0) return;
+	// Shared by focusSourceLines/focusExternalArtifact: selects the first
+	// matching line in the currently-loaded record (driving the PDF page +
+	// highlight), highlights every matching line (for multi-line findings),
+	// and scrolls the Line List so the primary line is centered.
+	async function highlightLinesInCurrentRecord(lineNumbers: number[]) {
 		const wanted = new Set(lineNumbers);
 		const matched = lines.filter((ln) => wanted.has(ln.line_number));
 		if (matched.length === 0) return;
@@ -709,6 +706,45 @@
 			`[data-line-key="${primary.page_number}-${primary.line_number}"]`
 		);
 		target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	}
+
+	/**
+	 * Externally-driven focus used by the Document Review report's left panel.
+	 */
+	export async function focusSourceLines(lineNumbers: number[]) {
+		if (!Array.isArray(lineNumbers) || lineNumbers.length === 0) return;
+		// Self-heal back to the reviewed document if a matched-unit jump
+		// (focusExternalArtifact) left the panel showing a different record.
+		if (lockedRecordId != null && currentInput?.id !== lockedRecordId) {
+			await loadStructureForRecord(lockedRecordId);
+		}
+		await highlightLinesInCurrentRecord(lineNumbers);
+	}
+
+	/**
+	 * Externally-driven focus used by the Document Review report's matched_units
+	 * dialog. Switches the panel to a matched artifact's source document (which
+	 * is frequently NOT the locked/reviewed document) and highlights its source
+	 * lines, if any. Leaves the panel on that document; see backToLockedRecord.
+	 */
+	export async function focusExternalArtifact(recordId: number, lineNumbers: number[]) {
+		if (!recordId || recordId <= 0) return;
+		if (currentInput?.id !== recordId) {
+			await loadStructureForRecord(recordId);
+		}
+		if (Array.isArray(lineNumbers) && lineNumbers.length > 0) {
+			await highlightLinesInCurrentRecord(lineNumbers);
+		}
+	}
+
+	// Viewing a matched unit's external document instead of the reviewed one
+	// (only meaningful when embedded with a lockedRecordId).
+	let viewingExternalRecord = $derived(
+		lockedRecordId != null && currentInput != null && currentInput.id !== lockedRecordId
+	);
+
+	function backToLockedRecord() {
+		if (lockedRecordId != null) void loadStructureForRecord(lockedRecordId);
 	}
 
 	function adjustLineListWidth(delta: number) {
@@ -1404,6 +1440,15 @@
 			{#if !currentInput}
 				<div class="doc-empty">Retrieve a record to display document and structure highlights.</div>
 			{:else}
+				{#if viewingExternalRecord}
+					<div class="external-record-banner">
+						<button type="button" class="external-record-back" onclick={backToLockedRecord}>
+							<ChevronLeftIcon style="width:13px; height:13px;" />
+							Back to reviewed document
+						</button>
+						<span class="external-record-label">Viewing matched document: {recordDisplayName(currentInput)}</span>
+					</div>
+				{/if}
 				{#if isPdf}
 					<PdfViewWindow
 						inputId={currentInput.id}
@@ -2563,6 +2608,36 @@
 	.doc-empty {
 		padding: 20px;
 		color: var(--text-secondary);
+	}
+	.external-record-banner {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+		padding: 8px 14px;
+		border-bottom: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+	}
+	.external-record-back {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		border: 1px solid var(--brass);
+		border-radius: 6px;
+		background: var(--brass-faint);
+		color: var(--brass);
+		font-size: 12px;
+		font-weight: 600;
+		padding: 4px 10px;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.external-record-label {
+		font-size: 12px;
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.meta-title {
 		font-weight: 700;

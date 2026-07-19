@@ -972,7 +972,13 @@
 		{#if inputRecordId != null}
 			<DocStructureView bind:this={structureView} darkMode={dark} lockedRecordId={inputRecordId}>
 				{#snippet sidebarOverride()}
-					<FindingDetailsPanel finding={selectedFinding} {requestId} runId={reportRunId} {dark} />
+					<FindingDetailsPanel
+						finding={selectedFinding}
+						{requestId}
+						runId={reportRunId}
+						{dark}
+						onFocusMatchedUnit={(recordId, lineNumbers) => void structureView?.focusExternalArtifact(recordId, lineNumbers)}
+					/>
 				{/snippet}
 			</DocStructureView>
 		{:else if !loading}

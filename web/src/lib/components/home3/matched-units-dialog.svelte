@@ -1,14 +1,21 @@
 <script lang="ts">
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
-	import { buildMatchedUnitRows, matchedUnitLabel } from './doc-review-json-dialog.js';
+	import { buildMatchedUnitRows, matchedUnitFocusTarget, matchedUnitLabel } from './doc-review-json-dialog.js';
 
 	let {
 		title,
 		units,
 		dark = true,
-		onclose
-	}: { title: string; units: unknown[]; dark?: boolean; onclose: () => void } = $props();
+		onclose,
+		onFocusUnit
+	}: {
+		title: string;
+		units: unknown[];
+		dark?: boolean;
+		onclose: () => void;
+		onFocusUnit?: (recordId: number, lineNumbers: number[]) => void;
+	} = $props();
 
 	let cardBg = $derived(dark ? '#1F2333' : '#FFFFFF');
 	let surface2 = $derived(dark ? '#252A3A' : '#ECEEF2');
@@ -23,6 +30,12 @@
 	let selected = $state<number | null>(null);
 	let selectedRows = $derived(selected != null ? buildMatchedUnitRows(units[selected]) : []);
 	let dialogTitle = $derived(selected != null ? `Matched — ${matchedUnitLabel(units[selected], selected)}` : title);
+
+	function selectUnit(i: number) {
+		selected = i;
+		const target = matchedUnitFocusTarget(units[i]);
+		if (target) onFocusUnit?.(target.recordId, target.lineNumbers);
+	}
 
 	let modalElement = $state<HTMLDivElement | null>(null);
 	let closeButton = $state<HTMLButtonElement | null>(null);
@@ -120,7 +133,7 @@
 								type="button"
 								class="mu-item"
 								style="border:1px solid {borderColor};color:{textSecondary}"
-								onclick={() => (selected = i)}
+								onclick={() => selectUnit(i)}
 							>
 								<span style="color:{accent};font-family:monospace">{matchedUnitLabel(unit, i)}</span>
 							</button>

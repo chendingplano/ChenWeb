@@ -99,6 +99,76 @@ export function buildMatchedUnitRows(value: unknown): JsonDialogRow[] {
 	return [...metricRows, ...restRows];
 }
 
+// Sibling fields on a matched_units[i] entry that are NOT the nested artifact
+// object (review-metrics.go/review-provisions.go/review-inventory-items.go/
+// review-entities.go each key the artifact differently: "metric", "provision",
+// "item", "entity"). Used to find the artifact generically without hardcoding
+// its key per reviewer type.
+const MATCHED_UNIT_SIBLING_KEYS = new Set([
+	'source_record_id',
+	'source_filename',
+	'source_doc_authority',
+	'match_via',
+	'match_rank',
+	'confidence',
+	'source_context'
+]);
+
+// Parses one line-span string ("14", "14-16", or "14:16") into an inclusive
+// range of line numbers. Mirrors parseArtifactSpan (review-artifact-window.go:62).
+function expandLineSpan(span: string): number[] {
+	const s = span.trim();
+	const sepIndex = (() => {
+		const dash = s.indexOf('-');
+		const colon = s.indexOf(':');
+		if (dash > 0 && (colon < 0 || dash < colon)) return dash;
+		return colon;
+	})();
+	if (sepIndex > 0) {
+		const a = parseInt(s.slice(0, sepIndex).trim(), 10);
+		const b = parseInt(s.slice(sepIndex + 1).trim(), 10);
+		if (Number.isInteger(a) && Number.isInteger(b) && a > 0 && b >= a) {
+			return Array.from({ length: b - a + 1 }, (_, i) => a + i);
+		}
+		return [];
+	}
+	const n = parseInt(s, 10);
+	return Number.isInteger(n) && n > 0 ? [n] : [];
+}
+
+// Resolves the {recordId, lineNumbers} target for jumping the PDF panel to a
+// matched_units[i] entry's source document. Returns null when the entry
+// carries no usable source_record_id. lineNumbers prefers the nested
+// artifact's own source_line_spans, falling back to source_context's
+// line_number values, and may be empty (still enables switching documents).
+export function matchedUnitFocusTarget(unit: unknown): { recordId: number; lineNumbers: number[] } | null {
+	if (!isRecord(unit)) return null;
+	const recordId = Number(unit.source_record_id);
+	if (!Number.isFinite(recordId) || recordId <= 0) return null;
+
+	const artifact = Object.entries(unit).find(
+		([key, v]) => !MATCHED_UNIT_SIBLING_KEYS.has(key) && isRecord(v)
+	)?.[1] as Record<string, unknown> | undefined;
+
+	const spans = artifact && Array.isArray(artifact.source_line_spans) ? artifact.source_line_spans : [];
+	const fromSpans = new Set<number>();
+	for (const span of spans) {
+		if (typeof span !== 'string') continue;
+		for (const n of expandLineSpan(span)) fromSpans.add(n);
+	}
+	if (fromSpans.size > 0) {
+		return { recordId, lineNumbers: [...fromSpans].sort((a, b) => a - b) };
+	}
+
+	const context = isSourceContextSpans(unit.source_context) ? unit.source_context : [];
+	const fromContext = new Set<number>();
+	for (const span of context) {
+		const n = Number(span.line_number);
+		if (Number.isInteger(n) && n > 0) fromContext.add(n);
+	}
+	return { recordId, lineNumbers: [...fromContext].sort((a, b) => a - b) };
+}
+
 // Row builder for the Finding Details panel's "View findings" dialog:
 // artifact_fields is dropped (redundant with the Artifact block already shown
 // in the panel), and related_artifact_fields is expanded inline as indented
