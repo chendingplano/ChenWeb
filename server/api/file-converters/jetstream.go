@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -193,7 +194,14 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 		opts = append(opts, nats.Durable(normalizedDurable))
 	}
 
+	// inFlight tracks message handlers currently running so shutdown can wait
+	// for them instead of abandoning them mid-pipeline (they can run LLM
+	// calls for minutes and write to the shared DB pool that the caller
+	// closes right after ctx is canceled).
+	var inFlight sync.WaitGroup
 	cb := func(msg *nats.Msg) {
+		inFlight.Add(1)
+		defer inFlight.Done()
 		if err := handler(ctx, msg.Data); err != nil {
 			s.logger.Error("(MID_26041120) converter message failed", "subject", msg.Subject, "error", err)
 			if shouldAckOnHandlerError(err) {
@@ -248,10 +256,31 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 			"fallback_durable_enabled", allowFallbackDurable,
 		)
 	}
-	defer sub.Unsubscribe()
-
 	<-ctx.Done()
+	_ = sub.Unsubscribe()
+
+	grace := envDurationSeconds(5*time.Minute, "NATS_SUBSCRIBE_SHUTDOWN_GRACE_SEC", "DOC_PROCESSOR_SHUTDOWN_GRACE_SEC")
+	if !waitWithGrace(&inFlight, grace) {
+		s.logger.Warn("(MID_26071901) in-flight message handlers still running after shutdown grace period; returning anyway",
+			"subject", subject, "grace", grace.String())
+	}
 	return nil
+}
+
+// waitWithGrace blocks until wg is fully drained or grace elapses, whichever
+// comes first. Returns true if wg drained within the grace period.
+func waitWithGrace(wg *sync.WaitGroup, grace time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(grace):
+		return false
+	}
 }
 
 func (s *NATSSubscriber) EnsureStream(streamName string, subject string) error {

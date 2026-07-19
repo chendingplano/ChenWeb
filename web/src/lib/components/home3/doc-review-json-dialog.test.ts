@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
 	buildJsonSections,
 	buildMatchedUnitsSections,
+	buildMetadataSections,
 	formatCompactContent
 } from './doc-review-json-dialog';
 
@@ -55,6 +56,46 @@ test('buildJsonSections keeps findings as simple name-value pairs', () => {
 test('buildJsonSections handles scalar values and nulls', () => {
 	assert.deepEqual(buildJsonSections('ok'), [{ rows: [{ label: 'value', value: 'ok' }] }]);
 	assert.deepEqual(buildJsonSections(null), [{ rows: [{ label: 'value', value: 'null' }] }]);
+});
+
+test('buildMetadataSections expands a JSON-string object field into indented rows', () => {
+	const sections = buildMetadataSections({
+		en: JSON.stringify({ title: 'Metric comparison', provenance: 'canonical' }),
+		run_id: 78
+	});
+
+	assert.equal(sections.length, 1);
+	assert.deepEqual(sections[0]?.rows, [
+		{ label: 'en', value: '' },
+		{ label: 'title', value: 'Metric comparison', indent: true },
+		{ label: 'provenance', value: 'canonical', indent: true },
+		{ label: 'run_id', value: '78' }
+	]);
+});
+
+test('buildMetadataSections expands a JSON-string array of objects with index-prefixed rows', () => {
+	const sections = buildMetadataSections({
+		related_artifacts: JSON.stringify([
+			{ summary: 'same metric', relationship: 'same_consistent' },
+			{ summary: 'different metric', relationship: 'related_distinct' }
+		])
+	});
+
+	assert.deepEqual(sections[0]?.rows, [
+		{ label: 'related_artifacts', value: '2 items' },
+		{ label: '[0] summary', value: 'same metric', indent: true },
+		{ label: '[0] relationship', value: 'same_consistent', indent: true },
+		{ label: '[1] summary', value: 'different metric', indent: true },
+		{ label: '[1] relationship', value: 'related_distinct', indent: true }
+	]);
+});
+
+test('buildMetadataSections leaves plain scalar fields untouched', () => {
+	const sections = buildMetadataSections({ source_language: 'en', schema_version: 1 });
+	assert.deepEqual(sections[0]?.rows, [
+		{ label: 'source_language', value: 'en' },
+		{ label: 'schema_version', value: '1' }
+	]);
 });
 
 test('formatCompactContent unwraps simple unit location wrappers', () => {

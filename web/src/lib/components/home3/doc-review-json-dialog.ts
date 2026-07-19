@@ -144,6 +144,65 @@ export function buildJsonSections(value: unknown): JsonDialogSection[] {
 	return [{ rows: [{ label: 'value', value: displayValue(value) }] }];
 }
 
+// Parses a value that may be a JSON-encoded string (as opposed to an already-
+// parsed object/array) so fields like metadata.en, which come back from the
+// API as stringified JSON, can be expanded instead of shown as a raw blob.
+function parseJsonLike(value: unknown): unknown {
+	if (typeof value !== 'string') return value;
+	const trimmed = value.trim();
+	if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return value;
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return value;
+	}
+}
+
+// Expands a single metadata field into name-value rows: objects become an
+// indented row per key, arrays of objects become indented rows per key
+// prefixed with the item's index, and anything else falls back to a single
+// row (same as flattenRecord). Used for the Metadata dialog, where fields
+// such as en/artifact_fields/related_artifacts arrive as JSON-encoded
+// strings that would otherwise render as an unreadable blob.
+function metadataFieldRows(key: string, rawValue: unknown): JsonDialogRow[] {
+	const value = parseJsonLike(rawValue);
+
+	if (isRecord(value)) {
+		return [
+			{ label: key, value: '' },
+			...Object.entries(value).map(([subKey, subValue]) => ({
+				label: subKey,
+				value: displayValue(subValue),
+				indent: true
+			}))
+		];
+	}
+
+	if (Array.isArray(value) && value.length && value.every(isRecord)) {
+		return [
+			{ label: key, value: `${value.length} item${value.length === 1 ? '' : 's'}` },
+			...value.flatMap((item, index) =>
+				Object.entries(item as Record<string, unknown>).map(([subKey, subValue]) => ({
+					label: `[${index}] ${subKey}`,
+					value: displayValue(subValue),
+					indent: true
+				}))
+			)
+		];
+	}
+
+	return [{ label: key, value: displayValue(rawValue) }];
+}
+
+// Like buildJsonSections, but expands any field whose value is a JSON-encoded
+// object/array (e.g. metadata.en, metadata.artifact_fields,
+// metadata.related_artifacts) into indented name-value rows instead of a raw
+// stringified blob. Used by the Metadata dialog.
+export function buildMetadataSections(value: unknown): JsonDialogSection[] {
+	if (!isRecord(value)) return buildJsonSections(value);
+	return [{ rows: Object.entries(value).flatMap(([key, v]) => metadataFieldRows(key, v)) }];
+}
+
 export type JsonTreeNode = {
 	label: string;
 	value: string;

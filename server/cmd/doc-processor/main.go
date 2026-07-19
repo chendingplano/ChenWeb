@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,6 +46,59 @@ func envFirst(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func uniqueNonEmpty(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func docProcessorSubjects(primary string) []string {
+	return uniqueNonEmpty(
+		primary,
+		docprocessing.DefaultEventSubject,
+		fileconverters.DefaultLineFileGeneratedSubject,
+	)
+}
+
+func docProcessorDurable(primarySubject, primaryDurable, subject string) string {
+	if strings.TrimSpace(subject) == strings.TrimSpace(primarySubject) {
+		return primaryDurable
+	}
+	switch strings.TrimSpace(subject) {
+	case docprocessing.DefaultEventSubject:
+		return primaryDurable + "-start-doc-processing"
+	case fileconverters.DefaultLineFileGeneratedSubject:
+		return primaryDurable + "-line-file-generated"
+	default:
+		return primaryDurable + "-compat"
+	}
+}
+
+func docProcessorStream(primarySubject, primaryStream, subject string) string {
+	if strings.TrimSpace(subject) == strings.TrimSpace(primarySubject) {
+		return primaryStream
+	}
+	switch strings.TrimSpace(subject) {
+	case docprocessing.DefaultEventSubject:
+		return "doc-processor-start-events"
+	case fileconverters.DefaultLineFileGeneratedSubject:
+		return "doc-processor-line-file-events"
+	default:
+		return "doc-processor-compat-events"
+	}
 }
 
 func buildChunkPhaseProcessors(
@@ -119,6 +174,13 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// wg tracks background work (event subscriptions and the pipelines they
+	// dispatch) so shutdown can wait for it to finish before the deferred
+	// database/connection cleanup below runs. Without this, cancel() (from a
+	// signal or a subscription error) let main() return immediately, closing
+	// the DB pool and NATS connections out from under still-running pipelines.
+	var wg sync.WaitGroup
+
 	_ = godotenv.Load("./.env")
 	_ = godotenv.Load()
 
@@ -178,6 +240,7 @@ func main() {
 	subject := envOrDefault("DOC_PROCESSOR_EVENT_SUBJECT", docprocessing.DefaultEventSubject)
 	durable := envOrDefault("DOC_PROCESSOR_EVENT_DURABLE", "doc-processor")
 	streamName := envFirst("DOC_PROCESSOR_EVENT_STREAM", "EXTRACT_DOCMETA_EVENT_STREAM")
+	subjects := docProcessorSubjects(subject)
 	docProcessorMode, err := docprocessing.DocProcessorModeFromEnv()
 	if err != nil {
 		logger.Error("invalid DOC_PROCESSOR_MODE", "error", err)
@@ -190,9 +253,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer ns.Close()
-	if err := ns.EnsureStream(streamName, subject); err != nil {
-		logger.Error("failed to ensure stream", "error", err, "stream", streamName, "subject", subject)
-		os.Exit(1)
+	for _, subSubject := range subjects {
+		subStream := docProcessorStream(subject, streamName, subSubject)
+		if err := ns.EnsureStream(subStream, subSubject); err != nil {
+			logger.Error("failed to ensure stream", "error", err, "stream", subStream, "subject", subSubject)
+			os.Exit(1)
+		}
 	}
 
 	// The production processor graph is shared with benchmark workers.
@@ -219,6 +285,7 @@ func main() {
 	logger.Info("doc processor starting",
 		"nats_url", natsURL,
 		"subject", subject,
+		"subjects", subjects,
 		"durable", durable,
 		"stream", streamName,
 		"doc_processor_mode", docProcessorMode,
@@ -231,15 +298,23 @@ func main() {
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 
-	// ── Doc-processing subscription (existing) ────────────────────────────────
-	go func() {
-		if err := ns.Subscribe(ctx, subject, durable, func(msgCtx context.Context, payload []byte) error {
-			return control.HandleJetStreamEvent(msgCtx, subject, payload)
-		}); err != nil && ctx.Err() == nil {
-			logger.Error("doc processor subscription exited with error", "error", err)
-			cancel()
-		}
-	}()
+	// ── Doc-processing subscriptions (compatibility: accept both subjects) ───
+	for _, subSubject := range subjects {
+		subjectForHandler := subSubject
+		durableForSubject := docProcessorDurable(subject, durable, subSubject)
+		wg.Go(func() {
+			if err := ns.Subscribe(ctx, subjectForHandler, durableForSubject, func(msgCtx context.Context, payload []byte) error {
+				return control.HandleJetStreamEvent(msgCtx, subjectForHandler, payload)
+			}); err != nil && ctx.Err() == nil {
+				logger.Error("doc processor subscription exited with error",
+					"error", err,
+					"subject", subjectForHandler,
+					"durable", durableForSubject,
+				)
+				cancel()
+			}
+		})
+	}
 
 	// ── Doc-review subscription ────────────────────────────────────────────────
 	docReviewSubject := envOrDefault("DOC_REVIEW_EVENT_SUBJECT", docreviews.DefaultDocReviewEventSubject)
@@ -263,7 +338,7 @@ func main() {
 		"durable", docReviewDurable,
 	)
 
-	go func() {
+	wg.Go(func() {
 		if err := drNS.Subscribe(ctx, docReviewSubject, docReviewDurable, func(msgCtx context.Context, payload []byte) error {
 			var evt struct {
 				RequestID int64 `json:"request_id"`
@@ -283,7 +358,7 @@ func main() {
 			logger.Error("doc-review subscription exited with error", "error", err)
 			cancel()
 		}
-	}()
+	})
 
 	// ── Recover stalled doc-review runs left by a previous process ────────────
 	// A killed/restarted backend leaves requests in 'accepted'/'running' with no
@@ -291,7 +366,7 @@ func main() {
 	// nothing partial is lost). Re-arm and re-run each from scratch. Disable with
 	// DOC_REVIEW_RECOVER_ON_START=false (e.g. when running multiple instances).
 	if envOrDefault("DOC_REVIEW_RECOVER_ON_START", "true") != "false" {
-		go func() {
+		wg.Go(func() {
 			ctrl := docreviews.NewDocReviewController()
 			stalled, err := ctrl.RecoverStalledReviews(ctx)
 			if err != nil {
@@ -300,11 +375,59 @@ func main() {
 			}
 			for _, ref := range stalled {
 				logger.Info("re-running recovered doc-review", "request_id", ref.RequestID, "run_id", ref.RunID)
-				go ctrl.RunReviewAndReport(ctx, ref.RequestID, ref.RunID)
+				wg.Go(func() { ctrl.RunReviewAndReport(ctx, ref.RequestID, ref.RunID) })
 			}
-		}()
+		})
 	}
 
 	<-ctx.Done()
+	logger.Info("shutdown: waiting for in-flight subscriptions and pipelines to finish")
+	grace := shutdownGrace()
+	// Drain the subscription wrappers and the doc-processing pipelines they
+	// dispatch concurrently, bounded by the same grace period, rather than
+	// waiting up to 2x grace by draining them one after another.
+	var subsDrained, pipelinesDrained bool
+	var drainWG sync.WaitGroup
+	drainWG.Go(func() { subsDrained = waitWithGrace(&wg, grace) })
+	drainWG.Go(func() { pipelinesDrained = control.WaitForInFlightPipelines(grace) })
+	drainWG.Wait()
+	if subsDrained && pipelinesDrained {
+		logger.Info("shutdown: all in-flight work finished cleanly")
+	} else {
+		logger.Warn("shutdown: grace period elapsed with work still in flight; closing database and connections now",
+			"grace", grace.String(), "subscriptions_drained", subsDrained, "pipelines_drained", pipelinesDrained)
+	}
 	fmt.Println("doc processor stopped")
+}
+
+// shutdownGrace returns how long main() waits for in-flight subscriptions and
+// pipelines to finish after ctx is canceled, before the deferred DB/connection
+// cleanup runs. Shares the same knob as NATSSubscriber's own internal drain
+// (fileconverters.envDurationSeconds default) so both layers agree on budget.
+func shutdownGrace() time.Duration {
+	raw := strings.TrimSpace(envFirst("DOC_PROCESSOR_SHUTDOWN_GRACE_SEC"))
+	if raw == "" {
+		return 5 * time.Minute
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil || sec <= 0 {
+		return 5 * time.Minute
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// waitWithGrace blocks until wg is fully drained or grace elapses, whichever
+// comes first. Returns true if wg drained within the grace period.
+func waitWithGrace(wg *sync.WaitGroup, grace time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(grace):
+		return false
+	}
 }

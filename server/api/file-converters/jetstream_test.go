@@ -2,7 +2,9 @@ package fileconverters
 
 import (
 	"errors"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestIsNonFatalEnsureStreamErr(t *testing.T) {
@@ -91,5 +93,29 @@ func TestShouldAckOnHandlerError(t *testing.T) {
 				t.Fatalf("shouldAckOnHandlerError() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWaitWithGraceDrainsBeforeGracePeriod(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		time.Sleep(10 * time.Millisecond)
+	})
+
+	start := time.Now()
+	if !waitWithGrace(&wg, time.Second) {
+		t.Fatal("waitWithGrace() = false, want true (wg drained well within grace)")
+	}
+	if elapsed := time.Since(start); elapsed >= time.Second {
+		t.Fatalf("waitWithGrace() took %v, want well under the 1s grace period", elapsed)
+	}
+}
+
+func TestWaitWithGraceTimesOutOnStuckWork(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1) // never Done() — simulates a handler stuck past shutdown
+
+	if waitWithGrace(&wg, 20*time.Millisecond) {
+		t.Fatal("waitWithGrace() = true, want false (wg never drains)")
 	}
 }

@@ -732,6 +732,63 @@ func TestControlService_HandleJetStreamEvent_MarksOnlyRunningSlotActive(t *testi
 	waitForStatusUpdate(t, store, "success")
 }
 
+// TestControlService_WaitForInFlightPipelines_BlocksUntilDispatchedPipelineFinishes
+// guards against the bug that produced "sql: database is closed" errors:
+// HandleJetStreamEvent dispatches the pipeline to a detached goroutine and
+// returns before it finishes, so shutdown code must not treat the handler's
+// return as proof the pipeline (and its DB writes) are done.
+func TestControlService_WaitForInFlightPipelines_BlocksUntilDispatchedPipelineFinishes(t *testing.T) {
+	t.Setenv("MAX_DOC_PROCESS_PIPELINES", "1")
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var done sync.WaitGroup
+	done.Add(1)
+	processor := &blockingConcurrencyProcessor{
+		name:    "blocking_probe",
+		started: started,
+		release: release,
+		done:    &done,
+	}
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:             1,
+			ParserName:     "opendata",
+			ResultFilename: "result.json",
+			StatusRaw:      `[]`,
+		},
+	}
+	svc := &ControlService{
+		Processors:             []Processor{processor},
+		InputStore:             store,
+		MaxDocProcessPipelines: 1,
+		Now:                    time.Now,
+	}
+
+	if err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1","filename":"`+inputPath+`"}`)); err != nil {
+		t.Fatalf("HandleJetStreamEvent() error = %v, want nil", err)
+	}
+	// HandleJetStreamEvent has already returned, but the pipeline it dispatched
+	// is still blocked in the processor below.
+	waitForProcessorStarts(t, started, 1)
+
+	if svc.WaitForInFlightPipelines(20 * time.Millisecond) {
+		t.Fatal("WaitForInFlightPipelines() = true while the dispatched pipeline is still running, want false")
+	}
+
+	close(release)
+	done.Wait()
+
+	if !svc.WaitForInFlightPipelines(time.Second) {
+		t.Fatal("WaitForInFlightPipelines() = false after the pipeline finished, want true")
+	}
+}
+
 func waitForStatusUpdate(t *testing.T, store *fakeDocMetadataStore, want string) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)

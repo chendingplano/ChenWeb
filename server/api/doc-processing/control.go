@@ -45,6 +45,30 @@ type ControlService struct {
 	pipelineSlots          chan struct{}
 	pipelineSlotsMax       int
 	pipelineSlotsMu        sync.Mutex
+
+	// inFlightPipelines tracks the detached goroutines HandleJetStreamEvent
+	// dispatches (it returns before the pipeline runs, so message-handler
+	// completion alone doesn't reflect pipeline completion). Shutdown code
+	// should wait on this via WaitForInFlightPipelines before closing the
+	// DB pool the pipelines still write to.
+	inFlightPipelines sync.WaitGroup
+}
+
+// WaitForInFlightPipelines blocks until every pipeline dispatched via
+// HandleJetStreamEvent has finished, or grace elapses, whichever comes
+// first. Returns true if everything drained within the grace period.
+func (s *ControlService) WaitForInFlightPipelines(grace time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.inFlightPipelines.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(grace):
+		return false
+	}
 }
 
 func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
@@ -75,7 +99,7 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 	if err != nil {
 		return err
 	}
-	go func() {
+	s.inFlightPipelines.Go(func() {
 		defer releaseSlot()
 		procStart := s.now()
 		var procErr error
@@ -96,7 +120,7 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 		if err := s.EventStore.UpsertConsumedStatus(context.Background(), eventID, procStart, time.Since(procStart).Milliseconds(), procErr); err != nil && s.Logger != nil {
 			s.Logger.Error("failed upserting kb.events consumed status", "event_id", eventID, "error", err)
 		}
-	}()
+	})
 	return nil
 }
 

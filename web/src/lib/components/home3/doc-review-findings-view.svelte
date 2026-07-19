@@ -5,6 +5,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import {
 		buildJsonSections,
+		buildMetadataSections,
 		formatCompactContent,
 		type JsonDialogSection
 	} from './doc-review-json-dialog.js';
@@ -190,7 +191,7 @@
 	}
 
 	function openMetadata(row: FindingRow) {
-		openModal(`Metadata — Finding #${row.id}`, buildJsonSections(row.metadata));
+		openModal(`Metadata — Finding #${row.id}`, buildMetadataSections(row.metadata));
 	}
 
 	function openReferenceDoc(row: FindingRow) {
@@ -534,8 +535,12 @@
 									class="grid gap-x-6 gap-y-2"
 									style="grid-template-columns:minmax(180px,240px) minmax(0,1fr)"
 								>
-									{#each section.rows as row (row.label)}
-										<div style="color:{textMuted};font-family:monospace;word-break:break-word">
+									{#each section.rows as row, i (i)}
+										<div
+											style="color:{textMuted};font-family:monospace;word-break:break-word;{row.indent
+												? 'padding-left:1rem;'
+												: ''}"
+										>
 											{row.label}
 										</div>
 										<div style="color:{textSecondary};word-break:break-word;white-space:pre-wrap">
