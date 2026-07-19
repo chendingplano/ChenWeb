@@ -2337,8 +2337,10 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 
 	for _, topic := range topics {
 		vec, err := s.embedWithRetry(ctx, s.Embedder, llmclients.EmbedInput{
-			ModelName: s.TopicEmbeddingModelName,
-			InputText: topic.Topic,
+			ModelName:  s.TopicEmbeddingModelName,
+			InputText:  topic.Topic,
+			CallReason: "embed_topic",
+			CallLoc:    "MID-20260719-0001",
 		})
 		if err != nil {
 			return fmt.Errorf("(MID_26050202) embed topic seq=%d failed: %w", topic.SeqNo, err)
@@ -2375,8 +2377,10 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 			continue
 		}
 		vec, err := s.embedWithRetry(ctx, s.Embedder, llmclients.EmbedInput{
-			ModelName: s.SummaryEmbeddingModelName,
-			InputText: summaryText,
+			ModelName:  s.SummaryEmbeddingModelName,
+			InputText:  summaryText,
+			CallReason: "embed_summary",
+			CallLoc:    "MID-20260719-0002",
 		})
 		if err != nil {
 			return fmt.Errorf("(MID_26043101) embed summary %q failed: %w", item.SummaryID, err)
