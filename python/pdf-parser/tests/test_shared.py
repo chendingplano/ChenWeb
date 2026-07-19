@@ -268,6 +268,27 @@ class TestRecordDuplicated:
 
 
 class TestRecordParsedStatus:
+    def test_record_parse_active_updates_parser_name_column(self):
+        conn = _FakeConn()
+        raw = json.dumps([])
+
+        updated = record_parse_active(
+            conn,
+            21,
+            raw,
+            "20260609 05:08:02",
+            1234,
+            42,
+            "mineru",
+            7,
+        )
+        entries = json.loads(updated)
+
+        assert conn.commit_called is True
+        assert "parser_name = COALESCE(NULLIF(%s, ''), parser_name)" in conn.executed_sql
+        assert conn.executed_params == (updated, "mineru", 21)
+        assert entries[0]["parser_name"] == "mineru"
+
     def test_record_parsed_success_includes_parser_name_in_status(self):
         conn = _FakeConn()
         raw = json.dumps([{"operation": "parsed", "proc_status": "active", "progress": "50%"}])
@@ -308,6 +329,8 @@ class TestRecordParsedStatus:
         entries = json.loads(updated)
 
         assert conn.commit_called is True
+        assert "parser_name = COALESCE(NULLIF(%s, ''), parser_name)" in conn.executed_sql
+        assert conn.executed_params == (updated, "mineru", "mineru exited 1", 22)
         assert len(entries) == 1
         assert entries[0]["operation"] == "parsed"
         assert entries[0]["proc_status"] == "failed"

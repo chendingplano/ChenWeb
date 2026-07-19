@@ -458,11 +458,13 @@ def record_parse_active(
     )
     sql = """
         UPDATE kb.inputs
-        SET status = %s::jsonb, modify_time = NOW()
+        SET status = %s::jsonb,
+            parser_name = COALESCE(NULLIF(%s, ''), parser_name),
+            modify_time = NOW()
         WHERE id = %s
     """
     with conn.cursor() as cur:
-        cur.execute(sql, (new_status, rec_id))
+        cur.execute(sql, (new_status, parser_name, rec_id))
     conn.commit()
     return new_status
 
@@ -524,12 +526,13 @@ def record_parsed_failure(
     sql = """
         UPDATE kb.inputs
         SET status    = %s::jsonb,
+            parser_name = COALESCE(NULLIF(%s, ''), parser_name),
             error_msg = %s,
             modify_time = NOW()
         WHERE id = %s
     """
     with conn.cursor() as cur:
-        cur.execute(sql, (new_status, error, rec_id))
+        cur.execute(sql, (new_status, parser_name, error, rec_id))
     conn.commit()
     return new_status
 
