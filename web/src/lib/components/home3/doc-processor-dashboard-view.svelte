@@ -466,7 +466,7 @@
 		const chosen = buildManualLaunchOperations(selectableProcessorIds, procs, entityExtractionSucceeded(record));
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: runMode === 'force', force_clear: forceClear };
 		payload.operation = chosen;
-		await publishEvent('kb.line-file-generated', payload);
+		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}
 
 	function filterByRunMode(records: KbInputRecord[], mode: RunMode, selectedStageIds: Set<string>): KbInputRecord[] {

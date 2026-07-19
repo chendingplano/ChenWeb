@@ -586,7 +586,7 @@
 		const allChosen = chosen.length === selectableProcessorIds.length;
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
 		if (!allChosen) payload.operation = chosen;
-		await publishEvent('kb.line-file-generated', payload);
+		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}
 
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
