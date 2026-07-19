@@ -348,16 +348,23 @@ func TestReviewMetric_LogsNoIssue(t *testing.T) {
 	}
 }
 
-func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
+func TestReviewMetric_ReturnsOneConsolidatedAnalysisFinding(t *testing.T) {
 	fake := &fakeJSONExtractor{
 		out: map[string]any{
-			"findings": []any{},
+			"findings":       []any{},
+			"metric_summary": "待审指标为最大工作压力，属设计上限阈值。",
 			"analyses": []any{
 				map[string]any{
 					"related_artifact_id": "2_m_9",
 					"related_record_id":   float64(2),
 					"relationship":        "same_consistent",
 					"summary":             "Same quantity, same conditions, unit-equivalent values, no conflict.",
+				},
+				map[string]any{
+					"related_artifact_id": "3_m_1",
+					"related_record_id":   float64(3),
+					"relationship":        "related_distinct",
+					"summary":             "Different measurement conditions.",
 				},
 			},
 		},
@@ -375,11 +382,11 @@ func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
 	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
-		PromptRef:  "prompt-review-metrics-v4.md",
+		PromptRef:  "prompt-review-metrics-v6.md",
 	}, doc, nil, "", false)
 
 	if len(findings) != 1 {
-		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)
+		t.Fatalf("findings = %d, want 1 consolidated analysis finding for 2 candidates: %+v", len(findings), findings)
 	}
 	f := findings[0]
 	if f.Pass != "P5" || f.Aspect != "metrics" || f.ArtifactID != "1_m_1" {
@@ -388,20 +395,81 @@ func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
 	if f.FindingType != "analysis" || f.Severity != "info" {
 		t.Fatalf("analysis type/severity = %q/%q, want analysis/info", f.FindingType, f.Severity)
 	}
-	if f.RelatedArtifactID != "2_m_9" || f.RelatedRecordID != 2 {
-		t.Fatalf("analysis related = %q/%d, want 2_m_9/2", f.RelatedArtifactID, f.RelatedRecordID)
-	}
 	if f.Location != "20:24" {
 		t.Fatalf("analysis location = %q, want 20:24", f.Location)
 	}
-	if !strings.Contains(f.Title, "1_m_1") || !strings.Contains(f.Title, "2_m_9") {
-		t.Fatalf("analysis title = %q, want both metric ids", f.Title)
+	if !strings.Contains(f.Title, "1_m_1") {
+		t.Fatalf("analysis title = %q, want the metric-under-review id", f.Title)
 	}
-	if f.Description != "Same quantity, same conditions, unit-equivalent values, no conflict." {
-		t.Fatalf("analysis description = %q", f.Description)
+	if f.Description != "待审指标为最大工作压力，属设计上限阈值。" {
+		t.Fatalf("analysis description = %q, want metric_summary verbatim", f.Description)
 	}
-	if f.ResultKind != "metric_analysis" || f.AnalysisRelationship != "same_consistent" {
-		t.Fatalf("analysis metadata = result_kind:%q relationship:%q, want metric_analysis/same_consistent", f.ResultKind, f.AnalysisRelationship)
+	if f.ResultKind != "metric_analysis" {
+		t.Fatalf("analysis result_kind = %q, want metric_analysis", f.ResultKind)
+	}
+	if f.RelatedArtifactID != "" || f.RelatedRecordID != 0 || f.AnalysisRelationship != "" {
+		t.Fatalf("analysis singular related fields = %q/%d/%q, want all empty for a multi-candidate row", f.RelatedArtifactID, f.RelatedRecordID, f.AnalysisRelationship)
+	}
+	if len(f.RelatedArtifacts) != 2 {
+		t.Fatalf("related_artifacts = %d, want 2: %+v", len(f.RelatedArtifacts), f.RelatedArtifacts)
+	}
+	if got := f.RelatedArtifacts[0]; got.RelatedArtifactID != "2_m_9" || got.RelatedRecordID != 2 || got.Relationship != "same_consistent" || got.Summary != "Same quantity, same conditions, unit-equivalent values, no conflict." {
+		t.Fatalf("related_artifacts[0] = %+v", got)
+	}
+	if got := f.RelatedArtifacts[1]; got.RelatedArtifactID != "3_m_1" || got.RelatedRecordID != 3 || got.Relationship != "related_distinct" || got.Summary != "Different measurement conditions." {
+		t.Fatalf("related_artifacts[1] = %+v", got)
+	}
+}
+
+func TestMetricAnalysesAsFinding_NoAnalysesProducesNoFinding(t *testing.T) {
+	doc := docMetric{id: 7, view: metricView{MetricID: "1_m_1"}, spans: []string{"20:24"}}
+
+	if got := metricAnalysesAsFinding(doc, "some summary", nil); got != nil {
+		t.Fatalf("finding = %+v, want nil for zero analyses", got)
+	}
+
+	// Every candidate has an empty summary (dropped by the caller before this
+	// point in practice, but defend the function itself too).
+	analyses := []MetricAnalysis{{RelatedArtifactID: "2_m_9", Relationship: "unrelated", Summary: "  "}}
+	if got := metricAnalysesAsFinding(doc, "some summary", analyses); got != nil {
+		t.Fatalf("finding = %+v, want nil when every analysis has an empty summary", got)
+	}
+}
+
+func TestReviewMetric_EmptyAnalysesProducesNoAnalysisFinding(t *testing.T) {
+	fake := &fakeJSONExtractor{
+		out: map[string]any{
+			"findings":       []any{},
+			"metric_summary": "待审指标说明。",
+			"analyses":       []any{},
+		},
+	}
+	r := &metricsReviewer{
+		client: fake,
+		logger: loggerutil.CreateDefaultLogger("TEST_METRICS"),
+	}
+	doc := docMetric{id: 7, view: metricView{MetricID: "1_m_1"}, spans: []string{"20:24"}}
+
+	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+		ModelName:  "metric-model",
+		PromptText: "compare metrics",
+		PromptRef:  "prompt-review-metrics-v6.md",
+	}, doc, nil, "", false)
+
+	if len(findings) != 0 {
+		t.Fatalf("findings = %d, want 0 when analyses is empty", len(findings))
+	}
+}
+
+func TestParseMetricSummaryJSON(t *testing.T) {
+	if got := parseMetricSummaryJSON(map[string]any{"metric_summary": "  待审指标说明。  "}); got != "待审指标说明。" {
+		t.Errorf("metric_summary = %q, want trimmed value", got)
+	}
+	if got := parseMetricSummaryJSON(map[string]any{"findings": []any{}}); got != "" {
+		t.Errorf("metric_summary = %q, want empty when key absent", got)
+	}
+	if got := parseMetricSummaryJSON(nil); got != "" {
+		t.Errorf("metric_summary = %q, want empty for nil payload", got)
 	}
 }
 

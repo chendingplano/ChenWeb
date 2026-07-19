@@ -144,6 +144,7 @@ var findingMetadataReservedKeys = map[string]bool{
 	"analysis_relationship":      true,
 	"artifact_fields":            true,
 	"related_artifact_fields":    true,
+	"related_artifacts":          true,
 	"model_name":                 true,
 	"run_id":                     true,
 }
@@ -161,8 +162,12 @@ type FindingMetadataEnvelope struct {
 	AnalysisRelationship  string
 	ArtifactFields        json.RawMessage
 	RelatedArtifactFields json.RawMessage
-	ModelName             string
-	RunID                 int64
+	// RelatedArtifacts is the multi-candidate comparison-analysis array (metrics
+	// reviewer, ADR 2026063002): one entry per candidate compared against the
+	// artifact under review. Empty for every other finding shape.
+	RelatedArtifacts []RelatedArtifactAnalysis
+	ModelName        string
+	RunID            int64
 }
 
 func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
@@ -197,6 +202,9 @@ func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
 	}
 	if len(e.RelatedArtifactFields) > 0 {
 		m["related_artifact_fields"] = e.RelatedArtifactFields
+	}
+	if len(e.RelatedArtifacts) > 0 {
+		m["related_artifacts"] = e.RelatedArtifacts
 	}
 	if e.ModelName != "" {
 		m["model_name"] = e.ModelName
@@ -252,6 +260,9 @@ func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
 	}
 	if raf, ok := raw["related_artifact_fields"]; ok {
 		e.RelatedArtifactFields = append(json.RawMessage(nil), raf...)
+	}
+	if ras, ok := raw["related_artifacts"]; ok {
+		_ = json.Unmarshal(ras, &e.RelatedArtifacts)
 	}
 	if mn, ok := raw["model_name"]; ok {
 		_ = json.Unmarshal(mn, &e.ModelName)

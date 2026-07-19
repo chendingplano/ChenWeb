@@ -163,6 +163,7 @@ func ListInputs(c echo.Context) error {
 		ModifyTimeEnd:   modifyEndTime,
 	}
 
+	/*
 	logger.Info("list kb inputs request",
 		"page", page,
 		"page_size", pageSize,
@@ -184,6 +185,7 @@ func ListInputs(c echo.Context) error {
 		"modify_start_time", formatOptionalTime(filters.ModifyTimeStart),
 		"modify_end_time", formatOptionalTime(filters.ModifyTimeEnd),
 	)
+	*/
 
 	if !isValidParseState(filters.ParseState) {
 		return c.JSON(http.StatusBadRequest, errorResponse{
@@ -303,13 +305,13 @@ func ListInputs(c echo.Context) error {
 		}
 	}
 
-	logger.Info("list kb inputs result",
-		"record_id", optionalInt64Value(recordID),
-		"ks_store_id", optionalInt64Value(ksStoreID),
-		"total", total,
-		"returned", len(results),
-		"sample_ids", sampleInputIDs(results, 8),
-	)
+	// logger.Info("list kb inputs result",
+	// 	"record_id", optionalInt64Value(recordID),
+	// 	"ks_store_id", optionalInt64Value(ksStoreID),
+	// 	"total", total,
+	// 	"returned", len(results),
+	// 	"sample_ids", sampleInputIDs(results, 8),
+	// )
 
 	return c.JSON(http.StatusOK, listInputsResponse{
 		Status:   true,

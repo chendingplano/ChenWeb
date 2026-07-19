@@ -281,7 +281,10 @@ func (r *metricsReviewer) reviewMetric(
 	}
 
 	if analyses := parseMetricAnalysesJSON(payload); len(analyses) > 0 {
-		findings = append(findings, metricAnalysesAsFindings(dm, analyses)...)
+		metricSummary := parseMetricSummaryJSON(payload)
+		if af := metricAnalysesAsFinding(dm, metricSummary, analyses); af != nil {
+			findings = append(findings, *af)
+		}
 	}
 
 	loc := strings.Join(dm.spans, ",")
@@ -345,13 +348,15 @@ func (r *metricsReviewer) reviewMetric(
 }
 
 // MetricAnalysis is one entry of the metrics reviewer's mandatory per-candidate
-// classification record (prompt-review-metrics-v4 `analyses`), converted into
-// first-class analysis rows in kb.doc_review_findings. Relationship is one of
-// the five classifications the prompt emits: "same_consistent", "same_conflict",
-// "related_distinct", "unrelated", "undetermined" (ADR 2026063002). The Go
-// pipeline treats it as opaque provenance — it is stored and rendered verbatim,
-// never branched on — so new/changed prompt vocabulary needs no code change
-// here, only in the prompt and this comment.
+// classification record (prompt-review-metrics-v4 `analyses`), folded into the
+// RelatedArtifacts array of a single per-metric analysis row in
+// kb.doc_review_findings (one row per metric-under-review, not one per
+// candidate). Relationship is one of the five classifications the prompt
+// emits: "same_consistent", "same_conflict", "related_distinct", "unrelated",
+// "undetermined" (ADR 2026063002). The Go pipeline treats it as opaque
+// provenance — it is stored and rendered verbatim, never branched on — so
+// new/changed prompt vocabulary needs no code change here, only in the prompt
+// and this comment.
 type MetricAnalysis struct {
 	RelatedArtifactID string
 	RelatedRecordID   int64
@@ -393,51 +398,52 @@ func parseMetricAnalysesJSON(payload map[string]any) []MetricAnalysis {
 	return out
 }
 
-func metricAnalysesAsFindings(dm docMetric, analyses []MetricAnalysis) []ReviewFinding {
-	if len(analyses) == 0 {
-		return nil
+// parseMetricSummaryJSON extracts the one-time "metric_summary" string from
+// the raw JSON payload returned by the LLM (prompt-review-metrics-v6). Empty
+// when absent.
+func parseMetricSummaryJSON(payload map[string]any) string {
+	if payload == nil {
+		return ""
 	}
-	loc := strings.Join(dm.spans, ",")
-	out := make([]ReviewFinding, 0, len(analyses))
+	return strings.TrimSpace(asString(payload["metric_summary"]))
+}
+
+// metricAnalysesAsFinding folds every candidate's MetricAnalysis into a single
+// ReviewFinding for the metric under review (one kb.doc_review_findings row
+// per metric, not one per candidate). metricSummary becomes the row's
+// Description; per-candidate detail lives in RelatedArtifacts. Returns nil
+// when analyses is empty — a metric with no candidate analyses gets no row.
+func metricAnalysesAsFinding(dm docMetric, metricSummary string, analyses []MetricAnalysis) *ReviewFinding {
+	related := make([]RelatedArtifactAnalysis, 0, len(analyses))
 	for _, a := range analyses {
 		summary := strings.TrimSpace(a.Summary)
 		if summary == "" {
 			continue
 		}
-		relatedID := strings.TrimSpace(a.RelatedArtifactID)
-		titleRelated := relatedID
-		if titleRelated == "" {
-			titleRelated = "unlinked match"
-		}
-		relationship := strings.TrimSpace(a.Relationship)
-		evidenceParts := []string{"metric_under_review=" + dm.view.MetricID}
-		if relatedID != "" {
-			evidenceParts = append(evidenceParts, "related_artifact_id="+relatedID)
-		}
-		if a.RelatedRecordID > 0 {
-			evidenceParts = append(evidenceParts, fmt.Sprintf("related_record_id=%d", a.RelatedRecordID))
-		}
-		if relationship != "" {
-			evidenceParts = append(evidenceParts, "relationship="+relationship)
-		}
-		out = append(out, ReviewFinding{
-			Pass:                 "P5",
-			Aspect:               "metrics",
-			Severity:             "info",
-			FindingType:          "analysis",
-			Title:                fmt.Sprintf("Metric comparison: %s vs %s", dm.view.MetricID, titleRelated),
-			Description:          summary,
-			Evidence:             strings.Join(evidenceParts, "; "),
-			Location:             loc,
-			Confidence:           1.0,
-			ArtifactID:           dm.view.MetricID,
-			RelatedArtifactID:    relatedID,
-			RelatedRecordID:      a.RelatedRecordID,
-			ResultKind:           "metric_analysis",
-			AnalysisRelationship: relationship,
+		related = append(related, RelatedArtifactAnalysis{
+			RelatedArtifactID: strings.TrimSpace(a.RelatedArtifactID),
+			RelatedRecordID:   a.RelatedRecordID,
+			Relationship:      strings.TrimSpace(a.Relationship),
+			Summary:           summary,
 		})
 	}
-	return out
+	if len(related) == 0 {
+		return nil
+	}
+	return &ReviewFinding{
+		Pass:             "P5",
+		Aspect:           "metrics",
+		Severity:         "info",
+		FindingType:      "analysis",
+		Title:            fmt.Sprintf("Metric comparison: %s (%d candidates)", dm.view.MetricID, len(related)),
+		Description:      metricSummary,
+		Evidence:         fmt.Sprintf("metric_under_review=%s; candidates=%d", dm.view.MetricID, len(related)),
+		Location:         strings.Join(dm.spans, ","),
+		Confidence:       1.0,
+		ArtifactID:       dm.view.MetricID,
+		ResultKind:       "metric_analysis",
+		RelatedArtifacts: related,
+	}
 }
 
 func (r *metricsReviewer) saveReviewLog(ctx context.Context, entry ReviewLogEntry) {

@@ -1054,6 +1054,57 @@ func TestFindingMetadataJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFindingMetadataJSONRoundTrip_RelatedArtifacts(t *testing.T) {
+	meta := FindingMetadataEnvelope{
+		I18N: FindingI18NMetadata{SchemaVersion: 1},
+		RelatedArtifacts: []RelatedArtifactAnalysis{
+			{RelatedArtifactID: "306_mtc_29", RelatedRecordID: 306, Relationship: "related_distinct", Summary: "候选指标为..."},
+			{RelatedArtifactID: "306_mtc_73", RelatedRecordID: 306, Relationship: "unrelated", Summary: "仅检索机制相关。"},
+		},
+	}
+
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var flat map[string]json.RawMessage
+	if err := json.Unmarshal(body, &flat); err != nil {
+		t.Fatalf("unmarshal flat check: %v", err)
+	}
+	if _, ok := flat["related_artifacts"]; !ok {
+		t.Fatal("marshaled output missing 'related_artifacts'")
+	}
+
+	var roundTrip FindingMetadataEnvelope
+	if err := json.Unmarshal(body, &roundTrip); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if len(roundTrip.RelatedArtifacts) != 2 {
+		t.Fatalf("roundTrip related_artifacts = %d, want 2: %+v", len(roundTrip.RelatedArtifacts), roundTrip.RelatedArtifacts)
+	}
+	if roundTrip.RelatedArtifacts[0].RelatedArtifactID != "306_mtc_29" || roundTrip.RelatedArtifacts[0].Relationship != "related_distinct" {
+		t.Fatalf("roundTrip related_artifacts[0] = %+v", roundTrip.RelatedArtifacts[0])
+	}
+	if roundTrip.RelatedArtifacts[1].RelatedArtifactID != "306_mtc_73" || roundTrip.RelatedArtifacts[1].Relationship != "unrelated" {
+		t.Fatalf("roundTrip related_artifacts[1] = %+v", roundTrip.RelatedArtifacts[1])
+	}
+
+	// A finding with no RelatedArtifacts set (every other reviewer/finding
+	// type) must not gain a related_artifacts key.
+	plain := FindingMetadataEnvelope{I18N: FindingI18NMetadata{SchemaVersion: 1}, RelatedArtifactID: "2002_m_3", RelatedRecordID: 2002}
+	plainBody, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatalf("json.Marshal plain: %v", err)
+	}
+	var plainFlat map[string]json.RawMessage
+	if err := json.Unmarshal(plainBody, &plainFlat); err != nil {
+		t.Fatalf("unmarshal plain flat check: %v", err)
+	}
+	if _, ok := plainFlat["related_artifacts"]; ok {
+		t.Fatal("marshaled output for a non-multi-candidate finding unexpectedly has 'related_artifacts'")
+	}
+}
+
 func TestTranslationFromMetadataReadsFlatSchemaV1Format(t *testing.T) {
 	raw := []byte(`{"schema_version":1,"source_language":"en","source_language_confidence":1,"canonical_language":"en","canonical_origin":"original","en":{"title":"Laboratory","description":"Missing initial L.","suggestion":"Correct the spelling.","provenance":"canonical"},"zh":{"title":"标题","description":"描述","suggestion":"建议","provenance":"llm_translation"}}`)
 	tr, ok := translationFromMetadata(raw, "zh")

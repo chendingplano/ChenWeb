@@ -58,9 +58,26 @@ type ReviewFinding struct {
 	ArtifactFields        json.RawMessage `json:"artifact_fields,omitempty"`
 	RelatedArtifactFields json.RawMessage `json:"related_artifact_fields,omitempty"`
 
+	// RelatedArtifacts holds one entry per candidate for a multi-candidate
+	// comparison-analysis row (metrics reviewer, ADR 2026063002): a single
+	// finding covering every candidate compared against the artifact under
+	// review, instead of one finding per candidate. Empty for every other
+	// finding shape, which still uses the singular RelatedArtifactID/
+	// RelatedRecordID/AnalysisRelationship above.
+	RelatedArtifacts []RelatedArtifactAnalysis `json:"related_artifacts,omitempty"`
+
 	// ModelName is the LLM model that generated this finding (ADR 2026070201
 	// change log), resolved from ReviewerConfig.ModelName at call time.
 	ModelName string `json:"model_name,omitempty"`
+}
+
+// RelatedArtifactAnalysis is one candidate's comparison result within a
+// multi-candidate ReviewFinding.RelatedArtifacts array.
+type RelatedArtifactAnalysis struct {
+	RelatedArtifactID string `json:"related_artifact_id,omitempty"`
+	RelatedRecordID   int64  `json:"related_record_id,omitempty"`
+	Relationship      string `json:"relationship,omitempty"`
+	Summary           string `json:"summary,omitempty"`
 }
 
 // ReviewStrategy selects how a reviewer processes a document.
