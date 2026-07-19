@@ -26,7 +26,6 @@
 	let textPrimary = $derived(dark ? '#E2E8F0' : '#111827');
 	let textSecondary = $derived(dark ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(dark ? '#64748B' : '#9CA3AF');
-	let overlay = $derived(dark ? '#0D1117E6' : '#00000066');
 	let scrollThumb = $derived(dark ? '#2A3140' : '#D7CFB8');
 
 	let selected = $state<number | null>(initialSelected ?? null);
@@ -44,37 +43,49 @@
 		if (target) onFocusUnit?.(target.recordId, target.lineNumbers);
 	}
 
-	let modalElement = $state<HTMLDivElement | null>(null);
+	let dialogEl = $state<HTMLDivElement | null>(null);
 	let closeButton = $state<HTMLButtonElement | null>(null);
 	let returnFocusElement: HTMLElement | null = null;
 
+	// Non-modal floating window: only Escape is handled (back to list, then
+	// close); no focus trap, so the PDF panel behind stays interactive.
 	function handleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			if (selected != null) selected = null;
 			else onclose();
-			return;
 		}
-		if (event.key !== 'Tab' || !modalElement) return;
-		const focusable = Array.from(
-			modalElement.querySelectorAll<HTMLElement>(
-				'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-			)
-		);
-		if (!focusable.length) {
-			event.preventDefault();
-			modalElement.focus();
-			return;
-		}
-		const first = focusable[0];
-		const last = focusable[focusable.length - 1];
-		if (event.shiftKey && document.activeElement === first) {
-			event.preventDefault();
-			last.focus();
-		} else if (!event.shiftKey && document.activeElement === last) {
-			event.preventDefault();
-			first.focus();
-		}
+	}
+
+	// --- Dragging (via the title bar) --------------------------------------
+	// Position/size are written imperatively on the element (not through the
+	// reactive style attribute) so they don't fight the browser-managed inline
+	// width/height that CSS `resize: both` sets while the user resizes.
+	let dragging = false;
+	let dragOffset = { x: 0, y: 0 };
+
+	function startDrag(e: PointerEvent) {
+		if (!dialogEl) return;
+		// Clicks on header buttons (back/close) are not drag starts.
+		if ((e.target as HTMLElement).closest('button')) return;
+		dragging = true;
+		const r = dialogEl.getBoundingClientRect();
+		dragOffset = { x: e.clientX - r.left, y: e.clientY - r.top };
+		// Switch from the initial centered position to explicit px coords.
+		dialogEl.style.left = `${r.left}px`;
+		dialogEl.style.top = `${r.top}px`;
+		dialogEl.style.transform = 'none';
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+	function onDrag(e: PointerEvent) {
+		if (!dragging || !dialogEl) return;
+		dialogEl.style.left = `${e.clientX - dragOffset.x}px`;
+		dialogEl.style.top = `${e.clientY - dragOffset.y}px`;
+	}
+	function endDrag(e: PointerEvent) {
+		if (!dragging) return;
+		dragging = false;
+		(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
 	}
 
 	$effect(() => {
@@ -87,96 +98,113 @@
 </script>
 
 <div
-	class="fixed inset-0 z-50 flex items-center justify-center p-6"
-	style="background:{overlay}"
-	role="presentation"
-	onclick={(event) => {
-		if (event.target === event.currentTarget) onclose();
-	}}
+	bind:this={dialogEl}
+	tabindex="-1"
+	class="mu-dialog rounded-xl flex flex-col"
+	role="dialog"
+	aria-label={dialogTitle}
+	onkeydown={handleKeydown}
+	style="background:{cardBg};border:1px solid {borderColor};left:50%;top:8vh;transform:translateX(-50%)"
 >
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		bind:this={modalElement}
-		tabindex="-1"
-		class="rounded-xl flex flex-col"
-		role="dialog"
-		aria-modal="true"
-		aria-label={dialogTitle}
-		onkeydown={handleKeydown}
-		style="background:{cardBg};border:1px solid {borderColor};width:min(900px,100%);max-height:80vh"
+		class="mu-titlebar flex justify-between items-center px-5 py-4"
+		style="border-bottom:1px solid {borderColor}"
+		onpointerdown={startDrag}
+		onpointermove={onDrag}
+		onpointerup={endDrag}
+		onpointercancel={endDrag}
 	>
-		<div class="flex justify-between items-center px-5 py-4" style="border-bottom:1px solid {borderColor}">
-			<div class="flex items-center gap-2">
-				{#if selected != null}
-					<button
-						type="button"
-						onclick={() => (selected = null)}
-						class="rounded p-1 cursor-pointer"
-						style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-						aria-label="Back to list"
-					>
-						<ChevronLeftIcon class="w-3.5 h-3.5" />
-					</button>
-				{/if}
-				<span style="font-size:14px;font-weight:600;color:{textPrimary};font-family:monospace">{dialogTitle}</span>
-			</div>
-			<button
-				bind:this={closeButton}
-				onclick={onclose}
-				class="rounded p-1.5 cursor-pointer"
-				style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-				aria-label="Close"
-			>
-				<XIcon class="w-4 h-4" />
-			</button>
-		</div>
-		<div class="flex-1 overflow-auto p-5 modal-scroll" style="--modal-scroll-thumb:{scrollThumb};">
-			{#if !units.length}
-				<div class="text-center" style="color:{textMuted};padding:2rem">No data.</div>
-			{:else if selected == null}
-				<ul class="mu-list">
-					{#each units as unit, i (i)}
-						<li>
-							<button
-								type="button"
-								class="mu-item"
-								style="border:1px solid {borderColor};color:{textSecondary}"
-								onclick={() => selectUnit(i)}
-							>
-								<span style="color:{accent};font-family:monospace">{matchedUnitLabel(unit, i)}</span>
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{:else}
-				<div class="rounded-lg p-4 text-xs" style="background:{surface2};border:1px solid {borderColor};line-height:1.6;user-select:text">
-					<div class="grid gap-x-3 gap-y-2" style="grid-template-columns:minmax(90px,max-content) minmax(0,1fr)">
-						{#each selectedRows as row, i (i)}
-							<div style="color:{textMuted};font-family:monospace;word-break:break-word">{row.label}</div>
-							{#if row.sourceContext}
-								<div class="sc-table" style="border:1px solid {borderColor};">
-									<div class="sc-head" style="color:{textMuted};border-bottom:1px solid {borderColor};">
-										<span>Line</span>
-										<span>Content</span>
-									</div>
-									{#each row.sourceContext as span, j (j)}
-										<div class="sc-row" style="color:{textSecondary};{j > 0 ? `border-top:1px solid ${borderColor};` : ''}">
-											<span style="color:{textMuted};font-family:monospace">{span.lineNumber}</span>
-											<span style="white-space:pre-wrap;word-break:break-word">{span.content}</span>
-										</div>
-									{/each}
-								</div>
-							{:else}
-								<div style="color:{textSecondary};word-break:break-word;white-space:pre-wrap">{row.value}</div>
-							{/if}
-						{/each}
-					</div>
-				</div>
+		<div class="flex items-center gap-2 min-w-0">
+			{#if selected != null}
+				<button
+					type="button"
+					onclick={() => (selected = null)}
+					class="rounded p-1 cursor-pointer"
+					style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
+					aria-label="Back to list"
+				>
+					<ChevronLeftIcon class="w-3.5 h-3.5" />
+				</button>
 			{/if}
+			<span class="truncate" style="font-size:14px;font-weight:600;color:{textPrimary};font-family:monospace">{dialogTitle}</span>
 		</div>
+		<button
+			bind:this={closeButton}
+			onclick={onclose}
+			class="rounded p-1.5 cursor-pointer"
+			style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
+			aria-label="Close"
+		>
+			<XIcon class="w-4 h-4" />
+		</button>
+	</div>
+	<div class="flex-1 overflow-auto p-5 modal-scroll" style="--modal-scroll-thumb:{scrollThumb};">
+		{#if !units.length}
+			<div class="text-center" style="color:{textMuted};padding:2rem">No data.</div>
+		{:else if selected == null}
+			<ul class="mu-list">
+				{#each units as unit, i (i)}
+					<li>
+						<button
+							type="button"
+							class="mu-item"
+							style="border:1px solid {borderColor};color:{textSecondary}"
+							onclick={() => selectUnit(i)}
+						>
+							<span style="color:{accent};font-family:monospace">{matchedUnitLabel(unit, i)}</span>
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<div class="rounded-lg p-4 text-xs" style="background:{surface2};border:1px solid {borderColor};line-height:1.6;user-select:text">
+				<div class="grid gap-x-3 gap-y-2" style="grid-template-columns:minmax(90px,max-content) minmax(0,1fr)">
+					{#each selectedRows as row, i (i)}
+						<div style="color:{textMuted};font-family:monospace;word-break:break-word">{row.label}</div>
+						{#if row.sourceContext}
+							<div class="sc-table" style="border:1px solid {borderColor};">
+								<div class="sc-head" style="color:{textMuted};border-bottom:1px solid {borderColor};">
+									<span>Line</span>
+									<span>Content</span>
+								</div>
+								{#each row.sourceContext as span, j (j)}
+									<div class="sc-row" style="color:{textSecondary};{j > 0 ? `border-top:1px solid ${borderColor};` : ''}">
+										<span style="color:{textMuted};font-family:monospace">{span.lineNumber}</span>
+										<span style="white-space:pre-wrap;word-break:break-word">{span.content}</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<div style="color:{textSecondary};word-break:break-word;white-space:pre-wrap">{row.value}</div>
+						{/if}
+					{/each}
+				</div>
+			</div>
+		{/if}
 	</div>
 </div>
 
 <style>
+	/* Floating, non-modal window: no backdrop, draggable by its title bar,
+	   resizable from the bottom-right corner (native CSS resize). */
+	.mu-dialog {
+		position: fixed;
+		z-index: 50;
+		width: min(900px, 90vw);
+		max-height: 84vh;
+		min-width: 360px;
+		min-height: 200px;
+		resize: both;
+		overflow: hidden;
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+	}
+	.mu-titlebar {
+		cursor: move;
+		touch-action: none;
+		user-select: none;
+		flex: 0 0 auto;
+	}
 	.modal-scroll {
 		scrollbar-width: thin;
 		scrollbar-color: var(--modal-scroll-thumb) transparent;
