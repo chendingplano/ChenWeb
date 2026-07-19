@@ -70,6 +70,7 @@ type fakePublisher struct {
 	payload  []byte
 	payloads [][]byte
 	calls    int
+	retErr   error
 }
 
 func (f *fakePublisher) Publish(_ context.Context, subject string, payload []byte) error {
@@ -77,7 +78,7 @@ func (f *fakePublisher) Publish(_ context.Context, subject string, payload []byt
 	f.payload = append([]byte(nil), payload...)
 	f.payloads = append(f.payloads, append([]byte(nil), payload...))
 	f.calls++
-	return nil
+	return f.retErr
 }
 
 func TestHasParsedSuccess(t *testing.T) {
@@ -717,6 +718,53 @@ func TestHandleRequestSkipsPublishWhenDocProcessorModeIsNotAuto(t *testing.T) {
 	}
 	if pub.calls != 0 {
 		t.Fatalf("expected no publish when DOC_PROCESSOR_MODE=dev, got %d", pub.calls)
+	}
+}
+
+func TestHandleRequestMarksConvertedFailedWhenDownstreamPublishFails(t *testing.T) {
+	tmp := t.TempDir()
+	jsonPath := filepath.Join(tmp, "source_opendata.json")
+	if err := os.WriteFile(jsonPath, []byte(`{"kids":[{"type":"paragraph","page number":1,"content":"ok","bounding box":[1,2,3,4]}]}`), 0o644); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+
+	st := &fakeStore{rec: InputRecord{
+		ID:             11,
+		Type:           "pdf",
+		ParserName:     "opendata",
+		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
+		FileName:       filepath.Join(tmp, "source.pdf"),
+		ResultFilename: filepath.Base(jsonPath),
+	}}
+
+	svc := NewService(st, slog.Default())
+	pub := &fakePublisher{retErr: errors.New("nats publish failed")}
+	svc.Publisher = pub
+	now := time.Date(2026, 4, 9, 17, 0, 30, 0, time.Local)
+	svc.Now = func() time.Time { return now }
+
+	err := svc.HandleRequest(context.Background(), ConvertRequest{
+		RecordID:       11,
+		ResultFilename: filepath.Base(jsonPath),
+		FileFormat:     "json",
+	})
+	if err == nil {
+		t.Fatal("expected publish failure")
+	}
+	if st.updateCalls != 1 {
+		t.Fatalf("expected updateCalls=1, got %d", st.updateCalls)
+	}
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "nats publish failed") {
+		t.Fatalf("expected persisted publish failure, got %v", st.updatedError)
+	}
+
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(st.updatedStatus), &entries); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	last := entries[len(entries)-1]
+	if last["operation"] != "converted" || last["proc_status"] != "failed" {
+		t.Fatalf("unexpected status entry: %+v", last)
 	}
 }
 

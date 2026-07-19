@@ -199,6 +199,11 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 	}
 
 	lineFilePaths, procErr = s.convert(ctx, rec)
+	for _, lineFilePath := range lineFilePaths {
+		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath); emitErr != nil {
+			procErr = errors.Join(procErr, emitErr)
+		}
+	}
 
 	durationMs := time.Since(start).Milliseconds()
 	updatedStatus, statusErr := appendConvertedStatus(rec.StatusRaw, start, durationMs, procErr)
@@ -215,11 +220,6 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 	if err := s.Store.UpdateInputStatus(ctx, rec.ID, updatedStatus, errorMsg); err != nil {
 		procErr = errors.Join(procErr, fmt.Errorf("(MID_26041106) update record status: %w", err))
 		return procErr
-	}
-	for _, lineFilePath := range lineFilePaths {
-		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath); emitErr != nil {
-			procErr = errors.Join(procErr, emitErr)
-		}
 	}
 	return procErr
 }
@@ -525,6 +525,11 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 	if err := s.Publisher.Publish(ctx, subject, payload); err != nil {
 		return fmt.Errorf("(MID_26041113) publish event subject=%s: %w", subject, err)
 	}
+	s.Logger.Info("published line-file-generated event",
+		"record_id", recordID,
+		"subject", subject,
+		"line_file", lineFilePath,
+	)
 	return nil
 }
 

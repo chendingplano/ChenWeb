@@ -96,6 +96,16 @@ func main() {
 	svc.Publisher = sub
 	svc.PublishSubject = fileconverters.DefaultLineFileGeneratedSubject
 
+	publishStreamName := envFirst("DOC_PROCESSOR_EVENT_STREAM", "EXTRACT_DOCMETA_EVENT_STREAM")
+	if err := sub.EnsureStream(publishStreamName, svc.PublishSubject); err != nil {
+		logger.Error("failed to ensure downstream publish stream",
+			"error", err,
+			"stream", publishStreamName,
+			"subject", svc.PublishSubject,
+		)
+		os.Exit(1)
+	}
+
 	go func() {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -109,6 +119,8 @@ func main() {
 		"subject", subject,
 		"durable", durable,
 		"stream", streamName,
+		"publish_subject", svc.PublishSubject,
+		"publish_stream", publishStreamName,
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 
