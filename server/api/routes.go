@@ -37,6 +37,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
+	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -250,6 +251,8 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	apiGroup.GET("/workspace/alarms", workspacelists.ListAlarms)
 	apiGroup.PATCH("/workspace/alarms/:id", workspacelists.UpdateAlarm)
+
+	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
 
 	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 

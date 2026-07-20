@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { listManagedUsers, type ManagedUser } from '$lib/services/userManagementService';
+
 	type UserRow = {
 		id: string;
 		name: string;
@@ -10,52 +13,9 @@
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
-	let users = $state<UserRow[]>([
-		{
-			id: 'u-001',
-			name: 'Alex Johnson',
-			email: 'alex@example.com',
-			status: 'active',
-			admin: true,
-			roles: ['admin', 'dev']
-		},
-		{
-			id: 'u-002',
-			name: 'Mia Chen',
-			email: 'mia.chen@example.com',
-			status: 'active',
-			admin: false,
-			roles: ['k_engineer']
-		},
-		{
-			id: 'u-003',
-			name: 'Noah Patel',
-			email: 'noah.patel@example.com',
-			status: 'trial',
-			admin: false,
-			roles: ['trial']
-		}
-	]);
-
-	let showCreate = $state(false);
-	let editingId = $state<string | null>(null);
+	let users = $state<UserRow[]>([]);
+	let loading = $state(true);
 	let error = $state<string | null>(null);
-
-	let createDraft = $state({
-		name: '',
-		email: '',
-		status: 'active' as UserRow['status'],
-		admin: false,
-		roles: ''
-	});
-
-	let editDraft = $state({
-		name: '',
-		email: '',
-		status: 'active' as UserRow['status'],
-		admin: false,
-		roles: ''
-	});
 
 	function normalizeRoles(raw: string, admin: boolean): string[] {
 		const roles = Array.from(
@@ -71,72 +31,49 @@
 		return Array.from(new Set(roles)).sort();
 	}
 
-	function validateDraft(name: string, email: string) {
-		if (!name.trim()) return 'Name is required.';
-		if (!email.trim()) return 'Email is required.';
-		if (!email.includes('@')) return 'Email must look valid.';
-		return null;
+	function displayName(user: ManagedUser): string {
+		const fullName = [user.first_name, user.last_name].map((part) => part?.trim()).filter(Boolean).join(' ');
+		return fullName || user.name?.trim() || user.email?.trim() || user.id;
 	}
 
-	function submitCreate() {
-		error = validateDraft(createDraft.name, createDraft.email);
-		if (error) return;
-		users = [
-			{
-				id: `u-${String(users.length + 1).padStart(3, '0')}`,
-				name: createDraft.name.trim(),
-				email: createDraft.email.trim(),
-				status: createDraft.status,
-				admin: createDraft.admin,
-				roles: normalizeRoles(createDraft.roles, createDraft.admin)
-			},
-			...users
-		];
-		createDraft = { name: '', email: '', status: 'active', admin: false, roles: '' };
-		showCreate = false;
-		error = null;
+	function mapStatus(user: ManagedUser): UserRow['status'] {
+		if (user.roles?.includes('trial')) return 'trial';
+		if (user.user_status && user.user_status !== 'active') return 'inactive';
+		return 'active';
 	}
 
-	function startEdit(user: UserRow) {
-		editingId = user.id;
-		editDraft = {
-			name: user.name,
+	function mapUser(user: ManagedUser): UserRow {
+		const roles = normalizeRoles((user.roles ?? []).join(','), Boolean(user.admin));
+		return {
+			id: user.id,
+			name: displayName(user),
 			email: user.email,
-			status: user.status,
-			admin: user.admin,
-			roles: user.roles.filter((role) => role !== 'admin').join(', ')
+			status: mapStatus(user),
+			admin: Boolean(user.admin),
+			roles
 		};
-		error = null;
 	}
 
-	function cancelEdit() {
-		editingId = null;
+	async function loadUsers() {
+		loading = true;
 		error = null;
+		try {
+			const managedUsers = await listManagedUsers();
+			users = managedUsers.map(mapUser).sort((a, b) => a.name.localeCompare(b.name));
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load users.';
+		} finally {
+			loading = false;
+		}
 	}
 
-	function saveEdit(id: string) {
-		error = validateDraft(editDraft.name, editDraft.email);
-		if (error) return;
-		users = users.map((user) =>
-			user.id === id
-				? {
-						...user,
-						name: editDraft.name.trim(),
-						email: editDraft.email.trim(),
-						status: editDraft.status,
-						admin: editDraft.admin,
-						roles: normalizeRoles(editDraft.roles, editDraft.admin)
-					}
-				: user
-		);
-		editingId = null;
-		error = null;
+	function notImplemented(message: string) {
+		error = message;
 	}
 
-	function removeUser(user: UserRow) {
-		if (!confirm(`Delete user "${user.name}"?`)) return;
-		users = users.filter((row) => row.id !== user.id);
-	}
+	onMount(() => {
+		void loadUsers();
+	});
 
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
 	const card = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -145,7 +82,6 @@
 	const heading = $derived(darkMode ? '#E2E8F0' : '#111827');
 	const sub = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	const btn = $derived(darkMode ? '#6366F1' : '#4F46E5');
-	const inputBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
 	const danger = '#dc2626';
 </script>
 
@@ -158,16 +94,15 @@
 	style:--heading={heading}
 	style:--sub={sub}
 	style:--btn={btn}
-	style:--input-bg={inputBg}
 	style:--danger={danger}
 >
 	<header class="toolbar">
 		<div>
 			<h2>User Management</h2>
-			<p class="muted">View, add, update, and remove Kratos-backed users.</p>
+			<p class="muted">View live Kratos-backed users and their current role assignments.</p>
 		</div>
-		<button class="primary" onclick={() => (showCreate = !showCreate)}>
-			{showCreate ? 'Cancel' : '+ Add User'}
+		<button class="primary" onclick={() => notImplemented('Create user is not wired to Kratos yet.')}>
+			+ Add User
 		</button>
 	</header>
 
@@ -186,31 +121,6 @@
 		</div>
 	</div>
 
-	{#if showCreate}
-		<form class="editor" onsubmit={(event) => { event.preventDefault(); submitCreate(); }}>
-			<div class="row two">
-				<label><span>Name</span><input bind:value={createDraft.name} placeholder="Jane Doe" /></label>
-				<label><span>Email</span><input bind:value={createDraft.email} placeholder="jane@example.com" /></label>
-			</div>
-			<div class="row three">
-				<label>
-					<span>Status</span>
-					<select bind:value={createDraft.status}>
-						<option value="active">active</option>
-						<option value="inactive">inactive</option>
-						<option value="trial">trial</option>
-					</select>
-				</label>
-				<label class="toggle">
-					<span>Admin</span>
-					<input type="checkbox" bind:checked={createDraft.admin} />
-				</label>
-				<label><span>Roles</span><input bind:value={createDraft.roles} placeholder="dev, k_engineer" /></label>
-			</div>
-			<div class="actions"><button class="primary" type="submit">Create User</button></div>
-		</form>
-	{/if}
-
 	{#if error}
 		<div class="error" role="alert">{error}</div>
 	{/if}
@@ -226,60 +136,43 @@
 				</tr>
 			</thead>
 			<tbody>
+				{#if loading}
+					<tr>
+						<td colspan="4" class="empty-state">Loading users from Kratos...</td>
+					</tr>
+				{:else if users.length === 0}
+					<tr>
+						<td colspan="4" class="empty-state">No Kratos users were returned.</td>
+					</tr>
+				{:else}
 				{#each users as user (user.id)}
 					<tr>
-						{#if editingId === user.id}
-							<td colspan="4">
-								<form class="editor compact" onsubmit={(event) => { event.preventDefault(); saveEdit(user.id); }}>
-									<div class="row two">
-										<label><span>Name</span><input bind:value={editDraft.name} /></label>
-										<label><span>Email</span><input bind:value={editDraft.email} /></label>
-									</div>
-									<div class="row three">
-										<label>
-											<span>Status</span>
-											<select bind:value={editDraft.status}>
-												<option value="active">active</option>
-												<option value="inactive">inactive</option>
-												<option value="trial">trial</option>
-											</select>
-										</label>
-										<label class="toggle">
-											<span>Admin</span>
-											<input type="checkbox" bind:checked={editDraft.admin} />
-										</label>
-										<label><span>Roles</span><input bind:value={editDraft.roles} placeholder="dev, trial" /></label>
-									</div>
-									<div class="actions">
-										<button class="primary" type="submit">Save</button>
-										<button class="ghost" type="button" onclick={cancelEdit}>Cancel</button>
-									</div>
-								</form>
-							</td>
-						{:else}
-							<td>
-								<div class="user-cell">
-									<strong>{user.name}</strong>
-									<span>{user.email}</span>
-								</div>
-							</td>
-							<td><span class="status">{user.status}</span></td>
-							<td>
-								<div class="chips">
-									{#each user.roles as role}
-										<span class="chip">{role}</span>
-									{/each}
-								</div>
-							</td>
-							<td>
-								<div class="row-actions">
-									<button class="link" onclick={() => startEdit(user)}>Edit</button>
-									<button class="danger-link" onclick={() => removeUser(user)}>Delete</button>
-								</div>
-							</td>
-						{/if}
+						<td>
+							<div class="user-cell">
+								<strong>{user.name}</strong>
+								<span>{user.email}</span>
+							</div>
+						</td>
+						<td><span class="status">{user.status}</span></td>
+						<td>
+							<div class="chips">
+								{#each user.roles as role}
+									<span class="chip">{role}</span>
+								{/each}
+								{#if user.roles.length === 0}
+									<span class="chip chip-muted">no roles</span>
+								{/if}
+							</div>
+						</td>
+						<td>
+							<div class="row-actions">
+								<button class="link" onclick={() => notImplemented('Edit user is not wired to Kratos yet.')}>Edit</button>
+								<button class="danger-link" onclick={() => notImplemented('Delete user is not wired to Kratos yet.')}>Delete</button>
+							</div>
+						</td>
 					</tr>
 				{/each}
+				{/if}
 			</tbody>
 		</table>
 	</div>
@@ -294,7 +187,7 @@
 		min-height: 100%;
 		padding: 16px 20px 32px;
 	}
-	.toolbar, .summary-grid, .actions, .row, .row-actions, .chips, .user-cell {
+	.toolbar, .summary-grid, .row-actions, .chips, .user-cell {
 		display: flex;
 	}
 	.toolbar {
@@ -304,7 +197,7 @@
 	}
 	h2 { margin: 0; font-size: 20px; color: var(--heading); }
 	.muted { margin: 4px 0 0; color: var(--sub); font-size: 12px; }
-	.primary, .ghost, .link, .danger-link {
+	.primary, .link, .danger-link {
 		border-radius: 8px;
 		cursor: pointer;
 		font-size: 13px;
@@ -316,17 +209,11 @@
 		font-weight: 600;
 		padding: 8px 14px;
 	}
-	.ghost {
-		background: transparent;
-		border: 1px solid var(--border);
-		color: var(--heading);
-		padding: 8px 14px;
-	}
 	.summary-grid {
 		gap: 16px;
 		flex-wrap: wrap;
 	}
-	.summary-card, .editor, .table-card {
+	.summary-card, .table-card {
 		background: var(--card);
 		border: 1px solid var(--border);
 		border-radius: 16px;
@@ -346,49 +233,6 @@
 		font-size: 28px;
 		font-weight: 700;
 		margin-top: 6px;
-	}
-	.editor {
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-		padding: 16px;
-	}
-	.editor.compact {
-		background: var(--panel);
-		border-style: dashed;
-	}
-	.row {
-		gap: 12px;
-		flex-wrap: wrap;
-	}
-	.row.two > label { flex: 1 1 280px; }
-	.row.three > label { flex: 1 1 200px; }
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		color: var(--sub);
-		font-size: 12px;
-	}
-	input, select {
-		background: var(--input-bg);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		color: var(--heading);
-		font-size: 13px;
-		padding: 10px 12px;
-	}
-	.toggle {
-		justify-content: flex-end;
-	}
-	.toggle input {
-		width: 18px;
-		height: 18px;
-		padding: 0;
-	}
-	.actions {
-		gap: 10px;
-		justify-content: flex-end;
 	}
 	.error {
 		background: color-mix(in srgb, var(--danger) 14%, transparent);
@@ -449,6 +293,9 @@
 		border: 1px solid var(--border);
 		color: var(--heading);
 	}
+	.chip-muted {
+		color: var(--sub);
+	}
 	.row-actions {
 		gap: 12px;
 	}
@@ -459,4 +306,9 @@
 	}
 	.link { color: var(--btn); }
 	.danger-link { color: var(--danger); }
+	.empty-state {
+		color: var(--sub);
+		padding: 32px 16px;
+		text-align: center;
+	}
 </style>
