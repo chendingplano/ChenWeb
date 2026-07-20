@@ -1,7 +1,8 @@
 <script lang="ts">
+	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import DocProcessorDashboardView from '$lib/components/home3/doc-processor-dashboard-view.svelte';
-	import AppFooter     from '$lib/components/home3/app-footer.svelte';
+	import SiteFooter    from '../../../routes/semos/components/SiteFooter.svelte';
 	import KbImportView  from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import DocGenView    from '$lib/components/home3/doc-gen-view.svelte';
@@ -58,6 +59,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		autoShrinkExpand = false,
 		docReviewKey   = 0,
 		railOffset     = 56,
+		siteConfig,
 		onToggleShelf,
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
 		onFocusModeChange = (_focused: boolean) => {},
@@ -68,6 +70,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		autoShrinkExpand?: boolean;
 		docReviewKey?:   number;
 		railOffset?:     number;
+		siteConfig:      SiteConfig;
 		onToggleShelf:   () => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 		onFocusModeChange?: (focused: boolean) => void;
@@ -383,9 +386,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	</div>
 
 	{#if showFooter}
-		<!-- AppFooter at the bottom of the scroll area -->
 		<div style="margin-top:48px;">
-			<AppFooter {darkMode} />
+			<SiteFooter config={siteConfig} />
 		</div>
 	{/if}
 </main>

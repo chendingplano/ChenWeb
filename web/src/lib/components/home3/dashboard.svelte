@@ -283,6 +283,7 @@
 			{shelfOpen}
 			{autoShrinkExpand}
 			{docReviewKey}
+			{siteConfig}
 			railOffset={currentRailOffset}
 			onToggleShelf={() => {
 				shelfOpen = !shelfOpen;

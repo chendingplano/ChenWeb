@@ -26,7 +26,6 @@
 		}
 	});
 
-	let user_name = $state('');
 	let first_name = $state('');
 	let last_name = $state('');
 	let email = $state('');
@@ -107,10 +106,7 @@
   }
     */
 
-		if (user_name) {
-			console.log('User Name:', user_name);
-			alert(`Sign up with user name: ${user_name} is currently disabled for demo purposes.`);
-		} else if (email) {
+		if (email) {
 			console.log('Email:', email);
 			const passwordConfirm = password;
 			const is_admin = false;
@@ -123,7 +119,7 @@
 				is_admin
 			});
 		} else {
-			alert('Please provide a user name or email to sign up.');
+			alert('Please provide an email to sign up.');
 		}
 	}
 
@@ -239,13 +235,6 @@
 	{:else if mode === 'signup'}
 		<!-- Sign Up Form -->
 		<form class="form" onsubmit={handleEmailSignup}>
-			<input
-				bind:value={user_name}
-				type="text"
-				class="input"
-				placeholder="user name"
-				autocomplete="username"
-			/>
 			<input
 				bind:value={first_name}
 				type="text"
