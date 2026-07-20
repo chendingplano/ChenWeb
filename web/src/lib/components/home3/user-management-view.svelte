@@ -144,7 +144,7 @@
 			managedUsers = managedUsers.map((user) => (user.id === updated.id ? updated : user));
 			syncUsers();
 			editDialogOpen = false;
-			success = `Updated ${displayName(updated)}.`;
+			success = `Updated account ${updated.email}.`;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to update user.';
 		} finally {
@@ -153,7 +153,7 @@
 	}
 
 	async function removeUser(user: UserRow) {
-		if (!confirm(`Delete user "${user.name}"? This removes the Kratos identity.`)) return;
+		if (!confirm(`Delete user "${user.email}"?`)) return;
 		deletingId = user.id;
 		success = null;
 		error = null;
@@ -161,7 +161,7 @@
 			await deleteManagedUser(user.id);
 			managedUsers = managedUsers.filter((entry) => entry.id !== user.id);
 			syncUsers();
-			success = `Deleted ${user.name}.`;
+			success = `Deleted account ${user.email}.`;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to delete user.';
 		} finally {
@@ -306,11 +306,15 @@
 			<div class="dialog-head">
 				<div>
 					<div class="dialog-title">Edit Account</div>
-					<div class="dialog-subtitle">{editDraft.email}</div>
+					<div class="dialog-subtitle">Use the email address below to confirm the exact account.</div>
 				</div>
 				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>Close</button>
 			</div>
 			<div class="dialog-body">
+				<label class="wide">
+					<span>Email Address</span>
+					<input value={editDraft.email} readonly />
+				</label>
 				<label>
 					<span>First Name</span>
 					<input bind:value={editDraft.firstName} placeholder="Chen" />
