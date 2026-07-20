@@ -108,7 +108,7 @@
 	}
 
 	function selectedRoleKeys(): string[] {
-		return normalizeRoles(editDraft.roles, editDraft.admin).filter((role) => role !== 'admin');
+		return normalizeRoles(editDraft.roles, editDraft.admin);
 	}
 
 	function availableRoleOptions(): RoleOption[] {
@@ -156,7 +156,7 @@
 			lastName: user.lastName,
 			status: user.status,
 			admin: user.admin,
-			roles: user.roles.filter((role) => role !== 'admin').join(', ')
+			roles: user.roles.join(', ')
 		};
 		editDialogOpen = true;
 		roleMenuOpen = false;
@@ -169,13 +169,30 @@
 	}
 
 	function addRole(key: string) {
-		const next = normalizeRoles(`${editDraft.roles},${key}`, editDraft.admin).filter((role) => role !== 'admin');
+		const next = normalizeRoles(`${editDraft.roles},${key}`, editDraft.admin || key === 'admin');
 		editDraft.roles = next.join(', ');
+		if (key === 'admin') {
+			editDraft.admin = true;
+		}
 		roleMenuOpen = false;
 	}
 
 	function removeRoleChip(key: string) {
 		editDraft.roles = selectedRoleKeys().filter((role) => role !== key).join(', ');
+		if (key === 'admin') {
+			editDraft.admin = false;
+		}
+	}
+
+	function toggleAdminRole(enabled: boolean) {
+		editDraft.admin = enabled;
+		const nextRoles = new Set(selectedRoleKeys());
+		if (enabled) {
+			nextRoles.add('admin');
+		} else {
+			nextRoles.delete('admin');
+		}
+		editDraft.roles = Array.from(nextRoles).sort().join(', ');
 	}
 
 	async function submitEdit() {
@@ -188,7 +205,7 @@
 				last_name: editDraft.lastName.trim(),
 				status: editDraft.status,
 				admin: editDraft.admin,
-				roles: normalizeRoles(editDraft.roles, editDraft.admin).filter((role) => role !== 'admin')
+				roles: normalizeRoles(editDraft.roles, editDraft.admin)
 			});
 			managedUsers = managedUsers.map((user) => (user.id === updated.id ? updated : user));
 			syncUsers();
@@ -383,7 +400,11 @@
 				</label>
 				<label class="toggle">
 					<span>Admin</span>
-					<input type="checkbox" bind:checked={editDraft.admin} />
+					<input
+						type="checkbox"
+						checked={editDraft.admin}
+						onchange={(event) => toggleAdminRole((event.currentTarget as HTMLInputElement).checked)}
+					/>
 				</label>
 				<div class="wide role-picker">
 					<span>Roles</span>

@@ -99,6 +99,29 @@ func ListUsers(c echo.Context) error {
 	})
 }
 
+func findIdentityByEmail(logger ApiTypes.JimoLogger, email string) (*ApiTypes.UserInfo, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "email is required")
+	}
+
+	user, err := auth.KratosGetIdentityByEmail(logger, email)
+	if err == nil {
+		return user, nil
+	}
+
+	users, listErr := auth.KratosListAllIdentities(logger)
+	if listErr != nil {
+		return nil, err
+	}
+	for _, candidate := range users {
+		if strings.EqualFold(strings.TrimSpace(candidate.Email), email) {
+			return candidate, nil
+		}
+	}
+	return nil, err
+}
+
 func UpdateUser(c echo.Context) error {
 	currentUser, rc, err := requireAdmin(c, "CWB_USR_030")
 	if err != nil {
@@ -135,7 +158,7 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	existingUser, err := auth.KratosGetIdentityByEmail(logger, targetEmail)
+	existingUser, err := findIdentityByEmail(logger, targetEmail)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "User not found",
@@ -192,7 +215,7 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	updatedUser, err := auth.KratosGetIdentityByEmail(logger, targetEmail)
+	updatedUser, err := findIdentityByEmail(logger, targetEmail)
 	if err != nil {
 		logger.Error("failed to load updated kratos user", "error", err, "user_email", targetEmail)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -230,7 +253,7 @@ func DeleteUser(c echo.Context) error {
 		})
 	}
 
-	existingUser, err := auth.KratosGetIdentityByEmail(logger, targetEmail)
+	existingUser, err := findIdentityByEmail(logger, targetEmail)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "User not found",
