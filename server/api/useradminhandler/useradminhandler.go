@@ -3,6 +3,7 @@ package useradminhandler
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -122,6 +123,14 @@ func findIdentityByEmail(logger ApiTypes.JimoLogger, email string) (*ApiTypes.Us
 	return nil, err
 }
 
+func normalizeEmailParam(raw string) (string, error) {
+	decoded, err := url.PathUnescape(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.ToLower(decoded)), nil
+}
+
 func UpdateUser(c echo.Context) error {
 	currentUser, rc, err := requireAdmin(c, "CWB_USR_030")
 	if err != nil {
@@ -131,7 +140,13 @@ func UpdateUser(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	targetEmail := strings.TrimSpace(c.Param("email"))
+	targetEmail, err := normalizeEmailParam(c.Param("email"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid email path parameter",
+			"loc":   "CWB_USR_039A",
+		})
+	}
 	if targetEmail == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Email is required",
@@ -239,7 +254,13 @@ func DeleteUser(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	targetEmail := strings.TrimSpace(c.Param("email"))
+	targetEmail, err := normalizeEmailParam(c.Param("email"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid email path parameter",
+			"loc":   "CWB_USR_149A",
+		})
+	}
 	if targetEmail == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Email is required",
