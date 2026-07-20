@@ -200,6 +200,12 @@
 						{ id: 'sysadmin-db-maint-log', label: 'Maintenance Log' },
 						{ id: 'sysadmin-db-resolve-ambiguous', label: 'Resolve Ambiguous Objects' }
 					]
+				},
+				{
+					id: 'sysadmin-users', label: 'Users and Access',
+					children: [
+						{ id: 'sysadmin-users-roles-access-controls', label: 'Users, Roles and Access Controls' }
+					]
 				}
 			]
 		},
