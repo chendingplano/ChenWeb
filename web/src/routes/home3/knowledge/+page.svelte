@@ -39,13 +39,8 @@
 	import ObjectManagerView from '$lib/components/home3/object-manager-view.svelte';
 	import SemanticProjectionsView from '$lib/components/home3/semantic-projections-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
-	import {
-		getProvisionCategory,
-		listProvisionGraph,
-		getKbMenuConfig,
-		type KbMenuConfig,
-		type KbMenuLabels
-	} from '$lib/services/kbService';
+	import { getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
+	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
 	import {
@@ -229,74 +224,69 @@
 		menuItems.flatMap((item) => [item.id, ...(item.children?.map((child) => child.id) ?? [])])
 	);
 
-	// Wiki sidebar menu visibility, from [knowledge-content] in
-	// config.toml / config.local.toml (GET /api/v1/kb/menu-config). Ids
-	// absent from the map default to enabled. Empty until the fetch
-	// resolves, so the full menu renders first paint (fail-open).
-	let menuConfig = $state<KbMenuConfig>({});
-
-	// Wiki sidebar menu label overrides for the site-wide language (Paraglide's
-	// getLocale()), from config/knowledge-content/labels-<lang>.toml. Ids absent
-	// from the map keep their hardcoded default label (fail-open).
-	let menuLabels = $state<KbMenuLabels>({});
+	// DB-backed page config for the Wiki sidebar (GET /api/v1/page-config/
+	// home3-knowledge; kb.page_config). Overlay model (spec 2026072001 §9.4):
+	// the menu tree + hardcoded labels are page-owned; config only overrides a
+	// label, hides an item (`hidden`), or restricts it by role. `null` until the
+	// fetch resolves (or on error) so the full menu renders first paint
+	// (fail-open). An id in neither `overrides` nor `hidden` has no config row,
+	// so it renders with its hardcoded default (what a deleted entry reverts to).
+	let pageConfig = $state<PageConfig | null>(null);
 
 	let menuConfigLang = $state(getLocale());
 
-	// Ids present in the fetched config/labels that don't match any real menu
-	// item id — almost always a typo in config.local.toml or a labels-<lang>.toml
-	// file (e.g. a label guessed from an item's display text instead of its
-	// real id). These entries are otherwise silently inert, so they're
-	// surfaced here rather than failing quietly.
+	// Ids referenced by the resolver (override or hidden) that don't match any
+	// real menu item id — almost always a stale or mistyped entry_key in
+	// kb.page_config. Otherwise inert, so surfaced here rather than failing quietly.
 	let unknownMenuConfigIds = $derived(
-		Object.keys(menuConfig).filter((id) => !knownMenuIds.has(id))
-	);
-	let unknownMenuLabelIds = $derived(
-		Object.keys(menuLabels).filter((id) => !knownMenuIds.has(id))
+		pageConfig
+			? [...Object.keys(pageConfig.overrides), ...pageConfig.hidden].filter(
+					(id) => !knownMenuIds.has(id)
+				)
+			: []
 	);
 
 	$effect(() => {
 		if (unknownMenuConfigIds.length > 0) {
 			console.warn(
-				`[knowledge-content] config.local.toml [knowledge-content] has unrecognized menu id(s), ignored: ${unknownMenuConfigIds.join(', ')}`
-			);
-		}
-		if (unknownMenuLabelIds.length > 0) {
-			console.warn(
-				`[knowledge-content] config/knowledge-content/labels-${menuConfigLang}.toml has unrecognized menu id(s), ignored: ${unknownMenuLabelIds.join(', ')}`
+				`[page-config] home3-knowledge returned unrecognized entry id(s), ignored: ${unknownMenuConfigIds.join(', ')}`
 			);
 		}
 	});
 
 	onMount(() => {
 		menuConfigLang = getLocale();
-		getKbMenuConfig(menuConfigLang)
-			.then(({ menus, labels }) => {
-				menuConfig = menus;
-				menuLabels = labels;
+		getPageConfig('home3-knowledge', menuConfigLang)
+			.then((cfg) => {
+				pageConfig = cfg;
 			})
 			.catch(() => {
-				// Keep the full menu, with default labels, on failure.
+				// Keep the full menu, with default labels, on failure (fail open).
 			});
 	});
 
-	// Filters menuItems against menuConfig: a disabled parent hides its whole
-	// subtree, a disabled child hides just that child, and a parent that had
-	// children but ends up with none visible is hidden too. Surviving items'
-	// labels are then resolved against menuLabels (configured override, else
-	// the existing hardcoded default label).
-	let visibleMenuItems = $derived(
-		menuItems
-			.filter((item) => menuConfig[item.id] !== false)
+	// Resolves visibility + labels against pageConfig (overlay model). Before the
+	// fetch resolves (pageConfig null) or on error, the full menu renders with
+	// default labels (fail open). Once loaded, an item is hidden only if its id
+	// is in `hidden` (disabled/suspended/unauthorized); otherwise it renders with
+	// its override label, else the hardcoded default. A parent whose children all
+	// hide is hidden.
+	let visibleMenuItems = $derived.by(() => {
+		const cfg = pageConfig;
+		const isVisible = (id: string) => cfg === null || !cfg.hidden.has(id);
+		const labelFor = (id: string, fallback: string) => cfg?.overrides[id]?.label ?? fallback;
+		return menuItems
+			.filter((item) => isVisible(item.id))
 			.map((item) => {
-				const label = menuLabels[item.id] ?? item.label;
+				const label = labelFor(item.id, item.label);
 				if (!item.children) return { ...item, label };
 				const children = item.children
-					.filter((child) => menuConfig[child.id] !== false)
-					.map((child) => ({ ...child, label: menuLabels[child.id] ?? child.label }));
+					.filter((child) => isVisible(child.id))
+					.map((child) => ({ ...child, label: labelFor(child.id, child.label) }));
 				return { ...item, label, children };
 			})
-			.filter((item) => !item.children || item.children.length > 0)
-	);
+			.filter((item) => !item.children || item.children.length > 0);
+	});
 
 	let menuCollapsed = $state(false);
 	let menuCollapsedBeforeFocus = false;
@@ -513,11 +503,11 @@
 			{/if}
 		</div>
 
-		{#if !menuCollapsed && (unknownMenuConfigIds.length > 0 || unknownMenuLabelIds.length > 0)}
-			<!-- Diagnostic: config.local.toml [knowledge-content] or a labels-<lang>.toml
-			     file references an id that doesn't match any menu item. These entries
-			     are otherwise silently ignored, so surface them here instead of only
-			     to the console, since this page is the config's own audience. -->
+		{#if !menuCollapsed && unknownMenuConfigIds.length > 0}
+			<!-- Diagnostic: kb.page_config for home3-knowledge has an entry_key that
+			     doesn't match any menu item. These entries are otherwise silently
+			     ignored, so surface them here instead of only to the console, since
+			     this page is the config's own audience. -->
 			<div class="flex-shrink-0 px-2 pt-2">
 				<div
 					class="rounded-lg px-3 py-2"
@@ -530,16 +520,9 @@
 					<div style="font-size:11px; font-weight:600; color:{darkMode ? '#FBBF24' : '#B45309'};">
 						Unrecognized menu config id(s) — ignored
 					</div>
-					{#if unknownMenuConfigIds.length > 0}
-						<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
-							config.local.toml [knowledge-content]: {unknownMenuConfigIds.join(', ')}
-						</div>
-					{/if}
-					{#if unknownMenuLabelIds.length > 0}
-						<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
-							labels-{menuConfigLang}.toml: {unknownMenuLabelIds.join(', ')}
-						</div>
-					{/if}
+					<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
+						page-config home3-knowledge: {unknownMenuConfigIds.join(', ')}
+					</div>
 				</div>
 			</div>
 		{/if}

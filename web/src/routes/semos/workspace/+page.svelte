@@ -3,14 +3,8 @@
 	import { page } from '$app/state';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
-	import {
-		fetchTenantSiteConfig,
-		getWorkspaceContentConfig,
-		type SiteConfig,
-		type WorkspaceContentVisibility,
-		type WorkspaceContentLabels,
-		type WorkspaceContentDescriptions
-	} from '$lib/services/siteConfigService';
+	import { fetchTenantSiteConfig, type SiteConfig } from '$lib/services/siteConfigService';
+	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
 	import {
 		fetchAnnouncements,
 		fetchRecentActivities,
@@ -64,57 +58,51 @@
 		])
 	);
 
-	// Workspace content visibility, from [workspace-content] in
-	// config.toml / config.local.toml (GET /api/v1/workspace/content-config).
-	// Ids absent from the map default to enabled. Empty until the fetch
-	// resolves, so the full page renders first paint (fail-open).
-	let contentVisibility = $state<WorkspaceContentVisibility>({});
-
-	// Workspace content label overrides for the site-wide language
-	// (Paraglide's getLocale()), from config/workspace-content/labels-<lang>.toml.
-	// Ids absent from the map keep their site-config default label (fail-open).
-	let contentLabels = $state<WorkspaceContentLabels>({});
-
-	// App tile (app.key) description overrides for the same language, from
-	// the same file's [descriptions] table. Ids absent keep their site-config
-	// default description (fail-open).
-	let contentDescriptions = $state<WorkspaceContentDescriptions>({});
+	// DB-backed page config for the workspace masthead + app tiles
+	// (GET /api/v1/page-config/semos-workspace; kb.page_config). Overlay model
+	// (spec 2026072001 §9.4): base content is page-owned (SiteConfig); config
+	// only overrides label/description, hides an item (`hidden`), or restricts it
+	// by role. `null` until the fetch resolves (or on error) so the full page
+	// renders first paint (fail-open). An id in neither `overrides` nor `hidden`
+	// has no config row, so it renders its SiteConfig default (what a deleted
+	// entry reverts to).
+	let pageConfig = $state<PageConfig | null>(null);
 
 	let contentConfigLang = $state(getLocale());
 
-	// Ids present in the fetched config/labels/descriptions that don't match
-	// any real content id — almost always a typo in config.local.toml or a
-	// labels-<lang>.toml file. These entries are otherwise silently inert,
-	// so they're surfaced here rather than failing quietly.
+	// Before the fetch resolves (pageConfig null) or on error, every item shows
+	// with its site-config default text (fail open). Once loaded, an item is
+	// hidden only if its id is in `hidden`; otherwise its label/description come
+	// from the resolved override, else the site-config default.
+	const isVisible = (id: string) => pageConfig === null || !pageConfig.hidden.has(id);
+	const labelFor = (id: string, fallback: string) => pageConfig?.overrides[id]?.label ?? fallback;
+	const descFor = (id: string, fallback: string) =>
+		pageConfig?.overrides[id]?.description ?? fallback;
+
+	// Ids referenced by the resolver (override or hidden) that don't match any
+	// real content id — almost always a stale or mistyped entry_key in
+	// kb.page_config. Otherwise inert, so surfaced here rather than failing quietly.
 	const unknownContentConfigIds = $derived(
-		Object.keys(contentVisibility).filter((id) => !knownContentIds.has(id))
-	);
-	const unknownContentLabelIds = $derived(
-		[...new Set([...Object.keys(contentLabels), ...Object.keys(contentDescriptions)])].filter(
-			(id) => !knownContentIds.has(id)
-		)
+		pageConfig
+			? [...Object.keys(pageConfig.overrides), ...pageConfig.hidden].filter(
+					(id) => !knownContentIds.has(id)
+				)
+			: []
 	);
 
 	$effect(() => {
 		if (unknownContentConfigIds.length > 0) {
 			console.warn(
-				`[workspace-content] config.local.toml [workspace-content] has unrecognized content id(s), ignored: ${unknownContentConfigIds.join(', ')}`
-			);
-		}
-		if (unknownContentLabelIds.length > 0) {
-			console.warn(
-				`[workspace-content] config/workspace-content/labels-${contentConfigLang}.toml has unrecognized content id(s), ignored: ${unknownContentLabelIds.join(', ')}`
+				`[page-config] semos-workspace returned unrecognized entry id(s), ignored: ${unknownContentConfigIds.join(', ')}`
 			);
 		}
 	});
 
 	onMount(() => {
 		contentConfigLang = getLocale();
-		getWorkspaceContentConfig(contentConfigLang)
-			.then(({ visibility, labels, descriptions }) => {
-				contentVisibility = visibility;
-				contentLabels = labels;
-				contentDescriptions = descriptions;
+		getPageConfig('semos-workspace', contentConfigLang)
+			.then((cfg) => {
+				pageConfig = cfg;
 			})
 			.catch(() => {
 				// Keep the full page, with default labels/descriptions, on failure.
@@ -137,26 +125,24 @@
 			});
 	});
 
-	const showKicker = $derived(contentVisibility[WS_KICKER_ID] ?? true);
-	const showBannerTitle = $derived(contentVisibility[WS_BANNER_TITLE_ID] ?? true);
-	const showBannerSubtitle = $derived(contentVisibility[WS_BANNER_SUBTITLE_ID] ?? true);
-	const showAnnouncements = $derived(contentVisibility[WS_ANNOUNCEMENTS_ID] ?? true);
+	const showKicker = $derived(isVisible(WS_KICKER_ID));
+	const showBannerTitle = $derived(isVisible(WS_BANNER_TITLE_ID));
+	const showBannerSubtitle = $derived(isVisible(WS_BANNER_SUBTITLE_ID));
+	const showAnnouncements = $derived(isVisible(WS_ANNOUNCEMENTS_ID));
 
-	const kickerText = $derived(contentLabels[WS_KICKER_ID] ?? cfg.workspace.kicker);
-	const bannerTitleText = $derived(contentLabels[WS_BANNER_TITLE_ID] ?? cfg.workspace.banner_title);
-	const bannerSubtitleText = $derived(
-		contentLabels[WS_BANNER_SUBTITLE_ID] ?? cfg.workspace.banner_subtitle
-	);
+	const kickerText = $derived(labelFor(WS_KICKER_ID, cfg.workspace.kicker));
+	const bannerTitleText = $derived(labelFor(WS_BANNER_TITLE_ID, cfg.workspace.banner_title));
+	const bannerSubtitleText = $derived(labelFor(WS_BANNER_SUBTITLE_ID, cfg.workspace.banner_subtitle));
 
-	// Apps grid filtered against contentVisibility (by app.key) with any
-	// configured label/description override applied to `name`/`description`.
+	// Apps grid filtered by presence in pageConfig (by app.key) with any
+	// resolved label/description override applied to `name`/`description`.
 	const visibleApps = $derived(
 		cfg.workspace.apps
-			.filter((app) => contentVisibility[app.key] ?? true)
+			.filter((app) => isVisible(app.key))
 			.map((app) => ({
 				...app,
-				name: contentLabels[app.key] ?? app.name,
-				description: contentDescriptions[app.key] ?? app.description
+				name: labelFor(app.key, app.name),
+				description: descFor(app.key, app.description)
 			}))
 	);
 
@@ -312,26 +298,18 @@
 				</p>
 			{/if}
 
-			{#if unknownContentConfigIds.length > 0 || unknownContentLabelIds.length > 0}
-				<!-- Diagnostic: config.local.toml [workspace-content] or a
-				     labels-<lang>.toml file references an id that doesn't match any
-				     content item. These entries are otherwise silently ignored, so
-				     surface them here instead of only to the console, since this
-				     page is the config's own audience. -->
+			{#if unknownContentConfigIds.length > 0}
+				<!-- Diagnostic: kb.page_config for semos-workspace has an entry_key
+				     that doesn't match any content item. These entries are otherwise
+				     silently ignored, so surface them here instead of only to the
+				     console, since this page is the config's own audience. -->
 				<div
 					class="mt-4 rounded-lg border px-3 py-2 text-xs border-amber-500/40 bg-amber-500/10 text-amber-800 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-300"
 				>
 					<div class="font-bold">Unrecognized workspace content id(s) — ignored</div>
-					{#if unknownContentConfigIds.length > 0}
-						<div class="mt-0.5">
-							config.local.toml [workspace-content]: {unknownContentConfigIds.join(', ')}
-						</div>
-					{/if}
-					{#if unknownContentLabelIds.length > 0}
-						<div class="mt-0.5">
-							labels-{contentConfigLang}.toml: {unknownContentLabelIds.join(', ')}
-						</div>
-					{/if}
+					<div class="mt-0.5">
+						page-config semos-workspace: {unknownContentConfigIds.join(', ')}
+					</div>
 				</div>
 			{/if}
 

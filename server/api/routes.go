@@ -37,6 +37,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
+	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -251,6 +252,16 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	apiGroup.GET("/workspace/alarms", workspacelists.ListAlarms)
 	apiGroup.PATCH("/workspace/alarms/:id", workspacelists.UpdateAlarm)
+
+	// DB-backed, language-aware page content configuration
+	// (kb.page_def / kb.page_config; KnowledgeStore spec 2026072001 §9).
+	// Resolution endpoint (per page, per user, per locale) + admin CRUD.
+	apiGroup.GET("/page-config/:pageKey", pageconfighandler.GetPageConfig)
+	apiGroup.GET("/page-config/admin/pages", pageconfighandler.ListPages)
+	apiGroup.GET("/page-config/admin/pages/:pageKey/entries", pageconfighandler.ListEntries)
+	apiGroup.POST("/page-config/admin/pages/:pageKey/entries", pageconfighandler.UpsertEntry)
+	apiGroup.PUT("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.UpsertEntry)
+	apiGroup.DELETE("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.DeleteEntry)
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)

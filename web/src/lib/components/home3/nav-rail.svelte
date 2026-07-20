@@ -208,7 +208,8 @@
 						{ id: 'sysadmin-role-management', label: 'Role Management' },
 						{ id: 'sysadmin-access-controls', label: 'Access Controls' }
 					]
-				}
+				},
+				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]
 		},
 		{

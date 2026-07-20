@@ -388,6 +388,20 @@ func GetLanguages() []string {
 	return out
 }
 
+// GetDefaultLanguage returns [languages].default (the fallback locale used when
+// a requested language is unavailable), normalized to trimmed lower-case. When
+// unset it falls back to the first configured language, or "en".
+func GetDefaultLanguage() string {
+	raw := strings.ToLower(strings.TrimSpace(appConfigViper.GetString("languages.default")))
+	if raw != "" {
+		return raw
+	}
+	if langs := GetLanguages(); len(langs) > 0 {
+		return langs[0]
+	}
+	return "en"
+}
+
 func normalizeStringList(raw []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(raw))
