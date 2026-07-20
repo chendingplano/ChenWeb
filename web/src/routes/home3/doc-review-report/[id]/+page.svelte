@@ -17,6 +17,9 @@
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
 	import FindingDetailsPanel from '$lib/components/home3/finding-details-panel.svelte';
+	import SiteHeader from '../../../semos/components/SiteHeader.svelte';
+
+	let { data } = $props();
 
 	let dark = $derived(theme.isDark);
 	let reportId = $derived(Number(page.params.id));
@@ -612,11 +615,14 @@
 	<title>{skeleton?.meta?.document_title || 'Document Review'} — Report</title>
 </svelte:head>
 
-<div
-	class="report-page"
-	bind:this={containerEl}
-	style="--page-bg:{pageBg}; --card-bg:{cardBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --scroll-thumb:{scrollThumb};"
->
+<div class="page-shell">
+	<SiteHeader config={data.siteConfig} />
+
+	<div
+		class="report-page"
+		bind:this={containerEl}
+		style="--page-bg:{pageBg}; --card-bg:{cardBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --scroll-thumb:{scrollThumb};"
+	>
 	<!-- LEFT: report -->
 	<section class="left-panel" style="width:{leftPct}%;">
 		{#if loading}
@@ -986,6 +992,7 @@
 			<div class="state">No source document linked to this report.</div>
 		{/if}
 	</section>
+	</div>
 </div>
 
 {#if toast}
@@ -1014,9 +1021,16 @@
 {/if}
 
 <style>
+	.page-shell {
+		display: flex;
+		flex-direction: column;
+		height: 100vh;
+		width: 100%;
+	}
 	.report-page {
 		display: flex;
-		height: 100vh;
+		flex: 1 1 auto;
+		min-height: 0;
 		width: 100%;
 		overflow: hidden;
 		background: var(--page-bg);
