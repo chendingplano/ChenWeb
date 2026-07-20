@@ -19,6 +19,7 @@
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import JsonTreeViewer from './json-tree-viewer.svelte';
 	import DocReviewFindingsView from './doc-review-findings-view.svelte';
 	import { marked } from 'marked';
@@ -47,7 +48,6 @@
 	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
-	let inputBg = $derived(darkMode ? '#252A3A' : '#F2F4F7');
 	let successBg = $derived(darkMode ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.10)');
 
 	type DialogCopy = {
@@ -105,7 +105,6 @@
 	let activeTab = $state<'results' | 'findings'>('results');
 	let isStopping = $state(false);
 	let packages = $state<ReviewPackageInfo[]>([]);
-	let supportedLanguages = $state<string[]>(['en']);
 	let defaultLanguage = $state('en');
 	let findingLanguage = $state<Record<number, string>>({});
 	let translating = $state<Record<number, boolean>>({});
@@ -390,6 +389,13 @@
 	let resolvedReportId = $derived(currentReportId || request?.report_id || 0);
 	let linkReportId = $derived(resolvedReportId || requestId);
 	let viewStatus = $derived(request?.run_status || request?.status || '');
+	let isCompletedView = $derived(
+		viewStatus !== 'accepted' &&
+			viewStatus !== 'pending' &&
+			viewStatus !== 'running' &&
+			viewStatus !== 'failed' &&
+			viewStatus !== 'stopped'
+	);
 
 	// Polling
 	let pollTimer: ReturnType<typeof setTimeout>;
@@ -449,10 +455,8 @@
 		}
 		try {
 			const config = await getKbFrontendConfig();
-			supportedLanguages = config.supported_languages?.length ? config.supported_languages : ['en'];
 			defaultLanguage = config.default_language?.[0] ?? 'en';
 		} catch {
-			supportedLanguages = ['en'];
 			defaultLanguage = 'en';
 		}
 	});
@@ -520,18 +524,6 @@
 
 	function cancelTranslate() {
 		pendingConfirm = null;
-	}
-
-	function handlePageLanguageChange(newLanguage: string) {
-		defaultLanguage = newLanguage;
-		findingLanguage = {};
-		pendingConfirm = null;
-		translateError = {};
-		autoChecked = new Set(expandedFindings);
-		for (const id of expandedFindings) {
-			const finding = findings.find((f) => f.id === id);
-			if (finding) handleLanguageChange(finding, newLanguage);
-		}
 	}
 
 	async function handleStop() {
@@ -626,11 +618,15 @@
 	<div style="padding: 1.5rem;">
 		<!-- Back / status header -->
 		<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem;">
-			<button
-				onclick={() => onNewReview?.()}
-				style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
-				>← Back</button
-			>
+			{#if activeTab === 'findings' && isCompletedView}
+				<button
+					onclick={showResultsPage}
+					style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 1rem; background: {accentTint}; color: {accent}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
+				>
+					<ArrowLeftIcon size={16} />
+					Back to Review Results
+				</button>
+			{/if}
 			<span style="color: {textMuted}; font-size: 0.85rem;"
 				>{docTitle || `Document #${request.input_record_id}`}</span
 			>
@@ -638,20 +634,6 @@
 				style="color: {textMuted}; font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid {borderColor}; border-radius: 5px; font-family: monospace;"
 				>Request #{requestId}</span
 			>
-			<label
-				style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: {textMuted};"
-			>
-				<span>Language</span>
-				<select
-					value={defaultLanguage}
-					onchange={(e) => handlePageLanguageChange((e.target as HTMLSelectElement).value)}
-					style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 6px; padding: 0.25rem 0.5rem; color: {textPrimary}; font-size: 0.8rem;"
-				>
-					{#each supportedLanguages as lang (lang)}
-						<option value={lang}>{lang}</option>
-					{/each}
-				</select>
-			</label>
 			<span
 				style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;"
 				>{viewStatus}</span
@@ -707,20 +689,6 @@
 		{:else}
 			<!-- Completed State -->
 			{#if activeTab === 'findings'}
-				<div
-					style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;"
-				>
-					<button
-						onclick={showResultsPage}
-						style="padding: 0.4rem 1rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
-						>Back to Review Results</button
-					>
-					<button
-						onclick={showFindingsPage}
-						style="padding: 0.4rem 1rem; background: {accentTint}; color: {accent}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
-						>Findings</button
-					>
-				</div>
 				<div style="height: calc(100vh - 220px); min-height: 640px;">
 					<DocReviewFindingsView
 						{darkMode}
