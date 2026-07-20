@@ -22,6 +22,7 @@
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import JsonTreeViewer from './json-tree-viewer.svelte';
 	import DocReviewFindingsView from './doc-review-findings-view.svelte';
+	import DocReviewReportView from './doc-review-report-view.svelte';
 	import { marked } from 'marked';
 
 	let {
@@ -102,7 +103,7 @@
 	let filterPass = $state('');
 	let filterSeverity = $state('');
 	let expandedFindings = $state<Set<number>>(new Set());
-	let activeTab = $state<'results' | 'findings'>('results');
+	let activeTab = $state<'results' | 'findings' | 'report'>('results');
 	let isStopping = $state(false);
 	let packages = $state<ReviewPackageInfo[]>([]);
 	let defaultLanguage = $state('en');
@@ -207,6 +208,9 @@
 
 	function showFindingsPage() {
 		activeTab = 'findings';
+	}
+	function showReportPage() {
+		activeTab = 'report';
 	}
 	function showResultsPage() {
 		activeTab = 'results';
@@ -618,7 +622,7 @@
 	<div style="padding: 1.5rem;">
 		<!-- Back / status header -->
 		<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem;">
-			{#if activeTab === 'findings' && isCompletedView}
+			{#if (activeTab === 'findings' || activeTab === 'report') && isCompletedView}
 				<button
 					onclick={showResultsPage}
 					style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 1rem; background: {accentTint}; color: {accent}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
@@ -696,6 +700,10 @@
 						embedded={true}
 					/>
 				</div>
+				{:else if activeTab === 'report'}
+					<div style="height: calc(100vh - 220px); min-height: 640px;">
+						<DocReviewReportView reportId={linkReportId} {darkMode} embedded={true} />
+					</div>
 			{:else}
 				<!-- Header -->
 				<div style="margin-bottom: 1.5rem;">
@@ -1087,19 +1095,19 @@
 				<div
 					style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;"
 				>
+					<!-- 1. View Report (highlighted) -->
+					<button
+						type="button"
+						onclick={showReportPage}
+						style="padding: 0.4rem 0.85rem; background: {accent}; color: #fff; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; box-shadow: 0 0 0 2px {accentTint}, 0 2px 8px rgba(0,0,0,0.35);"
+					>
+						View Report
+					</button>
 					<button
 						onclick={showFindingsPage}
 						style="padding: 0.4rem 1rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
 						>Findings</button
 					>
-					<!-- 1. Open Report (highlighted) -->
-					<a
-						href={`/home3/doc-review-report/${linkReportId}`}
-						target="_blank"
-						style="padding: 0.4rem 0.85rem; background: {accent}; color: #fff; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; box-shadow: 0 0 0 2px {accentTint}, 0 2px 8px rgba(0,0,0,0.35);"
-					>
-						Open Report
-					</a>
 					<!-- 2. View Full Report PDF (dropdown listing all PDFs for this document) -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div style="position: relative;" onmouseleave={closePDFMenu}>
