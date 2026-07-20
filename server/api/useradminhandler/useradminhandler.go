@@ -15,8 +15,10 @@ import (
 )
 
 type listUsersResponse struct {
-	Status string               `json:"status"`
-	Users  []*ApiTypes.UserInfo `json:"users"`
+	Status       string               `json:"status"`
+	Users        []*ApiTypes.UserInfo `json:"users"`
+	Scope        string               `json:"scope"`
+	CanManageAll bool                 `json:"can_manage_all"`
 }
 
 type roleCatalogEntry struct {
@@ -108,8 +110,59 @@ func requireAdmin(c echo.Context, loc string) (*ApiTypes.UserInfo, ApiTypes.Requ
 	return currentUser, rc, nil
 }
 
+func requireAuthenticatedUser(c echo.Context, loc string) (*ApiTypes.UserInfo, ApiTypes.RequestContext, error) {
+	rc := EchoFactory.NewFromEcho(c, loc)
+	currentUser := rc.IsAuthenticated()
+	if currentUser == nil {
+		return nil, rc, c.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "Authentication required",
+			"loc":   "CWB_USR_010",
+		})
+	}
+	return currentUser, rc, nil
+}
+
+func canManageAllUsers(user *ApiTypes.UserInfo) bool {
+	if user == nil {
+		return false
+	}
+	if user.Admin || user.IsOwner {
+		return true
+	}
+	for _, role := range user.Roles {
+		role = strings.ToLower(strings.TrimSpace(role))
+		if role == "admin" || role == "root" {
+			return true
+		}
+	}
+	return false
+}
+
+func userManagementStatus(user *ApiTypes.UserInfo) string {
+	if user == nil {
+		return "active"
+	}
+	if containsRole(user.Roles, "trial") {
+		return "trial"
+	}
+	if strings.TrimSpace(strings.ToLower(user.UserStatus)) == "inactive" {
+		return "inactive"
+	}
+	return "active"
+}
+
+func containsRole(roles []string, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	for _, role := range roles {
+		if strings.ToLower(strings.TrimSpace(role)) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func ListRoles(c echo.Context) error {
-	_, rc, err := requireAdmin(c, "CWB_USR_001R")
+	_, rc, err := requireAuthenticatedUser(c, "CWB_USR_001R")
 	if err != nil {
 		defer rc.Close()
 		return err
@@ -123,13 +176,28 @@ func ListRoles(c echo.Context) error {
 }
 
 func ListUsers(c echo.Context) error {
-	_, rc, err := requireAdmin(c, "CWB_USR_001")
+	currentUser, rc, err := requireAuthenticatedUser(c, "CWB_USR_001")
 	if err != nil {
 		defer rc.Close()
 		return err
 	}
 	defer rc.Close()
 	logger := rc.GetLogger()
+	canManageAll := canManageAllUsers(currentUser)
+
+	if !canManageAll {
+		user, err := findIdentityByEmail(logger, currentUser.Email)
+		if err != nil {
+			logger.Warn("failed to reload self identity for self-scoped user management", "email", currentUser.Email, "error", err)
+			user = currentUser
+		}
+		return c.JSON(http.StatusOK, listUsersResponse{
+			Status:       "ok",
+			Users:        []*ApiTypes.UserInfo{user},
+			Scope:        "self",
+			CanManageAll: false,
+		})
+	}
 
 	users, err := auth.KratosListAllIdentities(logger)
 	if err != nil {
@@ -141,8 +209,10 @@ func ListUsers(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, listUsersResponse{
-		Status: "ok",
-		Users:  users,
+		Status:       "ok",
+		Users:        users,
+		Scope:        "all",
+		CanManageAll: true,
 	})
 }
 
@@ -178,13 +248,14 @@ func normalizeEmailParam(raw string) (string, error) {
 }
 
 func UpdateUser(c echo.Context) error {
-	currentUser, rc, err := requireAdmin(c, "CWB_USR_030")
+	currentUser, rc, err := requireAuthenticatedUser(c, "CWB_USR_030")
 	if err != nil {
 		defer rc.Close()
 		return err
 	}
 	defer rc.Close()
 	logger := rc.GetLogger()
+	canManageAll := canManageAllUsers(currentUser)
 
 	targetEmail, err := normalizeEmailParam(c.Param("email"))
 	if err != nil {
@@ -225,6 +296,19 @@ func UpdateUser(c echo.Context) error {
 			"error": "User not found",
 			"loc":   "CWB_USR_072",
 		})
+	}
+
+	if !canManageAll && !strings.EqualFold(currentUser.Email, targetEmail) {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "You may only manage your own account",
+			"loc":   "CWB_USR_077",
+		})
+	}
+
+	if !canManageAll {
+		req.Admin = existingUser.Admin
+		req.Roles = append([]string(nil), existingUser.Roles...)
+		status = userManagementStatus(existingUser)
 	}
 
 	roles := normalizeRoles(req.Roles, req.Admin)
@@ -292,13 +376,19 @@ func UpdateUser(c echo.Context) error {
 }
 
 func DeleteUser(c echo.Context) error {
-	currentUser, rc, err := requireAdmin(c, "CWB_USR_140")
+	currentUser, rc, err := requireAuthenticatedUser(c, "CWB_USR_140")
 	if err != nil {
 		defer rc.Close()
 		return err
 	}
 	defer rc.Close()
 	logger := rc.GetLogger()
+	if !canManageAllUsers(currentUser) {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Admin or root access required",
+			"loc":   "CWB_USR_141",
+		})
+	}
 
 	targetEmail, err := normalizeEmailParam(c.Param("email"))
 	if err != nil {

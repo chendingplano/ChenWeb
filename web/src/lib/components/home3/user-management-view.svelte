@@ -6,6 +6,7 @@
 		listManagedUsers,
 		updateManagedUser,
 		type ManagedRole,
+		type ManagedUsersResult,
 		type ManagedUser
 	} from '$lib/services/userManagementService';
 
@@ -50,6 +51,8 @@
 	let roleMenuOpen = $state(false);
 	let roleOptions = $state<RoleOption[]>([]);
 	let editDialogOpen = $state(false);
+	let canManageAll = $state(false);
+	let userScope = $state<'all' | 'self'>('all');
 	let editDraft = $state<EditDraft>({
 		id: '',
 		email: '',
@@ -120,7 +123,10 @@
 		loading = true;
 		error = null;
 		try {
-			managedUsers = await listManagedUsers();
+			const result: ManagedUsersResult = await listManagedUsers();
+			managedUsers = result.users;
+			canManageAll = result.can_manage_all;
+			userScope = result.scope;
 			syncUsers();
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load users.';
@@ -160,6 +166,10 @@
 		};
 		editDialogOpen = true;
 		roleMenuOpen = false;
+	}
+
+	function canEditRolesAndStatus(): boolean {
+		return canManageAll;
 	}
 
 	function closeEditDialog() {
@@ -268,11 +278,17 @@
 	<header class="toolbar">
 		<div>
 			<h2>User Management</h2>
-			<p class="muted">View live Kratos-backed users and their current role assignments.</p>
+			<p class="muted">
+				{canManageAll
+					? 'View live Kratos-backed users and their current role assignments.'
+					: 'View your Kratos-backed account. Role and access-control changes require admin or root access.'}
+			</p>
 		</div>
-		<button class="primary" onclick={() => notImplemented('Create user is not wired to Kratos yet.')}>
-			+ Add User
-		</button>
+		{#if canManageAll}
+			<button class="primary" onclick={() => notImplemented('Create user is not wired to Kratos yet.')}>
+				+ Add User
+			</button>
+		{/if}
 	</header>
 
 	{#if success}
@@ -281,7 +297,7 @@
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Total Users</div>
+			<div class="summary-label">{userScope === 'self' ? 'Visible Users' : 'Total Users'}</div>
 			<div class="summary-value">{users.length}</div>
 		</div>
 		<div class="summary-card">
@@ -340,9 +356,11 @@
 						<td>
 							<div class="row-actions">
 								<button class="link" onclick={() => startEdit(user)}>Edit</button>
-								<button class="danger-link" onclick={() => removeUser(user)} disabled={deletingId === user.id}>
-									{deletingId === user.id ? 'Deleting…' : 'Delete'}
-								</button>
+								{#if canManageAll}
+									<button class="danger-link" onclick={() => removeUser(user)} disabled={deletingId === user.id}>
+										{deletingId === user.id ? 'Deleting…' : 'Delete'}
+									</button>
+								{/if}
 							</div>
 						</td>
 					</tr>
@@ -392,7 +410,7 @@
 				</label>
 				<label>
 					<span>Status</span>
-					<select bind:value={editDraft.status}>
+					<select bind:value={editDraft.status} disabled={!canEditRolesAndStatus()}>
 						<option value="active">active</option>
 						<option value="inactive">inactive</option>
 						<option value="trial">trial</option>
@@ -403,6 +421,7 @@
 					<input
 						type="checkbox"
 						checked={editDraft.admin}
+						disabled={!canEditRolesAndStatus()}
 						onchange={(event) => toggleAdminRole((event.currentTarget as HTMLInputElement).checked)}
 					/>
 				</label>
@@ -411,7 +430,12 @@
 					<div class="role-picker-shell">
 						<div class="role-chip-list">
 							{#each selectedRoleKeys() as roleKey (roleKey)}
-								<button type="button" class="role-chip" onclick={() => removeRoleChip(roleKey)}>
+								<button
+									type="button"
+									class="role-chip"
+									onclick={() => canEditRolesAndStatus() && removeRoleChip(roleKey)}
+									disabled={!canEditRolesAndStatus()}
+								>
 									{roleLabel(roleKey)}
 									<span aria-hidden="true">x</span>
 								</button>
@@ -425,7 +449,7 @@
 								type="button"
 								class="ghost role-menu-toggle"
 								onclick={() => (roleMenuOpen = !roleMenuOpen)}
-								disabled={rolesLoading}
+								disabled={rolesLoading || !canEditRolesAndStatus()}
 							>
 								{rolesLoading ? 'Loading roles…' : roleMenuOpen ? 'Close roles' : 'Add role'}
 							</button>

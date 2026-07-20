@@ -23,6 +23,8 @@ export type ManagedRole = {
 type ListUsersResponse = {
 	status: string;
 	users?: ManagedUser[];
+	scope?: 'all' | 'self';
+	can_manage_all?: boolean;
 };
 
 type ListRolesResponse = {
@@ -41,6 +43,12 @@ export type UpdateManagedUserInput = {
 	status: 'active' | 'inactive' | 'trial';
 	admin: boolean;
 	roles: string[];
+};
+
+export type ManagedUsersResult = {
+	users: ManagedUser[];
+	scope: 'all' | 'self';
+	can_manage_all: boolean;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -64,9 +72,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	return parsed as T;
 }
 
-export async function listManagedUsers(): Promise<ManagedUser[]> {
+export async function listManagedUsers(): Promise<ManagedUsersResult> {
 	const response = await req<ListUsersResponse>('/api/v1/system-admin/users');
-	return response.users ?? [];
+	return {
+		users: response.users ?? [],
+		scope: response.scope ?? 'all',
+		can_manage_all: Boolean(response.can_manage_all)
+	};
 }
 
 export async function listManagedRoles(): Promise<ManagedRole[]> {
