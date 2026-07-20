@@ -2,7 +2,7 @@
 	import { getDocReviewLogsFor, type FindingItem, type DocReviewLogRow } from '$lib/services/docReviewService';
 	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 	import { getLLMUsageEventsByIds, type LLMUsageEventDetail } from './llm-activities-client.js';
-	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, matchedUnitFocusTarget, matchedUnitLabel, type JsonDialogSection, type JsonTreeNode } from './doc-review-json-dialog.js';
+	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, lineNumbersFromSpans, matchedUnitFocusTarget, matchedUnitLabel, relatedArtifactsFromMetadata, type JsonDialogSection, type JsonTreeNode, type RelatedArtifact } from './doc-review-json-dialog.js';
 	import JsonTreeDialog from './json-tree-dialog.svelte';
 	import JsonSectionsDialog from './json-sections-dialog.svelte';
 	import MatchedUnitsDialog from './matched-units-dialog.svelte';
@@ -60,6 +60,35 @@
 		const value = logRow?.matched_units;
 		return Array.isArray(value) ? (value as unknown[]) : [];
 	});
+
+	// finding.metadata.related_artifacts, surfaced inline so it's visible
+	// without opening the "View metadata" dialog.
+	let relatedArtifacts = $derived(relatedArtifactsFromMetadata(finding?.metadata));
+	let relatedArtifactLoadingId = $state<string | null>(null);
+
+	// Focuses the PDF panel on a related_artifacts[i] entry's source document,
+	// mirroring openMatchedUnit below. Unlike a matched_units entry, a
+	// related_artifacts entry only carries the target's record/artifact id (no
+	// line spans), so the target artifact must be fetched first to read its
+	// source_line_spans.
+	async function openRelatedArtifact(ra: RelatedArtifact) {
+		const recordId = Number(ra.related_record_id);
+		if (!Number.isFinite(recordId) || recordId <= 0) return;
+		relatedArtifactLoadingId = ra.related_artifact_id;
+		try {
+			const artifactType = artifactTypeFromKey(ra.related_artifact_id);
+			let lineNumbers: number[] = [];
+			if (artifactType) {
+				const record = await getArtifactWiki(artifactType, ra.related_artifact_id);
+				lineNumbers = lineNumbersFromSpans(record.source_line_spans);
+			}
+			onFocusMatchedUnit?.(recordId, lineNumbers);
+		} catch (e) {
+			console.error('[finding-details-panel] failed to focus related artifact', ra, e);
+		} finally {
+			relatedArtifactLoadingId = null;
+		}
+	}
 
 	// ── Dialog ───────────────────────────────────────────────────────────────
 	let dialog = $state<
@@ -205,6 +234,39 @@
 						<span class="fd-label">metadata</span>
 						<button type="button" class="fd-btn" onclick={openMetadataDialog}>View metadata</button>
 					</div>
+					{#if relatedArtifacts.length}
+						<div class="fd-row">
+							<span class="fd-label">related_artifacts</span>
+							<div class="fd-related-list">
+								{#each relatedArtifacts as ra, i (i)}
+									<button
+										type="button"
+										class="fd-related-item"
+										disabled={relatedArtifactLoadingId === ra.related_artifact_id}
+										onclick={() => openRelatedArtifact(ra)}
+										title="Jump to this related artifact's source document"
+									>
+										<div class="fd-related-head">
+											<span class="fd-related-rel">{ra.relationship}</span>
+											<span class="fd-related-ref">record {ra.related_record_id} · {ra.related_artifact_id}</span>
+										</div>
+										{#if ra.summary}
+											<p class="fd-related-summary">{ra.summary}</p>
+										{:else if ra.fields.length}
+											<div class="fd-related-fields">
+												{#each ra.fields as f (f.label)}
+													<div class="fd-related-field">
+														<span class="fd-related-field-label">{f.label}</span>
+														<span class="fd-related-field-value">{f.value}</span>
+													</div>
+												{/each}
+											</div>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
 					<div class="fd-row"><span class="fd-label">location</span><span class="fd-value">{finding.location || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">reference_doc</span><span class="fd-value">{formatCompactContent(finding.reference_doc)}</span></div>
 				</div>
@@ -413,6 +475,75 @@
 		word-break: break-word;
 	}
 	.fd-value {
+		color: var(--fd-text-2);
+		word-break: break-word;
+		white-space: pre-wrap;
+	}
+	.fd-related-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+	.fd-related-item {
+		display: block;
+		width: 100%;
+		text-align: left;
+		border: 1px solid var(--fd-border);
+		border-radius: 6px;
+		padding: 0.4rem 0.55rem;
+		background: var(--fd-accent-tint);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+	.fd-related-item:hover:not(:disabled) {
+		border-color: var(--fd-accent);
+	}
+	.fd-related-item:disabled {
+		cursor: default;
+		opacity: 0.6;
+	}
+	.fd-related-head {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		align-items: baseline;
+	}
+	.fd-related-rel {
+		font-family: monospace;
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--fd-accent);
+	}
+	.fd-related-ref {
+		font-family: monospace;
+		font-size: 0.72rem;
+		color: var(--fd-text-muted);
+	}
+	.fd-related-summary {
+		margin: 0.3rem 0 0;
+		font-size: 0.78rem;
+		color: var(--fd-text-2);
+		white-space: pre-wrap;
+	}
+	.fd-related-fields {
+		margin: 0.3rem 0 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.fd-related-field {
+		display: grid;
+		grid-template-columns: minmax(80px, 110px) minmax(0, 1fr);
+		gap: 0.5rem;
+		font-size: 0.76rem;
+	}
+	.fd-related-field-label {
+		color: var(--fd-text-muted);
+		font-family: monospace;
+		word-break: break-word;
+	}
+	.fd-related-field-value {
 		color: var(--fd-text-2);
 		word-break: break-word;
 		white-space: pre-wrap;

@@ -6,7 +6,9 @@ import {
 	buildMatchedUnitsSections,
 	buildMetadataSections,
 	formatCompactContent,
-	matchedUnitFocusTarget
+	lineNumbersFromSpans,
+	matchedUnitFocusTarget,
+	relatedArtifactsFromMetadata
 } from './doc-review-json-dialog';
 
 test('buildMatchedUnitsSections flattens metric wrappers and preserves string arrays', () => {
@@ -99,6 +101,100 @@ test('buildMetadataSections leaves plain scalar fields untouched', () => {
 	]);
 });
 
+test('relatedArtifactsFromMetadata reads a plain array field', () => {
+	const result = relatedArtifactsFromMetadata({
+		related_artifacts: [
+			{
+				summary: '同一指标，同一条件：候选指标来自嘉兴市第一医院...',
+				relationship: 'same_consistent',
+				related_record_id: 430,
+				related_artifact_id: '430_mtc_1'
+			},
+			{
+				summary: '不同指标：候选指标为"两臂收缩压差>5 mmHg"...',
+				relationship: 'related_distinct',
+				related_record_id: 415,
+				related_artifact_id: '415_mtc_1'
+			}
+		]
+	});
+
+	assert.deepEqual(result, [
+		{
+			relationship: 'same_consistent',
+			related_record_id: '430',
+			related_artifact_id: '430_mtc_1',
+			summary: '同一指标，同一条件：候选指标来自嘉兴市第一医院...',
+			fields: []
+		},
+		{
+			relationship: 'related_distinct',
+			related_record_id: '415',
+			related_artifact_id: '415_mtc_1',
+			summary: '不同指标：候选指标为"两臂收缩压差>5 mmHg"...',
+			fields: []
+		}
+	]);
+});
+
+test('relatedArtifactsFromMetadata parses a JSON-encoded string field', () => {
+	const result = relatedArtifactsFromMetadata({
+		related_artifacts: JSON.stringify([
+			{ summary: 'same metric', relationship: 'same_consistent', related_record_id: 430, related_artifact_id: '430_mtc_1' }
+		])
+	});
+
+	assert.deepEqual(result, [
+		{ relationship: 'same_consistent', related_record_id: '430', related_artifact_id: '430_mtc_1', summary: 'same metric', fields: [] }
+	]);
+});
+
+test('relatedArtifactsFromMetadata reads the singular shape (ordinary "issue" findings) and flattens related_artifact_fields', () => {
+	const result = relatedArtifactsFromMetadata({
+		related_artifact_id: '430_mtc_19',
+		related_record_id: 430,
+		analysis_relationship: 'same_conflict',
+		related_artifact_fields: { metric_name: '有效记录时长', metric_value: '≥24 h' }
+	});
+
+	assert.deepEqual(result, [
+		{
+			relationship: 'same_conflict',
+			related_record_id: '430',
+			related_artifact_id: '430_mtc_19',
+			summary: '',
+			fields: [
+				{ label: 'metric_name', value: '有效记录时长' },
+				{ label: 'metric_value', value: '≥24 h' }
+			]
+		}
+	]);
+});
+
+test('relatedArtifactsFromMetadata parses a JSON-encoded related_artifact_fields string', () => {
+	const result = relatedArtifactsFromMetadata({
+		related_artifact_id: '430_mtc_19',
+		related_record_id: 430,
+		related_artifact_fields: JSON.stringify({ metric_name: '有效记录时长' })
+	});
+
+	assert.deepEqual(result, [
+		{
+			relationship: 'null',
+			related_record_id: '430',
+			related_artifact_id: '430_mtc_19',
+			summary: '',
+			fields: [{ label: 'metric_name', value: '有效记录时长' }]
+		}
+	]);
+});
+
+test('relatedArtifactsFromMetadata returns [] when metadata is missing, non-object, or has no related_artifacts', () => {
+	assert.deepEqual(relatedArtifactsFromMetadata(null), []);
+	assert.deepEqual(relatedArtifactsFromMetadata('not an object'), []);
+	assert.deepEqual(relatedArtifactsFromMetadata({ schema_version: 1 }), []);
+});
+
 test('formatCompactContent unwraps simple unit location wrappers', () => {
 	assert.equal(formatCompactContent({ line_spans: ['91'] }), '[91]');
 	assert.equal(formatCompactContent({ source_line_spans: [58, 91] }), '[58, 91]');
@@ -109,6 +205,19 @@ test('formatCompactContent keeps a JSON fallback for more complex objects', () =
 		formatCompactContent({ line_spans: ['91'], page: 3 }),
 		'{"line_spans":["91"],"page":3}'
 	);
+});
+
+test('lineNumbersFromSpans expands, de-duplicates, and sorts single/ranged/colon spans', () => {
+	assert.deepEqual(lineNumbersFromSpans(['27']), [27]);
+	assert.deepEqual(lineNumbersFromSpans(['53-56']), [53, 54, 55, 56]);
+	assert.deepEqual(lineNumbersFromSpans(['10', '12:13', '10']), [10, 12, 13]);
+	assert.deepEqual(lineNumbersFromSpans(['14', '5']), [5, 14]);
+});
+
+test('lineNumbersFromSpans returns [] for non-arrays or unparseable entries', () => {
+	assert.deepEqual(lineNumbersFromSpans(undefined), []);
+	assert.deepEqual(lineNumbersFromSpans('27'), []);
+	assert.deepEqual(lineNumbersFromSpans([42, 'not-a-span']), []);
 });
 
 test('matchedUnitFocusTarget expands single and ranged source_line_spans across metric/provision/item keys', () => {

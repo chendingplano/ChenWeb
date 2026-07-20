@@ -136,6 +136,20 @@ function expandLineSpan(span: string): number[] {
 	return Number.isInteger(n) && n > 0 ? [n] : [];
 }
 
+// Expands an array of line-span strings ("14", "14-16", "14:16") into a
+// sorted, de-duplicated list of line numbers. Used to resolve the PDF
+// panel's target lines from an artifact's source_line_spans field, e.g.
+// after fetching a related_artifacts[i] entry's target artifact.
+export function lineNumbersFromSpans(spans: unknown): number[] {
+	if (!Array.isArray(spans)) return [];
+	const out = new Set<number>();
+	for (const span of spans) {
+		if (typeof span !== 'string') continue;
+		for (const n of expandLineSpan(span)) out.add(n);
+	}
+	return [...out].sort((a, b) => a - b);
+}
+
 // Resolves the {recordId, lineNumbers} target for jumping the PDF panel to a
 // matched_units[i] entry's source document. Returns null when the entry
 // carries no usable source_record_id. lineNumbers prefers the nested
@@ -151,13 +165,9 @@ export function matchedUnitFocusTarget(unit: unknown): { recordId: number; lineN
 	)?.[1] as Record<string, unknown> | undefined;
 
 	const spans = artifact && Array.isArray(artifact.source_line_spans) ? artifact.source_line_spans : [];
-	const fromSpans = new Set<number>();
-	for (const span of spans) {
-		if (typeof span !== 'string') continue;
-		for (const n of expandLineSpan(span)) fromSpans.add(n);
-	}
-	if (fromSpans.size > 0) {
-		return { recordId, lineNumbers: [...fromSpans].sort((a, b) => a - b) };
+	const fromSpans = lineNumbersFromSpans(spans);
+	if (fromSpans.length > 0) {
+		return { recordId, lineNumbers: fromSpans };
 	}
 
 	const context = isSourceContextSpans(unit.source_context) ? unit.source_context : [];
@@ -271,6 +281,61 @@ function metadataFieldRows(key: string, rawValue: unknown): JsonDialogRow[] {
 export function buildMetadataSections(value: unknown): JsonDialogSection[] {
 	if (!isRecord(value)) return buildJsonSections(value);
 	return [{ rows: Object.entries(value).flatMap(([key, v]) => metadataFieldRows(key, v)) }];
+}
+
+export type RelatedArtifact = {
+	relationship: string;
+	related_record_id: string;
+	related_artifact_id: string;
+	summary: string;
+	// The related artifact's own raw field values (e.g. metric_name,
+	// metric_value), present only for the singular metadata shape below,
+	// where there is no LLM-authored summary to show instead.
+	fields: JsonDialogRow[];
+};
+
+// Pulls a finding's related-artifact reference out of its metadata, which the
+// doc-review pipeline emits in one of two shapes (models.go
+// FindingMetadataEnvelope):
+//  - plural `related_artifacts`: an array of {summary, relationship,
+//    related_record_id, related_artifact_id}, used only by the metrics
+//    reviewer's multi-candidate "analysis" finding_type row (one finding per
+//    metric, one array entry per candidate compared against it).
+//  - singular `related_artifact_id`/`related_record_id`/
+//    `analysis_relationship`/`related_artifact_fields`, used by every other
+//    finding shape (e.g. ordinary "issue" findings): exactly one related
+//    artifact, carrying its own raw field values instead of a summary.
+// Either shape's values may arrive JSON-encoded as a string, like other
+// metadata fields — see parseJsonLike. Normalized into one list so the
+// Finding Details panel can show it inline, without requiring the "View
+// metadata" dialog.
+export function relatedArtifactsFromMetadata(metadata: unknown): RelatedArtifact[] {
+	if (!isRecord(metadata)) return [];
+
+	const plural = parseJsonLike(metadata.related_artifacts);
+	if (Array.isArray(plural) && plural.length > 0) {
+		return plural.filter(isRecord).map((item) => ({
+			relationship: displayValue(item.relationship),
+			related_record_id: displayValue(item.related_record_id),
+			related_artifact_id: displayValue(item.related_artifact_id),
+			summary: displayValue(item.summary),
+			fields: []
+		}));
+	}
+
+	if (metadata.related_artifact_id === undefined && metadata.related_record_id === undefined) {
+		return [];
+	}
+	const relatedFields = parseJsonLike(metadata.related_artifact_fields);
+	return [
+		{
+			relationship: displayValue(metadata.analysis_relationship),
+			related_record_id: displayValue(metadata.related_record_id),
+			related_artifact_id: displayValue(metadata.related_artifact_id),
+			summary: '',
+			fields: isRecord(relatedFields) ? flattenRecord(relatedFields) : []
+		}
+	];
 }
 
 export type JsonTreeNode = {
