@@ -17,12 +17,28 @@ type listUsersResponse struct {
 	Users  []*ApiTypes.UserInfo `json:"users"`
 }
 
+type roleCatalogEntry struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+}
+
 type updateUserRequest struct {
 	FirstName string   `json:"first_name"`
 	LastName  string   `json:"last_name"`
 	Status    string   `json:"status"`
 	Admin     bool     `json:"admin"`
 	Roles     []string `json:"roles"`
+}
+
+var roleCatalog = []roleCatalogEntry{
+	{Key: "admin", Label: "Administrator", Description: "Full administrative access.", Status: "active"},
+	{Key: "root", Label: "Root", Description: "Reserved role; not intended for active use yet.", Status: "reserved"},
+	{Key: "guest", Label: "Guest", Description: "Limited guest access.", Status: "active"},
+	{Key: "dev", Label: "Developer", Description: "Engineering and development workflows.", Status: "active"},
+	{Key: "k_engineer", Label: "Knowledge Engineer", Description: "Knowledge-system and taxonomy operations.", Status: "active"},
+	{Key: "trial", Label: "Trial", Description: "Trial user access.", Status: "active"},
 }
 
 func requireAdmin(c echo.Context, loc string) (*ApiTypes.UserInfo, ApiTypes.RequestContext, error) {
@@ -43,6 +59,20 @@ func requireAdmin(c echo.Context, loc string) (*ApiTypes.UserInfo, ApiTypes.Requ
 	}
 
 	return currentUser, rc, nil
+}
+
+func ListRoles(c echo.Context) error {
+	_, rc, err := requireAdmin(c, "CWB_USR_001R")
+	if err != nil {
+		defer rc.Close()
+		return err
+	}
+	defer rc.Close()
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"roles":  roleCatalog,
+	})
 }
 
 func ListUsers(c echo.Context) error {
@@ -78,10 +108,10 @@ func UpdateUser(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	userID := strings.TrimSpace(c.Param("id"))
-	if userID == "" {
+	targetEmail := strings.TrimSpace(c.Param("email"))
+	if targetEmail == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "User ID is required",
+			"error": "Email is required",
 			"loc":   "CWB_USR_039",
 		})
 	}
@@ -91,13 +121,6 @@ func UpdateUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Invalid request body",
 			"loc":   "CWB_USR_047",
-		})
-	}
-
-	if strings.TrimSpace(req.FirstName) == "" && strings.TrimSpace(req.LastName) == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "At least one name field is required",
-			"loc":   "CWB_USR_054",
 		})
 	}
 
@@ -112,7 +135,7 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	existingUser, err := auth.KratosGetIdentityByID(logger, userID)
+	existingUser, err := auth.KratosGetIdentityByEmail(logger, targetEmail)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "User not found",
@@ -142,14 +165,14 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	if currentUser.UserId == userID && !req.Admin {
+	if currentUser.Email == targetEmail && !req.Admin {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "You cannot remove your own admin access",
 			"loc":   "CWB_USR_099",
 		})
 	}
 
-	if err := auth.KratosUpdateIdentity(logger, userID, auth.KratosIdentityUpdate{
+	if err := auth.KratosUpdateIdentity(logger, existingUser.UserId, auth.KratosIdentityUpdate{
 		Traits: map[string]interface{}{
 			"name": map[string]interface{}{
 				"first": strings.TrimSpace(req.FirstName),
@@ -162,16 +185,16 @@ func UpdateUser(c echo.Context) error {
 		},
 		State: &identityState,
 	}); err != nil {
-		logger.Error("failed to update kratos user", "error", err, "user_id", userID)
+		logger.Error("failed to update kratos user", "error", err, "user_email", targetEmail)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to update user",
 			"loc":   "CWB_USR_117",
 		})
 	}
 
-	updatedUser, err := auth.KratosGetIdentityByID(logger, userID)
+	updatedUser, err := auth.KratosGetIdentityByEmail(logger, targetEmail)
 	if err != nil {
-		logger.Error("failed to load updated kratos user", "error", err, "user_id", userID)
+		logger.Error("failed to load updated kratos user", "error", err, "user_email", targetEmail)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "User updated but could not be reloaded",
 			"loc":   "CWB_USR_126",
@@ -193,21 +216,21 @@ func DeleteUser(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	userID := strings.TrimSpace(c.Param("id"))
-	if userID == "" {
+	targetEmail := strings.TrimSpace(c.Param("email"))
+	if targetEmail == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "User ID is required",
+			"error": "Email is required",
 			"loc":   "CWB_USR_149",
 		})
 	}
-	if currentUser.UserId == userID {
+	if currentUser.Email == targetEmail {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "You cannot delete your own account",
 			"loc":   "CWB_USR_156",
 		})
 	}
 
-	existingUser, err := auth.KratosGetIdentityByID(logger, userID)
+	existingUser, err := auth.KratosGetIdentityByEmail(logger, targetEmail)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "User not found",
@@ -221,8 +244,8 @@ func DeleteUser(c echo.Context) error {
 		})
 	}
 
-	if err := auth.KratosDeleteIdentity(logger, userID); err != nil {
-		logger.Error("failed to delete kratos user", "error", err, "user_id", userID)
+	if err := auth.KratosDeleteIdentity(logger, existingUser.UserId); err != nil {
+		logger.Error("failed to delete kratos user", "error", err, "user_email", targetEmail)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to delete user",
 			"loc":   "CWB_USR_179",
@@ -232,7 +255,7 @@ func DeleteUser(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "ok",
 		"deleted": true,
-		"user_id": userID,
+		"email":   targetEmail,
 	})
 }
 

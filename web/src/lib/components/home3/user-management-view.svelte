@@ -2,8 +2,10 @@
 	import { onMount } from 'svelte';
 	import {
 		deleteManagedUser,
+		listManagedRoles,
 		listManagedUsers,
 		updateManagedUser,
+		type ManagedRole,
 		type ManagedUser
 	} from '$lib/services/userManagementService';
 
@@ -28,6 +30,13 @@
 		roles: string;
 	};
 
+	type RoleOption = {
+		key: string;
+		label: string;
+		description: string;
+		status: string;
+	};
+
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
 	let managedUsers = $state<ManagedUser[]>([]);
@@ -37,6 +46,9 @@
 	let deletingId = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let success = $state<string | null>(null);
+	let rolesLoading = $state(true);
+	let roleMenuOpen = $state(false);
+	let roleOptions = $state<RoleOption[]>([]);
 	let editDialogOpen = $state(false);
 	let editDraft = $state<EditDraft>({
 		id: '',
@@ -91,6 +103,19 @@
 		users = managedUsers.map(mapUser).sort((a, b) => a.name.localeCompare(b.name));
 	}
 
+	function roleLabel(key: string): string {
+		return roleOptions.find((role) => role.key === key)?.label ?? key;
+	}
+
+	function selectedRoleKeys(): string[] {
+		return normalizeRoles(editDraft.roles, editDraft.admin).filter((role) => role !== 'admin');
+	}
+
+	function availableRoleOptions(): RoleOption[] {
+		const selected = new Set(selectedRoleKeys());
+		return roleOptions.filter((role) => !selected.has(role.key));
+	}
+
 	async function loadUsers() {
 		loading = true;
 		error = null;
@@ -101,6 +126,18 @@
 			error = err instanceof Error ? err.message : 'Failed to load users.';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadRoles() {
+		rolesLoading = true;
+		try {
+			const roles = await listManagedRoles();
+			roleOptions = roles;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load roles.';
+		} finally {
+			rolesLoading = false;
 		}
 	}
 
@@ -122,11 +159,23 @@
 			roles: user.roles.filter((role) => role !== 'admin').join(', ')
 		};
 		editDialogOpen = true;
+		roleMenuOpen = false;
 	}
 
 	function closeEditDialog() {
 		if (saving) return;
 		editDialogOpen = false;
+		roleMenuOpen = false;
+	}
+
+	function addRole(key: string) {
+		const next = normalizeRoles(`${editDraft.roles},${key}`, editDraft.admin).filter((role) => role !== 'admin');
+		editDraft.roles = next.join(', ');
+		roleMenuOpen = false;
+	}
+
+	function removeRoleChip(key: string) {
+		editDraft.roles = selectedRoleKeys().filter((role) => role !== key).join(', ');
 	}
 
 	async function submitEdit() {
@@ -134,7 +183,7 @@
 		success = null;
 		error = null;
 		try {
-			const updated = await updateManagedUser(editDraft.id, {
+			const updated = await updateManagedUser(editDraft.email, {
 				first_name: editDraft.firstName.trim(),
 				last_name: editDraft.lastName.trim(),
 				status: editDraft.status,
@@ -158,7 +207,7 @@
 		success = null;
 		error = null;
 		try {
-			await deleteManagedUser(user.id);
+			await deleteManagedUser(user.email);
 			managedUsers = managedUsers.filter((entry) => entry.id !== user.id);
 			syncUsers();
 			success = `Deleted account ${user.email}.`;
@@ -171,6 +220,7 @@
 
 	onMount(() => {
 		void loadUsers();
+		void loadRoles();
 	});
 
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
@@ -335,10 +385,44 @@
 					<span>Admin</span>
 					<input type="checkbox" bind:checked={editDraft.admin} />
 				</label>
-				<label class="wide">
+				<div class="wide role-picker">
 					<span>Roles</span>
-					<input bind:value={editDraft.roles} placeholder="dev, k_engineer" />
-				</label>
+					<div class="role-picker-shell">
+						<div class="role-chip-list">
+							{#each selectedRoleKeys() as roleKey (roleKey)}
+								<button type="button" class="role-chip" onclick={() => removeRoleChip(roleKey)}>
+									{roleLabel(roleKey)}
+									<span aria-hidden="true">x</span>
+								</button>
+							{/each}
+							{#if selectedRoleKeys().length === 0}
+								<span class="role-placeholder">No explicit roles selected.</span>
+							{/if}
+						</div>
+						<div class="role-menu-wrap">
+							<button
+								type="button"
+								class="ghost role-menu-toggle"
+								onclick={() => (roleMenuOpen = !roleMenuOpen)}
+								disabled={rolesLoading}
+							>
+								{rolesLoading ? 'Loading roles…' : roleMenuOpen ? 'Close roles' : 'Add role'}
+							</button>
+							{#if roleMenuOpen}
+								<div class="role-menu">
+									{#each availableRoleOptions() as role (role.key)}
+										<button type="button" class="role-menu-item" onclick={() => addRole(role.key)}>
+											<strong>{role.label}</strong>
+											<span>{role.key}</span>
+										</button>
+									{:else}
+										<div class="role-menu-empty">No additional roles available.</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					</div>
+				</div>
 			</div>
 			<div class="dialog-foot">
 				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>Cancel</button>
@@ -537,14 +621,16 @@
 		gap: 14px;
 		padding: 20px;
 	}
-	.dialog-body label {
+	.dialog-body label,
+	.dialog-body .role-picker {
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
 		color: var(--sub);
 		font-size: 12px;
 	}
-	.dialog-body label.wide {
+	.dialog-body label.wide,
+	.dialog-body .wide {
 		grid-column: 1 / -1;
 	}
 	.dialog-body input,
@@ -563,6 +649,81 @@
 		width: 18px;
 		height: 18px;
 		padding: 0;
+	}
+	.role-picker-shell {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.role-chip-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		min-height: 42px;
+		padding: 10px 12px;
+		background: var(--input-bg, var(--panel));
+		border: 1px solid var(--border);
+		border-radius: 10px;
+	}
+	.role-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 4px 10px;
+		background: var(--panel);
+		color: var(--heading);
+		cursor: pointer;
+	}
+	.role-placeholder {
+		color: var(--sub);
+		font-size: 12px;
+	}
+	.role-menu-wrap {
+		position: relative;
+		display: flex;
+		justify-content: flex-start;
+	}
+	.role-menu-toggle {
+		min-width: 120px;
+	}
+	.role-menu {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		z-index: 4;
+		width: min(320px, 100%);
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 14px;
+		box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+		padding: 8px;
+	}
+	.role-menu-item {
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 2px;
+		border: none;
+		background: transparent;
+		color: var(--heading);
+		padding: 10px 12px;
+		border-radius: 10px;
+		cursor: pointer;
+	}
+	.role-menu-item:hover {
+		background: var(--panel);
+	}
+	.role-menu-item span {
+		color: var(--sub);
+		font-size: 12px;
+	}
+	.role-menu-empty {
+		padding: 12px;
+		color: var(--sub);
+		font-size: 12px;
 	}
 	.dialog-foot {
 		border-top: 1px solid var(--border);
