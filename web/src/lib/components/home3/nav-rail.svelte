@@ -202,9 +202,11 @@
 					]
 				},
 				{
-					id: 'sysadmin-users', label: 'Users and Access',
+					id: 'sysadmin-users', label: 'Users and Accesses',
 					children: [
-						{ id: 'sysadmin-users-roles-access-controls', label: 'Users, Roles and Access Controls' }
+						{ id: 'sysadmin-user-management', label: 'User Management' },
+						{ id: 'sysadmin-role-management', label: 'Role Management' },
+						{ id: 'sysadmin-access-controls', label: 'Access Controls' }
 					]
 				}
 			]

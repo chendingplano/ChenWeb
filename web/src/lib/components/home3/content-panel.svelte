@@ -24,7 +24,9 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import ResolveAmbiguousObjectsView from '$lib/components/home3/resolve-ambiguous-objects-view.svelte';
-	import UsersRolesAccessControlsView from '$lib/components/home3/users-roles-access-controls-view.svelte';
+	import UserManagementView from '$lib/components/home3/user-management-view.svelte';
+	import RoleManagementView from '$lib/components/home3/role-management-view.svelte';
+	import AccessControlsView from '$lib/components/home3/access-controls-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -226,8 +228,12 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<DbMaintLogView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-ambiguous'}
 			<ResolveAmbiguousObjectsView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-users-roles-access-controls'}
-			<UsersRolesAccessControlsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-user-management'}
+			<UserManagementView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-role-management'}
+			<RoleManagementView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-access-controls'}
+			<AccessControlsView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}
