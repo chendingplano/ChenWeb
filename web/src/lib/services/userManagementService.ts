@@ -18,6 +18,19 @@ type ListUsersResponse = {
 	users?: ManagedUser[];
 };
 
+type ManagedUserResponse = {
+	status: string;
+	user: ManagedUser;
+};
+
+export type UpdateManagedUserInput = {
+	first_name: string;
+	last_name: string;
+	status: 'active' | 'inactive' | 'trial';
+	admin: boolean;
+	roles: string[];
+};
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, { credentials: 'same-origin', ...init });
 	const text = await res.text();
@@ -42,4 +55,19 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listManagedUsers(): Promise<ManagedUser[]> {
 	const response = await req<ListUsersResponse>('/api/v1/system-admin/users');
 	return response.users ?? [];
+}
+
+export async function updateManagedUser(id: string, input: UpdateManagedUserInput): Promise<ManagedUser> {
+	const response = await req<ManagedUserResponse>(`/api/v1/system-admin/users/${encodeURIComponent(id)}`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(input)
+	});
+	return response.user;
+}
+
+export async function deleteManagedUser(id: string): Promise<void> {
+	await req<{ status: string; deleted: boolean }>(`/api/v1/system-admin/users/${encodeURIComponent(id)}`, {
+		method: 'DELETE'
+	});
 }

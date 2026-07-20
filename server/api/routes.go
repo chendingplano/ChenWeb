@@ -253,6 +253,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PATCH("/workspace/alarms/:id", workspacelists.UpdateAlarm)
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
+	apiGroup.PUT("/system-admin/users/:id", useradminhandler.UpdateUser)
+	apiGroup.DELETE("/system-admin/users/:id", useradminhandler.DeleteUser)
 
 	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 
