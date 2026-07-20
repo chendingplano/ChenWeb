@@ -146,6 +146,14 @@ type FrontendConfigSection struct {
 	AnnouncementsMax *int `mapstructure:"announcements_max"`
 }
 
+type SystemConfigSection struct {
+	// AccessRoles defines the canonical role keys for this project, sourced
+	// from [system].access_roles in config.toml / config.local.toml. When the
+	// setting is missing or empty, the application falls back to its built-in
+	// role set.
+	AccessRoles []string `mapstructure:"access_roles"`
+}
+
 type AppConfigDef struct {
 	AppTableNames struct {
 		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
@@ -177,6 +185,9 @@ type AppConfigDef struct {
 	// Frontend holds settings the frontend reads through dedicated endpoints.
 	// Configured via [frontend] in config.toml / config.local.toml.
 	Frontend FrontendConfigSection `mapstructure:"frontend"`
+	// System holds operator-tunable system settings such as the canonical
+	// access-role list for the current project.
+	System SystemConfigSection `mapstructure:"system"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review
@@ -349,23 +360,44 @@ func GetWorkspaceContentConfig() map[string]bool {
 	return AppConfig.WorkspaceContent
 }
 
+// GetAccessRoles returns the canonical role keys for the current project from
+// [system].access_roles. The list is normalized to trimmed lower-case unique
+// values while preserving order. When the config key is absent or resolves to
+// an empty list, the provided fallback is returned instead.
+func GetAccessRoles(fallback []string) []string {
+	raw := appConfigViper.GetStringSlice("system.access_roles")
+	if len(raw) == 0 {
+		raw = AppConfig.System.AccessRoles
+	}
+	out := normalizeStringList(raw)
+	if len(out) == 0 {
+		return normalizeStringList(fallback)
+	}
+	return out
+}
+
 func GetLanguages() []string {
 	raw := appConfigViper.GetStringSlice("languages.languages")
 	if len(raw) == 0 {
 		raw = AppConfig.Languages.Languages
 	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(raw))
-	for _, lang := range raw {
-		lang = strings.ToLower(strings.TrimSpace(lang))
-		if lang == "" || seen[lang] {
-			continue
-		}
-		seen[lang] = true
-		out = append(out, lang)
-	}
+	out := normalizeStringList(raw)
 	if len(out) == 0 {
 		return []string{"en"}
+	}
+	return out
+}
+
+func normalizeStringList(raw []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
 	}
 	return out
 }

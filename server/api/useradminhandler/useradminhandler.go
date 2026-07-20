@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/chendingplano/shared/go/api/auth"
@@ -33,13 +34,58 @@ type updateUserRequest struct {
 	Roles     []string `json:"roles"`
 }
 
-var roleCatalog = []roleCatalogEntry{
+var defaultRoleCatalog = []roleCatalogEntry{
 	{Key: "admin", Label: "Administrator", Description: "Full administrative access.", Status: "active"},
 	{Key: "root", Label: "Root", Description: "Reserved role; not intended for active use yet.", Status: "reserved"},
 	{Key: "guest", Label: "Guest", Description: "Limited guest access.", Status: "active"},
 	{Key: "dev", Label: "Developer", Description: "Engineering and development workflows.", Status: "active"},
 	{Key: "k_engineer", Label: "Knowledge Engineer", Description: "Knowledge-system and taxonomy operations.", Status: "active"},
 	{Key: "trial", Label: "Trial", Description: "Trial user access.", Status: "active"},
+}
+
+func getRoleCatalog() []roleCatalogEntry {
+	roleKeys := appconfig.GetAccessRoles(roleCatalogKeys(defaultRoleCatalog))
+	defaultByKey := make(map[string]roleCatalogEntry, len(defaultRoleCatalog))
+	for _, role := range defaultRoleCatalog {
+		defaultByKey[role.Key] = role
+	}
+
+	catalog := make([]roleCatalogEntry, 0, len(roleKeys))
+	for _, key := range roleKeys {
+		if role, ok := defaultByKey[key]; ok {
+			catalog = append(catalog, role)
+			continue
+		}
+		catalog = append(catalog, roleCatalogEntry{
+			Key:         key,
+			Label:       roleLabelFromKey(key),
+			Description: "Project-configured access role.",
+			Status:      "active",
+		})
+	}
+	return catalog
+}
+
+func roleCatalogKeys(catalog []roleCatalogEntry) []string {
+	keys := make([]string, 0, len(catalog))
+	for _, role := range catalog {
+		keys = append(keys, role.Key)
+	}
+	return keys
+}
+
+func roleLabelFromKey(key string) string {
+	parts := strings.FieldsFunc(strings.TrimSpace(key), func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	})
+	for i, part := range parts {
+		part = strings.ToLower(part)
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func requireAdmin(c echo.Context, loc string) (*ApiTypes.UserInfo, ApiTypes.RequestContext, error) {
@@ -72,7 +118,7 @@ func ListRoles(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status": "ok",
-		"roles":  roleCatalog,
+		"roles":  getRoleCatalog(),
 	})
 }
 
