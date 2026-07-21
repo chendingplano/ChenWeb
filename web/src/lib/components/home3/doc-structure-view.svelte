@@ -54,6 +54,40 @@
 		sidebarOverride
 	}: { darkMode?: boolean; lockedRecordId?: number | null; hideSidebar?: boolean; sidebarOverride?: Snippet } = $props();
 
+	// ── Draggable DESCRIPTION call-out ───────────────────────────────────────
+	// Null keeps the default CSS placement (top/right); once dragged we switch to
+	// explicit left/top within the PDF pane. Position persists across findings.
+	let calloutEl = $state<HTMLElement | null>(null);
+	let calloutPos = $state<{ x: number; y: number } | null>(null);
+	let calloutDrag: { pointerX: number; pointerY: number; startX: number; startY: number } | null = null;
+
+	function startCalloutDrag(e: PointerEvent) {
+		if (!calloutEl) return;
+		const parent = calloutEl.offsetParent as HTMLElement | null;
+		const rect = calloutEl.getBoundingClientRect();
+		const prect = parent?.getBoundingClientRect();
+		const startX = rect.left - (prect?.left ?? 0);
+		const startY = rect.top - (prect?.top ?? 0);
+		calloutDrag = { pointerX: e.clientX, pointerY: e.clientY, startX, startY };
+		calloutPos = { x: startX, y: startY };
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		e.preventDefault();
+	}
+	function onCalloutDrag(e: PointerEvent) {
+		if (!calloutDrag || !calloutEl) return;
+		const parent = calloutEl.offsetParent as HTMLElement | null;
+		const maxX = Math.max(0, (parent?.clientWidth ?? 0) - calloutEl.offsetWidth);
+		const maxY = Math.max(0, (parent?.clientHeight ?? 0) - calloutEl.offsetHeight);
+		calloutPos = {
+			x: Math.max(0, Math.min(maxX, calloutDrag.startX + (e.clientX - calloutDrag.pointerX))),
+			y: Math.max(0, Math.min(maxY, calloutDrag.startY + (e.clientY - calloutDrag.pointerY)))
+		};
+	}
+	function endCalloutDrag(e: PointerEvent) {
+		calloutDrag = null;
+		(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+	}
+
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
 	let panelBgAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
@@ -1613,7 +1647,23 @@
 					{@const f = findingShelf.finding}
 					{@const related = relatedArtifactsFromMetadata(f.metadata)}
 					{#if f.description || related.length}
-						<aside class="finding-callout">
+						<aside
+							class="finding-callout"
+							bind:this={calloutEl}
+							style={calloutPos ? `left:${calloutPos.x}px; top:${calloutPos.y}px; right:auto;` : ''}
+						>
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="finding-callout-drag"
+								title="Drag to move"
+								onpointerdown={startCalloutDrag}
+								onpointermove={onCalloutDrag}
+								onpointerup={endCalloutDrag}
+								onpointercancel={endCalloutDrag}
+							>
+								<span class="finding-callout-grip" aria-hidden="true">⠿</span>
+								<span class="finding-callout-drag-title">Finding</span>
+							</div>
 							{#if f.description}
 								<div class="finding-callout-label">description</div>
 								<div class="finding-callout-desc">{f.description}</div>
@@ -2627,6 +2677,7 @@
 	/* PDF viewer + finding call-out sit side by side; the viewer takes all
 	   remaining width (and re-fits on resize), the call-out is a fixed column. */
 	.pdf-and-callout {
+		position: relative;
 		display: flex;
 		flex-direction: row;
 		flex: 1;
@@ -3155,14 +3206,15 @@
 		margin-top: 2px;
 	}
 
-	/* Finding call-out: a fixed-width column beside the PDF (never over it), with
-	   ~15px of breathing room on each side. */
+	/* Finding call-out: floats over the PDF's right gutter (overlapping the display)
+	   so the PDF can use the full pane width. Sits ~20px below the top. */
 	.finding-callout {
-		flex: 0 0 auto;
-		align-self: flex-start;
+		position: absolute;
+		top: 232px;
+		right: 12px;
+		z-index: 4;
 		width: clamp(240px, 22vw, 320px);
-		max-height: calc(100% - 44px);
-		margin: 32px 15px 12px;
+		max-height: calc(100% - 52px);
 		overflow-y: auto;
 		padding: 10px 12px;
 		background: var(--panel-bg);
@@ -3171,6 +3223,32 @@
 		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 		font-family: var(--font-sans);
 		scrollbar-width: thin;
+	}
+	.finding-callout-drag {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin: -10px -12px 8px;
+		padding: 5px 12px;
+		border-bottom: 1px solid var(--ink-line);
+		border-radius: 10px 10px 0 0;
+		background: var(--brass-faint);
+		cursor: move;
+		touch-action: none;
+		user-select: none;
+	}
+	.finding-callout-grip {
+		font-size: 0.7rem;
+		line-height: 1;
+		letter-spacing: -1px;
+		color: var(--brass);
+	}
+	.finding-callout-drag-title {
+		font-family: var(--font-mono);
+		font-size: 0.62rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--text-secondary);
 	}
 	.finding-callout-label {
 		font-family: var(--font-mono);

@@ -32,9 +32,9 @@
 	const RAIL_WIDTH_DEFAULT = 240; // default expanded rail width in px
 	const RAIL_WIDTH_MIN = 180; // minimum draggable rail width in px
 	const RAIL_WIDTH_MAX = 320; // maximum draggable rail width in px
-	const SHELF_WIDTH_DEFAULT = 280; // default context shelf width in px
+	const SHELF_WIDTH_DEFAULT = 480; // default context shelf width in px
 	const SHELF_WIDTH_MIN = 220; // minimum draggable shelf width in px
-	const SHELF_WIDTH_MAX = 480; // maximum draggable shelf width in px
+	const SHELF_WIDTH_MAX = 680; // maximum draggable shelf width in px
 	const AUTO_SHRINK_EXPAND_STORAGE_KEY = 'chenweb:home3:auto-shrink-expand';
 
 	// --- Shadows (adjust here to change depth/elevation) ---

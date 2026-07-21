@@ -606,10 +606,10 @@
 		const stored = localStorage.getItem(LANG_STORAGE_KEY);
 		if (stored) selectedLanguage = stored;
 		void load();
-		// Initial left panel: 45% minus 200px so the PDF gets more room by default.
+		// Initial left panel: 45% minus 400px so the PDF gets more room by default.
 		if (containerEl) {
 			const w = containerEl.getBoundingClientRect().width;
-			const px = w * 0.45 - 200;
+			const px = w * 0.45 - 400;
 			leftPct = Math.max(10, Math.min(70, (px / w) * 100));
 		}
 	});

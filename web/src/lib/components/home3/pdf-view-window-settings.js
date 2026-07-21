@@ -6,7 +6,7 @@
 
 export const PDF_VIEW_WINDOW_DEFAULT_SETTINGS = {
 	sidebarWidth: 270,
-	zoom: 0.7
+	zoom: 0.9
 };
 
 export const PDF_VIEW_WINDOW_ZOOM_MIN = 0.1;
