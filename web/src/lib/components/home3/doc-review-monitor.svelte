@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { listActiveJobs, listAspects, stopRequest, restartRequest } from '$lib/services/docReviewService';
-    import type { ActiveJob, AspectStatus, AspectInfo } from '$lib/services/docReviewService';
+    import type { ActiveJob, AspectStatus } from '$lib/services/docReviewService';
+    import { getLocale } from '$lib/paraglide/runtime';
     import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
     import XCircleIcon from '@lucide/svelte/icons/x-circle';
     import ClockIcon from '@lucide/svelte/icons/clock';
@@ -128,7 +129,7 @@
     let clock: ReturnType<typeof setInterval>;
     onMount(async () => {
         try {
-            const all: AspectInfo[] = await listAspects();
+            const { aspects: all } = await listAspects(getLocale());
             const map: Record<string, string> = {};
             for (const a of all) map[a.name] = a.label;
             aspectLabels = map;

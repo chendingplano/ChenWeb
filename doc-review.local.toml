@@ -10,6 +10,11 @@
 #   * reference_docs is out of scope and intentionally omitted.
 #   * Only `grammar_spelling` is wired into execution today (Phase I); the other
 #     reviewer blocks are forward-looking config for when their reviewers land.
+#
+# i18n: package and reviewer labels are internationalized via `name_<locale>` /
+#   `desc_<locale>` fields. `name_en`/`desc_en` are the default (fallback); add
+#   `name_zh_cn`, etc. for other UI locales. The server resolves these per the
+#   `?lang=` locale on GET /doc-review/aspects, falling back to the *_en value.
 
 # ── Group (package) defaults ─────────────────────────────────────────────────
 
@@ -23,48 +28,60 @@ max_artifacts_passed_to_llm = 10
 
 [packages.P5]
 enabled = true
-name = "Technical & Compliance Standards"
-desc = "regulations"
+name_en = "Technical & Compliance Standards"
+name_zh_cn = "技术与合规"
+desc_en = "regulations"
+desc_zh_cn = "法规与合规标准"
 strategy = "per-chunk"
 model = "deepseek-flash-chen"
 max_tool_turns = 12
 
 [packages.P4]
 enabled = true
-name = "Consistency"
-desc = "Cross-document coherence"
+name_en = "Consistency"
+name_zh_cn = "一致性"
+desc_en = "Cross-document coherence"
+desc_zh_cn = "跨文档一致性"
 strategy = "document-level"
 model = "deepseek-flash-chen"
 max_tool_turns = 0
 
 [packages.P3]
 enabled = true
-name = "Content Quality"
-desc = "Depth and correctness of content"
+name_en = "Content Quality"
+name_zh_cn = "内容质量"
+desc_en = "Depth and correctness of content"
+desc_zh_cn = "内容的深度与正确性"
 strategy = "per-chunk"
 model = "deepseek-flash-chen"
 max_tool_turns = 0
 
 [packages.P2]
 enabled = true
-name = "Structure & Organization"
-desc = "Document architecture"
+name_en = "Structure & Organization"
+name_zh_cn = "结构与组织"
+desc_en = "Document architecture"
+desc_zh_cn = "文档架构"
 strategy = "document"
 model = "deepseek-flash-chen"
 max_tool_turns = 0
 
 [packages.P1]
 enabled = true
-name = "Language & Style"
-desc = "Surface-level writing quality"
+name_en = "Language & Style"
+name_zh_cn = "语言与文风"
+desc_en = "Surface-level writing quality"
+desc_zh_cn = "表层写作质量"
 strategy = "document-level"
 model = "deepseek-flash-chen"
 max_tool_turns = 0
 
 [packages.P6]
 enabled = true
-name = "Meta & Process"
-desc = "Document housekeeping"
+name_en = "Meta & Process"
+name_zh_cn = "元信息与流程"
+desc_en = "Document housekeeping"
+desc_zh_cn = "文档维护"
 strategy = "document-level"
 model = "deepseek-flash-chen"
 max_tool_turns = 0
@@ -74,6 +91,10 @@ max_tool_turns = 0
 
 # P1 — Language & Style
 [reviewers.grammar_spelling]
+name_en = "Grammar & Spelling"
+name_zh_cn = "语法与拼写"
+desc_en = "Checks grammar, spelling, punctuation, and capitalization."
+desc_zh_cn = "检查语法、拼写、标点与大小写。"
 enabled = true
 checked = true
 group = "P1"
@@ -83,6 +104,10 @@ prompt = "prompt-review-grammar-spelling.md"
 max_tool_turns = 0
 
 [reviewers.tone_voice]
+name_en = "Tone & Voice"
+name_zh_cn = "语气与风格"
+desc_en = "Evaluates consistency of tone and voice throughout."
+desc_zh_cn = "评估全文语气与风格的一致性。"
 enabled = true
 checked = true
 group = "P1"
@@ -92,6 +117,10 @@ prompt = "prompt-review-tone-voice.md"
 max_tool_turns = 0
 
 [reviewers.formatting_consistency]
+name_en = "Formatting Consistency"
+name_zh_cn = "格式一致性"
+desc_en = "Checks for consistent use of formatting (bold, italic, lists)."
+desc_zh_cn = "检查格式（加粗、斜体、列表）使用是否一致。"
 enabled = true
 checked = true
 group = "P1"
@@ -101,6 +130,10 @@ prompt = "prompt-review-formatting-consistency.md"
 max_tool_turns = 0
 
 [reviewers.readability]
+name_en = "Readability"
+name_zh_cn = "可读性"
+desc_en = "Measures sentence complexity, paragraph length, and clarity."
+desc_zh_cn = "衡量句子复杂度、段落长度与清晰度。"
 enabled = true
 checked = true
 group = "P1"
@@ -110,6 +143,10 @@ prompt = "prompt-review-readability.md"
 max_tool_turns = 0
 
 [reviewers.localization]
+name_en = "Localization"
+name_zh_cn = "本地化"
+desc_en = "Checks if content is suitable for target locale."
+desc_zh_cn = "检查内容是否适合目标语言区域。"
 enabled = true
 checked = false
 group = "P1"
@@ -120,6 +157,10 @@ max_tool_turns = 0
 
 # P2 — Structure & Organization
 [reviewers.logical_flow]
+name_en = "Logical Flow"
+name_zh_cn = "逻辑连贯"
+desc_en = "Evaluates whether content follows a logical sequence."
+desc_zh_cn = "评估内容是否遵循合理的逻辑顺序。"
 enabled = true
 checked = true
 group = "P2"
@@ -129,6 +170,10 @@ prompt = "prompt-review-logical-flow.md"
 max_tool_turns = 0
 
 [reviewers.heading_hierarchy]
+name_en = "Heading Hierarchy"
+name_zh_cn = "标题层级"
+desc_en = "Validates heading nesting and consistency."
+desc_zh_cn = "校验标题的嵌套与一致性。"
 enabled = true
 checked = true
 group = "P2"
@@ -138,6 +183,10 @@ prompt = "prompt-review-heading-hierarchy.md"
 max_tool_turns = 0
 
 [reviewers.toc_accuracy]
+name_en = "Table of Contents Accuracy"
+name_zh_cn = "目录准确性"
+desc_en = "Verifies ToC matches actual headings."
+desc_zh_cn = "核对目录是否与实际标题一致。"
 enabled = true
 checked = false
 group = "P2"
@@ -147,6 +196,10 @@ prompt = "prompt-review-toc-accuracy.md"
 max_tool_turns = 0
 
 [reviewers.navigability]
+name_en = "Navigability"
+name_zh_cn = "可导航性"
+desc_en = "Assesses how easily a reader can find relevant sections."
+desc_zh_cn = "评估读者查找相关章节的便捷程度。"
 enabled = true
 checked = true
 group = "P2"
@@ -156,6 +209,10 @@ prompt = "prompt-review-navigability.md"
 max_tool_turns = 0
 
 [reviewers.section_balance]
+name_en = "Section Balance"
+name_zh_cn = "章节均衡"
+desc_en = "Checks if sections are proportional in length."
+desc_zh_cn = "检查各章节篇幅是否均衡。"
 enabled = true
 checked = true
 group = "P2"
@@ -165,6 +222,10 @@ prompt = "prompt-review-section-balance.md"
 max_tool_turns = 0
 
 [reviewers.modularity]
+name_en = "Modularity"
+name_zh_cn = "模块化"
+desc_en = "Evaluates whether content is self-contained and reusable."
+desc_zh_cn = "评估内容是否自洽且可复用。"
 enabled = true
 checked = true
 group = "P2"
@@ -175,6 +236,10 @@ max_tool_turns = 0
 
 # P3 — Content Quality
 [reviewers.completeness]
+name_en = "Completeness"
+name_zh_cn = "完整性"
+desc_en = "Checks if all required topics are covered."
+desc_zh_cn = "检查是否覆盖了所有必需的主题。"
 enabled = true
 checked = true
 group = "P3"
@@ -184,6 +249,10 @@ prompt = "prompt-review-completeness.md"
 max_tool_turns = 5
 
 [reviewers.correctness]
+name_en = "Correctness"
+name_zh_cn = "正确性"
+desc_en = "Verifies factual accuracy of content."
+desc_zh_cn = "核实内容的事实准确性。"
 enabled = true
 checked = true
 group = "P3"
@@ -193,6 +262,10 @@ prompt = "prompt-review-correctness.md"
 max_tool_turns = 5
 
 [reviewers.clarity]
+name_en = "Clarity"
+name_zh_cn = "清晰度"
+desc_en = "Evaluates how clearly concepts are explained."
+desc_zh_cn = "评估概念表述的清晰程度。"
 enabled = true
 checked = true
 group = "P3"
@@ -202,6 +275,10 @@ prompt = "prompt-review-clarity.md"
 max_tool_turns = 5
 
 [reviewers.conciseness]
+name_en = "Conciseness"
+name_zh_cn = "简洁性"
+desc_en = "Checks for unnecessary verbosity."
+desc_zh_cn = "检查是否存在不必要的冗长表述。"
 enabled = true
 checked = true
 group = "P3"
@@ -211,6 +288,10 @@ prompt = "prompt-review-conciseness.md"
 max_tool_turns = 5
 
 [reviewers.relevance]
+name_en = "Relevance"
+name_zh_cn = "相关性"
+desc_en = "Ensures content is relevant to the document's purpose."
+desc_zh_cn = "确保内容与文档目的相关。"
 enabled = true
 checked = true
 group = "P3"
@@ -220,6 +301,10 @@ prompt = "prompt-review-relevance.md"
 max_tool_turns = 5
 
 [reviewers.currency]
+name_en = "Currency"
+name_zh_cn = "时效性"
+desc_en = "Verifies information is up-to-date."
+desc_zh_cn = "核实信息是否为最新。"
 enabled = true
 checked = false
 group = "P3"
@@ -229,6 +314,10 @@ prompt = "prompt-review-currency.md"
 max_tool_turns = 5
 
 [reviewers.examples]
+name_en = "Examples"
+name_zh_cn = "示例"
+desc_en = "Checks for adequate examples."
+desc_zh_cn = "检查是否提供了充分的示例。"
 enabled = true
 checked = true
 group = "P3"
@@ -238,6 +327,10 @@ prompt = "prompt-review-examples.md"
 max_tool_turns = 5
 
 [reviewers.diagrams]
+name_en = "Diagrams"
+name_zh_cn = "图示"
+desc_en = "Evaluates quality and relevance of diagrams."
+desc_zh_cn = "评估图示的质量与相关性。"
 enabled = true
 checked = true
 group = "P3"
@@ -247,6 +340,10 @@ prompt = "prompt-review-diagrams.md"
 max_tool_turns = 5
 
 [reviewers.testable_claims]
+name_en = "Testable Claims"
+name_zh_cn = "可验证论断"
+desc_en = "Flags claims that should be testable."
+desc_zh_cn = "标记应当可验证的论断。"
 enabled = true
 checked = true
 group = "P3"
@@ -256,6 +353,10 @@ prompt = "prompt-review-testable-claims.md"
 max_tool_turns = 5
 
 [reviewers.evidence_rationale]
+name_en = "Evidence & Rationale"
+name_zh_cn = "证据与论证"
+desc_en = "Checks if claims are supported by evidence."
+desc_zh_cn = "检查论断是否有证据支撑。"
 enabled = true
 checked = true
 group = "P3"
@@ -266,6 +367,10 @@ max_tool_turns = 5
 
 # P4 — Consistency
 [reviewers.internal_contradictions]
+name_en = "Internal Contradictions"
+name_zh_cn = "内部矛盾"
+desc_en = "Finds contradictory statements across the document."
+desc_zh_cn = "查找文档中相互矛盾的陈述。"
 enabled = true
 checked = true
 group = "P4"
@@ -275,6 +380,10 @@ prompt = "prompt-review-internal-contradictions.md"
 max_tool_turns = 8
 
 [reviewers.terminology_consistency]
+name_en = "Terminology Consistency"
+name_zh_cn = "术语一致性"
+desc_en = "Checks for consistent use of terms."
+desc_zh_cn = "检查术语使用是否一致。"
 enabled = true
 checked = true
 group = "P4"
@@ -284,6 +393,10 @@ prompt = "prompt-review-terminology-consistency.md"
 max_tool_turns = 8
 
 [reviewers.cross_reference_correctness]
+name_en = "Cross-Reference Correctness"
+name_zh_cn = "交叉引用正确性"
+desc_en = "Validates cross-references point to correct targets."
+desc_zh_cn = "校验交叉引用是否指向正确的目标。"
 enabled = true
 checked = true
 group = "P4"
@@ -293,6 +406,10 @@ prompt = "prompt-review-cross-reference-correctness.md"
 max_tool_turns = 8
 
 [reviewers.requirement_traceability]
+name_en = "Requirement Traceability"
+name_zh_cn = "需求可追溯性"
+desc_en = "Traces requirements to their implementation."
+desc_zh_cn = "将需求追溯到其实现。"
 enabled = true
 checked = true
 group = "P4"
@@ -319,6 +436,10 @@ max_tool_turns = 8
 # (a cross-record, read-only tool that must be listed explicitly in `tools`).
 # entities is out of scope for that ADR and stays one-shot on prompt v1.
 [reviewers.metrics]
+name_en = "Metric Consistency"
+name_zh_cn = "指标一致性"
+desc_en = "Cross-document check: flags conflicting metric values, units, or thresholds against related metrics in other documents."
+desc_zh_cn = "跨文档检查：将指标的数值、单位或阈值与其他文档中的相关指标比对，标记冲突。"
 enabled = true
 checked = true
 group = "P5"
@@ -336,6 +457,10 @@ tools = ["get_artifact_context", "get_document_metadata"]
 # (search_metrics for the absence-verification step, get_artifact_context
 # for context on screened candidates).
 [reviewers.metrics_completeness]
+name_en = "Missing Metric Detection"
+name_zh_cn = "缺失指标检测"
+desc_en = "Object-anchored check: flags metrics that peer documents attach to the same objects but are absent here."
+desc_zh_cn = "以对象为锚的检查：标记同类文档为相同对象记录、但本文档缺失的指标。"
 enabled = true
 checked = true
 group = "P5"
@@ -347,6 +472,10 @@ max_tool_tokens = 32000
 tools = ["search_metrics", "get_artifact_context"]
 
 [reviewers.provisions]
+name_en = "Provision Consistency"
+name_zh_cn = "条款一致性"
+desc_en = "Cross-document check: flags contradictory or conflicting provisions (requirements, prohibitions) against related provisions in other documents."
+desc_zh_cn = "跨文档检查：将条款（要求、禁止性规定）与其他文档中的相关条款比对，标记矛盾或冲突。"
 enabled = true
 checked = true
 group = "P5"
@@ -358,6 +487,10 @@ max_tool_tokens = 24000
 tools = ["get_artifact_context", "get_document_metadata"]
 
 [reviewers.entities]
+name_en = "Entity Consistency"
+name_zh_cn = "实体一致性"
+desc_en = "Cross-document check: flags conflicting entity types, definitions, or attributes for the same real-world entity against related entities in other documents."
+desc_zh_cn = "跨文档检查：将同一现实实体的类型、定义或属性与其他文档中的相关实体比对，标记冲突。"
 enabled = true
 checked = true
 group = "P5"
@@ -367,6 +500,10 @@ prompt = "prompt-review-entities-v1.md"
 max_tool_turns = 0
 
 [reviewers.inventory_items]
+name_en = "Inventory Item Consistency"
+name_zh_cn = "物料条目一致性"
+desc_en = "Cross-document check: flags conflicting manufacturer, brand, model/part numbers, specifications, or standards for the same catalog item against related inventory items in other documents."
+desc_zh_cn = "跨文档检查：将同一目录条目的制造商、品牌、型号/物料号、规格或标准与其他文档中的相关物料比对，标记冲突。"
 enabled = true
 checked = true
 group = "P5"
@@ -378,6 +515,10 @@ max_tool_tokens = 24000
 tools = ["get_artifact_context", "get_document_metadata"]
 
 [reviewers.technical_accuracy]
+name_en = "Technical Accuracy"
+name_zh_cn = "技术准确性"
+desc_en = "Verifies technical details, code snippets, formulas."
+desc_zh_cn = "核实技术细节、代码片段与公式。"
 enabled = true
 checked = true
 group = "P5"
@@ -387,6 +528,10 @@ prompt = "prompt-review-technical-accuracy.md"
 max_tool_turns = 12
 
 [reviewers.assumptions]
+name_en = "Assumptions"
+name_zh_cn = "假设"
+desc_en = "Identifies unstated or invalid assumptions."
+desc_zh_cn = "识别未明示或无效的假设。"
 enabled = true
 checked = true
 group = "P5"
@@ -396,6 +541,10 @@ prompt = "prompt-review-assumptions.md"
 max_tool_turns = 12
 
 [reviewers.prerequisites]
+name_en = "Prerequisites"
+name_zh_cn = "前置条件"
+desc_en = "Checks if prerequisites are documented."
+desc_zh_cn = "检查前置条件是否已记录。"
 enabled = true
 checked = true
 group = "P5"
@@ -405,6 +554,10 @@ prompt = "prompt-review-prerequisites.md"
 max_tool_turns = 12
 
 [reviewers.standards_compliance]
+name_en = "Standards Compliance"
+name_zh_cn = "标准合规"
+desc_en = "Checks compliance with relevant standards (ISO, IEC, GB)."
+desc_zh_cn = "检查是否符合相关标准（ISO、IEC、GB）。"
 enabled = true
 checked = true
 group = "P5"
@@ -414,6 +567,10 @@ prompt = "prompt-review-standards-compliance.md"
 max_tool_turns = 12
 
 [reviewers.legal_compliance]
+name_en = "Legal Compliance"
+name_zh_cn = "法律合规"
+desc_en = "Checks compliance with legal requirements."
+desc_zh_cn = "检查是否符合法律要求。"
 enabled = true
 checked = true
 group = "P5"
@@ -423,6 +580,10 @@ prompt = "prompt-review-legal-compliance.md"
 max_tool_turns = 12
 
 [reviewers.regulatory_compliance]
+name_en = "Regulatory Compliance"
+name_zh_cn = "监管合规"
+desc_en = "Checks compliance with regulatory requirements."
+desc_zh_cn = "检查是否符合监管要求。"
 enabled = true
 checked = true
 group = "P5"
@@ -432,6 +593,10 @@ prompt = "prompt-review-regulatory-compliance.md"
 max_tool_turns = 12
 
 [reviewers.internal_policy]
+name_en = "Internal Policy"
+name_zh_cn = "内部政策"
+desc_en = "Checks adherence to internal policies."
+desc_zh_cn = "检查是否遵守内部政策。"
 enabled = true
 checked = true
 group = "P5"
@@ -441,6 +606,10 @@ prompt = "prompt-review-internal-policy.md"
 max_tool_turns = 12
 
 [reviewers.security]
+name_en = "Security"
+name_zh_cn = "安全性"
+desc_en = "Identifies security vulnerabilities and concerns."
+desc_zh_cn = "识别安全漏洞与隐患。"
 enabled = true
 checked = true
 group = "P5"
@@ -450,6 +619,10 @@ prompt = "prompt-review-security.md"
 max_tool_turns = 12
 
 [reviewers.performance]
+name_en = "Performance"
+name_zh_cn = "性能"
+desc_en = "Evaluates performance implications."
+desc_zh_cn = "评估对性能的影响。"
 enabled = true
 checked = true
 group = "P5"
@@ -459,6 +632,10 @@ prompt = "prompt-review-performance.md"
 max_tool_turns = 12
 
 [reviewers.error_handling]
+name_en = "Error Handling"
+name_zh_cn = "错误处理"
+desc_en = "Checks if error scenarios are addressed."
+desc_zh_cn = "检查是否处理了错误场景。"
 enabled = true
 checked = true
 group = "P5"
@@ -468,6 +645,10 @@ prompt = "prompt-review-error-handling.md"
 max_tool_turns = 12
 
 [reviewers.limitations]
+name_en = "Limitations"
+name_zh_cn = "局限性"
+desc_en = "Identifies undocumented limitations."
+desc_zh_cn = "识别未记录的局限性。"
 enabled = true
 checked = true
 group = "P5"
@@ -478,6 +659,10 @@ max_tool_turns = 12
 
 # P6 — Meta & Process
 [reviewers.version_history]
+name_en = "Version History"
+name_zh_cn = "版本历史"
+desc_en = "Checks if version history is complete."
+desc_zh_cn = "检查版本历史是否完整。"
 enabled = false
 checked = false
 group = "P6"
@@ -487,6 +672,10 @@ prompt = "prompt-review-version-history.md"
 max_tool_turns = 0
 
 [reviewers.review_status]
+name_en = "Review Status"
+name_zh_cn = "评审状态"
+desc_en = "Verifies review status is documented."
+desc_zh_cn = "核实评审状态是否已记录。"
 enabled = false
 checked = false
 group = "P6"
@@ -496,6 +685,10 @@ prompt = "prompt-review-review-status.md"
 max_tool_turns = 0
 
 [reviewers.ownership]
+name_en = "Ownership"
+name_zh_cn = "归属"
+desc_en = "Checks document ownership is identified."
+desc_zh_cn = "检查文档归属是否已标明。"
 enabled = false
 checked = false
 group = "P6"
@@ -505,6 +698,10 @@ prompt = "prompt-review-ownership.md"
 max_tool_turns = 0
 
 [reviewers.references]
+name_en = "References"
+name_zh_cn = "参考文献"
+desc_en = "Verifies all references are properly cited."
+desc_zh_cn = "核实所有参考文献是否被正确引用。"
 enabled = false
 checked = false
 group = "P6"
@@ -514,6 +711,10 @@ prompt = "prompt-review-references.md"
 max_tool_turns = 0
 
 [reviewers.related_documents]
+name_en = "Related Documents"
+name_zh_cn = "相关文档"
+desc_en = "Checks if related documents are referenced."
+desc_zh_cn = "检查是否引用了相关文档。"
 enabled = false
 checked = false
 group = "P6"
@@ -523,6 +724,10 @@ prompt = "prompt-review-related-documents.md"
 max_tool_turns = 0
 
 [reviewers.confidentiality]
+name_en = "Confidentiality"
+name_zh_cn = "保密性"
+desc_en = "Checks for proper confidentiality markings."
+desc_zh_cn = "检查保密标识是否恰当。"
 enabled = false
 checked = false
 group = "P6"
@@ -532,6 +737,10 @@ prompt = "prompt-review-confidentiality.md"
 max_tool_turns = 0
 
 [reviewers.sensitive_data]
+name_en = "Sensitive Data"
+name_zh_cn = "敏感数据"
+desc_en = "Flags potentially sensitive information."
+desc_zh_cn = "标记可能的敏感信息。"
 enabled = false
 checked = false
 group = "P6"
@@ -541,6 +750,10 @@ prompt = "prompt-review-sensitive-data.md"
 max_tool_turns = 0
 
 [reviewers.pii]
+name_en = "Personally Identifiable Info"
+name_zh_cn = "个人身份信息"
+desc_en = "Detects PII exposure risks."
+desc_zh_cn = "检测个人身份信息（PII）泄露风险。"
 enabled = false
 checked = false
 group = "P6"
@@ -550,6 +763,10 @@ prompt = "prompt-review-pii.md"
 max_tool_turns = 0
 
 [reviewers.data_retention]
+name_en = "Data Retention"
+name_zh_cn = "数据留存"
+desc_en = "Checks if data retention is addressed."
+desc_zh_cn = "检查是否说明了数据留存要求。"
 enabled = false
 checked = false
 group = "P6"
@@ -559,6 +776,10 @@ prompt = "prompt-review-data-retention.md"
 max_tool_turns = 0
 
 [reviewers.license_ip]
+name_en = "License & IP"
+name_zh_cn = "许可与知识产权"
+desc_en = "Checks license and intellectual property issues."
+desc_zh_cn = "检查许可与知识产权相关问题。"
 enabled = false
 checked = false
 group = "P6"

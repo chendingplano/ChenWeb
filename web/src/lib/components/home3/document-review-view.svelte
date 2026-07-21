@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
-    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem } from '$lib/services/docReviewService';
+    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem, ReviewPackageInfo } from '$lib/services/docReviewService';
     import { uploadKbInputs, listKnowledgeStores } from '$lib/services/kbService';
     import type { KbInputRecord, KnowledgeStoreRecord } from '$lib/services/kbService';
     import { knowledgeStoreState } from './knowledge-store-state.svelte';
@@ -36,6 +36,9 @@
 
     // State
     let aspects = $state<AspectInfo[]>([]);
+    // Package (group) list from doc-review.local.toml, with labels localized
+    // server-side. Drives the per-group headers (P1..P6) in the check-level step.
+    let packages = $state<ReviewPackageInfo[]>([]);
     let tiers = $state<TierInfo[]>([]);
     let currentStep = $state(1);
     let selectedDocId = $state<number | null>(null);
@@ -136,12 +139,19 @@
         return exact ? exact.key : 'custom';
     });
 
-    // Derived: group labels
-    const groupLabels: Record<string, string> = {
+    // Group (package) labels. Sourced from [packages.*] in doc-review.local.toml
+    // (localized server-side, keyed by group P1..P6); the hardcoded English map
+    // is the fallback when the config has no entry for a group.
+    const groupLabelDefaults: Record<string, string> = {
         P1: 'Language & Style', P2: 'Structure & Organization',
         P3: 'Content Quality', P4: 'Consistency',
         P5: 'Technical & Compliance', P6: 'Meta & Process',
     };
+    let groupLabels = $derived.by(() => {
+        const map: Record<string, string> = { ...groupLabelDefaults };
+        for (const p of packages) if (p.label) map[p.key] = p.label;
+        return map;
+    });
 
     // ── Page-config overlay (KnowledgeStore spec 2026072001 §11) ──────────────
     // The page owns its structure AND hardcoded default text; page-config only
@@ -192,13 +202,13 @@
     });
 
     // Group a tier's aspect names by category for the foldable preview
-    function groupAspectNames(names: string[]): Array<{ group: string; label: string; items: Array<{ name: string; label: string }> }> {
-        const byGroup: Record<string, Array<{ name: string; label: string }>> = {};
+    function groupAspectNames(names: string[]): Array<{ group: string; label: string; items: Array<{ name: string; label: string; description: string }> }> {
+        const byGroup: Record<string, Array<{ name: string; label: string; description: string }>> = {};
         for (const name of names) {
             const info = aspectByName[name];
             const group = info?.group ?? '其他';
             if (!byGroup[group]) byGroup[group] = [];
-            byGroup[group].push({ name, label: info?.label ?? name });
+            byGroup[group].push({ name, label: info?.label ?? name, description: info?.description ?? '' });
         }
         return Object.entries(byGroup)
             .sort(([a], [b]) => a.localeCompare(b))
@@ -279,7 +289,9 @@
             .then((cfg) => { pageConfig = cfg; })
             .catch(() => {});
         try {
-            aspects = await listAspects();
+            const res = await listAspects(getLocale());
+            aspects = res.aspects;
+            packages = res.packages;
             tiers = await listTiers();
             // Initial selection driven by [reviewers.<aspect>].checked in doc-review.local.toml.
             selectedAspects = new Set(aspects.filter(a => a.checked).map(a => a.name));
@@ -643,7 +655,7 @@
                                                     {#each cat.items as item}
                                                         {@const checked = aspectChecked(item.name)}
                                                         <button type="button" onclick={() => toggleAspect(item.name)}
-                                                            title={checked ? 'Click to deselect' : 'Click to select'}
+                                                            title={item.description || (checked ? 'Click to deselect' : 'Click to select')}
                                                             style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
                                                             background: {checked ? accentTint : 'transparent'}; border: 1px solid {checked ? accent : borderColor}; color: {checked ? textPrimary : textMuted};">
                                                             {#if checked}

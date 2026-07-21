@@ -161,18 +161,18 @@ func TestReportBuild_MixedSeverities(t *testing.T) {
 func TestPackageOrderFromTOMLPreservesDeclarationOrder(t *testing.T) {
 	raw := []byte(`
 [packages.P5]
-name = "Technical & Compliance Standards"
+name_en = "Technical & Compliance Standards"
 
 [packages.P4]
-name = "Consistency"
+name_en = "Consistency"
 
 [packages.P1]
-name = "Language & Style"
+name_en = "Language & Style"
 `)
 	packages := map[string]ReviewPackageConfig{
-		"P1": {Name: "Language & Style"},
-		"P4": {Name: "Consistency"},
-		"P5": {Name: "Technical & Compliance Standards"},
+		"P1": {NameEN: "Language & Style"},
+		"P4": {NameEN: "Consistency"},
+		"P5": {NameEN: "Technical & Compliance Standards"},
 	}
 
 	got := packageOrderFromTOML(raw, packages)

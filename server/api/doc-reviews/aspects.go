@@ -7,18 +7,39 @@ import (
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
-// ListAspects returns all review aspects with their metadata.
+// ListAspects returns all review aspects with their metadata, using the default
+// (English) labels and descriptions. Callers that render for a specific UI
+// locale should use ListAspectsForLocale.
 // The Checked field is populated from [reviewers.<aspect>].checked in doc-review.local.toml.
 // Source: Document Review Checklist spec (doc-repo/specs/202606/2026061102-spec-document-review-checklist.md)
 func ListAspects() []AspectInfo {
+	return ListAspectsForLocale("")
+}
+
+// ListAspectsForLocale returns all review aspects with their Label/Description
+// resolved for locale. The built-in labels in listAspectsBase are the ultimate
+// fallback; a [reviewers.<aspect>].name_<locale>/desc_<locale> (falling back to
+// name_en/desc_en) overrides them when configured. An empty locale resolves to
+// the English variant.
+func ListAspectsForLocale(locale string) []AspectInfo {
 	base := listAspectsBase()
 	cfg, _ := GetDocReviewConfig()
 	if cfg == nil {
 		return base
 	}
 	for i, a := range base {
-		if rev, ok := cfg.Reviewers[a.Name]; ok && rev.Checked != nil {
+		rev, ok := cfg.Reviewers[a.Name]
+		if !ok {
+			continue
+		}
+		if rev.Checked != nil {
 			base[i].Checked = *rev.Checked
+		}
+		if name := rev.LocalizedName(locale); name != "" {
+			base[i].Label = name
+		}
+		if desc := rev.LocalizedDesc(locale); desc != "" {
+			base[i].Description = desc
 		}
 	}
 	return base

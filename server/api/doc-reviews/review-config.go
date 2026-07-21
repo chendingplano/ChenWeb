@@ -15,14 +15,31 @@ const docReviewConfigFileName = "doc-review.local.toml"
 var defaultReviewOutputLimits = [3]int{100, 200, 300}
 
 // ReviewPackageConfig is a group-level ([packages.P1..P6]) default block.
+//
+// Names and descriptions are internationalized: `name_en`/`desc_en` are the
+// default (fallback) values, `name_zh_cn`/`desc_zh_cn` the Simplified-Chinese
+// variants. More languages can be added as additional `name_<locale>` fields.
+// Use LocalizedName / LocalizedDesc to resolve the right one for a locale.
 type ReviewPackageConfig struct {
 	Enabled       bool   `toml:"enabled"`
-	Name          string `toml:"name"`
-	Desc          string `toml:"desc"`
+	NameEN        string `toml:"name_en"`
+	NameZhCN      string `toml:"name_zh_cn"`
+	DescEN        string `toml:"desc_en"`
+	DescZhCN      string `toml:"desc_zh_cn"`
 	Strategy      string `toml:"strategy"`
 	Model         string `toml:"model"`
 	MaxToolTurns  int    `toml:"max_tool_turns"`
 	MaxToolTokens int    `toml:"max_tool_tokens"`
+}
+
+// LocalizedName returns the package name for locale, falling back to name_en.
+func (p ReviewPackageConfig) LocalizedName(locale string) string {
+	return pickLocale(locale, p.NameEN, p.NameZhCN)
+}
+
+// LocalizedDesc returns the package description for locale, falling back to desc_en.
+func (p ReviewPackageConfig) LocalizedDesc(locale string) string {
+	return pickLocale(locale, p.DescEN, p.DescZhCN)
 }
 
 // ReviewAspectConfig is a per-aspect ([reviewers.<aspect>]) override block (DR3).
@@ -32,6 +49,10 @@ type ReviewAspectConfig struct {
 	Enabled       *bool    `toml:"enabled"`
 	Checked       *bool    `toml:"checked"`
 	Group         string   `toml:"group"`
+	NameEN        string   `toml:"name_en"`
+	NameZhCN      string   `toml:"name_zh_cn"`
+	DescEN        string   `toml:"desc_en"`
+	DescZhCN      string   `toml:"desc_zh_cn"`
 	Input         string   `toml:"input"` // "per-chunk" or "per-block"
 	Model         string   `toml:"model"`
 	Prompt        string   `toml:"prompt"`
@@ -40,6 +61,36 @@ type ReviewAspectConfig struct {
 	MaxFindings   []int    `toml:"max_findings"`
 	MaxAnalyses   []int    `toml:"max_analyses"`
 	Tools         []string `toml:"tools"`
+}
+
+// LocalizedName returns the aspect (reviewer) label for locale, falling back to
+// name_en. Empty when neither is configured (callers keep the built-in default).
+func (a ReviewAspectConfig) LocalizedName(locale string) string {
+	return pickLocale(locale, a.NameEN, a.NameZhCN)
+}
+
+// LocalizedDesc returns the aspect description for locale, falling back to desc_en.
+func (a ReviewAspectConfig) LocalizedDesc(locale string) string {
+	return pickLocale(locale, a.DescEN, a.DescZhCN)
+}
+
+// normalizeLocale canonicalizes a locale tag to lower-case with a hyphen
+// separator (e.g. "zh_CN", "ZH-cn" → "zh-cn"), matching the paraglide locales.
+func normalizeLocale(locale string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(locale)), "_", "-")
+}
+
+// pickLocale resolves a localized string for the given locale, falling back to
+// the English (default) value. New languages are added by extending this switch
+// alongside a new `*_<locale>` struct field.
+func pickLocale(locale, en, zhCN string) string {
+	switch normalizeLocale(locale) {
+	case "zh-cn":
+		if v := strings.TrimSpace(zhCN); v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(en)
 }
 
 // DocReviewConfig is the parsed doc-review.local.toml.
@@ -155,7 +206,7 @@ func packageOrderFromTOML(raw []byte, packages map[string]ReviewPackageConfig) [
 			continue
 		}
 		seen[key] = true
-		label := strings.TrimSpace(pkg.Name)
+		label := strings.TrimSpace(pkg.NameEN)
 		if label == "" {
 			label = key
 		}
@@ -170,6 +221,25 @@ func configuredPackageOrder() []ReviewPackageInfo {
 		return defaultReviewPackageOrder()
 	}
 	return append([]ReviewPackageInfo(nil), cfg.PackageOrder...)
+}
+
+// localizedPackageOrder returns the configured package groups in display order
+// with each Label resolved for locale (falling back to name_en). It reuses the
+// same ordering as configuredPackageOrder; only the labels are localized.
+func localizedPackageOrder(locale string) []ReviewPackageInfo {
+	order := configuredPackageOrder()
+	cfg, err := GetDocReviewConfig()
+	if err != nil || cfg == nil {
+		return order
+	}
+	for i := range order {
+		if pkg, ok := cfg.Packages[order[i].Key]; ok {
+			if label := pkg.LocalizedName(locale); label != "" {
+				order[i].Label = label
+			}
+		}
+	}
+	return order
 }
 
 func defaultReviewPackageOrder() []ReviewPackageInfo {

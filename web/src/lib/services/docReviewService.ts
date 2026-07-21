@@ -103,11 +103,18 @@ export type FindingItem = {
 	reference_doc?: unknown;
 };
 
-export async function listAspects(): Promise<AspectInfo[]> {
-	const res = await fetch(`${BASE}/aspects`, { credentials: 'same-origin' });
+// listAspects loads the review aspects and package (group) list. Labels and
+// descriptions are resolved server-side for `locale` (falling back to name_en
+// when a translation is missing); pass the current UI locale to get localized
+// text. `packages` drives the per-group headers on the selection page.
+export async function listAspects(
+	locale?: string
+): Promise<{ aspects: AspectInfo[]; packages: ReviewPackageInfo[] }> {
+	const query = locale ? `?lang=${encodeURIComponent(locale)}` : '';
+	const res = await fetch(`${BASE}/aspects${query}`, { credentials: 'same-origin' });
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load aspects');
-	return data.aspects;
+	return { aspects: data.aspects || [], packages: data.packages || [] };
 }
 
 export async function listTiers(): Promise<TierInfo[]> {

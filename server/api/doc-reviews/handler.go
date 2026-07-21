@@ -11,12 +11,15 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// HandleListAspects returns all review aspects.
+// HandleListAspects returns all review aspects and the package (group) list,
+// with labels/descriptions resolved for the requested UI locale (?lang=).
+// Unknown or empty locales fall back to the English (name_en) values.
 func HandleListAspects(c echo.Context) error {
-	aspects := ListAspects()
+	locale := strings.TrimSpace(c.QueryParam("lang"))
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":  true,
-		"aspects": aspects,
+		"status":   true,
+		"aspects":  ListAspectsForLocale(locale),
+		"packages": localizedPackageOrder(locale),
 	})
 }
 
