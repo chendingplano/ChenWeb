@@ -44,12 +44,15 @@
 		docStructureLineKey
 	} from './doc-structure-line-keys.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
+	import { relatedArtifactsFromMetadata } from './doc-review-json-dialog.js';
 
 	let {
 		darkMode = true,
 		lockedRecordId = null,
+		hideSidebar = false,
 		sidebarOverride
-	}: { darkMode?: boolean; lockedRecordId?: number | null; sidebarOverride?: Snippet } = $props();
+	}: { darkMode?: boolean; lockedRecordId?: number | null; hideSidebar?: boolean; sidebarOverride?: Snippet } = $props();
 
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
@@ -1155,7 +1158,7 @@
 		</div>
 	</header>
 
-	<div class="body" class:no-browser={!showBrowser}>
+	<div class="body" class:no-browser={!showBrowser} class:only-pdf={hideSidebar}>
 		{#if showBrowser}
 			<KbInputRecordBrowser
 				{darkMode}
@@ -1173,6 +1176,7 @@
 			/>
 		{/if}
 
+		{#if !hideSidebar}
 		<aside class="structure-sidebar" style={`width:${lineListWidth}px;`}>
 			{#if sidebarOverride}
 				{@render sidebarOverride()}
@@ -1451,6 +1455,7 @@
 				<span class="line-list-resizer-grip" aria-hidden="true"></span>
 			</button>
 		</aside>
+		{/if}
 
 		<section class="right">
 			{#if !currentInput}
@@ -1465,6 +1470,8 @@
 						<span class="external-record-label">Viewing matched document: {recordDisplayName(currentInput)}</span>
 					</div>
 				{/if}
+				<div class="pdf-and-callout">
+				<div class="pdf-pane">
 				{#if isPdf}
 					<PdfViewWindow
 						inputId={currentInput.id}
@@ -1600,6 +1607,37 @@
 				{:else}
 					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
 				{/if}
+				</div>
+
+				{#if findingShelf.active && findingShelf.finding}
+					{@const f = findingShelf.finding}
+					{@const related = relatedArtifactsFromMetadata(f.metadata)}
+					{#if f.description || related.length}
+						<aside class="finding-callout">
+							{#if f.description}
+								<div class="finding-callout-label">description</div>
+								<div class="finding-callout-desc">{f.description}</div>
+							{/if}
+							{#if related.length}
+								<div class="finding-callout-label">related_artifacts</div>
+								<div class="finding-callout-related">
+									{#each related as ra, i (i)}
+										<div class="finding-callout-ra">
+											<div class="finding-callout-ra-head">
+												<span class="finding-callout-ra-rel">{ra.relationship}</span>
+												<span class="finding-callout-ra-ref">record {ra.related_record_id} · {ra.related_artifact_id}</span>
+											</div>
+											{#if ra.summary}
+												<div class="finding-callout-ra-summary">{ra.summary}</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</aside>
+					{/if}
+				{/if}
+				</div>
 			{/if}
 		</section>
 	</div>
@@ -1893,6 +1931,11 @@
 	/* No record browser: line list + PDF only, PDF fills the remaining width. */
 	.body.no-browser {
 		grid-template-columns: auto 1fr;
+	}
+	/* Report mode: sidebar hidden, so the PDF section is the sole child and must
+	   span the whole width (otherwise a phantom track absorbs the space). */
+	.body.only-pdf {
+		grid-template-columns: minmax(0, 1fr);
 	}
 	.structure-sidebar {
 		position: relative;
@@ -2581,6 +2624,22 @@
 		display: flex;
 		flex-direction: column;
 	}
+	/* PDF viewer + finding call-out sit side by side; the viewer takes all
+	   remaining width (and re-fits on resize), the call-out is a fixed column. */
+	.pdf-and-callout {
+		display: flex;
+		flex-direction: row;
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+	}
+	.pdf-pane {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+	}
 	.pvw-tool-btn {
 		display: inline-flex;
 		align-items: center;
@@ -3094,5 +3153,77 @@
 	}
 	.content-edit-error {
 		margin-top: 2px;
+	}
+
+	/* Finding call-out: a fixed-width column beside the PDF (never over it), with
+	   ~15px of breathing room on each side. */
+	.finding-callout {
+		flex: 0 0 auto;
+		align-self: flex-start;
+		width: clamp(240px, 22vw, 320px);
+		max-height: calc(100% - 44px);
+		margin: 32px 15px 12px;
+		overflow-y: auto;
+		padding: 10px 12px;
+		background: var(--panel-bg);
+		border: 1px solid var(--brass);
+		border-radius: 10px;
+		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+		font-family: var(--font-sans);
+		scrollbar-width: thin;
+	}
+	.finding-callout-label {
+		font-family: var(--font-mono);
+		font-size: 0.62rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--brass);
+		margin: 6px 0 3px;
+	}
+	.finding-callout-label:first-child {
+		margin-top: 0;
+	}
+	.finding-callout-desc {
+		font-size: 0.78rem;
+		line-height: 1.5;
+		color: var(--text-primary);
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.finding-callout-related {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.finding-callout-ra {
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		padding: 6px 8px;
+		background: var(--brass-faint);
+	}
+	.finding-callout-ra-head {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		align-items: baseline;
+	}
+	.finding-callout-ra-rel {
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+		font-weight: 600;
+		color: var(--brass);
+	}
+	.finding-callout-ra-ref {
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+		color: var(--text-muted);
+	}
+	.finding-callout-ra-summary {
+		margin-top: 4px;
+		font-size: 0.74rem;
+		line-height: 1.45;
+		color: var(--text-secondary);
+		white-space: pre-wrap;
+		word-break: break-word;
 	}
 </style>

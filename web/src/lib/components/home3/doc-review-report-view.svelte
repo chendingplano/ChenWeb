@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import {
 		getReport,
 		getRequest,
@@ -14,7 +14,7 @@
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
-	import FindingDetailsPanel from '$lib/components/home3/finding-details-panel.svelte';
+	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
 
 	let {
 		reportId,
@@ -335,6 +335,34 @@
 			void structureView?.focusSourceLines(lineNumbers);
 		}
 	}
+
+	// Publish the selected finding to the page-level context shelf, which renders
+	// the Finding details panel while this report is open (see finding-shelf-store).
+	onMount(() => {
+		findingShelf.active = true;
+	});
+	onDestroy(() => {
+		findingShelf.active = false;
+		findingShelf.finding = null;
+		findingShelf.requestId = null;
+		findingShelf.runId = null;
+		findingShelf.onFocusMatchedUnit = null;
+		findingShelf.onCloseMatchedUnits = null;
+	});
+	$effect(() => {
+		findingShelf.finding = selectedFinding;
+		findingShelf.requestId = requestId;
+		findingShelf.runId = reportRunId;
+	});
+	// The focus callbacks close over the DocStructureView instance so the shelf's
+	// related_artifacts / matched_units can still drive the PDF panel.
+	$effect(() => {
+		const sv = structureView;
+		findingShelf.onFocusMatchedUnit = sv
+			? (recordId, lineNumbers) => void sv.focusExternalArtifact(recordId, lineNumbers)
+			: null;
+		findingShelf.onCloseMatchedUnits = sv ? () => sv.backToLockedRecord() : null;
+	});
 
 	const LANG_STORAGE_KEY = 'doc-review-language';
 
@@ -979,18 +1007,7 @@
 	<!-- RIGHT: Document Structure (line list + PDF) -->
 	<section class="right-panel">
 		{#if inputRecordId != null}
-			<DocStructureView bind:this={structureView} darkMode={dark} lockedRecordId={inputRecordId}>
-				{#snippet sidebarOverride()}
-					<FindingDetailsPanel
-						finding={selectedFinding}
-						{requestId}
-						runId={reportRunId}
-						{dark}
-						onFocusMatchedUnit={(recordId, lineNumbers) => void structureView?.focusExternalArtifact(recordId, lineNumbers)}
-						onCloseMatchedUnits={() => structureView?.backToLockedRecord()}
-					/>
-				{/snippet}
-			</DocStructureView>
+			<DocStructureView bind:this={structureView} darkMode={dark} lockedRecordId={inputRecordId} hideSidebar />
 		{:else if !loading}
 			<div class="state">No source document linked to this report.</div>
 		{/if}

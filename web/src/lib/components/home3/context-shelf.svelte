@@ -9,6 +9,8 @@
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import XIcon           from '@lucide/svelte/icons/x';
+	import FindingDetailsPanel from '$lib/components/home3/finding-details-panel.svelte';
+	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -87,7 +89,8 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
-				{#if sectionId === 'dashboard'}System Status
+				{#if findingShelf.active}Finding
+				{:else if sectionId === 'dashboard'}System Status
 				{:else if sectionId === 'agents'}Agent Insights
 				{:else if sectionId === 'skills'}Skill Analytics
 				{:else if sectionId === 'applications'}App Status
@@ -109,7 +112,19 @@
 			</button>
 		</div>
 
-		{#if sectionId === 'dashboard' || !activeMenu}
+		{#if findingShelf.active}
+			<div class="finding-shelf-body">
+				<FindingDetailsPanel
+					finding={findingShelf.finding}
+					requestId={findingShelf.requestId}
+					runId={findingShelf.runId}
+					dark={darkMode}
+					onFocusMatchedUnit={findingShelf.onFocusMatchedUnit ?? undefined}
+					onCloseMatchedUnits={findingShelf.onCloseMatchedUnits ?? undefined}
+				/>
+			</div>
+
+		{:else if sectionId === 'dashboard' || !activeMenu}
 			<!-- System Health card -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">

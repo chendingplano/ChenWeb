@@ -2,11 +2,13 @@
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		getRequest,
+		listAspects,
 		restartRequest,
 		updateFinding,
 		stopRequest,
 		translateFinding
 	} from '$lib/services/docReviewService';
+	import { getLocale } from '$lib/paraglide/runtime';
 	import type {
 		RequestStatus,
 		FindingItem,
@@ -107,6 +109,18 @@
 	let activeTab = $state<'results' | 'findings' | 'report'>('results');
 	let isStopping = $state(false);
 	let packages = $state<ReviewPackageInfo[]>([]);
+	// Localized display labels for the current UI locale (falling back to name_en),
+	// keyed by aspect name and by package/group key. Loaded once from /aspects.
+	let aspectLabels = $state<Record<string, string>>({});
+	let packageLabels = $state<Record<string, string>>({});
+	// Localized aspect label; falls back to a prettified snake_case name.
+	function aspectLabel(name: string): string {
+		return aspectLabels[name] || name.replace(/_/g, ' ');
+	}
+	// Localized package (group) label; falls back to the request's own label, then the key.
+	function packageLabel(key: string): string {
+		return packageLabels[key] || packages.find((p) => p.key === key)?.label || key;
+	}
 	let defaultLanguage = $state('en');
 	let findingLanguage = $state<Record<number, string>>({});
 	let translating = $state<Record<number, boolean>>({});
@@ -331,14 +345,14 @@
 		const nonEmpty = [...countByPass.entries()]
 			.map(([key, count]) => ({
 				key,
-				label: packages.find((p) => p.key === key)?.label ?? key,
+				label: packageLabel(key),
 				count,
 				color: CHART_COLORS[sortedKeys.indexOf(key) % CHART_COLORS.length]
 			}))
 			.sort((a, b) => b.count - a.count);
 		const emptyLabels = packages
 			.filter((p) => !countByPass.has(p.key))
-			.map((p) => p.label || p.key);
+			.map((p) => packageLabel(p.key));
 		const activeItems = nonEmpty.filter((p) => !deselectedPackages.has(p.key));
 		return {
 			slices: buildDonutSlices(
@@ -358,14 +372,14 @@
 		const nonEmpty = [...countByAspect.entries()]
 			.map(([aspect, count]) => ({
 				aspect,
-				label: aspect.replace(/_/g, ' '),
+				label: aspectLabel(aspect),
 				count,
 				color: CHART_COLORS[sortedAspects.indexOf(aspect) % CHART_COLORS.length]
 			}))
 			.sort((a, b) => b.count - a.count);
 		const emptyLabels = aspectStatuses
 			.filter((s) => s.finding_count === 0)
-			.map((s) => s.aspect.replace(/_/g, ' '));
+			.map((s) => aspectLabel(s.aspect));
 		const activeItems = nonEmpty.filter((r) => !deselectedReviewers.has(r.aspect));
 		return {
 			slices: buildDonutSlices(
@@ -454,6 +468,15 @@
 	}
 
 	onMount(async () => {
+		// Localized aspect/package labels for the current UI locale (fail open to
+		// the prettified fallbacks on error).
+		try {
+			const { aspects, packages: pkgs } = await listAspects(getLocale());
+			aspectLabels = Object.fromEntries(aspects.map((a) => [a.name, a.label]));
+			packageLabels = Object.fromEntries(pkgs.map((p) => [p.key, p.label]));
+		} catch {
+			/* keep prettified fallbacks */
+		}
 		await pollStatus();
 		if (isActive) {
 			startPolling();
@@ -688,7 +711,7 @@
 										style="width: 8px; height: 8px; border-radius: 50%; background: {statusColor}; flex-shrink: 0;
 										{s.status === 'running' ? 'animation: pulse 1.2s ease-in-out infinite;' : ''}"
 									></span>
-									<span style="color: {textPrimary}; font-weight: 500;">{s.aspect.replace(/_/g, ' ')}</span>
+									<span style="color: {textPrimary}; font-weight: 500;">{aspectLabel(s.aspect)}</span>
 									{#if s.pass}<span style="color: {textMuted}; font-size: 0.75rem;">({s.pass})</span>{/if}
 									<span style="margin-left:auto; color:{textMuted}; font-size:0.75rem;"
 										>{progressPercent(s.progress)}%</span
