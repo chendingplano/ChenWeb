@@ -21,7 +21,11 @@
 		childTitle?: string;
 	};
 
-	let { siteConfig }: { siteConfig: SiteConfig } = $props();
+	// `pageKey` (optional) enables DB-backed NavRail config for this host route
+	// (spec 2026072001 §11). /development passes 'development'; /home3 omits it
+	// and keeps the full hardcoded menu.
+	let { siteConfig, pageKey = undefined }: { siteConfig: SiteConfig; pageKey?: string } =
+		$props();
 
 	// --- Layout dimensions (adjust here to change panel sizes) ---
 	const RAIL_WIDTH_COLLAPSED = 56; // collapsed icon-rail width in px
@@ -244,6 +248,7 @@
 			{darkMode}
 			{activeMenu}
 			{autoShrinkExpand}
+			{pageKey}
 			expanded={railExpanded}
 			width={railWidth}
 			onSelect={handleMenuSelect}

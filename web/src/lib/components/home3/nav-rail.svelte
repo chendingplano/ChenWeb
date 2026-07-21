@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { getLocale } from '$lib/paraglide/runtime';
+	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
@@ -47,6 +50,7 @@
 		autoShrinkExpand = false,
 		expanded       = false,
 		width          = 240,
+		pageKey        = undefined,
 		onSelect,
 		onToggleRail,
 		onWidthDragStart,
@@ -57,6 +61,10 @@
 		autoShrinkExpand:  boolean;
 		expanded:          boolean;
 		width:             number;
+		// DB-backed page-config key (kb.page_def.page_key). When set, the menu's
+		// visibility + labels are overlaid from GET /api/v1/page-config/:pageKey
+		// (spec 2026072001 §11). Left undefined (e.g. /home3) → full hardcoded menu.
+		pageKey?:          string;
 		onSelect:          (sel: ActiveSelection) => void;
 		onToggleRail:      () => void;
 		onWidthDragStart:  (e: MouseEvent) => void;
@@ -225,6 +233,102 @@
 		{ id: 'about',    label: 'About',    icon: InfoIcon }
 	];
 
+	// ── DB-backed page config (overlay model, spec 2026072001 §11) ───────────
+	// The menu tree, ids, icons, and routes stay page-owned above. When `pageKey`
+	// is set, config only overrides labels, hides items, or restricts them by
+	// role. `null` until the fetch resolves (or on error, or when pageKey is
+	// unset) so the full default menu renders — fail open.
+	let pageConfig = $state<PageConfig | null>(null);
+
+	onMount(() => {
+		if (!pageKey) return;
+		getPageConfig(pageKey, getLocale())
+			.then((cfg) => {
+				pageConfig = cfg;
+			})
+			.catch(() => {
+				// Keep the full menu with default labels on failure.
+			});
+	});
+
+	// Fail open before load / on error: everything visible with default labels.
+	// Once loaded, an id is hidden only if the resolver put it in `hidden`; its
+	// label comes from the resolved override, else the hardcoded default.
+	const isVisible = (id: string) => pageConfig === null || !pageConfig.hidden.has(id);
+	const labelFor = (id: string, fallback: string) =>
+		pageConfig?.overrides[id]?.label ?? fallback;
+
+	// Prune the tree by visibility and apply label overrides, preserving the
+	// page-owned shape. Filtering rules mirror the Wiki menu (spec 2026072001
+	// §5.1): hiding a node hides that node; a parent whose descendants all hid
+	// collapses away.
+	function buildVisible(items: NavItem[]): NavItem[] {
+		const out: NavItem[] = [];
+		for (const item of items) {
+			if (!isVisible(item.id)) continue;
+			let children: NavChild[] | undefined;
+			if (item.children) {
+				children = [];
+				for (const child of item.children) {
+					if (!isVisible(child.id)) continue;
+					let grandchildren: NavGrandchild[] | undefined;
+					if (child.children) {
+						grandchildren = child.children
+							.filter((gc) => isVisible(gc.id))
+							.map((gc) => ({ ...gc, label: labelFor(gc.id, gc.label) }));
+						if (grandchildren.length === 0) continue; // sub-group collapses
+					}
+					children.push({
+						...child,
+						label: labelFor(child.id, child.label),
+						...(grandchildren ? { children: grandchildren } : {})
+					});
+				}
+				if (children.length === 0) continue; // parent collapses when all children hid
+			}
+			out.push({
+				...item,
+				label: labelFor(item.id, item.label),
+				...(children ? { children } : {})
+			});
+		}
+		return out;
+	}
+
+	const displayMainNav = $derived(buildVisible(mainNav));
+	const displayBottomNav = $derived(buildVisible(bottomNav));
+
+	// Every id the menu owns — the source of truth for valid entry_keys. Used to
+	// flag config rows that match nothing (a stale/typo entry_key), which are
+	// otherwise silently inert (spec 2026072001 §4.4).
+	const knownNavIds = (() => {
+		const ids = new Set<string>();
+		for (const item of [...mainNav, ...bottomNav]) {
+			ids.add(item.id);
+			for (const child of item.children ?? []) {
+				ids.add(child.id);
+				for (const gc of child.children ?? []) ids.add(gc.id);
+			}
+		}
+		return ids;
+	})();
+
+	const unknownConfigIds = $derived(
+		pageConfig
+			? [...Object.keys(pageConfig.overrides), ...pageConfig.hidden].filter(
+					(id) => !knownNavIds.has(id)
+				)
+			: []
+	);
+
+	$effect(() => {
+		if (unknownConfigIds.length > 0) {
+			console.warn(
+				`[page-config] ${pageKey} returned unrecognized nav entry id(s), ignored: ${unknownConfigIds.join(', ')}`
+			);
+		}
+	});
+
 	const user = { name: 'Alex Johnson', email: 'alex@example.com' };
 
 	function isItemActive(item: NavItem): boolean {
@@ -336,9 +440,9 @@
 
 	<!-- Main nav items (scrollable) -->
 	<nav class="flex-1 overflow-y-auto py-2" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
-		{#each mainNav as item, index (item.id)}
+		{#each displayMainNav as item, index (item.id)}
 			<div class="px-2 mb-0.5">
-				{#if showLabels && item.group && (index === 0 || mainNav[index - 1].group !== item.group)}
+				{#if showLabels && item.group && (index === 0 || displayMainNav[index - 1].group !== item.group)}
 					<div
 						class="px-2 py-2 text-xs uppercase tracking-wide"
 						style="color:{textMuted}; font-weight:600;"
@@ -471,7 +575,7 @@
 		<div class="mx-3 my-2" style="height:1px; background:{borderColor};"></div>
 
 		<!-- Bottom nav -->
-		{#each bottomNav as item (item.id)}
+		{#each displayBottomNav as item (item.id)}
 			<div class="px-2 mb-0.5">
 				<button
 					onclick={() => selectItem(item)}

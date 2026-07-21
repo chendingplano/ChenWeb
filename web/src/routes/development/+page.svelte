@@ -4,4 +4,4 @@
 	let { data } = $props();
 </script>
 
-<Dashboard siteConfig={data.siteConfig} />
+<Dashboard siteConfig={data.siteConfig} pageKey="development" />
