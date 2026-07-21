@@ -540,7 +540,8 @@
 							<button
 								type="button"
 								onclick={() => selectSection(item.id)}
-								class="flex w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+								data-entry-key={item.id}
+									class="flex w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
 								style="
 									padding:9px 0;
 									border:none;
@@ -580,6 +581,7 @@
 								<button
 									type="button"
 									onclick={() => toggleParentOpen(item)}
+										data-entry-key={item.id}
 									class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
 									style="
 										color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
@@ -608,6 +610,7 @@
 											<button
 												type="button"
 												onclick={() => selectSection(child.id)}
+													data-entry-key={child.id}
 												class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
 												style="
 													background:{isChildActive(child.id) ? accentTint : childIdleBg};
@@ -650,7 +653,8 @@
 						<button
 							type="button"
 							onclick={() => selectSection(item.id)}
-							class="flex w-full cursor-pointer items-center rounded-lg text-left transition-colors duration-150"
+							data-entry-key={item.id}
+								class="flex w-full cursor-pointer items-center rounded-lg text-left transition-colors duration-150"
 							style="
 								gap:{menuCollapsed ? '0' : '12px'};
 								padding:{menuCollapsed ? '9px 0' : '8px 10px'};
