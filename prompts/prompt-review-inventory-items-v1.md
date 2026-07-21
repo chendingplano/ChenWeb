@@ -92,13 +92,13 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields:
 - `severity`: "critical" (safety/compliance-relevant conflict), "high" (clear conflicting identity/spec), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a real conflict to fix; "observation" for a notable but non-blocking discrepancy.
-- `title` and `description`: always in English. Name both conflicting values and the conflicting `source_filename` (or `inventory_item_id`).
+- `title` and `description`: always in Chinese. Name both conflicting values and the conflicting `source_filename` (or `inventory_item_id`).
 - `evidence`: identify the item under review and the specific matching item it conflicts with. Keep any quoted item names/model numbers/values exactly as they appear (do not translate).
 - `location`: leave empty (`""`); the system fills it from the item's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the items clearly describe the same product and clearly conflict.
 
 Output language rules:
-- Always write `title` and `description` in English.
+- Always write `title` and `description` in Chinese.
 - Keep item names, model/part numbers, spec values, and units exactly as they appear; do not translate or normalize them.
 
 ---

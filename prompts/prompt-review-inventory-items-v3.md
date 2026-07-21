@@ -156,12 +156,12 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields (`analyses`):
 - `related_artifact_id` / `related_record_id`: the `inventory_item_id` and `source_record_id` of the matching item this entry analyzes. Every item in `matching_items` must have exactly one corresponding `analyses` entry.
 - `relationship`: `"same_subject"` (same catalog item/product as the item under review), `"related_subject"` (topically related but distinct product), or `"unrelated"` (candidate is noise).
-- `summary`: always in English, 1-3 sentences. Must mention what was compared (identity/spec and, when informative, surrounding context) and state the conclusion, even when the conclusion is "identical, no issue."
+- `summary`: always in Chinese, 1-3 sentences. Must mention what was compared (identity/spec and, when informative, surrounding context) and state the conclusion, even when the conclusion is "identical, no issue."
 
 Fields (`findings`):
 - `severity`: "critical" (safety/compliance-relevant conflict with a governing standard or regulation), "high" (clear conflicting identity/spec), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a confirmed conflict or extraction error; "observation" for outliers, currency signals, patterns, and unverified discrepancies.
-- `title` and `description`: always in English. Name both conflicting values and the conflicting `source_filename` (or `inventory_item_id`).
+- `title` and `description`: always in Chinese. Name both conflicting values and the conflicting `source_filename` (or `inventory_item_id`).
 - `evidence`: identify the item under review and the specific matching item it conflicts with. Keep any quoted item names/model numbers/values exactly as they appear (do not translate).
 - `location`: leave empty (`""`); the system fills it from the item's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the items clearly describe the same product and clearly conflict; below 0.5 for every `observation` that is unverified.

@@ -150,19 +150,19 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields (`analyses`):
 - `related_artifact_id` / `related_record_id`: the `prov_id` and `source_record_id` of the matching provision this entry analyzes. Every item in `matching_provisions` must have exactly one corresponding `analyses` entry.
 - `relationship`: `"same_subject"` (governs the same subject/scope as the provision under review), `"related_subject"` (topically related but distinct scope), or `"unrelated"` (candidate is noise).
-- `summary`: always in English, 1-3 sentences. Must mention what was compared (text and, when informative, surrounding context) and state the conclusion, even when the conclusion is "identical, no issue."
+- `summary`: always in Chinese, 1-3 sentences. Must mention what was compared (text and, when informative, surrounding context) and state the conclusion, even when the conclusion is "identical, no issue."
 
 Fields (`findings`):
 - `severity`: "critical" (safety/compliance-relevant contradiction with a governing standard or regulation), "high" (clear conflicting obligation/value), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a confirmed conflict or extraction error; "observation" for outliers, currency signals, patterns, and unverified discrepancies.
-- `title` and `description`: always in English. Name both provisions and the conflicting `source_filename` (or `prov_id`).
+- `title` and `description`: always in Chinese. Name both provisions and the conflicting `source_filename` (or `prov_id`).
 - `evidence`: identify the provision under review and the specific matching provision it conflicts with. Keep quoted provision text exactly as it appears (do not translate).
 - `location`: leave empty (`""`); the system fills it from the provision's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the provisions clearly govern the same subject and clearly conflict; below 0.5 for every `observation` that is unverified.
 - `related_artifact_id` / `related_record_id`: the `prov_id` and `source_record_id` of the matched provision the finding is about, so the report can link it. Omit both only when the finding references no specific match (e.g. an extraction error against the source window).
 
 Output language rules:
-- Always write `title`, `description`, and `analyses[].summary` in English.
+- Always write `title`, `description`, and `analyses[].summary` in Chinese.
 - Keep provision names and quoted text exactly as they appear; do not translate or normalize them.
 
 # 7. Rules

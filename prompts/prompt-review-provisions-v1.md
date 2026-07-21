@@ -86,13 +86,13 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields:
 - `severity`: "critical" (safety/compliance-relevant contradiction), "high" (clear conflicting obligation/value), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a real conflict to fix; "observation" for a notable but non-blocking discrepancy.
-- `title` and `description`: always in English. Name both provisions and the conflicting `source_filename` (or `prov_id`).
+- `title` and `description`: always in Chinese. Name both provisions and the conflicting `source_filename` (or `prov_id`).
 - `evidence`: identify the provision under review and the specific matching provision it conflicts with. Keep quoted provision text exactly as it appears (do not translate).
 - `location`: leave empty (`""`); the system fills it from the provision's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the provisions clearly govern the same subject and clearly conflict.
 
 Output language rules:
-- Always write `title` and `description` in English.
+- Always write `title` and `description` in Chinese.
 - Keep provision names and quoted text exactly as they appear; do not translate or normalize them.
 
 ---

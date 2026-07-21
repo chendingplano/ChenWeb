@@ -86,13 +86,13 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields:
 - `severity`: "critical" (safety/compliance-relevant conflict), "high" (clear conflicting value/limit), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a real conflict to fix; "observation" for a notable but non-blocking discrepancy.
-- `title` and `description`: always in English. Name both values/units and the conflicting `source_filename` (or `metric_id`).
+- `title` and `description`: always in Chinese. Name both values/units and the conflicting `source_filename` (or `metric_id`).
 - `evidence`: identify the metric under review and the specific matching metric it conflicts with. Keep any quoted metric names/values exactly as they appear (do not translate).
 - `location`: leave empty (`""`); the system fills it from the metric's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the metrics clearly describe the same quantity and clearly conflict.
 
 Output language rules:
-- Always write `title` and `description` in English.
+- Always write `title` and `description` in Chinese.
 - Keep metric names, values, and units exactly as they appear; do not translate or normalize them.
 
 ---

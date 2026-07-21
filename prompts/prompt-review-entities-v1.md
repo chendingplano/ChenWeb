@@ -89,13 +89,13 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields:
 - `severity`: "critical" (conflict that would mislead downstream consumers, e.g. wrong type for a safety-relevant entity), "high" (clear contradictory attribute/type), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a real conflict to fix; "observation" for a notable but non-blocking discrepancy.
-- `title` and `description`: always in English. Name both entities and the conflicting `source_filename` (or `entity_id`).
+- `title` and `description`: always in Chinese. Name both entities and the conflicting `source_filename` (or `entity_id`).
 - `evidence`: identify the entity under review and the specific matching entity it conflicts with. Keep entity names and quoted descriptions exactly as they appear (do not translate).
 - `location`: leave empty (`""`); the system fills it from the entity's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the two clearly denote the same entity AND clearly conflict.
 
 Output language rules:
-- Always write `title` and `description` in English.
+- Always write `title` and `description` in Chinese.
 - Keep entity names, aliases, and quoted text exactly as they appear; do not translate or normalize them.
 
 ---

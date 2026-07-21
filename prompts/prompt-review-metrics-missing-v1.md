@@ -175,8 +175,8 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields:
 - `severity`: "critical" (safety/compliance-critical metric absent from the doc), "high" (required by a governing standard), "medium" (widely expected but no single governing standard mandates it), "low" (minor or possibly-optional).
 - `finding_type`: `"missing_metric"` for a confirmed gap. `"observation"` for a plausible gap that could not be fully verified.
-- `title`: one-line summary; all in English.
-- `description`: what metric is missing, which peers expect it, and why it applies to this document. All in English.
+- `title`: one-line summary; all in Chinese.
+- `description`: what metric is missing, which peers expect it, and why it applies to this document. All in Chinese.
 - `evidence`: cite the object, the peer metrics/documents, and which searches were run.
 - `location`: leave empty (`""`).
 - `suggestion`: what to add and which document/standard to cite.
@@ -184,7 +184,7 @@ Fields:
 - `related_artifact_id` / `related_record_id`: the `metric_id` and `source_record_id` of the most authoritative peer metric for each missing metric, so the report can link it.
 
 Output language rules:
-- Always write `title`, `description`, and `suggestion` in English.
+- Always write `title`, `description`, and `suggestion` in Chinese.
 - Keep metric names, object names, and source filenames as they appear.
 
 # 6. Rules

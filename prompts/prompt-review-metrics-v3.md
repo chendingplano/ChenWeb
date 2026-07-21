@@ -152,12 +152,12 @@ Return **strict JSON only**. No prose, no markdown, no code fences.
 Fields (`analyses`):
 - `related_artifact_id` / `related_record_id`: the `metric_id` and `source_record_id` of the matching metric this entry analyzes. Every item in `matching_metrics` must have exactly one corresponding `analyses` entry.
 - `relationship`: `"same_subject"` (describes the same quantity as the metric under review), `"related_subject"` (topically related but distinct quantity), or `"unrelated"` (candidate is noise).
-- `summary`: always in English, 1-3 sentences. Must mention what was compared (value and, when informative, surrounding context) and state the conclusion, even when the conclusion is "identical, no issue."
+- `summary`: always in Chinese, 1-3 sentences. Must mention what was compared (value and, when informative, surrounding context) and state the conclusion, even when the conclusion is "identical, no issue."
 
 Fields (`findings`):
 - `severity`: "critical" (safety/compliance-relevant conflict with a governing standard or regulation), "high" (clear conflicting value/limit), "medium" (likely conflict needing confirmation), "low" (minor/possible).
 - `finding_type`: "issue" for a confirmed conflict or extraction error; "observation" for outliers, currency signals, patterns, and unverified discrepancies.
-- `title` and `description`: always in English. Name both values/units and the conflicting `source_filename` (or `metric_id`).
+- `title` and `description`: always in Chinese. Name both values/units and the conflicting `source_filename` (or `metric_id`).
 - `evidence`: identify the metric under review and the specific matching metric it conflicts with. Keep any quoted metric names/values exactly as they appear (do not translate).
 - When a finding references a matching metric, identify that metric in prose by its `metric_id`: e.g. `diaryMac.docx (refer to 415-mtc-2) specifies 48小时 ...`. Do this in both `description` and `evidence`; do not rely on the filename alone.
 - Do not paste `source_context` lines into `description`; the report renderer uses `related_artifact_id` and `related_record_id` to render those lines as a separate source block.

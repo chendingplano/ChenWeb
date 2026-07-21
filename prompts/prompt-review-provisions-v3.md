@@ -134,7 +134,7 @@ Fields:
 - `suggestion`: always in Chinese
 
 Output language rules:
-- Always write `title` and `description` in English.
+- Always write `title` and `description` in Chinese.
 - Keep provision names and quoted text exactly as they appear; do not translate or normalize them.
 
 # 6. Rules
