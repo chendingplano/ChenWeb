@@ -10,6 +10,8 @@
     import DocReviewMonitor from './doc-review-monitor.svelte';
     import DocReviewRequestsList from './doc-review-requests-list.svelte';
     import { appAuthStore } from '@chendingplano/shared';
+    import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
+    import { getLocale } from '$lib/paraglide/runtime';
     import SearchIcon from '@lucide/svelte/icons/search';
     import CheckIcon from '@lucide/svelte/icons/check';
     import XIcon from '@lucide/svelte/icons/x';
@@ -141,6 +143,47 @@
         P5: 'Technical & Compliance', P6: 'Meta & Process',
     };
 
+    // ── Page-config overlay (KnowledgeStore spec 2026072001 §11) ──────────────
+    // The page owns its structure AND hardcoded default text; page-config only
+    // overrides text or hides an item. null = "not loaded / errored" → fail open
+    // to the full default page. Only page-owned static UI text is driven here;
+    // tiers/aspects stay sourced from doc-review.local.toml.
+    let pageConfig = $state<PageConfig | null>(null);
+    // Text override with fallback to the page's hardcoded default (overlay model).
+    let labelFor = $derived(
+        (id: string, fallback: string) => pageConfig?.overrides[id]?.label ?? fallback
+    );
+    // Default visible; hide only what the resolver reports as hidden.
+    let isVisible = $derived((id: string) => pageConfig === null || !pageConfig.hidden.has(id));
+
+    // Every entry_key this page owns, so stale/typo ids from the resolver can be
+    // surfaced (§4.4) rather than failing silently.
+    const knownPageConfigIds = new Set<string>([
+        'dr-title', 'dr-subtitle', 'dr-btn-next', 'dr-btn-back', 'dr-btn-start',
+        'dr-step-select-document', 'dr-step-check-level', 'dr-step-references', 'dr-step-submit',
+        'dr-s1-heading', 'dr-s2-heading', 'dr-s3-heading', 'dr-s4-heading',
+        'dr-s1-mode-search', 'dr-s1-mode-upload', 'dr-s1-parser-label', 'dr-s1-upload-btn',
+        'dr-s2-depth-label', 'dr-s3-add-btn', 'dr-s3-ref-placeholder',
+        'dr-s4-name-label', 'dr-s4-notes-label', 'dr-s4-report-label', 'dr-s4-doctpl-label',
+        'dr-summary-heading', 'dr-summary-document', 'dr-summary-checklevel',
+        'dr-summary-aspects', 'dr-summary-depth', 'dr-summary-requester',
+        'dr-group-p1', 'dr-group-p2', 'dr-group-p3', 'dr-group-p4', 'dr-group-p5', 'dr-group-p6',
+    ]);
+    let unknownPageConfigIds = $derived(
+        pageConfig
+            ? [...Object.keys(pageConfig.overrides), ...pageConfig.hidden].filter(
+                  (id) => !knownPageConfigIds.has(id)
+              )
+            : []
+    );
+    $effect(() => {
+        if (unknownPageConfigIds.length > 0) {
+            console.warn(
+                `[page-config] doc-review returned unrecognized entry id(s), ignored: ${unknownPageConfigIds.join(', ')}`
+            );
+        }
+    });
+
     // Lookup: aspect name -> AspectInfo, for resolving a tier's aspect labels
     let aspectByName = $derived.by(() => {
         const map: Record<string, AspectInfo> = {};
@@ -159,7 +202,11 @@
         }
         return Object.entries(byGroup)
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([group, items]) => ({ group, label: groupLabels[group] ?? group, items }));
+            .map(([group, items]) => ({
+                group,
+                label: labelFor(`dr-group-${group.toLowerCase()}`, groupLabels[group] ?? group),
+                items,
+            }));
     }
 
     // Which tier cards have their aspect list expanded
@@ -226,6 +273,11 @@
     }
 
     onMount(async () => {
+        // Resolve configurable static text for the current locale; fail open to
+        // the hardcoded defaults on error (§11.2).
+        getPageConfig('doc-review', getLocale())
+            .then((cfg) => { pageConfig = cfg; })
+            .catch(() => {});
         try {
             aspects = await listAspects();
             tiers = await listTiers();
@@ -379,10 +431,12 @@
     />
 {:else}
     <div style="padding: 1.5rem; color: {textPrimary};">
-        <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">Document Review</h1>
-        <p style="color: {textSecondary}; margin-bottom: 1.25rem;">
-            Submit a document for AI-powered review across quality, compliance, and technical aspects.
-        </p>
+        <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">{labelFor('dr-title', 'Document Review')}</h1>
+        {#if isVisible('dr-subtitle')}
+            <p style="color: {textSecondary}; margin-bottom: 1.25rem;">
+                {labelFor('dr-subtitle', 'Submit a document for AI-powered review across quality, compliance, and technical aspects.')}
+            </p>
+        {/if}
 
         <!-- DR15: live monitor of all in-flight review jobs -->
         <DocReviewMonitor {darkMode} onView={(id) => { viewingRun = { requestId: id }; }} onStop={() => { requestsRefreshKey += 1; }} />
@@ -396,14 +450,14 @@
 
         <!-- Step indicators -->
         <div style="display: flex; gap: 0.5rem; margin-bottom: 2rem; font-size: 0.8rem;">
-            {#each ['Select Document', 'Check Level', 'References', 'Submit'] as step, i}
+            {#each [['dr-step-select-document', 'Select Document'], ['dr-step-check-level', 'Check Level'], ['dr-step-references', 'References'], ['dr-step-submit', 'Submit']] as [stepId, step], i}
                 <div style="display: flex; align-items: center; gap: 0.25rem;">
                     <div style="width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
                         background: {i + 1 <= currentStep ? accent : borderColor}; color: {i + 1 <= currentStep ? '#fff' : textMuted};
                         font-size: 0.75rem; font-weight: 600;">
                         {i + 1 <= currentStep ? '✓' : i + 1}
                     </div>
-                    <span style="color: {i + 1 === currentStep ? accent : textMuted}; white-space: nowrap;">{step}</span>
+                    <span style="color: {i + 1 === currentStep ? accent : textMuted}; white-space: nowrap;">{labelFor(stepId, step)}</span>
                 </div>
             {/each}
         </div>
@@ -411,11 +465,11 @@
         <!-- Step 1: Document Search -->
         {#if currentStep === 1}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 1: Select Document</h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s1-heading', 'Step 1: Select Document')}</h2>
 
                 <!-- Mode toggle: search the library or upload a new file -->
                 <div style="display: inline-flex; gap: 0.25rem; padding: 0.25rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; margin-bottom: 1rem;">
-                    {#each [['search', 'Search Library'], ['upload', 'Upload File']] as [mode, label]}
+                    {#each [['search', labelFor('dr-s1-mode-search', 'Search Library')], ['upload', labelFor('dr-s1-mode-upload', 'Upload File')]] as [mode, label]}
                         <button onclick={() => switchMode(mode as 'search' | 'upload')}
                             style="display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
                             background: {inputMode === mode ? accent : 'transparent'}; color: {inputMode === mode ? '#fff' : textSecondary};">
@@ -477,7 +531,7 @@
                         </button>
                         <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
                             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: {textSecondary};">
-                                Parser
+                                {labelFor('dr-s1-parser-label', 'Parser')}
                                 <select bind:value={uploadParser}
                                     style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 6px; padding: 0.35rem 0.5rem; color: {textPrimary}; font-size: 0.85rem;">
                                     {#each uploadParserOptions as opt}
@@ -493,7 +547,7 @@
                                     <LoaderIcon size={14} style="animation: spin 1s linear infinite;" />
                                     Uploading…
                                 {:else}
-                                    Upload & Select
+                                    {labelFor('dr-s1-upload-btn', 'Upload & Select')}
                                 {/if}
                             </button>
                         </div>
@@ -512,19 +566,19 @@
             <button onclick={() => selectedDocId && (currentStep = 2)}
                 disabled={!selectedDocId}
                 style="padding: 0.6rem 1.5rem; background: {selectedDocId ? accent : borderColor}; color: {selectedDocId ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {selectedDocId ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">
-                Next →
+                {labelFor('dr-btn-next', 'Next →')}
             </button>
         {/if}
 
         <!-- Step 2: Check Level & Aspects -->
         {#if currentStep === 2}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.35rem;">Step 2: Choose Check Level</h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.35rem;">{labelFor('dr-s2-heading', 'Step 2: Choose Check Level')}</h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
                     Toggle a level On to review its aspects, then expand it to fine-tune. {effectiveAspects.length} aspect{effectiveAspects.length === 1 ? '' : 's'} selected.
                 </p>
                 <fieldset style="margin: 0 0 1rem 0; padding: 0; border: none;">
-                    <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">Review depth</legend>
+                    <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">{labelFor('dr-s2-depth-label', 'Review depth')}</legend>
                     <div role="radiogroup" aria-label="Review depth" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         {#each [1, 2, 3] as depth}
                             <button
@@ -612,12 +666,12 @@
             </div>
             <div style="display: flex; gap: 0.5rem;">
                 <button onclick={() => currentStep = 1}
-                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
+                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">{labelFor('dr-btn-back', '← Back')}</button>
                 <!-- Wrap in a span so the help tooltip shows even while the button is disabled -->
                 <span title={effectiveAspects.length === 0 ? 'Select at least one aspect to review before continuing.' : ''} style="display: inline-flex;">
                     <button onclick={() => currentStep = 3}
                         disabled={effectiveAspects.length === 0}
-                        style="padding: 0.6rem 1.5rem; background: {effectiveAspects.length > 0 ? accent : borderColor}; color: {effectiveAspects.length > 0 ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {effectiveAspects.length > 0 ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">Next →</button>
+                        style="padding: 0.6rem 1.5rem; background: {effectiveAspects.length > 0 ? accent : borderColor}; color: {effectiveAspects.length > 0 ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {effectiveAspects.length > 0 ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">{labelFor('dr-btn-next', 'Next →')}</button>
                 </span>
             </div>
         {/if}
@@ -625,7 +679,7 @@
         <!-- Step 3: Supporting Documents -->
         {#if currentStep === 3}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 3: Supporting Documents <span style="font-weight: 400; color: {textMuted};">(optional)</span></h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s3-heading', 'Step 3: Supporting Documents')} <span style="font-weight: 400; color: {textMuted};">(optional)</span></h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
                     Add reference standards or supporting documents for compliance checking.
                 </p>
@@ -639,60 +693,64 @@
                     </div>
                 {/each}
                 <div style="display: flex; gap: 0.5rem;">
-                    <input id="ref-doc-input" type="text" placeholder="Reference document title or ID"
+                    <input id="ref-doc-input" type="text" placeholder={labelFor('dr-s3-ref-placeholder', 'Reference document title or ID')}
                         style="flex: 1; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                     <button onclick={refDocSearch}
-                        style="padding: 0.5rem 1rem; background: {accentTint}; color: {accent}; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Add</button>
+                        style="padding: 0.5rem 1rem; background: {accentTint}; color: {accent}; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{labelFor('dr-s3-add-btn', 'Add')}</button>
                 </div>
             </div>
             <div style="display: flex; gap: 0.5rem;">
                 <button onclick={() => currentStep = 2}
-                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
+                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">{labelFor('dr-btn-back', '← Back')}</button>
                 <button onclick={() => currentStep = 4}
-                    style="padding: 0.6rem 1.5rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">Next →</button>
+                    style="padding: 0.6rem 1.5rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">{labelFor('dr-btn-next', 'Next →')}</button>
             </div>
         {/if}
 
         <!-- Step 4: Notes & Submit -->
         {#if currentStep === 4}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 4: Review Details</h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s4-heading', 'Step 4: Review Details')}</h2>
                 <div style="margin-bottom: 1rem;">
-                    <label for="review-requester-name" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Your Name *</label>
+                    <label for="review-requester-name" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-name-label', 'Your Name *')}</label>
                     <input id="review-requester-name" type="text" bind:value={requesterName} placeholder="Enter your name"
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
                 <div style="margin-bottom: 1rem;">
-                    <label for="review-notes" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Notes (optional)</label>
+                    <label for="review-notes" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-notes-label', 'Notes (optional)')}</label>
                     <textarea id="review-notes" bind:value={notes} placeholder="e.g., Focus on sterilization validation sections..."
                         rows={4}
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem; resize: vertical;"></textarea>
                 </div>
-                <div style="margin-bottom: 1rem;">
-                    <label for="review-report-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Report Template (optional)</label>
-                    <input id="review-report-template" type="text" bind:value={reportTemplate} placeholder="Template name or path"
-                        style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
-                </div>
-                <div style="margin-bottom: 1rem;">
-                    <label for="review-doc-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Doc Template (optional)</label>
-                    <input id="review-doc-template" type="text" bind:value={docTemplate} placeholder="Template name or path"
-                        style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
-                </div>
+                {#if isVisible('dr-s4-report-label')}
+                    <div style="margin-bottom: 1rem;">
+                        <label for="review-report-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-report-label', 'Report Template (optional)')}</label>
+                        <input id="review-report-template" type="text" bind:value={reportTemplate} placeholder="Template name or path"
+                            style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
+                    </div>
+                {/if}
+                {#if isVisible('dr-s4-doctpl-label')}
+                    <div style="margin-bottom: 1rem;">
+                        <label for="review-doc-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-doctpl-label', 'Doc Template (optional)')}</label>
+                        <input id="review-doc-template" type="text" bind:value={docTemplate} placeholder="Template name or path"
+                            style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
+                    </div>
+                {/if}
             </div>
 
             <!-- Review Summary -->
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem;">Review Summary</h3>
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem;">{labelFor('dr-summary-heading', 'Review Summary')}</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem;">
-                    <div style="color: {textSecondary};">Document:</div>
+                    <div style="color: {textSecondary};">{labelFor('dr-summary-document', 'Document:')}</div>
                     <div style="color: {textPrimary};">{selectedDocTitle}</div>
-                    <div style="color: {textSecondary};">Check Level:</div>
+                    <div style="color: {textSecondary};">{labelFor('dr-summary-checklevel', 'Check Level:')}</div>
                     <div style="color: {textPrimary};">{checkLevelLabel}</div>
-                    <div style="color: {textSecondary};">Aspects:</div>
+                    <div style="color: {textSecondary};">{labelFor('dr-summary-aspects', 'Aspects:')}</div>
                     <div style="color: {textPrimary};">{effectiveAspects.length} selected</div>
-                    <div style="color: {textSecondary};">Review Depth:</div>
+                    <div style="color: {textSecondary};">{labelFor('dr-summary-depth', 'Review Depth:')}</div>
                     <div style="color: {textPrimary};">Depth {reviewDepth}</div>
-                    <div style="color: {textSecondary};">Requester:</div>
+                    <div style="color: {textSecondary};">{labelFor('dr-summary-requester', 'Requester:')}</div>
                     <div style="color: {textPrimary};">{requesterName}</div>
                 </div>
             </div>
@@ -706,7 +764,7 @@
             <div style="display: flex; gap: 0.5rem;">
                 <button onclick={() => currentStep = 3}
                     disabled={isSubmitting}
-                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
+                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">{labelFor('dr-btn-back', '← Back')}</button>
                 <button onclick={handleSubmit}
                     disabled={isSubmitting || !requesterName.trim()}
                     style="flex: 1; padding: 0.75rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
@@ -714,7 +772,7 @@
                         <LoaderIcon size={16} style="animation: spin 1s linear infinite;" />
                         Submitting...
                     {:else}
-                        Start Review
+                        {labelFor('dr-btn-start', 'Start Review')}
                     {/if}
                 </button>
             </div>
