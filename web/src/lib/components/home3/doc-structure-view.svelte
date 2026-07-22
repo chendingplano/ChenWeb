@@ -45,7 +45,8 @@
 	} from './doc-structure-line-keys.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
-	import { relatedArtifactsFromMetadata } from './doc-review-json-dialog.js';
+	import { relatedArtifactsFromMetadata, lineNumbersFromSpans, type RelatedArtifact } from './doc-review-json-dialog.js';
+	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 
 	let {
 		darkMode = true,
@@ -86,6 +87,28 @@
 	function endCalloutDrag(e: PointerEvent) {
 		calloutDrag = null;
 		(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+	}
+
+	// Clicking a related_artifacts entry in the call-out jumps the PDF to that
+	// artifact's source document/lines — same behavior as the right-panel list.
+	let calloutRaLoadingId = $state<string | null>(null);
+	async function openCalloutRelatedArtifact(ra: RelatedArtifact) {
+		const recordId = Number(ra.related_record_id);
+		if (!Number.isFinite(recordId) || recordId <= 0) return;
+		calloutRaLoadingId = ra.related_artifact_id;
+		try {
+			const artifactType = artifactTypeFromKey(ra.related_artifact_id);
+			let lineNumbers: number[] = [];
+			if (artifactType) {
+				const record = await getArtifactWiki(artifactType, ra.related_artifact_id);
+				lineNumbers = lineNumbersFromSpans(record.source_line_spans);
+			}
+			await focusExternalArtifact(recordId, lineNumbers);
+		} catch (e) {
+			console.error('[doc-structure-view] failed to focus related artifact', ra, e);
+		} finally {
+			calloutRaLoadingId = null;
+		}
 	}
 
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
@@ -1665,22 +1688,39 @@
 								<span class="finding-callout-drag-title">Finding</span>
 							</div>
 							{#if f.description}
-								<div class="finding-callout-label">description</div>
+								<div class="finding-callout-label">描述</div>
 								<div class="finding-callout-desc">{f.description}</div>
 							{/if}
 							{#if related.length}
-								<div class="finding-callout-label">related_artifacts</div>
+								<div class="finding-callout-label">关联指标</div>
 								<div class="finding-callout-related">
 									{#each related as ra, i (i)}
-										<div class="finding-callout-ra">
+										<button
+											type="button"
+											class="finding-callout-ra"
+											disabled={calloutRaLoadingId === ra.related_artifact_id}
+											onclick={() => openCalloutRelatedArtifact(ra)}
+											title="Jump to this related artifact's source document"
+										>
 											<div class="finding-callout-ra-head">
-												<span class="finding-callout-ra-rel">{ra.relationship}</span>
+												{#if ra.relationship}
+													<span class="finding-callout-ra-rel">{ra.relationship}</span>
+												{/if}
 												<span class="finding-callout-ra-ref">record {ra.related_record_id} · {ra.related_artifact_id}</span>
 											</div>
 											{#if ra.summary}
 												<div class="finding-callout-ra-summary">{ra.summary}</div>
+											{:else if ra.fields.length}
+												<div class="finding-callout-ra-fields">
+													{#each ra.fields as field (field.label)}
+														<div class="finding-callout-ra-field">
+															<span class="finding-callout-ra-field-label">{field.label}</span>
+															<span class="finding-callout-ra-field-value">{field.value}</span>
+														</div>
+													{/each}
+												</div>
 											{/if}
-										</div>
+										</button>
 									{/each}
 								</div>
 							{/if}
@@ -3274,10 +3314,23 @@
 		gap: 6px;
 	}
 	.finding-callout-ra {
+		display: block;
+		width: 100%;
+		text-align: left;
 		border: 1px solid var(--ink-line);
 		border-radius: 6px;
 		padding: 6px 8px;
 		background: var(--brass-faint);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+	.finding-callout-ra:hover:not(:disabled) {
+		border-color: var(--brass);
+	}
+	.finding-callout-ra:disabled {
+		cursor: default;
+		opacity: 0.6;
 	}
 	.finding-callout-ra-head {
 		display: flex;
@@ -3300,6 +3353,28 @@
 		margin-top: 4px;
 		font-size: 0.74rem;
 		line-height: 1.45;
+		color: var(--text-secondary);
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.finding-callout-ra-fields {
+		margin-top: 4px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.finding-callout-ra-field {
+		display: grid;
+		grid-template-columns: minmax(80px, 110px) minmax(0, 1fr);
+		gap: 6px;
+		font-size: 0.72rem;
+	}
+	.finding-callout-ra-field-label {
+		font-family: var(--font-mono);
+		color: var(--text-muted);
+		word-break: break-word;
+	}
+	.finding-callout-ra-field-value {
 		color: var(--text-secondary);
 		white-space: pre-wrap;
 		word-break: break-word;

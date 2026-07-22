@@ -180,7 +180,7 @@ test('relatedArtifactsFromMetadata parses a JSON-encoded related_artifact_fields
 
 	assert.deepEqual(result, [
 		{
-			relationship: 'null',
+			relationship: '',
 			related_record_id: '430',
 			related_artifact_id: '430_mtc_19',
 			summary: '',

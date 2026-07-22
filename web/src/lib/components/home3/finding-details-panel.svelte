@@ -66,6 +66,53 @@
 	let relatedArtifacts = $derived(relatedArtifactsFromMetadata(finding?.metadata));
 	let relatedArtifactLoadingId = $state<string | null>(null);
 
+	// Artifact block display: drop the English (_en) columns and a few noisy
+	// internal fields, relabel known fields to Chinese, and surface the important
+	// ones first (the rest keep their original order).
+	const ARTIFACT_LABELS: Record<string, string> = {
+		metric_name: '指标',
+		metric_desc: '描述',
+		object_node_canonical_name: '指标实体名',
+		metric_subject: '主体',
+		metric_context: '上下文',
+		metric_keywords: '关键词',
+		metric_value: '指标值',
+		metric_unit: '指标单位',
+		value_data_type: '数值类型',
+		metric_id: '指标标识符',
+		source_line_spans: '原文行号',
+		value_range_type: '数值范围类型',
+		value_class: '数值分类',
+		threshold_or_target: '阈值',
+		confidence: '可信度'
+	};
+	// Fields shown first, in this order. The remaining (non-hidden) fields follow
+	// in their original order.
+	const ARTIFACT_ORDER = [
+		'metric_name',
+		'metric_desc',
+		'object_node_canonical_name',
+		'metric_subject',
+		'metric_context',
+		'metric_keywords',
+		'metric_value',
+		'metric_unit',
+		'value_data_type'
+	];
+	const ARTIFACT_HIDDEN = new Set(['id', 'event_id', 'input_filename', 'model_name', 'location_type']);
+	let artifactRows = $derived.by(() => {
+		const rows = buildJsonSections(artifactRecord)[0]?.rows ?? [];
+		const visible = rows.filter((r) => !r.label.endsWith('_en') && !ARTIFACT_HIDDEN.has(r.label));
+		const prioritized = ARTIFACT_ORDER.map((key) => visible.find((r) => r.label === key)).filter(
+			(r): r is (typeof visible)[number] => r != null
+		);
+		const rest = visible.filter((r) => !ARTIFACT_ORDER.includes(r.label));
+		return [...prioritized, ...rest].map((r) => ({
+			label: ARTIFACT_LABELS[r.label] ?? r.label,
+			value: r.value
+		}));
+	});
+
 	// Focuses the PDF panel on a related_artifacts[i] entry's source document,
 	// mirroring openMatchedUnit below. Unlike a matched_units entry, a
 	// related_artifacts entry only carries the target's record/artifact id (no
@@ -214,6 +261,31 @@
 	{#if !finding}
 		<div class="fd-empty">Select a finding to view its details.</div>
 	{:else}
+		{#if finding.artifact_id}
+			<!-- Artifact block -->
+			<div class="fd-block">
+				<button type="button" class="fd-head" aria-expanded={expanded.artifact} onclick={() => toggle('artifact')}>
+					<span class="fd-chevron" class:open={expanded.artifact}>▶</span>
+					<span class="fd-title">Artifact</span>
+				</button>
+				{#if expanded.artifact}
+					<div class="fd-body">
+						{#if artifactLoading}
+							<div class="fd-note">Loading…</div>
+						{:else if artifactError}
+							<div class="fd-note fd-error">{artifactError}</div>
+						{:else if artifactRecord}
+							{#each artifactRows as row, i (i)}
+								<div class="fd-row"><span class="fd-label">{row.label}</span><span class="fd-value">{row.value}</span></div>
+							{/each}
+						{:else}
+							<div class="fd-note">No artifact found for this id.</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+		{/if}
+
 		<!-- Finding block -->
 		<div class="fd-block">
 			<button type="button" class="fd-head" aria-expanded={expanded.finding} onclick={() => toggle('finding')}>
@@ -227,7 +299,7 @@
 					<div class="fd-row"><span class="fd-label">severity</span><span class="fd-value">{finding.severity}</span></div>
 					<div class="fd-row"><span class="fd-label">finding_type</span><span class="fd-value">{finding.finding_type}</span></div>
 					<div class="fd-row"><span class="fd-label">title</span><span class="fd-value">{finding.title}</span></div>
-					<div class="fd-row"><span class="fd-label">description</span><span class="fd-value">{finding.description || '—'}</span></div>
+					<div class="fd-row"><span class="fd-label">描述</span><span class="fd-value">{finding.description || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">suggestion</span><span class="fd-value">{finding.suggestion || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">confidence</span><span class="fd-value">{formatConfidence(finding.confidence)}</span></div>
 					<div class="fd-row">
@@ -236,7 +308,7 @@
 					</div>
 					{#if relatedArtifacts.length}
 						<div class="fd-row">
-							<span class="fd-label">related_artifacts</span>
+							<span class="fd-label">关联指标</span>
 							<div class="fd-related-list">
 								{#each relatedArtifacts as ra, i (i)}
 									<button
@@ -247,7 +319,9 @@
 										title="Jump to this related artifact's source document"
 									>
 										<div class="fd-related-head">
-											<span class="fd-related-rel">{ra.relationship}</span>
+											{#if ra.relationship}
+												<span class="fd-related-rel">{ra.relationship}</span>
+											{/if}
 											<span class="fd-related-ref">record {ra.related_record_id} · {ra.related_artifact_id}</span>
 										</div>
 										{#if ra.summary}
@@ -274,29 +348,6 @@
 		</div>
 
 		{#if finding.artifact_id}
-			<!-- Artifact block -->
-			<div class="fd-block">
-				<button type="button" class="fd-head" aria-expanded={expanded.artifact} onclick={() => toggle('artifact')}>
-					<span class="fd-chevron" class:open={expanded.artifact}>▶</span>
-					<span class="fd-title">Artifact</span>
-				</button>
-				{#if expanded.artifact}
-					<div class="fd-body">
-						{#if artifactLoading}
-							<div class="fd-note">Loading…</div>
-						{:else if artifactError}
-							<div class="fd-note fd-error">{artifactError}</div>
-						{:else if artifactRecord}
-							{#each buildJsonSections(artifactRecord)[0]?.rows ?? [] as row (row.label)}
-								<div class="fd-row"><span class="fd-label">{row.label}</span><span class="fd-value">{row.value}</span></div>
-							{/each}
-						{:else}
-							<div class="fd-note">No artifact found for this id.</div>
-						{/if}
-					</div>
-				{/if}
-			</div>
-
 			<!-- Doc Review Log block -->
 			<div class="fd-block">
 				<button type="button" class="fd-head" aria-expanded={expanded.log} onclick={() => toggle('log')}>

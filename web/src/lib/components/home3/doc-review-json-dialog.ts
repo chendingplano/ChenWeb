@@ -31,6 +31,13 @@ function displayValue(value: unknown): string {
 	}
 }
 
+// Like displayValue, but yields '' (not the literal string 'null') for an
+// absent value, so optional fields such as a related artifact's relationship
+// or summary can be conditionally hidden instead of rendering "null".
+function optionalDisplayValue(value: unknown): string {
+	return value == null ? '' : displayValue(value);
+}
+
 function flattenRecord(record: Record<string, unknown>): JsonDialogRow[] {
 	return Object.entries(record).map(([label, value]) => ({
 		label,
@@ -315,10 +322,10 @@ export function relatedArtifactsFromMetadata(metadata: unknown): RelatedArtifact
 	const plural = parseJsonLike(metadata.related_artifacts);
 	if (Array.isArray(plural) && plural.length > 0) {
 		return plural.filter(isRecord).map((item) => ({
-			relationship: displayValue(item.relationship),
+			relationship: optionalDisplayValue(item.relationship),
 			related_record_id: displayValue(item.related_record_id),
 			related_artifact_id: displayValue(item.related_artifact_id),
-			summary: displayValue(item.summary),
+			summary: optionalDisplayValue(item.summary),
 			fields: []
 		}));
 	}
@@ -329,7 +336,7 @@ export function relatedArtifactsFromMetadata(metadata: unknown): RelatedArtifact
 	const relatedFields = parseJsonLike(metadata.related_artifact_fields);
 	return [
 		{
-			relationship: displayValue(metadata.analysis_relationship),
+			relationship: optionalDisplayValue(metadata.analysis_relationship),
 			related_record_id: displayValue(metadata.related_record_id),
 			related_artifact_id: displayValue(metadata.related_artifact_id),
 			summary: '',

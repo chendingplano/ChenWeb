@@ -68,11 +68,9 @@ href = "/home3"
 
 [footer]
 text = "SemOS — Knowledge Management AI Application System"
-address = """1-224 Knowledge Street
-Chicago, IL 60606
-United States"""
+address = """上海市杨浦区长阳路1687号1号楼"""
 newsletter = "Get the latest on knowledge management and AI."
-email = "hello@semos.ai"
+email = "99999@bzton.com"
 
 [[footer.quick_links]]
 label = "关于我们"
