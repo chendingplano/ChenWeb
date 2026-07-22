@@ -27,6 +27,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import UserManagementView from '$lib/components/home3/user-management-view.svelte';
 	import RoleManagementView from '$lib/components/home3/role-management-view.svelte';
 	import AccessControlsView from '$lib/components/home3/access-controls-view.svelte';
+	import BenchmarkSetupView from '$lib/components/home3/benchmark-setup-view.svelte';
 	import PageConfigAdminView from '$lib/components/home3/page-config-admin-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
@@ -235,6 +236,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<RoleManagementView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-access-controls'}
 			<AccessControlsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-benchmark-setup'}
+			<BenchmarkSetupView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-page-config'}
 			<PageConfigAdminView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}

@@ -26,6 +26,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
+	"github.com/chendingplano/deepdoc/server/api/docbenchmarkadminhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
@@ -552,6 +553,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/admin/db/kb-inputs-status/check", dbmainthandler.CheckKbInputsStatus)
 	apiGroup.POST("/admin/db/kb-inputs-status/fix", dbmainthandler.FixKbInputsStatus)
 	apiGroup.GET("/admin/db/maintenance-logs", dbmainthandler.ListMaintenanceLogs)
+	apiGroup.GET("/admin/benchmark/config", docbenchmarkadminhandler.GetConfig)
+	apiGroup.PUT("/admin/benchmark/config", docbenchmarkadminhandler.PutConfig)
+	apiGroup.GET("/admin/benchmark/setup-state", docbenchmarkadminhandler.GetSetupState)
+	apiGroup.POST("/admin/benchmark/steps/:stepId/run", docbenchmarkadminhandler.RunStep)
+	apiGroup.POST("/admin/benchmark/run-next", docbenchmarkadminhandler.RunNext)
+	apiGroup.GET("/admin/benchmark/jobs", docbenchmarkadminhandler.ListJobs)
+	apiGroup.GET("/admin/benchmark/jobs/:jobId", docbenchmarkadminhandler.GetJob)
 
 	// Diary (My Workspace) endpoints — reads/writes JSON files under DIARY_HOME_DIR.
 	apiGroup.GET("/diary", diaryhandler.List)

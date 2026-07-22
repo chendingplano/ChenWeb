@@ -21,5 +21,11 @@ func CreateTables(logger ApiTypes.JimoLogger) error {
 	if err := appdatastores.CreateDocGenLogTable(logger); err != nil {
 		return err
 	}
+	if err := appdatastores.CreateDocBenchmarkAdminConfigTable(logger); err != nil {
+		return err
+	}
+	if err := appdatastores.CreateDocBenchmarkAdminJobsTable(logger); err != nil {
+		return err
+	}
 	return nil
 }

@@ -217,6 +217,12 @@
 						{ id: 'sysadmin-access-controls', label: 'Access Controls' }
 					]
 				},
+				{
+					id: 'sysadmin-benchmark', label: 'Benchmark',
+					children: [
+						{ id: 'sysadmin-benchmark-setup', label: 'Setup' }
+					]
+				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]
 		},
