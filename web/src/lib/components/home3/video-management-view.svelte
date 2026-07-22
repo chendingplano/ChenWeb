@@ -97,10 +97,16 @@
 	}
 
 	async function onAutoGenerate() {
+		if (!name.trim() || !description.trim()) {
+			dialogError = 'Enter a name and description first — the cover is generated from them.';
+			return;
+		}
 		generating = true;
 		dialogError = null;
 		try {
-			const prompt = [name, description].filter(Boolean).join(' — ') || 'Training video cover';
+			// Prompt reflects the description (the subject), with the name for context.
+			// The generated image is saved into the image library server-side.
+			const prompt = `Cover image for a training video titled "${name.trim()}". ${description.trim()}`;
 			coverImage = await generateImage(prompt); // each click yields a new image
 		} catch (e) {
 			dialogError = e instanceof Error ? e.message : 'Auto-generate failed';
@@ -112,6 +118,14 @@
 	async function submitUpload() {
 		if (!file) {
 			dialogError = 'Please choose a video file.';
+			return;
+		}
+		if (!name.trim()) {
+			dialogError = 'Name is required.';
+			return;
+		}
+		if (!description.trim()) {
+			dialogError = 'Description is required.';
 			return;
 		}
 		if (source === 'Web' && !url.trim()) {
@@ -275,15 +289,15 @@
 
 				<!-- Name -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-name" style="color:{textSecondary};">Name</label>
-					<input id="v-name" bind:value={name} placeholder="Video name"
+					<label for="v-name" style="color:{textSecondary};">Name <span style="color:{dangerColor};">*</span></label>
+					<input id="v-name" bind:value={name} placeholder="Video name" required
 						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 				</div>
 
 				<!-- Description -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-desc" style="color:{textSecondary};">Description</label>
-					<textarea id="v-desc" bind:value={description} rows="2" placeholder="Short description"
+					<label for="v-desc" style="color:{textSecondary};">Description <span style="color:{dangerColor};">*</span></label>
+					<textarea id="v-desc" bind:value={description} rows="2" placeholder="Short description" required
 						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; resize:vertical;"></textarea>
 				</div>
 
