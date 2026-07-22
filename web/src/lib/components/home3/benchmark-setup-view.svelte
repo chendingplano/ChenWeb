@@ -33,6 +33,10 @@
 	let runNextBusy = $state(false);
 	let error = $state('');
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	// Which field's help tooltip is currently open. Driven by explicit pointer/focus
+	// events on the icon (not CSS :hover) because the CSS :hover flag can get stuck,
+	// leaving the tooltip visible while the cursor is nowhere near the icon.
+	let openHelp = $state<string | null>(null);
 
 	type FieldOption = {
 		value: string;
@@ -373,10 +377,14 @@
 											type="button"
 											class="help-tip"
 											aria-label={`${field.label} help`}
+											onmouseenter={() => (openHelp = String(field.key))}
+											onmouseleave={() => { if (openHelp === String(field.key)) openHelp = null; }}
+											onfocus={() => (openHelp = String(field.key))}
+											onblur={() => { if (openHelp === String(field.key)) openHelp = null; }}
 										>
 											<CircleHelpIcon size={14} />
 										</button>
-										<span class="tooltip" style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
+										<span class="tooltip" class:open={openHelp === String(field.key)} style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
 											<strong>{field.label}</strong>
 											<span><b>Purpose:</b> {field.help.purpose}</span>
 											<span><b>Valid values:</b> {field.help.valid}</span>
@@ -415,10 +423,14 @@
 										type="button"
 										class="help-tip"
 										aria-label="Allow dirty working copy help"
+										onmouseenter={() => (openHelp = 'allow_dirty')}
+										onmouseleave={() => { if (openHelp === 'allow_dirty') openHelp = null; }}
+										onfocus={() => (openHelp = 'allow_dirty')}
+										onblur={() => { if (openHelp === 'allow_dirty') openHelp = null; }}
 									>
 										<CircleHelpIcon size={14} />
 									</button>
-									<span class="tooltip" style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
+									<span class="tooltip" class:open={openHelp === 'allow_dirty'} style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
 										<strong>Allow dirty working copy</strong>
 										<span><b>Purpose:</b> {allowDirtyHelp.purpose}</span>
 										<span><b>Valid values:</b> {allowDirtyHelp.valid}</span>
@@ -591,8 +603,7 @@
 		box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
 		pointer-events: none;
 	}
-	.help-tip:hover + .tooltip,
-	.help-tip:focus-visible + .tooltip {
+	.tooltip.open {
 		display: flex;
 	}
 	.field input[type='text'],

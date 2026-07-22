@@ -1182,7 +1182,7 @@
 					</button>
 					<button
 						onclick={showFindingsPage}
-						style="padding: 0.4rem 1rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
+						style="padding: 0.4rem 1rem; background: {accentTint}; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
 						>Findings</button
 					>
 					<!-- 2. View Full Report PDF (dropdown listing all PDFs for this document) -->
@@ -1202,7 +1202,7 @@
 						</button>
 						{#if pdfMenuOpen}
 							<div
-								style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 320px; background: {cardBg}; border: 1px solid {borderColor}; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); overflow: hidden;"
+								style="position: absolute; top: 100%; left: 0; z-index: 50; min-width: 320px; background: {cardBg}; border: 1px solid {borderColor}; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); overflow: hidden;"
 							>
 								{#if pdfLoading}
 									<div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">
