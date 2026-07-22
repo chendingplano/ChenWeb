@@ -86,13 +86,14 @@
 	let pendingConfirm = $state<{ id: number; language: string } | null>(null);
 	let languageLoading = $state(false);
 	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
-	// View mode: 'packages' (by P1-P6) or 'severity' (by High/Medium/Low).
-	let viewMode = $state<'packages' | 'severity'>('packages');
+	// View mode: 'all' (flat, line-ordered), 'packages' (by P1-P6), or 'severity'
+	// (by High/Medium/Low).
+	let viewMode = $state<'all' | 'packages' | 'severity'>('packages');
 	// Package fold state (packages view, expanded by default); reviewer sub-groups
 	// are collapsed by default so the report opens showing only reviewer headers.
 	let expandedPackages = $state<Record<string, boolean>>({});
 	let expandedReviewers = $state<Record<string, boolean>>({});
-	// Severity view fold state (all expanded by default).
+	// Severity view fold state (collapsed by default, like reviewer sub-groups).
 	let expandedSeverities = $state<Record<string, boolean>>({});
 	function isPackageExpanded(pass: string): boolean {
 		return expandedPackages[pass] !== false;
@@ -101,7 +102,7 @@
 		return expandedReviewers[key] === true;
 	}
 	function isSeverityExpanded(sev: string): boolean {
-		return expandedSeverities[sev] !== false;
+		return expandedSeverities[sev] === true;
 	}
 	function togglePackage(pass: string) {
 		expandedPackages[pass] = !isPackageExpanded(pass);
@@ -329,12 +330,102 @@
 		return '#10b981';
 	}
 
+	// The findings currently highlighted in the PDF: one when a single finding row
+	// is clicked, or every finding in a reviewer/aspect folder when its header is
+	// clicked. Published to findingShelf.findings; doc-structure-view turns each
+	// into a highlight + FINDING box.
+	let activeFindings = $state<FindingItem[]>([]);
+
+	// All visible findings sorted by source line number, for the "Show All" flat
+	// view. Respects the active/all filter like the grouped views.
+	let flatFindings = $derived.by(() => {
+		const list = findings.filter(
+			(f) =>
+				f.review_status !== 'deleted' && !(showMode === 'active' && f.review_status === 'corrected')
+		);
+		return list.sort((a, b) => {
+			const al = parseLocationRange(a.location ?? '')[0] ?? Number.MAX_SAFE_INTEGER;
+			const bl = parseLocationRange(b.location ?? '')[0] ?? Number.MAX_SAFE_INTEGER;
+			return al - bl || a.id - b.id;
+		});
+	});
+
+	function sameFindingIds(a: FindingItem[], b: FindingItem[]): boolean {
+		if (a.length !== b.length) return false;
+		const ids = new Set(a.map((x) => x.id));
+		return b.every((x) => ids.has(x.id));
+	}
+
+	// The finding within a set that sits highest in the document (smallest line),
+	// i.e. the topmost FINDING box — used as the PDF jump target on folder clicks.
+	function firstByLine(items: FindingItem[]): FindingItem | undefined {
+		let best: FindingItem | undefined;
+		let bestLine = Number.MAX_SAFE_INTEGER;
+		for (const f of items) {
+			const l = parseLocationRange(f.location ?? '')[0] ?? Number.MAX_SAFE_INTEGER;
+			if (!best || l < bestLine) {
+				best = f;
+				bestLine = l;
+			}
+		}
+		return best;
+	}
+	function jumpToFirst(items: FindingItem[]) {
+		const f = firstByLine(items);
+		if (f) void structureView?.focusFindingTarget(`finding:${f.id}`);
+	}
+
+	// The set of findings that should stay highlighted when a single row is clicked,
+	// per the current view: the row's reviewer folder (packages), severity folder
+	// (severity), or every visible finding (all).
+	function findingSetForCurrentView(f: FindingItem): FindingItem[] {
+		if (viewMode === 'severity') {
+			const g = severityGroups.find((sg) => sg.findings.some((x) => x.id === f.id));
+			return g ? g.findings : [f];
+		}
+		if (viewMode === 'all') return flatFindings;
+		const rv = livePassGroups
+			.flatMap((g) => g.reviewers)
+			.find((r) => r.items.some((x) => x.id === f.id));
+		return rv ? rv.items : [f];
+	}
+
 	function onFocusFinding(f: FindingItem) {
 		activeKey = String(f.id);
-		const lineNumbers = parseLocationRange(f.location ?? '');
-		if (lineNumbers.length > 0) {
-			void structureView?.focusSourceLines(lineNumbers);
-		}
+		// Keep every finding in f's folder (or the whole "all" list) highlighted —
+		// clicking a row must not collapse the highlight set to one. Only move the
+		// PDF to f's highlight and open its detail in the right panel (via activeKey
+		// → findingShelf.finding). Reassign only when the set actually changes so
+		// re-resolving doesn't reset the boxes' drag positions.
+		const desired = findingSetForCurrentView(f);
+		if (!sameFindingIds(activeFindings, desired)) activeFindings = desired;
+		void structureView?.focusFindingTarget(`finding:${f.id}`);
+	}
+
+	// Clicking a reviewer/aspect folder highlights all of its findings at once (and
+	// still toggles the list open/closed). No single finding is "selected", so the
+	// right-hand detail panel clears.
+	function onFocusReviewer(pass: string, aspect: string, items: FindingItem[]) {
+		activeKey = null;
+		activeFindings = items;
+		void toggleReviewer(pass, aspect);
+		jumpToFirst(items);
+	}
+
+	// Clicking a severity folder behaves exactly like a package/reviewer folder.
+	function onFocusSeverity(g: SeverityGroup) {
+		activeKey = null;
+		activeFindings = g.findings;
+		toggleSeverity(g.severity);
+		jumpToFirst(g.findings);
+	}
+
+	// "Show All": a flat, line-ordered view that highlights every visible finding.
+	function onShowAll() {
+		viewMode = 'all';
+		activeKey = null;
+		activeFindings = flatFindings;
+		jumpToFirst(flatFindings);
 	}
 
 	// Publish the selected finding to the page-level context shelf, which renders
@@ -345,6 +436,7 @@
 	onDestroy(() => {
 		findingShelf.active = false;
 		findingShelf.finding = null;
+		findingShelf.findings = [];
 		findingShelf.requestId = null;
 		findingShelf.runId = null;
 		findingShelf.onFocusMatchedUnit = null;
@@ -352,6 +444,7 @@
 	});
 	$effect(() => {
 		findingShelf.finding = selectedFinding;
+		findingShelf.findings = activeFindings;
 		findingShelf.requestId = requestId;
 		findingShelf.runId = reportRunId;
 	});
@@ -708,17 +801,20 @@
 			<div class="show-mode-bar">
 				<button
 					type="button"
-					class="show-mode-btn"
+					class="show-mode-btn toggle-btn"
 					class:active={showMode === 'active'}
-					onclick={() => (showMode = 'active')}
+					onclick={() => (showMode = showMode === 'active' ? 'all' : 'active')}
+					title={showMode === 'active'
+						? 'Showing active findings only — click to show all'
+						: 'Showing all findings — click to show active only'}
 				>Show Active</button>
+				<div class="show-mode-sep"></div>
 				<button
 					type="button"
 					class="show-mode-btn"
-					class:active={showMode === 'all'}
-					onclick={() => (showMode = 'all')}
+					class:active={viewMode === 'all'}
+					onclick={onShowAll}
 				>Show All</button>
-				<div class="show-mode-sep"></div>
 				<button
 					type="button"
 					class="show-mode-btn"
@@ -748,7 +844,71 @@
 			</div>
 
 			<div class="left-body scroll-list">
-			{#if viewMode === 'packages'}
+			{#snippet findingRow(f: FindingItem)}
+				<div
+					class="finding"
+					class:active={activeKey === String(f.id)}
+					class:resolved={f.review_status === 'fixed' ||
+						f.review_status === 'accepted' ||
+						f.review_status === 'corrected'}
+					style="border-left-color:{sevColor(f.severity)};"
+				>
+					<button
+						type="button"
+						class="finding-body"
+						onclick={() => onFocusFinding(f)}
+						title={f.location ? `Jump to line ${f.location}` : ''}
+					>
+						<div class="finding-head">
+							<span class="finding-id">#{f.id}</span>
+							<strong>{f.title}</strong>
+							<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
+							<span class="badge">{f.aspect}</span>
+							{#if f.review_status === 'fixed'}
+								<span class="status-chip chip-fixed">Fixed</span>
+							{:else if f.review_status === 'accepted'}
+								<span class="status-chip accepted">Accepted</span>
+							{:else if f.review_status === 'corrected'}
+								<span class="status-chip corrected">Corrected</span>
+							{/if}
+						</div>
+						{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
+						{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
+						<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
+						{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
+					</button>
+
+					<div class="finding-actions">
+						<button class="act" disabled={busyId === f.id} onclick={() => onAutoFix(f)} title="Fix the offending line(s) automatically with the configured model">LLM Auto Fix</button>
+						<button class="act" disabled={busyId === f.id} onclick={() => (editFindingId = f.id)} title="Open the find/replace editor for the offending line(s)">Edit Tool</button>
+						<button class="act danger" disabled={busyId === f.id} onclick={() => onDelete(f)} title="Remove this finding from the report">Delete</button>
+						{#if pendingConfirm?.id === f.id}
+							<span class="finding-loc">Translate to {pendingConfirm.language}?</span>
+							<button class="act" onclick={() => confirmFindingTranslate(f)}>Translate</button>
+							<button class="act" onclick={cancelFindingTranslate}>Cancel</button>
+						{:else}
+							<label class="language-picker">
+								<select
+									value={findingLanguage[f.id] ?? defaultLanguage}
+									disabled={translatingId === f.id}
+									onchange={(e) => handleFindingLanguageChange(f, (e.target as HTMLSelectElement).value)}
+								>
+									{#each supportedLanguages as lang (lang)}
+										<option value={lang}>{lang}</option>
+									{/each}
+								</select>
+							</label>
+						{/if}
+						<button class="act" disabled={busyId === f.id} onclick={() => onAccept(f)} title="Keep as is — take no action">Accept</button>
+					</div>
+				</div>
+			{/snippet}
+
+			{#if viewMode === 'all'}
+				{#each flatFindings as f (f.id)}
+					{@render findingRow(f)}
+				{/each}
+			{:else if viewMode === 'packages'}
 				{#each livePassGroups as group (group.pass)}
 					<div class="package">
 						<button
@@ -771,7 +931,8 @@
 											type="button"
 											class="reviewer-head"
 											aria-expanded={isReviewerExpanded(rkey)}
-											onclick={() => toggleReviewer(group.pass, rv.aspect)}
+											onclick={() => onFocusReviewer(group.pass, rv.aspect, rv.items)}
+											title="Highlight all {rv.items.length} findings in this group"
 										>
 											<span class="chevron sub" class:open={isReviewerExpanded(rkey)}>▶</span>
 											<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>
@@ -781,91 +942,7 @@
 										{#if isReviewerExpanded(rkey)}
 											<div class="reviewer-body">
 												{#each rv.items as f (f.id)}
-													<div
-														class="finding"
-														class:active={activeKey === String(f.id)}
-														class:resolved={f.review_status === 'fixed' ||
-															f.review_status === 'accepted' ||
-															f.review_status === 'corrected'}
-														style="border-left-color:{sevColor(f.severity)};"
-													>
-														<button
-															type="button"
-															class="finding-body"
-															onclick={() => onFocusFinding(f)}
-															title={f.location ? `Jump to line ${f.location}` : ''}
-														>
-															<div class="finding-head">
-																<span class="finding-id">#{f.id}</span>
-																<strong>{f.title}</strong>
-																<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
-																<span class="badge">{f.aspect}</span>
-																{#if f.review_status === 'fixed'}
-																	<span class="status-chip chip-fixed">Fixed</span>
-																{:else if f.review_status === 'accepted'}
-																	<span class="status-chip accepted">Accepted</span>
-																{:else if f.review_status === 'corrected'}
-																	<span class="status-chip corrected">Corrected</span>
-																{/if}
-															</div>
-															{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
-															{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
-															<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
-															{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
-														</button>
-
-														<div class="finding-actions">
-															<button
-																class="act"
-																disabled={busyId === f.id}
-																onclick={() => onAutoFix(f)}
-																title="Fix the offending line(s) automatically with the configured model"
-															>
-																LLM Auto Fix
-															</button>
-															<button
-																class="act"
-																disabled={busyId === f.id}
-																onclick={() => (editFindingId = f.id)}
-																title="Open the find/replace editor for the offending line(s)"
-															>
-																Edit Tool
-															</button>
-															<button
-																class="act danger"
-																disabled={busyId === f.id}
-																onclick={() => onDelete(f)}
-																title="Remove this finding from the report"
-															>
-																Delete
-															</button>
-															{#if pendingConfirm?.id === f.id}
-																<span class="finding-loc">Translate to {pendingConfirm.language}?</span>
-																<button class="act" onclick={() => confirmFindingTranslate(f)}>Translate</button>
-																<button class="act" onclick={cancelFindingTranslate}>Cancel</button>
-															{:else}
-																<label class="language-picker">
-																	<select
-																		value={findingLanguage[f.id] ?? defaultLanguage}
-																		disabled={translatingId === f.id}
-																		onchange={(e) => handleFindingLanguageChange(f, (e.target as HTMLSelectElement).value)}
-																	>
-																		{#each supportedLanguages as lang (lang)}
-																			<option value={lang}>{lang}</option>
-																		{/each}
-																	</select>
-																</label>
-															{/if}
-															<button
-																class="act"
-																disabled={busyId === f.id}
-																onclick={() => onAccept(f)}
-																title="Keep as is — take no action"
-															>
-																Accept
-															</button>
-														</div>
-													</div>
+													{@render findingRow(f)}
 												{/each}
 											</div>
 										{/if}
@@ -875,7 +952,6 @@
 						{/if}
 					</div>
 				{/each}
-
 			{:else}
 				{#each severityGroups as sevGroup (sevGroup.severity)}
 					<div class="package">
@@ -883,7 +959,8 @@
 							type="button"
 							class="package-head"
 							aria-expanded={isSeverityExpanded(sevGroup.severity)}
-							onclick={() => toggleSeverity(sevGroup.severity)}
+							onclick={() => onFocusSeverity(sevGroup)}
+							title="Highlight all {sevGroup.findings.length} findings in this group"
 						>
 							<span class="chevron" class:open={isSeverityExpanded(sevGroup.severity)}>▶</span>
 							<span class="sev-dot" style="color:{sevColor(sevGroup.severity)};">●</span>
@@ -894,91 +971,7 @@
 						{#if isSeverityExpanded(sevGroup.severity)}
 							<div class="package-body">
 								{#each sevGroup.findings as f (f.id)}
-									<div
-										class="finding"
-										class:active={activeKey === String(f.id)}
-										class:resolved={f.review_status === 'fixed' ||
-											f.review_status === 'accepted' ||
-											f.review_status === 'corrected'}
-										style="border-left-color:{sevColor(f.severity)};"
-									>
-										<button
-											type="button"
-											class="finding-body"
-											onclick={() => onFocusFinding(f)}
-											title={f.location ? `Jump to line ${f.location}` : ''}
-										>
-											<div class="finding-head">
-												<span class="finding-id">#{f.id}</span>
-												<strong>{f.title}</strong>
-												<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
-												<span class="badge">{f.aspect}</span>
-												{#if f.review_status === 'fixed'}
-													<span class="status-chip chip-fixed">Fixed</span>
-												{:else if f.review_status === 'accepted'}
-													<span class="status-chip accepted">Accepted</span>
-												{:else if f.review_status === 'corrected'}
-													<span class="status-chip corrected">Corrected</span>
-												{/if}
-											</div>
-											{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
-											{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
-											<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
-											{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
-										</button>
-
-										<div class="finding-actions">
-											<button
-												class="act"
-												disabled={busyId === f.id}
-												onclick={() => onAutoFix(f)}
-												title="Fix the offending line(s) automatically with the configured model"
-											>
-												LLM Auto Fix
-											</button>
-											<button
-												class="act"
-												disabled={busyId === f.id}
-												onclick={() => (editFindingId = f.id)}
-												title="Open the find/replace editor for the offending line(s)"
-											>
-												Edit Tool
-											</button>
-											<button
-												class="act danger"
-												disabled={busyId === f.id}
-												onclick={() => onDelete(f)}
-												title="Remove this finding from the report"
-											>
-												Delete
-											</button>
-											{#if pendingConfirm?.id === f.id}
-												<span class="finding-loc">Translate to {pendingConfirm.language}?</span>
-												<button class="act" onclick={() => confirmFindingTranslate(f)}>Translate</button>
-												<button class="act" onclick={cancelFindingTranslate}>Cancel</button>
-											{:else}
-												<label class="language-picker">
-													<select
-														value={findingLanguage[f.id] ?? defaultLanguage}
-														disabled={translatingId === f.id}
-														onchange={(e) => handleFindingLanguageChange(f, (e.target as HTMLSelectElement).value)}
-													>
-														{#each supportedLanguages as lang (lang)}
-															<option value={lang}>{lang}</option>
-														{/each}
-													</select>
-												</label>
-											{/if}
-											<button
-												class="act"
-												disabled={busyId === f.id}
-												onclick={() => onAccept(f)}
-												title="Keep as is — take no action"
-											>
-												Accept
-											</button>
-										</div>
-									</div>
+									{@render findingRow(f)}
 								{/each}
 							</div>
 						{/if}
@@ -986,7 +979,7 @@
 				{/each}
 			{/if}
 
-			{#if (viewMode === 'packages' && livePassGroups.length === 0 || viewMode === 'severity' && severityGroups.length === 0) && findings.length > 0}
+			{#if ((viewMode === 'packages' && livePassGroups.length === 0) || (viewMode === 'severity' && severityGroups.length === 0) || (viewMode === 'all' && flatFindings.length === 0)) && findings.length > 0}
 				<p class="body-text">All findings have been deleted.</p>
 			{/if}
 			</div>

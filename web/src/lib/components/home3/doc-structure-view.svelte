@@ -45,8 +45,6 @@
 	} from './doc-structure-line-keys.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
-	import { relatedArtifactsFromMetadata, lineNumbersFromSpans, type RelatedArtifact } from './doc-review-json-dialog.js';
-	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 
 	let {
 		darkMode = true,
@@ -55,61 +53,166 @@
 		sidebarOverride
 	}: { darkMode?: boolean; lockedRecordId?: number | null; hideSidebar?: boolean; sidebarOverride?: Snippet } = $props();
 
-	// ── Draggable DESCRIPTION call-out ───────────────────────────────────────
-	// Null keeps the default CSS placement (top/right); once dragged we switch to
-	// explicit left/top within the PDF pane. Position persists across findings.
-	let calloutEl = $state<HTMLElement | null>(null);
-	let calloutPos = $state<{ x: number; y: number } | null>(null);
-	let calloutDrag: { pointerX: number; pointerY: number; startX: number; startY: number } | null = null;
+	// ── Report Finding highlight targets ─────────────────────────────────────
+	// Selecting a finding row (or a reviewer/aspect folder) highlights every
+	// finding in play in the reviewed PDF. Each finding resolves to source line
+	// numbers; each gets its own draggable FINDING box whose vertical centre is
+	// pinned to the centre of its highlight.
+	type FindingTarget = {
+		id: string;
+		recordId: number;
+		docLabel: string;
+		lines: number[];
+		kind: 'finding' | 'artifact';
+		title: string;
+		body: string;
+	};
+	let findingTargets = $state<FindingTarget[]>([]);
+	let activeTargetDoc = $state<number | null>(null);
+	let findingTargetToken = 0;
+	// Manual drag positions, resized dimensions, and stacking order keyed by target
+	// id, so imperatively re-created boxes keep their place, size, and z-order
+	// across overlay repaints.
+	const targetBoxPos = new Map<string, { left: number; top: number }>();
+	const targetBoxSize = new Map<string, { width: number; height: number }>();
+	const targetBoxZ = new Map<string, number>();
+	let targetBoxZTop = 20;
+	const TARGET_BOX_MAX_H = 240; // default height cap before the user resizes
+	// Fraction of a FINDING box's width that hangs past the page's right edge into
+	// the gutter. Zoom-independent (relative to the box, not pixels) and persisted,
+	// nudged left/right by the toolbar arrows. 0 = fully on page, 1 = fully off.
+	const FINDING_HANG_KEY = 'doc-review-finding-box-hang';
+	const FINDING_HANG_STEP = 0.12;
+	let findingBoxHang = $state(loadFindingBoxHang());
+	function loadFindingBoxHang(): number {
+		if (typeof localStorage === 'undefined') return 0.4;
+		const raw = Number(localStorage.getItem(FINDING_HANG_KEY));
+		return Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0.4;
+	}
+	function nudgeFindingBoxes(dir: -1 | 1) {
+		findingBoxHang = Math.min(1, Math.max(0, findingBoxHang + dir * FINDING_HANG_STEP));
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem(FINDING_HANG_KEY, String(findingBoxHang));
+		}
+		highlightSelectionVersion += 1; // repaint boxes at the new offset
+	}
 
-	function startCalloutDrag(e: PointerEvent) {
-		if (!calloutEl) return;
-		const parent = calloutEl.offsetParent as HTMLElement | null;
-		const rect = calloutEl.getBoundingClientRect();
-		const prect = parent?.getBoundingClientRect();
-		const startX = rect.left - (prect?.left ?? 0);
-		const startY = rect.top - (prect?.top ?? 0);
-		calloutDrag = { pointerX: e.clientX, pointerY: e.clientY, startX, startY };
-		calloutPos = { x: startX, y: startY };
-		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-		e.preventDefault();
-	}
-	function onCalloutDrag(e: PointerEvent) {
-		if (!calloutDrag || !calloutEl) return;
-		const parent = calloutEl.offsetParent as HTMLElement | null;
-		const maxX = Math.max(0, (parent?.clientWidth ?? 0) - calloutEl.offsetWidth);
-		const maxY = Math.max(0, (parent?.clientHeight ?? 0) - calloutEl.offsetHeight);
-		calloutPos = {
-			x: Math.max(0, Math.min(maxX, calloutDrag.startX + (e.clientX - calloutDrag.pointerX))),
-			y: Math.max(0, Math.min(maxY, calloutDrag.startY + (e.clientY - calloutDrag.pointerY)))
-		};
-	}
-	function endCalloutDrag(e: PointerEvent) {
-		calloutDrag = null;
-		(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
-	}
+	// Distinct documents referenced by the current finding's targets, with a
+	// per-document highlight count, for the document-chips bar.
+	let findingDocChips = $derived.by(() => {
+		const seen = new Map<number, { recordId: number; label: string; count: number }>();
+		for (const t of findingTargets) {
+			const existing = seen.get(t.recordId);
+			if (existing) existing.count += 1;
+			else seen.set(t.recordId, { recordId: t.recordId, label: t.docLabel, count: 1 });
+		}
+		return [...seen.values()];
+	});
 
-	// Clicking a related_artifacts entry in the call-out jumps the PDF to that
-	// artifact's source document/lines — same behavior as the right-panel list.
-	let calloutRaLoadingId = $state<string | null>(null);
-	async function openCalloutRelatedArtifact(ra: RelatedArtifact) {
-		const recordId = Number(ra.related_record_id);
-		if (!Number.isFinite(recordId) || recordId <= 0) return;
-		calloutRaLoadingId = ra.related_artifact_id;
-		try {
-			const artifactType = artifactTypeFromKey(ra.related_artifact_id);
-			let lineNumbers: number[] = [];
-			if (artifactType) {
-				const record = await getArtifactWiki(artifactType, ra.related_artifact_id);
-				lineNumbers = lineNumbersFromSpans(record.source_line_spans);
+	// Parses a finding `location` like "93-94" or "12, 40-42" into line numbers.
+	function parseFindingLocation(location: string): number[] {
+		const out: number[] = [];
+		for (const part of (location || '').split(',')) {
+			const seg = part.trim();
+			const m = seg.match(/^(\d+)\s*-\s*(\d+)$/);
+			if (m) {
+				const a = Number(m[1]);
+				const b = Number(m[2]);
+				for (let n = Math.min(a, b); n <= Math.max(a, b); n++) out.push(n);
+			} else {
+				const n = parseInt(seg, 10);
+				if (Number.isFinite(n)) out.push(n);
 			}
-			await focusExternalArtifact(recordId, lineNumbers);
-		} catch (e) {
-			console.error('[doc-structure-view] failed to focus related artifact', ra, e);
-		} finally {
-			calloutRaLoadingId = null;
+		}
+		return out;
+	}
+
+	// Turns the shelf's active findings into highlight targets. Every finding
+	// belongs to the reviewed document, so there is a single target document.
+	async function resolveFindingTargets(items: typeof findingShelf.findings) {
+		const token = ++findingTargetToken;
+		// Fresh drag/stack state whenever the target set changes.
+		targetBoxPos.clear();
+		targetBoxZ.clear();
+		const reviewedId = lockedRecordId ?? currentInput?.id ?? null;
+		if (!items || items.length === 0 || reviewedId == null) {
+			findingTargets = [];
+			activeTargetDoc = null;
+			highlightSelectionVersion += 1;
+			return;
+		}
+		const docLabel = currentInput ? recordDisplayName(currentInput) : 'Reviewed document';
+		findingTargets = items.map((f) => ({
+			id: `finding:${f.id}`,
+			recordId: reviewedId,
+			docLabel,
+			lines: parseFindingLocation(f.location ?? ''),
+			kind: 'finding' as const,
+			title: `Finding #${f.id}`,
+			body: f.description ?? ''
+		}));
+		await showTargetDoc(reviewedId, token);
+	}
+
+	// Switches the PDF to the requested document (loading it if needed) and
+	// repaints so its targets' highlights + boxes appear.
+	async function showTargetDoc(recordId: number | null, token = findingTargetToken) {
+		activeTargetDoc = recordId;
+		if (recordId == null) return;
+		if (currentInput?.id !== recordId) {
+			await loadStructureForRecord(recordId);
+			if (token !== findingTargetToken) return;
+		}
+		// loadStructureForRecord auto-selects the first line; suppress that stray
+		// selection so only finding targets are highlighted.
+		selectedHighlightTarget = null;
+		selectedLineKey = null;
+		findingHighlightLines = [];
+		// Jump to the first target line present in this document.
+		const target = findingTargets.find((t) => t.recordId === recordId);
+		if (target) {
+			const matched = lines.filter((l) => target.lines.includes(l.line_number));
+			if (matched[0] && matched[0].page_number > 0) docPage = matched[0].page_number;
+		}
+		highlightSelectionVersion += 1;
+	}
+
+	async function selectTargetDoc(recordId: number) {
+		if (recordId === activeTargetDoc) return;
+		await showTargetDoc(recordId);
+	}
+
+	// Scrolls the PDF to one finding's highlight WITHOUT changing the highlight set
+	// — every finding target stays highlighted. Used when a finding row is clicked
+	// (also opens the right-hand detail panel) or a folder is opened (jump to the
+	// first box). Retries briefly because the target set may still be rebuilding
+	// after the highlight set changed. Idempotent.
+	export async function focusFindingTarget(findingId: string) {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const target = findingTargets.find((t) => t.id === findingId);
+			if (target) {
+				const matched = lines.filter((l) => target.lines.includes(l.line_number));
+				if (matched[0] && matched[0].page_number > 0) docPage = matched[0].page_number;
+				await tick();
+				const mark = document.querySelector<HTMLElement>(
+					`.pdf-overlay [data-finding-id="${CSS.escape(findingId)}"]`
+				);
+				if (mark) {
+					mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+					return;
+				}
+			}
+			await new Promise((r) => requestAnimationFrame(() => r(null)));
 		}
 	}
+
+	// Re-resolve targets whenever the active finding set changes. Deferred + wrapped
+	// in untrack so the resolver's synchronous reads (currentInput, lines) don't
+	// register as dependencies of this effect and cause reload loops.
+	$effect(() => {
+		const items = findingShelf.findings;
+		queueMicrotask(() => untrack(() => void resolveFindingTargets(items)));
+	});
 
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
@@ -421,7 +524,7 @@
 			return;
 		}
 
-		const drawMark = (coords: number[], label: string) => {
+		const drawMark = (coords: number[], label: string, findingId?: string) => {
 			if (!Array.isArray(coords) || coords.length < 4) return;
 			const [vx1, vy1, vx2, vy2] = mineruToViewport(coords, viewport);
 			const left = Math.max(0, Math.min(vx1, vx2) - 5);
@@ -436,6 +539,7 @@
 			mark.style.width = `${width}px`;
 			mark.style.height = `${height}px`;
 			mark.title = label;
+			if (findingId) mark.dataset.findingId = findingId;
 			overlay.appendChild(mark);
 		};
 
@@ -449,6 +553,178 @@
 			if (lineKey(ln) === selectedLineKey) continue; // already drawn as primary target
 			drawMark(ln.coords, `page ${ln.page_number}, line ${ln.line_number}`);
 		}
+
+		// Report Finding targets: highlight every target on the active document
+		// and attach a draggable FINDING box, vertically centred on its highlight.
+		if (activeTargetDoc != null && (currentInput?.id ?? null) === activeTargetDoc) {
+			const boxAnchors: { target: FindingTarget; centerY: number }[] = [];
+			for (const t of findingTargets) {
+				if (t.recordId !== activeTargetDoc) continue;
+				const matched = lines.filter((l) => t.lines.includes(l.line_number));
+				const onPage = matched.filter((l) => l.page_number === pageNo);
+				// Box + anchor mark live on the page of the target's first matched line.
+				const anchorHere = matched[0] != null && matched[0].page_number === pageNo;
+				let unionTop = Infinity;
+				let unionBottom = -Infinity;
+				onPage.forEach((ln, i) => {
+					// Tag the first mark on the anchor page so the box + jump can find it.
+					const id = anchorHere && i === 0 ? t.id : undefined;
+					drawMark(ln.coords, `${t.title}: line ${ln.line_number}`, id);
+					if (Array.isArray(ln.coords) && ln.coords.length >= 4) {
+						const [, vy1, , vy2] = mineruToViewport(ln.coords, viewport);
+						unionTop = Math.min(unionTop, vy1, vy2);
+						unionBottom = Math.max(unionBottom, vy1, vy2);
+					}
+				});
+				// Anchor the box to the vertical centre of ALL the target's marks on
+				// this page (not just the first line), so a multi-line highlight and
+				// its box share the same centre line.
+				if (anchorHere && Number.isFinite(unionTop)) {
+					boxAnchors.push({ target: t, centerY: (unionTop + unionBottom) / 2 });
+				}
+			}
+			if (boxAnchors.length) layoutTargetBoxes(boxAnchors, viewport, overlay);
+		}
+	}
+
+	// Builds and positions one draggable FINDING box per anchor. Boxes float over
+	// the page's right edge — hanging into the gutter beside the PDF (by the
+	// persisted, toolbar-adjustable findingBoxHang fraction) so they cover little
+	// page content, each box's vertical centre pinned to its highlight's centre.
+	// Vertically-overlapping boxes shift left one column each so their drag handles
+	// stay reachable (click brings a box to the front). Manually dragged boxes keep
+	// their stored position and are excluded from flow.
+	function layoutTargetBoxes(
+		anchors: { target: FindingTarget; centerY: number }[],
+		viewport: PdfPageViewport,
+		overlay: HTMLDivElement
+	) {
+		const BOX_W = Math.round(Math.min(300, Math.max(210, viewport.width * 0.34)));
+		const COL_STEP = 30;
+		// Right gutter available inside the scroll host, so boxes never clip past it.
+		const host = overlay.closest('.pdf-canvas-host') as HTMLElement | null;
+		let gutter = BOX_W;
+		if (host) {
+			gutter = Math.max(0, host.getBoundingClientRect().right - overlay.getBoundingClientRect().right);
+		}
+		anchors.sort((a, b) => a.centerY - b.centerY);
+		const placed: { top: number; bottom: number; col: number }[] = [];
+		for (const { target, centerY } of anchors) {
+			const box = buildTargetBox(target, BOX_W);
+			overlay.appendChild(box);
+			// Cap the default height until the user resizes the box.
+			if (!targetBoxSize.has(target.id) && box.offsetHeight > TARGET_BOX_MAX_H) {
+				box.style.height = `${TARGET_BOX_MAX_H}px`;
+			}
+			const w = box.offsetWidth || BOX_W;
+			const h = box.offsetHeight || 80;
+			const manual = targetBoxPos.get(target.id);
+			let left: number;
+			let top: number;
+			if (manual) {
+				left = manual.left;
+				top = manual.top;
+			} else {
+				top = Math.max(4, Math.min(centerY - h / 2, Math.max(4, viewport.height - h - 4)));
+				let col = 0;
+				for (const p of placed) {
+					if (!(top + h <= p.top || top >= p.bottom)) col = Math.max(col, p.col + 1);
+				}
+				// Desired hang = findingBoxHang × box width, capped by the gutter.
+				const outside = Math.min(w * findingBoxHang, Math.max(0, gutter - 8));
+				const baseLeft = viewport.width - (w - outside);
+				left = Math.max(4, baseLeft - col * COL_STEP);
+				placed.push({ top, bottom: top + h, col });
+			}
+			box.style.left = `${left}px`;
+			box.style.top = `${top}px`;
+			box.style.zIndex = String(targetBoxZ.get(target.id) ?? 5);
+		}
+	}
+
+	function buildTargetBox(target: FindingTarget, width: number): HTMLDivElement {
+		const box = document.createElement('div');
+		box.className = 'finding-target-box';
+		// Re-apply the user's resized dimensions (native CSS resize), else default.
+		const size = targetBoxSize.get(target.id);
+		box.style.width = `${size ? size.width : width}px`;
+		if (size) box.style.height = `${size.height}px`;
+		box.dataset.targetId = target.id;
+
+		const head = document.createElement('div');
+		head.className = 'finding-target-box-head';
+		const grip = document.createElement('span');
+		grip.className = 'finding-target-box-grip';
+		grip.textContent = '⠿';
+		const title = document.createElement('span');
+		title.className = 'finding-target-box-title';
+		title.textContent = target.title || 'FINDING';
+		head.appendChild(grip);
+		head.appendChild(title);
+
+		const body = document.createElement('div');
+		body.className = 'finding-target-box-body';
+		body.textContent = target.body || '—';
+
+		box.appendChild(head);
+		box.appendChild(body);
+		attachTargetBoxDrag(box, target.id, head);
+		// Persist the box's dimensions after a native resize-handle drag ends.
+		box.addEventListener('pointerup', () => {
+			targetBoxSize.set(target.id, { width: box.offsetWidth, height: box.offsetHeight });
+		});
+		return box;
+	}
+
+	function attachTargetBoxDrag(box: HTMLDivElement, id: string, handle: HTMLElement) {
+		const raise = () => {
+			targetBoxZTop += 1;
+			targetBoxZ.set(id, targetBoxZTop);
+			box.style.zIndex = String(targetBoxZTop);
+		};
+		// Stop pointerdowns anywhere on the box (body + native resize grip) from
+		// reaching the PDF host, which would otherwise start a drag-selection and
+		// steal the pointer (via setPointerCapture) from the native resize. No
+		// preventDefault here, so the browser's own resize/select still works.
+		box.addEventListener('pointerdown', (e: PointerEvent) => {
+			e.stopPropagation();
+			raise();
+		});
+		handle.addEventListener('pointerdown', (e: PointerEvent) => {
+			e.stopPropagation();
+			e.preventDefault();
+			raise();
+			handle.setPointerCapture?.(e.pointerId);
+			const parent = box.offsetParent as HTMLElement | null;
+			const host = box.closest('.pdf-canvas-host') as HTMLElement | null;
+			const startLeft = box.offsetLeft;
+			const startTop = box.offsetTop;
+			const sx = e.clientX;
+			const sy = e.clientY;
+			// Let the box roam the full scroll-host width (page + both gutters), not
+			// just the page, so it can be parked outside the PDF; clamp so it never
+			// leaves the host horizontally.
+			let minX = -(box.offsetWidth - 44);
+			let maxX = (parent?.clientWidth ?? 0);
+			const prect = parent?.getBoundingClientRect();
+			const hrect = host?.getBoundingClientRect();
+			if (prect && hrect) {
+				minX = hrect.left - prect.left + 4;
+				maxX = hrect.right - prect.left - box.offsetWidth - 4;
+			}
+			const maxY = Math.max(0, (parent?.clientHeight ?? 0) - box.offsetHeight);
+			const onMove = (me: PointerEvent) => {
+				const left = Math.max(minX, Math.min(maxX, startLeft + (me.clientX - sx)));
+				const top = Math.max(0, Math.min(maxY, startTop + (me.clientY - sy)));
+				box.style.left = `${left}px`;
+				box.style.top = `${top}px`;
+				targetBoxPos.set(id, { left, top });
+			};
+			const onUp = () => handle.removeEventListener('pointermove', onMove);
+			handle.addEventListener('pointermove', onMove);
+			handle.addEventListener('pointerup', onUp, { once: true });
+			handle.addEventListener('pointercancel', onUp, { once: true });
+		});
 	}
 
 	function renderCoordEditor(viewport: PdfPageViewport, overlay: HTMLDivElement) {
@@ -1518,13 +1794,30 @@
 			{#if !currentInput}
 				<div class="doc-empty">Retrieve a record to display document and structure highlights.</div>
 			{:else}
-				{#if viewingExternalRecord}
+				{#if viewingExternalRecord && !(findingShelf.active && findingShelf.finding)}
 					<div class="external-record-banner">
 						<button type="button" class="external-record-back" onclick={backToLockedRecord}>
 							<ChevronLeftIcon style="width:13px; height:13px;" />
 							Back to reviewed document
 						</button>
 						<span class="external-record-label">Viewing matched document: {recordDisplayName(currentInput)}</span>
+					</div>
+				{/if}
+				{#if findingShelf.active && findingDocChips.length > 1}
+					<div class="finding-doc-chips">
+						<span class="finding-doc-chips-label">Documents</span>
+						{#each findingDocChips as chip (chip.recordId)}
+							<button
+								type="button"
+								class="finding-doc-chip"
+								class:active={chip.recordId === activeTargetDoc}
+								onclick={() => void selectTargetDoc(chip.recordId)}
+								title={chip.label}
+							>
+								<span class="finding-doc-chip-name">{chip.label}</span>
+								<span class="finding-doc-chip-count">{chip.count}</span>
+							</button>
+						{/each}
 					</div>
 				{/if}
 				<div class="pdf-and-callout">
@@ -1540,7 +1833,7 @@
 							? `edit:${editCoordsDraft.join(',')}:${highlightSelectionVersion}`
 							: selectedHighlightTarget
 							? `${selectedHighlightTarget.page}:${selectedHighlightTarget.coords.join(',')}:${selectedHighlightTarget.version}:f${findingHighlightLines.length}`
-							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}:f${findingHighlightLines.length}`}
+							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}:f${findingHighlightLines.length}:ft${activeTargetDoc ?? ''}:${findingTargets.length}:h${findingBoxHang}`}
 						renderHighlights={renderStructureHighlights}
 						{darkMode}
 						sidebarMinWidth={140}
@@ -1552,6 +1845,23 @@
 						showSidebar={lockedRecordId == null}
 					>
 						{#snippet toolbar()}
+							{#if findingTargets.length > 0}
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									disabled={findingBoxHang <= 0}
+									onclick={() => nudgeFindingBoxes(-1)}
+									title="Move FINDING boxes left (onto the page)"
+								><ChevronLeftIcon class="pvw-tb-icon" /></button>
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									disabled={findingBoxHang >= 1}
+									onclick={() => nudgeFindingBoxes(1)}
+									title="Move FINDING boxes right (off the page)"
+								><ChevronRightIcon class="pvw-tb-icon" /></button>
+								<div class="pvw-tool-sep"></div>
+							{/if}
 							<button
 								type="button"
 								class="pvw-tool-btn"
@@ -1665,68 +1975,6 @@
 					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
 				{/if}
 				</div>
-
-				{#if findingShelf.active && findingShelf.finding}
-					{@const f = findingShelf.finding}
-					{@const related = relatedArtifactsFromMetadata(f.metadata)}
-					{#if f.description || related.length}
-						<aside
-							class="finding-callout"
-							bind:this={calloutEl}
-							style={calloutPos ? `left:${calloutPos.x}px; top:${calloutPos.y}px; right:auto;` : ''}
-						>
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div
-								class="finding-callout-drag"
-								title="Drag to move"
-								onpointerdown={startCalloutDrag}
-								onpointermove={onCalloutDrag}
-								onpointerup={endCalloutDrag}
-								onpointercancel={endCalloutDrag}
-							>
-								<span class="finding-callout-grip" aria-hidden="true">⠿</span>
-								<span class="finding-callout-drag-title">Finding</span>
-							</div>
-							{#if f.description}
-								<div class="finding-callout-label">描述</div>
-								<div class="finding-callout-desc">{f.description}</div>
-							{/if}
-							{#if related.length}
-								<div class="finding-callout-label">关联指标</div>
-								<div class="finding-callout-related">
-									{#each related as ra, i (i)}
-										<button
-											type="button"
-											class="finding-callout-ra"
-											disabled={calloutRaLoadingId === ra.related_artifact_id}
-											onclick={() => openCalloutRelatedArtifact(ra)}
-											title="Jump to this related artifact's source document"
-										>
-											<div class="finding-callout-ra-head">
-												{#if ra.relationship}
-													<span class="finding-callout-ra-rel">{ra.relationship}</span>
-												{/if}
-												<span class="finding-callout-ra-ref">record {ra.related_record_id} · {ra.related_artifact_id}</span>
-											</div>
-											{#if ra.summary}
-												<div class="finding-callout-ra-summary">{ra.summary}</div>
-											{:else if ra.fields.length}
-												<div class="finding-callout-ra-fields">
-													{#each ra.fields as field (field.label)}
-														<div class="finding-callout-ra-field">
-															<span class="finding-callout-ra-field-label">{field.label}</span>
-															<span class="finding-callout-ra-field-value">{field.value}</span>
-														</div>
-													{/each}
-												</div>
-											{/if}
-										</button>
-									{/each}
-								</div>
-							{/if}
-						</aside>
-					{/if}
-				{/if}
 				</div>
 			{/if}
 		</section>
@@ -3246,137 +3494,119 @@
 		margin-top: 2px;
 	}
 
-	/* Finding call-out: floats over the PDF's right gutter (overlapping the display)
-	   so the PDF can use the full pane width. Sits ~20px below the top. */
-	.finding-callout {
+	/* Document chips: switch the PDF between the source documents referenced by a
+	   selected finding's targets (finding location + related artifacts). */
+	.finding-doc-chips {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding: 6px 10px;
+		background: var(--panel-bg-alt);
+		border-bottom: 1px solid var(--ink-line);
+	}
+	.finding-doc-chips-label {
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--text-muted);
+		margin-right: 2px;
+	}
+	.finding-doc-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		max-width: 260px;
+		padding: 3px 8px;
+		border: 1px solid var(--ink-line);
+		border-radius: 999px;
+		background: transparent;
+		color: var(--text-secondary);
+		font: inherit;
+		font-size: 0.72rem;
+		cursor: pointer;
+	}
+	.finding-doc-chip:hover {
+		border-color: var(--brass);
+	}
+	.finding-doc-chip.active {
+		border-color: var(--brass);
+		background: var(--brass-faint);
+		color: var(--text-primary);
+	}
+	.finding-doc-chip-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.finding-doc-chip-count {
+		flex-shrink: 0;
+		min-width: 16px;
+		padding: 0 5px;
+		border-radius: 999px;
+		background: var(--brass-faint);
+		color: var(--brass);
+		font-family: var(--font-mono);
+		font-size: 0.64rem;
+		text-align: center;
+	}
+
+	/* FINDING boxes are appended imperatively into the per-page PDF overlay
+	   (so they scroll with the page and align to their highlight), hence the
+	   :global rules — scoped classes wouldn't reach them. Inherit the theme
+	   CSS variables from the .doc-structure root they live under. */
+	:global(.finding-target-box) {
 		position: absolute;
-		top: 232px;
-		right: 12px;
-		z-index: 4;
-		width: clamp(240px, 22vw, 320px);
-		max-height: calc(100% - 52px);
-		overflow-y: auto;
-		padding: 10px 12px;
+		box-sizing: border-box;
+		min-width: 170px;
+		min-height: 64px;
+		overflow: auto;
+		resize: both;
+		padding: 8px 10px;
 		background: var(--panel-bg);
 		border: 1px solid var(--brass);
-		border-radius: 10px;
-		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+		border-radius: 9px;
+		box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
 		font-family: var(--font-sans);
+		pointer-events: auto;
 		scrollbar-width: thin;
 	}
-	.finding-callout-drag {
+	:global(.finding-target-box-head) {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		margin: -10px -12px 8px;
-		padding: 5px 12px;
+		margin: -8px -10px 7px;
+		padding: 4px 10px;
 		border-bottom: 1px solid var(--ink-line);
-		border-radius: 10px 10px 0 0;
+		border-radius: 9px 9px 0 0;
 		background: var(--brass-faint);
 		cursor: move;
 		touch-action: none;
 		user-select: none;
 	}
-	.finding-callout-grip {
+	:global(.finding-target-box-grip) {
 		font-size: 0.7rem;
 		line-height: 1;
 		letter-spacing: -1px;
 		color: var(--brass);
 	}
-	.finding-callout-drag-title {
+	:global(.finding-target-box-title) {
 		font-family: var(--font-mono);
-		font-size: 0.62rem;
+		font-size: 0.6rem;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-	.finding-callout-label {
-		font-family: var(--font-mono);
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--brass);
-		margin: 6px 0 3px;
-	}
-	.finding-callout-label:first-child {
-		margin-top: 0;
-	}
-	.finding-callout-desc {
-		font-size: 0.78rem;
-		line-height: 1.5;
+	:global(.finding-target-box-body) {
+		font-size: 0.76rem;
+		line-height: 1.45;
 		color: var(--text-primary);
 		white-space: pre-wrap;
 		word-break: break-word;
 	}
-	.finding-callout-related {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.finding-callout-ra {
-		display: block;
-		width: 100%;
-		text-align: left;
-		border: 1px solid var(--ink-line);
-		border-radius: 6px;
-		padding: 6px 8px;
-		background: var(--brass-faint);
-		color: inherit;
-		font: inherit;
-		cursor: pointer;
-	}
-	.finding-callout-ra:hover:not(:disabled) {
-		border-color: var(--brass);
-	}
-	.finding-callout-ra:disabled {
-		cursor: default;
-		opacity: 0.6;
-	}
-	.finding-callout-ra-head {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		align-items: baseline;
-	}
-	.finding-callout-ra-rel {
-		font-family: var(--font-mono);
-		font-size: 0.68rem;
-		font-weight: 600;
-		color: var(--brass);
-	}
-	.finding-callout-ra-ref {
-		font-family: var(--font-mono);
-		font-size: 0.68rem;
-		color: var(--text-muted);
-	}
-	.finding-callout-ra-summary {
-		margin-top: 4px;
-		font-size: 0.74rem;
-		line-height: 1.45;
-		color: var(--text-secondary);
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
-	.finding-callout-ra-fields {
-		margin-top: 4px;
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
-	.finding-callout-ra-field {
-		display: grid;
-		grid-template-columns: minmax(80px, 110px) minmax(0, 1fr);
-		gap: 6px;
-		font-size: 0.72rem;
-	}
-	.finding-callout-ra-field-label {
-		font-family: var(--font-mono);
-		color: var(--text-muted);
-		word-break: break-word;
-	}
-	.finding-callout-ra-field-value {
-		color: var(--text-secondary);
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
+
 </style>

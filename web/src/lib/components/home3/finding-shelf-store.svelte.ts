@@ -11,6 +11,9 @@ type FocusFn = (recordId: number, lineNumbers: number[]) => void;
 export const findingShelf = $state<{
 	active: boolean;
 	finding: FindingItem | null;
+	// The set of findings to highlight in the PDF. A single finding click yields a
+	// one-element list; clicking a reviewer/aspect folder yields all its findings.
+	findings: FindingItem[];
 	requestId: number | null;
 	runId: number | null;
 	onFocusMatchedUnit: FocusFn | null;
@@ -18,6 +21,7 @@ export const findingShelf = $state<{
 }>({
 	active: false,
 	finding: null,
+	findings: [],
 	requestId: null,
 	runId: null,
 	onFocusMatchedUnit: null,
