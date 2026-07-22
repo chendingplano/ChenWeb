@@ -39,6 +39,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
+	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -263,6 +264,14 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/page-config/admin/pages/:pageKey/entries", pageconfighandler.UpsertEntry)
 	apiGroup.PUT("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.UpsertEntry)
 	apiGroup.DELETE("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.DeleteEntry)
+
+	// Training-video management (Resources > Videos > Training).
+	// Filesystem storage under VIDEO_DIR + kb.videos metadata.
+	apiGroup.POST("/videos", videohandler.UploadVideo)
+	apiGroup.GET("/videos", videohandler.ListVideos)
+	apiGroup.GET("/videos/:id/stream", videohandler.StreamVideo)
+	apiGroup.GET("/videos/:id/download", videohandler.DownloadVideo)
+	apiGroup.DELETE("/videos/:id", videohandler.DeleteVideo)
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)

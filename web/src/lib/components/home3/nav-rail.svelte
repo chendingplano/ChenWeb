@@ -25,6 +25,8 @@
 	import ShieldIcon          from '@lucide/svelte/icons/shield';
 	import BookMarkedIcon      from '@lucide/svelte/icons/book-marked';
 	import BrainIcon           from '@lucide/svelte/icons/brain';
+	import FolderIcon          from '@lucide/svelte/icons/folder';
+	import VideoIcon           from '@lucide/svelte/icons/video';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -239,6 +241,30 @@
 		{ id: 'about',    label: 'About',    icon: InfoIcon }
 	];
 
+	// Resources page (pageKey='resources') gets its own menu tree, rendered in
+	// place of the workspace `mainNav`. A dedicated tree — rather than DB-hiding
+	// the workspace tree — keeps these items off /home3 (which passes no pageKey,
+	// so the page-config overlay is fail-open there). Labels/visibility are still
+	// overlaid from the seeded `resources` page-config.
+	const resourcesNav: NavItem[] = [
+		{
+			id: 'documents', label: 'Documents', icon: FolderIcon, group: 'Resources',
+			children: [
+				{ id: 'docs-users-manual', label: "User's Manual" },
+				{ id: 'docs-development',  label: 'Development' }
+			]
+		},
+		{
+			id: 'videos', label: 'Videos', icon: VideoIcon, group: 'Resources',
+			children: [
+				{ id: 'videos-training', label: 'Training' }
+			]
+		}
+	];
+
+	// The workspace tree is the default; `resources` swaps in its own tree.
+	const activeMainNav = $derived(pageKey === 'resources' ? resourcesNav : mainNav);
+
 	// ── DB-backed page config (overlay model, spec 2026072001 §11) ───────────
 	// The menu tree, ids, icons, and routes stay page-owned above. When `pageKey`
 	// is set, config only overrides labels, hides items, or restricts them by
@@ -301,15 +327,15 @@
 		return out;
 	}
 
-	const displayMainNav = $derived(buildVisible(mainNav));
+	const displayMainNav = $derived(buildVisible(activeMainNav));
 	const displayBottomNav = $derived(buildVisible(bottomNav));
 
-	// Every id the menu owns — the source of truth for valid entry_keys. Used to
-	// flag config rows that match nothing (a stale/typo entry_key), which are
-	// otherwise silently inert (spec 2026072001 §4.4).
-	const knownNavIds = (() => {
+	// Every id the active menu owns — the source of truth for valid entry_keys.
+	// Used to flag config rows that match nothing (a stale/typo entry_key), which
+	// are otherwise silently inert (spec 2026072001 §4.4).
+	const knownNavIds = $derived.by(() => {
 		const ids = new Set<string>();
-		for (const item of [...mainNav, ...bottomNav]) {
+		for (const item of [...activeMainNav, ...bottomNav]) {
 			ids.add(item.id);
 			for (const child of item.children ?? []) {
 				ids.add(child.id);
@@ -317,7 +343,7 @@
 			}
 		}
 		return ids;
-	})();
+	});
 
 	const unknownConfigIds = $derived(
 		pageConfig
