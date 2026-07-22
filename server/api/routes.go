@@ -38,6 +38,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
+	"github.com/chendingplano/deepdoc/server/api/imagehandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
@@ -272,6 +273,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/videos/:id/stream", videohandler.StreamVideo)
 	apiGroup.GET("/videos/:id/download", videohandler.DownloadVideo)
 	apiGroup.DELETE("/videos/:id", videohandler.DeleteVideo)
+
+	// Image library (video covers) + AI cover generation.
+	apiGroup.POST("/images", imagehandler.UploadImage)
+	apiGroup.GET("/images", imagehandler.ListImages)
+	apiGroup.POST("/images/generate", imagehandler.GenerateImage)
+	apiGroup.GET("/images/:id/content", imagehandler.ServeImageContent)
+	apiGroup.DELETE("/images/:id", imagehandler.DeleteImage)
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)

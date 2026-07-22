@@ -51,10 +51,23 @@ type errorResponse struct {
 type videoMeta struct {
 	ID          int64     `json:"id"`
 	Filename    string    `json:"filename"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Source      string    `json:"source"`
+	URL         string    `json:"url"`
+	ImageID     *int64    `json:"image_id"`
+	ImageURL    string    `json:"image_url"`
 	SizeBytes   int64     `json:"size_bytes"`
 	ContentType string    `json:"content_type"`
 	UploadedBy  string    `json:"uploaded_by"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+func imageURLFor(imageID *int64) string {
+	if imageID == nil {
+		return ""
+	}
+	return fmt.Sprintf("/api/v1/images/%d/content", *imageID)
 }
 
 // videoDir resolves the storage directory. VIDEO_DIR is the explicit override;
@@ -142,21 +155,52 @@ func UploadVideo(c echo.Context) error {
 	}
 	uploadedBy := currentUserEmail(rc)
 
+	// Enriched metadata from the upload dialog.
+	name := strings.TrimSpace(c.FormValue("name"))
+	if name == "" {
+		name = header.Filename
+	}
+	description := strings.TrimSpace(c.FormValue("description"))
+	source := strings.TrimSpace(c.FormValue("source"))
+	if source == "" {
+		source = "Recording"
+	}
+	if source != "Recording" && source != "Web" {
+		_ = os.Remove(destPath)
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "source must be Recording or Web (CWB_VID_017)"})
+	}
+	videoURL := strings.TrimSpace(c.FormValue("url"))
+	if source == "Web" && videoURL == "" {
+		_ = os.Remove(destPath)
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "url is required when source is Web (CWB_VID_018)"})
+	}
+	var imageID *int64
+	if raw := strings.TrimSpace(c.FormValue("image_id")); raw != "" {
+		if v, convErr := strconv.ParseInt(raw, 10, 64); convErr == nil && v > 0 {
+			imageID = &v
+		}
+	}
+
 	db := ApiTypes.ProjectDBHandle
 	var meta videoMeta
 	err = db.QueryRow(
-		`INSERT INTO kb.videos (filename, stored_path, size_bytes, content_type, uploaded_by)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, filename, size_bytes, content_type, COALESCE(uploaded_by, ''), created_at`,
+		`INSERT INTO kb.videos (filename, stored_path, size_bytes, content_type, uploaded_by, name, description, source, url, image_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		 RETURNING id, filename, COALESCE(name, filename), COALESCE(description, ''),
+		           COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
+		           size_bytes, content_type, COALESCE(uploaded_by, ''), created_at`,
 		header.Filename, destPath, written, contentType, nullableString(uploadedBy),
-	).Scan(&meta.ID, &meta.Filename, &meta.SizeBytes, &meta.ContentType, &meta.UploadedBy, &meta.CreatedAt)
+		nullableString(name), nullableString(description), source, nullableString(videoURL), imageID,
+	).Scan(&meta.ID, &meta.Filename, &meta.Name, &meta.Description, &meta.Source, &meta.URL,
+		&meta.ImageID, &meta.SizeBytes, &meta.ContentType, &meta.UploadedBy, &meta.CreatedAt)
 	if err != nil {
 		_ = os.Remove(destPath)
 		logger.Error("insert video metadata failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to record video (CWB_VID_016)"})
 	}
+	meta.ImageURL = imageURLFor(meta.ImageID)
 
-	logger.Info("video uploaded", "id", meta.ID, "filename", meta.Filename, "size", meta.SizeBytes, "by", uploadedBy)
+	logger.Info("video uploaded", "id", meta.ID, "name", meta.Name, "size", meta.SizeBytes, "by", uploadedBy)
 	return c.JSON(http.StatusOK, meta)
 }
 
@@ -168,7 +212,9 @@ func ListVideos(c echo.Context) error {
 
 	db := ApiTypes.ProjectDBHandle
 	rows, err := db.Query(
-		`SELECT id, filename, size_bytes, content_type, COALESCE(uploaded_by, ''), created_at
+		`SELECT id, filename, COALESCE(name, filename), COALESCE(description, ''),
+		        COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
+		        size_bytes, content_type, COALESCE(uploaded_by, ''), created_at
 		   FROM kb.videos
 		  ORDER BY created_at DESC, id DESC`,
 	)
@@ -181,10 +227,12 @@ func ListVideos(c echo.Context) error {
 	list := make([]videoMeta, 0)
 	for rows.Next() {
 		var m videoMeta
-		if err := rows.Scan(&m.ID, &m.Filename, &m.SizeBytes, &m.ContentType, &m.UploadedBy, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Filename, &m.Name, &m.Description, &m.Source, &m.URL,
+			&m.ImageID, &m.SizeBytes, &m.ContentType, &m.UploadedBy, &m.CreatedAt); err != nil {
 			logger.Error("scan video row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to read videos (CWB_VID_021)"})
 		}
+		m.ImageURL = imageURLFor(m.ImageID)
 		list = append(list, m)
 	}
 	return c.JSON(http.StatusOK, list)

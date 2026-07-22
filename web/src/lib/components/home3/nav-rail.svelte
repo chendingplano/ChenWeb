@@ -225,6 +225,12 @@
 						{ id: 'sysadmin-benchmark-setup', label: 'Setup' }
 					]
 				},
+				{
+					id: 'sysadmin-resources', label: 'Resources',
+					children: [
+						{ id: 'sysadmin-resources-videos', label: 'Videos' }
+					]
+				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]
 		},

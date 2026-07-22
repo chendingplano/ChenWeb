@@ -5,10 +5,24 @@
 export type VideoMeta = {
 	id: number;
 	filename: string;
+	name: string;
+	description: string;
+	source: string;
+	url: string;
+	image_id: number | null;
+	image_url: string;
 	size_bytes: number;
 	content_type: string;
 	uploaded_by: string;
 	created_at: string;
+};
+
+export type VideoUploadFields = {
+	name?: string;
+	description?: string;
+	source?: string; // 'Recording' | 'Web'
+	url?: string;
+	image_id?: number | null;
 };
 
 /** List all videos, newest first. */
@@ -24,11 +38,17 @@ export async function listVideos(fetchFn: typeof fetch = fetch): Promise<VideoMe
  */
 export function uploadVideo(
 	file: File,
+	fields: VideoUploadFields = {},
 	onProgress?: (fraction: number) => void
 ): Promise<VideoMeta> {
 	return new Promise((resolve, reject) => {
 		const form = new FormData();
 		form.append('file', file);
+		if (fields.name) form.append('name', fields.name);
+		if (fields.description) form.append('description', fields.description);
+		if (fields.source) form.append('source', fields.source);
+		if (fields.url) form.append('url', fields.url);
+		if (fields.image_id != null) form.append('image_id', String(fields.image_id));
 
 		const xhr = new XMLHttpRequest();
 		xhr.open('POST', '/api/v1/videos', true);
