@@ -2841,8 +2841,8 @@
 	}
 	:global(.pdf-highlight) {
 		position: absolute;
-		background: rgba(212, 162, 76, 0.3);
-		outline: 1px solid rgba(212, 162, 76, 0.85);
+		background: rgba(250, 253, 125, 0.3);
+		outline: 1px solid rgba(250, 253, 125, 0.85);
 		border-radius: 2px;
 	}
 	.error {
