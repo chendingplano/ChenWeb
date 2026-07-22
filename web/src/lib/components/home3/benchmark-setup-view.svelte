@@ -368,19 +368,21 @@
 							<label class="field">
 								<span class="field-label" style="color:{muted};">
 									<span>{field.label}</span>
-									<button
-										type="button"
-										class="help-tip"
-										aria-label={`${field.label} help`}
-									>
-										<CircleHelpIcon size={14} />
+									<span class="help-anchor">
+										<button
+											type="button"
+											class="help-tip"
+											aria-label={`${field.label} help`}
+										>
+											<CircleHelpIcon size={14} />
+										</button>
 										<span class="tooltip" style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
 											<strong>{field.label}</strong>
 											<span><b>Purpose:</b> {field.help.purpose}</span>
 											<span><b>Valid values:</b> {field.help.valid}</span>
 											<span><b>Recommended:</b> {field.help.recommended}</span>
 										</span>
-									</button>
+									</span>
 								</span>
 								{#if field.type === 'select' && field.options}
 									<select
@@ -408,15 +410,21 @@
 						<label class="field toggle">
 							<span class="field-label" style="color:{muted};">
 								<span>Allow dirty working copy</span>
-								<button type="button" class="help-tip" aria-label="Allow dirty working copy help">
-									<CircleHelpIcon size={14} />
+								<span class="help-anchor">
+									<button
+										type="button"
+										class="help-tip"
+										aria-label="Allow dirty working copy help"
+									>
+										<CircleHelpIcon size={14} />
+									</button>
 									<span class="tooltip" style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
 										<strong>Allow dirty working copy</strong>
 										<span><b>Purpose:</b> {allowDirtyHelp.purpose}</span>
 										<span><b>Valid values:</b> {allowDirtyHelp.valid}</span>
 										<span><b>Recommended:</b> {allowDirtyHelp.recommended}</span>
 									</span>
-								</button>
+								</span>
 							</span>
 							<input
 								type="checkbox"
@@ -546,15 +554,26 @@
 		gap: 6px;
 	}
 	.help-tip {
-		position: relative;
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		color: inherit;
 		cursor: help;
 		outline: none;
 		padding: 0;
 		border: 0;
 		background: transparent;
+		width: 14px;
+		height: 14px;
+		line-height: 1;
+		flex: 0 0 auto;
+	}
+	.help-anchor {
+		position: relative;
+		display: inline-flex;
+		width: 14px;
+		height: 14px;
+		flex: 0 0 auto;
 	}
 	.tooltip {
 		position: absolute;
@@ -570,10 +589,10 @@
 		font-size: 12px;
 		line-height: 1.5;
 		box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+		pointer-events: none;
 	}
-	.help-tip:hover .tooltip,
-	.help-tip:focus .tooltip,
-	.help-tip:focus-within .tooltip {
+	.help-tip:hover + .tooltip,
+	.help-tip:focus-visible + .tooltip {
 		display: flex;
 	}
 	.field input[type='text'],
