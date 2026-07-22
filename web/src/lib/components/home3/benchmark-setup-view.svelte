@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SaveIcon from '@lucide/svelte/icons/save';
 	import PlayIcon from '@lucide/svelte/icons/play';
@@ -33,23 +34,203 @@
 	let error = $state('');
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-	const configFields: Array<{ key: keyof BenchmarkConfig; label: string; type?: string }> = [
-		{ key: 'experiment_path', label: 'Experiment path' },
-		{ key: 'dataset_root', label: 'Dataset root' },
-		{ key: 'artifact_root', label: 'Artifact root' },
-		{ key: 'work_root', label: 'Work root' },
-		{ key: 'evidence_root', label: 'Evidence root' },
-		{ key: 'store_id', label: 'Store ID', type: 'number' },
-		{ key: 'owner', label: 'Owner' },
-		{ key: 'tenant_id', label: 'Tenant ID' },
-		{ key: 'metrics_model_name', label: 'Metrics model name' },
-		{ key: 'report_format', label: 'Report format' },
-		{ key: 'report_output_path', label: 'Report output path' },
-		{ key: 'metrics_baseline', label: 'Metrics baseline' },
-		{ key: 'metrics_candidate', label: 'Metrics candidate' },
-		{ key: 'chunk_baseline', label: 'Chunk baseline' },
-		{ key: 'chunk_candidate', label: 'Chunk candidate' }
+	type FieldOption = {
+		value: string;
+		label: string;
+		disabled?: boolean;
+	};
+
+	type ConfigField = {
+		key: keyof BenchmarkConfig;
+		label: string;
+		type?: 'text' | 'number' | 'select';
+		placeholder?: string;
+		help: {
+			purpose: string;
+			valid: string;
+			recommended: string;
+		};
+		options?: FieldOption[];
+	};
+
+	const configFields: ConfigField[] = [
+		{
+			key: 'experiment_path',
+			label: 'Experiment path',
+			placeholder: 'benchmark/doc-processors/experiments/example-20260717-clean.toml',
+			help: {
+				purpose: 'The experiment TOML that defines processors, variants, repetitions, and compare targets.',
+				valid: 'Any readable path on the ChenWeb server. Relative paths are resolved from the ChenWeb repo root.',
+				recommended: 'Use the checked-in clean example experiment first, then switch to a dedicated experiment file when you create a new benchmark run.'
+			}
+		},
+		{
+			key: 'dataset_root',
+			label: 'Dataset root',
+			placeholder: 'benchmark/doc-processors/datasets',
+			help: {
+				purpose: 'The root folder that contains benchmark datasets and versions.',
+				valid: 'A readable directory containing dataset folders such as doc-processors-synthetic-core/1.0.0.',
+				recommended: 'Keep the default benchmark/doc-processors/datasets unless you intentionally maintain an alternate dataset tree.'
+			}
+		},
+		{
+			key: 'artifact_root',
+			label: 'Artifact root',
+			placeholder: 'Data/kb/artifacts',
+			help: {
+				purpose: 'The production artifact root used by benchmarked processors during execution.',
+				valid: 'A writable directory. This should match the effective ARTIFACT_DIR used by the production runtime.',
+				recommended: 'Point it at the same artifact root your document processor already uses, then let benchmark outputs live under a doc-benchmark subdirectory.'
+			}
+		},
+		{
+			key: 'work_root',
+			label: 'Work root',
+			placeholder: '.benchmark/work',
+			help: {
+				purpose: 'Disposable workspace storage for temporary benchmark execution files.',
+				valid: 'A writable directory that does not overlap the evidence root.',
+				recommended: 'Use .benchmark/work under the ChenWeb repo unless your environment requires a different scratch location.'
+			}
+		},
+		{
+			key: 'evidence_root',
+			label: 'Evidence root',
+			placeholder: '.benchmark/evidence',
+			help: {
+				purpose: 'Immutable captured evidence for benchmark attempts, reports, diagnostics, and provenance.',
+				valid: 'A writable directory that does not overlap the work root.',
+				recommended: 'Use .benchmark/evidence under the ChenWeb repo for local work and keep it separate from disposable workspace files.'
+			}
+		},
+		{
+			key: 'store_id',
+			label: 'Store ID',
+			type: 'number',
+			help: {
+				purpose: 'The knowledge-store ID used when seeding temporary benchmark input rows.',
+				valid: 'Any numeric store ID that exists in the target environment.',
+				recommended: 'Use 1 unless your environment has a dedicated benchmark store that should isolate these runs.'
+			}
+		},
+		{
+			key: 'owner',
+			label: 'Owner',
+			placeholder: 'benchmark-admin',
+			help: {
+				purpose: 'A label used for benchmark leases and job ownership metadata.',
+				valid: 'Any short identifier string.',
+				recommended: 'Use a stable machine or operator name so job ownership and lease recovery are easy to trace.'
+			}
+		},
+		{
+			key: 'tenant_id',
+			label: 'Tenant ID',
+			placeholder: 'benchmark',
+			help: {
+				purpose: 'The tenant label used by the benchmark runner when creating temporary benchmark inputs.',
+				valid: 'Any non-empty tenant identifier recognized by your runtime conventions.',
+				recommended: 'Keep benchmark unless you intentionally isolate benchmark traffic under another tenant label.'
+			}
+		},
+		{
+			key: 'metrics_model_name',
+			label: 'Metrics model name',
+			placeholder: 'deepseek-flash-chen',
+			help: {
+				purpose: 'The model reference injected into the metrics benchmark variant through DOC_BENCHMARK_METRICS_MODEL_NAME.',
+				valid: 'A model name that resolves correctly in the local .models.toml configuration.',
+				recommended: 'Use a known local model ref that already works for extract_metrics in your environment.'
+			}
+		},
+		{
+			key: 'report_format',
+			label: 'Report format',
+			type: 'select',
+			options: [
+				{ value: 'markdown', label: 'Markdown' },
+				{ value: 'typst', label: 'Typst (Planned)', disabled: true }
+			],
+			help: {
+				purpose: 'The output format used when generating benchmark reports and compare outputs from stored results.',
+				valid: 'Markdown is supported today. Typst is planned but not implemented yet.',
+				recommended: 'Use Markdown for now. Typst is shown to document the intended future export option.'
+			}
+		},
+		{
+			key: 'report_output_path',
+			label: 'Report output path',
+			placeholder: 'Data/kb/artifacts/doc-benchmark/report-<experiment-id>.md',
+			help: {
+				purpose: 'An optional explicit output path for the main benchmark report.',
+				valid: 'Any writable file path. If empty, the server generates a default path under the artifact root.',
+				recommended: 'Leave it blank at first and let the system write to the default report path under the benchmark artifact directory.'
+			}
+		},
+		{
+			key: 'metrics_baseline',
+			label: 'Metrics baseline',
+			type: 'select',
+			options: [
+				{ value: 'metrics-baseline', label: 'metrics-baseline' },
+				{ value: 'metrics-alt', label: 'metrics-alt' }
+			],
+			help: {
+				purpose: 'The baseline variant used when generating the metrics compare report.',
+				valid: 'A variant name that exists in the configured experiment.',
+				recommended: 'Use metrics-baseline as the stable reference variant and compare metrics-alt against it.'
+			}
+		},
+		{
+			key: 'metrics_candidate',
+			label: 'Metrics candidate',
+			type: 'select',
+			options: [
+				{ value: 'metrics-baseline', label: 'metrics-baseline' },
+				{ value: 'metrics-alt', label: 'metrics-alt' }
+			],
+			help: {
+				purpose: 'The candidate variant used when generating the metrics compare report.',
+				valid: 'A variant name that exists in the configured experiment.',
+				recommended: 'Use metrics-alt as the candidate when comparing prompt or model changes against metrics-baseline.'
+			}
+		},
+		{
+			key: 'chunk_baseline',
+			label: 'Chunk baseline',
+			type: 'select',
+			options: [
+				{ value: 'chunk-small', label: 'chunk-small' },
+				{ value: 'chunk-large', label: 'chunk-large' }
+			],
+			help: {
+				purpose: 'The baseline variant used when generating the chunking compare report.',
+				valid: 'A variant name that exists in the configured experiment.',
+				recommended: 'Use chunk-small as the baseline if that is your current stable chunking configuration.'
+			}
+		},
+		{
+			key: 'chunk_candidate',
+			label: 'Chunk candidate',
+			type: 'select',
+			options: [
+				{ value: 'chunk-small', label: 'chunk-small' },
+				{ value: 'chunk-large', label: 'chunk-large' }
+			],
+			help: {
+				purpose: 'The candidate variant used when generating the chunking compare report.',
+				valid: 'A variant name that exists in the configured experiment.',
+				recommended: 'Use chunk-large when testing whether larger chunk sizing helps or hurts quality and efficiency.'
+			}
+		}
 	];
+
+	const allowDirtyHelp = {
+		purpose: 'Controls whether the benchmark runner may proceed when the current jj working copy is dirty.',
+		valid: 'Checked or unchecked.',
+		recommended: 'Leave it unchecked for reproducible benchmark runs. Enable it only for exploratory browser testing when a dirty working copy is acceptable.'
+	};
 
 	async function loadState() {
 		loading = true;
@@ -185,17 +366,58 @@
 					<div class="config-grid">
 						{#each configFields as field}
 							<label class="field">
-								<span style="color:{muted};">{field.label}</span>
-								<input
-									type={field.type ?? 'text'}
-									value={String(draft[field.key] ?? '')}
-									oninput={(e) => updateField(field.key, (e.currentTarget as HTMLInputElement).value)}
-									style="border:1px solid {border}; background:{pageBg}; color:{textPrimary};"
-								/>
+								<span class="field-label" style="color:{muted};">
+									<span>{field.label}</span>
+									<button
+										type="button"
+										class="help-tip"
+										aria-label={`${field.label} help`}
+									>
+										<CircleHelpIcon size={14} />
+										<span class="tooltip" style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
+											<strong>{field.label}</strong>
+											<span><b>Purpose:</b> {field.help.purpose}</span>
+											<span><b>Valid values:</b> {field.help.valid}</span>
+											<span><b>Recommended:</b> {field.help.recommended}</span>
+										</span>
+									</button>
+								</span>
+								{#if field.type === 'select' && field.options}
+									<select
+										value={String(draft[field.key] ?? '')}
+										onchange={(e) => updateField(field.key, (e.currentTarget as HTMLSelectElement).value)}
+										style="border:1px solid {border}; background:{pageBg}; color:{textPrimary};"
+									>
+										{#each field.options as option}
+											<option value={option.value} disabled={option.disabled}>
+												{option.label}
+											</option>
+										{/each}
+									</select>
+								{:else}
+									<input
+										type={field.type ?? 'text'}
+										value={String(draft[field.key] ?? '')}
+										placeholder={field.placeholder}
+										oninput={(e) => updateField(field.key, (e.currentTarget as HTMLInputElement).value)}
+										style="border:1px solid {border}; background:{pageBg}; color:{textPrimary};"
+									/>
+								{/if}
 							</label>
 						{/each}
 						<label class="field toggle">
-							<span style="color:{muted};">Allow dirty working copy</span>
+							<span class="field-label" style="color:{muted};">
+								<span>Allow dirty working copy</span>
+								<button type="button" class="help-tip" aria-label="Allow dirty working copy help">
+									<CircleHelpIcon size={14} />
+									<span class="tooltip" style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
+										<strong>Allow dirty working copy</strong>
+										<span><b>Purpose:</b> {allowDirtyHelp.purpose}</span>
+										<span><b>Valid values:</b> {allowDirtyHelp.valid}</span>
+										<span><b>Recommended:</b> {allowDirtyHelp.recommended}</span>
+									</span>
+								</button>
+							</span>
 							<input
 								type="checkbox"
 								checked={draft.allow_dirty}
@@ -318,8 +540,45 @@
 		gap: 7px;
 		font-size: 13px;
 	}
+	.field-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.help-tip {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		color: inherit;
+		cursor: help;
+		outline: none;
+		padding: 0;
+		border: 0;
+		background: transparent;
+	}
+	.tooltip {
+		position: absolute;
+		left: 0;
+		top: calc(100% + 10px);
+		z-index: 10;
+		width: min(320px, 60vw);
+		display: none;
+		flex-direction: column;
+		gap: 6px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		font-size: 12px;
+		line-height: 1.5;
+		box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+	}
+	.help-tip:hover .tooltip,
+	.help-tip:focus .tooltip,
+	.help-tip:focus-within .tooltip {
+		display: flex;
+	}
 	.field input[type='text'],
-	.field input[type='number'] {
+	.field input[type='number'],
+	.field select {
 		border-radius: 10px;
 		padding: 10px 12px;
 		outline: none;
