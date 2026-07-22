@@ -57,8 +57,18 @@ type videoMeta struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// videoDir resolves the storage directory. VIDEO_DIR is the explicit override;
+// when it is unset we fall back to <DATA_HOME_DIR>/Videos so uploads work out of
+// the box on any deployment that already sets DATA_HOME_DIR. Only when neither is
+// set do we fail closed (CWB_VID_010).
 func videoDir() string {
-	return strings.TrimSpace(os.Getenv("VIDEO_DIR"))
+	if v := strings.TrimSpace(os.Getenv("VIDEO_DIR")); v != "" {
+		return v
+	}
+	if home := strings.TrimSpace(os.Getenv("DATA_HOME_DIR")); home != "" {
+		return filepath.Join(home, "Videos")
+	}
+	return ""
 }
 
 func maxVideoBytes() int64 {

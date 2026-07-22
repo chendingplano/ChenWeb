@@ -37,7 +37,7 @@ Video storage has an existing precedent: `kbhandler.UploadInputs` streams multip
 
 - **Backend: new `videohandler` package, filesystem + `kb.videos`.**
   - Migration `kb.videos`: `id BIGSERIAL PK`, `filename TEXT`, `stored_path TEXT`, `size_bytes BIGINT`, `content_type TEXT`, `uploaded_by TEXT`, `created_at TIMESTAMPTZ DEFAULT now()`. Reserved-word-safe names. Created via goose in `project_migrations/` (tax/ChenWeb project tables live in `database.CreateTables`/project migrations, not `sysdatastores`).
-  - Storage dir from a new env/config key (e.g. `VIDEO_DIR`), validated fail-closed exactly like `STAGING_DIR`.
+  - Storage dir from a new env key `VIDEO_DIR` (set in `.env` — the server loads it via `godotenv` at startup — and in `mise.local.toml`). When `VIDEO_DIR` is unset it falls back to `<DATA_HOME_DIR>/Videos` (DATA_HOME_DIR is already present in every deployment), so uploads work out of the box; it fails closed (CWB_VID_010) only when neither is set.
   - Endpoints under `/api/v1/videos`, all behind the standard auth middleware:
     - `POST /api/v1/videos` — multipart upload; validate content type against a video allow-list + a max-size limit; write bytes to `VIDEO_DIR`, insert metadata; return the new row.
     - `GET /api/v1/videos` — list metadata, newest first.
