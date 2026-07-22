@@ -88,7 +88,8 @@
 	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
 	// View mode: 'packages' (by P1-P6) or 'severity' (by High/Medium/Low).
 	let viewMode = $state<'packages' | 'severity'>('packages');
-	// Per-package and per-reviewer fold state (packages view, all expanded by default).
+	// Package fold state (packages view, expanded by default); reviewer sub-groups
+	// are collapsed by default so the report opens showing only reviewer headers.
 	let expandedPackages = $state<Record<string, boolean>>({});
 	let expandedReviewers = $state<Record<string, boolean>>({});
 	// Severity view fold state (all expanded by default).
@@ -97,7 +98,7 @@
 		return expandedPackages[pass] !== false;
 	}
 	function isReviewerExpanded(key: string): boolean {
-		return expandedReviewers[key] !== false;
+		return expandedReviewers[key] === true;
 	}
 	function isSeverityExpanded(sev: string): boolean {
 		return expandedSeverities[sev] !== false;
