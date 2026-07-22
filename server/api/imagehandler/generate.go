@@ -93,7 +93,14 @@ func callImageProvider(baseURL, apiKey, model, prompt string) ([]byte, string, e
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/images/generations", bytes.NewReader(body))
+	// Accept a base URL that already includes the OpenAI-compatible `/v1`
+	// segment (e.g. DashScope's .../compatible-mode/v1) as well as a bare host.
+	endpoint := baseURL + "/v1/images/generations"
+	if strings.HasSuffix(baseURL, "/v1") {
+		endpoint = baseURL + "/images/generations"
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, "", err
 	}
