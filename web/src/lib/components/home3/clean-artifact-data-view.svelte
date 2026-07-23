@@ -33,13 +33,14 @@
 	let cleaning = $state(false);
 	let error = $state('');
 	let result = $state<CleanResult | null>(null);
+	let pendingConfirmID = $state<number | null>(null);
 
 	function parsedRecordID(): number {
 		const n = Number.parseInt(recordID.trim(), 10);
 		return Number.isFinite(n) ? n : 0;
 	}
 
-	async function cleanArtifacts() {
+	function requestCleanConfirmation() {
 		const id = parsedRecordID();
 		error = '';
 		result = null;
@@ -47,12 +48,13 @@
 			error = 'Enter a positive record ID.';
 			return;
 		}
-		const confirmed = window.confirm(
-			`Clean artifact data for record #${id}?\n\n` +
-				'This runs the same cleanup used by delete record. It may delete related DB rows, input row data if present, artifact directories, and ArtifactWeb index entries. This action cannot be undone.'
-		);
-		if (!confirmed) return;
+		pendingConfirmID = id;
+	}
 
+	async function cleanArtifacts(id: number) {
+		error = '';
+		result = null;
+		pendingConfirmID = null;
 		cleaning = true;
 		try {
 			const res = await fetch('/api/v1/admin/db/kb-input-artifacts/clean', {
@@ -70,6 +72,10 @@
 		} finally {
 			cleaning = false;
 		}
+	}
+
+	function cancelCleanConfirmation() {
+		pendingConfirmID = null;
 	}
 </script>
 
@@ -111,7 +117,7 @@
 			</div>
 
 			<button
-				onclick={cleanArtifacts}
+				onclick={requestCleanConfirmation}
 				disabled={cleaning}
 				style="
 					display:flex; align-items:center; gap:7px;
@@ -130,6 +136,54 @@
 				{/if}
 			</button>
 		</div>
+
+		{#if pendingConfirmID !== null}
+			<div
+				class="mt-4 rounded-lg p-4"
+				style="background:{dangerTint}; border:1px solid {danger}66;"
+				role="alertdialog"
+				aria-labelledby="clean-confirm-title"
+				aria-describedby="clean-confirm-desc"
+			>
+				<div class="flex items-start gap-3">
+					<AlertTriangleIcon style="width:18px; height:18px; color:{danger}; flex-shrink:0; margin-top:2px;" />
+					<div class="flex-1">
+						<div id="clean-confirm-title" style="font-size:14px; font-weight:700; color:{textPrimary}; margin-bottom:4px;">
+							Confirm clean for record #{pendingConfirmID}
+						</div>
+						<p id="clean-confirm-desc" style="font-size:13px; color:{textSecondary}; line-height:1.55; margin-bottom:12px;">
+							This will run the same cleanup used by delete record. It may delete related DB rows,
+							input row data if present, artifact directories, and ArtifactWeb index entries.
+							This action cannot be undone.
+						</p>
+						<div class="flex flex-wrap gap-2">
+							<button
+								onclick={() => cleanArtifacts(pendingConfirmID ?? 0)}
+								disabled={cleaning}
+								style="
+									padding:7px 14px; border-radius:7px; border:none; cursor:pointer;
+									font-size:13px; font-weight:700; background:{danger}; color:white;
+									opacity:{cleaning ? 0.65 : 1};
+								"
+							>
+								Yes, clean record #{pendingConfirmID}
+							</button>
+							<button
+								onclick={cancelCleanConfirmation}
+								disabled={cleaning}
+								style="
+									padding:7px 14px; border-radius:7px; border:1px solid {borderColor}; cursor:pointer;
+									font-size:13px; font-weight:600; background:{surface2}; color:{textPrimary};
+									opacity:{cleaning ? 0.65 : 1};
+								"
+							>
+								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		{#if error}
 			<div class="mt-4 rounded-lg p-3" style="background:{dangerTint}; color:{danger}; font-size:13px;">
