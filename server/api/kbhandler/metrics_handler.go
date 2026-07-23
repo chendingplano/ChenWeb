@@ -2,6 +2,7 @@ package kbhandler
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -1413,6 +1415,8 @@ type artifactWebCleanupStats struct {
 	LinesRemoved int `json:"lines_removed"`
 }
 
+const deleteInputDocProcLogLoc = "CWB_KB_M_416"
+
 var artifactWebIndexFilenames = map[string]struct{}{
 	"chunks.txt":               {},
 	"entities.txt":             {},
@@ -1565,6 +1569,26 @@ func cleanupInputArtifactWeb(logger ApiTypes.JimoLogger, recordID int64) artifac
 	return total
 }
 
+func writeDeleteInputDocProcLog(recordID int64, webStats artifactWebCleanupStats) error {
+	recordIDCopy := recordID
+	extraInfo := map[string]any{
+		"operation":            "delete_input",
+		"artifact_web_cleanup": webStats,
+	}
+	extraJSON, err := json.Marshal(extraInfo)
+	if err != nil {
+		return err
+	}
+	logger := docprocessing.DocProcLogger{DB: ApiTypes.ProjectDBHandle}
+	extraJSONString := string(extraJSON)
+	return logger.LogSummary(context.Background(), docprocessing.EntryTypeDeleteInput, docprocessing.DocProcLogRecord{
+		CallReason:    "delete_input",
+		DocProcName:   "delete_input",
+		RecordID:      &recordIDCopy,
+		ExtraInfoJSON: &extraJSONString,
+	}, deleteInputDocProcLogLoc)
+}
+
 // DeleteInput handles DELETE /api/v1/kb/inputs/:id
 func DeleteInput(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_400")
@@ -1646,7 +1670,10 @@ func DeleteInput(c echo.Context) error {
 
 	deleteInputFiles(logger, assets)
 	deleteInputArtifactDirs(logger, id, assets)
-	cleanupInputArtifactWeb(logger, id)
+	webStats := cleanupInputArtifactWeb(logger, id)
+	if err := writeDeleteInputDocProcLog(id, webStats); err != nil {
+		logger.Warn("write delete input doc proc log failed", "record_id", id, "err", err)
+	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"status": true})
 }

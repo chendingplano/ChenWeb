@@ -2,11 +2,13 @@ package kbhandler
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,6 +19,65 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
+
+type jsonWithFieldMatcher struct {
+	field string
+	want  any
+}
+
+func (m jsonWithFieldMatcher) Match(v driver.Value) bool {
+	var raw string
+	switch value := v.(type) {
+	case string:
+		raw = value
+	case *string:
+		if value == nil {
+			return false
+		}
+		raw = *value
+	default:
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	got, ok := payload[m.field]
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(got, m.want)
+}
+
+type stringPtrMatcher string
+
+func (m stringPtrMatcher) Match(v driver.Value) bool {
+	switch value := v.(type) {
+	case string:
+		return value == string(m)
+	case *string:
+		return value != nil && *value == string(m)
+	default:
+		return false
+	}
+}
+
+func strPtrValue(v string) sqlmock.Argument { return stringPtrMatcher(v) }
+
+type int64PtrMatcher int64
+
+func (m int64PtrMatcher) Match(v driver.Value) bool {
+	switch value := v.(type) {
+	case int64:
+		return value == int64(m)
+	case *int64:
+		return value != nil && *value == int64(m)
+	default:
+		return false
+	}
+}
+
+func int64PtrValue(v int64) sqlmock.Argument { return int64PtrMatcher(v) }
 
 func newUpdateInputContext(t *testing.T, id string, body string) (echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
@@ -482,6 +543,55 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 		WithArgs(int64(430)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+	logInsertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.doc_proc_logs (
+    call_reason,
+    doc_proc_name,
+    model_names,
+    prompt_name,
+    record_id,
+    proc_progress,
+    entry_type,
+    pass,
+    llm_call_id,
+    activity_name,
+    artifact,
+    errors,
+    extra_info,
+    ms_used,
+    log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
+    run_id,
+    create_time
+) VALUES (
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, $15, $16, $17, $18, NOW()
+)`)
+	recordID := int64(430)
+	mock.ExpectExec(logInsertQuery).
+		WithArgs(
+			strPtrValue("delete_input"),
+			"delete_input",
+			"{}",
+			nil,
+			int64PtrValue(recordID),
+			nil,
+			"delete_input",
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			jsonWithFieldMatcher{field: "operation", want: "delete_input"},
+			nil,
+			deleteInputDocProcLogLoc,
+			nil,
+			nil,
+			nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	c, rec := newDeleteInputContext(t, "430")
 	if err := DeleteInput(c); err != nil {

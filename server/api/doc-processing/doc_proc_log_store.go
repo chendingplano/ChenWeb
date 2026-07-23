@@ -42,6 +42,7 @@ const EntryTypeExtractDocMetadata = "extract_doc_metadata"
 const EntryTypeChunking = "chunking"
 const EntryTypeGenerateTopics = "generate_topics"
 const EntryTypeReconcileObject = "reconcile_object"
+const EntryTypeDeleteInput = "delete_input"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -323,6 +324,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeChunking,
 		EntryTypeGenerateTopics,
 		EntryTypeReconcileObject,
+		EntryTypeDeleteInput,
 		EntryTypeExtractDocMetadata:
 		return true
 	default:
