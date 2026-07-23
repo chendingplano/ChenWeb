@@ -13,7 +13,10 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
-// Schedule is one user-configured recurring job.
+// Schedule is one user-configured job. A recurring schedule keeps running
+// every IntervalSeconds; a RunOnce schedule uses IntervalSeconds only as the
+// one-time delay before its single run and is disabled (never re-picked-up
+// by DueSchedules) once that run completes, regardless of outcome.
 type Schedule struct {
 	ID              int64
 	Name            string
@@ -21,6 +24,7 @@ type Schedule struct {
 	IntervalSeconds int
 	Params          map[string]any
 	Enabled         bool
+	RunOnce         bool
 	NextRunAt       time.Time
 	LastRunAt       *time.Time
 	LastRunStatus   string
@@ -48,7 +52,7 @@ type Store interface {
 	DueSchedules(ctx context.Context, now time.Time, limit int) ([]Schedule, error)
 	StartRun(ctx context.Context, scheduleID int64, jobType string) (runID int64, err error)
 	FinishRun(ctx context.Context, runID int64, status string, result map[string]any, runErr error) error
-	AdvanceSchedule(ctx context.Context, scheduleID int64, nextRunAt time.Time, status string) error
+	AdvanceSchedule(ctx context.Context, scheduleID int64, nextRunAt time.Time, enabled bool, status string) error
 }
 
 // RunSummary summarizes one RunDueSchedules pass.
@@ -112,7 +116,10 @@ func RunDueSchedules(ctx context.Context, store Store, registry Registry, now ti
 			logger.Warn("scheduler: finish run failed", "run_id", runID, "error", err.Error())
 		}
 		nextRunAt := now.Add(time.Duration(sched.IntervalSeconds) * time.Second)
-		if err := store.AdvanceSchedule(ctx, sched.ID, nextRunAt, status); err != nil && logger != nil {
+		// A run-once schedule is disabled after its single run, success or
+		// failure — it must never be picked up by DueSchedules again.
+		stillEnabled := !sched.RunOnce
+		if err := store.AdvanceSchedule(ctx, sched.ID, nextRunAt, stillEnabled, status); err != nil && logger != nil {
 			logger.Warn("scheduler: advance schedule failed", "schedule_id", sched.ID, "error", err.Error())
 		}
 	}

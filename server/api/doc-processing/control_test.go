@@ -71,6 +71,188 @@ func (f fakeProcessor) HandleEvent(_ context.Context, _ []byte) error {
 	return f.retErr
 }
 
+type inspectingProcessor struct {
+	name          string
+	store         *fakeStatusStore
+	seenStatusRaw string
+}
+
+func (p *inspectingProcessor) Name() string { return p.name }
+
+func (p *inspectingProcessor) HandleEvent(ctx context.Context, _ []byte) error {
+	rec, err := p.store.GetInputRecord(ctx, 7)
+	if err != nil {
+		return err
+	}
+	p.seenStatusRaw = rec.StatusRaw
+	return nil
+}
+
+type fakeBatchProcessor struct {
+	name       string
+	initCalls   int
+	processCalls int
+	finalCalls  int
+}
+
+func (p *fakeBatchProcessor) Name() string { return p.name }
+
+func (p *fakeBatchProcessor) HandleEvent(_ context.Context, _ []byte) error { return nil }
+
+func (p *fakeBatchProcessor) InitChunkBatch(_ context.Context, _ int64, _ []Chunk, _ string) error {
+	p.initCalls++
+	return nil
+}
+
+func (p *fakeBatchProcessor) ProcessChunk(_ context.Context, _ int) error {
+	p.processCalls++
+	return nil
+}
+
+func (p *fakeBatchProcessor) FinalizeChunkBatch(_ context.Context) error {
+	p.finalCalls++
+	return nil
+}
+
+func TestRunSingleProcessorCollect_PersistsActiveStatusBeforeHandleEvent(t *testing.T) {
+	store := &fakeStatusStore{raw: "[]"}
+	proc := &inspectingProcessor{
+		name:  "extract_doc_metadata",
+		store: store,
+	}
+	svc := &ControlService{
+		InputStore: store,
+		Now: func() time.Time {
+			return time.Date(2026, 7, 23, 18, 0, 0, 0, time.UTC)
+		},
+	}
+
+	res := svc.runSingleProcessorCollect(context.Background(), []byte(`{}`), proc, 7)
+	if res.failed {
+		t.Fatalf("processor unexpectedly failed: %+v", res)
+	}
+
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(proc.seenStatusRaw), &entries); err != nil {
+		t.Fatalf("unmarshal seen status: %v", err)
+	}
+
+	var directEntry map[string]any
+	for _, entry := range entries {
+		if canonicalOperationName(asString(entry["operation"])) == "extract_doc_metadata" {
+			directEntry = entry
+			break
+		}
+	}
+	if directEntry == nil {
+		t.Fatalf("missing direct extract_doc_metadata status entry in %s", proc.seenStatusRaw)
+	}
+	if got := strings.TrimSpace(asString(directEntry["proc_status"])); got != "active" {
+		t.Fatalf("direct proc_status=%q, want active", got)
+	}
+}
+
+func TestUpsertProcessorRuntimeStatus_ReplacesLegacyAlias(t *testing.T) {
+	now := time.Date(2026, 7, 23, 18, 5, 0, 0, time.UTC)
+	raw := `[{"operation":"extract_metadata","proc_status":"success","error":"old","start_time":"20260723 17:00:00"}]`
+
+	got, err := upsertProcessorRuntimeStatus(raw, now, "extract_doc_metadata", "active", "")
+	if err != nil {
+		t.Fatalf("upsertProcessorRuntimeStatus: %v", err)
+	}
+
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(got), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries)=%d, want 1: %s", len(entries), got)
+	}
+	if got := strings.TrimSpace(asString(entries[0]["operation"])); got != "extract_metadata" {
+		t.Fatalf("operation=%q, want extract_metadata", got)
+	}
+	if got := strings.TrimSpace(asString(entries[0]["proc_status"])); got != "active" {
+		t.Fatalf("proc_status=%q, want active", got)
+	}
+	if _, ok := entries[0]["error"]; ok {
+		t.Fatalf("stale error should be cleared: %#v", entries[0])
+	}
+}
+
+func TestRunProcessorsChunkBatched_PersistsBatchProcessorLifecycle(t *testing.T) {
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "record.txt")
+	content := "1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tIntro\n"
+	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{
+			7: {
+				ID:             7,
+				StatusRaw:      "[]",
+				ResultFilename: lineFile,
+				ParserName:     "mineru",
+				StagingFilename: filepath.Join(tmp, "record.pdf"),
+			},
+		},
+	}
+	proc := &fakeBatchProcessor{name: "extract_metrics"}
+	svc := &ControlService{
+		InputStore: store,
+		Now: func() time.Time {
+			return time.Date(2026, 7, 23, 18, 10, 0, 0, time.UTC)
+		},
+	}
+
+	ctx := context.Background()
+	ctx, _ = withChunkBufferHolder(ctx)
+	storeChunksInContext(ctx, []Chunk{
+		{SeqNo: 1, Lines: []MarkedLine{{Line: Line{LineNo: 1, PageNo: 1, LineType: "paragraph", Content: "Intro"}, Mark: "r"}}},
+	})
+	payload := []byte(fmt.Sprintf(`{"record_id":"7","filename":"%s","operation":["extract_metrics"]}`, lineFile))
+
+	var (
+		requestFailed  bool
+		requestStopped bool
+		firstErr       error
+	)
+	svc.runProcessorsChunkBatched(ctx, payload, []Processor{proc}, 7, &requestFailed, &requestStopped, &firstErr, nil)
+
+	if requestFailed || requestStopped || firstErr != nil {
+		t.Fatalf("batch run failed=%v stopped=%v err=%v", requestFailed, requestStopped, firstErr)
+	}
+	if proc.initCalls != 1 || proc.finalCalls != 1 {
+		t.Fatalf("init=%d final=%d, want 1 each", proc.initCalls, proc.finalCalls)
+	}
+	if proc.processCalls == 0 {
+		t.Fatal("expected at least one ProcessChunk call")
+	}
+
+	rec, err := store.GetInputRecord(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("load record: %v", err)
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(rec.StatusRaw), &entries); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	var directEntry map[string]any
+	for _, entry := range entries {
+		if canonicalOperationName(asString(entry["operation"])) == "extract_metrics" {
+			directEntry = entry
+			break
+		}
+	}
+	if directEntry == nil {
+		t.Fatalf("missing extract_metrics status entry in %s", rec.StatusRaw)
+	}
+	if got := strings.TrimSpace(asString(directEntry["proc_status"])); got != "success" {
+		t.Fatalf("proc_status=%q, want success", got)
+	}
+}
+
 type blockBufferSettingProcessor struct {
 	name  string
 	calls *[]string
@@ -904,6 +1086,137 @@ func (p *statusWritingProcessor) HandleEvent(ctx context.Context, payload []byte
 		b, _ := json.Marshal(arr)
 		return DocMetadataUpdate{StatusRaw: string(b)}, nil
 	})
+}
+
+type phaseCBlockingProcessor struct {
+	statusWritingProcessor
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *phaseCBlockingProcessor) PostProcessIndex(_ context.Context, _ int64) error {
+	select {
+	case p.started <- struct{}{}:
+	default:
+	}
+	<-p.release
+	return nil
+}
+
+func TestControlService_PhaseCKeepsPipelineRunningWithoutProcessorName(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.pdf")
+	lineFilePath := filepath.Join(dir, "source_opendata.txt")
+	resultPath := filepath.Join(dir, "result.json")
+	if err := os.WriteFile(inputPath, []byte("pdf placeholder"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	writeLineFile(t, lineFilePath)
+
+	store := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              1,
+		ParserName:      "opendata",
+		ResultFilename:  resultPath,
+		StagingFilename: inputPath,
+		StatusRaw:       "[]",
+	}}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	proc := &phaseCBlockingProcessor{
+		statusWritingProcessor: statusWritingProcessor{name: "extract_metrics", store: store, id: 1},
+		started:                started,
+		release:                release,
+	}
+	svc := &ControlService{
+		InputStore:  store,
+		Processors:  []Processor{proc},
+		Now:         time.Now,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.handleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Phase C to start")
+	}
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		raw := store.currentStatusRaw()
+		entries := decodeDocMetaStatus(raw)
+		if len(entries) > 0 {
+			for _, entry := range entries {
+				if strings.TrimSpace(asString(entry["operation"])) != "doc_processing" {
+					continue
+				}
+				if strings.TrimSpace(asString(entry["proc_status"])) != "running" {
+					continue
+				}
+				if gotName := strings.TrimSpace(asString(entry["doc_processor_name"])); gotName != "" {
+					t.Fatalf("doc_processing still points at %q during Phase C; want empty processor name", gotName)
+				}
+				if isStuckPipeline(entries) {
+					t.Fatal("Phase C running status was misclassified as stuck")
+				}
+				close(release)
+				if err := <-done; err != nil {
+					t.Fatalf("handleEvent returned error: %v", err)
+				}
+				return
+			}
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for unnamed running doc_processing status; latest=%s", raw)
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestIsStuckPipeline_FalseForFreshRunWithoutDirectProcessorEntry(t *testing.T) {
+	entries := []map[string]any{
+		{"operation": "parsed", "proc_status": "success"},
+		{"operation": "converted", "proc_status": "success"},
+		{"operation": "doc_processing", "proc_status": "running", "doc_processor_name": "blocking"},
+	}
+	if isStuckPipeline(entries) {
+		t.Fatal("freshly started pipeline was misclassified as stuck")
+	}
+}
+
+func TestIsStuckPipeline_FalseDuringStageTransitionBeforeNamedProcessorWritesStatus(t *testing.T) {
+	entries := []map[string]any{
+		{"operation": "parsed", "proc_status": "success"},
+		{"operation": "converted", "proc_status": "success"},
+		{"operation": "blocking", "proc_status": "success"},
+		{"operation": "doc_processing", "proc_status": "running", "doc_processor_name": "static_analyzer"},
+	}
+	if isStuckPipeline(entries) {
+		t.Fatal("stage-transition pipeline was misclassified as stuck")
+	}
+}
+
+func TestIsStuckPipeline_TrueWhenNamedProcessorAlreadyFinished(t *testing.T) {
+	entries := []map[string]any{
+		{"operation": "parsed", "proc_status": "success"},
+		{"operation": "converted", "proc_status": "success"},
+		{"operation": "blocking", "proc_status": "success"},
+		{"operation": "static_analyzer", "proc_status": "success"},
+		{"operation": "doc_processing", "proc_status": "running", "doc_processor_name": "static_analyzer"},
+	}
+	if !isStuckPipeline(entries) {
+		t.Fatal("stuck pipeline was not detected")
+	}
 }
 
 func TestChunkBufferConcurrentReads_NoRace(t *testing.T) {

@@ -143,17 +143,24 @@ UPDATE kb.inputs
 SET status = (
     SELECT jsonb_agg(
         CASE
-            WHEN elem->>'operation' = $2
-            THEN jsonb_set(elem, '{progress}', to_jsonb($3::text))
+            WHEN replace(lower(trim(coalesce(elem->>'operation', ''))), '-', '_') = ANY($2::text[])
+            THEN jsonb_set(
+                jsonb_set(elem, '{progress}', to_jsonb($3::text), true),
+                '{proc_status}',
+                to_jsonb('active'::text),
+                true
+            )
             ELSE elem
         END
     )
     FROM jsonb_array_elements(COALESCE(status, '[]'::jsonb)) AS elem
 ),
 modify_time = NOW()
-WHERE id = $1`)
+WHERE id = $1
+  AND status IS NOT NULL
+  AND jsonb_typeof(status) = 'array'`)
 	mock.ExpectExec(updateQuery).
-		WithArgs(recordID, "extract_metrics", progress).
+		WithArgs(recordID, sqlmock.AnyArg(), progress).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	logger := DocProcLogger{DB: db}
@@ -165,6 +172,103 @@ WHERE id = $1`)
 		ExtraInfoJSON: &extra,
 	}, "MID-26052811"); err != nil {
 		t.Fatalf("LogExtractMetrics: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestDocProcLoggerLogExtractDocMetadata_ProgressUsesCanonicalAliases(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	recordID := int64(432)
+	progress := "25%"
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.doc_proc_logs (
+    call_reason,
+    doc_proc_name,
+    model_names,
+    prompt_name,
+    record_id,
+    proc_progress,
+    entry_type,
+    pass,
+    llm_call_id,
+    activity_name,
+    artifact,
+    errors,
+    extra_info,
+    ms_used,
+    log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
+    run_id,
+    create_time
+) VALUES (
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, $15, $16, $17, $18, NOW()
+)`)
+	mock.ExpectExec(insertQuery).
+		WithArgs(
+			nil,
+			"extract_doc_metadata",
+			"{}",
+			nil,
+			&recordID,
+			&progress,
+			EntryTypeExtractDocMetadata,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			"MID-TEST-ALIAS",
+			nil,
+			nil,
+			nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	updateQuery := regexp.QuoteMeta(`
+UPDATE kb.inputs
+SET status = (
+    SELECT jsonb_agg(
+        CASE
+            WHEN replace(lower(trim(coalesce(elem->>'operation', ''))), '-', '_') = ANY($2::text[])
+            THEN jsonb_set(
+                jsonb_set(elem, '{progress}', to_jsonb($3::text), true),
+                '{proc_status}',
+                to_jsonb('active'::text),
+                true
+            )
+            ELSE elem
+        END
+    )
+    FROM jsonb_array_elements(COALESCE(status, '[]'::jsonb)) AS elem
+),
+modify_time = NOW()
+WHERE id = $1
+  AND status IS NOT NULL
+  AND jsonb_typeof(status) = 'array'`)
+	mock.ExpectExec(updateQuery).
+		WithArgs(recordID, sqlmock.AnyArg(), progress).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	logger := DocProcLogger{DB: db}
+	if err := logger.LogExtractDocMetadata(context.Background(), DocProcLogRecord{
+		DocProcName:  "extract_doc_metadata",
+		RecordID:     &recordID,
+		ProcProgress: &progress,
+	}, "MID-TEST-ALIAS"); err != nil {
+		t.Fatalf("LogExtractDocMetadata: %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

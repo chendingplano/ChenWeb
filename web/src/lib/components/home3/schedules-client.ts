@@ -10,6 +10,8 @@ export type Schedule = {
 	interval_seconds: number;
 	params: Record<string, unknown>;
 	enabled: boolean;
+	/** Runs once after interval_seconds, then the backend disables it. */
+	run_once: boolean;
 	next_run_at: string;
 	last_run_at?: string;
 	last_run_status?: string;
@@ -32,6 +34,7 @@ export type CreateScheduleInput = {
 	interval_seconds: number;
 	params: Record<string, unknown>;
 	enabled: boolean;
+	run_once: boolean;
 };
 
 export type UpdateScheduleInput = {
@@ -39,6 +42,7 @@ export type UpdateScheduleInput = {
 	interval_seconds: number;
 	params: Record<string, unknown>;
 	enabled: boolean;
+	run_once: boolean;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -115,23 +119,31 @@ export function formatInterval(seconds: number): string {
 		const minutes = seconds / 60;
 		return `every ${minutes} minute${minutes === 1 ? '' : 's'}`;
 	}
-	return `every ${seconds}s`;
+	return `every ${seconds} second${seconds === 1 ? '' : 's'}`;
+}
+
+/** Human-readable one-time delay ("in 30 minutes") for a run_once schedule. */
+export function formatDelay(seconds: number): string {
+	return formatInterval(seconds).replace(/^every /, 'in ');
 }
 
 /**
- * Fraction of the interval elapsed since the last run (0 = just ran, 1 = due
- * now / overdue), for the "active schedules" progress-bar view. Clamped to
- * [0, 1]; a schedule with no last_run_at reads as fully due (1).
+ * Fraction of the way from "just (re)scheduled" to next_run_at (0 = a full
+ * interval away, 1 = due now / overdue), for the "active schedules"
+ * progress-bar view. Clamped to [0, 1].
+ *
+ * Derived from next_run_at/interval_seconds, not last_run_at — a schedule
+ * that has never run (recurring, freshly created, or run_once with a future
+ * delay) still has a meaningful next_run_at set by the backend, and reading
+ * "no last_run_at" as "fully due" would show a run_once schedule created
+ * with "run in 30 minutes" as already due, which it isn't.
  */
 export function progressToNextRun(schedule: Schedule, now: Date = new Date()): number {
-	if (!schedule.last_run_at) {
-		return 1;
-	}
-	const last = new Date(schedule.last_run_at).getTime();
-	const elapsedMs = now.getTime() - last;
 	const intervalMs = schedule.interval_seconds * 1000;
 	if (intervalMs <= 0) {
 		return 1;
 	}
-	return Math.min(1, Math.max(0, elapsedMs / intervalMs));
+	const remainingMs = new Date(schedule.next_run_at).getTime() - now.getTime();
+	const remainingFraction = Math.min(1, Math.max(0, remainingMs / intervalMs));
+	return 1 - remainingFraction;
 }

@@ -407,7 +407,11 @@ func processorStatusAliases(name string) []string {
 	key := canonicalOperationName(name)
 	switch key {
 	case "chunking":
-		return []string{"chunking", "chunked"}
+		return []string{"chunking", "chunked", "topic_chunking", "fix_size_chunking"}
+	case "static_analyzer":
+		return []string{"static_analyzer", "static_analzyer"}
+	case "structure_analyzer":
+		return []string{"structure_analyzer"}
 	case "extract_doc_metadata":
 		return []string{"extract_doc_metadata", "extract_metadata"}
 	case "generate_scene_blocks":
@@ -428,6 +432,77 @@ func processorStatusAliases(name string) []string {
 		}
 		return []string{key}
 	}
+}
+
+func primaryProcessorStatusOperation(name string) string {
+	switch canonicalOperationName(name) {
+	case "chunking":
+		return "chunked"
+	case "static_analyzer":
+		return "static_analzyer"
+	case "extract_doc_metadata":
+		return "extract_metadata"
+	case "generate_scene_blocks":
+		return "extract_scene_blocks"
+	default:
+		return canonicalOperationName(name)
+	}
+}
+
+func upsertProcessorRuntimeStatus(raw string, now time.Time, processorName string, procStatus string, progress string) (string, error) {
+	status := strings.ToLower(strings.TrimSpace(procStatus))
+	if status == "" {
+		status = "active"
+	}
+	operation := primaryProcessorStatusOperation(processorName)
+	if operation == "" {
+		return raw, nil
+	}
+	aliases := processorStatusAliases(processorName)
+	if len(aliases) == 0 {
+		aliases = []string{operation}
+	}
+	aliasSet := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		if key := canonicalOperationName(alias); key != "" {
+			aliasSet[key] = struct{}{}
+		}
+	}
+
+	entry := map[string]any{
+		"operation":   operation,
+		"start_time":  now.Format(defaultDocMetaStatusTime),
+		"proc_status": status,
+	}
+	if trimmedProgress := strings.TrimSpace(progress); trimmedProgress != "" {
+		entry["progress"] = trimmedProgress
+	}
+
+	entries := decodeDocMetaStatus(raw)
+	replaced := false
+	out := make([]map[string]any, 0, len(entries)+1)
+	for _, e := range entries {
+		if _, ok := aliasSet[canonicalOperationName(asString(e["operation"]))]; !ok {
+			out = append(out, e)
+			continue
+		}
+		if !replaced {
+			if originalStart := strings.TrimSpace(asString(e["start_time"])); originalStart != "" {
+				entry["start_time"] = originalStart
+			}
+			out = append(out, entry)
+			replaced = true
+		}
+	}
+	if !replaced {
+		out = append(out, entry)
+	}
+
+	bs, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
 }
 
 func statusValue(entry map[string]any) string {
@@ -687,6 +762,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		return nil
 	}
 
+	// Phase C can legitimately run after every direct processor status is final.
+	// Clear the per-processor marker before post-processing so the list API's
+	// stuck-pipeline auto-heal path does not mistake a live Phase C run for a
+	// crashed coordinator.
+	s.persistPipelineStatus(ctx, evt.RecordID, "running", "", nil)
+
 	// Phase C (post-process): now that every doc processor has finished, index the
 	// artifacts of the invoked processors that defer indexing to this phase. This is the
 	// only place cross-artifact indexing (e.g. metrics) may run, so it sees all outputs.
@@ -846,6 +927,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 			"processor", processorName,
 		)
 	}
+	s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "active", "")
 	s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
 	if err := p.HandleEvent(ctx, payload); err != nil {
 		res := procResult{failed: true, err: err, operation: processorName, msUsed: time.Since(procStart).Milliseconds()}
@@ -867,6 +949,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 				"ms_used", res.msUsed,
 			)
 		}
+		s.persistProcessorRuntimeStatus(ctx, recordID, processorName, procStatus, "")
 		setProcessorSpanResult(span, procStatus, err, res.msUsed)
 		return res
 	}
@@ -879,6 +962,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 			"ms_used", res.msUsed,
 		)
 	}
+	s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "success", "")
 	setProcessorSpanResult(span, "success", nil, res.msUsed)
 	return res
 }
@@ -1095,6 +1179,22 @@ func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int
 	})
 	if err != nil && s.Logger != nil {
 		s.Logger.Error("failed persisting doc pipeline status", "record_id", recordID, "error", err)
+	}
+}
+
+func (s *ControlService) persistProcessorRuntimeStatus(ctx context.Context, recordID int64, processorName string, procStatus string, progress string) {
+	if s.InputStore == nil || recordID <= 0 || strings.TrimSpace(processorName) == "" {
+		return
+	}
+	err := updateInputStatusAtomic(ctx, s.InputStore, recordID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := upsertProcessorRuntimeStatus(current, s.now(), processorName, procStatus, progress)
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	})
+	if err != nil && s.Logger != nil {
+		s.Logger.Error("failed persisting processor runtime status", "record_id", recordID, "processor", processorName, "error", err)
 	}
 }
 

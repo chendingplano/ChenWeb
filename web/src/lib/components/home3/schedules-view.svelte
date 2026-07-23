@@ -7,6 +7,7 @@
 		updateSchedule,
 		deleteSchedule,
 		listScheduleRuns,
+		formatDelay,
 		formatInterval,
 		progressToNextRun,
 		type JobType,
@@ -34,6 +35,7 @@
 	let runsLoading = $state(false);
 
 	const intervalUnits = [
+		{ label: 'seconds', seconds: 1 },
 		{ label: 'minutes', seconds: 60 },
 		{ label: 'hours', seconds: 3600 },
 		{ label: 'days', seconds: 86400 }
@@ -42,6 +44,7 @@
 	let draft = $state({
 		name: '',
 		job_type: '',
+		runOnce: false,
 		intervalValue: 1,
 		intervalUnit: 3600, // hours
 		limit: 200,
@@ -96,11 +99,12 @@
 				job_type: draft.job_type,
 				interval_seconds: Math.max(1, Math.round(draft.intervalValue * draft.intervalUnit)),
 				params: { limit: draft.limit },
-				enabled: draft.enabled
+				enabled: draft.enabled,
+				run_once: draft.runOnce
 			});
 			draft.name = '';
 			showCreate = false;
-			info = 'Schedule created.';
+			info = draft.runOnce ? 'Schedule created — will run once, then stop.' : 'Schedule created.';
 			await loadAll();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -116,7 +120,8 @@
 				name: sched.name,
 				interval_seconds: sched.interval_seconds,
 				params: sched.params,
-				enabled: !sched.enabled
+				enabled: !sched.enabled,
+				run_once: sched.run_once
 			});
 			await loadAll();
 		} catch (err) {
@@ -168,6 +173,21 @@
 		const entries = Object.entries(run.result ?? {});
 		if (entries.length === 0) return '—';
 		return entries.map(([k, v]) => `${k}: ${v}`).join(', ');
+	}
+
+	/** A run-once schedule that has already fired (disabled, has a run status). */
+	function isCompleted(sched: Schedule): boolean {
+		return sched.run_once && !sched.enabled && !!sched.last_run_status;
+	}
+
+	function intervalBadgeLabel(sched: Schedule): string {
+		return sched.run_once ? formatDelay(sched.interval_seconds) : formatInterval(sched.interval_seconds);
+	}
+
+	function nextRunLabel(sched: Schedule): string {
+		if (isCompleted(sched)) return 'completed';
+		if (!sched.enabled) return 'paused';
+		return fmtDate(sched.next_run_at);
 	}
 
 	function statusColor(status?: string): string {
@@ -265,9 +285,27 @@
 					</select>
 				</label>
 			</div>
+			<div class="segmented" role="radiogroup" aria-label="Recurrence">
+				<button
+					type="button"
+					class="segment"
+					class:active={!draft.runOnce}
+					onclick={() => (draft.runOnce = false)}
+				>
+					Recurring
+				</button>
+				<button
+					type="button"
+					class="segment"
+					class:active={draft.runOnce}
+					onclick={() => (draft.runOnce = true)}
+				>
+					Run once
+				</button>
+			</div>
 			<div class="row three">
 				<label>
-					<span>Run every</span>
+					<span>{draft.runOnce ? 'Run in' : 'Run every'}</span>
 					<input type="number" bind:value={draft.intervalValue} min="1" />
 				</label>
 				<label>
@@ -314,7 +352,10 @@
 						</label>
 					</div>
 					<div class="badge-row">
-						<span class="badge">{formatInterval(sched.interval_seconds)}</span>
+						{#if sched.run_once}
+							<span class="badge">one-time</span>
+						{/if}
+						<span class="badge">{intervalBadgeLabel(sched)}</span>
 						{#if sched.last_run_status}
 							<span class="badge" style:color={statusColor(sched.last_run_status)}>
 								last: {sched.last_run_status}
@@ -323,13 +364,13 @@
 					</div>
 					<div class="progress-label">
 						<span>next run</span>
-						<span>{sched.enabled ? fmtDate(sched.next_run_at) : 'paused'}</span>
+						<span>{nextRunLabel(sched)}</span>
 					</div>
 					<div class="progress-track">
 						<div
 							class="progress-fill"
-							style:width="{Math.round(progress * 100)}%"
-							style:background={sched.enabled ? btn : sub}
+							style:width="{Math.round((isCompleted(sched) ? 1 : progress) * 100)}%"
+							style:background={isCompleted(sched) ? statusColor(sched.last_run_status) : sched.enabled ? btn : sub}
 						></div>
 					</div>
 					<div class="card-foot">
@@ -434,6 +475,24 @@
 	.summary-value { margin-top: 6px; font-size: 22px; font-weight: 600; color: var(--heading); }
 	.create-form, .panel { padding: 16px; }
 	.create-form { display: flex; flex-direction: column; gap: 10px; }
+	.segmented {
+		display: inline-flex;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		overflow: hidden;
+		width: fit-content;
+	}
+	.segment {
+		background: var(--input-bg);
+		color: var(--sub);
+		border: none;
+		padding: 7px 14px;
+		font-size: 12px;
+		font-family: inherit;
+		cursor: pointer;
+	}
+	.segment + .segment { border-left: 1px solid var(--border); }
+	.segment.active { background: var(--btn); color: white; }
 	.row { display: grid; gap: 10px; }
 	.row.two { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 	.row.three { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }

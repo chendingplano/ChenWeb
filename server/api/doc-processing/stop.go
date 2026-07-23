@@ -205,9 +205,12 @@ func (s StopRequestSQLStore) FixStuckPipeline(ctx context.Context, id int64) (bo
 }
 
 // isStuckPipeline returns true when doc_processing is "running" with a named
-// processor but every other non-administrative status entry is final. The named
-// processor check prevents false positives when a pipeline is still genuinely
-// running concurrent processors.
+// processor, the currently named processor has already emitted its own direct
+// status entry, and every other non-administrative status entry is final.
+// Requiring the named processor's own status row prevents false positives at
+// the start of a real pipeline stage transition, where the coordinator has
+// advanced doc_processing.doc_processor_name to the next processor but that
+// processor has not yet written any status row of its own.
 func isStuckPipeline(entries []map[string]any) bool {
 	const docProcOp = "doc_processing"
 	finalStatuses := map[string]bool{
@@ -218,24 +221,37 @@ func isStuckPipeline(entries []map[string]any) bool {
 
 	docProcRunning := false
 	docProcHasName := false
+	currentProcessorName := ""
 	for _, e := range entries {
 		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
 		if op == docProcOp {
 			ps := strings.ToLower(strings.TrimSpace(asString(e["proc_status"])))
 			if ps == "running" {
 				docProcRunning = true
-				docProcHasName = strings.TrimSpace(asString(e["doc_processor_name"])) != ""
+				currentProcessorName = strings.ToLower(strings.TrimSpace(asString(e["doc_processor_name"])))
+				docProcHasName = currentProcessorName != ""
 			}
+			break
+		}
+	}
+
+	currentProcessorHasDirectEntry := false
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op == docProcOp {
 			continue
 		}
 		if skipOps[op] {
 			continue
 		}
+		if currentProcessorName != "" && op == currentProcessorName {
+			currentProcessorHasDirectEntry = true
+		}
 		if !finalStatuses[stuckEntryProcStatus(e)] {
 			return false
 		}
 	}
-	return docProcRunning && docProcHasName
+	return docProcRunning && docProcHasName && currentProcessorHasDirectEntry
 }
 
 func stuckEntryProcStatus(e map[string]any) string {

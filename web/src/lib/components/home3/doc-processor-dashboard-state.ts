@@ -39,7 +39,11 @@ export const PIPELINE_STAGES = [
 	{ id: 'parsing', label: 'PDF Parser', operations: ['parsing', 'parsed'] },
 	{ id: 'converting', label: 'Result Convert', operations: ['converting', 'converted', 'line-file-generated'] },
 	{ id: 'static_analyzer', label: 'Doc Structure Analyzer', operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
-	{ id: 'chunking', label: 'Chunking', operations: ['chunking', 'chunked'] },
+	{
+		id: 'chunking',
+		label: 'Chunking',
+		operations: ['chunking', 'chunked', 'topic_chunking', 'fix_size_chunking']
+	},
 	{ id: 'extract_doc_metadata', label: 'Extract Doc Metadata', operations: ['extract_doc_metadata', 'extract_metadata'] },
 	{ id: 'extract_metrics', label: 'Extract Metrics', operations: ['extract_metrics'] },
 	{ id: 'extract_provisions', label: 'Extract Provisions', operations: ['extract_provisions'] },
@@ -182,14 +186,22 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 			}
 		}
 
-		// Direct processor entry takes precedence: it is written after the processor
-		// completes and remains authoritative even when doc_processing still names
-		// this stage (e.g. after a crash before the pipeline coordinator finalized).
+		const docProcessingStatus = docProcessingEntry ? resolveEntryStatus(docProcessingEntry) : undefined;
+
+		// A live doc_processing entry for this stage must override any stale direct
+		// success/failure row from an earlier run, otherwise restarted/rerun stages
+		// never show the blue in-progress state.
+		if (docProcessingEntry && docProcessingStatus === 'in-progress') {
+			return { status: docProcessingStatus, entry: docProcessingEntry };
+		}
+
+		// Direct processor entry takes precedence once the coordinator is no longer
+		// actively naming this stage.
 		if (matchedStageEntry) {
 			return { status: resolveEntryStatus(matchedStageEntry), entry: matchedStageEntry };
 		}
 		if (docProcessingEntry) {
-			return { status: resolveEntryStatus(docProcessingEntry), entry: docProcessingEntry };
+			return { status: docProcessingStatus ?? resolveEntryStatus(docProcessingEntry), entry: docProcessingEntry };
 		}
 		return { status: 'pending' };
 	}

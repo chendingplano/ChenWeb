@@ -45,6 +45,7 @@ type scheduleDTO struct {
 	IntervalSeconds int            `json:"interval_seconds"`
 	Params          map[string]any `json:"params"`
 	Enabled         bool           `json:"enabled"`
+	RunOnce         bool           `json:"run_once"`
 	NextRunAt       string         `json:"next_run_at"`
 	LastRunAt       string         `json:"last_run_at,omitempty"`
 	LastRunStatus   string         `json:"last_run_status,omitempty"`
@@ -53,7 +54,7 @@ type scheduleDTO struct {
 func toScheduleDTO(s scheduler.Schedule) scheduleDTO {
 	dto := scheduleDTO{
 		ID: s.ID, Name: s.Name, JobType: s.JobType, IntervalSeconds: s.IntervalSeconds,
-		Params: s.Params, Enabled: s.Enabled, NextRunAt: s.NextRunAt.Format(rfc3339Layout),
+		Params: s.Params, Enabled: s.Enabled, RunOnce: s.RunOnce, NextRunAt: s.NextRunAt.Format(rfc3339Layout),
 		LastRunStatus: s.LastRunStatus,
 	}
 	if s.LastRunAt != nil {
@@ -73,9 +74,13 @@ type createScheduleRequest struct {
 	IntervalSeconds int            `json:"interval_seconds"`
 	Params          map[string]any `json:"params"`
 	Enabled         *bool          `json:"enabled"`
+	RunOnce         bool           `json:"run_once"`
 }
 
-// CreateSchedule adds a new schedule, due immediately.
+// CreateSchedule adds a new schedule. A recurring schedule (run_once=false,
+// the default) is due immediately; a run_once schedule is due after
+// interval_seconds — "run the job in 30 minutes" — and is disabled
+// automatically once it runs (see scheduler.RunDueSchedules).
 //
 // POST /kb/schedules
 func CreateSchedule(c echo.Context) error {
@@ -110,7 +115,7 @@ func CreateSchedule(c echo.Context) error {
 	store := scheduler.SQLStore{DB: db}
 	sched, err := store.CreateSchedule(c.Request().Context(), scheduler.CreateScheduleInput{
 		Name: req.Name, JobType: req.JobType, IntervalSeconds: req.IntervalSeconds,
-		Params: req.Params, Enabled: enabled,
+		Params: req.Params, Enabled: enabled, RunOnce: req.RunOnce,
 	})
 	if err != nil {
 		logger.Error("create schedule failed", "err", err)
@@ -149,6 +154,7 @@ type updateScheduleRequest struct {
 	IntervalSeconds int            `json:"interval_seconds"`
 	Params          map[string]any `json:"params"`
 	Enabled         bool           `json:"enabled"`
+	RunOnce         bool           `json:"run_once"`
 }
 
 // UpdateSchedule edits an existing schedule (name/interval/params/enabled).
@@ -181,7 +187,7 @@ func UpdateSchedule(c echo.Context) error {
 	}
 	store := scheduler.SQLStore{DB: db}
 	if err := store.UpdateSchedule(c.Request().Context(), id, scheduler.UpdateScheduleInput{
-		Name: req.Name, IntervalSeconds: req.IntervalSeconds, Params: req.Params, Enabled: req.Enabled,
+		Name: req.Name, IntervalSeconds: req.IntervalSeconds, Params: req.Params, Enabled: req.Enabled, RunOnce: req.RunOnce,
 	}); err != nil {
 		logger.Error("update schedule failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "update schedule failed (CWB_KB_SCH_041)"})

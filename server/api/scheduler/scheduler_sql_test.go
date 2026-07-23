@@ -20,9 +20,9 @@ func TestSQLStoreDueSchedulesReadsRow(t *testing.T) {
 	mock.ExpectQuery("FROM kb.scheduled_jobs").
 		WithArgs(now, 50).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "job_type", "interval_seconds", "params", "enabled", "next_run_at",
+			"id", "name", "job_type", "interval_seconds", "params", "enabled", "run_once", "next_run_at",
 		}).AddRow(
-			int64(1), "Nightly Entity Resolve", "resolve_entity_objects", 3600, []byte(`{"limit":200}`), true, now,
+			int64(1), "Nightly Entity Resolve", "resolve_entity_objects", 3600, []byte(`{"limit":200}`), true, false, now,
 		))
 
 	store := SQLStore{DB: db}
@@ -34,7 +34,7 @@ func TestSQLStoreDueSchedulesReadsRow(t *testing.T) {
 		t.Fatalf("schedules = %+v, want 1", schedules)
 	}
 	got := schedules[0]
-	if got.ID != 1 || got.JobType != "resolve_entity_objects" || got.IntervalSeconds != 3600 || got.Params["limit"] != float64(200) {
+	if got.ID != 1 || got.JobType != "resolve_entity_objects" || got.IntervalSeconds != 3600 || got.Params["limit"] != float64(200) || got.RunOnce {
 		t.Fatalf("got %+v, unexpected shape", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -102,11 +102,32 @@ func TestSQLStoreAdvanceScheduleUpdatesNextRunAndStatus(t *testing.T) {
 
 	next := time.Date(2026, 7, 23, 13, 0, 0, 0, time.UTC)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.scheduled_jobs")).
-		WithArgs(next, "success", int64(1)).
+		WithArgs(next, true, "success", int64(1)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	store := SQLStore{DB: db}
-	if err := store.AdvanceSchedule(context.Background(), 1, next, "success"); err != nil {
+	if err := store.AdvanceSchedule(context.Background(), 1, next, true, "success"); err != nil {
+		t.Fatalf("AdvanceSchedule: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLStoreAdvanceScheduleCanDisableForRunOnce(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	next := time.Date(2026, 7, 23, 13, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.scheduled_jobs")).
+		WithArgs(next, false, "success", int64(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store := SQLStore{DB: db}
+	if err := store.AdvanceSchedule(context.Background(), 1, next, false, "success"); err != nil {
 		t.Fatalf("AdvanceSchedule: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -140,6 +161,56 @@ func TestSQLStoreCreateScheduleInsertsRow(t *testing.T) {
 	}
 }
 
+func TestSQLStoreCreateScheduleInsertsRunOnceFlag(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.scheduled_jobs")).
+		WithArgs("Run Once Now", "resolve_entity_objects", 30, `{}`, true, true, 30).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(6)))
+
+	store := SQLStore{DB: db}
+	sched, err := store.CreateSchedule(context.Background(), CreateScheduleInput{
+		Name: "Run Once Now", JobType: "resolve_entity_objects", IntervalSeconds: 30,
+		Params: map[string]any{}, Enabled: true, RunOnce: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSchedule: %v", err)
+	}
+	if !sched.RunOnce {
+		t.Fatalf("sched.RunOnce = %v, want true", sched.RunOnce)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLStoreUpdateScheduleWritesAllEditableFieldsIncludingRunOnce(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.scheduled_jobs")).
+		WithArgs("Renamed", 120, `{}`, false, true, int64(3)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store := SQLStore{DB: db}
+	err = store.UpdateSchedule(context.Background(), 3, UpdateScheduleInput{
+		Name: "Renamed", IntervalSeconds: 120, Params: map[string]any{}, Enabled: false, RunOnce: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSchedule: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSQLStoreListSchedulesReadsRows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -149,10 +220,10 @@ func TestSQLStoreListSchedulesReadsRows(t *testing.T) {
 
 	mock.ExpectQuery("FROM kb.scheduled_jobs").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "job_type", "interval_seconds", "params", "enabled",
+			"id", "name", "job_type", "interval_seconds", "params", "enabled", "run_once",
 			"next_run_at", "last_run_at", "last_run_status",
 		}).AddRow(
-			int64(1), "Nightly", "resolve_entity_objects", 3600, []byte(`{}`), true,
+			int64(1), "Nightly", "resolve_entity_objects", 3600, []byte(`{}`), true, false,
 			time.Now(), nil, "",
 		))
 
@@ -161,7 +232,7 @@ func TestSQLStoreListSchedulesReadsRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSchedules: %v", err)
 	}
-	if len(schedules) != 1 || schedules[0].Name != "Nightly" {
+	if len(schedules) != 1 || schedules[0].Name != "Nightly" || schedules[0].RunOnce {
 		t.Fatalf("schedules = %+v", schedules)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

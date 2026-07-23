@@ -154,13 +154,18 @@ func (s *ControlService) runProcessorsChunkBatched(
 	var batchFirstErr error
 
 	for _, bp := range batchProcessors {
+		processorName := processorLogName(bp.(Processor))
+		s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "active", "")
+		s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
 		if isCtxStopped(ctx) {
 			*requestStopped = true
 			phaseBSpan.SetStatus(codes.Error, "stopped")
+			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "stopped", "")
 			return
 		}
 		recCtx := withLLMRecordID(ctx, recordID)
 		if err := bp.InitChunkBatch(recCtx, recordID, chunks, docCtx); err != nil {
+			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "failed", "")
 			if s.Logger != nil {
 				s.Logger.Error("chunk batch: init failed",
 					"record_id", recordID,
@@ -194,17 +199,21 @@ func (s *ControlService) runProcessorsChunkBatched(
 
 	// --- Finalize each processor ---
 	for _, bp := range batchProcessors {
+		processorName := processorLogName(bp.(Processor))
 		if isCtxStopped(ctx) {
 			*requestStopped = true
 			phaseBSpan.SetStatus(codes.Error, "stopped")
+			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "stopped", "")
 			return
 		}
 		recCtx := withLLMRecordID(ctx, recordID)
 		if err := bp.FinalizeChunkBatch(recCtx); err != nil {
 			if errors.Is(err, ErrPipelineStopped) {
 				*requestStopped = true
+				s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "stopped", "")
 				return
 			}
+			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "failed", "")
 			if s.Logger != nil {
 				s.Logger.Error("chunk batch: finalize failed",
 					"record_id", recordID,
@@ -215,7 +224,9 @@ func (s *ControlService) runProcessorsChunkBatched(
 			if batchFirstErr == nil {
 				batchFirstErr = fmt.Errorf("(MID_26062709) %s finalize: %w", bp.Name(), err)
 			}
+			continue
 		}
+		s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "success", "")
 	}
 
 	if batchFirstErr != nil {

@@ -65,7 +65,6 @@ required_processors = [
 	"extract_entity",
 	"extract_relation",
 	"generate_topics",
-	"generate_summaries",
 	"generate_scene_blocks",
 	"extract_inventory_items"]
 

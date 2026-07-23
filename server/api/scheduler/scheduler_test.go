@@ -35,6 +35,7 @@ type finishCall struct {
 type advanceCall struct {
 	scheduleID int64
 	nextRunAt  time.Time
+	enabled    bool
 	status     string
 }
 
@@ -63,11 +64,11 @@ func (s *fakeStore) FinishRun(_ context.Context, runID int64, status string, res
 	return nil
 }
 
-func (s *fakeStore) AdvanceSchedule(_ context.Context, scheduleID int64, nextRunAt time.Time, status string) error {
+func (s *fakeStore) AdvanceSchedule(_ context.Context, scheduleID int64, nextRunAt time.Time, enabled bool, status string) error {
 	if s.advanceErr != nil {
 		return s.advanceErr
 	}
-	s.advances = append(s.advances, advanceCall{scheduleID: scheduleID, nextRunAt: nextRunAt, status: status})
+	s.advances = append(s.advances, advanceCall{scheduleID: scheduleID, nextRunAt: nextRunAt, enabled: enabled, status: status})
 	return nil
 }
 
@@ -112,6 +113,48 @@ func TestRunDueSchedulesRunsKnownJobSuccessfully(t *testing.T) {
 	wantNext := now.Add(300 * time.Second)
 	if len(store.advances) != 1 || !store.advances[0].nextRunAt.Equal(wantNext) || store.advances[0].status != "success" {
 		t.Fatalf("advances = %+v, want next_run_at=%v status=success", store.advances, wantNext)
+	}
+	if !store.advances[0].enabled {
+		t.Fatalf("advances = %+v, want a recurring schedule to stay enabled after running", store.advances)
+	}
+}
+
+func TestRunDueSchedulesDisablesRunOnceScheduleAfterItRuns(t *testing.T) {
+	now := time.Now()
+	store := &fakeStore{due: []Schedule{
+		{ID: 1, JobType: "widget_job", IntervalSeconds: 60, RunOnce: true},
+	}}
+	registry := Registry{"widget_job": JobDescriptor{Run: func(context.Context, map[string]any, ApiTypes.JimoLogger) (map[string]any, error) {
+		return nil, nil
+	}}}
+
+	summary, err := RunDueSchedules(context.Background(), store, registry, now, nil)
+	if err != nil {
+		t.Fatalf("RunDueSchedules: %v", err)
+	}
+	if summary.Succeeded != 1 {
+		t.Fatalf("summary = %+v, want 1 succeeded", summary)
+	}
+	if len(store.advances) != 1 || store.advances[0].enabled {
+		t.Fatalf("advances = %+v, want a run-once schedule disabled after it runs so it is never picked up again", store.advances)
+	}
+}
+
+func TestRunDueSchedulesDisablesRunOnceScheduleEvenWhenItFails(t *testing.T) {
+	now := time.Now()
+	store := &fakeStore{due: []Schedule{
+		{ID: 1, JobType: "widget_job", IntervalSeconds: 60, RunOnce: true},
+	}}
+	registry := Registry{"widget_job": JobDescriptor{Run: func(context.Context, map[string]any, ApiTypes.JimoLogger) (map[string]any, error) {
+		return nil, errors.New("boom")
+	}}}
+
+	_, err := RunDueSchedules(context.Background(), store, registry, now, nil)
+	if err != nil {
+		t.Fatalf("RunDueSchedules: %v", err)
+	}
+	if len(store.advances) != 1 || store.advances[0].enabled {
+		t.Fatalf("advances = %+v, want a run-once schedule disabled even on failure — it must not retry on the next tick", store.advances)
 	}
 }
 

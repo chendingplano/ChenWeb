@@ -63,6 +63,12 @@ func (f *fakeDocMetadataStore) statusUpdates() []DocMetadataUpdate {
 	return out
 }
 
+func (f *fakeDocMetadataStore) currentStatusRaw() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rec.StatusRaw
+}
+
 type fakeJSONExtractor struct {
 	out                   map[string]any
 	outs                  []map[string]any

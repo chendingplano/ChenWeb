@@ -12,7 +12,7 @@ import {
 	enforceEntityBeforeRelation,
 	entityExtractionSucceeded,
 	type StatusEntry
-} from './doc-processor-dashboard-state';
+} from './doc-processor-dashboard-state.ts';
 
 function makeRecord(status: StatusEntry[]) {
 	return { status };
@@ -109,6 +109,21 @@ test('semantic projections stage recognizes legacy hyphenated in-progress status
 	assert.ok(semanticProjection);
 	assert.equal(semanticProjection.status, 'in-progress');
 	assert.equal(semanticProjection.entry?.progress, '42% (pass 1: 8/19)');
+});
+
+test('chunking stage recognizes topic chunking and fix-size chunking as in-progress', () => {
+	for (const docProcessorName of ['topic_chunking', 'fix_size_chunking']) {
+		const record = makeRecord([
+			{ operation: 'doc_processing', proc_status: 'running', doc_processor_name: docProcessorName }
+		]);
+
+		const stages = computeStages(record);
+		const chunking = stages.find((stage) => stage.id === 'chunking');
+
+		assert.ok(chunking, 'chunking stage missing');
+		assert.equal(chunking.status, 'in-progress');
+		assert.equal(chunking.entry?.doc_processor_name, docProcessorName);
+	}
 });
 
 test('visible stages hide processors that are not enabled in config', () => {

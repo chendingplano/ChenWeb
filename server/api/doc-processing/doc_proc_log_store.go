@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/lib/pq"
 )
 
 const EntryTypePipelineFinish = "pipeline finish"
@@ -411,13 +412,41 @@ INSERT INTO kb.doc_proc_logs (
 // updateStatusProgress sets the `progress` field of the matching operation entry inside
 // kb.inputs.status (a JSONB array) for the given record. Failures are tolerated by callers.
 func updateStatusProgress(ctx context.Context, db *sql.DB, recordID int64, operation, progress string) error {
+	aliases := processorStatusAliases(operation)
+	if len(aliases) == 0 {
+		if key := canonicalOperationName(operation); key != "" {
+			aliases = []string{key}
+		}
+	}
+	normalized := make([]string, 0, len(aliases))
+	seen := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		key := canonicalOperationName(alias)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, key)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+
 	const stmt = `
 UPDATE kb.inputs
 SET status = (
     SELECT jsonb_agg(
         CASE
-            WHEN elem->>'operation' = $2
-            THEN jsonb_set(elem, '{progress}', to_jsonb($3::text))
+            WHEN replace(lower(trim(coalesce(elem->>'operation', ''))), '-', '_') = ANY($2::text[])
+            THEN jsonb_set(
+                jsonb_set(elem, '{progress}', to_jsonb($3::text), true),
+                '{proc_status}',
+                to_jsonb('active'::text),
+                true
+            )
             ELSE elem
         END
     )
@@ -427,7 +456,7 @@ modify_time = NOW()
 WHERE id = $1
   AND status IS NOT NULL
   AND jsonb_typeof(status) = 'array'`
-	_, err := db.ExecContext(ctx, stmt, recordID, operation, progress)
+	_, err := db.ExecContext(ctx, stmt, recordID, pq.Array(normalized), progress)
 	return err
 }
 
