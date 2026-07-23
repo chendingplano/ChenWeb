@@ -63,6 +63,19 @@ var entityIndexConfig = artifactIndexConfig{
 	LogPrefix:            "entity indexing",
 }
 
+// entityObjectConnectionConfig drives the same generic
+// indexArtifactObjectConnections used by metrics/provisions/inventory items
+// for entity-sourced kb.artifact_objects rows (ADR 2026070101 Phase 4's
+// Phase 3 Amendment: entity<->object links are ordinary belong_to edges via
+// this shared indexer, not a bespoke edge shape).
+var entityObjectConnectionConfig = artifactObjectConnectionConfig{
+	ArtifactType:     searchArtifactEntity,
+	ArtifactTable:    "kb.entities",
+	ArtifactIDColumn: "entity_id",
+	SourceType:       searchArtifactEntity,
+	LogPrefix:        "entity indexing",
+}
+
 var relationIndexConfig = artifactIndexConfig{
 	SelfType:             searchArtifactRelation,
 	CategoryType:         "relation",

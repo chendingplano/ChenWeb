@@ -232,6 +232,7 @@
 						{ id: 'sysadmin-resources-videos', label: 'Videos' }
 					]
 				},
+				{ id: 'sysadmin-schedules', label: 'Schedules' },
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]
 		},

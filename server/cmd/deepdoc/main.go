@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api"
@@ -17,6 +19,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
+	"github.com/chendingplano/deepdoc/server/api/scheduler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -284,6 +287,23 @@ func main() {
 			"error", err, "loc", "CWB_DDM_169")
 		os.Exit(1)
 	}
+	// Scheduled backlog-drain jobs (entity object resolution, ambiguous object
+	// resolution, search embedding backfill — see ADR 2026070101 "Repeatable
+	// Endpoint, Not a New Scheduler" and its later revision once this landed).
+	// Enabled by default: it only executes user-created kb.scheduled_jobs
+	// rows, so with none configured it is a harmless idle poll. Disable with
+	// SCHEDULER_ENABLED=false.
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("SCHEDULER_ENABLED")), "false") {
+		tickSeconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SCHEDULER_TICK_INTERVAL_SECONDS")))
+		if err != nil || tickSeconds <= 0 {
+			tickSeconds = 30
+		}
+		scheduler.StartScheduler(context.Background(), scheduler.SQLStore{DB: project_db}, kbhandler.DefaultSchedulerRegistry(), time.Duration(tickSeconds)*time.Second, logger)
+		logger.Info("scheduler started", "tick_interval_seconds", tickSeconds, "loc", "CWB_DDM_170")
+	} else {
+		logger.Info("scheduler disabled via SCHEDULER_ENABLED=false", "loc", "CWB_DDM_170")
+	}
+
 	if err := promptoptimizerhandler.SeedBuiltinTemplates(project_db); err != nil {
 		logger.Error("failed to seed prompt optimizer built-in templates",
 			"error", err, "loc", "CWB_DDM_167")

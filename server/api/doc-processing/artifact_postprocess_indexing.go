@@ -259,6 +259,21 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 	entityIndexStart := time.Now()
 	IndexEntitiesForRecord(ctx, recordID, chunks, p.Logger)
 	IndexEntityNamesForRecord(ctx, recordID, p.Logger)
+	// Entity -> object-node linking (ADR 2026070101 Phase 3 Amendment / Phase
+	// 4): match-only against existing kb.object_nodes for this record's
+	// entities. Confident matches persist as kb.artifact_objects rows, which
+	// the object-connection indexing call right below turns into the same
+	// belong_to edges metrics/provisions/inventory items already produce.
+	// Non-fatal: this must not block the rest of entity indexing.
+	if entityObjectErr := ReconcileEntityObjectsForRecord(ctx,
+		EntityObjectSQLStore{DB: ApiTypes.ProjectDBHandle},
+		ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle},
+		ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv()},
+		recordID, p.Logger,
+	); entityObjectErr != nil && p.Logger != nil {
+		p.Logger.Warn("entity object-link reconciliation failed (non-fatal)", "record_id", recordID, "error", entityObjectErr)
+	}
+	entityObjectEdges := indexArtifactObjectConnections(ctx, ApiTypes.ProjectDBHandle, recordID, entityObjectConnectionConfig, p.Logger)
 	// Category membership edges: entities carry `categories` keys (like metrics/inventory),
 	// so resolve them via kb.artifact_categories and write belong_to / category_name edges.
 	entityCategoryConns := indexEntityCategoryMembership(ctx, ApiTypes.ProjectDBHandle, recordID, p.ModelName, p.PromptRef, p.Logger)
@@ -272,6 +287,7 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 		p.Logger.Info("entity-relation post-process entity indexing finished",
 			"record_id", recordID,
 			"category_connections", entityCategoryConns,
+			"object_edges", entityObjectEdges,
 			"shared_artifact_edges", entitySharedEdges,
 			"ms_used", time.Since(entityIndexStart).Milliseconds(),
 		)

@@ -446,6 +446,47 @@ WHERE m.input_record_id = $1
 	return tx.Commit()
 }
 
+// InsertOne writes a single kb.artifact_objects row without deleting any
+// existing rows first. Unlike ReplaceObjectsForRecord (which deletes every
+// row for (source_record_id, artifact_type) before inserting — correct for a
+// single processor persisting all of one record's objects at once), a
+// cross-record backlog pass that resolves one entity at a time must not wipe
+// sibling rows from other records or earlier passes over the same record.
+// See ADR 2026070101 Phase 4 (entity object resolution).
+func (s ArtifactObjectSQLStore) InsertOne(ctx context.Context, obj ArtifactObject) error {
+	if s.DB == nil {
+		return fmt.Errorf("db is nil")
+	}
+	const stmt = `
+INSERT INTO kb.artifact_objects (
+	source_record_id, input_record_id, artifact_type, artifact_id, object_id,
+	object_name, object_name_en, object_name_zh, language,
+	object_type, object_role, aliases, acronyms, normalized_names,
+	description, evidence_quote, source_line_spans, confidence,
+	reconcile_status, reconcile_confidence, ext_info
+) VALUES (
+	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,
+	$15,$16,$17::jsonb,$18,$19,$20,$21::jsonb
+)`
+	aliases, _ := json.Marshal(orEmptySlice(obj.Aliases))
+	acronyms, _ := json.Marshal(orEmptySlice(obj.Acronyms))
+	normalized, _ := json.Marshal(orEmptySlice(obj.NormalizedNames))
+	spans, _ := json.Marshal(orEmptySlice(obj.SourceLineSpans))
+	ext, _ := json.Marshal(obj.ExtInfo)
+	sourceRecordID := obj.SourceRecordID
+	if sourceRecordID <= 0 {
+		sourceRecordID = obj.InputRecordID
+	}
+	_, err := s.DB.ExecContext(ctx, stmt,
+		sourceRecordID, obj.InputRecordID, obj.ArtifactType, obj.ArtifactID, nullEmpty(obj.ObjectID),
+		obj.ObjectName, nullEmpty(obj.ObjectNameEn), nullEmpty(obj.ObjectNameZh), nullEmpty(obj.Language),
+		obj.ObjectType, obj.ObjectRole, string(aliases), string(acronyms), string(normalized),
+		nullEmpty(obj.Description), nullEmpty(obj.EvidenceQuote), string(spans), obj.Confidence,
+		firstNonEmptyTrimmed(obj.ReconcileStatus, ObjectReconcilePending), obj.ReconcileConfidence, string(ext),
+	)
+	return err
+}
+
 func nullEmpty(s string) any {
 	s = strings.TrimSpace(s)
 	if s == "" {
