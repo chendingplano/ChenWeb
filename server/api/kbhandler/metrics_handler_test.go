@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -641,6 +642,25 @@ func TestDeleteInputSkipsMissingRelatedCleanupTargets(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestInputRelatedDeleteSpecsCoverArtifactGraphTables(t *testing.T) {
+	required := []inputRelatedDeleteSpec{
+		{Table: "kb.artifact_connections", Column: "source_record_id"},
+		{Table: "kb.artifact_connections", Column: "target_record_id"},
+		{Table: "kb.artifact_objects", Column: "source_record_id"},
+	}
+	for _, want := range required {
+		if !slices.Contains(inputRelatedDeleteSpecs, want) {
+			t.Fatalf("inputRelatedDeleteSpecs missing %s.%s: DeleteInput would leave orphaned rows in that table", want.Table, want.Column)
+		}
+	}
+
+	for _, spec := range inputRelatedDeleteSpecs {
+		if spec.Table == "kb.object_nodes" {
+			t.Fatalf("inputRelatedDeleteSpecs must never delete kb.object_nodes per-record: it is corpus-wide canonical object identity that may still be referenced by other records' kb.artifact_objects rows (ADR 2026070101)")
+		}
 	}
 }
 
