@@ -29,14 +29,14 @@
 		};
 	};
 
-	let recordID = $state('');
+	let recordID = $state<string | number>('');
 	let cleaning = $state(false);
 	let error = $state('');
 	let result = $state<CleanResult | null>(null);
 	let pendingConfirmID = $state<number | null>(null);
 
 	function parsedRecordID(): number {
-		const n = Number.parseInt(recordID.trim(), 10);
+		const n = Number.parseInt(String(recordID).trim(), 10);
 		return Number.isFinite(n) ? n : 0;
 	}
 
