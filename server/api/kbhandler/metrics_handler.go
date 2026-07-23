@@ -1251,37 +1251,84 @@ func loadInputDeleteAssets(tx *sql.Tx, inputTable string, id int64) (inputDelete
 	return assets, true, nil
 }
 
-func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
-	stmts := []string{
-		`DELETE FROM kb.doc_review_provision_analyses WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_logs WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_findings WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_activities WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_status WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_reports WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_runs WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_requests WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_proc_logs WHERE record_id = $1`,
-		`DELETE FROM kb.doc_process_runs WHERE record_id = $1`,
-		`DELETE FROM kb.input_proc_status WHERE record_id = $1`,
-		`DELETE FROM kb.inventory_item_duplicates WHERE input_record_id = $1`,
-		`DELETE FROM kb.inventory_items WHERE input_record_id = $1`,
-		`DELETE FROM kb.relations WHERE input_record_id = $1`,
-		`DELETE FROM kb.entities WHERE input_record_id = $1`,
-		`DELETE FROM kb.knowledges WHERE input_record_id = $1`,
-		`DELETE FROM kb.semantic_projections WHERE input_record_id = $1`,
-		`DELETE FROM kb.scene_objects WHERE input_record_id = $1`,
-		`DELETE FROM kb.products WHERE input_record_id = $1`,
-		`DELETE FROM kb.provisions WHERE input_record_id = $1`,
-		`DELETE FROM kb.metrics WHERE input_record_id = $1`,
-		`DELETE FROM kb.topics WHERE input_record_id = $1`,
-		`DELETE FROM kb.summaries WHERE input_record_id = $1`,
-		`DELETE FROM kb.chunk_ranges WHERE input_record_id = $1`,
-		`DELETE FROM kb.search_artifacts WHERE input_record_id = $1`,
+type inputRelatedDeleteSpec struct {
+	Table  string
+	Column string
+}
+
+var inputRelatedDeleteSpecs = []inputRelatedDeleteSpec{
+	{Table: "kb.doc_review_provision_analyses", Column: "input_record_id"},
+	{Table: "kb.doc_review_logs", Column: "input_record_id"},
+	{Table: "kb.doc_review_findings", Column: "input_record_id"},
+	{Table: "kb.doc_review_activities", Column: "input_record_id"},
+	{Table: "kb.doc_review_status", Column: "input_record_id"},
+	{Table: "kb.doc_review_reports", Column: "input_record_id"},
+	{Table: "kb.doc_review_runs", Column: "input_record_id"},
+	{Table: "kb.doc_review_requests", Column: "input_record_id"},
+	{Table: "kb.doc_proc_logs", Column: "record_id"},
+	{Table: "kb.doc_process_runs", Column: "record_id"},
+	{Table: "kb.input_proc_status", Column: "record_id"},
+	{Table: "kb.artifact_connections", Column: "source_record_id"},
+	{Table: "kb.artifact_connections", Column: "target_record_id"},
+	{Table: "kb.artifact_connections", Column: "input_record_id"},
+	{Table: "kb.artifact_objects", Column: "source_record_id"},
+	{Table: "kb.artifact_objects", Column: "input_record_id"},
+	{Table: "kb.inventory_item_duplicates", Column: "input_record_id"},
+	{Table: "kb.inventory_items", Column: "input_record_id"},
+	{Table: "kb.relations", Column: "input_record_id"},
+	{Table: "kb.entities", Column: "input_record_id"},
+	{Table: "kb.knowledges", Column: "input_record_id"},
+	{Table: "kb.semantic_projections", Column: "input_record_id"},
+	{Table: "kb.scene_objects", Column: "input_record_id"},
+	{Table: "kb.products", Column: "input_record_id"},
+	{Table: "kb.provisions", Column: "input_record_id"},
+	{Table: "kb.metrics", Column: "input_record_id"},
+	{Table: "kb.topics", Column: "input_record_id"},
+	{Table: "kb.summaries", Column: "input_record_id"},
+	{Table: "kb.chunk_ranges", Column: "input_record_id"},
+	{Table: "kb.search_artifacts", Column: "input_record_id"},
+	{Table: "kb.chunks", Column: "source_record_id"},
+}
+
+const inputRelatedColumnExistsQuery = `
+SELECT EXISTS (
+	SELECT 1
+	FROM pg_catalog.pg_class c
+	JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+	JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+	WHERE n.nspname = $1
+	  AND c.relname = $2
+	  AND a.attname = $3
+	  AND a.attnum > 0
+	  AND NOT a.attisdropped
+)`
+
+func inputRelatedColumnExists(tx *sql.Tx, relation string, column string) (bool, error) {
+	schema, table, ok := strings.Cut(relation, ".")
+	if !ok || strings.TrimSpace(schema) == "" || strings.TrimSpace(table) == "" || strings.TrimSpace(column) == "" {
+		return false, fmt.Errorf("invalid relation cleanup target: %s.%s", relation, column)
 	}
-	for _, stmt := range stmts {
+
+	var exists bool
+	if err := tx.QueryRow(inputRelatedColumnExistsQuery, schema, table, column).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
+	for _, spec := range inputRelatedDeleteSpecs {
+		exists, err := inputRelatedColumnExists(tx, spec.Table, spec.Column)
+		if err != nil {
+			return fmt.Errorf("inspect %s.%s: %w", spec.Table, spec.Column, err)
+		}
+		if !exists {
+			continue
+		}
+
+		stmt := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", spec.Table, spec.Column)
 		if _, err := tx.Exec(stmt, id); err != nil {
-			return err
+			return fmt.Errorf("delete %s where %s: %w", spec.Table, spec.Column, err)
 		}
 	}
 	return nil

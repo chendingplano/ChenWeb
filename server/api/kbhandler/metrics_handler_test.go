@@ -66,6 +66,13 @@ func newDeleteInputContext(t *testing.T, id string) (echo.Context, *httptest.Res
 	return c, rec
 }
 
+func expectInputRelatedColumnCheck(mock sqlmock.Sqlmock, spec inputRelatedDeleteSpec, exists bool) {
+	schema, table, _ := strings.Cut(spec.Table, ".")
+	mock.ExpectQuery(regexp.QuoteMeta(inputRelatedColumnExistsQuery)).
+		WithArgs(schema, table, spec.Column).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
+}
+
 func TestUpdateInputSuccess(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -446,33 +453,9 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 		WithArgs(int64(430)).
 		WillReturnRows(sqlmock.NewRows([]string{"file_name", "backup_filename", "result_filename"}).AddRow("", "", ""))
 
-	for _, stmt := range []string{
-		`DELETE FROM kb.doc_review_provision_analyses WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_logs WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_findings WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_activities WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_status WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_reports WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_runs WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_review_requests WHERE input_record_id = $1`,
-		`DELETE FROM kb.doc_proc_logs WHERE record_id = $1`,
-		`DELETE FROM kb.doc_process_runs WHERE record_id = $1`,
-		`DELETE FROM kb.input_proc_status WHERE record_id = $1`,
-		`DELETE FROM kb.inventory_item_duplicates WHERE input_record_id = $1`,
-		`DELETE FROM kb.inventory_items WHERE input_record_id = $1`,
-		`DELETE FROM kb.relations WHERE input_record_id = $1`,
-		`DELETE FROM kb.entities WHERE input_record_id = $1`,
-		`DELETE FROM kb.knowledges WHERE input_record_id = $1`,
-		`DELETE FROM kb.semantic_projections WHERE input_record_id = $1`,
-		`DELETE FROM kb.scene_objects WHERE input_record_id = $1`,
-		`DELETE FROM kb.products WHERE input_record_id = $1`,
-		`DELETE FROM kb.provisions WHERE input_record_id = $1`,
-		`DELETE FROM kb.metrics WHERE input_record_id = $1`,
-		`DELETE FROM kb.topics WHERE input_record_id = $1`,
-		`DELETE FROM kb.summaries WHERE input_record_id = $1`,
-		`DELETE FROM kb.chunk_ranges WHERE input_record_id = $1`,
-		`DELETE FROM kb.search_artifacts WHERE input_record_id = $1`,
-	} {
+	for _, spec := range inputRelatedDeleteSpecs {
+		expectInputRelatedColumnCheck(mock, spec, true)
+		stmt := "DELETE FROM " + spec.Table + " WHERE " + spec.Column + " = $1"
 		mock.ExpectExec(regexp.QuoteMeta(stmt)).
 			WithArgs(int64(430)).
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -497,6 +480,35 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 	}
 	if !payload["status"] {
 		t.Fatalf("expected status=true")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestDeleteInputSkipsMissingRelatedCleanupTargets(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	for _, spec := range inputRelatedDeleteSpecs {
+		expectInputRelatedColumnCheck(mock, spec, false)
+	}
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin failed: %v", err)
+	}
+	if err := deleteInputRelatedRows(tx, 430); err != nil {
+		t.Fatalf("deleteInputRelatedRows returned error: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit failed: %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
