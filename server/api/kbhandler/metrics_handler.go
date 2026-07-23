@@ -1407,27 +1407,62 @@ func deleteInputArtifactDirs(logger ApiTypes.JimoLogger, recordID int64, assets 
 	addCandidate(filepath.Join(artifactRoot, "Artifacts", groupID, recordKey))
 }
 
-func removeSemanticProjectionTreeRecord(treeRootDir string, recordID int64) error {
+type artifactWebCleanupStats struct {
+	FilesScanned int `json:"files_scanned"`
+	FilesChanged int `json:"files_changed"`
+	LinesRemoved int `json:"lines_removed"`
+}
+
+var artifactWebIndexFilenames = map[string]struct{}{
+	"chunks.txt":               {},
+	"entities.txt":             {},
+	"inventory_items.txt":      {},
+	"metrics.txt":              {},
+	"products.txt":             {},
+	"provisions.txt":           {},
+	"relations.txt":            {},
+	"scenes.txt":               {},
+	"semantic_projections.txt": {},
+	"summaries.txt":            {},
+	"topics.txt":               {},
+}
+
+func removeArtifactWebTreeRecord(treeRootDir string, recordID int64) (artifactWebCleanupStats, error) {
 	prefix := strconv.FormatInt(recordID, 10) + "_"
-	return filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
+	stats := artifactWebCleanupStats{}
+	err := filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || d.Name() != "semantic_projections.txt" {
+		if d.IsDir() {
 			return nil
 		}
+		if _, ok := artifactWebIndexFilenames[d.Name()]; !ok {
+			return nil
+		}
+		stats.FilesScanned++
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 		rows := make([]string, 0)
+		removed := 0
 		for row := range strings.SplitSeq(string(body), "\n") {
 			row = strings.TrimSpace(row)
-			if row == "" || strings.HasPrefix(row, prefix) {
+			if row == "" {
+				continue
+			}
+			if artifactWebIndexRowBelongsToRecord(row, prefix) {
+				removed++
 				continue
 			}
 			rows = append(rows, row)
 		}
+		if removed == 0 {
+			return nil
+		}
+		stats.FilesChanged++
+		stats.LinesRemoved += removed
 		if len(rows) == 0 {
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
@@ -1437,6 +1472,21 @@ func removeSemanticProjectionTreeRecord(treeRootDir string, recordID int64) erro
 		sort.Strings(rows)
 		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
 	})
+	return stats, err
+}
+
+func artifactWebIndexRowBelongsToRecord(row string, recordIDPrefix string) bool {
+	firstField := strings.Fields(strings.TrimSpace(row))
+	if len(firstField) == 0 {
+		return false
+	}
+	return strings.HasPrefix(firstField[0], recordIDPrefix)
+}
+
+func removeSemanticProjectionTreeRecord(treeRootDir string, recordID int64) error {
+	stats, err := removeArtifactWebTreeRecord(treeRootDir, recordID)
+	_ = stats
+	return err
 }
 
 func pruneMetadataOnlyArtifactWebDirs(root string) error {
@@ -1482,18 +1532,47 @@ func pruneMetadataOnlyDir(path string, root string) (bool, error) {
 	return true, nil
 }
 
-func cleanupInputArtifactWeb(logger ApiTypes.JimoLogger, recordID int64) {
-	artifactWebDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
-	if artifactWebDir == "" {
-		return
+func artifactWebCleanupRoots() []string {
+	artifactWebDir := filepath.Clean(strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")))
+	if artifactWebDir == "" || artifactWebDir == "." {
+		return nil
 	}
-	if err := removeSemanticProjectionTreeRecord(artifactWebDir, recordID); err != nil {
-		logger.Warn("delete semantic projection artifact web entries failed", "record_id", recordID, "dir", artifactWebDir, "err", err)
-		return
+	roots := []string{artifactWebDir}
+	if filepath.Base(artifactWebDir) != "ArtifactWeb" {
+		child := filepath.Join(artifactWebDir, "ArtifactWeb")
+		if info, err := os.Stat(child); err == nil && info.IsDir() {
+			roots = append(roots, child)
+		}
 	}
-	if err := pruneMetadataOnlyArtifactWebDirs(artifactWebDir); err != nil {
-		logger.Warn("prune artifact web dirs failed", "record_id", recordID, "dir", artifactWebDir, "err", err)
+	seen := make(map[string]struct{}, len(roots))
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		out = append(out, root)
 	}
+	return out
+}
+
+func cleanupInputArtifactWeb(logger ApiTypes.JimoLogger, recordID int64) artifactWebCleanupStats {
+	var total artifactWebCleanupStats
+	for _, root := range artifactWebCleanupRoots() {
+		stats, err := removeArtifactWebTreeRecord(root, recordID)
+		total.FilesScanned += stats.FilesScanned
+		total.FilesChanged += stats.FilesChanged
+		total.LinesRemoved += stats.LinesRemoved
+		if err != nil {
+			logger.Warn("delete artifact web entries failed", "record_id", recordID, "dir", root, "err", err)
+			continue
+		}
+		if err := pruneMetadataOnlyArtifactWebDirs(root); err != nil {
+			logger.Warn("prune artifact web dirs failed", "record_id", recordID, "dir", root, "err", err)
+		}
+	}
+	return total
 }
 
 // DeleteInput handles DELETE /api/v1/kb/inputs/:id
@@ -1580,4 +1659,102 @@ func DeleteInput(c echo.Context) error {
 	cleanupInputArtifactWeb(logger, id)
 
 	return c.JSON(http.StatusOK, map[string]bool{"status": true})
+}
+
+type cleanInputArtifactsRequest struct {
+	RecordID int64 `json:"record_id"`
+}
+
+// CleanInputArtifacts handles POST /api/v1/admin/db/kb-input-artifacts/clean.
+// It performs the same cleanup as DeleteInput, but tolerates an already-missing
+// kb.inputs row so orphaned ArtifactWeb index entries can be cleaned repeatedly.
+func CleanInputArtifacts(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_410")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	var req cleanInputArtifactsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid request body (CWB_KB_M_411)",
+		})
+	}
+	id := req.RecordID
+	if id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid record_id (CWB_KB_M_412)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	inputTable, err := resolveInputTable(db)
+	if err != nil {
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve kb input table (CWB_KB_M_413)",
+		})
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		logger.Error("begin clean kb input artifacts transaction failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to clean kb input artifacts (CWB_KB_M_414)",
+		})
+	}
+	defer tx.Rollback()
+
+	assets, found, err := loadInputDeleteAssets(tx, inputTable, id)
+	if err != nil {
+		logger.Error("load kb input clean assets failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to verify kb input artifacts clean (CWB_KB_M_415)",
+		})
+	}
+
+	if err := deleteInputRelatedRows(tx, id); err != nil {
+		logger.Error("clean kb input related rows failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to clean kb input artifacts (CWB_KB_M_414)",
+		})
+	}
+
+	if found {
+		query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", inputTable)
+		result, err := tx.Exec(query, id)
+		if err != nil {
+			logger.Error("clean delete kb input failed", "id", id, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status: false, ErrorMsg: "failed to clean kb input artifacts (CWB_KB_M_414)",
+			})
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			logger.Error("rows affected clean delete kb input failed", "id", id, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status: false, ErrorMsg: "failed to verify kb input artifacts clean (CWB_KB_M_415)",
+			})
+		}
+		found = affected > 0
+	}
+
+	if err := tx.Commit(); err != nil {
+		logger.Error("commit clean kb input artifacts failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to clean kb input artifacts (CWB_KB_M_414)",
+		})
+	}
+
+	if found {
+		deleteInputFiles(logger, assets)
+	}
+	deleteInputArtifactDirs(logger, id, assets)
+	webStats := cleanupInputArtifactWeb(logger, id)
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":               true,
+		"record_id":            id,
+		"record_found":         found,
+		"artifact_web_cleanup": webStats,
+	})
 }

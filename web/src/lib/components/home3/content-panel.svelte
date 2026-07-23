@@ -22,6 +22,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import LLMModelProfilesView from '$lib/components/home3/llm-model-profiles-view.svelte';
 	import LLMModelsView from '$lib/components/home3/llm-models-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
+	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import ResolveAmbiguousObjectsView from '$lib/components/home3/resolve-ambiguous-objects-view.svelte';
 	import UserManagementView from '$lib/components/home3/user-management-view.svelte';
@@ -228,6 +229,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<LLMModelsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}
 			<DbConsistencyView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-db-clean-artifact-data'}
+			<CleanArtifactDataView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-maint-log'}
 			<DbMaintLogView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-ambiguous'}

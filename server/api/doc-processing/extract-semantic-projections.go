@@ -56,18 +56,18 @@ type SemanticProjectionsProcessor struct {
 	MaxTasks              int
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
-	batchRecordID            int64
-	batchChunks              []Chunk
-	batchDocCtx              string
-	batchProjections         []map[string]any // accumulated enriched projection rows
-	batchSeqNos              []int            // chunk.SeqNo per accumulated row
-	batchLineSpans           [][]string       // chunkLineSpans per accumulated row
-	batchLang                string
-	batchStart               time.Time
-	batchCompletedP1         int    // progress counter for logExtractProjectionsChunk
-	batchCompletedP2         int    // progress counter for logEnrichProjectionsChunk
-	batchUsedCandidateModel  string // tracks the candidate model actually used in batch
-	batchMu                  sync.Mutex // protects projections/seqnos/linespans/lang append under concurrent Phase 3
+	batchRecordID           int64
+	batchChunks             []Chunk
+	batchDocCtx             string
+	batchProjections        []map[string]any // accumulated enriched projection rows
+	batchSeqNos             []int            // chunk.SeqNo per accumulated row
+	batchLineSpans          [][]string       // chunkLineSpans per accumulated row
+	batchLang               string
+	batchStart              time.Time
+	batchCompletedP1        int        // progress counter for logExtractProjectionsChunk
+	batchCompletedP2        int        // progress counter for logEnrichProjectionsChunk
+	batchUsedCandidateModel string     // tracks the candidate model actually used in batch
+	batchMu                 sync.Mutex // protects projections/seqnos/linespans/lang append under concurrent Phase 3
 }
 
 type SemanticProjectionsStore interface {
@@ -1399,7 +1399,6 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 		       COALESCE(model_name, ''),
 		       COALESCE(prompt_name, ''),
 		       COALESCE(search_document, ''),
-		       kb.connected_artifacts(input_record_id, 'semantic_projection', id),
 		       COALESCE(ext_info, '{}'::jsonb),
 		       to_char(create_time AT TIME ZONE 'UTC', 'YYYYMMDD-HH24MISS')
 		FROM kb.semantic_projections
@@ -1420,7 +1419,7 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 			categoryPathsRaw, categoryPathsEnRaw  []byte
 			lineSpansRaw                          []byte
 			modelName, promptName, searchDocument string
-			connectedArtifactsRaw, extInfoRaw     []byte
+			extInfoRaw                            []byte
 			createTime                            string
 		)
 		if err := rows.Scan(
@@ -1431,7 +1430,7 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 			&categoryPathsRaw, &categoryPathsEnRaw,
 			&lineSpansRaw,
 			&modelName, &promptName, &searchDocument,
-			&connectedArtifactsRaw, &extInfoRaw,
+			&extInfoRaw,
 			&createTime,
 		); err != nil {
 			return nil, err
@@ -1451,7 +1450,6 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 			"model_name":             strings.TrimSpace(modelName),
 			"prompt_name":            strings.TrimSpace(promptName),
 			"search_document":        strings.TrimSpace(searchDocument),
-			"connected_artifacts":    jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
 			"ext_info":               jsonColumnToValue(extInfoRaw, map[string]any{}),
 			"create_time":            strings.TrimSpace(createTime),
 		})

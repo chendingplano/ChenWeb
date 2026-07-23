@@ -599,3 +599,63 @@ func TestPruneMetadataOnlyArtifactWebDirs(t *testing.T) {
 		t.Fatalf("expected keep dir to remain: %v", err)
 	}
 }
+
+func TestRemoveArtifactWebTreeRecordRemovesAllKnownIndexFiles(t *testing.T) {
+	root := t.TempDir()
+	leaf := filepath.Join(root, "health", "document_management", "version_changes", "dangerous_changes")
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatalf("mkdir leaf: %v", err)
+	}
+
+	for _, file := range []string{
+		"entities.txt",
+		"topics.txt",
+		"scenes.txt",
+		"inventory_items.txt",
+		"provisions.txt",
+		"summaries.txt",
+		"metrics.txt",
+		"semantic_projections.txt",
+	} {
+		body := strings.Join([]string{
+			"415_keep_1",
+			"430_" + strings.TrimSuffix(file, ".txt") + "_1",
+			"431_keep_1",
+		}, "\n")
+		if err := os.WriteFile(filepath.Join(leaf, file), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(leaf, "metadata.txt"), []byte("430 should not matter here"), 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	stats, err := removeArtifactWebTreeRecord(root, 430)
+	if err != nil {
+		t.Fatalf("removeArtifactWebTreeRecord returned error: %v", err)
+	}
+	if stats.FilesScanned != 8 || stats.FilesChanged != 8 || stats.LinesRemoved != 8 {
+		t.Fatalf("stats=%+v, want scanned=8 changed=8 removed=8", stats)
+	}
+
+	for _, file := range []string{"entities.txt", "topics.txt", "scenes.txt", "inventory_items.txt", "provisions.txt", "summaries.txt", "metrics.txt", "semantic_projections.txt"} {
+		body, err := os.ReadFile(filepath.Join(leaf, file))
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		got := string(body)
+		if strings.Contains(got, "430_") {
+			t.Fatalf("%s still contains deleted record: %q", file, got)
+		}
+		if !strings.Contains(got, "415_keep_1") || !strings.Contains(got, "431_keep_1") {
+			t.Fatalf("%s lost unrelated rows: %q", file, got)
+		}
+	}
+	metadata, err := os.ReadFile(filepath.Join(leaf, "metadata.txt"))
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	if string(metadata) != "430 should not matter here" {
+		t.Fatalf("metadata changed unexpectedly: %q", metadata)
+	}
+}

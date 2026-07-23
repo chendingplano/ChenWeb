@@ -25,23 +25,23 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/dbmainthandler"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
-	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/docbenchmarkadminhandler"
+	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
+	"github.com/chendingplano/deepdoc/server/api/imagehandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/llmadminhandler"
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
+	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
-	"github.com/chendingplano/deepdoc/server/api/imagehandler"
-	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
-	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
+	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -569,6 +569,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Database Maintenance endpoints — admin-only consistency checks and repairs.
 	apiGroup.GET("/admin/db/kb-inputs-status/check", dbmainthandler.CheckKbInputsStatus)
 	apiGroup.POST("/admin/db/kb-inputs-status/fix", dbmainthandler.FixKbInputsStatus)
+	apiGroup.POST("/admin/db/kb-input-artifacts/clean", kbhandler.CleanInputArtifacts)
 	apiGroup.GET("/admin/db/maintenance-logs", dbmainthandler.ListMaintenanceLogs)
 	apiGroup.GET("/admin/benchmark/config", docbenchmarkadminhandler.GetConfig)
 	apiGroup.PUT("/admin/benchmark/config", docbenchmarkadminhandler.PutConfig)
