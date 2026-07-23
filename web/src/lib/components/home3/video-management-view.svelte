@@ -48,6 +48,23 @@
 	let coverImage = $state<ImageMeta | null>(null);
 	let dialogFileInput = $state<HTMLInputElement | null>(null);
 
+	// --- Classification metadata (all optional) ---
+	let keywords = $state('');
+	let category = $state('');
+	let subcategory = $state('');
+	let container = $state('');
+	let status = $state('draft');
+	let notes = $state('');
+	let videoType = $state('');
+
+	// Distinct existing values feed the category/subcategory comboboxes.
+	let categoryOptions = $derived([
+		...new Set(videos.map((v) => v.category).filter((c) => c && c.trim()))
+	].sort());
+	let subcategoryOptions = $derived([
+		...new Set(videos.map((v) => v.subcategory).filter((c) => c && c.trim()))
+	].sort());
+
 	function formatBytes(n: number): string {
 		if (n < 1024) return `${n} B`;
 		const units = ['KB', 'MB', 'GB', 'TB'];
@@ -85,6 +102,13 @@
 		source = 'Recording';
 		url = '';
 		coverImage = null;
+		keywords = '';
+		category = '';
+		subcategory = '';
+		container = '';
+		status = 'draft';
+		notes = '';
+		videoType = '';
 		dialogError = null;
 		uploadProgress = 0;
 		dialogOpen = true;
@@ -94,6 +118,11 @@
 		const chosen = (event.target as HTMLInputElement).files?.[0] ?? null;
 		file = chosen;
 		if (chosen && !name) name = chosen.name.replace(/\.[^.]+$/, '');
+		// Auto-detect the video type from the file extension (editable fallback).
+		if (chosen) {
+			const match = /\.([^.]+)$/.exec(chosen.name);
+			videoType = match ? match[1].toLowerCase() : '';
+		}
 	}
 
 	async function onAutoGenerate() {
@@ -141,7 +170,14 @@
 				description: description.trim(),
 				source,
 				url: url.trim(),
-				image_id: coverImage?.id ?? null
+				image_id: coverImage?.id ?? null,
+				keywords: keywords.trim(),
+				category: category.trim(),
+				subcategory: subcategory.trim(),
+				container: container.trim(),
+				status,
+				notes: notes.trim(),
+				video_type: videoType.trim()
 			};
 			const meta = await uploadVideo(file, fields, (f) => (uploadProgress = f));
 			info = `Uploaded "${meta.name}"`;
@@ -318,6 +354,63 @@
 								style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 						</div>
 					{/if}
+				</div>
+
+				<!-- Keywords -->
+				<div class="flex flex-col gap-1.5">
+					<label for="v-keywords" style="color:{textSecondary};">Keywords</label>
+					<input id="v-keywords" bind:value={keywords} placeholder="Comma-separated tags"
+						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
+				</div>
+
+				<!-- Category + Subcategory (editable comboboxes) -->
+				<div class="flex gap-3 flex-wrap">
+					<div class="flex flex-col gap-1.5 flex-1" style="min-width:160px;">
+						<label for="v-category" style="color:{textSecondary};">Category</label>
+						<input id="v-category" list="v-category-options" bind:value={category} placeholder="Pick or type…"
+							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
+						<datalist id="v-category-options">
+							{#each categoryOptions as opt (opt)}<option value={opt}></option>{/each}
+						</datalist>
+					</div>
+					<div class="flex flex-col gap-1.5 flex-1" style="min-width:160px;">
+						<label for="v-subcategory" style="color:{textSecondary};">Subcategory</label>
+						<input id="v-subcategory" list="v-subcategory-options" bind:value={subcategory} placeholder="Pick or type…"
+							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
+						<datalist id="v-subcategory-options">
+							{#each subcategoryOptions as opt (opt)}<option value={opt}></option>{/each}
+						</datalist>
+					</div>
+				</div>
+
+				<!-- Container + Status + Video type -->
+				<div class="flex gap-3 flex-wrap">
+					<div class="flex flex-col gap-1.5 flex-1" style="min-width:160px;">
+						<label for="v-container" style="color:{textSecondary};">Container</label>
+						<input id="v-container" bind:value={container} placeholder="Collection / group"
+							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
+					</div>
+					<div class="flex flex-col gap-1.5" style="min-width:140px;">
+						<label for="v-status" style="color:{textSecondary};">Status</label>
+						<select id="v-status" bind:value={status}
+							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;">
+							<option value="draft">Draft</option>
+							<option value="published">Published</option>
+							<option value="archived">Archived</option>
+						</select>
+					</div>
+					<div class="flex flex-col gap-1.5" style="min-width:120px;">
+						<label for="v-video-type" style="color:{textSecondary};">Video type</label>
+						<input id="v-video-type" bind:value={videoType} placeholder="e.g. mp4"
+							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
+					</div>
+				</div>
+
+				<!-- Notes -->
+				<div class="flex flex-col gap-1.5">
+					<label for="v-notes" style="color:{textSecondary};">Notes</label>
+					<textarea id="v-notes" bind:value={notes} rows="2" placeholder="Internal notes"
+						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; resize:vertical;"></textarea>
 				</div>
 
 				<!-- Cover image -->

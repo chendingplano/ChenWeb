@@ -11,6 +11,13 @@ export type VideoMeta = {
 	url: string;
 	image_id: number | null;
 	image_url: string;
+	keywords: string;
+	category: string;
+	subcategory: string;
+	container: string;
+	status: string; // 'draft' | 'published' | 'archived'
+	notes: string;
+	video_type: string;
 	size_bytes: number;
 	content_type: string;
 	uploaded_by: string;
@@ -23,6 +30,13 @@ export type VideoUploadFields = {
 	source?: string; // 'Recording' | 'Web'
 	url?: string;
 	image_id?: number | null;
+	keywords?: string;
+	category?: string;
+	subcategory?: string;
+	container?: string;
+	status?: string; // 'draft' | 'published' | 'archived'
+	notes?: string;
+	video_type?: string;
 };
 
 /** List all videos, newest first. */
@@ -49,6 +63,13 @@ export function uploadVideo(
 		if (fields.source) form.append('source', fields.source);
 		if (fields.url) form.append('url', fields.url);
 		if (fields.image_id != null) form.append('image_id', String(fields.image_id));
+		if (fields.keywords) form.append('keywords', fields.keywords);
+		if (fields.category) form.append('category', fields.category);
+		if (fields.subcategory) form.append('subcategory', fields.subcategory);
+		if (fields.container) form.append('container', fields.container);
+		if (fields.status) form.append('status', fields.status);
+		if (fields.notes) form.append('notes', fields.notes);
+		if (fields.video_type) form.append('video_type', fields.video_type);
 
 		const xhr = new XMLHttpRequest();
 		xhr.open('POST', '/api/v1/videos', true);

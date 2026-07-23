@@ -57,10 +57,23 @@ type videoMeta struct {
 	URL         string    `json:"url"`
 	ImageID     *int64    `json:"image_id"`
 	ImageURL    string    `json:"image_url"`
+	Keywords    string    `json:"keywords"`
+	Category    string    `json:"category"`
+	Subcategory string    `json:"subcategory"`
+	Container   string    `json:"container"`
+	Status      string    `json:"status"`
+	Notes       string    `json:"notes"`
+	VideoType   string    `json:"video_type"`
 	SizeBytes   int64     `json:"size_bytes"`
 	ContentType string    `json:"content_type"`
 	UploadedBy  string    `json:"uploaded_by"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// allowedVideoStatuses constrains the status field. Kept in sync with the
+// VARCHAR default in the migration and the dialog's <select> options.
+var allowedVideoStatuses = map[string]struct{}{
+	"draft": {}, "published": {}, "archived": {},
 }
 
 func imageURLFor(imageID *int64) string {
@@ -181,18 +194,46 @@ func UploadVideo(c echo.Context) error {
 		}
 	}
 
+	// Classification metadata (all optional). status is constrained; video_type
+	// is auto-detected from the filename extension when the client omits it.
+	keywords := strings.TrimSpace(c.FormValue("keywords"))
+	category := strings.TrimSpace(c.FormValue("category"))
+	subcategory := strings.TrimSpace(c.FormValue("subcategory"))
+	container := strings.TrimSpace(c.FormValue("container"))
+	notes := strings.TrimSpace(c.FormValue("notes"))
+	status := strings.TrimSpace(c.FormValue("status"))
+	if status == "" {
+		status = "draft"
+	}
+	if _, ok := allowedVideoStatuses[status]; !ok {
+		_ = os.Remove(destPath)
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "status must be draft, published, or archived (CWB_VID_019)"})
+	}
+	videoType := strings.TrimSpace(c.FormValue("video_type"))
+	if videoType == "" {
+		videoType = fileExtType(header.Filename)
+	}
+
 	db := ApiTypes.ProjectDBHandle
 	var meta videoMeta
 	err = db.QueryRow(
-		`INSERT INTO kb.videos (filename, stored_path, size_bytes, content_type, uploaded_by, name, description, source, url, image_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`INSERT INTO kb.videos (filename, stored_path, size_bytes, content_type, uploaded_by, name, description, source, url, image_id,
+		                        keywords, category, subcategory, container, status, notes, video_type)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		 RETURNING id, filename, COALESCE(name, filename), COALESCE(description, ''),
 		           COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
+		           COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
+		           COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
+		           COALESCE(video_type, ''),
 		           size_bytes, content_type, COALESCE(uploaded_by, ''), created_at`,
 		header.Filename, destPath, written, contentType, nullableString(uploadedBy),
 		nullableString(name), nullableString(description), source, nullableString(videoURL), imageID,
+		nullableString(keywords), nullableString(category), nullableString(subcategory),
+		nullableString(container), status, nullableString(notes), nullableString(videoType),
 	).Scan(&meta.ID, &meta.Filename, &meta.Name, &meta.Description, &meta.Source, &meta.URL,
-		&meta.ImageID, &meta.SizeBytes, &meta.ContentType, &meta.UploadedBy, &meta.CreatedAt)
+		&meta.ImageID, &meta.Keywords, &meta.Category, &meta.Subcategory, &meta.Container,
+		&meta.Status, &meta.Notes, &meta.VideoType,
+		&meta.SizeBytes, &meta.ContentType, &meta.UploadedBy, &meta.CreatedAt)
 	if err != nil {
 		_ = os.Remove(destPath)
 		logger.Error("insert video metadata failed", "err", err)
@@ -214,6 +255,9 @@ func ListVideos(c echo.Context) error {
 	rows, err := db.Query(
 		`SELECT id, filename, COALESCE(name, filename), COALESCE(description, ''),
 		        COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
+		        COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
+		        COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
+		        COALESCE(video_type, ''),
 		        size_bytes, content_type, COALESCE(uploaded_by, ''), created_at
 		   FROM kb.videos
 		  ORDER BY created_at DESC, id DESC`,
@@ -228,7 +272,9 @@ func ListVideos(c echo.Context) error {
 	for rows.Next() {
 		var m videoMeta
 		if err := rows.Scan(&m.ID, &m.Filename, &m.Name, &m.Description, &m.Source, &m.URL,
-			&m.ImageID, &m.SizeBytes, &m.ContentType, &m.UploadedBy, &m.CreatedAt); err != nil {
+			&m.ImageID, &m.Keywords, &m.Category, &m.Subcategory, &m.Container,
+			&m.Status, &m.Notes, &m.VideoType,
+			&m.SizeBytes, &m.ContentType, &m.UploadedBy, &m.CreatedAt); err != nil {
 			logger.Error("scan video row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to read videos (CWB_VID_021)"})
 		}
@@ -387,6 +433,14 @@ func sanitizeFilename(name string) string {
 		return "video"
 	}
 	return cleaned
+}
+
+// fileExtType returns the lowercased extension without the leading dot
+// (e.g. "clip.MP4" -> "mp4"), used as the fallback video_type when the client
+// omits it. Returns "" when there is no extension.
+func fileExtType(filename string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
+	return ext
 }
 
 func nullableString(s string) any {
