@@ -659,3 +659,30 @@ func TestRemoveArtifactWebTreeRecordRemovesAllKnownIndexFiles(t *testing.T) {
 		t.Fatalf("metadata changed unexpectedly: %q", metadata)
 	}
 }
+
+func TestArtifactWebCleanupRootsPrefersArtifactWebChild(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "ArtifactWeb")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("mkdir ArtifactWeb child: %v", err)
+	}
+	t.Setenv("ARTIFACT_WEB_DIR", parent)
+
+	roots := artifactWebCleanupRoots()
+	if len(roots) != 1 || roots[0] != child {
+		t.Fatalf("roots=%v, want only %q", roots, child)
+	}
+}
+
+func TestArtifactWebCleanupRootsUsesConfiguredArtifactWeb(t *testing.T) {
+	child := filepath.Join(t.TempDir(), "ArtifactWeb")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("mkdir ArtifactWeb: %v", err)
+	}
+	t.Setenv("ARTIFACT_WEB_DIR", child)
+
+	roots := artifactWebCleanupRoots()
+	if len(roots) != 1 || roots[0] != child {
+		t.Fatalf("roots=%v, want only %q", roots, child)
+	}
+}

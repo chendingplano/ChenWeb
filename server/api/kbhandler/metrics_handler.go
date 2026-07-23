@@ -1537,24 +1537,14 @@ func artifactWebCleanupRoots() []string {
 	if artifactWebDir == "" || artifactWebDir == "." {
 		return nil
 	}
-	roots := []string{artifactWebDir}
-	if filepath.Base(artifactWebDir) != "ArtifactWeb" {
-		child := filepath.Join(artifactWebDir, "ArtifactWeb")
-		if info, err := os.Stat(child); err == nil && info.IsDir() {
-			roots = append(roots, child)
-		}
+	if filepath.Base(artifactWebDir) == "ArtifactWeb" {
+		return []string{artifactWebDir}
 	}
-	seen := make(map[string]struct{}, len(roots))
-	out := make([]string, 0, len(roots))
-	for _, root := range roots {
-		root = filepath.Clean(root)
-		if _, ok := seen[root]; ok {
-			continue
-		}
-		seen[root] = struct{}{}
-		out = append(out, root)
+	child := filepath.Join(artifactWebDir, "ArtifactWeb")
+	if info, err := os.Stat(child); err == nil && info.IsDir() {
+		return []string{child}
 	}
-	return out
+	return []string{artifactWebDir}
 }
 
 func cleanupInputArtifactWeb(logger ApiTypes.JimoLogger, recordID int64) artifactWebCleanupStats {
