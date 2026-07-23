@@ -1,9 +1,12 @@
 package kbhandler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -48,6 +51,18 @@ func newListMetricsContext(t *testing.T, inputRecordID string) (echo.Context, *h
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.QueryParams().Set("input_record_id", inputRecordID)
+	return c, rec
+}
+
+func newDeleteInputContext(t *testing.T, id string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/kb/inputs/"+id, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/kb/inputs/:id")
+	c.SetParamNames("id")
+	c.SetParamValues(id)
 	return c, rec
 }
 
@@ -410,5 +425,147 @@ ORDER BY m.id ASC
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectBegin()
+	selectQuery := regexp.QuoteMeta(`SELECT COALESCE(file_name, ''), COALESCE(backup_filename, ''), COALESCE(result_filename, '') FROM kb.inputs WHERE id = $1`)
+	mock.ExpectQuery(selectQuery).
+		WithArgs(int64(430)).
+		WillReturnRows(sqlmock.NewRows([]string{"file_name", "backup_filename", "result_filename"}).AddRow("", "", ""))
+
+	for _, stmt := range []string{
+		`DELETE FROM kb.doc_review_provision_analyses WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_logs WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_findings WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_activities WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_status WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_reports WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_runs WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_requests WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_proc_logs WHERE record_id = $1`,
+		`DELETE FROM kb.doc_process_runs WHERE record_id = $1`,
+		`DELETE FROM kb.input_proc_status WHERE record_id = $1`,
+		`DELETE FROM kb.inventory_item_duplicates WHERE input_record_id = $1`,
+		`DELETE FROM kb.inventory_items WHERE input_record_id = $1`,
+		`DELETE FROM kb.relations WHERE input_record_id = $1`,
+		`DELETE FROM kb.entities WHERE input_record_id = $1`,
+		`DELETE FROM kb.knowledges WHERE input_record_id = $1`,
+		`DELETE FROM kb.semantic_projections WHERE input_record_id = $1`,
+		`DELETE FROM kb.scene_objects WHERE input_record_id = $1`,
+		`DELETE FROM kb.products WHERE input_record_id = $1`,
+		`DELETE FROM kb.provisions WHERE input_record_id = $1`,
+		`DELETE FROM kb.metrics WHERE input_record_id = $1`,
+		`DELETE FROM kb.topics WHERE input_record_id = $1`,
+		`DELETE FROM kb.summaries WHERE input_record_id = $1`,
+		`DELETE FROM kb.chunk_ranges WHERE input_record_id = $1`,
+		`DELETE FROM kb.search_artifacts WHERE input_record_id = $1`,
+	} {
+		mock.ExpectExec(regexp.QuoteMeta(stmt)).
+			WithArgs(int64(430)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.inputs WHERE id = $1`)).
+		WithArgs(int64(430)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	c, rec := newDeleteInputContext(t, "430")
+	if err := DeleteInput(c); err != nil {
+		t.Fatalf("DeleteInput returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !payload["status"] {
+		t.Fatalf("expected status=true")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestDeleteInputNotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectBegin()
+	selectQuery := regexp.QuoteMeta(`SELECT COALESCE(file_name, ''), COALESCE(backup_filename, ''), COALESCE(result_filename, '') FROM kb.inputs WHERE id = $1`)
+	mock.ExpectQuery(selectQuery).
+		WithArgs(int64(999)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	c, rec := newDeleteInputContext(t, "999")
+	if err := DeleteInput(c); err != nil {
+		t.Fatalf("DeleteInput returned error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestPruneMetadataOnlyArtifactWebDirs(t *testing.T) {
+	root := t.TempDir()
+
+	leaf := filepath.Join(root, "alpha", "beta")
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatalf("mkdir leaf: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "alpha", "metadata.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatalf("write alpha metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(leaf, "metadata.txt"), []byte("beta"), 0o644); err != nil {
+		t.Fatalf("write beta metadata: %v", err)
+	}
+
+	keepDir := filepath.Join(root, "keep")
+	if err := os.MkdirAll(keepDir, 0o755); err != nil {
+		t.Fatalf("mkdir keep dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(keepDir, "semantic_projections.txt"), []byte("416_proj_1"), 0o644); err != nil {
+		t.Fatalf("write keep file: %v", err)
+	}
+
+	if err := pruneMetadataOnlyArtifactWebDirs(root); err != nil {
+		t.Fatalf("pruneMetadataOnlyArtifactWebDirs returned error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "alpha")); !os.IsNotExist(err) {
+		t.Fatalf("expected metadata-only branch removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(keepDir); err != nil {
+		t.Fatalf("expected keep dir to remain: %v", err)
 	}
 }

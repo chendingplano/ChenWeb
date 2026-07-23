@@ -985,6 +985,12 @@ type rawLinesResponse struct {
 	Pages    int       `json:"pages"`
 }
 
+type inputDeleteAssets struct {
+	FileName       string
+	BackupFileName string
+	ResultFileName string
+}
+
 // GetRawLines handles GET /api/v1/kb/raw-lines?input_record_id=N
 func GetRawLines(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_200")
@@ -1233,6 +1239,190 @@ func parseRawLine(s string) (rawLine, bool) {
 	}, true
 }
 
+func loadInputDeleteAssets(tx *sql.Tx, inputTable string, id int64) (inputDeleteAssets, bool, error) {
+	query := fmt.Sprintf(`SELECT COALESCE(file_name, ''), COALESCE(backup_filename, ''), COALESCE(result_filename, '') FROM %s WHERE id = $1`, inputTable)
+	var assets inputDeleteAssets
+	if err := tx.QueryRow(query, id).Scan(&assets.FileName, &assets.BackupFileName, &assets.ResultFileName); err != nil {
+		if err == sql.ErrNoRows {
+			return inputDeleteAssets{}, false, nil
+		}
+		return inputDeleteAssets{}, false, err
+	}
+	return assets, true, nil
+}
+
+func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
+	stmts := []string{
+		`DELETE FROM kb.doc_review_provision_analyses WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_logs WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_findings WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_activities WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_status WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_reports WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_runs WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_review_requests WHERE input_record_id = $1`,
+		`DELETE FROM kb.doc_proc_logs WHERE record_id = $1`,
+		`DELETE FROM kb.doc_process_runs WHERE record_id = $1`,
+		`DELETE FROM kb.input_proc_status WHERE record_id = $1`,
+		`DELETE FROM kb.inventory_item_duplicates WHERE input_record_id = $1`,
+		`DELETE FROM kb.inventory_items WHERE input_record_id = $1`,
+		`DELETE FROM kb.relations WHERE input_record_id = $1`,
+		`DELETE FROM kb.entities WHERE input_record_id = $1`,
+		`DELETE FROM kb.knowledges WHERE input_record_id = $1`,
+		`DELETE FROM kb.semantic_projections WHERE input_record_id = $1`,
+		`DELETE FROM kb.scene_objects WHERE input_record_id = $1`,
+		`DELETE FROM kb.products WHERE input_record_id = $1`,
+		`DELETE FROM kb.provisions WHERE input_record_id = $1`,
+		`DELETE FROM kb.metrics WHERE input_record_id = $1`,
+		`DELETE FROM kb.topics WHERE input_record_id = $1`,
+		`DELETE FROM kb.summaries WHERE input_record_id = $1`,
+		`DELETE FROM kb.chunk_ranges WHERE input_record_id = $1`,
+		`DELETE FROM kb.search_artifacts WHERE input_record_id = $1`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteInputFiles(logger ApiTypes.JimoLogger, assets inputDeleteAssets) {
+	seen := make(map[string]struct{}, 3)
+	for _, candidate := range []string{assets.FileName, assets.BackupFileName, assets.ResultFileName} {
+		path := strings.TrimSpace(candidate)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			logger.Warn("delete kb input file failed", "path", path, "err", err)
+		}
+	}
+}
+
+func deleteInputArtifactDirs(logger ApiTypes.JimoLogger, recordID int64, assets inputDeleteAssets) {
+	seen := make(map[string]struct{}, 3)
+	addCandidate := func(path string) {
+		path = filepath.Clean(strings.TrimSpace(path))
+		if path == "" || path == "." || path == string(filepath.Separator) {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		if err := os.RemoveAll(path); err != nil {
+			logger.Warn("delete kb input artifact dir failed", "record_id", recordID, "path", path, "err", err)
+		}
+	}
+
+	if resolved := pathutil.ResolveDataHomePath(strings.TrimSpace(assets.ResultFileName)); resolved != "" {
+		addCandidate(filepath.Dir(resolved))
+	}
+
+	artifactRoot := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
+	if artifactRoot == "" {
+		return
+	}
+	groupID := strconv.FormatInt(recordID/1000, 10)
+	recordKey := strconv.FormatInt(recordID, 10)
+	addCandidate(filepath.Join(artifactRoot, groupID, recordKey))
+	addCandidate(filepath.Join(artifactRoot, "Artifacts", groupID, recordKey))
+}
+
+func removeSemanticProjectionTreeRecord(treeRootDir string, recordID int64) error {
+	prefix := strconv.FormatInt(recordID, 10) + "_"
+	return filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "semantic_projections.txt" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rows := make([]string, 0)
+		for row := range strings.SplitSeq(string(body), "\n") {
+			row = strings.TrimSpace(row)
+			if row == "" || strings.HasPrefix(row, prefix) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		if len(rows) == 0 {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		sort.Strings(rows)
+		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
+	})
+}
+
+func pruneMetadataOnlyArtifactWebDirs(root string) error {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return nil
+	}
+	_, err := pruneMetadataOnlyDir(root, root)
+	return err
+}
+
+func pruneMetadataOnlyDir(path string, root string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+
+	keep := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			if entry.Name() != "metadata.txt" {
+				keep = true
+			}
+			continue
+		}
+		removed, err := pruneMetadataOnlyDir(filepath.Join(path, entry.Name()), root)
+		if err != nil {
+			return false, err
+		}
+		if !removed {
+			keep = true
+		}
+	}
+	if keep || path == root {
+		return false, nil
+	}
+	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	return true, nil
+}
+
+func cleanupInputArtifactWeb(logger ApiTypes.JimoLogger, recordID int64) {
+	artifactWebDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
+	if artifactWebDir == "" {
+		return
+	}
+	if err := removeSemanticProjectionTreeRecord(artifactWebDir, recordID); err != nil {
+		logger.Warn("delete semantic projection artifact web entries failed", "record_id", recordID, "dir", artifactWebDir, "err", err)
+		return
+	}
+	if err := pruneMetadataOnlyArtifactWebDirs(artifactWebDir); err != nil {
+		logger.Warn("prune artifact web dirs failed", "record_id", recordID, "dir", artifactWebDir, "err", err)
+	}
+}
+
 // DeleteInput handles DELETE /api/v1/kb/inputs/:id
 func DeleteInput(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_400")
@@ -1256,8 +1446,37 @@ func DeleteInput(c echo.Context) error {
 		})
 	}
 
+	tx, err := db.Begin()
+	if err != nil {
+		logger.Error("begin delete kb input transaction failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
+		})
+	}
+	defer tx.Rollback()
+
+	assets, found, err := loadInputDeleteAssets(tx, inputTable, id)
+	if err != nil {
+		logger.Error("load kb input delete assets failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to verify kb input delete (CWB_KB_M_404)",
+		})
+	}
+	if !found {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "record not found (CWB_KB_M_405)",
+		})
+	}
+
+	if err := deleteInputRelatedRows(tx, id); err != nil {
+		logger.Error("delete kb input related rows failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
+		})
+	}
+
 	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", inputTable)
-	result, err := db.Exec(query, id)
+	result, err := tx.Exec(query, id)
 	if err != nil {
 		logger.Error("delete kb input failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -1276,6 +1495,16 @@ func DeleteInput(c echo.Context) error {
 			Status: false, ErrorMsg: "record not found (CWB_KB_M_405)",
 		})
 	}
+	if err := tx.Commit(); err != nil {
+		logger.Error("commit delete kb input failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
+		})
+	}
+
+	deleteInputFiles(logger, assets)
+	deleteInputArtifactDirs(logger, id, assets)
+	cleanupInputArtifactWeb(logger, id)
 
 	return c.JSON(http.StatusOK, map[string]bool{"status": true})
 }
