@@ -1316,7 +1316,33 @@ func inputRelatedColumnExists(tx *sql.Tx, relation string, column string) (bool,
 	return exists, nil
 }
 
+func deleteDocProcLogsForInputRuns(tx *sql.Tx, id int64) error {
+	required := []inputRelatedDeleteSpec{
+		{Table: "kb.doc_proc_logs", Column: "run_id"},
+		{Table: "kb.doc_process_runs", Column: "id"},
+		{Table: "kb.doc_process_runs", Column: "record_id"},
+	}
+	for _, spec := range required {
+		exists, err := inputRelatedColumnExists(tx, spec.Table, spec.Column)
+		if err != nil {
+			return fmt.Errorf("inspect doc process run log cleanup %s.%s: %w", spec.Table, spec.Column, err)
+		}
+		if !exists {
+			return nil
+		}
+	}
+
+	stmt := `DELETE FROM kb.doc_proc_logs WHERE run_id IN (SELECT id FROM kb.doc_process_runs WHERE record_id = $1)`
+	if _, err := tx.Exec(stmt, id); err != nil {
+		return fmt.Errorf("delete kb.doc_proc_logs for doc process runs: %w", err)
+	}
+	return nil
+}
+
 func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
+	if err := deleteDocProcLogsForInputRuns(tx, id); err != nil {
+		return err
+	}
 	for _, spec := range inputRelatedDeleteSpecs {
 		exists, err := inputRelatedColumnExists(tx, spec.Table, spec.Column)
 		if err != nil {

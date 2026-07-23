@@ -73,6 +73,22 @@ func expectInputRelatedColumnCheck(mock sqlmock.Sqlmock, spec inputRelatedDelete
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
 }
 
+func expectDocProcRunLogCleanup(mock sqlmock.Sqlmock, exists bool) {
+	for _, spec := range []inputRelatedDeleteSpec{
+		{Table: "kb.doc_proc_logs", Column: "run_id"},
+		{Table: "kb.doc_process_runs", Column: "id"},
+		{Table: "kb.doc_process_runs", Column: "record_id"},
+	} {
+		expectInputRelatedColumnCheck(mock, spec, exists)
+		if !exists {
+			return
+		}
+	}
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.doc_proc_logs WHERE run_id IN (SELECT id FROM kb.doc_process_runs WHERE record_id = $1)`)).
+		WithArgs(int64(430)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+}
+
 func TestUpdateInputSuccess(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -453,6 +469,7 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 		WithArgs(int64(430)).
 		WillReturnRows(sqlmock.NewRows([]string{"file_name", "backup_filename", "result_filename"}).AddRow("", "", ""))
 
+	expectDocProcRunLogCleanup(mock, true)
 	for _, spec := range inputRelatedDeleteSpecs {
 		expectInputRelatedColumnCheck(mock, spec, true)
 		stmt := "DELETE FROM " + spec.Table + " WHERE " + spec.Column + " = $1"
@@ -495,6 +512,7 @@ func TestDeleteInputSkipsMissingRelatedCleanupTargets(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
+	expectDocProcRunLogCleanup(mock, false)
 	for _, spec := range inputRelatedDeleteSpecs {
 		expectInputRelatedColumnCheck(mock, spec, false)
 	}
