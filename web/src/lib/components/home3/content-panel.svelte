@@ -38,6 +38,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import KbSearchLabView from '$lib/components/home3/kb-search-lab-view.svelte';
 	import VideoManagementView from '$lib/components/home3/video-management-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
+	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -268,6 +269,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<VideoManagementView {darkMode} />
 		{:else if activeMenu?.childId === 'videos-training'}
 			<TrainingVideoViewer {darkMode} />
+		{:else if activeMenu?.childId === 'docs-users-manual'}
+			<UserManualViewer {darkMode} />
 		{:else if sectionId === 'chat'}
 			<Chatter01 {darkMode} />
 		{:else if isDashboard}
