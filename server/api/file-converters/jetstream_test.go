@@ -111,6 +111,25 @@ func TestWaitWithGraceDrainsBeforeGracePeriod(t *testing.T) {
 	}
 }
 
+func TestDefaultStreamNameForSubjectAvoidsCollisionAcrossSubjects(t *testing.T) {
+	// doc-processor's primary subject and parser-result-converter's subject
+	// both fall back to EnsureStream's default when their stream env vars
+	// are unset. They must not resolve to the same stream name.
+	docProcessorSubject := "kb.pdf.start-doc-processing"
+	parserResultSubject := "kb.pdf.parsed"
+
+	got1 := defaultStreamNameForSubject(docProcessorSubject)
+	got2 := defaultStreamNameForSubject(parserResultSubject)
+
+	if got1 == "" || got2 == "" {
+		t.Fatalf("defaultStreamNameForSubject returned empty name: got1=%q got2=%q", got1, got2)
+	}
+	if got1 == got2 {
+		t.Fatalf("defaultStreamNameForSubject collided for different subjects %q and %q: both resolved to %q",
+			docProcessorSubject, parserResultSubject, got1)
+	}
+}
+
 func TestWaitWithGraceTimesOutOnStuckWork(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1) // never Done() — simulates a handler stuck past shutdown

@@ -4777,10 +4777,84 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 * PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh; source .venv/bin/activate
 * Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
 * Start Docker: cd ChenWeb; mise run docker-start
-* Start Clickhose: cd ChenWeb; mise obs-up
+* Start Clickhouse: cd ChenWeb; mise obs-up
 * Start cc-switch: cd ThirdParty/cc-switch; 
 * Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
 * Start Caddy: ch ChenWeb; sh start_caddy.sh
+
+# Operations
+
+**Scope:** `192.168.29.96` (ssh port `8822`, user `cding`) — the Linux box, eventually the production host for `dingbo.bzton.cn`. Full install details/gotchas: `KnowledgeStore/doc-repo/devdocs/202607/2026072401-devdoc-deploy-production.md`.
+
+Unlike the MacMini's tmux list above, **every service on `.96` runs under systemd and is `enable`d** — after a reboot, everything comes back up on its own in the right order (each unit's `After=`/`Wants=` chains it to the ones it depends on). You should not normally need to start anything by hand. This section is for checking status and for the rare manual restart.
+
+## Services
+
+| systemd unit | What it is | Port(s) | Depends on |
+|---|---|---|---|
+| `nats-server` | JetStream broker | `4222` | — |
+| `kratos` | Auth (Ory Kratos, `mise run start-kratos`) | `4433` public, `4434` admin (loopback) | native PostgreSQL 12 |
+| `chenweb` | Main Go backend (`deepdoc`) | `8080` | `nats-server`, `kratos`, `docker` (ParadeDB) |
+| `doc-processor` | NATS worker: chunking/extraction/doc-review pipeline | — (no HTTP port) | `nats-server`, `kratos`, `docker` |
+| `parser-result-converter` | NATS worker: converts MinerU/pdf-parser output to line-files | — (no HTTP port) | `nats-server`, `kratos`, `docker` |
+| `caddy` | Reverse proxy for `dingbo.bzton.cn` → ChenWeb/Kratos | `80`, `443` | `chenweb`, `kratos` |
+
+Not (yet) under systemd — still started manually:
+* `python/pdf-parser` — `cd ~/Workspace/ChenWeb/python/pdf-parser && mise ocr-service-start` (or `-start-sync` to run in the foreground)
+
+Also running on this box, unrelated to ChenWeb: `chenweb-paradedb` (Docker, ChenWeb's own Postgres 18 + pgvector + pg_search — see the devdoc §1.3.2) and `agentgpt_db`/`platform` (AgentGPT, a separate stack, do not touch).
+
+**Retired on this box (2026-07-24):** Dify's containers (`docker-nginx-1`, `docker-api-1`, `docker-worker-1`, `docker-web-1`, `docker-sandbox-1`, `docker-ssrf_proxy-1`, `docker-weaviate-1`, `docker-redis-1`, `docker-db-1`) were `docker stop`'d — not removed — to free ports 80/443 for Caddy. `docker start <name>` brings any of them back if Dify is needed again. The native Ubuntu `nginx` package was also stopped and disabled for the same reason (it was only ever serving the default placeholder page).
+
+## Check everything is up
+
+```bash
+for svc in nats-server kratos chenweb doc-processor parser-result-converter caddy; do
+  printf "%-25s active=%-10s enabled=%s\n" "$svc" "$(systemctl is-active $svc)" "$(systemctl is-enabled $svc)"
+done
+
+curl -s -o /dev/null -w "ChenWeb :8080 -> %{http_code}\n" http://127.0.0.1:8080/
+curl -s -o /dev/null -w "Kratos  :4433 -> %{http_code}\n" http://127.0.0.1:4433/health/alive
+curl -s http://127.0.0.1:8080/session   # expect 401 {"error":"Login required"} when logged out —
+                                         # confirms ChenWeb is actually calling Kratos, not just up
+```
+
+## Restart / logs for a single service
+
+```bash
+sudo systemctl restart <unit>      # e.g. chenweb, doc-processor, kratos, caddy, nats-server, parser-result-converter
+sudo systemctl status <unit>
+sudo journalctl -u <unit> -n 100 --no-pager     # -f to follow live
+```
+
+`journalctl -u <unit>` without `sudo` shows nothing for units running as a different user (e.g. `caddy` runs as system user `caddy`, not `cding`) — use `sudo` or add your user to the `adm`/`systemd-journal` group.
+
+## Restart everything (rare — e.g. after changing `.env` or `config.local.toml`)
+
+Order matters because of the dependency chain (`nats-server`/`kratos`/ParadeDB → `chenweb`/workers → `caddy`):
+
+```bash
+sudo systemctl restart nats-server kratos
+sleep 3
+sudo systemctl restart chenweb doc-processor parser-result-converter
+sleep 3
+sudo systemctl restart caddy
+```
+
+## Where things live
+
+* `~/Workspace/ChenWeb/` — binaries (`server-linux`, `doc-processor-linux`, `parser-result-converter-linux`), `config.toml`/`config.local.toml`/`.env`, `project_migrations/`, `shared_migrations/`, `prompts/`, `.models.toml`, `docs/doc-templates/`, `python/pdf-parser/`, `Data/` (all runtime storage — logs, staging, artifacts, DocReviewReports, etc.)
+* `~/Workspace/Kratos/` — built from source (`src/kratos/kratos`), config in `mise.local.toml` (**not** a copy of the Mac's — separate secrets, see devdoc §1.6.2)
+* `~/Workspace/ThirdParty/mineru/` — MinerU, CPU/pipeline backend
+* `~/Workspace/shared/libconfig.toml` — shared-library system table names (`SHARED_LIB_CONFIG_DIR` env var points here; **must** be a real exported env var, not just in `.env` — see devdoc §3)
+* `/etc/caddy/Caddyfile` — same content as the Mac's `ChenWeb/Caddyfile`
+* `/etc/systemd/system/{nats-server,kratos,chenweb,doc-processor,parser-result-converter}.service` — our units; `caddy.service` came from the apt package
+
+## Known limitations on this box right now
+
+* `dingbo.bzton.cn` isn't pointed at `.96` yet — Caddy is up and correctly redirecting HTTP→HTTPS, but can't get a real cert until DNS is cut over. Not a bug; resolves itself once DNS points here.
+* Google OAuth and outbound email (SMTP) are intentionally left unconfigured on Kratos — password login only, for now.
+* `pdf-parser` has no systemd unit yet.
 
 About 'mitmproxy':
 Do not run 'mitmproxy' now since it causes probelsm.

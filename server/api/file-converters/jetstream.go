@@ -83,6 +83,18 @@ func normalizeStreamName(raw string, fallback string) string {
 	return v
 }
 
+// defaultStreamNameForSubject derives EnsureStream's fallback stream name
+// from the subject it guards, so two callers guarding different subjects
+// never collide on the same auto-generated stream name.
+func defaultStreamNameForSubject(subject string) string {
+	sanitized := invalidConsumerNameCharsRE.ReplaceAllString(strings.TrimSpace(subject), "-")
+	sanitized = strings.Trim(sanitized, "-_")
+	if sanitized == "" {
+		return ""
+	}
+	return sanitized + "-events"
+}
+
 func normalizeConsumerName(raw string) string {
 	v := strings.TrimSpace(raw)
 	if v == "" {
@@ -287,8 +299,8 @@ func (s *NATSSubscriber) EnsureStream(streamName string, subject string) error {
 	if s.conn == nil {
 		return fmt.Errorf("nats connection is nil")
 	}
-	streamName = normalizeStreamName(streamName, "pdf-parsed-events")
 	subject = strings.TrimSpace(subject)
+	streamName = normalizeStreamName(streamName, defaultStreamNameForSubject(subject))
 	if streamName == "" {
 		return nil
 	}
