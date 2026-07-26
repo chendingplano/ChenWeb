@@ -61,7 +61,7 @@ func TestSave_InvalidDocumentIsNotPersisted(t *testing.T) {
 	doc.Key = key
 	doc.Blocks = append(doc.Blocks, model.Block{ID: "bad", Type: "not-a-type"})
 
-	if _, err := s.Save(context.Background(), &doc); err == nil {
+	if _, err := s.Save(context.Background(), &doc, 0); err == nil {
 		t.Fatal("expected validation error, got nil")
 	}
 
@@ -83,7 +83,7 @@ func TestSave_ThenLoad_RoundTrips(t *testing.T) {
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
 
-	res, err := s.Save(context.Background(), &doc)
+	res, err := s.Save(context.Background(), &doc, 0)
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -115,12 +115,14 @@ func TestSave_SecondSaveIncrementsContentVersion(t *testing.T) {
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
 
-	if _, err := s.Save(context.Background(), &doc); err != nil {
+	if _, err := s.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
 
 	doc.Title = "Jaro-Winkler Similarity (Revised)"
-	res, err := s.Save(context.Background(), &doc)
+	// Save stamps doc.ContentVersion with the resolved version, so the
+	// second save's expectation is simply what the first one produced.
+	res, err := s.Save(context.Background(), &doc, doc.ContentVersion)
 	if err != nil {
 		t.Fatalf("second save: %v", err)
 	}
@@ -145,7 +147,7 @@ func TestSave_BlocksAreRebuilt(t *testing.T) {
 
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
-	res, err := s.Save(context.Background(), &doc)
+	res, err := s.Save(context.Background(), &doc, 0)
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -157,7 +159,7 @@ func TestSave_BlocksAreRebuilt(t *testing.T) {
 
 	// Remove the last top-level block and save again.
 	doc.Blocks = doc.Blocks[:len(doc.Blocks)-1]
-	if _, err := s.Save(context.Background(), &doc); err != nil {
+	if _, err := s.Save(context.Background(), &doc, doc.ContentVersion); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
 
@@ -186,7 +188,7 @@ func TestSave_PromotedColumnsMatchMetadata(t *testing.T) {
 
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
-	if _, err := s.Save(context.Background(), &doc); err != nil {
+	if _, err := s.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -215,7 +217,7 @@ func TestSave_SlugConflictReturnsTypedError(t *testing.T) {
 		},
 	}
 
-	if _, err := s.Save(context.Background(), &doc); err != nil {
+	if _, err := s.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -246,7 +248,7 @@ func TestSave_RollbackLeavesPriorDocumentIntact(t *testing.T) {
 
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
-	if _, err := s.Save(context.Background(), &doc); err != nil {
+	if _, err := s.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
 
@@ -260,7 +262,7 @@ func TestSave_RollbackLeavesPriorDocumentIntact(t *testing.T) {
 	// document is untouched.
 	bad := doc
 	bad.Blocks = append(bad.Blocks, model.Block{ID: "invalid", Type: "not-a-real-type"})
-	if _, err := s.Save(context.Background(), &bad); err == nil {
+	if _, err := s.Save(context.Background(), &bad, bad.ContentVersion); err == nil {
 		t.Fatal("expected the second save to fail validation")
 	}
 

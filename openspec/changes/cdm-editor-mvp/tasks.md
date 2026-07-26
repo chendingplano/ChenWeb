@@ -3,16 +3,16 @@
 These change existing `cdm/store` behavior and must land before the handlers,
 since the handlers depend on all three. See design D2, D3, D4.
 
-- [ ] 1.1 Write failing tests first for the three store changes: `input_record_id` populated on create, stale-version save rejected, published-document save refused
-- [ ] 1.2 Add a `tx`-accepting variant of `InputRegistrar.CreateDraft` so the input row can join another transaction; keep the existing method as a wrapper so Phase 1 callers are unaffected
-- [ ] 1.3 Add `Store.Create(ctx, doc, DraftInput)` writing the `kb.inputs` row and the `kb.cdm_documents` row in one transaction and setting `input_record_id` (design D2)
-- [ ] 1.4 Add a test asserting that a failure after the input insert leaves neither row behind
-- [ ] 1.5 Change `Store.Save` to take an expected `content_version`, applying the increment via `ON CONFLICT ... DO UPDATE ... WHERE content_version = $expected` so the check and the increment are one statement (design D3)
-- [ ] 1.6 Add `StaleVersionError{Expected, Actual}`, returned after re-reading the current version when the guarded update matches no row
-- [ ] 1.7 Add a concurrency test: two saves from the same loaded version, exactly one succeeds
-- [ ] 1.8 Add `FrozenError{DocumentKey}` and make `Store.Save` refuse to write when the linked `kb.inputs` row is published, joining through `input_record_id` (design D4)
-- [ ] 1.9 Update the existing Phase 1 store/publish tests for the new `Save` signature; confirm the compiler has found every caller
-- [ ] 1.10 Confirm all tests from 1.1 pass, and that `go test ./server/api/cdm/...` is green
+- [x] 1.1 Wrote failing tests first (`create_test.go`, `concurrency_test.go`), confirmed failing for the right reason — `s.Create undefined`, not a typo — before writing any implementation
+- [x] 1.2 Added `createDraftTx` taking an `execQuerier` (the `QueryRowContext` subset shared by `*sql.DB` and `*sql.Tx`); `InputRegistrar.CreateDraft` is now a one-line wrapper, so Phase 1 callers are untouched
+- [x] 1.3 Added `Store.Create(ctx, doc, DraftInput)` writing both rows in one transaction and setting `input_record_id`. Extracted `writeContentTx` so `Create` and `Save` share one definition of how content is persisted rather than drifting
+- [x] 1.4 `TestCreate_InvalidDocumentWritesNeitherRow` — counts `kb.inputs` rows before and after, asserting no orphan is left behind
+- [x] 1.5 **Implemented differently from the plan.** The planned `ON CONFLICT ... DO UPDATE ... WHERE content_version = $expected` handles a version mismatch but silently *creates* a document when the caller expects version 7 and no row exists. Replaced with `lockDocStateTx`: one `SELECT ... FOR UPDATE OF d` reading version and publication state together, then an explicit four-way branch (frozen / stale / missing / proceed). Clearer, handles every case, and reads the frozen state in the same query rather than a second round trip
+- [x] 1.6 Added `StaleVersionError{DocumentKey, Expected, Actual}` with `Actual == 0` meaning "no such document", and a distinct message for that case
+- [x] 1.7 Added `TestSave_ConcurrentSavesExactlyOneWins`. **It does not prove the row lock**, verified by deleting `FOR UPDATE` and watching it stay green across repeated runs — one goroutine commits before the other reads, so the lost-update window never opens. Added `TestLockDocStateTx_BlocksConcurrentReader` (`lock_internal_test.go`, internal to package `store`) as the deterministic proof: it holds a transaction, asserts a second reader blocks for 500ms, then asserts the waiter observes the committed version. Confirmed it fails with `FOR UPDATE` removed and passes with it. The goroutine test's comment now states what it does and does not cover
+- [x] 1.8 Added `FrozenError{DocumentKey}`; `lockDocStateTx` derives publication from the absence of the `doc_processing` status entry — the same signal the worklist uses — rather than introducing a second source of truth. A NULL `input_record_id` reads as a draft, keeping pre-`Create` documents editable
+- [x] 1.9 Updated all 18 call sites across `store_test.go` and `publish_test.go`; every one was a test, as design predicted. Noted in `publish_test.go` that `TestPublisher_RepublishSupersedesArtifacts` builds its document with `Save` + a separate `CreateDraft`, so `input_record_id` is NULL and the frozen rule does not apply — deliberate, since that test is about artifact superseding, not the editorial lifecycle
+- [x] 1.10 `go build ./server/...`, `go vet ./server/...` clean; `go test ./server/api/cdm/...` green; 20 store tests pass against the live `miner` database with none skipped
 
 ## 2. HTTP handlers
 

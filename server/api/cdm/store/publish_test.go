@@ -36,7 +36,7 @@ func TestPublisher_PublishEndToEnd(t *testing.T) {
 
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
-	if _, err := docStore.Save(context.Background(), &doc); err != nil {
+	if _, err := docStore.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestPublisher_RepublishSupersedesArtifacts(t *testing.T) {
 
 	doc := cdmfixtures.JaroWinkler()
 	doc.Key = key
-	if _, err := docStore.Save(context.Background(), &doc); err != nil {
+	if _, err := docStore.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	inputID, err := inputs.CreateDraft(context.Background(), store.DraftInput{TenantID: "tenant-x"})
@@ -156,8 +156,12 @@ func TestPublisher_RepublishSupersedesArtifacts(t *testing.T) {
 		t.Fatalf("first publish: %v", err)
 	}
 
+	// This document was created with Save + a separate CreateDraft, so its
+	// input_record_id is NULL and the frozen rule (D8) does not apply to it.
+	// That is deliberate here: this test is about artifact superseding across
+	// content versions, not about the editorial lifecycle.
 	doc.Title = "Jaro-Winkler Similarity (v2)"
-	if _, err := docStore.Save(context.Background(), &doc); err != nil {
+	if _, err := docStore.Save(context.Background(), &doc, doc.ContentVersion); err != nil {
 		t.Fatalf("resave: %v", err)
 	}
 	res2, err := pub.Publish(context.Background(), key, inputID)

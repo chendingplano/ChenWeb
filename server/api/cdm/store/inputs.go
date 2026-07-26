@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -53,13 +54,25 @@ func NewInputRegistrar(db *sql.DB) *InputRegistrar {
 // that an author-triggered doc-processing run has an input row to attach
 // artifacts to before publication.
 func (r *InputRegistrar) CreateDraft(ctx context.Context, in DraftInput) (int64, error) {
+	return createDraftTx(ctx, r.db, in)
+}
+
+// execQuerier is the subset of *sql.DB and *sql.Tx that createDraftTx needs,
+// so the same insert serves both the standalone CreateDraft above and
+// Store.Create, which must write this row inside its own transaction to keep
+// the kb.inputs row and the kb.cdm_documents row atomic (design D2).
+type execQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func createDraftTx(ctx context.Context, q execQuerier, in DraftInput) (int64, error) {
 	tenantID := in.TenantID
 	if tenantID == "" {
 		tenantID = "-"
 	}
 
 	var id int64
-	err := r.db.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, status)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
 		RETURNING id
@@ -68,6 +81,53 @@ func (r *InputRegistrar) CreateDraft(ctx context.Context, in DraftInput) (int64,
 		return 0, fmt.Errorf("cdm: create draft input row: %w", err)
 	}
 	return id, nil
+}
+
+// docState is the pre-write state of a document, read under a row lock so
+// that the version check and the version increment cannot interleave with a
+// concurrent writer (design D3).
+type docState struct {
+	exists    bool
+	version   int64
+	published bool
+}
+
+// lockDocStateTx reads a document's current version and publication state,
+// taking a row lock on kb.cdm_documents for the duration of the caller's
+// transaction.
+//
+// The lock is what makes optimistic concurrency correct. Without FOR UPDATE,
+// two transactions could both read version 7, both find it matches what their
+// client expected, and both increment — producing versions 8 and 9 and
+// silently losing one client's edit. With it, the second transaction blocks
+// until the first commits, then re-reads version 8 and correctly reports the
+// caller stale.
+//
+// Publication is derived from the absence of the doc_processing status entry
+// (see publishedStatus), which is the same signal that makes pipeline_state
+// derive back to 'pending' for the worklist — so this asks the question the
+// worklist already asks rather than introducing a second source of truth for
+// "is this document published" (design D4). A document whose input_record_id
+// is NULL (any document written before Store.Create existed) reads as a
+// draft, which is the safe default: it stays editable.
+func lockDocStateTx(ctx context.Context, q execQuerier, documentKey string) (docState, error) {
+	var st docState
+	err := q.QueryRowContext(ctx, `
+		SELECT d.content_version,
+		       COALESCE(NOT (i.status @> '[{"operation":"doc_processing"}]'::jsonb), false)
+		FROM kb.cdm_documents d
+		LEFT JOIN kb.inputs i ON i.id = d.input_record_id
+		WHERE d.document_key = $1
+		FOR UPDATE OF d
+	`, documentKey).Scan(&st.version, &st.published)
+	if errors.Is(err, sql.ErrNoRows) {
+		return docState{exists: false}, nil
+	}
+	if err != nil {
+		return docState{}, fmt.Errorf("cdm: read state for %q: %w", documentKey, err)
+	}
+	st.exists = true
+	return st, nil
 }
 
 // Publish transitions a CDM document's kb.inputs row from `editing` to
