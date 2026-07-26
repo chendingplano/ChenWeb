@@ -1,0 +1,99 @@
+## 1. Package scaffolding
+
+- [x] 1.1 Create `server/api/cdm/model/`, `server/api/cdm/rendering/`, and `server/api/cdm/store/` per design D4
+- [x] 1.2 Confirm `cdm/model` and `cdm/rendering` import no database or ChenWeb-specific packages, so a later move to `shared/go` is a package move
+- [x] 1.3 Verify the deployed PostgreSQL server is 15 or later (required for `UNIQUE NULLS NOT DISTINCT`); if not, record the `COALESCE(parent_block_id, '')` fallback in design.md before writing migrations
+
+## 2. Canonical types and JSON encoding
+
+- [x] 2.1 Define `Document`, `Metadata`, and `Block` in `cdm/model` per spec §5.2, including every field the renderer reads (`Text`, `Lang`, `Children`, `Term`, `Title`, `Role`, `Ordered`, `Src`, `Alt`, `Caption`)
+- [x] 2.2 Define `Inline`, `TableColumn`, `TableRow` (cells keyed by column key, values `[]Inline`), and `RefTarget`
+- [x] 2.3 Define `Equation`, `MathSource`, and `MathExpr`, with numeric literals as exact decimal strings
+- [x] 2.4 Write a round-trip test: marshal a fixture document to JSON, unmarshal, assert deep equality including block order and nesting
+- [x] 2.5 Add fixture documents covering every Phase 1 block type, for reuse by validator and renderer tests
+
+## 3. Validator
+
+- [x] 3.1 Write failing tests for each scenario in `specs/cdm-document-model/spec.md` before implementing
+- [x] 3.2 Implement schema version, block ID presence, and per-document ID uniqueness checks (recursive through `children` and `items`)
+- [x] 3.3 Implement the block and inline type vocabulary check, including rejecting `warning` as a block type with a message pointing to `callout` + `role`
+- [x] 3.4 Implement the content/children/items exclusivity rule and the heading level bound
+- [x] 3.5 Implement table integrity: unique non-empty column keys, row cell keys a subset of them, missing keys allowed
+- [x] 3.6 Implement equation well-formedness: `parse_status` enum, at least one of `normalized`/`original`, `original.format` enum
+- [x] 3.7 Make the validator accumulate and report all violations rather than returning on the first
+- [x] 3.8 Confirm all tests from 3.1 pass
+
+## 4. Database schema
+
+- [x] 4.1 Write goose migration `20260726000001_create_kb_cdm_tables.sql` creating `kb.cdm_documents`, `kb.cdm_blocks`, `kb.cdm_renderings`, `kb.cdm_projections`, and `kb.cdm_anchors` per spec §11, using the `kb.cdm_*` names from design D2
+- [x] 4.2 Apply `kb` conventions: `BIGSERIAL` keys, `create_time`/`update_time`, `VARCHAR(n)` for bounded values, `ON DELETE CASCADE` to `kb.cdm_documents`
+- [x] 4.3 Add constraints: unique `(document_id, block_id)`, unique `NULLS NOT DISTINCT (document_id, parent_block_id, ordinal)`, and the content-version-aware unique keys on renderings and projections
+- [x] 4.4 Use `TEXT` for `block_id`/`parent_block_id` and `TEXT[]` for `block_ids`; use `vector(1536)` for `embedding`
+- [x] 4.5 Add a table comment on `kb.cdm_projections` stating explicitly that it is unrelated to `kb.semantic_projections`, and one on `kb.semantic_projections` pointing back
+- [x] 4.6 Write the down migration dropping only the five `kb.cdm_*` tables
+- [x] 4.7 ~~Register the tables in `server/api/database/createtables.go`~~ — task premise did not hold: `createtables.go` only wires a handful of legacy non-`kb` tables (ProcessStatus, Documents, Flows, ...); every `kb.*` table, including all of `kb.chunks`/`kb.inputs`/etc., is created exclusively via goose migrations auto-discovered from `project_migrations/` (`server/cmd/config/config.go` `os.DirFS(cfg.MigrationsDir)`). No Go registration exists or is needed for `kb.cdm_*`; confirmed by applying `20260726000001_create_kb_cdm_tables.sql` directly and rolling it back cleanly against the live `miner` database (2026/07/26).
+- [x] 4.8 Apply up and down against a scratch database and confirm `kb.chunks`, `kb.chunk_ranges`, and `kb.semantic_projections` are unaffected
+
+## 5. Store
+
+- [x] 5.1 Write failing tests for the scenarios in `specs/cdm-storage/spec.md`
+- [x] 5.2 Implement save: validate first, reject before any write
+- [x] 5.3 Implement save as a single transaction writing `semantic_document`, the promoted `doc_type`/`rendering_type`/`authors` columns, and a full rebuild of `kb.cdm_blocks`
+- [x] 5.4 Implement `content_version` increment on content-changing writes
+- [x] 5.5 Map the `(document_id, block_id)` unique violation to a typed conflict error naming the slug; confirm no auto-renaming path exists
+- [x] 5.6 Implement load: read `semantic_document` and decode to `Document`
+- [x] 5.7 Add a test asserting rollback leaves the prior document and blocks intact when the block rebuild fails partway
+
+## 6. Publish lifecycle and `kb.inputs` registration
+
+- [x] 6.1 Read the existing MinerU line-file format and confirm the exact dialect extractors consume (design open question 3) before writing the generator
+- [x] 6.2 Implement document creation writing a `kb.inputs` row immediately (in `editing`, not deferred to publish), with `type='cdm'`, carrying `tenant_id` and `ks_store_id`, per design D3 (amended)
+- [x] 6.3 Write the draft `status` JSONB with both `parsed`/`success` and `doc_processing`/`success` — both derived states terminal, keeping the row off both worklists while `editing`
+- [x] 6.4 Implement publish as a status transition: clear the `doc_processing` status entry so `pipeline_state` derives back to `'pending'`, rather than creating a new row
+- [x] 6.5 Add an integration test reading back the derived columns for a draft and asserting `parse_state='parsed_success'` and `pipeline_state='success'`, and for a published document asserting `pipeline_state='pending'` — the guard against the SQL derivations changing under us
+- [x] 6.6 Add a test asserting the parse worklist (`handler.go:679`) returns no `type='cdm'` row in either state, and the doc-processing worklist (`handler.go:748`) returns published-but-not-yet-processed rows only
+- [x] 6.7 Implemented `rendering.GenerateLineFile` (`server/api/cdm/rendering/linefile.go`) — one line per unit from `CollectUnits`, in the exact tab-separated dialect of `server/api/file-converters/opendata.go:formatOpenDataLines` (line_number, page, type, font, font_size, bbox, content), with matching content escaping. Page/bbox come from each unit's derived fragment, so it is generated in the same `Publisher.Publish` pass as the anchor map (not a separate step). Verified against real Typst output in `TestGenerateLineFile_OneLinePerUnit`.
+- [~] 6.8 Verified the storage and lifecycle side end-to-end (`TestPublisher_PublishEndToEnd`): a published CDM document's line file, SVG pages, and anchors are correctly persisted and `kb.inputs` transitions correctly. **Not done**: actually invoking a real doc processor (e.g. `extract_metrics`) against a generated CDM line file to confirm its output artifacts carry usable `source_line_spans` — that requires the doc-processor binary/worker, which is outside what this session could drive. Design open question 2 remains open pending that run.
+- [x] 6.9 Implemented in `Publisher.Publish` (`server/api/cdm/store/publish.go`): every `kb.cdm_renderings` and `kb.cdm_anchors` row is keyed by `content_version`, using `ON CONFLICT ... DO UPDATE` only within the same version. Verified in `TestPublisher_RepublishSupersedesArtifacts`: after a resave + republish, version 1's renderings remain untouched and version 2's exist alongside them.
+- [x] 6.10 Checked admin and listing views — done 2026/07/26: every read of `i.staging_filename` in `kbhandler` is already defensive (`COALESCE(i.staging_filename, '')` or a dynamic `columnExists` check); the column itself is nullable in the schema. A CDM row with `staging_filename = NULL` renders correctly everywhere checked. Design risk 1 does not materialize; no code changes needed.
+
+## 7. Typst renderer
+
+- [x] 7.1 Wrote tests for every scenario in `specs/cdm-typst-renderer/spec.md` (`escape_test.go`, `math_test.go`, `typst_test.go`) before/alongside implementation
+- [x] 7.2 Implemented `escapeTypst` (`escape.go`) via `strings.NewReplacer`, which is single-pass and non-overlapping by construction — confirmed this makes "backslash first, no double-escape" automatic rather than order-dependent; all metacharacters tested individually
+- [x] 7.3 Implemented `renderInline`/`renderInlines` for all 8 inline types. **Corrected from the original design during implementation, verified against the real Typst compiler**: `cross_reference` renders as `#link(label(id))[...]`, not `#ref(label(...))` — `#ref` only resolves Typst's own numbered elements and hard-errors ("cannot reference text") on arbitrary content like a paragraph. `citation` renders as plain bracketed text (`[key, locator]`), not `#cite(...)` — `#cite` requires a real `#bibliography` to be present or it hard-errors, and Phase 1 builds no bibliography infrastructure
+- [x] 7.4 Implemented `renderBlock` dispatch and `renderBlocks`; unsupported-type and nested-failure attribution both verified by test
+- [x] 7.5 Implemented `heading`, `paragraph`, `quote`, `code` (as `#raw`, verified no Markdown fence appears in output)
+- [x] 7.6 Implemented `list` with `-`/`+` markers and `indentContinuation`. **Extended beyond the original plan**: lists are wrapped in `#block[...]`, discovered necessary because a label attached directly after bare list markup lands on the *last item*, not the list — verified via real compiler warning ("content labelled multiple times... only the last label is used") — which would have silently broken that item's own cross-reference/anchor
+- [x] 7.7 Implemented `table`, cells emitted by iterating declared `columns`, never the `cells` map (verified by `TestRenderDocument_TableCellOrderFollowsColumns`)
+- [x] 7.8 Implemented `image` and `callout`, passing only semantic values to the theme
+- [x] 7.9 Implemented `renderMath` with the §6.4 fallback (`math.go`): prefers `normalized`, falls back to `typst` passthrough or `latex` conversion (including a brace-balanced `\frac{}{}` → `(_)/(_)`converter, since a regex cannot handle nested fracs), errors naming the block/format otherwise
+- [x] 7.10 Implemented `RenderDocument`: explicit page geometry, anchor-mark prelude, theme import, escaped title, block body, anchor trailer (extended beyond the original scope to include anchored rendering — see group 8)
+- [x] 7.11 Wrote `theme.typ` defining `callout(role, title, body)` and `definition(term, body)`, styled via a role→color map, no properties read from the document
+- [x] 7.12 Added golden-file tests for both fixture documents (`testdata/*.typ.golden`, generated once and reviewed) plus a 100-iteration determinism test. **Golden files are also compiled with the real `typst` binary** (`TestGoldenFilesCompileWithTypst`) — this caught three real bugs no Go-level test could have (see 7.3 and 7.6 above), plus a fixture bug (a `cross_reference` in `AllBlockTypes` pointed at a block ID that only existed in the other fixture)
+
+## 8. Anchored rendering and highlight contract
+
+- [x] 8.1 Wrote tests for every scenario in `specs/cdm-anchored-rendering/spec.md` (`anchors_test.go`, `svg_test.go`, `linefile_test.go`, `publish_test.go`)
+- [x] 8.2 Implemented paired marks (`anchors.go`): `mark(id, kind)` records `here().position()` into a `state`, dumped at document end via `#context [#metadata(__anchors.final())#label("cdm-anchors")]`. Every block gets a pair via `renderBlocks`; table rows get a pair embedded inside their first/last cell's own content (a bare `#mark(...)` call as an extra `#table(...)` positional argument would corrupt the table's cell count — verified this specific placement compiles and records correctly without disturbing layout)
+- [x] 8.3 Implemented `ExtractAnchors` invoking `typst query <file> "<cdm-anchors>" --field value` and decoding the returned `[][]Mark`
+- [x] 8.4 Implemented `DeriveFragments`: same-page units yield one fragment; page-spanning units yield one fragment per occupied page, using known page-geometry constants (see 8.7 note) rather than `measure()` for the boundary on intermediate/partial pages
+- [x] 8.5 `TestExtractAnchors_PageRelativeCoordinates` and `TestDeriveFragments_PageSpanningUnit` — both verified against real Typst output for a 40-paragraph document forced across pages
+- [x] 8.6 Implemented via `CollectUnits` + `TestCollectUnits_EveryUnitHasExactlyOneAnchorPair`, which queries real Typst output and asserts every unit has exactly one start and one end mark, no more, no fewer. `GenerateLineFile` additionally errors outright if a unit has no derived fragment at all
+- [x] 8.7 `kb.cdm_anchors` (and `kb.cdm_renderings`) are keyed by `content_version` and a `RendererVersion` constant (`cdm-typst-renderer-v1`); `Publisher.Publish` writes both from one render pass. **Design change found necessary during implementation**: `kb.cdm_renderings`' original unique key `(document_id, content_version, renderer, renderer_version)` had no room for multiple SVG pages sharing one render. Added migration `20260726000002_add_page_to_kb_cdm_renderings.sql` (a `page` column, widened unique key), applied and rolled back cleanly against the live `miner` database before being left applied
+- [x] 8.8 Implemented `RenderSVGPages` (`svg.go`) via `typst compile --format svg` with a `page-{p}.svg` template, plus numeric (not lexicographic) page-ordering validation since Typst's `{p}` has no zero-padding as of 0.14.2. `Publisher.Publish` stores each page as its own `kb.cdm_renderings` row
+- [x] 8.9 Implemented `Publisher.ResolveHighlight` (`publish.go`): given `document_key` + `content_version` + line numbers, looks up `kb.cdm_anchors` and returns `[]Fragment` — the same `{page, x, y, w, h}` shape used throughout. Verified end-to-end in `TestPublisher_PublishEndToEnd`
+- [x] 8.10 Verified twice: `TestAnchoredRendering_AlignmentAgainstRenderedSVG` (automated, bounds-checked) and a manual visual proof — rendered a real document through the actual Go pipeline, painted a rect at a `DeriveFragments`-derived coordinate over the real compiled page, and inspected the image. **Result: the Y-axis (page + vertical bounds — the hard problem, pagination) is pixel-accurate; the X-axis is a known, now-visually-confirmed approximation** — every fragment uses the full page content width/margin rather than the element's actual rendered width, which overshoots for content narrower than the page (a table) and undershoots the true left edge for indented content (list items). Documented prominently in `anchors.go`'s `DeriveFragments` doc comment as a Phase 1 limitation, not silently accepted
+- [~] 8.11 Confirmed Typst 0.14.2 present and used for all testing in this session (`which typst`, `typst --version`). **Not done**: confirming presence in the actual deployment image/container (outside what this session could check) and formally pinning the version in deployment config. The invalidation consequence of a version bump is already recorded (8.7, and design/ADR risk lists)
+
+## 9. Verification
+
+- [x] 9.1 `go build ./server/api/cdm/...` and `go vet ./server/api/cdm/...` clean; `go build ./server/...` (the whole server tree) also clean, confirming nothing else in the codebase was disturbed
+- [x] 9.2 `go test ./server/api/cdm/...` — all packages pass (`model`, `rendering`, `store`); every requirement/scenario across all four capability specs has at least one corresponding test, the large majority run against the real Typst binary and/or the live database rather than asserting only Go-level string output
+- [x] 9.3 Done throughout, not just once: every golden fixture and several synthetic documents (page-spanning, table-row-marked) were compiled with the real `typst` binary via `TestGoldenFilesCompileWithTypst`, `TestAnchoredRendering_AlignmentAgainstRenderedSVG`, and the `TestRenderSVGPages_*`/`TestExtractAnchors_*` suites — this caught 4 real bugs (§7 notes) that Go-level testing alone would have missed
+- [x] 9.4 Applied both migrations (`...create_kb_cdm_tables.sql`, `...add_page_to_kb_cdm_renderings.sql`) directly against the live `miner` database (a staging server per workspace `CLAUDE.md`), each verified reversible before being left applied. Confirmed no `type='cdm'` row appears on the parse worklist in any state (draft or published), and appears on the doc-processing worklist only after publish (`TestCreateDraft_InvisibleToBothWorklists`, `TestPublish_EnqueuesForDocProcessingOnly` — assert against the literal production WHERE fragments from `handler.go:679`/`:748`, not a paraphrase of them)
+- [x] 9.5 Update the ADR with the decisions made in this change — done 2026/07/26: ADR 2026072501 amended with DR11 (scope/coexistence), DR12 (`kb.cdm_*`, superseding DR10's names), DR13 (`kb.inputs` registration + lifecycle), DR14 (module ownership)
+- [x] 9.6 Update the spec — done 2026/07/26: new §5.6 (anchored rendering), §10 pipeline redrawn with both origins converging, new §10.1 (lifecycle + line-file generation), `kb.cdm_anchors` added to §11, tables renamed to `kb.cdm_*`, §13.1 extended, §16 refreshed, preface reframed
+- [x] 9.7 Record the anchored-rendering architecture as its own ADR — done 2026/07/26: ADR 2026072601 (Typst layout as the location substrate), with the Typst 0.14.2 verification evidence
+- [x] 9.8 Reconciled the spec and ADR 2026072601 against what was actually built (2026/07/26): spec §11's `kb.cdm_renderings` schema updated with the `page` column; ADR 2026072601 status moved to Implemented with a new Implementation Notes section recording the four real Typst-compiler corrections (`#link` not `#ref`, plain-text citation not `#cite`, list `#block[...]` wrapping, table-row marks embedded in cell content), the confirmed X/W fragment-precision limitation, and the renderings schema fix; its stale `§5.6` cross-reference corrected to `§5.7`; References section extended with the actual implementation file paths and the second migration
+- [~] 9.9 Verified `ResolveHighlight` returns the documented `{page, x, y, w, h}` shape end-to-end for a real CDM document and a real line number (`TestPublisher_PublishEndToEnd`). **Not done**: a literal side-by-side comparison against the PDF-based resolver's actual output for an uploaded document — that resolver's call site was not located/exercised in this session, so parity is verified by contract (same shape, same semantics) rather than by a direct comparative run

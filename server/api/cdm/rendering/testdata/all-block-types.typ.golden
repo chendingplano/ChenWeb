@@ -1,0 +1,42 @@
+#set page(width: 612pt, height: 792pt, margin: 54pt)
+#let __anchors = state("__anchors", ())
+#let mark(id, kind) = context {
+  let p = here().position()
+  __anchors.update(a => a + ((id: id, kind: kind, page: p.page, x: p.x / 1pt, y: p.y / 1pt),))
+}
+
+#import "theme.typ": *
+
+= Phase 1 Block Type Coverage
+
+#mark("h1", "start")= Title Heading <h1>#mark("h1", "end")
+
+#mark("p1", "start")See *bold* and _italic_, inline #raw("x := 1"), a #link("https://example.com")[link], a citation \[winkler1990, p. 354\], and a #link(label("eq1"))[cross-reference]. <p1>#mark("p1", "end")
+
+#mark("list1", "start")#block[
++ #mark("list1-1", "start")First <list1-1>#mark("list1-1", "end")
++ #mark("list1-2", "start")Second <list1-2>#mark("list1-2", "end")
+] <list1>#mark("list1", "end")
+
+#mark("table1", "start")#table(
+  columns: 2,
+  align: (left, left),
+  table.header(
+    [*A*],
+    [*B*],
+  ),
+  [#mark("table1/row0", "start")1],
+  [2#mark("table1/row0", "end")],
+) <table1>#mark("table1", "end")
+
+#mark("code1", "start")#raw(block: true, lang: "go", "func main() {}\n") <code1>#mark("code1", "end")
+
+#mark("eq1", "start")$a + b = c$ <eq1>#mark("eq1", "end")
+
+#mark("img1", "start")#figure(image("diagrams/flow.png"), caption: [Figure: process flow]) <img1>#mark("img1", "end")
+
+#mark("quote1", "start")#quote(block: true)[A quoted passage.] <quote1>#mark("quote1", "end")
+
+#mark("callout1", "start")#callout("warning", [Limitation], [#mark("callout1-body", "start")Scores are not comparable across locales. <callout1-body>#mark("callout1-body", "end")]) <callout1>#mark("callout1", "end")
+
+#context [#metadata(__anchors.final())#label("cdm-anchors")]
