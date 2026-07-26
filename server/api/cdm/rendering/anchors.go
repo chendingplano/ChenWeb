@@ -29,6 +29,24 @@ const (
 // geometry above matches what Typst actually lays out.
 const pageSetupTypst = `#set page(width: 612pt, height: 792pt, margin: 54pt)`
 
+// numberingTypst assigns section, table, image, and formula numbers (spec
+// §16.1, ADR 2026072602 DR5d) so the TOC and figure/table/formula lists below
+// have numbers to display; the document AST never carries one. Figure
+// numbering needs no set rule -- Typst numbers figures "1", "2", ... by
+// default. Equation numbering is scoped to block (display) equations only,
+// matching CDM's Display flag, so inline math stays unnumbered and out of the
+// List of Formulas.
+//
+// This is emitted directly in the rendered document rather than placed in
+// theme.typ: verified against the real compiler that a #set rule executed
+// inside an imported module (theme.typ) has no effect on the importing
+// document at all, even wrapped in a called function -- #set only affects the
+// remainder of the scope it is textually written in, and #import carries
+// bindings, not styling. The same constraint already applies to
+// pageSetupTypst above, which is why both live here rather than in the theme.
+const numberingTypst = `#set heading(numbering: "1.1")
+#show math.equation.where(block: true): set math.equation(numbering: "(1)")`
+
 // anchorPreludeTypst defines the mark() function and its backing state.
 // mark(id, "start") / mark(id, "end") record here().position() into __anchors
 // without attaching to any content, so it does not interact with content
@@ -47,6 +65,20 @@ const (
 )
 
 var anchorTrailerTypst = fmt.Sprintf(`#context [#metadata(__anchors.final())#label(%q)]`, anchorLabelName)
+
+// outlinesTypst emits the table of contents and the lists of figures, tables,
+// and formulas (spec §16.1 as narrowed by ADR 2026072602 DR5d): Typst builds
+// these from the numbering set up by numberingTypst, so the document never
+// stores a number of its own. Emitted unconditionally, immediately after the
+// title: an outline with no matches still compiles and simply has no entries,
+// exactly as an empty Word list-of-tables field does before anything is
+// captioned.
+const outlinesTypst = `#outline(title: [Contents])
+#outline(title: [List of Figures], target: figure.where(kind: image))
+#outline(title: [List of Tables], target: figure.where(kind: table))
+#outline(title: [List of Formulas], target: math.equation.where(block: true))
+
+`
 
 // Mark is one raw position sample recorded by the Typst mark() function.
 type Mark struct {

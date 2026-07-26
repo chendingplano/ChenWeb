@@ -76,9 +76,12 @@ type Block struct {
 	// Math carries an equation (equation only).
 	Math *Equation `json:"math,omitempty"`
 
-	// Src, Alt, and Caption describe an image (image only).
-	Src     string   `json:"src,omitempty"`
-	Alt     string   `json:"alt,omitempty"`
+	// Src and Alt describe an image (image only).
+	Src string `json:"src,omitempty"`
+	Alt string `json:"alt,omitempty"`
+	// Caption is rendered as a Typst #figure caption (image and table only;
+	// ADR 2026072602 DR5d wraps a table in #figure so it is numbered and
+	// listable in the List of Tables regardless of whether it has one).
 	Caption []Inline `json:"caption,omitempty"`
 }
 

@@ -14,7 +14,25 @@ the theme file and emitting the document title as a top-level heading.
 
 #### Scenario: Heading level maps to Typst depth
 - **WHEN** a `heading` block with `level` 3 is rendered
-- **THEN** the output line begins with three `=` characters followed by a space
+- **THEN** the output is a `#heading(level: 3)[...]` call carrying the block's
+  content
+
+#### Scenario: Headings are real Typst heading elements, not literal text
+- **WHEN** any `heading` block is rendered and the output is compiled
+- **THEN** `query(heading)` on the compiled document finds it, with the
+  correct `level`, `outlined: true`, and a non-null `numbering`
+- **Note:** every block is prefixed with `#mark(id, "start")` on the same
+  source line (see anchored rendering); Typst's `= ...` markup sugar only
+  parses as a heading when it is the first token on its line, so a
+  mark-prefixed `= ...` silently renders as literal text with zero
+  `query(heading)` matches. The `#heading(level: N)[...]` function form has no
+  such position sensitivity, which is why it is required, not stylistic.
+
+#### Scenario: The document title is excluded from numbering and outline
+- **WHEN** any document is rendered and the output is compiled
+- **THEN** the title's heading element has `outlined: false` and a null
+  `numbering`, and does not appear in the Contents outline, regardless of the
+  numbering set rule applied to content headings
 
 #### Scenario: Ordered and unordered lists use distinct markers
 - **WHEN** a `list` block is rendered with `ordered` true, and again with false
@@ -30,6 +48,58 @@ the theme file and emitting the document title as a top-level heading.
 - **WHEN** a `callout` block with `role` `warning` is rendered
 - **THEN** the output is a `#callout` call receiving the role, the title, and the
   rendered children, and contains no font, color, or size properties
+
+### Requirement: Tables render as numbered, listable figures
+A `table` block SHALL be wrapped in `#figure(...)`, carrying its `Caption` (if
+any) as the figure caption, so that it is found by
+`figure.where(kind: table)` and participates in Typst's own figure numbering
+and outline machinery (ADR 2026072602 DR5d).
+
+#### Scenario: A table is discoverable as a table-kind figure
+- **WHEN** a `table` block is rendered and the output is compiled
+- **THEN** `query(figure.where(kind: table))` finds it, with a non-null
+  `numbering` and `outlined: true`
+
+#### Scenario: A table with no caption is still numbered and listed
+- **WHEN** a `table` block with an empty `Caption` is rendered and compiled
+- **THEN** it still appears in `figure.where(kind: table)`, matching Word's
+  behavior of numbering and listing an uncaptioned table once inserted
+
+### Requirement: Document-level TOC and figure/table/formula lists
+The renderer SHALL emit a table of contents and lists of figures, tables, and
+formulas immediately after the title, built from Typst's own `#outline(...)`
+against its native numbering (heading, figure, and block-equation counters) —
+never stored as blocks in the canonical document (CDM spec §16.1 as narrowed
+by ADR 2026072602 DR5d). Block (display) equations SHALL be numbered; inline
+equations SHALL NOT, so the List of Formulas contains only the former. The
+document title SHALL be excluded from both its own numbering and the Contents
+outline.
+
+#### Scenario: All four outlines are present
+- **WHEN** any document is rendered
+- **THEN** the output contains, in order after the title, `#outline(title:
+  [Contents])`, a List of Figures targeting `figure.where(kind: image)`, a
+  List of Tables targeting `figure.where(kind: table)`, and a List of
+  Formulas targeting `math.equation.where(block: true)`
+
+#### Scenario: An outline with no matching content still compiles
+- **WHEN** a document with no images is rendered and compiled
+- **THEN** the List of Figures outline compiles cleanly with no entries,
+  rather than being omitted or erroring
+
+#### Scenario: Populated outlines are non-empty
+- **WHEN** a document containing at least one table, one block equation, and
+  one outlined heading is rendered and compiled
+- **THEN** the corresponding outline queries each return at least one match
+- **Note:** an empty `#outline(...)` compiles without error, so only a
+  compiled-and-queried assertion — not a source-text or build-only check —
+  can catch a regression that silently empties an outline.
+
+#### Scenario: Inline equations are excluded from the List of Formulas
+- **WHEN** a document contains both a display equation and an inline
+  equation, and the output is compiled
+- **THEN** `query(math.equation.where(block: true))` finds only the display
+  equation
 
 ### Requirement: Deterministic output
 Rendering SHALL be deterministic: the same document rendered by the same

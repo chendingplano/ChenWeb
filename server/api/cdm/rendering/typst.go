@@ -34,7 +34,15 @@ func (r *TypstRenderer) RenderDocument(doc *model.Document) ([]byte, error) {
 	out.WriteString(pageSetupTypst + "\n")
 	out.WriteString(anchorPreludeTypst + "\n\n")
 	fmt.Fprintf(&out, "#import %q: *\n\n", theme)
-	fmt.Fprintf(&out, "= %s\n\n", escapeTypst(doc.Title))
+	out.WriteString(numberingTypst + "\n\n")
+
+	// The document title is emitted via the #heading(...) function form,
+	// with numbering and outline participation both turned off, so it never
+	// competes with content headings for a section number and never appears
+	// in the Contents outline below (design DR5d/D5a: Typst, not the
+	// document, produces the TOC and figure/table/formula lists).
+	fmt.Fprintf(&out, "#heading(numbering: none, outlined: false)[%s]\n\n", escapeTypst(doc.Title))
+	out.WriteString(outlinesTypst)
 
 	body, err := renderBlocks(doc.Blocks)
 	if err != nil {
@@ -79,7 +87,15 @@ func renderBlock(b model.Block) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("block %q: %w", b.ID, err)
 		}
-		return strings.Repeat("=", b.Level) + " " + content, nil
+		// The #heading(level: N)[...] function form, not "=" markup sugar.
+		// renderBlocks (below) prefixes every block with #mark(id, "start")
+		// on the same line, and Typst only parses "=" as heading syntax when
+		// it is the first token on its line -- verified against the real
+		// compiler that a mark-prefixed "= Sub" produces zero query(heading)
+		// matches and renders as a literal "=" character. The function form
+		// has no such position sensitivity and is what makes this heading
+		// numbered and outline-findable (design DR5d).
+		return fmt.Sprintf("#heading(level: %d)[%s]", b.Level, content), nil
 
 	case "paragraph":
 		content, err := renderInlines(b.Content)
@@ -182,8 +198,13 @@ func renderTable(b model.Block) (string, error) {
 		aligns = append(aligns, align)
 	}
 
+	// Wrapped in #figure(...) (design DR5d), not emitted as a bare table()
+	// call: only figures are found by figure.where(kind: table), which is
+	// what makes a table numbered and listable in the List of Tables. The
+	// inner call is written as "table(" without a leading "#" because it is
+	// now a code-mode argument to #figure(...), not a markup-mode statement.
 	var out strings.Builder
-	out.WriteString("#table(\n")
+	out.WriteString("#figure(\ntable(\n")
 	fmt.Fprintf(&out, "  columns: %d,\n", len(b.Columns))
 	fmt.Fprintf(&out, "  align: (%s),\n", strings.Join(aligns, ", "))
 	out.WriteString("  table.header(\n")
@@ -220,6 +241,17 @@ func renderTable(b model.Block) (string, error) {
 			}
 			fmt.Fprintf(&out, "  [%s%s%s],\n", prefix, cellContent, suffix)
 		}
+	}
+	out.WriteString(")")
+
+	caption, err := renderInlines(b.Caption)
+	if err != nil {
+		return "", fmt.Errorf("block %q: %w", b.ID, err)
+	}
+	if len(b.Caption) > 0 {
+		fmt.Fprintf(&out, ",\ncaption: [%s],\n", caption)
+	} else {
+		out.WriteString(",\n")
 	}
 	out.WriteString(")")
 	return out.String(), nil

@@ -39,6 +39,18 @@ func renderToTempDir(t *testing.T, doc *model.Document) string {
 	if err := os.WriteFile(filepath.Join(tmp, "theme.typ"), theme, 0o644); err != nil {
 		t.Fatalf("write theme.typ: %v", err)
 	}
+	// AllBlockTypes carries an image block referencing this fixture; other
+	// callers' documents simply never reference it.
+	if err := os.MkdirAll(filepath.Join(tmp, "diagrams"), 0o755); err != nil {
+		t.Fatalf("mkdir diagrams: %v", err)
+	}
+	img, err := os.ReadFile(filepath.Join("testdata", "diagrams", "flow.png"))
+	if err != nil {
+		t.Fatalf("read fixture image: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "diagrams", "flow.png"), img, 0o644); err != nil {
+		t.Fatalf("write fixture image: %v", err)
+	}
 	typPath := filepath.Join(tmp, "doc.typ")
 	if err := os.WriteFile(typPath, src, 0o644); err != nil {
 		t.Fatalf("write doc.typ: %v", err)

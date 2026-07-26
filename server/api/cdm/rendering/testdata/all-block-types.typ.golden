@@ -7,9 +7,17 @@
 
 #import "theme.typ": *
 
-= Phase 1 Block Type Coverage
+#set heading(numbering: "1.1")
+#show math.equation.where(block: true): set math.equation(numbering: "(1)")
 
-#mark("h1", "start")= Title Heading <h1>#mark("h1", "end")
+#heading(numbering: none, outlined: false)[Phase 1 Block Type Coverage]
+
+#outline(title: [Contents])
+#outline(title: [List of Figures], target: figure.where(kind: image))
+#outline(title: [List of Tables], target: figure.where(kind: table))
+#outline(title: [List of Formulas], target: math.equation.where(block: true))
+
+#mark("h1", "start")#heading(level: 1)[Title Heading] <h1>#mark("h1", "end")
 
 #mark("p1", "start")See *bold* and _italic_, inline #raw("x := 1"), a #link("https://example.com")[link], a citation \[winkler1990, p. 354\], and a #link(label("eq1"))[cross-reference]. <p1>#mark("p1", "end")
 
@@ -18,7 +26,8 @@
 + #mark("list1-2", "start")Second <list1-2>#mark("list1-2", "end")
 ] <list1>#mark("list1", "end")
 
-#mark("table1", "start")#table(
+#mark("table1", "start")#figure(
+table(
   columns: 2,
   align: (left, left),
   table.header(
@@ -27,6 +36,7 @@
   ),
   [#mark("table1/row0", "start")1],
   [2#mark("table1/row0", "end")],
+),
 ) <table1>#mark("table1", "end")
 
 #mark("code1", "start")#raw(block: true, lang: "go", "func main() {}\n") <code1>#mark("code1", "end")

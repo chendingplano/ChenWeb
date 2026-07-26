@@ -7,7 +7,15 @@
 
 #import "theme.typ": *
 
-= Jaro-Winkler Similarity
+#set heading(numbering: "1.1")
+#show math.equation.where(block: true): set math.equation(numbering: "(1)")
+
+#heading(numbering: none, outlined: false)[Jaro-Winkler Similarity]
+
+#outline(title: [Contents])
+#outline(title: [List of Figures], target: figure.where(kind: image))
+#outline(title: [List of Tables], target: figure.where(kind: table))
+#outline(title: [List of Formulas], target: math.equation.where(block: true))
 
 #mark("intro", "start")Jaro-Winkler similarity is a string similarity algorithm designed for _short strings_, especially names. <intro>#mark("intro", "end")
 
@@ -16,7 +24,8 @@
 - #mark("score-range-2", "start")*0.0* means completely different strings. <score-range-2>#mark("score-range-2", "end")
 ] <score-range>#mark("score-range", "end")
 
-#mark("example-table", "start")#table(
+#mark("example-table", "start")#figure(
+table(
   columns: 3,
   align: (left, left, right),
   table.header(
@@ -30,6 +39,7 @@
   [#mark("example-table/row1", "start")Michael],
   [Micheal],
   [0.97#mark("example-table/row1", "end")],
+),
 ) <example-table>#mark("example-table", "end")
 
 #mark("jaro-formula", "start")$ J = (1)/(3)((m)/(|s_1|) + (m)/(|s_2|) + (m-t)/(m)) $ <jaro-formula>#mark("jaro-formula", "end")

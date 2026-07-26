@@ -23,8 +23,17 @@ func TestRenderDocument_Preamble(t *testing.T) {
 	if !strings.Contains(got, `#set page(width: 612pt, height: 792pt, margin: 54pt)`) {
 		t.Fatalf("expected explicit page geometry in preamble:\n%s", got)
 	}
-	if !strings.Contains(got, `#import "theme.typ": *`+"\n\n= Jaro-Winkler Similarity\n\n") {
-		t.Fatalf("expected theme import followed by title heading:\n%s", got)
+	if !strings.Contains(got, `#import "theme.typ": *`+"\n\n"+`#set heading(numbering: "1.1")`) {
+		t.Fatalf("expected theme import followed by the numbering set rules:\n%s", got)
+	}
+	if !strings.Contains(got, "#heading(numbering: none, outlined: false)[Jaro-Winkler Similarity]") {
+		t.Fatalf("expected the title heading, excluded from numbering and outline:\n%s", got)
+	}
+	if !strings.Contains(got, "#outline(title: [Contents])") ||
+		!strings.Contains(got, "#outline(title: [List of Figures], target: figure.where(kind: image))") ||
+		!strings.Contains(got, "#outline(title: [List of Tables], target: figure.where(kind: table))") ||
+		!strings.Contains(got, "#outline(title: [List of Formulas], target: math.equation.where(block: true))") {
+		t.Fatalf("expected TOC and figure/table/formula outlines after the title (design DR5d):\n%s", got)
 	}
 }
 
@@ -41,8 +50,8 @@ func TestRenderDocument_HeadingLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(string(out), "=== Sub") {
-		t.Fatalf("expected level-3 heading (=== ), got:\n%s", out)
+	if !strings.Contains(string(out), "#heading(level: 3)[Sub]") {
+		t.Fatalf("expected a level-3 #heading(...) call, got:\n%s", out)
 	}
 }
 
