@@ -60,6 +60,9 @@ function inlineNodeToPMNodes(
 		case 'text':
 			return node.text ? [schema.text(node.text, activeMarks as PMMark[])] : [];
 
+		case 'line_break':
+			return [schema.nodes.line_break.create()];
+
 		case 'code':
 			// code excludes every other mark at the schema level (see
 			// inline-schema.ts), so it is applied alone regardless of
@@ -151,6 +154,9 @@ function leafToTagged(node: PMNode): TaggedLeaf {
 
 	if (node.isText) {
 		return { marks, linkUrl, node: { type: 'text', text: node.text ?? '' } };
+	}
+	if (node.type.name === 'line_break') {
+		return { marks, linkUrl, node: { type: 'line_break' } };
 	}
 	if (node.type.name === 'math') {
 		return {

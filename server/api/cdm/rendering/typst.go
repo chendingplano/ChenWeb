@@ -286,6 +286,9 @@ func renderInline(n model.Inline) (string, error) {
 	case "text":
 		return escapeTypst(n.Text), nil
 
+	case "line_break":
+		return "#linebreak()", nil
+
 	case "strong":
 		inner, err := renderInlines(n.Content)
 		if err != nil {

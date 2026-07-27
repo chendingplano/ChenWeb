@@ -111,3 +111,15 @@ test('an unrecognized block wrapper (Word/Docs-style paste) does not swallow the
 		content: [{ type: 'text', text: 'Pasted from Word' }]
 	});
 });
+
+test('<br> maps to a line_break inline node', () => {
+	const doc = parseHTMLSnippet('first<br>second');
+	assert.deepStrictEqual(doc.toJSON(), {
+		type: 'doc',
+		content: [
+			{ type: 'text', text: 'first' },
+			{ type: 'line_break' },
+			{ type: 'text', text: 'second' }
+		]
+	});
+});

@@ -29,6 +29,7 @@ export type BlockType = (typeof BLOCK_TYPES)[number];
 /** Phase 1 inline type vocabulary (validate.go: inlineTypes). */
 export const INLINE_TYPES = [
 	'text',
+	'line_break',
 	'strong',
 	'emphasis',
 	'code',

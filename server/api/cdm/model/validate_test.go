@@ -96,6 +96,21 @@ func TestValidate_ParagraphWithContentOnly(t *testing.T) {
 	}
 }
 
+func TestValidate_ParagraphAllowsInlineLineBreak(t *testing.T) {
+	doc := baseDoc()
+	doc.Blocks = []model.Block{
+		{ID: "p1", Type: "paragraph", Content: []model.Inline{
+			{Type: "text", Text: "hello"},
+			{Type: "line_break"},
+			{Type: "text", Text: "world"},
+		}},
+	}
+
+	if err := model.Validate(&doc); err != nil {
+		t.Fatalf("expected valid, got: %v", err)
+	}
+}
+
 func TestValidate_ListItemsValidatedRecursively(t *testing.T) {
 	doc := baseDoc()
 	doc.Blocks = []model.Block{

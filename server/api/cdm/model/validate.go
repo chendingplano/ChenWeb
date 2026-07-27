@@ -22,6 +22,7 @@ var blockTypes = map[string]bool{
 // inlineTypes is the Phase 1 inline type vocabulary (spec §2).
 var inlineTypes = map[string]bool{
 	"text":            true,
+	"line_break":      true,
 	"strong":          true,
 	"emphasis":        true,
 	"code":            true,

@@ -11,6 +11,7 @@
 
 {#each inline as node (node)}
 	{#if node.type === 'text'}{node.text ?? ''}
+	{:else if node.type === 'line_break'}<br />
 	{:else if node.type === 'strong'}<strong><Self inline={node.content ?? []} /></strong>
 	{:else if node.type === 'emphasis'}<em><Self inline={node.content ?? []} /></em>
 	{:else if node.type === 'code'}<code class="cdm-inline-code">{node.text ?? ''}</code>

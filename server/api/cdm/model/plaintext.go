@@ -17,6 +17,8 @@ func writePlainText(out *strings.Builder, inlines []Inline) {
 		switch n.Type {
 		case "text", "code":
 			out.WriteString(n.Text)
+		case "line_break":
+			out.WriteByte('\n')
 		case "citation":
 			out.WriteString(n.CitationKey)
 		default:

@@ -42,9 +42,9 @@ blocks that carry inline content.
 ### Requirement: The inline editor cannot express presentation
 
 The inline editor's schema SHALL contain exactly CDM's inline vocabulary —
-`text`, `strong`, `emphasis`, `code`, `link`, `math`, `citation`,
-`cross_reference` — and SHALL NOT define any mark or node carrying font, size,
-colour, alignment, or spacing.
+`text`, `line_break`, `strong`, `emphasis`, `code`, `link`, `math`,
+`citation`, `cross_reference` — and SHALL NOT define any mark or node carrying
+font, size, colour, alignment, or spacing.
 
 #### Scenario: Presentation marks are unavailable
 
@@ -59,9 +59,16 @@ colour, alignment, or spacing.
 
 #### Scenario: Every inline type round-trips
 
-- **WHEN** content using each of the eight CDM inline types is edited and
+- **WHEN** content using each of the nine CDM inline types is edited and
   serialized
 - **THEN** each type maps to its CDM representation and back without loss
+
+#### Scenario: Enter inserts an inline line break
+
+- **WHEN** the author presses `Enter` while editing a `paragraph`, `heading`,
+  or `quote`
+- **THEN** the inline editor inserts a `line_break` node into that block's
+  inline content instead of creating a new block
 
 ### Requirement: Block IDs are allocated at creation and never change
 

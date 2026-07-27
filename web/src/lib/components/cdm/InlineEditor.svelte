@@ -74,6 +74,13 @@
 			element: containerEl,
 			extensions: INLINE_EXTENSIONS,
 			content: initialDoc.toJSON(),
+			editorProps: {
+				handleKeyDown(_view, event) {
+					if (event.key !== 'Enter') return false;
+					event.preventDefault();
+					return editor?.commands.insertContent({ type: 'line_break' }) ?? false;
+				}
+			},
 			onUpdate: ({ editor, transaction }) => {
 				if (!transaction.docChanged) return;
 				content = proseMirrorDocToInlineArray(editor.state.doc);

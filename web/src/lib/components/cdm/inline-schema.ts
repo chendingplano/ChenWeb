@@ -1,5 +1,5 @@
 // The ProseMirror schema for editing one CDM block's inline content
-// (ADR 2026072603 DR1/DR7). Contains exactly CDM's eight inline types and no
+// (ADR 2026072603 DR1/DR7). Contains exactly CDM's nine inline types and no
 // presentation mark (font, size, colour, alignment) -- the schema is the
 // enforcement mechanism for D1's "no presentation properties" rule: a mark
 // this file never defines cannot be produced by any editor action or paste,
@@ -8,6 +8,7 @@
 // | CDM Inline.type   | ProseMirror representation                        |
 // |--------------------|----------------------------------------------------|
 // | text               | text node                                          |
+// | line_break         | inline atom rendered as `<br>`                     |
 // | strong/emphasis/link | marks wrapping arbitrary nested content (CDM's own
 // |                    | `content: Inline[]` nesting), so multiple can combine on one run |
 // | code               | a mark that EXCLUDES all others -- see below       |
@@ -38,6 +39,20 @@ const CdmDoc = Node.create({
 const CdmText = Node.create({
 	name: 'text',
 	group: 'inline'
+});
+
+const CdmLineBreak = Node.create({
+	name: 'line_break',
+	group: 'inline',
+	inline: true,
+	atom: true,
+	selectable: false,
+	parseHTML() {
+		return [{ tag: 'br' }];
+	},
+	renderHTML() {
+		return ['br'];
+	}
 });
 
 const CdmStrong = Mark.create({
@@ -129,6 +144,7 @@ const CdmCrossReference = atomNode('cross_reference', { target: null, content: n
 export const INLINE_EXTENSIONS: Extensions = [
 	CdmDoc,
 	CdmText,
+	CdmLineBreak,
 	CdmStrong,
 	CdmEmphasis,
 	CdmLink,

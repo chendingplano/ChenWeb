@@ -55,6 +55,30 @@ func TestRenderDocument_HeadingLevel(t *testing.T) {
 	}
 }
 
+func TestRenderDocument_ParagraphLineBreak(t *testing.T) {
+	doc := model.Document{
+		Title:         "T",
+		SchemaVersion: model.SchemaVersion,
+		Blocks: []model.Block{{
+			ID:   "p1",
+			Type: "paragraph",
+			Content: []model.Inline{
+				{Type: "text", Text: "first line"},
+				{Type: "line_break"},
+				{Type: "text", Text: "second line"},
+			},
+		}},
+	}
+	r := &rendering.TypstRenderer{}
+	out, err := r.RenderDocument(&doc)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(string(out), `first line#linebreak()second line`) {
+		t.Fatalf("expected inline Typst line break in paragraph output, got:\n%s", out)
+	}
+}
+
 func TestRenderDocument_ListMarkers(t *testing.T) {
 	unordered := model.Document{
 		Title: "T", SchemaVersion: model.SchemaVersion,

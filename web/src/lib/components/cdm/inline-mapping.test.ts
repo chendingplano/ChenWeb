@@ -17,6 +17,15 @@ test('plain text round-trips', () => {
 	assert.deepStrictEqual(roundTrip(inline), inline);
 });
 
+test('line_break round-trips as an inline node', () => {
+	const inline: Inline[] = [
+		{ type: 'text', text: 'first line' },
+		{ type: 'line_break' },
+		{ type: 'text', text: 'second line' }
+	];
+	assert.deepStrictEqual(roundTrip(inline), inline);
+});
+
 test('strong round-trips', () => {
 	const inline: Inline[] = [{ type: 'strong', content: [{ type: 'text', text: 'bold' }] }];
 	assert.deepStrictEqual(roundTrip(inline), inline);
