@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"os/exec"
 	"testing"
@@ -124,6 +125,82 @@ func TestPublisher_PublishEndToEnd(t *testing.T) {
 	if frags[0].Page < 1 || frags[0].W <= 0 || frags[0].H <= 0 {
 		t.Errorf("resolved fragment looks malformed: %+v", frags[0])
 	}
+}
+
+// TestPublisher_PreviewMatchesPublishedArtifact guards the cdm-http-api
+// spec's "Preview renders the published artifact on demand" requirement,
+// specifically the "Preview matches what publishing produces" scenario.
+// Publish is implemented as exactly Render (what preview calls) plus the
+// kb.inputs lifecycle transition (see Render's own doc comment above), so a
+// preview taken before publishing and the artifact publishing then produces
+// for the same content_version must be byte-identical -- not merely "the
+// same by construction" but actually re-verified here in case that ever
+// drifts (e.g. a future change makes Publish render differently than a bare
+// Render call).
+func TestPublisher_PreviewMatchesPublishedArtifact(t *testing.T) {
+	db := testDB(t)
+	typstBin := requireTypstBin(t)
+	theme, err := os.ReadFile("../rendering/theme.typ")
+	if err != nil {
+		t.Fatalf("read theme: %v", err)
+	}
+
+	docStore := store.New(db)
+	inputs := store.NewInputRegistrar(db)
+	pub := store.NewPublisher(db, theme, typstBin)
+
+	key := uniqueKey(t)
+	cleanupDocument(t, db, key)
+
+	doc := cdmfixtures.JaroWinkler()
+	doc.Key = key
+	if _, err := docStore.Save(context.Background(), &doc, 0); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	inputID, err := inputs.CreateDraft(context.Background(), store.DraftInput{
+		TenantID: "tenant-x", Title: doc.Title,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	cleanupInput(t, db, inputID)
+
+	// Preview: Render only, same as GET .../render does for a draft.
+	if _, err := pub.Render(context.Background(), key); err != nil {
+		t.Fatalf("preview render: %v", err)
+	}
+	var docRow int64
+	if err := db.QueryRow(`SELECT id FROM kb.cdm_documents WHERE document_key = $1`, key).Scan(&docRow); err != nil {
+		t.Fatalf("resolve document row: %v", err)
+	}
+	previewSVG := readSVGPage(t, db, docRow, doc.ContentVersion, 1)
+
+	// Publish the same content_version.
+	res, err := pub.Publish(context.Background(), key, inputID)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if res.ContentVersion != doc.ContentVersion {
+		t.Fatalf("publish rendered a different content_version: got %d, want %d", res.ContentVersion, doc.ContentVersion)
+	}
+	publishedSVG := readSVGPage(t, db, docRow, doc.ContentVersion, 1)
+
+	if previewSVG != publishedSVG {
+		t.Error("expected the previewed SVG and the published SVG to be byte-identical for the same content_version")
+	}
+}
+
+func readSVGPage(t *testing.T, db *sql.DB, documentID, contentVersion int64, page int) string {
+	t.Helper()
+	var content []byte
+	if err := db.QueryRow(`
+		SELECT rendered_content FROM kb.cdm_renderings
+		WHERE document_id = $1 AND content_version = $2 AND media_type = 'image/svg+xml' AND page = $3
+	`, documentID, contentVersion, page).Scan(&content); err != nil {
+		t.Fatalf("read svg page %d for content_version %d: %v", page, contentVersion, err)
+	}
+	return string(content)
 }
 
 func TestPublisher_RepublishSupersedesArtifacts(t *testing.T) {

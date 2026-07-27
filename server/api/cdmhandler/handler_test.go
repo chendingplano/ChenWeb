@@ -526,6 +526,86 @@ func TestRenderDocument_SecondRequestIsServedFromCache(t *testing.T) {
 	}
 }
 
+// TestRenderDocument_EditInvalidatesCachedPreview is the other half of D9's
+// "editing invalidates the preview": loadCachedPages looks up
+// (document_id, content_version), so a save that bumps content_version is a
+// cache miss by construction, not by any explicit invalidation step. This
+// confirms that guarantee behaviorally rather than trusting the key design
+// alone -- a rendered draft's SVG must actually change after an edit that
+// changes visible content, and the prior version's rendering must remain
+// retrievable (not overwritten), matching TestPublisher_RepublishSupersedesArtifacts's
+// same guarantee on the Publish path.
+func TestRenderDocument_EditInvalidatesCachedPreview(t *testing.T) {
+	if _, err := exec.LookPath("typst"); err != nil {
+		t.Skip("typst not found on PATH")
+	}
+	db := withDB(t)
+	created := createViaHandler(t, db, uniqueTitle(t))
+
+	renderPages := func() []string {
+		t.Helper()
+		c, rec := newContext(t, http.MethodGet, "/api/v1/cdm/documents/"+created.Key+"/render", "")
+		c = withKeyParam(c, created.Key)
+		if err := RenderDocument(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("render failed: err=%v code=%d body=%s", err, rec.Code, rec.Body.String())
+		}
+		var payload renderResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal render response: %v", err)
+		}
+		return payload.Pages
+	}
+
+	v1Pages := renderPages()
+	if len(v1Pages) == 0 {
+		t.Fatal("expected at least one v1 page")
+	}
+
+	created.Title = created.Title + " EDITED FOR RENDER"
+	body, _ := json.Marshal(created)
+	c2, rec2 := newContext(t, http.MethodPut, "/api/v1/cdm/documents/"+created.Key, string(body))
+	c2 = withKeyParam(c2, created.Key)
+	if err := SaveDocument(c2); err != nil || rec2.Code != http.StatusOK {
+		t.Fatalf("save failed: err=%v code=%d body=%s", err, rec2.Code, rec2.Body.String())
+	}
+	var saved model.Document
+	if err := json.Unmarshal(rec2.Body.Bytes(), &saved); err != nil {
+		t.Fatalf("unmarshal saved: %v", err)
+	}
+	if saved.ContentVersion == created.ContentVersion {
+		t.Fatal("save did not bump content_version")
+	}
+	created.ContentVersion = saved.ContentVersion
+
+	v2Pages := renderPages()
+	if len(v2Pages) == 0 {
+		t.Fatal("expected at least one v2 page")
+	}
+	if v1Pages[0] == v2Pages[0] {
+		t.Error("expected the edited document's rendered SVG to differ from the pre-edit version, got byte-identical pages")
+	}
+
+	var v1Count, v2Count int
+	if err := db.QueryRow(`
+		SELECT count(*) FROM kb.cdm_renderings r JOIN kb.cdm_documents d ON d.id = r.document_id
+		WHERE d.document_key = $1 AND r.content_version = 1 AND r.media_type = 'image/svg+xml'
+	`, created.Key).Scan(&v1Count); err != nil {
+		t.Fatalf("count v1 renderings: %v", err)
+	}
+	if err := db.QueryRow(`
+		SELECT count(*) FROM kb.cdm_renderings r JOIN kb.cdm_documents d ON d.id = r.document_id
+		WHERE d.document_key = $1 AND r.content_version = $2 AND r.media_type = 'image/svg+xml'
+	`, created.Key, saved.ContentVersion).Scan(&v2Count); err != nil {
+		t.Fatalf("count v2 renderings: %v", err)
+	}
+	if v1Count == 0 {
+		t.Error("expected the pre-edit version's rendering to remain retrievable, not overwritten")
+	}
+	if v2Count == 0 {
+		t.Error("expected the post-edit version to have its own rendering")
+	}
+}
+
 // TestRoutesAreRegisteredBehindAuth asserts every CDM route is inside the
 // authenticated /api/v1 group rather than reachable anonymously.
 func TestRoutesAreRegisteredBehindAuth(t *testing.T) {

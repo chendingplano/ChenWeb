@@ -123,9 +123,25 @@ action, and SHALL NOT trigger rendering on every keystroke.
   contents and figure/table/formula lists
 
 ### Requirement: Editor strings are localizable
-User-visible strings in the editor SHALL go through the existing Paraglide i18n
-mechanism rather than being hard-coded.
 
-#### Scenario: No hard-coded user-facing strings
-- **WHEN** the editor components are inspected
-- **THEN** user-visible labels resolve through the i18n mechanism
+**Deferred (task 8.2, 2026/07/27), not implemented in this change.** Before
+implementing this requirement, a grep across the whole frontend found that no
+`/home3/*` feature uses Paraglide today — it is used only on the public
+`/semos` marketing pages (42 message keys, all `semos_*`-prefixed); every
+`home3` view component (`doc-review-report-view.svelte`,
+`inputs-mgmt-view.svelte`, `document-review-view.svelte`, ...) hard-codes
+English strings directly. Implementing this requirement as originally written
+would have made the CDM editor the only `home3` feature with i18n, contrary
+to this project's own "match existing style" guidance. Presented to the user
+as an explicit choice rather than decided silently; the user chose to match
+the `home3` precedent instead. CDM editor strings are hard-coded English,
+same as every sibling `home3` feature. i18n for all of `home3` (CDM included)
+remains a valid, separate future change if wanted — this requirement is not
+rejected, only not undertaken piecemeal for one feature.
+
+~~User-visible strings in the editor SHALL go through the existing Paraglide
+i18n mechanism rather than being hard-coded.~~
+
+~~#### Scenario: No hard-coded user-facing strings~~
+~~- **WHEN** the editor components are inspected~~
+~~- **THEN** user-visible labels resolve through the i18n mechanism~~
