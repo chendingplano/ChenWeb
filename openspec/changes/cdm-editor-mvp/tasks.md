@@ -103,13 +103,25 @@ Live-browser verification used the same scratch-route-then-delete approach as ta
 
 ## 6. Structured block editors
 
-- [ ] 6.1 `table`: column add/remove/retitle/align, row add/remove, per-cell inline editing, and an optional caption
-- [ ] 6.2 `list`: ordered/unordered toggle, item add/remove, nested block content per item
-- [ ] 6.3 `code`: language selector and a plain textarea, verbatim and unescaped
-- [ ] 6.4 `equation`: display/inline toggle and the original source with its format; Phase 1 stores `parse_status: "skipped"` with no normalized AST
-- [ ] 6.5 `image`: source, alt text, and caption
-- [ ] 6.6 `callout`: the five CDM roles and a title
-- [ ] 6.7 Verify a document containing every block type round-trips through the editor unchanged
+Structural mutation logic again went into plain `.ts` modules with real unit
+tests (`table-ops.ts`, `list-ops.ts`; code/equation/image/callout needed no
+new module, just direct field bindings), matching groups 4-5's convention.
+`BlockView.svelte` grew an `{#if editable}...{:else}...{/if}` branch per
+block type, same pattern as paragraph/heading/quote in group 5.
+
+- [x] 6.1 `table-ops.ts` (`addColumn`/`removeColumn`/`renameColumnTitle`/`setColumnAlign`/`addRow`/`removeRow`, 9 tests) plus `TableEditor.svelte`: column title/align/remove, a `+ Column`/`+ Row` control, per-cell editing via `InlineEditor` (new `as="plain"` variant — a cell isn't semantically a paragraph/heading/quote), and an optional caption. New column keys are single letters (`a`, `b`, ...), falling back to `letter+number` once exhausted. A `setColumnAlign(block, key, '')` clears the align key entirely rather than setting it to `""` — same `dropUndefined`-class lesson as inline-mapping.ts, caught by a dedicated test before it could round-trip wrong
+- [x] 6.2 `list-ops.ts` (`addListItem`/`removeListItem`, 3 tests) plus ordered/unordered toggle and per-item remove buttons in `BlockView.svelte`'s list branch. `addListItem` needed the *document-wide* id allocator, not a local one: a nested `BlockView` rendering a list only has that list's own subtree in scope, and allocating against just that subtree could silently collide with an unrelated block elsewhere in the document. Added a Svelte context (`ALLOCATE_ID_CONTEXT_KEY` in `block-id.ts`) that `BlockList` provides, recomputing `collectBlockIds(blocks)` fresh on every call rather than a stale snapshot
+- [x] 6.3 `code`: language input + verbatim textarea bound directly to `block.lang`/`block.text`, no new module needed
+- [x] 6.4 `equation`: display checkbox, format select, and source textarea bound to `block.math.{display,original.format,original.source}`; `parse_status` is left untouched (stays `"skipped"`, never set toward `"success"` — Phase 1 has no normalizer to justify that)
+- [x] 6.5 `image`: src/alt text inputs, plus the same `as="plain"` `InlineEditor` pattern as the table caption for `block.caption`
+- [x] 6.6 `callout`: a role `<select>` (`CALLOUT_ROLES`) and a title input
+
+### Found while implementing group 6
+
+- [x] **A real, user-facing layout-shift bug, not just a test artifact.** `InlineEditor`'s formatting toolbar (task 5.6) appeared/disappeared via `{#if focused}`, pushing every element below it up/down by the toolbar's height on every focus change. Confirmed with Playwright that this is not merely cosmetic: the very first click on *any* button below a focused editor could land on stale coordinates from before the shift and silently do nothing, because the shift happens synchronously as part of the same mousedown that blurs the editor and dispatches that click — reproduced deterministically (worked on the 2nd/3rd click, never the 1st), then bisected by testing a plain button outside `BlockList` (unaffected), a button wrapped in an unrelated clickable div (also unaffected), and finally selecting a *non-editable* block before the target click (also unaffected) — isolating the cause specifically to focusing a ProseMirror editor before the click, not "any prior click" or "being in a reactive tree". Fixed by making the toolbar `position: absolute` so it floats over content instead of participating in document flow; re-verified the exact single-click reproduction now succeeds
+- [x] **A real ownership/architecture issue Svelte's own dev-mode warnings flagged, not just noise.** `InlineEditor`/`TableEditor` bind into nested properties of `block` (`block.content`, `row.cells[key]`, `block.caption`), while `BlockView` held `block` as a plain, non-bindable prop — this happened to work through Svelte 5's deep `$state` reactivity, but Svelte's own `ownership_invalid_binding` warning correctly identified that the ownership chain wasn't declared to match. Fixed by making `block` `$bindable()` in both `BlockView` and `TableEditor` and threading `bind:block` through `BlockList` and every recursive `<Self>`/`<TableEditor>` call — which itself surfaced a Svelte 5 runes-mode rule neither of us had hit before: you cannot bind directly to an `#each` loop variable (`bind:block={child}` is rejected at compile time with `each_item_invalid_assignment`), only to an indexed array expression (`bind:block={block.items![i][j]}`). Both warnings are gone after the fix, confirmed via a fresh console-message capture
+- [x] 6.7 Verified live in a real browser (`webapp-testing` Playwright skill, same scratch-route-then-delete approach as groups 4-5, for the same reason: no Kratos session in this environment) against the full `AllBlockTypes` fixture: added a column, a row, retitled a column, set an align, edited a cell's text; added a list item and toggled ordered; edited code's language and text; toggled equation display, changed its format, edited its source (confirmed `parse_status` stayed `"skipped"`); edited image src/alt; changed callout role and title. Screenshotted for visual confirmation of all six
+- [x] `bun test src/lib/components/cdm/` — 77 tests (65 from groups 3-5 plus 12 new), `bun run check` — no new errors (same one pre-existing, unrelated error as before this task), `bun run lint` — clean on all changed files (scoped format, not project-wide)
 
 ## 7. Save, publish, preview
 

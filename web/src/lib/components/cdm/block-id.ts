@@ -87,6 +87,16 @@ export function collectBlockIds(blocks: readonly Block[]): Set<string> {
 }
 
 /**
+ * Svelte context key for a live, document-wide id allocator. BlockList owns
+ * the full top-level block array and is the only component that can compute
+ * collectBlockIds correctly; a deeply nested BlockView creating a new block
+ * (e.g. a list item) only has its own subtree in scope, so it needs this
+ * context rather than allocating against a partial id set that could
+ * silently collide with a sibling elsewhere in the document.
+ */
+export const ALLOCATE_ID_CONTEXT_KEY = 'cdm-allocate-id';
+
+/**
  * Returns a stateful allocator seeded with existingIds, so a caller minting
  * several ids in one operation (e.g. a new `list` block plus its first
  * item) does not hand out the same slug twice. Each call both allocates and

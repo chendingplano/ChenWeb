@@ -45,11 +45,18 @@
 	import { inlineArrayToProseMirrorDoc, proseMirrorDocToInlineArray } from './inline-mapping.js';
 	import type { Inline } from './types.js';
 
+	// 'plain' carries no heading/quote styling -- used for content that is
+	// still Inline[] but isn't semantically a paragraph/heading/quote block
+	// of its own (a table cell, a table/image caption, task group 6).
 	let {
 		content = $bindable(),
 		as = 'paragraph',
 		level = 2
-	}: { content: Inline[]; as?: 'paragraph' | 'heading' | 'quote'; level?: number } = $props();
+	}: {
+		content: Inline[];
+		as?: 'paragraph' | 'heading' | 'quote' | 'plain';
+		level?: number;
+	} = $props();
 
 	let containerEl: HTMLDivElement;
 	let editor: Editor | undefined;
@@ -127,6 +134,18 @@
 </script>
 
 <div class="cdm-inline-editor-wrap">
+	<!--
+		Floated (position: absolute), not in normal document flow: appearing
+		on focus and disappearing on blur used to push/pull every element
+		below it by the toolbar's own height on every focus change. That is
+		not just a visual jump -- confirmed with Playwright that the very
+		first click on any button below a focused editor could land on stale
+		coordinates from before the shift and silently do nothing, because
+		the toolbar's appear/disappear happens synchronously as part of the
+		same mousedown that blurs this editor and processes that click.
+		Floating removes the shift at its source rather than working around
+		the symptom.
+	-->
 	{#if focused}
 		<div class="cdm-inline-toolbar">
 			<button
@@ -166,10 +185,21 @@
 </div>
 
 <style>
+	.cdm-inline-editor-wrap {
+		position: relative;
+	}
 	.cdm-inline-toolbar {
+		position: absolute;
+		bottom: 100%;
+		left: 0;
 		display: flex;
 		gap: 2px;
 		margin-bottom: 2px;
+		background: var(--cdm-surface, #fff);
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+		border-radius: 4px;
+		padding: 2px;
+		z-index: 10;
 	}
 	.cdm-inline-toolbar button {
 		border: 1px solid rgba(127, 127, 127, 0.35);

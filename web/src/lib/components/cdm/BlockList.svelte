@@ -16,11 +16,17 @@
 	// (data-table.svelte), so richer reordering can be layered in later
 	// without a new dependency; up/down is simpler and fully satisfies
 	// "operating directly on the block array" for now.
+	import { setContext } from 'svelte';
 	import type { Block, BlockType } from './types.js';
 	import { BLOCK_TYPES } from './types.js';
 	import BlockView from './BlockView.svelte';
 	import InsertControl from './InsertControl.svelte';
-	import { createIdAllocator, collectBlockIds } from './block-id.js';
+	import {
+		createIdAllocator,
+		collectBlockIds,
+		ALLOCATE_ID_CONTEXT_KEY,
+		type BlockIdHint
+	} from './block-id.js';
 	import { createDefaultBlock } from './block-defaults.js';
 	import {
 		insertBlockAt,
@@ -32,6 +38,14 @@
 	} from './block-ops.js';
 
 	let { blocks = $bindable() }: { blocks: Block[] } = $props();
+
+	// Provided to every nested BlockView so a block created anywhere in the
+	// tree (a new list item, say) gets an id unique against the *whole*
+	// document, not just its own subtree -- recomputed from the current
+	// `blocks` on every call, never a stale snapshot.
+	setContext(ALLOCATE_ID_CONTEXT_KEY, (hint: BlockIdHint) =>
+		createIdAllocator(collectBlockIds(blocks))(hint)
+	);
 
 	let selectedId = $state<string | null>(null);
 	let insertTypeChoice = $state<BlockType>('paragraph');
@@ -86,7 +100,7 @@
 			-->
 			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 			<div class="cdm-block-select" onclick={() => selectBlock(block.id)}>
-				<BlockView {block} editable={true} />
+				<BlockView bind:block={blocks[index]} editable={true} />
 			</div>
 
 			{#if selectedId === block.id}

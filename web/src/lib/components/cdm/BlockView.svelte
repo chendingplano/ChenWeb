@@ -9,19 +9,52 @@
 	// publishes. This view exists so an author can see block structure and
 	// content while editing, without triggering a server render on every
 	// keystroke.
+	import { getContext } from 'svelte';
 	import type { Block } from './types.js';
+	import { CALLOUT_ROLES, EQUATION_FORMATS } from './types.js';
 	import InlineView from './InlineView.svelte';
 	import InlineEditor from './InlineEditor.svelte';
+	import TableEditor from './TableEditor.svelte';
 	import Self from './BlockView.svelte';
+	import { ALLOCATE_ID_CONTEXT_KEY, type BlockIdHint } from './block-id.js';
+	import { addListItem, removeListItem } from './list-ops.js';
 
 	// editable switches paragraph/heading/quote from InlineView (read-only)
-	// to InlineEditor (a real ProseMirror instance, task group 5). Defaults
-	// to false so this component still serves as a plain read-only preview
-	// wherever one is wanted; BlockList, the actual editing surface, passes
-	// true explicitly.
-	let { block, editable = false }: { block: Block; editable?: boolean } = $props();
+	// to InlineEditor (a real ProseMirror instance, task group 5), and turns
+	// on the structural editors for table/list/code/equation/image/callout
+	// (task group 6). Defaults to false so this component still serves as a
+	// plain read-only preview wherever one is wanted; BlockList, the actual
+	// editing surface, passes true explicitly.
+	//
+	// block is $bindable: InlineEditor/TableEditor bind into its nested
+	// properties (block.content, row.cells[...], block.caption, ...), and
+	// Svelte's own dev-mode ownership check flags exactly this pattern --
+	// "component X passed a bind: into property Y of a prop its own parent
+	// did not declare bindable" -- when an intermediate component in the
+	// chain holds a plain, non-bindable reference. Declaring it bindable
+	// here and threading bind:block through BlockList and every recursive
+	// Self/TableEditor call below makes the ownership chain match what is
+	// actually happening (deep mutation through the same reactive object),
+	// rather than relying on it working anyway through Svelte 5's deep
+	// $state reactivity without being declared.
+	let { block = $bindable(), editable = false }: { block: Block; editable?: boolean } = $props();
 
 	let headingTag = $derived(`h${Math.min(6, Math.max(1, block.level ?? 2))}` as const);
+
+	// Only list items currently mint new blocks from within a nested
+	// BlockView; provided by BlockList (see block-id.ts's doc comment on
+	// ALLOCATE_ID_CONTEXT_KEY for why this can't just be computed locally).
+	const allocateId = getContext<((hint: BlockIdHint) => string) | undefined>(
+		ALLOCATE_ID_CONTEXT_KEY
+	);
+
+	function doAddListItem() {
+		if (!allocateId) return;
+		Object.assign(block, addListItem(block, allocateId));
+	}
+	function doRemoveListItem(index: number) {
+		Object.assign(block, removeListItem(block, index));
+	}
 </script>
 
 {#if block.type === 'paragraph'}
@@ -46,62 +79,168 @@
 	<svelte:element this={block.ordered ? 'ol' : 'ul'}>
 		{#each block.items ?? [] as item, i (i)}
 			<li>
-				{#each item as child (child.id)}
-					<Self block={child} {editable} />
+				{#each item as child, j (child.id)}
+					<Self bind:block={block.items![i][j]} {editable} />
 				{/each}
+				{#if editable}
+					<button type="button" class="cdm-list-remove-item" onclick={() => doRemoveListItem(i)}
+						>Remove item</button
+					>
+				{/if}
 			</li>
 		{/each}
 	</svelte:element>
+	{#if editable}
+		<label class="cdm-list-ordered-toggle">
+			<input
+				type="checkbox"
+				checked={block.ordered ?? false}
+				onchange={(e) => (block.ordered = e.currentTarget.checked)}
+			/>
+			Ordered
+		</label>
+		<button type="button" onclick={doAddListItem}>+ Item</button>
+	{/if}
 {:else if block.type === 'table'}
-	<table class="cdm-table">
-		{#if block.caption?.length}
-			<caption><InlineView inline={block.caption} /></caption>
-		{/if}
-		<thead>
-			<tr>
-				{#each block.columns ?? [] as col (col.key)}
-					<th style={col.align ? `text-align: ${col.align}` : undefined}>{col.title}</th>
-				{/each}
-			</tr>
-		</thead>
-		<tbody>
-			{#each block.rows ?? [] as row, i (i)}
+	{#if editable}
+		<TableEditor bind:block />
+	{:else}
+		<table class="cdm-table">
+			{#if block.caption?.length}
+				<caption><InlineView inline={block.caption} /></caption>
+			{/if}
+			<thead>
 				<tr>
 					{#each block.columns ?? [] as col (col.key)}
-						<td style={col.align ? `text-align: ${col.align}` : undefined}
-							><InlineView inline={row.cells[col.key] ?? []} /></td
-						>
+						<th style={col.align ? `text-align: ${col.align}` : undefined}>{col.title}</th>
 					{/each}
 				</tr>
-			{/each}
-		</tbody>
-	</table>
+			</thead>
+			<tbody>
+				{#each block.rows ?? [] as row, i (i)}
+					<tr>
+						{#each block.columns ?? [] as col (col.key)}
+							<td style={col.align ? `text-align: ${col.align}` : undefined}
+								><InlineView inline={row.cells[col.key] ?? []} /></td
+							>
+						{/each}
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	{/if}
 {:else if block.type === 'equation'}
-	<div class="cdm-equation" class:cdm-equation--inline={block.math && !block.math.display}>
-		<code>{block.math?.original?.source ?? '(no source)'}</code>
-		{#if block.math}
-			<span class="cdm-equation-meta"
-				>{block.math.original?.format ?? '?'} · {block.math.parse_status}</span
+	{#if editable && block.math}
+		<div class="cdm-equation cdm-equation-editor">
+			<label>
+				<input
+					type="checkbox"
+					checked={block.math.display}
+					onchange={(e) => (block.math!.display = e.currentTarget.checked)}
+				/>
+				Display (block) equation
+			</label>
+			<select
+				value={block.math.original?.format ?? 'typst'}
+				onchange={(e) => {
+					if (!block.math!.original) block.math!.original = { format: 'typst', source: '' };
+					block.math!.original.format = e.currentTarget.value;
+				}}
 			>
-		{/if}
-	</div>
+				{#each EQUATION_FORMATS as format (format)}
+					<option value={format}>{format}</option>
+				{/each}
+			</select>
+			<textarea
+				class="cdm-equation-source"
+				value={block.math.original?.source ?? ''}
+				oninput={(e) => {
+					if (!block.math!.original) block.math!.original = { format: 'typst', source: '' };
+					block.math!.original.source = e.currentTarget.value;
+				}}
+			></textarea>
+		</div>
+	{:else}
+		<div class="cdm-equation" class:cdm-equation--inline={block.math && !block.math.display}>
+			<code>{block.math?.original?.source ?? '(no source)'}</code>
+			{#if block.math}
+				<span class="cdm-equation-meta"
+					>{block.math.original?.format ?? '?'} · {block.math.parse_status}</span
+				>
+			{/if}
+		</div>
+	{/if}
 {:else if block.type === 'code'}
-	<div class="cdm-code">
-		{#if block.lang}<span class="cdm-code-lang">{block.lang}</span>{/if}
-		<pre><code>{block.text ?? ''}</code></pre>
-	</div>
+	{#if editable}
+		<div class="cdm-code cdm-code-editor">
+			<input
+				type="text"
+				class="cdm-code-lang-input"
+				placeholder="language"
+				value={block.lang ?? ''}
+				oninput={(e) => (block.lang = e.currentTarget.value)}
+			/>
+			<textarea
+				class="cdm-code-textarea"
+				value={block.text ?? ''}
+				oninput={(e) => (block.text = e.currentTarget.value)}
+			></textarea>
+		</div>
+	{:else}
+		<div class="cdm-code">
+			{#if block.lang}<span class="cdm-code-lang">{block.lang}</span>{/if}
+			<pre><code>{block.text ?? ''}</code></pre>
+		</div>
+	{/if}
 {:else if block.type === 'image'}
 	<figure class="cdm-figure">
-		<img src={block.src} alt={block.alt ?? ''} />
-		{#if block.caption?.length}
+		{#if editable}
+			<input
+				type="text"
+				placeholder="Image source (path or URL)"
+				value={block.src ?? ''}
+				oninput={(e) => (block.src = e.currentTarget.value)}
+			/>
+			<input
+				type="text"
+				placeholder="Alt text"
+				value={block.alt ?? ''}
+				oninput={(e) => (block.alt = e.currentTarget.value)}
+			/>
+		{:else}
+			<img src={block.src} alt={block.alt ?? ''} />
+		{/if}
+		{#if editable}
+			{#if block.caption}
+				<figcaption><InlineEditor bind:content={block.caption} as="plain" /></figcaption>
+			{:else}
+				<button type="button" onclick={() => (block.caption = [])}>+ Caption</button>
+			{/if}
+		{:else if block.caption?.length}
 			<figcaption><InlineView inline={block.caption} /></figcaption>
 		{/if}
 	</figure>
 {:else if block.type === 'callout'}
 	<div class="cdm-callout" data-role={block.role ?? 'note'}>
-		{#if block.title}<div class="cdm-callout-title">{block.title}</div>{/if}
-		{#each block.children ?? [] as child (child.id)}
-			<Self block={child} {editable} />
+		{#if editable}
+			<div class="cdm-callout-editor-header">
+				<select value={block.role ?? 'note'} onchange={(e) => (block.role = e.currentTarget.value)}>
+					{#each CALLOUT_ROLES as role (role)}
+						<option value={role}>{role}</option>
+					{/each}
+				</select>
+				<input
+					type="text"
+					placeholder="Title"
+					value={block.title ?? ''}
+					oninput={(e) => (block.title = e.currentTarget.value)}
+				/>
+			</div>
+		{:else if block.title}
+			<div class="cdm-callout-title">{block.title}</div>
+		{/if}
+		{#each block.children ?? [] as child, i (child.id)}
+			<Self bind:block={block.children![i]} {editable} />
 		{/each}
 	</div>
 {:else}
@@ -245,5 +384,43 @@
 		border: 1px dashed #b91c1c;
 		border-radius: 6px;
 		padding: 6px 10px;
+	}
+	.cdm-list-remove-item {
+		font-size: 0.75em;
+		opacity: 0.6;
+		margin-left: 4px;
+	}
+	.cdm-list-remove-item:hover {
+		opacity: 1;
+	}
+	.cdm-list-ordered-toggle {
+		font-size: 0.8em;
+		margin-right: 8px;
+	}
+	.cdm-equation-editor {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 6px;
+	}
+	.cdm-equation-source,
+	.cdm-code-textarea {
+		font-family: ui-monospace, monospace;
+		width: 100%;
+		min-height: 3em;
+		resize: vertical;
+	}
+	.cdm-code-editor {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.cdm-code-lang-input {
+		font-size: 0.8em;
+		width: 8em;
+	}
+	.cdm-callout-editor-header {
+		display: flex;
+		gap: 6px;
+		margin-bottom: 6px;
 	}
 </style>
