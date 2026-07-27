@@ -148,6 +148,13 @@ description = "Build and run AI agents over your knowledge."
 href = "/home3"
 icon = "bot"
 
+[[workspace.apps]]
+key = "cdm_editor"
+name = "CDM Editor"
+description = "Author documents as meaning, rendered by Typst templates."
+href = "/home3/cdm"
+icon = "pen-line"
+
 # ── Main-page section copy (tenant-independent, ADR 2026071102) ──────────
 
 [features_section]

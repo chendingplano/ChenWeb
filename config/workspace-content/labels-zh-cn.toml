@@ -14,6 +14,7 @@ search = "检索知识库"
 doc_reviews = "文档审核"
 workflows = "工作流"
 agents = "智能体与运行平台"
+cdm_editor = "智能编辑器"
 
 [descriptions]
 knowledge_base = "浏览和管理文档与知识工件。"
@@ -22,3 +23,4 @@ search = "关键词与语义混合检索。"
 doc_reviews = "运行并查看带引用依据的文档审核。"
 workflows = "自动化多步骤文档处理流程。"
 agents = "基于知识构建并运行智能体。"
+cdm_editor = "以语义方式撰写文档，由 Typst 模板负责排版。"
