@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-node';
+import adapter from '@sveltejs/adapter-static';
 import { resolve } from 'node:path';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
@@ -8,7 +8,9 @@ const config = {
 	// for more information about preprocessors
 	preprocess: vitePreprocess(),
 	kit: {
-		adapter: adapter(),
+		adapter: adapter({
+			fallback: 'index.html'
+		}),
 		alias: {
 			'@': resolve('./src'),
 			'$types': resolve('./src/lib/types'),

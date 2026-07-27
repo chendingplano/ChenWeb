@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -95,7 +97,31 @@ func RegisterRoutes(e *echo.Echo) error {
 			return error_msg
 		}
 		fileServer := http.FileServerFS(webBuildFS)
-		frontendHandler = fileServer
+		frontendHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqPath := path.Clean(strings.TrimPrefix(r.URL.Path, "/"))
+			if reqPath == "." || reqPath == "" {
+				reqPath = "index.html"
+			}
+
+			// Serve real embedded assets directly. For client-side routes such as
+			// /login, fall back to the SPA entrypoint instead of returning the raw
+			// file server's 404 or directory listing.
+			if path.Ext(reqPath) != "" {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			if info, statErr := fs.Stat(webBuildFS, reqPath); statErr == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+
+			indexBytes, readErr := fs.ReadFile(webBuildFS, "index.html")
+			if readErr != nil {
+				http.Error(w, "embedded frontend index.html missing", http.StatusInternalServerError)
+				return
+			}
+			http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(indexBytes))
+		})
 	}
 
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
