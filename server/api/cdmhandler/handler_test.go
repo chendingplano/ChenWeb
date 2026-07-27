@@ -590,6 +590,23 @@ func TestRenderDraftDocument_UsesRequestBodyWithoutSavingIt(t *testing.T) {
 	}
 }
 
+func TestWriteStoreError_ContextCanceledDoesNotLogOrWrite500(t *testing.T) {
+	c, rec := newContext(t, http.MethodGet, "/api/v1/cdm/documents/doc:test/render-preview", "")
+	logged := false
+	err := writeStoreError(c, context.Canceled, func(msg string, args ...any) {
+		logged = true
+	})
+	if err != nil {
+		t.Fatalf("writeStoreError returned error: %v", err)
+	}
+	if logged {
+		t.Fatal("expected canceled request not to be logged as a store failure")
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("expected no error body for canceled request, got: %s", rec.Body.String())
+	}
+}
+
 // TestRenderDocument_SecondRequestIsServedFromCache covers the caching half
 // of D9: renderings are keyed by content_version, so an unchanged version is
 // a table read rather than another Typst subprocess.

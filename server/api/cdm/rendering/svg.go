@@ -36,6 +36,9 @@ func RenderSVGPagesContext(ctx context.Context, typstBin, typstPath string) ([][
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("cdm: typst compile svg failed: %w: %s", err, stderr.String())
 	}
 

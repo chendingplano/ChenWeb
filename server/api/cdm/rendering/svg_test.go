@@ -1,7 +1,12 @@
 package rendering_test
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/cdm/cdmfixtures"
 	"github.com/chendingplano/deepdoc/server/api/cdm/model"
@@ -55,6 +60,26 @@ func TestRenderSVGPages_MultiplePagesInOrder(t *testing.T) {
 		if len(p) == 0 {
 			t.Errorf("page %d is empty", i+1)
 		}
+	}
+}
+
+func TestRenderSVGPagesContext_ReturnsContextCanceledWhenCompileIsAborted(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-typst.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+		t.Fatalf("write fake typst: %v", err)
+	}
+	typPath := filepath.Join(dir, "doc.typ")
+	if err := os.WriteFile(typPath, []byte("ignored"), 0o644); err != nil {
+		t.Fatalf("write typst input: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	_, err := rendering.RenderSVGPagesContext(ctx, script, typPath)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 }
 

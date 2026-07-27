@@ -110,6 +110,8 @@ func writeStoreError(c echo.Context, err error, logf func(msg string, args ...an
 		notFound   *store.NotFoundError
 	)
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return nil
 	case errors.As(err, &notFound):
 		return c.JSON(http.StatusNotFound, errorResponse{
 			Status:   false,
@@ -123,10 +125,10 @@ func writeStoreError(c echo.Context, err error, logf func(msg string, args ...an
 		})
 	case errors.As(err, &stale):
 		return c.JSON(http.StatusConflict, errorResponse{
-			Status:         false,
-			ErrorMsg:       stale.Error(),
-			Conflict:       conflictStaleVersion,
-			EditVersion:    stale.Actual,
+			Status:      false,
+			ErrorMsg:    stale.Error(),
+			Conflict:    conflictStaleVersion,
+			EditVersion: stale.Actual,
 		})
 	case errors.As(err, &frozen):
 		return c.JSON(http.StatusConflict, errorResponse{
