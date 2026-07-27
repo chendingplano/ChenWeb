@@ -99,16 +99,6 @@
 </script>
 
 <div class="cdm-block-list">
-	{#if editable}
-		<div class="cdm-insert-row">
-			<InsertControl
-				bind:choice={insertTypeChoice}
-				onInsert={() => insertAt(0)}
-				label="Insert at top"
-			/>
-		</div>
-	{/if}
-
 	{#each blocks as block, index (block.id)}
 		<div
 			class="cdm-block-row"
@@ -191,6 +181,7 @@
 		height: 1.25rem;
 		display: flex;
 		align-items: center;
+		justify-content: flex-end;
 		opacity: 0.35;
 		transition: opacity 0.1s;
 		/*

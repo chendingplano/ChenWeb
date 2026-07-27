@@ -214,11 +214,27 @@
 		previewLoading = true;
 		previewError = null;
 		try {
+			if (dirty) {
+				clearSaveFeedback();
+				const saved = await saveDocument(doc);
+				adoptSavedDocument(saved, `Saved current version v${saved.content_version}.`);
+			}
 			const result = await renderDocument(doc.document_key);
 			previewPages = result.pages;
 			previewVersion = result.content_version;
 		} catch (e) {
-			previewError = e instanceof CdmApiError ? e.message : String(e);
+			if (
+				e instanceof CdmStaleVersionError ||
+				e instanceof CdmFrozenError ||
+				e instanceof CdmValidationError ||
+				e instanceof CdmBlockConflictError ||
+				e instanceof CdmApiError
+			) {
+				handleSaveError(e);
+				previewError = e.message;
+			} else {
+				previewError = String(e);
+			}
 		} finally {
 			previewLoading = false;
 		}
