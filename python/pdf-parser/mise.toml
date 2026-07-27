@@ -9,6 +9,46 @@ if [ -f ../../.cache/ocr-service.pid ] && kill -0 "$(cat ../../.cache/ocr-servic
   exit 0
 fi
 VENV=./.venv
+if [ -f ../../.env ]; then
+  eval "$("$VENV/bin/python" - <<'PY'
+from pathlib import Path
+import shlex
+
+keys = {
+    "PG_HOST",
+    "PG_PORT",
+    "PG_DB_NAME",
+    "PG_USER_NAME",
+    "PG_PASSWORD",
+    "NATS_URL",
+    "DATA_HOME_DIR",
+    "DATA_BACKUP_DIR",
+    "DATA_STAGING_DIR",
+    "STAGING_DIR",
+    "PDF_STAGING_DIR",
+    "PDF_STAGE_EVENT_SUBJECT",
+    "PDF_STAGE_EVENT_DURABLE",
+    "PDF_PARSER_NAME",
+    "PDF_DEFAULT_PARSER",
+}
+for raw_line in Path("../../.env").read_text().splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    key = key.strip()
+    if key not in keys:
+        continue
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    print(f"export {key}={shlex.quote(value)}")
+PY
+)"
+fi
+export PDF_BACKUP_DIR="${PDF_BACKUP_DIR:-${DATA_BACKUP_DIR:-}}"
+export PDF_STAGE_EVENT_STREAM="${PDF_STAGE_EVENT_STREAM:-kb-pdf-staged-events}"
+export PDF_PARSED_EVENT_STREAM="${PDF_PARSED_EVENT_STREAM:-pdf-parsed-events}"
 export VIRTUAL_ENV="$VENV"
 export PYTHONPATH="."
 unset PYTHONHOME
@@ -21,6 +61,46 @@ echo "ocr-service started (pid $(cat ../../.cache/ocr-service.pid))"
 [tasks.ocr-service-start-sync]
 run = '''
 VENV=./.venv
+if [ -f ../../.env ]; then
+  eval "$("$VENV/bin/python" - <<'PY'
+from pathlib import Path
+import shlex
+
+keys = {
+    "PG_HOST",
+    "PG_PORT",
+    "PG_DB_NAME",
+    "PG_USER_NAME",
+    "PG_PASSWORD",
+    "NATS_URL",
+    "DATA_HOME_DIR",
+    "DATA_BACKUP_DIR",
+    "DATA_STAGING_DIR",
+    "STAGING_DIR",
+    "PDF_STAGING_DIR",
+    "PDF_STAGE_EVENT_SUBJECT",
+    "PDF_STAGE_EVENT_DURABLE",
+    "PDF_PARSER_NAME",
+    "PDF_DEFAULT_PARSER",
+}
+for raw_line in Path("../../.env").read_text().splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    key = key.strip()
+    if key not in keys:
+        continue
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    print(f"export {key}={shlex.quote(value)}")
+PY
+)"
+fi
+export PDF_BACKUP_DIR="${PDF_BACKUP_DIR:-${DATA_BACKUP_DIR:-}}"
+export PDF_STAGE_EVENT_STREAM="${PDF_STAGE_EVENT_STREAM:-kb-pdf-staged-events}"
+export PDF_PARSED_EVENT_STREAM="${PDF_PARSED_EVENT_STREAM:-pdf-parsed-events}"
 export VIRTUAL_ENV="$VENV"
 export PYTHONPATH="."
 unset PYTHONHOME
