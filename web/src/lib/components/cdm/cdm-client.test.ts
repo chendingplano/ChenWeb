@@ -10,6 +10,7 @@ import {
 	listDocumentVersions,
 	publishDocument,
 	renderDocument,
+	renderDraftDocument,
 	CdmValidationError,
 	CdmStaleVersionError,
 	CdmFrozenError,
@@ -116,6 +117,29 @@ test('saveDocumentToNewVersion POSTs to the versions endpoint', async () => {
 		);
 		assert.equal(saved.content_version, 8);
 		assert.equal(saved.edit_version, 9);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('renderDraftDocument renders the in-memory document without saving it', async () => {
+	const draft = minimalDoc({
+		document_key: 'doc:jaro-winkler',
+		title: 'Unsaved title'
+	});
+	const mock = installFetchMock(async (call) => {
+		assert.equal(String(call.input), '/api/v1/cdm/documents/doc%3Ajaro-winkler/render-preview');
+		assert.equal(call.init?.method, 'POST');
+		assert.deepEqual(JSON.parse(String(call.init?.body)), draft);
+		return Response.json({
+			status: true,
+			content_version: 7,
+			pages: ['<svg><text>Unsaved title</text></svg>']
+		});
+	});
+	try {
+		const rendered = await renderDraftDocument(draft);
+		assert.equal(rendered.pages[0], '<svg><text>Unsaved title</text></svg>');
 	} finally {
 		mock.restore();
 	}

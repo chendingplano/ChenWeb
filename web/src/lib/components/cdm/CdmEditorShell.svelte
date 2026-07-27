@@ -28,6 +28,7 @@
 	import { SCHEMA_VERSION, type Document } from './types.js';
 	import DocumentListView from './DocumentListView.svelte';
 	import DocumentEditor from './DocumentEditor.svelte';
+	import { updatePreviewPages } from './preview-dom.js';
 
 	let {
 		darkMode = true,
@@ -123,6 +124,13 @@
 	let previewPages = $state<string[] | null>(null);
 	let previewVersion = $state<number | null>(null);
 	let previewLoading = $state(false);
+	let previewPagesElement = $state<HTMLElement | null>(null);
+
+	$effect(() => {
+		if (previewPagesElement && previewPages) {
+			updatePreviewPages(previewPagesElement, previewPages);
+		}
+	});
 
 	function resetPreview() {
 		previewPages = null;
@@ -295,15 +303,14 @@
 			<div class="cdm-shell-divider" onmousedown={startDrag} title="Drag to resize"></div>
 
 			<div class="cdm-shell-right">
-				{#if previewLoading}
-					<div class="cdm-shell-preview-status">Rendering preview…</div>
-				{:else if previewPages && previewPages.length > 0}
-					<div class="cdm-shell-preview-header">Preview — version {previewVersion}</div>
-					<div class="cdm-shell-preview-pages">
-						{#each previewPages as pageSvg, i (i)}
-							<div class="cdm-shell-preview-page">{@html pageSvg}</div>
-						{/each}
+				{#if previewPages && previewPages.length > 0}
+					<div class="cdm-shell-preview-header">
+						<span>Preview — version {previewVersion}</span>
+						{#if previewLoading}<span class="cdm-shell-preview-updating">Updating…</span>{/if}
 					</div>
+					<div class="cdm-shell-preview-pages" bind:this={previewPagesElement}></div>
+				{:else if previewLoading}
+					<div class="cdm-shell-preview-status">Rendering preview…</div>
 				{:else if mode === 'editor'}
 					<div class="cdm-shell-preview-status">
 						Click “Preview” above to render this document here.
@@ -399,12 +406,19 @@
 	.cdm-shell-preview-header {
 		position: sticky;
 		top: 0;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
 		padding: 10px 16px;
 		border-bottom: 1px solid var(--shell-line);
 		background: var(--cdm-surface);
 		font-size: 0.82rem;
 		color: var(--shell-text-2);
 		z-index: 2;
+	}
+	.cdm-shell-preview-updating {
+		color: var(--shell-brass);
 	}
 	.cdm-shell-preview-pages {
 		padding: 16px;
@@ -416,11 +430,11 @@
 		min-width: 0;
 		box-sizing: border-box;
 	}
-	.cdm-shell-preview-page {
+	.cdm-shell-preview-pages :global(.cdm-shell-preview-page) {
 		width: min(100%, 816px);
 		min-width: 0;
 	}
-	.cdm-shell-preview-page :global(svg) {
+	.cdm-shell-preview-pages :global(.cdm-shell-preview-page svg) {
 		display: block;
 		width: 100%;
 		height: auto;

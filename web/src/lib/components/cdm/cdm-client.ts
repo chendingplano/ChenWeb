@@ -240,6 +240,19 @@ export function renderDocument(key: string): Promise<RenderResponse> {
 	return request<RenderResponse>(`/api/v1/cdm/documents/${encodeURIComponent(key)}/render`);
 }
 
+/** Renders the current in-memory draft without saving it. */
+export function renderDraftDocument(doc: Document, signal?: AbortSignal): Promise<RenderResponse> {
+	return request<RenderResponse>(
+		`/api/v1/cdm/documents/${encodeURIComponent(doc.document_key)}/render-preview`,
+		{
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify(doc),
+			signal
+		}
+	);
+}
+
 export interface DocumentVersionNode {
 	content_version: number;
 	parent_content_version?: number;

@@ -1,6 +1,7 @@
 package cdmhandler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/cdm/cdmfixtures"
 	"github.com/chendingplano/deepdoc/server/api/cdm/model"
+	"github.com/chendingplano/deepdoc/server/api/cdm/store"
 )
 
 // These handler tests run against the live staging database rather than
@@ -549,6 +551,45 @@ func TestRenderDocument_PreviewsDraftWithoutPublishing(t *testing.T) {
 	}
 }
 
+func TestRenderDraftDocument_UsesRequestBodyWithoutSavingIt(t *testing.T) {
+	if _, err := exec.LookPath("typst"); err != nil {
+		t.Skip("typst not found on PATH")
+	}
+	db := withDB(t)
+	created := createViaHandler(t, db, uniqueTitle(t))
+	storedTitle := created.Title
+	created.Title = storedTitle + " UNSAVED PREVIEW"
+	body, _ := json.Marshal(created)
+
+	c, rec := newContext(t, http.MethodPost, "/api/v1/cdm/documents/"+created.Key+"/render-preview", string(body))
+	c = withKeyParam(c, created.Key)
+	if err := RenderDraftDocument(c); err != nil {
+		t.Fatalf("RenderDraftDocument: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload renderResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(payload.Pages) == 0 {
+		t.Fatal("expected at least one rendered SVG page")
+	}
+
+	stored, err := store.New(db).Load(context.Background(), created.Key)
+	if err != nil {
+		t.Fatalf("load stored document: %v", err)
+	}
+	if stored.Title != storedTitle {
+		t.Fatalf("draft preview persisted title %q; want stored title %q", stored.Title, storedTitle)
+	}
+	if stored.EditVersion != created.EditVersion {
+		t.Fatalf("draft preview changed edit_version to %d; want %d", stored.EditVersion, created.EditVersion)
+	}
+}
+
 // TestRenderDocument_SecondRequestIsServedFromCache covers the caching half
 // of D9: renderings are keyed by content_version, so an unchanged version is
 // a table read rather than another Typst subprocess.
@@ -680,10 +721,11 @@ func TestRenderDocument_EditInvalidatesCachedPreview(t *testing.T) {
 // authenticated /api/v1 group rather than reachable anonymously.
 func TestRoutesAreRegisteredBehindAuth(t *testing.T) {
 	want := map[string]string{
-		"/api/v1/cdm/documents":              http.MethodPost,
-		"/api/v1/cdm/documents/:key":         http.MethodPut,
-		"/api/v1/cdm/documents/:key/publish": http.MethodPost,
-		"/api/v1/cdm/documents/:key/render":  http.MethodGet,
+		"/api/v1/cdm/documents":                     http.MethodPost,
+		"/api/v1/cdm/documents/:key":                http.MethodPut,
+		"/api/v1/cdm/documents/:key/publish":        http.MethodPost,
+		"/api/v1/cdm/documents/:key/render":         http.MethodGet,
+		"/api/v1/cdm/documents/:key/render-preview": http.MethodPost,
 	}
 
 	src, err := os.ReadFile("../routes.go")

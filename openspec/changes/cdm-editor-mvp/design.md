@@ -38,6 +38,7 @@ has no accessor for it. `Store.Save` will happily rewrite a published document.
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Close the authoring loop end to end: create → edit → save → publish → preview.
 - Expose Phase 1 over HTTP without reimplementing validation or persistence.
 - Make D8 (published is frozen) and DR6 (optimistic concurrency) real
@@ -48,6 +49,7 @@ has no accessor for it. `Store.Save` will happily rewrite a published document.
   inexpressible, not merely absent.
 
 **Non-Goals:**
+
 - Any feature listed out-of-scope in the proposal (search, annotation, LLM
   tools, reviewers, ontology, chunking, appendices, lifecycle FSM, retention,
   template management, concurrency locks).
@@ -74,12 +76,13 @@ PUT    /api/v1/cdm/documents/:key
 POST   /api/v1/cdm/documents/:key/publish
 DELETE /api/v1/cdm/documents/:key
 GET    /api/v1/cdm/documents/:key/render
+POST   /api/v1/cdm/documents/:key/render-preview
 ```
 
 Correcting the ADR's path is a documentation fix, recorded here rather than
 silently diverging.
 
-*Alternative:* a separate un-versioned group. Rejected — it would be the only
+_Alternative:_ a separate un-versioned group. Rejected — it would be the only
 API in the app outside `/api/v1` and would need its own auth wiring.
 
 ### D2 — Creating a document is one transaction that writes both rows and links them
@@ -99,7 +102,7 @@ independently. It grows a `tx`-accepting variant so both writes join one
 transaction; the existing method stays as a thin wrapper so Phase 1 tests are
 unaffected.
 
-*Alternative:* leave `input_record_id` null and resolve the input row by
+_Alternative:_ leave `input_record_id` null and resolve the input row by
 matching `kb.inputs.title`. Rejected — titles are neither unique nor stable, and
 this is exactly the kind of implicit join that breaks silently.
 
@@ -124,7 +127,7 @@ This is a **breaking signature change** to a Phase 1 exported function. Its only
 callers are Phase 1's own tests, so the blast radius is contained, but the
 change is real and the tests move with it.
 
-*Alternative:* an `If-Match`/ETag header carrying the version. Rejected as
+_Alternative:_ an `If-Match`/ETag header carrying the version. Rejected as
 equivalent in effect but requiring the same store change anyway, plus HTTP
 plumbing; the version is a first-class field of the document, not an opaque tag.
 
@@ -143,7 +146,7 @@ check would protect exactly one caller.
 
 The editor turns `FrozenError` into the "open a new version?" affordance (D8).
 
-*Note on scope:* the new-version endpoint itself needs the `kb.inputs`
+_Note on scope:_ the new-version endpoint itself needs the `kb.inputs`
 version-relation field from ADR 2026072602 DR3, which does not exist yet.
 **Creating a new version is deferred out of this change**; the MVP surfaces the
 frozen state and explains it, but does not yet offer the action. This is a
@@ -157,7 +160,7 @@ proposal's "new-version" bullet is narrowed accordingly.
 server at creation because uniqueness is global (CDM §1.1) and only the server
 can check it; readability comes from the title the author just typed.
 
-*Alternative:* a UUID key. Rejected — CDM §1.1 makes `document_key` explicitly
+_Alternative:_ a UUID key. Rejected — CDM §1.1 makes `document_key` explicitly
 "stable, human-readable document identity," and it appears in export files.
 
 ### D6 — Block IDs are minted client-side, uniqueness enforced server-side
@@ -178,11 +181,11 @@ cannot be serialized back to CDM.
 
 The schema is written by hand and contains exactly CDM's inline vocabulary:
 
-| CDM `Inline.Type` | ProseMirror |
-|---|---|
-| `text` | text node |
-| `strong`, `emphasis`, `code` | marks |
-| `link` | mark with a `url` attribute |
+| CDM `Inline.Type`                     | ProseMirror                   |
+| ------------------------------------- | ----------------------------- |
+| `text`                                | text node                     |
+| `strong`, `emphasis`, `code`          | marks                         |
+| `link`                                | mark with a `url` attribute   |
 | `math`, `citation`, `cross_reference` | atom nodes, rendered as chips |
 
 The document node is a single paragraph — one TipTap instance edits one CDM
@@ -196,7 +199,7 @@ TipTap mounts into a DOM element with plain JS, so no framework-specific binding
 is required and Svelte 5 compatibility is not a gamble on a wrapper package's
 release cadence.
 
-*Alternative:* `@tiptap/starter-kit`. Rejected as above — convenience that
+_Alternative:_ `@tiptap/starter-kit`. Rejected as above — convenience that
 admits unserializable content.
 
 ### D8 — The block list is a Svelte 5 `$state` array of `model.Block`
@@ -212,20 +215,23 @@ TypeScript types are hand-written to mirror `model.Document` in
 `cdmfixtures` documents the Go tests use, so drift between the two definitions
 is caught rather than assumed absent.
 
-*Alternative:* generate TS types from the Go structs. Rejected for the MVP as
+_Alternative:_ generate TS types from the Go structs. Rejected for the MVP as
 build-toolchain work disproportionate to nine block types; the round-trip test
 gives most of the safety at none of the cost. Worth revisiting if the AST grows.
 
-### D9 — Preview renders on demand and is cached by `content_version`
+### D9 — Saved artifacts are cached; live drafts render without persistence
 
 `GET /api/v1/cdm/documents/:key/render` returns the SVG pages. On a cache miss
 it compiles through the existing `Publisher` path; `kb.cdm_renderings` is
 already keyed by `(document_id, content_version, renderer, renderer_version,
 page)`, so a repeat request at an unchanged `content_version` is a table read.
 
-Explicitly not per-keystroke: Typst compilation is a subprocess, and compiling
-on every edit would be both slow and a trivial way for one author to saturate
-the server.
+`POST /api/v1/cdm/documents/:key/render-preview` accepts the current canonical
+document JSON and returns SVG pages without saving the document or writing
+rendering artifacts. The editor debounces input, cancels a superseded request
+and its Typst subprocess, and applies only the newest completed response.
+Existing SVG page roots stay mounted while compilation runs and are patched
+synchronously when the response arrives, preventing a blank repaint.
 
 Reusing the SVG path rather than adding an HTML preview renderer means preview
 shows exactly the published artifact — same renderer, same template, same
@@ -245,13 +251,14 @@ solved, because codegen is disproportionate at this size; revisit if the AST
 grows or a third consumer appears.
 
 **Hand-writing a ProseMirror schema is more work than `starter-kit`** →
-Accepted deliberately. The schema *is* the D1 enforcement mechanism; taking the
+Accepted deliberately. The schema _is_ the D1 enforcement mechanism; taking the
 convenient bundle would trade away the main reason for choosing ProseMirror.
 
-**Preview latency may prove unacceptable** → Cached by `content_version`, so the
-cost is paid once per saved revision. If it is still too slow, the escape hatch
-is the HTML renderer the ADR rejected for MVP, at the cost of preview no longer
-being exactly the published artifact. Measure before switching.
+**Live preview compilation may saturate the server** → Input is debounced and
+each new edit cancels the prior request and Typst subprocess. Saved-version
+preview remains cached by `content_version`; draft preview is intentionally not
+persisted. If latency or load is still unacceptable, the next step is a
+long-lived Typst watch session rather than an approximate HTML renderer.
 
 **TipTap is a new frontend dependency** → Confined to one component behind the
 CDM inline types, which is the narrowest surface it can occupy and makes

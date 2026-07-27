@@ -2,6 +2,7 @@ package rendering
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,12 @@ import (
 // verified that HTML export discards pagination). Pages are returned in
 // order, page 1 first.
 func RenderSVGPages(typstBin, typstPath string) ([][]byte, error) {
+	return RenderSVGPagesContext(context.Background(), typstBin, typstPath)
+}
+
+// RenderSVGPagesContext is RenderSVGPages with cancellation support for live
+// previews whose compilation becomes obsolete when the author keeps typing.
+func RenderSVGPagesContext(ctx context.Context, typstBin, typstPath string) ([][]byte, error) {
 	if typstBin == "" {
 		typstBin = "typst"
 	}
@@ -25,7 +32,7 @@ func RenderSVGPages(typstBin, typstPath string) ([][]byte, error) {
 	defer os.RemoveAll(dir)
 
 	outPattern := filepath.Join(dir, "page-{p}.svg")
-	cmd := exec.Command(typstBin, "compile", "--format", "svg", typstPath, outPattern)
+	cmd := exec.CommandContext(ctx, typstBin, "compile", "--format", "svg", typstPath, outPattern)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

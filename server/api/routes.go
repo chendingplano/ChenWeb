@@ -19,6 +19,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
+	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
@@ -31,7 +32,6 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/deepdoc/server/api/imagehandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
-	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/llmadminhandler"
@@ -389,6 +389,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/cdm/documents/:key/versions", cdmhandler.SaveDocumentToNewVersion)
 	apiGroup.POST("/cdm/documents/:key/publish", cdmhandler.PublishDocument)
 	apiGroup.GET("/cdm/documents/:key/render", cdmhandler.RenderDocument)
+	apiGroup.POST("/cdm/documents/:key/render-preview", cdmhandler.RenderDraftDocument)
 
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/stores", kbhandler.ListKnowledgeStores)

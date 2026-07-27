@@ -391,6 +391,51 @@ func RenderDocument(c echo.Context) error {
 	})
 }
 
+// RenderDraftDocument renders canonical document JSON from the request body
+// without saving it. Live preview uses this endpoint so typing never changes
+// the current version or the document's dirty state.
+func RenderDraftDocument(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_CDM_066")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_067)")
+	}
+	if strings.TrimSpace(key) == "" {
+		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_068)")
+	}
+
+	doc, err := decodeDocument(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "%v (CWB_CDM_069)", err)
+	}
+	if doc.Key != "" && doc.Key != key {
+		return fail(c, http.StatusBadRequest,
+			"document_key in the body (%q) does not match the URL (%q) (CWB_CDM_070)", doc.Key, key)
+	}
+	doc.Key = key
+
+	pages, err := rendering.RenderPreviewSVG(
+		c.Request().Context(),
+		doc,
+		rendering.DefaultTheme,
+		"",
+	)
+	if err != nil {
+		return writeStoreError(c, err, logger.Error)
+	}
+
+	pageStrings := make([]string, len(pages))
+	for i, page := range pages {
+		pageStrings[i] = string(page)
+	}
+	return c.JSON(http.StatusOK, renderResponse{
+		Status: true, ContentVersion: doc.ContentVersion, Pages: pageStrings,
+	})
+}
+
 const timeFormat = "2006-01-02T15:04:05Z"
 
 var errNoInputRow = errors.New("cdm: document has no linked kb.inputs row")

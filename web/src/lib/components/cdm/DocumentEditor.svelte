@@ -6,7 +6,7 @@
 		saveDocument,
 		saveDocumentToNewVersion,
 		publishDocument,
-		renderDocument,
+		renderDraftDocument,
 		getDocument,
 		createDocument,
 		listDocumentVersions,
@@ -59,7 +59,9 @@
 
 	let previewError = $state<string | null>(null);
 	let livePreviewTimer: ReturnType<typeof setTimeout> | null = null;
-	let livePreviewInFlight = $state(false);
+	let previewAbortController: AbortController | null = null;
+	let previewRequestSequence = 0;
+	let lastPreviewSnapshot = $state<string | null>(null);
 	let hasGeneratedPreviewStructure = $derived(
 		doc.blocks.length === 0 &&
 			(!!doc.title.trim() ||
@@ -88,12 +90,6 @@
 		savedNote = null;
 	}
 
-	function clearPreviewSurface() {
-		previewPages = null;
-		previewVersion = null;
-		previewError = null;
-	}
-
 	function adoptSavedDocument(result: Document, note?: string) {
 		doc.document_key = result.document_key;
 		doc.content_version = result.content_version;
@@ -102,7 +98,6 @@
 		if (note) {
 			savedNote = note;
 		}
-		clearPreviewSurface();
 	}
 
 	function handleSaveError(e: unknown) {
@@ -214,24 +209,25 @@
 		}
 	}
 
-	async function syncPreview(showSaveNote = true) {
+	async function syncPreview() {
 		if (!doc.document_key) return;
+		clearLivePreviewTimer();
+		cancelPreviewRequest();
+		const requestSequence = previewRequestSequence;
+		const controller = new AbortController();
+		previewAbortController = controller;
+		const snapshot = JSON.stringify(doc);
+		const draft = JSON.parse(snapshot) as Document;
+		lastPreviewSnapshot = snapshot;
 		previewLoading = true;
-		livePreviewInFlight = true;
 		previewError = null;
 		try {
-			if (dirty) {
-				clearSaveFeedback();
-				const saved = await saveDocument(doc);
-				adoptSavedDocument(
-					saved,
-					showSaveNote ? `Saved current version v${saved.content_version}.` : undefined
-				);
-			}
-			const result = await renderDocument(doc.document_key);
+			const result = await renderDraftDocument(draft, controller.signal);
+			if (requestSequence !== previewRequestSequence) return;
 			previewPages = result.pages;
 			previewVersion = result.content_version;
 		} catch (e) {
+			if (controller.signal.aborted || requestSequence !== previewRequestSequence) return;
 			if (
 				e instanceof CdmStaleVersionError ||
 				e instanceof CdmFrozenError ||
@@ -245,13 +241,15 @@
 				previewError = String(e);
 			}
 		} finally {
-			previewLoading = false;
-			livePreviewInFlight = false;
+			if (requestSequence === previewRequestSequence) {
+				previewLoading = false;
+				previewAbortController = null;
+			}
 		}
 	}
 
 	async function preview() {
-		await syncPreview(true);
+		await syncPreview();
 	}
 
 	function clearLivePreviewTimer() {
@@ -261,17 +259,25 @@
 		}
 	}
 
+	function cancelPreviewRequest() {
+		previewRequestSequence++;
+		previewAbortController?.abort();
+		previewAbortController = null;
+	}
+
 	function scheduleLivePreview(delayMs: number) {
 		if (isNew || !doc.document_key || frozenMessage) return;
 		clearLivePreviewTimer();
+		cancelPreviewRequest();
 		livePreviewTimer = setTimeout(() => {
 			livePreviewTimer = null;
-			void syncPreview(false);
+			void syncPreview();
 		}, delayMs);
 	}
 
 	onDestroy(() => {
 		clearLivePreviewTimer();
+		cancelPreviewRequest();
 	});
 
 	$effect(() => {
@@ -281,20 +287,17 @@
 		const isFrozen = !!frozenMessage;
 		if (!key || isFrozen) {
 			clearLivePreviewTimer();
+			cancelPreviewRequest();
+			return;
+		}
+		if (snapshot === lastPreviewSnapshot) {
 			return;
 		}
 		if (!previewPages || previewPages.length === 0) {
 			scheduleLivePreview(0);
 			return;
 		}
-		if (isDirty) {
-			scheduleLivePreview(500);
-			return;
-		}
-		if (!livePreviewInFlight && previewVersion !== doc.content_version) {
-			scheduleLivePreview(0);
-		}
-		void snapshot;
+		scheduleLivePreview(isDirty ? 150 : 0);
 	});
 
 	function formatDate(value: string) {
