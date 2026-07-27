@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -238,6 +239,75 @@ func TestGetDocument_UnknownKeyIs404(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestEchoParam_DoesNotURLDecodePathSegments pins down the exact router
+// behavior keyParam (documents.go) exists to correct: registered against a
+// real echo.Echo and driven through ServeHTTP (not the withKeyParam bypass
+// every other test in this file uses, which sets an already-decoded value
+// directly and so cannot see this), a request for
+// "/documents/doc%3Achentest-01" makes echo's own c.Param("key") return the
+// segment still percent-encoded. document_key contains ":" (design D5,
+// "doc:<slug>"), and every client percent-encodes it to survive as one path
+// segment (cdm-client.ts's encodeURIComponent) -- so every handler reading
+// this param over the real router needs keyParam's decode, or it looks up a
+// key nothing ever created. Needs no database; this is router behavior, not
+// application behavior.
+func TestEchoParam_DoesNotURLDecodePathSegments(t *testing.T) {
+	e := echo.New()
+	var raw string
+	e.GET("/api/v1/cdm/documents/:key", func(c echo.Context) error {
+		raw = c.Param("key")
+		return c.NoContent(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cdm/documents/doc%3Achentest-01", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if raw != "doc%3Achentest-01" {
+		t.Fatalf("c.Param(%q) = %q, want the segment still percent-encoded (echo/v4 behavior changed?)",
+			"key", raw)
+	}
+}
+
+// TestGetDocument_ThroughRouterWithPercentEncodedKey reproduces the actual
+// reported failure: a browser navigating to /home3/cdm/<encodeURIComponent
+// (document_key)> (DocumentEditorPage.svelte -> getDocument -> GET
+// /api/v1/cdm/documents/:key) got "document \"doc%3Achentest-01\" not found"
+// for a document that existed. Unlike TestGetDocument_ReturnsCanonicalJSON
+// above, this drives the request through a real echo.Echo and ServeHTTP so
+// c.Param carries the same still-encoded value production sees, rather than
+// injecting the already-decoded key via withKeyParam.
+func TestGetDocument_ThroughRouterWithPercentEncodedKey(t *testing.T) {
+	db := withDB(t)
+	created := createViaHandler(t, db, uniqueTitle(t))
+
+	e := echo.New()
+	e.GET("/api/v1/cdm/documents/:key", GetDocument)
+
+	// url.QueryEscape, not url.PathEscape: PathEscape leaves ':' unescaped
+	// (RFC 3986's pchar allows it in a path segment), but the browser's
+	// encodeURIComponent -- what cdm-client.ts actually calls -- escapes ':'
+	// unconditionally, producing "doc%3A..." exactly as the reported bug's
+	// URL bar showed. QueryEscape matches that for this string; PathEscape
+	// would leave the key untouched and the test would pass without
+	// reproducing anything.
+	encodedPath := "/api/v1/cdm/documents/" + url.QueryEscape(created.Key)
+	req := httptest.NewRequest(http.MethodGet, encodedPath, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s: expected 200, got %d: %s", encodedPath, rec.Code, rec.Body.String())
+	}
+	var loaded model.Document
+	if err := json.Unmarshal(rec.Body.Bytes(), &loaded); err != nil {
+		t.Fatalf("response is not canonical document JSON: %v", err)
+	}
+	if loaded.Key != created.Key {
+		t.Errorf("document_key = %q, want %q", loaded.Key, created.Key)
 	}
 }
 

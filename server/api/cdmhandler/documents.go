@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -14,6 +15,21 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/cdm/rendering"
 	"github.com/chendingplano/deepdoc/server/api/cdm/store"
 )
+
+// keyParam reads the :key path parameter decoded.
+//
+// Echo's c.Param does not URL-decode path segments (confirmed against the
+// installed echo/v4: a route registered as "/documents/:key" hit with
+// "/documents/doc%3Achentest-01" returns c.Param("key") == "doc%3Achentest-01"
+// verbatim). document_key contains ":" (design D5, "doc:<slug>"), which every
+// client must percent-encode to survive as a single path segment
+// (cdm-client.ts's encodeURIComponent), so every handler that reads this
+// param needs the matching decode or it looks up a key nothing ever created —
+// same fix useradminhandler.go's normalizeEmailParam already applies to its
+// own path parameter.
+func keyParam(c echo.Context) (string, error) {
+	return url.PathUnescape(c.Param("key"))
+}
 
 // CreateDocument handles POST /api/v1/cdm/documents.
 //
@@ -81,7 +97,10 @@ func GetDocument(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	key := c.Param("key")
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_022)")
+	}
 	if strings.TrimSpace(key) == "" {
 		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_021)")
 	}
@@ -104,7 +123,10 @@ func SaveDocument(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	key := c.Param("key")
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_034)")
+	}
 	if strings.TrimSpace(key) == "" {
 		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_031)")
 	}
@@ -201,7 +223,10 @@ func PublishDocument(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	key := c.Param("key")
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_055)")
+	}
 	if strings.TrimSpace(key) == "" {
 		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_051)")
 	}
@@ -246,7 +271,10 @@ func RenderDocument(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	key := c.Param("key")
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_065)")
+	}
 	if strings.TrimSpace(key) == "" {
 		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_061)")
 	}
@@ -258,7 +286,7 @@ func RenderDocument(c echo.Context) error {
 		docID          int64
 		contentVersion int64
 	)
-	err := db.QueryRowContext(ctx,
+	err = db.QueryRowContext(ctx,
 		`SELECT id, content_version FROM kb.cdm_documents WHERE document_key = $1`, key,
 	).Scan(&docID, &contentVersion)
 	if err != nil {
