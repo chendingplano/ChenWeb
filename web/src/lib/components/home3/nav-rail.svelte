@@ -165,7 +165,8 @@
 				{ id: 'kb-search-lab', label: 'KB Search Lab' },
 				{ id: 'flow', label: 'Flow' },
 				{ id: 'prompt-optimizer', label: 'Prompt Optimizer' },
-				{ id: 'openmetadata', label: 'OpenMetadata' }
+				{ id: 'openmetadata', label: 'OpenMetadata' },
+				{ id: 'cdm-editor', label: 'CDM Editor' }
 			]
 		},
 		{

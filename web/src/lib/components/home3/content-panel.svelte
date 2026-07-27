@@ -9,6 +9,7 @@
 import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
+	import DocumentListView from '$lib/components/cdm/DocumentListView.svelte';
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
@@ -211,6 +212,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<PromptOptimizerView {darkMode} />
 		{:else if activeMenu?.childId === 'openmetadata'}
 			<OpenMetadataWorkspace {darkMode} />
+		{:else if activeMenu?.childId === 'cdm-editor'}
+			<DocumentListView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-logs'}
 			<JetStreamLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-events'}
