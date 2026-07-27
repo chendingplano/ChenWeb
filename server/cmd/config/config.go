@@ -141,6 +141,11 @@ type FrontendConfigSection struct {
 	// config.toml / config.local.toml.
 	EnableLoginWithGithub *bool `mapstructure:"enable_login_with_github"`
 	EnableLoginWithGoogle *bool `mapstructure:"enable_login_with_google"`
+	// EnablePhoneLogin controls whether the phone/SMS login mode is shown on
+	// the login page. Pointer so an unset key defaults to false (Phase 1
+	// ships behind this flag until Aliyun SMS credentials are provisioned
+	// and the Kratos phone/code flow is verified end-to-end).
+	EnablePhoneLogin *bool `mapstructure:"enable_phone_login"`
 	// AnnouncementsMax caps how many rows the workspace announcements list
 	// returns. Pointer so an unset key defaults to 5.
 	AnnouncementsMax *int `mapstructure:"announcements_max"`
@@ -442,6 +447,15 @@ func GetEnableLoginWithGoogle() bool {
 		return true
 	}
 	return *AppConfig.Frontend.EnableLoginWithGoogle
+}
+
+// GetEnablePhoneLogin returns [frontend].enable_phone_login, defaulting to
+// false when unset.
+func GetEnablePhoneLogin() bool {
+	if AppConfig.Frontend.EnablePhoneLogin == nil {
+		return false
+	}
+	return *AppConfig.Frontend.EnablePhoneLogin
 }
 
 // GetAnnouncementsMax returns [frontend].announcements_max, defaulting to 5

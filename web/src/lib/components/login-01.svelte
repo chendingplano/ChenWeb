@@ -8,10 +8,13 @@
 	// This page implements three modes: login, signup, forgot password
 	// (or three pages). This is controlled by the "mode" variable.
 
-	// Populated on mount from GET /api/config; both default to true so the
-	// buttons stay visible if the fetch fails.
+	// Populated on mount from GET /api/config; the OAuth flags default to
+	// true so the buttons stay visible if the fetch fails. Phone login
+	// defaults to false (Phase 1, gated until Aliyun SMS credentials and the
+	// Kratos phone/code flow are confirmed working end-to-end).
 	let enableLoginWithGithub = $state(true);
 	let enableLoginWithGoogle = $state(true);
+	let enablePhoneLogin = $state(false);
 
 	onMount(async () => {
 		try {
@@ -20,6 +23,7 @@
 				const data = await res.json();
 				enableLoginWithGithub = data.enable_login_with_github ?? true;
 				enableLoginWithGoogle = data.enable_login_with_google ?? true;
+				enablePhoneLogin = data.enable_phone_login ?? false;
 			}
 		} catch (err) {
 			console.error('Failed to load config:', err);
@@ -38,6 +42,17 @@
 	let newPassword = $state('');
 	let newPasswordConfirm = $state('');
 
+	// Phone login (Phase 1: Chinese mobile numbers only)
+	const cnPhonePattern = /^1[3-9]\d{9}$/;
+	let phone = $state('');
+	let phoneCode = $state('');
+	let phoneStep = $state<'enter-phone' | 'enter-code'>('enter-phone');
+	let phoneFlowId = $state('');
+	let phoneFlowType = $state('');
+	let phoneSending = $state(false);
+	let phoneCooldownSeconds = $state(0);
+	let phoneCooldownTimer: ReturnType<typeof setInterval> | undefined;
+
 	async function getErrorMessage(res: Response): Promise<string> {
 		try {
 			const data = await res.json();
@@ -47,8 +62,7 @@
 		}
 	}
 
-	async function handleEmailLogin(event: SubmitEvent) {
-		event.preventDefault();
+	async function handleEmailLogin() {
 		try {
 			const res = await fetch('/auth/email/login', {
 				method: 'POST',
@@ -80,8 +94,7 @@
 		}
 	}
 
-	async function handleEmailSignup(event: SubmitEvent) {
-		event.preventDefault();
+	async function handleEmailSignup() {
 		/*
     const res = await fetch("/auth/email/signup", {
       method: "POST",
@@ -123,59 +136,81 @@
 		}
 	}
 
-	async function handleForgotPassword(event: SubmitEvent) {
-		event.preventDefault();
-		const res = await fetch('/auth/recovery', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ email })
-		});
-		if (res.ok) {
-			const data = await res.json();
-			recoveryFlowId = data.flow_id;
-			mode = 'forgot-code';
-		} else {
-			alert(await getErrorMessage(res));
+	async function handleForgotPassword() {
+		console.log('[login-01] handleForgotPassword', { email });
+		if (!email) {
+			alert('Please enter your email address.');
+			return;
+		}
+		try {
+			const res = await fetch('/auth/recovery', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ email })
+			});
+			if (res.ok) {
+				const data = await res.json();
+				recoveryFlowId = data.flow_id;
+				mode = 'forgot-code';
+			} else {
+				alert(await getErrorMessage(res));
+			}
+		} catch (err) {
+			alert(`Network error: ${err}`);
 		}
 	}
 
-	async function handleRecoveryCode(event: SubmitEvent) {
-		event.preventDefault();
-		const res = await fetch('/auth/recovery', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ email, flow_id: recoveryFlowId, code: recoveryCode })
+	async function handleRecoveryCode() {
+		console.log('[login-01] handleRecoveryCode', {
+			email,
+			hasFlowId: Boolean(recoveryFlowId),
+			hasCode: Boolean(recoveryCode)
 		});
-		if (res.ok) {
-			mode = 'forgot-reset';
-		} else {
-			alert(await getErrorMessage(res));
+		try {
+			const res = await fetch('/auth/recovery', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ email, flow_id: recoveryFlowId, code: recoveryCode })
+			});
+			if (res.ok) {
+				mode = 'forgot-reset';
+			} else {
+				alert(await getErrorMessage(res));
+			}
+		} catch (err) {
+			alert(`Network error: ${err}`);
 		}
 	}
 
-	async function handleSetNewPassword(event: SubmitEvent) {
-		event.preventDefault();
+	async function handleSetNewPassword() {
+		console.log('[login-01] handleSetNewPassword', {
+			hasFlowId: Boolean(recoveryFlowId)
+		});
 		if (newPassword !== newPasswordConfirm) {
 			alert('Passwords do not match.');
 			return;
 		}
-		const res = await fetch('/auth/recovery/settings', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ password: newPassword })
-		});
-		if (res.ok) {
-			alert('Your password has been reset. Please log in.');
-			recoveryFlowId = '';
-			recoveryCode = '';
-			newPassword = '';
-			newPasswordConfirm = '';
-			mode = 'login';
-		} else {
-			alert(await getErrorMessage(res));
+		try {
+			const res = await fetch('/auth/recovery/settings', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ password: newPassword })
+			});
+			if (res.ok) {
+				alert('Your password has been reset. Please log in.');
+				recoveryFlowId = '';
+				recoveryCode = '';
+				newPassword = '';
+				newPasswordConfirm = '';
+				mode = 'login';
+			} else {
+				alert(await getErrorMessage(res));
+			}
+		} catch (err) {
+			alert(`Network error: ${err}`);
 		}
 	}
 
@@ -190,16 +225,104 @@
 	function switchToForgot() {
 		mode = 'forgot';
 	}
+
+	function switchToPhone() {
+		phone = '';
+		phoneCode = '';
+		phoneStep = 'enter-phone';
+		phoneFlowId = '';
+		phoneFlowType = '';
+		mode = 'phone';
+	}
+
+	function startPhoneCooldown() {
+		phoneCooldownSeconds = 60;
+		if (phoneCooldownTimer) clearInterval(phoneCooldownTimer);
+		phoneCooldownTimer = setInterval(() => {
+			phoneCooldownSeconds -= 1;
+			if (phoneCooldownSeconds <= 0 && phoneCooldownTimer) {
+				clearInterval(phoneCooldownTimer);
+				phoneCooldownTimer = undefined;
+			}
+		}, 1000);
+	}
+
+	async function handleSendPhoneCode() {
+		if (!cnPhonePattern.test(phone)) {
+			alert('Please enter a valid Chinese mobile number (11 digits, starting with 1).');
+			return;
+		}
+		phoneSending = true;
+		try {
+			const res = await fetch('/auth/phone/send-code', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ phone })
+			});
+			const data = await res.json();
+			if (res.ok) {
+				phoneFlowId = data.flow_id;
+				phoneFlowType = data.flow_type;
+				phoneStep = 'enter-code';
+				startPhoneCooldown();
+			} else {
+				alert(data.message || 'Failed to send code.');
+			}
+		} catch (err) {
+			alert(`Network error: ${err}`);
+		} finally {
+			phoneSending = false;
+		}
+	}
+
+	async function handleVerifyPhoneCode() {
+		if (!phoneCode) {
+			alert('Please enter the code you received.');
+			return;
+		}
+		try {
+			const res = await fetch('/auth/phone/verify', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					phone,
+					code: phoneCode,
+					flow_id: phoneFlowId,
+					flow_type: phoneFlowType
+				})
+			});
+			const data = await res.json();
+			if (res.ok) {
+				window.location.href = data.redirect_url || '/sidebar-01';
+			} else {
+				alert(data.message || 'Invalid or expired code.');
+			}
+		} catch (err) {
+			alert(`Network error: ${err}`);
+		}
+	}
 </script>
 
 <div class="form-container">
 	<p class="title">
-		{mode === 'login' ? 'Welcome to DeepDocs' : 'Reset your password'}
+		{#if mode === 'login'}
+			Welcome to DeepDocs
+		{:else if mode === 'phone'}
+			Log in with Phone
+		{:else}
+			Reset your password
+		{/if}
 	</p>
 
 	{#if mode === 'login'}
 		<!-- Login Form -->
-		<form class="form" onsubmit={handleEmailLogin}>
+		<form
+			class="form"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void handleEmailLogin();
+			}}
+		>
 			<input
 				bind:value={email}
 				type="email"
@@ -221,8 +344,14 @@
 					>Forgot Password?</button
 				>
 			</p>
-			<button class="form-btn">Log in</button>
+			<button type="submit" class="form-btn">Log in</button>
 		</form>
+
+		{#if enablePhoneLogin}
+			<p class="sign-up-label">
+				<button class="sign-up-link" onclick={switchToPhone}>Log in with Phone</button>
+			</p>
+		{/if}
 
 		{#if children}
 			{@render children()}
@@ -234,7 +363,13 @@
 		</p>
 	{:else if mode === 'signup'}
 		<!-- Sign Up Form -->
-		<form class="form" onsubmit={handleEmailSignup}>
+		<form
+			class="form"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void handleEmailSignup();
+			}}
+		>
 			<input
 				bind:value={first_name}
 				type="text"
@@ -264,7 +399,7 @@
 				autocomplete="new-password"
 				required
 			/>
-			<button class="form-btn">Sign up</button>
+			<button type="submit" class="form-btn">Sign up</button>
 		</form>
 
 		<p class="sign-up-label">
@@ -274,7 +409,13 @@
 		</p>
 	{:else if mode == 'forgot'}
 		<!-- Forgot Password: request a recovery code -->
-		<form class="form" onsubmit={handleForgotPassword}>
+		<form
+			class="form"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void handleForgotPassword();
+			}}
+		>
 			<input
 				bind:value={email}
 				type="email"
@@ -283,7 +424,15 @@
 				autocomplete="email"
 				required
 			/>
-			<button class="form-btn">Send Recovery Code</button>
+			<button
+				type="button"
+				class="form-btn"
+				onclick={() => {
+					void handleForgotPassword();
+				}}
+			>
+				Send Recovery Code
+			</button>
 		</form>
 
 		<p class="sign-up-label">
@@ -292,7 +441,13 @@
 		</p>
 	{:else if mode == 'forgot-code'}
 		<!-- Forgot Password: enter the code emailed to the user -->
-		<form class="form" onsubmit={handleRecoveryCode}>
+		<form
+			class="form"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void handleRecoveryCode();
+			}}
+		>
 			<input
 				bind:value={recoveryCode}
 				type="text"
@@ -301,7 +456,15 @@
 				autocomplete="one-time-code"
 				required
 			/>
-			<button class="form-btn">Verify Code</button>
+			<button
+				type="button"
+				class="form-btn"
+				onclick={() => {
+					void handleRecoveryCode();
+				}}
+			>
+				Verify Code
+			</button>
 		</form>
 
 		<p class="sign-up-label">
@@ -310,7 +473,13 @@
 		</p>
 	{:else if mode == 'forgot-reset'}
 		<!-- Forgot Password: set a new password -->
-		<form class="form" onsubmit={handleSetNewPassword}>
+		<form
+			class="form"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void handleSetNewPassword();
+			}}
+		>
 			<input
 				bind:value={newPassword}
 				type="password"
@@ -327,8 +496,71 @@
 				autocomplete="new-password"
 				required
 			/>
-			<button class="form-btn">Reset Password</button>
+			<button
+				type="button"
+				class="form-btn"
+				onclick={() => {
+					void handleSetNewPassword();
+				}}
+			>
+				Reset Password
+			</button>
 		</form>
+	{:else if mode === 'phone' && enablePhoneLogin}
+		<!-- Login with Phone (Phase 1: Chinese mobile numbers) -->
+		{#if phoneStep === 'enter-phone'}
+			<form
+				class="form"
+				onsubmit={(event) => {
+					event.preventDefault();
+					void handleSendPhoneCode();
+				}}
+			>
+				<input
+					bind:value={phone}
+					type="tel"
+					class="input"
+					placeholder="Mobile number (e.g. 13812345678)"
+					autocomplete="tel"
+					required
+				/>
+				<button type="submit" class="form-btn" disabled={phoneSending}>
+					{phoneSending ? 'Sending...' : 'Send code'}
+				</button>
+			</form>
+		{:else}
+			<form
+				class="form"
+				onsubmit={(event) => {
+					event.preventDefault();
+					void handleVerifyPhoneCode();
+				}}
+			>
+				<input
+					bind:value={phoneCode}
+					type="text"
+					class="input"
+					placeholder="Enter the code you received"
+					autocomplete="one-time-code"
+					required
+				/>
+				<button type="submit" class="form-btn">Verify code</button>
+				<button
+					type="button"
+					class="page-link-label"
+					disabled={phoneCooldownSeconds > 0}
+					onclick={() => {
+						void handleSendPhoneCode();
+					}}
+				>
+					{phoneCooldownSeconds > 0 ? `Resend code (${phoneCooldownSeconds}s)` : 'Resend code'}
+				</button>
+			</form>
+		{/if}
+
+		<p class="sign-up-label">
+			<button class="sign-up-link" onclick={switchToLogin}>Back to login</button>
+		</p>
 	{/if}
 
 	{#if enableLoginWithGithub || enableLoginWithGoogle}

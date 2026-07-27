@@ -18,6 +18,7 @@ type ConfigResponse struct {
 	Auth                  AuthConfig              `json:"auth"`
 	EnableLoginWithGithub bool                    `json:"enable_login_with_github"`
 	EnableLoginWithGoogle bool                    `json:"enable_login_with_google"`
+	EnablePhoneLogin      bool                    `json:"enable_phone_login"`
 }
 
 type ServerConfig struct {
@@ -76,6 +77,7 @@ func GetConfig(c echo.Context) error {
 		},
 		EnableLoginWithGithub: config.GetEnableLoginWithGithub(),
 		EnableLoginWithGoogle: config.GetEnableLoginWithGoogle(),
+		EnablePhoneLogin:      config.GetEnablePhoneLogin(),
 	}
 
 	return c.JSON(http.StatusOK, response)

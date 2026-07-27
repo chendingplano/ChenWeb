@@ -150,6 +150,7 @@ func RegisterRoutes(e *echo.Echo) error {
 				"/":               true,
 				"/semos":          true, // Main page - accessible pre-login
 				"/login":          true,
+				"/verification":   true,
 				"/example-login":  true,
 				"/oauth/callback": true, // Public route for password reset and OAuth callbacks
 				"/verify-2fa":     true, // 2FA verification page (user has AAL1 session but needs AAL2)
