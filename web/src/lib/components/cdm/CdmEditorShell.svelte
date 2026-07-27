@@ -205,12 +205,6 @@
 	function startDrag(e: MouseEvent) {
 		dragStartX = e.clientX;
 		dragStartWidth = leftWidth;
-		console.log('[cdm-shell] resize-start', {
-			dragStartX,
-			dragStartWidth,
-			splitWidth: splitEl?.clientWidth ?? null,
-			previewMinWidth: PREVIEW_WIDTH_MIN
-		});
 		document.addEventListener('mousemove', onDragMove);
 		document.addEventListener('mouseup', onDragEnd);
 		e.preventDefault();
@@ -223,17 +217,8 @@
 				? Math.max(LEFT_WIDTH_MIN, splitWidth - DIVIDER_WIDTH - PREVIEW_WIDTH_MIN)
 				: dragStartWidth + delta;
 		leftWidth = Math.max(LEFT_WIDTH_MIN, Math.min(maxLeftWidth, dragStartWidth + delta));
-		console.log('[cdm-shell] resize-move', {
-			clientX: e.clientX,
-			delta,
-			leftWidth,
-			splitWidth,
-			maxLeftWidth,
-			previewWidth: splitWidth > 0 ? splitWidth - DIVIDER_WIDTH - leftWidth : null
-		});
 	}
 	function onDragEnd() {
-		console.log('[cdm-shell] resize-end', { leftWidth, splitWidth: splitEl?.clientWidth ?? null });
 		document.removeEventListener('mousemove', onDragMove);
 		document.removeEventListener('mouseup', onDragEnd);
 	}

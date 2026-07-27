@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import BlockList from './BlockList.svelte';
 	import type { Document } from './types.js';
 	import {
@@ -57,6 +58,8 @@
 	let savedNote = $state<string | null>(null);
 
 	let previewError = $state<string | null>(null);
+	let livePreviewTimer: ReturnType<typeof setTimeout> | null = null;
+	let livePreviewInFlight = $state(false);
 	let hasGeneratedPreviewStructure = $derived(
 		doc.blocks.length === 0 &&
 			(!!doc.title.trim() ||
@@ -91,12 +94,14 @@
 		previewError = null;
 	}
 
-	function adoptSavedDocument(result: Document, note: string) {
+	function adoptSavedDocument(result: Document, note?: string) {
 		doc.document_key = result.document_key;
 		doc.content_version = result.content_version;
 		doc.edit_version = result.edit_version;
 		savedSnapshot = JSON.stringify(doc);
-		savedNote = note;
+		if (note) {
+			savedNote = note;
+		}
 		clearPreviewSurface();
 	}
 
@@ -209,15 +214,19 @@
 		}
 	}
 
-	async function preview() {
+	async function syncPreview(showSaveNote = true) {
 		if (!doc.document_key) return;
 		previewLoading = true;
+		livePreviewInFlight = true;
 		previewError = null;
 		try {
 			if (dirty) {
 				clearSaveFeedback();
 				const saved = await saveDocument(doc);
-				adoptSavedDocument(saved, `Saved current version v${saved.content_version}.`);
+				adoptSavedDocument(
+					saved,
+					showSaveNote ? `Saved current version v${saved.content_version}.` : undefined
+				);
 			}
 			const result = await renderDocument(doc.document_key);
 			previewPages = result.pages;
@@ -237,8 +246,56 @@
 			}
 		} finally {
 			previewLoading = false;
+			livePreviewInFlight = false;
 		}
 	}
+
+	async function preview() {
+		await syncPreview(true);
+	}
+
+	function clearLivePreviewTimer() {
+		if (livePreviewTimer !== null) {
+			clearTimeout(livePreviewTimer);
+			livePreviewTimer = null;
+		}
+	}
+
+	function scheduleLivePreview(delayMs: number) {
+		if (isNew || !doc.document_key || frozenMessage) return;
+		clearLivePreviewTimer();
+		livePreviewTimer = setTimeout(() => {
+			livePreviewTimer = null;
+			void syncPreview(false);
+		}, delayMs);
+	}
+
+	onDestroy(() => {
+		clearLivePreviewTimer();
+	});
+
+	$effect(() => {
+		const key = doc.document_key;
+		const snapshot = JSON.stringify(doc);
+		const isDirty = dirty;
+		const isFrozen = !!frozenMessage;
+		if (!key || isFrozen) {
+			clearLivePreviewTimer();
+			return;
+		}
+		if (!previewPages || previewPages.length === 0) {
+			scheduleLivePreview(0);
+			return;
+		}
+		if (isDirty) {
+			scheduleLivePreview(500);
+			return;
+		}
+		if (!livePreviewInFlight && previewVersion !== doc.content_version) {
+			scheduleLivePreview(0);
+		}
+		void snapshot;
+	});
 
 	function formatDate(value: string) {
 		return new Intl.DateTimeFormat(undefined, {
