@@ -195,23 +195,45 @@
 	// dashboard.svelte's rail/shelf resize already uses ----------
 	const LEFT_WIDTH_DEFAULT = 1140;
 	const LEFT_WIDTH_MIN = 380;
-	const LEFT_WIDTH_MAX = 1500;
+	const PREVIEW_WIDTH_MIN = 120;
+	const DIVIDER_WIDTH = 6;
 	let leftWidth = $state(LEFT_WIDTH_DEFAULT);
 	let dragStartX = 0;
 	let dragStartWidth = 0;
+	let splitEl = $state<HTMLElement | null>(null);
 
 	function startDrag(e: MouseEvent) {
 		dragStartX = e.clientX;
 		dragStartWidth = leftWidth;
+		console.log('[cdm-shell] resize-start', {
+			dragStartX,
+			dragStartWidth,
+			splitWidth: splitEl?.clientWidth ?? null,
+			previewMinWidth: PREVIEW_WIDTH_MIN
+		});
 		document.addEventListener('mousemove', onDragMove);
 		document.addEventListener('mouseup', onDragEnd);
 		e.preventDefault();
 	}
 	function onDragMove(e: MouseEvent) {
 		const delta = e.clientX - dragStartX;
-		leftWidth = Math.max(LEFT_WIDTH_MIN, Math.min(LEFT_WIDTH_MAX, dragStartWidth + delta));
+		const splitWidth = splitEl?.clientWidth ?? 0;
+		const maxLeftWidth =
+			splitWidth > 0
+				? Math.max(LEFT_WIDTH_MIN, splitWidth - DIVIDER_WIDTH - PREVIEW_WIDTH_MIN)
+				: dragStartWidth + delta;
+		leftWidth = Math.max(LEFT_WIDTH_MIN, Math.min(maxLeftWidth, dragStartWidth + delta));
+		console.log('[cdm-shell] resize-move', {
+			clientX: e.clientX,
+			delta,
+			leftWidth,
+			splitWidth,
+			maxLeftWidth,
+			previewWidth: splitWidth > 0 ? splitWidth - DIVIDER_WIDTH - leftWidth : null
+		});
 	}
 	function onDragEnd() {
+		console.log('[cdm-shell] resize-end', { leftWidth, splitWidth: splitEl?.clientWidth ?? null });
 		document.removeEventListener('mousemove', onDragMove);
 		document.removeEventListener('mouseup', onDragEnd);
 	}
@@ -240,7 +262,7 @@
 			No knowledge stores available. Create one under Knowledge Base first.
 		</p>
 	{:else}
-		<div class="cdm-shell-split">
+		<div class="cdm-shell-split" bind:this={splitEl}>
 			<div class="cdm-shell-left" style:width="{leftWidth}px">
 				{#if mode === 'list'}
 					<DocumentListView

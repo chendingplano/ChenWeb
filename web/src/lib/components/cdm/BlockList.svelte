@@ -156,16 +156,26 @@
 			{/if}
 		</div>
 
-		{#if editable}
+		{#if editable && index === blocks.length - 1}
 			<div class="cdm-insert-row">
 				<InsertControl
 					bind:choice={insertTypeChoice}
 					onInsert={() => insertAt(index + 1)}
-					label="Insert here"
+					label="Insert at bottom"
 				/>
 			</div>
 		{/if}
 	{/each}
+
+	{#if editable && blocks.length === 0}
+		<div class="cdm-insert-row">
+			<InsertControl
+				bind:choice={insertTypeChoice}
+				onInsert={() => insertAt(0)}
+				label="Insert at bottom"
+			/>
+		</div>
+	{/if}
 
 	{#if blocks.length === 0}
 		<p class="cdm-empty">{emptyMessage}</p>
