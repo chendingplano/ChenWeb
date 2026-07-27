@@ -51,8 +51,14 @@
 	let {
 		blocks = $bindable(),
 		editable = true,
-		blockErrors = new Map<string, string[]>()
-	}: { blocks: Block[]; editable?: boolean; blockErrors?: Map<string, string[]> } = $props();
+		blockErrors = new Map<string, string[]>(),
+		emptyMessage = 'This document has no blocks yet.'
+	}: {
+		blocks: Block[];
+		editable?: boolean;
+		blockErrors?: Map<string, string[]>;
+		emptyMessage?: string;
+	} = $props();
 
 	// Provided to every nested BlockView so a block created anywhere in the
 	// tree (a new list item, say) gets an id unique against the *whole*
@@ -172,7 +178,7 @@
 	{/each}
 
 	{#if blocks.length === 0}
-		<p class="cdm-empty">This document has no blocks yet.</p>
+		<p class="cdm-empty">{emptyMessage}</p>
 	{/if}
 </div>
 

@@ -93,7 +93,11 @@
 
 	let createTarget: CreateTarget | null = $derived(
 		activeStore
-			? { tenantId: activeStore.tenant_id ?? '', ksStoreId: activeStore.id, ksName: activeStore.ks_name }
+			? {
+					tenantId: activeStore.tenant_id ?? '',
+					ksStoreId: activeStore.id,
+					ksName: activeStore.ks_name
+				}
 			: null
 	);
 
@@ -281,11 +285,7 @@
 
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-			<div
-				class="cdm-shell-divider"
-				onmousedown={startDrag}
-				title="Drag to resize"
-			></div>
+			<div class="cdm-shell-divider" onmousedown={startDrag} title="Drag to resize"></div>
 
 			<div class="cdm-shell-right">
 				{#if previewLoading}
@@ -375,7 +375,7 @@
 
 	.cdm-shell-right {
 		flex: 1 1 auto;
-		min-width: 240px;
+		min-width: 0;
 		overflow-y: auto;
 		background: var(--cdm-surface);
 	}
@@ -405,8 +405,18 @@
 		flex-direction: column;
 		gap: 16px;
 		align-items: center;
+		width: 100%;
+		min-width: 0;
+		box-sizing: border-box;
+	}
+	.cdm-shell-preview-page {
+		width: min(100%, 816px);
+		min-width: 0;
 	}
 	.cdm-shell-preview-page :global(svg) {
+		display: block;
+		width: 100%;
+		height: auto;
 		max-width: 100%;
 		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
 	}

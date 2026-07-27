@@ -94,6 +94,14 @@
 	let savedNote = $state<string | null>(null);
 
 	let previewError = $state<string | null>(null);
+	let hasGeneratedPreviewStructure = $derived(
+		doc.blocks.length === 0 &&
+			(!!doc.title.trim() ||
+				!!doc.metadata.doc_type ||
+				!!doc.metadata.rendering_type ||
+				(doc.metadata.authors?.length ?? 0) > 0 ||
+				!!doc.metadata.version)
+	);
 
 	// Violations/conflicts with no resolvable block id (e.g. a block missing
 	// its own id, which per extractBlockId's doc comment has nothing to
@@ -293,7 +301,11 @@
 				type="button"
 				onclick={publish}
 				disabled={publishing || !!frozenMessage || dirty || isNew}
-				title={isNew ? 'Save the document first' : dirty ? 'Save your changes before publishing' : undefined}
+				title={isNew
+					? 'Save the document first'
+					: dirty
+						? 'Save your changes before publishing'
+						: undefined}
 			>
 				{publishing ? 'Publishing…' : 'Publish'}
 			</button>
@@ -332,7 +344,14 @@
 		</div>
 	{/if}
 
-	<BlockList bind:blocks={doc.blocks} editable={!frozenMessage} {blockErrors} />
+	<BlockList
+		bind:blocks={doc.blocks}
+		editable={!frozenMessage}
+		{blockErrors}
+		emptyMessage={hasGeneratedPreviewStructure
+			? 'This document has no editable blocks yet. The preview may still show generated title and outline pages.'
+			: 'This document has no blocks yet.'}
+	/>
 
 	{#if previewError}
 		<div class="cdm-banner cdm-banner--error">{previewError}</div>
@@ -350,9 +369,7 @@
 			</p>
 			<div class="cdm-confirm-actions">
 				<button type="button" onclick={cancelCreate}>Cancel</button>
-				<button type="button" class="cdm-confirm-primary" onclick={confirmCreate}>
-					Create
-				</button>
+				<button type="button" class="cdm-confirm-primary" onclick={confirmCreate}> Create </button>
 			</div>
 		</div>
 	</div>
