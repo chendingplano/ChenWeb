@@ -9,7 +9,7 @@
 import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
-	import DocumentListView from '$lib/components/cdm/DocumentListView.svelte';
+	import CdmEditorShell from '$lib/components/cdm/CdmEditorShell.svelte';
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
@@ -147,7 +147,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
 		activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
 		activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
-		activeMenu?.childId !== 'sysadmin-doc-review-logs'
+		activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
+		activeMenu?.childId !== 'cdm-editor'
 	);
 </script>
 
@@ -213,7 +214,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		{:else if activeMenu?.childId === 'openmetadata'}
 			<OpenMetadataWorkspace {darkMode} />
 		{:else if activeMenu?.childId === 'cdm-editor'}
-			<DocumentListView {darkMode} />
+			<CdmEditorShell {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-logs'}
 			<JetStreamLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-events'}

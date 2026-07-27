@@ -114,6 +114,16 @@ export interface CreateDocumentOptions {
 }
 
 /**
+ * Where a not-yet-created document (DocumentEditor's key-less "New Document"
+ * case) will be created, plus the display name its create-confirmation
+ * dialog names so the author knows which knowledge store they are committing
+ * to before the first save actually calls createDocument.
+ */
+export interface CreateTarget extends CreateDocumentOptions {
+	ksName: string;
+}
+
+/**
  * Creates a document. doc.document_key is ignored — keys are
  * server-allocated from the title (design D5) — and the returned document
  * carries the real one.

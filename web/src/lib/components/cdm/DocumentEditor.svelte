@@ -10,6 +10,15 @@
 	// loading it. structuredClone matches the existing project convention
 	// (inputs-mgmt-view.svelte, kb-input-metadata.js) for taking a private
 	// mutable copy of data that came from elsewhere.
+	//
+	// initialDocument.document_key === '' is a second, deliberate case: a
+	// brand-new document the host (CdmEditorShell) built purely in memory
+	// for "New Document," never sent to the server. Nothing above this
+	// component has called createDocument yet -- Save is what does that, and
+	// only after the author confirms it in the create dialog below, naming
+	// the knowledge store it commits to (design D2's "creation allocates a
+	// document_key and writes kb.inputs immediately" still holds; what moved
+	// is *when* the UI decides to call it, not what the API does).
 	import BlockList from './BlockList.svelte';
 	import type { Document } from './types.js';
 	import {
@@ -17,17 +26,46 @@
 		publishDocument,
 		renderDocument,
 		getDocument,
+		createDocument,
 		CdmApiError,
 		CdmStaleVersionError,
 		CdmFrozenError,
 		CdmValidationError,
-		CdmBlockConflictError
+		CdmBlockConflictError,
+		type CreateTarget
 	} from './cdm-client.js';
 	import { attributeToBlocks, type BlockAttribution } from './document-editor-ops.js';
 
-	let { initialDocument }: { initialDocument: Document } = $props();
+	let {
+		initialDocument,
+		createTarget = null,
+		onCreated,
+		previewPages = $bindable(null),
+		previewVersion = $bindable(null),
+		previewLoading = $bindable(false)
+	}: {
+		initialDocument: Document;
+		// Required to save a new (key-less) document; unused once it has a
+		// document_key. Null-checked defensively in confirmCreate, but every
+		// real host always supplies one before letting Save be clicked, since
+		// CdmEditorShell never opens "New Document" without an active store.
+		createTarget?: CreateTarget | null;
+		// Fires once, right after a brand-new document's first save succeeds
+		// and it has a real document_key. Lets the host (e.g. refresh its
+		// document list) react without polling doc.document_key itself.
+		onCreated?: (key: string) => void;
+		// Bindable rather than a callback: the host (CdmEditorShell) docks
+		// these in a persistent pane instead of this component's own overlay
+		// (removed below), and $bindable is the same "child mutates, parent
+		// owns the value" idiom BlockList already uses for `blocks`.
+		previewPages?: string[] | null;
+		previewVersion?: number | null;
+		previewLoading?: boolean;
+	} = $props();
 
 	let doc = $state(structuredClone(initialDocument));
+	let isNew = $derived(doc.document_key === '');
+	let showCreateConfirm = $state(false);
 
 	// dirty compares against a JSON snapshot taken at load/save time rather
 	// than a dedicated dirty flag flipped by every mutation: BlockList (and
@@ -43,7 +81,6 @@
 
 	let saving = $state(false);
 	let publishing = $state(false);
-	let previewing = $state(false);
 
 	let staleError = $state<CdmStaleVersionError | null>(null);
 	// Once set, this document is published (D8): every mutating BlockList
@@ -56,8 +93,6 @@
 	let attributions = $state<BlockAttribution[]>([]);
 	let savedNote = $state<string | null>(null);
 
-	let previewPages = $state<string[] | null>(null);
-	let previewVersion = $state<number | null>(null);
 	let previewError = $state<string | null>(null);
 
 	// Violations/conflicts with no resolvable block id (e.g. a block missing
@@ -82,8 +117,16 @@
 		savedNote = null;
 	}
 
+	// Save on a brand-new document does not call the API directly -- it opens
+	// the confirm dialog below, which is what actually calls createDocument
+	// (confirmCreate). Every existing-document save still goes straight
+	// through, unchanged.
 	async function save() {
 		if (frozenMessage) return;
+		if (isNew) {
+			showCreateConfirm = true;
+			return;
+		}
 		saving = true;
 		clearSaveFeedback();
 		try {
@@ -108,6 +151,47 @@
 				genericError = 'This document has validation problems (see below).';
 			} else if (e instanceof CdmBlockConflictError) {
 				attributions = attributeToBlocks([e.message]);
+			} else if (e instanceof CdmApiError) {
+				genericError = e.message;
+			} else {
+				genericError = String(e);
+			}
+		} finally {
+			saving = false;
+		}
+	}
+
+	function cancelCreate() {
+		showCreateConfirm = false;
+	}
+
+	async function confirmCreate() {
+		if (!createTarget) {
+			genericError = 'No knowledge store is active — cannot create a document.';
+			showCreateConfirm = false;
+			return;
+		}
+		showCreateConfirm = false;
+		saving = true;
+		clearSaveFeedback();
+		try {
+			const created = await createDocument(doc, {
+				tenantId: createTarget.tenantId,
+				ksStoreId: createTarget.ksStoreId
+			});
+			// Adopt the server-allocated key/version the same conservative way
+			// save() adopts content_version: doc.blocks/title stay exactly what
+			// was just sent, since they are already validated and a full
+			// replacement risks clobbering an in-flight edit.
+			doc.document_key = created.document_key;
+			doc.content_version = created.content_version;
+			savedSnapshot = JSON.stringify(doc);
+			savedNote = `Created as ${created.document_key} (version ${created.content_version}).`;
+			onCreated?.(created.document_key);
+		} catch (e) {
+			if (e instanceof CdmValidationError) {
+				attributions = attributeToBlocks(e.violations);
+				genericError = 'This document has validation problems (see below).';
 			} else if (e instanceof CdmApiError) {
 				genericError = e.message;
 			} else {
@@ -160,7 +244,12 @@
 		// D9); if `dirty`, that is deliberately not what's on screen, and the
 		// panel below says so rather than silently showing stale content as
 		// if it were current.
-		previewing = true;
+		//
+		// Guarded defensively even though the Preview button is disabled for
+		// isNew below -- renderDocument needs a real document_key and has none
+		// to call with yet.
+		if (!doc.document_key) return;
+		previewLoading = true;
 		previewError = null;
 		try {
 			const result = await renderDocument(doc.document_key);
@@ -169,13 +258,8 @@
 		} catch (e) {
 			previewError = e instanceof CdmApiError ? e.message : String(e);
 		} finally {
-			previewing = false;
+			previewLoading = false;
 		}
-	}
-
-	function closePreview() {
-		previewPages = null;
-		previewVersion = null;
 	}
 </script>
 
@@ -188,19 +272,28 @@
 			disabled={!!frozenMessage}
 			placeholder="Document title"
 		/>
-		<span class="cdm-version-badge">v{doc.content_version}{dirty ? ' · unsaved changes' : ''}</span>
+		<span class="cdm-version-badge">
+			{isNew ? 'not yet saved' : `v${doc.content_version}`}{dirty && !isNew
+				? ' · unsaved changes'
+				: ''}
+		</span>
 		<div class="cdm-editor-actions">
-			<button type="button" onclick={preview} disabled={previewing}>
-				{previewing ? 'Rendering…' : 'Preview'}
+			<button
+				type="button"
+				onclick={preview}
+				disabled={previewLoading || isNew}
+				title={isNew ? 'Save the document first' : undefined}
+			>
+				{previewLoading ? 'Rendering…' : 'Preview'}
 			</button>
 			<button type="button" onclick={save} disabled={saving || !!frozenMessage}>
-				{saving ? 'Saving…' : 'Save'}
+				{saving ? 'Saving…' : isNew ? 'Save…' : 'Save'}
 			</button>
 			<button
 				type="button"
 				onclick={publish}
-				disabled={publishing || !!frozenMessage || dirty}
-				title={dirty ? 'Save your changes before publishing' : undefined}
+				disabled={publishing || !!frozenMessage || dirty || isNew}
+				title={isNew ? 'Save the document first' : dirty ? 'Save your changes before publishing' : undefined}
 			>
 				{publishing ? 'Publishing…' : 'Publish'}
 			</button>
@@ -244,26 +337,26 @@
 	{#if previewError}
 		<div class="cdm-banner cdm-banner--error">{previewError}</div>
 	{/if}
+</div>
 
-	{#if previewPages}
-		<div class="cdm-preview-overlay">
-			<div class="cdm-preview-panel">
-				<div class="cdm-preview-panel-header">
-					<span>
-						Preview — version {previewVersion}
-						{#if dirty}(unsaved changes exist; save to update this preview){/if}
-					</span>
-					<button type="button" onclick={closePreview}>Close</button>
-				</div>
-				<div class="cdm-preview-pages">
-					{#each previewPages as pageSvg, i (i)}
-						<div class="cdm-preview-page">{@html pageSvg}</div>
-					{/each}
-				</div>
+{#if showCreateConfirm}
+	<div class="cdm-confirm-overlay">
+		<div class="cdm-confirm-panel">
+			<h2>Create this document?</h2>
+			<p>
+				This creates a new document titled <strong>{doc.title || '(untitled)'}</strong> in the
+				knowledge store
+				<strong>{createTarget?.ksName ?? '—'}</strong>.
+			</p>
+			<div class="cdm-confirm-actions">
+				<button type="button" onclick={cancelCreate}>Cancel</button>
+				<button type="button" class="cdm-confirm-primary" onclick={confirmCreate}>
+					Create
+				</button>
 			</div>
 		</div>
-	{/if}
-</div>
+	</div>
+{/if}
 
 <style>
 	.cdm-document-editor {
@@ -324,7 +417,7 @@
 		border: 1px solid rgba(220, 38, 38, 0.4);
 		color: #b91c1c;
 	}
-	.cdm-preview-overlay {
+	.cdm-confirm-overlay {
 		position: fixed;
 		inset: 0;
 		background: rgba(0, 0, 0, 0.5);
@@ -333,34 +426,27 @@
 		justify-content: center;
 		z-index: 50;
 	}
-	.cdm-preview-panel {
+	.cdm-confirm-panel {
 		background: var(--cdm-surface, #fff);
-		width: min(900px, 92vw);
-		height: min(85vh, 1100px);
+		width: min(440px, 92vw);
 		border-radius: 8px;
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
+		padding: 20px;
 	}
-	.cdm-preview-panel-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 10px 14px;
-		border-bottom: 1px solid rgba(127, 127, 127, 0.3);
-		font-size: 0.85em;
+	.cdm-confirm-panel h2 {
+		margin: 0 0 10px;
+		font-size: 1.05em;
 	}
-	.cdm-preview-pages {
-		flex: 1 1 auto;
-		overflow-y: auto;
-		padding: 16px;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-		align-items: center;
+	.cdm-confirm-panel p {
+		margin: 0 0 16px;
+		font-size: 0.92em;
+		line-height: 1.6;
 	}
-	.cdm-preview-page :global(svg) {
-		max-width: 100%;
-		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+	.cdm-confirm-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+	.cdm-confirm-primary {
+		font-weight: 600;
 	}
 </style>

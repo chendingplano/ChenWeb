@@ -1,38 +1,48 @@
 <script lang="ts">
-	// The CDM Editor main page: the landing surface reached from the
-	// "CDM Editor" workspace app tile (/semos/workspace -> /home3/cdm) and the
-	// hub every authoring action starts from -- pick a knowledge store, start a
-	// document, find an existing one, open it in the editor.
+	// The CDM Editor document list: the browsing half of CdmEditorShell's left
+	// pane (the other half is DocumentEditor, swapped in when a document is
+	// opened or created). Store selection, "New Document," and opening a
+	// document are all owned by the Shell and handed down as props/callbacks
+	// -- this component only renders the list for whatever store it is given.
 	//
-	// This replaced the bridging list task group 8 shipped with the MVP (a bare
-	// <h1> + <ul> store picker + unstyled <table>), which was route wiring
-	// rather than a page. What it does has not changed: same three API calls,
-	// same knowledgeStoreState scoping. What is new is that it is a designed
-	// destination -- theme-aware, with a store selector, title filter, status
-	// filter, and designed empty/loading/error states.
-	//
-	// tenant_id/ks_store_id come from knowledgeStoreState (home3's existing
-	// active-knowledge-store singleton, shared with kb-import-view.svelte and
-	// document-review-view.svelte), not a new selection mechanism:
-	// cdm-client.ts's createDocument/listDocuments already need exactly what
-	// that state holds, and every other home3 feature that needs a tenant
-	// sources it the same way.
-	import { goto } from '$app/navigation';
+	// This replaced two things in turn: task group 8's bridging list (a bare
+	// <h1> + <ul> store picker + unstyled <table>), then a designed
+	// single-pane destination with its own store gate and creation form. Both
+	// the store gate and the creation form moved up into CdmEditorShell (a
+	// compact store dropdown and a "New Document" button that opens the
+	// editor directly, deferring persistence until the author confirms Save)
+	// so this component's only job is: given a store, list its documents.
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
-	import { listKnowledgeStores, type KnowledgeStoreRecord } from '$lib/services/kbService';
-	import { knowledgeStoreState } from '../home3/knowledge-store-state.svelte.js';
-	import { listDocuments, createDocument, type DocumentSummary } from './cdm-client.js';
-	import { SCHEMA_VERSION, type Document } from './types.js';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import type { KnowledgeStoreRecord } from '$lib/services/kbService';
+	import { listDocuments, type DocumentSummary } from './cdm-client.js';
 
-	let { darkMode = true }: { darkMode?: boolean } = $props();
+	let {
+		darkMode = true,
+		activeStore,
+		stores,
+		onChangeStore,
+		onNewDocument,
+		onOpenDocument,
+		refreshKey = 0
+	}: {
+		darkMode?: boolean;
+		activeStore: KnowledgeStoreRecord;
+		stores: KnowledgeStoreRecord[];
+		onChangeStore: (store: KnowledgeStoreRecord) => void;
+		onNewDocument: () => void;
+		onOpenDocument: (key: string) => void;
+		// Bump to force a reload without changing anything else -- e.g. after
+		// a newly-created document's first save, so the list picks it up.
+		refreshKey?: number;
+	} = $props();
 
 	// ---------- Aesthetic tokens: "archival reading room", the palette
 	// inputs-mgmt-view.svelte established for home3's document surfaces ----------
-	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
 	let panelBgAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
 	let inkLine = $derived(darkMode ? '#2A3140' : '#D7CFB8');
@@ -52,44 +62,15 @@
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 
 	// ---------- State ----------
-	let activeStore = $derived(knowledgeStoreState.activeStore);
-
-	let storeOptions = $state<KnowledgeStoreRecord[]>([]);
-	let loadingStores = $state(false);
-	let storeError = $state('');
-
 	let documents = $state<DocumentSummary[]>([]);
 	let loading = $state(false);
 	let loadError = $state('');
 
-	let newTitle = $state('');
-	let creating = $state(false);
-	let createError = $state('');
-
 	let titleFilter = $state('');
 	let statusFilter = $state<'all' | 'draft' | 'published'>('all');
 
-	async function loadStoreOptions() {
-		loadingStores = true;
-		storeError = '';
-		try {
-			const res = await listKnowledgeStores();
-			storeOptions = res.results ?? [];
-		} catch (err) {
-			storeError = err instanceof Error ? err.message : 'Failed to load knowledge stores.';
-		} finally {
-			loadingStores = false;
-		}
-	}
-
-	function pickStore(store: KnowledgeStoreRecord) {
-		knowledgeStoreState.setActiveStore(store);
-	}
-
-	function changeStore() {
-		knowledgeStoreState.setActiveStore(null);
-		if (storeOptions.length === 0) loadStoreOptions();
-	}
+	let searchOpen = $state(false);
+	let searchDraft = $state('');
 
 	async function loadDocuments(tenantId: string) {
 		loading = true;
@@ -104,41 +85,49 @@
 		}
 	}
 
-	// Loads whenever the active store (or its tenant_id) changes, including
-	// the very first time one is picked; re-derives from `activeStore` rather
-	// than a one-time onMount so switching stores refreshes the list too.
+	// Re-derives from activeStore.tenant_id (switching stores refreshes the
+	// list) and refreshKey (an explicit host-forced reload), not a one-time
+	// onMount.
 	$effect(() => {
-		const tenantId = activeStore?.tenant_id;
-		if (tenantId) {
-			loadDocuments(tenantId);
-		} else if (storeOptions.length === 0 && !loadingStores) {
-			loadStoreOptions();
-		}
+		const tenantId = activeStore.tenant_id;
+		void refreshKey;
+		if (tenantId) loadDocuments(tenantId);
 	});
 
-	async function create() {
-		const tenantId = activeStore?.tenant_id;
-		const title = newTitle.trim();
-		if (!tenantId || !title) return;
-		creating = true;
-		createError = '';
-		try {
-			const doc: Document = {
-				document_key: '',
-				title,
-				language: 'en',
-				schema_version: SCHEMA_VERSION,
-				content_version: 0,
-				metadata: {},
-				blocks: []
-			};
-			const result = await createDocument(doc, { tenantId, ksStoreId: activeStore?.id });
-			goto(`/home3/cdm/${encodeURIComponent(result.document_key)}`);
-		} catch (err) {
-			createError = err instanceof Error ? err.message : 'Failed to create document.';
-		} finally {
-			creating = false;
+	function openSearch() {
+		searchDraft = titleFilter;
+		searchOpen = true;
+	}
+
+	function applySearch() {
+		titleFilter = searchDraft.trim();
+		searchOpen = false;
+	}
+
+	function clearSearch() {
+		searchDraft = '';
+		titleFilter = '';
+		searchOpen = false;
+	}
+
+	function handleStoreSelect(e: Event) {
+		const id = Number((e.target as HTMLSelectElement).value);
+		const next = stores.find((s) => s.id === id);
+		if (next) onChangeStore(next);
+	}
+
+	// The row stays a real <a href> (right-click "copy link", ctrl/cmd/middle
+	// click "open in new tab" all keep working) but a plain left click is
+	// intercepted: opening a document is in-shell state, not a navigation --
+	// CdmEditorShell has no per-document route when embedded in /development,
+	// and even on /home3/cdm a full navigation would remount the shell and
+	// lose the split-pane/preview state for no reason.
+	function handleRowClick(e: MouseEvent, key: string) {
+		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+			return;
 		}
+		e.preventDefault();
+		onOpenDocument(key);
 	}
 
 	// Filtering is client-side over the page the API already returned, not a
@@ -182,8 +171,7 @@
 </script>
 
 <div
-	class="cdm-home"
-	style:--bg={pageBg}
+	class="cdm-list"
 	style:--panel={panelBg}
 	style:--panel-alt={panelBgAlt}
 	style:--line={inkLine}
@@ -211,174 +199,149 @@
 			<h1>Author documents SemOS understands.</h1>
 			<p>
 				A knowledge editor, not a word processor: you write meaning — headings, tables,
-				equations, callouts — and a Typst template decides how it looks. Everything you publish
-				here feeds the same pipeline, search, and review tooling as an uploaded document.
+				equations, callouts — and a Typst template decides how it looks.
 			</p>
 		</div>
 
-		{#if activeStore}
-			<div class="cdm-store-chip">
-				<DatabaseIcon size={14} />
-				<div>
-					<span class="cdm-store-label">Knowledge store</span>
-					<strong>{activeStore.ks_name}</strong>
+		<div class="cdm-masthead-controls">
+			<label class="cdm-store-select">
+				<span class="cdm-store-select-label">
+					<DatabaseIcon size={12} />
+					Knowledge store
+				</span>
+				<div class="cdm-store-select-input">
+					<select value={activeStore.id} onchange={handleStoreSelect}>
+						{#each stores as store (store.id)}
+							<option value={store.id}>{store.ks_name}</option>
+						{/each}
+					</select>
+					<ChevronDownIcon size={14} />
 				</div>
-				<button type="button" class="cdm-link-btn" onclick={changeStore}>Change</button>
-			</div>
-		{/if}
+			</label>
+			<button type="button" class="cdm-btn cdm-btn--primary" onclick={onNewDocument}>
+				<FilePlusIcon size={15} />
+				New Document
+			</button>
+		</div>
 	</header>
 
-	{#if !activeStore}
-		<!-- ── Store gate: nothing on this page is addressable without one ── -->
-		<section class="cdm-panel cdm-gate">
-			<h2>Choose a knowledge store</h2>
-			<p class="cdm-gate-help">
-				Documents are scoped to a knowledge store's tenant. Pick one to see its documents and
-				start new ones.
-			</p>
-
-			{#if loadingStores}
-				<p class="cdm-status-line">Loading knowledge stores…</p>
-			{:else if storeError}
-				<p class="cdm-error">{storeError}</p>
-				<button type="button" class="cdm-btn cdm-btn--ghost" onclick={loadStoreOptions}>
-					<RefreshCwIcon size={14} /> Retry
-				</button>
-			{:else if storeOptions.length === 0}
-				<p class="cdm-status-line">
-					No knowledge stores available. Create one under Knowledge Base first.
-				</p>
-			{:else}
-				<ul class="cdm-store-options">
-					{#each storeOptions as store (store.id)}
-						<li>
-							<button type="button" class="cdm-store-option" onclick={() => pickStore(store)}>
-								<DatabaseIcon size={15} />
-								<span class="cdm-store-option-name">{store.ks_name}</span>
-								{#if store.ks_desc}
-									<span class="cdm-store-option-desc">{store.ks_desc}</span>
-								{/if}
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</section>
-	{:else}
-		<!-- ── Start a document ────────────────────────────────────────────── -->
-		<section class="cdm-panel cdm-create">
-			<label class="cdm-field">
-				<span class="cdm-field-label">New document</span>
-				<input
-					type="text"
-					placeholder="Working title — you can change it in the editor"
-					bind:value={newTitle}
-					disabled={creating}
-					onkeydown={(e) => e.key === 'Enter' && create()}
-				/>
-			</label>
-			<button
-				type="button"
-				class="cdm-btn cdm-btn--primary"
-				onclick={create}
-				disabled={creating || !newTitle.trim()}
-			>
-				<FilePlusIcon size={15} />
-				{creating ? 'Creating…' : 'Create & open'}
-			</button>
-		</section>
-		{#if createError}
-			<p class="cdm-error">{createError}</p>
-		{/if}
-
-		<!-- ── Documents ───────────────────────────────────────────────────── -->
-		<section class="cdm-panel cdm-docs">
-			<div class="cdm-docs-toolbar">
-				<div class="cdm-tabs" role="tablist" aria-label="Filter by status">
-					{#each statusTabs as tab (tab.id)}
-						<button
-							type="button"
-							role="tab"
-							aria-selected={statusFilter === tab.id}
-							class="cdm-tab"
-							class:is-active={statusFilter === tab.id}
-							onclick={() => (statusFilter = tab.id)}
-						>
-							{tab.label}
-							<span class="cdm-tab-count">{tabCount(tab.id)}</span>
-						</button>
-					{/each}
-				</div>
-
-				<div class="cdm-search">
-					<SearchIcon size={14} />
-					<input type="search" placeholder="Filter by title…" bind:value={titleFilter} />
-				</div>
+	<!-- ── Documents ───────────────────────────────────────────────────── -->
+	<section class="cdm-panel cdm-docs">
+		<div class="cdm-docs-toolbar">
+			<div class="cdm-tabs" role="tablist" aria-label="Filter by status">
+				{#each statusTabs as tab (tab.id)}
+					<button
+						type="button"
+						role="tab"
+						aria-selected={statusFilter === tab.id}
+						class="cdm-tab"
+						class:is-active={statusFilter === tab.id}
+						onclick={() => (statusFilter = tab.id)}
+					>
+						{tab.label}
+						<span class="cdm-tab-count">{tabCount(tab.id)}</span>
+					</button>
+				{/each}
 			</div>
 
-			{#if loading}
-				<p class="cdm-status-line">Loading documents…</p>
-			{:else if loadError}
-				<p class="cdm-error">{loadError}</p>
+			<div class="cdm-search-wrap">
 				<button
 					type="button"
-					class="cdm-btn cdm-btn--ghost"
-					onclick={() => activeStore?.tenant_id && loadDocuments(activeStore.tenant_id)}
+					class="cdm-btn cdm-btn--ghost cdm-search-btn"
+					onclick={() => (searchOpen ? (searchOpen = false) : openSearch())}
 				>
-					<RefreshCwIcon size={14} /> Retry
+					<SearchIcon size={14} />
+					Search
+					{#if titleFilter}<span class="cdm-search-dot" aria-hidden="true"></span>{/if}
 				</button>
-			{:else if documents.length === 0}
-				<div class="cdm-empty">
-					<span class="cdm-diamond cdm-diamond--lg" aria-hidden="true"></span>
-					<p>No documents in this store yet.</p>
-					<p class="cdm-empty-sub">Give one a title above to start writing.</p>
-				</div>
-			{:else if visibleDocuments.length === 0}
-				<div class="cdm-empty">
-					<span class="cdm-diamond cdm-diamond--lg" aria-hidden="true"></span>
-					<p>No documents match this filter.</p>
-				</div>
-			{:else}
-				<ul class="cdm-doc-list">
-					{#each visibleDocuments as doc (doc.document_key)}
-						<li>
-							<!-- The whole row is the link, so the "Edit"/"Open" affordance below is
-							     a styled span rather than a nested button or second anchor: it would
-							     otherwise be either invalid HTML or a second tab stop to the same
-							     destination. Clicking it navigates via this anchor either way. -->
-							<a class="cdm-doc-row" href={`/home3/cdm/${encodeURIComponent(doc.document_key)}`}>
-								<span class="cdm-doc-title">{doc.title}</span>
-								<span
-									class="cdm-badge"
-									class:cdm-badge--published={doc.published}
-									class:cdm-badge--draft={!doc.published}
-								>
-									{doc.published ? 'Published' : 'Draft'}
-								</span>
-								<span class="cdm-doc-version">v{doc.content_version}</span>
-								<span class="cdm-doc-key">{doc.document_key}</span>
-								<span class="cdm-doc-time">{formatTime(doc.update_time)}</span>
-								<!-- A published document is frozen (D8), so it opens read-only --
-								     "Open" rather than "Edit" says so before the click. -->
-								<span class="cdm-doc-action">
-									{doc.published ? 'Open' : 'Edit'}
-									<ArrowRightIcon size={13} />
-								</span>
-							</a>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</section>
-	{/if}
+				{#if searchOpen}
+					<div class="cdm-search-popover">
+						<input
+							type="text"
+							placeholder="Title contains…"
+							bind:value={searchDraft}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') applySearch();
+								if (e.key === 'Escape') searchOpen = false;
+							}}
+						/>
+						<div class="cdm-search-popover-actions">
+							<button type="button" class="cdm-btn cdm-btn--ghost" onclick={clearSearch}>
+								Clear
+							</button>
+							<button type="button" class="cdm-btn cdm-btn--primary" onclick={applySearch}>
+								Search
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		{#if loading}
+			<p class="cdm-status-line">Loading documents…</p>
+		{:else if loadError}
+			<p class="cdm-error">{loadError}</p>
+			<button
+				type="button"
+				class="cdm-btn cdm-btn--ghost"
+				onclick={() => activeStore.tenant_id && loadDocuments(activeStore.tenant_id)}
+			>
+				<RefreshCwIcon size={14} /> Retry
+			</button>
+		{:else if documents.length === 0}
+			<div class="cdm-empty">
+				<span class="cdm-diamond cdm-diamond--lg" aria-hidden="true"></span>
+				<p>No documents in this store yet.</p>
+				<p class="cdm-empty-sub">Click “New Document” above to start writing.</p>
+			</div>
+		{:else if visibleDocuments.length === 0}
+			<div class="cdm-empty">
+				<span class="cdm-diamond cdm-diamond--lg" aria-hidden="true"></span>
+				<p>No documents match this filter.</p>
+			</div>
+		{:else}
+			<ul class="cdm-doc-list">
+				{#each visibleDocuments as doc (doc.document_key)}
+					<li>
+						<!-- The whole row is the link, so the "Edit"/"Open" affordance below is
+						     a styled span rather than a nested button or second anchor: it would
+						     otherwise be either invalid HTML or a second tab stop to the same
+						     destination. -->
+						<a
+							class="cdm-doc-row"
+							href={`/home3/cdm/${encodeURIComponent(doc.document_key)}`}
+							onclick={(e) => handleRowClick(e, doc.document_key)}
+						>
+							<span class="cdm-doc-title">{doc.title}</span>
+							<span
+								class="cdm-badge"
+								class:cdm-badge--published={doc.published}
+								class:cdm-badge--draft={!doc.published}
+							>
+								{doc.published ? 'Published' : 'Draft'}
+							</span>
+							<span class="cdm-doc-version">v{doc.content_version}</span>
+							<span class="cdm-doc-key">{doc.document_key}</span>
+							<span class="cdm-doc-time">{formatTime(doc.update_time)}</span>
+							<!-- A published document is frozen (D8), so it opens read-only --
+							     "Open" rather than "Edit" says so before the click. -->
+							<span class="cdm-doc-action">
+								{doc.published ? 'Open' : 'Edit'}
+								<ArrowRightIcon size={13} />
+							</span>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 </div>
 
 <style>
-	.cdm-home {
-		min-height: 100%;
+	.cdm-list {
 		box-sizing: border-box;
-		padding: 40px 32px 64px;
-		background: var(--bg);
+		padding: 28px 28px 40px;
 		color: var(--text);
 		font-family: var(--font-sans);
 	}
@@ -386,17 +349,16 @@
 	/* ── Masthead ──────────────────────────────────────────────────────── */
 	.cdm-masthead {
 		display: flex;
-		align-items: flex-start;
+		align-items: flex-end;
 		justify-content: space-between;
-		gap: 32px;
+		gap: 24px;
 		flex-wrap: wrap;
-		max-width: 1100px;
-		margin: 0 auto 32px;
-		padding-bottom: 24px;
+		margin: 0 0 24px;
+		padding-bottom: 20px;
 		border-bottom: 1px solid var(--line);
 	}
 	.cdm-masthead-copy {
-		flex: 1 1 420px;
+		flex: 1 1 320px;
 		min-width: 0;
 	}
 	.cdm-kicker {
@@ -422,157 +384,82 @@
 		opacity: 0.4;
 	}
 	.cdm-masthead h1 {
-		margin: 14px 0 0;
+		margin: 12px 0 0;
 		font-family: var(--font-serif);
-		font-size: clamp(1.8rem, 2.4vw + 0.7rem, 2.5rem);
+		font-size: clamp(1.4rem, 1.6vw + 0.7rem, 1.9rem);
 		font-weight: 600;
-		line-height: 1.15;
+		line-height: 1.2;
 		letter-spacing: -0.01em;
 		color: var(--text);
 	}
 	.cdm-masthead p {
-		margin: 12px 0 0;
-		max-width: 62ch;
-		font-size: 0.9rem;
-		line-height: 1.8;
+		margin: 8px 0 0;
+		max-width: 56ch;
+		font-size: 0.85rem;
+		line-height: 1.7;
 		color: var(--text-2);
 	}
 
-	.cdm-store-chip {
+	/* ── Masthead controls: knowledge store + new document ──────────────── */
+	.cdm-masthead-controls {
 		display: flex;
-		align-items: center;
+		align-items: flex-end;
 		gap: 10px;
-		padding: 10px 14px;
-		border: 1px solid var(--line);
-		border-radius: 8px;
-		background: var(--panel);
-		color: var(--text-2);
-	}
-	.cdm-store-chip :global(svg) {
-		color: var(--brass);
 		flex: 0 0 auto;
 	}
-	.cdm-store-label {
-		display: block;
+	.cdm-store-select {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.cdm-store-select-label {
+		display: flex;
+		align-items: center;
+		gap: 5px;
 		font-size: 10px;
 		font-weight: 700;
-		letter-spacing: 0.14em;
+		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		color: var(--text-3);
 	}
-	.cdm-store-chip strong {
-		display: block;
-		margin-top: 2px;
-		font-size: 0.9rem;
+	.cdm-store-select-label :global(svg) {
+		color: var(--brass);
+	}
+	.cdm-store-select-input {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+	.cdm-store-select-input select {
+		appearance: none;
+		width: 100%;
+		min-width: 180px;
+		padding: 8px 30px 8px 12px;
+		border: 1px solid var(--line);
+		border-radius: 7px;
+		background: var(--panel);
 		color: var(--text);
+		font-family: inherit;
+		font-size: 0.86rem;
+		cursor: pointer;
+	}
+	.cdm-store-select-input select:focus-visible {
+		outline: 2px solid var(--brass);
+		outline-offset: 1px;
+	}
+	.cdm-store-select-input :global(svg) {
+		position: absolute;
+		right: 10px;
+		color: var(--text-3);
+		pointer-events: none;
 	}
 
 	/* ── Panels ────────────────────────────────────────────────────────── */
 	.cdm-panel {
-		max-width: 1100px;
-		margin: 0 auto 20px;
 		padding: 22px 24px;
 		border: 1px solid var(--line);
 		border-radius: 10px;
 		background: var(--panel);
-	}
-
-	.cdm-gate h2 {
-		margin: 0;
-		font-family: var(--font-serif);
-		font-size: 1.35rem;
-		font-weight: 600;
-		color: var(--text);
-	}
-	.cdm-gate-help {
-		margin: 8px 0 18px;
-		font-size: 0.86rem;
-		line-height: 1.7;
-		color: var(--text-2);
-	}
-	.cdm-store-options {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		gap: 8px;
-	}
-	.cdm-store-option {
-		display: flex;
-		align-items: baseline;
-		gap: 10px;
-		width: 100%;
-		padding: 12px 14px;
-		border: 1px solid var(--line-soft);
-		border-radius: 8px;
-		background: var(--panel-alt);
-		color: var(--text);
-		font-family: inherit;
-		font-size: 0.92rem;
-		text-align: left;
-		cursor: pointer;
-		transition:
-			border-color 0.15s ease,
-			background 0.15s ease;
-	}
-	.cdm-store-option:hover {
-		border-color: var(--brass);
-		background: var(--brass-faint);
-	}
-	.cdm-store-option :global(svg) {
-		color: var(--brass);
-		flex: 0 0 auto;
-		align-self: center;
-	}
-	.cdm-store-option-name {
-		font-weight: 600;
-	}
-	.cdm-store-option-desc {
-		font-size: 0.8rem;
-		color: var(--text-3);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	/* ── Create row ────────────────────────────────────────────────────── */
-	.cdm-create {
-		display: flex;
-		align-items: flex-end;
-		gap: 12px;
-		flex-wrap: wrap;
-	}
-	.cdm-field {
-		flex: 1 1 320px;
-		min-width: 0;
-	}
-	.cdm-field-label {
-		display: block;
-		margin-bottom: 6px;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.16em;
-		text-transform: uppercase;
-		color: var(--brass);
-	}
-	.cdm-field input {
-		width: 100%;
-		box-sizing: border-box;
-		padding: 10px 12px;
-		border: 1px solid var(--line);
-		border-radius: 7px;
-		background: var(--panel-alt);
-		color: var(--text);
-		font-family: inherit;
-		font-size: 0.92rem;
-	}
-	.cdm-field input::placeholder {
-		color: var(--text-3);
-	}
-	.cdm-field input:focus-visible,
-	.cdm-search input:focus-visible {
-		outline: 2px solid var(--brass);
-		outline-offset: 1px;
 	}
 
 	/* ── Buttons ───────────────────────────────────────────────────────── */
@@ -580,16 +467,18 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 7px;
-		padding: 10px 16px;
+		padding: 8px 14px;
 		border: 1px solid transparent;
 		border-radius: 7px;
 		font-family: inherit;
-		font-size: 0.88rem;
+		font-size: 0.85rem;
 		font-weight: 600;
 		cursor: pointer;
+		white-space: nowrap;
 		transition:
 			opacity 0.15s ease,
-			background 0.15s ease;
+			background 0.15s ease,
+			border-color 0.15s ease;
 	}
 	.cdm-btn:disabled {
 		opacity: 0.45;
@@ -603,25 +492,13 @@
 		opacity: 0.88;
 	}
 	.cdm-btn--ghost {
-		margin-top: 10px;
 		border-color: var(--line);
 		background: transparent;
 		color: var(--text-2);
 	}
 	.cdm-btn--ghost:hover {
 		background: var(--panel-alt);
-	}
-	.cdm-link-btn {
-		margin-left: 6px;
-		border: none;
-		background: none;
-		padding: 0;
-		font: inherit;
-		font-size: 0.78rem;
-		color: var(--brass);
-		cursor: pointer;
-		text-decoration: underline;
-		text-underline-offset: 3px;
+		border-color: var(--brass);
 	}
 
 	/* ── Documents toolbar ─────────────────────────────────────────────── */
@@ -668,30 +545,55 @@
 		color: var(--brass);
 	}
 
-	.cdm-search {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 0 12px;
+	/* ── Search: a button matching kb-input-record-browser.svelte's own
+	   "ghost search-btn" affordance (pill, icon + label, hover accent border),
+	   opening a small popover instead of that component's full search dialog
+	   -- CDM's list only needs a title filter, not kb.inputs' query surface. */
+	.cdm-search-wrap {
+		position: relative;
+	}
+	.cdm-search-btn {
+		position: relative;
+	}
+	.cdm-search-dot {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: var(--brass);
+	}
+	.cdm-search-popover {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		z-index: 10;
+		width: 260px;
+		padding: 12px;
 		border: 1px solid var(--line);
-		border-radius: 7px;
+		border-radius: 9px;
+		background: var(--panel);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+	}
+	.cdm-search-popover input {
+		width: 100%;
+		box-sizing: border-box;
+		padding: 8px 10px;
+		border: 1px solid var(--line);
+		border-radius: 6px;
 		background: var(--panel-alt);
-	}
-	.cdm-search :global(svg) {
-		color: var(--text-3);
-		flex: 0 0 auto;
-	}
-	.cdm-search input {
-		width: 210px;
-		padding: 9px 0;
-		border: none;
-		background: none;
 		color: var(--text);
 		font-family: inherit;
-		font-size: 0.88rem;
+		font-size: 0.86rem;
 	}
-	.cdm-search input::placeholder {
-		color: var(--text-3);
+	.cdm-search-popover input:focus-visible {
+		outline: 2px solid var(--brass);
+		outline-offset: 1px;
+	}
+	.cdm-search-popover-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 6px;
+		margin-top: 10px;
 	}
 
 	/* ── Document list ─────────────────────────────────────────────────── */
@@ -703,10 +605,10 @@
 	}
 	.cdm-doc-row {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto 3.5rem minmax(0, 14rem) 11rem auto;
+		grid-template-columns: minmax(0, 1fr) auto 3rem minmax(0, 10rem) 8.5rem auto;
 		align-items: center;
-		gap: 14px;
-		padding: 13px 10px;
+		gap: 12px;
+		padding: 12px 10px;
 		border-bottom: 1px solid var(--line-soft);
 		color: inherit;
 		text-decoration: none;
@@ -721,10 +623,9 @@
 		outline-offset: -2px;
 	}
 	/* The title carries the link colour so the row reads as navigable at rest,
-	   not only under the cursor -- which is what sent someone looking for an
-	   "edit" control that was the row itself all along. */
+	   not only under the cursor. */
 	.cdm-doc-title {
-		font-size: 0.95rem;
+		font-size: 0.92rem;
 		font-weight: 600;
 		color: var(--brass);
 		overflow: hidden;
@@ -741,10 +642,10 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		padding: 5px 11px;
+		padding: 4px 10px;
 		border: 1px solid var(--line);
 		border-radius: 6px;
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		font-weight: 600;
 		color: var(--text-2);
 		white-space: nowrap;
@@ -769,7 +670,7 @@
 	.cdm-doc-key,
 	.cdm-doc-time {
 		font-family: var(--font-mono);
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 		color: var(--text-3);
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -781,7 +682,7 @@
 	.cdm-badge {
 		padding: 3px 9px;
 		border-radius: 999px;
-		font-size: 0.68rem;
+		font-size: 0.66rem;
 		font-weight: 700;
 		letter-spacing: 0.09em;
 		text-transform: uppercase;
@@ -803,8 +704,7 @@
 		color: var(--text-2);
 	}
 	.cdm-error {
-		max-width: 1100px;
-		margin: 0 auto 12px;
+		margin: 0 0 12px;
 		padding: 10px 14px;
 		border: 1px solid var(--crimson);
 		border-radius: 7px;
@@ -834,12 +734,9 @@
 	/* Below ~820px the metadata columns stop earning their width; the row
 	   collapses to title + badge and the rest wraps underneath. */
 	@media (max-width: 820px) {
-		.cdm-home {
-			padding: 28px 18px 48px;
+		.cdm-list {
+			padding: 20px 16px 32px;
 		}
-		/* Title + badge + the action on the first line; version and time wrap
-		   underneath. The action keeps its column at every width -- it is the
-		   affordance, so it is the last thing that should drop. */
 		.cdm-doc-row {
 			grid-template-columns: minmax(0, 1fr) auto auto;
 			gap: 6px 12px;
@@ -851,8 +748,9 @@
 		.cdm-doc-time {
 			text-align: left;
 		}
-		.cdm-search input {
+		.cdm-masthead-controls {
 			width: 100%;
+			justify-content: space-between;
 		}
 	}
 </style>
