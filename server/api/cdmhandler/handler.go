@@ -47,6 +47,7 @@ type errorResponse struct {
 	Violations     []string `json:"violations,omitempty"`
 	Conflict       string   `json:"conflict,omitempty"`
 	ContentVersion int64    `json:"content_version,omitempty"`
+	EditVersion    int64    `json:"edit_version,omitempty"`
 }
 
 type documentSummary struct {
@@ -77,6 +78,20 @@ type renderResponse struct {
 	Status         bool     `json:"status"`
 	ContentVersion int64    `json:"content_version"`
 	Pages          []string `json:"pages"`
+}
+
+type versionNodeResponse struct {
+	ContentVersion       int64  `json:"content_version"`
+	ParentContentVersion *int64 `json:"parent_content_version,omitempty"`
+	CreateTime           string `json:"create_time"`
+	UpdateTime           string `json:"update_time"`
+	SizeBytes            int64  `json:"size_bytes"`
+	Current              bool   `json:"current"`
+}
+
+type versionsResponse struct {
+	Status  bool                  `json:"status"`
+	Results []versionNodeResponse `json:"results"`
 }
 
 func fail(c echo.Context, code int, format string, args ...any) error {
@@ -111,7 +126,7 @@ func writeStoreError(c echo.Context, err error, logf func(msg string, args ...an
 			Status:         false,
 			ErrorMsg:       stale.Error(),
 			Conflict:       conflictStaleVersion,
-			ContentVersion: stale.Actual,
+			EditVersion:    stale.Actual,
 		})
 	case errors.As(err, &frozen):
 		return c.JSON(http.StatusConflict, errorResponse{

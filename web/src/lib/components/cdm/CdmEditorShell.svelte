@@ -193,9 +193,9 @@
 
 	// ---------- Split-pane divider, the same drag mechanic
 	// dashboard.svelte's rail/shelf resize already uses ----------
-	const LEFT_WIDTH_DEFAULT = 640;
+	const LEFT_WIDTH_DEFAULT = 940;
 	const LEFT_WIDTH_MIN = 380;
-	const LEFT_WIDTH_MAX = 1200;
+	const LEFT_WIDTH_MAX = 1500;
 	let leftWidth = $state(LEFT_WIDTH_DEFAULT);
 	let dragStartX = 0;
 	let dragStartWidth = 0;

@@ -87,9 +87,10 @@ func createDraftTx(ctx context.Context, q execQuerier, in DraftInput) (int64, er
 // that the version check and the version increment cannot interleave with a
 // concurrent writer (design D3).
 type docState struct {
-	exists    bool
-	version   int64
-	published bool
+	exists         bool
+	contentVersion int64
+	editVersion    int64
+	published      bool
 }
 
 // lockDocStateTx reads a document's current version and publication state,
@@ -114,12 +115,13 @@ func lockDocStateTx(ctx context.Context, q execQuerier, documentKey string) (doc
 	var st docState
 	err := q.QueryRowContext(ctx, `
 		SELECT d.content_version,
+		       d.edit_version,
 		       COALESCE(NOT (i.status @> '[{"operation":"doc_processing"}]'::jsonb), false)
 		FROM kb.cdm_documents d
 		LEFT JOIN kb.inputs i ON i.id = d.input_record_id
 		WHERE d.document_key = $1
 		FOR UPDATE OF d
-	`, documentKey).Scan(&st.version, &st.published)
+	`, documentKey).Scan(&st.contentVersion, &st.editVersion, &st.published)
 	if errors.Is(err, sql.ErrNoRows) {
 		return docState{exists: false}, nil
 	}

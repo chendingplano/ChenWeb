@@ -81,7 +81,7 @@ func TestLockDocStateTx_BlocksConcurrentReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tx1 lock: %v", err)
 	}
-	if !st.exists || st.version != 1 {
+	if !st.exists || st.contentVersion != 1 || st.editVersion != 1 {
 		t.Fatalf("tx1 read unexpected state: %+v", st)
 	}
 
@@ -127,8 +127,8 @@ func TestLockDocStateTx_BlocksConcurrentReader(t *testing.T) {
 		if r.err != nil {
 			t.Fatalf("second reader failed after the lock was released: %v", r.err)
 		}
-		if r.st.version != 2 {
-			t.Fatalf("second reader saw content_version %d, want 2 — it read a stale value from before the first writer committed", r.st.version)
+		if r.st.contentVersion != 2 {
+			t.Fatalf("second reader saw content_version %d, want 2 — it read a stale value from before the first writer committed", r.st.contentVersion)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("second reader never completed after the lock was released")

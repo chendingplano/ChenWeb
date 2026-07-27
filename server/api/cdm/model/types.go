@@ -18,6 +18,7 @@ type Document struct {
 	Language       string   `json:"language"`
 	SchemaVersion  string   `json:"schema_version"`
 	ContentVersion int64    `json:"content_version"`
+	EditVersion    int64    `json:"edit_version,omitempty"`
 	Metadata       Metadata `json:"metadata"`
 	Blocks         []Block  `json:"blocks"`
 }

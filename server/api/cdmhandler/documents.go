@@ -112,12 +112,9 @@ func GetDocument(c echo.Context) error {
 	return c.JSON(http.StatusOK, doc)
 }
 
-// SaveDocument handles PUT /api/v1/cdm/documents/:key.
-//
-// The body's own content_version is the caller's expectation (DR6): a client
-// loads version 7, sends it back, and the store writes 8 only if 7 is still
-// current. This needs no extra header or parameter because the version is
-// already a first-class field of the document.
+// SaveDocument handles PUT /api/v1/cdm/documents/:key, saving edits into the
+// current visible content version while advancing edit_version for
+// optimistic concurrency.
 func SaveDocument(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_CDM_030")
 	defer rc.Close()
@@ -141,12 +138,48 @@ func SaveDocument(c echo.Context) error {
 	}
 	doc.Key = key
 
-	expected := doc.ContentVersion
+	expected := doc.EditVersion
 	if _, err := store.New(ApiTypes.ProjectDBHandle).Save(c.Request().Context(), doc, expected); err != nil {
 		return writeStoreError(c, err, logger.Error)
 	}
 
-	logger.Info("cdm document saved", "document_key", key, "content_version", doc.ContentVersion)
+	logger.Info("cdm document saved",
+		"document_key", key, "content_version", doc.ContentVersion, "edit_version", doc.EditVersion)
+	return c.JSON(http.StatusOK, doc)
+}
+
+// SaveDocumentToNewVersion handles POST /api/v1/cdm/documents/:key/versions,
+// saving the request body as a fresh visible content version.
+func SaveDocumentToNewVersion(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_CDM_035")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_039)")
+	}
+	if strings.TrimSpace(key) == "" {
+		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_036)")
+	}
+
+	doc, err := decodeDocument(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "%v (CWB_CDM_037)", err)
+	}
+	if doc.Key != "" && doc.Key != key {
+		return fail(c, http.StatusBadRequest,
+			"document_key in the body (%q) does not match the URL (%q) (CWB_CDM_038)", doc.Key, key)
+	}
+	doc.Key = key
+
+	expected := doc.EditVersion
+	if _, err := store.New(ApiTypes.ProjectDBHandle).SaveToNewVersion(c.Request().Context(), doc, expected); err != nil {
+		return writeStoreError(c, err, logger.Error)
+	}
+
+	logger.Info("cdm document saved to new version",
+		"document_key", key, "content_version", doc.ContentVersion, "edit_version", doc.EditVersion)
 	return c.JSON(http.StatusOK, doc)
 }
 
@@ -212,6 +245,44 @@ func ListDocuments(c echo.Context) error {
 	return c.JSON(http.StatusOK, listResponse{
 		Status: true, Results: results, Page: page, PageSize: pageSize,
 	})
+}
+
+// ListDocumentVersions handles GET /api/v1/cdm/documents/:key/versions.
+func ListDocumentVersions(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_CDM_045")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	key, err := keyParam(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "invalid document key (CWB_CDM_046)")
+	}
+	if strings.TrimSpace(key) == "" {
+		return fail(c, http.StatusBadRequest, "document key is required (CWB_CDM_047)")
+	}
+
+	versions, err := store.New(ApiTypes.ProjectDBHandle).ListVersions(c.Request().Context(), key)
+	if err != nil {
+		return writeStoreError(c, err, logger.Error)
+	}
+
+	results := make([]versionNodeResponse, 0, len(versions))
+	for _, v := range versions {
+		var parent *int64
+		if v.ParentContentVersion.Valid {
+			parent = &v.ParentContentVersion.Int64
+		}
+		results = append(results, versionNodeResponse{
+			ContentVersion:       v.ContentVersion,
+			ParentContentVersion: parent,
+			CreateTime:           v.CreateTime.UTC().Format(timeFormat),
+			UpdateTime:           v.UpdateTime.UTC().Format(timeFormat),
+			SizeBytes:            v.SizeBytes,
+			Current:              v.Current,
+		})
+	}
+
+	return c.JSON(http.StatusOK, versionsResponse{Status: true, Results: results})
 }
 
 // PublishDocument handles POST /api/v1/cdm/documents/:key/publish. It renders

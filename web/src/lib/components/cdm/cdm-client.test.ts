@@ -5,7 +5,9 @@ import {
 	createDocument,
 	getDocument,
 	saveDocument,
+	saveDocumentToNewVersion,
 	listDocuments,
+	listDocumentVersions,
 	publishDocument,
 	renderDocument,
 	CdmValidationError,
@@ -41,6 +43,7 @@ function minimalDoc(overrides: Partial<Document> = {}): Document {
 		language: 'en',
 		schema_version: '1.0',
 		content_version: 1,
+		edit_version: 1,
 		metadata: {},
 		blocks: [],
 		...overrides
@@ -84,13 +87,35 @@ test('saveDocument PUTs to the document_key from the body', async () => {
 	const mock = installFetchMock(async (call) => {
 		assert.equal(String(call.input), '/api/v1/cdm/documents/doc%3Ajaro-winkler');
 		assert.equal(call.init?.method, 'PUT');
-		return Response.json(minimalDoc({ document_key: 'doc:jaro-winkler', content_version: 8 }));
+		return Response.json(
+			minimalDoc({ document_key: 'doc:jaro-winkler', content_version: 7, edit_version: 8 })
+		);
 	});
 	try {
 		const saved = await saveDocument(
-			minimalDoc({ document_key: 'doc:jaro-winkler', content_version: 7 })
+			minimalDoc({ document_key: 'doc:jaro-winkler', content_version: 7, edit_version: 7 })
+		);
+		assert.equal(saved.content_version, 7);
+		assert.equal(saved.edit_version, 8);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('saveDocumentToNewVersion POSTs to the versions endpoint', async () => {
+	const mock = installFetchMock(async (call) => {
+		assert.equal(String(call.input), '/api/v1/cdm/documents/doc%3Ajaro-winkler/versions');
+		assert.equal(call.init?.method, 'POST');
+		return Response.json(
+			minimalDoc({ document_key: 'doc:jaro-winkler', content_version: 8, edit_version: 9 })
+		);
+	});
+	try {
+		const saved = await saveDocumentToNewVersion(
+			minimalDoc({ document_key: 'doc:jaro-winkler', content_version: 7, edit_version: 8 })
 		);
 		assert.equal(saved.content_version, 8);
+		assert.equal(saved.edit_version, 9);
 	} finally {
 		mock.restore();
 	}
@@ -103,14 +128,15 @@ test('saveDocument surfaces a stale version as CdmStaleVersionError with the cur
 				status: false,
 				error_msg: 'cdm: document "doc:x" changed since it was loaded',
 				conflict: 'stale_version',
-				content_version: 9
+				edit_version: 9
 			},
 			{ status: 409 }
 		)
 	);
 	try {
 		await assert.rejects(
-			() => saveDocument(minimalDoc({ document_key: 'doc:x', content_version: 7 })),
+			() =>
+				saveDocument(minimalDoc({ document_key: 'doc:x', content_version: 7, edit_version: 7 })),
 			(err: unknown) => {
 				assert.ok(err instanceof CdmStaleVersionError);
 				assert.equal(err.currentVersion, 9);
@@ -232,6 +258,32 @@ test('publishDocument posts to the publish endpoint', async () => {
 	try {
 		const res = await publishDocument('doc:x');
 		assert.equal(res.page_count, 1);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('listDocumentVersions GETs the versions endpoint', async () => {
+	const mock = installFetchMock(async (call) => {
+		assert.equal(String(call.input), '/api/v1/cdm/documents/doc%3Ax/versions');
+		return Response.json({
+			status: true,
+			results: [
+				{
+					content_version: 3,
+					parent_content_version: 2,
+					create_time: '2026-07-27T10:00:00Z',
+					update_time: '2026-07-27T10:05:00Z',
+					size_bytes: 1234,
+					current: true
+				}
+			]
+		});
+	});
+	try {
+		const res = await listDocumentVersions('doc:x');
+		assert.equal(res.results[0].content_version, 3);
+		assert.equal(res.results[0].size_bytes, 1234);
 	} finally {
 		mock.restore();
 	}

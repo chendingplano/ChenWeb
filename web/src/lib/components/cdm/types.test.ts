@@ -125,6 +125,7 @@ function cloneDocument(d: Document): Document {
 		language: d.language,
 		schema_version: d.schema_version,
 		content_version: d.content_version,
+		edit_version: d.edit_version,
 		metadata: cloneMetadata(d.metadata),
 		blocks: d.blocks.map(cloneBlock)
 	};

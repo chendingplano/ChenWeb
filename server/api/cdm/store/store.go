@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/cdm/model"
 	"github.com/lib/pq"
@@ -49,10 +50,9 @@ func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("cdm: document %q not found", e.DocumentKey)
 }
 
-// StaleVersionError is returned when a save's expected content_version no
-// longer matches what is stored — the document changed since the caller
-// loaded it (ADR 2026072603 DR6). Actual is 0 when the document does not
-// exist at all.
+// StaleVersionError is returned when a save's expected edit_version no longer
+// matches what is stored — the document changed since the caller loaded it.
+// Actual is 0 when the document does not exist at all.
 type StaleVersionError struct {
 	DocumentKey string
 	Expected    int64
@@ -61,10 +61,10 @@ type StaleVersionError struct {
 
 func (e *StaleVersionError) Error() string {
 	if e.Actual == 0 {
-		return fmt.Sprintf("cdm: document %q does not exist (expected content_version %d)",
+		return fmt.Sprintf("cdm: document %q does not exist (expected edit_version %d)",
 			e.DocumentKey, e.Expected)
 	}
-	return fmt.Sprintf("cdm: document %q changed since it was loaded (expected content_version %d, found %d)",
+	return fmt.Sprintf("cdm: document %q changed since it was loaded (expected edit_version %d, found %d)",
 		e.DocumentKey, e.Expected, e.Actual)
 }
 
@@ -79,10 +79,11 @@ func (e *FrozenError) Error() string {
 	return fmt.Sprintf("cdm: document %q is published and cannot be modified", e.DocumentKey)
 }
 
-// SaveResult reports the outcome of a successful Save.
+// SaveResult reports the outcome of a successful save.
 type SaveResult struct {
 	DocumentID     int64
 	ContentVersion int64
+	EditVersion    int64
 }
 
 // CreateResult reports the outcome of a successful Create.
@@ -90,17 +91,33 @@ type CreateResult struct {
 	DocumentID     int64
 	InputRecordID  int64
 	ContentVersion int64
+	EditVersion    int64
 }
 
-// Save validates doc, then persists it transactionally: upserts
-// kb.cdm_documents by document_key, increments content_version, and fully
-// rebuilds kb.cdm_blocks from the new content (spec "Canonical JSON is
-// authoritative"; design D5). No write occurs if validation fails.
-//
-// content_version is server-assigned; on success, doc.ContentVersion is
-// updated in place to the resolved value. doc is left unmodified if Save
-// returns an error.
+// VersionNode is one visible content version in a document's version history.
+type VersionNode struct {
+	ContentVersion       int64
+	ParentContentVersion sql.NullInt64
+	CreateTime           time.Time
+	UpdateTime           time.Time
+	SizeBytes            int64
+	Current              bool
+}
+
+// Save persists doc transactionally without advancing the visible
+// content_version. edit_version, not content_version, is the concurrency
+// token for "save current version".
 func (s *Store) Save(ctx context.Context, doc *model.Document, expectedVersion int64) (*SaveResult, error) {
+	return s.save(ctx, doc, expectedVersion, false)
+}
+
+// SaveToNewVersion persists doc transactionally while advancing the visible
+// content_version and recording a new version-history snapshot.
+func (s *Store) SaveToNewVersion(ctx context.Context, doc *model.Document, expectedVersion int64) (*SaveResult, error) {
+	return s.save(ctx, doc, expectedVersion, true)
+}
+
+func (s *Store) save(ctx context.Context, doc *model.Document, expectedVersion int64, advanceContentVersion bool) (*SaveResult, error) {
 	if err := model.Validate(doc); err != nil {
 		return nil, err
 	}
@@ -111,10 +128,6 @@ func (s *Store) Save(ctx context.Context, doc *model.Document, expectedVersion i
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op if committed
 
-	// Read the pre-write state under a row lock, then decide, then write.
-	// Both checks below have to happen inside this transaction and behind
-	// that lock: a caller-side load-compare-save would let two writers pass
-	// the same check and lose one edit (design D3).
 	st, err := lockDocStateTx(ctx, tx, doc.Key)
 	if err != nil {
 		return nil, err
@@ -122,52 +135,55 @@ func (s *Store) Save(ctx context.Context, doc *model.Document, expectedVersion i
 	switch {
 	case st.exists && st.published:
 		return nil, &FrozenError{DocumentKey: doc.Key}
-	case st.exists && st.version != expectedVersion:
-		return nil, &StaleVersionError{DocumentKey: doc.Key, Expected: expectedVersion, Actual: st.version}
+	case st.exists && st.editVersion != expectedVersion:
+		return nil, &StaleVersionError{DocumentKey: doc.Key, Expected: expectedVersion, Actual: st.editVersion}
 	case !st.exists && expectedVersion != 0:
-		// The caller believes it is updating a document that is not there.
 		return nil, &StaleVersionError{DocumentKey: doc.Key, Expected: expectedVersion, Actual: 0}
 	}
 
-	// content_version is server-assigned (the DB column is the counter), so
-	// the upsert runs once to resolve it, then the caller's document is
-	// stamped with the resolved version and (re-)marshalled before being
-	// written as semantic_document. Otherwise a Save+Load round trip could
-	// return a stale content_version baked into the stored JSON from before
-	// this write — the "Content versioning" requirement (spec §11) is about
-	// the resolved version, not whatever the caller happened to pass in.
 	var (
 		id             int64
 		contentVersion int64
+		editVersion    int64
 	)
 
-	err = tx.QueryRowContext(ctx, `
+	updateContentExpr := "kb.cdm_documents.content_version"
+	if advanceContentVersion {
+		updateContentExpr = "kb.cdm_documents.content_version + 1"
+	}
+
+	err = tx.QueryRowContext(ctx, fmt.Sprintf(`
 		INSERT INTO kb.cdm_documents
-			(document_key, title, language, schema_version, content_version,
+			(document_key, title, language, schema_version, content_version, edit_version,
 			 doc_type, rendering_type, authors, doc_version, semantic_document,
 			 update_time)
-		VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, '{}'::jsonb, NOW())
+		VALUES ($1, $2, $3, $4, 1, 1, $5, $6, $7, $8, '{}'::jsonb, NOW())
 		ON CONFLICT (document_key) DO UPDATE SET
 			title             = EXCLUDED.title,
 			language          = EXCLUDED.language,
 			schema_version    = EXCLUDED.schema_version,
-			content_version   = kb.cdm_documents.content_version + 1,
+			content_version   = %s,
+			edit_version      = kb.cdm_documents.edit_version + 1,
 			doc_type          = EXCLUDED.doc_type,
 			rendering_type    = EXCLUDED.rendering_type,
 			authors           = EXCLUDED.authors,
 			doc_version       = EXCLUDED.doc_version,
 			update_time       = NOW()
-		RETURNING id, content_version
-	`,
+		RETURNING id, content_version, edit_version
+	`, updateContentExpr),
 		doc.Key, doc.Title, nullableString(doc.Language), doc.SchemaVersion,
 		nullableString(doc.Metadata.DocType), nullableString(doc.Metadata.RenderingType),
 		pq.Array(nonNilStrings(doc.Metadata.Authors)), nullableString(doc.Metadata.Version),
-	).Scan(&id, &contentVersion)
+	).Scan(&id, &contentVersion, &editVersion)
 	if err != nil {
 		return nil, fmt.Errorf("cdm: upsert document: %w", err)
 	}
 
-	if err := writeContentTx(ctx, tx, id, contentVersion, doc); err != nil {
+	parentVersion := sql.NullInt64{}
+	if advanceContentVersion && st.exists {
+		parentVersion = sql.NullInt64{Int64: st.contentVersion, Valid: true}
+	}
+	if err := writeContentTx(ctx, tx, id, contentVersion, editVersion, doc, advanceContentVersion, parentVersion); err != nil {
 		return nil, err
 	}
 
@@ -176,20 +192,12 @@ func (s *Store) Save(ctx context.Context, doc *model.Document, expectedVersion i
 	}
 
 	doc.ContentVersion = contentVersion
-	return &SaveResult{DocumentID: id, ContentVersion: contentVersion}, nil
+	doc.EditVersion = editVersion
+	return &SaveResult{DocumentID: id, ContentVersion: contentVersion, EditVersion: editVersion}, nil
 }
 
 // Create writes a new CDM document and the kb.inputs row backing it in a
 // single transaction, linking them via kb.cdm_documents.input_record_id.
-//
-// The link is what lets everything downstream find a document's input row
-// from its document_key alone: tenant scoping, the publish transition, and
-// the frozen check in Save all traverse it. Writing both rows here — the one
-// moment both are being created anyway — is the only place they cannot
-// diverge (design D2).
-//
-// Creating a document whose document_key already exists is an error; use Save
-// to update an existing document.
 func (s *Store) Create(ctx context.Context, doc *model.Document, in DraftInput) (*CreateResult, error) {
 	if err := model.Validate(doc); err != nil {
 		return nil, err
@@ -206,17 +214,20 @@ func (s *Store) Create(ctx context.Context, doc *model.Document, in DraftInput) 
 		return nil, err
 	}
 
-	const initialVersion = 1
+	const (
+		initialVersion     = 1
+		initialEditVersion = 1
+	)
 	var id int64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO kb.cdm_documents
-			(document_key, title, language, schema_version, content_version,
+			(document_key, title, language, schema_version, content_version, edit_version,
 			 doc_type, rendering_type, authors, doc_version, input_record_id,
 			 semantic_document, update_time)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}'::jsonb, NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '{}'::jsonb, NOW())
 		RETURNING id
 	`,
-		doc.Key, doc.Title, nullableString(doc.Language), doc.SchemaVersion, initialVersion,
+		doc.Key, doc.Title, nullableString(doc.Language), doc.SchemaVersion, initialVersion, initialEditVersion,
 		nullableString(doc.Metadata.DocType), nullableString(doc.Metadata.RenderingType),
 		pq.Array(nonNilStrings(doc.Metadata.Authors)), nullableString(doc.Metadata.Version),
 		inputID,
@@ -228,7 +239,7 @@ func (s *Store) Create(ctx context.Context, doc *model.Document, in DraftInput) 
 		return nil, fmt.Errorf("cdm: insert document: %w", err)
 	}
 
-	if err := writeContentTx(ctx, tx, id, initialVersion, doc); err != nil {
+	if err := writeContentTx(ctx, tx, id, initialVersion, initialEditVersion, doc, true, sql.NullInt64{}); err != nil {
 		return nil, err
 	}
 
@@ -237,23 +248,97 @@ func (s *Store) Create(ctx context.Context, doc *model.Document, in DraftInput) 
 	}
 
 	doc.ContentVersion = initialVersion
+	doc.EditVersion = initialEditVersion
 	return &CreateResult{
 		DocumentID:     id,
 		InputRecordID:  inputID,
 		ContentVersion: initialVersion,
+		EditVersion:    initialEditVersion,
 	}, nil
 }
 
-// writeContentTx stores the canonical JSON and rebuilds kb.cdm_blocks for a
-// document row that already exists in this transaction. Shared by Create and
-// Save so the two cannot drift in how a document's content is persisted.
-func writeContentTx(ctx context.Context, tx *sql.Tx, id, contentVersion int64, doc *model.Document) error {
-	// Marshal a stamped copy rather than mutating the caller's doc here: the
-	// transaction can still fail below (a block slug conflict, for example),
-	// and the caller's Document should not appear to have a new
-	// content_version unless the write actually commits.
+// Load reads a document by its document_key.
+func (s *Store) Load(ctx context.Context, documentKey string) (*model.Document, error) {
+	var (
+		docJSON        []byte
+		contentVersion int64
+		editVersion    int64
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT semantic_document, content_version, edit_version
+		FROM kb.cdm_documents
+		WHERE document_key = $1
+	`, documentKey).Scan(&docJSON, &contentVersion, &editVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, &NotFoundError{DocumentKey: documentKey}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cdm: load document %q: %w", documentKey, err)
+	}
+
+	var doc model.Document
+	if err := json.Unmarshal(docJSON, &doc); err != nil {
+		return nil, fmt.Errorf("cdm: decode document %q: %w", documentKey, err)
+	}
+	doc.ContentVersion = contentVersion
+	doc.EditVersion = editVersion
+	return &doc, nil
+}
+
+// ListVersions returns the visible content-version history for one document.
+func (s *Store) ListVersions(ctx context.Context, documentKey string) ([]VersionNode, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT v.content_version,
+		       v.parent_content_version,
+		       v.create_time,
+		       v.update_time,
+		       v.size_bytes,
+		       (v.content_version = d.content_version) AS current
+		FROM kb.cdm_document_versions v
+		JOIN kb.cdm_documents d ON d.id = v.document_id
+		WHERE d.document_key = $1
+		ORDER BY v.content_version DESC
+	`, documentKey)
+	if err != nil {
+		return nil, fmt.Errorf("cdm: list versions for %q: %w", documentKey, err)
+	}
+	defer rows.Close()
+
+	var versions []VersionNode
+	for rows.Next() {
+		var v VersionNode
+		if err := rows.Scan(
+			&v.ContentVersion,
+			&v.ParentContentVersion,
+			&v.CreateTime,
+			&v.UpdateTime,
+			&v.SizeBytes,
+			&v.Current,
+		); err != nil {
+			return nil, fmt.Errorf("cdm: scan version for %q: %w", documentKey, err)
+		}
+		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cdm: iterate versions for %q: %w", documentKey, err)
+	}
+	if len(versions) == 0 {
+		return nil, &NotFoundError{DocumentKey: documentKey}
+	}
+	return versions, nil
+}
+
+func writeContentTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	id, contentVersion, editVersion int64,
+	doc *model.Document,
+	newVersion bool,
+	parentVersion sql.NullInt64,
+) error {
 	stamped := *doc
 	stamped.ContentVersion = contentVersion
+	stamped.EditVersion = editVersion
 	docJSON, err := json.Marshal(&stamped)
 	if err != nil {
 		return fmt.Errorf("cdm: marshal document: %w", err)
@@ -263,6 +348,32 @@ func writeContentTx(ctx context.Context, tx *sql.Tx, id, contentVersion int64, d
 		UPDATE kb.cdm_documents SET semantic_document = $1 WHERE id = $2
 	`, docJSON, id); err != nil {
 		return fmt.Errorf("cdm: store semantic_document: %w", err)
+	}
+
+	if newVersion {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO kb.cdm_document_versions
+				(document_id, content_version, parent_content_version, semantic_document, size_bytes, update_time)
+			VALUES ($1, $2, $3, $4, $5, NOW())
+			ON CONFLICT (document_id, content_version) DO UPDATE SET
+				parent_content_version = EXCLUDED.parent_content_version,
+				semantic_document = EXCLUDED.semantic_document,
+				size_bytes = EXCLUDED.size_bytes,
+				update_time = NOW()
+		`, id, contentVersion, nullableInt64(parentVersion), docJSON, int64(len(docJSON))); err != nil {
+			return fmt.Errorf("cdm: upsert document version %d: %w", contentVersion, err)
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE kb.cdm_document_versions
+			SET semantic_document = $3, size_bytes = $4, update_time = NOW()
+			WHERE document_id = $1 AND content_version = $2
+		`, id, contentVersion, docJSON, int64(len(docJSON))); err != nil {
+			return fmt.Errorf("cdm: update document version %d: %w", contentVersion, err)
+		}
+		if err := clearArtifactsForVersionTx(ctx, tx, id, contentVersion); err != nil {
+			return err
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM kb.cdm_blocks WHERE document_id = $1`, id); err != nil {
@@ -293,29 +404,6 @@ func writeContentTx(ctx context.Context, tx *sql.Tx, id, contentVersion int64, d
 		}
 	}
 	return nil
-}
-
-// Load reads a document by its document_key.
-func (s *Store) Load(ctx context.Context, documentKey string) (*model.Document, error) {
-	var docJSON []byte
-	err := s.db.QueryRowContext(ctx, `
-		SELECT semantic_document FROM kb.cdm_documents WHERE document_key = $1
-	`, documentKey).Scan(&docJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		// Wrapped, not flattened to a string: callers must be able to tell
-		// "no such document" from "the load failed", because those are a 404
-		// and a 500 respectively.
-		return nil, &NotFoundError{DocumentKey: documentKey}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("cdm: load document %q: %w", documentKey, err)
-	}
-
-	var doc model.Document
-	if err := json.Unmarshal(docJSON, &doc); err != nil {
-		return nil, fmt.Errorf("cdm: decode document %q: %w", documentKey, err)
-	}
-	return &doc, nil
 }
 
 type blockRow struct {
@@ -357,6 +445,13 @@ func nullableString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }
 
+func nullableInt64(v sql.NullInt64) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Int64
+}
+
 // nonNilStrings returns ss, or an empty (non-nil) slice if ss is nil, so
 // pq.Array never encodes as SQL NULL against the NOT NULL authors column.
 func nonNilStrings(ss []string) []string {
@@ -364,6 +459,18 @@ func nonNilStrings(ss []string) []string {
 		return []string{}
 	}
 	return ss
+}
+
+func clearArtifactsForVersionTx(ctx context.Context, tx *sql.Tx, documentID, contentVersion int64) error {
+	for _, table := range []string{"kb.cdm_renderings", "kb.cdm_projections", "kb.cdm_anchors"} {
+		if _, err := tx.ExecContext(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE document_id = $1 AND content_version = $2`, table),
+			documentID, contentVersion,
+		); err != nil {
+			return fmt.Errorf("cdm: clear %s for version %d: %w", table, contentVersion, err)
+		}
+	}
+	return nil
 }
 
 // isUniqueViolation reports whether an error is a Postgres unique-constraint
@@ -379,4 +486,3 @@ func isUniqueViolation(err error) bool {
 		strings.Contains(s, "23505") ||
 		strings.Contains(s, "unique constraint")
 }
-

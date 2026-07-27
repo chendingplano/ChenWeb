@@ -385,6 +385,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/cdm/documents", cdmhandler.ListDocuments)
 	apiGroup.GET("/cdm/documents/:key", cdmhandler.GetDocument)
 	apiGroup.PUT("/cdm/documents/:key", cdmhandler.SaveDocument)
+	apiGroup.GET("/cdm/documents/:key/versions", cdmhandler.ListDocumentVersions)
+	apiGroup.POST("/cdm/documents/:key/versions", cdmhandler.SaveDocumentToNewVersion)
 	apiGroup.POST("/cdm/documents/:key/publish", cdmhandler.PublishDocument)
 	apiGroup.GET("/cdm/documents/:key/render", cdmhandler.RenderDocument)
 

@@ -62,6 +62,7 @@ export interface Document {
 	language: string;
 	schema_version: string;
 	content_version: number;
+	edit_version?: number;
 	metadata: Metadata;
 	blocks: Block[];
 }

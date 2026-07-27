@@ -69,6 +69,7 @@ type ErrorBody = {
 	violations?: string[];
 	conflict?: 'stale_version' | 'frozen' | 'block_slug';
 	content_version?: number;
+	edit_version?: number;
 };
 
 function isErrorBody(v: unknown): v is ErrorBody {
@@ -92,7 +93,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 		const message = body?.error_msg ?? `HTTP ${res.status}`;
 		switch (body?.conflict) {
 			case 'stale_version':
-				throw new CdmStaleVersionError(message, body.content_version ?? 0);
+				throw new CdmStaleVersionError(message, body.edit_version ?? body.content_version ?? 0);
 			case 'frozen':
 				throw new CdmFrozenError(message);
 			case 'block_slug':
@@ -156,6 +157,17 @@ export function saveDocument(doc: Document): Promise<Document> {
 		headers: jsonHeaders,
 		body: JSON.stringify(doc)
 	});
+}
+
+export function saveDocumentToNewVersion(doc: Document): Promise<Document> {
+	return request<Document>(
+		`/api/v1/cdm/documents/${encodeURIComponent(doc.document_key)}/versions`,
+		{
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify(doc)
+		}
+	);
 }
 
 export interface DocumentSummary {
@@ -226,4 +238,24 @@ export interface RenderResponse {
  */
 export function renderDocument(key: string): Promise<RenderResponse> {
 	return request<RenderResponse>(`/api/v1/cdm/documents/${encodeURIComponent(key)}/render`);
+}
+
+export interface DocumentVersionNode {
+	content_version: number;
+	parent_content_version?: number;
+	create_time: string;
+	update_time: string;
+	size_bytes: number;
+	current: boolean;
+}
+
+export interface ListDocumentVersionsResponse {
+	status: true;
+	results: DocumentVersionNode[];
+}
+
+export function listDocumentVersions(key: string): Promise<ListDocumentVersionsResponse> {
+	return request<ListDocumentVersionsResponse>(
+		`/api/v1/cdm/documents/${encodeURIComponent(key)}/versions`
+	);
 }

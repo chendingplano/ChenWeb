@@ -1,38 +1,21 @@
 <script lang="ts">
-	// Task group 7: wires BlockList's local-only editing to the CDM HTTP API
-	// -- save, publish, and on-demand preview -- closing the authoring loop
-	// design.md calls out as this change's actual goal (create -> edit ->
-	// save -> publish -> preview).
-	//
-	// initialDocument is a one-time seed, not a bindable prop: this component
-	// owns the document from here on (its own content_version moves forward
-	// on every successful save/publish), and the caller's job ends at
-	// loading it. structuredClone matches the existing project convention
-	// (inputs-mgmt-view.svelte, kb-input-metadata.js) for taking a private
-	// mutable copy of data that came from elsewhere.
-	//
-	// initialDocument.document_key === '' is a second, deliberate case: a
-	// brand-new document the host (CdmEditorShell) built purely in memory
-	// for "New Document," never sent to the server. Nothing above this
-	// component has called createDocument yet -- Save is what does that, and
-	// only after the author confirms it in the create dialog below, naming
-	// the knowledge store it commits to (design D2's "creation allocates a
-	// document_key and writes kb.inputs immediately" still holds; what moved
-	// is *when* the UI decides to call it, not what the API does).
 	import BlockList from './BlockList.svelte';
 	import type { Document } from './types.js';
 	import {
 		saveDocument,
+		saveDocumentToNewVersion,
 		publishDocument,
 		renderDocument,
 		getDocument,
 		createDocument,
+		listDocumentVersions,
 		CdmApiError,
 		CdmStaleVersionError,
 		CdmFrozenError,
 		CdmValidationError,
 		CdmBlockConflictError,
-		type CreateTarget
+		type CreateTarget,
+		type DocumentVersionNode
 	} from './cdm-client.js';
 	import { attributeToBlocks, type BlockAttribution } from './document-editor-ops.js';
 
@@ -45,19 +28,8 @@
 		previewLoading = $bindable(false)
 	}: {
 		initialDocument: Document;
-		// Required to save a new (key-less) document; unused once it has a
-		// document_key. Null-checked defensively in confirmCreate, but every
-		// real host always supplies one before letting Save be clicked, since
-		// CdmEditorShell never opens "New Document" without an active store.
 		createTarget?: CreateTarget | null;
-		// Fires once, right after a brand-new document's first save succeeds
-		// and it has a real document_key. Lets the host (e.g. refresh its
-		// document list) react without polling doc.document_key itself.
 		onCreated?: (key: string) => void;
-		// Bindable rather than a callback: the host (CdmEditorShell) docks
-		// these in a persistent pane instead of this component's own overlay
-		// (removed below), and $bindable is the same "child mutates, parent
-		// owns the value" idiom BlockList already uses for `blocks`.
 		previewPages?: string[] | null;
 		previewVersion?: number | null;
 		previewLoading?: boolean;
@@ -66,28 +38,19 @@
 	let doc = $state(structuredClone(initialDocument));
 	let isNew = $derived(doc.document_key === '');
 	let showCreateConfirm = $state(false);
+	let showVersionsDialog = $state(false);
+	let versionsLoading = $state(false);
+	let versionsError = $state<string | null>(null);
+	let versions = $state<DocumentVersionNode[]>([]);
 
-	// dirty compares against a JSON snapshot taken at load/save time rather
-	// than a dedicated dirty flag flipped by every mutation: BlockList (and
-	// everything under it) mutates `doc.blocks` through many different
-	// entry points -- block-ops, table-ops, list-ops, InlineEditor's
-	// onUpdate, plain oninput handlers -- and none of them report back to
-	// this component today. A snapshot compare is correct regardless of
-	// which of those paths changed something, at the cost of a stringify on
-	// every access; documents at this MVP's scale make that cost
-	// unmeasurable.
 	let savedSnapshot = $state(JSON.stringify(initialDocument));
 	let dirty = $derived(JSON.stringify(doc) !== savedSnapshot);
 
 	let saving = $state(false);
+	let savingNewVersion = $state(false);
 	let publishing = $state(false);
 
 	let staleError = $state<CdmStaleVersionError | null>(null);
-	// Once set, this document is published (D8): every mutating BlockList
-	// control is hidden (editable={!frozenMessage} below) and Save/Publish
-	// are disabled. There is deliberately no action offered to open a new
-	// version -- design.md D4 defers that; the requirement here is only
-	// that the state is explained, not dead-ended.
 	let frozenMessage = $state<string | null>(null);
 	let genericError = $state<string | null>(null);
 	let attributions = $state<BlockAttribution[]>([]);
@@ -103,9 +66,6 @@
 				!!doc.metadata.version)
 	);
 
-	// Violations/conflicts with no resolvable block id (e.g. a block missing
-	// its own id, which per extractBlockId's doc comment has nothing to
-	// quote) are shown as a plain list rather than silently dropped.
 	let unattributed = $derived(attributions.filter((a) => a.blockId === null).map((a) => a.message));
 	let blockErrors = $derived.by(() => {
 		const map = new Map<string, string[]>();
@@ -125,12 +85,40 @@
 		savedNote = null;
 	}
 
-	// Save on a brand-new document does not call the API directly -- it opens
-	// the confirm dialog below, which is what actually calls createDocument
-	// (confirmCreate). Every existing-document save still goes straight
-	// through, unchanged.
+	function clearPreviewSurface() {
+		previewPages = null;
+		previewVersion = null;
+		previewError = null;
+	}
+
+	function adoptSavedDocument(result: Document, note: string) {
+		doc.document_key = result.document_key;
+		doc.content_version = result.content_version;
+		doc.edit_version = result.edit_version;
+		savedSnapshot = JSON.stringify(doc);
+		savedNote = note;
+		clearPreviewSurface();
+	}
+
+	function handleSaveError(e: unknown) {
+		if (e instanceof CdmStaleVersionError) {
+			staleError = e;
+		} else if (e instanceof CdmFrozenError) {
+			frozenMessage = e.message;
+		} else if (e instanceof CdmValidationError) {
+			attributions = attributeToBlocks(e.violations);
+			genericError = 'This document has validation problems (see below).';
+		} else if (e instanceof CdmBlockConflictError) {
+			attributions = attributeToBlocks([e.message]);
+		} else if (e instanceof CdmApiError) {
+			genericError = e.message;
+		} else {
+			genericError = String(e);
+		}
+	}
+
 	async function save() {
-		if (frozenMessage) return;
+		if (frozenMessage || (!isNew && !dirty)) return;
 		if (isNew) {
 			showCreateConfirm = true;
 			return;
@@ -139,33 +127,28 @@
 		clearSaveFeedback();
 		try {
 			const result = await saveDocument(doc);
-			// Only content_version is adopted from the response, not the whole
-			// document: doc.blocks here is exactly what was just sent (already
-			// validated), and wholesale-replacing it risks clobbering an edit
-			// made during the request's round trip.
-			doc.content_version = result.content_version;
-			savedSnapshot = JSON.stringify(doc);
-			savedNote = `Saved as version ${result.content_version}.`;
+			adoptSavedDocument(result, `Saved current version v${result.content_version}.`);
 		} catch (e) {
-			if (e instanceof CdmStaleVersionError) {
-				// Task 7.2: the author's local content is untouched here --
-				// only reloadDiscardingLocalChanges, an explicit separate
-				// action below, replaces it.
-				staleError = e;
-			} else if (e instanceof CdmFrozenError) {
-				frozenMessage = e.message;
-			} else if (e instanceof CdmValidationError) {
-				attributions = attributeToBlocks(e.violations);
-				genericError = 'This document has validation problems (see below).';
-			} else if (e instanceof CdmBlockConflictError) {
-				attributions = attributeToBlocks([e.message]);
-			} else if (e instanceof CdmApiError) {
-				genericError = e.message;
-			} else {
-				genericError = String(e);
-			}
+			handleSaveError(e);
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function saveToNewVersion() {
+		if (frozenMessage || isNew || !dirty) return;
+		savingNewVersion = true;
+		clearSaveFeedback();
+		try {
+			const result = await saveDocumentToNewVersion(doc);
+			adoptSavedDocument(result, `Saved to new version v${result.content_version}.`);
+			if (showVersionsDialog) {
+				await loadVersions();
+			}
+		} catch (e) {
+			handleSaveError(e);
+		} finally {
+			savingNewVersion = false;
 		}
 	}
 
@@ -187,24 +170,13 @@
 				tenantId: createTarget.tenantId,
 				ksStoreId: createTarget.ksStoreId
 			});
-			// Adopt the server-allocated key/version the same conservative way
-			// save() adopts content_version: doc.blocks/title stay exactly what
-			// was just sent, since they are already validated and a full
-			// replacement risks clobbering an in-flight edit.
-			doc.document_key = created.document_key;
-			doc.content_version = created.content_version;
-			savedSnapshot = JSON.stringify(doc);
-			savedNote = `Created as ${created.document_key} (version ${created.content_version}).`;
+			adoptSavedDocument(
+				created,
+				`Created as ${created.document_key} (version ${created.content_version}).`
+			);
 			onCreated?.(created.document_key);
 		} catch (e) {
-			if (e instanceof CdmValidationError) {
-				attributions = attributeToBlocks(e.violations);
-				genericError = 'This document has validation problems (see below).';
-			} else if (e instanceof CdmApiError) {
-				genericError = e.message;
-			} else {
-				genericError = String(e);
-			}
+			handleSaveError(e);
 		} finally {
 			saving = false;
 		}
@@ -218,7 +190,7 @@
 	}
 
 	async function publish() {
-		if (frozenMessage || dirty) return;
+		if (frozenMessage || dirty || isNew) return;
 		if (!window.confirm('Publishing freezes this document: it becomes read-only. Continue?')) {
 			return;
 		}
@@ -229,33 +201,15 @@
 			doc.content_version = result.content_version;
 			savedSnapshot = JSON.stringify(doc);
 			frozenMessage =
-				'This document is now published and read-only. Opening a new version to keep editing is not supported yet.';
+				'This document is now published and read-only. Save to New Version is disabled until editable version branching is supported for published documents.';
 		} catch (e) {
-			if (e instanceof CdmStaleVersionError) {
-				staleError = e;
-			} else if (e instanceof CdmFrozenError) {
-				frozenMessage = e.message;
-			} else if (e instanceof CdmApiError) {
-				genericError = e.message;
-			} else {
-				genericError = String(e);
-			}
+			handleSaveError(e);
 		} finally {
 			publishing = false;
 		}
 	}
 
 	async function preview() {
-		// Task 7.6: an explicit action only -- never called from an $effect
-		// tracking `doc`, which would fire on every keystroke. Renders
-		// whatever content_version is currently saved server-side (design
-		// D9); if `dirty`, that is deliberately not what's on screen, and the
-		// panel below says so rather than silently showing stale content as
-		// if it were current.
-		//
-		// Guarded defensively even though the Preview button is disabled for
-		// isNew below -- renderDocument needs a real document_key and has none
-		// to call with yet.
 		if (!doc.document_key) return;
 		previewLoading = true;
 		previewError = null;
@@ -269,6 +223,40 @@
 			previewLoading = false;
 		}
 	}
+
+	function formatDate(value: string) {
+		return new Intl.DateTimeFormat(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit'
+		}).format(new Date(value));
+	}
+
+	function formatBytes(bytes: number) {
+		return new Intl.NumberFormat(undefined).format(bytes) + ' bytes';
+	}
+
+	async function loadVersions() {
+		if (!doc.document_key) return;
+		versionsLoading = true;
+		versionsError = null;
+		try {
+			const result = await listDocumentVersions(doc.document_key);
+			versions = result.results;
+		} catch (e) {
+			versionsError = e instanceof CdmApiError ? e.message : String(e);
+		} finally {
+			versionsLoading = false;
+		}
+	}
+
+	async function openVersions() {
+		if (!doc.document_key) return;
+		showVersionsDialog = true;
+		await loadVersions();
+	}
 </script>
 
 <div class="cdm-document-editor">
@@ -280,25 +268,53 @@
 			disabled={!!frozenMessage}
 			placeholder="Document title"
 		/>
-		<span class="cdm-version-badge">
-			{isNew ? 'not yet saved' : `v${doc.content_version}`}{dirty && !isNew
-				? ' · unsaved changes'
-				: ''}
-		</span>
+		<div class="cdm-editor-meta">
+			<span class="cdm-version-badge">
+				{isNew ? 'not yet saved' : `v${doc.content_version}`}{dirty && !isNew
+					? ' · unsaved changes'
+					: ''}
+			</span>
+		</div>
 		<div class="cdm-editor-actions">
 			<button
 				type="button"
+				class="cdm-action-button"
 				onclick={preview}
 				disabled={previewLoading || isNew}
 				title={isNew ? 'Save the document first' : undefined}
 			>
 				{previewLoading ? 'Rendering…' : 'Preview'}
 			</button>
-			<button type="button" onclick={save} disabled={saving || !!frozenMessage}>
+			<button
+				type="button"
+				class="cdm-action-button"
+				onclick={save}
+				disabled={saving || !!frozenMessage || (!isNew && !dirty)}
+				title={!isNew && !dirty ? 'No unsaved changes' : undefined}
+			>
 				{saving ? 'Saving…' : isNew ? 'Save…' : 'Save'}
 			</button>
 			<button
 				type="button"
+				class="cdm-action-button"
+				onclick={saveToNewVersion}
+				disabled={savingNewVersion || !!frozenMessage || isNew || !dirty}
+				title={isNew ? 'Save the document first' : !dirty ? 'No unsaved changes' : undefined}
+			>
+				{savingNewVersion ? 'Saving…' : 'Save to New Version'}
+			</button>
+			<button
+				type="button"
+				class="cdm-action-button"
+				onclick={openVersions}
+				disabled={isNew}
+				title={isNew ? 'Save the document first' : undefined}
+			>
+				Versions
+			</button>
+			<button
+				type="button"
+				class="cdm-action-button cdm-action-button--primary"
 				onclick={publish}
 				disabled={publishing || !!frozenMessage || dirty || isNew}
 				title={isNew
@@ -319,11 +335,11 @@
 	{#if staleError}
 		<div class="cdm-banner cdm-banner--warn">
 			<p>
-				Someone else saved a newer version (v{staleError.currentVersion}) while you were editing.
-				Your changes here have not been discarded or sent.
+				Someone else saved a newer edit state (revision {staleError.currentVersion}) while you were
+				editing. Your local changes have not been discarded or sent.
 			</p>
-			<button type="button" onclick={reloadDiscardingLocalChanges}>
-				Discard my changes and reload v{staleError.currentVersion}
+			<button type="button" class="cdm-inline-button" onclick={reloadDiscardingLocalChanges}>
+				Discard my changes and reload
 			</button>
 		</div>
 	{/if}
@@ -359,18 +375,79 @@
 </div>
 
 {#if showCreateConfirm}
-	<div class="cdm-confirm-overlay">
-		<div class="cdm-confirm-panel">
+	<div class="cdm-overlay">
+		<div class="cdm-dialog">
 			<h2>Create this document?</h2>
 			<p>
 				This creates a new document titled <strong>{doc.title || '(untitled)'}</strong> in the
-				knowledge store
-				<strong>{createTarget?.ksName ?? '—'}</strong>.
+				knowledge store <strong>{createTarget?.ksName ?? '—'}</strong>.
 			</p>
-			<div class="cdm-confirm-actions">
-				<button type="button" onclick={cancelCreate}>Cancel</button>
-				<button type="button" class="cdm-confirm-primary" onclick={confirmCreate}> Create </button>
+			<div class="cdm-dialog-actions">
+				<button type="button" class="cdm-action-button" onclick={cancelCreate}>Cancel</button>
+				<button
+					type="button"
+					class="cdm-action-button cdm-action-button--primary"
+					onclick={confirmCreate}
+				>
+					Create
+				</button>
 			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showVersionsDialog}
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<div
+		class="cdm-overlay"
+		onclick={(e) => e.target === e.currentTarget && (showVersionsDialog = false)}
+	>
+		<div class="cdm-dialog cdm-dialog--versions">
+			<div class="cdm-dialog-head">
+				<div>
+					<h2>Version Tree</h2>
+					<p>Document versions for {doc.title || doc.document_key}</p>
+				</div>
+				<button
+					type="button"
+					class="cdm-action-button"
+					onclick={() => (showVersionsDialog = false)}
+				>
+					Close
+				</button>
+			</div>
+
+			{#if versionsLoading}
+				<div class="cdm-versions-status">Loading versions…</div>
+			{:else if versionsError}
+				<div class="cdm-banner cdm-banner--error">{versionsError}</div>
+			{:else}
+				<div class="cdm-version-tree">
+					{#each versions as version, index (version.content_version)}
+						<div class="cdm-version-node-wrap">
+							<div class="cdm-version-node" class:cdm-version-node--current={version.current}>
+								<div class="cdm-version-node-head">
+									<strong>Version {version.content_version}</strong>
+									{#if version.current}
+										<span class="cdm-version-current">Current</span>
+									{/if}
+								</div>
+								<div class="cdm-version-node-meta">Created: {formatDate(version.create_time)}</div>
+								<div class="cdm-version-node-meta">Modified: {formatDate(version.update_time)}</div>
+								<div class="cdm-version-node-meta">Size: {formatBytes(version.size_bytes)}</div>
+								{#if version.parent_content_version !== undefined}
+									<div class="cdm-version-node-parent">
+										Parent: v{version.parent_content_version}
+									</div>
+								{/if}
+							</div>
+							{#if index < versions.length - 1}
+								<div class="cdm-version-connector"></div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -390,14 +467,20 @@
 		background: var(--cdm-surface, #fff);
 		padding: 8px 0;
 		z-index: 5;
+		flex-wrap: wrap;
 	}
 	.cdm-title-input {
-		flex: 1 1 auto;
+		flex: 1 1 320px;
 		font-size: 1.1em;
 		font-weight: 600;
 		border: 1px solid rgba(127, 127, 127, 0.35);
-		border-radius: 6px;
-		padding: 4px 8px;
+		border-radius: 8px;
+		padding: 8px 10px;
+		background: rgba(255, 255, 255, 0.8);
+	}
+	.cdm-editor-meta {
+		display: flex;
+		align-items: center;
 	}
 	.cdm-version-badge {
 		font-family: ui-monospace, monospace;
@@ -407,7 +490,51 @@
 	}
 	.cdm-editor-actions {
 		display: flex;
-		gap: 6px;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.cdm-action-button {
+		appearance: none;
+		border: 1px solid rgba(127, 127, 127, 0.35);
+		border-radius: 8px;
+		padding: 8px 12px;
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 236, 224, 0.96));
+		color: #241d16;
+		font: inherit;
+		font-size: 0.86rem;
+		font-weight: 600;
+		cursor: pointer;
+		box-shadow:
+			0 1px 0 rgba(255, 255, 255, 0.7) inset,
+			0 1px 2px rgba(0, 0, 0, 0.08);
+	}
+	.cdm-action-button:hover:not(:disabled) {
+		background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(232, 224, 205, 1));
+	}
+	.cdm-action-button:disabled {
+		opacity: 0.48;
+		cursor: not-allowed;
+		box-shadow: none;
+	}
+	.cdm-action-button--primary {
+		background: linear-gradient(180deg, #1f5bd8, #1848ad);
+		border-color: #143b8d;
+		color: #fff;
+	}
+	.cdm-action-button--primary:hover:not(:disabled) {
+		background: linear-gradient(180deg, #2563eb, #1d4ed8);
+	}
+	.cdm-inline-button {
+		appearance: none;
+		border: 1px solid currentColor;
+		border-radius: 7px;
+		padding: 6px 10px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		font-size: 0.86rem;
+		font-weight: 600;
+		cursor: pointer;
 	}
 	.cdm-banner {
 		border-radius: 6px;
@@ -434,7 +561,7 @@
 		border: 1px solid rgba(220, 38, 38, 0.4);
 		color: #b91c1c;
 	}
-	.cdm-confirm-overlay {
+	.cdm-overlay {
 		position: fixed;
 		inset: 0;
 		background: rgba(0, 0, 0, 0.5);
@@ -442,28 +569,97 @@
 		align-items: center;
 		justify-content: center;
 		z-index: 50;
+		padding: 24px;
 	}
-	.cdm-confirm-panel {
+	.cdm-dialog {
 		background: var(--cdm-surface, #fff);
 		width: min(440px, 92vw);
-		border-radius: 8px;
+		border-radius: 10px;
 		padding: 20px;
+		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
 	}
-	.cdm-confirm-panel h2 {
-		margin: 0 0 10px;
+	.cdm-dialog--versions {
+		width: min(760px, 96vw);
+		max-height: 84vh;
+		overflow: auto;
+	}
+	.cdm-dialog-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 18px;
+	}
+	.cdm-dialog h2 {
+		margin: 0 0 6px;
 		font-size: 1.05em;
 	}
-	.cdm-confirm-panel p {
-		margin: 0 0 16px;
+	.cdm-dialog p {
+		margin: 0;
 		font-size: 0.92em;
 		line-height: 1.6;
+		color: var(--cdm-muted, #6b7280);
 	}
-	.cdm-confirm-actions {
+	.cdm-dialog-actions {
 		display: flex;
 		justify-content: flex-end;
 		gap: 8px;
+		margin-top: 16px;
 	}
-	.cdm-confirm-primary {
-		font-weight: 600;
+	.cdm-versions-status {
+		padding: 20px 4px;
+		color: var(--cdm-muted, #6b7280);
+	}
+	.cdm-version-tree {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+	}
+	.cdm-version-node-wrap {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 100%;
+	}
+	.cdm-version-node {
+		width: min(100%, 520px);
+		align-self: flex-start;
+		border: 1px solid rgba(127, 127, 127, 0.35);
+		border-radius: 12px;
+		padding: 14px 16px;
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 239, 228, 0.98));
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+	}
+	.cdm-version-node--current {
+		border-color: #1d4ed8;
+		box-shadow:
+			0 0 0 2px rgba(29, 78, 216, 0.12),
+			0 8px 24px rgba(0, 0, 0, 0.08);
+	}
+	.cdm-version-node-head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 8px;
+	}
+	.cdm-version-current {
+		border-radius: 999px;
+		padding: 2px 8px;
+		background: rgba(29, 78, 216, 0.12);
+		color: #1d4ed8;
+		font-size: 0.72rem;
+		font-weight: 700;
+	}
+	.cdm-version-node-meta,
+	.cdm-version-node-parent {
+		font-size: 0.84rem;
+		color: #54493d;
+		margin-top: 4px;
+	}
+	.cdm-version-connector {
+		width: 2px;
+		height: 22px;
+		background: rgba(127, 127, 127, 0.35);
+		margin: 6px 0;
 	}
 </style>
