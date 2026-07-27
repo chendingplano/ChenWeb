@@ -1,0 +1,229 @@
+{
+	"document_key": "doc:phase1-all-types",
+	"title": "Phase 1 Block Type Coverage",
+	"language": "en",
+	"schema_version": "1.0",
+	"content_version": 1,
+	"metadata": {
+		"doc_type": "technical-doc",
+		"rendering_type": "user-manual",
+		"authors": ["Chen Ding"]
+	},
+	"blocks": [
+		{
+			"id": "h1",
+			"type": "heading",
+			"level": 1,
+			"content": [
+				{
+					"type": "text",
+					"text": "Title Heading"
+				}
+			]
+		},
+		{
+			"id": "p1",
+			"type": "paragraph",
+			"content": [
+				{
+					"type": "text",
+					"text": "See "
+				},
+				{
+					"type": "strong",
+					"content": [
+						{
+							"type": "text",
+							"text": "bold"
+						}
+					]
+				},
+				{
+					"type": "text",
+					"text": " and "
+				},
+				{
+					"type": "emphasis",
+					"content": [
+						{
+							"type": "text",
+							"text": "italic"
+						}
+					]
+				},
+				{
+					"type": "text",
+					"text": ", inline "
+				},
+				{
+					"type": "code",
+					"text": "x := 1"
+				},
+				{
+					"type": "text",
+					"text": ", a "
+				},
+				{
+					"type": "link",
+					"content": [
+						{
+							"type": "text",
+							"text": "link"
+						}
+					],
+					"url": "https://example.com"
+				},
+				{
+					"type": "text",
+					"text": ", a citation "
+				},
+				{
+					"type": "citation",
+					"citation_key": "winkler1990",
+					"locator": "p. 354"
+				},
+				{
+					"type": "text",
+					"text": ", and a "
+				},
+				{
+					"type": "cross_reference",
+					"content": [
+						{
+							"type": "text",
+							"text": "cross-reference"
+						}
+					],
+					"target": {
+						"block_id": "eq1"
+					}
+				},
+				{
+					"type": "text",
+					"text": "."
+				}
+			]
+		},
+		{
+			"id": "list1",
+			"type": "list",
+			"ordered": true,
+			"items": [
+				[
+					{
+						"id": "list1-1",
+						"type": "paragraph",
+						"content": [
+							{
+								"type": "text",
+								"text": "First"
+							}
+						]
+					}
+				],
+				[
+					{
+						"id": "list1-2",
+						"type": "paragraph",
+						"content": [
+							{
+								"type": "text",
+								"text": "Second"
+							}
+						]
+					}
+				]
+			]
+		},
+		{
+			"id": "table1",
+			"type": "table",
+			"columns": [
+				{
+					"key": "a",
+					"title": "A"
+				},
+				{
+					"key": "b",
+					"title": "B"
+				}
+			],
+			"rows": [
+				{
+					"cells": {
+						"a": [
+							{
+								"type": "text",
+								"text": "1"
+							}
+						],
+						"b": [
+							{
+								"type": "text",
+								"text": "2"
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"id": "code1",
+			"type": "code",
+			"text": "func main() {}\n",
+			"lang": "go"
+		},
+		{
+			"id": "eq1",
+			"type": "equation",
+			"math": {
+				"display": false,
+				"original": {
+					"format": "typst",
+					"source": "a + b = c"
+				},
+				"parse_status": "skipped"
+			}
+		},
+		{
+			"id": "img1",
+			"type": "image",
+			"src": "diagrams/flow.png",
+			"alt": "Flow diagram",
+			"caption": [
+				{
+					"type": "text",
+					"text": "Figure: process flow"
+				}
+			]
+		},
+		{
+			"id": "quote1",
+			"type": "quote",
+			"content": [
+				{
+					"type": "text",
+					"text": "A quoted passage."
+				}
+			]
+		},
+		{
+			"id": "callout1",
+			"type": "callout",
+			"role": "warning",
+			"title": "Limitation",
+			"children": [
+				{
+					"id": "callout1-body",
+					"type": "paragraph",
+					"content": [
+						{
+							"type": "text",
+							"text": "Scores are not comparable across locales."
+						}
+					]
+				}
+			]
+		}
+	]
+}

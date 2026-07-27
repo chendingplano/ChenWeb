@@ -78,6 +78,8 @@
 		"@event-calendar/core": "^4.7.1",
 		"@svar-ui/svelte-core": "^2.3.1",
 		"@svar-ui/svelte-editor": "^2.3.0",
+		"@tiptap/core": "^3",
+		"@tiptap/pm": "^3",
 		"@types/node": "^25.0.3",
 		"@types/three": "^0.180.0",
 		"@xyflow/svelte": "^1.5.1",

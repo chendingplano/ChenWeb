@@ -1,0 +1,167 @@
+{
+	"document_key": "doc:jaro-winkler",
+	"title": "Jaro-Winkler Similarity",
+	"language": "en",
+	"schema_version": "1.0",
+	"content_version": 1,
+	"metadata": {
+		"doc_type": "technical-doc",
+		"rendering_type": "user-manual",
+		"authors": ["Chen Ding"],
+		"version": "v1.0",
+		"create_time": "2026-07-15T00:00:00Z",
+		"modify_time": "2026-07-26T00:00:00Z"
+	},
+	"blocks": [
+		{
+			"id": "intro",
+			"type": "paragraph",
+			"content": [
+				{
+					"type": "text",
+					"text": "Jaro-Winkler similarity is a string similarity algorithm designed for "
+				},
+				{
+					"type": "emphasis",
+					"content": [
+						{
+							"type": "text",
+							"text": "short strings"
+						}
+					]
+				},
+				{
+					"type": "text",
+					"text": ", especially names."
+				}
+			]
+		},
+		{
+			"id": "score-range",
+			"type": "list",
+			"items": [
+				[
+					{
+						"id": "score-range-1",
+						"type": "paragraph",
+						"content": [
+							{
+								"type": "strong",
+								"content": [
+									{
+										"type": "text",
+										"text": "1.0"
+									}
+								]
+							},
+							{
+								"type": "text",
+								"text": " means identical strings."
+							}
+						]
+					}
+				],
+				[
+					{
+						"id": "score-range-2",
+						"type": "paragraph",
+						"content": [
+							{
+								"type": "strong",
+								"content": [
+									{
+										"type": "text",
+										"text": "0.0"
+									}
+								]
+							},
+							{
+								"type": "text",
+								"text": " means completely different strings."
+							}
+						]
+					}
+				]
+			]
+		},
+		{
+			"id": "example-table",
+			"type": "table",
+			"columns": [
+				{
+					"key": "left",
+					"title": "String 1",
+					"align": "left"
+				},
+				{
+					"key": "right",
+					"title": "String 2",
+					"align": "left"
+				},
+				{
+					"key": "score",
+					"title": "Similarity",
+					"align": "right"
+				}
+			],
+			"rows": [
+				{
+					"cells": {
+						"left": [
+							{
+								"type": "text",
+								"text": "John"
+							}
+						],
+						"right": [
+							{
+								"type": "text",
+								"text": "Jon"
+							}
+						],
+						"score": [
+							{
+								"type": "text",
+								"text": "0.93"
+							}
+						]
+					}
+				},
+				{
+					"cells": {
+						"left": [
+							{
+								"type": "text",
+								"text": "Michael"
+							}
+						],
+						"right": [
+							{
+								"type": "text",
+								"text": "Micheal"
+							}
+						],
+						"score": [
+							{
+								"type": "text",
+								"text": "0.97"
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"id": "jaro-formula",
+			"type": "equation",
+			"math": {
+				"display": true,
+				"original": {
+					"format": "latex",
+					"source": "J = \\frac{1}{3}\\left(\\frac{m}{|s_1|} + \\frac{m}{|s_2|} + \\frac{m-t}{m}\\right)"
+				},
+				"parse_status": "skipped"
+			}
+		}
+	]
+}
