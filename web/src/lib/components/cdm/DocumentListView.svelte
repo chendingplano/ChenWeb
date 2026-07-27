@@ -22,6 +22,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import { listKnowledgeStores, type KnowledgeStoreRecord } from '$lib/services/kbService';
 	import { knowledgeStoreState } from '../home3/knowledge-store-state.svelte.js';
 	import { listDocuments, createDocument, type DocumentSummary } from './cdm-client.js';
@@ -341,6 +342,10 @@
 				<ul class="cdm-doc-list">
 					{#each visibleDocuments as doc (doc.document_key)}
 						<li>
+							<!-- The whole row is the link, so the "Edit"/"Open" affordance below is
+							     a styled span rather than a nested button or second anchor: it would
+							     otherwise be either invalid HTML or a second tab stop to the same
+							     destination. Clicking it navigates via this anchor either way. -->
 							<a class="cdm-doc-row" href={`/home3/cdm/${encodeURIComponent(doc.document_key)}`}>
 								<span class="cdm-doc-title">{doc.title}</span>
 								<span
@@ -353,6 +358,12 @@
 								<span class="cdm-doc-version">v{doc.content_version}</span>
 								<span class="cdm-doc-key">{doc.document_key}</span>
 								<span class="cdm-doc-time">{formatTime(doc.update_time)}</span>
+								<!-- A published document is frozen (D8), so it opens read-only --
+								     "Open" rather than "Edit" says so before the click. -->
+								<span class="cdm-doc-action">
+									{doc.published ? 'Open' : 'Edit'}
+									<ArrowRightIcon size={13} />
+								</span>
 							</a>
 						</li>
 					{/each}
@@ -692,7 +703,7 @@
 	}
 	.cdm-doc-row {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto 3.5rem minmax(0, 14rem) 11rem;
+		grid-template-columns: minmax(0, 1fr) auto 3.5rem minmax(0, 14rem) 11rem auto;
 		align-items: center;
 		gap: 14px;
 		padding: 13px 10px;
@@ -701,16 +712,58 @@
 		text-decoration: none;
 		transition: background 0.15s ease;
 	}
-	.cdm-doc-row:hover {
+	.cdm-doc-row:hover,
+	.cdm-doc-row:focus-visible {
 		background: var(--panel-alt);
 	}
+	.cdm-doc-row:focus-visible {
+		outline: 2px solid var(--brass);
+		outline-offset: -2px;
+	}
+	/* The title carries the link colour so the row reads as navigable at rest,
+	   not only under the cursor -- which is what sent someone looking for an
+	   "edit" control that was the row itself all along. */
 	.cdm-doc-title {
 		font-size: 0.95rem;
 		font-weight: 600;
-		color: var(--text);
+		color: var(--brass);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.cdm-doc-row:hover .cdm-doc-title,
+	.cdm-doc-row:focus-visible .cdm-doc-title {
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.cdm-doc-action {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 5px 11px;
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--text-2);
+		white-space: nowrap;
+		transition:
+			background 0.15s ease,
+			border-color 0.15s ease,
+			color 0.15s ease;
+	}
+	.cdm-doc-action :global(svg) {
+		transition: transform 0.15s ease;
+	}
+	.cdm-doc-row:hover .cdm-doc-action,
+	.cdm-doc-row:focus-visible .cdm-doc-action {
+		border-color: var(--brass);
+		background: var(--brass);
+		color: #16120a;
+	}
+	.cdm-doc-row:hover .cdm-doc-action :global(svg) {
+		transform: translateX(2px);
 	}
 	.cdm-doc-version,
 	.cdm-doc-key,
@@ -784,8 +837,12 @@
 		.cdm-home {
 			padding: 28px 18px 48px;
 		}
+		/* Title + badge + the action on the first line; version and time wrap
+		   underneath. The action keeps its column at every width -- it is the
+		   affordance, so it is the last thing that should drop. */
 		.cdm-doc-row {
-			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-columns: minmax(0, 1fr) auto auto;
+			gap: 6px 12px;
 		}
 		.cdm-doc-key {
 			display: none;
