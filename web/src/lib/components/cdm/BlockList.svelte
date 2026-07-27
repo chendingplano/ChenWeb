@@ -187,6 +187,19 @@
 		align-items: center;
 		opacity: 0.35;
 		transition: opacity 0.1s;
+		/*
+		 * position+z-index, not just a higher stacking context by luck:
+		 * confirmed live (task group 8's full-loop test) that a focused
+		 * block's floating InlineEditor toolbar (position: absolute,
+		 * z-index: 10, floats above its own editor) can render directly on
+		 * top of the "Insert at top" row immediately preceding the first
+		 * block, hiding it completely and swallowing clicks meant for it.
+		 * Outranking that toolbar's z-index here keeps every insert row
+		 * visible and clickable regardless of which block currently has
+		 * focus.
+		 */
+		position: relative;
+		z-index: 11;
 	}
 	.cdm-insert-row:hover {
 		opacity: 1;
