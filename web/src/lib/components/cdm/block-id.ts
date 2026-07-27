@@ -85,3 +85,18 @@ export function collectBlockIds(blocks: readonly Block[]): Set<string> {
 	walk(blocks);
 	return ids;
 }
+
+/**
+ * Returns a stateful allocator seeded with existingIds, so a caller minting
+ * several ids in one operation (e.g. a new `list` block plus its first
+ * item) does not hand out the same slug twice. Each call both allocates and
+ * reserves the id, in order.
+ */
+export function createIdAllocator(existingIds: ReadonlySet<string>): (hint: BlockIdHint) => string {
+	const used = new Set(existingIds);
+	return (hint) => {
+		const id = allocateBlockId(hint, used);
+		used.add(id);
+		return id;
+	};
+}

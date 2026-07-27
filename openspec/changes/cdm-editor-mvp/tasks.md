@@ -50,10 +50,35 @@ since the handlers depend on all three. See design D2, D3, D4.
 
 ## 4. Block list and read-only rendering
 
-- [ ] 4.1 Write the block list component holding `$state<Block[]>`, rendering all nine Phase 1 block types read-only
-- [ ] 4.2 Verify it renders both shared fixture documents correctly, loaded from the real API
-- [ ] 4.3 Add block selection, insertion, deletion, reordering, and type change, operating directly on the block array (no rich-text engine involved)
-- [ ] 4.4 Add a test asserting block ids survive reorder and content edits unchanged
+Business logic (mutation, defaults, id allocation) was split into plain `.ts`
+modules with real unit tests, and the `.svelte` files stay thin views calling
+them — this codebase has no component-testing infrastructure (13 existing
+`*.test.ts` files test only plain TS modules, zero test `.svelte` files
+directly), so this split is what makes 4.3/4.4 actually testable rather than
+asserted by inspection, matching the project's own convention rather than
+introducing a new one.
+
+- [x] 4.1 Wrote `InlineView.svelte` (all 8 inline types, recursive via self-import) and `BlockView.svelte` (all 9 Phase 1 block types, recursive into `children`/`items` via self-import) as read-only views, plus `BlockList.svelte` holding `blocks` as a `$bindable` prop (not internal `$state` — the caller, eventually the editor page, owns the one canonical copy; no duplicate view model, per design D8)
+- [x] Added supporting pure-logic modules, each with its own test file: `createIdAllocator` in `block-id.ts` (a stateful allocator so one insert minting several ids, e.g. a `list` block plus its first item, can't hand out the same slug twice); `block-defaults.ts` (`createDefaultBlock`, a minimal valid shape for each of the 9 types — checked against the content/children/items exclusivity and table-cell-key invariants from spec §1.2, deliberately *not* a client-side port of `model.Validate`, which stays server-side by design); `block-ops.ts` (`insertBlockAt`, `deleteBlockById`, `moveBlock`, `changeContentBlockType`)
+- [x] 4.3 Wired selection (click to reveal a toolbar), insertion (a type-picker + Insert control before/between/after every block), deletion, reordering, and type change into `BlockList.svelte`. **Reordering is up/down buttons, not drag-and-drop** — a deliberate simplification for this iteration; `@dnd-kit` is already a project dependency (used in `data-table.svelte`) so richer reordering can be layered in later without a new dependency. **Type change is scoped to paragraph/heading/quote** (`changeContentBlockType`) — the three CDM types that carry `content`; every other type has no content-preserving equivalent (a table's columns/rows don't become paragraph text), so converting into or out of one is delete-then-insert-a-default, not an in-place function. Both scoping decisions are documented in the code, not silently reduced
+- [x] 4.4 `block-ops.test.ts` is the direct proof: `moveBlock` asserts the *same* block object references survive a swap (not rebuilt copies with fresh identity), and `changeContentBlockType` asserts `id` is unchanged across a type conversion. Also verified live in a real browser (below) — selecting a block, moving it down, and reading its id back from the DOM confirmed the same id survives the reorder, matching the unit-test result end to end
+
+### 4.2: verification, and what it actually covers
+
+**Full authenticated browser verification through the live server was not
+achieved.** Auth is wired through Kratos (`libmanager.go` sets
+`authmiddleware.KratosAuthenticator`), no Kratos container was running in this
+environment, and no dev-mode auth bypass exists. Scripting a real login was
+judged disproportionate to this task, so it was not attempted further; this
+is a known gap, not a claimed pass.
+
+What was actually done, and it is real, not a substitute performed for lack
+of better options:
+
+- [x] Built a temporary scratch route (`web/src/routes/dev-cdm-verify/`, deleted after use — not part of the shipped route tree) that renders `BlockList` against the exact same fixture JSON used by the group 3 round-trip test — byte-identical to what the live API serves, which the round-trip test already proved
+- [x] Loaded it in a real headless Chromium via Playwright (`webapp-testing` skill) and screenshotted it. Found and fixed two real cosmetic bugs this way: the app's global Tailwind preflight strips list markers and heading font-size/weight and link color, making lists/headings/links unreadable in the block list. Added targeted scoped-CSS overrides in `BlockView.svelte` and `InlineView.svelte`, re-screenshotted, confirmed fixed. Every block type and inline type visually matched the source data: table cell alignment, code language label, callout role coloring, equation source/format/status, citation brackets, cross-reference styling
+- [x] Drove the interactive controls (4.3) in the same real browser: selecting a block reveals the toolbar with the correct id; moving a block down changes rendered order and the moved block's id is unchanged afterward (the live proof for 4.4); inserting grows the block count by exactly one; deleting returns it to the original count. All assertions passed
+- [x] `bun test src/lib/components/cdm/` — 44 tests, `bun run check` — no new errors introduced (same one pre-existing, unrelated error as before this task), `bun run lint` — clean on all new files (format applied *scoped to the specific files*, having learned from task group 3 not to run the project-wide format script again)
 
 ## 5. Inline editor
 

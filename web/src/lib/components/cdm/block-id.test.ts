@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { slugify, allocateBlockId, collectBlockIds } from './block-id.js';
+import { slugify, allocateBlockId, collectBlockIds, createIdAllocator } from './block-id.js';
 import type { Block } from './types.js';
 
 test('slugify collapses non-alphanumeric runs to a single hyphen', () => {
@@ -74,4 +74,17 @@ test('collectBlockIds walks children (callout) and list items', () => {
 
 test('collectBlockIds on an empty document returns an empty set', () => {
 	assert.equal(collectBlockIds([]).size, 0);
+});
+
+test('createIdAllocator reserves each allocated id so a later call in the same batch cannot reuse it', () => {
+	const allocate = createIdAllocator(new Set());
+	const first = allocate({ type: 'paragraph' });
+	const second = allocate({ type: 'paragraph' });
+	assert.equal(first, 'paragraph');
+	assert.equal(second, 'paragraph-2');
+});
+
+test('createIdAllocator honors ids already present in the seed set', () => {
+	const allocate = createIdAllocator(new Set(['heading']));
+	assert.equal(allocate({ type: 'heading' }), 'heading-2');
 });
