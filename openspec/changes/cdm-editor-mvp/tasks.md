@@ -125,12 +125,55 @@ block type, same pattern as paragraph/heading/quote in group 5.
 
 ## 7. Save, publish, preview
 
-- [ ] 7.1 Wire save, sending the loaded `content_version`; on success adopt the returned version
-- [ ] 7.2 Surface a stale save without discarding the author's local content
-- [ ] 7.3 Surface a frozen document with an explanation that continuing needs a new version — the action itself is deferred (design D4), so this must not dead-end silently
-- [ ] 7.4 Attribute validation violations and block-slug conflicts to the offending block
-- [ ] 7.5 Wire publish, with confirmation, since publishing freezes the document
-- [ ] 7.6 Wire preview: request the rendered pages explicitly, never per keystroke, and display them
+New `DocumentEditor.svelte` owns a `Document` end to end (`initialDocument` is
+a one-time seed via `structuredClone`, matching the existing
+`inputs-mgmt-view.svelte`/`kb-input-metadata.js` convention for taking a
+private mutable copy) and wires it to `cdm-client.ts`'s
+`saveDocument`/`publishDocument`/`renderDocument`/`getDocument`. `BlockList`
+grew two small, narrowly-scoped additions to support it: an `editable` prop
+(defaults `true`, hides every insert/delete/move/type-change control when
+`false`) for the frozen/read-only state, and a `blockErrors: Map<string,
+string[]>` prop that renders attributed messages under the offending block's
+row and gives it a red outline.
+
+Block/violation attribution (task 7.4) is the one piece of real logic here,
+so it went into a pure module with tests rather than living inline:
+`document-editor-ops.ts`'s `extractBlockId`/`attributeToBlocks`. Read through
+`server/api/cdm/model/validate.go` and `server/api/cdm/store/store.go` first
+to confirm the actual message shapes rather than guessing — every violation
+and conflict message puts the offending block's id in the *first* quoted
+substring (`block "p1" has no type`, `cdm: block id "p1" already exists in
+this document`) and nothing else is quoted before it, so "first quoted
+substring, or null if none" is a correct, minimal parse with no server-side
+change needed. A block that fails validation for having no id of its own
+(`block at position 2 in the document has an empty id`) has nothing to quote
+and is correctly attributed to nothing — shown as a general (non-block)
+banner instead of silently dropped or misattributed.
+
+- [x] 7.1 `save()` sends `doc` (whose `content_version` is whatever was last loaded/saved) and, on success, adopts only `result.content_version` from the response — not the whole document — since `doc.blocks` at that point is exactly what was just validated and sent; replacing it wholesale would risk clobbering an edit made during the request's round trip
+- [x] 7.2 A `CdmStaleVersionError` sets a dismissable-by-action (not by time) banner naming the current server version; the author's `doc` is left completely untouched — confirmed live that an edit made just before a forced-stale save survives in the input. Discarding local content only happens through a separate, explicit `reloadDiscardingLocalChanges()` action (a button inside the banner), never automatically
+- [x] 7.3 A `CdmFrozenError` (from either `save()` or `publish()`) sets `frozenMessage`, which does three things at once: shows a persistent banner explaining the document is published and read-only and that opening a new version isn't supported yet (per design D4's explicit scope cut), disables Save and Publish, and passes `editable={!frozenMessage}` down to `BlockList` so every mutating control disappears — not dead-ended silently, since the explanation and the "why" are always visible, but there genuinely is no forward action, matching D4
+- [x] 7.4 `attributeToBlocks` turns `CdmValidationError.violations` (multiple) or a single `CdmBlockConflictError.message` into `{blockId, message}` pairs; `DocumentEditor` derives a `Map<string, string[]>` from these and passes it to `BlockList` as `blockErrors`, which renders each message directly under its block and outlines the row in red. Unattributed messages (null `blockId`) surface as a general banner instead
+- [x] 7.5 `publish()` requires `window.confirm(...)` before calling the API (real browser confirm dialog, not a custom modal — matches this being the one genuinely destructive action in the MVP). Also disabled whenever the document is `dirty` (see below) — publish operates on whatever `content_version` is currently saved server-side, not on in-editor state, so publishing while local edits are unsaved would silently publish stale content; blocking the action until a save clears `dirty` was a correctness fix I made while implementing this, not something task 7.5's wording asked for explicitly. On success, immediately treats the document as frozen (does not wait for a subsequent failed save to discover it)
+- [x] 7.6 `preview()` is only ever called from a button's `onclick`, never from an `$effect` tracking `doc` — confirmed by asserting the mock render endpoint had zero calls after several edits and a save, then exactly one call after clicking Preview. Displays the returned SVG pages via `{@html}` in an overlay panel. Preview reflects the document's last-*saved* `content_version` (design D9 — cached and compiled server-side, not per-keystroke); if local edits are unsaved (`dirty`), the panel says so explicitly rather than implying the preview is current
+
+### `dirty` tracking (not in the task list, needed by 7.5 and 7.6)
+
+Added a `dirty` derived value: `JSON.stringify(doc) !== savedSnapshot`, where
+`savedSnapshot` is retaken after every successful load/save/publish/reload.
+Considered a dedicated flag flipped by every mutation instead, but `doc.blocks`
+is mutated through many independent entry points by now (`block-ops.ts`,
+`table-ops.ts`, `list-ops.ts`, `InlineEditor`'s `onUpdate`, and several plain
+`oninput`/`onchange` handlers directly in `BlockView.svelte`), none of which
+report back to `DocumentEditor` today; a snapshot compare is correct
+regardless of which path changed something, at the cost of a stringify on
+access, which is unmeasurable at this MVP's document sizes.
+
+### Found while implementing group 7
+
+- [x] Publishing itself needed the same `dirty` guard as 7.5 describes above — this was found while writing the design, not while debugging afterward: `PublishDocument` (`server/api/cdmhandler/documents.go`) takes no body and no version, and simply publishes whatever `content_version` is currently the row's value. An editor that let an author click Publish with unsaved local changes would publish the *previous* saved version while the UI showed the new one, silently. There is no server-side signal that would have caught this (no stale-version conflict occurs, because publish isn't checking the editor's local state at all) — it would only have shown up as "my last edit didn't make it into the published doc," reported well after the fact. Blocking Publish while `dirty` closes it at the source
+- [x] Live-browser verification (Playwright, scratch route deleted after use, same convention as groups 4-6) had to mock the CDM HTTP API via `page.route('**/api/v1/cdm/**')` rather than hit the real backend: this environment has no way to establish a real Kratos session, and `apiGroup.Use(authmiddleware.AuthMiddleware)` (`server/api/routes.go`) sits in front of every `/api/v1/cdm/*` route, same accepted gap noted in every prior group. The mock responses were built to match the exact wire shapes in `server/api/cdmhandler/handler.go`'s `errorResponse`/`publishResponse`/`renderResponse` (verified by reading that file, not assumed), so this exercises the real component/Svelte code — real state, real DOM, real button-disabled attributes — against realistic HTTP responses; it does not exercise the real Go handlers or Postgres, which groups 1-2's own tests already cover directly. 31 checks, all passing: save-success version adoption; a stale save leaving a local title edit intact, then an explicit reload replacing it; a validation response's two violations landing one under block `p1` and one (no quotable id) in a general banner; a block-slug conflict landing under `p1`; a frozen response hiding insert controls and disabling Save/Publish with the banner visible; Publish disabled while dirty and enabled again after a save; publish success immediately freezing the document; Preview making zero render calls from typing/saving and exactly one from an explicit click, showing the returned SVG, and reporting the version it reflects
+- [x] `bun test src/lib/components/cdm/` — 83 tests (77 from groups 3-6 plus 6 new), `bun run check` — no new errors (same one pre-existing, unrelated error as before this task), `bun run lint` — clean on all changed files (scoped `prettier --write`, not project-wide; the only "cdm" hit in the raw lint output was a stale generated `.svelte-kit/types/.../dev-cdm-verify/$types.d.ts` left over from the now-deleted scratch route, not a real source file)
 
 ## 8. Routes and integration
 

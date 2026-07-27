@@ -37,7 +37,22 @@
 		type ContentBearingType
 	} from './block-ops.js';
 
-	let { blocks = $bindable() }: { blocks: Block[] } = $props();
+	// editable false is the frozen/published read-only state (design D4/D8,
+	// task group 7): the caller (DocumentEditor) sets this once a save or
+	// publish attempt reveals the document is published, hiding every
+	// mutating control while still showing the block content underneath.
+	//
+	// blockErrors attributes a save-time validation violation or block-slug
+	// conflict (task 7.4) to the block that caused it, keyed by block id;
+	// DocumentEditor computes it from document-editor-ops.ts's
+	// attributeToBlocks. Read-only here -- this component only displays it,
+	// it does not clear it (DocumentEditor clears it on the next save
+	// attempt).
+	let {
+		blocks = $bindable(),
+		editable = true,
+		blockErrors = new Map<string, string[]>()
+	}: { blocks: Block[]; editable?: boolean; blockErrors?: Map<string, string[]> } = $props();
 
 	// Provided to every nested BlockView so a block created anywhere in the
 	// tree (a new list item, say) gets an id unique against the *whole*
@@ -78,16 +93,22 @@
 </script>
 
 <div class="cdm-block-list">
-	<div class="cdm-insert-row">
-		<InsertControl
-			bind:choice={insertTypeChoice}
-			onInsert={() => insertAt(0)}
-			label="Insert at top"
-		/>
-	</div>
+	{#if editable}
+		<div class="cdm-insert-row">
+			<InsertControl
+				bind:choice={insertTypeChoice}
+				onInsert={() => insertAt(0)}
+				label="Insert at top"
+			/>
+		</div>
+	{/if}
 
 	{#each blocks as block, index (block.id)}
-		<div class="cdm-block-row" class:cdm-block-row--selected={selectedId === block.id}>
+		<div
+			class="cdm-block-row"
+			class:cdm-block-row--selected={editable && selectedId === block.id}
+			class:cdm-block-row--error={(blockErrors.get(block.id)?.length ?? 0) > 0}
+		>
 			<!--
 				A plain div, not a button: this hosts InlineEditor for
 				content-bearing blocks, which mounts a real contenteditable
@@ -99,11 +120,19 @@
 				reveals the block's toolbar.
 			-->
 			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-			<div class="cdm-block-select" onclick={() => selectBlock(block.id)}>
-				<BlockView bind:block={blocks[index]} editable={true} />
+			<div class="cdm-block-select" onclick={() => editable && selectBlock(block.id)}>
+				<BlockView bind:block={blocks[index]} {editable} />
 			</div>
 
-			{#if selectedId === block.id}
+			{#if blockErrors.get(block.id)?.length}
+				<div class="cdm-block-errors">
+					{#each blockErrors.get(block.id) ?? [] as msg (msg)}
+						<p>{msg}</p>
+					{/each}
+				</div>
+			{/if}
+
+			{#if editable && selectedId === block.id}
 				<div class="cdm-block-toolbar">
 					<span class="cdm-block-id" title="block id">{block.id}</span>
 					<button type="button" onclick={() => move(block.id, 'up')} disabled={index === 0}
@@ -131,13 +160,15 @@
 			{/if}
 		</div>
 
-		<div class="cdm-insert-row">
-			<InsertControl
-				bind:choice={insertTypeChoice}
-				onInsert={() => insertAt(index + 1)}
-				label="Insert here"
-			/>
-		</div>
+		{#if editable}
+			<div class="cdm-insert-row">
+				<InsertControl
+					bind:choice={insertTypeChoice}
+					onInsert={() => insertAt(index + 1)}
+					label="Insert here"
+				/>
+			</div>
+		{/if}
 	{/each}
 
 	{#if blocks.length === 0}
@@ -168,6 +199,18 @@
 	.cdm-block-row--selected {
 		border-color: rgba(37, 99, 235, 0.5);
 		background: rgba(37, 99, 235, 0.04);
+	}
+	.cdm-block-row--error {
+		border-color: rgba(220, 38, 38, 0.5);
+		background: rgba(220, 38, 38, 0.04);
+	}
+	.cdm-block-errors {
+		color: #b91c1c;
+		font-size: 0.8em;
+		padding: 0 8px 6px;
+	}
+	.cdm-block-errors p {
+		margin: 0;
 	}
 	.cdm-block-select {
 		display: block;
