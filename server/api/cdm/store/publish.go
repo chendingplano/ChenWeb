@@ -57,6 +57,44 @@ type PublishResult struct {
 // finally clearing kb.inputs' doc_processing status so the standard
 // doc-processing worklist picks the document up.
 func (p *Publisher) Publish(ctx context.Context, documentKey string, inputRecordID int64) (*PublishResult, error) {
+	res, err := p.Render(ctx, documentKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.inputs.Publish(ctx, inputRecordID); err != nil {
+		return nil, err
+	}
+
+	return &PublishResult{
+		ContentVersion: res.ContentVersion,
+		PageCount:      res.PageCount,
+		LineCount:      res.LineCount,
+	}, nil
+}
+
+// RenderResult summarizes what a successful Render produced.
+type RenderResult struct {
+	ContentVersion int64
+	PageCount      int
+	LineCount      int
+}
+
+// Render produces and stores a document's rendered artifacts — Typst source,
+// SVG pages, line file, and anchor map — for its current content_version,
+// without touching the editorial lifecycle.
+//
+// Split out of Publish so the editor can preview a draft (ADR 2026072603 DR4)
+// without publishing it. Calling Publish for a preview would freeze the
+// document (D8), which is the opposite of what an author previewing their
+// work-in-progress wants. Publish is now exactly Render plus the kb.inputs
+// transition, so the published artifacts are produced by the same code path
+// the preview used and cannot drift from it.
+//
+// Artifacts are keyed by content_version, so re-rendering an unchanged
+// version overwrites identical rows and a later version's artifacts sit
+// alongside rather than replacing the earlier ones.
+func (p *Publisher) Render(ctx context.Context, documentKey string) (*RenderResult, error) {
 	doc, err := p.docs.Load(ctx, documentKey)
 	if err != nil {
 		return nil, err
@@ -134,14 +172,10 @@ func (p *Publisher) Publish(ctx context.Context, documentKey string, inputRecord
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("cdm: commit publish transaction: %w", err)
+		return nil, fmt.Errorf("cdm: commit render transaction: %w", err)
 	}
 
-	if err := p.inputs.Publish(ctx, inputRecordID); err != nil {
-		return nil, err
-	}
-
-	return &PublishResult{
+	return &RenderResult{
 		ContentVersion: doc.ContentVersion,
 		PageCount:      len(pages),
 		LineCount:      len(lineUnitIDs),

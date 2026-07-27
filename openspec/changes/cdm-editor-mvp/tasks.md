@@ -16,18 +16,25 @@ since the handlers depend on all three. See design D2, D3, D4.
 
 ## 2. HTTP handlers
 
-- [ ] 2.1 Write failing handler tests for each scenario in `specs/cdm-http-api/spec.md`, against the live staging database as `kbhandler` tests do
-- [ ] 2.2 Create `server/api/cdmhandler/` with a handler struct holding the `*Store`, `*InputRegistrar`, and `*Publisher`
-- [ ] 2.3 Implement `document_key` allocation: `doc:<slug-of-title>` with a numeric suffix on collision (design D5)
-- [ ] 2.4 Implement `POST /documents` (create) and `GET /documents` (list, tenant-scoped through the linked input row)
-- [ ] 2.5 Implement `GET /documents/:key` (load) returning canonical JSON directly, with no intermediate DTO
-- [ ] 2.6 Implement `PUT /documents/:key` (save): pass the client's expected `content_version` through to `Store.Save`, return the new version on success
-- [ ] 2.7 Map store errors to HTTP: `*ValidationError` to a structured violation list, `*StaleVersionError` to 409 with both versions, `*FrozenError` to 409 naming the document, `*ConflictError` to 409 naming the block slug
-- [ ] 2.8 Implement `POST /documents/:key/publish` delegating to `Publisher.Publish`, and `DELETE /documents/:key` (soft delete)
-- [ ] 2.9 Implement `GET /documents/:key/render` serving cached `kb.cdm_renderings` rows for the current `content_version`, compiling through `Publisher` only on a miss (design D9)
-- [ ] 2.10 Register all routes in `server/api/routes.go` under the existing `/api/v1` group, so they inherit `authmiddleware.AuthMiddleware` (design D1)
-- [ ] 2.11 Add a test asserting an unauthenticated request never reaches a handler
-- [ ] 2.12 Confirm all tests from 2.1 pass; `go build ./server/...` and `go vet ./server/...` clean
+- [x] 2.1 Wrote 13 failing tests first from the spec scenarios, confirmed failing for the right reason (`s.Create undefined`). Against the live staging database, **not** sqlmock as `kbhandler` uses: these handlers are thin over `cdm/store`, so mocking the SQL would assert only that the mock was called, and the invariants that matter (row lock, version guard, frozen rule) all live in the database. Noted in the test file
+- [x] 2.2 Created `server/api/cdmhandler/`. **Not a handler struct as planned** — the codebase convention is package-level `func(c echo.Context) error` reading `ApiTypes.ProjectDBHandle`, and every other handler package follows it. Matched that rather than introducing a second pattern
+- [x] 2.3 `slugifyTitle` + `allocateDocumentKey`: `doc:<slug>` with a numeric suffix on collision. Documented that it is ASCII-oriented — a CJK title strips to empty and falls back to `document`, which is correct but not useful, and improving it needs a transliteration decision the MVP does not need to make
+- [x] 2.4 `CreateDocument` (201 + canonical JSON, server-allocated key, `tenant_id` from query) and `ListDocuments` (paged, filtered by tenant through the linked input row)
+- [x] 2.5 `GetDocument` returns canonical JSON directly, no wrapper, no DTO
+- [x] 2.6 `SaveDocument`. **The body's own `content_version` is the expectation** — no extra header or parameter, since the version is already a first-class field of the document. A client loads v7, sends it back, the store writes v8 only if 7 is still current
+- [x] 2.7 `writeStoreError` maps every typed store error: 404 for `*NotFoundError`, 400 + full `violations[]` for `*ValidationError`, 409 for the three conflict types with a `conflict` discriminator (`stale_version` / `frozen` / `block_slug`) so the client can offer the right recovery, and 500 with the detail logged rather than returned for anything else
+- [x] 2.8 `PublishDocument`. **`DELETE` deferred, not implemented**: spec §2.6 makes soft delete the default and no soft-delete column exists on `kb.inputs` or `kb.cdm_documents`, so building it means either a migration (design says none) or shipping hard delete mislabelled as soft. Recorded in `routes.go` and below
+- [x] 2.9 `RenderDocument` serving cached `kb.cdm_renderings` rows, compiling only on a miss. **Required splitting `Publisher.Render` out of `Publisher.Publish`**: `Publish` renders *and* transitions the input row, so reusing it for preview would freeze a draft the author only wanted to look at (D8). `Publish` is now exactly `Render` + the transition, so published artifacts come from the same code path preview used and cannot drift
+- [x] 2.10 Registered six routes on the existing `apiGroup` (`/api/v1`), inheriting `authmiddleware.AuthMiddleware`. **Corrects ADR DR2's `/api/cdm`** — the authenticated group is `/api/v1`, so the paths are `/api/v1/cdm/...`
+- [x] 2.11 `TestRoutesAreRegisteredBehindAuth` asserts both that `apiGroup` still carries `AuthMiddleware` and that each CDM route is registered on it
+- [x] 2.12 `go build ./server/...` and `go vet ./server/...` clean; 15 handler tests pass against the live database with none skipped; `go test ./server/api/cdm/...` still green. Also drove the whole spine end to end (create → render-without-publish → confirm still a draft → load canonical JSON) against the live database
+
+### Found while implementing group 2
+
+- [x] 2.13 `Store.Load` flattened `sql.ErrNoRows` into `fmt.Errorf` with no `%w`, so a caller could not distinguish "no such document" from "the load failed" — the 404 test returned 500. Added `store.NotFoundError` and wrapped it properly
+- [x] 2.14 Added `rendering.DefaultTheme` (`//go:embed theme.typ`) so a deployed binary carries the fallback template instead of depending on the source tree being present beside it at runtime
+- [ ] 2.15 **Deferred: `DELETE /documents/:key`.** Needs a soft-delete column that does not exist. Decide whether to add one (migration) or make deletion hard-delete-with-confirmation, then build it with the lineage and inbound-reference checks D14 requires
+- [ ] 2.16 **Known limitation: `tenant_id` is a client-supplied filter, not an isolation boundary.** `ApiTypes.UserInfo` carries no tenant, and the rest of this API takes `tenant_id` from the client the same way (`upload_handler.go:87`), so there is no server-side tenant identity to scope against. The spec scenario "a caller sees only their own tenant's documents" is therefore weaker than it reads. Needs a product decision about multi-tenancy before it can be made real
 
 ## 3. Frontend foundation
 

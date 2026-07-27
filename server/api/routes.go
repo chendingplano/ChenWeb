@@ -31,6 +31,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/deepdoc/server/api/imagehandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
+	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/llmadminhandler"
@@ -373,6 +374,19 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Customer request log endpoint
 	apiGroup.POST("/cust_request_logs", custreqloghandler.CreateCustRequestLog)
+
+	// Canonical Document Model authoring endpoints (ADR 2026072603).
+	// Thin HTTP surface over server/api/cdm/{model,rendering,store}; every
+	// invariant that matters — validation, optimistic concurrency, the
+	// frozen-document rule — is enforced in those packages, not here.
+	// DELETE is deliberately absent: spec 2026072502 §2.6 makes soft delete
+	// the default and no soft-delete column exists yet.
+	apiGroup.POST("/cdm/documents", cdmhandler.CreateDocument)
+	apiGroup.GET("/cdm/documents", cdmhandler.ListDocuments)
+	apiGroup.GET("/cdm/documents/:key", cdmhandler.GetDocument)
+	apiGroup.PUT("/cdm/documents/:key", cdmhandler.SaveDocument)
+	apiGroup.POST("/cdm/documents/:key/publish", cdmhandler.PublishDocument)
+	apiGroup.GET("/cdm/documents/:key/render", cdmhandler.RenderDocument)
 
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/stores", kbhandler.ListKnowledgeStores)

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -37,6 +38,15 @@ type ConflictError struct {
 
 func (e *ConflictError) Error() string {
 	return fmt.Sprintf("cdm: block id %q already exists in this document", e.BlockID)
+}
+
+// NotFoundError is returned when a document_key resolves to no document.
+type NotFoundError struct {
+	DocumentKey string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("cdm: document %q not found", e.DocumentKey)
 }
 
 // StaleVersionError is returned when a save's expected content_version no
@@ -291,8 +301,11 @@ func (s *Store) Load(ctx context.Context, documentKey string) (*model.Document, 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT semantic_document FROM kb.cdm_documents WHERE document_key = $1
 	`, documentKey).Scan(&docJSON)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("cdm: document %q not found", documentKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Wrapped, not flattened to a string: callers must be able to tell
+		// "no such document" from "the load failed", because those are a 404
+		// and a 500 respectively.
+		return nil, &NotFoundError{DocumentKey: documentKey}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cdm: load document %q: %w", documentKey, err)

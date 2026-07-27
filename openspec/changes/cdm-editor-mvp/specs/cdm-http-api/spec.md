@@ -148,10 +148,22 @@ render on every edit.
 - **THEN** the next preview renders fresh rather than returning the prior
   version's pages
 
-### Requirement: Documents are listed and scoped by tenant
-`GET /api/v1/cdm/documents` SHALL list CDM documents scoped to the caller's
-tenant, resolved through the linked `kb.inputs` row.
+### Requirement: Documents are listed and filtered by tenant
+`GET /api/v1/cdm/documents` SHALL list CDM documents, filtered by a
+`tenant_id` query parameter resolved through the linked `kb.inputs` row, and
+paged.
 
-#### Scenario: Listing is tenant-scoped
-- **WHEN** documents exist under two tenants
-- **THEN** a caller sees only their own tenant's documents
+**This is a filter, not an isolation boundary.** `ApiTypes.UserInfo` carries no
+tenant, so there is no server-side tenant identity to scope against; the rest
+of this API takes `tenant_id` from the client the same way
+(`upload_handler.go:87`). A caller who supplies a different `tenant_id` sees
+that tenant's documents. Making this a real boundary requires a
+multi-tenancy decision beyond this change.
+
+#### Scenario: Listing is filtered by the requested tenant
+- **WHEN** documents exist under two tenants and `tenant_id` names one of them
+- **THEN** only that tenant's documents are returned
+
+#### Scenario: Results are paged
+- **WHEN** a page and page size are supplied
+- **THEN** the response reports both back alongside the results
