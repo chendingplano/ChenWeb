@@ -11,25 +11,43 @@
 	// keystroke.
 	import type { Block } from './types.js';
 	import InlineView from './InlineView.svelte';
+	import InlineEditor from './InlineEditor.svelte';
 	import Self from './BlockView.svelte';
 
-	let { block }: { block: Block } = $props();
+	// editable switches paragraph/heading/quote from InlineView (read-only)
+	// to InlineEditor (a real ProseMirror instance, task group 5). Defaults
+	// to false so this component still serves as a plain read-only preview
+	// wherever one is wanted; BlockList, the actual editing surface, passes
+	// true explicitly.
+	let { block, editable = false }: { block: Block; editable?: boolean } = $props();
 
 	let headingTag = $derived(`h${Math.min(6, Math.max(1, block.level ?? 2))}` as const);
 </script>
 
 {#if block.type === 'paragraph'}
-	<p><InlineView inline={block.content ?? []} /></p>
+	{#if editable && block.content}
+		<InlineEditor bind:content={block.content} as="paragraph" />
+	{:else}
+		<p><InlineView inline={block.content ?? []} /></p>
+	{/if}
 {:else if block.type === 'heading'}
-	<svelte:element this={headingTag}><InlineView inline={block.content ?? []} /></svelte:element>
+	{#if editable && block.content}
+		<InlineEditor bind:content={block.content} as="heading" level={block.level ?? 2} />
+	{:else}
+		<svelte:element this={headingTag}><InlineView inline={block.content ?? []} /></svelte:element>
+	{/if}
 {:else if block.type === 'quote'}
-	<blockquote class="cdm-quote"><InlineView inline={block.content ?? []} /></blockquote>
+	{#if editable && block.content}
+		<InlineEditor bind:content={block.content} as="quote" />
+	{:else}
+		<blockquote class="cdm-quote"><InlineView inline={block.content ?? []} /></blockquote>
+	{/if}
 {:else if block.type === 'list'}
 	<svelte:element this={block.ordered ? 'ol' : 'ul'}>
 		{#each block.items ?? [] as item, i (i)}
 			<li>
 				{#each item as child (child.id)}
-					<Self block={child} />
+					<Self block={child} {editable} />
 				{/each}
 			</li>
 		{/each}
@@ -83,7 +101,7 @@
 	<div class="cdm-callout" data-role={block.role ?? 'note'}>
 		{#if block.title}<div class="cdm-callout-title">{block.title}</div>{/if}
 		{#each block.children ?? [] as child (child.id)}
-			<Self block={child} />
+			<Self block={child} {editable} />
 		{/each}
 	</div>
 {:else}

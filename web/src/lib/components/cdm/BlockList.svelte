@@ -74,14 +74,20 @@
 
 	{#each blocks as block, index (block.id)}
 		<div class="cdm-block-row" class:cdm-block-row--selected={selectedId === block.id}>
-			<button
-				type="button"
-				class="cdm-block-select"
-				onclick={() => selectBlock(block.id)}
-				aria-pressed={selectedId === block.id}
-			>
-				<BlockView {block} />
-			</button>
+			<!--
+				A plain div, not a button: this hosts InlineEditor for
+				content-bearing blocks, which mounts a real contenteditable
+				ProseMirror view (task group 5). A <button> ancestor breaks
+				focus and cursor placement for editable descendant content,
+				so selection is a bubbling click handler here instead --
+				clicking into the editable text both places the cursor
+				(native browser behavior, unaffected by this handler) and
+				reveals the block's toolbar.
+			-->
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+			<div class="cdm-block-select" onclick={() => selectBlock(block.id)}>
+				<BlockView {block} editable={true} />
+			</div>
 
 			{#if selectedId === block.id}
 				<div class="cdm-block-toolbar">
@@ -150,10 +156,8 @@
 		background: rgba(37, 99, 235, 0.04);
 	}
 	.cdm-block-select {
-		all: unset;
 		display: block;
 		width: 100%;
-		cursor: pointer;
 		padding: 4px 8px;
 	}
 	.cdm-block-toolbar {
