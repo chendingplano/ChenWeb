@@ -208,3 +208,68 @@ run = "go run ./server/cmd/pdf-parser/"
 
 [tasks.apply-nix]
 run = "cd ~/Workspace/nix && sudo darwin-rebuild switch --flake ."
+
+# --- Gold corpus benchmark (benchmark/doc-processors/gold) ---
+# Always runs against the isolated chenweb_test DB and ThirdParty-2/Data
+# artifact dirs, never the production DB/artifacts (ADR 2026072901 P3). These
+# are hardcoded (not `${VAR:-default}`) because mise.local.toml already
+# exports PG_DB_NAME/ARTIFACT_DIR/ARTIFACT_WEB_DIR for production use, so a
+# fallback-if-unset pattern would silently inherit the production values
+# instead of overriding them.
+
+[tasks.gold-benchmark-run]
+description = '''
+Run the gold ventilator-display-module corpus through ONE real doc processor.
+Usage: PROCESSOR=extract_metrics mise run gold-benchmark-run
+Optional: DATASET_ROOT/CASE_ID to point at a different corpus case as more
+documents/cases are added; extra args (e.g. --document, --dry-run) pass
+through after --.
+'''
+run = '''
+set -euo pipefail
+: "${PROCESSOR:?set PROCESSOR to a doc processor name, or PROCESSOR=all, e.g. PROCESSOR=extract_metrics}"
+export PG_DB_NAME=chenweb_test
+export ARTIFACT_DIR=/Users/cding/Workspace/ThirdParty-2/Data/Artifacts
+export ARTIFACT_WEB_DIR=/Users/cding/Workspace/ThirdParty-2/Data/ArtifactWeb
+DATASET_ROOT="${DATASET_ROOT:-benchmark/doc-processors/gold/display-module-v1}"
+CASE_ID="${CASE_ID:-display-module-v1}"
+go run ./server/cmd/doc-benchmark gold-run \
+  --dataset "$DATASET_ROOT" \
+  --case "$CASE_ID" \
+  --artifact-root "$ARTIFACT_DIR" \
+  --artifact-web-root "$ARTIFACT_WEB_DIR" \
+  --processors "$PROCESSOR" \
+  "$@"
+'''
+
+[tasks.gold-benchmark-run-all]
+description = '''
+Run the gold ventilator-display-module corpus through EVERY known doc
+processor in one pass (generate_summaries, generate_topics,
+extract_doc_metadata, extract_semantic_projections,
+extract_structured_knowledge, extract_entity, extract_relation,
+extract_inventory_items, extract_metrics, extract_provisions,
+generate_scene_blocks). Optional: DATASET_ROOT/CASE_ID; extra args pass
+through after --.
+'''
+run = 'PROCESSOR=all mise run gold-benchmark-run -- "$@"'
+
+[tasks.gold-benchmark-analyze]
+description = '''
+Ask an LLM to read a gold-benchmark-run's JSON output side by side with the
+gold fixture's own source text and write a Markdown extraction-quality
+report. Usage: RESULTS=/path/to/run.json mise run gold-benchmark-analyze
+Optional: DATASET_ROOT/CASE_ID (must match the run that produced RESULTS),
+OUTPUT (markdown file; stdout when unset).
+'''
+run = '''
+set -euo pipefail
+: "${RESULTS:?set RESULTS to a gold-benchmark-run JSON output file}"
+DATASET_ROOT="${DATASET_ROOT:-benchmark/doc-processors/gold/display-module-v1}"
+CASE_ID="${CASE_ID:-display-module-v1}"
+args=(--dataset "$DATASET_ROOT" --case "$CASE_ID" --results "$RESULTS")
+if [ -n "${OUTPUT:-}" ]; then
+  args+=(--output "$OUTPUT")
+fi
+go run ./server/cmd/doc-benchmark analyze "${args[@]}" "$@"
+'''

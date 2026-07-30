@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset_id": "doc-processors-corpus-display-module",
+  "dataset_version": "1.0.0",
+  "cases": [
+    {
+      "case_id": "display-module-v1",
+      "gold": "gold.toml",
+      "tags": ["ontology-comparison", "grounding"]
+    }
+  ]
+}

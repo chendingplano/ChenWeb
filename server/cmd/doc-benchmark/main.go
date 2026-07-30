@@ -59,6 +59,10 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = renderStored(ctx, args[1:], stdout, stderr, false)
 	case "clean":
 		err = clean(ctx, args[1:], stdout, stderr)
+	case "gold-run":
+		err = runGoldCase(ctx, args[1:], stdout, stderr)
+	case "analyze":
+		err = runGoldAnalyze(ctx, args[1:], stdout, stderr)
 	default:
 		emitError(stderr, "usage_error", fmt.Errorf("unknown command %q", args[0]))
 		return 2
@@ -123,6 +127,7 @@ func runBenchmark(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	workRoot := fs.String("work-root", envOr("BENCHMARK_WORK_ROOT", ".benchmark/work"), "disposable work root")
 	evidenceRoot := fs.String("evidence-root", envOr("BENCHMARK_EVIDENCE_ROOT", ".benchmark/evidence"), "immutable evidence root")
 	artifactRoot := fs.String("artifact-root", os.Getenv("ARTIFACT_DIR"), "production artifact root")
+	artifactWebRoot := fs.String("artifact-web-root", os.Getenv("ARTIFACT_WEB_DIR"), "production artifact web root (optional; only required by processors that publish web-servable paths)")
 	owner := fs.String("owner", hostname(), "lease owner")
 	tenant := fs.String("tenant-id", "benchmark", "benchmark tenant ID")
 	storeID := fs.Int64("store-id", envInt64("BENCHMARK_STORE_ID", 1), "kb store ID")
@@ -139,6 +144,17 @@ func runBenchmark(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	// reconcile.
 	if err := os.Setenv("ARTIFACT_DIR", filepath.Clean(*artifactRoot)); err != nil {
 		return fmt.Errorf("set ARTIFACT_DIR: %w", err)
+	}
+	// ARTIFACT_WEB_DIR is only required by processors that publish
+	// web-servable paths (e.g. generate_summaries/generate_topics). Leave it
+	// untouched here if neither --artifact-web-root nor the ambient
+	// environment provides one, so a run that doesn't need it isn't forced to
+	// declare a path -- but when it is provided, isolate it the same way
+	// ARTIFACT_DIR is isolated above.
+	if *artifactWebRoot != "" {
+		if err := os.Setenv("ARTIFACT_WEB_DIR", filepath.Clean(*artifactWebRoot)); err != nil {
+			return fmt.Errorf("set ARTIFACT_WEB_DIR: %w", err)
+		}
 	}
 	dirty, err := workingCopyDirty(ctx)
 	if err != nil {

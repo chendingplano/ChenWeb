@@ -1,0 +1,967 @@
+# Gold ontology and synthetic corpus source for the "显示屏模块" (display module)
+# vertical slice — ADR 2026072901 (KnowledgeStore/doc-repo/adrs/202607/
+# 2026072901-adr-semantic-platform-and-adaptive-pipeline.md), DR12/DR15/DR20-DR23/DR25.
+#
+# ALL document numbers, issuers, editions, clause numbers, and values in this file are
+# SYNTHETIC. None of them are real standards. This is deliberate: ground truth for a
+# benchmark must be authored, not inferred, so every gold answer below is true by
+# construction rather than by expert labeling. Do not cite anything in this file as a
+# real regulatory requirement.
+#
+# Status: draft, P0. Three consumers:
+#   1. Benchmark corpus generator (ChenWeb/benchmark/doc-processors/generator) renders
+#      each [[authority_document]] as a CDM document (server/api/cdm/model) from its
+#      clause text_templates, so grounding (ADR 2026072601) is exact by construction.
+#   2. extract_metrics / normalize_assertions benchmark gold: [[clause]].expected_metric.
+#   3. Pilot 4b domain-module fixture content once the ontology data repository (DR17)
+#      exists: [[metric_definition]] becomes module terms.toml content; [[clause]]
+#      values become conformance fixtures for the profile rules they instantiate.
+#
+# Every [[expected_verdict]] is derived by hand from the DR21 strictness relation over
+# the authored clause values, with the deciding rule stated in `rationale`. Where the
+# comparator disagrees with this file, the comparator is the thing to investigate first
+# for a coding bug; where it agrees but the *rationale* here turns out to be unsound,
+# this file is wrong and must be corrected — an expected_verdict is not authoritative
+# merely by being checked in.
+
+[module]
+id = "display-module-v1"
+title = "Display module (显示屏模块) — pilot fixture for ventilator (呼吸机) domain"
+part_class_id = "vent:display_module"
+part_parent_class_id = "vent:ventilator"
+subject_organization = "华康医疗设备有限公司（合成示例，非真实企业）"
+notes = """
+Part class hierarchy for this fixture (DR20 — roles, not classes):
+  vent:ventilator
+    part_of <- vent:display_module        (this fixture's target class)
+    part_of <- vent:control_knob_module
+    part_of <- vent:breathing_circuit_module
+    part_of <- vent:filter_valve
+    part_of <- vent:sensor_valve_module
+    part_of <- vent:caster_module
+    part_of <- vent:base_module
+  vent:display_module
+    component_of -> vent:display_panel     (used by M1's asserted-level dial)
+"""
+
+# ── metric definitions ───────────────────────────────────────────────────────────
+# The row identity of the comparison matrix (DR23). Aliases are lexicon (DR15/DR16)
+# content, aligned to the term via `aligns_to_term`, not stored as term duplicates.
+
+[[metric_definition]]
+id = "vent:display_brightness"
+quantity_kind = "Luminance"
+canonical_unit = "cd/m2"
+value_form = "lower_bound"
+applies_to_class = "vent:display_module"
+asserted_level = "vent:display_panel"          # DR20: metric is asserted at the sub-part
+pref_label_zh = "显示亮度"
+pref_label_en = "display brightness"
+alt_labels_zh = ["亮度", "屏幕亮度", "显示器亮度"]
+alt_labels_en = ["luminance", "screen brightness"]
+definition = "Luminance of the primary display surface under intended ambient conditions."
+dial = "stronger/weaker + supersession + alias + restated-list + asserted-level roll-up"
+
+[[metric_definition]]
+id = "vent:static_contrast_ratio"
+quantity_kind = "Dimensionless"
+canonical_unit = "ratio"                        # expressed "N:1"; comparator treats N as the scalar
+value_form = "lower_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "静态对比度"
+pref_label_en = "static contrast ratio"
+alt_labels_zh = ["对比度(静态)"]
+alt_labels_en = ["static CR"]
+definition = "Ratio of luminance between the brightest and darkest static elements displayable at once."
+dial = "identical + incomparable"
+
+# Near-miss distractor: lexically close to static_contrast_ratio ("对比度" substring
+# overlap) but a DIFFERENT concept. The reconciler/lexicon must keep these as two
+# concepts; a benchmark pass requires zero cross-contamination between the two rows.
+[[metric_definition]]
+id = "vent:dynamic_contrast_ratio"
+quantity_kind = "Dimensionless"
+canonical_unit = "ratio"
+value_form = "lower_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "动态对比度"
+pref_label_en = "dynamic contrast ratio"
+definition = "Marketing-collateral ratio computed across backlight-modulated extremes; not a regulated metric."
+dial = "near-miss distractor — must not merge with vent:static_contrast_ratio"
+is_distractor = true
+
+[[metric_definition]]
+id = "vent:alarm_response_time"
+quantity_kind = "Time"
+canonical_unit = "ms"
+value_form = "upper_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "报警响应时间"
+pref_label_en = "alarm response time"
+definition = "Elapsed time from an alarm-triggering condition to visible alarm indication."
+dial = "stronger + identical + equivalent(unit conversion) + conflict — one row, four verdict kinds"
+
+[[metric_definition]]
+id = "vent:touch_response_time"
+quantity_kind = "Time"
+canonical_unit = "ms"
+value_form = "upper_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "触控响应时间"
+pref_label_en = "touch response time"
+definition = "Elapsed time from a touchscreen input to visible UI feedback."
+dial = "qualitative_only x3 + standard_absent — corrects the mock's over-optimistic 一致"
+
+[[metric_definition]]
+id = "vent:screen_resolution"
+quantity_kind = "Dimensionless"
+canonical_unit = "px_pair"                      # compound (width x height); see note below
+value_form = "lower_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "屏幕分辨率"
+pref_label_en = "screen resolution"
+definition = "Native addressable resolution of the display panel."
+dial = "limit_absent x4 — property is universally expected, no authority gives a decidable bound"
+note = """
+Modeled as a single scalar (width*height) for this fixture only. The framework's real
+value model (research §6.2) does not have a first-class 'paired quantity' value_form;
+if a second real compound metric appears in the pilot module, add one rather than
+inventing more px_pair-style workarounds here.
+"""
+
+[[metric_definition]]
+id = "vent:effective_viewing_angle"
+quantity_kind = "Angle"
+canonical_unit = "degree"
+value_form = "lower_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "有效视角"
+pref_label_en = "effective viewing angle"
+definition = "Angular range from which display content remains legible, given separately per axis."
+components = ["horizontal", "vertical"]          # condition/qualifier is part of metric identity
+dial = "qualitative_only x3 + indeterminate(open dimension, missing evidence) — not standard_absent"
+
+[[metric_definition]]
+id = "vent:cleaning_disinfection_cycles"
+quantity_kind = "Count"
+canonical_unit = "count"
+value_form = "lower_bound"
+applies_to_class = "vent:display_module"
+pref_label_zh = "清洁消毒耐受次数"
+pref_label_en = "cleaning/disinfection tolerance"
+definition = "Number of cleaning/disinfection cycles the surface withstands without functional failure."
+dial = "weaker + recommendation example (mock's 建议提高 annotation, worked end to end)"
+
+[[metric_definition]]
+id = "vent:key_parameter_readability"
+quantity_kind = "Dimensionless"
+value_form = "qualitative"
+applies_to_class = "vent:display_module"
+pref_label_zh = "关键参数可读性"
+pref_label_en = "key parameter readability"
+definition = "Legibility of safety-critical displayed values under intended-use viewing conditions."
+dial = "qualitative_only x4 (standalone) + not_applicable x4 (excluded product variant)"
+applicability_condition = "适用于台式/移动式呼吸机；不适用于集成于麻醉工作站的呼吸机显示模块"
+
+# ── authority documents ──────────────────────────────────────────────────────────
+# Every field here (issuer, edition, jurisdiction, status) is 4a document-authority
+# module content. Status/supersession drives representative selection in DR22.
+
+[[authority_document]]
+id = "doc:cn-gb-syn-9706-1-2020"
+family = "cn_national"
+title = "GB-SYN 9706.1—2020《医用电气设备通用安全要求（合成示例）》"
+issuer = "国家药品监督管理局（合成示例）"
+jurisdiction = "CN"
+edition = "2020"
+status = "active"
+
+[[authority_document]]
+id = "doc:intl-iso-syn-62366-1-2015"
+family = "international"
+title = "ISO-SYN 62366-1:2015 Medical devices — Usability engineering (synthetic)"
+issuer = "ISO (synthetic)"
+jurisdiction = "INTL"
+edition = "2015"
+status = "active"
+
+[[authority_document]]
+id = "doc:intl-iec-syn-60601-1-8-2020"
+family = "international"
+title = "IEC-SYN 60601-1-8:2020 Alarm systems (synthetic)"
+issuer = "IEC (synthetic)"
+jurisdiction = "INTL"
+edition = "2020"
+status = "active"
+
+[[authority_document]]
+id = "doc:eu-harm-syn-2021"
+family = "eu"
+title = "EN-SYN 60601 series harmonized standard, 2021 consolidation (synthetic)"
+issuer = "CEN/CENELEC (synthetic)"
+jurisdiction = "EU"
+edition = "2021"
+status = "active"
+references = ["doc:intl-iso-syn-62366-1-2015", "doc:intl-iec-syn-60601-1-8-2020"]
+
+[[authority_document]]
+id = "doc:us-syn-guidance-2019"
+family = "us"
+title = "FDA-SYN Guidance for Ventilator Displays, 2019 (synthetic)"
+issuer = "FDA (synthetic)"
+jurisdiction = "US"
+edition = "2019"
+status = "active"
+
+[[authority_document]]
+id = "doc:ent-q-syn-001-2026"
+family = "enterprise"
+title = "Q/SYN 001—2026《显示与交互技术规范（合成示例）》"
+issuer = "华康医疗设备有限公司（合成示例）"
+jurisdiction = "CN"
+edition = "2026"
+status = "active"
+supersedes = "doc:ent-q-syn-001-2019"
+
+[[authority_document]]
+id = "doc:ent-q-syn-001-2019"
+family = "enterprise"
+title = "Q/SYN 001—2019《显示与交互技术规范（合成示例）》"
+issuer = "华康医疗设备有限公司（合成示例）"
+jurisdiction = "CN"
+edition = "2019"
+status = "superseded"
+superseded_by = "doc:ent-q-syn-001-2026"
+
+[[authority_document]]
+id = "doc:ent-q-syn-002-2024"
+family = "enterprise"
+title = "Q/SYN 002—2024《便携式呼吸机显示模块规范（合成示例，同一企业不同产品线）》"
+issuer = "华康医疗设备有限公司（合成示例）"
+jurisdiction = "CN"
+edition = "2024"
+status = "active"
+
+[[authority_document]]
+id = "doc:ent-mkt-syn-2025"
+family = "enterprise"
+title = "华康医疗市场宣传资料 2025（合成示例，非规范性文件）"
+issuer = "华康医疗设备有限公司（合成示例）"
+jurisdiction = "CN"
+status = "active"
+normative = false
+
+# ── clauses ───────────────────────────────────────────────────────────────────────
+# One clause = one rendered CDM paragraph in its document (generator renders
+# `text_template` verbatim) = one extract_metrics gold row where a numeric value
+# exists. `expected_metric` is the Level-1 extraction gold (today's extract-metrics-
+# spec.md shape); the *_normalized fields are the Level-2 (DR9/normalize_assertions)
+# gold this fixture requires that spec change to produce.
+
+# --- M1 display_brightness ---------------------------------------------------
+
+[[clause]]
+id = "cl:cn-9706-7.1.2-brightness"
+expectation = "best_effort"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "7.1.2"
+metric = "vent:display_brightness"
+form = "qualitative"
+text_template = "关键参数应在正常使用位置清晰可辨识；显示亮度应保证在预期使用环境下清晰可见。"
+expected_metric = { metric_name = "显示亮度", is_explicit_metric = false, threshold_or_target = "预期使用环境下清晰可见" }
+
+[[clause]]
+id = "cl:iso-62366-5.7-brightness"
+expectation = "best_effort"
+document = "doc:intl-iso-syn-62366-1-2015"
+clause_no = "5.7"
+metric = "vent:display_brightness"
+form = "qualitative"
+text_template = "Display luminance shall satisfy usability evaluation for the intended-use environment; no fixed numeric limit is prescribed."
+expected_metric = { metric_name = "display brightness", is_explicit_metric = false, threshold_or_target = "满足可用性评价要求" }
+
+[[clause]]
+id = "cl:eu-harm-brightness"
+expectation = "best_effort"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:display_brightness"
+form = "qualitative"
+text_template = "显示亮度要求与 IEC/ISO 国际标准协调一致，未另行规定数值限值。"
+expected_metric = { metric_name = "显示亮度", is_explicit_metric = false, threshold_or_target = "与国际要求一致" }
+
+# US document intentionally contains no display_brightness clause at all. Silence
+# is the fixture, not an omission bug — this is what produces standard_absent below.
+
+[[clause]]
+id = "cl:ent-2026-4.2.2-brightness"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.2.2"
+metric = "vent:display_brightness"
+form = "lower_bound"
+value = 250
+unit = "cd/m2"
+text_template = "4.2.2 显示屏幕亮度：正常工作条件下，显示亮度应不低于 250 cd/m²。"
+expected_metric = { metric_name = "显示亮度", is_explicit_metric = true, metric_value = "250", metric_unit = "cd/m2", threshold_or_target = ">=250" }
+is_representative = true   # newest non-superseded enterprise edition
+
+[[clause]]
+id = "cl:ent-2019-4.2.2-brightness"
+document = "doc:ent-q-syn-001-2019"
+clause_no = "4.2.2"
+metric = "vent:display_brightness"
+form = "lower_bound"
+value = 200
+unit = "cd/m2"
+text_template = "4.2.2 显示屏幕亮度：正常工作条件下，显示亮度应不低于 200 cd/m²。"
+expected_metric = { metric_name = "显示亮度", is_explicit_metric = true, metric_value = "200", metric_unit = "cd/m2", threshold_or_target = ">=200" }
+supersession_note = "superseded by cl:ent-2026-4.2.2-brightness; must not be chosen as representative"
+
+[[clause]]
+id = "cl:ent-002-brightness-alias"
+document = "doc:ent-q-syn-002-2024"
+metric = "vent:display_brightness"
+form = "lower_bound"
+value = 230
+unit = "cd/m2"
+text_template = "本产品线显示器亮度不低于 230 cd/m²，符合公司显示与交互技术规范要求。"
+expected_metric = { metric_name = "显示器亮度", is_explicit_metric = true, metric_value = "230", metric_unit = "cd/m2", threshold_or_target = ">=230" }
+lexicon_note = "surface '显示器亮度' must resolve via alias to vent:display_brightness, not a new concept"
+cell_role = "remainder"   # collapses into the enterprise cell's remainder, not a separate column
+
+# --- M2 static_contrast_ratio + dynamic_contrast_ratio distractor -------------
+
+[[clause]]
+id = "cl:cn-contrast-range"
+document = "doc:cn-gb-syn-9706-1-2020"
+metric = "vent:static_contrast_ratio"
+form = "range"
+lower_value = 500
+upper_value = 2000
+unit = "ratio"
+text_template = "显示屏静态对比度应处于 500:1 至 2000:1 范围内。"
+expected_metric = { metric_name = "静态对比度", is_explicit_metric = true, threshold_or_target = "500:1-2000:1" }
+
+[[clause]]
+id = "cl:iso-contrast-qual"
+expectation = "best_effort"
+document = "doc:intl-iso-syn-62366-1-2015"
+metric = "vent:static_contrast_ratio"
+form = "qualitative"
+text_template = "Static contrast shall satisfy usability evaluation for legibility; no fixed ratio is prescribed."
+expected_metric = { metric_name = "static contrast ratio", is_explicit_metric = false, threshold_or_target = "满足可用性评价" }
+
+[[clause]]
+id = "cl:eu-contrast-qual"
+expectation = "best_effort"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:static_contrast_ratio"
+form = "qualitative"
+text_template = "静态对比度要求与国际标准协调一致，未另行规定数值。"
+expected_metric = { metric_name = "静态对比度", is_explicit_metric = false, threshold_or_target = "与国际要求一致" }
+
+[[clause]]
+id = "cl:us-contrast-identical"
+document = "doc:us-syn-guidance-2019"
+metric = "vent:static_contrast_ratio"
+form = "lower_bound"
+value = 1000
+unit = "ratio"
+text_template = "Static contrast ratio shall be at least 1000:1 under intended ambient lighting."
+expected_metric = { metric_name = "static contrast ratio", is_explicit_metric = true, metric_value = "1000", metric_unit = "ratio", threshold_or_target = ">=1000" }
+
+[[clause]]
+id = "cl:ent-contrast-1000"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.2.3"
+metric = "vent:static_contrast_ratio"
+form = "lower_bound"
+value = 1000
+unit = "ratio"
+text_template = "4.2.3 显示屏静态对比度：不低于 1000:1。"
+expected_metric = { metric_name = "静态对比度", is_explicit_metric = true, metric_value = "1000", metric_unit = "ratio", threshold_or_target = ">=1000" }
+
+[[clause]]
+id = "cl:ent-mkt-dynamic-contrast"
+document = "doc:ent-mkt-syn-2025"
+metric = "vent:dynamic_contrast_ratio"
+form = "lower_bound"
+value = 5000000
+unit = "ratio"
+text_template = "动态对比度高达 5,000,000:1（背光调制条件下测得，非监管性能指标）。"
+expected_metric = { metric_name = "动态对比度", is_explicit_metric = true, metric_value = "5000000", metric_unit = "ratio", threshold_or_target = ">=5000000" }
+guardrail_note = "must reconcile to vent:dynamic_contrast_ratio; must never be treated as a stronger static_contrast_ratio candidate"
+
+# --- M3 alarm_response_time ----------------------------------------------------
+
+[[clause]]
+id = "cl:cn-alarm-150ms"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "6.3.2.2"
+metric = "vent:alarm_response_time"
+form = "upper_bound"
+value = 150
+unit = "ms"
+text_template = "6.3.2.2 视觉报警信号应在触发条件出现后 150 ms 内显示。"
+expected_metric = { metric_name = "报警响应时间", is_explicit_metric = true, metric_value = "150", metric_unit = "ms", threshold_or_target = "<=150" }
+
+[[clause]]
+id = "cl:iec-alarm-120ms"
+document = "doc:intl-iec-syn-60601-1-8-2020"
+clause_no = "6.3.2.2"
+metric = "vent:alarm_response_time"
+form = "upper_bound"
+value = 120
+unit = "ms"
+text_template = "Visual alarm signals shall be presented within 120 ms of the alarm condition."
+expected_metric = { metric_name = "alarm response time", is_explicit_metric = true, metric_value = "120", metric_unit = "ms", threshold_or_target = "<=120" }
+
+[[clause]]
+id = "cl:eu-alarm-0.12s"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:alarm_response_time"
+form = "upper_bound"
+value = 0.12
+unit = "s"
+text_template = "视觉与听觉报警信号应在 0.12 s 内呈现，与 IEC 60601-1-8 一致。"
+expected_metric = { metric_name = "报警响应时间", is_explicit_metric = true, metric_value = "0.12", metric_unit = "s", threshold_or_target = "<=0.12s" }
+unit_conversion_note = "0.12 s == 120 ms; must normalize to the same satisfying set as cl:iec-alarm-120ms"
+
+[[clause]]
+id = "cl:us-alarm-exact-200ms"
+document = "doc:us-syn-guidance-2019"
+metric = "vent:alarm_response_time"
+form = "exact_value"
+value = 200
+unit = "ms"
+text_template = "Visual alarm timing shall be fixed at exactly 200 ms per device configuration."
+expected_metric = { metric_name = "alarm response time", is_explicit_metric = true, metric_value = "200", metric_unit = "ms", threshold_or_target = "==200" }
+
+[[clause]]
+id = "cl:ent-alarm-120ms"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.1.3"
+metric = "vent:alarm_response_time"
+form = "upper_bound"
+value = 120
+unit = "ms"
+text_template = "4.1.3 视觉报警响应时间：不超过 120 ms。"
+expected_metric = { metric_name = "报警响应时间", is_explicit_metric = true, metric_value = "120", metric_unit = "ms", threshold_or_target = "<=120" }
+
+# --- M4 touch_response_time -----------------------------------------------------
+
+[[clause]]
+id = "cl:cn-touch-qual"
+expectation = "best_effort"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "7.1.2"
+metric = "vent:touch_response_time"
+form = "qualitative"
+text_template = "触控操作反馈不应存在不可接受的延迟。"
+expected_metric = { metric_name = "触控响应时间", is_explicit_metric = false, threshold_or_target = "操作反馈无不可接受延迟" }
+
+[[clause]]
+id = "cl:iso-touch-qual"
+expectation = "best_effort"
+document = "doc:intl-iso-syn-62366-1-2015"
+clause_no = "5.7"
+metric = "vent:touch_response_time"
+form = "qualitative"
+text_template = "Feedback to a critical touch action shall be timely and unambiguous."
+expected_metric = { metric_name = "touch response time", is_explicit_metric = false, threshold_or_target = "反馈应及时且明确" }
+
+[[clause]]
+id = "cl:eu-touch-qual"
+expectation = "best_effort"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:touch_response_time"
+form = "qualitative"
+text_template = "关键操作触控反馈要求与国际标准一致。"
+expected_metric = { metric_name = "触控响应时间", is_explicit_metric = false, threshold_or_target = "与国际要求一致" }
+
+# US document intentionally contains no touch_response_time clause -> standard_absent.
+
+[[clause]]
+id = "cl:ent-touch-120ms"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.3.2"
+metric = "vent:touch_response_time"
+form = "upper_bound"
+value = 120
+unit = "ms"
+text_template = "4.3.2 触控响应时间：关键操作触控响应时间不超过 120 ms。"
+expected_metric = { metric_name = "触控响应时间", is_explicit_metric = true, metric_value = "120", metric_unit = "ms", threshold_or_target = "<=120" }
+
+# --- M5 screen_resolution --------------------------------------------------------
+
+[[clause]]
+id = "cl:cn-resolution-absent"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "7.1.2"
+metric = "vent:screen_resolution"
+form = "limit_absent"
+text_template = "本标准未规定显示屏具体像素限值。"
+expected_metric = { metric_name = "屏幕分辨率", is_explicit_metric = false, threshold_or_target = "未规定具体像素" }
+
+[[clause]]
+id = "cl:iso-resolution-absent"
+document = "doc:intl-iso-syn-62366-1-2015"
+clause_no = "5.7"
+metric = "vent:screen_resolution"
+form = "limit_absent"
+text_template = "Resolution shall be determined by the intended use; no fixed value is specified."
+expected_metric = { metric_name = "screen resolution", is_explicit_metric = false, threshold_or_target = "由预期用途确定" }
+
+[[clause]]
+id = "cl:eu-resolution-absent"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:screen_resolution"
+form = "limit_absent"
+text_template = "分辨率应由可用性评价确定，未另行规定数值。"
+expected_metric = { metric_name = "屏幕分辨率", is_explicit_metric = false, threshold_or_target = "由可用性评价确定" }
+
+[[clause]]
+id = "cl:us-resolution-absent"
+document = "doc:us-syn-guidance-2019"
+metric = "vent:screen_resolution"
+form = "limit_absent"
+text_template = "Resolution shall be determined by design input; no fixed value is specified."
+expected_metric = { metric_name = "screen resolution", is_explicit_metric = false, threshold_or_target = "由设计输入确定" }
+
+[[clause]]
+id = "cl:ent-resolution-1024x600"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.2.1"
+metric = "vent:screen_resolution"
+form = "lower_bound"
+value = 614400          # 1024 * 600, see metric_definition note
+unit = "px_pair"
+display_value = "1024x600"
+text_template = "4.2.1 显示屏分辨率：不低于 1024×600。"
+expected_metric = { metric_name = "屏幕分辨率", is_explicit_metric = true, metric_value = "1024x600", metric_unit = "px", threshold_or_target = ">=1024x600" }
+
+# --- M6 effective_viewing_angle --------------------------------------------------
+
+[[clause]]
+id = "cl:cn-viewing-angle-qual"
+expectation = "best_effort"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "7.1.2"
+metric = "vent:effective_viewing_angle"
+form = "qualitative"
+text_template = "显示屏在正常操作位置应可读。"
+expected_metric = { metric_name = "有效视角", is_explicit_metric = false, threshold_or_target = "正常操作位置可读" }
+
+[[clause]]
+id = "cl:iso-viewing-angle-qual"
+expectation = "best_effort"
+document = "doc:intl-iso-syn-62366-1-2015"
+clause_no = "5.7"
+metric = "vent:effective_viewing_angle"
+form = "qualitative"
+text_template = "Viewing angle shall cover the intended user positions."
+expected_metric = { metric_name = "effective viewing angle", is_explicit_metric = false, threshold_or_target = "覆盖预期用户位置" }
+
+[[clause]]
+id = "cl:eu-viewing-angle-qual"
+expectation = "best_effort"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:effective_viewing_angle"
+form = "qualitative"
+text_template = "视角要求应覆盖预期使用场景。"
+expected_metric = { metric_name = "有效视角", is_explicit_metric = false, threshold_or_target = "覆盖预期使用场景" }
+
+# US document intentionally omits any viewing-angle clause AND the comparison scope
+# for this metric declares the US dimension NOT closed (evidence incomplete, not
+# exhaustively searched) — this is what forces `indeterminate` rather than
+# `standard_absent` below. Contrast with M1/M4, where the US dimension IS declared
+# closed for display_brightness/touch_response_time.
+
+[[clause]]
+id = "cl:ent-viewing-angle"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.2.4"
+metric = "vent:effective_viewing_angle"
+form = "lower_bound"
+components = { horizontal = { value = 160, unit = "degree" }, vertical = { value = 140, unit = "degree" } }
+text_template = "4.2.4 有效视角：水平方向不小于 160°，垂直方向不小于 140°。"
+expected_metric = { metric_name = "有效视角", is_explicit_metric = true, metric_value = "水平>=160/垂直>=140", metric_unit = "degree", threshold_or_target = "horizontal>=160,vertical>=140" }
+
+# --- M7 cleaning_disinfection_cycles --------------------------------------------
+
+[[clause]]
+id = "cl:cn-cleaning-qual"
+expectation = "best_effort"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "11.6.6"
+metric = "vent:cleaning_disinfection_cycles"
+form = "qualitative"
+text_template = "清洁消毒后应保持标记清晰与功能正常。"
+expected_metric = { metric_name = "清洁消毒耐受", is_explicit_metric = false, threshold_or_target = "清洁后标记与功能保持" }
+
+[[clause]]
+id = "cl:iso-cleaning-qual"
+expectation = "best_effort"
+document = "doc:intl-iso-syn-62366-1-2015"
+clause_no = "5.7"
+metric = "vent:cleaning_disinfection_cycles"
+form = "qualitative"
+text_template = "Cleaning tolerance shall be verified against the intended cleaning process."
+expected_metric = { metric_name = "cleaning tolerance", is_explicit_metric = false, threshold_or_target = "按预期清洁过程验证" }
+
+[[clause]]
+id = "cl:eu-cleaning-qual"
+expectation = "best_effort"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:cleaning_disinfection_cycles"
+form = "qualitative"
+text_template = "清洁耐受要求与国际标准一致。"
+expected_metric = { metric_name = "清洁消毒耐受", is_explicit_metric = false, threshold_or_target = "与国际要求一致" }
+
+[[clause]]
+id = "cl:us-cleaning-500"
+document = "doc:us-syn-guidance-2019"
+metric = "vent:cleaning_disinfection_cycles"
+form = "lower_bound"
+value = 500
+unit = "count"
+text_template = "Surfaces shall withstand at least 500 cleaning/disinfection cycles without functional failure."
+expected_metric = { metric_name = "cleaning tolerance", is_explicit_metric = true, metric_value = "500", metric_unit = "count", threshold_or_target = ">=500" }
+
+[[clause]]
+id = "cl:ent-cleaning-300"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "5.2.1"
+metric = "vent:cleaning_disinfection_cycles"
+form = "lower_bound"
+value = 300
+unit = "count"
+text_template = "5.2.1 清洁消毒耐受次数：不低于 300 次无失效。"
+expected_metric = { metric_name = "清洁消毒耐受", is_explicit_metric = true, metric_value = "300", metric_unit = "count", threshold_or_target = ">=300" }
+
+# --- M8 key_parameter_readability (standalone product) ---------------------------
+
+[[clause]]
+id = "cl:cn-readability-qual"
+expectation = "best_effort"
+document = "doc:cn-gb-syn-9706-1-2020"
+clause_no = "7.1.2"
+metric = "vent:key_parameter_readability"
+form = "qualitative"
+text_template = "关键参数应在正常使用位置清晰可辨识。"
+expected_metric = { metric_name = "关键参数可读性", is_explicit_metric = false, threshold_or_target = "正常使用位置应清晰可识别" }
+
+[[clause]]
+id = "cl:iso-readability-qual"
+expectation = "best_effort"
+document = "doc:intl-iso-syn-62366-1-2015"
+clause_no = "5.7"
+metric = "vent:key_parameter_readability"
+form = "qualitative"
+text_template = "User-interface safety-related information shall be identifiable."
+expected_metric = { metric_name = "key parameter readability", is_explicit_metric = false, threshold_or_target = "用户界面安全相关信息可识别" }
+
+[[clause]]
+id = "cl:eu-readability-qual"
+expectation = "best_effort"
+document = "doc:eu-harm-syn-2021"
+metric = "vent:key_parameter_readability"
+form = "qualitative"
+text_template = "关键参数可读性要求与 IEC 标准协调一致。"
+expected_metric = { metric_name = "关键参数可读性", is_explicit_metric = false, threshold_or_target = "与 IEC 要求协调" }
+
+[[clause]]
+id = "cl:us-readability-qual"
+expectation = "best_effort"
+document = "doc:us-syn-guidance-2019"
+metric = "vent:key_parameter_readability"
+form = "qualitative"
+text_template = "Usability verification shall confirm readability of safety-critical parameters."
+expected_metric = { metric_name = "key parameter readability", is_explicit_metric = false, threshold_or_target = "可用性验证确认" }
+
+[[clause]]
+id = "cl:ent-readability-1m"
+expectation = "best_effort"
+document = "doc:ent-q-syn-001-2026"
+clause_no = "4.1.1"
+metric = "vent:key_parameter_readability"
+form = "qualitative"
+text_template = "4.1.1 关键参数可读性：在 1 m 距离处应可清晰辨识。"
+expected_metric = { metric_name = "关键参数可读性", is_explicit_metric = false, threshold_or_target = "1 m 距离可辨识" }
+
+# ── applicability exception object ───────────────────────────────────────────────
+# A second object of the same class, in a scope where the profile's stated condition
+# excludes it. Drives the `not_applicable` verdict for M8 (DR20/DR21).
+
+[[applicability_object]]
+id = "vent:display_module@anesthesia-integrated-variant"
+of_class = "vent:display_module"
+scope_note = "集成于麻醉工作站的呼吸机显示模块变体（与独立/移动式呼吸机型号区分）"
+excluded_by_condition_on = "vent:key_parameter_readability"
+excluded_because = "applicability_condition on vent:key_parameter_readability excludes this configuration"
+
+# ── closed-dimension declarations ────────────────────────────────────────────────
+# DR21 rule 2: absence of a matching assertion in a family yields standard_absent
+# only when that (metric, family) is declared closed (exhaustively searched); an
+# open dimension yields indeterminate instead. Default for this fixture is `closed
+# = true`, since the corpus is authored exhaustively for every family/metric pair
+# unless listed here. Only the exception needs a row; the two `closed = true` rows
+# are listed anyway for self-documentation.
+
+[[closed_dimension]]
+metric = "vent:display_brightness"
+family = "us"
+closed = true
+
+[[closed_dimension]]
+metric = "vent:touch_response_time"
+family = "us"
+closed = true
+
+[[closed_dimension]]
+metric = "vent:effective_viewing_angle"
+family = "us"
+closed = false
+note = "evidence incomplete for this (metric, family) pair -- not exhaustively searched; produces indeterminate, not standard_absent"
+
+# ── expected verdicts (subject = enterprise doc:ent-q-syn-001-2026, per DR22) ─────
+# Each row is enterprise-vs-one-family, matching the mock's four comparison rows per
+# metric. `rationale` names the DR21 rule; this is the auditable derivation, not a
+# restatement of the verdict.
+
+[[expected_verdict]]
+metric = "vent:display_brightness"
+vs_family = "cn_national"
+verdict = "qualitative_only"
+rationale = "cl:cn-9706-7.1.2-brightness has no decidable satisfying set (qualitative)"
+
+[[expected_verdict]]
+metric = "vent:display_brightness"
+vs_family = "international"
+verdict = "qualitative_only"
+rationale = "cl:iso-62366-5.7-brightness qualitative"
+
+[[expected_verdict]]
+metric = "vent:display_brightness"
+vs_family = "eu"
+verdict = "qualitative_only"
+rationale = "cl:eu-harm-brightness qualitative"
+
+[[expected_verdict]]
+metric = "vent:display_brightness"
+vs_family = "us"
+verdict = "standard_absent"
+rationale = "no US clause for this metric; dimension declared closed for M1 (fully authored corpus, exhaustively searched)"
+
+[[expected_verdict]]
+metric = "vent:static_contrast_ratio"
+vs_family = "cn_national"
+verdict = "incomparable"
+rationale = "enterprise [1000,inf) and CN [500,2000] overlap on [1000,2000] with neither containing the other"
+
+[[expected_verdict]]
+metric = "vent:static_contrast_ratio"
+vs_family = "international"
+verdict = "qualitative_only"
+rationale = "cl:iso-contrast-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:static_contrast_ratio"
+vs_family = "eu"
+verdict = "qualitative_only"
+rationale = "cl:eu-contrast-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:static_contrast_ratio"
+vs_family = "us"
+verdict = "identical"
+rationale = "enterprise >=1000 and US >=1000 denote equal satisfying sets"
+
+[[expected_verdict]]
+metric = "vent:alarm_response_time"
+vs_family = "cn_national"
+verdict = "stronger"
+direction = "enterprise_stronger"
+rationale = "enterprise (-inf,120] is a strict subset of CN (-inf,150]; enterprise is the tighter (stronger) requirement"
+
+[[expected_verdict]]
+metric = "vent:alarm_response_time"
+vs_family = "international"
+verdict = "identical"
+rationale = "enterprise <=120ms equals IEC-SYN 60601-1-8 <=120ms"
+
+[[expected_verdict]]
+metric = "vent:alarm_response_time"
+vs_family = "eu"
+verdict = "equivalent"
+rationale = "EU's 0.12 s converts to 120 ms; equal satisfying set to enterprise, different unit expression"
+
+[[expected_verdict]]
+metric = "vent:alarm_response_time"
+vs_family = "us"
+verdict = "conflict"
+rationale = "US exact_value {200ms} is disjoint from enterprise's upper_bound (-inf,120]"
+
+[[expected_verdict]]
+metric = "vent:touch_response_time"
+vs_family = "cn_national"
+verdict = "qualitative_only"
+rationale = "cl:cn-touch-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:touch_response_time"
+vs_family = "international"
+verdict = "qualitative_only"
+rationale = "cl:iso-touch-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:touch_response_time"
+vs_family = "eu"
+verdict = "qualitative_only"
+rationale = "cl:eu-touch-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:touch_response_time"
+vs_family = "us"
+verdict = "standard_absent"
+rationale = "no US clause for this metric; dimension declared closed for M4"
+
+[[expected_verdict]]
+metric = "vent:screen_resolution"
+vs_family = "cn_national"
+verdict = "limit_absent"
+rationale = "property referenced, no numeric bound given (cl:cn-resolution-absent)"
+
+[[expected_verdict]]
+metric = "vent:screen_resolution"
+vs_family = "international"
+verdict = "limit_absent"
+rationale = "cl:iso-resolution-absent"
+
+[[expected_verdict]]
+metric = "vent:screen_resolution"
+vs_family = "eu"
+verdict = "limit_absent"
+rationale = "cl:eu-resolution-absent"
+
+[[expected_verdict]]
+metric = "vent:screen_resolution"
+vs_family = "us"
+verdict = "limit_absent"
+rationale = "cl:us-resolution-absent"
+
+[[expected_verdict]]
+metric = "vent:effective_viewing_angle"
+vs_family = "cn_national"
+verdict = "qualitative_only"
+rationale = "cl:cn-viewing-angle-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:effective_viewing_angle"
+vs_family = "international"
+verdict = "qualitative_only"
+rationale = "cl:iso-viewing-angle-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:effective_viewing_angle"
+vs_family = "eu"
+verdict = "qualitative_only"
+rationale = "cl:eu-viewing-angle-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:effective_viewing_angle"
+vs_family = "us"
+verdict = "indeterminate"
+rationale = "no US clause AND the US dimension is declared open (not exhaustively searched) for this metric -- absence of evidence under an open dimension is unknown, not standard_absent (DR21 rule 2)"
+
+[[expected_verdict]]
+metric = "vent:cleaning_disinfection_cycles"
+vs_family = "cn_national"
+verdict = "qualitative_only"
+rationale = "cl:cn-cleaning-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:cleaning_disinfection_cycles"
+vs_family = "international"
+verdict = "qualitative_only"
+rationale = "cl:iso-cleaning-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:cleaning_disinfection_cycles"
+vs_family = "eu"
+verdict = "qualitative_only"
+rationale = "cl:eu-cleaning-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:cleaning_disinfection_cycles"
+vs_family = "us"
+verdict = "weaker"
+direction = "enterprise_weaker"
+rationale = "enterprise [300,inf) strictly contains US [500,inf); enterprise's requirement is the looser (weaker) one"
+recommendation = "建议将企业标准（Q/SYN 001-2026 5.2.1）由≥300次提升至≥500次，以达到或超过美国标准（FDA-SYN 2019）的已知最严格适用要求"
+recommendation_note = "DR21 rule 1: recommendation is a policy over the 'weaker' verdict, stored separately; changing the house policy must not change the verdict itself"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+vs_family = "cn_national"
+verdict = "qualitative_only"
+rationale = "cl:cn-readability-qual qualitative; enterprise's '1m distance' criterion is also non-numeric-bound, no satisfying-set comparison is decidable"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+vs_family = "international"
+verdict = "qualitative_only"
+rationale = "cl:iso-readability-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+vs_family = "eu"
+verdict = "qualitative_only"
+rationale = "cl:eu-readability-qual qualitative"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+vs_family = "us"
+verdict = "qualitative_only"
+rationale = "cl:us-readability-qual qualitative"
+
+# Auxiliary object: same metric, excluded product configuration -> not_applicable
+# for all four families regardless of clause content.
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+object = "vent:display_module@anesthesia-integrated-variant"
+vs_family = "cn_national"
+verdict = "not_applicable"
+rationale = "applicability_condition on vent:key_parameter_readability excludes this product configuration"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+object = "vent:display_module@anesthesia-integrated-variant"
+vs_family = "international"
+verdict = "not_applicable"
+rationale = "same applicability exclusion"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+object = "vent:display_module@anesthesia-integrated-variant"
+vs_family = "eu"
+verdict = "not_applicable"
+rationale = "same applicability exclusion"
+
+[[expected_verdict]]
+metric = "vent:key_parameter_readability"
+object = "vent:display_module@anesthesia-integrated-variant"
+vs_family = "us"
+verdict = "not_applicable"
+rationale = "same applicability exclusion"
+
+# ── coverage summary ──────────────────────────────────────────────────────────────
+# Verified by `python3 -c "import tomllib; ..."` against this file (see README.md):
+# metric_definitions=9  authority_documents=9  clauses=40  expected_verdicts=36
+# verdict counts: qualitative_only=18 limit_absent=4 not_applicable=4
+#   standard_absent=2 identical=2 incomparable=1 stronger=1 equivalent=1
+#   conflict=1 indeterminate=1 weaker=1  -> all 11 DR21 verdict kinds present.
+# Plus, not scored as verdicts: 1 near-miss distractor excluded from every cell
+# (dynamic_contrast_ratio), 1 supersession pair (M1 2026/2019), 1 alias resolution
+# (M1 "显示器亮度"), 1 unit conversion (M3 EU ms/s), 1 multi-component metric
+# identity (M6 horizontal/vertical), 1 asserted-level roll-up (M1 display_panel).
