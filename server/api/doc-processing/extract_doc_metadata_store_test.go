@@ -19,7 +19,7 @@ func TestDocMetadataSQLStoreGetInputRecordLoadsKnowledgeStoreID(t *testing.T) {
 SELECT i.id,
        COALESCE(i.ks_store_id, 0),
        COALESCE(i.requested_pipeline, ''),
-       COALESCE(ks.default_pipeline, ''),
+       COALESCE(bp.name, ''),
        COALESCE(i.type, ''),
        COALESCE(i.doc_metadata->'metadata'->>'language', i.doc_metadata->>'language', ''),
        COALESCE(NULLIF(BTRIM(i.doc_metadata->>'doc_no'), ''), NULLIF(BTRIM(i.doc_no), ''), ''),
@@ -31,13 +31,14 @@ SELECT i.id,
        COALESCE(i.title, ''),
        COALESCE(i.doc_metadata::text, '')
 FROM kb.inputs i
-LEFT JOIN kb.knowledge_store ks ON ks.id = i.ks_store_id
+LEFT JOIN kb.pipeline_bindings pb ON pb.ks_store_id = i.ks_store_id
+LEFT JOIN kb.pipelines bp ON bp.id = pb.pipeline_id
 WHERE i.id = $1`)
 
 	mock.ExpectQuery(query).
 		WithArgs(int64(91)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "ks_store_id", "requested_pipeline", "default_pipeline", "type", "source_language", "document_number", "parser_name", "result_filename", "staging_filename", "status", "file_name", "title", "doc_metadata",
+			"id", "ks_store_id", "requested_pipeline", "bound_pipeline_name", "type", "source_language", "document_number", "parser_name", "result_filename", "staging_filename", "status", "file_name", "title", "doc_metadata",
 		}).AddRow(
 			int64(91),
 			int64(42),

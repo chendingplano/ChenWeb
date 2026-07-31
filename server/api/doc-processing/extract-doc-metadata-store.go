@@ -50,7 +50,7 @@ func (s DocMetadataSQLStore) GetInputRecord(ctx context.Context, id int64) (DocM
 SELECT i.id,
        COALESCE(i.ks_store_id, 0),
        COALESCE(i.requested_pipeline, ''),
-       COALESCE(ks.default_pipeline, ''),
+       COALESCE(bp.name, ''),
        COALESCE(i.type, ''),
        COALESCE(i.doc_metadata->'metadata'->>'language', i.doc_metadata->>'language', ''),
        COALESCE(NULLIF(BTRIM(i.doc_metadata->>'doc_no'), ''), NULLIF(BTRIM(i.doc_no), ''), ''),
@@ -62,7 +62,8 @@ SELECT i.id,
        COALESCE(i.title, ''),
        COALESCE(i.doc_metadata::text, '')
 FROM kb.inputs i
-LEFT JOIN kb.knowledge_store ks ON ks.id = i.ks_store_id
+LEFT JOIN kb.pipeline_bindings pb ON pb.ks_store_id = i.ks_store_id
+LEFT JOIN kb.pipelines bp ON bp.id = pb.pipeline_id
 WHERE i.id = $1`
 
 	var rec DocMetadataInputRecord
