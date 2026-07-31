@@ -23,8 +23,13 @@ type ProductionPipelineSelection struct {
 type ProductionPipelineBindingResolution struct {
 	RequestedPipeline  string
 	StoreBoundPipeline string
-	Source             string
-	SelectedPipeline   string
+	// RuleName is the name of the kb.pipeline_rules row that won, set only
+	// when Source == "rule_match". Explains *why* a rule-based selection
+	// happened, the same way StoreBoundPipeline/RequestedPipeline already
+	// explain the other two non-default sources.
+	RuleName         string
+	Source           string
+	SelectedPipeline string
 }
 
 type ProductionPipelineResolution struct {
@@ -78,6 +83,11 @@ func ResolveProductionPipelineSelection(facts ProductionPlanFacts) (ProductionPi
 	}, nil
 }
 
+// ResolveProductionPipelineBinding applies P1's binding precedence:
+// explicit request > facet-matched rule > knowledge-store binding > system
+// default. Rule matching sits between request and store binding because a
+// rule is a more specific, facet-conditioned policy than a store's flat
+// default, but an explicit per-request override always wins outright.
 func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipelineBindingResolution, error) {
 	requested := strings.TrimSpace(facts.RequestedPipeline)
 	storeBound := strings.TrimSpace(facts.StoreBoundPipeline)
@@ -90,6 +100,20 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 			StoreBoundPipeline: storeBound,
 			Source:             "explicit_request",
 			SelectedPipeline:   requested,
+		}, nil
+	}
+	if ruleName, ruleSelected, matched, err := resolveProductionPipelineRuleMatchName(facts.RoutingFacets); err != nil {
+		return ProductionPipelineBindingResolution{}, err
+	} else if matched {
+		if _, ok := LookupProductionPipeline(ruleSelected); !ok {
+			return ProductionPipelineBindingResolution{}, fmt.Errorf("pipeline rule %q selected unknown pipeline %q", ruleName, ruleSelected)
+		}
+		return ProductionPipelineBindingResolution{
+			RequestedPipeline:  requested,
+			StoreBoundPipeline: storeBound,
+			RuleName:           ruleName,
+			Source:             "rule_match",
+			SelectedPipeline:   ruleSelected,
 		}, nil
 	}
 	if storeBound != "" {

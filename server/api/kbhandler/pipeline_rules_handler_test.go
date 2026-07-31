@@ -1,0 +1,238 @@
+package kbhandler
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/labstack/echo/v4"
+)
+
+const pipelineRuleSelectCols = `
+    r.id, r.name, r.priority, r.match_input_doc_type, r.match_source_language, r.match_knowledge_store_binding,
+    r.pipeline_id, p.name, r.active, r.create_time, r.modify_time
+FROM kb.pipeline_rules r
+JOIN kb.pipelines p ON p.id = r.pipeline_id`
+
+func newPipelineRuleContext(t *testing.T, method, target string, body string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	return e.NewContext(req, rec), rec
+}
+
+func newPipelineRuleIDContext(t *testing.T, method, id string, body string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	target := "/api/v1/kb/pipeline-rules/" + id
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/kb/pipeline-rules/:id")
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+	return c, rec
+}
+
+func TestListPipelineRulesOrderedByPriority(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	query := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nORDER BY r.priority DESC, r.id")
+	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
+		"pipeline_id", "pipeline_name", "active", "create_time", "modify_time",
+	}).AddRow(
+		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true,
+		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
+	))
+
+	c, rec := newPipelineRuleContext(t, http.MethodGet, "/api/v1/kb/pipeline-rules", "")
+	if err := ListPipelineRules(c); err != nil {
+		t.Fatalf("ListPipelineRules returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload listPipelineRulesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if !payload.Status || len(payload.Results) != 1 {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if payload.Results[0].PipelineName != "regulated_reference" || payload.Results[0].MatchInputDocType == nil || *payload.Results[0].MatchInputDocType != "pdf" {
+		t.Fatalf("unexpected result: %+v", payload.Results[0])
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreatePipelineRuleSuccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.pipeline_rules (
+    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+RETURNING id
+`)
+	mock.ExpectQuery(insertQuery).
+		WithArgs("pdf-zh", 10, "pdf", "zh", nil, int64(3), true).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
+
+	selectQuery := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nWHERE r.id = $1")
+	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
+		"pipeline_id", "pipeline_name", "active", "create_time", "modify_time",
+	}).AddRow(
+		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true,
+		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
+	))
+
+	c, rec := newPipelineRuleContext(t, http.MethodPost, "/api/v1/kb/pipeline-rules", `{
+		"name":"pdf-zh",
+		"priority":10,
+		"match_input_doc_type":" PDF ",
+		"match_source_language":" ZH ",
+		"pipeline_id":3
+	}`)
+	if err := CreatePipelineRule(c); err != nil {
+		t.Fatalf("CreatePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload pipelineRuleDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if !payload.Status || payload.Record.ID != 2 {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreatePipelineRuleRequiresNameAndPipelineID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	c, rec := newPipelineRuleContext(t, http.MethodPost, "/api/v1/kb/pipeline-rules", `{"name":"missing-pipeline"}`)
+	if err := CreatePipelineRule(c); err != nil {
+		t.Fatalf("CreatePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestUpdatePipelineRuleSuccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	updateQuery := regexp.QuoteMeta("UPDATE kb.pipeline_rules SET modify_time = NOW(), active = $1, priority = $2 WHERE id = $3")
+	mock.ExpectExec(updateQuery).
+		WithArgs(false, 20, int64(2)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	selectQuery := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nWHERE r.id = $1")
+	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
+		"pipeline_id", "pipeline_name", "active", "create_time", "modify_time",
+	}).AddRow(
+		int64(2), "pdf-zh", 20, "pdf", "zh", nil, int64(3), "regulated_reference", false,
+		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 30, 0, 0, time.UTC),
+	))
+
+	c, rec := newPipelineRuleIDContext(t, http.MethodPut, "2", `{"priority":20,"active":false}`)
+	if err := UpdatePipelineRule(c); err != nil {
+		t.Fatalf("UpdatePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestDeletePipelineRuleNotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	deleteQuery := regexp.QuoteMeta("DELETE FROM kb.pipeline_rules WHERE id = $1")
+	mock.ExpectExec(deleteQuery).
+		WithArgs(int64(999)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	c, rec := newPipelineRuleIDContext(t, http.MethodDelete, "999", "")
+	if err := DeletePipelineRule(c); err != nil {
+		t.Fatalf("DeletePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

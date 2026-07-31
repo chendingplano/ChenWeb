@@ -62,7 +62,7 @@ RETURNING id`)
 			`{"RequestedProcessors":["generate_topics","extract_provisions"],"RequestedPipeline":"","StoreBoundPipeline":"","KnowledgeStoreID":42,"KnowledgeStoreType":"","InputDocType":"pdf","SourceLanguage":"en","DocumentNumber":"YY 9706.252-2021","ParserName":"mineru","DocumentTitle":"Ventilator display module","RoutingFacets":{"KnowledgeStoreBinding":"bound","InputDocType":"pdf","SourceLanguage":"en","HasDocumentNumber":true},"Mode":""}`,
 			`[{"Name":"static_analyzer","Phase":"A","DependsOn":[],"Reason":"mandatory_baseline"},{"Name":"chunking","Phase":"A","DependsOn":["static_analyzer"],"Reason":"implicit_dependency"},{"Name":"generate_topics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"},{"Name":"extract_provisions","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
-			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
+			`{"RequestedPipeline":"","StoreBoundPipeline":"","RuleName":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
 			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
 			sqlmock.AnyArg(),
 		).
