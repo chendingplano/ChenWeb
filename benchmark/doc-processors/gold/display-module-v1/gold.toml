@@ -13,9 +13,18 @@
 #      each [[authority_document]] as a CDM document (server/api/cdm/model) from its
 #      clause text_templates, so grounding (ADR 2026072601) is exact by construction.
 #   2. extract_metrics / normalize_assertions benchmark gold: [[clause]].expected_metric.
-#   3. Pilot 4b domain-module fixture content once the ontology data repository (DR17)
-#      exists: [[metric_definition]] becomes module terms.toml content; [[clause]]
-#      values become conformance fixtures for the profile rules they instantiate.
+#   3. Machine-consumed project fixture content, with ChenWeb as the approved home for
+#      this checked-in synthetic corpus. Any later relocation to an ontology data
+#      repository (DR17) requires a separate decision. [[metric_definition]] remains
+#      close to future module terms.toml content; [[clause]] values remain candidate
+#      conformance fixtures for the profile rules they instantiate.
+#
+# Store-profile metadata in manifest.json currently groups the 9 synthetic documents as:
+#   - regulated-reference / authority-standard (5 docs)
+#   - product-specification / enterprise-standard (3 docs)
+#   - narrative-research / marketing-narrative (1 doc)
+# These profile expectations are benchmark metadata only; they do not by themselves
+# define or guarantee the deployed runtime's routing behavior.
 #
 # Every [[expected_verdict]] is derived by hand from the DR21 strictness relation over
 # the authored clause values, with the deciding rule stated in `rationale`. Where the

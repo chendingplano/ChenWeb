@@ -3,6 +3,8 @@ package docbenchmark
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -633,6 +635,103 @@ func TestLoadCorpusDatasetAgainstRealFixture(t *testing.T) {
 		t.Fatalf("got %d documents, want 9 authority documents", len(docs))
 	}
 
+	wantProfileCounts := map[string]int{
+		"regulated-reference":   5,
+		"product-specification": 3,
+		"narrative-research":    1,
+	}
+	wantDocuments := map[string]struct{ profile, kind string }{
+		"doc:cn-gb-syn-9706-1-2020":       {"regulated-reference", "authority-standard"},
+		"doc:intl-iso-syn-62366-1-2015":   {"regulated-reference", "authority-standard"},
+		"doc:intl-iec-syn-60601-1-8-2020": {"regulated-reference", "authority-standard"},
+		"doc:eu-harm-syn-2021":            {"regulated-reference", "authority-standard"},
+		"doc:us-syn-guidance-2019":        {"regulated-reference", "authority-standard"},
+		"doc:ent-q-syn-001-2026":          {"product-specification", "enterprise-standard"},
+		"doc:ent-q-syn-001-2019":          {"product-specification", "enterprise-standard"},
+		"doc:ent-q-syn-002-2024":          {"product-specification", "enterprise-standard"},
+		"doc:ent-mkt-syn-2025":            {"narrative-research", "marketing-narrative"},
+	}
+	wantProfileProcessors := map[string]map[string]ProcessorApplicability{
+		"regulated-reference": {
+			"generate_summaries":           ProcessorNotRequired,
+			"generate_topics":              ProcessorUseful,
+			"extract_structured_knowledge": ProcessorUseful,
+			"extract_entity":               ProcessorNotRequired,
+			"extract_relation":             ProcessorNotRequired,
+			"extract_inventory_items":      ProcessorNotRequired,
+			"extract_metrics":              ProcessorUseful,
+			"extract_provisions":           ProcessorRequired,
+		},
+		"product-specification": {
+			"generate_summaries":           ProcessorNotRequired,
+			"generate_topics":              ProcessorUseful,
+			"extract_structured_knowledge": ProcessorUseful,
+			"extract_entity":               ProcessorUseful,
+			"extract_relation":             ProcessorUseful,
+			"extract_inventory_items":      ProcessorRequired,
+			"extract_metrics":              ProcessorRequired,
+			"extract_provisions":           ProcessorUseful,
+		},
+		"narrative-research": {
+			"generate_summaries":           ProcessorRequired,
+			"generate_topics":              ProcessorRequired,
+			"extract_structured_knowledge": ProcessorUseful,
+			"extract_entity":               ProcessorUseful,
+			"extract_relation":             ProcessorNotRequired,
+			"extract_inventory_items":      ProcessorNotRequired,
+			"extract_metrics":              ProcessorNotRequired,
+			"extract_provisions":           ProcessorNotRequired,
+		},
+	}
+
+	if len(c.DocumentProfiles) != len(wantDocuments) {
+		t.Fatalf("got %d document profiles, want %d", len(c.DocumentProfiles), len(wantDocuments))
+	}
+	gotProfileCounts := make(map[string]int, len(wantProfileCounts))
+	gotProfileVectors := make(map[string]map[string]ProcessorApplicability, len(wantProfileProcessors))
+	for docID, want := range wantDocuments {
+		profile, ok := c.DocumentProfiles[docID]
+		if !ok {
+			t.Fatalf("missing document profile for %s", docID)
+		}
+		if profile.StoreProfile != want.profile || profile.DocumentKind != want.kind {
+			t.Fatalf("document %s profile/kind = {%q %q}, want {%q %q}", docID, profile.StoreProfile, profile.DocumentKind, want.profile, want.kind)
+		}
+		wantProcessors := wantProfileProcessors[want.profile]
+		if !reflect.DeepEqual(profile.ExpectedProcessors, wantProcessors) {
+			t.Fatalf("document %s expected_processors = %#v, want %#v", docID, profile.ExpectedProcessors, wantProcessors)
+		}
+		gotProfileCounts[profile.StoreProfile]++
+		if prior, exists := gotProfileVectors[profile.StoreProfile]; exists {
+			if !reflect.DeepEqual(prior, profile.ExpectedProcessors) {
+				t.Fatalf("profile %s has inconsistent expected_processors vectors: %#v vs %#v", profile.StoreProfile, prior, profile.ExpectedProcessors)
+			}
+		} else {
+			gotProfileVectors[profile.StoreProfile] = profile.ExpectedProcessors
+		}
+	}
+	for docID := range c.DocumentProfiles {
+		if _, ok := wantDocuments[docID]; !ok {
+			t.Fatalf("unexpected document profile for %s", docID)
+		}
+	}
+	if !reflect.DeepEqual(gotProfileCounts, wantProfileCounts) {
+		t.Fatalf("profile counts = %#v, want %#v", gotProfileCounts, wantProfileCounts)
+	}
+	profiles := []string{"regulated-reference", "product-specification", "narrative-research"}
+	for _, profile := range profiles {
+		if !reflect.DeepEqual(gotProfileVectors[profile], wantProfileProcessors[profile]) {
+			t.Fatalf("profile %s vector = %#v, want %#v", profile, gotProfileVectors[profile], wantProfileProcessors[profile])
+		}
+	}
+	for i := 0; i < len(profiles); i++ {
+		for j := i + 1; j < len(profiles); j++ {
+			if reflect.DeepEqual(gotProfileVectors[profiles[i]], gotProfileVectors[profiles[j]]) {
+				t.Fatalf("profiles %s and %s unexpectedly share expected_processors vector %#v", profiles[i], profiles[j], gotProfileVectors[profiles[i]])
+			}
+		}
+	}
+
 	expected := c.Expected()
 	if len(expected) != 36 {
 		t.Fatalf("got %d expected verdict cells, want 36", len(expected))
@@ -646,4 +745,19 @@ func TestLoadCorpusDatasetAgainstRealFixture(t *testing.T) {
 	if score.TotalCells != 36 || score.MatchedCells != 36 || score.Accuracy != 1.0 {
 		t.Fatalf("loading the real fixture through LoadCorpusDataset scored %+v, want 36/36", score)
 	}
+	if len(score.Mismatches) != 0 || len(score.MissingActual) != 0 || len(score.UnexpectedActual) != 0 {
+		t.Fatalf("got mismatches=%v missing=%v unexpected=%v, want exact 36/36 match", score.Mismatches, score.MissingActual, score.UnexpectedActual)
+	}
+	if got, want := sortedVerdictCellKeys(expected), sortedVerdictCellKeys(actual); !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected/simulated verdict keys differ:\nexpected=%v\nactual=%v", got, want)
+	}
+}
+
+func sortedVerdictCellKeys(cells []VerdictCell) []string {
+	keys := make([]string, len(cells))
+	for i, cell := range cells {
+		keys[i] = cell.Metric + "|" + cell.Family + "|" + cell.Object
+	}
+	sort.Strings(keys)
+	return keys
 }

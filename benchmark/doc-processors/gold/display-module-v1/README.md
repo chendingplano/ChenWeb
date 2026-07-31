@@ -14,6 +14,22 @@ expected verdicts covering all 11 verdict kinds from DR21. Every expected verdic
 carries a `rationale` naming the DR21 rule that produced it, so it is auditable
 rather than asserted.
 
+`manifest.json` also classifies the nine synthetic documents into three
+machine-consumed store profiles hosted in ChenWeb, the currently approved home
+for this fixture family. Any future relocation of these machine-consumed
+fixtures needs a separate decision; this benchmark does not pre-approve one.
+
+- `regulated-reference` / `authority-standard` (5 docs): the CN, international,
+  EU, and US authority references
+- `product-specification` / `enterprise-standard` (3 docs): the enterprise Q
+  specifications
+- `narrative-research` / `marketing-narrative` (1 doc): the enterprise
+  marketing-style narrative
+
+Those profile expectations are benchmark metadata only. They document what a
+fixture consumer should expect from the synthetic corpus, not what the deployed
+runtime necessarily routes or enables today.
+
 Validate it parses and check verdict coverage:
 
 ```sh
@@ -94,8 +110,11 @@ not be treated as gold for those cells.
 
 ## Reuse as pilot 4b module content
 
-Once the ontology data repository exists (ADR 2026072901 DR17), the
-`[[metric_definition]]` blocks here are close to direct input for that module's
-`terms.toml`, and the `[[clause]]` values are candidate conformance fixtures for
-its profile rules. This file intentionally uses the same identifiers
-(`vent:display_brightness`, etc.) so that migration is a copy, not a rewrite.
+ChenWeb is the approved home for these machine-consumed project fixtures today.
+If a later ontology data repository (ADR 2026072901 DR17) becomes the better
+home, moving this fixture there should happen only through a separate decision.
+The `[[metric_definition]]` blocks here are close to direct input for that
+module's `terms.toml`, and the `[[clause]]` values are candidate conformance
+fixtures for its profile rules. This file intentionally uses the same
+identifiers (`vent:display_brightness`, etc.) so that migration is a copy, not
+a rewrite.

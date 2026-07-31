@@ -1,12 +1,140 @@
 {
   "schema_version": 1,
   "dataset_id": "doc-processors-corpus-display-module",
-  "dataset_version": "1.0.0",
+  "dataset_version": "1.1.0",
   "cases": [
     {
       "case_id": "display-module-v1",
       "gold": "gold.toml",
-      "tags": ["ontology-comparison", "grounding"]
+      "tags": ["ontology-comparison", "grounding"],
+      "document_profiles": {
+        "doc:cn-gb-syn-9706-1-2020": {
+          "store_profile": "regulated-reference",
+          "document_kind": "authority-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "not_required",
+            "extract_relation": "not_required",
+            "extract_inventory_items": "not_required",
+            "extract_metrics": "useful",
+            "extract_provisions": "required"
+          }
+        },
+        "doc:intl-iso-syn-62366-1-2015": {
+          "store_profile": "regulated-reference",
+          "document_kind": "authority-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "not_required",
+            "extract_relation": "not_required",
+            "extract_inventory_items": "not_required",
+            "extract_metrics": "useful",
+            "extract_provisions": "required"
+          }
+        },
+        "doc:intl-iec-syn-60601-1-8-2020": {
+          "store_profile": "regulated-reference",
+          "document_kind": "authority-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "not_required",
+            "extract_relation": "not_required",
+            "extract_inventory_items": "not_required",
+            "extract_metrics": "useful",
+            "extract_provisions": "required"
+          }
+        },
+        "doc:eu-harm-syn-2021": {
+          "store_profile": "regulated-reference",
+          "document_kind": "authority-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "not_required",
+            "extract_relation": "not_required",
+            "extract_inventory_items": "not_required",
+            "extract_metrics": "useful",
+            "extract_provisions": "required"
+          }
+        },
+        "doc:us-syn-guidance-2019": {
+          "store_profile": "regulated-reference",
+          "document_kind": "authority-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "not_required",
+            "extract_relation": "not_required",
+            "extract_inventory_items": "not_required",
+            "extract_metrics": "useful",
+            "extract_provisions": "required"
+          }
+        },
+        "doc:ent-q-syn-001-2026": {
+          "store_profile": "product-specification",
+          "document_kind": "enterprise-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "useful",
+            "extract_relation": "useful",
+            "extract_inventory_items": "required",
+            "extract_metrics": "required",
+            "extract_provisions": "useful"
+          }
+        },
+        "doc:ent-q-syn-001-2019": {
+          "store_profile": "product-specification",
+          "document_kind": "enterprise-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "useful",
+            "extract_relation": "useful",
+            "extract_inventory_items": "required",
+            "extract_metrics": "required",
+            "extract_provisions": "useful"
+          }
+        },
+        "doc:ent-q-syn-002-2024": {
+          "store_profile": "product-specification",
+          "document_kind": "enterprise-standard",
+          "expected_processors": {
+            "generate_summaries": "not_required",
+            "generate_topics": "useful",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "useful",
+            "extract_relation": "useful",
+            "extract_inventory_items": "required",
+            "extract_metrics": "required",
+            "extract_provisions": "useful"
+          }
+        },
+        "doc:ent-mkt-syn-2025": {
+          "store_profile": "narrative-research",
+          "document_kind": "marketing-narrative",
+          "expected_processors": {
+            "generate_summaries": "required",
+            "generate_topics": "required",
+            "extract_structured_knowledge": "useful",
+            "extract_entity": "useful",
+            "extract_relation": "not_required",
+            "extract_inventory_items": "not_required",
+            "extract_metrics": "not_required",
+            "extract_provisions": "not_required"
+          }
+        }
+      }
     }
   ]
 }
