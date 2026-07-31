@@ -253,8 +253,8 @@ func resolveRequiredProcessors(requested []string) []string {
 	for _, name := range requested {
 		wanted[normalizeRuntimeName(name)] = true
 	}
-	productionOrder := []string{"static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity", "extract_relation", "extract_inventory_items", "extract_metrics", "extract_provisions", "generate_scene_blocks"}
-	out := make([]string, 0, len(wanted))
+	productionOrder := append([]string{"static_analyzer", "chunking"}, optionalProductionProcessorOrder...)
+	out := make([]string, 0, len(productionOrder))
 	for _, name := range productionOrder {
 		if wanted[name] {
 			out = append(out, name)
@@ -264,16 +264,12 @@ func resolveRequiredProcessors(requested []string) []string {
 }
 
 func validateRequiredProcessors(requested []string) error {
-	known := map[string]bool{}
-	for _, name := range resolveRequiredProcessors(nil) {
-		known[name] = true
-	}
-	for _, name := range []string{"generate_summaries", "generate_topics", "extract_doc_metadata", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity", "extract_relation", "extract_inventory_items", "extract_metrics", "extract_provisions", "generate_scene_blocks"} {
-		known[name] = true
-	}
 	for _, raw := range requested {
 		name := normalizeRuntimeName(raw)
-		if !known[name] {
+		if name == "static_analyzer" || name == "chunking" {
+			continue
+		}
+		if _, ok := CanonicalOptionalProductionProcessor(raw); !ok {
 			return fmt.Errorf("unknown required processor %q", raw)
 		}
 	}
