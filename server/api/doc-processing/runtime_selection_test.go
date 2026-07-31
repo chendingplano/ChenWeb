@@ -65,6 +65,36 @@ func TestExplicitMetricsSelectionIgnoresUnselectedFixedServiceConfigs(t *testing
 	}
 }
 
+func TestDocPipelineModeFromEnvDefaultsToPlanOnly(t *testing.T) {
+	mode, err := normalizeDocPipelineMode("")
+	if err != nil {
+		t.Fatalf("normalizeDocPipelineMode: %v", err)
+	}
+	if mode != DocPipelineModePlanOnly {
+		t.Fatalf("mode=%q want=%q", mode, DocPipelineModePlanOnly)
+	}
+
+	mode, err = normalizeDocPipelineMode(" true ")
+	if err != nil {
+		t.Fatalf("normalizeDocPipelineMode(true): %v", err)
+	}
+	if mode != DocPipelineModePlanOnly {
+		t.Fatalf("mode=%q want=%q", mode, DocPipelineModePlanOnly)
+	}
+}
+
+func TestDocPipelineModeFromEnvRejectsEnforcedRequest(t *testing.T) {
+	if _, err := normalizeDocPipelineMode("false"); err == nil || !strings.Contains(err.Error(), "enforced") {
+		t.Fatalf("err=%v, want an error naming enforced-mode as unsupported", err)
+	}
+}
+
+func TestDocPipelineModeFromEnvRejectsNonBoolean(t *testing.T) {
+	if _, err := normalizeDocPipelineMode("plan_only"); err == nil {
+		t.Fatal("expected error for non-boolean DOC_PIPELINE_PLAN_ONLY value")
+	}
+}
+
 func TestNewProductionRuntimeSuccessfulExplicitAndDefaultSelection(t *testing.T) {
 	original := buildProductionRuntimeComponents
 	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {
@@ -95,6 +125,42 @@ func TestNewProductionRuntimeSuccessfulExplicitAndDefaultSelection(t *testing.T)
 	}
 	if got, want := processorNames(defaults.Processors), []string{"static_analyzer", "chunking", "extract_doc_metadata", "extract_provisions"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("default processors=%v want=%v", got, want)
+	}
+}
+
+func TestNewProductionRuntimeRejectsEnforcedPipelineModeRequest(t *testing.T) {
+	original := buildProductionRuntimeComponents
+	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {
+		return productionRuntimeComponents{
+			fixed:      &FixedSizeChunkingService{},
+			processors: []Processor{runtimeSelectionProcessor("static_analyzer"), runtimeSelectionProcessor("chunking")},
+		}
+	}
+	t.Cleanup(func() { buildProductionRuntimeComponents = original })
+	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
+
+	_, err := NewProductionRuntime()
+	if err == nil || !strings.Contains(err.Error(), "enforced") {
+		t.Fatalf("err=%v, want construction to fail fast on an unsupported enforced-mode request", err)
+	}
+}
+
+func TestProductionRuntimeResolvedConfigExposesPipelineMode(t *testing.T) {
+	original := buildProductionRuntimeComponents
+	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {
+		return productionRuntimeComponents{
+			fixed:      &FixedSizeChunkingService{},
+			processors: []Processor{runtimeSelectionProcessor("static_analyzer"), runtimeSelectionProcessor("chunking")},
+		}
+	}
+	t.Cleanup(func() { buildProductionRuntimeComponents = original })
+
+	runtime, err := NewProductionRuntime()
+	if err != nil {
+		t.Fatalf("NewProductionRuntime: %v", err)
+	}
+	if got, want := runtime.ResolvedConfig().Values["processor_pipeline_mode"], DocPipelineModePlanOnly; got != want {
+		t.Fatalf("processor_pipeline_mode=%v want=%v", got, want)
 	}
 }
 
