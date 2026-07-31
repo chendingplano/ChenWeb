@@ -292,6 +292,141 @@ func TestHandleEvent_CreatesAndClosesRunAndThreadsRunIDToProcessors(t *testing.T
 	}
 }
 
+// TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline is the
+// regression test for the gap found during P1 benchmark-closeout prep:
+// DocPipelineModeEnforced computed and recorded ExcludedByPolicy, but
+// handleEvent never applied it to the processors that actually ran --
+// selectProcessors only ever consulted evt.Operations, never the plan. This
+// proves applyPlanEnforcement closes that gap: with an enforced pipeline
+// declaring only "extract_metrics", a request for both extract_metrics and
+// extract_provisions must invoke extract_metrics and must NOT invoke
+// extract_provisions.
+func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "metrics_only", Processors: []string{"extract_metrics"}},
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:                4821,
+			ParserName:        "opendata",
+			ResultFilename:    "result.json",
+			StagingFilename:   inputPath,
+			StatusRaw:         "[]",
+			RequestedPipeline: "metrics_only",
+			InputDocType:      "pdf",
+			SourceLanguage:    "en",
+		},
+	}
+	runStore := &fakeRunStore{}
+	planStore := &fakePlanStore{}
+
+	var calls []string
+	svc := &ControlService{
+		InputStore: store,
+		RunStore:   runStore,
+		PlanStore:  planStore,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &calls},
+			fakeProcessor{name: "extract_provisions", calls: &calls},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`",
+		"operation":["extract_metrics","extract_provisions"]
+	}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+
+	if got, want := calls, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("processor calls=%v, want %v (extract_provisions must be excluded by enforcement)", got, want)
+	}
+
+	runStore.mu.Lock()
+	defer runStore.mu.Unlock()
+	if len(runStore.creates) != 1 {
+		t.Fatalf("creates=%d, want 1", len(runStore.creates))
+	}
+	if got, want := runStore.creates[0].Processors, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("persisted run Processors=%v, want %v (excluded processor should not be recorded as executed either)", got, want)
+	}
+
+	planStore.mu.Lock()
+	defer planStore.mu.Unlock()
+	if len(planStore.creates) != 1 {
+		t.Fatalf("plan creates=%d, want 1", len(planStore.creates))
+	}
+	if got, want := planStore.creates[0].ExcludedByPolicy, []string{"extract_provisions"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("plan ExcludedByPolicy=%v, want %v", got, want)
+	}
+}
+
+func TestHandleEvent_PlanOnlyModeStillRunsEverythingRequested(t *testing.T) {
+	// Same setup as the enforced-mode test above, but without
+	// DOC_PIPELINE_PLAN_ONLY=false: proves applyPlanEnforcement is a true
+	// no-op in the default (plan-only) mode, preserving legacy behavior.
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "metrics_only", Processors: []string{"extract_metrics"}},
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:                4821,
+			ParserName:        "opendata",
+			ResultFilename:    "result.json",
+			StagingFilename:   inputPath,
+			StatusRaw:         "[]",
+			RequestedPipeline: "metrics_only",
+		},
+	}
+	runStore := &fakeRunStore{}
+
+	var calls []string
+	svc := &ControlService{
+		InputStore: store,
+		RunStore:   runStore,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &calls},
+			fakeProcessor{name: "extract_provisions", calls: &calls},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`",
+		"operation":["extract_metrics","extract_provisions"]
+	}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Errorf("plan-only mode must run everything requested regardless of pipeline: calls=%v", calls)
+	}
+}
+
 func TestHandleEvent_ClosesRunAsFailedWhenProcessorFails(t *testing.T) {
 	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	dir := t.TempDir()

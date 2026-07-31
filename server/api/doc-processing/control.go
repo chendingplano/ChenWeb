@@ -666,6 +666,9 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	}
+	if planErr == nil {
+		processors = s.applyPlanEnforcement(processors, plan)
+	}
 	var runID int64
 	var runCreated bool
 	if s.RunStore != nil {
@@ -1703,6 +1706,34 @@ func (s *ControlService) selectProcessors(ops []string) []Processor {
 		selected = append(selected, p)
 	}
 	return selected
+}
+
+// applyPlanEnforcement drops any already-selected processor that the
+// resolved plan excluded via DocPipelineModeEnforced's intersect/filter
+// (applyPolicyFilter in processor_plan.go). plan.ExcludedByPolicy() is
+// always empty in plan-only mode, or when the resolved pipeline declares no
+// explicit Processors -- i.e. every case that existed before this method
+// was added -- so this is a no-op there and changes nothing about existing
+// (legacy) behavior. It only ever removes something in the new "enforced
+// mode with an authored, non-empty-Processors pipeline" case, which was not
+// previously reachable at all.
+func (s *ControlService) applyPlanEnforcement(processors []Processor, plan ProductionProcessorPlan) []Processor {
+	excluded := plan.ExcludedByPolicy()
+	if len(excluded) == 0 {
+		return processors
+	}
+	excludedSet := make(map[string]bool, len(excluded))
+	for _, name := range excluded {
+		excludedSet[normalizeRuntimeName(name)] = true
+	}
+	filtered := make([]Processor, 0, len(processors))
+	for _, p := range processors {
+		if p == nil || excludedSet[normalizeRuntimeName(p.Name())] {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return filtered
 }
 
 func requestedOperationsNeedAutoChunking(ops []string) bool {
