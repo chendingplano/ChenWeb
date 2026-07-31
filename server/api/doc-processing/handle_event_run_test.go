@@ -374,6 +374,77 @@ func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline(t *testing.T) {
 	}
 }
 
+// TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline_NoExplicitOperations
+// reproduces the common ingestion path -- and what gold-run's payload
+// actually looks like -- where the event carries no "operation" field at
+// all, so resolveProductionPlanFacts must fall back to s.Processors as the
+// RequestedProcessors baseline. Before that fallback existed,
+// facts.RequestedProcessors stayed empty here, plan.ExcludedByPolicy() was
+// therefore always empty, and applyPlanEnforcement was a silent no-op for
+// exactly this (the most common) case.
+func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline_NoExplicitOperations(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "metrics_only", Processors: []string{"extract_metrics"}},
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:                4821,
+			ParserName:        "opendata",
+			ResultFilename:    "result.json",
+			StagingFilename:   inputPath,
+			StatusRaw:         "[]",
+			RequestedPipeline: "metrics_only",
+			InputDocType:      "pdf",
+			SourceLanguage:    "en",
+		},
+	}
+	runStore := &fakeRunStore{}
+	planStore := &fakePlanStore{}
+
+	var calls []string
+	svc := &ControlService{
+		InputStore: store,
+		RunStore:   runStore,
+		PlanStore:  planStore,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &calls},
+			fakeProcessor{name: "extract_provisions", calls: &calls},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`"
+	}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+
+	if got, want := calls, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("processor calls=%v, want %v (extract_provisions must be excluded even with no explicit operations)", got, want)
+	}
+
+	planStore.mu.Lock()
+	defer planStore.mu.Unlock()
+	if len(planStore.creates) != 1 {
+		t.Fatalf("plan creates=%d, want 1", len(planStore.creates))
+	}
+	if got, want := planStore.creates[0].ExcludedByPolicy, []string{"extract_provisions"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("plan ExcludedByPolicy=%v, want %v (persisted audit trail must match real exclusion)", got, want)
+	}
+}
+
 func TestHandleEvent_PlanOnlyModeStillRunsEverythingRequested(t *testing.T) {
 	// Same setup as the enforced-mode test above, but without
 	// DOC_PIPELINE_PLAN_ONLY=false: proves applyPlanEnforcement is a true

@@ -1389,14 +1389,28 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 	if modeErr != nil {
 		mode = DocPipelineModePlanOnly
 	}
+	// evt.Operations is only set for an explicit per-event processor
+	// request. The common ingestion path (no operations in the payload)
+	// runs the server's registered s.Processors instead, so that must be
+	// the RequestedProcessors baseline here too -- otherwise plan.
+	// ExcludedByPolicy() is computed against an empty list and enforcement
+	// (which trusts that field) becomes a no-op for the common case.
+	requested := append([]string(nil), evt.Operations...)
+	if len(requested) == 0 && s != nil {
+		for _, p := range s.Processors {
+			if p != nil {
+				requested = append(requested, p.Name())
+			}
+		}
+	}
 	if s == nil || s.InputStore == nil {
-		return ProductionPlanFacts{RequestedProcessors: append([]string(nil), evt.Operations...), Mode: mode}, nil
+		return ProductionPlanFacts{RequestedProcessors: requested, Mode: mode}, nil
 	}
 	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
 		return ProductionPlanFacts{}, err
 	}
-	facts := BuildProductionPlanFactsFromInputRecord(evt.Operations, rec)
+	facts := BuildProductionPlanFactsFromInputRecord(requested, rec)
 	facts.Mode = mode
 	return facts, nil
 }
