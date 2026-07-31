@@ -121,21 +121,17 @@ func runGoldCase(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		}
 	}
 
-	results := make([]map[string]any, 0, len(docs))
+	results := make([]docbenchmark.GoldRunDocumentResult, 0, len(docs))
 	for _, doc := range docs {
-		recordID, linePath, lineCount, err := prepareGoldInput(ctx, db, *artifactRoot, typstBin, doc)
+		recordID, _, _, err := prepareGoldInput(ctx, db, *artifactRoot, typstBin, doc)
 		if err != nil {
 			return fmt.Errorf("document %s: prepare: %w", doc.Key, err)
 		}
-		entry := map[string]any{
-			"document":    doc.Key,
-			"record_id":   recordID,
-			"line_file":   linePath,
-			"line_count":  lineCount,
-			"block_count": len(doc.Blocks),
-		}
 		if *dryRun {
-			results = append(results, entry)
+			results = append(results, docbenchmark.GoldRunDocumentResult{
+				Document: doc.Key,
+				RecordID: recordID,
+			})
 			continue
 		}
 
@@ -148,27 +144,29 @@ func runGoldCase(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			return fmt.Errorf("document %s: marshal payload: %w", doc.Key, err)
 		}
 		if err := runtime.Control.RunEvent(ctx, payload); err != nil {
-			entry["run_error"] = err.Error()
-			results = append(results, entry)
+			results = append(results, goldRunDocumentRunError(doc.Key, recordID, err))
 			continue
 		}
-		processorResults := make(map[string]any, len(processors))
+		processorResults := make(map[string]docbenchmark.GoldRunProcessorResult, len(processors))
 		for _, proc := range processors {
 			rows, ferr := fetchProcessorResults(ctx, db, proc, recordID)
 			if ferr != nil {
 				return fmt.Errorf("document %s: fetch %s results: %w", doc.Key, proc, ferr)
 			}
 			if rows == nil {
-				processorResults[proc] = "not applicable: no per-record result table registered for this processor"
+				processorResults[proc] = goldRunNotRegisteredResult()
 				continue
 			}
-			processorResults[proc] = rows
+			processorResults[proc] = goldRunRowsResult(rows)
 		}
-		entry["results"] = processorResults
-		results = append(results, entry)
+		results = append(results, docbenchmark.GoldRunDocumentResult{
+			Document: doc.Key,
+			RecordID: recordID,
+			Results:  processorResults,
+		})
 	}
 
-	return json.NewEncoder(stdout).Encode(map[string]any{"dry_run": *dryRun, "results": results})
+	return json.NewEncoder(stdout).Encode(goldRunEnvelope(ds, corpusCase, *dryRun, processors, results))
 }
 
 // prepareGoldInput renders doc through the real Typst pipeline exactly as
@@ -264,48 +262,37 @@ func findCorpusCase(ds *docbenchmark.CorpusDataset, caseID string) *docbenchmark
 	return nil
 }
 
-// allGoldProcessors is docprocessing's productionOrder (runtime.go) minus the
-// always-mandatory static_analyzer/chunking pair, which resolveRequiredProcessors
-// forces on regardless of what is requested.
-var allGoldProcessors = []string{
-	"generate_summaries", "generate_topics", "extract_doc_metadata",
-	"extract_semantic_projections", "extract_structured_knowledge",
-	"extract_entity", "extract_relation", "extract_inventory_items",
-	"extract_metrics", "extract_provisions", "generate_scene_blocks",
-}
-
-// resolveProcessorSelection parses --processors: a comma-separated list of
-// names from allGoldProcessors, or the literal "all".
+// resolveProcessorSelection parses --processors using the canonical optional
+// production processor registry, returning selections in registry order.
 func resolveProcessorSelection(raw string) ([]string, error) {
+	known := docprocessing.OptionalProductionProcessorNames()
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, fmt.Errorf("--processors is required (comma-separated names, or \"all\"); known: %s", strings.Join(allGoldProcessors, ", "))
+		return nil, fmt.Errorf("--processors is required (comma-separated names, or \"all\"); known: %s", strings.Join(known, ", "))
 	}
 	if raw == "all" {
-		return append([]string(nil), allGoldProcessors...), nil
+		return append([]string(nil), known...), nil
 	}
-	known := map[string]bool{}
-	for _, p := range allGoldProcessors {
-		known[p] = true
-	}
-	seen := map[string]bool{}
-	var out []string
+	selected := map[string]bool{}
 	for part := range strings.SplitSeq(raw, ",") {
 		name := strings.TrimSpace(part)
 		if name == "" {
 			continue
 		}
-		if !known[name] {
-			return nil, fmt.Errorf("unknown processor %q; known: %s", name, strings.Join(allGoldProcessors, ", "))
+		canonical, ok := docprocessing.CanonicalOptionalProductionProcessor(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown processor %q; known: %s", name, strings.Join(known, ", "))
 		}
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		out = append(out, name)
+		selected[canonical] = true
 	}
-	if len(out) == 0 {
+	if len(selected) == 0 {
 		return nil, fmt.Errorf("--processors resolved to no processors")
+	}
+	out := make([]string, 0, len(selected))
+	for _, name := range known {
+		if selected[name] {
+			out = append(out, name)
+		}
 	}
 	return out, nil
 }
@@ -314,11 +301,10 @@ func resolveProcessorSelection(raw string) ([]string, error) {
 // input_record_id-equivalent foreign key column) that holds its per-document
 // output, so gold-run can report real results without any processor-specific
 // scoring logic. extract_doc_metadata writes directly onto kb.inputs rather
-// than a child table, so it's registered against kb.inputs/id. generate_summaries
-// and generate_topics are intentionally absent: their output is chunk-derived
-// artifacts, not a queryable per-record row set, and reporting on them belongs
-// to `analyze`, not this generic fetch.
+// than a child table, so it's registered against kb.inputs/id.
 var processorResultTables = map[string]struct{ table, fkCol string }{
+	"generate_summaries":           {"kb.summaries", "input_record_id"},
+	"generate_topics":              {"kb.topics", "input_record_id"},
 	"extract_metrics":              {"kb.metrics", "input_record_id"},
 	"extract_provisions":           {"kb.provisions", "input_record_id"},
 	"extract_entity":               {"kb.entities", "input_record_id"},
@@ -345,6 +331,43 @@ func fetchProcessorResults(ctx context.Context, db *sql.DB, processor string, re
 	}
 	defer rows.Close()
 	return scanRowsAsMaps(rows)
+}
+
+func goldRunEnvelope(ds *docbenchmark.CorpusDataset, corpusCase *docbenchmark.CorpusCase, dryRun bool, selected []string, results []docbenchmark.GoldRunDocumentResult) docbenchmark.GoldRunEnvelope {
+	if dryRun {
+		selected = nil
+	}
+	return docbenchmark.GoldRunEnvelope{
+		SchemaVersion: docbenchmark.GoldRunSchemaVersion,
+		Dataset: docbenchmark.GoldRunDatasetIdentity{
+			ID:          ds.Manifest.DatasetID,
+			Version:     ds.Manifest.DatasetVersion,
+			ContentHash: corpusCase.ContentHash,
+		},
+		CaseID:             corpusCase.CaseID,
+		SelectedProcessors: append([]string(nil), selected...),
+		DryRun:             dryRun,
+		Results:            results,
+	}
+}
+
+func goldRunRowsResult(rows []map[string]any) docbenchmark.GoldRunProcessorResult {
+	return docbenchmark.GoldRunProcessorResult{
+		State: docbenchmark.GoldRunResultRows,
+		Rows:  &rows,
+	}
+}
+
+func goldRunNotRegisteredResult() docbenchmark.GoldRunProcessorResult {
+	return docbenchmark.GoldRunProcessorResult{State: docbenchmark.GoldRunResultNotRegistered}
+}
+
+func goldRunDocumentRunError(document string, recordID int64, err error) docbenchmark.GoldRunDocumentResult {
+	return docbenchmark.GoldRunDocumentResult{
+		Document: document,
+		RecordID: recordID,
+		RunError: err.Error(),
+	}
 }
 
 // scanRowsAsMaps scans every remaining row into a column-name-keyed map,
