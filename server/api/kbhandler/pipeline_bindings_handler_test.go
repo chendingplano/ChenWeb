@@ -15,7 +15,7 @@ import (
 )
 
 const pipelineBindingSelectCols = `
-    b.id, b.ks_store_id, b.pipeline_id, p.name,
+    b.id, b.ks_store_id, b.pipeline_id, p.name, b.policy_id,
     b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id`
@@ -57,8 +57,8 @@ func TestListPipelineBindingsFiltersByKSStoreID(t *testing.T) {
 	query := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.ks_store_id = $1\nORDER BY b.id")
 	mock.ExpectQuery(query).
 		WithArgs(int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "ks_store_id", "pipeline_id", "name", "create_time", "modify_time"}).AddRow(
-			int64(3), int64(42), int64(2), "narrative_default",
+		WillReturnRows(sqlmock.NewRows([]string{"id", "ks_store_id", "pipeline_id", "name", "policy_id", "create_time", "modify_time"}).AddRow(
+			int64(3), int64(42), int64(2), "narrative_default", int64(1),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 		))
 
@@ -97,15 +97,18 @@ func TestCreatePipelineBindingSuccess(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	insertQuery := regexp.QuoteMeta("INSERT INTO kb.pipeline_bindings (ks_store_id, pipeline_id) VALUES ($1, $2) RETURNING id")
+	activePolicyQuery := regexp.QuoteMeta("SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1")
+	mock.ExpectQuery(activePolicyQuery).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+
+	insertQuery := regexp.QuoteMeta("INSERT INTO kb.pipeline_bindings (ks_store_id, pipeline_id, policy_id) VALUES ($1, $2, $3) RETURNING id")
 	mock.ExpectQuery(insertQuery).
-		WithArgs(int64(42), int64(2)).
+		WithArgs(int64(42), int64(2), int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(3)))
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "ks_store_id", "pipeline_id", "name", "create_time", "modify_time"}).AddRow(
-			int64(3), int64(42), int64(2), "narrative_default",
+		sqlmock.NewRows([]string{"id", "ks_store_id", "pipeline_id", "name", "policy_id", "create_time", "modify_time"}).AddRow(
+			int64(3), int64(42), int64(2), "narrative_default", int64(1),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 		))
 
@@ -172,8 +175,8 @@ func TestUpdatePipelineBindingSuccess(t *testing.T) {
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "ks_store_id", "pipeline_id", "name", "create_time", "modify_time"}).AddRow(
-			int64(3), int64(42), int64(5), "request_override",
+		sqlmock.NewRows([]string{"id", "ks_store_id", "pipeline_id", "name", "policy_id", "create_time", "modify_time"}).AddRow(
+			int64(3), int64(42), int64(5), "request_override", int64(1),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 30, 0, 0, time.UTC),
 		))
 

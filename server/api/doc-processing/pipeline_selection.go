@@ -30,6 +30,12 @@ type ProductionPipelineBindingResolution struct {
 	RuleName         string
 	Source           string
 	SelectedPipeline string
+	// PolicyID/PolicyVersion identify the kb.pipeline_policies row that was
+	// active when this binding was resolved -- DR6's "every run writes...
+	// the policy version, the selected pipeline and why" explainability
+	// requirement. Zero value means no policy store was consulted.
+	PolicyID      int64
+	PolicyVersion int
 }
 
 type ProductionPipelineResolution struct {
@@ -100,6 +106,8 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 			StoreBoundPipeline: storeBound,
 			Source:             "explicit_request",
 			SelectedPipeline:   requested,
+			PolicyID:           facts.ActivePolicyID,
+			PolicyVersion:      facts.ActivePolicyVersion,
 		}, nil
 	}
 	if ruleName, ruleSelected, matched, err := resolveProductionPipelineRuleMatchName(facts.RoutingFacets); err != nil {
@@ -114,6 +122,8 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 			RuleName:           ruleName,
 			Source:             "rule_match",
 			SelectedPipeline:   ruleSelected,
+			PolicyID:           facts.ActivePolicyID,
+			PolicyVersion:      facts.ActivePolicyVersion,
 		}, nil
 	}
 	if storeBound != "" {
@@ -125,6 +135,8 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 			StoreBoundPipeline: storeBound,
 			Source:             "knowledge_store_binding",
 			SelectedPipeline:   storeBound,
+			PolicyID:           facts.ActivePolicyID,
+			PolicyVersion:      facts.ActivePolicyVersion,
 		}, nil
 	}
 	return ProductionPipelineBindingResolution{
@@ -132,6 +144,8 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 		StoreBoundPipeline: storeBound,
 		Source:             "system_default",
 		SelectedPipeline:   DefaultProductionPipelineName,
+		PolicyID:           facts.ActivePolicyID,
+		PolicyVersion:      facts.ActivePolicyVersion,
 	}, nil
 }
 

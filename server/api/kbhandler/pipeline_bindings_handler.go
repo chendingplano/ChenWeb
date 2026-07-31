@@ -18,6 +18,7 @@ type pipelineBindingRecord struct {
 	KSStoreID    int64     `json:"ks_store_id"`
 	PipelineID   int64     `json:"pipeline_id"`
 	PipelineName string    `json:"pipeline_name"`
+	PolicyID     int64     `json:"policy_id"`
 	CreateTime   time.Time `json:"create_time"`
 	ModifyTime   time.Time `json:"modify_time"`
 }
@@ -34,7 +35,7 @@ type pipelineBindingDetailResponse struct {
 }
 
 const pipelineBindingSelectColumns = `
-    b.id, b.ks_store_id, b.pipeline_id, p.name,
+    b.id, b.ks_store_id, b.pipeline_id, p.name, b.policy_id,
     b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id`
@@ -42,7 +43,7 @@ JOIN kb.pipelines p ON p.id = b.pipeline_id`
 func scanPipelineBindingRecord(scan func(dest ...any) error) (pipelineBindingRecord, error) {
 	var record pipelineBindingRecord
 	if err := scan(
-		&record.ID, &record.KSStoreID, &record.PipelineID, &record.PipelineName,
+		&record.ID, &record.KSStoreID, &record.PipelineID, &record.PipelineName, &record.PolicyID,
 		&record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineBindingRecord{}, err
@@ -111,6 +112,7 @@ func CreatePipelineBinding(c echo.Context) error {
 	var payload struct {
 		KSStoreID  *int64 `json:"ks_store_id"`
 		PipelineID *int64 `json:"pipeline_id"`
+		PolicyID   *int64 `json:"policy_id"`
 	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PB_101)"})
@@ -123,10 +125,20 @@ func CreatePipelineBinding(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	policyID := payload.PolicyID
+	if policyID == nil {
+		active, err := activePipelinePolicyID(db)
+		if err != nil {
+			logger.Error("resolve active pipeline policy failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve active pipeline policy (CWB_KB_PB_106)"})
+		}
+		policyID = &active
+	}
+
 	var id int64
 	if err := db.QueryRow(
-		"INSERT INTO kb.pipeline_bindings (ks_store_id, pipeline_id) VALUES ($1, $2) RETURNING id",
-		*payload.KSStoreID, *payload.PipelineID,
+		"INSERT INTO kb.pipeline_bindings (ks_store_id, pipeline_id, policy_id) VALUES ($1, $2, $3) RETURNING id",
+		*payload.KSStoreID, *payload.PipelineID, *policyID,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline binding failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline binding (CWB_KB_PB_104)"})

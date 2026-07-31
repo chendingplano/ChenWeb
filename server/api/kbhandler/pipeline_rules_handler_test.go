@@ -16,7 +16,7 @@ import (
 
 const pipelineRuleSelectCols = `
     r.id, r.name, r.priority, r.match_input_doc_type, r.match_source_language, r.match_knowledge_store_binding,
-    r.pipeline_id, p.name, r.active, r.create_time, r.modify_time
+    r.pipeline_id, p.name, r.active, r.policy_id, r.create_time, r.modify_time
 FROM kb.pipeline_rules r
 JOIN kb.pipelines p ON p.id = r.pipeline_id`
 
@@ -57,9 +57,9 @@ func TestListPipelineRulesOrderedByPriority(t *testing.T) {
 	query := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nORDER BY r.priority DESC, r.id")
 	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
-		"pipeline_id", "pipeline_name", "active", "create_time", "modify_time",
+		"pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
-		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true,
+		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 	))
 
@@ -98,24 +98,27 @@ func TestCreatePipelineRuleSuccess(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	activePolicyQuery := regexp.QuoteMeta("SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1")
+	mock.ExpectQuery(activePolicyQuery).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+
 	insertQuery := regexp.QuoteMeta(`
 INSERT INTO kb.pipeline_rules (
-    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active
+    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active, policy_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING id
 `)
 	mock.ExpectQuery(insertQuery).
-		WithArgs("pdf-zh", 10, "pdf", "zh", nil, int64(3), true).
+		WithArgs("pdf-zh", 10, "pdf", "zh", nil, int64(3), true, int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nWHERE r.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
-		"pipeline_id", "pipeline_name", "active", "create_time", "modify_time",
+		"pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
-		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true,
+		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 	))
 
@@ -189,9 +192,9 @@ func TestUpdatePipelineRuleSuccess(t *testing.T) {
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nWHERE r.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
-		"pipeline_id", "pipeline_name", "active", "create_time", "modify_time",
+		"pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
-		int64(2), "pdf-zh", 20, "pdf", "zh", nil, int64(3), "regulated_reference", false,
+		int64(2), "pdf-zh", 20, "pdf", "zh", nil, int64(3), "regulated_reference", false, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 30, 0, 0, time.UTC),
 	))
 

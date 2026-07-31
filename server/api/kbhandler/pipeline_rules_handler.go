@@ -25,6 +25,7 @@ type pipelineRuleRecord struct {
 	PipelineID                 int64     `json:"pipeline_id"`
 	PipelineName               string    `json:"pipeline_name"`
 	Active                     bool      `json:"active"`
+	PolicyID                   int64     `json:"policy_id"`
 	CreateTime                 time.Time `json:"create_time"`
 	ModifyTime                 time.Time `json:"modify_time"`
 }
@@ -42,7 +43,7 @@ type pipelineRuleDetailResponse struct {
 
 const pipelineRuleSelectColumns = `
     r.id, r.name, r.priority, r.match_input_doc_type, r.match_source_language, r.match_knowledge_store_binding,
-    r.pipeline_id, p.name, r.active, r.create_time, r.modify_time
+    r.pipeline_id, p.name, r.active, r.policy_id, r.create_time, r.modify_time
 FROM kb.pipeline_rules r
 JOIN kb.pipelines p ON p.id = r.pipeline_id`
 
@@ -55,7 +56,7 @@ func scanPipelineRuleRecord(scan func(dest ...any) error) (pipelineRuleRecord, e
 	)
 	if err := scan(
 		&record.ID, &record.Name, &record.Priority, &matchDocType, &matchLang, &matchBinding,
-		&record.PipelineID, &record.PipelineName, &record.Active, &record.CreateTime, &record.ModifyTime,
+		&record.PipelineID, &record.PipelineName, &record.Active, &record.PolicyID, &record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineRuleRecord{}, err
 	}
@@ -141,6 +142,7 @@ func CreatePipelineRule(c echo.Context) error {
 		MatchKnowledgeStoreBinding *string `json:"match_knowledge_store_binding"`
 		PipelineID                 *int64  `json:"pipeline_id"`
 		Active                     *bool   `json:"active"`
+		PolicyID                   *int64  `json:"policy_id"`
 	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PR_101)"})
@@ -162,11 +164,21 @@ func CreatePipelineRule(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	policyID := payload.PolicyID
+	if policyID == nil {
+		active, err := activePipelinePolicyID(db)
+		if err != nil {
+			logger.Error("resolve active pipeline policy failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve active pipeline policy (CWB_KB_PR_106)"})
+		}
+		policyID = &active
+	}
+
 	const insertQuery = `
 INSERT INTO kb.pipeline_rules (
-    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active
+    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active, policy_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING id
 `
@@ -177,7 +189,7 @@ RETURNING id
 		normalizeRuleMatchInput(payload.MatchInputDocType),
 		normalizeRuleMatchInput(payload.MatchSourceLanguage),
 		normalizeRuleMatchInput(payload.MatchKnowledgeStoreBinding),
-		*payload.PipelineID, active,
+		*payload.PipelineID, active, *policyID,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline rule failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline rule (CWB_KB_PR_104)"})

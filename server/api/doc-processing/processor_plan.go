@@ -35,6 +35,14 @@ type ProductionPlanFacts struct {
 	// callers that don't set it (tests, the constructor-time BuildProductionProcessorPlan
 	// seam) get legacy-equivalent behavior by default.
 	Mode string
+	// ActivePolicyID/ActivePolicyVersion identify the kb.pipeline_policies
+	// row that was active when this plan was built. Zero value means no
+	// policy store was consulted (tests, the constructor-time
+	// BuildProductionProcessorPlan seam) -- resolution behaves identically
+	// either way, since bindings/rules matching is unaffected; these fields
+	// exist purely for the persisted plan's explainability.
+	ActivePolicyID      int64
+	ActivePolicyVersion int
 }
 
 type ProductionProcessorPlan struct {
@@ -159,6 +167,8 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		DocumentTitle:       facts.DocumentTitle,
 		RoutingFacets:       facts.RoutingFacets,
 		Mode:                facts.Mode,
+		ActivePolicyID:      facts.ActivePolicyID,
+		ActivePolicyVersion: facts.ActivePolicyVersion,
 	}}
 	order := plan.ExecutionOrder()
 	steps := make([]ProcessorPlanStep, 0, len(order))

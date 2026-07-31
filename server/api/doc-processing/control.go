@@ -40,6 +40,7 @@ type ControlService struct {
 	RunStore          DocProcessRunStore
 	PlanStore         DocProcessPlanStore
 	FacetStore        DocFacetStore
+	PolicyStore       PipelinePolicyStore
 	Now               func() time.Time
 
 	DocProcessorMode       string
@@ -1403,8 +1404,16 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 			}
 		}
 	}
+	var policyID int64
+	var policyVersion int
+	if s != nil && s.PolicyStore != nil {
+		if policy, err := s.PolicyStore.GetActivePolicy(ctx); err == nil {
+			policyID = policy.ID
+			policyVersion = policy.Version
+		}
+	}
 	if s == nil || s.InputStore == nil {
-		return ProductionPlanFacts{RequestedProcessors: requested, Mode: mode}, nil
+		return ProductionPlanFacts{RequestedProcessors: requested, Mode: mode, ActivePolicyID: policyID, ActivePolicyVersion: policyVersion}, nil
 	}
 	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
@@ -1412,6 +1421,8 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 	}
 	facts := BuildProductionPlanFactsFromInputRecord(requested, rec)
 	facts.Mode = mode
+	facts.ActivePolicyID = policyID
+	facts.ActivePolicyVersion = policyVersion
 	return facts, nil
 }
 
