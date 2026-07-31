@@ -124,7 +124,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := LoadProductionPipelineRegistry(context.Background(), PipelineRegistrySQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
 		logger.Warn("failed to load authored pipeline registry, using legacy-equivalent fallback", "error", err)
 	}
-	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err

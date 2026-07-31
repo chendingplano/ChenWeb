@@ -431,6 +431,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/pipeline-bindings", kbhandler.CreatePipelineBinding)
 	apiGroup.PUT("/kb/pipeline-bindings/:id", kbhandler.UpdatePipelineBinding)
 	apiGroup.DELETE("/kb/pipeline-bindings/:id", kbhandler.DeletePipelineBinding)
+	apiGroup.GET("/kb/doc-facets", kbhandler.GetDocFacets)
 	apiGroup.GET("/kb/default-store", kbhandler.GetDefaultKnowledgeStore)
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
 	apiGroup.GET("/kb/inputs/:id", kbhandler.GetInput)

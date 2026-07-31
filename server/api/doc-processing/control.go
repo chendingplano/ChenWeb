@@ -39,6 +39,7 @@ type ControlService struct {
 	StopStore         StopRequestStore
 	RunStore          DocProcessRunStore
 	PlanStore         DocProcessPlanStore
+	FacetStore        DocFacetStore
 	Now               func() time.Time
 
 	DocProcessorMode       string
@@ -639,6 +640,8 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	}
 	if factsErr != nil {
 		planFacts = ProductionPlanFacts{RequestedProcessors: append([]string(nil), evt.Operations...)}
+	} else {
+		s.persistDocFacets(ctx, evt.RecordID, planFacts)
 	}
 	plan, planErr := BuildProductionProcessorPlanFromFacts(planFacts)
 	if planErr != nil && s.Logger != nil {
@@ -1187,6 +1190,27 @@ func (s *ControlService) logPipelineFinish(ctx context.Context, recordID int64, 
 		ExtraInfoJSON: &extraInfoStr,
 	}, "MID-26060801"); err != nil && s.Logger != nil {
 		s.Logger.Warn("failed to write pipeline finish log", "record_id", recordID, "error", err)
+	}
+}
+
+// persistDocFacets upserts the deterministic routing facets for a record
+// into kb.doc_facets. Best-effort: a failure here does not affect the
+// document-processing run itself, matching how plan-fact/plan-store
+// failures elsewhere in this file are logged and treated as non-blocking.
+func (s *ControlService) persistDocFacets(ctx context.Context, recordID int64, facts ProductionPlanFacts) {
+	if s.FacetStore == nil || recordID <= 0 {
+		return
+	}
+	err := s.FacetStore.UpsertDocFacets(ctx, DocFacetRecord{
+		RecordID:              recordID,
+		KSStoreID:             facts.KnowledgeStoreID,
+		KnowledgeStoreBinding: facts.RoutingFacets.KnowledgeStoreBinding,
+		InputDocType:          facts.RoutingFacets.InputDocType,
+		SourceLanguage:        facts.RoutingFacets.SourceLanguage,
+		HasDocumentNumber:     facts.RoutingFacets.HasDocumentNumber,
+	})
+	if err != nil && s.Logger != nil {
+		s.Logger.Warn("failed persisting doc facets", "record_id", recordID, "error", err)
 	}
 }
 

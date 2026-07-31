@@ -1357,6 +1357,58 @@ func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *
 	}
 }
 
+type fakeDocFacetStore struct {
+	upserted []DocFacetRecord
+	err      error
+}
+
+func (f *fakeDocFacetStore) UpsertDocFacets(_ context.Context, rec DocFacetRecord) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.upserted = append(f.upserted, rec)
+	return nil
+}
+
+func (f *fakeDocFacetStore) GetDocFacets(_ context.Context, recordID int64) (DocFacetRecord, error) {
+	for _, rec := range f.upserted {
+		if rec.RecordID == recordID {
+			return rec, nil
+		}
+	}
+	return DocFacetRecord{}, sql.ErrNoRows
+}
+
+func TestPersistDocFacetsUpsertsRoutingFacetsFromPlanFacts(t *testing.T) {
+	facetStore := &fakeDocFacetStore{}
+	svc := &ControlService{FacetStore: facetStore}
+
+	svc.persistDocFacets(context.Background(), 91, ProductionPlanFacts{
+		KnowledgeStoreID: 42,
+		RoutingFacets: ProductionRoutingFacets{
+			KnowledgeStoreBinding: "bound",
+			InputDocType:          "pdf",
+			SourceLanguage:        "en",
+			HasDocumentNumber:     true,
+		},
+	})
+
+	if len(facetStore.upserted) != 1 {
+		t.Fatalf("expected 1 upsert, got %d", len(facetStore.upserted))
+	}
+	want := DocFacetRecord{RecordID: 91, KSStoreID: 42, KnowledgeStoreBinding: "bound", InputDocType: "pdf", SourceLanguage: "en", HasDocumentNumber: true}
+	if facetStore.upserted[0] != want {
+		t.Fatalf("got=%#v want=%#v", facetStore.upserted[0], want)
+	}
+}
+
+func TestPersistDocFacetsNoopsWithoutFacetStore(t *testing.T) {
+	svc := &ControlService{}
+	// Must not panic when FacetStore is unset (e.g. in tests that construct
+	// ControlService directly without wiring every optional dependency).
+	svc.persistDocFacets(context.Background(), 91, ProductionPlanFacts{})
+}
+
 type fakeDocProcessingCommandStore struct {
 	records    map[int64]DocMetadataInputRecord
 	parsed     []DocMetadataInputRecord
