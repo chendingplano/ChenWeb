@@ -39,7 +39,7 @@ var AllowedRelations = map[string]bool{
 
 // MappingStore persists versioned mapping rows.
 type MappingStore struct {
-	DB *sql.DB
+	DB DBX
 }
 
 const mappingColumns = `
@@ -135,7 +135,7 @@ INSERT INTO kb.ontology_mappings
 	(mapping_id, version, from_term_id, to_term_id, to_iri, relation,
 	 evidence, approval_status, module_id, status, source_candidate_id,
 	 create_by, modify_by)
-VALUES ($1, 1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, 1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12)
 RETURNING ` + mappingColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(m.MappingID), strings.TrimSpace(m.FromTermID),

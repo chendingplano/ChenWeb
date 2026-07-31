@@ -35,7 +35,7 @@ var AllowedLabelRoles = map[string]bool{
 
 // LabelStore persists versioned term-label rows.
 type LabelStore struct {
-	DB *sql.DB
+	DB DBX
 }
 
 const labelColumns = `
@@ -121,7 +121,7 @@ func (s LabelStore) CreateLabel(ctx context.Context, l TermLabel) (TermLabel, er
 INSERT INTO kb.ontology_term_labels
 	(term_id, version, label, lang, label_role, status, source_candidate_id,
 	 create_by, modify_by)
-VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING ` + labelColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(l.TermID), strings.TrimSpace(l.Label), l.Lang, l.LabelRole,
@@ -157,7 +157,7 @@ INSERT INTO kb.ontology_term_labels
 	(term_id, version, label, lang, label_role, status, source_candidate_id,
 	 create_by, modify_by)
 VALUES ($1, (SELECT COALESCE(MAX(version), 0) + 1 FROM kb.ontology_term_labels WHERE term_id = $1),
-        $2, $3, $4, $5, $6, $7, $8, $9)
+        $2, $3, $4, $5, $6, $7, $8)
 RETURNING ` + labelColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(l.TermID), strings.TrimSpace(l.Label), l.Lang, l.LabelRole,

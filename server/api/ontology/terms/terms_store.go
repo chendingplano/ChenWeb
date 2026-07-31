@@ -33,6 +33,16 @@ type Term struct {
 	ModifyBy          string    `json:"modify_by"`
 }
 
+// DBX is the subset of database/sql that the content stores need. Both
+// *sql.DB and *sql.Tx satisfy it, so store methods can run against a live
+// connection or inside a caller's transaction (the module release flow tags
+// content rows atomically in one tx).
+type DBX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // AllowedTermKinds is the governed set of term kinds, mirroring the schema
 // CHECK on kb.ontology_terms. Only compiler-approved kinds may be authored.
 var AllowedTermKinds = map[string]bool{
@@ -73,7 +83,7 @@ var termStatusTransitions = map[string]map[string]bool{
 
 // TermStore persists versioned term rows.
 type TermStore struct {
-	DB *sql.DB
+	DB DBX
 }
 
 const termColumns = `

@@ -31,7 +31,7 @@ type Axiom struct {
 
 // AxiomStore persists versioned axiom rows.
 type AxiomStore struct {
-	DB *sql.DB
+	DB DBX
 }
 
 const axiomColumns = `
@@ -115,7 +115,7 @@ INSERT INTO kb.ontology_axioms
 	(axiom_id, version, axiom_kind, subject_term_id, predicate_term_id,
 	 object_term_id, object_iri, module_id, status, source_candidate_id,
 	 create_by, modify_by)
-VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING ` + axiomColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(a.AxiomID), a.AxiomKind, strings.TrimSpace(a.SubjectTermID),

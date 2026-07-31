@@ -314,3 +314,18 @@ go run ./server/cmd/doc-benchmark gold-run \
 RESULTS="$RESULTS" OUTPUT="$REPORT" FORMAT=json \
   mise run gold-benchmark-profile-report
 '''
+
+[tasks.ontology-compiler]
+description = '''
+Run the DB-native ontology module compiler against the database.
+Usage: COMPILER_ARGS='release --module core --version 1.0.0' mise run ontology-compiler
+Subcommands: validate --module <id> | release --module <id> --version <v> |
+activate --module <id> --release-id <n> | rollback --module <id> --version <v> |
+modules | active [--module <id>]
+'''
+run = '''
+set -euo pipefail
+: "${COMPILER_ARGS:?set COMPILER_ARGS, e.g. COMPILER_ARGS='release --module core --version 1.0.0'}"
+export PG_DB_NAME=chenweb_test
+go run ./server/cmd/ontology-compiler $COMPILER_ARGS
+'''
