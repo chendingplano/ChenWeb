@@ -231,6 +231,7 @@ set -euo pipefail
 export PG_DB_NAME=chenweb_test
 export ARTIFACT_DIR=/Users/cding/Workspace/ThirdParty-2/Data/Artifacts
 export ARTIFACT_WEB_DIR=/Users/cding/Workspace/ThirdParty-2/Data/ArtifactWeb
+export JIMO_LOG_STDIO=0
 DATASET_ROOT="${DATASET_ROOT:-benchmark/doc-processors/gold/display-module-v1}"
 CASE_ID="${CASE_ID:-display-module-v1}"
 go run ./server/cmd/doc-benchmark gold-run \
@@ -265,6 +266,7 @@ OUTPUT (markdown file; stdout when unset).
 run = '''
 set -euo pipefail
 : "${RESULTS:?set RESULTS to a gold-benchmark-run JSON output file}"
+export JIMO_LOG_STDIO=0
 DATASET_ROOT="${DATASET_ROOT:-benchmark/doc-processors/gold/display-module-v1}"
 CASE_ID="${CASE_ID:-display-module-v1}"
 args=(--dataset "$DATASET_ROOT" --case "$CASE_ID" --results "$RESULTS")
@@ -279,6 +281,7 @@ description = "Render a deterministic store-profile report from schema-v2 gold-r
 run = '''
 set -euo pipefail
 : "${RESULTS:?set RESULTS to an absolute schema-v2 gold-run JSON path}"
+export JIMO_LOG_STDIO=0
 DATASET_ROOT="${DATASET_ROOT:-benchmark/doc-processors/gold/display-module-v1}"
 CASE_ID="${CASE_ID:-display-module-v1}"
 FORMAT="${FORMAT:-json}"
@@ -298,6 +301,7 @@ set -euo pipefail
 export PG_DB_NAME=chenweb_test
 export ARTIFACT_DIR=/Users/cding/Workspace/ThirdParty-2/Data/Artifacts
 export ARTIFACT_WEB_DIR=/Users/cding/Workspace/ThirdParty-2/Data/ArtifactWeb
+export JIMO_LOG_STDIO=0
 DATASET_ROOT=benchmark/doc-processors/gold/display-module-v1
 CASE_ID=display-module-v1
 PROCESSORS=generate_summaries,generate_topics,extract_structured_knowledge,extract_entity,extract_relation,extract_inventory_items,extract_metrics,extract_provisions

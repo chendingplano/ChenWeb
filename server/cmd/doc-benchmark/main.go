@@ -50,21 +50,21 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch args[0] {
 	case "validate":
-		err = validate(args[1:], stdout, stderr)
+		err = withQuietCommandLogs(func() error { return validate(args[1:], stdout, stderr) })
 	case "run":
-		err = runBenchmark(ctx, args[1:], stdout, stderr)
+		err = withQuietCommandLogs(func() error { return runBenchmark(ctx, args[1:], stdout, stderr) })
 	case "compare":
-		err = renderStored(ctx, args[1:], stdout, stderr, true)
+		err = withQuietCommandLogs(func() error { return renderStored(ctx, args[1:], stdout, stderr, true) })
 	case "report":
-		err = renderStored(ctx, args[1:], stdout, stderr, false)
+		err = withQuietCommandLogs(func() error { return renderStored(ctx, args[1:], stdout, stderr, false) })
 	case "clean":
-		err = clean(ctx, args[1:], stdout, stderr)
+		err = withQuietCommandLogs(func() error { return clean(ctx, args[1:], stdout, stderr) })
 	case "gold-run":
-		err = runGoldCase(ctx, args[1:], stdout, stderr)
+		err = withQuietCommandLogs(func() error { return runGoldCase(ctx, args[1:], stdout, stderr) })
 	case "profile-report":
-		err = runGoldProfileReport(ctx, args[1:], stdout, stderr)
+		err = withQuietCommandLogs(func() error { return runGoldProfileReport(ctx, args[1:], stdout, stderr) })
 	case "analyze":
-		err = runGoldAnalyze(ctx, args[1:], stdout, stderr)
+		err = withQuietCommandLogs(func() error { return runGoldAnalyze(ctx, args[1:], stdout, stderr) })
 	default:
 		emitError(stderr, "usage_error", fmt.Errorf("unknown command %q", args[0]))
 		return 2
@@ -82,6 +82,17 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	emitError(stderr, "infrastructure_error", err)
 	return 3
+}
+
+func withQuietCommandLogs(run func() error) error {
+	prev := loggerutil.SetStdioOutputEnabled(false)
+	defer loggerutil.SetStdioOutputEnabled(prev)
+	origStdout := os.Stdout
+	os.Stdout = os.Stderr
+	defer func() {
+		os.Stdout = origStdout
+	}()
+	return run()
 }
 
 var errUsage = errors.New("invalid command arguments")
