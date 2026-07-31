@@ -23,6 +23,7 @@ type ProductionRuntime struct {
 	Processors []Processor
 	services   map[string]any
 	config     ResolvedConfigSnapshot
+	plan       ProductionProcessorPlan
 }
 
 // ResolvedConfigSnapshot is a deterministic, secret-free description of the
@@ -39,6 +40,7 @@ type ProductionRuntimeOptions struct {
 	Logger             ApiTypes.JimoLogger
 	Overrides          map[string]string
 	RequiredProcessors []string
+	PlanFacts          ProductionPlanFacts
 }
 
 type productionRuntimeComponents struct {
@@ -79,6 +81,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	var logger ApiTypes.JimoLogger
 	var overrides map[string]string
 	var required []string
+	var planFacts ProductionPlanFacts
 	explicitSelection := false
 	for _, arg := range args {
 		if l, ok := arg.(ApiTypes.JimoLogger); ok {
@@ -91,7 +94,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			required, explicitSelection = names, true
 		}
 		if opts, ok := arg.(ProductionRuntimeOptions); ok {
-			logger, overrides, required, explicitSelection = opts.Logger, opts.Overrides, opts.RequiredProcessors, true
+			logger, overrides, required, planFacts, explicitSelection = opts.Logger, opts.Overrides, opts.RequiredProcessors, opts.PlanFacts, true
 		}
 	}
 	if !explicitSelection {
@@ -99,6 +102,9 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 		required = append(required, "extract_doc_metadata")
 	} else if err := validateRequiredProcessors(required); err != nil {
 		return nil, err
+	}
+	if len(planFacts.RequestedProcessors) == 0 {
+		planFacts.RequestedProcessors = append([]string(nil), required...)
 	}
 	components := buildProductionRuntimeComponents(logger)
 	fixed := components.fixed
@@ -111,7 +117,11 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := validateFixedRuntimeConfig(fixed, required, explicitSelection); err != nil {
 		return nil, err
 	}
-	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
+	if err != nil {
+		return nil, err
+	}
 	for _, p := range control.Processors {
 		if err := processorInitError(p); err != nil {
 			return nil, err
@@ -127,14 +137,21 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			}
 		}
 	}
-	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}}
+	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}, plan: plan}
 	for _, p := range control.Processors {
 		if m, ok := p.(*MetricsProcessor); ok {
 			r.services["extract_metrics"] = m.RuntimeConfig()
 		}
 	}
-	r.config = makeResolvedConfig(control, r.services)
+	r.config = makeResolvedConfig(control, r.services, r.plan)
 	return r, nil
+}
+
+func (r *ProductionRuntime) Plan() ProductionProcessorPlan {
+	if r == nil {
+		return ProductionProcessorPlan{}
+	}
+	return r.plan
 }
 
 func validateFixedRuntimeConfig(fixed *FixedSizeChunkingService, required []string, explicit bool) error {
@@ -277,13 +294,20 @@ func validateRequiredProcessors(requested []string) error {
 }
 
 func filterProcessors(processors []Processor, required []string) []Processor {
-	enabled := map[string]bool{}
-	for _, n := range resolveRequiredProcessors(required) {
-		enabled[normalizeRuntimeName(n)] = true
+	plan, err := BuildProductionProcessorPlan(required)
+	if err != nil {
+		return nil
+	}
+	byName := map[string]Processor{}
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		byName[normalizeRuntimeName(p.Name())] = p
 	}
 	out := make([]Processor, 0, len(processors))
-	for _, p := range processors {
-		if p != nil && enabled[normalizeRuntimeName(p.Name())] {
+	for _, name := range plan.ExecutionOrder() {
+		if p, ok := byName[normalizeRuntimeName(name)]; ok && p != nil {
 			out = append(out, p)
 		}
 	}
@@ -310,11 +334,11 @@ func (r *ProductionRuntime) ResolvedConfig() ResolvedConfigSnapshot {
 		return ResolvedConfigSnapshot{}
 	}
 	if r.config.Hash == "" {
-		r.config = makeResolvedConfig(r.Control, r.services)
+		r.config = makeResolvedConfig(r.Control, r.services, r.plan)
 	}
 	return r.config
 }
-func makeResolvedConfig(c *ControlService, services map[string]any) ResolvedConfigSnapshot {
+func makeResolvedConfig(c *ControlService, services map[string]any, plan ProductionProcessorPlan) ResolvedConfigSnapshot {
 	names := []string{}
 	if c != nil {
 		for _, p := range c.Processors {
@@ -322,7 +346,7 @@ func makeResolvedConfig(c *ControlService, services map[string]any) ResolvedConf
 		}
 	}
 	sort.Strings(names)
-	v := map[string]any{"processors": names, "max_doc_process_pipelines": 0, "run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv(), "chunk_size": envInt("CHUNK_SIZE", DefaultChunkSize, 1), "chunk_overlap_percent": envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0)}
+	v := map[string]any{"processors": names, "max_doc_process_pipelines": 0, "run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv(), "chunk_size": envInt("CHUNK_SIZE", DefaultChunkSize, 1), "chunk_overlap_percent": envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0), "processor_plan_steps": plan.Steps(), "processor_plan_facts": plan.Facts(), "processor_pipeline_binding": plan.PipelineBinding(), "processor_pipeline_selection": plan.PipelineSelection(), "processor_pipeline_spec": plan.PipelineSpec()}
 	v["prompt_hashes"] = map[string]string{}
 	v["model_references"] = map[string]any{}
 	v["concurrency"] = map[string]any{"run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv()}

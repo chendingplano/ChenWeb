@@ -27,30 +27,39 @@ const (
 )
 
 type inputRecord struct {
-	ID             int64           `json:"id"`
-	Name           *string         `json:"name,omitempty"`
-	ParserName     *string         `json:"parser_name,omitempty"`
-	Type           string          `json:"type"`
-	TenantID       *string         `json:"tenant_id,omitempty"`
-	KSStoreID      *int64          `json:"ks_store_id,omitempty"`
-	Title          *string         `json:"title,omitempty"`
-	DocNo          *string         `json:"doc_no,omitempty"`
-	KSDesc         *string         `json:"ks_desc,omitempty"`
-	Source         *string         `json:"source,omitempty"`
-	FileName       *string         `json:"file_name,omitempty"`
-	BackupFileName *string         `json:"backup_filename,omitempty"`
-	ResultFileName *string         `json:"result_filename,omitempty"`
-	PublishDate    *time.Time      `json:"publish_date,omitempty"`
-	Authors        *string         `json:"authors,omitempty"`
-	Owner          *int64          `json:"owner,omitempty"`
-	Status         json.RawMessage `json:"status"`
-	CreateTime     time.Time       `json:"create_time"`
-	ModifyTime     time.Time       `json:"modify_time"`
-	PublicInfo     json.RawMessage `json:"public_info,omitempty"`
-	PrivateInfo    json.RawMessage `json:"private_info,omitempty"`
-	DocMetadata    json.RawMessage `json:"doc_metadata,omitempty"`
-	Notes          *string         `json:"notes,omitempty"`
-	ErrorMsg       *string         `json:"error_msg,omitempty"`
+	ID                int64                      `json:"id"`
+	Name              *string                    `json:"name,omitempty"`
+	ParserName        *string                    `json:"parser_name,omitempty"`
+	Type              string                     `json:"type"`
+	TenantID          *string                    `json:"tenant_id,omitempty"`
+	KSStoreID         *int64                     `json:"ks_store_id,omitempty"`
+	Title             *string                    `json:"title,omitempty"`
+	DocNo             *string                    `json:"doc_no,omitempty"`
+	KSDesc            *string                    `json:"ks_desc,omitempty"`
+	Source            *string                    `json:"source,omitempty"`
+	FileName          *string                    `json:"file_name,omitempty"`
+	BackupFileName    *string                    `json:"backup_filename,omitempty"`
+	ResultFileName    *string                    `json:"result_filename,omitempty"`
+	PublishDate       *time.Time                 `json:"publish_date,omitempty"`
+	Authors           *string                    `json:"authors,omitempty"`
+	Owner             *int64                     `json:"owner,omitempty"`
+	Status            json.RawMessage            `json:"status"`
+	CreateTime        time.Time                  `json:"create_time"`
+	ModifyTime        time.Time                  `json:"modify_time"`
+	PublicInfo        json.RawMessage            `json:"public_info,omitempty"`
+	PrivateInfo       json.RawMessage            `json:"private_info,omitempty"`
+	DocMetadata       json.RawMessage            `json:"doc_metadata,omitempty"`
+	DocProcessingPlan *docProcessingPlanSnapshot `json:"doc_processing_plan,omitempty"`
+	Notes             *string                    `json:"notes,omitempty"`
+	ErrorMsg          *string                    `json:"error_msg,omitempty"`
+}
+
+type docProcessingPlanSnapshot struct {
+	ProcStatus        string                                            `json:"proc_status,omitempty"`
+	PlanFacts         docprocessing.ProductionPlanFacts                 `json:"plan_facts,omitempty"`
+	PlanSteps         []docprocessing.ProcessorPlanStep                 `json:"plan_steps,omitempty"`
+	PipelineBinding   docprocessing.ProductionPipelineBindingResolution `json:"pipeline_binding,omitempty"`
+	PipelineSelection docprocessing.ProductionPipelineSelection         `json:"pipeline_selection,omitempty"`
 }
 
 type listInputsResponse struct {
@@ -164,27 +173,27 @@ func ListInputs(c echo.Context) error {
 	}
 
 	/*
-	logger.Info("list kb inputs request",
-		"page", page,
-		"page_size", pageSize,
-		"record_id", optionalInt64Value(recordID),
-		"ks_store_id", optionalInt64Value(ksStoreID),
-		"doc_type", strings.TrimSpace(filters.DocType),
-		"parse_state", strings.TrimSpace(filters.ParseState),
-		"name", strings.TrimSpace(filters.Name),
-		"title", strings.TrimSpace(filters.Title),
-		"doc_no", strings.TrimSpace(filters.DocNo),
-		"file_name", strings.TrimSpace(filters.FileName),
-		"parser_name", strings.TrimSpace(filters.ParserName),
-		"operation", strings.TrimSpace(filters.Operation),
-		"proc_status", strings.TrimSpace(filters.ProcStatus),
-		"pipeline_filter", strings.TrimSpace(filters.PipelineFilter),
-		"exclude_doc_type", strings.TrimSpace(filters.ExcludeDocType),
-		"create_start_time", formatOptionalTime(filters.CreateTimeStart),
-		"create_end_time", formatOptionalTime(filters.CreateTimeEnd),
-		"modify_start_time", formatOptionalTime(filters.ModifyTimeStart),
-		"modify_end_time", formatOptionalTime(filters.ModifyTimeEnd),
-	)
+		logger.Info("list kb inputs request",
+			"page", page,
+			"page_size", pageSize,
+			"record_id", optionalInt64Value(recordID),
+			"ks_store_id", optionalInt64Value(ksStoreID),
+			"doc_type", strings.TrimSpace(filters.DocType),
+			"parse_state", strings.TrimSpace(filters.ParseState),
+			"name", strings.TrimSpace(filters.Name),
+			"title", strings.TrimSpace(filters.Title),
+			"doc_no", strings.TrimSpace(filters.DocNo),
+			"file_name", strings.TrimSpace(filters.FileName),
+			"parser_name", strings.TrimSpace(filters.ParserName),
+			"operation", strings.TrimSpace(filters.Operation),
+			"proc_status", strings.TrimSpace(filters.ProcStatus),
+			"pipeline_filter", strings.TrimSpace(filters.PipelineFilter),
+			"exclude_doc_type", strings.TrimSpace(filters.ExcludeDocType),
+			"create_start_time", formatOptionalTime(filters.CreateTimeStart),
+			"create_end_time", formatOptionalTime(filters.CreateTimeEnd),
+			"modify_start_time", formatOptionalTime(filters.ModifyTimeStart),
+			"modify_end_time", formatOptionalTime(filters.ModifyTimeEnd),
+		)
 	*/
 
 	if !isValidParseState(filters.ParseState) {
@@ -486,6 +495,7 @@ FROM %s i
 		}
 
 		record.Status = json.RawMessage(statusBytes)
+		record.DocProcessingPlan = extractDocProcessingPlanSnapshot(statusBytes)
 		if publicInfoNullable.Valid && strings.TrimSpace(publicInfoNullable.String) != "" {
 			publicInfoBytes = []byte(publicInfoNullable.String)
 			record.PublicInfo = json.RawMessage(publicInfoBytes)
@@ -504,6 +514,46 @@ FROM %s i
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func extractDocProcessingPlanSnapshot(statusBytes []byte) *docProcessingPlanSnapshot {
+	if len(statusBytes) == 0 {
+		return nil
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal(statusBytes, &entries); err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(strings.ToLower(anyAsString(entry["operation"]))) != "doc_processing" {
+			continue
+		}
+		snapshot := &docProcessingPlanSnapshot{
+			ProcStatus: strings.TrimSpace(anyAsString(entry["proc_status"])),
+		}
+		if rawFacts, ok := entry["processor_plan_facts"]; ok {
+			if bs, err := json.Marshal(rawFacts); err == nil {
+				_ = json.Unmarshal(bs, &snapshot.PlanFacts)
+			}
+		}
+		if rawSteps, ok := entry["processor_plan_steps"]; ok {
+			if bs, err := json.Marshal(rawSteps); err == nil {
+				_ = json.Unmarshal(bs, &snapshot.PlanSteps)
+			}
+		}
+		if rawBinding, ok := entry["processor_pipeline_binding"]; ok {
+			if bs, err := json.Marshal(rawBinding); err == nil {
+				_ = json.Unmarshal(bs, &snapshot.PipelineBinding)
+			}
+		}
+		if rawSelection, ok := entry["processor_pipeline_selection"]; ok {
+			if bs, err := json.Marshal(rawSelection); err == nil {
+				_ = json.Unmarshal(bs, &snapshot.PipelineSelection)
+			}
+		}
+		return snapshot
+	}
+	return nil
 }
 
 func resolveParserNameColumnExpr(db *sql.DB, inputTable string) (string, error) {

@@ -145,6 +145,7 @@ func UploadInputs(c echo.Context) error {
 	}
 	notes := normalizeOptionalString(c.FormValue("notes"))
 	ksDesc := normalizeOptionalString(c.FormValue("ks_desc"))
+	requestedPipeline := normalizeOptionalString(c.FormValue("requested_pipeline"))
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -180,20 +181,21 @@ func UploadInputs(c echo.Context) error {
 			tx,
 			inputTable,
 			uploadedInputInsert{
-				TenantID:       tenantID,
-				KSStoreID:      ksStoreID,
-				Type:           docType,
-				Title:          title,
-				DocNo:          docNo,
-				Authors:        authors,
-				PublicInfo:     publicInfo,
-				PrivateInfo:    privateInfo,
-				Notes:          notes,
-				KSDesc:         ksDesc,
-				ParserName:     parserName,
-				StagingName:    stageName,
-				StagingAbsPath: destPath,
-				MD5:            &fileMD5,
+				TenantID:          tenantID,
+				KSStoreID:         ksStoreID,
+				Type:              docType,
+				Title:             title,
+				DocNo:             docNo,
+				Authors:           authors,
+				PublicInfo:        publicInfo,
+				PrivateInfo:       privateInfo,
+				Notes:             notes,
+				KSDesc:            ksDesc,
+				RequestedPipeline: requestedPipeline,
+				ParserName:        parserName,
+				StagingName:       stageName,
+				StagingAbsPath:    destPath,
+				MD5:               &fileMD5,
 			},
 		)
 		if err != nil {
@@ -224,20 +226,21 @@ func UploadInputs(c echo.Context) error {
 }
 
 type uploadedInputInsert struct {
-	TenantID       string
-	KSStoreID      int64
-	Type           string
-	Title          *string
-	DocNo          *string
-	Authors        *string
-	PublicInfo     *string
-	PrivateInfo    *string
-	Notes          *string
-	KSDesc         *string
-	ParserName     string
-	StagingName    string
-	StagingAbsPath string
-	MD5            *string
+	TenantID          string
+	KSStoreID         int64
+	Type              string
+	Title             *string
+	DocNo             *string
+	Authors           *string
+	PublicInfo        *string
+	PrivateInfo       *string
+	Notes             *string
+	KSDesc            *string
+	RequestedPipeline *string
+	ParserName        string
+	StagingName       string
+	StagingAbsPath    string
+	MD5               *string
 }
 
 func insertUploadedInputRecord(tx *sql.Tx, inputTable string, req uploadedInputInsert) (int64, error) {
@@ -245,6 +248,7 @@ func insertUploadedInputRecord(tx *sql.Tx, inputTable string, req uploadedInputI
 INSERT INTO %s (
     tenant_id,
     ks_store_id,
+    requested_pipeline,
     type,
     title,
     doc_no,
@@ -282,6 +286,7 @@ RETURNING id`, inputTable)
 		query,
 		req.TenantID,
 		req.KSStoreID,
+		req.RequestedPipeline,
 		req.Type,
 		req.Title,
 		req.DocNo,

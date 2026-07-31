@@ -38,6 +38,7 @@ type ControlService struct {
 	EventStore        EventStore
 	StopStore         StopRequestStore
 	RunStore          DocProcessRunStore
+	PlanStore         DocProcessPlanStore
 	Now               func() time.Time
 
 	DocProcessorMode       string
@@ -632,6 +633,17 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		return errors.New("(MID_26042404) preflight input failed")
 	}
+	planFacts, factsErr := s.resolveProductionPlanFacts(ctx, evt)
+	if factsErr != nil && s.Logger != nil {
+		s.Logger.Warn("failed resolving production plan facts", "record_id", evt.RecordID, "error", factsErr)
+	}
+	if factsErr != nil {
+		planFacts = ProductionPlanFacts{RequestedProcessors: append([]string(nil), evt.Operations...)}
+	}
+	plan, planErr := BuildProductionProcessorPlanFromFacts(planFacts)
+	if planErr != nil && s.Logger != nil {
+		s.Logger.Warn("failed building production processor plan", "record_id", evt.RecordID, "error", planErr)
+	}
 	if len(evt.Operations) > 0 {
 		processors = s.selectProcessors(evt.Operations)
 		processors = s.skipSatisfiedAutoDependencies(ctx, evt, processors)
@@ -675,6 +687,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		if strings.TrimSpace(evt.Filename) != "" {
 			parameters["filename"] = evt.Filename
 		}
+		parameters["processor_plan_facts"] = planFacts
+		if planErr == nil {
+			parameters["processor_plan_steps"] = plan.Steps()
+			parameters["processor_pipeline_binding"] = plan.PipelineBinding()
+			parameters["processor_pipeline_selection"] = plan.PipelineSelection()
+		}
 		id, createErr := s.RunStore.CreateDocProcessRun(ctx, DocProcessRunRecord{
 			RecordID:   evt.RecordID,
 			EventID:    eventIDFromContext(ctx),
@@ -690,6 +708,20 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			runID = id
 			runCreated = true
 			ctx = withRunID(ctx, runID)
+			if s.PlanStore != nil && planErr == nil {
+				if _, persistErr := s.PlanStore.CreateDocProcessPlan(ctx, DocProcessPlanRecord{
+					RunID:             runID,
+					RecordID:          evt.RecordID,
+					PlanFacts:         planFacts,
+					PlanSteps:         plan.Steps(),
+					PipelineBinding:   plan.PipelineBinding(),
+					PipelineSelection: plan.PipelineSelection(),
+				}); persistErr != nil {
+					if s.Logger != nil {
+						s.Logger.Warn("failed to create kb.doc_process_plans row", "run_id", runID, "record_id", evt.RecordID, "error", persistErr)
+					}
+				}
+			}
 		}
 	}
 	if len(processors) > 0 {
@@ -722,7 +754,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	requestFailed := false
 	requestStopped := false
 	var firstErr error
-	s.persistPipelineStatus(ctx, evt.RecordID, "running", "", nil)
+	s.persistPipelineStatusWithPlan(ctx, evt.RecordID, "running", "", nil, planFacts, plan.Steps(), plan.PipelineSelection(), plan.PipelineBinding())
 	defer func() {
 		status := "success"
 		if requestStopped {
@@ -730,7 +762,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		} else if requestFailed {
 			status = "failed"
 		}
-		s.persistPipelineStatus(context.Background(), evt.RecordID, status, "", firstErr)
+		s.persistPipelineStatusWithPlan(context.Background(), evt.RecordID, status, "", firstErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
 		if requestStopped && s.StopStore != nil {
 			_ = s.StopStore.ClearStopRequested(context.Background(), evt.RecordID)
 		}
@@ -766,7 +798,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// Clear the per-processor marker before post-processing so the list API's
 	// stuck-pipeline auto-heal path does not mistake a live Phase C run for a
 	// crashed coordinator.
-	s.persistPipelineStatus(ctx, evt.RecordID, "running", "", nil)
+	s.persistPipelineStatusWithPlan(ctx, evt.RecordID, "running", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
 
 	// Phase C (post-process): now that every doc processor has finished, index the
 	// artifacts of the invoked processors that defer indexing to this phase. This is the
@@ -897,12 +929,7 @@ func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors 
 // sequential Phase A processor. Must stay in sync with the mandatory set in
 // cmd/doc-processor/main.go filterConfiguredProcessors.
 func isPhaseAProcessor(name string) bool {
-	switch canonicalOperationName(name) {
-	case "static_analyzer", "chunking", "extract_doc_metadata":
-		return true
-	default:
-		return false
-	}
+	return productionProcessorPhase(canonicalOperationName(name)) == "A"
 }
 
 type procResult struct {
@@ -1162,11 +1189,15 @@ func (s *ControlService) logPipelineFinish(ctx context.Context, recordID int64, 
 }
 
 func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int64, procStatus string, processorName string, procErr error) {
+	s.persistPipelineStatusWithPlan(ctx, recordID, procStatus, processorName, procErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+}
+
+func (s *ControlService) persistPipelineStatusWithPlan(ctx context.Context, recordID int64, procStatus string, processorName string, procErr error, planFacts ProductionPlanFacts, planSteps []ProcessorPlanStep, pipelineSelection ProductionPipelineSelection, pipelineBinding ProductionPipelineBindingResolution) {
 	if s.InputStore == nil || recordID <= 0 {
 		return
 	}
 	err := updateInputStatusAtomic(ctx, s.InputStore, recordID, func(current string) (DocMetadataUpdate, error) {
-		statusRaw, err := appendPipelineStatus(current, s.now(), procStatus, processorName, procErr)
+		statusRaw, err := appendPipelineStatusWithPlan(current, s.now(), procStatus, processorName, procErr, planFacts, planSteps, pipelineSelection, pipelineBinding)
 		if err != nil {
 			return DocMetadataUpdate{}, err
 		}
@@ -1320,6 +1351,17 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 	return true
 }
 
+func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt LineFileGeneratedEvent) (ProductionPlanFacts, error) {
+	if s == nil || s.InputStore == nil {
+		return ProductionPlanFacts{RequestedProcessors: append([]string(nil), evt.Operations...)}, nil
+	}
+	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
+	if err != nil {
+		return ProductionPlanFacts{}, err
+	}
+	return BuildProductionPlanFactsFromInputRecord(evt.Operations, rec), nil
+}
+
 func (s *ControlService) persistControlFailure(ctx context.Context, rec DocMetadataInputRecord, procErr error) {
 	if s.InputStore == nil {
 		return
@@ -1460,6 +1502,10 @@ func newEventID() string {
 }
 
 func appendPipelineStatus(raw string, now time.Time, procStatus string, processorName string, procErr error) (string, error) {
+	return appendPipelineStatusWithPlan(raw, now, procStatus, processorName, procErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+}
+
+func appendPipelineStatusWithPlan(raw string, now time.Time, procStatus string, processorName string, procErr error, planFacts ProductionPlanFacts, planSteps []ProcessorPlanStep, pipelineSelection ProductionPipelineSelection, pipelineBinding ProductionPipelineBindingResolution) (string, error) {
 	status := strings.ToLower(strings.TrimSpace(procStatus))
 	if status == "" {
 		status = "running"
@@ -1475,6 +1521,18 @@ func appendPipelineStatus(raw string, now time.Time, procStatus string, processo
 	if procErr != nil {
 		entry["error"] = strings.TrimSpace(procErr.Error())
 	}
+	if len(planFacts.RequestedProcessors) > 0 || planFacts.KnowledgeStoreID != 0 || strings.TrimSpace(planFacts.KnowledgeStoreType) != "" || strings.TrimSpace(planFacts.ParserName) != "" || strings.TrimSpace(planFacts.DocumentTitle) != "" {
+		entry["processor_plan_facts"] = planFacts
+	}
+	if len(planSteps) > 0 {
+		entry["processor_plan_steps"] = planSteps
+	}
+	if strings.TrimSpace(pipelineSelection.PipelineName) != "" || strings.TrimSpace(pipelineSelection.Reason) != "" {
+		entry["processor_pipeline_selection"] = pipelineSelection
+	}
+	if strings.TrimSpace(pipelineBinding.Source) != "" || strings.TrimSpace(pipelineBinding.SelectedPipeline) != "" || strings.TrimSpace(pipelineBinding.RequestedPipeline) != "" || strings.TrimSpace(pipelineBinding.StoreBoundPipeline) != "" {
+		entry["processor_pipeline_binding"] = pipelineBinding
+	}
 
 	entries := decodeDocMetaStatus(raw)
 	replaced := false
@@ -1488,6 +1546,26 @@ func appendPipelineStatus(raw string, now time.Time, procStatus string, processo
 		if !replaced {
 			if originalStart := strings.TrimSpace(asString(e["start_time"])); originalStart != "" {
 				entry["start_time"] = originalStart
+			}
+			if _, ok := entry["processor_plan_facts"]; !ok {
+				if existingFacts, ok := e["processor_plan_facts"]; ok {
+					entry["processor_plan_facts"] = existingFacts
+				}
+			}
+			if _, ok := entry["processor_plan_steps"]; !ok {
+				if existingSteps, ok := e["processor_plan_steps"]; ok {
+					entry["processor_plan_steps"] = existingSteps
+				}
+			}
+			if _, ok := entry["processor_pipeline_selection"]; !ok {
+				if existingSelection, ok := e["processor_pipeline_selection"]; ok {
+					entry["processor_pipeline_selection"] = existingSelection
+				}
+			}
+			if _, ok := entry["processor_pipeline_binding"]; !ok {
+				if existingBinding, ok := e["processor_pipeline_binding"]; ok {
+					entry["processor_pipeline_binding"] = existingBinding
+				}
 			}
 			out = append(out, entry)
 			replaced = true

@@ -1,18 +1,6 @@
 package docprocessing
 
-var optionalProductionProcessorOrder = []string{
-	"generate_summaries",
-	"generate_topics",
-	"extract_doc_metadata",
-	"extract_semantic_projections",
-	"extract_structured_knowledge",
-	"extract_entity",
-	"extract_relation",
-	"extract_inventory_items",
-	"extract_metrics",
-	"extract_provisions",
-	"generate_scene_blocks",
-}
+var optionalProductionProcessorOrder = selectableProductionProcessorOrder()
 
 func OptionalProductionProcessorNames() []string {
 	return append([]string(nil), optionalProductionProcessorOrder...)

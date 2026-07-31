@@ -303,7 +303,17 @@ FROM kb.inputs i
 	}).AddRow(
 		int64(101), "Report A", "mineru", "pdf", "tenant-alpha", int64(7), "Annual Report", nil, "Store desc", "upload", "/tmp/report-a.pdf",
 		"/backup/report-a.pdf", "/result/report-a.json", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
-		`[{"operation":"parsing","status":"success"}]`, time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 12, 10, 0, 0, time.UTC),
+		`[
+			{"operation":"parsing","status":"success"},
+			{
+				"operation":"doc_processing",
+				"proc_status":"success",
+				"processor_plan_facts":{"RequestedProcessors":["extract_metrics"]},
+				"processor_plan_steps":[{"Name":"extract_metrics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}],
+				"processor_pipeline_binding":{"Source":"system_default","SelectedPipeline":"legacy_default"},
+				"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"}
+			}
+		]`, time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 12, 10, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
 	)
 	mock.ExpectQuery(dataQuery).
@@ -340,6 +350,18 @@ FROM kb.inputs i
 	}
 	if payload.Results[0].ID != 101 {
 		t.Fatalf("expected result id=101, got %d", payload.Results[0].ID)
+	}
+	if payload.Results[0].DocProcessingPlan == nil {
+		t.Fatal("expected doc_processing_plan to be populated")
+	}
+	if got, want := payload.Results[0].DocProcessingPlan.PipelineSelection.PipelineName, "legacy_default"; got != want {
+		t.Fatalf("doc_processing_plan.pipeline_selection.pipeline_name=%q want=%q", got, want)
+	}
+	if got, want := payload.Results[0].DocProcessingPlan.PipelineBinding.Source, "system_default"; got != want {
+		t.Fatalf("doc_processing_plan.pipeline_binding.source=%q want=%q", got, want)
+	}
+	if got, want := len(payload.Results[0].DocProcessingPlan.PlanSteps), 1; got != want {
+		t.Fatalf("doc_processing_plan.plan_steps len=%d want=%d", got, want)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

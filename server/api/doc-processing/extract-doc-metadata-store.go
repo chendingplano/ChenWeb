@@ -10,14 +10,20 @@ import (
 )
 
 type DocMetadataInputRecord struct {
-	ID              int64
-	ParserName      string
-	ResultFilename  string
-	StagingFilename string
-	StatusRaw       string
-	FileName        string
-	Title           string
-	DocMetadataJSON string // raw JSON from kb.inputs.doc_metadata; "" when not loaded
+	ID                 int64
+	KSStoreID          int64
+	RequestedPipeline  string
+	StoreBoundPipeline string
+	InputDocType       string
+	SourceLanguage     string
+	DocumentNumber     string
+	ParserName         string
+	ResultFilename     string
+	StagingFilename    string
+	StatusRaw          string
+	FileName           string
+	Title              string
+	DocMetadataJSON    string // raw JSON from kb.inputs.doc_metadata; "" when not loaded
 }
 
 type DocMetadataUpdate struct {
@@ -41,20 +47,33 @@ type DocMetadataSQLStore struct {
 
 func (s DocMetadataSQLStore) GetInputRecord(ctx context.Context, id int64) (DocMetadataInputRecord, error) {
 	const stmt = `
-SELECT id,
-       COALESCE(parser_name, ''),
-       COALESCE(result_filename, ''),
-       COALESCE(staging_filename, ''),
-       COALESCE(status::text, '[]'),
-       COALESCE(file_name, ''),
-       COALESCE(title, ''),
-       COALESCE(doc_metadata::text, '')
-FROM kb.inputs
-WHERE id = $1`
+SELECT i.id,
+       COALESCE(i.ks_store_id, 0),
+       COALESCE(i.requested_pipeline, ''),
+       COALESCE(ks.default_pipeline, ''),
+       COALESCE(i.type, ''),
+       COALESCE(i.doc_metadata->'metadata'->>'language', i.doc_metadata->>'language', ''),
+       COALESCE(NULLIF(BTRIM(i.doc_metadata->>'doc_no'), ''), NULLIF(BTRIM(i.doc_no), ''), ''),
+       COALESCE(i.parser_name, ''),
+       COALESCE(i.result_filename, ''),
+       COALESCE(i.staging_filename, ''),
+       COALESCE(i.status::text, '[]'),
+       COALESCE(i.file_name, ''),
+       COALESCE(i.title, ''),
+       COALESCE(i.doc_metadata::text, '')
+FROM kb.inputs i
+LEFT JOIN kb.knowledge_store ks ON ks.id = i.ks_store_id
+WHERE i.id = $1`
 
 	var rec DocMetadataInputRecord
 	err := s.DB.QueryRowContext(ctx, stmt, id).Scan(
 		&rec.ID,
+		&rec.KSStoreID,
+		&rec.RequestedPipeline,
+		&rec.StoreBoundPipeline,
+		&rec.InputDocType,
+		&rec.SourceLanguage,
+		&rec.DocumentNumber,
 		&rec.ParserName,
 		&rec.ResultFilename,
 		&rec.StagingFilename,

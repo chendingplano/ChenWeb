@@ -73,6 +73,7 @@ func TestUploadInputsSuccess(t *testing.T) {
 	insertQuery := regexp.QuoteMeta(`INSERT INTO kb.inputs (
     tenant_id,
     ks_store_id,
+    requested_pipeline,
     type,
     title,
     doc_no,
@@ -108,6 +109,7 @@ RETURNING id`)
 		WithArgs(
 			"tenant-alpha",
 			int64(7),
+			"narrative_default",
 			"pdf",
 			"Doc Title",
 			"DOC-42",
@@ -125,17 +127,18 @@ RETURNING id`)
 	mock.ExpectCommit()
 
 	body, contentType := buildUploadMultipartBody(t, map[string]string{
-		"type":         "pdf",
-		"title":        "Doc Title",
-		"doc_no":       "DOC-42",
-		"authors":      "Alice;Bob",
-		"public_info":  "public text",
-		"private_info": "private text",
-		"notes":        "note body",
-		"ks_desc":      "store upload desc",
-		"parser_name":  "docling",
-		"ks_store_id":  "7",
-		"tenant_id":    "tenant-alpha",
+		"type":               "pdf",
+		"title":              "Doc Title",
+		"doc_no":             "DOC-42",
+		"authors":            "Alice;Bob",
+		"public_info":        "public text",
+		"private_info":       "private text",
+		"notes":              "note body",
+		"ks_desc":            "store upload desc",
+		"parser_name":        "docling",
+		"ks_store_id":        "7",
+		"tenant_id":          "tenant-alpha",
+		"requested_pipeline": "narrative_default",
 	}, map[string]string{
 		"sample.pdf": "hello world",
 	})

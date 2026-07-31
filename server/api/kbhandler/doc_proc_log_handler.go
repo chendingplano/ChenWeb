@@ -51,6 +51,33 @@ type deleteOldLogsResponse struct {
 	Message string `json:"message"`
 }
 
+type getLatestDocProcessPlanResponse struct {
+	Status bool                          `json:"status"`
+	Result *latestDocProcessPlanResponse `json:"result,omitempty"`
+}
+
+type listDocProcessPlansResponse struct {
+	Status   bool                           `json:"status"`
+	Results  []latestDocProcessPlanResponse `json:"results"`
+	Page     int                            `json:"page"`
+	PageSize int                            `json:"page_size"`
+	Total    int64                          `json:"total"`
+}
+
+type latestDocProcessPlanResponse struct {
+	RunID             int64                                             `json:"run_id"`
+	RecordID          int64                                             `json:"record_id"`
+	Mode              string                                            `json:"mode"`
+	Status            string                                            `json:"status"`
+	Processors        []string                                          `json:"processors"`
+	Parameters        map[string]any                                    `json:"parameters"`
+	PlanFacts         docprocessing.ProductionPlanFacts                 `json:"plan_facts"`
+	PlanSteps         []docprocessing.ProcessorPlanStep                 `json:"plan_steps"`
+	PipelineBinding   docprocessing.ProductionPipelineBindingResolution `json:"pipeline_binding"`
+	PipelineSelection docprocessing.ProductionPipelineSelection         `json:"pipeline_selection"`
+	CreateTime        string                                            `json:"create_time"`
+}
+
 // ListDocProcLogs handles GET /api/v1/kb/doc-proc-logs.
 //
 // Query params:
@@ -200,6 +227,106 @@ func ListDocProcLogFilterOptions(c echo.Context) error {
 		EntryTypes:    options.EntryTypes,
 		DocProcNames:  options.DocProcNames,
 		ActivityNames: options.ActivityNames,
+	})
+}
+
+// GetLatestDocProcessPlan handles GET /api/v1/kb/doc-proc-plans/latest?record_id=N.
+func GetLatestDocProcessPlan(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DPLG_041")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	recordID, err := parseOptionalPositiveInt64(c.QueryParam("record_id"))
+	if err != nil || recordID == nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "query param 'record_id' must be a positive integer (CWB_DPLG_042)",
+		})
+	}
+
+	store := docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle}
+	view, err := store.GetLatestDocProcessPlan(c.Request().Context(), *recordID)
+	if err != nil {
+		logger.Error("get latest doc process plan failed", "record_id", *recordID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to get latest doc process plan (CWB_DPLG_043)",
+		})
+	}
+
+	return c.JSON(http.StatusOK, getLatestDocProcessPlanResponse{
+		Status: true,
+		Result: &latestDocProcessPlanResponse{
+			RunID:             view.RunID,
+			RecordID:          view.RecordID,
+			Mode:              view.Mode,
+			Status:            view.Status,
+			Processors:        view.Processors,
+			Parameters:        view.Parameters,
+			PlanFacts:         view.PlanFacts,
+			PlanSteps:         view.PlanSteps,
+			PipelineBinding:   view.PipelineBinding,
+			PipelineSelection: view.PipelineSelection,
+			CreateTime:        view.CreateTime,
+		},
+	})
+}
+
+// ListDocProcessPlans handles GET /api/v1/kb/doc-proc-plans?record_id=N&page=1&page_size=50.
+func ListDocProcessPlans(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DPLG_044")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	recordID, err := parseOptionalPositiveInt64(c.QueryParam("record_id"))
+	if err != nil || recordID == nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "query param 'record_id' must be a positive integer (CWB_DPLG_045)",
+		})
+	}
+	page := parsePositiveInt(c.QueryParam("page"), 1)
+	pageSize := parsePositiveInt(c.QueryParam("page_size"), defaultPageSize)
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+	statusFilter := c.QueryParam("status")
+	modeFilter := c.QueryParam("mode")
+	pipelineNameFilter := c.QueryParam("pipeline_name")
+
+	store := docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle}
+	views, total, err := store.ListDocProcessPlans(c.Request().Context(), *recordID, page, pageSize, statusFilter, modeFilter, pipelineNameFilter)
+	if err != nil {
+		logger.Error("list doc process plans failed", "record_id", *recordID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to list doc process plans (CWB_DPLG_046)",
+		})
+	}
+
+	results := make([]latestDocProcessPlanResponse, 0, len(views))
+	for _, view := range views {
+		results = append(results, latestDocProcessPlanResponse{
+			RunID:             view.RunID,
+			RecordID:          view.RecordID,
+			Mode:              view.Mode,
+			Status:            view.Status,
+			Processors:        view.Processors,
+			Parameters:        view.Parameters,
+			PlanFacts:         view.PlanFacts,
+			PlanSteps:         view.PlanSteps,
+			PipelineBinding:   view.PipelineBinding,
+			PipelineSelection: view.PipelineSelection,
+			CreateTime:        view.CreateTime,
+		})
+	}
+
+	return c.JSON(http.StatusOK, listDocProcessPlansResponse{
+		Status:   true,
+		Results:  results,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
 	})
 }
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -13,6 +15,28 @@ type fakeRunStoreClose struct {
 	runID  int64
 	status string
 	errMsg *string
+}
+
+type fakePlanStore struct {
+	mu      sync.Mutex
+	nextID  int64
+	creates []DocProcessPlanRecord
+}
+
+func (f *fakePlanStore) CreateDocProcessPlan(_ context.Context, rec DocProcessPlanRecord) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	f.creates = append(f.creates, rec)
+	return f.nextID, nil
+}
+
+func (f *fakePlanStore) GetLatestDocProcessPlan(_ context.Context, _ int64) (DocProcessPlanView, error) {
+	return DocProcessPlanView{}, errors.New("not implemented")
+}
+
+func (f *fakePlanStore) ListDocProcessPlans(_ context.Context, _ int64, _ int, _ int, _ string, _ string, _ string) ([]DocProcessPlanView, int64, error) {
+	return nil, 0, errors.New("not implemented")
 }
 
 // fakeRunStore is a test double for DocProcessRunStore that records every
@@ -77,14 +101,19 @@ func TestHandleEvent_CreatesAndClosesRunAndThreadsRunIDToProcessors(t *testing.T
 			ResultFilename:  "result.json",
 			StagingFilename: inputPath,
 			StatusRaw:       "[]",
+			InputDocType:    "pdf",
+			SourceLanguage:  "en",
+			DocumentNumber:  "YY 9706.252-2021",
 		},
 	}
 	runStore := &fakeRunStore{}
+	planStore := &fakePlanStore{}
 	var gotRunID int64
 	var gotOK bool
 	svc := &ControlService{
 		InputStore: store,
 		RunStore:   runStore,
+		PlanStore:  planStore,
 		Processors: []Processor{
 			runIDCapturingProcessor{name: "extract_metrics", got: &gotRunID, ok: &gotOK},
 		},
@@ -121,6 +150,87 @@ func TestHandleEvent_CreatesAndClosesRunAndThreadsRunIDToProcessors(t *testing.T
 	if force, ok := create.Parameters["force"].(bool); !ok || !force {
 		t.Errorf("Parameters[force]=%v, want true (event omitted force, defaults to true)", create.Parameters["force"])
 	}
+	rawFacts, ok := create.Parameters["processor_plan_facts"].(ProductionPlanFacts)
+	if !ok {
+		t.Fatalf("processor_plan_facts type=%T", create.Parameters["processor_plan_facts"])
+	}
+	if rawFacts.KnowledgeStoreID != 0 {
+		t.Errorf("processor_plan_facts.KnowledgeStoreID=%d, want 0", rawFacts.KnowledgeStoreID)
+	}
+	if got, want := rawFacts.RequestedProcessors, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("processor_plan_facts.RequestedProcessors=%v, want %v", got, want)
+	}
+	if got, want := rawFacts.InputDocType, "pdf"; got != want {
+		t.Errorf("processor_plan_facts.InputDocType=%q, want %q", got, want)
+	}
+	if got, want := rawFacts.SourceLanguage, "en"; got != want {
+		t.Errorf("processor_plan_facts.SourceLanguage=%q, want %q", got, want)
+	}
+	if got, want := rawFacts.DocumentNumber, "YY 9706.252-2021"; got != want {
+		t.Errorf("processor_plan_facts.DocumentNumber=%q, want %q", got, want)
+	}
+	if got, want := rawFacts.RoutingFacets, (ProductionRoutingFacets{
+		KnowledgeStoreBinding: "absent",
+		InputDocType:          "pdf",
+		SourceLanguage:        "en",
+		HasDocumentNumber:     true,
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("processor_plan_facts.RoutingFacets=%#v, want %#v", got, want)
+	}
+	rawSteps, ok := create.Parameters["processor_plan_steps"].([]ProcessorPlanStep)
+	if !ok {
+		t.Fatalf("processor_plan_steps type=%T", create.Parameters["processor_plan_steps"])
+	}
+	if got, want := len(rawSteps), 3; got != want {
+		t.Fatalf("processor_plan_steps len=%d, want %d", got, want)
+	}
+	if got, want := rawSteps[2].Name, "extract_metrics"; got != want {
+		t.Errorf("processor_plan_steps[2].Name=%q, want %q", got, want)
+	}
+	rawSelection, ok := create.Parameters["processor_pipeline_selection"].(ProductionPipelineSelection)
+	if !ok {
+		t.Fatalf("processor_pipeline_selection type=%T", create.Parameters["processor_pipeline_selection"])
+	}
+	if got, want := rawSelection, (ProductionPipelineSelection{
+		PipelineName: "legacy_default",
+		Reason:       "system_default",
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("processor_pipeline_selection=%#v, want %#v", got, want)
+	}
+	rawBinding, ok := create.Parameters["processor_pipeline_binding"].(ProductionPipelineBindingResolution)
+	if !ok {
+		t.Fatalf("processor_pipeline_binding type=%T", create.Parameters["processor_pipeline_binding"])
+	}
+	if got, want := rawBinding, (ProductionPipelineBindingResolution{
+		Source:           "system_default",
+		SelectedPipeline: "legacy_default",
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("processor_pipeline_binding=%#v, want %#v", got, want)
+	}
+
+	statusEntries := decodeDocMetaStatus(store.currentStatusRaw())
+	var docProcessing map[string]any
+	for _, entry := range statusEntries {
+		if strings.TrimSpace(asString(entry["operation"])) == "doc_processing" {
+			docProcessing = entry
+			break
+		}
+	}
+	if docProcessing == nil {
+		t.Fatalf("missing doc_processing status entry in %s", store.currentStatusRaw())
+	}
+	if _, ok := docProcessing["processor_plan_facts"]; !ok {
+		t.Fatalf("doc_processing status missing processor_plan_facts: %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_plan_steps"]; !ok {
+		t.Fatalf("doc_processing status missing processor_plan_steps: %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_pipeline_selection"]; !ok {
+		t.Fatalf("doc_processing status missing processor_pipeline_selection: %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_pipeline_binding"]; !ok {
+		t.Fatalf("doc_processing status missing processor_pipeline_binding: %#v", docProcessing)
+	}
 
 	if len(runStore.closes) != 1 {
 		t.Fatalf("closes=%d, want 1", len(runStore.closes))
@@ -131,6 +241,54 @@ func TestHandleEvent_CreatesAndClosesRunAndThreadsRunIDToProcessors(t *testing.T
 	}
 	if closeCall.status != "success" {
 		t.Errorf("close status=%q, want success", closeCall.status)
+	}
+
+	planStore.mu.Lock()
+	defer planStore.mu.Unlock()
+	if len(planStore.creates) != 1 {
+		t.Fatalf("plan creates=%d, want 1", len(planStore.creates))
+	}
+	planCreate := planStore.creates[0]
+	if planCreate.RunID != gotRunID {
+		t.Errorf("plan run_id=%d, want %d", planCreate.RunID, gotRunID)
+	}
+	if planCreate.RecordID != 4821 {
+		t.Errorf("plan record_id=%d, want 4821", planCreate.RecordID)
+	}
+	if got, want := planCreate.PlanFacts.RequestedProcessors, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("plan facts requested=%v, want %v", got, want)
+	}
+	if got, want := len(planCreate.PlanSteps), 3; got != want {
+		t.Errorf("plan steps len=%d, want %d", got, want)
+	}
+	if got, want := planCreate.PipelineSelection, (ProductionPipelineSelection{
+		PipelineName: "legacy_default",
+		Reason:       "system_default",
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("plan pipeline selection=%#v, want %#v", got, want)
+	}
+	if got, want := planCreate.PipelineBinding, (ProductionPipelineBindingResolution{
+		Source:           "system_default",
+		SelectedPipeline: "legacy_default",
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("plan pipeline binding=%#v, want %#v", got, want)
+	}
+	if got, want := planCreate.PlanFacts.InputDocType, "pdf"; got != want {
+		t.Errorf("plan facts InputDocType=%q, want %q", got, want)
+	}
+	if got, want := planCreate.PlanFacts.SourceLanguage, "en"; got != want {
+		t.Errorf("plan facts SourceLanguage=%q, want %q", got, want)
+	}
+	if got, want := planCreate.PlanFacts.DocumentNumber, "YY 9706.252-2021"; got != want {
+		t.Errorf("plan facts DocumentNumber=%q, want %q", got, want)
+	}
+	if got, want := planCreate.PlanFacts.RoutingFacets, (ProductionRoutingFacets{
+		KnowledgeStoreBinding: "absent",
+		InputDocType:          "pdf",
+		SourceLanguage:        "en",
+		HasDocumentNumber:     true,
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("plan facts RoutingFacets=%#v, want %#v", got, want)
 	}
 }
 

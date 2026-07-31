@@ -225,3 +225,251 @@ func TestListDocProcLogs_FiltersByRunIDActivityAndCreateTime(t *testing.T) {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
+
+func TestGetLatestDocProcessPlanByRecordID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	query := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT 1`
+	mock.ExpectQuery(query).
+		WithArgs(int64(4821)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "mode", "status", "processors", "parameters", "create_time",
+		}).AddRow(
+			int64(19),
+			int64(4821),
+			`{"RequestedProcessors":["extract_metrics"],"RequestedPipeline":"","StoreBoundPipeline":"","KnowledgeStoreID":0,"KnowledgeStoreType":"","InputDocType":"pdf","SourceLanguage":"en","DocumentNumber":"YY 9706.252-2021","ParserName":"opendata","DocumentTitle":"","RoutingFacets":{"KnowledgeStoreBinding":"absent","InputDocType":"pdf","SourceLanguage":"en","HasDocumentNumber":true}}`,
+			`[{"Name":"static_analyzer","Phase":"A","DependsOn":[],"Reason":"mandatory_baseline"},{"Name":"chunking","Phase":"A","DependsOn":["static_analyzer"],"Reason":"implicit_dependency"},{"Name":"extract_metrics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
+			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
+			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
+			"auto",
+			"success",
+			`["extract_metrics"]`,
+			`{"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"}}`,
+			"2026-07-31T14:22:00+00:00",
+		))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-proc-plans/latest?record_id=4821", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := GetLatestDocProcessPlan(c); err != nil {
+		t.Fatalf("GetLatestDocProcessPlan returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if payload["status"] != true {
+		t.Fatalf("payload status=%v", payload["status"])
+	}
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result=%#v", payload["result"])
+	}
+	if got := result["run_id"]; got != float64(19) {
+		t.Fatalf("run_id=%v want 19", got)
+	}
+	if got := result["mode"]; got != "auto" {
+		t.Fatalf("mode=%v want auto", got)
+	}
+	if got := result["status"]; got != "success" {
+		t.Fatalf("status=%v want success", got)
+	}
+	selection, ok := result["pipeline_selection"].(map[string]any)
+	if !ok {
+		t.Fatalf("pipeline_selection=%#v", result["pipeline_selection"])
+	}
+	if got := selection["PipelineName"]; got != "legacy_default" {
+		t.Fatalf("pipeline_selection.PipelineName=%v", got)
+	}
+	binding, ok := result["pipeline_binding"].(map[string]any)
+	if !ok {
+		t.Fatalf("pipeline_binding=%#v", result["pipeline_binding"])
+	}
+	if got := binding["Source"]; got != "system_default" {
+		t.Fatalf("pipeline_binding.Source=%v", got)
+	}
+	steps, ok := result["plan_steps"].([]any)
+	if !ok || len(steps) != 3 {
+		t.Fatalf("plan_steps=%#v", result["plan_steps"])
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestListDocProcessPlansByRecordID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	countQuery := `SELECT COUNT\(\*\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1`
+	mock.ExpectQuery(countQuery).
+		WithArgs(int64(4821)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
+
+	listQuery := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT \$2 OFFSET \$3`
+	mock.ExpectQuery(listQuery).
+		WithArgs(int64(4821), 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "mode", "status", "processors", "parameters", "create_time",
+		}).AddRow(
+			int64(20),
+			int64(4821),
+			`{"RequestedProcessors":["extract_metrics"]}`,
+			`[{"Name":"extract_metrics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
+			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
+			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
+			"auto",
+			"success",
+			`["extract_metrics"]`,
+			`{"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"}}`,
+			"2026-07-31T14:23:00+00:00",
+		).AddRow(
+			int64(19),
+			int64(4821),
+			`{"RequestedProcessors":["generate_topics"]}`,
+			`[{"Name":"generate_topics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
+			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
+			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
+			"auto",
+			"failed",
+			`["generate_topics"]`,
+			`{"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"}}`,
+			"2026-07-31T14:22:00+00:00",
+		))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-proc-plans?record_id=4821&page=1&page_size=50", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListDocProcessPlans(c); err != nil {
+		t.Fatalf("ListDocProcessPlans returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if payload["status"] != true {
+		t.Fatalf("payload status=%v", payload["status"])
+	}
+	if got := payload["total"]; got != float64(2) {
+		t.Fatalf("total=%v want 2", got)
+	}
+	results, ok := payload["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Fatalf("results=%#v", payload["results"])
+	}
+	first, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first=%#v", results[0])
+	}
+	if got := first["run_id"]; got != float64(20) {
+		t.Fatalf("first run_id=%v want 20", got)
+	}
+	if got := first["status"]; got != "success" {
+		t.Fatalf("first status=%v want success", got)
+	}
+	second, ok := results[1].(map[string]any)
+	if !ok {
+		t.Fatalf("second=%#v", results[1])
+	}
+	if got := second["run_id"]; got != float64(19) {
+		t.Fatalf("second run_id=%v want 19", got)
+	}
+	if got := second["status"]; got != "failed" {
+		t.Fatalf("second status=%v want failed", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestListDocProcessPlansByRecordID_AcceptsStatusModeAndPipelineFilters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	countQuery := `SELECT COUNT\(\*\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1 AND COALESCE\(r.status, ''\) = \$2 AND COALESCE\(r.mode, ''\) = \$3 AND p.pipeline_selection->>'PipelineName' = \$4`
+	mock.ExpectQuery(countQuery).
+		WithArgs(int64(4821), "success", "auto", "legacy_default").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	listQuery := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1 AND COALESCE\(r.status, ''\) = \$2 AND COALESCE\(r.mode, ''\) = \$3 AND p.pipeline_selection->>'PipelineName' = \$4\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT \$5 OFFSET \$6`
+	mock.ExpectQuery(listQuery).
+		WithArgs(int64(4821), "success", "auto", "legacy_default", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "mode", "status", "processors", "parameters", "create_time",
+		}).AddRow(
+			int64(20),
+			int64(4821),
+			`{"RequestedProcessors":["extract_metrics"]}`,
+			`[{"Name":"extract_metrics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
+			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
+			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
+			"auto",
+			"success",
+			`["extract_metrics"]`,
+			`{"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"}}`,
+			"2026-07-31T14:23:00+00:00",
+		))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-proc-plans?record_id=4821&status=success&mode=auto&pipeline_name=legacy_default&page=1&page_size=50", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListDocProcessPlans(c); err != nil {
+		t.Fatalf("ListDocProcessPlans returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if payload["status"] != true {
+		t.Fatalf("payload status=%v", payload["status"])
+	}
+	if got := payload["total"]; got != float64(1) {
+		t.Fatalf("total=%v want 1", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

@@ -58,18 +58,18 @@ func TestListKnowledgeStoresSuccess(t *testing.T) {
 	query := regexp.QuoteMeta(`
 SELECT
     id, tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode,
-    ks_sources, status, notes, error_msg, public_info, private_info,
+    ks_sources, default_pipeline, status, notes, error_msg, public_info, private_info,
     create_time, modify_time
 FROM kb.knowledge_store
 ORDER BY modify_time DESC, id DESC
 `)
 	rows := sqlmock.NewRows([]string{
 		"id", "tenant_id", "ks_type", "ks_name", "ks_desc", "ks_sync_mode",
-		"ks_sources", "status", "notes", "error_msg", "public_info", "private_info",
+		"ks_sources", "default_pipeline", "status", "notes", "error_msg", "public_info", "private_info",
 		"create_time", "modify_time",
 	}).AddRow(
 		int64(7), "tenant-a", "reference", "Standards Store", "Core standards", "manual",
-		`{"docs","specs"}`, "active", "notes", "", `{"visibility":"team"}`, `{"secret":true}`,
+		`{"docs","specs"}`, "store_default", "active", "notes", "", `{"visibility":"team"}`, `{"secret":true}`,
 		time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC),
 	)
 	mock.ExpectQuery(query).WillReturnRows(rows)
@@ -95,6 +95,9 @@ ORDER BY modify_time DESC, id DESC
 	if len(payload.Results[0].KSSources) != 2 || payload.Results[0].KSSources[0] != "docs" {
 		t.Fatalf("expected sources, got %+v", payload.Results[0].KSSources)
 	}
+	if payload.Results[0].DefaultPipeline == nil || *payload.Results[0].DefaultPipeline != "store_default" {
+		t.Fatalf("expected default_pipeline, got %+v", payload.Results[0].DefaultPipeline)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
@@ -115,31 +118,31 @@ func TestCreateKnowledgeStoreSuccess(t *testing.T) {
 	expectResolveKnowledgeStoreTable(mock)
 	insertQuery := regexp.QuoteMeta(`
 INSERT INTO kb.knowledge_store (
-    tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode, ks_sources, status, notes, public_info, private_info
+    tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode, ks_sources, default_pipeline, status, notes, public_info, private_info
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING id
 `)
 	mock.ExpectQuery(insertQuery).
-		WithArgs("tenant-a", "reference", "Standards Store", "Core standards", "manual", sqlmock.AnyArg(), "active", "notes", `{"visibility":"team"}`, `{}`).
+		WithArgs("tenant-a", "reference", "Standards Store", "Core standards", "manual", sqlmock.AnyArg(), "store_default", "active", "notes", `{"visibility":"team"}`, `{}`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(7)))
 
 	selectQuery := regexp.QuoteMeta(`
 SELECT
     id, tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode,
-    ks_sources, status, notes, error_msg, public_info, private_info,
+    ks_sources, default_pipeline, status, notes, error_msg, public_info, private_info,
     create_time, modify_time
 FROM kb.knowledge_store
 WHERE id = $1
 `)
 	rows := sqlmock.NewRows([]string{
 		"id", "tenant_id", "ks_type", "ks_name", "ks_desc", "ks_sync_mode",
-		"ks_sources", "status", "notes", "error_msg", "public_info", "private_info",
+		"ks_sources", "default_pipeline", "status", "notes", "error_msg", "public_info", "private_info",
 		"create_time", "modify_time",
 	}).AddRow(
 		int64(7), "tenant-a", "reference", "Standards Store", "Core standards", "manual",
-		`{"docs","specs"}`, "active", "notes", "", `{"visibility":"team"}`, `{}`,
+		`{"docs","specs"}`, "store_default", "active", "notes", "", `{"visibility":"team"}`, `{}`,
 		time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC),
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(7)).WillReturnRows(rows)
@@ -151,6 +154,7 @@ WHERE id = $1
 		"ks_desc":"Core standards",
 		"ks_sync_mode":"manual",
 		"ks_sources":["docs","specs"],
+		"default_pipeline":"store_default",
 		"status":"active",
 		"notes":"notes",
 		"public_info":{"visibility":"team"},
@@ -190,31 +194,31 @@ func TestCreateKnowledgeStoreDefaultsTenantID(t *testing.T) {
 	expectResolveKnowledgeStoreTable(mock)
 	insertQuery := regexp.QuoteMeta(`
 INSERT INTO kb.knowledge_store (
-    tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode, ks_sources, status, notes, public_info, private_info
+    tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode, ks_sources, default_pipeline, status, notes, public_info, private_info
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING id
 `)
 	mock.ExpectQuery(insertQuery).
-		WithArgs("-", nil, "Default Tenant Store", nil, "manual", sqlmock.AnyArg(), "active", nil, `{}`, `{}`).
+		WithArgs("-", nil, "Default Tenant Store", nil, "manual", sqlmock.AnyArg(), nil, "active", nil, `{}`, `{}`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(8)))
 
 	selectQuery := regexp.QuoteMeta(`
 SELECT
     id, tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode,
-    ks_sources, status, notes, error_msg, public_info, private_info,
+    ks_sources, default_pipeline, status, notes, error_msg, public_info, private_info,
     create_time, modify_time
 FROM kb.knowledge_store
 WHERE id = $1
 `)
 	rows := sqlmock.NewRows([]string{
 		"id", "tenant_id", "ks_type", "ks_name", "ks_desc", "ks_sync_mode",
-		"ks_sources", "status", "notes", "error_msg", "public_info", "private_info",
+		"ks_sources", "default_pipeline", "status", "notes", "error_msg", "public_info", "private_info",
 		"create_time", "modify_time",
 	}).AddRow(
 		int64(8), "-", nil, "Default Tenant Store", nil, "manual",
-		`{}`, "active", nil, nil, `{}`, `{}`,
+		`{}`, nil, "active", nil, nil, `{}`, `{}`,
 		time.Date(2026, 4, 25, 14, 0, 0, 0, time.UTC), time.Date(2026, 4, 25, 14, 0, 0, 0, time.UTC),
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(8)).WillReturnRows(rows)
@@ -246,31 +250,32 @@ func TestUpdateKnowledgeStoreSuccess(t *testing.T) {
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
 	expectResolveKnowledgeStoreTable(mock)
-	updateQuery := regexp.QuoteMeta("UPDATE kb.knowledge_store SET modify_time = NOW(), ks_desc = $1, ks_sources = $2, status = $3 WHERE id = $4")
+	updateQuery := regexp.QuoteMeta("UPDATE kb.knowledge_store SET modify_time = NOW(), default_pipeline = $1, ks_desc = $2, ks_sources = $3, status = $4 WHERE id = $5")
 	mock.ExpectExec(updateQuery).
-		WithArgs("Updated description", sqlmock.AnyArg(), "suspended", int64(7)).
+		WithArgs("store_default", "Updated description", sqlmock.AnyArg(), "suspended", int64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	selectQuery := regexp.QuoteMeta(`
 SELECT
     id, tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode,
-    ks_sources, status, notes, error_msg, public_info, private_info,
+    ks_sources, default_pipeline, status, notes, error_msg, public_info, private_info,
     create_time, modify_time
 FROM kb.knowledge_store
 WHERE id = $1
 `)
 	rows := sqlmock.NewRows([]string{
 		"id", "tenant_id", "ks_type", "ks_name", "ks_desc", "ks_sync_mode",
-		"ks_sources", "status", "notes", "error_msg", "public_info", "private_info",
+		"ks_sources", "default_pipeline", "status", "notes", "error_msg", "public_info", "private_info",
 		"create_time", "modify_time",
 	}).AddRow(
 		int64(7), "tenant-a", "reference", "Standards Store", "Updated description", "manual",
-		`{"docs","specs","archive"}`, "suspended", "notes", "", `{"visibility":"team"}`, nil,
+		`{"docs","specs","archive"}`, "store_default", "suspended", "notes", "", `{"visibility":"team"}`, nil,
 		time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC),
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(7)).WillReturnRows(rows)
 
 	c, rec := newKnowledgeStoreIDContext(t, http.MethodPut, "7", `{
+		"default_pipeline":"store_default",
 		"ks_desc":"Updated description",
 		"ks_sources":["docs","specs","archive"],
 		"status":"suspended"

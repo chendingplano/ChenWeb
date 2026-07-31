@@ -22,20 +22,21 @@ const (
 )
 
 type knowledgeStoreRecord struct {
-	ID         int64           `json:"id"`
-	TenantID   *string         `json:"tenant_id,omitempty"`
-	KSType     *string         `json:"ks_type,omitempty"`
-	KSName     string          `json:"ks_name"`
-	KSDesc     *string         `json:"ks_desc,omitempty"`
-	KSSyncMode *string         `json:"ks_sync_mode,omitempty"`
-	KSSources  []string        `json:"ks_sources,omitempty"`
-	Status     *string         `json:"status,omitempty"`
-	Notes      *string         `json:"notes,omitempty"`
-	ErrorMsg   *string         `json:"error_msg,omitempty"`
-	PublicInfo json.RawMessage `json:"public_info,omitempty"`
-	PrivateInfo json.RawMessage `json:"private_info,omitempty"`
-	CreateTime time.Time       `json:"create_time"`
-	ModifyTime time.Time       `json:"modify_time"`
+	ID              int64           `json:"id"`
+	TenantID        *string         `json:"tenant_id,omitempty"`
+	KSType          *string         `json:"ks_type,omitempty"`
+	KSName          string          `json:"ks_name"`
+	KSDesc          *string         `json:"ks_desc,omitempty"`
+	KSSyncMode      *string         `json:"ks_sync_mode,omitempty"`
+	KSSources       []string        `json:"ks_sources,omitempty"`
+	DefaultPipeline *string         `json:"default_pipeline,omitempty"`
+	Status          *string         `json:"status,omitempty"`
+	Notes           *string         `json:"notes,omitempty"`
+	ErrorMsg        *string         `json:"error_msg,omitempty"`
+	PublicInfo      json.RawMessage `json:"public_info,omitempty"`
+	PrivateInfo     json.RawMessage `json:"private_info,omitempty"`
+	CreateTime      time.Time       `json:"create_time"`
+	ModifyTime      time.Time       `json:"modify_time"`
 }
 
 type listKnowledgeStoresResponse struct {
@@ -74,7 +75,7 @@ func fetchKnowledgeStoreByID(db *sql.DB, storeTable string, id int64) (knowledge
 	query := fmt.Sprintf(`
 SELECT
     id, tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode,
-    ks_sources, status, notes, error_msg, public_info, private_info,
+    ks_sources, default_pipeline, status, notes, error_msg, public_info, private_info,
     create_time, modify_time
 FROM %s
 WHERE id = $1
@@ -89,7 +90,7 @@ WHERE id = $1
 	)
 	if err := row.Scan(
 		&record.ID, &record.TenantID, &record.KSType, &record.KSName, &record.KSDesc, &record.KSSyncMode,
-		&sources, &record.Status, &record.Notes, &record.ErrorMsg, &publicInfoNullable, &privateInfoNullable,
+		&sources, &record.DefaultPipeline, &record.Status, &record.Notes, &record.ErrorMsg, &publicInfoNullable, &privateInfoNullable,
 		&record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return knowledgeStoreRecord{}, err
@@ -138,7 +139,7 @@ func ListKnowledgeStores(c echo.Context) error {
 	query := fmt.Sprintf(`
 SELECT
     id, tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode,
-    ks_sources, status, notes, error_msg, public_info, private_info,
+    ks_sources, default_pipeline, status, notes, error_msg, public_info, private_info,
     create_time, modify_time
 FROM %s
 ORDER BY modify_time DESC, id DESC
@@ -161,7 +162,7 @@ ORDER BY modify_time DESC, id DESC
 		)
 		if err := rows.Scan(
 			&record.ID, &record.TenantID, &record.KSType, &record.KSName, &record.KSDesc, &record.KSSyncMode,
-			&sources, &record.Status, &record.Notes, &record.ErrorMsg, &publicInfoNullable, &privateInfoNullable,
+			&sources, &record.DefaultPipeline, &record.Status, &record.Notes, &record.ErrorMsg, &publicInfoNullable, &privateInfoNullable,
 			&record.CreateTime, &record.ModifyTime,
 		); err != nil {
 			logger.Error("scan knowledge store failed", "err", err)
@@ -206,16 +207,17 @@ func CreateKnowledgeStore(c echo.Context) error {
 	}
 
 	var (
-		tenantID   any = "-"
-		ksType     any
-		ksName     string
-		ksDesc     any
-		ksSyncMode any = "manual"
-		ksSources  any = pq.Array([]string{})
-		status     any = "active"
-		notes      any
-		publicInfo any = "{}"
-		privateInfo any = "{}"
+		tenantID        any = "-"
+		ksType          any
+		ksName          string
+		ksDesc          any
+		ksSyncMode      any = "manual"
+		ksSources       any = pq.Array([]string{})
+		defaultPipeline any
+		status          any = "active"
+		notes           any
+		publicInfo      any = "{}"
+		privateInfo     any = "{}"
 	)
 
 	if raw, ok := payload["tenant_id"]; ok {
@@ -272,6 +274,15 @@ func CreateKnowledgeStore(c echo.Context) error {
 			ksSources = pq.Array(*value)
 		}
 	}
+	if raw, ok := payload["default_pipeline"]; ok {
+		value, err := decodeStringValue(raw, false)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid default_pipeline: %v (CWB_KB_S_115)", err)})
+		}
+		if value != nil {
+			defaultPipeline = *value
+		}
+	}
 	if raw, ok := payload["status"]; ok {
 		value, err := decodeStringValue(raw, true)
 		if err != nil {
@@ -315,15 +326,15 @@ func CreateKnowledgeStore(c echo.Context) error {
 
 	query := fmt.Sprintf(`
 INSERT INTO %s (
-    tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode, ks_sources, status, notes, public_info, private_info
+    tenant_id, ks_type, ks_name, ks_desc, ks_sync_mode, ks_sources, default_pipeline, status, notes, public_info, private_info
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING id
 `, storeTable)
 
 	var id int64
-	if err := db.QueryRow(query, tenantID, ksType, ksName, ksDesc, ksSyncMode, ksSources, status, notes, publicInfo, privateInfo).Scan(&id); err != nil {
+	if err := db.QueryRow(query, tenantID, ksType, ksName, ksDesc, ksSyncMode, ksSources, defaultPipeline, status, notes, publicInfo, privateInfo).Scan(&id); err != nil {
 		logger.Error("insert knowledge store failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create knowledge store (CWB_KB_S_113)"})
 	}
@@ -386,7 +397,7 @@ func UpdateKnowledgeStore(c echo.Context) error {
 			} else {
 				addSet(field, *value)
 			}
-		case "ks_desc", "notes", "error_msg":
+		case "ks_desc", "notes", "error_msg", "default_pipeline":
 			value, err := decodeStringValue(raw, false)
 			if err != nil {
 				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_S_205)", field, err)})

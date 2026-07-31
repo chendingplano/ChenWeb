@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,10 +90,10 @@ func (p *inspectingProcessor) HandleEvent(ctx context.Context, _ []byte) error {
 }
 
 type fakeBatchProcessor struct {
-	name       string
-	initCalls   int
+	name         string
+	initCalls    int
 	processCalls int
-	finalCalls  int
+	finalCalls   int
 }
 
 func (p *fakeBatchProcessor) Name() string { return p.name }
@@ -190,10 +191,10 @@ func TestRunProcessorsChunkBatched_PersistsBatchProcessorLifecycle(t *testing.T)
 	store := &fakeDocProcessingCommandStore{
 		records: map[int64]DocMetadataInputRecord{
 			7: {
-				ID:             7,
-				StatusRaw:      "[]",
-				ResultFilename: lineFile,
-				ParserName:     "mineru",
+				ID:              7,
+				StatusRaw:       "[]",
+				ResultFilename:  lineFile,
+				ParserName:      "mineru",
 				StagingFilename: filepath.Join(tmp, "record.pdf"),
 			},
 		},
@@ -1130,9 +1131,9 @@ func TestControlService_PhaseCKeepsPipelineRunningWithoutProcessorName(t *testin
 		release:                release,
 	}
 	svc := &ControlService{
-		InputStore:  store,
-		Processors:  []Processor{proc},
-		Now:         time.Now,
+		InputStore: store,
+		Processors: []Processor{proc},
+		Now:        time.Now,
 	}
 
 	done := make(chan error, 1)
@@ -1247,6 +1248,104 @@ func TestProcessorLogName_PrefersMethodSpecificLogName(t *testing.T) {
 	p := fakeProcessor{name: "chunking", logName: "topic_chunking"}
 	if got := processorLogName(p); got != "topic_chunking" {
 		t.Fatalf("processorLogName=%q, want topic_chunking", got)
+	}
+}
+
+func TestResolveProductionPlanFactsBuildsFactsFromCurrentInputRecord(t *testing.T) {
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{
+			7: {
+				ID:             7,
+				KSStoreID:      42,
+				ParserName:     "mineru",
+				Title:          "Ventilator display module",
+				InputDocType:   "pdf",
+				SourceLanguage: "en",
+				DocumentNumber: "YY 9706.252-2021",
+			},
+		},
+	}
+	svc := &ControlService{InputStore: store}
+	evt := LineFileGeneratedEvent{RecordID: 7, Operations: []string{"generate_topics", "extract_provisions"}}
+
+	got, err := svc.resolveProductionPlanFacts(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("resolveProductionPlanFacts: %v", err)
+	}
+
+	want := ProductionPlanFacts{
+		RequestedProcessors: []string{"generate_topics", "extract_provisions"},
+		KnowledgeStoreID:    42,
+		ParserName:          "mineru",
+		DocumentTitle:       "Ventilator display module",
+		InputDocType:        "pdf",
+		SourceLanguage:      "en",
+		DocumentNumber:      "YY 9706.252-2021",
+		RoutingFacets: ProductionRoutingFacets{
+			KnowledgeStoreBinding: "bound",
+			InputDocType:          "pdf",
+			SourceLanguage:        "en",
+			HasDocumentNumber:     true,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("facts=%#v want=%#v", got, want)
+	}
+}
+
+func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	facts := ProductionPlanFacts{
+		RequestedProcessors: []string{"generate_topics"},
+		KnowledgeStoreID:    42,
+		ParserName:          "mineru",
+		DocumentTitle:       "Ventilator display module",
+	}
+	steps := []ProcessorPlanStep{
+		{Name: "static_analyzer", Phase: "A", DependsOn: []string{}, Reason: "mandatory_baseline"},
+		{Name: "chunking", Phase: "A", DependsOn: []string{"static_analyzer"}, Reason: "implicit_dependency"},
+		{Name: "generate_topics", Phase: "B", DependsOn: []string{"chunking"}, Reason: "explicit_request"},
+	}
+	selection := ProductionPipelineSelection{
+		PipelineName: "legacy_default",
+		Reason:       "system_default",
+	}
+	binding := ProductionPipelineBindingResolution{
+		Source:           "system_default",
+		SelectedPipeline: "legacy_default",
+	}
+
+	raw, err := appendPipelineStatusWithPlan("[]", now, "running", "", nil, facts, steps, selection, binding)
+	if err != nil {
+		t.Fatalf("appendPipelineStatusWithPlan initial: %v", err)
+	}
+	raw, err = appendPipelineStatusWithPlan(raw, now.Add(time.Second), "success", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+	if err != nil {
+		t.Fatalf("appendPipelineStatusWithPlan follow-up: %v", err)
+	}
+
+	entries := decodeDocMetaStatus(raw)
+	var docProcessing map[string]any
+	for _, entry := range entries {
+		if strings.TrimSpace(asString(entry["operation"])) == "doc_processing" {
+			docProcessing = entry
+			break
+		}
+	}
+	if docProcessing == nil {
+		t.Fatalf("missing doc_processing entry in %s", raw)
+	}
+	if _, ok := docProcessing["processor_plan_facts"]; !ok {
+		t.Fatalf("missing processor_plan_facts in %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_plan_steps"]; !ok {
+		t.Fatalf("missing processor_plan_steps in %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_pipeline_selection"]; !ok {
+		t.Fatalf("missing processor_pipeline_selection in %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_pipeline_binding"]; !ok {
+		t.Fatalf("missing processor_pipeline_binding in %#v", docProcessing)
 	}
 }
 
