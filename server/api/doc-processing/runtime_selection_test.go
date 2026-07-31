@@ -83,9 +83,13 @@ func TestDocPipelineModeFromEnvDefaultsToPlanOnly(t *testing.T) {
 	}
 }
 
-func TestDocPipelineModeFromEnvRejectsEnforcedRequest(t *testing.T) {
-	if _, err := normalizeDocPipelineMode("false"); err == nil || !strings.Contains(err.Error(), "enforced") {
-		t.Fatalf("err=%v, want an error naming enforced-mode as unsupported", err)
+func TestDocPipelineModeFromEnvResolvesEnforcedRequest(t *testing.T) {
+	mode, err := normalizeDocPipelineMode("false")
+	if err != nil {
+		t.Fatalf("normalizeDocPipelineMode(false): %v", err)
+	}
+	if mode != DocPipelineModeEnforced {
+		t.Fatalf("mode=%q want=%q", mode, DocPipelineModeEnforced)
 	}
 }
 
@@ -128,7 +132,7 @@ func TestNewProductionRuntimeSuccessfulExplicitAndDefaultSelection(t *testing.T)
 	}
 }
 
-func TestNewProductionRuntimeRejectsEnforcedPipelineModeRequest(t *testing.T) {
+func TestNewProductionRuntimeAcceptsEnforcedPipelineModeRequest(t *testing.T) {
 	original := buildProductionRuntimeComponents
 	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {
 		return productionRuntimeComponents{
@@ -139,9 +143,12 @@ func TestNewProductionRuntimeRejectsEnforcedPipelineModeRequest(t *testing.T) {
 	t.Cleanup(func() { buildProductionRuntimeComponents = original })
 	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
 
-	_, err := NewProductionRuntime()
-	if err == nil || !strings.Contains(err.Error(), "enforced") {
-		t.Fatalf("err=%v, want construction to fail fast on an unsupported enforced-mode request", err)
+	runtime, err := NewProductionRuntime()
+	if err != nil {
+		t.Fatalf("NewProductionRuntime: %v", err)
+	}
+	if got, want := runtime.ResolvedConfig().Values["processor_pipeline_mode"], DocPipelineModeEnforced; got != want {
+		t.Fatalf("processor_pipeline_mode=%v want=%v", got, want)
 	}
 }
 
@@ -598,6 +605,97 @@ func TestBuildProductionProcessorPlanFromFactsPreservesInputsForFutureRouting(t 
 		t.Fatalf("facts=%#v want=%#v", got, want)
 	}
 
+	if got, want := plan.ExecutionOrder(), []string{"static_analyzer", "chunking", "generate_topics", "extract_provisions"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("execution order=%v want=%v", got, want)
+	}
+}
+
+func TestApplyPolicyFilterOnlyFiltersInEnforcedModeWithNonEmptyProcessors(t *testing.T) {
+	requested := []string{"generate_topics", "extract_provisions", "extract_metrics"}
+	spec := ProductionPipelineSpec{Name: "narrative_default", Processors: []string{"generate_topics", "extract_metrics"}}
+
+	tests := []struct {
+		name          string
+		mode          string
+		spec          ProductionPipelineSpec
+		wantEffective []string
+		wantExcluded  []string
+	}{
+		{name: "plan-only never filters", mode: DocPipelineModePlanOnly, spec: spec, wantEffective: requested, wantExcluded: nil},
+		{name: "empty mode never filters", mode: "", spec: spec, wantEffective: requested, wantExcluded: nil},
+		{name: "enforced with empty pipeline processors never filters", mode: DocPipelineModeEnforced, spec: ProductionPipelineSpec{Name: "legacy_default"}, wantEffective: requested, wantExcluded: nil},
+		{name: "enforced filters to pipeline's declared processors", mode: DocPipelineModeEnforced, spec: spec, wantEffective: []string{"generate_topics", "extract_metrics"}, wantExcluded: []string{"extract_provisions"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			effective, excluded := applyPolicyFilter(requested, tc.mode, tc.spec)
+			if !reflect.DeepEqual(effective, tc.wantEffective) {
+				t.Fatalf("effective=%v want=%v", effective, tc.wantEffective)
+			}
+			if !reflect.DeepEqual(excluded, tc.wantExcluded) {
+				t.Fatalf("excluded=%v want=%v", excluded, tc.wantExcluded)
+			}
+		})
+	}
+}
+
+func TestApplyPolicyFilterNeverExcludesMandatoryBaseline(t *testing.T) {
+	effective, excluded := applyPolicyFilter(
+		[]string{"static_analyzer", "chunking", "extract_metrics"},
+		DocPipelineModeEnforced,
+		ProductionPipelineSpec{Name: "narrow", Processors: []string{"extract_provisions"}},
+	)
+	if !reflect.DeepEqual(effective, []string{"static_analyzer", "chunking"}) {
+		t.Fatalf("effective=%v", effective)
+	}
+	if !reflect.DeepEqual(excluded, []string{"extract_metrics"}) {
+		t.Fatalf("excluded=%v", excluded)
+	}
+}
+
+func TestBuildProductionProcessorPlanFromFactsEnforcesPipelineProcessorsAndRecordsExclusions(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "narrative_default", DisplayName: "Narrative Default", Processors: []string{"generate_topics", "extract_metrics"}},
+	})
+
+	facts := ProductionPlanFacts{
+		RequestedProcessors: []string{"generate_topics", "extract_provisions", "extract_metrics"},
+		RequestedPipeline:   "narrative_default",
+		Mode:                DocPipelineModeEnforced,
+	}
+	plan, err := BuildProductionProcessorPlanFromFacts(facts)
+	if err != nil {
+		t.Fatalf("BuildProductionProcessorPlanFromFacts: %v", err)
+	}
+
+	if got, want := plan.ExecutionOrder(), []string{"static_analyzer", "chunking", "generate_topics", "extract_metrics"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("execution order=%v want=%v", got, want)
+	}
+	if got, want := plan.ExcludedByPolicy(), []string{"extract_provisions"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("excluded by policy=%v want=%v", got, want)
+	}
+}
+
+func TestBuildProductionProcessorPlanFromFactsPlanOnlyModeNeverExcludes(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "narrative_default", DisplayName: "Narrative Default", Processors: []string{"generate_topics"}},
+	})
+
+	facts := ProductionPlanFacts{
+		RequestedProcessors: []string{"generate_topics", "extract_provisions"},
+		RequestedPipeline:   "narrative_default",
+		Mode:                DocPipelineModePlanOnly,
+	}
+	plan, err := BuildProductionProcessorPlanFromFacts(facts)
+	if err != nil {
+		t.Fatalf("BuildProductionProcessorPlanFromFacts: %v", err)
+	}
+
+	if got := plan.ExcludedByPolicy(); got != nil {
+		t.Fatalf("excluded by policy=%v want nil", got)
+	}
 	if got, want := plan.ExecutionOrder(), []string{"static_analyzer", "chunking", "generate_topics", "extract_provisions"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("execution order=%v want=%v", got, want)
 	}

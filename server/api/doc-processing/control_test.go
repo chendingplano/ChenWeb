@@ -1287,6 +1287,7 @@ func TestResolveProductionPlanFactsBuildsFactsFromCurrentInputRecord(t *testing.
 			SourceLanguage:        "en",
 			HasDocumentNumber:     true,
 		},
+		Mode: DocPipelineModePlanOnly,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("facts=%#v want=%#v", got, want)
@@ -1319,12 +1320,13 @@ func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *
 		DisplayName:      "Legacy Default",
 		LegacyEquivalent: true,
 	}
+	excluded := []string{"extract_provisions"}
 
-	raw, err := appendPipelineStatusWithPlan("[]", now, "running", "", nil, facts, steps, selection, binding, spec)
+	raw, err := appendPipelineStatusWithPlan("[]", now, "running", "", nil, facts, steps, selection, binding, spec, excluded)
 	if err != nil {
 		t.Fatalf("appendPipelineStatusWithPlan initial: %v", err)
 	}
-	raw, err = appendPipelineStatusWithPlan(raw, now.Add(time.Second), "success", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{})
+	raw, err = appendPipelineStatusWithPlan(raw, now.Add(time.Second), "success", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{}, nil)
 	if err != nil {
 		t.Fatalf("appendPipelineStatusWithPlan follow-up: %v", err)
 	}
@@ -1354,6 +1356,9 @@ func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *
 	}
 	if _, ok := docProcessing["processor_pipeline_spec"]; !ok {
 		t.Fatalf("missing processor_pipeline_spec in %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_excluded_by_policy"]; !ok {
+		t.Fatalf("missing processor_excluded_by_policy in %#v", docProcessing)
 	}
 }
 

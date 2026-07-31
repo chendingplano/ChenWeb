@@ -30,6 +30,11 @@ type ProductionPlanFacts struct {
 	ParserName          string
 	DocumentTitle       string
 	RoutingFacets       ProductionRoutingFacets
+	// Mode is the resolved DocPipelineMode for this plan (DocPipelineModePlanOnly
+	// or DocPipelineModeEnforced). Zero value ("") behaves as plan-only, so
+	// callers that don't set it (tests, the constructor-time BuildProductionProcessorPlan
+	// seam) get legacy-equivalent behavior by default.
+	Mode string
 }
 
 type ProductionProcessorPlan struct {
@@ -39,6 +44,7 @@ type ProductionProcessorPlan struct {
 	pipelineBinding   ProductionPipelineBindingResolution
 	pipelineSelection ProductionPipelineSelection
 	pipelineSpec      ProductionPipelineSpec
+	excludedByPolicy  []string
 }
 
 type ProcessorPlanStep struct {
@@ -46,6 +52,37 @@ type ProcessorPlanStep struct {
 	Phase     string
 	DependsOn []string
 	Reason    string
+}
+
+// applyPolicyFilter implements DocPipelineModeEnforced's intersect/filter
+// semantics: when enforced and the resolved pipeline declares a non-empty
+// Processors list, a requested processor only survives if the pipeline
+// allows it. static_analyzer/chunking are exempt — they are the mandatory
+// baseline resolveRequiredProcessors always adds regardless of policy, not
+// something a pipeline could meaningfully exclude. A pipeline with an empty
+// Processors list has no effect (it hasn't opted into governing selection),
+// and plan-only mode never filters, so both return the request unchanged.
+// Returns the filtered request and, separately, what got excluded — the
+// exclusion is recorded on the plan rather than silently dropped, per the
+// ADR's "plan computation is explainable" invariant.
+func applyPolicyFilter(requested []string, mode string, spec ProductionPipelineSpec) (effective []string, excluded []string) {
+	if mode != DocPipelineModeEnforced || len(spec.Processors) == 0 {
+		return requested, nil
+	}
+	allowed := map[string]bool{}
+	for _, name := range spec.Processors {
+		allowed[normalizeRuntimeName(name)] = true
+	}
+	effective = make([]string, 0, len(requested))
+	for _, name := range requested {
+		norm := normalizeRuntimeName(name)
+		if norm == "static_analyzer" || norm == "chunking" || allowed[norm] {
+			effective = append(effective, name)
+			continue
+		}
+		excluded = append(excluded, name)
+	}
+	return effective, excluded
 }
 
 func BuildProductionProcessorPlan(requested []string) (ProductionProcessorPlan, error) {
@@ -90,12 +127,13 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 	if err != nil {
 		return ProductionProcessorPlan{}, err
 	}
+	effectiveRequested, excludedByPolicy := applyPolicyFilter(requested, facts.Mode, resolution.Spec)
 	enabled := map[string]bool{}
 	requestedSet := map[string]bool{}
-	for _, name := range resolveRequiredProcessors(requested) {
+	for _, name := range resolveRequiredProcessors(effectiveRequested) {
 		enabled[normalizeRuntimeName(name)] = true
 	}
-	for _, name := range requested {
+	for _, name := range effectiveRequested {
 		requestedSet[normalizeRuntimeName(name)] = true
 	}
 	specs := make([]ProcessorSpec, 0, len(productionProcessorSpecs))
@@ -108,7 +146,7 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		}
 		specs = append(specs, spec)
 	}
-	plan := ProductionProcessorPlan{specs: specs, pipelineBinding: resolution.Binding, pipelineSelection: resolution.Selection, pipelineSpec: resolution.Spec, facts: ProductionPlanFacts{
+	plan := ProductionProcessorPlan{specs: specs, pipelineBinding: resolution.Binding, pipelineSelection: resolution.Selection, pipelineSpec: resolution.Spec, excludedByPolicy: excludedByPolicy, facts: ProductionPlanFacts{
 		RequestedProcessors: append([]string(nil), facts.RequestedProcessors...),
 		RequestedPipeline:   strings.TrimSpace(facts.RequestedPipeline),
 		StoreBoundPipeline:  strings.TrimSpace(facts.StoreBoundPipeline),
@@ -120,6 +158,7 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		ParserName:          facts.ParserName,
 		DocumentTitle:       facts.DocumentTitle,
 		RoutingFacets:       facts.RoutingFacets,
+		Mode:                facts.Mode,
 	}}
 	order := plan.ExecutionOrder()
 	steps := make([]ProcessorPlanStep, 0, len(order))
@@ -217,6 +256,17 @@ func (p ProductionProcessorPlan) PipelineBinding() ProductionPipelineBindingReso
 
 func (p ProductionProcessorPlan) PipelineSpec() ProductionPipelineSpec {
 	return p.pipelineSpec
+}
+
+// ExcludedByPolicy lists requested processors that DocPipelineModeEnforced
+// filtered out because they weren't in the resolved pipeline's Processors
+// list. Empty in plan-only mode, and empty in enforced mode when the
+// resolved pipeline declares no explicit Processors.
+func (p ProductionProcessorPlan) ExcludedByPolicy() []string {
+	if len(p.excludedByPolicy) == 0 {
+		return nil
+	}
+	return append([]string(nil), p.excludedByPolicy...)
 }
 
 var productionProcessorSpecs = []ProcessorSpec{

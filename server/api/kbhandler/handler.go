@@ -61,6 +61,7 @@ type docProcessingPlanSnapshot struct {
 	PipelineBinding   docprocessing.ProductionPipelineBindingResolution `json:"pipeline_binding,omitempty"`
 	PipelineSelection docprocessing.ProductionPipelineSelection         `json:"pipeline_selection,omitempty"`
 	PipelineSpec      docprocessing.ProductionPipelineSpec              `json:"pipeline_spec,omitempty"`
+	ExcludedByPolicy  []string                                          `json:"excluded_by_policy,omitempty"`
 }
 
 type listInputsResponse struct {
@@ -555,6 +556,11 @@ func extractDocProcessingPlanSnapshot(statusBytes []byte) *docProcessingPlanSnap
 		if rawSpec, ok := entry["processor_pipeline_spec"]; ok {
 			if bs, err := json.Marshal(rawSpec); err == nil {
 				_ = json.Unmarshal(bs, &snapshot.PipelineSpec)
+			}
+		}
+		if rawExcluded, ok := entry["processor_excluded_by_policy"]; ok {
+			if bs, err := json.Marshal(rawExcluded); err == nil {
+				_ = json.Unmarshal(bs, &snapshot.ExcludedByPolicy)
 			}
 		}
 		return snapshot

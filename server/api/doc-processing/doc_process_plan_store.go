@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 type DocProcessPlanRecord struct {
@@ -17,6 +19,7 @@ type DocProcessPlanRecord struct {
 	PipelineBinding   ProductionPipelineBindingResolution
 	PipelineSelection ProductionPipelineSelection
 	PipelineSpec      ProductionPipelineSpec
+	ExcludedByPolicy  []string
 }
 
 type DocProcessPlanView struct {
@@ -27,6 +30,7 @@ type DocProcessPlanView struct {
 	PipelineBinding   ProductionPipelineBindingResolution
 	PipelineSelection ProductionPipelineSelection
 	PipelineSpec      ProductionPipelineSpec
+	ExcludedByPolicy  []string
 	Mode              string
 	Status            string
 	Processors        []string
@@ -73,12 +77,12 @@ func (s SQLStore) CreateDocProcessPlan(ctx context.Context, rec DocProcessPlanRe
 	}
 
 	const stmt = `
-INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec)
-VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb)
+INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec, excluded_by_policy)
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8)
 RETURNING id`
 
 	var id int64
-	err = s.DB.QueryRowContext(ctx, stmt, rec.RunID, rec.RecordID, string(factsJSON), string(stepsJSON), string(selectionJSON), string(bindingJSON), string(specJSON)).Scan(&id)
+	err = s.DB.QueryRowContext(ctx, stmt, rec.RunID, rec.RecordID, string(factsJSON), string(stepsJSON), string(selectionJSON), string(bindingJSON), string(specJSON), pq.Array(rec.ExcludedByPolicy)).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -101,6 +105,7 @@ SELECT p.run_id,
        p.pipeline_selection::text,
        p.pipeline_binding::text,
        COALESCE(p.pipeline_spec::text, '{}'::text),
+       p.excluded_by_policy,
        COALESCE(r.mode, ''),
        COALESCE(r.status, ''),
        COALESCE(r.processors::text, '[]'::text),
@@ -113,14 +118,15 @@ ORDER BY p.create_time DESC, p.id DESC
 LIMIT 1`
 
 	var (
-		view           DocProcessPlanView
-		planFactsJSON  string
-		planStepsJSON  string
-		selectionJSON  string
-		bindingJSON    string
-		specJSON       string
-		processorsJSON string
-		parametersJSON string
+		view             DocProcessPlanView
+		planFactsJSON    string
+		planStepsJSON    string
+		selectionJSON    string
+		bindingJSON      string
+		specJSON         string
+		excludedByPolicy pq.StringArray
+		processorsJSON   string
+		parametersJSON   string
 	)
 	err := s.DB.QueryRowContext(ctx, stmt, recordID).Scan(
 		&view.RunID,
@@ -130,6 +136,7 @@ LIMIT 1`
 		&selectionJSON,
 		&bindingJSON,
 		&specJSON,
+		&excludedByPolicy,
 		&view.Mode,
 		&view.Status,
 		&processorsJSON,
@@ -157,6 +164,7 @@ LIMIT 1`
 	if err := json.Unmarshal([]byte(specJSON), &view.PipelineSpec); err != nil {
 		return DocProcessPlanView{}, err
 	}
+	view.ExcludedByPolicy = []string(excludedByPolicy)
 	if err := json.Unmarshal([]byte(processorsJSON), &view.Processors); err != nil {
 		return DocProcessPlanView{}, err
 	}
@@ -222,6 +230,7 @@ SELECT p.run_id,
        p.pipeline_selection::text,
        p.pipeline_binding::text,
        COALESCE(p.pipeline_spec::text, '{}'::text),
+       p.excluded_by_policy,
        COALESCE(r.mode, ''),
        COALESCE(r.status, ''),
        COALESCE(r.processors::text, '[]'::text),
@@ -241,14 +250,15 @@ LIMIT %s OFFSET %s`, whereSQL, nextArg(pageSize), nextArg(offset))
 	out := make([]DocProcessPlanView, 0)
 	for rows.Next() {
 		var (
-			view           DocProcessPlanView
-			planFactsJSON  string
-			planStepsJSON  string
-			selectionJSON  string
-			bindingJSON    string
-			specJSON       string
-			processorsJSON string
-			parametersJSON string
+			view             DocProcessPlanView
+			planFactsJSON    string
+			planStepsJSON    string
+			selectionJSON    string
+			bindingJSON      string
+			specJSON         string
+			excludedByPolicy pq.StringArray
+			processorsJSON   string
+			parametersJSON   string
 		)
 		if err := rows.Scan(
 			&view.RunID,
@@ -258,6 +268,7 @@ LIMIT %s OFFSET %s`, whereSQL, nextArg(pageSize), nextArg(offset))
 			&selectionJSON,
 			&bindingJSON,
 			&specJSON,
+			&excludedByPolicy,
 			&view.Mode,
 			&view.Status,
 			&processorsJSON,
@@ -281,6 +292,7 @@ LIMIT %s OFFSET %s`, whereSQL, nextArg(pageSize), nextArg(offset))
 		if err := json.Unmarshal([]byte(specJSON), &view.PipelineSpec); err != nil {
 			return nil, 0, err
 		}
+		view.ExcludedByPolicy = []string(excludedByPolicy)
 		if err := json.Unmarshal([]byte(processorsJSON), &view.Processors); err != nil {
 			return nil, 0, err
 		}

@@ -16,8 +16,8 @@ func TestCreateDocProcessPlan_InsertsAndReturnsID(t *testing.T) {
 	defer db.Close()
 
 	insertQuery := regexp.QuoteMeta(`
-INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec)
-VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb)
+INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec, excluded_by_policy)
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8)
 RETURNING id`)
 
 	facts := ProductionPlanFacts{
@@ -59,11 +59,12 @@ RETURNING id`)
 		WithArgs(
 			int64(5),
 			int64(4821),
-			`{"RequestedProcessors":["generate_topics","extract_provisions"],"RequestedPipeline":"","StoreBoundPipeline":"","KnowledgeStoreID":42,"KnowledgeStoreType":"","InputDocType":"pdf","SourceLanguage":"en","DocumentNumber":"YY 9706.252-2021","ParserName":"mineru","DocumentTitle":"Ventilator display module","RoutingFacets":{"KnowledgeStoreBinding":"bound","InputDocType":"pdf","SourceLanguage":"en","HasDocumentNumber":true}}`,
+			`{"RequestedProcessors":["generate_topics","extract_provisions"],"RequestedPipeline":"","StoreBoundPipeline":"","KnowledgeStoreID":42,"KnowledgeStoreType":"","InputDocType":"pdf","SourceLanguage":"en","DocumentNumber":"YY 9706.252-2021","ParserName":"mineru","DocumentTitle":"Ventilator display module","RoutingFacets":{"KnowledgeStoreBinding":"bound","InputDocType":"pdf","SourceLanguage":"en","HasDocumentNumber":true},"Mode":""}`,
 			`[{"Name":"static_analyzer","Phase":"A","DependsOn":[],"Reason":"mandatory_baseline"},{"Name":"chunking","Phase":"A","DependsOn":["static_analyzer"],"Reason":"implicit_dependency"},{"Name":"generate_topics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"},{"Name":"extract_provisions","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
 			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
 			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
+			sqlmock.AnyArg(),
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(9)))
 
@@ -76,6 +77,7 @@ RETURNING id`)
 		PipelineSelection: selection,
 		PipelineBinding:   binding,
 		PipelineSpec:      spec,
+		ExcludedByPolicy:  []string{"extract_provisions"},
 	})
 	if err != nil {
 		t.Fatalf("CreateDocProcessPlan: %v", err)

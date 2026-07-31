@@ -77,6 +77,10 @@ type latestDocProcessPlanResponse struct {
 	PipelineBinding   docprocessing.ProductionPipelineBindingResolution `json:"pipeline_binding"`
 	PipelineSelection docprocessing.ProductionPipelineSelection         `json:"pipeline_selection"`
 	PipelineSpec      docprocessing.ProductionPipelineSpec              `json:"pipeline_spec"`
+	// ExcludedByPolicy lists requested processors DocPipelineModeEnforced
+	// filtered out because they weren't in the resolved pipeline's declared
+	// Processors. Empty outside enforced mode.
+	ExcludedByPolicy []string `json:"excluded_by_policy,omitempty"`
 	// PipelineProcessorsMatchExecuted compares the selected pipeline's
 	// declared Processors against the processors that actually executed.
 	// P1 does not enforce a pipeline's processor set, so this is a read-only
@@ -297,6 +301,7 @@ func GetLatestDocProcessPlan(c echo.Context) error {
 			PipelineBinding:                 view.PipelineBinding,
 			PipelineSelection:               view.PipelineSelection,
 			PipelineSpec:                    view.PipelineSpec,
+			ExcludedByPolicy:                view.ExcludedByPolicy,
 			PipelineProcessorsMatchExecuted: pipelineProcessorsMatchExecuted(view.PipelineSpec, view.Processors),
 			CreateTime:                      view.CreateTime,
 		},
@@ -349,6 +354,7 @@ func ListDocProcessPlans(c echo.Context) error {
 			PipelineBinding:                 view.PipelineBinding,
 			PipelineSelection:               view.PipelineSelection,
 			PipelineSpec:                    view.PipelineSpec,
+			ExcludedByPolicy:                view.ExcludedByPolicy,
 			PipelineProcessorsMatchExecuted: pipelineProcessorsMatchExecuted(view.PipelineSpec, view.Processors),
 			CreateTime:                      view.CreateTime,
 		})

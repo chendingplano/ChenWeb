@@ -238,11 +238,11 @@ func TestGetLatestDocProcessPlanByRecordID(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	query := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(p.pipeline_spec::text, '\{\}'::text\), COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT 1`
+	query := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(p.pipeline_spec::text, '\{\}'::text\), p.excluded_by_policy, COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT 1`
 	mock.ExpectQuery(query).
 		WithArgs(int64(4821)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "pipeline_spec", "mode", "status", "processors", "parameters", "create_time",
+			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "pipeline_spec", "excluded_by_policy", "mode", "status", "processors", "parameters", "create_time",
 		}).AddRow(
 			int64(19),
 			int64(4821),
@@ -251,6 +251,7 @@ func TestGetLatestDocProcessPlanByRecordID(t *testing.T) {
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
 			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
 			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
+			`{}`,
 			"auto",
 			"success",
 			`["extract_metrics"]`,
@@ -330,11 +331,11 @@ func TestListDocProcessPlansByRecordID(t *testing.T) {
 		WithArgs(int64(4821)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
 
-	listQuery := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(p.pipeline_spec::text, '\{\}'::text\), COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT \$2 OFFSET \$3`
+	listQuery := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(p.pipeline_spec::text, '\{\}'::text\), p.excluded_by_policy, COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT \$2 OFFSET \$3`
 	mock.ExpectQuery(listQuery).
 		WithArgs(int64(4821), 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "pipeline_spec", "mode", "status", "processors", "parameters", "create_time",
+			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "pipeline_spec", "excluded_by_policy", "mode", "status", "processors", "parameters", "create_time",
 		}).AddRow(
 			int64(20),
 			int64(4821),
@@ -343,6 +344,7 @@ func TestListDocProcessPlansByRecordID(t *testing.T) {
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
 			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
 			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
+			`{}`,
 			"auto",
 			"success",
 			`["extract_metrics"]`,
@@ -356,6 +358,7 @@ func TestListDocProcessPlansByRecordID(t *testing.T) {
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
 			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
 			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
+			`{}`,
 			"auto",
 			"failed",
 			`["generate_topics"]`,
@@ -431,11 +434,11 @@ func TestListDocProcessPlansByRecordID_AcceptsStatusModeAndPipelineFilters(t *te
 		WithArgs(int64(4821), "success", "auto", "legacy_default").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
-	listQuery := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(p.pipeline_spec::text, '\{\}'::text\), COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1 AND COALESCE\(r.status, ''\) = \$2 AND COALESCE\(r.mode, ''\) = \$3 AND p.pipeline_selection->>'PipelineName' = \$4\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT \$5 OFFSET \$6`
+	listQuery := `SELECT p.run_id, p.record_id, p.plan_facts::text, p.plan_steps::text, p.pipeline_selection::text, p.pipeline_binding::text, COALESCE\(p.pipeline_spec::text, '\{\}'::text\), p.excluded_by_policy, COALESCE\(r.mode, ''\), COALESCE\(r.status, ''\), COALESCE\(r.processors::text, '\[\]'::text\), COALESCE\(r.parameters::text, '\{\}'::text\), COALESCE\(to_char\(p.create_time, .*?\), ''\)\s+FROM kb\.doc_process_plans p\s+JOIN kb\.doc_process_runs r ON r.id = p.run_id\s+WHERE p.record_id = \$1 AND COALESCE\(r.status, ''\) = \$2 AND COALESCE\(r.mode, ''\) = \$3 AND p.pipeline_selection->>'PipelineName' = \$4\s+ORDER BY p.create_time DESC, p.id DESC\s+LIMIT \$5 OFFSET \$6`
 	mock.ExpectQuery(listQuery).
 		WithArgs(int64(4821), "success", "auto", "legacy_default", 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "pipeline_spec", "mode", "status", "processors", "parameters", "create_time",
+			"run_id", "record_id", "plan_facts", "plan_steps", "pipeline_selection", "pipeline_binding", "pipeline_spec", "excluded_by_policy", "mode", "status", "processors", "parameters", "create_time",
 		}).AddRow(
 			int64(20),
 			int64(4821),
@@ -444,6 +447,7 @@ func TestListDocProcessPlansByRecordID_AcceptsStatusModeAndPipelineFilters(t *te
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
 			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
 			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
+			`{}`,
 			"auto",
 			"success",
 			`["extract_metrics"]`,
