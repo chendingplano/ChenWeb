@@ -168,6 +168,7 @@ func TestBuildProfileReportValidation(t *testing.T) {
 		want   string
 	}{
 		{"unsupported schema version", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.SchemaVersion = 99 }, "schema_version"},
+		{"missing schema version", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.SchemaVersion = 0 }, "schema_version"},
 		{"dry run", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.DryRun = true }, "dry_run"},
 		{"dataset id mismatch", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.Dataset.ID = "wrong" }, "dataset.id"},
 		{"dataset version mismatch", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.Dataset.Version = "wrong" }, "dataset.version"},
