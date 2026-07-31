@@ -291,14 +291,24 @@ func TestLoadCorpusDatasetRejectsInvalidDocumentProfiles(t *testing.T) {
 			want: []string{`document_profiles[doc:ghost]: document is not generated`},
 		},
 		{
-			name:     "blank store profile",
-			manifest: strings.Replace(validCorpusManifest(), `"store_profile": "product-specification"`, `"store_profile": "   "`, 1),
-			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].store_profile`},
+			name:     "empty store profile",
+			manifest: strings.Replace(validCorpusManifest(), `"store_profile": "product-specification"`, `"store_profile": ""`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].store_profile: required`},
 		},
 		{
-			name:     "blank document kind",
+			name:     "whitespace store profile",
+			manifest: strings.Replace(validCorpusManifest(), `"store_profile": "product-specification"`, `"store_profile": "   "`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].store_profile: must be canonical nonblank text`},
+		},
+		{
+			name:     "empty document kind",
+			manifest: strings.Replace(validCorpusManifest(), `"document_kind": "enterprise-standard"`, `"document_kind": ""`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].document_kind: required`},
+		},
+		{
+			name:     "whitespace document kind",
 			manifest: strings.Replace(validCorpusManifest(), `"document_kind": "enterprise-standard"`, `"document_kind": "  "`, 1),
-			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].document_kind`},
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].document_kind: must be canonical nonblank text`},
 		},
 		{
 			name: "missing expected processors",
@@ -338,7 +348,7 @@ func TestLoadCorpusDatasetRejectsInvalidDocumentProfiles(t *testing.T) {
 		{
 			name:     "unknown processor",
 			manifest: strings.Replace(validCorpusManifest(), `"extract_metrics": "required"`, `"not_a_processor": "required"`, 1),
-			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[not_a_processor]`},
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[not_a_processor]`, `unknown processor`},
 		},
 		{
 			name:     "processor alias rejected",
@@ -348,7 +358,7 @@ func TestLoadCorpusDatasetRejectsInvalidDocumentProfiles(t *testing.T) {
 		{
 			name:     "unknown applicability",
 			manifest: strings.Replace(validCorpusManifest(), `"extract_metrics": "required"`, `"extract_metrics": "sometimes"`, 1),
-			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[extract_metrics]`},
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[extract_metrics]`, `unknown applicability`},
 		},
 		{
 			name: "missing selected expectation",

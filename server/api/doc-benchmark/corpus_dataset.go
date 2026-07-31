@@ -267,12 +267,8 @@ func validateCorpusDocumentProfiles(caseID string, raw map[string]DocumentProfil
 		if _, ok := generatedKeys[docID]; !ok {
 			*out = append(*out, fieldError(caseID, field, "document is not generated"))
 		}
-		if strings.TrimSpace(profile.StoreProfile) == "" {
-			*out = append(*out, fieldError(caseID, field+".store_profile", "required"))
-		}
-		if strings.TrimSpace(profile.DocumentKind) == "" {
-			*out = append(*out, fieldError(caseID, field+".document_kind", "required"))
-		}
+		validateCanonicalNonblankProfileText(caseID, field+".store_profile", profile.StoreProfile, out)
+		validateCanonicalNonblankProfileText(caseID, field+".document_kind", profile.DocumentKind, out)
 		if !profile.expectedProcessorsPresent {
 			*out = append(*out, fieldError(caseID, field+".expected_processors", "required"))
 		} else if len(profile.ExpectedProcessors) == 0 {
@@ -343,6 +339,15 @@ func validateCorpusDocumentProfiles(caseID string, raw map[string]DocumentProfil
 	}
 
 	return normalizedProfiles
+}
+
+func validateCanonicalNonblankProfileText(caseID, field, raw string, out *validationErrors) {
+	switch {
+	case raw == "":
+		*out = append(*out, fieldError(caseID, field, "required"))
+	case strings.TrimSpace(raw) == "":
+		*out = append(*out, fieldError(caseID, field, "must be canonical nonblank text"))
+	}
 }
 
 func rejectDuplicateJSONKeys(raw []byte) error {
