@@ -300,8 +300,8 @@ func TestResolveProductionPipelineSelectionRejectsUnknownPipeline(t *testing.T) 
 	}
 }
 
-func TestLookupSeededProductionPipelineReturnsStructuredSpec(t *testing.T) {
-	got, ok := LookupSeededProductionPipeline("legacy_default")
+func TestLookupProductionPipelineReturnsStructuredSpec(t *testing.T) {
+	got, ok := LookupProductionPipeline("legacy_default")
 	if !ok {
 		t.Fatal("expected legacy_default pipeline")
 	}
@@ -312,6 +312,35 @@ func TestLookupSeededProductionPipelineReturnsStructuredSpec(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("pipeline spec=%#v want=%#v", got, want)
+	}
+}
+
+func TestSetProductionPipelineRegistryOverridesLookupAndResetsToDefault(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+
+	if _, ok := LookupProductionPipeline("authored_only"); ok {
+		t.Fatal("did not expect authored_only before registry is installed")
+	}
+
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "authored_only", DisplayName: "Authored Only", LegacyEquivalent: true},
+	})
+
+	got, ok := LookupProductionPipeline("authored_only")
+	if !ok {
+		t.Fatal("expected authored_only after installing override registry")
+	}
+	want := ProductionPipelineSpec{Name: "authored_only", DisplayName: "Authored Only", LegacyEquivalent: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pipeline spec=%#v want=%#v", got, want)
+	}
+	if _, ok := LookupProductionPipeline("legacy_default"); ok {
+		t.Fatal("legacy_default should not resolve once the override registry replaced the fallback")
+	}
+
+	SetProductionPipelineRegistry(nil)
+	if _, ok := LookupProductionPipeline("legacy_default"); !ok {
+		t.Fatal("expected legacy_default to resolve again after resetting the registry override")
 	}
 }
 
