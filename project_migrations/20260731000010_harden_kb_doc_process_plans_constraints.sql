@@ -5,6 +5,7 @@
 -- (20260731000001). This migration makes them explicit so a fresh goose-only
 -- install gets them too, using idempotent IF NOT EXISTS / DO $$ patterns to
 -- be safe on systems that already have them.
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -17,6 +18,7 @@ BEGIN
             FOREIGN KEY (run_id) REFERENCES kb.doc_process_runs(id) ON DELETE CASCADE;
     END IF;
 END $$;
+-- +goose StatementEnd
 
 -- The original 20260731000001 migration created idx_kb_doc_process_plans_run_id
 -- as a regular index, but the correct semantics for the P1 design (one plan
