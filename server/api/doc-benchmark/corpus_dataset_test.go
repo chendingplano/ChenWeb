@@ -3,6 +3,7 @@ package docbenchmark
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,7 +69,32 @@ func validCorpusManifest() string {
 		"schema_version": 1,
 		"dataset_id": "test-corpus",
 		"dataset_version": "1.0.0",
-		"cases": [{"case_id": "case1", "gold": "gold.toml"}]
+		"cases": [{
+			"case_id": "case1",
+			"gold": "gold.toml",
+			` + validDocumentProfilesJSON() + `
+		}]
+	}`
+}
+
+func validDocumentProfilesJSON() string {
+	return `"document_profiles": {
+		"doc:ent-q-syn-001-2026": {
+			"store_profile": "product-specification",
+			"document_kind": "enterprise-standard",
+			"expected_processors": {
+				"extract_metrics": "required",
+				"extract_provisions": "useful"
+			}
+		},
+		"doc:cn": {
+			"store_profile": "regulated-reference",
+			"document_kind": "authority-standard",
+			"expected_processors": {
+				"extract_metrics": "useful",
+				"extract_provisions": "required"
+			}
+		}
 	}`
 }
 
@@ -193,6 +219,385 @@ text_template = "x"
 	root := writeCorpusDataset(t, validCorpusManifest(), badGold)
 	if _, err := LoadCorpusDataset(root); err == nil {
 		t.Fatal("expected an error for a gold file that fails Resolve, got nil")
+	}
+}
+
+func TestLoadCorpusDatasetRejectsInvalidDocumentProfiles(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest string
+		want     []string
+	}{
+		{
+			name: "missing generated document",
+			manifest: `{
+				"schema_version": 1,
+				"dataset_id": "test-corpus",
+				"dataset_version": "1.0.0",
+				"cases": [{
+					"case_id": "case1",
+					"gold": "gold.toml",
+					"document_profiles": {
+						"doc:ent-q-syn-001-2026": {
+							"store_profile": "product-specification",
+							"document_kind": "enterprise-standard",
+							"expected_processors": {
+								"extract_metrics": "required",
+								"extract_provisions": "useful"
+							}
+						}
+					}
+				}]
+			}`,
+			want: []string{`document_profiles[doc:cn]: required`},
+		},
+		{
+			name: "unknown document",
+			manifest: `{
+				"schema_version": 1,
+				"dataset_id": "test-corpus",
+				"dataset_version": "1.0.0",
+				"cases": [{
+					"case_id": "case1",
+					"gold": "gold.toml",
+					"document_profiles": {
+						"doc:ent-q-syn-001-2026": {
+							"store_profile": "product-specification",
+							"document_kind": "enterprise-standard",
+							"expected_processors": {
+								"extract_metrics": "required",
+								"extract_provisions": "useful"
+							}
+						},
+						"doc:cn": {
+							"store_profile": "regulated-reference",
+							"document_kind": "authority-standard",
+							"expected_processors": {
+								"extract_metrics": "useful",
+								"extract_provisions": "required"
+							}
+						},
+						"doc:ghost": {
+							"store_profile": "regulated-reference",
+							"document_kind": "authority-standard",
+							"expected_processors": {
+								"extract_metrics": "useful",
+								"extract_provisions": "required"
+							}
+						}
+					}
+				}]
+			}`,
+			want: []string{`document_profiles[doc:ghost]: document is not generated`},
+		},
+		{
+			name:     "blank store profile",
+			manifest: strings.Replace(validCorpusManifest(), `"store_profile": "product-specification"`, `"store_profile": "   "`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].store_profile`},
+		},
+		{
+			name:     "blank document kind",
+			manifest: strings.Replace(validCorpusManifest(), `"document_kind": "enterprise-standard"`, `"document_kind": "  "`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].document_kind`},
+		},
+		{
+			name: "missing expected processors",
+			manifest: `{
+				"schema_version": 1,
+				"dataset_id": "test-corpus",
+				"dataset_version": "1.0.0",
+				"cases": [{
+					"case_id": "case1",
+					"gold": "gold.toml",
+					"document_profiles": {
+						"doc:ent-q-syn-001-2026": {
+							"store_profile": "product-specification",
+							"document_kind": "enterprise-standard"
+						},
+						"doc:cn": {
+							"store_profile": "regulated-reference",
+							"document_kind": "authority-standard",
+							"expected_processors": {
+								"extract_metrics": "useful",
+								"extract_provisions": "required"
+							}
+						}
+					}
+				}]
+			}`,
+			want: []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors: required`},
+		},
+		{
+			name: "empty expected processors",
+			manifest: strings.Replace(validCorpusManifest(), `"expected_processors": {
+				"extract_metrics": "required",
+				"extract_provisions": "useful"
+			}`, `"expected_processors": {}`, 1),
+			want: []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors: must not be empty`},
+		},
+		{
+			name:     "unknown processor",
+			manifest: strings.Replace(validCorpusManifest(), `"extract_metrics": "required"`, `"not_a_processor": "required"`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[not_a_processor]`},
+		},
+		{
+			name:     "processor alias rejected",
+			manifest: strings.Replace(validCorpusManifest(), `"extract_metrics": "required"`, `"extract-metrics": "required"`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[extract-metrics]`, `processor name must be canonical`},
+		},
+		{
+			name:     "unknown applicability",
+			manifest: strings.Replace(validCorpusManifest(), `"extract_metrics": "required"`, `"extract_metrics": "sometimes"`, 1),
+			want:     []string{`document_profiles[doc:ent-q-syn-001-2026].expected_processors[extract_metrics]`},
+		},
+		{
+			name: "missing selected expectation",
+			manifest: `{
+				"schema_version": 1,
+				"dataset_id": "test-corpus",
+				"dataset_version": "1.0.0",
+				"cases": [{
+					"case_id": "case1",
+					"gold": "gold.toml",
+					"document_profiles": {
+						"doc:ent-q-syn-001-2026": {
+							"store_profile": "product-specification",
+							"document_kind": "enterprise-standard",
+							"expected_processors": {
+								"extract_metrics": "required"
+							}
+						},
+						"doc:cn": {
+							"store_profile": "regulated-reference",
+							"document_kind": "authority-standard",
+							"expected_processors": {
+								"extract_metrics": "useful",
+								"extract_provisions": "required"
+							}
+						}
+					}
+				}]
+			}`,
+			want: []string{`expected_processors[extract_provisions]: required`},
+		},
+		{
+			name: "normalized duplicate document id",
+			manifest: strings.Replace(validCorpusManifest(), `"doc:cn": {`, `" doc:cn ": {
+			"store_profile": "regulated-reference",
+			"document_kind": "authority-standard",
+			"expected_processors": {
+				"extract_metrics": "useful",
+				"extract_provisions": "required"
+			}
+		},
+		"doc:cn": {`, 1),
+			want: []string{`document_profiles[doc:cn]: duplicate normalized document id`},
+		},
+		{
+			name:     "normalized duplicate processor id",
+			manifest: strings.Replace(validCorpusManifest(), `"extract_provisions": "useful"`, `" extract_provisions ": "useful", "extract_provisions": "required"`, 1),
+			want:     []string{`expected_processors[extract_provisions]: duplicate normalized processor id`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeCorpusDataset(t, tt.manifest, minimalGoldTOML)
+			_, err := LoadCorpusDataset(root)
+			if err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q missing %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadCorpusDatasetRejectsDuplicateDocumentProfileJSONKey(t *testing.T) {
+	root := writeCorpusDataset(t, `{
+		"schema_version": 1,
+		"dataset_id": "test-corpus",
+		"dataset_version": "1.0.0",
+		"cases": [{
+			"case_id": "case1",
+			"gold": "gold.toml",
+			"document_profiles": {
+				"doc:ent-q-syn-001-2026": {
+					"store_profile": "product-specification",
+					"document_kind": "enterprise-standard",
+					"expected_processors": {
+						"extract_metrics": "required",
+						"extract_provisions": "useful"
+					}
+				},
+				"doc:cn": {
+					"store_profile": "regulated-reference",
+					"document_kind": "authority-standard",
+					"expected_processors": {
+						"extract_metrics": "useful",
+						"extract_provisions": "required"
+					}
+				},
+				"doc:cn": {
+					"store_profile": "duplicate",
+					"document_kind": "duplicate",
+					"expected_processors": {
+						"extract_metrics": "required",
+						"extract_provisions": "required"
+					}
+				}
+			}
+		}]
+	}`, minimalGoldTOML)
+	_, err := LoadCorpusDataset(root)
+	if err == nil || !strings.Contains(err.Error(), `document_profiles.doc:cn`) {
+		t.Fatalf("got %v, want duplicate document_profiles key error", err)
+	}
+}
+
+func TestLoadCorpusDatasetRejectsDuplicateExpectedProcessorJSONKey(t *testing.T) {
+	root := writeCorpusDataset(t, `{
+		"schema_version": 1,
+		"dataset_id": "test-corpus",
+		"dataset_version": "1.0.0",
+		"cases": [{
+			"case_id": "case1",
+			"gold": "gold.toml",
+			"document_profiles": {
+				"doc:ent-q-syn-001-2026": {
+					"store_profile": "product-specification",
+					"document_kind": "enterprise-standard",
+					"expected_processors": {
+						"extract_metrics": "required",
+						"extract_metrics": "useful",
+						"extract_provisions": "useful"
+					}
+				},
+				"doc:cn": {
+					"store_profile": "regulated-reference",
+					"document_kind": "authority-standard",
+					"expected_processors": {
+						"extract_metrics": "useful",
+						"extract_provisions": "required"
+					}
+				}
+			}
+		}]
+	}`, minimalGoldTOML)
+	_, err := LoadCorpusDataset(root)
+	if err == nil || !strings.Contains(err.Error(), `expected_processors.extract_metrics`) {
+		t.Fatalf("got %v, want duplicate expected_processors key error", err)
+	}
+}
+
+func TestCorpusCaseContentHashChangesWithProfileOrGold(t *testing.T) {
+	root := writeCorpusDataset(t, validCorpusManifest(), minimalGoldTOML)
+	one, err := LoadCorpusDataset(root)
+	if err != nil {
+		t.Fatalf("LoadCorpusDataset: %v", err)
+	}
+
+	profileManifest := strings.Replace(validCorpusManifest(), `"product-specification"`, `"subject-profile"`, 1)
+	profileRoot := writeCorpusDataset(t, profileManifest, minimalGoldTOML)
+	two, err := LoadCorpusDataset(profileRoot)
+	if err != nil {
+		t.Fatalf("LoadCorpusDataset profile mutation: %v", err)
+	}
+	if one.Cases[0].ContentHash == two.Cases[0].ContentHash {
+		t.Fatal("profile mutation did not change content hash")
+	}
+
+	goldRoot := writeCorpusDataset(t, validCorpusManifest(), minimalGoldTOML+"\n# gold mutation\n")
+	three, err := LoadCorpusDataset(goldRoot)
+	if err != nil {
+		t.Fatalf("LoadCorpusDataset gold mutation: %v", err)
+	}
+	if one.Cases[0].ContentHash == three.Cases[0].ContentHash {
+		t.Fatal("gold mutation did not change content hash")
+	}
+}
+
+func TestCorpusCaseContentHashIgnoresMapInsertionOrder(t *testing.T) {
+	manifestA := `{
+		"schema_version": 1,
+		"dataset_id": "test-corpus",
+		"dataset_version": "1.0.0",
+		"cases": [{
+			"case_id": "case1",
+			"gold": "gold.toml",
+			"tags": ["alpha", "beta"],
+			"document_profiles": {
+				"doc:ent-q-syn-001-2026": {
+					"store_profile": "product-specification",
+					"document_kind": "enterprise-standard",
+					"expected_processors": {
+						"extract_metrics": "required",
+						"extract_provisions": "useful"
+					}
+				},
+				"doc:cn": {
+					"store_profile": "regulated-reference",
+					"document_kind": "authority-standard",
+					"expected_processors": {
+						"extract_metrics": "useful",
+						"extract_provisions": "required"
+					}
+				}
+			}
+		}]
+	}`
+	manifestB := `{
+		"schema_version": 1,
+		"dataset_id": "test-corpus",
+		"dataset_version": "1.0.0",
+		"cases": [{
+			"case_id": "case1",
+			"gold": "gold.toml",
+			"tags": ["alpha", "beta"],
+			"document_profiles": {
+				"doc:cn": {
+					"document_kind": "authority-standard",
+					"store_profile": "regulated-reference",
+					"expected_processors": {
+						"extract_provisions": "required",
+						"extract_metrics": "useful"
+					}
+				},
+				"doc:ent-q-syn-001-2026": {
+					"expected_processors": {
+						"extract_provisions": "useful",
+						"extract_metrics": "required"
+					},
+					"document_kind": "enterprise-standard",
+					"store_profile": "product-specification"
+				}
+			}
+		}]
+	}`
+
+	left, err := LoadCorpusDataset(writeCorpusDataset(t, manifestA, minimalGoldTOML))
+	if err != nil {
+		t.Fatalf("LoadCorpusDataset A: %v", err)
+	}
+	right, err := LoadCorpusDataset(writeCorpusDataset(t, manifestB, minimalGoldTOML))
+	if err != nil {
+		t.Fatalf("LoadCorpusDataset B: %v", err)
+	}
+	if left.Cases[0].ContentHash != right.Cases[0].ContentHash {
+		t.Fatalf("got %q and %q, want equal hashes", left.Cases[0].ContentHash, right.Cases[0].ContentHash)
+	}
+}
+
+func TestCorpusCaseContentHashUsesSHA256Prefix(t *testing.T) {
+	ds, err := LoadCorpusDataset(writeCorpusDataset(t, validCorpusManifest(), minimalGoldTOML))
+	if err != nil {
+		t.Fatalf("LoadCorpusDataset: %v", err)
+	}
+	if !strings.HasPrefix(ds.Cases[0].ContentHash, "sha256:") {
+		t.Fatalf("got %q, want sha256: prefix", ds.Cases[0].ContentHash)
 	}
 }
 

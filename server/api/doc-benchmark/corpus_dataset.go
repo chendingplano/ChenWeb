@@ -18,12 +18,22 @@ package docbenchmark
 // assume are available).
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	gold "github.com/chendingplano/deepdoc/benchmark/doc-processors/gold/display-module-v1"
 	"github.com/chendingplano/deepdoc/server/api/cdm/model"
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 type CorpusManifest struct {
@@ -33,10 +43,27 @@ type CorpusManifest struct {
 	Cases          []CorpusManifestCase `json:"cases"`
 }
 
+type ProcessorApplicability string
+
+const (
+	ProcessorRequired    ProcessorApplicability = "required"
+	ProcessorUseful      ProcessorApplicability = "useful"
+	ProcessorNotRequired ProcessorApplicability = "not_required"
+)
+
+type DocumentProfile struct {
+	StoreProfile       string                            `json:"store_profile"`
+	DocumentKind       string                            `json:"document_kind"`
+	ExpectedProcessors map[string]ProcessorApplicability `json:"expected_processors"`
+
+	expectedProcessorsPresent bool
+}
+
 type CorpusManifestCase struct {
-	CaseID string   `json:"case_id"`
-	Gold   string   `json:"gold"`
-	Tags   []string `json:"tags,omitempty"`
+	CaseID           string                     `json:"case_id"`
+	Gold             string                     `json:"gold"`
+	Tags             []string                   `json:"tags,omitempty"`
+	DocumentProfiles map[string]DocumentProfile `json:"document_profiles"`
 }
 
 // CorpusCase is one loaded, validated corpus-level case: a gold ontology
@@ -46,8 +73,10 @@ type CorpusCase struct {
 	CaseID string
 	Tags   []string
 
-	Gold     gold.File
-	Resolved *gold.Resolved
+	Gold             gold.File
+	Resolved         *gold.Resolved
+	DocumentProfiles map[string]DocumentProfile
+	ContentHash      string
 }
 
 // Documents renders this case's gold fixture into CDM documents, one per
@@ -117,6 +146,9 @@ func LoadCorpusDataset(root string) (*CorpusDataset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("manifest.json: %w", err)
 	}
+	if err := rejectDuplicateJSONKeys(manifestBytes); err != nil {
+		return nil, fmt.Errorf("manifest.json: %w", err)
+	}
 	var manifest CorpusManifest
 	if err := decodeStrict(manifestBytes, &manifest); err != nil {
 		return nil, fmt.Errorf("manifest.json: %w", err)
@@ -139,6 +171,10 @@ func LoadCorpusDataset(root string) (*CorpusDataset, error) {
 	seenCaseIDs := map[string]bool{}
 	refs := map[string]string{}
 	cases := make([]CorpusCase, 0, len(manifest.Cases))
+	canonicalManifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("manifest.json: canonical JSON: %w", err)
+	}
 	for i, mc := range manifest.Cases {
 		caseID := mc.CaseID
 		if caseID == "" {
@@ -168,12 +204,233 @@ func LoadCorpusDataset(root string) (*CorpusDataset, error) {
 			problems = append(problems, fieldError(caseID, "gold", fmt.Sprintf("resolving: %v", err)))
 			continue
 		}
+		documentProfiles := validateCorpusDocumentProfiles(caseID, mc.DocumentProfiles, gold.BuildDocuments(goldFile), &problems)
+		contentHash, err := corpusCaseContentHash(canonicalManifestBytes, goldBytes)
+		if err != nil {
+			problems = append(problems, fieldError(caseID, "content_hash", err.Error()))
+			continue
+		}
 
-		cases = append(cases, CorpusCase{CaseID: caseID, Tags: mc.Tags, Gold: goldFile, Resolved: resolved})
+		cases = append(cases, CorpusCase{
+			CaseID:           caseID,
+			Tags:             mc.Tags,
+			Gold:             goldFile,
+			Resolved:         resolved,
+			DocumentProfiles: documentProfiles,
+			ContentHash:      contentHash,
+		})
 	}
 
 	if len(problems) > 0 {
 		return nil, problems
 	}
 	return &CorpusDataset{Root: canonicalRoot, Manifest: manifest, Cases: cases}, nil
+}
+
+func (p *DocumentProfile) UnmarshalJSON(raw []byte) error {
+	type alias DocumentProfile
+	aux := struct {
+		ExpectedProcessors *map[string]ProcessorApplicability `json:"expected_processors"`
+		*alias
+	}{alias: (*alias)(p)}
+	if err := decodeStrict(raw, &aux); err != nil {
+		return err
+	}
+	p.expectedProcessorsPresent = aux.ExpectedProcessors != nil
+	if aux.ExpectedProcessors != nil {
+		p.ExpectedProcessors = *aux.ExpectedProcessors
+	}
+	return nil
+}
+
+func validateCorpusDocumentProfiles(caseID string, raw map[string]DocumentProfile, generated []model.Document, out *validationErrors) map[string]DocumentProfile {
+	generatedKeys := make(map[string]struct{}, len(generated))
+	for _, doc := range generated {
+		generatedKeys[doc.Key] = struct{}{}
+	}
+
+	normalizedProfiles := make(map[string]DocumentProfile, len(raw))
+	normalizedDocs := make(map[string]string, len(raw))
+	union := map[string]struct{}{}
+
+	for rawDocID, profile := range raw {
+		docID := strings.TrimSpace(rawDocID)
+		field := fmt.Sprintf("document_profiles[%s]", docID)
+		if rawDocID != docID {
+			*out = append(*out, fieldError(caseID, field, "document id must be canonical"))
+		}
+		if previous, exists := normalizedDocs[docID]; exists && previous != rawDocID {
+			*out = append(*out, fieldError(caseID, field, "duplicate normalized document id"))
+			continue
+		}
+		normalizedDocs[docID] = rawDocID
+		if _, ok := generatedKeys[docID]; !ok {
+			*out = append(*out, fieldError(caseID, field, "document is not generated"))
+		}
+		if strings.TrimSpace(profile.StoreProfile) == "" {
+			*out = append(*out, fieldError(caseID, field+".store_profile", "required"))
+		}
+		if strings.TrimSpace(profile.DocumentKind) == "" {
+			*out = append(*out, fieldError(caseID, field+".document_kind", "required"))
+		}
+		if !profile.expectedProcessorsPresent {
+			*out = append(*out, fieldError(caseID, field+".expected_processors", "required"))
+		} else if len(profile.ExpectedProcessors) == 0 {
+			*out = append(*out, fieldError(caseID, field+".expected_processors", "must not be empty"))
+		}
+
+		normalizedExpected := make(map[string]ProcessorApplicability, len(profile.ExpectedProcessors))
+		normalizedProcessors := make(map[string]string, len(profile.ExpectedProcessors))
+		for rawProcessor, applicability := range profile.ExpectedProcessors {
+			processorID := strings.TrimSpace(rawProcessor)
+			procField := fmt.Sprintf("%s.expected_processors[%s]", field, processorID)
+			if rawProcessor != processorID {
+				*out = append(*out, fieldError(caseID, procField, "processor name must be canonical"))
+			}
+			canonicalProcessor, ok := docprocessing.CanonicalOptionalProductionProcessor(rawProcessor)
+			if !ok {
+				*out = append(*out, fieldError(caseID, procField, "unknown processor"))
+				continue
+			}
+			if canonicalProcessor != processorID {
+				*out = append(*out, fieldError(caseID, procField, "processor name must be canonical"))
+				continue
+			}
+			if previous, exists := normalizedProcessors[canonicalProcessor]; exists && previous != rawProcessor {
+				*out = append(*out, fieldError(caseID, fmt.Sprintf("%s.expected_processors[%s]", field, canonicalProcessor), "duplicate normalized processor id"))
+				continue
+			}
+			normalizedProcessors[canonicalProcessor] = rawProcessor
+			switch applicability {
+			case ProcessorRequired, ProcessorUseful, ProcessorNotRequired:
+			default:
+				*out = append(*out, fieldError(caseID, procField, "unknown applicability"))
+				continue
+			}
+			normalizedExpected[canonicalProcessor] = applicability
+			union[canonicalProcessor] = struct{}{}
+		}
+		profile.ExpectedProcessors = normalizedExpected
+		normalizedProfiles[docID] = profile
+	}
+
+	generatedIDs := make([]string, 0, len(generatedKeys))
+	for docID := range generatedKeys {
+		generatedIDs = append(generatedIDs, docID)
+	}
+	sort.Strings(generatedIDs)
+	for _, docID := range generatedIDs {
+		if _, ok := normalizedProfiles[docID]; !ok {
+			*out = append(*out, fieldError(caseID, fmt.Sprintf("document_profiles[%s]", docID), "required"))
+		}
+	}
+
+	unionKeys := make([]string, 0, len(union))
+	for name := range union {
+		unionKeys = append(unionKeys, name)
+	}
+	sort.Strings(unionKeys)
+	for _, docID := range generatedIDs {
+		profile, ok := normalizedProfiles[docID]
+		if !ok {
+			continue
+		}
+		for _, processor := range unionKeys {
+			if _, ok := profile.ExpectedProcessors[processor]; !ok {
+				*out = append(*out, fieldError(caseID, fmt.Sprintf("document_profiles[%s].expected_processors[%s]", docID, processor), "required"))
+			}
+		}
+	}
+
+	return normalizedProfiles
+}
+
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := checkJSONValue(dec, ""); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err == nil {
+		return fmt.Errorf("multiple JSON values")
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
+func checkJSONValue(dec *json.Decoder, path string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := map[string]struct{}{}
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyTok.(string)
+			if !ok {
+				return fmt.Errorf("object key is not a string")
+			}
+			keyPath := joinJSONPath(path, key)
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("duplicate JSON key at %s", keyPath)
+			}
+			seen[key] = struct{}{}
+			if err := checkJSONValue(dec, keyPath); err != nil {
+				return err
+			}
+		}
+		end, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return fmt.Errorf("malformed JSON object")
+		}
+	case '[':
+		for i := 0; dec.More(); i++ {
+			if err := checkJSONValue(dec, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+		end, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return fmt.Errorf("malformed JSON array")
+		}
+	}
+	return nil
+}
+
+func joinJSONPath(base, key string) string {
+	if base == "" {
+		return key
+	}
+	return base + "." + key
+}
+
+func corpusCaseContentHash(canonicalManifest, goldBytes []byte) (string, error) {
+	hasher := sha256.New()
+	for _, frame := range [][]byte{[]byte("chenweb-corpus-case-v1\n"), canonicalManifest, goldBytes} {
+		var length [8]byte
+		binary.BigEndian.PutUint64(length[:], uint64(len(frame)))
+		if _, err := hasher.Write(length[:]); err != nil {
+			return "", err
+		}
+		if _, err := hasher.Write(frame); err != nil {
+			return "", err
+		}
+	}
+	return "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
 }
