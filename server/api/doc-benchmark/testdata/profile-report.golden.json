@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "id": "doc-processors-corpus-display-module",
+    "version": "1.1.0",
+    "content_hash": "sha256:16ed1dbb544e6bdf2cafa47b308eab0b1c6e415b7544a381ea4e25906e1da86b"
+  },
+  "case_id": "display-module-v1",
+  "selected_processors": [
+    "generate_summaries",
+    "extract_inventory_items",
+    "extract_provisions"
+  ],
+  "rows": [
+    {
+      "store_profile": "narrative-research",
+      "document_kind": "marketing-narrative",
+      "processor": "extract_inventory_items",
+      "documents": 1,
+      "successful_documents": 1,
+      "failed_documents": 0,
+      "documents_with_output": 1,
+      "output_rows": 1,
+      "not_registered": 0,
+      "applicability": "not_required",
+      "evidence_kind": "structural_yield",
+      "assessment": "informational_not_required"
+    },
+    {
+      "store_profile": "narrative-research",
+      "document_kind": "marketing-narrative",
+      "processor": "extract_provisions",
+      "documents": 1,
+      "successful_documents": 1,
+      "failed_documents": 0,
+      "documents_with_output": 0,
+      "output_rows": 0,
+      "not_registered": 1,
+      "applicability": "not_required",
+      "evidence_kind": "structural_yield",
+      "assessment": "informational_not_required"
+    },
+    {
+      "store_profile": "narrative-research",
+      "document_kind": "marketing-narrative",
+      "processor": "generate_summaries",
+      "documents": 1,
+      "successful_documents": 1,
+      "failed_documents": 0,
+      "documents_with_output": 1,
+      "output_rows": 1,
+      "not_registered": 0,
+      "applicability": "required",
+      "evidence_kind": "structural_yield",
+      "assessment": "required_output_observed"
+    },
+    {
+      "store_profile": "product-specification",
+      "document_kind": "enterprise-standard",
+      "processor": "extract_inventory_items",
+      "documents": 3,
+      "successful_documents": 2,
+      "failed_documents": 1,
+      "documents_with_output": 1,
+      "output_rows": 1,
+      "not_registered": 0,
+      "applicability": "required",
+      "evidence_kind": "structural_yield",
+      "assessment": "required_failure"
+    },
+    {
+      "store_profile": "product-specification",
+      "document_kind": "enterprise-standard",
+      "processor": "extract_provisions",
+      "documents": 3,
+      "successful_documents": 2,
+      "failed_documents": 1,
+      "documents_with_output": 2,
+      "output_rows": 2,
+      "not_registered": 0,
+      "applicability": "useful",
+      "evidence_kind": "structural_yield",
+      "assessment": "useful_review_warning"
+    },
+    {
+      "store_profile": "product-specification",
+      "document_kind": "enterprise-standard",
+      "processor": "generate_summaries",
+      "documents": 3,
+      "successful_documents": 2,
+      "failed_documents": 1,
+      "documents_with_output": 2,
+      "output_rows": 2,
+      "not_registered": 0,
+      "applicability": "not_required",
+      "evidence_kind": "structural_yield",
+      "assessment": "informational_not_required"
+    },
+    {
+      "store_profile": "regulated-reference",
+      "document_kind": "authority-standard",
+      "processor": "extract_inventory_items",
+      "documents": 5,
+      "successful_documents": 5,
+      "failed_documents": 0,
+      "documents_with_output": 5,
+      "output_rows": 5,
+      "not_registered": 0,
+      "applicability": "not_required",
+      "evidence_kind": "structural_yield",
+      "assessment": "informational_not_required"
+    },
+    {
+      "store_profile": "regulated-reference",
+      "document_kind": "authority-standard",
+      "processor": "extract_provisions",
+      "documents": 5,
+      "successful_documents": 5,
+      "failed_documents": 0,
+      "documents_with_output": 5,
+      "output_rows": 5,
+      "not_registered": 0,
+      "applicability": "required",
+      "evidence_kind": "structural_yield",
+      "assessment": "required_output_observed"
+    },
+    {
+      "store_profile": "regulated-reference",
+      "document_kind": "authority-standard",
+      "processor": "generate_summaries",
+      "documents": 5,
+      "successful_documents": 5,
+      "failed_documents": 0,
+      "documents_with_output": 5,
+      "output_rows": 5,
+      "not_registered": 0,
+      "applicability": "not_required",
+      "evidence_kind": "structural_yield",
+      "assessment": "informational_not_required"
+    }
+  ]
+}
