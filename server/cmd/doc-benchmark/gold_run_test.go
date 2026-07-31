@@ -71,6 +71,13 @@ func TestDryRunEnvelopeHasNoSelectedProcessors(t *testing.T) {
 	if len(env.SelectedProcessors) != 0 {
 		t.Fatalf("SelectedProcessors = %v, want empty for dry-run", env.SelectedProcessors)
 	}
+	got, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(got) != `{"schema_version":2,"dataset":{"id":"dataset-a","version":"1.2.3","content_hash":"sha256:abc123"},"case_id":"case-7","selected_processors":[],"dry_run":true,"results":null}` {
+		t.Fatalf("json = %s, want selected_processors as []", got)
+	}
 }
 
 func TestGoldRunProcessorResultEmitsNonemptyRows(t *testing.T) {

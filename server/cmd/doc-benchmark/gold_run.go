@@ -335,7 +335,7 @@ func fetchProcessorResults(ctx context.Context, db *sql.DB, processor string, re
 
 func goldRunEnvelope(ds *docbenchmark.CorpusDataset, corpusCase *docbenchmark.CorpusCase, dryRun bool, selected []string, results []docbenchmark.GoldRunDocumentResult) docbenchmark.GoldRunEnvelope {
 	if dryRun {
-		selected = nil
+		selected = []string{}
 	}
 	return docbenchmark.GoldRunEnvelope{
 		SchemaVersion: docbenchmark.GoldRunSchemaVersion,
@@ -345,7 +345,7 @@ func goldRunEnvelope(ds *docbenchmark.CorpusDataset, corpusCase *docbenchmark.Co
 			ContentHash: corpusCase.ContentHash,
 		},
 		CaseID:             corpusCase.CaseID,
-		SelectedProcessors: append([]string(nil), selected...),
+		SelectedProcessors: append([]string{}, selected...),
 		DryRun:             dryRun,
 		Results:            results,
 	}
