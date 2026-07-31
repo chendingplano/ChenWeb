@@ -153,7 +153,11 @@ func BuildProfileReport(ds *CorpusDataset, caseID string, run GoldRunEnvelope) (
 		}
 		profile := corpusCase.DocumentProfiles[docKey]
 		for _, processor := range run.SelectedProcessors {
-			applicability := string(profile.ExpectedProcessors[processor])
+			applicabilityValue, ok := profile.ExpectedProcessors[processor]
+			if !ok {
+				return ProfileReport{}, fmt.Errorf("document_profiles[%s].expected_processors[%s]: required", docKey, processor)
+			}
+			applicability := string(applicabilityValue)
 			key := aggregateKey{storeProfile: profile.StoreProfile, documentKind: profile.DocumentKind, processor: processor}
 			row := aggregates[key]
 			if row == nil {
@@ -268,7 +272,7 @@ func assessProfileReportRow(row ProfileReportRow) string {
 		}
 		return "required_output_observed"
 	case string(ProcessorUseful):
-		if row.FailedDocuments > 0 || row.DocumentsWithOutput == 0 {
+		if row.FailedDocuments > 0 || row.NotRegistered > 0 || row.DocumentsWithOutput == 0 {
 			return "useful_review_warning"
 		}
 		return "useful_output_observed"

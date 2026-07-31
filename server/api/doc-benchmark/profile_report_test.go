@@ -170,6 +170,7 @@ func TestBuildProfileReportValidation(t *testing.T) {
 		{"unsupported schema version", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.SchemaVersion = 99 }, "schema_version"},
 		{"missing schema version", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.SchemaVersion = 0 }, "schema_version"},
 		{"dry run", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.DryRun = true }, "dry_run"},
+		{"empty selected processors", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.SelectedProcessors = []string{} }, "selected_processors"},
 		{"dataset id mismatch", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.Dataset.ID = "wrong" }, "dataset.id"},
 		{"dataset version mismatch", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.Dataset.Version = "wrong" }, "dataset.version"},
 		{"case id mismatch", func(_ *CorpusDataset, run *GoldRunEnvelope) { run.CaseID = "wrong" }, "case_id"},
@@ -211,6 +212,16 @@ func TestBuildProfileReportValidation(t *testing.T) {
 			bad.Rows = &rows
 			result.Results["extract_provisions"] = bad
 		}, "not_registered state must omit rows field"},
+		{"missing applicability for selected processor", func(ds *CorpusDataset, _ *GoldRunEnvelope) {
+			profile := ds.Cases[0].DocumentProfiles["doc:cn-gb-syn-9706-1-2020"]
+			expected := make(map[string]ProcessorApplicability, len(profile.ExpectedProcessors))
+			for k, v := range profile.ExpectedProcessors {
+				expected[k] = v
+			}
+			delete(expected, "extract_provisions")
+			profile.ExpectedProcessors = expected
+			ds.Cases[0].DocumentProfiles["doc:cn-gb-syn-9706-1-2020"] = profile
+		}, "expected_processors[extract_provisions]: required"},
 		{"run_error with processor results", func(_ *CorpusDataset, run *GoldRunEnvelope) {
 			result := fixtureResult(run, "doc:ent-q-syn-001-2026")
 			result.RunError = "boom"
@@ -253,6 +264,9 @@ func TestProfileReportRenderDeterministicAndGolden(t *testing.T) {
 	if !strings.HasSuffix(string(jsonA), "\n") {
 		t.Fatal("JSON must end with one newline")
 	}
+	if strings.HasSuffix(string(jsonA[:len(jsonA)-1]), "\n") {
+		t.Fatal("JSON must end with exactly one trailing newline")
+	}
 
 	mdA := RenderProfileReportMarkdown(report)
 	mdB := RenderProfileReportMarkdown(report)
@@ -288,6 +302,21 @@ func TestProfileReportRenderDeterministicAndGolden(t *testing.T) {
 	}
 	if mdA != string(mdGolden) {
 		t.Fatalf("Markdown render mismatch\nGOT:\n%s\nWANT:\n%s", mdA, mdGolden)
+	}
+}
+
+func TestProfileReportAssessmentUsefulNotRegisteredWarns(t *testing.T) {
+	row := ProfileReportRow{
+		Applicability:       string(ProcessorUseful),
+		Documents:           2,
+		SuccessfulDocuments: 2,
+		FailedDocuments:     0,
+		DocumentsWithOutput: 1,
+		OutputRows:          1,
+		NotRegistered:       1,
+	}
+	if got := assessProfileReportRow(row); got != "useful_review_warning" {
+		t.Fatalf("assessment = %q, want useful_review_warning", got)
 	}
 }
 
