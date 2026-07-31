@@ -16,8 +16,8 @@ func TestCreateDocProcessPlan_InsertsAndReturnsID(t *testing.T) {
 	defer db.Close()
 
 	insertQuery := regexp.QuoteMeta(`
-INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding)
-VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb)
+INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec)
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb)
 RETURNING id`)
 
 	facts := ProductionPlanFacts{
@@ -49,6 +49,11 @@ RETURNING id`)
 		Source:           "system_default",
 		SelectedPipeline: "legacy_default",
 	}
+	spec := ProductionPipelineSpec{
+		Name:             "legacy_default",
+		DisplayName:      "Legacy Default",
+		LegacyEquivalent: true,
+	}
 
 	mock.ExpectQuery(insertQuery).
 		WithArgs(
@@ -58,6 +63,7 @@ RETURNING id`)
 			`[{"Name":"static_analyzer","Phase":"A","DependsOn":[],"Reason":"mandatory_baseline"},{"Name":"chunking","Phase":"A","DependsOn":["static_analyzer"],"Reason":"implicit_dependency"},{"Name":"generate_topics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"},{"Name":"extract_provisions","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
 			`{"RequestedPipeline":"","StoreBoundPipeline":"","Source":"system_default","SelectedPipeline":"legacy_default"}`,
+			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(9)))
 
@@ -69,6 +75,7 @@ RETURNING id`)
 		PlanSteps:         steps,
 		PipelineSelection: selection,
 		PipelineBinding:   binding,
+		PipelineSpec:      spec,
 	})
 	if err != nil {
 		t.Fatalf("CreateDocProcessPlan: %v", err)

@@ -16,6 +16,7 @@ type DocProcessPlanRecord struct {
 	PlanSteps         []ProcessorPlanStep
 	PipelineBinding   ProductionPipelineBindingResolution
 	PipelineSelection ProductionPipelineSelection
+	PipelineSpec      ProductionPipelineSpec
 }
 
 type DocProcessPlanView struct {
@@ -25,6 +26,7 @@ type DocProcessPlanView struct {
 	PlanSteps         []ProcessorPlanStep
 	PipelineBinding   ProductionPipelineBindingResolution
 	PipelineSelection ProductionPipelineSelection
+	PipelineSpec      ProductionPipelineSpec
 	Mode              string
 	Status            string
 	Processors        []string
@@ -65,14 +67,18 @@ func (s SQLStore) CreateDocProcessPlan(ctx context.Context, rec DocProcessPlanRe
 	if err != nil {
 		return 0, err
 	}
+	specJSON, err := json.Marshal(rec.PipelineSpec)
+	if err != nil {
+		return 0, err
+	}
 
 	const stmt = `
-INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding)
-VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb)
+INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec)
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb)
 RETURNING id`
 
 	var id int64
-	err = s.DB.QueryRowContext(ctx, stmt, rec.RunID, rec.RecordID, string(factsJSON), string(stepsJSON), string(selectionJSON), string(bindingJSON)).Scan(&id)
+	err = s.DB.QueryRowContext(ctx, stmt, rec.RunID, rec.RecordID, string(factsJSON), string(stepsJSON), string(selectionJSON), string(bindingJSON), string(specJSON)).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -94,6 +100,7 @@ SELECT p.run_id,
        p.plan_steps::text,
        p.pipeline_selection::text,
        p.pipeline_binding::text,
+       COALESCE(p.pipeline_spec::text, '{}'::text),
        COALESCE(r.mode, ''),
        COALESCE(r.status, ''),
        COALESCE(r.processors::text, '[]'::text),
@@ -111,6 +118,7 @@ LIMIT 1`
 		planStepsJSON  string
 		selectionJSON  string
 		bindingJSON    string
+		specJSON       string
 		processorsJSON string
 		parametersJSON string
 	)
@@ -121,6 +129,7 @@ LIMIT 1`
 		&planStepsJSON,
 		&selectionJSON,
 		&bindingJSON,
+		&specJSON,
 		&view.Mode,
 		&view.Status,
 		&processorsJSON,
@@ -143,6 +152,9 @@ LIMIT 1`
 		return DocProcessPlanView{}, err
 	}
 	if err := json.Unmarshal([]byte(bindingJSON), &view.PipelineBinding); err != nil {
+		return DocProcessPlanView{}, err
+	}
+	if err := json.Unmarshal([]byte(specJSON), &view.PipelineSpec); err != nil {
 		return DocProcessPlanView{}, err
 	}
 	if err := json.Unmarshal([]byte(processorsJSON), &view.Processors); err != nil {
@@ -209,6 +221,7 @@ SELECT p.run_id,
        p.plan_steps::text,
        p.pipeline_selection::text,
        p.pipeline_binding::text,
+       COALESCE(p.pipeline_spec::text, '{}'::text),
        COALESCE(r.mode, ''),
        COALESCE(r.status, ''),
        COALESCE(r.processors::text, '[]'::text),
@@ -233,6 +246,7 @@ LIMIT %s OFFSET %s`, whereSQL, nextArg(pageSize), nextArg(offset))
 			planStepsJSON  string
 			selectionJSON  string
 			bindingJSON    string
+			specJSON       string
 			processorsJSON string
 			parametersJSON string
 		)
@@ -243,6 +257,7 @@ LIMIT %s OFFSET %s`, whereSQL, nextArg(pageSize), nextArg(offset))
 			&planStepsJSON,
 			&selectionJSON,
 			&bindingJSON,
+			&specJSON,
 			&view.Mode,
 			&view.Status,
 			&processorsJSON,
@@ -261,6 +276,9 @@ LIMIT %s OFFSET %s`, whereSQL, nextArg(pageSize), nextArg(offset))
 			return nil, 0, err
 		}
 		if err := json.Unmarshal([]byte(bindingJSON), &view.PipelineBinding); err != nil {
+			return nil, 0, err
+		}
+		if err := json.Unmarshal([]byte(specJSON), &view.PipelineSpec); err != nil {
 			return nil, 0, err
 		}
 		if err := json.Unmarshal([]byte(processorsJSON), &view.Processors); err != nil {

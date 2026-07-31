@@ -311,7 +311,8 @@ FROM kb.inputs i
 				"processor_plan_facts":{"RequestedProcessors":["extract_metrics"]},
 				"processor_plan_steps":[{"Name":"extract_metrics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}],
 				"processor_pipeline_binding":{"Source":"system_default","SelectedPipeline":"legacy_default"},
-				"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"}
+				"processor_pipeline_selection":{"PipelineName":"legacy_default","Reason":"system_default"},
+				"processor_pipeline_spec":{"Name":"legacy_default","DisplayName":"Legacy Default","LegacyEquivalent":true}
 			}
 		]`, time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 12, 10, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
@@ -362,6 +363,9 @@ FROM kb.inputs i
 	}
 	if got, want := len(payload.Results[0].DocProcessingPlan.PlanSteps), 1; got != want {
 		t.Fatalf("doc_processing_plan.plan_steps len=%d want=%d", got, want)
+	}
+	if got, want := payload.Results[0].DocProcessingPlan.PipelineSpec.Name, "legacy_default"; got != want {
+		t.Fatalf("doc_processing_plan.pipeline_spec.name=%q want=%q", got, want)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

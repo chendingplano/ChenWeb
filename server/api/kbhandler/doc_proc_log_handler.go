@@ -2,6 +2,7 @@ package kbhandler
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
@@ -75,7 +76,35 @@ type latestDocProcessPlanResponse struct {
 	PlanSteps         []docprocessing.ProcessorPlanStep                 `json:"plan_steps"`
 	PipelineBinding   docprocessing.ProductionPipelineBindingResolution `json:"pipeline_binding"`
 	PipelineSelection docprocessing.ProductionPipelineSelection         `json:"pipeline_selection"`
-	CreateTime        string                                            `json:"create_time"`
+	PipelineSpec      docprocessing.ProductionPipelineSpec              `json:"pipeline_spec"`
+	// PipelineProcessorsMatchExecuted compares the selected pipeline's
+	// declared Processors against the processors that actually executed.
+	// P1 does not enforce a pipeline's processor set, so this is a read-only
+	// diagnostic for shadow-mode review, not a validation result. Nil when
+	// the selected pipeline declares no explicit processor set (true for
+	// all seeded pipelines today), since there is nothing to compare.
+	PipelineProcessorsMatchExecuted *bool  `json:"pipeline_processors_match_executed,omitempty"`
+	CreateTime                      string `json:"create_time"`
+}
+
+func pipelineProcessorsMatchExecuted(spec docprocessing.ProductionPipelineSpec, executed []string) *bool {
+	if len(spec.Processors) == 0 {
+		return nil
+	}
+	want := append([]string(nil), spec.Processors...)
+	got := append([]string(nil), executed...)
+	sort.Strings(want)
+	sort.Strings(got)
+	match := len(want) == len(got)
+	if match {
+		for i := range want {
+			if want[i] != got[i] {
+				match = false
+				break
+			}
+		}
+	}
+	return &match
 }
 
 // ListDocProcLogs handles GET /api/v1/kb/doc-proc-logs.
@@ -257,17 +286,19 @@ func GetLatestDocProcessPlan(c echo.Context) error {
 	return c.JSON(http.StatusOK, getLatestDocProcessPlanResponse{
 		Status: true,
 		Result: &latestDocProcessPlanResponse{
-			RunID:             view.RunID,
-			RecordID:          view.RecordID,
-			Mode:              view.Mode,
-			Status:            view.Status,
-			Processors:        view.Processors,
-			Parameters:        view.Parameters,
-			PlanFacts:         view.PlanFacts,
-			PlanSteps:         view.PlanSteps,
-			PipelineBinding:   view.PipelineBinding,
-			PipelineSelection: view.PipelineSelection,
-			CreateTime:        view.CreateTime,
+			RunID:                           view.RunID,
+			RecordID:                        view.RecordID,
+			Mode:                            view.Mode,
+			Status:                          view.Status,
+			Processors:                      view.Processors,
+			Parameters:                      view.Parameters,
+			PlanFacts:                       view.PlanFacts,
+			PlanSteps:                       view.PlanSteps,
+			PipelineBinding:                 view.PipelineBinding,
+			PipelineSelection:               view.PipelineSelection,
+			PipelineSpec:                    view.PipelineSpec,
+			PipelineProcessorsMatchExecuted: pipelineProcessorsMatchExecuted(view.PipelineSpec, view.Processors),
+			CreateTime:                      view.CreateTime,
 		},
 	})
 }
@@ -307,17 +338,19 @@ func ListDocProcessPlans(c echo.Context) error {
 	results := make([]latestDocProcessPlanResponse, 0, len(views))
 	for _, view := range views {
 		results = append(results, latestDocProcessPlanResponse{
-			RunID:             view.RunID,
-			RecordID:          view.RecordID,
-			Mode:              view.Mode,
-			Status:            view.Status,
-			Processors:        view.Processors,
-			Parameters:        view.Parameters,
-			PlanFacts:         view.PlanFacts,
-			PlanSteps:         view.PlanSteps,
-			PipelineBinding:   view.PipelineBinding,
-			PipelineSelection: view.PipelineSelection,
-			CreateTime:        view.CreateTime,
+			RunID:                           view.RunID,
+			RecordID:                        view.RecordID,
+			Mode:                            view.Mode,
+			Status:                          view.Status,
+			Processors:                      view.Processors,
+			Parameters:                      view.Parameters,
+			PlanFacts:                       view.PlanFacts,
+			PlanSteps:                       view.PlanSteps,
+			PipelineBinding:                 view.PipelineBinding,
+			PipelineSelection:               view.PipelineSelection,
+			PipelineSpec:                    view.PipelineSpec,
+			PipelineProcessorsMatchExecuted: pipelineProcessorsMatchExecuted(view.PipelineSpec, view.Processors),
+			CreateTime:                      view.CreateTime,
 		})
 	}
 

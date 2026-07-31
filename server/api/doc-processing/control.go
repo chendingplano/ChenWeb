@@ -692,6 +692,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			parameters["processor_plan_steps"] = plan.Steps()
 			parameters["processor_pipeline_binding"] = plan.PipelineBinding()
 			parameters["processor_pipeline_selection"] = plan.PipelineSelection()
+			parameters["processor_pipeline_spec"] = plan.PipelineSpec()
 		}
 		id, createErr := s.RunStore.CreateDocProcessRun(ctx, DocProcessRunRecord{
 			RecordID:   evt.RecordID,
@@ -716,6 +717,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 					PlanSteps:         plan.Steps(),
 					PipelineBinding:   plan.PipelineBinding(),
 					PipelineSelection: plan.PipelineSelection(),
+					PipelineSpec:      plan.PipelineSpec(),
 				}); persistErr != nil {
 					if s.Logger != nil {
 						s.Logger.Warn("failed to create kb.doc_process_plans row", "run_id", runID, "record_id", evt.RecordID, "error", persistErr)
@@ -754,7 +756,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	requestFailed := false
 	requestStopped := false
 	var firstErr error
-	s.persistPipelineStatusWithPlan(ctx, evt.RecordID, "running", "", nil, planFacts, plan.Steps(), plan.PipelineSelection(), plan.PipelineBinding())
+	s.persistPipelineStatusWithPlan(ctx, evt.RecordID, "running", "", nil, planFacts, plan.Steps(), plan.PipelineSelection(), plan.PipelineBinding(), plan.PipelineSpec())
 	defer func() {
 		status := "success"
 		if requestStopped {
@@ -762,7 +764,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		} else if requestFailed {
 			status = "failed"
 		}
-		s.persistPipelineStatusWithPlan(context.Background(), evt.RecordID, status, "", firstErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+		s.persistPipelineStatusWithPlan(context.Background(), evt.RecordID, status, "", firstErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{})
 		if requestStopped && s.StopStore != nil {
 			_ = s.StopStore.ClearStopRequested(context.Background(), evt.RecordID)
 		}
@@ -798,7 +800,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// Clear the per-processor marker before post-processing so the list API's
 	// stuck-pipeline auto-heal path does not mistake a live Phase C run for a
 	// crashed coordinator.
-	s.persistPipelineStatusWithPlan(ctx, evt.RecordID, "running", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+	s.persistPipelineStatusWithPlan(ctx, evt.RecordID, "running", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{})
 
 	// Phase C (post-process): now that every doc processor has finished, index the
 	// artifacts of the invoked processors that defer indexing to this phase. This is the
@@ -1189,15 +1191,15 @@ func (s *ControlService) logPipelineFinish(ctx context.Context, recordID int64, 
 }
 
 func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int64, procStatus string, processorName string, procErr error) {
-	s.persistPipelineStatusWithPlan(ctx, recordID, procStatus, processorName, procErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+	s.persistPipelineStatusWithPlan(ctx, recordID, procStatus, processorName, procErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{})
 }
 
-func (s *ControlService) persistPipelineStatusWithPlan(ctx context.Context, recordID int64, procStatus string, processorName string, procErr error, planFacts ProductionPlanFacts, planSteps []ProcessorPlanStep, pipelineSelection ProductionPipelineSelection, pipelineBinding ProductionPipelineBindingResolution) {
+func (s *ControlService) persistPipelineStatusWithPlan(ctx context.Context, recordID int64, procStatus string, processorName string, procErr error, planFacts ProductionPlanFacts, planSteps []ProcessorPlanStep, pipelineSelection ProductionPipelineSelection, pipelineBinding ProductionPipelineBindingResolution, pipelineSpec ProductionPipelineSpec) {
 	if s.InputStore == nil || recordID <= 0 {
 		return
 	}
 	err := updateInputStatusAtomic(ctx, s.InputStore, recordID, func(current string) (DocMetadataUpdate, error) {
-		statusRaw, err := appendPipelineStatusWithPlan(current, s.now(), procStatus, processorName, procErr, planFacts, planSteps, pipelineSelection, pipelineBinding)
+		statusRaw, err := appendPipelineStatusWithPlan(current, s.now(), procStatus, processorName, procErr, planFacts, planSteps, pipelineSelection, pipelineBinding, pipelineSpec)
 		if err != nil {
 			return DocMetadataUpdate{}, err
 		}
@@ -1502,10 +1504,10 @@ func newEventID() string {
 }
 
 func appendPipelineStatus(raw string, now time.Time, procStatus string, processorName string, procErr error) (string, error) {
-	return appendPipelineStatusWithPlan(raw, now, procStatus, processorName, procErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+	return appendPipelineStatusWithPlan(raw, now, procStatus, processorName, procErr, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{})
 }
 
-func appendPipelineStatusWithPlan(raw string, now time.Time, procStatus string, processorName string, procErr error, planFacts ProductionPlanFacts, planSteps []ProcessorPlanStep, pipelineSelection ProductionPipelineSelection, pipelineBinding ProductionPipelineBindingResolution) (string, error) {
+func appendPipelineStatusWithPlan(raw string, now time.Time, procStatus string, processorName string, procErr error, planFacts ProductionPlanFacts, planSteps []ProcessorPlanStep, pipelineSelection ProductionPipelineSelection, pipelineBinding ProductionPipelineBindingResolution, pipelineSpec ProductionPipelineSpec) (string, error) {
 	status := strings.ToLower(strings.TrimSpace(procStatus))
 	if status == "" {
 		status = "running"
@@ -1532,6 +1534,9 @@ func appendPipelineStatusWithPlan(raw string, now time.Time, procStatus string, 
 	}
 	if strings.TrimSpace(pipelineBinding.Source) != "" || strings.TrimSpace(pipelineBinding.SelectedPipeline) != "" || strings.TrimSpace(pipelineBinding.RequestedPipeline) != "" || strings.TrimSpace(pipelineBinding.StoreBoundPipeline) != "" {
 		entry["processor_pipeline_binding"] = pipelineBinding
+	}
+	if strings.TrimSpace(pipelineSpec.Name) != "" {
+		entry["processor_pipeline_spec"] = pipelineSpec
 	}
 
 	entries := decodeDocMetaStatus(raw)
@@ -1565,6 +1570,11 @@ func appendPipelineStatusWithPlan(raw string, now time.Time, procStatus string, 
 			if _, ok := entry["processor_pipeline_binding"]; !ok {
 				if existingBinding, ok := e["processor_pipeline_binding"]; ok {
 					entry["processor_pipeline_binding"] = existingBinding
+				}
+			}
+			if _, ok := entry["processor_pipeline_spec"]; !ok {
+				if existingSpec, ok := e["processor_pipeline_spec"]; ok {
+					entry["processor_pipeline_spec"] = existingSpec
 				}
 			}
 			out = append(out, entry)

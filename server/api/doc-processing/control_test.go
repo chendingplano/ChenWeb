@@ -1314,12 +1314,17 @@ func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *
 		Source:           "system_default",
 		SelectedPipeline: "legacy_default",
 	}
+	spec := ProductionPipelineSpec{
+		Name:             "legacy_default",
+		DisplayName:      "Legacy Default",
+		LegacyEquivalent: true,
+	}
 
-	raw, err := appendPipelineStatusWithPlan("[]", now, "running", "", nil, facts, steps, selection, binding)
+	raw, err := appendPipelineStatusWithPlan("[]", now, "running", "", nil, facts, steps, selection, binding, spec)
 	if err != nil {
 		t.Fatalf("appendPipelineStatusWithPlan initial: %v", err)
 	}
-	raw, err = appendPipelineStatusWithPlan(raw, now.Add(time.Second), "success", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{})
+	raw, err = appendPipelineStatusWithPlan(raw, now.Add(time.Second), "success", "", nil, ProductionPlanFacts{}, nil, ProductionPipelineSelection{}, ProductionPipelineBindingResolution{}, ProductionPipelineSpec{})
 	if err != nil {
 		t.Fatalf("appendPipelineStatusWithPlan follow-up: %v", err)
 	}
@@ -1346,6 +1351,9 @@ func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *
 	}
 	if _, ok := docProcessing["processor_pipeline_binding"]; !ok {
 		t.Fatalf("missing processor_pipeline_binding in %#v", docProcessing)
+	}
+	if _, ok := docProcessing["processor_pipeline_spec"]; !ok {
+		t.Fatalf("missing processor_pipeline_spec in %#v", docProcessing)
 	}
 }
 
