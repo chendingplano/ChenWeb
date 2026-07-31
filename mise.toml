@@ -273,3 +273,40 @@ if [ -n "${OUTPUT:-}" ]; then
 fi
 go run ./server/cmd/doc-benchmark analyze "${args[@]}" "$@"
 '''
+
+[tasks.gold-benchmark-profile-report]
+description = "Render a deterministic store-profile report from schema-v2 gold-run JSON."
+run = '''
+set -euo pipefail
+: "${RESULTS:?set RESULTS to an absolute schema-v2 gold-run JSON path}"
+DATASET_ROOT="${DATASET_ROOT:-benchmark/doc-processors/gold/display-module-v1}"
+CASE_ID="${CASE_ID:-display-module-v1}"
+FORMAT="${FORMAT:-json}"
+args=(profile-report --dataset "$DATASET_ROOT" --case "$CASE_ID" --results "$RESULTS" --format "$FORMAT")
+if [ -n "${OUTPUT:-}" ]; then
+  args+=(--output "$OUTPUT")
+fi
+go run ./server/cmd/doc-benchmark "${args[@]}" "$@"
+'''
+
+[tasks.semos-p0-benchmark-evidence]
+description = "Run the isolated SemOS P0 store-profile evidence workflow."
+run = '''
+set -euo pipefail
+: "${RESULTS:?set RESULTS to an absolute output JSON path}"
+: "${REPORT:?set REPORT to an absolute report JSON path}"
+export PG_DB_NAME=chenweb_test
+export ARTIFACT_DIR=/Users/cding/Workspace/ThirdParty-2/Data/Artifacts
+export ARTIFACT_WEB_DIR=/Users/cding/Workspace/ThirdParty-2/Data/ArtifactWeb
+DATASET_ROOT=benchmark/doc-processors/gold/display-module-v1
+CASE_ID=display-module-v1
+PROCESSORS=generate_summaries,generate_topics,extract_structured_knowledge,extract_entity,extract_relation,extract_inventory_items,extract_metrics,extract_provisions
+go run ./server/cmd/doc-benchmark gold-run \
+  --dataset "$DATASET_ROOT" \
+  --case "$CASE_ID" \
+  --artifact-root "$ARTIFACT_DIR" \
+  --artifact-web-root "$ARTIFACT_WEB_DIR" \
+  --processors "$PROCESSORS" > "$RESULTS"
+RESULTS="$RESULTS" OUTPUT="$REPORT" FORMAT=json \
+  mise run gold-benchmark-profile-report
+'''

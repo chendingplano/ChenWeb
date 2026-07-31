@@ -61,6 +61,8 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = clean(ctx, args[1:], stdout, stderr)
 	case "gold-run":
 		err = runGoldCase(ctx, args[1:], stdout, stderr)
+	case "profile-report":
+		err = runGoldProfileReport(ctx, args[1:], stdout, stderr)
 	case "analyze":
 		err = runGoldAnalyze(ctx, args[1:], stdout, stderr)
 	default:
