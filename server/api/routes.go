@@ -467,6 +467,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/ontology/comparison-scopes", kbhandler.CreateOntologyComparisonScope)
 	apiGroup.GET("/kb/ontology/comparison-scopes/:scope_id", kbhandler.GetOntologyComparisonScope)
 	apiGroup.POST("/kb/ontology/comparison-scopes/:scope_id/runs", kbhandler.CreateOntologyComparisonRun)
+	apiGroup.POST("/kb/ontology/comparison-runs/:run_id/cells", kbhandler.CreateOntologyComparisonCell)
 	apiGroup.POST("/kb/semantic-decisions/drain-deferred", kbhandler.DrainDeferredSemanticDecisions)
 	apiGroup.GET("/kb/default-store", kbhandler.GetDefaultKnowledgeStore)
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
