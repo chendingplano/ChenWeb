@@ -163,6 +163,30 @@ func parseTestMethodMentions(payload map[string]any) []testMethodMention {
 	return out
 }
 
+func parseMetricDefinitionMentions(payload map[string]any) []metricDefinitionMention {
+	raw, _ := payload["metric_definitions"].([]any)
+	out := make([]metricDefinitionMention, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(asString(m["canonical_name"]))
+		if name == "" {
+			continue
+		}
+		aliases := []string{}
+		if values, ok := m["aliases"].([]any); ok {
+			for _, v := range values {
+				aliases = append(aliases, asString(v))
+			}
+		}
+		confidence, _ := m["confidence"].(float64)
+		out = append(out, metricDefinitionMention{CanonicalName: name, Aliases: normalizedStrings(aliases), Definition: strings.TrimSpace(asString(m["definition"])), ValueType: strings.TrimSpace(asString(m["value_type"])), RangeType: strings.TrimSpace(asString(m["range_type"])), Confidence: confidence, LineNumbers: sourceSpanLineNumbers(m["source_line_spans"])})
+	}
+	return out
+}
+
 // buildMetricDefinitionCandidate turns one extracted definition into the
 // reviewable ontology candidate required by ADR §8.2.  Promotion remains an
 // explicit curator action; this helper never writes governed content itself.

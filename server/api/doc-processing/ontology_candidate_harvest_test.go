@@ -144,3 +144,21 @@ func TestTestMethodsProcessorPersistsValidatedChunkOutput(t *testing.T) {
 		t.Fatalf("persisted %d candidates, want procedure and link", len(sink.got))
 	}
 }
+
+func TestMetricDefinitionsProcessorPersistsValidatedChunkOutput(t *testing.T) {
+	sink := &recordingOntologyCandidateSink{}
+	p := &MetricDefinitionsProcessor{Extractor: &fakeJSONExtractor{out: map[string]any{"metric_definitions": []any{map[string]any{"canonical_name": "Air flow rate", "definition": "Volume per time", "source_line_spans": []any{"71"}}}}}, CandidateSink: sink, ModelName: "test-model"}
+	chunks := []Chunk{{SeqNo: 1, Lines: []MarkedLine{{Line: Line{LineNo: 71, Content: "Air flow rate is volume per time."}}}}}
+	if err := p.InitChunkBatch(context.Background(), 42, chunks, "doc"); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if err := p.ProcessChunk(context.Background(), 0); err != nil {
+		t.Fatalf("ProcessChunk: %v", err)
+	}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if len(sink.got) != 1 || sink.got[0].CandidateKind != "term" {
+		t.Fatalf("candidates=%#v", sink.got)
+	}
+}
