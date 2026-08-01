@@ -79,3 +79,21 @@ func TestProfileRuleStoreTransitionStatusAllowsDraftToInReview(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProfileRuleStoreLoadsRulesFromPinnedRelease(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules pr\nJOIN kb.ontology_profiles p")).WithArgs("p", 2, int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "release_id", "create_time", "create_by", "modify_time", "modify_by"}).AddRow(1, "r", 1, "p", 2, "required_assertion_pattern", "included_in_release", "error", []byte(`{}`), []byte(`{}`), 42, now, "", now, ""))
+	got, err := (ProfileRuleStore{DB: db}).LoadReleasedRules(context.Background(), "p", 2, 42)
+	if err != nil || len(got) != 1 || got[0].ReleaseID != 42 {
+		t.Fatalf("LoadReleasedRules = %#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

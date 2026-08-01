@@ -149,6 +149,40 @@ ORDER BY pr.rule_id, pr.version DESC`
 	return rules, rows.Err()
 }
 
+// LoadReleasedRules loads a scope-pinned profile/rule set. Unlike active
+// reads, it intentionally does not join the current activation pointer.
+func (s ProfileRuleStore) LoadReleasedRules(ctx context.Context, profileID string, profileVersion int, releaseID int64) ([]ProfileRule, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	if strings.TrimSpace(profileID) == "" || profileVersion < 1 || releaseID == 0 {
+		return nil, errors.New("profile identity and release_id are required")
+	}
+	const stmt = `SELECT
+	pr.id, pr.rule_id, pr.version, pr.profile_id, pr.profile_version,
+	pr.rule_kind, pr.status, pr.severity, pr.rule_config, pr.applicability,
+	pr.released_in_release_id, pr.create_time, COALESCE(pr.create_by, ''), pr.modify_time, COALESCE(pr.modify_by, '')
+FROM kb.ontology_profile_rules pr
+JOIN kb.ontology_profiles p ON p.profile_id = pr.profile_id AND p.version = pr.profile_version
+WHERE pr.profile_id = $1 AND pr.profile_version = $2 AND pr.released_in_release_id = $3
+  AND p.released_in_release_id = $3 AND p.status = 'included_in_release' AND pr.status = 'included_in_release'
+ORDER BY pr.rule_id, pr.version DESC`
+	rows, err := s.DB.QueryContext(ctx, stmt, strings.TrimSpace(profileID), profileVersion, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var rules []ProfileRule
+	for rows.Next() {
+		var r ProfileRule
+		if err := rows.Scan(&r.ID, &r.RuleID, &r.Version, &r.ProfileID, &r.ProfileVersion, &r.RuleKind, &r.Status, &r.Severity, &r.RuleConfig, &r.Applicability, &r.ReleaseID, &r.CreateTime, &r.CreateBy, &r.ModifyTime, &r.ModifyBy); err != nil {
+			return nil, err
+		}
+		rules = append(rules, r)
+	}
+	return rules, rows.Err()
+}
+
 // ListApprovedProfileRules returns staged rules for one module compiler
 // snapshot. The profile join prevents orphan rules from being released.
 func (s ProfileRuleStore) ListApprovedProfileRules(ctx context.Context, moduleID string) ([]ProfileRule, error) {

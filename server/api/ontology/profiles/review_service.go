@@ -10,9 +10,44 @@ type FindingWriter interface {
 	Persist(context.Context, OntologyFinding) error
 }
 
+type FrozenRuleLoader interface {
+	LoadReleasedRules(context.Context, string, int, int64) ([]ProfileRule, error)
+}
+
 // ReviewService evaluates only the rules supplied from a frozen scope's
 // activated profile release and persists one auditable finding per rule.
-type ReviewService struct{ Findings FindingWriter }
+type ReviewService struct {
+	Findings FindingWriter
+	Rules    FrozenRuleLoader
+}
+
+// EvaluatePinnedScope loads rules using the profile version and release id
+// recorded in the scope, never the current module activation pointer.
+func (s ReviewService) EvaluatePinnedScope(ctx context.Context, scope ReviewScope, assertions []ReviewAssertion, inputRecordID, runID int64) ([]RuleEvaluationResult, error) {
+	if s.Rules == nil {
+		return nil, fmt.Errorf("frozen rule loader is required")
+	}
+	var selected []struct {
+		ProfileID      string `json:"profile_id"`
+		ProfileVersion int    `json:"profile_version"`
+		ReleaseID      int64  `json:"release_id"`
+	}
+	if err := json.Unmarshal(scope.SelectedProfiles, &selected); err != nil {
+		return nil, fmt.Errorf("selected_profiles: %w", err)
+	}
+	var all []ProfileRule
+	for _, p := range selected {
+		if p.ProfileID == "" || p.ProfileVersion < 1 || p.ReleaseID == 0 {
+			return nil, fmt.Errorf("selected profile lacks pinned identity/release")
+		}
+		rules, err := s.Rules.LoadReleasedRules(ctx, p.ProfileID, p.ProfileVersion, p.ReleaseID)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, rules...)
+	}
+	return s.EvaluateAndPersist(ctx, scope, all, assertions, inputRecordID, runID)
+}
 
 func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope, rules []ProfileRule, assertions []ReviewAssertion, inputRecordID, runID int64) ([]RuleEvaluationResult, error) {
 	if s.Findings == nil {
