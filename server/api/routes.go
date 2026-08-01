@@ -456,6 +456,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/ontology/candidates/:id/promote", kbhandler.PromoteOntologyCandidate)
 	apiGroup.GET("/kb/ontology/profiles", kbhandler.ListActiveOntologyProfiles)
 	apiGroup.POST("/kb/ontology/profiles", kbhandler.CreateOntologyProfile)
+	apiGroup.POST("/kb/ontology/profiles/:profile_id/:version/status", kbhandler.TransitionOntologyProfileStatus)
 	apiGroup.GET("/kb/ontology/profile-rules", kbhandler.ListActiveOntologyProfileRules)
 	apiGroup.POST("/kb/ontology/profile-rules", kbhandler.CreateOntologyProfileRule)
 	apiGroup.POST("/kb/ontology/profile-rules/:rule_id/:version/status", kbhandler.TransitionOntologyProfileRuleStatus)

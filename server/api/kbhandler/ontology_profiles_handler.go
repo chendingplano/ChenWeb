@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/profiles"
@@ -37,6 +38,30 @@ func ListActiveOntologyProfiles(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve active ontology profiles (CWB_KB_OP_003)"})
 	}
 	return c.JSON(http.StatusOK, ontologyProfileListResponse{Status: true, Results: items, Total: len(items)})
+}
+
+// TransitionOntologyProfileStatus applies the profile lifecycle before a
+// profile can be included in a module release.
+func TransitionOntologyProfileStatus(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_OP_200")
+	defer rc.Close()
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version < 1 || strings.TrimSpace(c.Param("profile_id")) == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid profile_id or version (CWB_KB_OP_201)"})
+	}
+	var payload struct {
+		To string `json:"to"`
+		By string `json:"by"`
+	}
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_OP_202)"})
+	}
+	updated, err := (profiles.ProfileStore{DB: ApiTypes.ProjectDBHandle}).TransitionStatus(c.Request().Context(), c.Param("profile_id"), version, payload.To, payload.By)
+	if err != nil {
+		rc.GetLogger().Error("transition ontology profile failed", "err", err)
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "illegal ontology profile transition (CWB_KB_OP_203)"})
+	}
+	return c.JSON(http.StatusOK, ontologyProfileResponse{Status: true, Record: updated})
 }
 
 // CreateOntologyProfile creates only an initial draft. Visibility and
