@@ -21,16 +21,20 @@ import (
 	"time"
 )
 
-// Operator evaluates a typed, known fact value against a predicate value.
-type Operator func(fact KnownValue, expected any) (bool, error)
+// Operator is the legacy, untyped operator signature retained for source
+// compatibility with the original evaluator extension seam.
+type Operator func(fact, expected any) (bool, error)
 
-// LegacyOperator is the untyped operator signature accepted by the original
-// evaluator compatibility seam.
-type LegacyOperator func(fact, expected any) (bool, error)
+// LegacyOperator is an alias retained for callers that adopted the interim
+// name while the P5 typed boundary was introduced.
+type LegacyOperator = Operator
+
+// TypedOperator evaluates a typed, known fact value against a predicate value.
+type TypedOperator func(fact KnownValue, expected any) (bool, error)
 
 type operatorEntry struct {
-	typed  Operator
-	legacy LegacyOperator
+	typed  TypedOperator
+	legacy Operator
 }
 
 var (
@@ -47,7 +51,7 @@ func init() {
 // RegisterOperator adds an operator to the registry (seam 3). An operator with
 // the same name is replaced. This legacy entry point adapts untyped callers to
 // the typed P5 operator boundary.
-func RegisterOperator(name string, op LegacyOperator) error {
+func RegisterOperator(name string, op Operator) error {
 	name = strings.TrimSpace(name)
 	if name == "" || op == nil {
 		return errors.New("operator name and implementation are required")
@@ -65,7 +69,7 @@ func RegisterOperator(name string, op LegacyOperator) error {
 
 // RegisterTypedOperator registers a P5 operator that receives the fact's
 // declared type as well as its known value.
-func RegisterTypedOperator(name string, op Operator) error {
+func RegisterTypedOperator(name string, op TypedOperator) error {
 	name = strings.TrimSpace(name)
 	if name == "" || op == nil {
 		return errors.New("operator name and implementation are required")
@@ -92,7 +96,7 @@ func eqValues(a, b any) (bool, error) {
 	return fmt.Sprint(a) == fmt.Sprint(b), nil
 }
 
-var builtinOperators = map[string]Operator{
+var builtinOperators = map[string]TypedOperator{
 	"eq": typedEqual,
 	"neq": func(fact KnownValue, expected any) (bool, error) {
 		eq, err := typedEqual(fact, expected)
@@ -125,7 +129,7 @@ var builtinOperators = map[string]Operator{
 	"exists": func(KnownValue, any) (bool, error) { return true, nil },
 }
 
-var legacyBuiltinOperators = map[string]LegacyOperator{
+var legacyBuiltinOperators = map[string]Operator{
 	"eq": eqValues,
 	"neq": func(a, b any) (bool, error) {
 		eq, err := eqValues(a, b)
@@ -246,14 +250,14 @@ func Evaluate(pred Predicate, facts map[string]any) (Result, error) {
 	return res, err
 }
 
-func lookupOperator(name string) (Operator, bool) {
+func lookupOperator(name string) (TypedOperator, bool) {
 	operatorsMu.RLock()
 	defer operatorsMu.RUnlock()
 	entry, ok := operators[name]
 	return entry.typed, ok
 }
 
-func lookupLegacyOperator(name string) (LegacyOperator, bool) {
+func lookupLegacyOperator(name string) (Operator, bool) {
 	operatorsMu.RLock()
 	defer operatorsMu.RUnlock()
 	entry, ok := operators[name]

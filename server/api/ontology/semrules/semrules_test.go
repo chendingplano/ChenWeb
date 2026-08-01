@@ -54,6 +54,25 @@ func TestLegacyOperatorEvaluationPreservesCoercion(t *testing.T) {
 	}
 }
 
+func TestRegisterOperatorAcceptsDeclaredOperator(t *testing.T) {
+	var op Operator = func(fact, expected any) (bool, error) {
+		return fact == expected, nil
+	}
+	if err := RegisterOperator("test_declared_legacy_operator", op); err != nil {
+		t.Fatalf("RegisterOperator: %v", err)
+	}
+	res, err := Evaluate(
+		Predicate{Kind: "facet", Facet: "value", Op: "test_declared_legacy_operator", Value: "same"},
+		map[string]any{"value": "same"},
+	)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if !res.Value {
+		t.Fatal("declared legacy Operator did not match")
+	}
+}
+
 func TestEvaluateFacetPredicates(t *testing.T) {
 	facts := map[string]any{"doc_kind": "standard", "numeric_unit_density": 0.043}
 
