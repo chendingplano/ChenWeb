@@ -57,3 +57,25 @@ func TestProfileRuleStoreCreateStartsDraftVersionOne(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProfileRuleStoreTransitionStatusAllowsDraftToInReview(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	columns := []string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "create_time", "create_by", "modify_time", "modify_by"}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules WHERE rule_id = $1 AND version = $2")).WithArgs("r", 1).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(1, "r", 1, "p", 1, "required_assertion_pattern", "draft", "error", []byte(`{}`), []byte(`{}`), now, "", now, ""))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.ontology_profile_rules SET status = $3")).WithArgs("r", 1, "in_review", "curator").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules WHERE rule_id = $1 AND version = $2")).WithArgs("r", 1).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(1, "r", 1, "p", 1, "required_assertion_pattern", "in_review", "error", []byte(`{}`), []byte(`{}`), now, "", now, "curator"))
+	got, err := (ProfileRuleStore{DB: db}).TransitionStatus(context.Background(), "r", 1, "in_review", "curator")
+	if err != nil || got.Status != "in_review" {
+		t.Fatalf("TransitionStatus = %#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

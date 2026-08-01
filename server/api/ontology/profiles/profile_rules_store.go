@@ -36,6 +36,39 @@ type ProfileRuleStore struct {
 	DB terms.DBX
 }
 
+var profileRuleTransitions = map[string]map[string]bool{
+	"draft":               {"in_review": true, "rejected": true},
+	"in_review":           {"approved": true, "rejected": true},
+	"approved":            {"included_in_release": true, "superseded": true},
+	"included_in_release": {"superseded": true},
+}
+
+func (s ProfileRuleStore) GetProfileRule(ctx context.Context, ruleID string, version int) (ProfileRule, error) {
+	if s.DB == nil {
+		return ProfileRule{}, errors.New("db is nil")
+	}
+	const stmt = `SELECT id, rule_id, version, profile_id, profile_version, rule_kind, status, severity, rule_config, applicability, create_time, COALESCE(create_by, ''), modify_time, COALESCE(modify_by, '') FROM kb.ontology_profile_rules WHERE rule_id = $1 AND version = $2`
+	var r ProfileRule
+	err := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(ruleID), version).Scan(&r.ID, &r.RuleID, &r.Version, &r.ProfileID, &r.ProfileVersion, &r.RuleKind, &r.Status, &r.Severity, &r.RuleConfig, &r.Applicability, &r.CreateTime, &r.CreateBy, &r.ModifyTime, &r.ModifyBy)
+	return r, err
+}
+
+// TransitionStatus enforces the governed lifecycle and deliberately cannot
+// change a released rule's content or return it to a mutable status.
+func (s ProfileRuleStore) TransitionStatus(ctx context.Context, ruleID string, version int, next, by string) (ProfileRule, error) {
+	current, err := s.GetProfileRule(ctx, ruleID, version)
+	if err != nil {
+		return ProfileRule{}, err
+	}
+	if !profileRuleTransitions[current.Status][next] {
+		return ProfileRule{}, errors.New("illegal profile rule status transition")
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE kb.ontology_profile_rules SET status = $3, modify_time = NOW(), modify_by = $4 WHERE rule_id = $1 AND version = $2`, strings.TrimSpace(ruleID), version, next, nullableText(by)); err != nil {
+		return ProfileRule{}, err
+	}
+	return s.GetProfileRule(ctx, ruleID, version)
+}
+
 // CreateProfileRule creates the initial draft version of a rule. A rule's
 // profile/version is FK-validated by Postgres; release visibility remains the
 // module compiler's separate responsibility.
