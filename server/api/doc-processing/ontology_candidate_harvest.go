@@ -27,6 +27,45 @@ type metricDefinitionMention struct {
 	LineNumbers   []int
 }
 
+type testMethodMention struct {
+	ProcedureName string
+	Definition    string
+	MetricNames   []string
+	LineNumbers   []int
+}
+
+// buildTestMethodCandidates proposes a procedure concept and, when a metric
+// is named explicitly, a governed measured_by axiom candidate. Both sides are
+// proposals: no relation becomes active without curator approval and release.
+func buildTestMethodCandidates(recordID int64, m testMethodMention) ([]candidates.Candidate, error) {
+	procedure := strings.TrimSpace(m.ProcedureName)
+	if recordID <= 0 || procedure == "" {
+		return nil, fmt.Errorf("input record id and procedure name are required")
+	}
+	spans := normalizedLineNumbers(m.LineNumbers)
+	procedureID := "measurement:" + candidateIdentifier(procedure)
+	termPayload, err := json.Marshal(map[string]any{
+		"term_id": procedureID, "term_kind": "concept", "module_id": "measurement",
+		"definition": strings.TrimSpace(m.Definition), "scope": "document-derived candidate", "label": procedure,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := []candidates.Candidate{{CandidateKind: "term", ProposedPayload: termPayload, ProposedModuleID: "measurement", SourceType: "document", SourceRef: fmt.Sprintf("input_record:%d", recordID), SourceLineSpans: spans, DiscoveryMethod: "routed_extraction", ProposedBy: "extract_test_methods"}}
+	for _, metric := range normalizedStrings(m.MetricNames) {
+		metricID := "measurement:" + candidateIdentifier(metric)
+		payload, err := json.Marshal(map[string]any{
+			"axiom_id": "measurement:" + candidateIdentifier(metric+" measured by "+procedure), "axiom_kind": "object_property_assertion",
+			"subject_term_id": metricID, "predicate_term_id": "mea:measured_by", "object_term_id": procedureID, "module_id": "measurement",
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, candidates.Candidate{CandidateKind: "axiom", ProposedPayload: payload, ProposedModuleID: "measurement", SourceType: "document", SourceRef: fmt.Sprintf("input_record:%d", recordID), SourceLineSpans: spans, DiscoveryMethod: "routed_extraction", ProposedBy: "extract_test_methods"})
+	}
+	return out, nil
+}
+
 // OntologyCandidateSink makes the harvesting boundary testable while the
 // production runtime uses candidates.CandidateStore directly.
 type OntologyCandidateSink interface {

@@ -80,3 +80,25 @@ func TestMetricsProcessorHarvestsDefinitionCandidatesAfterMetricExtraction(t *te
 		t.Fatalf("candidate sink = %#v", sink.got)
 	}
 }
+
+func TestBuildTestMethodCandidatesProposesProcedureAndMetricLink(t *testing.T) {
+	got, err := buildTestMethodCandidates(42, testMethodMention{
+		ProcedureName: "Constant-flow test",
+		Definition:    "Measure output at a controlled constant flow.",
+		MetricNames:   []string{"Air flow rate"},
+		LineNumbers:   []int{31},
+	})
+	if err != nil {
+		t.Fatalf("buildTestMethodCandidates: %v", err)
+	}
+	if len(got) != 2 || got[0].CandidateKind != "term" || got[1].CandidateKind != "axiom" {
+		t.Fatalf("candidates = %#v", got)
+	}
+	var link map[string]any
+	if err := json.Unmarshal(got[1].ProposedPayload, &link); err != nil {
+		t.Fatalf("unmarshal link: %v", err)
+	}
+	if link["predicate_term_id"] != "mea:measured_by" || link["subject_term_id"] != "measurement:air_flow_rate" {
+		t.Fatalf("link = %#v", link)
+	}
+}
