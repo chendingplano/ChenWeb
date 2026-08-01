@@ -125,6 +125,25 @@ RETURNING id`,
 		return Release{}, err
 	}
 
+	// Approved candidates whose content this release includes become
+	// included_in_release. This is the ONLY path that activates a candidate
+	// (spec §16.3 item 3: approved candidates remain inactive until included
+	// in a module release).
+	if _, err := tx.ExecContext(ctx, `
+UPDATE kb.ontology_candidates
+SET status = 'included_in_release', modify_time = NOW()
+WHERE id IN (
+	SELECT DISTINCT source_candidate_id FROM kb.ontology_terms WHERE released_in_release_id = $1 AND source_candidate_id IS NOT NULL
+	UNION
+	SELECT DISTINCT source_candidate_id FROM kb.ontology_term_labels WHERE released_in_release_id = $1 AND source_candidate_id IS NOT NULL
+	UNION
+	SELECT DISTINCT source_candidate_id FROM kb.ontology_axioms WHERE released_in_release_id = $1 AND source_candidate_id IS NOT NULL
+	UNION
+	SELECT DISTINCT source_candidate_id FROM kb.ontology_mappings WHERE released_in_release_id = $1 AND source_candidate_id IS NOT NULL
+)`, releaseID); err != nil {
+		return Release{}, err
+	}
+
 	// The new release supersedes any prior release of the same module.
 	if _, err := tx.ExecContext(ctx, `
 UPDATE kb.ontology_module_releases

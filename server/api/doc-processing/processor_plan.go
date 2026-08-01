@@ -5,10 +5,21 @@ import (
 	"strings"
 )
 
+// ProcessorSpec is the DR5 declarative processor contract (ADR 2026072901
+// DR5). Name/Phase/DependsOn were the P1 core; Requires/Produces/Class/Cost/
+// OnUndetermined are the DR5 fields added by P2 seam 1. The DAG planner that
+// consumes Requires/Produces arrives in a later phase; the declaration and the
+// registry seam are complete now.
 type ProcessorSpec struct {
-	Name      string
-	Phase     string
-	DependsOn []string
+	Name           string
+	Phase          string
+	DependsOn      []string
+	Requires       []string   // artifact kinds this processor needs as input
+	Produces       []string   // artifact kinds this processor emits
+	Class          string     // mandatory | routed | on_demand
+	Cost           string     // free | cheap_llm | expensive_llm
+	OnUndetermined string     // run | skip — the default when rules do not decide
+	Idempotent     bool
 }
 
 type ProductionRoutingFacets struct {

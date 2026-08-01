@@ -269,6 +269,13 @@ func (s CandidateStore) TransitionStatus(ctx context.Context, id int64, to, by s
 	if err != nil {
 		return Candidate{}, err
 	}
+	if to == StatusIncludedInRelease {
+		// included_in_release is release-owned: only the module release path
+		// (which includes the candidate's promoted content) may set it, so
+		// approved candidates remain inactive until included in a release
+		// (spec §16.3 item 3).
+		return Candidate{}, errors.New("included_in_release is set only by the module release path")
+	}
 	if !transitionAllowed(cur.Status, to) {
 		return Candidate{}, fmt.Errorf("candidate status transition %s -> %s is not allowed", cur.Status, to)
 	}
