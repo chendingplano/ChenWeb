@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -321,15 +320,7 @@ func (p *RelationProcessor) PostProcessIndex(ctx context.Context, recordID int64
 	} else {
 		p.Logger.Warn("store does not support endpoint linking; skipping link step", "record_id", recordID)
 	}
-	if err := p.EntityRelationProcessor.PostProcessIndex(ctx, recordID); err != nil {
-		return err
-	}
-	if ApiTypes.ProjectDBHandle != nil {
-		if err := HarvestProductStructureFromRelations(ctx, ApiTypes.ProjectDBHandle, recordID, assertions.DecisionCandidateStore{DB: ApiTypes.ProjectDBHandle}); err != nil {
-			p.Logger.Warn("product structure harvest failed", "record_id", recordID, "error", err)
-		}
-	}
-	return nil
+	return p.EntityRelationProcessor.PostProcessIndex(ctx, recordID)
 }
 
 // ---- ChunkBatchProcessor implementation for EntityProcessor (entity-only) ----
