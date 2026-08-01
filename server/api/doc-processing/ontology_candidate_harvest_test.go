@@ -124,3 +124,23 @@ func TestBuildProductStructureCandidatePreservesExplicitRelationAndEvidence(t *t
 		t.Fatalf("candidate=%#v", candidate)
 	}
 }
+
+func TestTestMethodsProcessorPersistsValidatedChunkOutput(t *testing.T) {
+	sink := &recordingOntologyCandidateSink{}
+	p := &TestMethodsProcessor{Extractor: &fakeJSONExtractor{out: map[string]any{"procedures": []any{map[string]any{
+		"procedure_name": "Constant-flow test", "metric_names": []any{"Air flow rate"}, "source_line_spans": []any{"61"},
+	}}}}, CandidateSink: sink, ModelName: "test-model"}
+	chunks := []Chunk{{SeqNo: 1, Lines: []MarkedLine{{Line: Line{LineNo: 61, Content: "The constant-flow test measures air flow rate."}}}}}
+	if err := p.InitChunkBatch(context.Background(), 42, chunks, "doc"); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if err := p.ProcessChunk(context.Background(), 0); err != nil {
+		t.Fatalf("ProcessChunk: %v", err)
+	}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if len(sink.got) != 2 {
+		t.Fatalf("persisted %d candidates, want procedure and link", len(sink.got))
+	}
+}

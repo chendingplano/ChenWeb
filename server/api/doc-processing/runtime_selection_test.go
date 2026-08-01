@@ -24,6 +24,7 @@ func TestProductionRuntimeSelectedProcessorDependencyClosure(t *testing.T) {
 	}{
 		{"chunking", []string{"chunking"}, []string{"static_analyzer", "chunking"}},
 		{"metrics", []string{"extract_metrics"}, []string{"static_analyzer", "chunking", "extract_metrics"}},
+		{"test methods", []string{"extract_test_methods"}, []string{"static_analyzer", "chunking", "extract_test_methods"}},
 		{"preserves optional selection", []string{"extract_entity", "extract_relation"}, []string{"static_analyzer", "chunking", "extract_entity", "extract_relation"}},
 	}
 	for _, tc := range tests {
