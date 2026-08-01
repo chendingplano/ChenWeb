@@ -102,3 +102,24 @@ func TestProfileStoreCreateProfileStartsDraftVersionOne(t *testing.T) {
 		t.Fatalf("ExpectationsWereMet: %v", err)
 	}
 }
+
+func TestProfileStoreTransitionStatusAllowsDraftToInReview(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profiles\nWHERE profile_id = $1 AND version = $2")).WithArgs("p", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "profile_id", "version", "module_id", "status", "title", "applicability", "closed_dimensions", "create_time", "create_by", "modify_time", "modify_by"}).AddRow(int64(1), "p", 1, "m", "draft", "", []byte(`{}`), []byte(`[]`), now, "", now, ""))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.ontology_profiles")).WithArgs("p", 1, "in_review", "curator").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profiles\nWHERE profile_id = $1 AND version = $2")).WithArgs("p", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "profile_id", "version", "module_id", "status", "title", "applicability", "closed_dimensions", "create_time", "create_by", "modify_time", "modify_by"}).AddRow(int64(1), "p", 1, "m", "in_review", "", []byte(`{}`), []byte(`[]`), now, "", now, "curator"))
+	got, err := (ProfileStore{DB: db}).TransitionStatus(context.Background(), "p", 1, "in_review", "curator")
+	if err != nil || got.Status != "in_review" {
+		t.Fatalf("TransitionStatus = %#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

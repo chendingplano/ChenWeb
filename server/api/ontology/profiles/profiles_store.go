@@ -37,6 +37,13 @@ type ProfileStore struct {
 	DB terms.DBX
 }
 
+var profileTransitions = map[string]map[string]bool{
+	"draft":               {"in_review": true, "rejected": true},
+	"in_review":           {"approved": true, "rejected": true},
+	"approved":            {"included_in_release": true, "superseded": true},
+	"included_in_release": {"superseded": true},
+}
+
 const activeProfileColumns = `
 	p.id, p.profile_id, p.version, p.module_id, p.status,
 	COALESCE(p.title, ''), p.applicability, p.closed_dimensions,
@@ -105,6 +112,30 @@ func nullableText(v string) any {
 		return nil
 	}
 	return v
+}
+
+func (s ProfileStore) GetProfile(ctx context.Context, profileID string, version int) (Profile, error) {
+	if s.DB == nil {
+		return Profile{}, errors.New("db is nil")
+	}
+	const stmt = `SELECT id, profile_id, version, module_id, status, COALESCE(title, ''), applicability, closed_dimensions, create_time, COALESCE(create_by, ''), modify_time, COALESCE(modify_by, '') FROM kb.ontology_profiles
+WHERE profile_id = $1 AND version = $2`
+	return scanStagedProfile(s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(profileID), version).Scan)
+}
+
+func (s ProfileStore) TransitionStatus(ctx context.Context, profileID string, version int, next, by string) (Profile, error) {
+	current, err := s.GetProfile(ctx, profileID, version)
+	if err != nil {
+		return Profile{}, err
+	}
+	if !profileTransitions[current.Status][next] {
+		return Profile{}, errors.New("illegal profile status transition")
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE kb.ontology_profiles SET status = $3, modify_time = NOW(), modify_by = $4 WHERE profile_id = $1 AND version = $2`, strings.TrimSpace(profileID), version, next, nullableText(by))
+	if err != nil {
+		return Profile{}, err
+	}
+	return s.GetProfile(ctx, profileID, version)
 }
 
 // ListActiveProfiles returns only profile versions included in the module's
