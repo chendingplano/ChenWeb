@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/profiles"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terms"
 	"github.com/lib/pq"
 )
@@ -55,8 +56,8 @@ FROM kb.ontology_module_releases`
 
 func scanRelease(scan func(dest ...any) error) (Release, error) {
 	var (
-		r                Release
-		supersededBy     sql.NullInt64
+		r            Release
+		supersededBy sql.NullInt64
 	)
 	if err := scan(
 		&r.ID, &r.ModuleID, &r.Version, &r.Title, &r.Payload, &r.ContentChecksum,
@@ -186,7 +187,13 @@ func tagContentRows(ctx context.Context, tx *sql.Tx, releaseID int64, snap snaps
 	if err := tag("kb.ontology_axioms", idsOfAxioms(snap.Axioms)); err != nil {
 		return err
 	}
-	return tag("kb.ontology_mappings", idsOfMappings(snap.Mappings))
+	if err := tag("kb.ontology_mappings", idsOfMappings(snap.Mappings)); err != nil {
+		return err
+	}
+	if err := tag("kb.ontology_profiles", idsOfProfiles(snap.Profiles)); err != nil {
+		return err
+	}
+	return tag("kb.ontology_profile_rules", idsOfProfileRules(snap.ProfileRules))
 }
 
 func idsOfTerms(ts []terms.Term) []int64 {
@@ -217,6 +224,22 @@ func idsOfMappings(ms []terms.Mapping) []int64 {
 	out := make([]int64, 0, len(ms))
 	for _, m := range ms {
 		out = append(out, m.ID)
+	}
+	return out
+}
+
+func idsOfProfiles(ps []profiles.Profile) []int64 {
+	out := make([]int64, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+func idsOfProfileRules(rs []profiles.ProfileRule) []int64 {
+	out := make([]int64, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, r.ID)
 	}
 	return out
 }

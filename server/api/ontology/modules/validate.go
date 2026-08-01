@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/profiles"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terms"
 )
 
@@ -17,12 +18,14 @@ import (
 // kb.ontology_module_releases.payload stores, so a release is reproducible
 // from its own row.
 type snapshot struct {
-	ModuleID string            `json:"module_id"`
-	Version  string            `json:"version"`
-	Terms    []terms.Term      `json:"terms"`
-	Labels   []terms.TermLabel `json:"labels"`
-	Axioms   []terms.Axiom     `json:"axioms"`
-	Mappings []terms.Mapping   `json:"mappings"`
+	ModuleID     string                 `json:"module_id"`
+	Version      string                 `json:"version"`
+	Terms        []terms.Term           `json:"terms"`
+	Labels       []terms.TermLabel      `json:"labels"`
+	Axioms       []terms.Axiom          `json:"axioms"`
+	Mappings     []terms.Mapping        `json:"mappings"`
+	Profiles     []profiles.Profile     `json:"profiles"`
+	ProfileRules []profiles.ProfileRule `json:"profile_rules"`
 }
 
 // buildSnapshot collects the module's approved content. It runs against a
@@ -82,13 +85,26 @@ func buildSnapshot(ctx context.Context, db terms.DBX, moduleID, version string) 
 		}
 	}
 
+	ps := profiles.ProfileStore{DB: db}
+	approvedProfiles, err := ps.ListApprovedProfiles(ctx, moduleID)
+	if err != nil {
+		return snapshot{}, err
+	}
+	rs := profiles.ProfileRuleStore{DB: db}
+	approvedRules, err := rs.ListApprovedProfileRules(ctx, moduleID)
+	if err != nil {
+		return snapshot{}, err
+	}
+
 	return snapshot{
-		ModuleID: moduleID,
-		Version:  version,
-		Terms:    latest,
-		Labels:   labels,
-		Axioms:   axioms,
-		Mappings: mappings,
+		ModuleID:     moduleID,
+		Version:      version,
+		Terms:        latest,
+		Labels:       labels,
+		Axioms:       axioms,
+		Mappings:     mappings,
+		Profiles:     approvedProfiles,
+		ProfileRules: approvedRules,
 	}, nil
 }
 
@@ -246,4 +262,3 @@ func Checksum(payload []byte) (string, error) {
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:]), nil
 }
-
