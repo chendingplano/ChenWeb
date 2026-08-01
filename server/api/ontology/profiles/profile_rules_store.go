@@ -36,6 +36,41 @@ type ProfileRuleStore struct {
 	DB terms.DBX
 }
 
+// CreateProfileRule creates the initial draft version of a rule. A rule's
+// profile/version is FK-validated by Postgres; release visibility remains the
+// module compiler's separate responsibility.
+func (s ProfileRuleStore) CreateProfileRule(ctx context.Context, r ProfileRule) (ProfileRule, error) {
+	if s.DB == nil {
+		return ProfileRule{}, errors.New("db is nil")
+	}
+	if strings.TrimSpace(r.RuleID) == "" || strings.TrimSpace(r.ProfileID) == "" || r.ProfileVersion < 1 || strings.TrimSpace(r.RuleKind) == "" {
+		return ProfileRule{}, errors.New("rule_id, profile_id/version, and rule_kind are required")
+	}
+	if _, ok := LookupRuleKind(r.RuleKind); !ok {
+		return ProfileRule{}, errors.New("rule_kind is not registered")
+	}
+	if r.Status == "" {
+		r.Status = "draft"
+	}
+	if r.Status != "draft" {
+		return ProfileRule{}, errors.New("new profile rules must start in draft")
+	}
+	if r.Severity == "" {
+		r.Severity = "error"
+	}
+	if len(r.RuleConfig) == 0 {
+		return ProfileRule{}, errors.New("rule_config is required")
+	}
+	if len(r.Applicability) == 0 {
+		r.Applicability = json.RawMessage(`{}`)
+	}
+	const stmt = `INSERT INTO kb.ontology_profile_rules (rule_id, version, profile_id, profile_version, rule_kind, status, severity, rule_config, applicability, create_by, modify_by) VALUES ($1, 1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10) RETURNING id, rule_id, version, profile_id, profile_version, rule_kind, status, severity, rule_config, applicability, create_time, COALESCE(create_by, ''), modify_time, COALESCE(modify_by, '')`
+	row := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(r.RuleID), strings.TrimSpace(r.ProfileID), r.ProfileVersion, strings.TrimSpace(r.RuleKind), r.Status, r.Severity, string(r.RuleConfig), string(r.Applicability), nullableText(r.CreateBy), nullableText(r.ModifyBy))
+	var out ProfileRule
+	err := row.Scan(&out.ID, &out.RuleID, &out.Version, &out.ProfileID, &out.ProfileVersion, &out.RuleKind, &out.Status, &out.Severity, &out.RuleConfig, &out.Applicability, &out.CreateTime, &out.CreateBy, &out.ModifyTime, &out.ModifyBy)
+	return out, err
+}
+
 // ListActiveProfileRules returns only rules whose profile and rule are both
 // included in the same currently activated module release.
 func (s ProfileRuleStore) ListActiveProfileRules(ctx context.Context, profileID string, profileVersion int) ([]ProfileRule, error) {

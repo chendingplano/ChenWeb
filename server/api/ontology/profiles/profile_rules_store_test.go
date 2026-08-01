@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"testing"
 	"time"
@@ -34,5 +35,25 @@ func TestActiveProfileRulesExcludeDraft(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
+func TestProfileRuleStoreCreateStartsDraftVersionOne(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_profile_rules")).
+		WithArgs("ventilator-display:requires_luminance", "ventilator-display:display_metrics", 1, "required_assertion_pattern", "draft", "error", `{"dimension":"display_metrics"}`, `{}`, "curator", "curator").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(int64(1), "ventilator-display:requires_luminance", 1, "ventilator-display:display_metrics", 1, "required_assertion_pattern", "draft", "error", []byte(`{"dimension":"display_metrics"}`), []byte(`{}`), now, "curator", now, "curator"))
+	got, err := (ProfileRuleStore{DB: db}).CreateProfileRule(context.Background(), ProfileRule{RuleID: "ventilator-display:requires_luminance", ProfileID: "ventilator-display:display_metrics", ProfileVersion: 1, RuleKind: "required_assertion_pattern", Severity: "error", RuleConfig: json.RawMessage(`{"dimension":"display_metrics"}`), Applicability: json.RawMessage(`{}`), CreateBy: "curator", ModifyBy: "curator"})
+	if err != nil || got.Status != "draft" || got.Version != 1 {
+		t.Fatalf("CreateProfileRule = %#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
