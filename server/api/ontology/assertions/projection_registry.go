@@ -107,16 +107,16 @@ type ProjectionStateStore struct {
 
 // ProjectionState is one row of kb.projection_state.
 type ProjectionState struct {
-	ID                      int64
-	ProjectionKind          string
-	ProjectionTargetTable   string
-	ProjectionTargetID      string
-	AuthoritativeTable      string
-	AuthoritativeID         int64
-	AuthoritativeRevision   int
-	ProjectionVersion       int
-	Stale                   bool
-	StaleReason             string
+	ID                    int64
+	ProjectionKind        string
+	ProjectionTargetTable string
+	ProjectionTargetID    string
+	AuthoritativeTable    string
+	AuthoritativeID       int64
+	AuthoritativeRevision int
+	ProjectionVersion     int
+	Stale                 bool
+	StaleReason           string
 }
 
 const projectionStateColumns = `

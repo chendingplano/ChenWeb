@@ -35,7 +35,7 @@ type Normalizer interface {
 // normalizer never requires editing normalize_assertions.go, only calling
 // RegisterNormalizer.
 type AssertionNormalizerRegistry struct {
-	mu         sync.RWMutex
+	mu          sync.RWMutex
 	normalizers map[string]Normalizer
 }
 

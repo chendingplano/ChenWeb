@@ -37,16 +37,16 @@ type Assertion struct {
 	Modality              string          `json:"modality,omitempty"`
 	Qualifiers            json.RawMessage `json:"qualifiers,omitempty"`
 	Confidence            *float64        `json:"confidence,omitempty"`
-	ValueForm              string          `json:"value_form,omitempty"`
-	NumericValue            *float64        `json:"numeric_value,omitempty"`
-	LowerValue               *float64        `json:"lower_value,omitempty"`
-	UpperValue                *float64        `json:"upper_value,omitempty"`
-	LowerInclusive             *bool           `json:"lower_inclusive,omitempty"`
-	UpperInclusive              *bool           `json:"upper_inclusive,omitempty"`
-	Comparator                   string          `json:"comparator,omitempty"`
-	UnitTermID                     string          `json:"unit_term_id,omitempty"`
-	QuantityKindTermID              string          `json:"quantity_kind_term_id,omitempty"`
-	RawText                          string          `json:"raw_text,omitempty"`
+	ValueForm             string          `json:"value_form,omitempty"`
+	NumericValue          *float64        `json:"numeric_value,omitempty"`
+	LowerValue            *float64        `json:"lower_value,omitempty"`
+	UpperValue            *float64        `json:"upper_value,omitempty"`
+	LowerInclusive        *bool           `json:"lower_inclusive,omitempty"`
+	UpperInclusive        *bool           `json:"upper_inclusive,omitempty"`
+	Comparator            string          `json:"comparator,omitempty"`
+	UnitTermID            string          `json:"unit_term_id,omitempty"`
+	QuantityKindTermID    string          `json:"quantity_kind_term_id,omitempty"`
+	RawText               string          `json:"raw_text,omitempty"`
 	Status                string          `json:"status"`
 	DecisionReason        string          `json:"decision_reason,omitempty"`
 	DependencyFingerprint string          `json:"dependency_fingerprint,omitempty"`

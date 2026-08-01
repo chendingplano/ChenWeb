@@ -36,11 +36,16 @@ func (a AssociateSemantics) Run(ctx context.Context, inputRecordID int64) (Assoc
 		return report, fmt.Errorf("db is nil")
 	}
 
+	// Also picks up rows stuck at 'in_review': that status is this stage's own
+	// momentary bookkeeping (transition-in immediately followed by
+	// resolve/adjudicate), not a human-review pause, so a row still sitting
+	// there was orphaned by a crash mid-candidate and must be resumable
+	// (spec §16.3 item 13), not left stuck forever.
 	const stmt = `
 SELECT id FROM kb.semantic_decision_candidates
-WHERE status = 'candidate' AND source_artifact_type IN ('metric', 'provision')
-  AND logical_identity_key LIKE $1`
-	rows, err := a.DB.QueryContext(ctx, stmt, fmt.Sprintf("%%:%d:%%", inputRecordID))
+WHERE status IN ('candidate', 'in_review') AND source_artifact_type IN ('metric', 'provision')
+  AND input_record_id = $1`
+	rows, err := a.DB.QueryContext(ctx, stmt, inputRecordID)
 	if err != nil {
 		return report, err
 	}
@@ -99,9 +104,14 @@ func (a AssociateSemantics) processOne(ctx context.Context, dcStore DecisionCand
 	if err != nil {
 		return "", err
 	}
-	if _, err := dcStore.TransitionStatus(ctx, dc.ID, StatusInReview, "", "associate_semantics"); err != nil {
-		return "", err
+	if dc.Status == StatusCandidate {
+		if _, err := dcStore.TransitionStatus(ctx, dc.ID, StatusInReview, "", "associate_semantics"); err != nil {
+			return "", err
+		}
 	}
+	// dc.Status == StatusInReview here means a prior run was interrupted
+	// after transitioning in but before resolving -- resume from where it
+	// left off rather than re-transitioning (which would be refused).
 
 	switch dc.SourceArtifactType {
 	case "metric":

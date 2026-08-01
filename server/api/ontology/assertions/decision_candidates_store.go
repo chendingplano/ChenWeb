@@ -58,30 +58,31 @@ var errIllegalDecisionCandidateTransition = errors.New("illegal semantic decisio
 // revision pattern as Assertion; PayloadFingerprint detects whether a
 // reprocessing run's payload changed (spec §16.3 item 2).
 type DecisionCandidate struct {
-	ID                   int64           `json:"id"`
-	LogicalIdentityKey   string          `json:"logical_identity_key"`
-	Revision             int             `json:"revision"`
-	PayloadFingerprint   string          `json:"payload_fingerprint"`
-	CandidateKind        string          `json:"candidate_kind"`
-	ProposedPayload      json.RawMessage `json:"proposed_payload"`
-	Method               string          `json:"method"`
-	ResolutionOutcome    string          `json:"resolution_outcome,omitempty"`
-	ResolutionReason     string          `json:"resolution_reason,omitempty"`
-	SourceArtifactType   string          `json:"source_artifact_type,omitempty"`
-	SourceArtifactID     string          `json:"source_artifact_id,omitempty"`
-	SourceLineSpans      json.RawMessage `json:"source_line_spans,omitempty"`
-	Confidence           *float64        `json:"confidence,omitempty"`
-	Status               string          `json:"status"`
-	DecisionReason       string          `json:"decision_reason,omitempty"`
-	DependencyFingerprint string         `json:"dependency_fingerprint,omitempty"`
-	SupersededBy         *int64          `json:"superseded_by,omitempty"`
-	ResultingAssertionID *int64          `json:"resulting_assertion_id,omitempty"`
-	LastSeen             time.Time       `json:"last_seen"`
-	CreateTime           time.Time       `json:"create_time"`
-	CreateBy             string          `json:"create_by,omitempty"`
-	ModifyTime           time.Time       `json:"modify_time"`
-	ModifyBy             string          `json:"modify_by,omitempty"`
-	Reused               bool            `json:"reused"`
+	ID                    int64           `json:"id"`
+	LogicalIdentityKey    string          `json:"logical_identity_key"`
+	Revision              int             `json:"revision"`
+	PayloadFingerprint    string          `json:"payload_fingerprint"`
+	CandidateKind         string          `json:"candidate_kind"`
+	ProposedPayload       json.RawMessage `json:"proposed_payload"`
+	Method                string          `json:"method"`
+	ResolutionOutcome     string          `json:"resolution_outcome,omitempty"`
+	ResolutionReason      string          `json:"resolution_reason,omitempty"`
+	SourceArtifactType    string          `json:"source_artifact_type,omitempty"`
+	SourceArtifactID      string          `json:"source_artifact_id,omitempty"`
+	InputRecordID         *int64          `json:"input_record_id,omitempty"`
+	SourceLineSpans       json.RawMessage `json:"source_line_spans,omitempty"`
+	Confidence            *float64        `json:"confidence,omitempty"`
+	Status                string          `json:"status"`
+	DecisionReason        string          `json:"decision_reason,omitempty"`
+	DependencyFingerprint string          `json:"dependency_fingerprint,omitempty"`
+	SupersededBy          *int64          `json:"superseded_by,omitempty"`
+	ResultingAssertionID  *int64          `json:"resulting_assertion_id,omitempty"`
+	LastSeen              time.Time       `json:"last_seen"`
+	CreateTime            time.Time       `json:"create_time"`
+	CreateBy              string          `json:"create_by,omitempty"`
+	ModifyTime            time.Time       `json:"modify_time"`
+	ModifyBy              string          `json:"modify_by,omitempty"`
+	Reused                bool            `json:"reused"`
 }
 
 // DecisionCandidateStore persists association candidates and enforces the
@@ -93,7 +94,7 @@ type DecisionCandidateStore struct {
 const decisionCandidateColumns = `
 	id, logical_identity_key, revision, payload_fingerprint, candidate_kind,
 	proposed_payload, method, resolution_outcome, resolution_reason,
-	source_artifact_type, source_artifact_id, source_line_spans, confidence,
+	source_artifact_type, source_artifact_id, input_record_id, source_line_spans, confidence,
 	status, decision_reason, dependency_fingerprint, superseded_by,
 	resulting_assertion_id, last_seen, create_time, create_by, modify_time, modify_by`
 
@@ -129,13 +130,14 @@ func scanDecisionCandidate(scan func(dest ...any) error) (DecisionCandidate, err
 		depFingerprint     sql.NullString
 		supersededBy       sql.NullInt64
 		resultingAssertion sql.NullInt64
+		inputRecordID      sql.NullInt64
 		createBy           sql.NullString
 		modifyBy           sql.NullString
 	)
 	if err := scan(
 		&c.ID, &c.LogicalIdentityKey, &c.Revision, &c.PayloadFingerprint, &c.CandidateKind,
 		&c.ProposedPayload, &c.Method, &resolutionOutcome, &resolutionReason,
-		&sourceArtifactType, &sourceArtifactID, &lineSpans, &confidence,
+		&sourceArtifactType, &sourceArtifactID, &inputRecordID, &lineSpans, &confidence,
 		&c.Status, &decisionReason, &depFingerprint, &supersededBy,
 		&resultingAssertion, &c.LastSeen, &c.CreateTime, &createBy, &c.ModifyTime, &modifyBy,
 	); err != nil {
@@ -152,6 +154,10 @@ func scanDecisionCandidate(scan func(dest ...any) error) (DecisionCandidate, err
 	}
 	if sourceArtifactID.Valid {
 		c.SourceArtifactID = sourceArtifactID.String
+	}
+	if inputRecordID.Valid {
+		v := inputRecordID.Int64
+		c.InputRecordID = &v
 	}
 	if lineSpans != nil {
 		c.SourceLineSpans = lineSpans
@@ -251,14 +257,14 @@ UPDATE kb.semantic_decision_candidates SET last_seen = NOW() WHERE id = $1`, pri
 INSERT INTO kb.semantic_decision_candidates
 	(logical_identity_key, revision, payload_fingerprint, candidate_kind,
 	 proposed_payload, method, resolution_outcome, resolution_reason,
-	 source_artifact_type, source_artifact_id, source_line_spans, confidence,
+	 source_artifact_type, source_artifact_id, input_record_id, source_line_spans, confidence,
 	 status, create_by, modify_by)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16)
 RETURNING ` + decisionCandidateColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(c.LogicalIdentityKey), revision, fp, c.CandidateKind,
 		string(c.ProposedPayload), c.Method, nullableString(c.ResolutionOutcome), nullableString(c.ResolutionReason),
-		nullableString(c.SourceArtifactType), nullableString(c.SourceArtifactID), nullableJSON(c.SourceLineSpans),
+		nullableString(c.SourceArtifactType), nullableString(c.SourceArtifactID), nullableInt64(c.InputRecordID), nullableJSON(c.SourceLineSpans),
 		nullableFloat(c.Confidence), c.Status, nullableString(c.CreateBy), nullableString(c.ModifyBy),
 	)
 	next, err := scanDecisionCandidate(row.Scan)
@@ -266,7 +272,17 @@ RETURNING ` + decisionCandidateColumns
 		return DecisionCandidate{}, err
 	}
 
-	if hasPrior && (prior.Status == StatusAccepted || prior.Status == StatusRejected) {
+	// A new revision always retires whichever revision was current before it
+	// -- not only accepted/rejected ones. Leaving a still-open prior revision
+	// (candidate/in_review/deferred) un-superseded would let both revisions
+	// sit in a non-terminal status simultaneously, so a later stage
+	// (associate_semantics, the backlog drain) processes the same logical
+	// association twice under two different row ids. This was found live:
+	// the backlog drain re-resolved a referent, which changed the candidate's
+	// payload fingerprint, which created revision 2 -- but revision 1 (with
+	// the stale, still-unresolved payload) was left at 'candidate' and got
+	// reprocessed right alongside it, deferring again on stale data.
+	if hasPrior && prior.Status != StatusSuperseded {
 		if _, err := s.DB.ExecContext(ctx, `
 UPDATE kb.semantic_decision_candidates
 SET status = $2, superseded_by = $3, modify_time = NOW()

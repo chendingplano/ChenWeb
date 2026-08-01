@@ -98,6 +98,7 @@ WHERE p.input_record_id = $1`
 			return report, err
 		}
 
+		recordID := inputRecordID
 		candidate := DecisionCandidate{
 			LogicalIdentityKey: fmt.Sprintf("provision:%d:%s", inputRecordID, provID),
 			CandidateKind:      "assertion",
@@ -105,6 +106,7 @@ WHERE p.input_record_id = $1`
 			Method:             "explicit_structured",
 			SourceArtifactType: "provision",
 			SourceArtifactID:   provID,
+			InputRecordID:      &recordID,
 			SourceLineSpans:    r.SourceLineSpans,
 		}
 		if r.Confidence.Valid {

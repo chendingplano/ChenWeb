@@ -113,6 +113,7 @@ WHERE m.input_record_id = $1`
 			return report, err
 		}
 
+		recordID := inputRecordID
 		candidate := DecisionCandidate{
 			LogicalIdentityKey: fmt.Sprintf("metric:%d:%s", inputRecordID, metricID),
 			CandidateKind:      "assertion",
@@ -120,6 +121,7 @@ WHERE m.input_record_id = $1`
 			Method:             "explicit_structured",
 			SourceArtifactType: "metric",
 			SourceArtifactID:   metricID,
+			InputRecordID:      &recordID,
 			SourceLineSpans:    r.SourceLineSpans,
 		}
 		if r.Confidence.Valid {
