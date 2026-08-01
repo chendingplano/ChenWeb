@@ -152,3 +152,45 @@ func TestAssertionStoreRetryDeferredRejectsUnchangedFingerprint(t *testing.T) {
 		t.Fatalf("expected errNoRetryWithoutDependencyChange, got %v", err)
 	}
 }
+
+func TestHighestAcceptedAssertionIDReturnsMaxForSubjectObject(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(MAX(id), 0) FROM kb.semantic_assertions")).
+		WithArgs("obj-1").
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(int64(90)))
+	got, err := (AssertionStore{DB: db}).HighestAcceptedAssertionID(context.Background(), "obj-1")
+	if err != nil {
+		t.Fatalf("HighestAcceptedAssertionID: %v", err)
+	}
+	if got != 90 {
+		t.Fatalf("HighestAcceptedAssertionID = %d, want 90", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHighestAcceptedAssertionIDReturnsZeroWhenNone(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(MAX(id), 0) FROM kb.semantic_assertions")).
+		WithArgs("obj-none").
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(int64(0)))
+	got, err := (AssertionStore{DB: db}).HighestAcceptedAssertionID(context.Background(), "obj-none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Fatalf("HighestAcceptedAssertionID = %d, want 0", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -418,6 +418,26 @@ ORDER BY id`
 	return out, rows.Err()
 }
 
+// HighestAcceptedAssertionID returns the greatest id among the latest,
+// accepted-revision assertions for one subject object, or 0 if none exist.
+// A review or comparison run uses this to pin a reproducible assertion
+// watermark computed from governed state, rather than trust a caller-supplied
+// value.
+func (s AssertionStore) HighestAcceptedAssertionID(ctx context.Context, subjectObjectID string) (int64, error) {
+	if s.DB == nil {
+		return 0, errors.New("db is nil")
+	}
+	const stmt = `SELECT COALESCE(MAX(id), 0) FROM kb.semantic_assertions
+WHERE subject_object_id = $1 AND status = 'accepted'
+  AND revision = (
+	SELECT MAX(revision) FROM kb.semantic_assertions a2
+	WHERE a2.logical_identity_key = kb.semantic_assertions.logical_identity_key
+  )`
+	var maxID int64
+	err := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(subjectObjectID)).Scan(&maxID)
+	return maxID, err
+}
+
 // TransitionStatus moves an assertion between allowed operational states
 // (spec §9.3).
 func (s AssertionStore) TransitionStatus(ctx context.Context, id int64, to, reason, by string) (Assertion, error) {

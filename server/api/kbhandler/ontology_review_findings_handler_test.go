@@ -18,7 +18,7 @@ func TestGetOntologyReviewFindingReturnsProvenance(t *testing.T) {
 	old := ApiTypes.ProjectDBHandle
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = old }()
-	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.doc_review_findings")).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"id", "review_scope_id", "profile_rule_id", "assertion_id"}).AddRow(5, "scope-1", 9, 11))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.doc_review_findings")).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"id", "review_scope_id", "review_run_id", "profile_rule_id", "assertion_id"}).AddRow(5, "scope-1", 77, 9, 11))
 	c, rec := newOntologyCandidateContext(t, http.MethodGet, "/api/v1/kb/ontology/review-findings/5", "", map[string]string{"id": "5"})
 	if err := GetOntologyReviewFinding(c); err != nil {
 		t.Fatal(err)

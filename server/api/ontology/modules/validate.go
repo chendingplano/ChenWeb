@@ -215,7 +215,7 @@ func (s ReleaseStore) validateAndBuildSnapshot(ctx context.Context, db terms.DBX
 			refs = append(refs, m.ToTermID)
 		}
 	}
-	if len(refs) > 0 {
+	if len(refs) > 0 || len(snap.ProfileRules) > 0 {
 		known = unionTermIDs(ctx, db, known)
 		for _, ref := range refs {
 			if !known[ref] {
@@ -223,12 +223,44 @@ func (s ReleaseStore) validateAndBuildSnapshot(ctx context.Context, db terms.DBX
 			}
 		}
 	}
+	if err := validateProfileRuleReferences(snap.ProfileRules, known); err != nil {
+		return snapshot{}, nil, err
+	}
 
 	pins, err := s.pinDependencies(ctx, db, module)
 	if err != nil {
 		return snapshot{}, nil, err
 	}
 	return snap, pins, nil
+}
+
+// validateProfileRuleReferences is the rule-content counterpart of the
+// axiom/mapping dangling-reference guard above. A rule's config is opaque
+// JSONB whose meaning is owned by its registered rule_kind (extension seam
+// 6), so reference extraction is delegated to that kind's own
+// ReferencedTermIDs (optional; a rule kind with no term references leaves it
+// nil). A rule whose kind isn't registered at all cannot be evaluated once
+// released, so that is rejected here too, not just a dangling term.
+func validateProfileRuleReferences(rules []profiles.ProfileRule, known map[string]bool) error {
+	for _, r := range rules {
+		kind, ok := profiles.LookupRuleKind(r.RuleKind)
+		if !ok {
+			return fmt.Errorf("profile rule %q references unregistered rule_kind %q", r.RuleID, r.RuleKind)
+		}
+		if kind.ReferencedTermIDs == nil {
+			continue
+		}
+		refs, err := kind.ReferencedTermIDs(r)
+		if err != nil {
+			return fmt.Errorf("profile rule %q: %w", r.RuleID, err)
+		}
+		for _, ref := range refs {
+			if !known[ref] {
+				return fmt.Errorf("dangling reference to term %q in profile rule %q", ref, r.RuleID)
+			}
+		}
+	}
+	return nil
 }
 
 // unionTermIDs loads the full governed term_id space so refs that point at

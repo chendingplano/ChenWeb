@@ -18,10 +18,11 @@ func GetOntologyReviewFinding(c echo.Context) error {
 	var out struct {
 		ID            int64  `json:"id"`
 		ReviewScopeID string `json:"review_scope_id"`
+		ReviewRunID   int64  `json:"review_run_id"`
 		ProfileRuleID int64  `json:"profile_rule_id"`
 		AssertionID   int64  `json:"assertion_id"`
 	}
-	err = ApiTypes.ProjectDBHandle.QueryRowContext(c.Request().Context(), `SELECT id, COALESCE(review_scope_id, ''), COALESCE(profile_rule_id, 0), COALESCE(assertion_id, 0) FROM kb.doc_review_findings WHERE id = $1`, id).Scan(&out.ID, &out.ReviewScopeID, &out.ProfileRuleID, &out.AssertionID)
+	err = ApiTypes.ProjectDBHandle.QueryRowContext(c.Request().Context(), `SELECT id, COALESCE(review_scope_id, ''), COALESCE(review_run_id, 0), COALESCE(profile_rule_id, 0), COALESCE(assertion_id, 0) FROM kb.doc_review_findings WHERE id = $1`, id).Scan(&out.ID, &out.ReviewScopeID, &out.ReviewRunID, &out.ProfileRuleID, &out.AssertionID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "ontology review finding not found"})
 	}

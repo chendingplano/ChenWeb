@@ -52,10 +52,16 @@ type RuleEvaluationResult struct {
 }
 
 // RuleKind is extension seam 6. A kind is valid only when it has both the
-// native evaluator and the corresponding SHACL emitter.
+// native evaluator and the corresponding SHACL emitter. ReferencedTermIDs is
+// optional: a rule kind whose config references governed ontology terms
+// (e.g. a predicate_term_id) should implement it so the module release gate
+// can reject a rule with a dangling term reference, the same way it already
+// rejects a dangling axiom or mapping reference. A rule kind with no term
+// references (e.g. one that only compares object attributes) may leave it nil.
 type RuleKind struct {
-	Evaluate  func(context.Context, RuleEvaluationInput) (RuleEvaluationResult, error)
-	EmitSHACL func(ProfileRule) (string, error)
+	Evaluate          func(context.Context, RuleEvaluationInput) (RuleEvaluationResult, error)
+	EmitSHACL         func(ProfileRule) (string, error)
+	ReferencedTermIDs func(ProfileRule) ([]string, error)
 }
 
 var (

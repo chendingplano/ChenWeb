@@ -142,3 +142,32 @@ func TestChecksumDiffersOnContentChange(t *testing.T) {
 		t.Fatal("expected different checksums for different content")
 	}
 }
+
+func TestValidateProfileRuleReferencesRejectsUnregisteredKind(t *testing.T) {
+	rules := []profiles.ProfileRule{{RuleID: "r1", RuleKind: "no_such_kind"}}
+	if err := validateProfileRuleReferences(rules, map[string]bool{}); err == nil {
+		t.Fatal("expected an error for an unregistered rule_kind")
+	}
+}
+
+func TestValidateProfileRuleReferencesRejectsDanglingTerm(t *testing.T) {
+	rules := []profiles.ProfileRule{{
+		RuleID:     "r1",
+		RuleKind:   "required_assertion_pattern",
+		RuleConfig: []byte(`{"dimension":"d","predicate_term_id":"measurement:ghost","quantifier":"exists_conforming"}`),
+	}}
+	if err := validateProfileRuleReferences(rules, map[string]bool{"measurement:real": true}); err == nil {
+		t.Fatal("expected a dangling reference error for measurement:ghost")
+	}
+}
+
+func TestValidateProfileRuleReferencesAcceptsKnownTerm(t *testing.T) {
+	rules := []profiles.ProfileRule{{
+		RuleID:     "r1",
+		RuleKind:   "required_assertion_pattern",
+		RuleConfig: []byte(`{"dimension":"d","predicate_term_id":"measurement:luminance","quantifier":"exists_conforming"}`),
+	}}
+	if err := validateProfileRuleReferences(rules, map[string]bool{"measurement:luminance": true}); err != nil {
+		t.Fatalf("validateProfileRuleReferences: %v", err)
+	}
+}
