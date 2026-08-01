@@ -6,64 +6,46 @@ import (
 )
 
 func TestFactRegistryInitialPathsAndTypes(t *testing.T) {
-	want := map[string]FactType{
-		"document.input_doc_type":                FactTypeString,
-		"document.source_language":               FactTypeString,
-		"document.knowledge_store_binding_state": FactTypeString,
-		"document.has_document_number":           FactTypeBoolean,
-		"document.numeric_unit_density":          FactTypeNumber,
-		"document.doc_kind":                      FactTypeString,
-		"document.domain":                        FactTypeString,
-		"document.normative_status":              FactTypeString,
-		"document.jurisdiction":                  FactTypeString,
-		"object.class":                           FactTypeStringSet,
-		"review.as_of":                           FactTypeDate,
-		"review.jurisdiction":                    FactTypeString,
-		"review.operating_context":               FactTypeString,
-		"review.purpose":                         FactTypeString,
-		"deployment.workspace":                   FactTypeString,
-		"deployment.tenant":                      FactTypeString,
-		"deployment.knowledge_store":             FactTypeString,
-		"deployment.user":                        FactTypeString,
-		"deployment.corpus":                      FactTypeString,
+	stringOps := []string{"eq", "neq", "in", "not_in", "exists"}
+	numberOps := []string{"eq", "neq", "in", "not_in", "gt", "gte", "lt", "lte", "exists"}
+	booleanOps := []string{"eq", "neq", "exists"}
+	dateOps := []string{"eq", "neq", "in", "not_in", "gt", "gte", "lt", "lte", "exists"}
+	stringSetOps := []string{"contains", "exists"}
+	want := map[string]PathSpec{
+		"document.input_doc_type":                {Path: "document.input_doc_type", Namespace: "document", Type: FactTypeString, Operators: stringOps},
+		"document.source_language":               {Path: "document.source_language", Namespace: "document", Type: FactTypeString, Operators: stringOps},
+		"document.knowledge_store_binding_state": {Path: "document.knowledge_store_binding_state", Namespace: "document", Type: FactTypeString, Operators: stringOps},
+		"document.has_document_number":           {Path: "document.has_document_number", Namespace: "document", Type: FactTypeBoolean, Operators: booleanOps},
+		"document.numeric_unit_density":          {Path: "document.numeric_unit_density", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		"document.doc_kind":                      {Path: "document.doc_kind", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "document.doc_kind"},
+		"document.domain":                        {Path: "document.domain", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "document.domain"},
+		"document.normative_status":              {Path: "document.normative_status", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "document.normative_status"},
+		"document.jurisdiction":                  {Path: "document.jurisdiction", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "jurisdiction"},
+		"object.class":                           {Path: "object.class", Namespace: "object", Type: FactTypeStringSet, Operators: stringSetOps},
+		"review.as_of":                           {Path: "review.as_of", Namespace: "review", Type: FactTypeDate, Operators: dateOps},
+		"review.jurisdiction":                    {Path: "review.jurisdiction", Namespace: "review", Type: FactTypeString, Operators: stringOps, GovernedValueScheme: "jurisdiction"},
+		"review.operating_context":               {Path: "review.operating_context", Namespace: "review", Type: FactTypeString, Operators: stringOps},
+		"review.purpose":                         {Path: "review.purpose", Namespace: "review", Type: FactTypeString, Operators: stringOps, GovernedValueScheme: "review.purpose"},
+		"deployment.workspace":                   {Path: "deployment.workspace", Namespace: "deployment", Type: FactTypeString, Operators: stringOps},
+		"deployment.tenant":                      {Path: "deployment.tenant", Namespace: "deployment", Type: FactTypeString, Operators: stringOps},
+		"deployment.knowledge_store":             {Path: "deployment.knowledge_store", Namespace: "deployment", Type: FactTypeString, Operators: stringOps},
+		"deployment.user":                        {Path: "deployment.user", Namespace: "deployment", Type: FactTypeString, Operators: stringOps},
+		"deployment.corpus":                      {Path: "deployment.corpus", Namespace: "deployment", Type: FactTypeString, Operators: stringOps},
 	}
 
 	got := RegisteredFactPaths()
 	if len(got) != len(want) {
 		t.Fatalf("registered path count = %d, want %d", len(got), len(want))
 	}
-	for path, wantType := range want {
+	for path, wantSpec := range want {
 		spec, ok := got[path]
 		if !ok {
 			t.Errorf("path %q is not registered", path)
 			continue
 		}
-		if spec.Type != wantType {
-			t.Errorf("path %q type = %q, want %q", path, spec.Type, wantType)
+		if !reflect.DeepEqual(spec, wantSpec) {
+			t.Errorf("path %q spec = %#v, want %#v", path, spec, wantSpec)
 		}
-	}
-
-	for _, path := range []string{
-		"document.doc_kind",
-		"document.domain",
-		"document.normative_status",
-		"document.jurisdiction",
-	} {
-		if !got[path].Tier3Producible {
-			t.Errorf("path %q must be marked tier-3-producible", path)
-		}
-	}
-	if got["document.numeric_unit_density"].Tier3Producible {
-		t.Error("deterministic numeric density must not be marked tier-3-producible")
-	}
-
-	wantNumberOps := []string{"eq", "neq", "in", "not_in", "gt", "gte", "lt", "lte", "exists"}
-	if gotOps := got["document.numeric_unit_density"].Operators; !reflect.DeepEqual(gotOps, wantNumberOps) {
-		t.Errorf("number operators = %q, want %q", gotOps, wantNumberOps)
-	}
-	wantSetOps := []string{"contains", "exists"}
-	if gotOps := got["object.class"].Operators; !reflect.DeepEqual(gotOps, wantSetOps) {
-		t.Errorf("string_set operators = %q, want %q", gotOps, wantSetOps)
 	}
 }
 

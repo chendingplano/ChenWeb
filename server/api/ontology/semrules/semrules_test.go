@@ -1,14 +1,66 @@
 package semrules
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestTypedOperatorRegistrationSeesDeclaredType(t *testing.T) {
+	const name = "test_declared_type"
+	var got KnownValue
+	if err := RegisterTypedOperator(name, func(fact KnownValue, _ any) (bool, error) {
+		got = fact
+		return true, nil
+	}); err != nil {
+		t.Fatalf("RegisterTypedOperator: %v", err)
+	}
+
+	op, ok := lookupOperator(name)
+	if !ok {
+		t.Fatalf("typed operator %q is not registered", name)
+	}
+	want := KnownValue{Type: FactTypeDate, Value: "2026-08-01"}
+	if matched, err := op(want, nil); err != nil || !matched {
+		t.Fatalf("typed operator result = %v, %v", matched, err)
+	}
+	if got.Type != want.Type || got.Value != want.Value {
+		t.Fatalf("typed operator saw %#v, want %#v", got, want)
+	}
+}
+
+func TestTypedOperatorEqualityDoesNotCoerceAcrossTypes(t *testing.T) {
+	op, ok := lookupOperator("eq")
+	if !ok {
+		t.Fatal("eq operator is not registered")
+	}
+	if matched, err := op(KnownValue{Type: FactTypeString, Value: "1"}, 1); err == nil || matched {
+		t.Fatalf("string eq number = %v, %v; want false with type error", matched, err)
+	}
+	if matched, err := op(KnownValue{Type: FactTypeNumber, Value: float64(0.1)}, json.Number("0.1")); err != nil || !matched {
+		t.Fatalf("numeric common representation equality = %v, %v; want true", matched, err)
+	}
+}
+
+func TestLegacyOperatorEvaluationPreservesCoercion(t *testing.T) {
+	res, err := Evaluate(
+		Predicate{Kind: "facet", Facet: "legacy_number", Op: "eq", Value: "1"},
+		map[string]any{"legacy_number": 1},
+	)
+	if err != nil {
+		t.Fatalf("legacy Evaluate: %v", err)
+	}
+	if !res.Value {
+		t.Fatal("legacy eq must preserve its historical string coercion")
+	}
+}
 
 func TestEvaluateFacetPredicates(t *testing.T) {
 	facts := map[string]any{"doc_kind": "standard", "numeric_unit_density": 0.043}
 
 	cases := []struct {
-		name  string
-		pred  Predicate
-		want  bool
+		name string
+		pred Predicate
+		want bool
 	}{
 		{"eq", Predicate{Kind: "facet", Facet: "doc_kind", Op: "eq", Value: "standard"}, true},
 		{"neq", Predicate{Kind: "facet", Facet: "doc_kind", Op: "neq", Value: "manual"}, true},

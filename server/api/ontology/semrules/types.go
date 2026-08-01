@@ -52,6 +52,14 @@ const (
 	FactTypeStringSet FactType = "string_set"
 )
 
+// KnownValue is a usable fact value paired with the type declared by its
+// registered path. Typed operators receive only known values; fact-state
+// handling occurs before operator dispatch.
+type KnownValue struct {
+	Type  FactType
+	Value any
+}
+
 // Fact is a typed observation supplied to the predicate evaluator.
 type Fact struct {
 	Path        string    `json:"path"`
