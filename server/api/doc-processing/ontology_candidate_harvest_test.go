@@ -3,12 +3,24 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/candidates"
 )
 
 type recordingOntologyCandidateSink struct{ got []candidates.Candidate }
+
+type recordingStructuralSink struct {
+	got []assertions.DecisionCandidate
+}
+
+func (s *recordingStructuralSink) Propose(_ context.Context, c assertions.DecisionCandidate) (assertions.DecisionCandidate, error) {
+	s.got = append(s.got, c)
+	return c, nil
+}
 
 func (s *recordingOntologyCandidateSink) CreateCandidate(_ context.Context, c candidates.Candidate) (candidates.Candidate, error) {
 	s.got = append(s.got, c)
@@ -122,6 +134,25 @@ func TestBuildProductStructureCandidatePreservesExplicitRelationAndEvidence(t *t
 	}
 	if candidate.CandidateKind != "assertion" || candidate.Method != "structural_candidate" || candidate.LogicalIdentityKey != "product_structure:42:obj:child:part_of:obj:parent" {
 		t.Fatalf("candidate=%#v", candidate)
+	}
+}
+
+func TestHarvestProductStructureFromRelationsUsesReconciledEndpoints(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT r.relation_id")).WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"relation_id", "predicate", "line_spans", "subject_object_id", "object_object_id"}).AddRow("42_rel_1", "part_of", []byte(`[51]`), "obj:child", "obj:parent"))
+	sink := &recordingStructuralSink{}
+	if err := HarvestProductStructureFromRelations(context.Background(), db, 42, sink); err != nil {
+		t.Fatalf("HarvestProductStructureFromRelations: %v", err)
+	}
+	if len(sink.got) != 1 || sink.got[0].LogicalIdentityKey != "product_structure:42:obj:child:part_of:obj:parent" {
+		t.Fatalf("candidates=%#v", sink.got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
