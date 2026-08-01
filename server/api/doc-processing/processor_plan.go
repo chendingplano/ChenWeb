@@ -14,11 +14,11 @@ type ProcessorSpec struct {
 	Name           string
 	Phase          string
 	DependsOn      []string
-	Requires       []string   // artifact kinds this processor needs as input
-	Produces       []string   // artifact kinds this processor emits
-	Class          string     // mandatory | routed | on_demand
-	Cost           string     // free | cheap_llm | expensive_llm
-	OnUndetermined string     // run | skip — the default when rules do not decide
+	Requires       []string // artifact kinds this processor needs as input
+	Produces       []string // artifact kinds this processor emits
+	Class          string   // mandatory | routed | on_demand
+	Cost           string   // free | cheap_llm | expensive_llm
+	OnUndetermined string   // run | skip — the default when rules do not decide
 	Idempotent     bool
 }
 
@@ -303,6 +303,11 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "extract_inventory_items", Phase: "B", DependsOn: []string{"chunking"}},
 	{Name: "extract_metrics", Phase: "B", DependsOn: []string{"chunking"}},
 	{Name: "extract_provisions", Phase: "B", DependsOn: []string{"chunking"}},
+	// ADR §8.2 P4 harvesters. They are routed so a governed pipeline chooses
+	// the corpus types for which their candidate output is meaningful.
+	{Name: "extract_metric_definitions", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
+	{Name: "extract_product_structure", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
+	{Name: "extract_test_methods", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
 	{Name: "generate_scene_blocks", Phase: "B", DependsOn: []string{"chunking"}},
 }
 

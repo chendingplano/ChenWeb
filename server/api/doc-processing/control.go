@@ -1852,6 +1852,9 @@ func requiresChunkingDependency(op string) bool {
 		"extract_inventory_items",
 		"extract_metrics",
 		"extract_provisions",
+		"extract_metric_definitions",
+		"extract_product_structure",
+		"extract_test_methods",
 		"extract_semantic_projections",
 		"extract_structured_knowledge":
 		return true

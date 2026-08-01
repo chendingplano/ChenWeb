@@ -28,6 +28,18 @@ func TestProcessorRegistrySeededFromProductionRoster(t *testing.T) {
 	}
 }
 
+func TestP4OntologyHarvestersAreRoutedProductionProcessors(t *testing.T) {
+	for _, name := range []string{"extract_metric_definitions", "extract_product_structure", "extract_test_methods"} {
+		spec, ok := LookupProcessor(name)
+		if !ok {
+			t.Fatalf("%s is not registered", name)
+		}
+		if spec.Phase != "B" || spec.Class != "routed" || spec.Cost != "cheap_llm" || spec.OnUndetermined != "skip" {
+			t.Fatalf("%s spec=%#v, want a routed cheap Phase-B processor that skips undetermined routing", name, spec)
+		}
+	}
+}
+
 func TestFacetProducerRegistryIsTheSeam(t *testing.T) {
 	producer := facetProducerAdapter{name: "tier1_probe", fn: func(ctx context.Context, rec InputRecord) ([]Facet, error) {
 		return []Facet{{Key: "probe", Value: "ok", Confidence: 1, Method: "tier1"}}, nil
