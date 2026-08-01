@@ -71,6 +71,93 @@ func TestValidateAcceptsValidStructuresAndTypes(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidJSONNumberGrammar(t *testing.T) {
+	tests := []string{"01", "+1", "1.", ".1", "1/2", "--1", "1e", "1e+"}
+	for _, raw := range tests {
+		t.Run(raw, func(t *testing.T) {
+			err := Validate(factDocument("document.numeric_unit_density", "eq", json.Number(raw)))
+			if err == nil {
+				t.Fatal("Validate succeeded, want invalid JSON number error")
+			}
+			if !strings.Contains(err.Error(), "JSON number") {
+				t.Fatalf("Validate error = %q, want JSON number grammar error", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsOversizedJSONNumbers(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"too many digits", "1" + strings.Repeat("0", 1024), "digits"},
+		{"positive exponent", "1e10001", "exponent"},
+		{"negative exponent", "1e-10001", "exponent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Validate(factDocument("document.numeric_unit_density", "eq", json.Number(tt.raw)))
+			if err == nil {
+				t.Fatal("Validate succeeded, want numeric limit error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsTypedCustomOperatorForDeclaredType(t *testing.T) {
+	const name = "test_starts_with_for_string"
+	err := RegisterTypedOperatorForTypes(name, []FactType{FactTypeString}, func(fact KnownValue, expected any) (bool, error) {
+		return strings.HasPrefix(fact.Value.(string), expected.(string)), nil
+	})
+	if err != nil {
+		t.Fatalf("RegisterTypedOperatorForTypes: %v", err)
+	}
+	if err := Validate(factDocument("document.doc_kind", name, "stand")); err != nil {
+		t.Fatalf("Validate custom string operator: %v", err)
+	}
+}
+
+func TestValidateRejectsTypedCustomOperatorForUndeclaredType(t *testing.T) {
+	const name = "test_string_only_operator"
+	if err := RegisterTypedOperatorForTypes(name, []FactType{FactTypeString}, func(KnownValue, any) (bool, error) {
+		return true, nil
+	}); err != nil {
+		t.Fatalf("RegisterTypedOperatorForTypes: %v", err)
+	}
+	err := Validate(factDocument("document.numeric_unit_density", name, 1))
+	if err == nil {
+		t.Fatal("Validate accepted string-only operator for number fact")
+	}
+	if !strings.Contains(err.Error(), "expression.op") || !strings.Contains(err.Error(), "number") {
+		t.Fatalf("Validate error = %q, want local incompatible number operator error", err)
+	}
+}
+
+func TestRegisterTypedOperatorForTypesRejectsInvalidMetadata(t *testing.T) {
+	tests := []struct {
+		name  string
+		types []FactType
+	}{
+		{"missing types", nil},
+		{"unknown type", []FactType{"imaginary"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := RegisterTypedOperatorForTypes("test_invalid_"+strings.ReplaceAll(tt.name, " ", "_"), tt.types, func(KnownValue, any) (bool, error) {
+				return true, nil
+			})
+			if err == nil {
+				t.Fatal("RegisterTypedOperatorForTypes succeeded, want metadata error")
+			}
+		})
+	}
+}
+
 func TestAnalyzeReturnsStableRequirementsAndDistinctSpecificity(t *testing.T) {
 	doc := Document{Version: 1, Expression: Predicate{Kind: "all", Items: []Predicate{
 		{Kind: "fact", Path: "review.purpose", Op: "eq", Value: "compliance"},

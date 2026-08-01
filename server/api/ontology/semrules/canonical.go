@@ -5,9 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"reflect"
-	"strings"
 )
 
 // Canonicalize validates a predicate document, serializes it deterministically,
@@ -50,7 +48,7 @@ func normalizePredicate(predicate Predicate) (Predicate, error) {
 }
 
 func normalizeJSONValue(value any) (any, error) {
-	if _, err := numericValue(value); err == nil {
+	if isNumericValue(value) {
 		canonical, err := canonicalNumber(value)
 		if err != nil {
 			return nil, err
@@ -74,34 +72,9 @@ func normalizeJSONValue(value any) (any, error) {
 }
 
 func canonicalNumber(value any) (string, error) {
-	rational, err := numericValue(value)
+	parsed, err := parseNumber(value)
 	if err != nil {
 		return "", err
 	}
-	denominator := new(big.Int).Set(rational.Denom())
-	two := 0
-	five := 0
-	for new(big.Int).Mod(denominator, big.NewInt(2)).Sign() == 0 {
-		denominator.Div(denominator, big.NewInt(2))
-		two++
-	}
-	for new(big.Int).Mod(denominator, big.NewInt(5)).Sign() == 0 {
-		denominator.Div(denominator, big.NewInt(5))
-		five++
-	}
-	if denominator.Cmp(big.NewInt(1)) != 0 {
-		return "", fmt.Errorf("number %v has no finite decimal representation", value)
-	}
-	precision := two
-	if five > precision {
-		precision = five
-	}
-	result := rational.FloatString(precision)
-	if strings.Contains(result, ".") {
-		result = strings.TrimRight(strings.TrimRight(result, "0"), ".")
-	}
-	if result == "-0" {
-		return "0", nil
-	}
-	return result, nil
+	return parsed.canonical, nil
 }

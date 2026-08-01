@@ -12,10 +12,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,8 +31,9 @@ type LegacyOperator = Operator
 type TypedOperator func(fact KnownValue, expected any) (bool, error)
 
 type operatorEntry struct {
-	typed  TypedOperator
-	legacy Operator
+	typed           TypedOperator
+	legacy          Operator
+	compatibleTypes map[FactType]struct{}
 }
 
 var (
@@ -70,6 +69,26 @@ func RegisterOperator(name string, op Operator) error {
 // RegisterTypedOperator registers a P5 operator that receives the fact's
 // declared type as well as its known value.
 func RegisterTypedOperator(name string, op TypedOperator) error {
+	return registerTypedOperator(name, nil, op)
+}
+
+// RegisterTypedOperatorForTypes registers a P5 operator together with the
+// fact types for which predicate validation may use it.
+func RegisterTypedOperatorForTypes(name string, factTypes []FactType, op TypedOperator) error {
+	if len(factTypes) == 0 {
+		return errors.New("at least one compatible fact type is required")
+	}
+	compatibleTypes := make(map[FactType]struct{}, len(factTypes))
+	for _, factType := range factTypes {
+		if !knownFactType(factType) {
+			return fmt.Errorf("unknown compatible fact type %q", factType)
+		}
+		compatibleTypes[factType] = struct{}{}
+	}
+	return registerTypedOperator(name, compatibleTypes, op)
+}
+
+func registerTypedOperator(name string, compatibleTypes map[FactType]struct{}, op TypedOperator) error {
 	name = strings.TrimSpace(name)
 	if name == "" || op == nil {
 		return errors.New("operator name and implementation are required")
@@ -77,7 +96,8 @@ func RegisterTypedOperator(name string, op TypedOperator) error {
 	operatorsMu.Lock()
 	defer operatorsMu.Unlock()
 	operators[name] = operatorEntry{
-		typed: op,
+		typed:           op,
+		compatibleTypes: compatibleTypes,
 		legacy: func(fact, expected any) (bool, error) {
 			factType, err := inferLegacyFactType(fact)
 			if err != nil {
@@ -87,6 +107,15 @@ func RegisterTypedOperator(name string, op TypedOperator) error {
 		},
 	}
 	return nil
+}
+
+func knownFactType(factType FactType) bool {
+	switch factType {
+	case FactTypeString, FactTypeNumber, FactTypeBoolean, FactTypeDate, FactTypeStringSet:
+		return true
+	default:
+		return false
+	}
 }
 
 func eqValues(a, b any) (bool, error) {
@@ -257,6 +286,20 @@ func lookupOperator(name string) (TypedOperator, bool) {
 	return entry.typed, ok
 }
 
+func operatorPermittedForType(name string, factType FactType, pathAllowsBuiltin bool) (bool, bool) {
+	operatorsMu.RLock()
+	defer operatorsMu.RUnlock()
+	entry, known := operators[name]
+	if !known {
+		return false, false
+	}
+	if entry.compatibleTypes == nil {
+		return true, pathAllowsBuiltin
+	}
+	_, permitted := entry.compatibleTypes[factType]
+	return true, permitted
+}
+
 func lookupLegacyOperator(name string) (Operator, bool) {
 	operatorsMu.RLock()
 	defer operatorsMu.RUnlock()
@@ -391,46 +434,11 @@ func typedCompare(fact KnownValue, expected any, want func(int) bool) (bool, err
 }
 
 func numericValue(value any) (*big.Rat, error) {
-	result := new(big.Rat)
-	switch number := value.(type) {
-	case json.Number:
-		if _, ok := result.SetString(number.String()); !ok {
-			return nil, fmt.Errorf("invalid JSON number %q", number)
-		}
-	case float64:
-		if math.IsNaN(number) || math.IsInf(number, 0) {
-			return nil, fmt.Errorf("invalid number %v", number)
-		}
-		result.SetString(strconv.FormatFloat(number, 'g', -1, 64))
-	case float32:
-		if math.IsNaN(float64(number)) || math.IsInf(float64(number), 0) {
-			return nil, fmt.Errorf("invalid number %v", number)
-		}
-		result.SetString(strconv.FormatFloat(float64(number), 'g', -1, 32))
-	case int:
-		result.SetInt64(int64(number))
-	case int8:
-		result.SetInt64(int64(number))
-	case int16:
-		result.SetInt64(int64(number))
-	case int32:
-		result.SetInt64(int64(number))
-	case int64:
-		result.SetInt64(number)
-	case uint:
-		result.SetUint64(uint64(number))
-	case uint8:
-		result.SetUint64(uint64(number))
-	case uint16:
-		result.SetUint64(uint64(number))
-	case uint32:
-		result.SetUint64(uint64(number))
-	case uint64:
-		result.SetUint64(number)
-	default:
-		return nil, fmt.Errorf("value has non-numeric type %T", value)
+	parsed, err := parseNumber(value)
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	return parsed.rat(), nil
 }
 
 func dateValue(value any) (time.Time, error) {

@@ -2,6 +2,7 @@ package semrules
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,23 @@ func TestTypedOperatorEqualityDoesNotCoerceAcrossTypes(t *testing.T) {
 	}
 	if matched, err := op(KnownValue{Type: FactTypeNumber, Value: float64(0.1)}, json.Number("0.1")); err != nil || !matched {
 		t.Fatalf("numeric common representation equality = %v, %v; want true", matched, err)
+	}
+}
+
+func TestTypedNumericOperatorEnforcesJSONNumberLimits(t *testing.T) {
+	op, ok := lookupOperator("eq")
+	if !ok {
+		t.Fatal("eq operator is not registered")
+	}
+	tests := []json.Number{
+		"01",
+		json.Number("1" + strings.Repeat("0", maxJSONNumberDigits)),
+		json.Number("1e" + strings.Repeat("9", 20)),
+	}
+	for _, number := range tests {
+		if matched, err := op(KnownValue{Type: FactTypeNumber, Value: number}, json.Number("1")); err == nil || matched {
+			t.Fatalf("eq accepted adversarial number %q: matched=%v err=%v", number, matched, err)
+		}
 	}
 }
 
