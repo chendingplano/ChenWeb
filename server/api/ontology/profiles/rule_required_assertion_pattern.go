@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type requiredAssertionPatternConfig struct {
@@ -83,8 +84,28 @@ func emitRequiredAssertionPatternSHACL(rule ProfileRule) (string, error) {
 	if err := json.Unmarshal(rule.RuleConfig, &cfg); err != nil {
 		return "", err
 	}
-	if cfg.PredicateTermID == "" {
+	if cfg.PredicateTermID == "" || cfg.Quantifier == "" {
 		return "", fmt.Errorf("required_assertion_pattern requires predicate_term_id")
 	}
-	return "# SemOS required_assertion_pattern\n# predicate: " + cfg.PredicateTermID, nil
+	min := cfg.Minimum
+	if cfg.Quantifier == "exists_conforming" && min == 0 {
+		min = 1
+	}
+	var b strings.Builder
+	b.WriteString("@prefix sh: <http://www.w3.org/ns/shacl#> .\n")
+	b.WriteString("@prefix semos: <urn:semos:> .\n\n")
+	b.WriteString("[] a sh:NodeShape ;\n  sh:property [\n    sh:path semos:predicate_term_id ;\n    sh:hasValue \"")
+	b.WriteString(strings.ReplaceAll(cfg.PredicateTermID, "\"", "\\\""))
+	b.WriteString("\" ;\n    sh:minCount ")
+	b.WriteString(fmt.Sprintf("%d", min))
+	b.WriteString(" ;\n")
+	if cfg.Maximum != nil {
+		b.WriteString("    sh:maxCount ")
+		b.WriteString(fmt.Sprintf("%d", *cfg.Maximum))
+		b.WriteString(" ;\n")
+	}
+	b.WriteString("    sh:message \"required_assertion_pattern: ")
+	b.WriteString(strings.ReplaceAll(cfg.PredicateTermID, "\"", "\\\""))
+	b.WriteString("\"\n  ] .\n")
+	return b.String(), nil
 }

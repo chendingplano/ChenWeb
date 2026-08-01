@@ -3,6 +3,7 @@ package profiles
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +61,17 @@ func TestRequiredAssertionPatternExistsConformingSatisfiesWithAcceptedMatch(t *t
 	}
 	if result.Category != ResultSatisfied || len(result.AssertionIDs) != 1 || result.AssertionIDs[0] != 7 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRequiredAssertionPatternEmitsDeterministicSHACLShape(t *testing.T) {
+	shape, err := emitRequiredAssertionPatternSHACL(ProfileRule{RuleID: "example:requires", RuleConfig: json.RawMessage(`{"dimension":"d","predicate_term_id":"measurement:luminance","quantifier":"count_conforming","minimum":1,"maximum":2}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"@prefix sh:", "sh:NodeShape", "sh:minCount 1", "sh:maxCount 2", "measurement:luminance"} {
+		if !strings.Contains(shape, want) {
+			t.Fatalf("shape missing %q: %s", want, shape)
+		}
 	}
 }
