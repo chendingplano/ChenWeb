@@ -3,7 +3,9 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -143,13 +145,16 @@ func TestHarvestProductStructureFromRelationsUsesReconciledEndpoints(t *testing.
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT r.relation_id")).WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"relation_id", "predicate", "line_spans", "subject_object_id", "object_object_id"}).AddRow("42_rel_1", "part_of", []byte(`[51]`), "obj:child", "obj:parent"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT r.relation_id")).WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"relation_id", "predicate", "line_spans", "subject_object_id", "object_object_id"}).AddRow("42_rel_1", "part_of", []byte(`["51"]`), "obj:child", "obj:parent"))
 	sink := &recordingStructuralSink{}
 	if err := HarvestProductStructureFromRelations(context.Background(), db, 42, sink); err != nil {
 		t.Fatalf("HarvestProductStructureFromRelations: %v", err)
 	}
 	if len(sink.got) != 1 || sink.got[0].LogicalIdentityKey != "product_structure:42:obj:child:part_of:obj:parent" {
 		t.Fatalf("candidates=%#v", sink.got)
+	}
+	if string(sink.got[0].SourceLineSpans) != "[51]" {
+		t.Fatalf("SourceLineSpans = %s, want [51] (kb.relations.line_spans is stored as a JSON string array, not numbers)", sink.got[0].SourceLineSpans)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -191,5 +196,31 @@ func TestMetricDefinitionsProcessorPersistsValidatedChunkOutput(t *testing.T) {
 	}
 	if len(sink.got) != 1 || sink.got[0].CandidateKind != "term" {
 		t.Fatalf("candidates=%#v", sink.got)
+	}
+}
+
+func TestCandidateIdentifierPreservesCJKRunes(t *testing.T) {
+	got := candidateIdentifier("触摸响应时间")
+	if got == "" || strings.HasPrefix(got, "term_") {
+		t.Fatalf("candidateIdentifier(CJK) = %q, want a stable slug derived from the label, not a hash fallback", got)
+	}
+	if got != "触摸响应时间" {
+		t.Fatalf("candidateIdentifier(CJK) = %q, want %q", got, "触摸响应时间")
+	}
+}
+
+func TestCandidateIdentifierDistinguishesMixedScriptLabels(t *testing.T) {
+	a := candidateIdentifier("A触摸B")
+	b := candidateIdentifier("AB")
+	if a == b {
+		t.Fatalf("candidateIdentifier collision: %q and %q both produced %q", "A触摸B", "AB", a)
+	}
+}
+
+func TestLineNumbersFromSpanStringsExpandsRanges(t *testing.T) {
+	got := lineNumbersFromSpanStrings([]string{"51", "60-62", "not-a-number"})
+	want := "[51 60 62]"
+	if fmt.Sprintf("%v", got) != want {
+		t.Fatalf("lineNumbersFromSpanStrings = %v, want %s", got, want)
 	}
 }

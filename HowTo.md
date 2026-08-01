@@ -4911,3 +4911,32 @@ Long-context pricing:
 | GPT‑5.6 Luna | $2.00 | $0.20 | $2.50 | $9.00 |
 | GPT‑5.5 | $10.00 | $1.00 | — | $45.00 |
 | GPT‑5.4 | $5.00 | $0.50 | — | $22.50 |
+
+# Codex Prompt
+```text
+Implement the complete job described in docs/spec.md.
+
+Work through every task in the approved plan without stopping after individual
+tasks or milestones.
+
+For each task:
+1. Implement it completely.
+2. Add or update tests.
+3. Run the relevant tests, linting, formatting, and type checks.
+4. Fix failures before moving to the next task.
+5. Update the plan/checklist to record progress.
+
+Continue automatically to the next incomplete task.
+
+The goal is complete only when:
+- every planned task is implemented;
+- all acceptance criteria in docs/spec.md are satisfied;
+- all relevant tests, lint, formatting, and type checks pass;
+- no TODO or placeholder introduced by this work remains;
+- documentation is updated where required;
+- the final diff has been reviewed for regressions.
+
+Do not stop merely because one task, phase, or checkpoint is complete.
+Stop only when the entire goal is verified complete, or when genuinely blocked
+by information or credentials that cannot be obtained from the repository.
+```

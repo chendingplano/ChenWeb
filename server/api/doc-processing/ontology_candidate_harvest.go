@@ -264,11 +264,11 @@ func candidateIdentifier(label string) string {
 	var b strings.Builder
 	lastUnderscore := false
 	for _, r := range strings.ToLower(strings.TrimSpace(label)) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			if r <= unicode.MaxASCII {
-				b.WriteRune(r)
-				lastUnderscore = false
-			}
+		isASCIIAlphaNum := (unicode.IsLetter(r) || unicode.IsDigit(r)) && r <= unicode.MaxASCII
+		isCJK := r >= '一' && r <= '鿿'
+		if isASCIIAlphaNum || isCJK {
+			b.WriteRune(r)
+			lastUnderscore = false
 			continue
 		}
 		if b.Len() > 0 && !lastUnderscore {

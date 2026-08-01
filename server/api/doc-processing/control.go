@@ -879,16 +879,34 @@ type PostProcessIndexer interface {
 	PostProcessIndex(ctx context.Context, recordID int64) error
 }
 
+// PostProcessDependent is implemented by a Phase C processor whose indexing
+// must not start until other named Phase C processors have finished for the
+// same record (for example, structural relation harvesting needs entity
+// reconciliation's kb.artifact_objects rows to already exist). A name absent
+// from this run's invoked processors is not waited on.
+type PostProcessDependent interface {
+	PostProcessDependsOn() []string
+}
+
 // runPostProcessIndexing executes Phase C: for each invoked processor that implements
 // PostProcessIndexer, run its indexing step concurrently (one goroutine per processor).
-// Errors are logged and do not abort sibling processors' indexing. The caller skips this
-// when the pipeline was stopped.
+// A processor that also implements PostProcessDependent waits for its named
+// dependencies (if invoked this run) to finish before it starts. Errors are logged and
+// do not abort sibling processors' indexing. The caller skips this when the pipeline was
+// stopped.
 func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors []Processor, recordID int64) {
 	if isCtxStopped(ctx) {
 		return
 	}
 	ctx, phaseSpan := startPhaseSpan(ctx, "C", recordID, processors)
 	defer phaseSpan.End()
+
+	done := make(map[string]chan struct{}, len(processors))
+	for _, p := range processors {
+		if _, ok := p.(PostProcessIndexer); ok {
+			done[processorLogName(p)] = make(chan struct{})
+		}
+	}
 
 	var wg sync.WaitGroup
 	for _, p := range processors {
@@ -898,17 +916,34 @@ func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors 
 		}
 		wg.Add(1)
 		go func(p Processor, indexer PostProcessIndexer) {
+			name := processorLogName(p)
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
 					if s.Logger != nil {
-						s.Logger.Error("post-process indexing panicked", "record_id", recordID, "processor", processorLogName(p), "panic", r)
+						s.Logger.Error("post-process indexing panicked", "record_id", recordID, "processor", name, "panic", r)
 					}
+				}
+				if ch, ok := done[name]; ok {
+					close(ch)
 				}
 			}()
 
+			if dependent, ok := indexer.(PostProcessDependent); ok {
+				for _, depName := range dependent.PostProcessDependsOn() {
+					depDone, invoked := done[depName]
+					if !invoked {
+						continue
+					}
+					select {
+					case <-depDone:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+
 			startTime := time.Now()
-			name := processorLogName(p)
 			if s.Logger != nil {
 				s.Logger.Info("post-process indexing start", "record_id", recordID, "processor", name)
 			}

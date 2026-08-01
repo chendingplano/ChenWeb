@@ -13,6 +13,24 @@ type structuralCandidateSink interface {
 	Propose(context.Context, assertions.DecisionCandidate) (assertions.DecisionCandidate, error)
 }
 
+// lineNumbersFromSpanStrings expands kb.relations.line_spans entries (each a
+// single line or a "start-end"/"start:end" range, per parseLineSpanRange) into
+// line numbers. The column is stored as a JSON array of strings, not numbers.
+func lineNumbersFromSpanStrings(spans []string) []int {
+	out := make([]int, 0, len(spans)*2)
+	for _, s := range spans {
+		start, end := parseLineSpanRange(s)
+		if start == 0 {
+			continue
+		}
+		out = append(out, start)
+		if end != start {
+			out = append(out, end)
+		}
+	}
+	return out
+}
+
 // HarvestProductStructureFromRelations converts only explicit, already-extracted
 // structural relations with reconciled endpoints into decision candidates.
 func HarvestProductStructureFromRelations(ctx context.Context, db *sql.DB, recordID int64, sink structuralCandidateSink) error {
@@ -37,9 +55,9 @@ WHERE r.input_record_id = $1 AND LOWER(BTRIM(r.predicate)) IN ('part_of', 'compo
 		if err := rows.Scan(&id, &relation, &spans, &subject, &object); err != nil {
 			return err
 		}
-		var lines []int
-		_ = json.Unmarshal(spans, &lines)
-		c, err := buildProductStructureCandidate(recordID, productStructureMention{SubjectObjectID: subject, ObjectObjectID: object, Relation: relation, LineNumbers: lines})
+		var spanStrings []string
+		_ = json.Unmarshal(spans, &spanStrings)
+		c, err := buildProductStructureCandidate(recordID, productStructureMention{SubjectObjectID: subject, ObjectObjectID: object, Relation: relation, LineNumbers: lineNumbersFromSpanStrings(spanStrings)})
 		if err != nil {
 			return fmt.Errorf("relation %s: %w", id, err)
 		}
