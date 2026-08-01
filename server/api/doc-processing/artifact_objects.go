@@ -62,6 +62,13 @@ type ObjectNode struct {
 	SearchDocument    string
 	ReconcileStatus   string
 	ExtInfo           map[string]any
+	// DR15.1 kernel contracts (2026-08-01): merged_into is the tombstone
+	// merge pointer, scope_key the identity scope. The columns exist and the
+	// reconciler keeps its current behavior; the live reconciler does not
+	// populate them yet -- they are adopted by the object family's incremental
+	// kernel instantiation (ADR kernel test 23 parity).
+	MergedInto string
+	ScopeKey   string
 }
 
 type ObjectNodeCandidate struct {
