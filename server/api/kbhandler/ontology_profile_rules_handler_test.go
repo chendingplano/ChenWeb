@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"testing"
@@ -30,6 +31,41 @@ func TestCreateOntologyProfileRuleCreatesDraftOnly(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListActiveOntologyProfileRulesReturnsReleaseBoundContent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	old := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = old }()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules pr")).WithArgs("example:profile", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "release_id", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(1, "example:rule", 1, "example:profile", 1, "required_assertion_pattern", "included_in_release", "error", []byte(`{}`), []byte(`{}`), 42, now, "author", now, "author"))
+	c, rec := newOntologyCandidateContext(t, http.MethodGet, "/api/v1/kb/ontology/profile-rules?profile_id=example:profile&profile_version=1", "", nil)
+	if err := ListActiveOntologyProfileRules(c); err != nil {
+		t.Fatalf("ListActiveOntologyProfileRules: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Status bool `json:"status"`
+		Total  int  `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Status || response.Total != 1 {
+		t.Fatalf("response: %s", rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
