@@ -112,3 +112,15 @@ func TestParseTestMethodMentionsUsesReturnedLineSpans(t *testing.T) {
 		t.Fatalf("mentions = %#v", got)
 	}
 }
+
+func TestBuildProductStructureCandidatePreservesExplicitRelationAndEvidence(t *testing.T) {
+	candidate, err := buildProductStructureCandidate(42, productStructureMention{
+		SubjectObjectID: "obj:child", ObjectObjectID: "obj:parent", Relation: "part_of", LineNumbers: []int{51},
+	})
+	if err != nil {
+		t.Fatalf("buildProductStructureCandidate: %v", err)
+	}
+	if candidate.CandidateKind != "assertion" || candidate.Method != "structural_candidate" || candidate.LogicalIdentityKey != "product_structure:42:obj:child:part_of:obj:parent" {
+		t.Fatalf("candidate=%#v", candidate)
+	}
+}

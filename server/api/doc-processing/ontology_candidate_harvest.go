@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/candidates"
 )
 
@@ -32,6 +33,27 @@ type testMethodMention struct {
 	Definition    string
 	MetricNames   []string
 	LineNumbers   []int
+}
+
+type productStructureMention struct {
+	SubjectObjectID, ObjectObjectID, Relation string
+	LineNumbers                               []int
+}
+
+func buildProductStructureCandidate(recordID int64, m productStructureMention) (assertions.DecisionCandidate, error) {
+	if recordID <= 0 || strings.TrimSpace(m.SubjectObjectID) == "" || strings.TrimSpace(m.ObjectObjectID) == "" {
+		return assertions.DecisionCandidate{}, fmt.Errorf("record id and structural endpoints are required")
+	}
+	relation := strings.TrimSpace(m.Relation)
+	if relation != "part_of" && relation != "component_of" {
+		return assertions.DecisionCandidate{}, fmt.Errorf("unsupported structural relation %q", relation)
+	}
+	payload, err := json.Marshal(map[string]any{"subject_object_id": m.SubjectObjectID, "predicate_term_id": "core:" + relation, "object_object_id": m.ObjectObjectID, "assertion_kind": "structural_relation"})
+	if err != nil {
+		return assertions.DecisionCandidate{}, err
+	}
+	id := fmt.Sprintf("product_structure:%d:%s:%s:%s", recordID, m.SubjectObjectID, relation, m.ObjectObjectID)
+	return assertions.DecisionCandidate{LogicalIdentityKey: id, CandidateKind: "assertion", ProposedPayload: payload, Method: "structural_candidate", SourceArtifactType: "product_structure", SourceArtifactID: id, SourceLineSpans: normalizedLineNumbers(m.LineNumbers)}, nil
 }
 
 // buildTestMethodCandidates proposes a procedure concept and, when a metric
