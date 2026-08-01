@@ -41,6 +41,30 @@ func ListActiveOntologyProfileRules(c echo.Context) error {
 	return c.JSON(http.StatusOK, ontologyProfileRuleListResponse{Status: true, Results: items, Total: len(items)})
 }
 
+// TransitionOntologyProfileRuleStatus applies the governed profile-rule state
+// machine; arbitrary status updates are not available through the API.
+func TransitionOntologyProfileRuleStatus(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_OPR_200")
+	defer rc.Close()
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version < 1 || strings.TrimSpace(c.Param("rule_id")) == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid rule_id or version (CWB_KB_OPR_201)"})
+	}
+	var payload struct {
+		To string `json:"to"`
+		By string `json:"by"`
+	}
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_OPR_202)"})
+	}
+	updated, err := (profiles.ProfileRuleStore{DB: ApiTypes.ProjectDBHandle}).TransitionStatus(c.Request().Context(), c.Param("rule_id"), version, payload.To, payload.By)
+	if err != nil {
+		rc.GetLogger().Error("transition ontology profile rule failed", "err", err)
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "illegal ontology profile rule transition (CWB_KB_OPR_203)"})
+	}
+	return c.JSON(http.StatusOK, ontologyProfileRuleResponse{Status: true, Record: updated})
+}
+
 // CreateOntologyProfileRule creates an initial draft rule. Its registered
 // rule kind and parent profile version are validated by the generic store.
 func CreateOntologyProfileRule(c echo.Context) error {

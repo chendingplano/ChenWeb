@@ -71,3 +71,29 @@ func TestListActiveOntologyProfileRulesReturnsReleaseBoundContent(t *testing.T) 
 		t.Fatal(err)
 	}
 }
+
+func TestTransitionOntologyProfileRuleUsesGovernedLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	old := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = old }()
+	now := time.Now()
+	columns := []string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "create_time", "create_by", "modify_time", "modify_by"}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules WHERE rule_id = $1 AND version = $2")).WithArgs("example:rule", 1).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, "example:rule", 1, "p", 1, "required_assertion_pattern", "draft", "error", []byte(`{}`), []byte(`{}`), now, "", now, ""))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.ontology_profile_rules SET status = $3")).WithArgs("example:rule", 1, "in_review", "curator").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules WHERE rule_id = $1 AND version = $2")).WithArgs("example:rule", 1).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, "example:rule", 1, "p", 1, "required_assertion_pattern", "in_review", "error", []byte(`{}`), []byte(`{}`), now, "", now, "curator"))
+	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/profile-rules/example:rule/1/status", `{"to":"in_review","by":"curator"}`, map[string]string{"rule_id": "example:rule", "version": "1"})
+	if err := TransitionOntologyProfileRuleStatus(c); err != nil {
+		t.Fatalf("TransitionOntologyProfileRuleStatus: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
