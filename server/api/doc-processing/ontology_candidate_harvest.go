@@ -1,11 +1,13 @@
 package docprocessing
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -23,6 +25,54 @@ type metricDefinitionMention struct {
 	RangeType     string
 	Confidence    float64
 	LineNumbers   []int
+}
+
+// OntologyCandidateSink makes the harvesting boundary testable while the
+// production runtime uses candidates.CandidateStore directly.
+type OntologyCandidateSink interface {
+	CreateCandidate(context.Context, candidates.Candidate) (candidates.Candidate, error)
+}
+
+// harvestMetricDefinitions submits candidates only for metrics that carry a
+// definition. A threshold/value alone is an assertion, not a definition, and
+// must remain on the assertion-normalization path.
+func harvestMetricDefinitions(ctx context.Context, recordID int64, metrics []map[string]any, sink OntologyCandidateSink) error {
+	if sink == nil {
+		return fmt.Errorf("ontology candidate sink is nil")
+	}
+	for _, metric := range metrics {
+		definition := strings.TrimSpace(asString(metric["formula_or_definition"]))
+		if definition == "" {
+			continue
+		}
+		candidate, err := buildMetricDefinitionCandidate(recordID, metricDefinitionMention{
+			CanonicalName: strings.TrimSpace(asString(metric["metric_name"])),
+			Definition:    definition,
+			ValueType:     strings.TrimSpace(asString(metric["value_data_type"])),
+			RangeType:     strings.TrimSpace(asString(metric["value_range_type"])),
+			LineNumbers:   sourceSpanLineNumbers(metric["source_line_spans"]),
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := sink.CreateCandidate(ctx, candidate); err != nil {
+			return fmt.Errorf("create metric definition candidate: %w", err)
+		}
+	}
+	return nil
+}
+
+func sourceSpanLineNumbers(raw any) []int {
+	spans := normalizeSourceLineSpans(raw)
+	out := make([]int, 0, len(spans))
+	for _, span := range spans {
+		for _, part := range strings.Split(span, ":") {
+			if n, err := strconv.Atoi(strings.TrimSpace(part)); err == nil && n > 0 {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
 }
 
 // buildMetricDefinitionCandidate turns one extracted definition into the

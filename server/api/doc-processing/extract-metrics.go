@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	ontologycandidates "github.com/chendingplano/deepdoc/server/api/ontology/candidates"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -24,6 +25,7 @@ import (
 type MetricsProcessor struct {
 	InputStore                       DocMetadataStore
 	Store                            MetricsStore
+	CandidateSink                    OntologyCandidateSink
 	ObjectStore                      ArtifactObjectsStore
 	ObjectReconciler                 ObjectReconciler
 	AmbiguousObjectLLMResolver       AmbiguousObjectLLMResolver
@@ -354,6 +356,9 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ChunkDir:              strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		MetricEnrichGroupSize: enrichGroupSize,
 		MaxTasks:              maxTasks,
+	}
+	if ApiTypes.ProjectDBHandle != nil {
+		p.CandidateSink = ontologycandidates.CandidateStore{DB: ApiTypes.ProjectDBHandle}
 	}
 	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
 		p.AmbiguousObjectLLMResolver = resolver
@@ -3243,6 +3248,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
 			p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 		}
+		if err := p.harvestMetricDefinitionCandidates(ctx, metrics); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -3277,6 +3285,19 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		dirty, p.batchStart, p.Now())
 	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, dirty); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
+	}
+	if err := p.harvestMetricDefinitionCandidates(ctx, dirty); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *MetricsProcessor) harvestMetricDefinitionCandidates(ctx context.Context, metrics []map[string]any) error {
+	if p.CandidateSink == nil || len(metrics) == 0 {
+		return nil
+	}
+	if err := harvestMetricDefinitions(ctx, p.batchRecordID, metrics, p.CandidateSink); err != nil {
+		return fmt.Errorf("%s harvest metric definitions: %w", p.Name(), err)
 	}
 	return nil
 }
