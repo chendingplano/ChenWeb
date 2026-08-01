@@ -89,11 +89,10 @@ func validateFact(predicate Predicate, location string) error {
 	if predicate.Op == "" {
 		return fmt.Errorf("%s.op: fact operator is required", location)
 	}
-	knownOperator, permittedOperator := operatorPermittedForType(predicate.Op, spec.Type, containsString(spec.Operators, predicate.Op))
-	if !knownOperator {
+	if _, ok := lookupOperator(predicate.Op); !ok {
 		return fmt.Errorf("%s.op: unknown operator %q", location, predicate.Op)
 	}
-	if !permittedOperator {
+	if !containsString(spec.Operators, predicate.Op) {
 		return fmt.Errorf("%s.op: operator %q is not permitted for %s", location, predicate.Op, spec.Type)
 	}
 	if confidence := predicate.MinConfidence; confidence != nil {

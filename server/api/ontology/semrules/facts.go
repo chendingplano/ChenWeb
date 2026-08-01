@@ -70,6 +70,41 @@ func (r *FactRegistry) Snapshot() map[string]PathSpec {
 	return snapshot
 }
 
+func (r *FactRegistry) setOperatorPaths(paths []string, operator string) error {
+	if r == nil {
+		return errors.New("fact registry is nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, path := range paths {
+		if _, ok := r.paths[path]; !ok {
+			return fmt.Errorf("unknown fact path %q", path)
+		}
+	}
+	for path, spec := range r.paths {
+		spec.Operators = removeString(spec.Operators, operator)
+		r.paths[path] = spec
+	}
+	for _, path := range paths {
+		spec := r.paths[path]
+		if !containsString(spec.Operators, operator) {
+			spec.Operators = append(spec.Operators, operator)
+			r.paths[path] = spec
+		}
+	}
+	return nil
+}
+
+func removeString(values []string, unwanted string) []string {
+	result := values[:0]
+	for _, value := range values {
+		if value != unwanted {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
 func clonePathSpec(spec PathSpec) PathSpec {
 	spec.Operators = append([]string(nil), spec.Operators...)
 	return spec
@@ -77,7 +112,7 @@ func clonePathSpec(spec PathSpec) PathSpec {
 
 var defaultFactRegistry = newInitialFactRegistry()
 
-// RegisteredFactPaths returns an immutable snapshot of the initial registry.
+// RegisteredFactPaths returns an immutable snapshot of current path metadata.
 func RegisteredFactPaths() map[string]PathSpec {
 	return defaultFactRegistry.Snapshot()
 }

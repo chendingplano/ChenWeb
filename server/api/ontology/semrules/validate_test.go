@@ -109,48 +109,89 @@ func TestValidateRejectsOversizedJSONNumbers(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsTypedCustomOperatorForDeclaredType(t *testing.T) {
-	const name = "test_starts_with_for_string"
-	err := RegisterTypedOperatorForTypes(name, []FactType{FactTypeString}, func(fact KnownValue, expected any) (bool, error) {
+func TestRegisterTypedOperatorForPathsAuthorizesOnlyDeclaredPath(t *testing.T) {
+	const name = "test_doc_kind_starts_with"
+	t.Cleanup(func() {
+		_ = defaultFactRegistry.setOperatorPaths(nil, name)
+		operatorsMu.Lock()
+		delete(operators, name)
+		operatorsMu.Unlock()
+	})
+	err := RegisterTypedOperatorForPaths(name, []string{"document.doc_kind"}, func(fact KnownValue, expected any) (bool, error) {
 		return strings.HasPrefix(fact.Value.(string), expected.(string)), nil
 	})
 	if err != nil {
-		t.Fatalf("RegisterTypedOperatorForTypes: %v", err)
+		t.Fatalf("RegisterTypedOperatorForPaths: %v", err)
 	}
 	if err := Validate(factDocument("document.doc_kind", name, "stand")); err != nil {
-		t.Fatalf("Validate custom string operator: %v", err)
+		t.Fatalf("Validate authorized path: %v", err)
+	}
+	if err := Validate(factDocument("document.source_language", name, "en")); err == nil {
+		t.Fatal("Validate accepted custom operator on another string path")
+	}
+
+	paths := RegisteredFactPaths()
+	if !containsString(paths["document.doc_kind"].Operators, name) {
+		t.Fatalf("document.doc_kind registry metadata does not include %q", name)
+	}
+	if containsString(paths["document.source_language"].Operators, name) {
+		t.Fatalf("document.source_language registry metadata unexpectedly includes %q", name)
 	}
 }
 
-func TestValidateRejectsTypedCustomOperatorForUndeclaredType(t *testing.T) {
-	const name = "test_string_only_operator"
+func TestRegisterTypedOperatorForTypesDoesNotAuthorizeFactPaths(t *testing.T) {
+	const name = "test_type_only_operator"
 	if err := RegisterTypedOperatorForTypes(name, []FactType{FactTypeString}, func(KnownValue, any) (bool, error) {
 		return true, nil
 	}); err != nil {
 		t.Fatalf("RegisterTypedOperatorForTypes: %v", err)
 	}
-	err := Validate(factDocument("document.numeric_unit_density", name, 1))
+	err := Validate(factDocument("document.doc_kind", name, "standard"))
 	if err == nil {
-		t.Fatal("Validate accepted string-only operator for number fact")
+		t.Fatal("Validate accepted a type-only operator without path authorization")
 	}
-	if !strings.Contains(err.Error(), "expression.op") || !strings.Contains(err.Error(), "number") {
-		t.Fatalf("Validate error = %q, want local incompatible number operator error", err)
+	if !strings.Contains(err.Error(), "expression.op") {
+		t.Fatalf("Validate error = %q, want local operator error", err)
+	}
+	if containsString(RegisteredFactPaths()["document.doc_kind"].Operators, name) {
+		t.Fatalf("type-only operator %q leaked into path registry", name)
+	}
+	op, ok := lookupOperator(name)
+	if !ok {
+		t.Fatalf("evaluation operator %q is not registered", name)
+	}
+	if matched, err := op(KnownValue{Type: FactTypeNumber, Value: 1}, "standard"); err == nil || matched {
+		t.Fatalf("type-only operator accepted undeclared runtime type: matched=%v err=%v", matched, err)
+	}
+}
+
+func TestRegisterTypedOperatorRemainsEvaluationOnly(t *testing.T) {
+	const name = "test_legacy_typed_evaluation_only"
+	if err := RegisterTypedOperator(name, func(KnownValue, any) (bool, error) { return true, nil }); err != nil {
+		t.Fatalf("RegisterTypedOperator: %v", err)
+	}
+	if _, ok := lookupOperator(name); !ok {
+		t.Fatalf("evaluation operator %q is not registered", name)
+	}
+	if err := Validate(factDocument("document.doc_kind", name, "standard")); err == nil {
+		t.Fatal("legacy typed registration unexpectedly authorized a P5 fact path")
 	}
 }
 
 func TestRegisterTypedOperatorForTypesRejectsInvalidMetadata(t *testing.T) {
+	validOperator := func(KnownValue, any) (bool, error) { return true, nil }
 	tests := []struct {
 		name  string
 		types []FactType
+		op    TypedOperator
 	}{
-		{"missing types", nil},
-		{"unknown type", []FactType{"imaginary"}},
+		{"missing types", nil, validOperator},
+		{"unknown type", []FactType{"imaginary"}, validOperator},
+		{"missing implementation", []FactType{FactTypeString}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := RegisterTypedOperatorForTypes("test_invalid_"+strings.ReplaceAll(tt.name, " ", "_"), tt.types, func(KnownValue, any) (bool, error) {
-				return true, nil
-			})
+			err := RegisterTypedOperatorForTypes("test_invalid_"+strings.ReplaceAll(tt.name, " ", "_"), tt.types, tt.op)
 			if err == nil {
 				t.Fatal("RegisterTypedOperatorForTypes succeeded, want metadata error")
 			}

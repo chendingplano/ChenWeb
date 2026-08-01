@@ -31,9 +31,8 @@ type LegacyOperator = Operator
 type TypedOperator func(fact KnownValue, expected any) (bool, error)
 
 type operatorEntry struct {
-	typed           TypedOperator
-	legacy          Operator
-	compatibleTypes map[FactType]struct{}
+	typed  TypedOperator
+	legacy Operator
 }
 
 var (
@@ -66,15 +65,22 @@ func RegisterOperator(name string, op Operator) error {
 	return nil
 }
 
-// RegisterTypedOperator registers a P5 operator that receives the fact's
-// declared type as well as its known value.
+// RegisterTypedOperator registers an evaluation-only operator that receives
+// the fact's declared type. It does not authorize persisted P5 predicates on
+// any fact path; use RegisterTypedOperatorForPaths for new P5 operators.
+//
+// Deprecated: use RegisterTypedOperatorForPaths for validated P5 predicates.
 func RegisterTypedOperator(name string, op TypedOperator) error {
-	return registerTypedOperator(name, nil, op)
+	return registerTypedOperator(name, op)
 }
 
-// RegisterTypedOperatorForTypes registers a P5 operator together with the
-// fact types for which predicate validation may use it.
+// RegisterTypedOperatorForTypes registers an evaluation-only operator and
+// rejects runtime facts outside factTypes. Type metadata alone does not grant
+// permission on any persisted P5 fact path.
 func RegisterTypedOperatorForTypes(name string, factTypes []FactType, op TypedOperator) error {
+	if op == nil {
+		return errors.New("operator name and implementation are required")
+	}
 	if len(factTypes) == 0 {
 		return errors.New("at least one compatible fact type is required")
 	}
@@ -85,10 +91,38 @@ func RegisterTypedOperatorForTypes(name string, factTypes []FactType, op TypedOp
 		}
 		compatibleTypes[factType] = struct{}{}
 	}
-	return registerTypedOperator(name, compatibleTypes, op)
+	typeChecked := func(fact KnownValue, expected any) (bool, error) {
+		if _, ok := compatibleTypes[fact.Type]; !ok {
+			return false, fmt.Errorf("operator %q is not compatible with fact type %q", name, fact.Type)
+		}
+		return op(fact, expected)
+	}
+	return registerTypedOperator(name, typeChecked)
 }
 
-func registerTypedOperator(name string, compatibleTypes map[FactType]struct{}, op TypedOperator) error {
+// RegisterTypedOperatorForPaths registers an operator and authorizes it on
+// exactly the named fact paths. The fact-path registry remains the source of
+// truth inspected by both Validate and RegisteredFactPaths.
+func RegisterTypedOperatorForPaths(name string, paths []string, op TypedOperator) error {
+	name = strings.TrimSpace(name)
+	if name == "" || op == nil {
+		return errors.New("operator name and implementation are required")
+	}
+	if len(paths) == 0 {
+		return errors.New("at least one authorized fact path is required")
+	}
+	for _, path := range paths {
+		if _, ok := LookupFactPath(path); !ok {
+			return fmt.Errorf("unknown fact path %q", path)
+		}
+	}
+	if err := registerTypedOperator(name, op); err != nil {
+		return err
+	}
+	return defaultFactRegistry.setOperatorPaths(paths, name)
+}
+
+func registerTypedOperator(name string, op TypedOperator) error {
 	name = strings.TrimSpace(name)
 	if name == "" || op == nil {
 		return errors.New("operator name and implementation are required")
@@ -96,8 +130,7 @@ func registerTypedOperator(name string, compatibleTypes map[FactType]struct{}, o
 	operatorsMu.Lock()
 	defer operatorsMu.Unlock()
 	operators[name] = operatorEntry{
-		typed:           op,
-		compatibleTypes: compatibleTypes,
+		typed: op,
 		legacy: func(fact, expected any) (bool, error) {
 			factType, err := inferLegacyFactType(fact)
 			if err != nil {
@@ -284,20 +317,6 @@ func lookupOperator(name string) (TypedOperator, bool) {
 	defer operatorsMu.RUnlock()
 	entry, ok := operators[name]
 	return entry.typed, ok
-}
-
-func operatorPermittedForType(name string, factType FactType, pathAllowsBuiltin bool) (bool, bool) {
-	operatorsMu.RLock()
-	defer operatorsMu.RUnlock()
-	entry, known := operators[name]
-	if !known {
-		return false, false
-	}
-	if entry.compatibleTypes == nil {
-		return true, pathAllowsBuiltin
-	}
-	_, permitted := entry.compatibleTypes[factType]
-	return true, permitted
 }
 
 func lookupLegacyOperator(name string) (Operator, bool) {
