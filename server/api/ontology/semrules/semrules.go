@@ -16,15 +16,6 @@ import (
 	"sync"
 )
 
-// Predicate is a node in the applicability predicate tree.
-type Predicate struct {
-	Kind  string      `json:"kind"` // "all" | "any" | "not" | "facet" | "object_class"
-	Facet string      `json:"facet,omitempty"`
-	Op    string      `json:"op,omitempty"` // registered operator name, e.g. eq, in, gte
-	Value any         `json:"value,omitempty"`
-	Items []Predicate `json:"items,omitempty"` // children for all/any/not
-}
-
 // Operator evaluates a fact value against the predicate value.
 type Operator func(fact, expected any) (bool, error)
 
