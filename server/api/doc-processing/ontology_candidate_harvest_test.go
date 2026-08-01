@@ -102,3 +102,13 @@ func TestBuildTestMethodCandidatesProposesProcedureAndMetricLink(t *testing.T) {
 		t.Fatalf("link = %#v", link)
 	}
 }
+
+func TestParseTestMethodMentionsUsesReturnedLineSpans(t *testing.T) {
+	got := parseTestMethodMentions(map[string]any{"procedures": []any{map[string]any{
+		"procedure_name": "Constant-flow test", "definition": "Measure output.",
+		"metric_names": []any{"Air flow rate"}, "source_line_spans": []any{"31", "32"},
+	}}})
+	if len(got) != 1 || got[0].ProcedureName != "Constant-flow test" || len(got[0].LineNumbers) != 2 {
+		t.Fatalf("mentions = %#v", got)
+	}
+}

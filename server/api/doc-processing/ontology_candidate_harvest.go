@@ -114,6 +114,33 @@ func sourceSpanLineNumbers(raw any) []int {
 	return out
 }
 
+// parseTestMethodMentions is deliberately strict about names and forgiving
+// about optional enrichment fields, so malformed LLM entries are skipped
+// rather than producing unnamed ontology content.
+func parseTestMethodMentions(payload map[string]any) []testMethodMention {
+	raw, _ := payload["procedures"].([]any)
+	out := make([]testMethodMention, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok || strings.TrimSpace(asString(m["procedure_name"])) == "" {
+			continue
+		}
+		metricNames := []string{}
+		if values, ok := m["metric_names"].([]any); ok {
+			for _, value := range values {
+				metricNames = append(metricNames, asString(value))
+			}
+		}
+		out = append(out, testMethodMention{
+			ProcedureName: strings.TrimSpace(asString(m["procedure_name"])),
+			Definition:    strings.TrimSpace(asString(m["definition"])),
+			MetricNames:   normalizedStrings(metricNames),
+			LineNumbers:   sourceSpanLineNumbers(m["source_line_spans"]),
+		})
+	}
+	return out
+}
+
 // buildMetricDefinitionCandidate turns one extracted definition into the
 // reviewable ontology candidate required by ADR §8.2.  Promotion remains an
 // explicit curator action; this helper never writes governed content itself.
