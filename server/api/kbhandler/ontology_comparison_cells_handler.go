@@ -27,3 +27,17 @@ func CreateOntologyComparisonCell(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
+
+// ListOntologyComparisonCells returns cached, evidence-preserving cells for a
+// comparison run; it never recomputes or merges underlying assertions.
+func ListOntologyComparisonCells(c echo.Context) error {
+	runID, err := strconv.ParseInt(c.Param("run_id"), 10, 64)
+	if err != nil || runID < 1 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid comparison run id"})
+	}
+	cells, err := (comparison.ComparisonStore{DB: ApiTypes.ProjectDBHandle}).ListCells(c.Request().Context(), runID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve comparison cells"})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "results": cells, "total": len(cells)})
+}

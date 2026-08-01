@@ -88,3 +88,19 @@ func TestComparisonStoreGetScopeLoadsFrozenReleaseSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestComparisonStoreListCellsForRun(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_comparison_cells WHERE comparison_run_id = $1")).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"comparison_run_id", "target_object_id", "metric_key", "subject_family", "subject_representative_assertion_id", "subject_assertions", "subject_remainder_count", "authority_family", "authority_representative_assertion_id", "authority_assertions", "authority_remainder_count", "verdict", "direction", "rationale"}).AddRow(7, "obj", "metric", "enterprise", 1, []byte(`[]`), 0, "authority", 2, []byte(`[]`), 0, "stronger", "subject_to_authority", "tighter"))
+	got, err := (ComparisonStore{DB: db}).ListCells(context.Background(), 7)
+	if err != nil || len(got) != 1 || got[0].Verdict != Stronger {
+		t.Fatalf("ListCells=%#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

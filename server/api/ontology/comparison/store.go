@@ -123,6 +123,32 @@ func (s ComparisonStore) PersistCell(ctx context.Context, cell ComparisonCell) e
 	return err
 }
 
+// ListCells returns the stored evidence-preserving directional cells for one
+// immutable comparison run.
+func (s ComparisonStore) ListCells(ctx context.Context, runID int64) ([]ComparisonCell, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	if runID < 1 {
+		return nil, errors.New("comparison run id is required")
+	}
+	const stmt = `SELECT comparison_run_id, target_object_id, metric_key, subject_family, COALESCE(subject_representative_assertion_id, 0), subject_assertions, subject_remainder_count, authority_family, COALESCE(authority_representative_assertion_id, 0), authority_assertions, authority_remainder_count, verdict, direction, rationale FROM kb.ontology_comparison_cells WHERE comparison_run_id = $1 ORDER BY target_object_id, metric_key, authority_family`
+	rows, err := s.DB.QueryContext(ctx, stmt, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cells []ComparisonCell
+	for rows.Next() {
+		var c ComparisonCell
+		if err := rows.Scan(&c.RunID, &c.TargetObjectID, &c.MetricKey, &c.SubjectFamily, &c.SubjectRepresentativeAssertionID, &c.SubjectAssertions, &c.SubjectRemainderCount, &c.AuthorityFamily, &c.AuthorityRepresentativeAssertionID, &c.AuthorityAssertions, &c.AuthorityRemainderCount, &c.Verdict, &c.Direction, &c.Rationale); err != nil {
+			return nil, err
+		}
+		cells = append(cells, c)
+	}
+	return cells, rows.Err()
+}
+
 func nullableText(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil
