@@ -69,6 +69,16 @@ type ObjectNode struct {
 	// kernel instantiation (ADR kernel test 23 parity).
 	MergedInto string
 	ScopeKey   string
+	// ADR P2 extension columns (DR10, 2026-08-01): ontological_level is the
+	// governed level (individual/type/collection/occurrence/concept);
+	// identity_scope the scope dimension; external_identifiers carries source
+	// IRIs; primary_class_term_id is a DERIVED projection maintained by
+	// classification assertions and project_semantics in P3 -- it is never
+	// authored directly.
+	OntologicalLevel     string
+	IdentityScope        string
+	ExternalIdentifiers  []byte // JSONB
+	PrimaryClassTermID   string
 }
 
 type ObjectNodeCandidate struct {
