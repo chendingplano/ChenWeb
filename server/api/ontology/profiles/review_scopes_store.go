@@ -32,6 +32,31 @@ type ReviewScope struct {
 
 type ReviewScopeStore struct{ DB terms.DBX }
 
+func scanReviewScope(scan func(dest ...any) error) (ReviewScope, error) {
+	var (
+		out     ReviewScope
+		context sql.NullString
+	)
+	err := scan(&out.ReviewScopeID, &out.ReviewedDocumentIDs, &out.TargetObjectIDs, &out.TargetClassTermIDs, &out.AsOfDate, &out.Jurisdiction, &context, &out.SelectedProfiles, &out.SelectionMode, &out.PrecedencePolicy, &out.ClosedDimensions, &out.SelectedBy, &out.SelectionReason, &out.CreateTime)
+	if context.Valid {
+		out.OperatingContext = context.String
+	}
+	return out, err
+}
+
+// Get retrieves the original frozen scope; callers must use this record, not
+// current activation, when reproducing a historical review.
+func (s ReviewScopeStore) Get(ctx context.Context, scopeID string) (ReviewScope, error) {
+	if s.DB == nil {
+		return ReviewScope{}, errors.New("db is nil")
+	}
+	if strings.TrimSpace(scopeID) == "" {
+		return ReviewScope{}, errors.New("review_scope_id is required")
+	}
+	const stmt = `SELECT review_scope_id, reviewed_document_ids, target_object_ids, target_class_term_ids, as_of_date::text, jurisdiction, operating_context, selected_profiles, selection_mode, precedence_policy, closed_dimensions, COALESCE(selected_by, ''), COALESCE(selection_reason, ''), create_time FROM kb.ontology_review_scopes WHERE review_scope_id = $1`
+	return scanReviewScope(s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(scopeID)).Scan)
+}
+
 func (s ReviewScopeStore) Create(ctx context.Context, scope ReviewScope) (ReviewScope, error) {
 	if s.DB == nil {
 		return ReviewScope{}, errors.New("db is nil")
@@ -62,13 +87,5 @@ func (s ReviewScopeStore) Create(ctx context.Context, scope ReviewScope) (Review
 	}
 	const stmt = `INSERT INTO kb.ontology_review_scopes (review_scope_id, reviewed_document_ids, target_object_ids, target_class_term_ids, as_of_date, jurisdiction, operating_context, selected_profiles, selection_mode, precedence_policy, closed_dimensions, selected_by, selection_reason) VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::date, $6, $7, $8::jsonb, $9, $10::jsonb, $11::jsonb, $12, $13) RETURNING review_scope_id, reviewed_document_ids, target_object_ids, target_class_term_ids, as_of_date::text, jurisdiction, operating_context, selected_profiles, selection_mode, precedence_policy, closed_dimensions, COALESCE(selected_by, ''), COALESCE(selection_reason, ''), create_time`
 	row := s.DB.QueryRowContext(ctx, stmt, scope.ReviewScopeID, string(scope.ReviewedDocumentIDs), string(scope.TargetObjectIDs), string(scope.TargetClassTermIDs), scope.AsOfDate, scope.Jurisdiction, nullableText(scope.OperatingContext), string(scope.SelectedProfiles), scope.SelectionMode, string(scope.PrecedencePolicy), string(scope.ClosedDimensions), nullableText(scope.SelectedBy), nullableText(scope.SelectionReason))
-	var (
-		out     ReviewScope
-		context sql.NullString
-	)
-	err := row.Scan(&out.ReviewScopeID, &out.ReviewedDocumentIDs, &out.TargetObjectIDs, &out.TargetClassTermIDs, &out.AsOfDate, &out.Jurisdiction, &context, &out.SelectedProfiles, &out.SelectionMode, &out.PrecedencePolicy, &out.ClosedDimensions, &out.SelectedBy, &out.SelectionReason, &out.CreateTime)
-	if context.Valid {
-		out.OperatingContext = context.String
-	}
-	return out, err
+	return scanReviewScope(row.Scan)
 }

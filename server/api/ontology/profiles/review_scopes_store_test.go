@@ -32,3 +32,23 @@ func TestReviewScopeStoreCreateFreezesSelectedProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReviewScopeStoreGetLoadsHistoricalSelection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT review_scope_id, reviewed_document_ids")).
+		WithArgs("scope-1").
+		WillReturnRows(sqlmock.NewRows([]string{"review_scope_id", "reviewed_document_ids", "target_object_ids", "target_class_term_ids", "as_of_date", "jurisdiction", "operating_context", "selected_profiles", "selection_mode", "precedence_policy", "closed_dimensions", "selected_by", "selection_reason", "create_time"}).
+			AddRow("scope-1", []byte(`[2]`), []byte(`[]`), []byte(`[]`), "2026-08-01", "CN", nil, []byte(`[{"profile_id":"p","release_id":42}]`), "explicit", []byte(`{}`), []byte(`[]`), "reviewer", "historical", now))
+	got, err := (ReviewScopeStore{DB: db}).Get(context.Background(), "scope-1")
+	if err != nil || string(got.SelectedProfiles) != `[{"profile_id":"p","release_id":42}]` {
+		t.Fatalf("Get = %#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
