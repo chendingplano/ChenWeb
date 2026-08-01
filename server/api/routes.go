@@ -463,6 +463,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/ontology/review-scopes", kbhandler.CreateOntologyReviewScope)
 	apiGroup.GET("/kb/ontology/review-scopes/:scope_id", kbhandler.GetOntologyReviewScope)
 	apiGroup.POST("/kb/ontology/review-scopes/:scope_id/execute", kbhandler.ExecuteOntologyReviewScope)
+	apiGroup.GET("/kb/ontology/review-findings/:id", kbhandler.GetOntologyReviewFinding)
 	apiGroup.POST("/kb/ontology/comparison-scopes", kbhandler.CreateOntologyComparisonScope)
 	apiGroup.GET("/kb/ontology/comparison-scopes/:scope_id", kbhandler.GetOntologyComparisonScope)
 	apiGroup.POST("/kb/semantic-decisions/drain-deferred", kbhandler.DrainDeferredSemanticDecisions)
