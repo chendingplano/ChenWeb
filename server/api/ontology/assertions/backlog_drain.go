@@ -21,19 +21,22 @@ type DrainReport struct {
 // pattern, reused rather than a new backlog mechanism. Safe to call
 // repeatedly: records with nothing newly resolved make no changes.
 //
-// This re-runs the metric normalizer for each affected record rather than
-// flipping the deferred candidate's status directly. That is the correct
-// mechanism, not merely a simpler one: a resolved referent changes the
-// candidate's proposed_payload (subject_object_id gets populated), so
-// re-normalizing naturally produces a new payload_fingerprint, which
-// DecisionCandidateStore.Propose already turns into a fresh 'candidate'
-// revision that properly supersedes the stale deferred one. Directly
-// retrying the deferred row via RetryDeferred without re-normalizing was
-// tried first and found live to reprocess the OLD, still-unresolved payload
-// -- the dependency-fingerprint retry gate is the right tool for a defer
-// reason where the payload is unchanged and something external changed
-// (e.g. a governed term being released), not for a resolved-referent defer,
-// where the payload itself is what changes.
+// This re-normalizes every registered family (DR11 seam 5) for each
+// affected record rather than flipping the deferred candidate's status
+// directly. That is the correct mechanism, not merely a simpler one: a
+// resolved referent changes the candidate's proposed_payload
+// (subject_object_id gets populated), so re-normalizing naturally produces a
+// new payload_fingerprint, which DecisionCandidateStore.Propose already
+// turns into a fresh 'candidate' revision that properly supersedes the
+// stale deferred one. Directly retrying the deferred row via RetryDeferred
+// without re-normalizing was tried first and found live to reprocess the
+// OLD, still-unresolved payload -- the dependency-fingerprint retry gate is
+// the right tool for a defer reason where the payload is unchanged and
+// something external changed (e.g. a governed term being released), not for
+// a resolved-referent defer, where the payload itself is what changes.
+// Re-normalizing every family rather than hardcoding 'metric' means a
+// future family whose normalizer also defers on 'unresolved_referent' is
+// covered without editing this drain.
 //
 // This drain targets specifically the 'unresolved_referent' reason -- the
 // dominant real-world blocker found in this workspace's gold corpus (chunk D
@@ -77,15 +80,11 @@ LIMIT $1`
 	}
 	rows.Close()
 
-	metricNormalizer, ok := LookupNormalizer("metric")
-	if !ok {
-		return report, fmt.Errorf("no normalizer registered for family %q", "metric")
-	}
 	assoc := AssociateSemantics{DB: db}
 
 	for _, recordID := range recordIDs {
 		report.RecordsScanned++
-		if _, err := metricNormalizer.Normalize(ctx, db, recordID); err != nil {
+		if err := NormalizeAllFamilies(ctx, db, recordID); err != nil {
 			return report, fmt.Errorf("re-normalize record %d: %w", recordID, err)
 		}
 		assocReport, err := assoc.Run(ctx, recordID)

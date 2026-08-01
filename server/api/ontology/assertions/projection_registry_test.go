@@ -63,3 +63,46 @@ func TestClassificationProjectionSelfRegistered(t *testing.T) {
 		t.Fatal("expected the classification projection to self-register via init()")
 	}
 }
+
+// TestClassificationProjectionRecordScopeSelfRegistered locks in the seam-7
+// fix: ProjectSemantics.Run must be able to discover this kind's per-record
+// target resolver generically, via RegisterProjectionRecordScope, not via
+// project_semantics.go hardcoding ProjectionKindObjectPrimaryClass.
+func TestClassificationProjectionRecordScopeSelfRegistered(t *testing.T) {
+	targetTable, targetsForRecord, ok := LookupProjectionRecordScope(ProjectionKindObjectPrimaryClass)
+	if !ok || targetsForRecord == nil {
+		t.Fatal("expected the classification projection's record scope to self-register via init()")
+	}
+	if targetTable != "kb.object_nodes" {
+		t.Fatalf("expected target table kb.object_nodes, got %q", targetTable)
+	}
+}
+
+func TestRegisterProjectionRecordScopeRejectsDuplicateKind(t *testing.T) {
+	fn := func(ctx context.Context, db *sql.DB, inputRecordID int64) ([]string, error) { return nil, nil }
+	if err := RegisterProjectionRecordScope("test_record_scope_kind", "kb.test_targets", fn); err != nil {
+		t.Fatalf("first RegisterProjectionRecordScope: %v", err)
+	}
+	if err := RegisterProjectionRecordScope("test_record_scope_kind", "kb.test_targets", fn); err == nil {
+		t.Fatal("expected error registering a duplicate kind")
+	}
+}
+
+func TestRegisterProjectionRecordScopeRequiresFields(t *testing.T) {
+	fn := func(ctx context.Context, db *sql.DB, inputRecordID int64) ([]string, error) { return nil, nil }
+	if err := RegisterProjectionRecordScope("", "kb.test_targets", fn); err == nil {
+		t.Fatal("expected error when kind is empty")
+	}
+	if err := RegisterProjectionRecordScope("test_record_scope_kind_2", "", fn); err == nil {
+		t.Fatal("expected error when target table is empty")
+	}
+	if err := RegisterProjectionRecordScope("test_record_scope_kind_3", "kb.test_targets", nil); err == nil {
+		t.Fatal("expected error when targetsForRecord is nil")
+	}
+}
+
+func TestLookupProjectionRecordScopeMissingKind(t *testing.T) {
+	if _, _, ok := LookupProjectionRecordScope("nonexistent_record_scope_kind"); ok {
+		t.Fatal("expected lookup of an unregistered kind to fail")
+	}
+}

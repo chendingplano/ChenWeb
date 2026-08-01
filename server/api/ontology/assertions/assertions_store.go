@@ -295,9 +295,13 @@ RETURNING ` + assertionColumns
 
 // CreateRevision inserts the next revision for an existing logical assertion
 // (spec §10.7: a decision-relevant change creates a payload revision and
-// supersedes any completed prior revision, never mutating it in place). If
-// the current latest revision is accepted, it is marked superseded and
-// points at the new revision.
+// supersedes any completed prior revision, never mutating it in place). The
+// prior revision is marked superseded regardless of its status (accepted,
+// in_review, unsupported, ...) as long as it isn't already superseded --
+// mirroring DecisionCandidateStore.Propose's fix for the same bug class
+// (P3 log §F3): guarding on status == accepted only left a still-open or
+// unsupported prior revision live alongside the new one, so a later reader
+// could see two non-superseded revisions of the same logical assertion.
 func (s AssertionStore) CreateRevision(ctx context.Context, a Assertion) (Assertion, error) {
 	if s.DB == nil {
 		return Assertion{}, errors.New("db is nil")
@@ -349,7 +353,7 @@ RETURNING ` + assertionColumns
 		return Assertion{}, err
 	}
 
-	if prior.Status == StatusAccepted {
+	if prior.Status != StatusSuperseded {
 		const supersede = `
 UPDATE kb.semantic_assertions
 SET status = $2, superseded_by = $3, modify_time = NOW()

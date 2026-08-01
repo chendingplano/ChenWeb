@@ -10,6 +10,10 @@ import (
 )
 
 func assertionRow(cols []string) *sqlmock.Rows {
+	return assertionRowWithStatus(cols, StatusCandidate)
+}
+
+func assertionRowWithStatus(cols []string, status string) *sqlmock.Rows {
 	now := time.Now()
 	return sqlmock.NewRows(cols).AddRow(
 		int64(1), "p3test:metric:001", 1, "object_node", "obj_1",
@@ -17,7 +21,7 @@ func assertionRow(cols []string) *sqlmock.Rows {
 		nil, []byte(`{"value":250}`), nil, "positive",
 		nil, []byte("null"), nil, "", nil, nil,
 		nil, nil, nil, nil, nil,
-		nil, "", StatusCandidate, nil,
+		nil, "", status, nil,
 		nil, nil, nil, nil,
 		now, now, "tester", now, "tester",
 	)
@@ -112,6 +116,47 @@ func TestAssertionStoreTransitionStatusRejectsIllegalTransition(t *testing.T) {
 	_, err = store.TransitionStatus(context.Background(), 1, StatusAccepted, "", "tester")
 	if err == nil {
 		t.Fatal("expected illegal transition error")
+	}
+}
+
+// TestAssertionStoreCreateRevisionSupersedesNonAcceptedPrior locks in the
+// fix for the P3-review finding mirroring log §F3: CreateRevision must
+// supersede the prior revision whenever it is not already superseded, not
+// only when it was accepted. An 'unsupported' prior (restored-from-evidence
+// state) left un-superseded by the old accepted-only guard would otherwise
+// remain live alongside the new revision.
+func TestAssertionStoreCreateRevisionSupersedesNonAcceptedPrior(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE logical_identity_key = $1")).
+		WithArgs("p3test:metric:001").
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusUnsupported))
+
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusCandidate))
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
+		WithArgs(int64(1), StatusSuperseded, int64(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store := AssertionStore{DB: db}
+	_, err = store.CreateRevision(context.Background(), Assertion{
+		LogicalIdentityKey: "p3test:metric:001",
+		SubjectRefKind:     "object_node",
+		SubjectRefID:       "obj_1",
+		PredicateTermID:    "mea:measured_by",
+		ObjectRefKind:      "literal",
+		ObjectLiteral:      []byte(`{"value":250}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateRevision: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v (supersede UPDATE was not issued for an unsupported prior)", err)
 	}
 }
 

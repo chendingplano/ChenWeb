@@ -309,6 +309,15 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "extract_product_structure", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
 	{Name: "extract_test_methods", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
 	{Name: "generate_scene_blocks", Phase: "B", DependsOn: []string{"chunking"}},
+	// DR8 Phase D (ADR §8.1/§8.2): declared as Phase-C processors since this
+	// planner's phase model has no separate "D" tier -- they run in the same
+	// post-process-indexing tier as the rest of Phase C, ordered last via
+	// PostProcessDependsOn (see phase_d.go). Gated by
+	// SEMANTIC_ASSOCIATION_ENABLED so registering them here does not change
+	// default production behavior.
+	{Name: "normalize_assertions", Phase: "C", DependsOn: []string{"extract_metrics", "extract_provisions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	{Name: "associate_semantics", Phase: "C", DependsOn: []string{"normalize_assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	{Name: "project_semantics", Phase: "C", DependsOn: []string{"associate_semantics"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
 }
 
 func productionProcessorPhase(name string) string {

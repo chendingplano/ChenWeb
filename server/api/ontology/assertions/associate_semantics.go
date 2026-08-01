@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/lib/pq"
 )
 
 // AssociateReport summarizes one associate_semantics run over one input
@@ -23,17 +25,25 @@ type AssociateReport struct {
 // 'candidate'. Adjudication here is deterministic-only (spec §16.3 item 4:
 // an LLM-only recommendation cannot activate an assertion -- trivially true
 // because no LLM path exists yet; a future LLM path plugs in as a candidate
-// scorer ahead of this step, never as a direct writer).
+// scorer ahead of this step, never as a direct writer). Which source
+// artifact types Run examines, and how each is resolved, comes from the
+// AssociationResolver registry (DR11 seam 5): adding a family's resolver
+// never requires editing Run or processOne.
 type AssociateSemantics struct {
 	DB *sql.DB
 }
 
 // Run resolves, validates, adjudicates, and persists every 'candidate'
-// decision candidate proposed for the given input record.
+// decision candidate proposed for the given input record, for every
+// source_artifact_type with a registered AssociationResolver.
 func (a AssociateSemantics) Run(ctx context.Context, inputRecordID int64) (AssociateReport, error) {
 	report := AssociateReport{}
 	if a.DB == nil {
 		return report, fmt.Errorf("db is nil")
+	}
+	sourceArtifactTypes := RegisteredAssociationResolverTypes()
+	if len(sourceArtifactTypes) == 0 {
+		return report, nil
 	}
 
 	// Also picks up rows stuck at 'in_review': that status is this stage's own
@@ -43,9 +53,9 @@ func (a AssociateSemantics) Run(ctx context.Context, inputRecordID int64) (Assoc
 	// (spec §16.3 item 13), not left stuck forever.
 	const stmt = `
 SELECT id FROM kb.semantic_decision_candidates
-WHERE status IN ('candidate', 'in_review') AND source_artifact_type IN ('metric', 'provision')
-  AND input_record_id = $1`
-	rows, err := a.DB.QueryContext(ctx, stmt, inputRecordID)
+WHERE status IN ('candidate', 'in_review') AND source_artifact_type = ANY($1)
+  AND input_record_id = $2`
+	rows, err := a.DB.QueryContext(ctx, stmt, pq.Array(sourceArtifactTypes), inputRecordID)
 	if err != nil {
 		return report, err
 	}
@@ -113,13 +123,27 @@ func (a AssociateSemantics) processOne(ctx context.Context, dcStore DecisionCand
 	// after transitioning in but before resolving -- resume from where it
 	// left off rather than re-transitioning (which would be refused).
 
-	switch dc.SourceArtifactType {
-	case "metric":
-		return a.processMetric(ctx, dcStore, asStore, evStore, dc, inputRecordID)
-	case "provision":
-		return a.processProvision(ctx, dcStore, dc)
-	default:
+	resolver, ok := LookupAssociationResolver(dc.SourceArtifactType)
+	if !ok {
 		return a.deferCandidate(ctx, dcStore, dc, "unrecognized_source_artifact_type")
+	}
+	return resolver(ctx, a, dcStore, asStore, evStore, dc, inputRecordID)
+}
+
+// init registers the metric and provision resolvers with the default
+// AssociationResolver registry (DR11 seam 5): the same self-registration
+// pattern MetricNormalizer/ProvisionNormalizer already use for
+// normalize_assertions.
+func init() {
+	if err := RegisterAssociationResolver("metric", func(ctx context.Context, a AssociateSemantics, dcStore DecisionCandidateStore, asStore AssertionStore, evStore EvidenceStore, dc DecisionCandidate, inputRecordID int64) (string, error) {
+		return a.processMetric(ctx, dcStore, asStore, evStore, dc, inputRecordID)
+	}); err != nil {
+		panic(err)
+	}
+	if err := RegisterAssociationResolver("provision", func(ctx context.Context, a AssociateSemantics, dcStore DecisionCandidateStore, _ AssertionStore, _ EvidenceStore, dc DecisionCandidate, _ int64) (string, error) {
+		return a.processProvision(ctx, dcStore, dc)
+	}); err != nil {
+		panic(err)
 	}
 }
 

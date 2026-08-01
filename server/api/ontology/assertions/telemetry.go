@@ -136,16 +136,9 @@ func RunPhaseD(ctx context.Context, db *sql.DB, inputRecordID int64) (Associatio
 		}
 	}
 
-	for _, family := range RegisteredFamilies() {
-		normalizer, ok := LookupNormalizer(family)
-		if !ok {
-			continue
-		}
-		runStage("normalize_assertions:"+family, func() error {
-			_, err := normalizer.Normalize(ctx, db, inputRecordID)
-			return err
-		})
-	}
+	runStage("normalize_assertions", func() error {
+		return NormalizeAllFamilies(ctx, db, inputRecordID)
+	})
 
 	runStage("associate_semantics", func() error {
 		_, err := (AssociateSemantics{DB: db}).Run(ctx, inputRecordID)

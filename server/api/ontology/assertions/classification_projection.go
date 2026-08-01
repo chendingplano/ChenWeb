@@ -19,6 +19,41 @@ func init() {
 	if err := RegisterProjectionBuilder(ProjectionKindObjectPrimaryClass, buildPrimaryClassProjection, repairPrimaryClassProjection); err != nil {
 		panic(err)
 	}
+	if err := RegisterProjectionRecordScope(ProjectionKindObjectPrimaryClass, "kb.object_nodes", classificationTargetsForRecord); err != nil {
+		panic(err)
+	}
+}
+
+// classificationTargetsForRecord returns the distinct subject object ids of
+// accepted core:instance_of assertions whose evidence traces back to this
+// input record -- the objects whose primary_class_term_id projection may
+// need (re)building after this record's Phase D run. Registered as this
+// kind's ProjectionTargetsFunc (RegisterProjectionRecordScope) so
+// ProjectSemantics.Run never needs kind-specific knowledge to scope a
+// per-record rebuild.
+func classificationTargetsForRecord(ctx context.Context, db *sql.DB, inputRecordID int64) ([]string, error) {
+	const stmt = `
+SELECT DISTINCT a.subject_object_id
+FROM kb.semantic_assertions a
+JOIN kb.assertion_evidence e ON e.assertion_id = a.id
+WHERE e.input_record_id = $1
+  AND a.predicate_term_id = 'core:instance_of'
+  AND a.subject_object_id IS NOT NULL`
+	rows, err := db.QueryContext(ctx, stmt, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var objectID string
+		if err := rows.Scan(&objectID); err != nil {
+			return nil, err
+		}
+		out = append(out, objectID)
+	}
+	return out, rows.Err()
 }
 
 // primaryClassificationFor returns the deterministic "primary" classification

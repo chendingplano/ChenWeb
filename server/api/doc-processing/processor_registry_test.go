@@ -10,7 +10,10 @@ func TestOptionalProductionProcessorNames(t *testing.T) {
 		"generate_summaries", "generate_topics", "extract_doc_metadata",
 		"extract_semantic_projections", "extract_structured_knowledge",
 		"extract_entity", "extract_relation", "extract_inventory_items",
-		"extract_metrics", "extract_provisions", "generate_scene_blocks",
+		"extract_metrics", "extract_provisions",
+		"extract_metric_definitions", "extract_product_structure", "extract_test_methods",
+		"generate_scene_blocks",
+		"normalize_assertions", "associate_semantics", "project_semantics",
 	}
 	got := OptionalProductionProcessorNames()
 	if !reflect.DeepEqual(got, want) {

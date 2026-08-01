@@ -3,6 +3,7 @@ package assertions
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -79,6 +80,25 @@ func (r *AssertionNormalizerRegistry) Lookup(family string) (Normalizer, bool) {
 // no particular order.
 func RegisteredFamilies() []string {
 	return defaultRegistry.Families()
+}
+
+// NormalizeAllFamilies runs every registered seam-5 normalizer (DR11) against
+// one input record. A single family's normalizer failing does not block the
+// others -- this is the shared normalize_assertions dispatch, used both by
+// RunPhaseD and by the standalone NormalizeAssertionsProcessor, so adding a
+// new family's normalizer never requires editing either caller.
+func NormalizeAllFamilies(ctx context.Context, db *sql.DB, inputRecordID int64) error {
+	var errs []error
+	for _, family := range RegisteredFamilies() {
+		normalizer, ok := LookupNormalizer(family)
+		if !ok {
+			continue
+		}
+		if _, err := normalizer.Normalize(ctx, db, inputRecordID); err != nil {
+			errs = append(errs, fmt.Errorf("normalize %s: %w", family, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Families returns every family registered on this registry instance.

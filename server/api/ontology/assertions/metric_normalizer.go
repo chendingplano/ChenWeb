@@ -144,14 +144,24 @@ WHERE m.input_record_id = $1`
 
 // The pilot corpus (ADR OD1: 呼吸机/医疗器械) is predominantly Chinese-language
 // standard text, so the comparator vocabulary covers both languages rather
-// than only English -- 不低于/不小于/至少 ("not less than"/"at least") and
-// 不超过/不大于/不高于 ("not more than"/"not exceeding") are the common forms
-// observed in the gold corpus's threshold_or_target values.
+// than only English -- 不低于/不小于/不得低于/至少 ("not less than"/"at least")
+// and 不超过/不大于/不高于/不应超过/不得超过 ("not more than"/"not exceeding")
+// are the common forms observed in the gold corpus's threshold_or_target
+// values.
 var (
-	reLowerBound = regexp.MustCompile(`(?i)(at least|no less than|not less than|minimum of|>=|≥|不低于|不小于|至少)`)
-	reUpperBound = regexp.MustCompile(`(?i)(at most|no more than|not more than|maximum of|<=|≤|不超过|不大于|不高于)`)
-	reRange      = regexp.MustCompile(`(?i)(-?\d+(?:\.\d+)?)\s*(?:to|~|-|―|–|—|至)\s*(-?\d+(?:\.\d+)?)`)
-	reNumber     = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
+	reLowerBound = regexp.MustCompile(`(?i)(at least|no less than|not less than|minimum of|>=|≥|不低于|不小于|不得低于|至少)`)
+	reUpperBound = regexp.MustCompile(`(?i)(at most|no more than|not more than|maximum of|<=|≤|不超过|不大于|不高于|不应超过|不得超过)`)
+	// reRangeKeyword matches an explicit range keyword/dash between two
+	// numbers, with optional surrounding whitespace.
+	reRangeKeyword = regexp.MustCompile(`(?i)(-?\d+(?:\.\d+)?)\s*(?:to|~|至|―|–|—)\s*(-?\d+(?:\.\d+)?)`)
+	// reRangeHyphen matches a plain ASCII hyphen as a range separator only
+	// when whitespace surrounds it on both sides -- an unspaced hyphen
+	// between two numbers is at least as likely to be part of a standard/
+	// document identifier ("GB 9706.1-2020") as a genuine range, and
+	// reRangeKeyword already covers "10-20"-style ranges via its keyword
+	// forms once a space or Chinese range marker is present.
+	reRangeHyphen = regexp.MustCompile(`(-?\d+(?:\.\d+)?)\s+-\s+(-?\d+(?:\.\d+)?)`)
+	reNumber      = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
 	// reRatioDenominatorOne matches the "N:1" contrast/ratio notation.
 	reRatioDenominatorOne = regexp.MustCompile(`(\d+(?:\.\d+)?):1\b`)
 )
@@ -182,7 +192,11 @@ func parseThresholdOrTarget(raw string) parsedThreshold {
 	// the untouched "500:1" for anyone who needs the literal ratio.
 	text = reRatioDenominatorOne.ReplaceAllString(text, "$1")
 
-	if m := reRange.FindStringSubmatch(text); m != nil {
+	m := reRangeKeyword.FindStringSubmatch(text)
+	if m == nil {
+		m = reRangeHyphen.FindStringSubmatch(text)
+	}
+	if m != nil {
 		lo, errLo := strconv.ParseFloat(m[1], 64)
 		hi, errHi := strconv.ParseFloat(m[2], 64)
 		if errLo == nil && errHi == nil {
@@ -193,6 +207,28 @@ func parseThresholdOrTarget(raw string) parsedThreshold {
 		}
 	}
 
+	// Anchor the numeric match to the position right after the matched
+	// comparator keyword rather than the first number anywhere in the
+	// string -- otherwise a leading distance, date, or standard-number
+	// token ("在 1 m 距离处不低于 250", "GB 9706.1-2020 规定不低于 250") is
+	// mistaken for the threshold value itself. A comparator keyword with no
+	// number after it is unparsed, never fabricated from an earlier number.
+	if loc := reLowerBound.FindStringIndex(text); loc != nil {
+		if value, ok := firstNumberAfter(text, loc[1]); ok {
+			return parsedThreshold{ValueForm: "single", Comparator: ">=", AssertionKind: "lower_bound_requirement", NumericValue: &value}
+		}
+		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+	}
+	if loc := reUpperBound.FindStringIndex(text); loc != nil {
+		if value, ok := firstNumberAfter(text, loc[1]); ok {
+			return parsedThreshold{ValueForm: "single", Comparator: "<=", AssertionKind: "upper_bound_requirement", NumericValue: &value}
+		}
+		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+	}
+
+	// No comparator keyword: a bare number is recorded as an observed value,
+	// not a requirement -- spec §16.3 item 8's distinction between
+	// requirement and observation assertion kinds.
 	numMatch := reNumber.FindString(text)
 	if numMatch == "" {
 		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
@@ -201,16 +237,22 @@ func parseThresholdOrTarget(raw string) parsedThreshold {
 	if err != nil {
 		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
 	}
+	return parsedThreshold{ValueForm: "single", Comparator: "=", AssertionKind: "observed_value", NumericValue: &value}
+}
 
-	switch {
-	case reLowerBound.MatchString(text):
-		return parsedThreshold{ValueForm: "single", Comparator: ">=", AssertionKind: "lower_bound_requirement", NumericValue: &value}
-	case reUpperBound.MatchString(text):
-		return parsedThreshold{ValueForm: "single", Comparator: "<=", AssertionKind: "upper_bound_requirement", NumericValue: &value}
-	default:
-		// A bare number with no comparator language is recorded as an
-		// observed value, not a requirement -- spec §16.3 item 8's
-		// distinction between requirement and observation assertion kinds.
-		return parsedThreshold{ValueForm: "single", Comparator: "=", AssertionKind: "observed_value", NumericValue: &value}
+// firstNumberAfter returns the first parseable number in text at or after
+// byte offset from, and whether one was found.
+func firstNumberAfter(text string, from int) (float64, bool) {
+	if from > len(text) {
+		return 0, false
 	}
+	numMatch := reNumber.FindString(text[from:])
+	if numMatch == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(numMatch, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }

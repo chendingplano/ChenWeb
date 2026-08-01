@@ -100,6 +100,62 @@ func (r *ProjectionBuilderRegistry) Kinds() []string {
 	return out
 }
 
+// ProjectionTargetsFunc returns the projection targets whose authoritative
+// source may have changed for one input record -- e.g. the objects touched
+// by this record's newly-accepted assertions this run.
+type ProjectionTargetsFunc func(ctx context.Context, db *sql.DB, inputRecordID int64) ([]string, error)
+
+type projectionRecordScopeEntry struct {
+	targetTable      string
+	targetsForRecord ProjectionTargetsFunc
+}
+
+var defaultProjectionRecordScopes = struct {
+	mu    sync.RWMutex
+	scope map[string]projectionRecordScopeEntry
+}{scope: map[string]projectionRecordScopeEntry{}}
+
+// RegisterProjectionRecordScope declares, for one projection kind, how to
+// find the targets touched by a single input record and the
+// kb.projection_state target table they live in. This is the piece
+// ProjectSemantics.Run needs to scope a per-record rebuild (and mark a
+// failed target stale) generically across every registered kind -- DR11
+// seam 7's "adding a projection kind requires no change to
+// project_semantics.go" only holds once this is registered alongside the
+// build/repair pair. A projection kind repaired only by the periodic sweep
+// (RepairStaleProjections) and never triggered per-record does not need
+// this registration.
+func RegisterProjectionRecordScope(kind, targetTable string, targetsForRecord ProjectionTargetsFunc) error {
+	if kind == "" {
+		return fmt.Errorf("projection kind is required")
+	}
+	if targetTable == "" {
+		return fmt.Errorf("projection target table is required")
+	}
+	if targetsForRecord == nil {
+		return fmt.Errorf("targetsForRecord is required")
+	}
+	defaultProjectionRecordScopes.mu.Lock()
+	defer defaultProjectionRecordScopes.mu.Unlock()
+	if _, exists := defaultProjectionRecordScopes.scope[kind]; exists {
+		return fmt.Errorf("record scope already registered for projection kind %q", kind)
+	}
+	defaultProjectionRecordScopes.scope[kind] = projectionRecordScopeEntry{targetTable: targetTable, targetsForRecord: targetsForRecord}
+	return nil
+}
+
+// LookupProjectionRecordScope returns the registered per-record target
+// resolver and target table for a projection kind, if any.
+func LookupProjectionRecordScope(kind string) (targetTable string, targetsForRecord ProjectionTargetsFunc, ok bool) {
+	defaultProjectionRecordScopes.mu.RLock()
+	defer defaultProjectionRecordScopes.mu.RUnlock()
+	e, exists := defaultProjectionRecordScopes.scope[kind]
+	if !exists {
+		return "", nil, false
+	}
+	return e.targetTable, e.targetsForRecord, true
+}
+
 // ProjectionStateStore persists projection provenance (kb.projection_state).
 type ProjectionStateStore struct {
 	DB DBX

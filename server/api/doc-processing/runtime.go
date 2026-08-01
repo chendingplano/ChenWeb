@@ -74,6 +74,9 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 		NewTestMethodsProcessor(newClient()),
 		NewProvisionsProcessor(inputStore, ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewSceneBlocksProcessor(inputStore, SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewNormalizeAssertionsProcessor(),
+		NewAssociateSemanticsProcessor(),
+		NewProjectSemanticsProcessor(logger),
 	}
 	return productionRuntimeComponents{inputStore: inputStore, fixed: fixed, processors: all, blocking: NewBlockingProcessor(inputStore, logger)}
 }

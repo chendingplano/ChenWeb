@@ -16,70 +16,53 @@ type ProjectReport struct {
 }
 
 // ProjectSemantics implements the third DR8 Phase D stage (spec §10.8):
-// build derived projections from accepted assertions. This slice's only
-// registered projection kind is ProjectionKindObjectPrimaryClass (DR10);
-// registering a second kind (e.g. artifact-semantic-link projections for a
-// future normalized family) requires no change here, only a new
-// RegisterProjectionBuilder call (DR11 seam 7).
+// build derived projections from accepted assertions. Run iterates every
+// registered projection kind (DR11 seam 7); registering a second kind (e.g.
+// artifact-semantic-link projections for a future normalized family)
+// requires no change here, only RegisterProjectionBuilder plus
+// RegisterProjectionRecordScope for the new kind (see
+// classification_projection.go's init for the template).
 type ProjectSemantics struct {
 	DB *sql.DB
 }
 
 // Run (re)builds every registered projection kind's targets touched by
-// assertions accepted for the given input record.
+// assertions accepted for the given input record. A build failure marks the
+// target stale (spec §16.3 item 14) rather than leaving kb.projection_state
+// looking current with no record that a rebuild is owed.
 func (p ProjectSemantics) Run(ctx context.Context, inputRecordID int64) (ProjectReport, error) {
 	report := ProjectReport{}
 	if p.DB == nil {
 		return report, fmt.Errorf("db is nil")
 	}
 
-	targets, err := p.classificationTargetsForRecord(ctx, inputRecordID)
-	if err != nil {
-		return report, err
-	}
-
-	build, _, ok := LookupProjectionBuilder(ProjectionKindObjectPrimaryClass)
-	if !ok {
-		return report, fmt.Errorf("no projection builder registered for %q", ProjectionKindObjectPrimaryClass)
-	}
-	for _, objectID := range targets {
-		report.TargetsExamined++
-		if err := build(ctx, p.DB, objectID); err != nil {
-			report.Errors++
+	stateStore := ProjectionStateStore{DB: p.DB}
+	for _, kind := range RegisteredProjectionKinds() {
+		targetTable, targetsForRecord, ok := LookupProjectionRecordScope(kind)
+		if !ok {
 			continue
 		}
-		report.Built++
+		build, _, ok := LookupProjectionBuilder(kind)
+		if !ok {
+			continue
+		}
+		targets, err := targetsForRecord(ctx, p.DB, inputRecordID)
+		if err != nil {
+			return report, fmt.Errorf("resolve %q targets for record %d: %w", kind, inputRecordID, err)
+		}
+		for _, targetID := range targets {
+			report.TargetsExamined++
+			if err := build(ctx, p.DB, targetID); err != nil {
+				report.Errors++
+				// Best-effort: the build failure is already counted above
+				// regardless of whether marking it stale also succeeds.
+				_ = stateStore.MarkStale(ctx, kind, targetTable, targetID, err.Error())
+				continue
+			}
+			report.Built++
+		}
 	}
 	return report, nil
-}
-
-// classificationTargetsForRecord returns the distinct subject object ids of
-// accepted core:instance_of assertions whose evidence traces back to this
-// input record -- the objects whose primary_class_term_id projection may
-// need (re)building after this record's Phase D run.
-func (p ProjectSemantics) classificationTargetsForRecord(ctx context.Context, inputRecordID int64) ([]string, error) {
-	const stmt = `
-SELECT DISTINCT a.subject_object_id
-FROM kb.semantic_assertions a
-JOIN kb.assertion_evidence e ON e.assertion_id = a.id
-WHERE e.input_record_id = $1
-  AND a.predicate_term_id = 'core:instance_of'
-  AND a.subject_object_id IS NOT NULL`
-	rows, err := p.DB.QueryContext(ctx, stmt, inputRecordID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]string, 0)
-	for rows.Next() {
-		var objectID string
-		if err := rows.Scan(&objectID); err != nil {
-			return nil, err
-		}
-		out = append(out, objectID)
-	}
-	return out, rows.Err()
 }
 
 // RepairStaleProjections sweeps every target of a registered projection kind

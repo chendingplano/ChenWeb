@@ -816,13 +816,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// Phase C (post-process): now that every doc processor has finished, index the
 	// artifacts of the invoked processors that defer indexing to this phase. This is the
 	// only place cross-artifact indexing (e.g. metrics) may run, so it sees all outputs.
+	// DR8's Phase D stages (normalize_assertions, associate_semantics,
+	// project_semantics) run here too, as PostProcessIndexer processors
+	// ordered after the rest via PostProcessDependsOn -- see phase_d.go.
+	// Inert unless SEMANTIC_ASSOCIATION_ENABLED, and only invoked at all if
+	// present in this run's processors (routed, per ADR §8.2).
 	s.runPostProcessIndexing(ctx, processors, evt.RecordID)
-
-	// Phase D (DR8, spec §10.1): normalize this record's artifacts into
-	// candidate qualified assertions, resolve/validate/adjudicate them, then
-	// build derived projections, logging the spec §10.9 association-run
-	// report. Inert unless SEMANTIC_ASSOCIATION_ENABLED.
-	s.runPhaseD(ctx, evt.RecordID)
 
 	pipelineMSUsed := time.Since(requestStart).Milliseconds()
 	status := "success"
