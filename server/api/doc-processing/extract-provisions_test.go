@@ -9,7 +9,23 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestNormalizeProvisionListPreservesStructuredAuthorityFields(t *testing.T) {
+	got := normalizeProvisionList([]any{map[string]any{
+		"provision_name": "P", "provision": "shall", "source_line_spans": []any{"9"},
+		"applicability": map[string]any{"object_type": "equipment"}, "authority": "standard", "effective_interval": map[string]any{"start": "2026-01-01"},
+	}}, map[int]int{9: 1}, map[string]string{"9": "shall"})
+	if len(got) != 1 {
+		t.Fatalf("got %d provisions", len(got))
+	}
+	rows := (&ProvisionsProcessor{}).buildProvisionOutputRows(1, got, time.Now(), 1, 0, "model")
+	info := rows[0]["public_info"].(map[string]any)
+	if info["authority"] != "standard" || info["applicability"] == nil || info["effective_interval"] == nil {
+		t.Fatalf("public_info=%#v", info)
+	}
+}
 
 type fakeProvisionsStore struct {
 	exists       bool

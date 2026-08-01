@@ -994,26 +994,29 @@ func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[st
 			categoryPaths = raw["categories"]
 		}
 		normalized := map[string]any{
-			"provision_name":    provisionName,
-			"provision_name_en": strings.TrimSpace(asString(raw["name_en"])),
-			"provision_type":    strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision_type"]), asString(raw["type"]))),
-			"source_text":       strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["source_text"]), provisionText)),
-			"provision":         provisionText,
-			"provision_en":      strings.TrimSpace(asString(raw["provision_en"])),
-			"provision_desc":    strings.TrimSpace(asString(raw["provision_desc"])),
-			"provision_desc_en": strings.TrimSpace(asString(raw["provision_desc_en"])),
-			"context":           strings.TrimSpace(asString(raw["context"])),
-			"context_en":        strings.TrimSpace(asString(raw["context_en"])),
-			"subject":           strings.TrimSpace(asString(raw["subject"])),
-			"subject_en":        strings.TrimSpace(asString(raw["subject_en"])),
-			"location_type":     strings.TrimSpace(asString(raw["location_type"])),
-			"keywords":          toStringSlice(raw["keywords"]),
-			"keywords_en":       toStringSlice(raw["keywords_en"]),
-			"confidence":        toFloat(raw["confidence"]),
-			"is_explicit":       toBool(raw["is_explicit"]),
-			"need_verify":       toBool(raw["need_verify"]),
-			"category_paths":    categoryPaths,
-			"category_paths_en": raw["category_path_en"],
+			"provision_name":     provisionName,
+			"provision_name_en":  strings.TrimSpace(asString(raw["name_en"])),
+			"provision_type":     strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision_type"]), asString(raw["type"]))),
+			"source_text":        strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["source_text"]), provisionText)),
+			"provision":          provisionText,
+			"provision_en":       strings.TrimSpace(asString(raw["provision_en"])),
+			"provision_desc":     strings.TrimSpace(asString(raw["provision_desc"])),
+			"provision_desc_en":  strings.TrimSpace(asString(raw["provision_desc_en"])),
+			"context":            strings.TrimSpace(asString(raw["context"])),
+			"context_en":         strings.TrimSpace(asString(raw["context_en"])),
+			"subject":            strings.TrimSpace(asString(raw["subject"])),
+			"subject_en":         strings.TrimSpace(asString(raw["subject_en"])),
+			"location_type":      strings.TrimSpace(asString(raw["location_type"])),
+			"keywords":           toStringSlice(raw["keywords"]),
+			"keywords_en":        toStringSlice(raw["keywords_en"]),
+			"confidence":         toFloat(raw["confidence"]),
+			"is_explicit":        toBool(raw["is_explicit"]),
+			"need_verify":        toBool(raw["need_verify"]),
+			"category_paths":     categoryPaths,
+			"category_paths_en":  raw["category_path_en"],
+			"applicability":      raw["applicability"],
+			"authority":          raw["authority"],
+			"effective_interval": raw["effective_interval"],
 		}
 		if objects := objectItemsFromValue(raw["objects"]); len(objects) > 0 {
 			normalized["objects"] = objects
@@ -1138,6 +1141,11 @@ func (p *ProvisionsProcessor) buildProvisionOutputRows(recordID int64, provision
 		publicInfo := map[string]any{
 			"provision_type":    strings.TrimSpace(asString(provision["provision_type"])),
 			"source_line_spans": provision["source_line_spans"],
+		}
+		for _, key := range []string{"applicability", "authority", "effective_interval"} {
+			if value, ok := provision[key]; ok && value != nil {
+				publicInfo[key] = value
+			}
 		}
 		out = append(out, map[string]any{
 			"prov_id":               fmt.Sprintf("%d_prv_%d", recordID, i+1),
