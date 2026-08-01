@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lib/pq"
 )
@@ -156,6 +157,7 @@ type metricCandidatePayload struct {
 	Comparator      string   `json:"comparator"`
 	AssertionKind   string   `json:"assertion_kind"`
 	SubjectObjectID string   `json:"subject_object_id"`
+	Condition       string   `json:"condition"`
 	NumericValue    *float64 `json:"numeric_value"`
 	LowerValue      *float64 `json:"lower_value"`
 	UpperValue      *float64 `json:"upper_value"`
@@ -221,10 +223,15 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 	if err != nil {
 		return "", err
 	}
-	qualifiers, err := json.Marshal(map[string]any{"metric_name": p.MetricName})
+	qualifierMap := map[string]any{"metric_name": p.MetricName}
+	if p.Condition != "" {
+		qualifierMap["condition"] = p.Condition
+	}
+	qualifiers, err := json.Marshal(qualifierMap)
 	if err != nil {
 		return "", err
 	}
+	unitTermID, quantityKindTermID := a.resolveUnitTerms(ctx, p.Unit)
 
 	assertion := Assertion{
 		LogicalIdentityKey:  dc.LogicalIdentityKey,
@@ -236,6 +243,8 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 		ObjectLiteral:       objectLiteralJSON,
 		AssertionKindTermID: assertionKindTermID,
 		Qualifiers:          qualifiers,
+		UnitTermID:          unitTermID,
+		QuantityKindTermID:  quantityKindTermID,
 		ValueForm:           p.ValueForm,
 		NumericValue:        p.NumericValue,
 		LowerValue:          p.LowerValue,
@@ -295,6 +304,74 @@ func (a AssociateSemantics) persistAssertion(ctx context.Context, asStore Assert
 	default:
 		return Assertion{}, err
 	}
+}
+
+// resolveUnitTerms maps the raw unit string on an accepted metric assertion to
+// a governed QUDT unit term and its quantity-kind term (P3 log §8 item 13),
+// so DR21 verdicts can compare canonical units instead of raw strings. It is
+// best-effort enrichment, never a gate: an unresolved unit leaves the term IDs
+// empty and the assertion is still accepted (the comparison layer's unitDef
+// registry remains the conversion authority).
+//
+// Lookup is by term_id against the QUDT quantity module. The import stores
+// term rows (kb.ontology_terms, 4151 quantity terms) but did not populate
+// kb.ontology_term_labels for them -- only core/mea/da have labels -- so a
+// label join would resolve nothing. canonicalUnitForm maps the raw unit string
+// to the catalog's local-name suffix; units absent from the catalog (e.g.
+// cd/m² -- no candela unit was imported) resolve to empty term IDs, which the
+// comparison layer's unitDef already handles for conversions.
+func (a AssociateSemantics) resolveUnitTerms(ctx context.Context, rawUnit string) (unitTermID, quantityKindTermID string) {
+	canonical := canonicalUnitForm(rawUnit)
+	if canonical == "" || a.DB == nil {
+		return "", ""
+	}
+	termID := "quantity:unit_" + canonical
+	var exists bool
+	err := a.DB.QueryRowContext(ctx, `
+SELECT EXISTS (
+	SELECT 1 FROM kb.ontology_terms
+	WHERE term_id = $1 AND module_id = 'quantity'
+	  AND status = 'included_in_release' AND term_kind = 'unit'
+)`, termID).Scan(&exists)
+	if err != nil || !exists {
+		return "", ""
+	}
+	return termID, unitQuantityKindMap[canonical]
+}
+
+// unitQuantityKindMap maps QUDT unit local-names (the suffix after
+// quantity:unit_) to their quantity-kind term IDs, covering the pilot corpus's
+// units as actually imported into the catalog (local names verified against
+// the dev DB: unit_SEC, unit_MilliSEC, unit_ONE, unit_DEG, unit_COUNT;
+// quantity:qk_*). The QUDT import stores no unit→quantity-kind relation, so
+// the mapping is a small hardcoded table over the pilot quantity kinds (DR12:
+// metrics is the pilot family).
+var unitQuantityKindMap = map[string]string{
+	"MilliSEC": "quantity:qk_Time",
+	"SEC":      "quantity:qk_Time",
+	"ONE":      "quantity:qk_Dimensionless",
+	"DEG":      "quantity:qk_Angle",
+	"COUNT":    "quantity:qk_Count",
+}
+
+// canonicalUnitForm maps a raw unit string to the QUDT catalog's unit
+// local-name (the suffix after quantity:unit_). Units absent from the imported
+// catalog -- including cd/m², which has no candela unit -- return "" and
+// resolve to empty term IDs.
+func canonicalUnitForm(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "ms", "msec", "millisecond", "milliseconds", "毫秒":
+		return "MilliSEC"
+	case "s", "sec", "second", "seconds", "秒":
+		return "SEC"
+	case "ratio", "one", "1", "dimensionless", "无量纲":
+		return "ONE"
+	case "degree", "deg", "°", "度", "degrees":
+		return "DEG"
+	case "count", "counts", "个":
+		return "COUNT"
+	}
+	return ""
 }
 
 type provisionCandidatePayload struct {

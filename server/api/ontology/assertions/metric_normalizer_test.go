@@ -1,6 +1,9 @@
 package assertions
 
-import "testing"
+import (
+	"database/sql"
+	"testing"
+)
 
 func TestParseThresholdOrTargetLowerBound(t *testing.T) {
 	p := parseThresholdOrTarget("shall be at least 250 cd/m2")
@@ -138,5 +141,178 @@ func TestParseThresholdOrTargetChineseLowerBoundExtendedVocab(t *testing.T) {
 	}
 	if p.NumericValue == nil || *p.NumericValue != 250 {
 		t.Fatalf("expected numeric value 250, got %+v", p.NumericValue)
+	}
+}
+
+// --- structured-first path (design D1) ---
+
+// nullStr / numStr / numF are helpers for building metricRow fixtures for
+// resolveMetricValue.
+func ns(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+func nf(v float64) sql.NullFloat64 {
+	return sql.NullFloat64{Float64: v, Valid: true}
+}
+
+func metricRowFixture() metricRow {
+	return metricRow{MetricID: "m1", MetricUnit: ns("cd/m²")}
+}
+
+func TestResolveMetricValueLowerBound(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("lower_bound")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("250")
+	p := resolveMetricValue(r)
+	if p.ValueForm != "single" || p.Comparator != ">=" || p.AssertionKind != "lower_bound_requirement" {
+		t.Fatalf("unexpected resolve: %+v", p)
+	}
+	if p.NumericValue == nil || *p.NumericValue != 250 {
+		t.Fatalf("expected numeric value 250, got %+v", p.NumericValue)
+	}
+}
+
+func TestResolveMetricValueUpperBound(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("upper_bound")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("120")
+	p := resolveMetricValue(r)
+	if p.Comparator != "<=" || p.AssertionKind != "upper_bound_requirement" {
+		t.Fatalf("unexpected resolve: %+v", p)
+	}
+	if p.NumericValue == nil || *p.NumericValue != 120 {
+		t.Fatalf("expected numeric value 120, got %+v", p.NumericValue)
+	}
+}
+
+func TestResolveMetricValueExact(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("exact")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("15")
+	p := resolveMetricValue(r)
+	if p.Comparator != "=" || p.AssertionKind != "exact_value" {
+		t.Fatalf("unexpected resolve: %+v", p)
+	}
+	if p.NumericValue == nil || *p.NumericValue != 15 {
+		t.Fatalf("expected numeric value 15, got %+v", p.NumericValue)
+	}
+}
+
+// TestResolveMetricValueRangeUsesValueMinMax locks in design D1: a range row's
+// endpoints come from value_min/value_max, never from re-parsing
+// threshold_or_target (spec: "range values use value_min and value_max without
+// free-text parsing"). The fixture's metric_value carries range-looking text
+// that would be parsed by parseThresholdOrTarget -- if the structured path
+// leaks to the parser, the bounds would come out wrong.
+func TestResolveMetricValueRangeUsesValueMinMax(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("range")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("500:1 至 2000:1")
+	r.ValueMin = nf(500)
+	r.ValueMax = nf(2000)
+	p := resolveMetricValue(r)
+	if p.ValueForm != "range" || p.Comparator != "between" || p.AssertionKind != "interval_requirement" {
+		t.Fatalf("unexpected resolve: %+v", p)
+	}
+	if p.LowerValue == nil || *p.LowerValue != 500 || p.UpperValue == nil || *p.UpperValue != 2000 {
+		t.Fatalf("expected bounds 500/2000 from value_min/value_max, got lower=%v upper=%v", p.LowerValue, p.UpperValue)
+	}
+}
+
+func TestResolveMetricValueQualitativeHasNoNumericFields(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("qualitative")
+	r.ValueClass = ns("observation")
+	r.MetricValue = ns("clearly legible")
+	p := resolveMetricValue(r)
+	if p.ValueForm != "qualitative" {
+		t.Fatalf("expected value_form qualitative, got %+v", p)
+	}
+	if p.NumericValue != nil || p.LowerValue != nil || p.UpperValue != nil {
+		t.Fatalf("expected no numeric fields for qualitative, got %+v", p)
+	}
+	if p.AssertionKind != "observed_value" {
+		t.Fatalf("expected qualitative observation to classify as observed_value, got %q", p.AssertionKind)
+	}
+}
+
+func TestResolveMetricValueLimitAbsentHasNoNumericFields(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("limit_absent")
+	r.ValueClass = ns("requirement")
+	p := resolveMetricValue(r)
+	if p.ValueForm != "limit_absent" {
+		t.Fatalf("expected value_form limit_absent, got %+v", p)
+	}
+	if p.NumericValue != nil || p.LowerValue != nil || p.UpperValue != nil {
+		t.Fatalf("expected no numeric fields for limit_absent, got %+v", p)
+	}
+}
+
+func TestResolveMetricValueValueClassRefinesKind(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("lower_bound")
+	r.ValueClass = ns("observation")
+	r.MetricValue = ns("250")
+	p := resolveMetricValue(r)
+	if p.AssertionKind != "observed_value" {
+		t.Fatalf("expected lower_bound + observation to classify as observed_value, got %q", p.AssertionKind)
+	}
+	if p.NumericValue == nil || *p.NumericValue != 250 {
+		t.Fatalf("expected numeric value 250 preserved, got %+v", p.NumericValue)
+	}
+}
+
+func TestResolveMetricValueStructuredLowerBoundNonNumericIsUnparsed(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("lower_bound")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("clearly legible")
+	p := resolveMetricValue(r)
+	if p.ValueForm != "unparsed" {
+		t.Fatalf("expected structured lower_bound with non-numeric metric_value to be unparsed, got %+v", p)
+	}
+	if p.NumericValue != nil {
+		t.Fatalf("expected no fabricated numeric value, got %+v", p.NumericValue)
+	}
+}
+
+// TestResolveMetricValueLegacyFallsBackToParser locks in design D1: a row with
+// NULL value_range_type (pre-structured-schema row) routes through
+// parseThresholdOrTarget unchanged.
+func TestResolveMetricValueLegacyFallsBackToParser(t *testing.T) {
+	r := metricRowFixture()
+	r.ThresholdOrTarget = ns("不低于250 cd/m²")
+	p := resolveMetricValue(r)
+	if p.ValueForm != "single" || p.Comparator != ">=" || p.AssertionKind != "lower_bound_requirement" {
+		t.Fatalf("expected legacy row to fall back to the free-text parser, got %+v", p)
+	}
+	if p.NumericValue == nil || *p.NumericValue != 250 {
+		t.Fatalf("expected numeric value 250, got %+v", p.NumericValue)
+	}
+}
+
+func TestResolveMetricValueRangeMissingBoundsFallsBackHonestly(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("range")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("500:1 至 2000:1")
+	// value_min/value_max NULL: endpoints can't come from structured columns,
+	// and the spec forbids re-parsing free text for a range row, so this must
+	// be honest unparsed -- not a fabricated interval from the text.
+	p := resolveMetricValue(r)
+	if p.ValueForm != "unparsed" {
+		t.Fatalf("expected range row without value_min/value_max to be unparsed, got %+v", p)
+	}
+	if p.LowerValue != nil || p.UpperValue != nil {
+		t.Fatalf("expected no fabricated bounds, got %+v", p)
 	}
 }

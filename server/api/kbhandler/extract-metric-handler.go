@@ -491,6 +491,9 @@ func normalizeExtractedMetrics(items []any) []map[string]any {
 			"value_range_type":      stringVal(raw, "value_range_type"),
 			"value_class":           stringVal(raw, "value_class"),
 			"value_class_en":        stringVal(raw, "value_class_en"),
+			"value_min":             optionalFloatVal(raw, "value_min"),
+			"value_max":             optionalFloatVal(raw, "value_max"),
+			"condition":             stringVal(raw, "condition"),
 			"formula_or_definition": stringVal(raw, "formula_or_definition"),
 			"threshold_or_target":   stringVal(raw, "threshold_or_target"),
 			"measurement_frequency": stringVal(raw, "measurement_frequency"),
@@ -569,13 +572,14 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		metric_context, metric_context_en, metric_keywords, metric_keywords_en,
 		model_name, prompt_name, location_type, metric_unit, metric_unit_en,
 		metric_value, value_data_type, value_range_type, value_class, value_class_en,
+		value_min, value_max, condition,
 		formula_or_definition, threshold_or_target, measurement_frequency,
 		confidence, is_explicit_metric, table_name_or_section, reasoning_tags,
 		metric_categories, metric_categories_en, category_paths, category_paths_en, ext_info
 	) VALUES (
 		$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,
-		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,
-		$32,$33,$34::jsonb,$35::jsonb,$36::jsonb
+		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,
+		$35,$36,$37::jsonb,$38::jsonb,$39::jsonb
 	)`
 
 	extInfo, _ := json.Marshal(map[string]any{
@@ -633,6 +637,9 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			strings.TrimSpace(anyAsString(m["value_range_type"])),
 			strings.TrimSpace(anyAsString(m["value_class"])),
 			strings.TrimSpace(anyAsString(m["value_class_en"])),
+			optionalFloatVal(m, "value_min"),
+			optionalFloatVal(m, "value_max"),
+			strings.TrimSpace(anyAsString(m["condition"])),
 			strings.TrimSpace(anyAsString(m["formula_or_definition"])),
 			strings.TrimSpace(anyAsString(m["threshold_or_target"])),
 			strings.TrimSpace(anyAsString(m["measurement_frequency"])),
@@ -724,6 +731,40 @@ func anySlice(m map[string]any, key string, fallbacks ...string) []any {
 		}
 	}
 	return nil
+}
+
+// optionalFloatVal returns the numeric value of m[key] as a float64, or nil
+// when the key is absent, null, or not a number. It feeds the nullable
+// value_min/value_max columns on kb.metrics: a range metric has numeric
+// endpoints, and anything else (or a v4-era extraction that never emitted the
+// keys) stores NULL.
+func optionalFloatVal(m map[string]any, key string) any {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case float64:
+		return x
+	case json.Number:
+		f, err := x.Float64()
+		if err != nil {
+			return nil
+		}
+		return f
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		if err != nil {
+			return nil
+		}
+		return f
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	default:
+		return nil
+	}
 }
 
 func confidenceVal(m map[string]any, key string) float64 {

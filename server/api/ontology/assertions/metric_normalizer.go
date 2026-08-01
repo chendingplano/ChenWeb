@@ -42,12 +42,19 @@ type metricRow struct {
 	MetricID             string
 	MetricName           sql.NullString
 	MetricUnit           sql.NullString
+	MetricUnitEn         sql.NullString
 	FormulaOrDefinition  sql.NullString
 	ThresholdOrTarget    sql.NullString
 	MeasurementFrequency sql.NullString
 	Confidence           sql.NullFloat64
 	SourceLineSpans      json.RawMessage
 	SubjectObjectID      sql.NullString
+	ValueRangeType       sql.NullString
+	ValueClass           sql.NullString
+	MetricValue          sql.NullString
+	ValueMin             sql.NullFloat64
+	ValueMax             sql.NullFloat64
+	Condition            sql.NullString
 }
 
 // Normalize implements Normalizer.
@@ -58,9 +65,10 @@ func (n MetricNormalizer) Normalize(ctx context.Context, db *sql.DB, inputRecord
 	}
 
 	const stmt = `
-SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.formula_or_definition,
+SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.formula_or_definition,
        m.threshold_or_target, m.measurement_frequency, m.confidence, m.source_line_spans,
-       ao.object_id
+       ao.object_id,
+       m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition
 FROM kb.metrics m
 LEFT JOIN kb.artifact_objects ao
   ON ao.artifact_type = 'metric' AND ao.artifact_id = m.metric_id AND ao.input_record_id = m.input_record_id
@@ -74,8 +82,9 @@ WHERE m.input_record_id = $1`
 	dcStore := DecisionCandidateStore{DB: db}
 	for rows.Next() {
 		var r metricRow
-		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.FormulaOrDefinition,
-			&r.ThresholdOrTarget, &r.MeasurementFrequency, &r.Confidence, &r.SourceLineSpans, &r.SubjectObjectID); err != nil {
+		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition,
+			&r.ThresholdOrTarget, &r.MeasurementFrequency, &r.Confidence, &r.SourceLineSpans, &r.SubjectObjectID,
+			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition); err != nil {
 			return report, err
 		}
 		report.Examined++
@@ -85,16 +94,23 @@ WHERE m.input_record_id = $1`
 			report.Skipped++
 			continue
 		}
-		parsed := parseThresholdOrTarget(r.ThresholdOrTarget.String)
+		unit := r.MetricUnit.String
+		if unit == "" {
+			unit = r.MetricUnitEn.String
+		}
+		parsed := resolveMetricValue(r)
 
 		payload := map[string]any{
 			"metric_id":      metricID,
 			"metric_name":    r.MetricName.String,
-			"unit":           r.MetricUnit.String,
+			"unit":           unit,
 			"raw_text":       r.ThresholdOrTarget.String,
 			"value_form":     parsed.ValueForm,
 			"comparator":     parsed.Comparator,
 			"assertion_kind": parsed.AssertionKind,
+		}
+		if r.Condition.Valid && r.Condition.String != "" {
+			payload["condition"] = r.Condition.String
 		}
 		if r.SubjectObjectID.Valid && r.SubjectObjectID.String != "" {
 			payload["subject_object_id"] = r.SubjectObjectID.String
@@ -173,6 +189,110 @@ type parsedThreshold struct {
 	NumericValue  *float64
 	LowerValue    *float64
 	UpperValue    *float64
+}
+
+// structuredValueAssertionKind maps a kb.metrics value_range_type + value_class
+// to the governed assertion kind the normalizer emits (design D1). The values
+// match the closed enum the v4/v5 enrichment prompts emit; exact_value is
+// included even though no governed mea:exact_value term is seeded yet -- such
+// a row defers downstream via the existing no_governed_assertion_kind_term
+// path rather than being fabricated (and the gold corpus is expected to gain
+// exact rows in a benchmark pass).
+var structuredValueAssertionKind = map[string]string{
+	"lower_bound": "lower_bound_requirement",
+	"upper_bound": "upper_bound_requirement",
+	"exact":       "exact_value",
+	"range":       "interval_requirement",
+}
+
+// valueClassAssertionKind refines the assertion kind by value_class, mirroring
+// the parser's requirement-vs-observation distinction: an observed test result
+// is an observed_value even when the source phrasing is a bound.
+var valueClassAssertionKind = map[string]string{
+	"observation":         "observed_value",
+	"requirement":         "",
+	"target":              "target",
+	"reference":           "reference",
+	"design_capability":   "capability",
+	"definition":          "reference",
+}
+
+// resolveMetricValue is the structured-first path (design D1). When the row
+// carries a populated value_range_type it maps the enum + value_class +
+// metric_value/value_min/value_max deterministically into value form,
+// comparator, assertion kind, and numeric fields -- no free-text parsing. When
+// the enum is empty (pre-structured-schema rows, or extraction that left it
+// unset) it falls back to parseThresholdOrTarget on threshold_or_target. It
+// never fabricates: a structured row with no parseable number produces an
+// honest unparsed, never a value invented from unrelated text.
+func resolveMetricValue(r metricRow) parsedThreshold {
+	vrt := strings.TrimSpace(r.ValueRangeType.String)
+	if vrt == "" {
+		// Legacy row (pre-structured-schema, or extraction left the enum
+		// unset): fall back to the free-text parser unchanged.
+		return parseThresholdOrTarget(r.ThresholdOrTarget.String)
+	}
+	// kind starts from the enum's base assertion kind (empty for
+	// qualitative/limit_absent, which have no numeric-kind term) and is
+	// refined by value_class.
+	kind := structuredValueAssertionKind[vrt]
+	if vc, ok := valueClassAssertionKind[strings.TrimSpace(r.ValueClass.String)]; ok && vc != "" {
+		kind = vc
+	}
+
+	switch vrt {
+	case "range":
+		if r.ValueMin.Valid && r.ValueMax.Valid {
+			lo, hi := r.ValueMin.Float64, r.ValueMax.Float64
+			return parsedThreshold{
+				ValueForm: "range", Comparator: "between", AssertionKind: kind,
+				LowerValue: &lo, UpperValue: &hi,
+			}
+		}
+	case "lower_bound", "upper_bound":
+		if v, ok := firstParseableNumber(r.MetricValue.String); ok {
+			comparator := ">="
+			if vrt == "upper_bound" {
+				comparator = "<="
+			}
+			return parsedThreshold{
+				ValueForm: "single", Comparator: comparator, AssertionKind: kind,
+				NumericValue: &v,
+			}
+		}
+	case "exact":
+		if v, ok := firstParseableNumber(r.MetricValue.String); ok {
+			return parsedThreshold{
+				ValueForm: "single", Comparator: "=", AssertionKind: kind,
+				NumericValue: &v,
+			}
+		}
+	case "qualitative", "limit_absent":
+		// No numeric fields by design; the kind follows value_class (a
+		// qualitative observation is an observed_value with no number).
+		return parsedThreshold{ValueForm: vrt, AssertionKind: kind}
+	}
+	// The row claims a structured enum but either it is unrecognized or the
+	// value cannot be grounded in the structured columns. Honest unparsed --
+	// never a value invented from unrelated text, and never a free-text parse
+	// of a row that declared structured values.
+	return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+}
+
+// firstParseableNumber returns the first number in s ("" -> no number), which
+// is what a single numeric metric_value carries. For structured rows this is
+// the trusted source; unlike parseThresholdOrTarget there is no comparator to
+// anchor against, so a non-numeric metric_value is honest unparsed.
+func firstParseableNumber(s string) (float64, bool) {
+	m := reNumber.FindString(strings.TrimSpace(s))
+	if m == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(m, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 // parseThresholdOrTarget best-effort parses extract_metrics' free-text

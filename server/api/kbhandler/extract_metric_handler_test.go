@@ -360,6 +360,9 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 			"exact",
 			"performance",
 			"",
+			nil,
+			nil,
+			"",
 			"",
 			"",
 			"monthly",
@@ -421,6 +424,107 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 		t.Fatalf("inserted=%d, want 1", payload.Inserted)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+// TestSaveExtractedMetricsPersistsRangeValueMinMaxCondition locks in the v5
+// extraction path: a range metric carries numeric value_min/value_max and a
+// condition string, and the handler persists all three to kb.metrics.
+func TestSaveExtractedMetricsPersistsRangeValueMinMaxCondition(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb;").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.metrics WHERE input_record_id").
+		WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectExec("INSERT INTO kb.metrics").
+		WithArgs(
+			"rest-api",
+			int64(9),
+			"9_mtc_1",
+			"Contrast ratio",
+			nil,
+			`["5"]`,
+			"Display",
+			"",
+			"",
+			"",
+			"",
+			"",
+			`["contrast"]`,
+			nil,
+			"",
+			"",
+			"table_row",
+			"ratio",
+			"",
+			"500:1 至 2000:1",
+			"number",
+			"range",
+			"requirement",
+			"",
+			500.0,
+			2000.0,
+			"常温下",
+			"",
+			"",
+			"",
+			0.9,
+			true,
+			"Table 1",
+			`["range_metric"]`,
+			`["ratio"]`,
+			`["contrast_ratio"]`,
+			sqlmock.AnyArg(),
+			nil,
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(102, 1))
+
+	c, rec := newSaveExtractedMetricsContext(t, `{
+		"record_id": 9,
+		"metrics": [
+			{
+				"metric_name": "Contrast ratio",
+				"metric_subject": "Display",
+				"source_line_spans": ["5"],
+				"metric_keywords": ["contrast"],
+				"location_type": "table_row",
+				"metric_unit": "ratio",
+				"metric_value": "500:1 至 2000:1",
+				"value_data_type": "number",
+				"value_range_type": "range",
+				"value_class": "requirement",
+				"value_min": 500,
+				"value_max": 2000,
+				"condition": "常温下",
+				"measurement_frequency": "",
+				"confidence": 0.9,
+				"is_explicit_metric": true,
+				"table_name_or_section": "Table 1",
+				"reasoning_tags": ["range_metric"],
+				"metric_categories": ["ratio"],
+				"metric_categories_en": ["contrast_ratio"]
+			}
+		]
+	}`)
+	if err := SaveExtractedMetrics(c); err != nil {
+		t.Fatalf("SaveExtractedMetrics returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
