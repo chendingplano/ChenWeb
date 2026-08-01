@@ -15,6 +15,38 @@ type ontologyReviewScopeResponse struct {
 	Record profiles.ReviewScope `json:"record"`
 }
 
+type ontologyReviewExecutionResponse struct {
+	Status  bool                            `json:"status"`
+	Results []profiles.RuleEvaluationResult `json:"results"`
+}
+
+// ExecuteOntologyReviewScope evaluates an already-frozen scope. The rule
+// loader resolves only releases pinned in that scope, never current activation.
+func ExecuteOntologyReviewScope(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_ORS_300")
+	defer rc.Close()
+	var payload struct {
+		InputRecordID int64                      `json:"input_record_id"`
+		RunID         int64                      `json:"run_id"`
+		Assertions    []profiles.ReviewAssertion `json:"assertions"`
+	}
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil || payload.InputRecordID == 0 || payload.RunID == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "input_record_id and run_id are required (CWB_KB_ORS_301)"})
+	}
+	db := ApiTypes.ProjectDBHandle
+	scope, err := (profiles.ReviewScopeStore{DB: db}).Get(c.Request().Context(), c.Param("scope_id"))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "ontology review scope not found (CWB_KB_ORS_302)"})
+	}
+	service := profiles.ReviewService{Findings: profiles.FindingStore{DB: db}, Rules: profiles.ProfileRuleStore{DB: db}}
+	results, err := service.EvaluatePinnedScope(c.Request().Context(), scope, payload.Assertions, payload.InputRecordID, payload.RunID)
+	if err != nil {
+		rc.GetLogger().Error("execute ontology review scope failed", "err", err)
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "failed to execute frozen ontology review scope (CWB_KB_ORS_303)"})
+	}
+	return c.JSON(http.StatusOK, ontologyReviewExecutionResponse{Status: true, Results: results})
+}
+
 // CreateOntologyReviewScope freezes an explicit or deterministic selection
 // before any review execution. The endpoint deliberately exposes no update
 // operation: a changed selection requires a new scope id.
