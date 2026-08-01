@@ -58,6 +58,21 @@ type ComparisonCell struct {
 
 type ComparisonStore struct{ DB terms.DBX }
 
+// GetScope reloads the original immutable comparison selection, including the
+// release snapshots and closure policy used by a historical run.
+func (s ComparisonStore) GetScope(ctx context.Context, scopeID string) (ComparisonScope, error) {
+	if s.DB == nil {
+		return ComparisonScope{}, errors.New("db is nil")
+	}
+	if strings.TrimSpace(scopeID) == "" {
+		return ComparisonScope{}, errors.New("comparison_scope_id is required")
+	}
+	const stmt = `SELECT comparison_scope_id, target_object_ids, metric_keys, as_of_date::text, module_releases, profile_releases, precedence_policy, closed_dimensions, COALESCE(selected_by, ''), COALESCE(selection_reason, ''), create_time FROM kb.ontology_comparison_scopes WHERE comparison_scope_id = $1`
+	var out ComparisonScope
+	err := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(scopeID)).Scan(&out.ComparisonScopeID, &out.TargetObjectIDs, &out.MetricKeys, &out.AsOfDate, &out.ModuleReleases, &out.ProfileReleases, &out.PrecedencePolicy, &out.ClosedDimensions, &out.SelectedBy, &out.SelectionReason, &out.CreateTime)
+	return out, err
+}
+
 func (s ComparisonStore) CreateScope(ctx context.Context, scope ComparisonScope) (ComparisonScope, error) {
 	if s.DB == nil {
 		return ComparisonScope{}, errors.New("db is nil")

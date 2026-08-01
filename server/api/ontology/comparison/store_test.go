@@ -69,3 +69,22 @@ func TestEvaluateDirectionalCellUsesFamilyEvidence(t *testing.T) {
 		t.Fatalf("cell = %#v, want stronger subject-to-authority", cell)
 	}
 }
+
+func TestComparisonStoreGetScopeLoadsFrozenReleaseSnapshot(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT comparison_scope_id, target_object_ids")).WithArgs("comparison-scope-1").
+		WillReturnRows(sqlmock.NewRows([]string{"comparison_scope_id", "target_object_ids", "metric_keys", "as_of_date", "module_releases", "profile_releases", "precedence_policy", "closed_dimensions", "selected_by", "selection_reason", "create_time"}).
+			AddRow("comparison-scope-1", []byte(`[]`), []byte(`[]`), "2026-08-01", []byte(`[{"release_id":42}]`), []byte(`[]`), []byte(`{}`), []byte(`{}`), "reviewer", "historical", now))
+	got, err := (ComparisonStore{DB: db}).GetScope(context.Background(), "comparison-scope-1")
+	if err != nil || string(got.ModuleReleases) != `[{"release_id":42}]` {
+		t.Fatalf("GetScope = %#v, %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
