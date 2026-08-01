@@ -64,7 +64,7 @@ WHERE status = 'candidate' AND source_artifact_type IN ('metric', 'provision')
 
 	for _, id := range ids {
 		report.Examined++
-		outcome, err := a.processOne(ctx, dcStore, asStore, evStore, id)
+		outcome, err := a.processOne(ctx, dcStore, asStore, evStore, id, inputRecordID)
 		if err != nil {
 			return report, fmt.Errorf("process candidate %d: %w", id, err)
 		}
@@ -94,7 +94,7 @@ SELECT EXISTS (
 	return exists, err
 }
 
-func (a AssociateSemantics) processOne(ctx context.Context, dcStore DecisionCandidateStore, asStore AssertionStore, evStore EvidenceStore, id int64) (string, error) {
+func (a AssociateSemantics) processOne(ctx context.Context, dcStore DecisionCandidateStore, asStore AssertionStore, evStore EvidenceStore, id, inputRecordID int64) (string, error) {
 	dc, err := dcStore.GetByID(ctx, id)
 	if err != nil {
 		return "", err
@@ -105,7 +105,7 @@ func (a AssociateSemantics) processOne(ctx context.Context, dcStore DecisionCand
 
 	switch dc.SourceArtifactType {
 	case "metric":
-		return a.processMetric(ctx, dcStore, asStore, evStore, dc)
+		return a.processMetric(ctx, dcStore, asStore, evStore, dc, inputRecordID)
 	case "provision":
 		return a.processProvision(ctx, dcStore, dc)
 	default:
@@ -137,7 +137,7 @@ var governedMetricAssertionKinds = map[string]bool{
 	"target": true, "reference": true, "capability": true,
 }
 
-func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionCandidateStore, asStore AssertionStore, evStore EvidenceStore, dc DecisionCandidate) (string, error) {
+func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionCandidateStore, asStore AssertionStore, evStore EvidenceStore, dc DecisionCandidate, inputRecordID int64) (string, error) {
 	var p metricCandidatePayload
 	if err := json.Unmarshal(dc.ProposedPayload, &p); err != nil {
 		if _, err := dcStore.TransitionStatus(ctx, dc.ID, StatusRejected, "malformed proposed_payload", "associate_semantics"); err != nil {
@@ -219,8 +219,10 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 		return "", err
 	}
 
+	recordID := inputRecordID
 	if _, err := evStore.AddEvidence(ctx, Evidence{
 		AssertionID:   created.ID,
+		InputRecordID: &recordID,
 		ArtifactType:  dc.SourceArtifactType,
 		ArtifactID:    dc.SourceArtifactID,
 		EvidenceQuote: p.RawText,

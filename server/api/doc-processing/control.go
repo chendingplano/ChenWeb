@@ -818,11 +818,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// only place cross-artifact indexing (e.g. metrics) may run, so it sees all outputs.
 	s.runPostProcessIndexing(ctx, processors, evt.RecordID)
 
-	// Phase D stages 1-2 (DR8, spec §10.1): normalize this record's artifacts
-	// into candidate qualified assertions, then resolve/validate/adjudicate
-	// them. Inert unless SEMANTIC_ASSOCIATION_ENABLED.
+	// Phase D stages 1-3 (DR8, spec §10.1): normalize this record's artifacts
+	// into candidate qualified assertions, resolve/validate/adjudicate them,
+	// then build derived projections. Inert unless SEMANTIC_ASSOCIATION_ENABLED.
 	s.runNormalizeAssertions(ctx, evt.RecordID)
 	s.runAssociateSemantics(ctx, evt.RecordID)
+	s.runProjectSemantics(ctx, evt.RecordID)
 
 	pipelineMSUsed := time.Since(requestStart).Milliseconds()
 	status := "success"
