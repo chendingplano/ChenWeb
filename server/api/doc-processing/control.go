@@ -658,7 +658,29 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		if s.Logger != nil {
 			s.Logger.Warn("failed building production processor plan", "record_id", evt.RecordID, "error", planErr)
 		}
-		s.raiseRoutingAlarms(ctx, []RoutingAlarm{AlarmForPlanError(planErr)})
+		alarm := AlarmForPlanError(planErr)
+		s.raiseRoutingAlarms(ctx, []RoutingAlarm{alarm})
+		s.emitAlarmAuditEvent(ctx, evt.RecordID, 0, planFacts.ActivePolicyID, planFacts.ActivePolicyVersion, alarm)
+		if len(evt.Operations) == 0 && IsDecisionRelevantPlanConflict(planErr) {
+			// A decision-relevant pipeline-binding/processor-gate conflict
+			// (DR7 indeterminacy/conflict, not a structural/configuration
+			// error such as an unknown pipeline or processor name) is
+			// block-mode today (ResolveProductionPipelineBinding hardcodes
+			// PipelineBindingOnConflictBlock), so it must fail before any
+			// processor runs, per spec 2026080102 section 11 ("fail before
+			// processors run"). An explicit evt.Operations request bypasses
+			// policy entirely (existing precedence) and is unaffected; a
+			// non-decision-relevant plan-build failure keeps the prior
+			// alarm-and-continue behavior below.
+			if s.Logger != nil {
+				s.Logger.Info("finish processing request",
+					"record_id", evt.RecordID,
+					"proc_status", "failed",
+					"ms_used", time.Since(requestStart).Milliseconds(),
+				)
+			}
+			return fmt.Errorf("(MID_26080201) decision-relevant routing conflict blocked processing: %w", planErr)
+		}
 	}
 	if len(evt.Operations) > 0 {
 		processors = s.selectProcessors(evt.Operations)
@@ -691,7 +713,9 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		} else {
 			routingFinalized = true
 			processors = s.applyPlanEnforcement(processors, routingResult.ExcludedProcessorNames())
-			s.raiseRoutingAlarms(ctx, routingResult.Alarms)
+			// Alarms/events for routingResult are raised after runID is
+			// known (below) so they carry a RunID for per-run dedup
+			// (spec 2026080102 section 11) instead of firing unscoped here.
 		}
 	}
 	var runID int64
@@ -768,6 +792,15 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}
 	if routingFinalized {
+		scopedAlarms := make([]RoutingAlarm, len(routingResult.Alarms))
+		copy(scopedAlarms, routingResult.Alarms)
+		for i := range scopedAlarms {
+			scopedAlarms[i].RunID = runID
+		}
+		s.raiseRoutingAlarms(ctx, scopedAlarms)
+		for _, alarm := range DedupeRoutingAlarms(scopedAlarms) {
+			s.emitAlarmAuditEvent(ctx, evt.RecordID, runID, planFacts.ActivePolicyID, planFacts.ActivePolicyVersion, alarm)
+		}
 		s.recordRoutingDecisionEvents(ctx, evt.RecordID, runID, planFacts, routingResult)
 	}
 	if len(processors) > 0 {
@@ -1885,6 +1918,42 @@ func (s *ControlService) raiseRoutingAlarms(ctx context.Context, alarms []Routin
 		if s.Logger != nil {
 			s.Logger.Warn("failed writing routing alarm", "error", err)
 		}
+	}
+}
+
+// policyAuditEventKindForAlarm maps a RoutingAlarm's Kind to the
+// policyaudit event kind the P5 plan's "conflicts, fallback" checklist item
+// asks for. Alarm kinds with no defined event (operator_failure,
+// policy_integrity_failure) return ok=false and stay alarm-only, matching
+// the plan's event-kind list.
+func policyAuditEventKindForAlarm(kind string) (string, bool) {
+	switch kind {
+	case RoutingAlarmKindBindingConflict:
+		return policyaudit.EventBindingConflict, true
+	case RoutingAlarmKindGateConflict:
+		return policyaudit.EventGateConflict, true
+	case RoutingAlarmKindFallbackWarning:
+		return policyaudit.EventFallbackApplied, true
+	default:
+		return "", false
+	}
+}
+
+// emitAlarmAuditEvent writes the policyaudit event matching a conflict or
+// fallback RoutingAlarm (the "conflicts, fallback" P5 plan checklist item),
+// at the same decision point that already raised the alarm. Best-effort: a
+// write failure is logged, never propagated. A no-op when no PolicyAudit
+// writer is configured or the alarm kind has no matching event kind.
+func (s *ControlService) emitAlarmAuditEvent(ctx context.Context, recordID, runID, policyID int64, policyVersion int, alarm RoutingAlarm) {
+	kind, ok := policyAuditEventKindForAlarm(alarm.Kind)
+	if !ok || s.PolicyAudit == nil {
+		return
+	}
+	if err := s.PolicyAudit.WriteEvent(ctx, policyaudit.Event{
+		Kind: kind, PolicyID: policyID, PolicyVersion: policyVersion, RunID: runID, RecordID: recordID,
+		Detail: map[string]any{"alarm_kind": alarm.Kind, "message": alarm.Message},
+	}); err != nil && s.Logger != nil {
+		s.Logger.Warn("failed writing policy audit event", "kind", kind, "record_id", recordID, "error", err)
 	}
 }
 

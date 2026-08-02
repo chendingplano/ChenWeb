@@ -9,7 +9,31 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
+
+// fakePolicyAuditEventWriter records every event handed to it so
+// control.go's conflict/fallback/decision event wiring can be asserted
+// end-to-end through handleEvent without a database.
+type fakePolicyAuditEventWriter struct {
+	mu     sync.Mutex
+	events []policyaudit.Event
+}
+
+func (w *fakePolicyAuditEventWriter) WriteEvent(_ context.Context, event policyaudit.Event) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.events = append(w.events, event)
+	return nil
+}
+
+func (w *fakePolicyAuditEventWriter) snapshot() []policyaudit.Event {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]policyaudit.Event(nil), w.events...)
+}
 
 type fakeRunStoreClose struct {
 	runID  int64
@@ -573,6 +597,250 @@ func TestHandleEvent_PlanOnlyModeStillRunsEverythingRequested(t *testing.T) {
 
 	if len(calls) != 2 {
 		t.Errorf("plan-only mode must run everything requested regardless of pipeline: calls=%v", calls)
+	}
+}
+
+// TestHandleEvent_BlockModeConflictFailsBeforeAnyProcessorRuns proves E3
+// Finding 2: a decision-relevant DR7 conditional-binding conflict (block
+// mode is hardcoded for binding resolution) must fail handleEvent before
+// any processor is dispatched and before a run row is created, raising
+// exactly one binding_conflict alarm/event -- not silently continue with
+// every processor unfiltered, which was the bug this test guards against.
+func TestHandleEvent_BlockModeConflictFailsBeforeAnyProcessorRuns(t *testing.T) {
+	t.Cleanup(func() {
+		SetProductionPipelineRegistry(nil)
+		SetProductionPipelineBindings(nil)
+	})
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "pipeline_a"},
+		{Name: "pipeline_b"},
+	})
+	// Two same-rank conditional bindings that both evaluate true for a
+	// pdf/en document but select different pipelines -- DR7's "true
+	// conflict blocks" case (see TestPipelineBindingDR7DecisionTable).
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "match-pdf", "pipeline_a", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
+		mustLegacyBinding(t, "match-en", "pipeline_b", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchSourceLanguage: "en"}),
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:              4821,
+			ParserName:      "opendata",
+			ResultFilename:  "result.json",
+			StagingFilename: inputPath,
+			StatusRaw:       "[]",
+			InputDocType:    "pdf",
+			SourceLanguage:  "en",
+		},
+	}
+	runStore := &fakeRunStore{}
+	alarms := &fakeAlarmWriter{}
+	audit := &fakePolicyAuditEventWriter{}
+
+	var calls []string
+	svc := &ControlService{
+		InputStore:    store,
+		RunStore:      runStore,
+		RoutingAlarms: alarms,
+		PolicyAudit:   audit,
+		Processors:    []Processor{fakeProcessor{name: "extract_metrics", calls: &calls}},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`"
+	}`))
+	if err == nil {
+		t.Fatal("handleEvent must return an error for a decision-relevant block-mode conflict")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("processor calls=%v, want zero -- block-mode conflict must fail before any processor runs", calls)
+	}
+	runStore.mu.Lock()
+	created := len(runStore.creates)
+	runStore.mu.Unlock()
+	if created != 0 {
+		t.Fatalf("run creates=%d, want zero -- no run row for a pre-dispatch conflict", created)
+	}
+	if len(alarms.written) != 1 || alarms.written[0].Kind != RoutingAlarmKindBindingConflict {
+		t.Fatalf("alarms=%+v, want exactly one binding_conflict alarm", alarms.written)
+	}
+	events := audit.snapshot()
+	if len(events) != 1 || events[0].Kind != policyaudit.EventBindingConflict {
+		t.Fatalf("audit events=%+v, want exactly one binding_conflict event", events)
+	}
+}
+
+// TestHandleEvent_FallbackModeGateConflictStillExecutes proves the
+// fallback-mode counterpart to the block-mode test above: processor-gate
+// resolution is always fallback mode today
+// (BuildProductionProcessorPlanFromFacts hardcodes
+// PipelineBindingOnConflictFallback for gates), so an indeterminate gate
+// decision never produces a planErr and never blocks dispatch -- the
+// affected processor keeps running (DR7 fallback, not a hard failure) while
+// still raising a gate_conflict alarm/event so operators see the
+// ambiguity.
+func TestHandleEvent_FallbackModeGateConflictStillExecutes(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineGates(nil) })
+	// document.doc_kind is never populated by BuildPipelineBindingFactSet,
+	// so this predicate is indeterminate (missing fact) for every document.
+	SetProductionPipelineGates([]PipelineGate{
+		{
+			ID: 1, Name: "needs-doc-kind", Priority: 10, TargetProcessor: "extract_metric_definitions",
+			Effect: GateEffectSkip, PredicateChecksum: "sha256:test-gate", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "narrative"}},
+		},
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:              4821,
+			ParserName:      "opendata",
+			ResultFilename:  "result.json",
+			StagingFilename: inputPath,
+			StatusRaw:       "[]",
+		},
+	}
+	runStore := &fakeRunStore{}
+	alarms := &fakeAlarmWriter{}
+	audit := &fakePolicyAuditEventWriter{}
+
+	var calls []string
+	svc := &ControlService{
+		InputStore:    store,
+		RunStore:      runStore,
+		RoutingAlarms: alarms,
+		PolicyAudit:   audit,
+		Processors:    []Processor{fakeProcessor{name: "extract_metric_definitions", calls: &calls}},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`"
+	}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v (fallback-mode conflicts must not block processing)", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("processor calls=%v, want extract_metric_definitions to still run under fallback-mode indeterminacy", calls)
+	}
+	foundAlarm := false
+	for _, alarm := range alarms.written {
+		if alarm.Kind == RoutingAlarmKindGateConflict {
+			foundAlarm = true
+		}
+	}
+	if !foundAlarm {
+		t.Fatalf("alarms=%+v, want a gate_conflict alarm", alarms.written)
+	}
+	foundEvent := false
+	for _, event := range audit.snapshot() {
+		if event.Kind == policyaudit.EventGateConflict {
+			foundEvent = true
+		}
+	}
+	if !foundEvent {
+		t.Fatalf("audit events=%+v, want a gate_conflict event", audit.snapshot())
+	}
+}
+
+// TestHandleEvent_UnclearedSuppressiveBindingRaisesFallbackEvent proves E3
+// Finding 1's "fallback" event category end-to-end: an enforced-mode
+// conditional binding that would suppress a processor, with no D2 clearance
+// configured, falls back to the baseline pipeline (nothing is suppressed)
+// and raises exactly one fallback_warning alarm plus one EventFallbackApplied
+// policyaudit event -- complementing the pure-decision proof already covered
+// by TestFinalizeRoutingPlan_ConditionalBindingFallsBackToBaselineWhenUncleared.
+func TestHandleEvent_UnclearedSuppressiveBindingRaisesFallbackEvent(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
+	t.Cleanup(func() {
+		SetProductionPipelineRegistry(nil)
+		SetProductionPipelineBindings(nil)
+	})
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "narrow", Processors: []string{"extract_metrics"}},
+	})
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "pdf-narrow", "narrow", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:              4821,
+			ParserName:      "opendata",
+			ResultFilename:  "result.json",
+			StagingFilename: inputPath,
+			StatusRaw:       "[]",
+			InputDocType:    "pdf",
+		},
+	}
+	runStore := &fakeRunStore{}
+	alarms := &fakeAlarmWriter{}
+	audit := &fakePolicyAuditEventWriter{}
+
+	var calls []string
+	svc := &ControlService{
+		InputStore:    store,
+		RunStore:      runStore,
+		RoutingAlarms: alarms,
+		PolicyAudit:   audit,
+		// RoutingClearances is intentionally nil: no D2 store means every
+		// suppressive decision is uncleared and must fall back to shadow.
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &calls},
+			fakeProcessor{name: "extract_provisions", calls: &calls},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`"
+	}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("processor calls=%v, want both processors to run (uncleared suppression falls back to the unrestricted baseline pipeline)", calls)
+	}
+	foundAlarm := false
+	for _, alarm := range alarms.written {
+		if alarm.Kind == RoutingAlarmKindFallbackWarning {
+			foundAlarm = true
+		}
+	}
+	if !foundAlarm {
+		t.Fatalf("alarms=%+v, want a fallback_warning alarm", alarms.written)
+	}
+	foundEvent := false
+	for _, event := range audit.snapshot() {
+		if event.Kind == policyaudit.EventFallbackApplied {
+			foundEvent = true
+		}
+	}
+	if !foundEvent {
+		t.Fatalf("audit events=%+v, want a fallback_applied event", audit.snapshot())
 	}
 }
 
