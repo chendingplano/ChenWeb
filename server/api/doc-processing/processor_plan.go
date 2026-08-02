@@ -1,8 +1,14 @@
 package docprocessing
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 // ProcessorSpec is the DR5 declarative processor contract (ADR 2026072901
@@ -52,8 +58,26 @@ type ProductionPlanFacts struct {
 	// BuildProductionProcessorPlan seam) -- resolution behaves identically
 	// either way, since bindings/rules matching is unaffected; these fields
 	// exist purely for the persisted plan's explainability.
-	ActivePolicyID      int64
-	ActivePolicyVersion int
+	ActivePolicyID            int64
+	ActivePolicyVersion       int
+	ActivePolicyChecksum      string             `json:",omitempty"`
+	ExplicitProcessorOverride bool               `json:",omitempty"`
+	ProcessorGateOverrides    map[string]string  `json:",omitempty"`
+	RoutingSnapshot           *P5RoutingSnapshot `json:",omitempty"`
+}
+
+// P5RoutingSnapshot is the immutable, self-contained routing evidence stored
+// with an execution plan. Runtime registries are never needed to inspect it.
+type P5RoutingSnapshot struct {
+	Facts                    []semrules.Fact         `json:"facts"`
+	PolicyID                 int64                   `json:"policy_id"`
+	PolicyVersion            int                     `json:"policy_version"`
+	PolicyChecksum           string                  `json:"policy_checksum,omitempty"`
+	SelectedPipelineChecksum string                  `json:"selected_pipeline_checksum"`
+	BaselinePipelineChecksum string                  `json:"baseline_pipeline_checksum"`
+	BindingTrace             []PipelineBindingTrace  `json:"binding_trace,omitempty"`
+	GateShadow               ProcessorGateShadowPlan `json:"gate_shadow"`
+	RuleChecksums            []string                `json:"rule_checksums,omitempty"`
 }
 
 type ProductionProcessorPlan struct {
@@ -64,6 +88,7 @@ type ProductionProcessorPlan struct {
 	pipelineSelection ProductionPipelineSelection
 	pipelineSpec      ProductionPipelineSpec
 	excludedByPolicy  []string
+	routingSnapshot   *P5RoutingSnapshot
 }
 
 type ProcessorPlanStep struct {
@@ -166,21 +191,65 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		specs = append(specs, spec)
 	}
 	plan := ProductionProcessorPlan{specs: specs, pipelineBinding: resolution.Binding, pipelineSelection: resolution.Selection, pipelineSpec: resolution.Spec, excludedByPolicy: excludedByPolicy, facts: ProductionPlanFacts{
-		RequestedProcessors: append([]string(nil), facts.RequestedProcessors...),
-		RequestedPipeline:   strings.TrimSpace(facts.RequestedPipeline),
-		StoreBoundPipeline:  strings.TrimSpace(facts.StoreBoundPipeline),
-		KnowledgeStoreID:    facts.KnowledgeStoreID,
-		KnowledgeStoreType:  facts.KnowledgeStoreType,
-		InputDocType:        facts.InputDocType,
-		SourceLanguage:      facts.SourceLanguage,
-		DocumentNumber:      facts.DocumentNumber,
-		ParserName:          facts.ParserName,
-		DocumentTitle:       facts.DocumentTitle,
-		RoutingFacets:       facts.RoutingFacets,
-		Mode:                facts.Mode,
-		ActivePolicyID:      facts.ActivePolicyID,
-		ActivePolicyVersion: facts.ActivePolicyVersion,
+		RequestedProcessors:       append([]string(nil), facts.RequestedProcessors...),
+		RequestedPipeline:         strings.TrimSpace(facts.RequestedPipeline),
+		StoreBoundPipeline:        strings.TrimSpace(facts.StoreBoundPipeline),
+		KnowledgeStoreID:          facts.KnowledgeStoreID,
+		KnowledgeStoreType:        facts.KnowledgeStoreType,
+		InputDocType:              facts.InputDocType,
+		SourceLanguage:            facts.SourceLanguage,
+		DocumentNumber:            facts.DocumentNumber,
+		ParserName:                facts.ParserName,
+		DocumentTitle:             facts.DocumentTitle,
+		RoutingFacets:             facts.RoutingFacets,
+		Mode:                      facts.Mode,
+		ActivePolicyID:            facts.ActivePolicyID,
+		ActivePolicyVersion:       facts.ActivePolicyVersion,
+		ActivePolicyChecksum:      facts.ActivePolicyChecksum,
+		ExplicitProcessorOverride: facts.ExplicitProcessorOverride,
+		ProcessorGateOverrides:    cloneStringMap(facts.ProcessorGateOverrides),
 	}}
+	if facts.RoutingSnapshot != nil {
+		plan.routingSnapshot = cloneP5RoutingSnapshot(facts.RoutingSnapshot)
+	} else {
+		factSet := BuildPipelineBindingFactSet(facts)
+		baselineNames := make([]string, 0, len(specs))
+		for _, spec := range specs {
+			baselineNames = append(baselineNames, spec.Name)
+		}
+		explicit := []string(nil)
+		if facts.ExplicitProcessorOverride {
+			explicit = append(explicit, facts.RequestedProcessors...)
+		}
+		shadow, shadowErr := BuildProcessorGateShadowPlan(baselineNames, productionProcessorSpecs, currentProductionPipelineGates(), factSet, GateShadowOptions{
+			ExplicitProcessors: explicit,
+			RunOverrides:       facts.ProcessorGateOverrides,
+			OnConflict:         PipelineBindingOnConflictFallback,
+		})
+		if shadowErr != nil {
+			return ProductionProcessorPlan{}, shadowErr
+		}
+		selectedChecksum, checksumErr := productionPipelineSpecChecksum(resolution.Spec)
+		if checksumErr != nil {
+			return ProductionProcessorPlan{}, checksumErr
+		}
+		baselineSpec, _ := LookupProductionPipeline(DefaultProductionPipelineName)
+		baselineChecksum, checksumErr := productionPipelineSpecChecksum(baselineSpec)
+		if checksumErr != nil {
+			return ProductionProcessorPlan{}, checksumErr
+		}
+		plan.routingSnapshot = &P5RoutingSnapshot{
+			Facts:                    sortedFactSnapshot(factSet),
+			PolicyID:                 facts.ActivePolicyID,
+			PolicyVersion:            facts.ActivePolicyVersion,
+			PolicyChecksum:           facts.ActivePolicyChecksum,
+			SelectedPipelineChecksum: selectedChecksum,
+			BaselinePipelineChecksum: baselineChecksum,
+			BindingTrace:             append([]PipelineBindingTrace(nil), resolution.Binding.BindingTrace...),
+			GateShadow:               shadow,
+			RuleChecksums:            shadowRuleChecksums(shadow),
+		}
+	}
 	order := plan.ExecutionOrder()
 	steps := make([]ProcessorPlanStep, 0, len(order))
 	for _, name := range order {
@@ -264,7 +333,12 @@ func (p ProductionProcessorPlan) Steps() []ProcessorPlanStep {
 func (p ProductionProcessorPlan) Facts() ProductionPlanFacts {
 	out := p.facts
 	out.RequestedProcessors = append([]string(nil), p.facts.RequestedProcessors...)
+	out.ProcessorGateOverrides = cloneStringMap(p.facts.ProcessorGateOverrides)
 	return out
+}
+
+func (p ProductionProcessorPlan) RoutingSnapshot() *P5RoutingSnapshot {
+	return cloneP5RoutingSnapshot(p.routingSnapshot)
 }
 
 func (p ProductionProcessorPlan) PipelineSelection() ProductionPipelineSelection {
@@ -339,4 +413,60 @@ func selectableProductionProcessorOrder() []string {
 		out = append(out, spec.Name)
 	}
 	return out
+}
+
+func sortedFactSnapshot(facts semrules.FactSet) []semrules.Fact {
+	paths := make([]string, 0, len(facts))
+	for path := range facts {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]semrules.Fact, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, facts[path])
+	}
+	return out
+}
+
+func productionPipelineSpecChecksum(spec ProductionPipelineSpec) (string, error) {
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(digest[:]), nil
+}
+
+func shadowRuleChecksums(shadow ProcessorGateShadowPlan) []string {
+	var checksums []string
+	for _, decision := range shadow.Decisions {
+		checksums = append(checksums, decision.RuleChecksums...)
+	}
+	return sortedUniqueNonEmpty(checksums)
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneP5RoutingSnapshot(in *P5RoutingSnapshot) *P5RoutingSnapshot {
+	if in == nil {
+		return nil
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return nil
+	}
+	var out P5RoutingSnapshot
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return &out
 }

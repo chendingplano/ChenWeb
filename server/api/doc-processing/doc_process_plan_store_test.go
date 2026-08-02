@@ -2,10 +2,13 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 func TestCreateDocProcessPlan_InsertsAndReturnsID(t *testing.T) {
@@ -107,5 +110,43 @@ func TestCreateDocProcessPlan_RequiresRunIDAndRecordID(t *testing.T) {
 	}
 	if _, err := store.CreateDocProcessPlan(context.Background(), DocProcessPlanRecord{RunID: 1}); err == nil {
 		t.Fatal("expected error for missing record id")
+	}
+}
+
+func TestPersistedP5PlanReloadIgnoresLaterActivation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	wantSnapshot := &P5RoutingSnapshot{
+		Facts:    []semrules.Fact{{Path: "document.doc_kind", State: semrules.FactKnown, Value: "standard"}},
+		PolicyID: 7, PolicyVersion: 3, PolicyChecksum: "sha256:old-policy",
+		SelectedPipelineChecksum: "sha256:selected", BaselinePipelineChecksum: "sha256:baseline",
+		GateShadow:    ProcessorGateShadowPlan{EffectiveProcessors: []string{"extract_metrics"}, WouldSkip: []string{"extract_metrics"}},
+		RuleChecksums: []string{"sha256:old-rule"},
+	}
+	factsRaw, _ := json.Marshal(ProductionPlanFacts{RequestedProcessors: []string{"extract_metrics"}, RoutingSnapshot: wantSnapshot})
+	stepsRaw, _ := json.Marshal([]ProcessorPlanStep{{Name: "extract_metrics", Phase: "B", Reason: "explicit_request"}})
+	selectionRaw, _ := json.Marshal(ProductionPipelineSelection{PipelineName: "old", Reason: "conditional"})
+	bindingRaw, _ := json.Marshal(ProductionPipelineBindingResolution{SelectedPipeline: "old", Source: "conditional"})
+	specRaw, _ := json.Marshal(ProductionPipelineSpec{Name: "old", Processors: []string{"extract_metrics"}})
+	mock.ExpectQuery("SELECT p.run_id,").WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{
+		"run_id", "record_id", "facts", "steps", "selection", "binding", "spec", "excluded", "mode", "status", "processors", "parameters", "created",
+	}).AddRow(int64(9), int64(42), string(factsRaw), string(stepsRaw), string(selectionRaw), string(bindingRaw), string(specRaw), "{}", "plan_only", "succeeded", `["extract_metrics"]`, `{}`, "2026-08-02T00:00:00+00"))
+
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{{Name: "new", Processors: []string{"extract_provisions"}}})
+	SetProductionPipelineGates([]PipelineGate{gateFixtureForProcessor(99, "extract_metrics", GateEffectRequire)})
+	defer SetProductionPipelineRegistry(nil)
+	defer SetProductionPipelineGates(nil)
+	view, err := (SQLStore{DB: db}).GetLatestDocProcessPlan(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(view.PlanFacts.RoutingSnapshot, wantSnapshot) || view.PipelineSpec.Name != "old" {
+		t.Fatalf("reloaded view=%+v", view)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

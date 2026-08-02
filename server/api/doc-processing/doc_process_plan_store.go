@@ -20,6 +20,7 @@ type DocProcessPlanRecord struct {
 	PipelineSelection ProductionPipelineSelection
 	PipelineSpec      ProductionPipelineSpec
 	ExcludedByPolicy  []string
+	RoutingSnapshot   *P5RoutingSnapshot
 }
 
 type DocProcessPlanView struct {
@@ -55,7 +56,9 @@ func (s SQLStore) CreateDocProcessPlan(ctx context.Context, rec DocProcessPlanRe
 		return 0, errors.New("record_id is required")
 	}
 
-	factsJSON, err := json.Marshal(rec.PlanFacts)
+	planFacts := rec.PlanFacts
+	planFacts.RoutingSnapshot = cloneP5RoutingSnapshot(rec.RoutingSnapshot)
+	factsJSON, err := json.Marshal(planFacts)
 	if err != nil {
 		return 0, err
 	}

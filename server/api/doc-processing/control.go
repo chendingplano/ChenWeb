@@ -700,6 +700,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		parameters["processor_plan_facts"] = planFacts
 		if planErr == nil {
+			parameters["processor_routing_snapshot"] = plan.RoutingSnapshot()
 			parameters["processor_plan_steps"] = plan.Steps()
 			parameters["processor_pipeline_binding"] = plan.PipelineBinding()
 			parameters["processor_pipeline_selection"] = plan.PipelineSelection()
@@ -727,12 +728,13 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 				if _, persistErr := s.PlanStore.CreateDocProcessPlan(ctx, DocProcessPlanRecord{
 					RunID:             runID,
 					RecordID:          evt.RecordID,
-					PlanFacts:         planFacts,
+					PlanFacts:         plan.Facts(),
 					PlanSteps:         plan.Steps(),
 					PipelineBinding:   plan.PipelineBinding(),
 					PipelineSelection: plan.PipelineSelection(),
 					PipelineSpec:      plan.PipelineSpec(),
 					ExcludedByPolicy:  plan.ExcludedByPolicy(),
+					RoutingSnapshot:   plan.RoutingSnapshot(),
 				}); persistErr != nil {
 					if s.Logger != nil {
 						s.Logger.Warn("failed to create kb.doc_process_plans row", "run_id", runID, "record_id", evt.RecordID, "error", persistErr)

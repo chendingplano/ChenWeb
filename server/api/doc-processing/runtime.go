@@ -133,6 +133,9 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := LoadProductionPipelineBindings(context.Background(), PipelineBindingSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
 		logger.Warn("failed to load canonical pipeline bindings, no policy binding will apply", "error", err)
 	}
+	if err := LoadProductionPipelineGates(context.Background(), PipelineGateSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
+		logger.Warn("failed to load processor gates, no policy gate will apply", "error", err)
+	}
 	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
@@ -367,6 +370,7 @@ func makeResolvedConfig(c *ControlService, services map[string]any, plan Product
 		pipelineMode = ""
 	}
 	v := map[string]any{"processors": names, "max_doc_process_pipelines": 0, "run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv(), "chunk_size": envInt("CHUNK_SIZE", DefaultChunkSize, 1), "chunk_overlap_percent": envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0), "processor_plan_steps": plan.Steps(), "processor_plan_facts": plan.Facts(), "processor_pipeline_binding": plan.PipelineBinding(), "processor_pipeline_selection": plan.PipelineSelection(), "processor_pipeline_spec": plan.PipelineSpec(), "processor_pipeline_mode": pipelineMode}
+	v["processor_routing_snapshot"] = plan.RoutingSnapshot()
 	v["prompt_hashes"] = map[string]string{}
 	v["model_references"] = map[string]any{}
 	v["concurrency"] = map[string]any{"run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv()}
