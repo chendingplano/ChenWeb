@@ -146,6 +146,9 @@ func CreatePipelineBinding(c echo.Context) error {
 		Predicate         json.RawMessage `json:"predicate"`
 		PredicateChecksum string          `json:"predicate_checksum"`
 		Active            *bool           `json:"active"`
+		TenantID          string          `json:"tenant_id"`
+		UserID            string          `json:"user_id"`
+		InputRecordID     *int64          `json:"input_record_id"`
 	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PB_101)"})
@@ -174,6 +177,18 @@ func CreatePipelineBinding(c echo.Context) error {
 	var ksStoreID any
 	if payload.KSStoreID != nil && *payload.KSStoreID > 0 {
 		ksStoreID = *payload.KSStoreID
+	}
+	if payload.InputRecordID != nil && *payload.InputRecordID <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid input_record_id (CWB_KB_PB_114)"})
+	}
+	tenantID := strings.TrimSpace(payload.TenantID)
+	if tenantID == "" {
+		tenantID = "-"
+	}
+	userID := strings.TrimSpace(payload.UserID)
+	var inputRecordID any
+	if payload.InputRecordID != nil {
+		inputRecordID = *payload.InputRecordID
 	}
 	predicate := any(nil)
 	predicateChecksum := strings.TrimSpace(payload.PredicateChecksum)
@@ -212,8 +227,8 @@ func CreatePipelineBinding(c echo.Context) error {
 
 	var id int64
 	if err := db.QueryRow(
-		"INSERT INTO kb.pipeline_bindings (name, priority, ks_store_id, pipeline_id, policy_id, binding_kind, predicate, predicate_checksum, active) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) RETURNING id",
-		strings.TrimSpace(payload.Name), priority, ksStoreID, *payload.PipelineID, *policyID, bindingKind, predicate, predicateChecksum, active,
+		"INSERT INTO kb.pipeline_bindings (name, priority, ks_store_id, pipeline_id, policy_id, binding_kind, predicate, predicate_checksum, active, tenant_id, user_id, input_record_id) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12) RETURNING id",
+		strings.TrimSpace(payload.Name), priority, ksStoreID, *payload.PipelineID, *policyID, bindingKind, predicate, predicateChecksum, active, tenantID, userID, inputRecordID,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline binding failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline binding (CWB_KB_PB_104)"})
@@ -290,6 +305,32 @@ func UpdatePipelineBinding(c echo.Context) error {
 				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid pipeline_id (CWB_KB_PB_205)"})
 			}
 			addSet("pipeline_id", "$%d", value)
+		case "tenant_id":
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid tenant_id (CWB_KB_PB_216)"})
+			}
+			value = strings.TrimSpace(value)
+			if value == "" {
+				value = "-"
+			}
+			addSet("tenant_id", "$%d", value)
+		case "user_id":
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid user_id (CWB_KB_PB_217)"})
+			}
+			addSet("user_id", "$%d", strings.TrimSpace(value))
+		case "ks_store_id", "input_record_id":
+			var value *int64
+			if err := json.Unmarshal(raw, &value); err != nil || (value != nil && *value <= 0) {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid %s (CWB_KB_PB_218)", field)})
+			}
+			if value == nil {
+				addSet(field, "$%d", nil)
+			} else {
+				addSet(field, "$%d", *value)
+			}
 		case "binding_kind":
 			var value string
 			if err := json.Unmarshal(raw, &value); err != nil || (value != "conditional" && value != "store_default") {
