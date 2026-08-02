@@ -304,6 +304,58 @@ WHERE b.id = $1`)
 	}
 }
 
+func TestUpdatePipelineBindingUpdatesCanonicalFields(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	statusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_bindings b
+JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
+WHERE b.id = $1`)
+	mock.ExpectQuery(statusQuery).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
+
+	updateQuery := regexp.QuoteMeta("UPDATE kb.pipeline_bindings SET active = $1, binding_kind = $2, name = $3, pipeline_id = $4, predicate = $5::jsonb, predicate_checksum = $6, priority = $7, modify_time = NOW() WHERE id = $8")
+	mock.ExpectExec(updateQuery).
+		WithArgs(false, "conditional", "pdf policy v2", int64(5), sqlmock.AnyArg(), sqlmock.AnyArg(), 20, int64(3)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
+	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
+			int64(3), "pdf policy v2", 20, int64(0), int64(5), "request_override", int64(1), "conditional",
+			`{"version":1,"expression":{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"}}`,
+			"sha256:test", false,
+			time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC), time.Date(2026, 8, 2, 10, 30, 0, 0, time.UTC),
+		))
+
+	c, rec := newPipelineBindingIDContext(t, http.MethodPut, "3", `{
+		"name":"pdf policy v2",
+		"priority":20,
+		"binding_kind":"conditional",
+		"pipeline_id":5,
+		"predicate":{"version":1,"expression":{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"}},
+		"active":false
+	}`)
+	if err := UpdatePipelineBinding(c); err != nil {
+		t.Fatalf("UpdatePipelineBinding returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestUpdatePipelineBindingRejectsActivePolicyWrite(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

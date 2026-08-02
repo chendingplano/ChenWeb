@@ -3,7 +3,9 @@ package kbhandler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -226,8 +228,9 @@ func CreatePipelineBinding(c echo.Context) error {
 	return c.JSON(http.StatusOK, pipelineBindingDetailResponse{Status: true, Record: record})
 }
 
-// UpdatePipelineBinding handles PUT /api/v1/kb/pipeline-bindings/:id,
-// rebinding an existing store to a different pipeline.
+// UpdatePipelineBinding handles PUT /api/v1/kb/pipeline-bindings/:id.
+// It permits draft-policy binding metadata and predicate updates, preserving the
+// predicate checksum as a function of the validated SemRules document.
 func UpdatePipelineBinding(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PB_200")
 	defer rc.Close()
@@ -239,14 +242,91 @@ func UpdatePipelineBinding(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid id (CWB_KB_PB_201)"})
 	}
 
-	var payload struct {
-		PipelineID *int64 `json:"pipeline_id"`
-	}
+	var payload map[string]json.RawMessage
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PB_202)"})
 	}
-	if payload.PipelineID == nil || *payload.PipelineID <= 0 {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "pipeline_id is required (CWB_KB_PB_203)"})
+
+	fields := make([]string, 0, len(payload))
+	for field := range payload {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	sets := make([]string, 0, len(fields)+1)
+	args := make([]any, 0, len(fields)+2)
+	addSet := func(column, expression string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = %s", column, fmt.Sprintf(expression, len(args))))
+	}
+
+	var requestedChecksum *string
+	if raw, ok := payload["predicate_checksum"]; ok {
+		var checksum string
+		if err := json.Unmarshal(raw, &checksum); err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate_checksum (CWB_KB_PB_210)"})
+		}
+		requestedChecksum = &checksum
+	}
+
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "name":
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil || strings.TrimSpace(value) == "" {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "name cannot be empty (CWB_KB_PB_203)"})
+			}
+			addSet("name", "$%d", strings.TrimSpace(value))
+		case "priority":
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid priority (CWB_KB_PB_204)"})
+			}
+			addSet("priority", "$%d", value)
+		case "pipeline_id":
+			var value int64
+			if err := json.Unmarshal(raw, &value); err != nil || value <= 0 {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid pipeline_id (CWB_KB_PB_205)"})
+			}
+			addSet("pipeline_id", "$%d", value)
+		case "binding_kind":
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil || (value != "conditional" && value != "store_default") {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid binding_kind (CWB_KB_PB_206)"})
+			}
+			addSet("binding_kind", "$%d", value)
+		case "active":
+			var value bool
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid active (CWB_KB_PB_207)"})
+			}
+			addSet("active", "$%d", value)
+		case "predicate":
+			var doc semrules.Document
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PB_211)"})
+			}
+			if err := semrules.Validate(doc); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PB_212)"})
+			}
+			_, checksum, err := semrules.Canonicalize(doc)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PB_213)"})
+			}
+			if requestedChecksum != nil && strings.TrimSpace(*requestedChecksum) != checksum {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "predicate_checksum mismatch (CWB_KB_PB_214)"})
+			}
+			addSet("predicate", "$%d::jsonb", string(raw))
+			addSet("predicate_checksum", "$%d", checksum)
+		case "predicate_checksum":
+			// It is verified when predicate is supplied and cannot be changed on its own.
+		default:
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "no editable fields in request (CWB_KB_PB_215)"})
+		}
+	}
+	if len(sets) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "no editable fields in request (CWB_KB_PB_215)"})
 	}
 
 	db := ApiTypes.ProjectDBHandle
@@ -261,10 +341,10 @@ func UpdatePipelineBinding(c echo.Context) error {
 	if status == "active" {
 		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_209)"})
 	}
-	result, err := db.Exec(
-		"UPDATE kb.pipeline_bindings SET pipeline_id = $1, modify_time = NOW() WHERE id = $2",
-		*payload.PipelineID, id,
-	)
+	sets = append(sets, "modify_time = NOW()")
+	args = append(args, id)
+	query := fmt.Sprintf("UPDATE kb.pipeline_bindings SET %s WHERE id = $%d", strings.Join(sets, ", "), len(args))
+	result, err := db.Exec(query, args...)
 	if err != nil {
 		logger.Error("update pipeline binding failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to update pipeline binding (CWB_KB_PB_204)"})
