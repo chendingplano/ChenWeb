@@ -255,6 +255,31 @@ func TestProfileStoreDeriveKnowledgeStoreSingleStore(t *testing.T) {
 	}
 }
 
+func TestProfileStoreDeriveKnowledgeStoreDeduplicatesDocumentIDs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	// PostgreSQL returns one row per id, so a duplicated document id must not
+	// be miscounted as an unresolvable document.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ks_store_id FROM kb.inputs WHERE id = ANY($1::bigint[])")).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"ks_store_id"}).AddRow(int64(9)))
+
+	got, err := (ProfileStore{DB: db}).DeriveKnowledgeStore(context.Background(), []int64{101, 101})
+	if err != nil {
+		t.Fatalf("DeriveKnowledgeStore with duplicated document ids: %v", err)
+	}
+	if got != 9 {
+		t.Fatalf("knowledge store = %d, want 9", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
 func TestProfileStoreDeriveKnowledgeStoreRejectsMixedStores(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

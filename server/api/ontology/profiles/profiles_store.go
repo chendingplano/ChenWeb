@@ -316,11 +316,14 @@ func (s ProfileStore) DeriveKnowledgeStore(ctx context.Context, documentIDs []in
 	if s.DB == nil {
 		return 0, errors.New("db is nil")
 	}
-	if len(documentIDs) == 0 {
+	// PostgreSQL returns one row per id, so a duplicated document id must not
+	// be miscounted against the input length as an unresolvable document.
+	unique := deduplicateIDs(documentIDs)
+	if len(unique) == 0 {
 		return 0, errors.New("reviewed document ids are required")
 	}
 	const stmt = `SELECT ks_store_id FROM kb.inputs WHERE id = ANY($1::bigint[])`
-	rows, err := s.DB.QueryContext(ctx, stmt, pq.Array(documentIDs))
+	rows, err := s.DB.QueryContext(ctx, stmt, pq.Array(unique))
 	if err != nil {
 		return 0, err
 	}
@@ -345,10 +348,23 @@ func (s ProfileStore) DeriveKnowledgeStore(ctx context.Context, documentIDs []in
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	if seen != len(documentIDs) {
-		return 0, fmt.Errorf("%d reviewed document(s) do not resolve to a knowledge store", len(documentIDs)-seen)
+	if seen != len(unique) {
+		return 0, fmt.Errorf("%d reviewed document(s) do not resolve to a knowledge store", len(unique)-seen)
 	}
 	return storeID, nil
+}
+
+func deduplicateIDs(ids []int64) []int64 {
+	seen := make(map[int64]struct{}, len(ids))
+	unique := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
 }
 
 // ListApprovedProfiles returns staged profile versions for the module compiler.
