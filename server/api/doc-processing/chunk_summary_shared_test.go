@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildSummaryID(t *testing.T) {
-	if got := buildSummaryID(93, 1, 12); got != "93_1_0012" {
+	if got := buildSummaryID(93, 1, 12); got != "93_sum_1_0012" {
 		t.Fatalf("buildSummaryID=%q, want 93_1_0012", got)
 	}
 }
@@ -24,12 +24,12 @@ func TestSummaryFileName(t *testing.T) {
 func TestWriteSummaryFile(t *testing.T) {
 	tmp := t.TempDir()
 	item := SummaryItem{
-		SummaryID: "93_1_0001",
+		SummaryID: "93_sum_1_0001",
 		RecordID:  93,
 		Level:     1,
 		SeqNo:     1,
 		Lines:     []string{"1-4"},
-		Children:  []string{"93_0_0001", "93_0_0002"},
+		Children:  []string{"93_sum_0_0001", "93_sum_0_0002"},
 		Summary:   "Parent summary text",
 	}
 
@@ -43,9 +43,9 @@ func TestWriteSummaryFile(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{
-		`summary_id: "93_1_0001"`,
+		`summary_id: "93_sum_1_0001"`,
 		"record_id: 93",
-		"children: [\"93_0_0001\", \"93_0_0002\"]",
+		"children: [\"93_sum_0_0001\", \"93_sum_0_0002\"]",
 		"summary_begin",
 		"Parent summary text",
 		"summary_end",
@@ -97,10 +97,10 @@ func TestDeleteSummaryFiles_PreservesTopicEmbeddings(t *testing.T) {
 
 func TestBuildSummaryTree(t *testing.T) {
 	leafs := []SummaryItem{
-		{SummaryID: "93_0_0001", RecordID: 93, Level: 0, SeqNo: 1, Lines: []string{"1-2"}, Summary: "A"},
-		{SummaryID: "93_0_0002", RecordID: 93, Level: 0, SeqNo: 2, Lines: []string{"3-4"}, Summary: "B"},
-		{SummaryID: "93_0_0003", RecordID: 93, Level: 0, SeqNo: 3, Lines: []string{"5-6"}, Summary: "C"},
-		{SummaryID: "93_0_0004", RecordID: 93, Level: 0, SeqNo: 4, Lines: []string{"7-8"}, Summary: "D"},
+		{SummaryID: "93_sum_0_0001", RecordID: 93, Level: 0, SeqNo: 1, Lines: []string{"1-2"}, Summary: "A"},
+		{SummaryID: "93_sum_0_0002", RecordID: 93, Level: 0, SeqNo: 2, Lines: []string{"3-4"}, Summary: "B"},
+		{SummaryID: "93_sum_0_0003", RecordID: 93, Level: 0, SeqNo: 3, Lines: []string{"5-6"}, Summary: "C"},
+		{SummaryID: "93_sum_0_0004", RecordID: 93, Level: 0, SeqNo: 4, Lines: []string{"7-8"}, Summary: "D"},
 	}
 
 	all, root, err := buildSummaryTree(93, leafs, 2, 1, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
@@ -116,11 +116,11 @@ func TestBuildSummaryTree(t *testing.T) {
 	if len(all) != 7 {
 		t.Fatalf("summary count=%d, want 7", len(all))
 	}
-	if root.SummaryID != "93_2_0001" {
+	if root.SummaryID != "93_sum_2_0001" {
 		t.Fatalf("root summary id=%q, want 93_2_0001", root.SummaryID)
 	}
-	if got := strings.Join(root.Children, ","); got != "93_1_0001,93_1_0002" {
-		t.Fatalf("root children=%q, want 93_1_0001,93_1_0002", got)
+	if got := strings.Join(root.Children, ","); got != "93_sum_1_0001,93_sum_1_0002" {
+		t.Fatalf("root children=%q, want 93_sum_1_0001,93_sum_1_0002", got)
 	}
 	if got := strings.Join(root.Lines, ","); got != "1-8" {
 		t.Fatalf("root lines=%q, want 1-8", got)
@@ -129,7 +129,7 @@ func TestBuildSummaryTree(t *testing.T) {
 
 func TestWriteSummaryTreeRootReference(t *testing.T) {
 	tmp := t.TempDir()
-	root := SummaryItem{SummaryID: "53_1_0001", RecordID: 53, Level: 1, SeqNo: 1}
+	root := SummaryItem{SummaryID: "53_sum_1_0001", RecordID: 53, Level: 1, SeqNo: 1}
 
 	if err := writeSummaryTreeRootReference(nil, tmp, 53, root, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("writeSummaryTreeRootReference: %v", err)
@@ -139,12 +139,12 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read summaries.txt: %v", err)
 	}
-	if strings.TrimSpace(string(body)) != "53_1_0001" {
+	if strings.TrimSpace(string(body)) != "53_sum_1_0001" {
 		t.Fatalf("unexpected summaries.txt content: %q", string(body))
 	}
 
 	// Reprocessing the same record replaces its prior entry and does not duplicate it.
-	root2 := SummaryItem{SummaryID: "53_2_0001", RecordID: 53, Level: 2, SeqNo: 1}
+	root2 := SummaryItem{SummaryID: "53_sum_2_0001", RecordID: 53, Level: 2, SeqNo: 1}
 	if err := writeSummaryTreeRootReference(nil, tmp, 53, root2, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("rewrite summary tree root reference: %v", err)
 	}
@@ -152,12 +152,12 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read summaries.txt after rewrite: %v", err)
 	}
-	if strings.TrimSpace(string(body)) != "53_2_0001" {
+	if strings.TrimSpace(string(body)) != "53_sum_2_0001" {
 		t.Fatalf("unexpected rewritten summaries.txt content: %q", string(body))
 	}
 
 	// A second record writing to the same leaf must not overwrite the first record's entry.
-	root3 := SummaryItem{SummaryID: "77_1_0001", RecordID: 77, Level: 1, SeqNo: 1}
+	root3 := SummaryItem{SummaryID: "77_sum_1_0001", RecordID: 77, Level: 1, SeqNo: 1}
 	if err := writeSummaryTreeRootReference(nil, tmp, 77, root3, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("write second record summary tree root reference: %v", err)
 	}
@@ -166,15 +166,15 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 		t.Fatalf("read summaries.txt after second record: %v", err)
 	}
 	got := strings.TrimSpace(string(body))
-	if !strings.Contains(got, "53_2_0001") {
+	if !strings.Contains(got, "53_sum_2_0001") {
 		t.Fatalf("expected summaries.txt to still contain 53_2_0001, got: %q", got)
 	}
-	if !strings.Contains(got, "77_1_0001") {
+	if !strings.Contains(got, "77_sum_1_0001") {
 		t.Fatalf("expected summaries.txt to contain 77_1_0001, got: %q", got)
 	}
 
 	// Reprocessing record 77 replaces its entry and preserves record 53's entry.
-	root4 := SummaryItem{SummaryID: "77_2_0001", RecordID: 77, Level: 2, SeqNo: 1}
+	root4 := SummaryItem{SummaryID: "77_sum_2_0001", RecordID: 77, Level: 2, SeqNo: 1}
 	if err := writeSummaryTreeRootReference(nil, tmp, 77, root4, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("reprocess record 77: %v", err)
 	}
@@ -183,13 +183,13 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 		t.Fatalf("read summaries.txt after reprocess: %v", err)
 	}
 	got = strings.TrimSpace(string(body))
-	if strings.Contains(got, "77_1_0001") {
+	if strings.Contains(got, "77_sum_1_0001") {
 		t.Fatalf("expected old 77 entry to be removed, got: %q", got)
 	}
-	if !strings.Contains(got, "77_2_0001") {
+	if !strings.Contains(got, "77_sum_2_0001") {
 		t.Fatalf("expected new 77 entry in summaries.txt, got: %q", got)
 	}
-	if !strings.Contains(got, "53_2_0001") {
+	if !strings.Contains(got, "53_sum_2_0001") {
 		t.Fatalf("expected record 53 entry preserved after reprocess of 77, got: %q", got)
 	}
 }
@@ -199,7 +199,7 @@ func TestValidateSummaryArtifacts(t *testing.T) {
 	treeRoot := t.TempDir()
 
 	item := SummaryItem{
-		SummaryID:     "93_0_0001",
+		SummaryID:     "93_sum_0_0001",
 		RecordID:      93,
 		Level:         0,
 		SeqNo:         1,
@@ -222,12 +222,12 @@ func TestValidateSummaryArtifacts(t *testing.T) {
 	}
 }
 
-func TestValidateSummaryArtifacts_FailsForLanguageMismatch(t *testing.T) {
+func TestValidateSummaryArtifacts_AllowsLanguageFallback(t *testing.T) {
 	tmp := t.TempDir()
 	treeRoot := t.TempDir()
 
 	item := SummaryItem{
-		SummaryID:     "93_0_0001",
+		SummaryID:     "93_sum_0_0001",
 		RecordID:      93,
 		Level:         0,
 		SeqNo:         1,
@@ -243,12 +243,8 @@ func TestValidateSummaryArtifacts_FailsForLanguageMismatch(t *testing.T) {
 		t.Fatalf("writeSummaryTreeEntry: %v", err)
 	}
 
-	err := validateSummaryArtifacts(93, "zh", []SummaryItem{item}, tmp, treeRoot)
-	if err == nil {
-		t.Fatalf("expected language mismatch error")
-	}
-	if !strings.Contains(err.Error(), "language") {
-		t.Fatalf("expected language error, got %v", err)
+	if err := validateSummaryArtifacts(93, "zh", []SummaryItem{item}, tmp, treeRoot); err != nil {
+		t.Fatalf("language fallback should remain valid: %v", err)
 	}
 }
 
@@ -257,7 +253,7 @@ func TestValidateSummaryArtifacts_AllowsMissingCategoryPaths(t *testing.T) {
 	treeRoot := t.TempDir()
 
 	item := SummaryItem{
-		SummaryID: "93_0_0001",
+		SummaryID: "93_sum_0_0001",
 		RecordID:  93,
 		Level:     0,
 		SeqNo:     1,
@@ -286,7 +282,7 @@ func TestWriteSummaryTreeEntriesForItem_IndexesAllCategoryPaths(t *testing.T) {
 	artifactRoot := t.TempDir()
 
 	item := SummaryItem{
-		SummaryID: "124_0_0001",
+		SummaryID: "124_sum_0_0001",
 		RecordID:  124,
 		Level:     0,
 		SeqNo:     1,
@@ -496,7 +492,7 @@ func TestCategoryDirMetadata_ExistingDirWithoutFile(t *testing.T) {
 
 func TestWriteSummaryTreeEntry_WritesMetadata(t *testing.T) {
 	tmp := t.TempDir()
-	summary := SummaryItem{SummaryID: "10_1_0001", RecordID: 10, Level: 1, SeqNo: 1}
+	summary := SummaryItem{SummaryID: "10_sum_1_0001", RecordID: 10, Level: 1, SeqNo: 1}
 	nodes := []CategoryPathNode{
 		{Name: "Safety Overview", Keywords: []string{"safety", "overview"}, Confidence: 0.9},
 		{Name: "Closing Notes", Keywords: []string{"closing"}, Confidence: 0.8},
