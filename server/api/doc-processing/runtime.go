@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/spf13/viper"
@@ -136,7 +137,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := LoadProductionPipelineGates(context.Background(), PipelineGateSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
 		logger.Warn("failed to load processor gates, no policy gate will apply", "error", err)
 	}
-	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err

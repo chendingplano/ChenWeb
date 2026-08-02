@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -41,6 +42,14 @@ type ControlService struct {
 	PlanStore         DocProcessPlanStore
 	FacetStore        DocFacetStore
 	PolicyStore       PipelinePolicyStore
+	// RoutingClearances/RoutingAlarms/PolicyAudit are E3's clearance-aware
+	// enforcement seams. All three are optional (nil-safe): a nil
+	// RoutingClearances means every suppressive routing decision stays
+	// shadow-only (fail closed, never enforced); a nil RoutingAlarms/
+	// PolicyAudit simply skips persistence of alarms/events.
+	RoutingClearances RoutingClearanceChecker
+	RoutingAlarms     RoutingAlarmWriter
+	PolicyAudit       policyaudit.Writer
 	Now               func() time.Time
 
 	DocProcessorMode       string
@@ -645,8 +654,11 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		s.persistDocFacets(ctx, evt.RecordID, planFacts)
 	}
 	plan, planErr := BuildProductionProcessorPlanFromFacts(planFacts)
-	if planErr != nil && s.Logger != nil {
-		s.Logger.Warn("failed building production processor plan", "record_id", evt.RecordID, "error", planErr)
+	if planErr != nil {
+		if s.Logger != nil {
+			s.Logger.Warn("failed building production processor plan", "record_id", evt.RecordID, "error", planErr)
+		}
+		s.raiseRoutingAlarms(ctx, []RoutingAlarm{AlarmForPlanError(planErr)})
 	}
 	if len(evt.Operations) > 0 {
 		processors = s.selectProcessors(evt.Operations)
@@ -667,8 +679,20 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	}
+	var routingResult RoutingEnforcementResult
+	var routingFinalized bool
 	if planErr == nil && len(evt.Operations) == 0 {
-		processors = s.applyPlanEnforcement(processors, plan)
+		routingResult, err = s.finalizeRoutingPlan(ctx, plan)
+		if err != nil {
+			if s.Logger != nil {
+				s.Logger.Warn("failed finalizing routing enforcement, falling back to legacy policy exclusions", "record_id", evt.RecordID, "error", err)
+			}
+			processors = s.applyPlanEnforcement(processors, plan.ExcludedByPolicy())
+		} else {
+			routingFinalized = true
+			processors = s.applyPlanEnforcement(processors, routingResult.ExcludedProcessorNames())
+			s.raiseRoutingAlarms(ctx, routingResult.Alarms)
+		}
 	}
 	var runID int64
 	var runCreated bool
@@ -742,6 +766,9 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 				}
 			}
 		}
+	}
+	if routingFinalized {
+		s.recordRoutingDecisionEvents(ctx, evt.RecordID, runID, planFacts, routingResult)
 	}
 	if len(processors) > 0 {
 		s.resetProcessorStatuses(ctx, evt.RecordID, processors)
@@ -1789,17 +1816,14 @@ func (s *ControlService) selectProcessors(ops []string) []Processor {
 	return selected
 }
 
-// applyPlanEnforcement drops any already-selected processor that the
-// resolved plan excluded via DocPipelineModeEnforced's intersect/filter
-// (applyPolicyFilter in processor_plan.go). plan.ExcludedByPolicy() is
-// always empty in plan-only mode, or when the resolved pipeline declares no
-// explicit Processors -- i.e. every case that existed before this method
-// was added -- so this is a no-op there and changes nothing about existing
-// (legacy) behavior. It only ever removes something in the new "enforced
-// mode with an authored, non-empty-Processors pipeline" case, which was not
-// previously reachable at all.
-func (s *ControlService) applyPlanEnforcement(processors []Processor, plan ProductionProcessorPlan) []Processor {
-	excluded := plan.ExcludedByPolicy()
+// applyPlanEnforcement drops any already-selected processor named in
+// excluded. excluded is empty in plan-only mode, when the resolved pipeline
+// declares no explicit Processors, and whenever FinalizeRoutingPlan left a
+// suppressive decision shadow-only for lack of an effective D2 clearance --
+// i.e. every case that existed before E1-E3 was a no-op here, so this
+// changes nothing about that legacy behavior. It only ever removes
+// something for a decision FinalizeRoutingPlan actually enforced.
+func (s *ControlService) applyPlanEnforcement(processors []Processor, excluded []string) []Processor {
 	if len(excluded) == 0 {
 		return processors
 	}
@@ -1815,6 +1839,83 @@ func (s *ControlService) applyPlanEnforcement(processors []Processor, plan Produ
 		filtered = append(filtered, p)
 	}
 	return filtered
+}
+
+// finalizeRoutingPlan builds a RoutingEnforcementRequest from the already
+// resolved plan (E1's pure gate shadow and C1's pure binding selection) and
+// asks FinalizeRoutingPlan to turn it into a real effective processor set,
+// consulting s.RoutingClearances for every suppressive decision. It is the
+// control.go call site for E3's single FinalizeRoutingPlan boundary.
+func (s *ControlService) finalizeRoutingPlan(ctx context.Context, plan ProductionProcessorPlan) (RoutingEnforcementResult, error) {
+	facts := plan.Facts()
+	binding := plan.PipelineBinding()
+	snapshot := plan.RoutingSnapshot()
+	gateShadow := ProcessorGateShadowPlan{}
+	if snapshot != nil {
+		gateShadow = snapshot.GateShadow
+	}
+	baselineSpec, _ := LookupProductionPipeline(DefaultProductionPipelineName)
+	req := RoutingEnforcementRequest{
+		Mode:                     facts.Mode,
+		Explicit:                 facts.ExplicitProcessorOverride,
+		PolicyID:                 facts.ActivePolicyID,
+		PolicyVersion:            facts.ActivePolicyVersion,
+		DocumentKind:             facts.RoutingFacets.InputDocType,
+		RequestedProcessors:      facts.RequestedProcessors,
+		BindingSource:            binding.Source,
+		BindingID:                binding.BindingID,
+		BindingName:              binding.RuleName,
+		BindingPredicateChecksum: binding.PredicateChecksum,
+		SelectedSpec:             plan.PipelineSpec(),
+		BaselineSpec:             baselineSpec,
+		GateShadow:               gateShadow,
+	}
+	return FinalizeRoutingPlan(ctx, req, s.RoutingClearances)
+}
+
+// raiseRoutingAlarms dedupes and persists operator alarms via
+// s.RoutingAlarms. It is a no-op (never blocks/fails the pipeline) when no
+// writer is configured or a write fails -- an alarms_errors outage must not
+// stop document processing.
+func (s *ControlService) raiseRoutingAlarms(ctx context.Context, alarms []RoutingAlarm) {
+	if len(alarms) == 0 {
+		return
+	}
+	for _, err := range WriteRoutingAlarms(ctx, s.RoutingAlarms, alarms) {
+		if s.Logger != nil {
+			s.Logger.Warn("failed writing routing alarm", "error", err)
+		}
+	}
+}
+
+// recordRoutingDecisionEvents writes one content-safe policyaudit event per
+// suppressive routing decision FinalizeRoutingPlan evaluated -- enforced or
+// shadowed -- so operators can reconstruct why a processor did or did not
+// run without ever logging document content. Best-effort: a write failure is
+// logged, never propagated.
+func (s *ControlService) recordRoutingDecisionEvents(ctx context.Context, recordID, runID int64, facts ProductionPlanFacts, result RoutingEnforcementResult) {
+	if s.PolicyAudit == nil {
+		return
+	}
+	emit := func(kind string, detail map[string]any) {
+		if err := s.PolicyAudit.WriteEvent(ctx, policyaudit.Event{
+			Kind: kind, PolicyID: facts.ActivePolicyID, PolicyVersion: facts.ActivePolicyVersion,
+			RunID: runID, RecordID: recordID, Detail: detail,
+		}); err != nil && s.Logger != nil {
+			s.Logger.Warn("failed writing policy audit event", "kind", kind, "record_id", recordID, "error", err)
+		}
+	}
+	for _, processor := range result.ExcludedByGate {
+		emit(policyaudit.EventDecisionEnforced, map[string]any{"subject_kind": "processor_rule", "processor": processor})
+	}
+	for _, processor := range result.ShadowGateExclusions {
+		emit(policyaudit.EventDecisionShadowed, map[string]any{"subject_kind": "processor_rule", "processor": processor})
+	}
+	if result.UsedFallbackPipeline {
+		emit(policyaudit.EventDecisionShadowed, map[string]any{"subject_kind": "conditional_binding", "removed_processors": result.ShadowPipelineExclusions, "fallback_pipeline": result.Pipeline.Name})
+	} else if len(result.ExcludedByPipeline) > 0 {
+		emit(policyaudit.EventDecisionEnforced, map[string]any{"subject_kind": "conditional_binding", "excluded_processors": result.ExcludedByPipeline, "pipeline": result.Pipeline.Name})
+	}
 }
 
 func requestedOperationsNeedAutoChunking(ops []string) bool {
