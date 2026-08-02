@@ -18,6 +18,16 @@ func p5MigrationSQL(t *testing.T) string {
 	return string(data)
 }
 
+func p5FacetObservationMigrationSQL(t *testing.T) string {
+	t.Helper()
+	_, file, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../../project_migrations", "20260801000016_create_kb_doc_facet_values.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func TestP5MigrationContract(t *testing.T) {
 	sqlText := p5MigrationSQL(t)
 
@@ -82,6 +92,40 @@ func TestP5MigrationContract(t *testing.T) {
 	} {
 		if !strings.Contains(sqlText, fragment) {
 			t.Fatalf("migration is missing index fragment %q", fragment)
+		}
+	}
+}
+
+func TestP5FacetObservationMigrationContract(t *testing.T) {
+	sqlText := p5FacetObservationMigrationSQL(t)
+
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS kb.doc_facet_values",
+		"record_id BIGINT NOT NULL REFERENCES kb.inputs(id) ON DELETE CASCADE",
+		"path TEXT NOT NULL",
+		"value JSONB",
+		"state TEXT NOT NULL DEFAULT 'known'",
+		"method TEXT NOT NULL",
+		"confidence DOUBLE PRECISION",
+		"evidence JSONB NOT NULL DEFAULT '{}'::jsonb",
+		"source_fingerprint TEXT NOT NULL DEFAULT ''",
+		"decision_attempt_id TEXT NOT NULL DEFAULT ''",
+		"invocation_id TEXT NOT NULL DEFAULT ''",
+		"vocabulary_release_id BIGINT NOT NULL DEFAULT 0",
+		"UNIQUE (record_id, path, decision_attempt_id, invocation_id)",
+		"idx_kb_doc_facet_values_record_release",
+	} {
+		if !strings.Contains(sqlText, fragment) {
+			t.Fatalf("facet observation migration is missing %q", fragment)
+		}
+	}
+
+	for _, fragment := range []string{
+		"CHECK (state IN ('known', 'missing', 'conflicting', 'invalid'))",
+		"CHECK (method IN ('deterministic', 'metadata', 'classifier'))",
+	} {
+		if !strings.Contains(sqlText, fragment) {
+			t.Fatalf("facet observation migration is missing constraint %q", fragment)
 		}
 	}
 }
