@@ -380,6 +380,41 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 	}
 }
 
+func TestUpdatePipelineRuleCanonicalGate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	statusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_rules r
+JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
+WHERE r.id = $1 AND r.target_processor IS NOT NULL`)
+	mock.ExpectQuery(statusQuery).WithArgs(int64(12)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
+	updateQuery := regexp.QuoteMeta("UPDATE kb.pipeline_rules SET effect = $1, priority = $2, modify_time = NOW() WHERE id = $3 AND target_processor IS NOT NULL")
+	mock.ExpectExec(updateQuery).WithArgs("defer", 20, int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+	c, rec := newPipelineRuleIDContext(t, http.MethodPut, "12", `{"effect":"defer","priority":20}`)
+	if err := UpdatePipelineRule(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"id":12`, `"effect":"defer"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("response %s missing %s", rec.Body.String(), want)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUpdatePipelineRuleRejectsActivePolicyWrite(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -420,6 +455,12 @@ func TestDeletePipelineRuleNotFound(t *testing.T) {
 	oldDB := ApiTypes.ProjectDBHandle
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	gateStatusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_rules r
+JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
+WHERE r.id = $1 AND r.target_processor IS NOT NULL`)
+	mock.ExpectQuery(gateStatusQuery).WithArgs(int64(999)).WillReturnError(sql.ErrNoRows)
 
 	statusQuery := regexp.QuoteMeta(`
 SELECT pp.status
@@ -438,5 +479,33 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestDeletePipelineRuleCanonicalGate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	statusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_rules r
+JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
+WHERE r.id = $1 AND r.target_processor IS NOT NULL`)
+	mock.ExpectQuery(statusQuery).WithArgs(int64(12)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM kb.pipeline_rules WHERE id = $1 AND target_processor IS NOT NULL")).WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+	c, rec := newPipelineRuleIDContext(t, http.MethodDelete, "12", "")
+	if err := DeletePipelineRule(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

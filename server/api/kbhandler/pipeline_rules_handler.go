@@ -432,6 +432,9 @@ func UpdatePipelineRule(c echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PR_202)"})
 	}
+	if isCanonicalGateUpdate(payload) {
+		return updateCanonicalPipelineGate(c, logger, id, payload)
+	}
 
 	sets := []string{"modify_time = NOW()"}
 	args := make([]any, 0, len(payload)+1)
@@ -591,6 +594,111 @@ func UpdatePipelineRule(c echo.Context) error {
 	return c.JSON(http.StatusOK, pipelineRuleDetailResponse{Status: true, Record: record})
 }
 
+func isCanonicalGateUpdate(payload map[string]json.RawMessage) bool {
+	for _, field := range []string{"predicate", "predicate_checksum", "target_processor", "effect", "required_facets"} {
+		if _, ok := payload[field]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func updateCanonicalPipelineGate(c echo.Context, logger interface{ Error(string, ...any) }, id int64, payload map[string]json.RawMessage) error {
+	db := ApiTypes.ProjectDBHandle
+	var status string
+	if err := db.QueryRow(`
+SELECT pp.status
+FROM kb.pipeline_rules r
+JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
+WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
+		}
+		logger.Error("resolve canonical pipeline gate policy status failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule (CWB_KB_PR_216)"})
+	}
+	if strings.EqualFold(strings.TrimSpace(status), "active") {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_217)"})
+	}
+	fields := make([]string, 0, len(payload))
+	for field := range payload {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	sets := make([]string, 0, len(fields)+2)
+	args := make([]any, 0, len(fields)+3)
+	response := map[string]any{"id": id, "predicate_source": "json"}
+	add := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+		response[column] = value
+	}
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "name", "target_processor":
+			var value string
+			if json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == "" {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid " + field})
+			}
+			add(field, strings.TrimSpace(value))
+		case "effect":
+			var value string
+			_ = json.Unmarshal(raw, &value)
+			value = strings.ToLower(strings.TrimSpace(value))
+			if value != "require" && value != "enable" && value != "skip" && value != "defer" {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid effect (CWB_KB_PR_112)"})
+			}
+			add(field, value)
+		case "priority":
+			var value int
+			if json.Unmarshal(raw, &value) != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid priority"})
+			}
+			add(field, value)
+		case "active":
+			var value bool
+			if json.Unmarshal(raw, &value) != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid active"})
+			}
+			add(field, value)
+		case "predicate":
+			var doc semrules.Document
+			if json.Unmarshal(raw, &doc) != nil || semrules.Validate(doc) != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PR_113)"})
+			}
+			_, checksum, err := semrules.Canonicalize(doc)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PR_113)"})
+			}
+			analysisRaw, _ := json.Marshal(semrules.Analyze(doc).RequiredDocumentFacets)
+			add("predicate", string(raw))
+			add("predicate_checksum", checksum)
+			add("required_facets", string(analysisRaw))
+		case "predicate_checksum", "required_facets":
+			// Derived from predicate and never independently editable.
+		default:
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "no editable fields in request (CWB_KB_PR_208)"})
+		}
+	}
+	if len(sets) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "no editable fields in request (CWB_KB_PR_208)"})
+	}
+	sets = append(sets, "modify_time = NOW()")
+	args = append(args, id)
+	query := fmt.Sprintf("UPDATE kb.pipeline_rules SET %s WHERE id = $%d AND target_processor IS NOT NULL", strings.Join(sets, ", "), len(args))
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		logger.Error("update canonical pipeline gate failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to update pipeline rule (CWB_KB_PR_209)"})
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected == 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "record": response})
+}
+
 func derefString(value *string) string {
 	if value == nil {
 		return ""
@@ -611,6 +719,33 @@ func DeletePipelineRule(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	if c.QueryParam("predicate_source") != "legacy_adapter" {
+		var gateStatus string
+		gateStatusErr := db.QueryRow(`
+SELECT pp.status
+FROM kb.pipeline_rules r
+JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
+WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&gateStatus)
+		if gateStatusErr == nil {
+			if strings.EqualFold(strings.TrimSpace(gateStatus), "active") {
+				return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_306)"})
+			}
+			result, err := db.Exec("DELETE FROM kb.pipeline_rules WHERE id = $1 AND target_processor IS NOT NULL", id)
+			if err != nil {
+				logger.Error("delete canonical pipeline gate failed", "id", id, "err", err)
+				return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to delete pipeline rule (CWB_KB_PR_302)"})
+			}
+			affected, err := result.RowsAffected()
+			if err != nil || affected == 0 {
+				return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_304)"})
+			}
+			return c.JSON(http.StatusOK, map[string]bool{"status": true})
+		}
+		if gateStatusErr != sql.ErrNoRows {
+			logger.Error("resolve canonical pipeline gate policy status failed", "id", id, "err", gateStatusErr)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule policy (CWB_KB_PR_305)"})
+		}
+	}
 	status, err := pipelineRuleCompatBindingPolicyStatus(db, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
