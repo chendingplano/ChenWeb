@@ -4940,3 +4940,11 @@ Do not stop merely because one task, phase, or checkpoint is complete.
 Stop only when the entire goal is verified complete, or when genuinely blocked
 by information or credentials that cannot be obtained from the repository.
 ```
+
+= How to Switch Codex Model
+The commands below switch Codex to use deepseek-v4-flash
+- bash: codex logout
+- bash: pkill -f codex
+- bash: codex --model deepseek-v4-flash 
+- cc-switch: switch to deepseek
+- Restart VS Code

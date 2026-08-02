@@ -5,28 +5,29 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
-	import MessageSquareIcon   from '@lucide/svelte/icons/message-square';
-	import BotIcon             from '@lucide/svelte/icons/bot';
-	import ZapIcon             from '@lucide/svelte/icons/zap';
-	import LayoutGridIcon      from '@lucide/svelte/icons/layout-grid';
-	import CodeIcon            from '@lucide/svelte/icons/code-2';
-	import UserIcon            from '@lucide/svelte/icons/user';
-	import BookOpenIcon        from '@lucide/svelte/icons/book-open';
-	import SettingsIcon        from '@lucide/svelte/icons/settings';
-	import InfoIcon            from '@lucide/svelte/icons/info';
-	import ChevronDownIcon     from '@lucide/svelte/icons/chevron-down';
-	import PanelLeftIcon       from '@lucide/svelte/icons/panel-left';
-	import PanelLeftCloseIcon  from '@lucide/svelte/icons/panel-left-close';
-	import MoreHorizontalIcon  from '@lucide/svelte/icons/more-horizontal';
-	import UserCircle2Icon     from '@lucide/svelte/icons/user-circle-2';
-	import CreditCardIcon      from '@lucide/svelte/icons/credit-card';
-	import LogOutIcon          from '@lucide/svelte/icons/log-out';
-	import WorkflowIcon        from '@lucide/svelte/icons/workflow';
-	import ShieldIcon          from '@lucide/svelte/icons/shield';
-	import BookMarkedIcon      from '@lucide/svelte/icons/book-marked';
-	import BrainIcon           from '@lucide/svelte/icons/brain';
-	import FolderIcon          from '@lucide/svelte/icons/folder';
-	import VideoIcon           from '@lucide/svelte/icons/video';
+	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
+	import BotIcon from '@lucide/svelte/icons/bot';
+	import ZapIcon from '@lucide/svelte/icons/zap';
+	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+	import CodeIcon from '@lucide/svelte/icons/code-2';
+	import UserIcon from '@lucide/svelte/icons/user';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
+	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
+	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal';
+	import UserCircle2Icon from '@lucide/svelte/icons/user-circle-2';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import WorkflowIcon from '@lucide/svelte/icons/workflow';
+	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import BookMarkedIcon from '@lucide/svelte/icons/book-marked';
+	import BrainIcon from '@lucide/svelte/icons/brain';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import VideoIcon from '@lucide/svelte/icons/video';
+	import LayersIcon from '@lucide/svelte/icons/layers';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -37,7 +38,7 @@
 
 	type NavGrandchild = { id: string; label: string };
 	type NavChild = { id: string; label: string; children?: NavGrandchild[] };
-	type NavItem  = {
+	type NavItem = {
 		id: string;
 		label: string;
 		icon: any; // lucide component
@@ -47,47 +48,47 @@
 	};
 
 	let {
-		darkMode       = true,
-		activeMenu     = null,
+		darkMode = true,
+		activeMenu = null,
 		autoShrinkExpand = false,
-		expanded       = false,
-		width          = 240,
-		pageKey        = undefined,
+		expanded = false,
+		width = 240,
+		pageKey = undefined,
 		onSelect,
 		onToggleRail,
 		onWidthDragStart,
 		onHoverChange
 	}: {
-		darkMode:          boolean;
-		activeMenu:        ActiveSelection | null;
-		autoShrinkExpand:  boolean;
-		expanded:          boolean;
-		width:             number;
+		darkMode: boolean;
+		activeMenu: ActiveSelection | null;
+		autoShrinkExpand: boolean;
+		expanded: boolean;
+		width: number;
 		// DB-backed page-config key (kb.page_def.page_key). When set, the menu's
 		// visibility + labels are overlaid from GET /api/v1/page-config/:pageKey
 		// (spec 2026072001 §11). Left undefined (e.g. /home3) → full hardcoded menu.
-		pageKey?:          string;
-		onSelect:          (sel: ActiveSelection) => void;
-		onToggleRail:      () => void;
-		onWidthDragStart:  (e: MouseEvent) => void;
-		onHoverChange:     (hovered: boolean) => void;
+		pageKey?: string;
+		onSelect: (sel: ActiveSelection) => void;
+		onToggleRail: () => void;
+		onWidthDragStart: (e: MouseEvent) => void;
+		onHoverChange: (hovered: boolean) => void;
 	} = $props();
 
 	// --- Layout constants ---
-	const RAIL_WIDTH_COLLAPSED = 56;  // collapsed icon-rail width in px
+	const RAIL_WIDTH_COLLAPSED = 56; // collapsed icon-rail width in px
 	const RAIL_TRANSITION = '200ms ease'; // panel slide animation
 
 	// --- Typography ---
 	const fontMono = "'Fira Code', 'Cascadia Code', monospace"; // monospace for badges
 
 	// --- Design tokens ---
-	let surface2      = $derived(darkMode ? '#252A3A'  : '#ECEEF2');  // rail background
-	let borderColor   = $derived(darkMode ? '#2D3348'  : '#E4E6EB');  // border / divider lines
-	let accent        = $derived(darkMode ? '#818CF8'  : '#6366F1');  // primary accent
-	let accentTint    = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)'); // tint
-	let textPrimary   = $derived(darkMode ? '#E2E8F0' : '#111827');   // headings
-	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');   // body text
-	let textMuted     = $derived(darkMode ? '#64748B' : '#9CA3AF');   // placeholder
+	let surface2 = $derived(darkMode ? '#252A3A' : '#ECEEF2'); // rail background
+	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB'); // border / divider lines
+	let accent = $derived(darkMode ? '#818CF8' : '#6366F1'); // primary accent
+	let accentTint = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)'); // tint
+	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827'); // headings
+	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280'); // body text
+	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF'); // placeholder
 
 	// Suppress unused
 	void fontMono;
@@ -97,13 +98,16 @@
 	let showLabels = $derived(expanded);
 
 	// Accordion expand state per item (top-level) and sub-group
-	let accordionOpen    = $state<Record<string, boolean>>({});
+	let accordionOpen = $state<Record<string, boolean>>({});
 	let subAccordionOpen = $state<Record<string, boolean>>({});
 
 	// Nav item definitions
 	const mainNav: NavItem[] = [
 		{
-			id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, group: 'Workspace',
+			id: 'dashboard',
+			label: 'Dashboard',
+			icon: LayoutDashboardIcon,
+			group: 'Workspace',
 			children: [
 				{ id: 'doc-processor-dashboard', label: 'Doc Processor' },
 				{ id: 'llm-activities', label: 'LLM Activities' }
@@ -111,56 +115,88 @@
 		},
 		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon, group: 'Workspace' },
 		{
-			id: 'agents', label: 'Agents', icon: BotIcon, group: 'Workspace',
+			id: 'agents',
+			label: 'Agents',
+			icon: BotIcon,
+			group: 'Workspace',
 			children: [
-				{ id: 'agents-my',     label: 'My Agents' },
+				{ id: 'agents-my', label: 'My Agents' },
 				{ id: 'agents-browse', label: 'Browse Library' },
 				{ id: 'agents-create', label: 'Create Agent' }
 			]
 		},
 		{
-			id: 'skills', label: 'Skills', icon: ZapIcon, group: 'Workspace',
+			id: 'skills',
+			label: 'Skills',
+			icon: ZapIcon,
+			group: 'Workspace',
 			children: [
-				{ id: 'skills-all',    label: 'All Skills' },
+				{ id: 'skills-all', label: 'All Skills' },
 				{ id: 'skills-active', label: 'Active' },
 				{ id: 'skills-create', label: 'New Skill' }
 			]
 		},
 		{
-			id: 'applications', label: 'Applications', icon: LayoutGridIcon, group: 'Workspace',
+			id: 'applications',
+			label: 'Applications',
+			icon: LayoutGridIcon,
+			group: 'Workspace',
 			children: [
-				{ id: 'apps-installed',  label: 'Installed' },
-				{ id: 'apps-browse',     label: 'Browse' },
-				{ id: 'apps-configure',  label: 'Configure' },
+				{ id: 'apps-installed', label: 'Installed' },
+				{ id: 'apps-browse', label: 'Browse' },
+				{ id: 'apps-configure', label: 'Configure' },
 				{ id: 'apps-generate-doc', label: 'Generate Doc' },
-				{ id: 'apps-document-review', label: 'Document Review' },
+				{ id: 'apps-document-review', label: 'Document Review' }
 			]
 		},
 		{
-			id: 'coding', label: 'Coding Assistant', icon: CodeIcon, group: 'Workspace',
+			id: 'coding',
+			label: 'Coding Assistant',
+			icon: CodeIcon,
+			group: 'Workspace',
 			children: [
 				{ id: 'coding-review', label: 'Code Review' },
-				{ id: 'coding-gen',    label: 'Code Generation' },
-				{ id: 'coding-debug',  label: 'Debugger' }
+				{ id: 'coding-gen', label: 'Code Generation' },
+				{ id: 'coding-debug', label: 'Debugger' }
 			]
 		},
 		{
-			id: 'personal', label: 'Personal Assistant', icon: UserIcon, group: 'Workspace',
+			id: 'personal',
+			label: 'Personal Assistant',
+			icon: UserIcon,
+			group: 'Workspace',
 			children: [
-				{ id: 'personal-tasks',    label: 'Tasks' },
+				{ id: 'personal-tasks', label: 'Tasks' },
 				{ id: 'personal-calendar', label: 'Calendar' },
-				{ id: 'personal-email',    label: 'Email' }
-			]
-		},
-		{ id: 'knowledge', label: 'Knowledge System', icon: BookOpenIcon, group: 'Workspace', href: '/home3/knowledge' },
-		{
-			id: 'knowledge-engineering', label: 'Knowledge Engineering', icon: BrainIcon, group: 'Workspace',
-			children: [
-				{ id: 'ke-research-topics', label: 'Research Topics' }
+				{ id: 'personal-email', label: 'Email' }
 			]
 		},
 		{
-			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
+			id: 'knowledge',
+			label: 'Knowledge System',
+			icon: BookOpenIcon,
+			group: 'Workspace',
+			href: '/home3/knowledge'
+		},
+		{
+			id: 'knowledge-engineering',
+			label: 'Knowledge Engineering',
+			icon: BrainIcon,
+			group: 'Workspace',
+			children: [{ id: 'ke-research-topics', label: 'Research Topics' }]
+		},
+		{
+			id: 'ontology',
+			label: 'Ontology',
+			icon: LayersIcon,
+			group: 'Workspace',
+			children: [{ id: 'ontology-doc-facets', label: 'Doc Facets' }]
+		},
+		{
+			id: 'tools',
+			label: 'Tools',
+			icon: WorkflowIcon,
+			group: 'Workspace',
 			children: [
 				{ id: 'kb-search-lab', label: 'KB Search Lab' },
 				{ id: 'flow', label: 'Flow' },
@@ -170,26 +206,34 @@
 			]
 		},
 		{
-			id: 'agent-platform', label: 'Agent Platform', icon: BotIcon, group: 'Workspace',
+			id: 'agent-platform',
+			label: 'Agent Platform',
+			icon: BotIcon,
+			group: 'Workspace',
 			children: [
-				{ id: 'ap-board',    label: 'Board' },
-				{ id: 'ap-agents',   label: 'Agents' },
+				{ id: 'ap-board', label: 'Board' },
+				{ id: 'ap-agents', label: 'Agents' },
 				{ id: 'ap-projects', label: 'Projects' }
 			]
 		},
 		{
-			id: 'system-admin', label: 'System Admin', icon: ShieldIcon, group: 'System Admin',
+			id: 'system-admin',
+			label: 'System Admin',
+			icon: ShieldIcon,
+			group: 'System Admin',
 			children: [
 				{
-					id: 'jetstream', label: 'JetStream',
+					id: 'jetstream',
+					label: 'JetStream',
 					children: [
-						{ id: 'sysadmin-jetstream-logs',     label: 'JetStream Logs' },
-						{ id: 'sysadmin-jetstream-events',   label: 'JetStream Events' },
+						{ id: 'sysadmin-jetstream-logs', label: 'JetStream Logs' },
+						{ id: 'sysadmin-jetstream-events', label: 'JetStream Events' },
 						{ id: 'sysadmin-jetstream-subjects', label: 'JetStream Subjects' }
 					]
 				},
 				{
-					id: 'sysadmin-logs', label: 'Logs',
+					id: 'sysadmin-logs',
+					label: 'Logs',
 					children: [
 						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' },
 						{ id: 'sysadmin-llm-usage-logs', label: 'LLM Usage Logs' },
@@ -197,7 +241,8 @@
 					]
 				},
 				{
-					id: 'sysadmin-llm', label: 'LLM',
+					id: 'sysadmin-llm',
+					label: 'LLM',
 					children: [
 						{ id: 'sysadmin-llm-accounts', label: 'LLM Accounts' },
 						{ id: 'sysadmin-llm-model-profiles', label: 'Model Profiles' },
@@ -205,7 +250,8 @@
 					]
 				},
 				{
-					id: 'sysadmin-db', label: 'Database Maintenance',
+					id: 'sysadmin-db',
+					label: 'Database Maintenance',
 					children: [
 						{ id: 'sysadmin-db-consistency', label: 'Consistency Check' },
 						{ id: 'sysadmin-db-clean-artifact-data', label: 'Clean Artifact Data' },
@@ -214,7 +260,8 @@
 					]
 				},
 				{
-					id: 'sysadmin-users', label: 'Users and Accesses',
+					id: 'sysadmin-users',
+					label: 'Users and Accesses',
 					children: [
 						{ id: 'sysadmin-user-management', label: 'User Management' },
 						{ id: 'sysadmin-role-management', label: 'Role Management' },
@@ -222,32 +269,31 @@
 					]
 				},
 				{
-					id: 'sysadmin-benchmark', label: 'Benchmark',
-					children: [
-						{ id: 'sysadmin-benchmark-setup', label: 'Setup' }
-					]
+					id: 'sysadmin-benchmark',
+					label: 'Benchmark',
+					children: [{ id: 'sysadmin-benchmark-setup', label: 'Setup' }]
 				},
 				{
-					id: 'sysadmin-resources', label: 'Resources',
-					children: [
-						{ id: 'sysadmin-resources-videos', label: 'Videos' }
-					]
+					id: 'sysadmin-resources',
+					label: 'Resources',
+					children: [{ id: 'sysadmin-resources-videos', label: 'Videos' }]
 				},
 				{ id: 'sysadmin-schedules', label: 'Schedules' },
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]
 		},
 		{
-			id: 'my-workspace', label: 'My Workspace', icon: BookMarkedIcon, group: 'Personal',
-			children: [
-				{ id: 'diary', label: 'Diary' }
-			]
+			id: 'my-workspace',
+			label: 'My Workspace',
+			icon: BookMarkedIcon,
+			group: 'Personal',
+			children: [{ id: 'diary', label: 'Diary' }]
 		}
 	];
 
 	const bottomNav: NavItem[] = [
 		{ id: 'settings', label: 'Settings', icon: SettingsIcon },
-		{ id: 'about',    label: 'About',    icon: InfoIcon }
+		{ id: 'about', label: 'About', icon: InfoIcon }
 	];
 
 	// Resources page (pageKey='resources') gets its own menu tree, rendered in
@@ -257,17 +303,21 @@
 	// overlaid from the seeded `resources` page-config.
 	const resourcesNav: NavItem[] = [
 		{
-			id: 'documents', label: 'Documents', icon: FolderIcon, group: 'Resources',
+			id: 'documents',
+			label: 'Documents',
+			icon: FolderIcon,
+			group: 'Resources',
 			children: [
 				{ id: 'docs-users-manual', label: "User's Manual" },
-				{ id: 'docs-development',  label: 'Development' }
+				{ id: 'docs-development', label: 'Development' }
 			]
 		},
 		{
-			id: 'videos', label: 'Videos', icon: VideoIcon, group: 'Resources',
-			children: [
-				{ id: 'videos-training', label: 'Training' }
-			]
+			id: 'videos',
+			label: 'Videos',
+			icon: VideoIcon,
+			group: 'Resources',
+			children: [{ id: 'videos-training', label: 'Training' }]
 		}
 	];
 
@@ -296,8 +346,7 @@
 	// Once loaded, an id is hidden only if the resolver put it in `hidden`; its
 	// label comes from the resolved override, else the hardcoded default.
 	const isVisible = (id: string) => pageConfig === null || !pageConfig.hidden.has(id);
-	const labelFor = (id: string, fallback: string) =>
-		pageConfig?.overrides[id]?.label ?? fallback;
+	const labelFor = (id: string, fallback: string) => pageConfig?.overrides[id]?.label ?? fallback;
 
 	// Prune the tree by visibility and apply label overrides, preserving the
 	// page-owned shape. Filtering rules mirror the Wiki menu (spec 2026072001
@@ -402,9 +451,9 @@
 			return;
 		}
 		onSelect({
-			itemId:     item.id,
-			childId:    child?.id,
-			itemTitle:  item.label,
+			itemId: item.id,
+			childId: child?.id,
+			itemTitle: item.label,
 			childTitle: child?.label
 		});
 		if (child) return;
@@ -426,7 +475,7 @@
 	}
 
 	function isSubGroupActive(child: NavChild): boolean {
-		return !!child.children && child.children.some(gc => isGrandchildActive(gc));
+		return !!child.children && child.children.some((gc) => isGrandchildActive(gc));
 	}
 
 	// Hover background
@@ -435,57 +484,68 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <aside
-	class="flex-shrink-0 flex flex-col overflow-hidden relative"
+	class="relative flex flex-shrink-0 flex-col overflow-hidden"
 	style="width:{effectiveWidth}px; background:{surface2}; border-right:1px solid {borderColor}; transition:width {RAIL_TRANSITION};"
 	onmouseenter={() => onHoverChange(true)}
 	onmouseleave={() => onHoverChange(false)}
 >
 	<!-- Rail mode button at top -->
 	<div
-		class="flex items-center flex-shrink-0 px-2"
+		class="flex flex-shrink-0 items-center px-2"
 		style="height:48px; border-bottom:1px solid {borderColor};"
 	>
 		{#if showLabels}
-			<div class="flex items-center justify-between w-full px-1">
+			<div class="flex w-full items-center justify-between px-1">
 				<span style="font-size:13px; font-weight:600; color:{accent};">Navigation</span>
 				<button
 					onclick={onToggleRail}
-					class="flex items-center justify-center w-7 h-7 rounded-lg cursor-pointer transition-colors duration-150"
+					class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
 					style="color:{textMuted};"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = accent;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textMuted;
+					}}
 					aria-label={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Shrink navigation'}
 					title={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Shrink navigation'}
 				>
 					{#if autoShrinkExpand}
-						<PanelLeftIcon class="w-4 h-4" />
+						<PanelLeftIcon class="h-4 w-4" />
 					{:else}
-						<PanelLeftCloseIcon class="w-4 h-4" />
+						<PanelLeftCloseIcon class="h-4 w-4" />
 					{/if}
 				</button>
 			</div>
 		{:else}
 			<button
 				onclick={onToggleRail}
-				class="flex items-center justify-center w-full h-8 rounded-lg cursor-pointer transition-colors duration-150"
+				class="flex h-8 w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
 				style="color:{textMuted};"
-				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
-				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+				onmouseenter={(e) => {
+					(e.currentTarget as HTMLElement).style.color = accent;
+				}}
+				onmouseleave={(e) => {
+					(e.currentTarget as HTMLElement).style.color = textMuted;
+				}}
 				aria-label={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Expand navigation'}
 				title={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Expand navigation'}
 			>
-				<PanelLeftIcon class="w-5 h-5" />
+				<PanelLeftIcon class="h-5 w-5" />
 			</button>
 		{/if}
 	</div>
 
 	<!-- Main nav items (scrollable) -->
-	<nav class="flex-1 overflow-y-auto py-2" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
+	<nav
+		class="flex-1 overflow-y-auto py-2"
+		style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
+	>
 		{#each displayMainNav as item, index (item.id)}
-			<div class="px-2 mb-0.5">
+			<div class="mb-0.5 px-2">
 				{#if showLabels && item.group && (index === 0 || displayMainNav[index - 1].group !== item.group)}
 					<div
-						class="px-2 py-2 text-xs uppercase tracking-wide"
+						class="px-2 py-2 text-xs tracking-wide uppercase"
 						style="color:{textMuted}; font-weight:600;"
 					>
 						{item.group}
@@ -493,8 +553,8 @@
 				{/if}
 				<!-- Parent item button -->
 				<button
-					onclick={() => item.children ? toggleAccordion(item.id) : selectItem(item)}
-					class="flex w-full items-center gap-3 rounded-lg cursor-pointer transition-colors duration-150"
+					onclick={() => (item.children ? toggleAccordion(item.id) : selectItem(item))}
+					class="flex w-full cursor-pointer items-center gap-3 rounded-lg transition-colors duration-150"
 					style="
 						padding: {showLabels ? '8px 10px' : '9px 0'};
 						justify-content: {showLabels ? 'flex-start' : 'center'};
@@ -517,11 +577,15 @@
 				>
 					<item.icon class="flex-shrink-0" style="width:20px; height:20px;" />
 					{#if showLabels}
-						<span class="flex-1 text-left truncate" style="font-size:14px; font-weight:500;">{item.label}</span>
+						<span class="flex-1 truncate text-left" style="font-size:14px; font-weight:500;"
+							>{item.label}</span
+						>
 						{#if item.children}
 							<ChevronDownIcon
 								class="flex-shrink-0 transition-transform duration-200"
-								style="width:14px; height:14px; transform: rotate({accordionOpen[item.id] ? '180deg' : '0deg'});"
+								style="width:14px; height:14px; transform: rotate({accordionOpen[item.id]
+									? '180deg'
+									: '0deg'});"
 							/>
 						{/if}
 					{/if}
@@ -535,7 +599,7 @@
 								<!-- Sub-group: foldable header -->
 								<button
 									onclick={() => toggleSubAccordion(child.id)}
-									class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
+									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors duration-150"
 									style="
 										color: {isSubGroupActive(child) ? accent : textSecondary};
 										background: {isSubGroupActive(child) ? accentTint : 'transparent'};
@@ -543,17 +607,25 @@
 									"
 									onmouseenter={(e) => {
 										const el = e.currentTarget as HTMLElement;
-										if (!isSubGroupActive(child)) { el.style.background = hoverBg; el.style.color = textPrimary; }
+										if (!isSubGroupActive(child)) {
+											el.style.background = hoverBg;
+											el.style.color = textPrimary;
+										}
 									}}
 									onmouseleave={(e) => {
 										const el = e.currentTarget as HTMLElement;
-										if (!isSubGroupActive(child)) { el.style.background = 'transparent'; el.style.color = isSubGroupActive(child) ? accent : textSecondary; }
+										if (!isSubGroupActive(child)) {
+											el.style.background = 'transparent';
+											el.style.color = isSubGroupActive(child) ? accent : textSecondary;
+										}
 									}}
 								>
-									<span class="flex-1 text-left truncate">{child.label}</span>
+									<span class="flex-1 truncate text-left">{child.label}</span>
 									<ChevronDownIcon
 										class="flex-shrink-0 transition-transform duration-200"
-										style="width:12px; height:12px; transform: rotate({subAccordionOpen[child.id] ? '180deg' : '0deg'});"
+										style="width:12px; height:12px; transform: rotate({subAccordionOpen[child.id]
+											? '180deg'
+											: '0deg'});"
 									/>
 								</button>
 								<!-- Grandchildren -->
@@ -562,7 +634,7 @@
 										{#each child.children as gc (gc.id)}
 											<button
 												onclick={() => selectItem(item, gc)}
-												class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
+												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors duration-150"
 												style="
 													color: {isGrandchildActive(gc) ? accent : textMuted};
 													background: {isGrandchildActive(gc) ? accentTint : 'transparent'};
@@ -570,14 +642,23 @@
 												"
 												onmouseenter={(e) => {
 													const el = e.currentTarget as HTMLElement;
-													if (!isGrandchildActive(gc)) { el.style.background = hoverBg; el.style.color = textPrimary; }
+													if (!isGrandchildActive(gc)) {
+														el.style.background = hoverBg;
+														el.style.color = textPrimary;
+													}
 												}}
 												onmouseleave={(e) => {
 													const el = e.currentTarget as HTMLElement;
-													if (!isGrandchildActive(gc)) { el.style.background = 'transparent'; el.style.color = textMuted; }
+													if (!isGrandchildActive(gc)) {
+														el.style.background = 'transparent';
+														el.style.color = textMuted;
+													}
 												}}
 											>
-												<div class="w-1 h-1 rounded-full flex-shrink-0" style="background:currentColor; opacity:0.5;"></div>
+												<div
+													class="h-1 w-1 flex-shrink-0 rounded-full"
+													style="background:currentColor; opacity:0.5;"
+												></div>
 												{gc.label}
 											</button>
 										{/each}
@@ -587,7 +668,7 @@
 								<!-- Flat leaf child (existing behaviour) -->
 								<button
 									onclick={() => selectItem(item, child)}
-									class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
+									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors duration-150"
 									style="
 										color: {isChildActive(child) ? accent : textMuted};
 										background: {isChildActive(child) ? accentTint : 'transparent'};
@@ -595,14 +676,23 @@
 									"
 									onmouseenter={(e) => {
 										const el = e.currentTarget as HTMLElement;
-										if (!isChildActive(child)) { el.style.background = hoverBg; el.style.color = textPrimary; }
+										if (!isChildActive(child)) {
+											el.style.background = hoverBg;
+											el.style.color = textPrimary;
+										}
 									}}
 									onmouseleave={(e) => {
 										const el = e.currentTarget as HTMLElement;
-										if (!isChildActive(child)) { el.style.background = 'transparent'; el.style.color = textMuted; }
+										if (!isChildActive(child)) {
+											el.style.background = 'transparent';
+											el.style.color = textMuted;
+										}
 									}}
 								>
-									<div class="w-1 h-1 rounded-full flex-shrink-0" style="background:currentColor; opacity:0.5;"></div>
+									<div
+										class="h-1 w-1 flex-shrink-0 rounded-full"
+										style="background:currentColor; opacity:0.5;"
+									></div>
 									{child.label}
 								</button>
 							{/if}
@@ -617,10 +707,10 @@
 
 		<!-- Bottom nav -->
 		{#each displayBottomNav as item (item.id)}
-			<div class="px-2 mb-0.5">
+			<div class="mb-0.5 px-2">
 				<button
 					onclick={() => selectItem(item)}
-					class="flex w-full items-center gap-3 rounded-lg cursor-pointer transition-colors duration-150"
+					class="flex w-full cursor-pointer items-center gap-3 rounded-lg transition-colors duration-150"
 					style="
 						padding: {showLabels ? '8px 10px' : '9px 0'};
 						justify-content: {showLabels ? 'flex-start' : 'center'};
@@ -643,7 +733,9 @@
 				>
 					<item.icon class="flex-shrink-0" style="width:20px; height:20px;" />
 					{#if showLabels}
-						<span class="flex-1 text-left truncate" style="font-size:14px; font-weight:500;">{item.label}</span>
+						<span class="flex-1 truncate text-left" style="font-size:14px; font-weight:500;"
+							>{item.label}</span
+						>
 					{/if}
 				</button>
 			</div>
@@ -653,20 +745,22 @@
 	<!-- User section at bottom -->
 	<div class="flex-shrink-0 p-2" style="border-top:1px solid {borderColor};">
 		{#if showLabels}
-			<div
-				class="flex items-center gap-2 rounded-lg p-2"
-				style="background:{hoverBg};"
-			>
+			<div class="flex items-center gap-2 rounded-lg p-2" style="background:{hoverBg};">
 				<!-- Avatar -->
 				<div
-					class="flex items-center justify-center rounded-lg flex-shrink-0 text-xs font-semibold"
+					class="flex flex-shrink-0 items-center justify-center rounded-lg text-xs font-semibold"
 					style="width:32px; height:32px; background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
 				>
-					{user.name.split(' ').map(n => n[0]).join('')}
+					{user.name
+						.split(' ')
+						.map((n) => n[0])
+						.join('')}
 				</div>
 				<!-- Name + email -->
-				<div class="flex-1 min-w-0">
-					<div class="truncate" style="font-size:13px; font-weight:500; color:{textPrimary};">{user.name}</div>
+				<div class="min-w-0 flex-1">
+					<div class="truncate" style="font-size:13px; font-weight:500; color:{textPrimary};">
+						{user.name}
+					</div>
 					<div class="truncate" style="font-size:11px; color:{textMuted};">{user.email}</div>
 				</div>
 				<!-- Three-dots dropdown -->
@@ -675,28 +769,40 @@
 						{#snippet child({ props })}
 							<button
 								{...props}
-								class="flex items-center justify-center w-6 h-6 rounded-md cursor-pointer flex-shrink-0 transition-colors duration-150"
+								class="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-150"
 								style="color:{textMuted};"
-								onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; (e.currentTarget as HTMLElement).style.background = borderColor; }}
-								onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+								onmouseenter={(e) => {
+									(e.currentTarget as HTMLElement).style.color = textPrimary;
+									(e.currentTarget as HTMLElement).style.background = borderColor;
+								}}
+								onmouseleave={(e) => {
+									(e.currentTarget as HTMLElement).style.color = textMuted;
+									(e.currentTarget as HTMLElement).style.background = 'transparent';
+								}}
 								aria-label="User menu"
 							>
-								<MoreHorizontalIcon class="w-4 h-4" />
+								<MoreHorizontalIcon class="h-4 w-4" />
 							</button>
 						{/snippet}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content class="min-w-44 rounded-lg" side="top" align="end" sideOffset={8}>
-						<DropdownMenu.Item onclick={() => onSelect({ itemId: '__user_info__', itemTitle: 'User Info' })}>
-							<UserCircle2Icon class="w-4 h-4 mr-2" />
+						<DropdownMenu.Item
+							onclick={() => onSelect({ itemId: '__user_info__', itemTitle: 'User Info' })}
+						>
+							<UserCircle2Icon class="mr-2 h-4 w-4" />
 							User Info
 						</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => onSelect({ itemId: '__account__', itemTitle: 'Account' })}>
-							<CreditCardIcon class="w-4 h-4 mr-2" />
+						<DropdownMenu.Item
+							onclick={() => onSelect({ itemId: '__account__', itemTitle: 'Account' })}
+						>
+							<CreditCardIcon class="mr-2 h-4 w-4" />
 							Account
 						</DropdownMenu.Item>
 						<DropdownMenu.Separator />
-						<DropdownMenu.Item onclick={() => onSelect({ itemId: '__logout__', itemTitle: 'Logout' })}>
-							<LogOutIcon class="w-4 h-4 mr-2" />
+						<DropdownMenu.Item
+							onclick={() => onSelect({ itemId: '__logout__', itemTitle: 'Logout' })}
+						>
+							<LogOutIcon class="mr-2 h-4 w-4" />
 							Log Out
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
@@ -709,27 +815,36 @@
 					{#snippet child({ props })}
 						<button
 							{...props}
-							class="flex items-center justify-center w-full h-9 rounded-lg cursor-pointer"
+							class="flex h-9 w-full cursor-pointer items-center justify-center rounded-lg"
 							style="background:{accentTint}; color:{accent}; font-size:11px; font-weight:600;"
 							aria-label="User menu"
 							title={user.name}
 						>
-							{user.name.split(' ').map(n => n[0]).join('')}
+							{user.name
+								.split(' ')
+								.map((n) => n[0])
+								.join('')}
 						</button>
 					{/snippet}
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content class="min-w-44 rounded-lg" side="right" align="end" sideOffset={8}>
-					<DropdownMenu.Item onclick={() => onSelect({ itemId: '__user_info__', itemTitle: 'User Info' })}>
-						<UserCircle2Icon class="w-4 h-4 mr-2" />
+					<DropdownMenu.Item
+						onclick={() => onSelect({ itemId: '__user_info__', itemTitle: 'User Info' })}
+					>
+						<UserCircle2Icon class="mr-2 h-4 w-4" />
 						User Info
 					</DropdownMenu.Item>
-					<DropdownMenu.Item onclick={() => onSelect({ itemId: '__account__', itemTitle: 'Account' })}>
-						<CreditCardIcon class="w-4 h-4 mr-2" />
+					<DropdownMenu.Item
+						onclick={() => onSelect({ itemId: '__account__', itemTitle: 'Account' })}
+					>
+						<CreditCardIcon class="mr-2 h-4 w-4" />
 						Account
 					</DropdownMenu.Item>
 					<DropdownMenu.Separator />
-					<DropdownMenu.Item onclick={() => onSelect({ itemId: '__logout__', itemTitle: 'Logout' })}>
-						<LogOutIcon class="w-4 h-4 mr-2" />
+					<DropdownMenu.Item
+						onclick={() => onSelect({ itemId: '__logout__', itemTitle: 'Logout' })}
+					>
+						<LogOutIcon class="mr-2 h-4 w-4" />
 						Log Out
 					</DropdownMenu.Item>
 				</DropdownMenu.Content>
@@ -741,7 +856,7 @@
 	{#if showLabels}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="absolute right-0 top-0 bottom-0 cursor-col-resize"
+			class="absolute top-0 right-0 bottom-0 cursor-col-resize"
 			style="width:4px; z-index:10;"
 			onmousedown={onWidthDragStart}
 		></div>

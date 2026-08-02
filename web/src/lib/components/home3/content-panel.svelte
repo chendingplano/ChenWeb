@@ -2,11 +2,11 @@
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import DocProcessorDashboardView from '$lib/components/home3/doc-processor-dashboard-view.svelte';
-	import SiteFooter    from '../../../routes/semos/components/SiteFooter.svelte';
-	import KbImportView  from '$lib/components/home3/kb-import-view.svelte';
+	import SiteFooter from '../../../routes/semos/components/SiteFooter.svelte';
+	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
-	import DocGenView    from '$lib/components/home3/doc-gen-view.svelte';
-import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
+	import DocGenView from '$lib/components/home3/doc-gen-view.svelte';
+	import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import CdmEditorShell from '$lib/components/cdm/CdmEditorShell.svelte';
@@ -36,25 +36,26 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
 	import SkillMgmtView from '$lib/components/home3/skill-mgmt-view.svelte';
+	import DocFacetsView from '$lib/components/home3/doc-facets-view.svelte';
 	import KbSearchLabView from '$lib/components/home3/kb-search-lab-view.svelte';
 	import VideoManagementView from '$lib/components/home3/video-management-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
 	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
-	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
-	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
+	import Canvas01 from '$lib/components/shared-ui/canvas-01.svelte';
+	import Chatter01 from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import PanelRightIcon   from '@lucide/svelte/icons/panel-right';
-	import BotIcon          from '@lucide/svelte/icons/bot';
-	import ZapIcon          from '@lucide/svelte/icons/zap';
-	import LayoutGridIcon   from '@lucide/svelte/icons/layout-grid';
-	import CodeIcon         from '@lucide/svelte/icons/code-2';
-	import UserIcon         from '@lucide/svelte/icons/user';
-	import BookOpenIcon     from '@lucide/svelte/icons/book-open';
-	import SettingsIcon     from '@lucide/svelte/icons/settings';
-	import InfoIcon         from '@lucide/svelte/icons/info';
-	import ShieldIcon       from '@lucide/svelte/icons/shield';
-	import BookMarkedIcon   from '@lucide/svelte/icons/book-marked';
-	import BrainIcon        from '@lucide/svelte/icons/brain';
+	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
+	import BotIcon from '@lucide/svelte/icons/bot';
+	import ZapIcon from '@lucide/svelte/icons/zap';
+	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+	import CodeIcon from '@lucide/svelte/icons/code-2';
+	import UserIcon from '@lucide/svelte/icons/user';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import BookMarkedIcon from '@lucide/svelte/icons/book-marked';
+	import BrainIcon from '@lucide/svelte/icons/brain';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -64,76 +65,80 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	};
 
 	let {
-		darkMode       = true,
-		activeMenu     = null,
-		shelfOpen      = true,
+		darkMode = true,
+		activeMenu = null,
+		shelfOpen = true,
 		autoShrinkExpand = false,
-		docReviewKey   = 0,
-		railOffset     = 56,
+		docReviewKey = 0,
+		railOffset = 56,
 		siteConfig,
 		onToggleShelf,
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
-		onFocusModeChange = (_focused: boolean) => {},
+		onFocusModeChange = (_focused: boolean) => {}
 	}: {
-		darkMode:        boolean;
-		activeMenu:      ActiveSelection | null;
-		shelfOpen:       boolean;
+		darkMode: boolean;
+		activeMenu: ActiveSelection | null;
+		shelfOpen: boolean;
 		autoShrinkExpand?: boolean;
-		docReviewKey?:   number;
-		railOffset?:     number;
-		siteConfig:      SiteConfig;
-		onToggleShelf:   () => void;
+		docReviewKey?: number;
+		railOffset?: number;
+		siteConfig: SiteConfig;
+		onToggleShelf: () => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
 
 	// --- Layout constants ---
-	const radiusCard   = '12px'; // cards, panels
-	const radiusButton = '8px';  // buttons
+	const radiusCard = '12px'; // cards, panels
+	const radiusButton = '8px'; // buttons
 
 	// --- Design tokens ---
-	let pageBg        = $derived(darkMode ? '#171B26'  : '#F2F4F7');
-	let cardBg        = $derived(darkMode ? '#1F2333'  : '#FFFFFF');
-	let surface2      = $derived(darkMode ? '#252A3A'  : '#ECEEF2');
-	let borderColor   = $derived(darkMode ? '#2D3348'  : '#E4E6EB');
-	let accent        = $derived(darkMode ? '#818CF8'  : '#6366F1');
-	let accentTint    = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
-	let textPrimary   = $derived(darkMode ? '#E2E8F0' : '#111827');
+	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
+	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
+	let surface2 = $derived(darkMode ? '#252A3A' : '#ECEEF2');
+	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB');
+	let accent = $derived(darkMode ? '#818CF8' : '#6366F1');
+	let accentTint = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
+	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
-	let textMuted     = $derived(darkMode ? '#64748B' : '#9CA3AF');
+	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
 	// Section icon map
 	const sectionIcons: Record<string, any> = {
-		agents:       BotIcon,
-		chat:         BotIcon,
-		skills:       ZapIcon,
+		agents: BotIcon,
+		chat: BotIcon,
+		skills: ZapIcon,
 		applications: LayoutGridIcon,
-		coding:       CodeIcon,
-		personal:     UserIcon,
-		knowledge:    BookOpenIcon,
-		settings:     SettingsIcon,
-		about:        InfoIcon,
+		coding: CodeIcon,
+		personal: UserIcon,
+		knowledge: BookOpenIcon,
+		settings: SettingsIcon,
+		about: InfoIcon,
 		'system-admin': ShieldIcon,
 		jetstream: ShieldIcon,
 		'my-workspace': BookMarkedIcon,
-		'knowledge-engineering': BrainIcon
+		'knowledge-engineering': BrainIcon,
+		ontology: BrainIcon
 	};
 
 	// Section descriptions
 	const sectionDesc: Record<string, string> = {
-		agents:       'Manage, browse, and create AI agents for your workflows.',
-		chat:         'Chat with multiple agents and models in session tabs.',
-		skills:       'Discover and manage modular skills that extend your agents.',
+		agents: 'Manage, browse, and create AI agents for your workflows.',
+		chat: 'Chat with multiple agents and models in session tabs.',
+		skills: 'Discover and manage modular skills that extend your agents.',
 		applications: 'Connect and manage third-party app integrations.',
-		coding:       'AI-powered coding assistance: review, generate, and debug.',
-		personal:     'Your personal AI assistant for tasks, calendar, and email.',
-		knowledge:    'Your document library and semantic search knowledge base.',
-		settings:     'Configure your workspace, models, and integrations.',
-		about:        'Version info, credits, and system information.',
+		coding: 'AI-powered coding assistance: review, generate, and debug.',
+		personal: 'Your personal AI assistant for tasks, calendar, and email.',
+		knowledge: 'Your document library and semantic search knowledge base.',
+		settings: 'Configure your workspace, models, and integrations.',
+		about: 'Version info, credits, and system information.',
 		jetstream: 'Operational monitoring and diagnostics for JetStream services.',
-		'system-admin': 'System administration: JetStream monitoring, doc processor logs, and diagnostics.',
+		'system-admin':
+			'System administration: JetStream monitoring, doc processor logs, and diagnostics.',
 		'my-workspace': 'Your personal workspace: diary, notes, and resources.',
-		'knowledge-engineering': 'Manage research topic beans: articles, thoughts, designs, specs, and readings.'
+		'knowledge-engineering':
+			'Manage research topic beans: articles, thoughts, designs, specs, and readings.',
+		ontology: 'Browse and manage ontology artifacts: terms, facets, and semantic bindings.'
 	};
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
@@ -144,42 +149,42 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
-		activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
-		activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
-		activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
-		activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
-		activeMenu?.childId !== 'cdm-editor'
+			activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
+			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
+			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
+			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
+			activeMenu?.childId !== 'cdm-editor'
 	);
 </script>
 
 <main
-	class="relative flex-1 overflow-y-auto flex flex-col min-w-0"
+	class="relative flex min-w-0 flex-1 flex-col overflow-y-auto"
 	style="background:{pageBg}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
 	<!-- Topbar: breadcrumb + shelf toggle -->
 	{#if !isDashboard}
 		<div
-			class="flex items-center justify-between px-6 py-3 flex-shrink-0 sticky top-0"
+			class="sticky top-0 flex flex-shrink-0 items-center justify-between px-6 py-3"
 			style="background:{pageBg}; border-bottom:1px solid {borderColor}; z-index:5;"
 		>
 			<!-- Breadcrumb -->
 			<nav class="flex items-center gap-1.5" style="font-size:13px; color:{textMuted};">
 				<span>Home</span>
-				<ChevronRightIcon class="w-3 h-3" />
+				<ChevronRightIcon class="h-3 w-3" />
 				<span style="color:{textSecondary};">{activeMenu?.itemTitle}</span>
 				{#if activeMenu?.childTitle}
-					<ChevronRightIcon class="w-3 h-3" />
+					<ChevronRightIcon class="h-3 w-3" />
 					<span style="color:{textPrimary}; font-weight:500;">{activeMenu.childTitle}</span>
 				{/if}
 			</nav>
 			<!-- Shelf toggle -->
 			<button
 				onclick={onToggleShelf}
-				class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors duration-150"
+				class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
 				style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
 				aria-label={shelfOpen ? 'Close context panel' : 'Open context panel'}
 			>
-				<PanelRightIcon class="w-3.5 h-3.5" />
+				<PanelRightIcon class="h-3.5 w-3.5" />
 				{shelfOpen ? 'Close panel' : 'Open panel'}
 			</button>
 		</div>
@@ -197,7 +202,9 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<Canvas01
 				{darkMode}
 				{railOffset}
-				onClose={() => { /* no-op — handled by parent navigation */ }}
+				onClose={() => {
+					/* no-op — handled by parent navigation */
+				}}
 			/>
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
@@ -257,13 +264,15 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}
 			<ResearchTopicsView {darkMode} />
+		{:else if activeMenu?.childId === 'ontology-doc-facets'}
+			<DocFacetsView {darkMode} />
 		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-active'}
 			<SkillMgmtView {darkMode} initialFilter="activated" />
 		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-create'}
 			<SkillMgmtView {darkMode} openAdd={true} />
 		{:else if activeMenu?.itemId === 'skills'}
 			<SkillMgmtView {darkMode} />
-	{:else if activeMenu?.childId === 'ap-board'}
+		{:else if activeMenu?.childId === 'ap-board'}
 			<KanbanBoardView {darkMode} />
 		{:else if activeMenu?.childId === 'ap-agents'}
 			<AgentsView {darkMode} />
@@ -282,11 +291,11 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<div class="flex justify-end px-6 pt-4">
 				<button
 					onclick={onToggleShelf}
-					class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors duration-150"
+					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
 					style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
 					aria-label={shelfOpen ? 'Close context panel' : 'Open context panel'}
 				>
-					<PanelRightIcon class="w-3.5 h-3.5" />
+					<PanelRightIcon class="h-3.5 w-3.5" />
 					{shelfOpen ? 'Close panel' : 'Open panel'}
 				</button>
 			</div>
@@ -295,7 +304,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<!-- Section header + placeholder content -->
 			<div class="p-6">
 				<div
-					class="rounded-xl p-6 mb-6"
+					class="mb-6 rounded-xl p-6"
 					style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard};"
 				>
 					<div class="flex items-start justify-between">
@@ -304,14 +313,16 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 								{@const IconComponent = sectionIcons[sectionId]}
 								<div
 									role="presentation"
-									class="flex items-center justify-center rounded-xl flex-shrink-0"
+									class="flex flex-shrink-0 items-center justify-center rounded-xl"
 									style="width:48px; height:48px; background:{accentTint}; border:1px solid {accent}30;"
 								>
-									<IconComponent class="w-6 h-6" style="color:{accent};" />
+									<IconComponent class="h-6 w-6" style="color:{accent};" />
 								</div>
 							{/if}
 							<div>
-								<h1 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
+								<h1
+									style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;"
+								>
 									{activeMenu?.childTitle ?? activeMenu?.itemTitle}
 								</h1>
 								<p style="font-size:14px; color:{textSecondary};">
@@ -320,10 +331,14 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 							</div>
 						</div>
 						<button
-							class="flex items-center gap-2 rounded-lg px-4 py-2 cursor-pointer transition-opacity duration-150"
+							class="flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 transition-opacity duration-150"
 							style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; border-radius:{radiusButton};"
-							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
-							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+							onmouseenter={(e) => {
+								(e.currentTarget as HTMLElement).style.opacity = '0.88';
+							}}
+							onmouseleave={(e) => {
+								(e.currentTarget as HTMLElement).style.opacity = '1';
+							}}
 						>
 							+ New
 						</button>
@@ -332,7 +347,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 
 				{#if sectionId === 'settings'}
 					<div
-						class="rounded-xl p-6 space-y-6"
+						class="space-y-6 rounded-xl p-6"
 						style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; min-height:300px;"
 					>
 						<div>
@@ -350,12 +365,14 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 						>
 							<div class="flex items-start justify-between gap-6">
 								<div>
-									<div style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
+									<div
+										style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:4px;"
+									>
 										Auto Shrink/Expand
 									</div>
 									<p style="font-size:13px; color:{textSecondary}; line-height:1.5;">
-										When enabled, the left panel stays collapsed until you move over it.
-										When disabled, the panel only expands or shrinks when you use the rail button.
+										When enabled, the left panel stays collapsed until you move over it. When
+										disabled, the panel only expands or shrinks when you use the rail button.
 									</p>
 								</div>
 								<button
@@ -364,7 +381,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 									aria-checked={autoShrinkExpand}
 									aria-label="Toggle auto shrink expand"
 									onclick={() => onAutoShrinkExpandChange(!autoShrinkExpand)}
-									class="relative flex-shrink-0 rounded-full cursor-pointer transition-colors duration-200"
+									class="relative flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200"
 									style="
 										width:52px;
 										height:30px;
@@ -386,7 +403,11 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 							</div>
 							<div
 								class="mt-4 inline-flex items-center rounded-full px-3 py-1"
-								style="background:{autoShrinkExpand ? accentTint : borderColor}; color:{autoShrinkExpand ? accent : textMuted}; font-size:12px; font-weight:600;"
+								style="background:{autoShrinkExpand
+									? accentTint
+									: borderColor}; color:{autoShrinkExpand
+									? accent
+									: textMuted}; font-size:12px; font-weight:600;"
 							>
 								Default: Disabled
 							</div>
@@ -396,15 +417,22 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 					<!-- Placeholder content card -->
 					<div
 						role="presentation"
-						class="rounded-xl p-8 flex items-center justify-center"
+						class="flex items-center justify-center rounded-xl p-8"
 						style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; min-height:300px;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = cardBg; }}
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.background = surface2;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.background = cardBg;
+						}}
 					>
 						<div class="text-center">
 							{#if sectionIcons[sectionId]}
 								{@const IconComponent = sectionIcons[sectionId]}
-								<IconComponent class="w-12 h-12 mx-auto mb-4" style="color:{accent}; opacity:0.4;" />
+								<IconComponent
+									class="mx-auto mb-4 h-12 w-12"
+									style="color:{accent}; opacity:0.4;"
+								/>
 							{/if}
 							<p style="font-size:16px; font-weight:500; color:{textSecondary}; margin-bottom:8px;">
 								{activeMenu?.childTitle ?? activeMenu?.itemTitle}
