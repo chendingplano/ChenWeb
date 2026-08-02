@@ -161,7 +161,7 @@ ON CONFLICT (run_id, kind) WHERE run_id IS NOT NULL AND kind IS NOT NULL DO NOTH
 ON CONFLICT (record_id, kind) WHERE run_id IS NULL AND record_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, severity, alarm.Message, alarm.RecordID, kind)
 		return err
 	}
-	_, err := w.DB.ExecContext(ctx, "INSERT INTO alarms_errors (severity, message) VALUES ($1,$2)", severity, alarm.Message)
+	_, err := w.DB.ExecContext(ctx, "INSERT INTO alarms_errors (severity, message, kind) VALUES ($1,$2,$3)", severity, alarm.Message, kind)
 	return err
 }
 

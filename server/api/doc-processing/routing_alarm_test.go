@@ -174,18 +174,20 @@ func TestRoutingAlarmSQLWriterPrefersRunIDOverRecordIDWhenBothSet(t *testing.T) 
 
 // TestRoutingAlarmSQLWriterInsertsUnconditionallyWithNoCorrelator covers the
 // residual case where neither RunID nor RecordID is set (should not happen
-// for a real event, which always carries a record id): the alarm inserts
-// without any run_id/record_id/kind columns, matching pre-dedup behavior.
+// for a real event, which always carries a record id): the alarm inserts with
+// kind but no run_id/record_id, matching pre-dedup behavior for that residual
+// case.
 func TestRoutingAlarmSQLWriterInsertsUnconditionallyWithNoCorrelator(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectExec("INSERT INTO alarms_errors \\(severity, message\\) VALUES \\(\\$1,\\$2\\)").
-		WithArgs(RoutingAlarmSeverityError, "no correlator available").
+	mock.ExpectExec("INSERT INTO alarms_errors \\(severity, message, kind\\) VALUES \\(\\$1,\\$2,\\$3\\)").
+		WithArgs(RoutingAlarmSeverityError, "no correlator available", RoutingAlarmKindPlanBuildFailure).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	if err := (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
+		Kind:    RoutingAlarmKindPlanBuildFailure,
 		Message: "no correlator available",
 	}); err != nil {
 		t.Fatalf("WriteAlarm: %v", err)

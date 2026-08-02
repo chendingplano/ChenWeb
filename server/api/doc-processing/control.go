@@ -801,6 +801,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		copy(scopedAlarms, routingResult.Alarms)
 		for i := range scopedAlarms {
 			scopedAlarms[i].RunID = runID
+			scopedAlarms[i].RecordID = evt.RecordID
 		}
 		s.raiseRoutingAlarms(ctx, scopedAlarms)
 		for _, alarm := range DedupeRoutingAlarms(scopedAlarms) {
