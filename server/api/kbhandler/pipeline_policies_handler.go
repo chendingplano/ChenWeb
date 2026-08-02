@@ -1,17 +1,28 @@
 package kbhandler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
+
+var newPipelinePolicyCompiler = func() docprocessing.PolicyCompiler {
+	return docprocessing.PolicyCompilerSQLStore{DB: ApiTypes.ProjectDBHandle}
+}
+
+var recompilePipelinePolicyInTx = func(ctx context.Context, tx *sql.Tx, policyID int64) (docprocessing.CompiledPolicy, error) {
+	return (docprocessing.PolicyCompilerSQLStore{DB: tx}).CompilePolicy(ctx, policyID)
+}
 
 type pipelinePolicyRecord struct {
 	ID          int64      `json:"id"`
@@ -165,6 +176,10 @@ func ActivatePipelinePolicy(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PP_200")
 	defer rc.Close()
 	logger := rc.GetLogger()
+	user := rc.IsAuthenticated()
+	if err := pipelineRoutingAuthorizer.Authorize(user, PolicyActionActivation); err != nil {
+		return policyAuthorizationResponse(c, err)
+	}
 
 	idStr := strings.TrimSpace(c.Param("id"))
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -172,15 +187,18 @@ func ActivatePipelinePolicy(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid id (CWB_KB_PP_201)"})
 	}
 
-	var payload struct {
-		ActivatedBy *string `json:"activated_by"`
-	}
-	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil && err.Error() != "EOF" {
+	var payload struct{}
+	if err := decodeStrictJSON(c, &payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PP_202)"})
 	}
-	activatedBy := "unknown"
-	if payload.ActivatedBy != nil && strings.TrimSpace(*payload.ActivatedBy) != "" {
-		activatedBy = strings.TrimSpace(*payload.ActivatedBy)
+
+	compiled, err := newPipelinePolicyCompiler().CompilePolicy(c.Request().Context(), id)
+	if err != nil {
+		logger.Warn("pipeline policy compilation failed", "id", id, "err", err)
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse{Status: false, ErrorMsg: "pipeline policy compilation failed: " + err.Error()})
+	}
+	if compiled.PolicyID != id || strings.TrimSpace(compiled.Checksum) == "" {
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse{Status: false, ErrorMsg: "pipeline policy compilation returned invalid identity/checksum"})
 	}
 
 	db := ApiTypes.ProjectDBHandle
@@ -191,13 +209,41 @@ func ActivatePipelinePolicy(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec("UPDATE kb.pipeline_policies SET status = 'archived', modify_time = NOW() WHERE status = 'active'"); err != nil {
+	var storedChecksum, targetStatus string
+	if err := tx.QueryRow("SELECT COALESCE(checksum, ''), status FROM kb.pipeline_policies WHERE id = $1 FOR UPDATE", id).Scan(&storedChecksum, &targetStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PP_207)"})
+		}
+		logger.Error("lock target pipeline policy failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to activate pipeline policy (CWB_KB_PP_204)"})
+	}
+	if strings.ToLower(strings.TrimSpace(targetStatus)) != "draft" {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "only a draft pipeline policy can be activated"})
+	}
+	recompiled, err := recompilePipelinePolicyInTx(c.Request().Context(), tx, id)
+	if err != nil {
+		logger.Warn("pipeline policy transaction recompile failed", "id", id, "err", err)
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "pipeline policy changed during compilation"})
+	}
+	if recompiled.PolicyID != compiled.PolicyID || recompiled.Checksum != compiled.Checksum {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "pipeline policy changed during compilation"})
+	}
+	if storedChecksum != "" && storedChecksum != compiled.Checksum {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "pipeline policy changed after compilation"})
+	}
+	if storedChecksum == "" {
+		if _, err := tx.Exec("UPDATE kb.pipeline_policies SET checksum = $1, modify_time = NOW() WHERE id = $2", compiled.Checksum, id); err != nil {
+			logger.Error("store compiled pipeline policy checksum failed", "id", id, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to activate pipeline policy (CWB_KB_PP_204)"})
+		}
+	}
+	if _, err := tx.Exec("UPDATE kb.pipeline_policies SET status = 'archived', modify_time = NOW() WHERE status = 'active' AND id <> $1", id); err != nil {
 		logger.Error("archive previous active pipeline policy failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to activate pipeline policy (CWB_KB_PP_204)"})
 	}
 	result, err := tx.Exec(
-		"UPDATE kb.pipeline_policies SET status = 'active', activated_at = NOW(), activated_by = $1, modify_time = NOW() WHERE id = $2",
-		activatedBy, id,
+		"UPDATE kb.pipeline_policies SET status = 'active', activated_at = NOW(), activated_by = $1, checksum = $3, modify_time = NOW() WHERE id = $2 AND status = 'draft' AND checksum = $3",
+		strings.TrimSpace(user.UserName), id, compiled.Checksum,
 	)
 	if err != nil {
 		logger.Error("activate pipeline policy failed", "id", id, "err", err)

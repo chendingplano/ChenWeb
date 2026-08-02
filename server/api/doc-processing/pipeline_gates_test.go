@@ -77,7 +77,7 @@ func TestResolveProcessorGateFallbackDefaultsAndDeferFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Effect != GateEffectDefer || got.DeferFingerprint == "" || !reflect.DeepEqual(got.DeferredPaths, []string{"document.domain", "document.jurisdiction"}) {
+	if got.Effect != GateEffectDefer || got.DeferFingerprint == "" || !reflect.DeepEqual(got.DeferredPaths, []string{"document.doc_kind", "document.domain", "document.jurisdiction"}) {
 		t.Fatalf("resolution=%+v", got)
 	}
 }

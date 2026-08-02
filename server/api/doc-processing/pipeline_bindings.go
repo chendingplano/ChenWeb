@@ -37,6 +37,7 @@ type PipelineBinding struct {
 	Predicate         semrules.Document
 	PredicateChecksum string
 	Active            bool
+	LegacyRule        *ProductionPipelineRule `json:"-"`
 }
 
 type PipelineBindingSelection struct {

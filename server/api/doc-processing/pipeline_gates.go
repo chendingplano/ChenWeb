@@ -151,6 +151,7 @@ func ResolveProcessorGate(spec ProcessorSpec, gates []PipelineGate, facts semrul
 		resolution.WinningChecksum = winner.PredicateChecksum
 		if winner.Effect == GateEffectDefer {
 			paths := append([]string(nil), winner.RequiredFacets...)
+			paths = append(paths, semrules.Analyze(winner.Predicate).RequiredPaths...)
 			paths = append(paths, results[winner.ID].DecisionRelevantMissingPaths...)
 			resolution.DeferredPaths = sortedUniqueNonEmpty(paths)
 			if len(resolution.DeferredPaths) == 0 {
