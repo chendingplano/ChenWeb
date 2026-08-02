@@ -292,16 +292,12 @@ func TestHandleEvent_CreatesAndClosesRunAndThreadsRunIDToProcessors(t *testing.T
 	}
 }
 
-// TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline is the
-// regression test for the gap found during P1 benchmark-closeout prep:
-// DocPipelineModeEnforced computed and recorded ExcludedByPolicy, but
-// handleEvent never applied it to the processors that actually ran --
-// selectProcessors only ever consulted evt.Operations, never the plan. This
-// proves applyPlanEnforcement closes that gap: with an enforced pipeline
-// declaring only "extract_metrics", a request for both extract_metrics and
-// extract_provisions must invoke extract_metrics and must NOT invoke
-// extract_provisions.
-func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline(t *testing.T) {
+// TestHandleEvent_ExplicitOperationsBypassPolicyGates proves C1's run-scoped
+// processor override precedence: operation/processor_override payload fields
+// select processors directly for this run, even when enforced policy would
+// normally exclude one of them. The no-explicit-operations test below still
+// proves common ingestion is policy-enforced.
+func TestHandleEvent_ExplicitOperationsBypassPolicyGates(t *testing.T) {
 	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
 	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
@@ -351,8 +347,8 @@ func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline(t *testing.T) {
 		t.Fatalf("handleEvent: %v", err)
 	}
 
-	if got, want := calls, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("processor calls=%v, want %v (extract_provisions must be excluded by enforcement)", got, want)
+	if got, want := calls, []string{"extract_metrics", "extract_provisions"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("processor calls=%v, want %v (explicit operations bypass policy gates)", got, want)
 	}
 
 	runStore.mu.Lock()
@@ -360,8 +356,11 @@ func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline(t *testing.T) {
 	if len(runStore.creates) != 1 {
 		t.Fatalf("creates=%d, want 1", len(runStore.creates))
 	}
-	if got, want := runStore.creates[0].Processors, []string{"extract_metrics"}; len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("persisted run Processors=%v, want %v (excluded processor should not be recorded as executed either)", got, want)
+	if got, want := runStore.creates[0].Processors, []string{"extract_metrics", "extract_provisions"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("persisted run Processors=%v, want %v", got, want)
+	}
+	if got := runStore.creates[0].Parameters["processor_override_bypasses_policy"]; got != true {
+		t.Errorf("processor_override_bypasses_policy=%v, want true", got)
 	}
 
 	planStore.mu.Lock()
@@ -369,8 +368,87 @@ func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline(t *testing.T) {
 	if len(planStore.creates) != 1 {
 		t.Fatalf("plan creates=%d, want 1", len(planStore.creates))
 	}
-	if got, want := planStore.creates[0].ExcludedByPolicy, []string{"extract_provisions"}; len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("plan ExcludedByPolicy=%v, want %v", got, want)
+	if got := planStore.creates[0].ExcludedByPolicy; len(got) != 0 {
+		t.Errorf("plan ExcludedByPolicy=%v, want empty because explicit operations bypass policy gates", got)
+	}
+	if got, want := planStore.creates[0].PlanFacts.Mode, DocPipelineModePlanOnly; got != want {
+		t.Errorf("plan mode=%q, want %q", got, want)
+	}
+}
+
+func TestHandleEvent_PipelineOverrideOutranksCanonicalBindingAndStoreDefault(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	t.Setenv("DOC_PIPELINE_PLAN_ONLY", "false")
+	t.Cleanup(func() {
+		SetProductionPipelineRegistry(nil)
+		SetProductionPipelineBindings(nil)
+	})
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "store_default"},
+		{Name: "policy_selected"},
+		{Name: "override_pipeline"},
+	})
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "pdf-policy", "policy_selected", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:                 4821,
+			ParserName:         "opendata",
+			ResultFilename:     "result.json",
+			StagingFilename:    inputPath,
+			StatusRaw:          "[]",
+			StoreBoundPipeline: "store_default",
+			InputDocType:       "pdf",
+			SourceLanguage:     "en",
+		},
+	}
+	runStore := &fakeRunStore{}
+	planStore := &fakePlanStore{}
+	var calls []string
+	svc := &ControlService{
+		InputStore: store,
+		RunStore:   runStore,
+		PlanStore:  planStore,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &calls},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{
+		"record_id":"4821",
+		"filename":"`+inputPath+`",
+		"pipeline_override":"override_pipeline"
+	}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+
+	planStore.mu.Lock()
+	defer planStore.mu.Unlock()
+	if len(planStore.creates) != 1 {
+		t.Fatalf("plan creates=%d, want 1", len(planStore.creates))
+	}
+	binding := planStore.creates[0].PipelineBinding
+	if binding.Source != "explicit_request" || binding.SelectedPipeline != "override_pipeline" || binding.RequestedPipeline != "override_pipeline" {
+		t.Fatalf("binding=%#v, want explicit override_pipeline", binding)
+	}
+
+	runStore.mu.Lock()
+	defer runStore.mu.Unlock()
+	if len(runStore.creates) != 1 {
+		t.Fatalf("run creates=%d, want 1", len(runStore.creates))
+	}
+	if got := runStore.creates[0].Parameters["pipeline_override"]; got != "override_pipeline" {
+		t.Fatalf("pipeline_override parameter=%v, want override_pipeline", got)
 	}
 }
 

@@ -164,6 +164,25 @@ func TestParseLineFileGeneratedEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("parses run scoped overrides", func(t *testing.T) {
+		evt, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"42","pipeline_override":"metrics_only","processor_overrides":"extract-metrics, extract_metadata"}`))
+		if err != nil {
+			t.Fatalf("ParseLineFileGeneratedEvent: %v", err)
+		}
+		if evt.PipelineOverride != "metrics_only" {
+			t.Fatalf("PipelineOverride=%q, want metrics_only", evt.PipelineOverride)
+		}
+		want := []string{"extract_metrics", "extract_doc_metadata"}
+		if len(evt.Operations) != len(want) {
+			t.Fatalf("operations len=%d, want %d (%v)", len(evt.Operations), len(want), evt.Operations)
+		}
+		for i := range want {
+			if evt.Operations[i] != want[i] {
+				t.Fatalf("operations[%d]=%q, want %q", i, evt.Operations[i], want[i])
+			}
+		}
+	})
+
 	t.Run("uses line_file_filename when present", func(t *testing.T) {
 		evt, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"42","line_file_filename":"/tmp/out/actual_opendata.txt"}`))
 		if err != nil {

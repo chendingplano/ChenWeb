@@ -15,13 +15,14 @@ import (
 const DefaultEventSubject = "kb.pdf.start-doc-processing"
 
 type LineFileGeneratedEvent struct {
-	RecordID   int64
-	Filename   string
-	Force      bool
-	ForceClear bool
-	Type       string
-	Status     string
-	Operations []string
+	RecordID         int64
+	Filename         string
+	Force            bool
+	ForceClear       bool
+	Type             string
+	Status           string
+	Operations       []string
+	PipelineOverride string
 }
 
 func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error) {
@@ -54,13 +55,14 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 	}
 
 	return LineFileGeneratedEvent{
-		RecordID:   rid,
-		Filename:   firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
-		Force:      force,
-		ForceClear: forceClear,
-		Type:       strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
-		Status:     strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
-		Operations: parseOperations(raw["operation"]),
+		RecordID:         rid,
+		Filename:         firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
+		Force:            force,
+		ForceClear:       forceClear,
+		Type:             strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
+		Status:           strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
+		Operations:       parseOperations(firstPresentValue(raw, "operation", "processor_override", "processor_overrides", "doc-processors", "doc_processors")),
+		PipelineOverride: strings.TrimSpace(asString(raw["pipeline_override"])),
 	}, nil
 }
 

@@ -667,7 +667,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	}
-	if planErr == nil {
+	if planErr == nil && len(evt.Operations) == 0 {
 		processors = s.applyPlanEnforcement(processors, plan)
 	}
 	var runID int64
@@ -690,6 +690,10 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		if len(evt.Operations) > 0 {
 			parameters["operations"] = evt.Operations
+			parameters["processor_override_bypasses_policy"] = true
+		}
+		if strings.TrimSpace(evt.PipelineOverride) != "" {
+			parameters["pipeline_override"] = strings.TrimSpace(evt.PipelineOverride)
 		}
 		if strings.TrimSpace(evt.Filename) != "" {
 			parameters["filename"] = evt.Filename
@@ -1453,6 +1457,9 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 		}
 	}
 	if s == nil || s.InputStore == nil {
+		if len(evt.Operations) > 0 {
+			mode = DocPipelineModePlanOnly
+		}
 		return ProductionPlanFacts{RequestedProcessors: requested, Mode: mode, ActivePolicyID: policyID, ActivePolicyVersion: policyVersion}, nil
 	}
 	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
@@ -1460,7 +1467,14 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 		return ProductionPlanFacts{}, err
 	}
 	facts := BuildProductionPlanFactsFromInputRecord(requested, rec)
-	facts.Mode = mode
+	if override := strings.TrimSpace(evt.PipelineOverride); override != "" {
+		facts.RequestedPipeline = override
+	}
+	if len(evt.Operations) > 0 {
+		facts.Mode = DocPipelineModePlanOnly
+	} else {
+		facts.Mode = mode
+	}
 	facts.ActivePolicyID = policyID
 	facts.ActivePolicyVersion = policyVersion
 	return facts, nil
