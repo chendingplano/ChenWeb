@@ -4,11 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
+
+// captureWriter collects slog text output into a buffer so a test can assert
+// the selector surfaced a best-effort alarm-write failure via the logger.
+type captureWriter struct{ buf *string }
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	*w.buf += string(p)
+	return len(p), nil
+}
+
+var _ io.Writer = (*captureWriter)(nil)
 
 // stubSelectionSource fakes the SelectionSource surface (ProfileStore): the
 // knowledge-store derivation and the pinned released-profile load, so the
@@ -341,6 +355,39 @@ func TestSelectRaisesExactlyOneWarningPerIndeterminateScopeId(t *testing.T) {
 	}
 	if len(alarms.written) != 1 {
 		t.Fatalf("written = %#v, want still exactly one warning (the indeterminate scope only)", alarms.written)
+	}
+}
+
+// TestSelectStillCreatesIndeterminateScopeWhenAlarmWriteFails proves spec
+// 2026080102 section 11's "create the scope with selection_status=indeterminate,
+// continue review, and raise one warning" even when the warning write fails: a
+// best-effort warning must not abort scope creation, so Select returns the
+// indeterminate SelectionResult with the failure surfaced via the logger
+// rather than an error.
+func TestSelectStillCreatesIndeterminateScopeWhenAlarmWriteFails(t *testing.T) {
+	alarms := &fakeSelectionAlarmWriter{failFor: SelectionAlarmKindIndeterminate}
+	var logged string
+	logger := slog.New(slog.NewTextHandler(&captureWriter{buf: &logged}, nil))
+	selector := Selector{
+		Source: &stubSelectionSource{storeID: 9, released: selectionFixture(selectionProfile("p-indet", applicabilityIndet, `["display_metrics"]`))},
+		Alarms: alarms,
+		Logger: logger,
+	}
+	result, err := selector.Select(context.Background(), SelectionRequest{
+		ReviewScopeID:       "scope-indet",
+		ReviewedDocumentIDs: []int64{101},
+		ClosedDimensions:    []string{"display_metrics"},
+		ReviewContext:       selectionReviewContext(),
+		SubjectFacts:        &stubSubjectFactsLoader{facts: semrules.FactSet{}},
+	})
+	if err != nil {
+		t.Fatalf("Select must still succeed when the alarm write fails: %v", err)
+	}
+	if result.SelectionStatus != SelectionStatusIndeterminate {
+		t.Fatalf("selection_status = %q, want indeterminate scope still created", result.SelectionStatus)
+	}
+	if !strings.Contains(logged, "selection alarm write failed") || !strings.Contains(logged, "scope-indet") {
+		t.Fatalf("logger = %q, want the failed write surfaced via the logger", logged)
 	}
 }
 

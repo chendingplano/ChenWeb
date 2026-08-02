@@ -96,12 +96,26 @@ type SelectionAlarmWriter interface {
 	WriteSelectionAlarm(context.Context, SelectionAlarm) error
 }
 
+// SelectionLogger receives the best-effort alarm-write failure. Both the
+// standard library's *slog.Logger and shared's ApiTypes.JimoLogger satisfy it,
+// so the handler can inject its request logger with no adapter code.
+type SelectionLogger interface {
+	Error(message string, args ...any)
+}
+
 // Selector performs deterministic review-profile selection. Source supplies
 // the pinned released profiles and knowledge-store derivation; Alarms (may be
-// nil) raises the one-per-scope indeterminacy warning.
+// nil) raises the one-per-scope indeterminacy warning; Logger (may be nil)
+// receives the write failure when the warning cannot be persisted, because
+// that must never abort the scope's creation (spec 2026080102 section 11:
+// "create the scope with selection_status=indeterminate, continue review, and
+// raise one warning deduplicated by scope id" -- an alarms-table outage must
+// not stop document/review processing, matching the E3 routing-alarm
+// precedent).
 type Selector struct {
 	Source SelectionSource
 	Alarms SelectionAlarmWriter
+	Logger SelectionLogger
 }
 
 // SelectionSnapshot is the immutable selection record persisted as
@@ -288,13 +302,20 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 	}
 
 	if indeterminate && s.Alarms != nil {
-		if err := s.Alarms.WriteSelectionAlarm(ctx, SelectionAlarm{
+		alarm := SelectionAlarm{
 			Kind:     SelectionAlarmKindIndeterminate,
 			Severity: SelectionAlarmSeverityWarning,
 			Message:  "automatic review profile selection is indeterminate on a requested closed dimension; review continues with explicit indeterminate applicability results",
 			ScopeID:  req.ReviewScopeID,
-		}); err != nil {
-			return SelectionResult{}, err
+		}
+		if err := s.Alarms.WriteSelectionAlarm(ctx, alarm); err != nil {
+			// The warning is best-effort: a failed write must not abort the
+			// scope's creation (spec section 11 -- the scope is still created
+			// with selection_status=indeterminate and executable, and the
+			// warning is deduplicated by scope id). Log and continue.
+			if s.Logger != nil {
+				s.Logger.Error("selection alarm write failed", "scope_id", alarm.ScopeID, "kind", alarm.Kind, "err", err)
+			}
 		}
 	}
 	return result, nil

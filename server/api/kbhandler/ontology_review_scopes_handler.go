@@ -76,7 +76,7 @@ func CreateOntologyReviewScope(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_ORS_101)"})
 	}
 	if scope.SelectionMode == profiles.SelectionModeDeterministicRule {
-		created, err := createDeterministicReviewScope(c.Request().Context(), scope)
+		created, err := createDeterministicReviewScope(c.Request().Context(), scope, rc.GetLogger())
 		if err != nil {
 			rc.GetLogger().Error("create deterministic ontology review scope failed", "err", err)
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "failed to create deterministic immutable review scope (CWB_KB_ORS_103)"})
@@ -110,7 +110,7 @@ func defaultJSONArray(raw json.RawMessage) []byte {
 	return raw
 }
 
-func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewScope) (profiles.ReviewScope, error) {
+func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewScope, logger profiles.SelectionLogger) (profiles.ReviewScope, error) {
 	db := ApiTypes.ProjectDBHandle
 	if db == nil {
 		return profiles.ReviewScope{}, errors.New("db is nil")
@@ -133,6 +133,7 @@ func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewSc
 	selector := profiles.Selector{
 		Source: profiles.ProfileStore{DB: db},
 		Alarms: profiles.SelectionAlarmSQLWriter{DB: db},
+		Logger: logger,
 	}
 	selection, err := selector.Select(ctx, profiles.SelectionRequest{
 		ReviewScopeID:       scope.ReviewScopeID,

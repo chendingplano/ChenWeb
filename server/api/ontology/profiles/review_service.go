@@ -128,7 +128,11 @@ func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope
 	for _, d := range dimensions {
 		closed[d] = true
 	}
-	applicability, decisionRelevant, err := ruleApplicabilityGate(scope, s.ApplicabilityContext)
+	gateFacts, err := ruleApplicabilityGateFacts(scope, s.ApplicabilityContext, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	applicability, decisionRelevant, err := ruleApplicabilityGate(scope, gateFacts)
 	if err != nil {
 		return nil, err
 	}
@@ -177,32 +181,18 @@ func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope
 }
 
 // ruleApplicabilityGate builds the per-rule applicability gate for the frozen
-// scope. The review context facts are derived from the scope's own frozen
-// fields (jurisdiction, as-of date, operating context), never from mutable
-// current configuration, so a scope's applicability result stays reproducible
-// from the scope record alone. decisionRelevant reports whether an
-// indeterminate applicability is decision-relevant: a tier-3 missing path is
-// decision-relevant exactly when the rule's profile closed dimensions
-// intersect the scope's closed dimensions (spec section 6).
-func ruleApplicabilityGate(scope ReviewScope, ctx *ReviewApplicabilityContext) (func(ProfileRule) (ruleApplicabilityGateResult, error), func(ProfileRule) bool, error) {
-	context := ReviewApplicabilityContext{}
-	if ctx != nil {
-		context = *ctx
-	}
-	if context.Jurisdiction == "" {
-		context.Jurisdiction = scope.Jurisdiction
-	}
-	if context.AsOfDate == "" {
-		context.AsOfDate = scope.AsOfDate
-	}
-	if context.OperatingContext == "" {
-		context.OperatingContext = scope.OperatingContext
-	}
+// scope, evaluating each pinned rule's applicability predicate against the
+// frozen per-subject fact base supplied by ruleApplicabilityGateFacts (the
+// scope's fact_snapshot entry for the executed input record, with the review
+// context as fallback). The fact base is derived from the scope's own frozen
+// fields, never from mutable current configuration, so a scope's applicability
+// result stays reproducible from the scope record alone (acceptance criterion
+// 14). decisionRelevant reports whether an indeterminate applicability is
+// decision-relevant: a tier-3 missing path is decision-relevant exactly when
+// the rule's profile closed dimensions intersect the scope's closed dimensions
+// (spec section 6).
+func ruleApplicabilityGate(scope ReviewScope, facts semrules.FactSet) (func(ProfileRule) (ruleApplicabilityGateResult, error), func(ProfileRule) bool, error) {
 	profileClosed, err := pinnedProfileClosedDimensions(scope)
-	if err != nil {
-		return nil, nil, err
-	}
-	reviewFacts, err := BuildReviewContextFacts(context)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -225,7 +215,7 @@ func ruleApplicabilityGate(scope ReviewScope, ctx *ReviewApplicabilityContext) (
 		if _, _, err := semrules.Canonicalize(doc); err != nil {
 			return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
 		}
-		result := semrules.EvaluateDocument(doc, reviewFacts)
+		result := semrules.EvaluateDocument(doc, facts)
 		switch result.Truth {
 		case semrules.TruthTrue:
 			return gateApplicable, nil
@@ -244,6 +234,65 @@ func ruleApplicabilityGate(scope ReviewScope, ctx *ReviewApplicabilityContext) (
 		return slicesIntersect(profileClosed[profileKey(rule.ProfileID, rule.ProfileVersion)], requestClosed)
 	}
 	return applicability, decisionRelevant, nil
+}
+
+// ruleApplicabilityGateFacts resolves the fact base for rule-level
+// applicability: the scope's frozen per-subject fact snapshot entry for the
+// executed input record (review context + document + deployment facts merged
+// at selection time), so a rule whose applicability references document.* or
+// deployment.* (first-class paths per spec section 3.3) is evaluated against
+// the facts that actually selected the profile. Fallback: when the scope has
+// no fact_snapshot or no entry matches the input record (explicit-mode scopes,
+// and P4-era scopes), the review-context-only facts are used, preserving the
+// previous behavior exactly.
+func ruleApplicabilityGateFacts(scope ReviewScope, ctx *ReviewApplicabilityContext, inputRecordID int64) (semrules.FactSet, error) {
+	context := ReviewApplicabilityContext{}
+	if ctx != nil {
+		context = *ctx
+	}
+	if context.Jurisdiction == "" {
+		context.Jurisdiction = scope.Jurisdiction
+	}
+	if context.AsOfDate == "" {
+		context.AsOfDate = scope.AsOfDate
+	}
+	if context.OperatingContext == "" {
+		context.OperatingContext = scope.OperatingContext
+	}
+	reviewFacts, err := BuildReviewContextFacts(context)
+	if err != nil {
+		return nil, err
+	}
+	frozen, ok, err := frozenSubjectFacts(scope, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return reviewFacts, nil
+	}
+	// The snapshot facts already include the review context (merged at
+	// selection time), so the review context must not be re-added: a duplicate
+	// known producer would be rejected. Use the frozen merged facts directly.
+	return frozen, nil
+}
+
+// frozenSubjectFacts returns the frozen per-subject fact set from the scope's
+// fact_snapshot whose subject's document id matches the executed input record.
+// ok is false when the scope has no fact_snapshot or no entry matches.
+func frozenSubjectFacts(scope ReviewScope, inputRecordID int64) (semrules.FactSet, bool, error) {
+	if len(scope.FactSnapshot) == 0 {
+		return nil, false, nil
+	}
+	var snapshots []SubjectFactSnapshot
+	if err := json.Unmarshal(scope.FactSnapshot, &snapshots); err != nil {
+		return nil, false, fmt.Errorf("fact_snapshot: %w", err)
+	}
+	for _, entry := range snapshots {
+		if entry.Subject.DocumentID == inputRecordID {
+			return entry.Facts, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // scopeClosedDimensions returns the request's closed dimensions frozen in the

@@ -71,6 +71,69 @@ func TestCreateDeterministicReviewScopeSelectsAndPersistsFrozenSelection(t *test
 	}
 }
 
+// TestCreateOntologyReviewScopePersistsFrozenSelection restores the explicit
+// Create handler-level coverage (deleted in the F2 diff): an explicit scope
+// round-trips through CreateOntologyReviewScope with the five P5 columns
+// nullable (knowledge_store_id, selection_attempt_id, selection_status,
+// fact_snapshot, selection_snapshot all NULL), preserving explicit mode exactly.
+func TestCreateOntologyReviewScopePersistsFrozenSelection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	old := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = old }()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_review_scopes")).
+		WithArgs("scope-1", `[]`, `[]`, `[]`, "2026-08-01", "CN", nil, `[{"profile_id":"p","release_id":42}]`, "explicit", `{}`, `[]`, nil, nil, nil, nil, nil, nil, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"review_scope_id", "reviewed_document_ids", "target_object_ids", "target_class_term_ids", "as_of_date", "jurisdiction", "operating_context", "selected_profiles", "selection_mode", "precedence_policy", "closed_dimensions", "selected_by", "selection_reason", "create_time", "knowledge_store_id", "selection_attempt_id", "selection_status", "fact_snapshot", "selection_snapshot"}).
+			AddRow("scope-1", []byte(`[]`), []byte(`[]`), []byte(`[]`), "2026-08-01", "CN", nil, []byte(`[{"profile_id":"p","release_id":42}]`), "explicit", []byte(`{}`), []byte(`[]`), "", "", now, nil, nil, nil, nil, nil))
+	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/review-scopes", `{"review_scope_id":"scope-1","as_of_date":"2026-08-01","jurisdiction":"CN","selected_profiles":[{"profile_id":"p","release_id":42}]}`, nil)
+	if err := CreateOntologyReviewScope(c); err != nil {
+		t.Fatalf("CreateOntologyReviewScope: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestExecuteOntologyReviewScopeUsesPinnedRulesAndPersistsFinding restores the
+// full Execute endpoint handler-level coverage (deleted in the F2 diff): scope
+// Get (19 columns incl. the 5 P5 columns) -> pinned rule load -> review-run
+// INSERT -> finding INSERT, proving the frozen scope's rules are loaded and the
+// finding persists.
+func TestExecuteOntologyReviewScopeUsesPinnedRulesAndPersistsFinding(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	old := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = old }()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_review_scopes WHERE review_scope_id = $1")).WithArgs("scope").WillReturnRows(sqlmock.NewRows([]string{"review_scope_id", "reviewed_document_ids", "target_object_ids", "target_class_term_ids", "as_of_date", "jurisdiction", "operating_context", "selected_profiles", "selection_mode", "precedence_policy", "closed_dimensions", "selected_by", "selection_reason", "create_time", "knowledge_store_id", "selection_attempt_id", "selection_status", "fact_snapshot", "selection_snapshot"}).AddRow("scope", []byte(`[]`), []byte(`[]`), []byte(`[]`), "2026-08-01", "CN", nil, []byte(`[{"profile_id":"p","profile_version":1,"release_id":42}]`), "explicit", []byte(`{}`), []byte(`["d"]`), "", "", now, nil, nil, nil, nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profile_rules pr\nJOIN kb.ontology_profiles p")).WithArgs("p", 1, int64(42)).WillReturnRows(sqlmock.NewRows([]string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "released_in_release_id", "create_time", "create_by", "modify_time", "modify_by"}).AddRow(9, "r", 1, "p", 1, "required_assertion_pattern", "included_in_release", "error", []byte(`{"dimension":"d","predicate_term_id":"x","quantifier":"exists_conforming"}`), []byte(`{}`), int64(42), now, "", now, ""))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_review_runs")).WithArgs("scope", int64(2), "none").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "review_scope_id", "input_record_id", "assertion_watermark", "create_time"}).AddRow(int64(77), "scope", int64(2), "none", now))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.doc_review_findings")).WithArgs(int64(2), int64(3), int64(77), "ontology_profile", "profile", "error", "missing", "r", "no qualifying assertion in a closed dimension", "scope", int64(9), int64(0)).WillReturnResult(sqlmock.NewResult(1, 1))
+	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/review-scopes/scope/execute", `{"input_record_id":2,"run_id":3}`, map[string]string{"scope_id": "scope"})
+	if err := ExecuteOntologyReviewScope(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateDeterministicReviewScopeRejectsSuppliedSelectedProfiles(t *testing.T) {
 	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/review-scopes", `{"review_scope_id":"scope-det","reviewed_document_ids":[101],"selected_profiles":[{"profile_id":"p"}],"selection_mode":"deterministic_rule"}`, nil)
 	if err := CreateOntologyReviewScope(c); err != nil {

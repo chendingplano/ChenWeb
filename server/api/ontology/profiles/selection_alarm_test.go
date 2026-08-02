@@ -104,9 +104,13 @@ func (w *fakeSelectionAlarmWriter) WriteSelectionAlarm(_ context.Context, alarm 
 	return nil
 }
 
-func TestWriteSelectionAlarmPropagatesWriterErrors(t *testing.T) {
+// TestWriteSelectionAlarmSurfacesWriterErrors proves the writer itself returns
+// a write failure (which the selector then treats as best-effort and surfaces
+// via its logger rather than aborting the scope's creation, per spec
+// 2026080102 section 11 and TestSelectStillCreatesIndeterminateScopeWhenAlarmWriteFails).
+func TestWriteSelectionAlarmSurfacesWriterErrors(t *testing.T) {
 	writer := &fakeSelectionAlarmWriter{failFor: SelectionAlarmKindIndeterminate}
 	if err := writer.WriteSelectionAlarm(context.Background(), SelectionAlarm{Kind: SelectionAlarmKindIndeterminate, ScopeID: "scope"}); err == nil {
-		t.Fatal("writer failure must propagate")
+		t.Fatal("writer failure must be returned to the selector")
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 type memoryFindingWriter struct{ findings []OntologyFinding }
@@ -268,5 +270,87 @@ func TestReviewServiceNeverLoadsUnpinnedProfileRules(t *testing.T) {
 	}
 	if len(rules.called) != 1 || rules.called[0] != "p1" {
 		t.Fatalf("rule loader asked for %v, want exactly the pinned profile p1 (never an unpinned profile)", rules.called)
+	}
+}
+
+// TestReviewServiceRuleApplicabilityUsesFrozenSubjectFactSnapshot proves a
+// rule whose applicability references a document.* path is evaluated against
+// the scope's frozen per-subject fact snapshot for the executed input record
+// (review context + document + deployment facts merged at selection time), not
+// review-context facts alone. With a matching frozen entry carrying
+// document.doc_kind=standard, the rule's applicability evaluates true and the
+// rule is evaluated normally -- a finding persists -- instead of being silently
+// dropped or spuriously indeterminate.
+func TestReviewServiceRuleApplicabilityUsesFrozenSubjectFactSnapshot(t *testing.T) {
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	facts, err := BuildReviewContextFacts(ReviewApplicabilityContext{Jurisdiction: "US"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts["document.doc_kind"] = semrules.Fact{Path: "document.doc_kind", State: semrules.FactKnown, Value: "standard"}
+	snapshot, err := json.Marshal([]SubjectFactSnapshot{
+		{Subject: SelectionSubject{DocumentID: 2}, Facts: facts},
+		{Subject: SelectionSubject{DocumentID: 99}, Facts: facts},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ReviewScope{
+		ReviewScopeID:    "scope-1",
+		Jurisdiction:     "US",
+		ClosedDimensions: json.RawMessage(`["display_metrics"]`),
+		FactSnapshot:     snapshot,
+	}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{applicabilityRule(9, "r", ruleApplicabilityInd)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The rule evaluates normally (true path): the evaluator ran and the finding
+	// persisted, not a silent exclusion and not a spurious indeterminate.
+	if len(results) != 1 || results[0].Category != ResultMissing {
+		t.Fatalf("results = %#v, want the rule evaluated normally against the frozen facts", results)
+	}
+	if len(w.findings) != 1 || w.findings[0].ProfileRuleID != 9 {
+		t.Fatalf("findings = %#v, want one normal finding for the rule", w.findings)
+	}
+}
+
+// TestReviewServiceRuleApplicabilityFallsBackWithoutFrozenSubjectFacts proves
+// a scope with no matching FactSnapshot subject (empty fact_snapshot, or no
+// entry whose document id matches the input record) falls back to
+// review-context-only facts, preserving the existing behavior: the existing
+// four rule-applicability tests construct scopes without FactSnapshot and stay
+// unchanged.
+func TestReviewServiceRuleApplicabilityFallsBackWithoutFrozenSubjectFacts(t *testing.T) {
+	// No fact_snapshot at all: review-context-only fallback keeps the rule
+	// (jurisdiction US) applicable and evaluates it normally.
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	scope := ReviewScope{ReviewScopeID: "scope-1", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`)}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{applicabilityRule(2, "r", ruleApplicabilityUS)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Category != ResultMissing || len(w.findings) != 1 {
+		t.Fatalf("no-fact_snapshot results = %#v findings = %#v, want the review-context fallback to keep the rule applicable", results, w.findings)
+	}
+	// A fact_snapshot that exists but has no entry for the executed input
+	// record (document 2): also falls back to review-context-only.
+	w2 := &memoryFindingWriter{}
+	s2 := ReviewService{Findings: w2}
+	snapshot, err := json.Marshal([]SubjectFactSnapshot{
+		{Subject: SelectionSubject{DocumentID: 99}, Facts: semrules.FactSet{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope2 := ReviewScope{ReviewScopeID: "scope-2", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`), FactSnapshot: snapshot}
+	results2, err := s2.EvaluateAndPersist(context.Background(), scope2, []ProfileRule{applicabilityRule(2, "r", ruleApplicabilityUS)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results2) != 1 || results2[0].Category != ResultMissing || len(w2.findings) != 1 {
+		t.Fatalf("no-matching-entry results = %#v findings = %#v, want the review-context fallback", results2, w2.findings)
 	}
 }
