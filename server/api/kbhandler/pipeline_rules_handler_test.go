@@ -54,12 +54,21 @@ func TestListPipelineRulesOrderedByPriority(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	query := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nORDER BY r.priority DESC, r.id")
+	query := regexp.QuoteMeta(`
+SELECT b.id, COALESCE(b.name, ''), b.priority,
+       COALESCE(b.predicate, '{}'::jsonb)::text,
+       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.binding_kind = 'conditional'
+ORDER BY b.priority DESC, b.id`)
 	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
-		"pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
+		"id", "name", "priority", "predicate", "pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
-		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true, int64(1),
+		int64(2), "pdf-zh", 10, `{"version":1,"expression":{"kind":"all","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"},{"kind":"fact","path":"document.source_language","op":"eq","value":"zh"}]}}`, int64(3), "regulated_reference", true, int64(1),
+		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
+	).AddRow(
+		int64(3), "rich-canonical", 9, `{"version":1,"expression":{"kind":"any","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"}]}}`, int64(3), "regulated_reference", true, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 	))
 
@@ -75,7 +84,7 @@ func TestListPipelineRulesOrderedByPriority(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal failed: %v", err)
 	}
-	if !payload.Status || len(payload.Results) != 1 {
+	if !payload.Status || len(payload.Results) != 1 || payload.Total != 1 {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 	if payload.Results[0].PipelineName != "regulated_reference" || payload.Results[0].MatchInputDocType == nil || *payload.Results[0].MatchInputDocType != "pdf" {

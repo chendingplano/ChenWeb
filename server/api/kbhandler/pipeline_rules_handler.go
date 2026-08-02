@@ -90,37 +90,60 @@ SELECT b.id, COALESCE(b.name, ''), b.priority,
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id
 WHERE b.id = $1 OR b.legacy_rule_id = $1`
+	row := db.QueryRow(query, id)
+	record, representable, err := scanPipelineRuleCompatBindingRecord(row.Scan)
+	if err != nil {
+		return pipelineRuleRecord{}, err
+	}
+	if !representable {
+		return pipelineRuleRecord{}, sql.ErrNoRows
+	}
+	return record, nil
+}
+
+func scanPipelineRuleCompatBindingRecord(scan func(dest ...any) error) (pipelineRuleRecord, bool, error) {
 	var (
 		record       pipelineRuleRecord
 		predicateRaw string
 	)
-	row := db.QueryRow(query, id)
-	if err := row.Scan(
+	if err := scan(
 		&record.ID, &record.Name, &record.Priority, &predicateRaw,
 		&record.PipelineID, &record.PipelineName, &record.Active, &record.PolicyID, &record.CreateTime, &record.ModifyTime,
 	); err != nil {
-		return pipelineRuleRecord{}, err
+		return pipelineRuleRecord{}, false, err
 	}
-	applyLegacyPredicateToPipelineRuleRecord(&record, predicateRaw)
-	return record, nil
+	if !applyLegacyPredicateToPipelineRuleRecord(&record, predicateRaw) {
+		return pipelineRuleRecord{}, false, nil
+	}
+	return record, true, nil
 }
 
-func applyLegacyPredicateToPipelineRuleRecord(record *pipelineRuleRecord, predicateRaw string) {
+func applyLegacyPredicateToPipelineRuleRecord(record *pipelineRuleRecord, predicateRaw string) bool {
 	var doc struct {
+		Version    int `json:"version"`
 		Expression struct {
+			Kind  string `json:"kind"`
 			Items []struct {
+				Kind  string `json:"kind"`
 				Path  string `json:"path"`
+				Op    string `json:"op"`
 				Value any    `json:"value"`
 			} `json:"items"`
 		} `json:"expression"`
 	}
 	if err := json.Unmarshal([]byte(predicateRaw), &doc); err != nil {
-		return
+		return false
+	}
+	if doc.Version != 1 || doc.Expression.Kind != "all" {
+		return false
 	}
 	for _, item := range doc.Expression.Items {
+		if item.Kind != "fact" || item.Op != "eq" {
+			return false
+		}
 		value := strings.TrimSpace(fmt.Sprint(item.Value))
 		if value == "" {
-			continue
+			return false
 		}
 		switch item.Path {
 		case "document.input_doc_type":
@@ -129,8 +152,11 @@ func applyLegacyPredicateToPipelineRuleRecord(record *pipelineRuleRecord, predic
 			record.MatchSourceLanguage = &value
 		case "document.knowledge_store_binding_state":
 			record.MatchKnowledgeStoreBinding = &value
+		default:
+			return false
 		}
 	}
+	return true
 }
 
 // normalizeRuleMatchInput lowercases/trims a match_* value the same way
@@ -155,7 +181,14 @@ func ListPipelineRules(c echo.Context) error {
 	logger := rc.GetLogger()
 
 	db := ApiTypes.ProjectDBHandle
-	query := "SELECT" + pipelineRuleSelectColumns + "\nORDER BY r.priority DESC, r.id"
+	query := `
+SELECT b.id, COALESCE(b.name, ''), b.priority,
+       COALESCE(b.predicate, '{}'::jsonb)::text,
+       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.binding_kind = 'conditional'
+ORDER BY b.priority DESC, b.id`
 	rows, err := db.Query(query)
 	if err != nil {
 		logger.Error("query pipeline rules failed", "err", err)
@@ -165,10 +198,13 @@ func ListPipelineRules(c echo.Context) error {
 
 	results := make([]pipelineRuleRecord, 0)
 	for rows.Next() {
-		record, err := scanPipelineRuleRecord(rows.Scan)
+		record, representable, err := scanPipelineRuleCompatBindingRecord(rows.Scan)
 		if err != nil {
 			logger.Error("scan pipeline rule failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to scan pipeline rules (CWB_KB_PR_003)"})
+		}
+		if !representable {
+			continue
 		}
 		results = append(results, record)
 	}
