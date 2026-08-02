@@ -7,17 +7,25 @@ import (
 	"fmt"
 )
 
-// Routing alarm kinds are stable identifiers. alarms_errors
-// (workspacelists/alarms.go) has no dedicated kind column -- it is a plain
-// severity/message/status/notes operator alarm feed used across the
-// codebase -- so the kind is folded into Message text; RoutingAlarm.Kind
-// stays available to callers/tests for classification and dedupe.
+// Routing alarm kinds are stable identifiers, also persisted verbatim into
+// alarms_errors' optional `kind` column (migration 20260801000019) so a
+// run-scoped alarm can be deduplicated at the database level across
+// separate handleEvent invocations (e.g. a JetStream redelivery), not just
+// within one Go call. The kind is additionally folded into Message text for
+// operators reading alarms_errors directly, since that table predates this
+// column and other producers don't set it.
 const (
-	RoutingAlarmKindBindingConflict = "binding_conflict"
-	RoutingAlarmKindGateConflict    = "gate_conflict"
-	RoutingAlarmKindOperatorFailure = "operator_failure"
-	RoutingAlarmKindPolicyIntegrity = "policy_integrity_failure"
-	RoutingAlarmKindFallbackWarning = "fallback_warning"
+	RoutingAlarmKindBindingConflict  = "binding_conflict"
+	RoutingAlarmKindGateConflict     = "gate_conflict"
+	RoutingAlarmKindOperatorFailure  = "operator_failure"
+	RoutingAlarmKindPolicyIntegrity  = "policy_integrity_failure"
+	RoutingAlarmKindFallbackWarning  = "fallback_warning"
+	// RoutingAlarmKindPlanBuildFailure covers a BuildProductionProcessorPlanFromFacts
+	// error that is NOT a decision-relevant DR7 binding/gate conflict (e.g. an
+	// unknown pipeline/processor name, a broken spec registration) -- a
+	// structural/configuration problem, not an applicability conflict. It is
+	// alarmed but does not block processing (see IsDecisionRelevantPlanConflict).
+	RoutingAlarmKindPlanBuildFailure = "plan_build_failure"
 )
 
 const (
@@ -29,10 +37,15 @@ const (
 // resolution/enforcement. Message is the human-readable text persisted
 // verbatim into alarms_errors.message; it must stay content-safe (ids,
 // checksums, processor/pipeline names only -- never document content).
+// RunID correlates the alarm to kb.doc_process_runs.id for per-run dedup
+// (spec 2026080102 section 11); zero/unset means the alarm was raised
+// before a run row exists (e.g. a block-mode conflict that fails before
+// processing starts) and is therefore never deduped against other alarms.
 type RoutingAlarm struct {
 	Kind     string
 	Severity string
 	Message  string
+	RunID    int64
 }
 
 // DedupeRoutingAlarms collapses repeated alarms of the same kind into their
@@ -53,10 +66,12 @@ func DedupeRoutingAlarms(alarms []RoutingAlarm) []RoutingAlarm {
 	return out
 }
 
-// AlarmForPlanError classifies a BuildProductionProcessorPlanFromFacts /
-// ResolveProductionPipelineResolution failure -- a decision-relevant
-// binding/gate conflict or indeterminacy in block mode -- as an operator
-// alarm.
+// AlarmForPlanError classifies a BuildProductionProcessorPlanFromFacts
+// failure as an operator alarm. A decision-relevant DR7 binding/gate
+// conflict (see IsDecisionRelevantPlanConflict) is classified as
+// binding_conflict/gate_conflict; every other plan-build failure (unknown
+// pipeline/processor, broken spec registration) is a plan_build_failure --
+// still alarmed, but not a policy applicability conflict.
 func AlarmForPlanError(planErr error) RoutingAlarm {
 	var gateErr *PipelineGateResolutionError
 	if errors.As(planErr, &gateErr) {
@@ -65,10 +80,32 @@ func AlarmForPlanError(planErr error) RoutingAlarm {
 			Message: fmt.Sprintf("processor gate resolution failed: %s", planErr.Error()),
 		}
 	}
-	return RoutingAlarm{
-		Kind: RoutingAlarmKindBindingConflict, Severity: RoutingAlarmSeverityError,
-		Message: fmt.Sprintf("pipeline binding resolution failed: %s", planErr.Error()),
+	var bindingErr *PipelineBindingConflictError
+	if errors.As(planErr, &bindingErr) {
+		return RoutingAlarm{
+			Kind: RoutingAlarmKindBindingConflict, Severity: RoutingAlarmSeverityError,
+			Message: fmt.Sprintf("pipeline binding resolution failed: %s", planErr.Error()),
+		}
 	}
+	return RoutingAlarm{
+		Kind: RoutingAlarmKindPlanBuildFailure, Severity: RoutingAlarmSeverityError,
+		Message: fmt.Sprintf("routing plan build failed: %s", planErr.Error()),
+	}
+}
+
+// IsDecisionRelevantPlanConflict reports whether planErr is a
+// decision-relevant DR7 binding/gate conflict or indeterminacy -- the exact
+// category spec 2026080102 section 11 requires to "fail before processors
+// run" in block mode -- as opposed to a structural/configuration error
+// (unknown pipeline/processor, broken spec registration) that is alarmed
+// but does not block processing, preserving prior behavior for those cases.
+func IsDecisionRelevantPlanConflict(planErr error) bool {
+	var gateErr *PipelineGateResolutionError
+	if errors.As(planErr, &gateErr) {
+		return true
+	}
+	var bindingErr *PipelineBindingConflictError
+	return errors.As(planErr, &bindingErr)
 }
 
 // RoutingAlarmWriter persists one operator alarm.
@@ -81,6 +118,13 @@ type RoutingAlarmWriter interface {
 // operator alarm on /semos/admin/alarms without a new admin surface.
 type RoutingAlarmSQLWriter struct{ DB *sql.DB }
 
+// WriteAlarm inserts one alarm. When both RunID and Kind are set, it relies
+// on uq_alarms_errors_run_id_kind (migration 20260801000019) plus
+// ON CONFLICT DO NOTHING to guarantee at most one row per (run_id, kind)
+// even across separate process invocations retrying the same run -- an
+// in-memory dedupe (DedupeRoutingAlarms) alone cannot survive a retry.
+// Alarms without a RunID (raised before a run row exists) always insert;
+// they have no run to dedupe against.
 func (w RoutingAlarmSQLWriter) WriteAlarm(ctx context.Context, alarm RoutingAlarm) error {
 	if w.DB == nil {
 		return errors.New("db is nil")
@@ -89,7 +133,16 @@ func (w RoutingAlarmSQLWriter) WriteAlarm(ctx context.Context, alarm RoutingAlar
 	if severity == "" {
 		severity = RoutingAlarmSeverityError
 	}
-	_, err := w.DB.ExecContext(ctx, "INSERT INTO alarms_errors (severity, message) VALUES ($1,$2)", severity, alarm.Message)
+	var runID any
+	if alarm.RunID != 0 {
+		runID = alarm.RunID
+	}
+	var kind any
+	if alarm.Kind != "" {
+		kind = alarm.Kind
+	}
+	_, err := w.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, run_id, kind) VALUES ($1,$2,$3,$4)
+ON CONFLICT (run_id, kind) WHERE run_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, severity, alarm.Message, runID, kind)
 	return err
 }
 

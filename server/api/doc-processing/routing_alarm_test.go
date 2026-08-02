@@ -26,15 +26,36 @@ func TestDedupeRoutingAlarmsKeepsExactlyOnePerKind(t *testing.T) {
 	}
 }
 
-func TestAlarmForPlanErrorClassifiesGateVersusBindingConflict(t *testing.T) {
+func TestAlarmForPlanErrorClassifiesGateVersusBindingVersusStructuralFailure(t *testing.T) {
 	gateAlarm := AlarmForPlanError(&PipelineGateResolutionError{Processor: "extract_metrics", Reason: "decision_relevant_indeterminate"})
 	if gateAlarm.Kind != RoutingAlarmKindGateConflict || gateAlarm.Severity != RoutingAlarmSeverityError {
 		t.Fatalf("gate alarm=%+v, want kind=%s severity=%s", gateAlarm, RoutingAlarmKindGateConflict, RoutingAlarmSeverityError)
 	}
+	if !IsDecisionRelevantPlanConflict(&PipelineGateResolutionError{Processor: "extract_metrics", Reason: "x"}) {
+		t.Fatal("gate resolution errors must be decision-relevant conflicts")
+	}
 
-	bindingAlarm := AlarmForPlanError(errors.New("indeterminate conditional pipeline bindings at priority 10"))
+	bindingAlarm := AlarmForPlanError(&PipelineBindingConflictError{Priority: 10, Reason: "indeterminate"})
 	if bindingAlarm.Kind != RoutingAlarmKindBindingConflict {
 		t.Fatalf("binding alarm=%+v, want kind=%s", bindingAlarm, RoutingAlarmKindBindingConflict)
+	}
+	if !IsDecisionRelevantPlanConflict(&PipelineBindingConflictError{Priority: 10, Reason: "conflicting"}) {
+		t.Fatal("binding conflict errors must be decision-relevant conflicts")
+	}
+
+	// A structural/configuration error (unknown pipeline, unknown processor,
+	// etc.) is NOT a DR7 applicability conflict: it must not be classified as
+	// binding_conflict/gate_conflict, and must not be decision-relevant --
+	// otherwise every test fixture using a non-production processor/pipeline
+	// name would incorrectly block processing (see control.go's planErr
+	// handling).
+	structuralErr := errors.New(`unknown requested pipeline "typo_pipeline"`)
+	structuralAlarm := AlarmForPlanError(structuralErr)
+	if structuralAlarm.Kind != RoutingAlarmKindPlanBuildFailure {
+		t.Fatalf("structural alarm=%+v, want kind=%s", structuralAlarm, RoutingAlarmKindPlanBuildFailure)
+	}
+	if IsDecisionRelevantPlanConflict(structuralErr) {
+		t.Fatal("a structural/configuration error must not be decision-relevant")
 	}
 }
 
@@ -45,12 +66,12 @@ func TestRoutingAlarmSQLWriterInsertsIntoAlarmsErrors(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectExec("INSERT INTO alarms_errors").
-		WithArgs(RoutingAlarmSeverityWarning, "uncleared suppressive decision stays shadow-only").
+		WithArgs(RoutingAlarmSeverityWarning, "uncleared suppressive decision stays shadow-only", int64(99), RoutingAlarmKindFallbackWarning).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
 		Kind: RoutingAlarmKindFallbackWarning, Severity: RoutingAlarmSeverityWarning,
-		Message: "uncleared suppressive decision stays shadow-only",
+		Message: "uncleared suppressive decision stays shadow-only", RunID: 99,
 	})
 	if err != nil {
 		t.Fatalf("WriteAlarm: %v", err)
@@ -67,13 +88,57 @@ func TestRoutingAlarmSQLWriterDefaultsMissingSeverityToError(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectExec("INSERT INTO alarms_errors").
-		WithArgs(RoutingAlarmSeverityError, "policy load failure").
+		WithArgs(RoutingAlarmSeverityError, "policy load failure", int64(99), RoutingAlarmKindPolicyIntegrity).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
-		Kind: RoutingAlarmKindPolicyIntegrity, Message: "policy load failure",
+		Kind: RoutingAlarmKindPolicyIntegrity, Message: "policy load failure", RunID: 99,
 	})
 	if err != nil {
+		t.Fatalf("WriteAlarm: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRoutingAlarmSQLWriterUsesConflictClauseForRunScopedDedup proves the
+// INSERT relies on uq_alarms_errors_run_id_kind (migration 20260801000019)
+// plus ON CONFLICT DO NOTHING for cross-invocation dedup by (run_id, kind) --
+// a retry of the same run raising the same alarm kind produces no second
+// row. A live-Postgres proof that the conflict actually no-ops belongs to
+// the plan's live-DB devdoc task; this proves the SQL shape the writer sends.
+func TestRoutingAlarmSQLWriterUsesConflictClauseForRunScopedDedup(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("INSERT INTO alarms_errors \\(severity, message, run_id, kind\\) VALUES \\(\\$1,\\$2,\\$3,\\$4\\)\\s*\nON CONFLICT \\(run_id, kind\\) WHERE run_id IS NOT NULL AND kind IS NOT NULL DO NOTHING").
+		WithArgs(RoutingAlarmSeverityError, "duplicate retry", int64(7), RoutingAlarmKindBindingConflict).
+		WillReturnResult(sqlmock.NewResult(0, 0)) // 0 rows affected: the conflict no-op path
+	if err := (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
+		Kind: RoutingAlarmKindBindingConflict, Message: "duplicate retry", RunID: 7,
+	}); err != nil {
+		t.Fatalf("WriteAlarm: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRoutingAlarmSQLWriterOmitsRunIDAndKindWhenUnset(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("INSERT INTO alarms_errors").
+		WithArgs(RoutingAlarmSeverityError, "no run context yet", nil, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	if err := (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
+		Message: "no run context yet",
+	}); err != nil {
 		t.Fatalf("WriteAlarm: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
