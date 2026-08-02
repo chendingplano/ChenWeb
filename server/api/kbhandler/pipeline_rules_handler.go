@@ -89,7 +89,7 @@ SELECT b.id, COALESCE(b.name, ''), b.priority,
        b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id
-WHERE b.id = $1`
+WHERE b.id = $1 OR b.legacy_rule_id = $1`
 	var (
 		record       pipelineRuleRecord
 		predicateRaw string
@@ -344,7 +344,75 @@ func UpdatePipelineRule(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	query := fmt.Sprintf("UPDATE kb.pipeline_rules SET %s WHERE id = $%d", strings.Join(sets, ", "), len(args)+1)
+	existing, err := fetchPipelineRuleCompatBindingByID(db, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
+		}
+		logger.Error("fetch pipeline rule compatibility binding failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve pipeline rule (CWB_KB_PR_213)"})
+	}
+	var matchInputDocType = derefString(existing.MatchInputDocType)
+	var matchSourceLanguage = derefString(existing.MatchSourceLanguage)
+	var matchKnowledgeStoreBinding = derefString(existing.MatchKnowledgeStoreBinding)
+	rebuildPredicate := false
+	sets = []string{"modify_time = NOW()"}
+	args = args[:0]
+	addSet = func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "name":
+			value, _ := decodeStringValue(raw, true)
+			addSet("name", strings.TrimSpace(*value))
+		case "priority":
+			var v int
+			_ = json.Unmarshal(raw, &v)
+			addSet("priority", v)
+		case "match_input_doc_type":
+			value, _ := decodeStringValue(raw, false)
+			matchInputDocType = stringPtrFromNormalizedAny(normalizeRuleMatchInput(value))
+			rebuildPredicate = true
+		case "match_source_language":
+			value, _ := decodeStringValue(raw, false)
+			matchSourceLanguage = stringPtrFromNormalizedAny(normalizeRuleMatchInput(value))
+			rebuildPredicate = true
+		case "match_knowledge_store_binding":
+			value, _ := decodeStringValue(raw, false)
+			matchKnowledgeStoreBinding = stringPtrFromNormalizedAny(normalizeRuleMatchInput(value))
+			rebuildPredicate = true
+		case "pipeline_id":
+			var v int64
+			_ = json.Unmarshal(raw, &v)
+			addSet("pipeline_id", v)
+		case "active":
+			var v bool
+			_ = json.Unmarshal(raw, &v)
+			addSet("active", v)
+		}
+	}
+	if rebuildPredicate {
+		predicateDoc, checksum, err := docprocessing.LegacyRulePredicateDocument(docprocessing.ProductionPipelineRule{
+			MatchInputDocType:          matchInputDocType,
+			MatchSourceLanguage:        matchSourceLanguage,
+			MatchKnowledgeStoreBinding: matchKnowledgeStoreBinding,
+		})
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PR_214)"})
+		}
+		predicateJSON, err := json.Marshal(predicateDoc)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to encode predicate (CWB_KB_PR_215)"})
+		}
+		addSet("predicate", string(predicateJSON))
+		addSet("predicate_checksum", checksum)
+	}
+
+	query := fmt.Sprintf("UPDATE kb.pipeline_bindings SET %s WHERE id = $%d OR legacy_rule_id = $%d", strings.Join(sets, ", "), len(args)+1, len(args)+1)
 	args = append(args, id)
 	result, err := db.Exec(query, args...)
 	if err != nil {
@@ -360,13 +428,20 @@ func UpdatePipelineRule(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
 	}
 
-	record, err := fetchPipelineRuleByID(db, id)
+	record, err := fetchPipelineRuleCompatBindingByID(db, id)
 	if err != nil {
 		logger.Error("fetch updated pipeline rule failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve updated pipeline rule (CWB_KB_PR_212)"})
 	}
 
 	return c.JSON(http.StatusOK, pipelineRuleDetailResponse{Status: true, Record: record})
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // DeletePipelineRule handles DELETE /api/v1/kb/pipeline-rules/:id.
@@ -382,7 +457,7 @@ func DeletePipelineRule(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	result, err := db.Exec("DELETE FROM kb.pipeline_rules WHERE id = $1", id)
+	result, err := db.Exec("DELETE FROM kb.pipeline_bindings WHERE id = $1 OR legacy_rule_id = $1", id)
 	if err != nil {
 		logger.Error("delete pipeline rule failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to delete pipeline rule (CWB_KB_PR_302)"})

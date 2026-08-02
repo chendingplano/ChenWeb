@@ -119,7 +119,7 @@ SELECT b.id, COALESCE(b.name, ''), b.priority,
        b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id
-WHERE b.id = $1`)
+WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "name", "priority", "predicate", "pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
@@ -189,17 +189,30 @@ func TestUpdatePipelineRuleSuccess(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	updateQuery := regexp.QuoteMeta("UPDATE kb.pipeline_rules SET modify_time = NOW(), active = $1, priority = $2 WHERE id = $3")
+	selectCompatQuery := regexp.QuoteMeta(`
+SELECT b.id, COALESCE(b.name, ''), b.priority,
+       COALESCE(b.predicate, '{}'::jsonb)::text,
+       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.id = $1 OR b.legacy_rule_id = $1`)
+	rows := sqlmock.NewRows([]string{
+		"id", "name", "priority", "predicate", "pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
+	}).AddRow(
+		int64(2), "pdf-zh", 10, `{"version":1,"expression":{"kind":"all","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"},{"kind":"fact","path":"document.source_language","op":"eq","value":"zh"}]}}`, int64(3), "regulated_reference", true, int64(1),
+		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
+	)
+	mock.ExpectQuery(selectCompatQuery).WithArgs(int64(2)).WillReturnRows(rows)
+
+	updateQuery := regexp.QuoteMeta("UPDATE kb.pipeline_bindings SET modify_time = NOW(), active = $1, priority = $2 WHERE id = $3 OR legacy_rule_id = $3")
 	mock.ExpectExec(updateQuery).
 		WithArgs(false, 20, int64(2)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	selectQuery := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nWHERE r.id = $1")
-	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
-		"pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
+	mock.ExpectQuery(selectCompatQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "name", "priority", "predicate", "pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
-		int64(2), "pdf-zh", 20, "pdf", "zh", nil, int64(3), "regulated_reference", false, int64(1),
+		int64(2), "pdf-zh", 20, `{"version":1,"expression":{"kind":"all","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"},{"kind":"fact","path":"document.source_language","op":"eq","value":"zh"}]}}`, int64(3), "regulated_reference", false, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 30, 0, 0, time.UTC),
 	))
 
@@ -227,7 +240,7 @@ func TestDeletePipelineRuleNotFound(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	deleteQuery := regexp.QuoteMeta("DELETE FROM kb.pipeline_rules WHERE id = $1")
+	deleteQuery := regexp.QuoteMeta("DELETE FROM kb.pipeline_bindings WHERE id = $1 OR legacy_rule_id = $1")
 	mock.ExpectExec(deleteQuery).
 		WithArgs(int64(999)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
