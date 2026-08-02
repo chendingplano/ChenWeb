@@ -4,12 +4,15 @@ package profiles
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/terms"
+	"github.com/lib/pq"
 )
 
 // Profile is one version of a governed review profile. ReleaseID is populated
@@ -48,6 +51,15 @@ const activeProfileColumns = `
 	p.id, p.profile_id, p.version, p.module_id, p.status,
 	COALESCE(p.title, ''), p.applicability, p.closed_dimensions,
 	ar.release_id, r.version, p.create_time, COALESCE(p.create_by, ''),
+	p.modify_time, COALESCE(p.modify_by, '')`
+
+// releasedProfileColumns is activeProfileColumns for the pinned loader, which
+// joins only the release row (r) and never the current activation pointer
+// (ar): the release id is r.id, and there is no active-release join to read.
+const releasedProfileColumns = `
+	p.id, p.profile_id, p.version, p.module_id, p.status,
+	COALESCE(p.title, ''), p.applicability, p.closed_dimensions,
+	r.id, r.version, p.create_time, COALESCE(p.create_by, ''),
 	p.modify_time, COALESCE(p.modify_by, '')`
 
 func scanProfile(scan func(dest ...any) error) (Profile, error) {
@@ -171,6 +183,172 @@ ORDER BY p.profile_id, p.version DESC`
 		profiles = append(profiles, p)
 	}
 	return profiles, rows.Err()
+}
+
+// PinnedRelease is one active module release pinned by the released-profile
+// loader. ReleaseID and Checksum are retained as attempt inputs so a scope
+// can be reproduced and verified even after activation changes.
+type PinnedRelease struct {
+	ModuleID  string `json:"module_id"`
+	ReleaseID int64  `json:"release_id"`
+	Version   string `json:"version"`
+	Checksum  string `json:"content_checksum"`
+}
+
+// ReleasedProfiles is the result of one pinned load: the active module
+// releases pinned at the moment of the load plus only the profiles visible to
+// that knowledge store (status included_in_release on a pinned release).
+type ReleasedProfiles struct {
+	Releases []PinnedRelease
+	Profiles []Profile
+}
+
+// txBeginner is the transaction capability the pinned loader needs. The
+// store's terms.DBX surface deliberately omits it because *sql.Tx satisfies
+// DBX but cannot begin a nested transaction; the loader requires a fresh
+// transaction and detects the capability at the call site.
+type txBeginner interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+}
+
+// LoadReleasedProfiles pins the currently active module releases and loads
+// only the profiles visible through those pinned releases, in one short
+// repeatable-read transaction (spec §6 item 2). The transaction is committed
+// before the loader returns, so a classifier call can never run inside it;
+// the caller retains the release ids/checksums as attempt inputs. The load
+// joins the pinned release ids directly rather than rereading current
+// activation, so a later activation change cannot partially change the
+// selection attempt.
+func (s ProfileStore) LoadReleasedProfiles(ctx context.Context) (ReleasedProfiles, error) {
+	if s.DB == nil {
+		return ReleasedProfiles{}, errors.New("db is nil")
+	}
+	begin, ok := s.DB.(txBeginner)
+	if !ok {
+		return ReleasedProfiles{}, errors.New("pinned profile load requires a transaction-capable connection")
+	}
+	// Repeatable-read: every read in the transaction observes one consistent
+	// activation snapshot, and the commit ends the transaction before any
+	// classifier call (§6 item 2).
+	tx, err := begin.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return ReleasedProfiles{}, err
+	}
+	defer tx.Rollback()
+
+	// Pin active module releases (same shape as modules.ReleaseStore's
+	// LoadActiveModuleReleases) inside the transaction.
+	const pinStmt = `
+SELECT ar.module_id, ar.release_id, r.version, r.content_checksum
+FROM kb.ontology_active_releases ar
+JOIN kb.ontology_module_releases r ON r.id = ar.release_id
+WHERE ar.deactivated_at IS NULL`
+	rows, err := tx.QueryContext(ctx, pinStmt)
+	if err != nil {
+		return ReleasedProfiles{}, err
+	}
+	pins := make([]PinnedRelease, 0)
+	for rows.Next() {
+		var pin PinnedRelease
+		if err := rows.Scan(&pin.ModuleID, &pin.ReleaseID, &pin.Version, &pin.Checksum); err != nil {
+			rows.Close()
+			return ReleasedProfiles{}, err
+		}
+		pins = append(pins, pin)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return ReleasedProfiles{}, err
+	}
+	rows.Close()
+	if len(pins) == 0 {
+		if err := tx.Commit(); err != nil {
+			return ReleasedProfiles{}, err
+		}
+		return ReleasedProfiles{Releases: pins, Profiles: []Profile{}}, nil
+	}
+
+	releaseIDs := make([]int64, len(pins))
+	for i, p := range pins {
+		releaseIDs[i] = p.ReleaseID
+	}
+
+	// Load only the profiles belonging to the pinned releases, never the
+	// current activation pointer: same runtime-visibility gate as
+	// ListActiveProfiles, but against the pinned ids.
+	const profileStmt = `SELECT ` + releasedProfileColumns + `
+FROM kb.ontology_profiles p
+JOIN kb.ontology_module_releases r ON r.id = p.released_in_release_id
+WHERE r.id = ANY($1::bigint[])
+  AND p.status = 'included_in_release'
+ORDER BY p.profile_id, p.version DESC`
+	profileRows, err := tx.QueryContext(ctx, profileStmt, pq.Array(releaseIDs))
+	if err != nil {
+		return ReleasedProfiles{}, err
+	}
+	profiles := make([]Profile, 0)
+	for profileRows.Next() {
+		p, err := scanProfile(profileRows.Scan)
+		if err != nil {
+			profileRows.Close()
+			return ReleasedProfiles{}, err
+		}
+		profiles = append(profiles, p)
+	}
+	if err := profileRows.Err(); err != nil {
+		profileRows.Close()
+		return ReleasedProfiles{}, err
+	}
+	profileRows.Close()
+
+	if err := tx.Commit(); err != nil {
+		return ReleasedProfiles{}, err
+	}
+	return ReleasedProfiles{Releases: pins, Profiles: profiles}, nil
+}
+
+// DeriveKnowledgeStore resolves the single knowledge store behind the
+// reviewed documents of a deterministic scope request (spec §6 item 1).
+// Knowledge-store identity comes from kb.inputs.ks_store_id, never client
+// input. A mixed-store or unresolvable document set is rejected so the
+// selection layer can never guess a store.
+func (s ProfileStore) DeriveKnowledgeStore(ctx context.Context, documentIDs []int64) (int64, error) {
+	if s.DB == nil {
+		return 0, errors.New("db is nil")
+	}
+	if len(documentIDs) == 0 {
+		return 0, errors.New("reviewed document ids are required")
+	}
+	const stmt = `SELECT ks_store_id FROM kb.inputs WHERE id = ANY($1::bigint[])`
+	rows, err := s.DB.QueryContext(ctx, stmt, pq.Array(documentIDs))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	storeID := int64(0)
+	seen := 0
+	for rows.Next() {
+		var id sql.NullInt64
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		if !id.Valid || id.Int64 == 0 {
+			continue // unbound document: never a store candidate
+		}
+		if storeID == 0 {
+			storeID = id.Int64
+		} else if storeID != id.Int64 {
+			return 0, fmt.Errorf("reviewed documents resolve to multiple knowledge stores: cannot derive a single store for a deterministic scope")
+		}
+		seen++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if seen != len(documentIDs) {
+		return 0, fmt.Errorf("%d reviewed document(s) do not resolve to a knowledge store", len(documentIDs)-seen)
+	}
+	return storeID, nil
 }
 
 // ListApprovedProfiles returns staged profile versions for the module compiler.
