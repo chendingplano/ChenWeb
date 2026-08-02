@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 const noAssertionsWatermark = "none"
@@ -39,6 +41,12 @@ type ReviewService struct {
 	Rules      FrozenRuleLoader
 	Assertions AssertionLoader
 	Runs       ReviewRunWriter
+	// ApplicabilityContext is the review context used to evaluate each pinned
+	// rule's own applicability predicate (spec 2026080102 section 6 last
+	// paragraph). When nil, a rule with a non-trivial applicability predicate is
+	// treated as inapplicable (excluded) -- a conservative default -- while a
+	// rule without one is always applicable.
+	ApplicabilityContext *ReviewApplicabilityContext
 }
 
 // EvaluatePinnedScope loads rules using the profile version and release id
@@ -120,8 +128,38 @@ func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope
 	for _, d := range dimensions {
 		closed[d] = true
 	}
+	applicability, decisionRelevant, err := ruleApplicabilityGate(scope, s.ApplicabilityContext)
+	if err != nil {
+		return nil, err
+	}
 	results := make([]RuleEvaluationResult, 0, len(rules))
 	for _, rule := range rules {
+		gate, err := applicability(rule)
+		if err != nil {
+			return nil, err
+		}
+		switch gate {
+		case gateInapplicable:
+			// The rule's own applicability predicate is false: exclude only
+			// this rule -- no result, no finding -- without adding any profile
+			// or release that was not already pinned in the scope.
+			continue
+		case gateIndeterminate:
+			if !decisionRelevant(rule) {
+				// A non-decision-relevant indeterminate applicability stays
+				// trace-only (spec section 11): no result, no finding.
+				continue
+			}
+			// Decision-relevant indeterminate: emit an explicit indeterminate
+			// applicability result and finding rather than a silent exclusion
+			// (spec sections 6/11).
+			result := RuleEvaluationResult{Category: ResultIndeterminate, Reason: "profile-rule applicability is indeterminate on a requested closed dimension"}
+			results = append(results, result)
+			if err := s.Findings.Persist(ctx, OntologyFinding{InputRecordID: inputRecordID, RunID: runID, ReviewRunID: reviewRunID, ScopeID: scope.ReviewScopeID, ProfileRuleID: rule.ID, Category: result.Category, Severity: rule.Severity, Title: rule.RuleID, Description: result.Reason}); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		result, err := EvaluateRule(ctx, RuleEvaluationInput{Rule: rule, ClosedDimensions: closed, Assertions: assertions})
 		if err != nil {
 			return nil, err
@@ -136,4 +174,132 @@ func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope
 		}
 	}
 	return results, nil
+}
+
+// ruleApplicabilityGate builds the per-rule applicability gate for the frozen
+// scope. The review context facts are derived from the scope's own frozen
+// fields (jurisdiction, as-of date, operating context), never from mutable
+// current configuration, so a scope's applicability result stays reproducible
+// from the scope record alone. decisionRelevant reports whether an
+// indeterminate applicability is decision-relevant: a tier-3 missing path is
+// decision-relevant exactly when the rule's profile closed dimensions
+// intersect the scope's closed dimensions (spec section 6).
+func ruleApplicabilityGate(scope ReviewScope, ctx *ReviewApplicabilityContext) (func(ProfileRule) (ruleApplicabilityGateResult, error), func(ProfileRule) bool, error) {
+	context := ReviewApplicabilityContext{}
+	if ctx != nil {
+		context = *ctx
+	}
+	if context.Jurisdiction == "" {
+		context.Jurisdiction = scope.Jurisdiction
+	}
+	if context.AsOfDate == "" {
+		context.AsOfDate = scope.AsOfDate
+	}
+	if context.OperatingContext == "" {
+		context.OperatingContext = scope.OperatingContext
+	}
+	profileClosed, err := pinnedProfileClosedDimensions(scope)
+	if err != nil {
+		return nil, nil, err
+	}
+	reviewFacts, err := BuildReviewContextFacts(context)
+	if err != nil {
+		return nil, nil, err
+	}
+	requestClosed, err := scopeClosedDimensions(scope)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	applicability := func(rule ProfileRule) (ruleApplicabilityGateResult, error) {
+		if isTrivialPredicate(rule.Applicability) {
+			return gateApplicable, nil
+		}
+		var doc semrules.Document
+		if err := json.Unmarshal(rule.Applicability, &doc); err != nil {
+			return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
+		}
+		// Invalid predicates were rejected before activation (spec section 11),
+		// so a malformed rule predicate here is a configuration error, surfaced
+		// as an error rather than a silent exclusion.
+		if _, _, err := semrules.Canonicalize(doc); err != nil {
+			return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
+		}
+		result := semrules.EvaluateDocument(doc, reviewFacts)
+		switch result.Truth {
+		case semrules.TruthTrue:
+			return gateApplicable, nil
+		case semrules.TruthFalse:
+			return gateInapplicable, nil
+		default:
+			return gateIndeterminate, nil
+		}
+	}
+	decisionRelevant := func(rule ProfileRule) bool {
+		// A rule inherits its profile's closed dimensions from the frozen
+		// selection snapshot; an indeterminate applicability is
+		// decision-relevant exactly when that profile's closed dimensions
+		// intersect the scope's (spec section 6: "decision-relevant exactly
+		// when the profile/request closed-dimension sets intersect").
+		return slicesIntersect(profileClosed[profileKey(rule.ProfileID, rule.ProfileVersion)], requestClosed)
+	}
+	return applicability, decisionRelevant, nil
+}
+
+// scopeClosedDimensions returns the request's closed dimensions frozen in the
+// scope.
+func scopeClosedDimensions(scope ReviewScope) (map[string]bool, error) {
+	var dimensions []string
+	if err := json.Unmarshal(scope.ClosedDimensions, &dimensions); err != nil {
+		return nil, fmt.Errorf("closed_dimensions: %w", err)
+	}
+	set := make(map[string]bool, len(dimensions))
+	for _, d := range dimensions {
+		set[d] = true
+	}
+	return set, nil
+}
+
+// profileKey identifies a pinned profile within a scope by identity, so a
+// rule's closed-dimension decision relevance resolves against the frozen
+// snapshot rather than any mutable profile content.
+func profileKey(profileID string, profileVersion int) string {
+	return fmt.Sprintf("%s:%d", profileID, profileVersion)
+}
+
+func slicesIntersect(values []string, set map[string]bool) bool {
+	for _, value := range values {
+		if set[value] {
+			return true
+		}
+	}
+	return false
+}
+
+type ruleApplicabilityGateResult int
+
+const (
+	gateApplicable ruleApplicabilityGateResult = iota
+	gateInapplicable
+	gateIndeterminate
+)
+
+// pinnedProfileClosedDimensions reads the frozen profile/release entries from
+// the scope's selection_snapshot, keyed by profile identity, and returns each
+// profile's closed dimensions. A P4 explicit scope (no selection_snapshot) has
+// no profile closed dimensions, so no indeterminate applicability is ever
+// decision relevant there -- the explicit mode is preserved exactly.
+func pinnedProfileClosedDimensions(scope ReviewScope) (map[string][]string, error) {
+	if len(scope.SelectionSnapshot) == 0 {
+		return map[string][]string{}, nil
+	}
+	var snapshot SelectionSnapshot
+	if err := json.Unmarshal(scope.SelectionSnapshot, &snapshot); err != nil {
+		return nil, fmt.Errorf("selection_snapshot: %w", err)
+	}
+	closed := make(map[string][]string, len(snapshot.Selected))
+	for _, entry := range snapshot.Selected {
+		closed[profileKey(entry.ProfileID, entry.ProfileVersion)] = entry.ClosedDimensions
+	}
+	return closed, nil
 }

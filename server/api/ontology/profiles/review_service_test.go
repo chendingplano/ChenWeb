@@ -17,11 +17,13 @@ type frozenRuleLoader struct {
 	gotProfile string
 	gotVersion int
 	gotRelease int64
+	called     []string
 	rules      []ProfileRule
 }
 
 func (l *frozenRuleLoader) LoadReleasedRules(_ context.Context, profileID string, version int, releaseID int64) ([]ProfileRule, error) {
 	l.gotProfile, l.gotVersion, l.gotRelease = profileID, version, releaseID
+	l.called = append(l.called, profileID)
 	return l.rules, nil
 }
 
@@ -138,5 +140,133 @@ func TestReviewServiceWatermarkTracksHighestLoadedAssertionAcrossTargets(t *test
 	}
 	if runs.got.AssertionWatermark != "assertion:90" {
 		t.Fatalf("watermark = %q, want assertion:90 (the highest assertion id across all target objects)", runs.got.AssertionWatermark)
+	}
+}
+
+// rule-level applicability fixtures. The rules below use the review context
+// facts only (jurisdiction US) so the applicability gate is decided purely by
+// the frozen scope, mirroring spec 2026080102 section 6 last paragraph.
+
+const (
+	ruleApplicabilityUS  = `{"version":1,"expression":{"kind":"fact","path":"review.jurisdiction","op":"eq","value":"US"}}`
+	ruleApplicabilityCN  = `{"version":1,"expression":{"kind":"fact","path":"review.jurisdiction","op":"eq","value":"CN"}}`
+	ruleApplicabilityInd = `{"version":1,"expression":{"kind":"fact","path":"document.doc_kind","op":"eq","value":"standard"}}`
+)
+
+func applicabilityRule(id int64, ruleID, applicability string) ProfileRule {
+	return ProfileRule{
+		ID: id, RuleID: ruleID, ProfileID: "p", ProfileVersion: 1, ReleaseID: 42,
+		RuleKind: "required_assertion_pattern", Severity: "error",
+		RuleConfig:    json.RawMessage(`{"dimension":"display_metrics","predicate_term_id":"x","quantifier":"exists_conforming"}`),
+		Applicability: json.RawMessage(applicability),
+	}
+}
+
+// TestReviewServiceRuleApplicabilityExcludesOnlyThatRuleWhenFalse proves that
+// a pinned rule whose own applicability predicate evaluates false against the
+// frozen review context is excluded from the run -- no result, no finding --
+// while the other pinned rule still evaluates normally.
+func TestReviewServiceRuleApplicabilityExcludesOnlyThatRuleWhenFalse(t *testing.T) {
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	scope := ReviewScope{ReviewScopeID: "scope-1", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`)}
+	rules := []ProfileRule{
+		applicabilityRule(1, "r-inapplicable", ruleApplicabilityCN),
+		applicabilityRule(2, "r-applicable", ruleApplicabilityUS),
+	}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, rules, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Category != ResultMissing {
+		t.Fatalf("results = %#v, want only the applicable rule evaluated", results)
+	}
+	if len(w.findings) != 1 || w.findings[0].ProfileRuleID != 2 {
+		t.Fatalf("findings = %#v, want exactly one finding for the applicable rule only", w.findings)
+	}
+}
+
+// TestReviewServiceRuleApplicabilityEvaluatesNormallyOnTrue proves a pinned
+// rule whose applicability is true against the frozen review context is
+// evaluated normally (the existing rule-evaluation path).
+func TestReviewServiceRuleApplicabilityEvaluatesNormallyOnTrue(t *testing.T) {
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	scope := ReviewScope{ReviewScopeID: "scope-1", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`)}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{applicabilityRule(2, "r-applicable", ruleApplicabilityUS)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Category != ResultMissing || len(w.findings) != 1 || w.findings[0].ProfileRuleID != 2 {
+		t.Fatalf("results=%#v findings=%#v, want the rule evaluated normally", results, w.findings)
+	}
+}
+
+// TestReviewServiceRuleApplicabilityEmitsIndeterminateOnDecisionRelevant
+// proves that a decision-relevant indeterminate applicability (the rule's
+// profile closed dimensions intersect the scope's closed dimensions, per spec
+// section 6/11) yields an explicit indeterminate applicability result and a
+// finding, not a silent exclusion.
+func TestReviewServiceRuleApplicabilityEmitsIndeterminateOnDecisionRelevant(t *testing.T) {
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	scope := ReviewScope{
+		ReviewScopeID: "scope-1", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`),
+		SelectionSnapshot: json.RawMessage(`{"releases":[{"module_id":"m","release_id":42,"version":"0.1.0","content_checksum":"sha256:aaa"}],"selected":[{"profile_id":"p","profile_version":1,"release_id":42,"closed_dimensions":["display_metrics"]}],"evaluations":[],"status":"indeterminate"}`),
+	}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{applicabilityRule(9, "r", ruleApplicabilityInd)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Category != ResultIndeterminate {
+		t.Fatalf("results = %#v, want one indeterminate applicability result", results)
+	}
+	if len(w.findings) != 1 || w.findings[0].Category != ResultIndeterminate || w.findings[0].ProfileRuleID != 9 {
+		t.Fatalf("findings = %#v, want one indeterminate finding for the affected rule", w.findings)
+	}
+}
+
+// TestReviewServiceRuleApplicabilityNonDecisionRelevantIsTraceOnly proves an
+// indeterminate applicability whose profile closed dimensions do NOT intersect
+// the scope's closed dimensions stays trace-only: no result, no finding.
+func TestReviewServiceRuleApplicabilityNonDecisionRelevantIsTraceOnly(t *testing.T) {
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	scope := ReviewScope{
+		ReviewScopeID: "scope-1", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`),
+		SelectionSnapshot: json.RawMessage(`{"releases":[{"module_id":"m","release_id":42,"version":"0.1.0","content_checksum":"sha256:aaa"}],"selected":[{"profile_id":"p","profile_version":1,"release_id":42,"closed_dimensions":["dimension_x"]}],"evaluations":[],"status":"complete"}`),
+	}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{applicabilityRule(9, "r", ruleApplicabilityInd)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %#v, want the non-decision-relevant indeterminate rule trace-only (no result)", results)
+	}
+	if len(w.findings) != 0 {
+		t.Fatalf("findings = %#v, want no finding for a trace-only indeterminate rule", w.findings)
+	}
+}
+
+// TestReviewServiceNeverLoadsUnpinnedProfileRules proves EvaluatePinnedScope
+// requests rules only for the profiles pinned in the scope's selected_profiles
+// and can never add a profile/release that was not already pinned: an unpinned
+// profile that has rules in the loader is never loaded or evaluated.
+func TestReviewServiceNeverLoadsUnpinnedProfileRules(t *testing.T) {
+	w := &memoryFindingWriter{}
+	rules := &frozenRuleLoader{rules: []ProfileRule{{ID: 9, RuleID: "r", RuleKind: "required_assertion_pattern", Severity: "error", RuleConfig: json.RawMessage(`{"dimension":"d","predicate_term_id":"p","quantifier":"exists_conforming"}`)}}}
+	assertionLoader := &stubAssertionLoader{}
+	runs := &stubReviewRunWriter{returnID: 55}
+	s := ReviewService{Findings: w, Rules: rules, Assertions: assertionLoader, Runs: runs}
+	_, _, err := s.EvaluatePinnedScope(context.Background(), ReviewScope{
+		ReviewScopeID: "scope", ClosedDimensions: json.RawMessage(`["d"]`),
+		TargetObjectIDs:  json.RawMessage(`["obj-1"]`),
+		SelectedProfiles: json.RawMessage(`[{"profile_id":"p1","profile_version":1,"release_id":42}]`),
+	}, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules.called) != 1 || rules.called[0] != "p1" {
+		t.Fatalf("rule loader asked for %v, want exactly the pinned profile p1 (never an unpinned profile)", rules.called)
 	}
 }
