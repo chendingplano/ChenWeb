@@ -35,6 +35,12 @@ type ProductionPipelineBindingResolution struct {
 	PolicyID      int64
 	PolicyVersion int
 	BindingTrace  []PipelineBindingTrace `json:",omitempty"`
+	// BindingID/PredicateChecksum mirror PipelineBindingSelection's fields
+	// for the winning conditional binding (zero value for every other
+	// source), so callers building a D2 clearance subject don't need to
+	// re-resolve bindings.
+	BindingID         int64  `json:",omitempty"`
+	PredicateChecksum string `json:",omitempty"`
 }
 
 type ProductionPipelineResolution struct {
@@ -126,6 +132,8 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 				PolicyID:           facts.ActivePolicyID,
 				PolicyVersion:      facts.ActivePolicyVersion,
 				BindingTrace:       selection.Trace,
+				BindingID:          selection.BindingID,
+				PredicateChecksum:  selection.PredicateChecksum,
 			}, nil
 		}
 	}

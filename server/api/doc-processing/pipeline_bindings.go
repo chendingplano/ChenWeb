@@ -44,7 +44,15 @@ type PipelineBindingSelection struct {
 	SelectedPipeline string
 	Source           string
 	BindingName      string
-	Trace            []PipelineBindingTrace
+	// BindingID/PredicateChecksum identify the winning kb.pipeline_bindings
+	// row when Source == "conditional_binding" -- E3's FinalizeRoutingPlan
+	// needs both to build the D2 clearance subject
+	// (ConditionalBindingSubjectChecksum) for a suppressive selection. Zero
+	// value for every other source (store_default/system_default), which
+	// never need a P5 clearance.
+	BindingID         int64
+	PredicateChecksum string
+	Trace             []PipelineBindingTrace
 }
 
 type PipelineBindingTrace struct {
@@ -337,9 +345,11 @@ func resolveBindingRank(bindings []PipelineBinding, facts semrules.FactSet) (Pip
 		}
 	}
 	return PipelineBindingSelection{
-		SelectedPipeline: selected.PipelineName,
-		Source:           "conditional_binding",
-		BindingName:      selected.Name,
+		SelectedPipeline:  selected.PipelineName,
+		Source:            "conditional_binding",
+		BindingName:       selected.Name,
+		BindingID:         selected.ID,
+		PredicateChecksum: selected.PredicateChecksum,
 	}, trace, nil
 }
 
