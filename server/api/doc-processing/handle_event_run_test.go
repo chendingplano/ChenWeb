@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
@@ -676,6 +677,96 @@ func TestHandleEvent_BlockModeConflictFailsBeforeAnyProcessorRuns(t *testing.T) 
 	events := audit.snapshot()
 	if len(events) != 1 || events[0].Kind != policyaudit.EventBindingConflict {
 		t.Fatalf("audit events=%+v, want exactly one binding_conflict event", events)
+	}
+}
+
+// TestHandleEvent_BlockModeConflictAlarmDedupesByRecordIDAcrossRetries
+// proves E3 fix round 2, Finding 3's remaining gap: the block-mode-conflict
+// alarm fires before any kb.doc_process_runs row exists, so RunID is always
+// 0 there -- RoutingAlarmSQLWriter.WriteAlarm must fall back to RecordID
+// (evt.RecordID, stable across redeliveries) as the dedup correlator
+// instead, via uq_alarms_errors_record_id_kind. This drives handleEvent
+// through the real RoutingAlarmSQLWriter (backed by sqlmock, not the
+// in-memory fakeAlarmWriter used elsewhere) so the exact SQL/args sent for
+// a redelivered record can be asserted: two handleEvent calls for the same
+// record send the identical INSERT (which the database's partial unique
+// index + ON CONFLICT DO NOTHING collapses to one row), while a third call
+// for a different record sends a different record_id, proving the dedup
+// key is scoped per record, not global.
+func TestHandleEvent_BlockModeConflictAlarmDedupesByRecordIDAcrossRetries(t *testing.T) {
+	t.Cleanup(func() {
+		SetProductionPipelineRegistry(nil)
+		SetProductionPipelineBindings(nil)
+	})
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "legacy_default", LegacyEquivalent: true},
+		{Name: "pipeline_a"},
+		{Name: "pipeline_b"},
+	})
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "match-pdf", "pipeline_a", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
+		mustLegacyBinding(t, "match-en", "pipeline_b", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchSourceLanguage: "en"}),
+	})
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	insertPattern := "INSERT INTO alarms_errors \\(severity, message, record_id, kind\\) VALUES"
+	// First delivery of record 4821 inserts the alarm row.
+	mock.ExpectExec(insertPattern).
+		WithArgs(RoutingAlarmSeverityError, sqlmock.AnyArg(), int64(4821), RoutingAlarmKindBindingConflict).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// A redelivery of the SAME record sends the identical dedup key --
+	// uq_alarms_errors_record_id_kind + ON CONFLICT DO NOTHING no-ops it
+	// (0 rows affected), so exactly one row survives for this record.
+	mock.ExpectExec(insertPattern).
+		WithArgs(RoutingAlarmSeverityError, sqlmock.AnyArg(), int64(4821), RoutingAlarmKindBindingConflict).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	// A different record gets its own dedup key/row.
+	mock.ExpectExec(insertPattern).
+		WithArgs(RoutingAlarmSeverityError, sqlmock.AnyArg(), int64(9001), RoutingAlarmKindBindingConflict).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+
+	svc := &ControlService{
+		InputStore: &fakeDocMetadataStore{
+			rec: DocMetadataInputRecord{
+				ID: 4821, ParserName: "opendata", ResultFilename: "result.json",
+				StagingFilename: inputPath, StatusRaw: "[]", InputDocType: "pdf", SourceLanguage: "en",
+			},
+		},
+		RoutingAlarms: RoutingAlarmSQLWriter{DB: db},
+		Processors:    []Processor{fakeProcessor{name: "extract_metrics"}},
+	}
+
+	payload := []byte(`{"record_id":"4821","filename":"` + inputPath + `"}`)
+	if err := svc.handleEvent(context.Background(), payload); err == nil {
+		t.Fatal("want error on first block-mode conflict")
+	}
+	if err := svc.handleEvent(context.Background(), payload); err == nil {
+		t.Fatal("want error on redelivered block-mode conflict")
+	}
+
+	svc.InputStore = &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID: 9001, ParserName: "opendata", ResultFilename: "result.json",
+			StagingFilename: inputPath, StatusRaw: "[]", InputDocType: "pdf", SourceLanguage: "en",
+		},
+	}
+	if err := svc.handleEvent(context.Background(), []byte(`{"record_id":"9001","filename":"`+inputPath+`"}`)); err == nil {
+		t.Fatal("want error for the different record's conflict too")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

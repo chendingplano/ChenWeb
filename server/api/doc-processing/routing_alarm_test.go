@@ -127,17 +127,66 @@ func TestRoutingAlarmSQLWriterUsesConflictClauseForRunScopedDedup(t *testing.T) 
 	}
 }
 
-func TestRoutingAlarmSQLWriterOmitsRunIDAndKindWhenUnset(t *testing.T) {
+// TestRoutingAlarmSQLWriterUsesConflictClauseForRecordScopedDedup proves the
+// RunID==0 && RecordID!=0 branch (e.g. AlarmForPlanError's block-mode-
+// conflict alarm, raised before any kb.doc_process_runs row exists) relies
+// on uq_alarms_errors_record_id_kind plus ON CONFLICT (record_id, kind)
+// WHERE run_id IS NULL DO NOTHING -- a retry/redelivery of the same record
+// raising the same alarm kind produces no second row, even though no run_id
+// is ever available at that call site.
+func TestRoutingAlarmSQLWriterUsesConflictClauseForRecordScopedDedup(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectExec("INSERT INTO alarms_errors").
-		WithArgs(RoutingAlarmSeverityError, "no run context yet", nil, nil).
+	mock.ExpectExec("INSERT INTO alarms_errors \\(severity, message, record_id, kind\\) VALUES \\(\\$1,\\$2,\\$3,\\$4\\)\\s*\nON CONFLICT \\(record_id, kind\\) WHERE run_id IS NULL AND record_id IS NOT NULL AND kind IS NOT NULL DO NOTHING").
+		WithArgs(RoutingAlarmSeverityError, "duplicate retry, no run yet", int64(4821), RoutingAlarmKindBindingConflict).
+		WillReturnResult(sqlmock.NewResult(0, 0)) // 0 rows affected: the conflict no-op path
+	if err := (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
+		Kind: RoutingAlarmKindBindingConflict, Message: "duplicate retry, no run yet", RecordID: 4821,
+	}); err != nil {
+		t.Fatalf("WriteAlarm: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRoutingAlarmSQLWriterPrefersRunIDOverRecordIDWhenBothSet(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("INSERT INTO alarms_errors \\(severity, message, run_id, kind\\) VALUES").
+		WithArgs(RoutingAlarmSeverityError, "run exists", int64(99), RoutingAlarmKindGateConflict).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	if err := (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
-		Message: "no run context yet",
+		Kind: RoutingAlarmKindGateConflict, Message: "run exists", RunID: 99, RecordID: 4821,
+	}); err != nil {
+		t.Fatalf("WriteAlarm: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRoutingAlarmSQLWriterInsertsUnconditionallyWithNoCorrelator covers the
+// residual case where neither RunID nor RecordID is set (should not happen
+// for a real event, which always carries a record id): the alarm inserts
+// without any run_id/record_id/kind columns, matching pre-dedup behavior.
+func TestRoutingAlarmSQLWriterInsertsUnconditionallyWithNoCorrelator(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("INSERT INTO alarms_errors \\(severity, message\\) VALUES \\(\\$1,\\$2\\)").
+		WithArgs(RoutingAlarmSeverityError, "no correlator available").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	if err := (RoutingAlarmSQLWriter{DB: db}).WriteAlarm(context.Background(), RoutingAlarm{
+		Message: "no correlator available",
 	}); err != nil {
 		t.Fatalf("WriteAlarm: %v", err)
 	}

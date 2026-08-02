@@ -659,6 +659,11 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			s.Logger.Warn("failed building production processor plan", "record_id", evt.RecordID, "error", planErr)
 		}
 		alarm := AlarmForPlanError(planErr)
+		// RunID is unavailable here -- no kb.doc_process_runs row exists yet
+		// at this call site -- so RecordID is the dedup correlator instead
+		// (stable across redeliveries/retries of the same record; see
+		// RoutingAlarmSQLWriter.WriteAlarm).
+		alarm.RecordID = evt.RecordID
 		s.raiseRoutingAlarms(ctx, []RoutingAlarm{alarm})
 		s.emitAlarmAuditEvent(ctx, evt.RecordID, 0, planFacts.ActivePolicyID, planFacts.ActivePolicyVersion, alarm)
 		if len(evt.Operations) == 0 && IsDecisionRelevantPlanConflict(planErr) {

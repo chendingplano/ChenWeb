@@ -38,14 +38,19 @@ const (
 // verbatim into alarms_errors.message; it must stay content-safe (ids,
 // checksums, processor/pipeline names only -- never document content).
 // RunID correlates the alarm to kb.doc_process_runs.id for per-run dedup
-// (spec 2026080102 section 11); zero/unset means the alarm was raised
-// before a run row exists (e.g. a block-mode conflict that fails before
-// processing starts) and is therefore never deduped against other alarms.
+// (spec 2026080102 section 11). RecordID is the fallback correlator for
+// alarms raised before a run row exists (e.g. a block-mode conflict that
+// fails processing before dispatch, per IsDecisionRelevantPlanConflict) --
+// it is stable across redeliveries/retries of the same input record, unlike
+// RunID which is always 0 at that call site. When both are zero/unset
+// (should not happen for a real event, which always carries a record id)
+// the alarm is never deduped against any other.
 type RoutingAlarm struct {
 	Kind     string
 	Severity string
 	Message  string
 	RunID    int64
+	RecordID int64
 }
 
 // DedupeRoutingAlarms collapses repeated alarms of the same kind into their
@@ -118,13 +123,22 @@ type RoutingAlarmWriter interface {
 // operator alarm on /semos/admin/alarms without a new admin surface.
 type RoutingAlarmSQLWriter struct{ DB *sql.DB }
 
-// WriteAlarm inserts one alarm. When both RunID and Kind are set, it relies
-// on uq_alarms_errors_run_id_kind (migration 20260801000019) plus
-// ON CONFLICT DO NOTHING to guarantee at most one row per (run_id, kind)
-// even across separate process invocations retrying the same run -- an
-// in-memory dedupe (DedupeRoutingAlarms) alone cannot survive a retry.
-// Alarms without a RunID (raised before a run row exists) always insert;
-// they have no run to dedupe against.
+// WriteAlarm inserts one alarm, deduplicated at the database level so a
+// retry/redelivery of the same run (or, before a run row exists, the same
+// record) never writes a second row for the same alarm kind -- an
+// in-memory dedupe (DedupeRoutingAlarms) alone cannot survive that, since
+// it only sees alarms raised within one Go call.
+//
+//   - RunID != 0: relies on uq_alarms_errors_run_id_kind (migration
+//     20260801000019) plus ON CONFLICT (run_id, kind) DO NOTHING.
+//   - RunID == 0 && RecordID != 0: an alarm raised before a run row exists
+//     (e.g. IsDecisionRelevantPlanConflict's block-mode failure, which
+//     returns before any kb.doc_process_runs row is created). Relies on the
+//     companion uq_alarms_errors_record_id_kind partial index plus
+//     ON CONFLICT (record_id, kind) WHERE run_id IS NULL DO NOTHING.
+//   - Both zero: no correlator available (should not happen for a real
+//     event, which always carries a record id) -- inserts unconditionally,
+//     matching the pre-dedup behavior for that residual case.
 func (w RoutingAlarmSQLWriter) WriteAlarm(ctx context.Context, alarm RoutingAlarm) error {
 	if w.DB == nil {
 		return errors.New("db is nil")
@@ -133,16 +147,21 @@ func (w RoutingAlarmSQLWriter) WriteAlarm(ctx context.Context, alarm RoutingAlar
 	if severity == "" {
 		severity = RoutingAlarmSeverityError
 	}
-	var runID any
-	if alarm.RunID != 0 {
-		runID = alarm.RunID
-	}
 	var kind any
 	if alarm.Kind != "" {
 		kind = alarm.Kind
 	}
-	_, err := w.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, run_id, kind) VALUES ($1,$2,$3,$4)
-ON CONFLICT (run_id, kind) WHERE run_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, severity, alarm.Message, runID, kind)
+	if alarm.RunID != 0 {
+		_, err := w.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, run_id, kind) VALUES ($1,$2,$3,$4)
+ON CONFLICT (run_id, kind) WHERE run_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, severity, alarm.Message, alarm.RunID, kind)
+		return err
+	}
+	if alarm.RecordID != 0 {
+		_, err := w.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, record_id, kind) VALUES ($1,$2,$3,$4)
+ON CONFLICT (record_id, kind) WHERE run_id IS NULL AND record_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, severity, alarm.Message, alarm.RecordID, kind)
+		return err
+	}
+	_, err := w.DB.ExecContext(ctx, "INSERT INTO alarms_errors (severity, message) VALUES ($1,$2)", severity, alarm.Message)
 	return err
 }
 
