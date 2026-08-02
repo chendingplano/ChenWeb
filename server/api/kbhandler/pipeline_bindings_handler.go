@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -244,6 +245,10 @@ func CreatePipelineBinding(c echo.Context) error {
 		logger.Error("fetch created pipeline binding failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created pipeline binding (CWB_KB_PB_105)"})
 	}
+	writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
+		Kind: policyaudit.EventBindingAuthored, PolicyID: *policyID, SubjectKind: bindingKind, SubjectID: id,
+		Detail: map[string]any{"predicate_checksum": predicateChecksum, "pipeline_id": *payload.PipelineID, "binding_kind": bindingKind},
+	})
 
 	return c.JSON(http.StatusOK, pipelineBindingDetailResponse{Status: true, Record: record})
 }

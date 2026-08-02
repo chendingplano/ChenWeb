@@ -11,6 +11,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -261,6 +262,10 @@ func ActivatePipelinePolicy(c echo.Context) error {
 		logger.Error("commit activate pipeline policy failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to activate pipeline policy (CWB_KB_PP_208)"})
 	}
+	writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
+		Kind: policyaudit.EventPolicyActivated, PolicyID: id, PolicyVersion: compiled.Version,
+		Detail: map[string]any{"checksum": compiled.Checksum},
+	})
 
 	record, err := fetchPipelinePolicyByID(db, id)
 	if err != nil {

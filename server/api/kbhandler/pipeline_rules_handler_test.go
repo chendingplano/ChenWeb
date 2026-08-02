@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
@@ -163,6 +164,7 @@ func TestCreatePipelineRuleSuccess(t *testing.T) {
 	oldDB := ApiTypes.ProjectDBHandle
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	audit := installPolicyAuditFake(t)
 
 	policyStatusQuery := regexp.QuoteMeta("SELECT status FROM kb.pipeline_policies WHERE id = $1")
 	mock.ExpectQuery(policyStatusQuery).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
@@ -215,6 +217,9 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 	if !payload.Status || payload.Record.ID != 2 {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
+	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventBindingAuthored || audit.events[0].SubjectID != 2 {
+		t.Fatalf("audit events=%+v, want one binding_authored event for subject 2", audit.events)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
@@ -230,6 +235,7 @@ func TestCreatePipelineRuleCanonicalGateWritesProcessorRule(t *testing.T) {
 	oldDB := ApiTypes.ProjectDBHandle
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	audit := installPolicyAuditFake(t)
 
 	policyStatusQuery := regexp.QuoteMeta("SELECT status FROM kb.pipeline_policies WHERE id = $1")
 	mock.ExpectQuery(policyStatusQuery).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
@@ -261,6 +267,9 @@ RETURNING id`)
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("response %s missing %s", rec.Body.String(), want)
 		}
+	}
+	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventRuleAuthored || audit.events[0].SubjectID != 12 {
+		t.Fatalf("audit events=%+v, want one rule_authored event for subject 12", audit.events)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)

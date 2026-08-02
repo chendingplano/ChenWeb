@@ -14,6 +14,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -115,6 +116,7 @@ func TestActivatePipelinePolicyCompilesLocksAndActivatesAtomically(t *testing.T)
 	compiler := &fakePolicyCompiler{compiled: docprocessing.CompiledPolicy{PolicyID: 2, Version: 2, Checksum: "sha256:compiled"}}
 	restore := installPolicyActivationFakes(t, &ApiTypes.UserInfo{UserName: "owner@example.com", IsOwner: true}, compiler)
 	defer restore()
+	audit := installPolicyAuditFake(t)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(checksum, ''), status FROM kb.pipeline_policies WHERE id = $1 FOR UPDATE")).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"checksum", "status"}).AddRow("", "draft"))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET checksum = $1, modify_time = NOW() WHERE id = $2")).WithArgs("sha256:compiled", int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -128,6 +130,9 @@ func TestActivatePipelinePolicyCompilesLocksAndActivatesAtomically(t *testing.T)
 	}
 	if rec.Code != http.StatusOK || compiler.calls != 2 {
 		t.Fatalf("code=%d calls=%d body=%s", rec.Code, compiler.calls, rec.Body.String())
+	}
+	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventPolicyActivated || audit.events[0].PolicyID != 2 || audit.events[0].Actor != "owner@example.com" {
+		t.Fatalf("audit events=%+v, want one policy_activated event for policy 2 by owner@example.com", audit.events)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
