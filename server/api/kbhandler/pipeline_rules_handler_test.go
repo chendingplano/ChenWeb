@@ -102,23 +102,28 @@ func TestCreatePipelineRuleSuccess(t *testing.T) {
 	mock.ExpectQuery(activePolicyQuery).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
 
 	insertQuery := regexp.QuoteMeta(`
-INSERT INTO kb.pipeline_rules (
-    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active, policy_id
+INSERT INTO kb.pipeline_bindings (
+    name, priority, binding_kind, predicate, predicate_checksum, pipeline_id, active, policy_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, 'conditional', $3::jsonb, $4, $5, $6, $7
 )
 RETURNING id
 `)
 	mock.ExpectQuery(insertQuery).
-		WithArgs("pdf-zh", 10, "pdf", "zh", nil, int64(3), true, int64(1)).
+		WithArgs("pdf-zh", 10, sqlmock.AnyArg(), sqlmock.AnyArg(), int64(3), true, int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
 
-	selectQuery := regexp.QuoteMeta("SELECT" + pipelineRuleSelectCols + "\nWHERE r.id = $1")
+	selectQuery := regexp.QuoteMeta(`
+SELECT b.id, COALESCE(b.name, ''), b.priority,
+       COALESCE(b.predicate, '{}'::jsonb)::text,
+       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.id = $1`)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding",
-		"pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
+		"id", "name", "priority", "predicate", "pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time",
 	}).AddRow(
-		int64(2), "pdf-zh", 10, "pdf", "zh", nil, int64(3), "regulated_reference", true, int64(1),
+		int64(2), "pdf-zh", 10, `{"version":1,"expression":{"kind":"all","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"},{"kind":"fact","path":"document.source_language","op":"eq","value":"zh"}]}}`, int64(3), "regulated_reference", true, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 	))
 

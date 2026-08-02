@@ -8,19 +8,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
 type pipelineBindingRecord struct {
-	ID           int64     `json:"id"`
-	KSStoreID    int64     `json:"ks_store_id"`
-	PipelineID   int64     `json:"pipeline_id"`
-	PipelineName string    `json:"pipeline_name"`
-	PolicyID     int64     `json:"policy_id"`
-	CreateTime   time.Time `json:"create_time"`
-	ModifyTime   time.Time `json:"modify_time"`
+	ID                int64           `json:"id"`
+	Name              string          `json:"name,omitempty"`
+	Priority          int             `json:"priority"`
+	KSStoreID         int64           `json:"ks_store_id,omitempty"`
+	PipelineID        int64           `json:"pipeline_id"`
+	PipelineName      string          `json:"pipeline_name"`
+	PolicyID          int64           `json:"policy_id"`
+	BindingKind       string          `json:"binding_kind"`
+	Predicate         json.RawMessage `json:"predicate,omitempty"`
+	PredicateChecksum string          `json:"predicate_checksum,omitempty"`
+	Active            bool            `json:"active"`
+	CreateTime        time.Time       `json:"create_time"`
+	ModifyTime        time.Time       `json:"modify_time"`
 }
 
 type listPipelineBindingsResponse struct {
@@ -35,18 +42,26 @@ type pipelineBindingDetailResponse struct {
 }
 
 const pipelineBindingSelectColumns = `
-    b.id, b.ks_store_id, b.pipeline_id, p.name, b.policy_id,
+    b.id, COALESCE(b.name, ''), b.priority, COALESCE(b.ks_store_id, 0),
+    b.pipeline_id, p.name, b.policy_id, b.binding_kind,
+    COALESCE(b.predicate, '{}'::jsonb)::text, COALESCE(b.predicate_checksum, ''), b.active,
     b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id`
 
 func scanPipelineBindingRecord(scan func(dest ...any) error) (pipelineBindingRecord, error) {
 	var record pipelineBindingRecord
+	var predicateRaw string
 	if err := scan(
-		&record.ID, &record.KSStoreID, &record.PipelineID, &record.PipelineName, &record.PolicyID,
+		&record.ID, &record.Name, &record.Priority, &record.KSStoreID,
+		&record.PipelineID, &record.PipelineName, &record.PolicyID, &record.BindingKind,
+		&predicateRaw, &record.PredicateChecksum, &record.Active,
 		&record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineBindingRecord{}, err
+	}
+	if strings.TrimSpace(predicateRaw) != "" && strings.TrimSpace(predicateRaw) != "{}" {
+		record.Predicate = json.RawMessage(predicateRaw)
 	}
 	return record, nil
 }
@@ -110,18 +125,63 @@ func CreatePipelineBinding(c echo.Context) error {
 	logger := rc.GetLogger()
 
 	var payload struct {
-		KSStoreID  *int64 `json:"ks_store_id"`
-		PipelineID *int64 `json:"pipeline_id"`
-		PolicyID   *int64 `json:"policy_id"`
+		Name              string          `json:"name"`
+		Priority          *int            `json:"priority"`
+		KSStoreID         *int64          `json:"ks_store_id"`
+		PipelineID        *int64          `json:"pipeline_id"`
+		PolicyID          *int64          `json:"policy_id"`
+		BindingKind       string          `json:"binding_kind"`
+		Predicate         json.RawMessage `json:"predicate"`
+		PredicateChecksum string          `json:"predicate_checksum"`
+		Active            *bool           `json:"active"`
 	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PB_101)"})
 	}
-	if payload.KSStoreID == nil || *payload.KSStoreID <= 0 {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "ks_store_id is required (CWB_KB_PB_102)"})
-	}
 	if payload.PipelineID == nil || *payload.PipelineID <= 0 {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "pipeline_id is required (CWB_KB_PB_103)"})
+	}
+	priority := 0
+	if payload.Priority != nil {
+		priority = *payload.Priority
+	}
+	active := true
+	if payload.Active != nil {
+		active = *payload.Active
+	}
+	bindingKind := strings.TrimSpace(payload.BindingKind)
+	if bindingKind == "" {
+		bindingKind = "store_default"
+	}
+	if bindingKind == "store_default" && (payload.KSStoreID == nil || *payload.KSStoreID <= 0) {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "ks_store_id is required (CWB_KB_PB_102)"})
+	}
+	if bindingKind == "conditional" && len(payload.Predicate) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "predicate is required (CWB_KB_PB_111)"})
+	}
+	var ksStoreID any
+	if payload.KSStoreID != nil && *payload.KSStoreID > 0 {
+		ksStoreID = *payload.KSStoreID
+	}
+	predicate := any(nil)
+	predicateChecksum := strings.TrimSpace(payload.PredicateChecksum)
+	if len(payload.Predicate) > 0 {
+		var doc semrules.Document
+		if err := json.Unmarshal(payload.Predicate, &doc); err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PB_107)"})
+		}
+		if err := semrules.Validate(doc); err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PB_108)"})
+		}
+		_, checksum, err := semrules.Canonicalize(doc)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PB_109)"})
+		}
+		if predicateChecksum != "" && predicateChecksum != checksum {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "predicate_checksum mismatch (CWB_KB_PB_110)"})
+		}
+		predicateChecksum = checksum
+		predicate = string(payload.Predicate)
 	}
 
 	db := ApiTypes.ProjectDBHandle
@@ -137,8 +197,8 @@ func CreatePipelineBinding(c echo.Context) error {
 
 	var id int64
 	if err := db.QueryRow(
-		"INSERT INTO kb.pipeline_bindings (ks_store_id, pipeline_id, policy_id) VALUES ($1, $2, $3) RETURNING id",
-		*payload.KSStoreID, *payload.PipelineID, *policyID,
+		"INSERT INTO kb.pipeline_bindings (name, priority, ks_store_id, pipeline_id, policy_id, binding_kind, predicate, predicate_checksum, active) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) RETURNING id",
+		strings.TrimSpace(payload.Name), priority, ksStoreID, *payload.PipelineID, *policyID, bindingKind, predicate, predicateChecksum, active,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline binding failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline binding (CWB_KB_PB_104)"})

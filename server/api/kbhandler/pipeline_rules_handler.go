@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -79,6 +80,57 @@ func fetchPipelineRuleByID(db *sql.DB, id int64) (pipelineRuleRecord, error) {
 	query := "SELECT" + pipelineRuleSelectColumns + "\nWHERE r.id = $1"
 	row := db.QueryRow(query, id)
 	return scanPipelineRuleRecord(row.Scan)
+}
+
+func fetchPipelineRuleCompatBindingByID(db *sql.DB, id int64) (pipelineRuleRecord, error) {
+	const query = `
+SELECT b.id, COALESCE(b.name, ''), b.priority,
+       COALESCE(b.predicate, '{}'::jsonb)::text,
+       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.id = $1`
+	var (
+		record       pipelineRuleRecord
+		predicateRaw string
+	)
+	row := db.QueryRow(query, id)
+	if err := row.Scan(
+		&record.ID, &record.Name, &record.Priority, &predicateRaw,
+		&record.PipelineID, &record.PipelineName, &record.Active, &record.PolicyID, &record.CreateTime, &record.ModifyTime,
+	); err != nil {
+		return pipelineRuleRecord{}, err
+	}
+	applyLegacyPredicateToPipelineRuleRecord(&record, predicateRaw)
+	return record, nil
+}
+
+func applyLegacyPredicateToPipelineRuleRecord(record *pipelineRuleRecord, predicateRaw string) {
+	var doc struct {
+		Expression struct {
+			Items []struct {
+				Path  string `json:"path"`
+				Value any    `json:"value"`
+			} `json:"items"`
+		} `json:"expression"`
+	}
+	if err := json.Unmarshal([]byte(predicateRaw), &doc); err != nil {
+		return
+	}
+	for _, item := range doc.Expression.Items {
+		value := strings.TrimSpace(fmt.Sprint(item.Value))
+		if value == "" {
+			continue
+		}
+		switch item.Path {
+		case "document.input_doc_type":
+			record.MatchInputDocType = &value
+		case "document.source_language":
+			record.MatchSourceLanguage = &value
+		case "document.knowledge_store_binding_state":
+			record.MatchKnowledgeStoreBinding = &value
+		}
+	}
 }
 
 // normalizeRuleMatchInput lowercases/trims a match_* value the same way
@@ -174,34 +226,51 @@ func CreatePipelineRule(c echo.Context) error {
 		policyID = &active
 	}
 
+	rule := docprocessing.ProductionPipelineRule{
+		MatchInputDocType:          stringPtrFromNormalizedAny(normalizeRuleMatchInput(payload.MatchInputDocType)),
+		MatchSourceLanguage:        stringPtrFromNormalizedAny(normalizeRuleMatchInput(payload.MatchSourceLanguage)),
+		MatchKnowledgeStoreBinding: stringPtrFromNormalizedAny(normalizeRuleMatchInput(payload.MatchKnowledgeStoreBinding)),
+	}
+	predicateDoc, checksum, err := docprocessing.LegacyRulePredicateDocument(rule)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PR_107)"})
+	}
+	predicateJSON, err := json.Marshal(predicateDoc)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to encode predicate (CWB_KB_PR_108)"})
+	}
+
 	const insertQuery = `
-INSERT INTO kb.pipeline_rules (
-    name, priority, match_input_doc_type, match_source_language, match_knowledge_store_binding, pipeline_id, active, policy_id
+INSERT INTO kb.pipeline_bindings (
+    name, priority, binding_kind, predicate, predicate_checksum, pipeline_id, active, policy_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, 'conditional', $3::jsonb, $4, $5, $6, $7
 )
 RETURNING id
 `
 	var id int64
 	if err := db.QueryRow(
 		insertQuery,
-		strings.TrimSpace(payload.Name), priority,
-		normalizeRuleMatchInput(payload.MatchInputDocType),
-		normalizeRuleMatchInput(payload.MatchSourceLanguage),
-		normalizeRuleMatchInput(payload.MatchKnowledgeStoreBinding),
-		*payload.PipelineID, active, *policyID,
+		strings.TrimSpace(payload.Name), priority, string(predicateJSON), checksum, *payload.PipelineID, active, *policyID,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline rule failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline rule (CWB_KB_PR_104)"})
 	}
 
-	record, err := fetchPipelineRuleByID(db, id)
+	record, err := fetchPipelineRuleCompatBindingByID(db, id)
 	if err != nil {
 		logger.Error("fetch created pipeline rule failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created pipeline rule (CWB_KB_PR_105)"})
 	}
 
 	return c.JSON(http.StatusOK, pipelineRuleDetailResponse{Status: true, Record: record})
+}
+
+func stringPtrFromNormalizedAny(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
 }
 
 // UpdatePipelineRule handles PUT /api/v1/kb/pipeline-rules/:id.
