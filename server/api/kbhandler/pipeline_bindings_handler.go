@@ -28,6 +28,9 @@ type pipelineBindingRecord struct {
 	Predicate         json.RawMessage `json:"predicate,omitempty"`
 	PredicateChecksum string          `json:"predicate_checksum,omitempty"`
 	Active            bool            `json:"active"`
+	TenantID          string          `json:"tenant_id,omitempty"`
+	UserID            string          `json:"user_id,omitempty"`
+	InputRecordID     int64           `json:"input_record_id,omitempty"`
 	CreateTime        time.Time       `json:"create_time"`
 	ModifyTime        time.Time       `json:"modify_time"`
 }
@@ -47,6 +50,7 @@ const pipelineBindingSelectColumns = `
     b.id, COALESCE(b.name, ''), b.priority, COALESCE(b.ks_store_id, 0),
     b.pipeline_id, p.name, b.policy_id, b.binding_kind,
     COALESCE(b.predicate, '{}'::jsonb)::text, COALESCE(b.predicate_checksum, ''), b.active,
+    COALESCE(b.tenant_id, '-'), COALESCE(b.user_id, ''), COALESCE(b.input_record_id, 0),
     b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id`
@@ -58,6 +62,7 @@ func scanPipelineBindingRecord(scan func(dest ...any) error) (pipelineBindingRec
 		&record.ID, &record.Name, &record.Priority, &record.KSStoreID,
 		&record.PipelineID, &record.PipelineName, &record.PolicyID, &record.BindingKind,
 		&predicateRaw, &record.PredicateChecksum, &record.Active,
+		&record.TenantID, &record.UserID, &record.InputRecordID,
 		&record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineBindingRecord{}, err

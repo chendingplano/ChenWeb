@@ -19,6 +19,7 @@ const pipelineBindingSelectCols = `
     b.id, COALESCE(b.name, ''), b.priority, COALESCE(b.ks_store_id, 0),
     b.pipeline_id, p.name, b.policy_id, b.binding_kind,
     COALESCE(b.predicate, '{}'::jsonb)::text, COALESCE(b.predicate_checksum, ''), b.active,
+    COALESCE(b.tenant_id, '-'), COALESCE(b.user_id, ''), COALESCE(b.input_record_id, 0),
     b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id`
@@ -60,8 +61,8 @@ func TestListPipelineBindingsFiltersByKSStoreID(t *testing.T) {
 	query := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.ks_store_id = $1\nORDER BY b.id")
 	mock.ExpectQuery(query).
 		WithArgs(int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
-			int64(3), "store-default", 0, int64(42), int64(2), "narrative_default", int64(1), "store_default", `{}`, "", true,
+		WillReturnRows(sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
+			int64(3), "store-default", 0, int64(42), int64(2), "narrative_default", int64(1), "store_default", `{}`, "", true, "-", "", int64(0),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 		))
 
@@ -89,6 +90,47 @@ func TestListPipelineBindingsFiltersByKSStoreID(t *testing.T) {
 	}
 }
 
+func TestListPipelineBindingsReturnsCanonicalScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	query := regexp.QuoteMeta(`SELECT
+    b.id, COALESCE(b.name, ''), b.priority, COALESCE(b.ks_store_id, 0),
+    b.pipeline_id, p.name, b.policy_id, b.binding_kind,
+    COALESCE(b.predicate, '{}'::jsonb)::text, COALESCE(b.predicate_checksum, ''), b.active,
+    COALESCE(b.tenant_id, '-'), COALESCE(b.user_id, ''), COALESCE(b.input_record_id, 0),
+    b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+ORDER BY b.id`)
+	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "priority", "ks_store_id", "pipeline_id", "pipeline_name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
+		int64(3), "document policy", 10, int64(42), int64(2), "narrative_default", int64(1), "conditional", `{}`, "", true, "tenant-a", "user-a", int64(91),
+		time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC), time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC),
+	))
+
+	c, rec := newPipelineBindingContext(t, http.MethodGet, "/api/v1/kb/pipeline-bindings", "")
+	if err := ListPipelineBindings(c); err != nil {
+		t.Fatalf("ListPipelineBindings returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"tenant_id":"tenant-a"`, `"user_id":"user-a"`, `"input_record_id":91`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("response %s missing %s", rec.Body.String(), want)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestCreatePipelineBindingSuccess(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -110,8 +152,8 @@ func TestCreatePipelineBindingSuccess(t *testing.T) {
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
-			int64(3), "", 0, int64(42), int64(2), "narrative_default", int64(1), "store_default", `{}`, "", true,
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
+			int64(3), "", 0, int64(42), int64(2), "narrative_default", int64(1), "store_default", `{}`, "", true, "-", "", int64(0),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 		))
 
@@ -157,10 +199,10 @@ func TestCreatePipelineBindingConditionalValidatesPredicate(t *testing.T) {
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(4)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
 			int64(4), "pdf policy", 10, int64(0), int64(2), "narrative_default", int64(1), "conditional",
 			`{"version":1,"expression":{"kind":"all","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"}]}}`,
-			"sha256:test", true,
+			"sha256:test", true, "-", "", int64(0),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 		))
 
@@ -205,8 +247,8 @@ func TestCreatePipelineBindingWritesScopeFields(t *testing.T) {
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(4)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
-			int64(4), "document policy", 10, int64(42), int64(2), "narrative_default", int64(1), "conditional", `{}`, "", true,
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
+			int64(4), "document policy", 10, int64(42), int64(2), "narrative_default", int64(1), "conditional", `{}`, "", true, "tenant-a", "user-a", int64(91),
 			time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC), time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC),
 		))
 
@@ -328,8 +370,8 @@ WHERE b.id = $1`)
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
-			int64(3), "", 0, int64(42), int64(5), "request_override", int64(1), "store_default", `{}`, "", true,
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
+			int64(3), "", 0, int64(42), int64(5), "request_override", int64(1), "store_default", `{}`, "", true, "-", "", int64(0),
 			time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 30, 0, 0, time.UTC),
 		))
 
@@ -371,10 +413,10 @@ WHERE b.id = $1`)
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
 			int64(3), "pdf policy v2", 20, int64(0), int64(5), "request_override", int64(1), "conditional",
 			`{"version":1,"expression":{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"}}`,
-			"sha256:test", false,
+			"sha256:test", false, "-", "", int64(0),
 			time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC), time.Date(2026, 8, 2, 10, 30, 0, 0, time.UTC),
 		))
 
@@ -423,8 +465,8 @@ WHERE b.id = $1`)
 
 	selectQuery := regexp.QuoteMeta("SELECT" + pipelineBindingSelectCols + "\nWHERE b.id = $1")
 	mock.ExpectQuery(selectQuery).WithArgs(int64(3)).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "create_time", "modify_time"}).AddRow(
-			int64(3), "document policy", 0, int64(42), int64(2), "request_override", int64(1), "conditional", `{}`, "", true,
+		sqlmock.NewRows([]string{"id", "binding_name", "priority", "ks_store_id", "pipeline_id", "name", "policy_id", "binding_kind", "predicate", "predicate_checksum", "active", "tenant_id", "user_id", "input_record_id", "create_time", "modify_time"}).AddRow(
+			int64(3), "document policy", 0, int64(42), int64(2), "request_override", int64(1), "conditional", `{}`, "", true, "tenant-a", "user-a", int64(91),
 			time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC), time.Date(2026, 8, 2, 10, 30, 0, 0, time.UTC),
 		))
 
