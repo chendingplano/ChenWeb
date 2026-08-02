@@ -33,6 +33,47 @@ func TestRoutingClearanceIncomparablePipelineRecordsRemovedSet(t *testing.T) {
 	}
 }
 
+func TestRoutingClearanceReplaceRevokesPriorGenerationTransactionally(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	request := RoutingClearanceApproval{Subject: RoutingClearanceSubject{PolicyID: 7, PolicyVersion: 3, SubjectKind: "processor_rule", SubjectID: 12, SubjectChecksum: "sha256:subject", DocumentKind: "standard", NetPlanDeltaChecksum: "sha256:delta"}, PolicyChecksum: "sha256:policy", ManifestChecksum: "sha256:manifest", BaselineRunID: "00000000-0000-0000-0000-000000000001", RoutedRunID: "00000000-0000-0000-0000-000000000002", Repetitions: 1, PairedCaseCount: 3, GoldPositiveDenominator: 3, BaselineRecallNumerator: 3, BaselineRecallDenominator: 3, RoutedRecallNumerator: 3, RoutedRecallDenominator: 3, Approved: true, Actor: "owner@example.com", Rationale: "replacement evidence"}
+	mock.ExpectBegin()
+	mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT cv.clearance_id").WithArgs(int64(7), 3, "processor_rule", int64(12), "standard").WillReturnRows(sqlmock.NewRows([]string{"clearance_id"}).AddRow(int64(9)))
+	mock.ExpectExec("INSERT INTO kb.pipeline_routing_clearance_revocations").WithArgs(int64(9), "owner@example.com", "replaced: replacement evidence").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("INSERT INTO kb.pipeline_routing_clearances").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
+	mock.ExpectExec("INSERT INTO kb.pipeline_routing_clearance_coverage").WithArgs(int64(11), int64(7), 3, "processor_rule", int64(12), "sha256:subject", "standard", "sha256:delta", int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	got, err := (RoutingClearanceStore{DB: db}).Replace(context.Background(), request)
+	if err != nil || got != 11 {
+		t.Fatalf("id=%d err=%v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRoutingClearanceRevokeIsAppendOnly(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs("clearance/11").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO kb.pipeline_routing_clearance_revocations").WithArgs(int64(11), "owner@example.com", "bad evidence").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := (RoutingClearanceStore{DB: db}).Revoke(context.Background(), 11, "owner@example.com", "bad evidence"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRoutingClearanceResolveEffectiveRequiresExactSliceAndChecksum(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
