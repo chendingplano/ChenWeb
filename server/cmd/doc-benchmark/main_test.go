@@ -70,6 +70,42 @@ func TestCommandValidationUsesStableJSONErrors(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRoutingEmitsApprovalReadyEvidenceWithoutMutation(t *testing.T) {
+	evidence := docbenchmark.RoutingClearanceEvidence{
+		DocumentKind: "standard", PolicyChecksum: "sha256:policy",
+		Baseline: docbenchmark.RoutingClearanceRunEvidence{RunID: "baseline", ManifestChecksum: "sha256:manifest", Repetitions: 1},
+		Routed:   docbenchmark.RoutingClearanceRunEvidence{RunID: "routed", ManifestChecksum: "sha256:manifest", Repetitions: 1},
+	}
+	for _, caseID := range []string{"a", "b", "c"} {
+		row := docbenchmark.RoutingClearanceCaseEvidence{CaseID: caseID, Repetition: 1, GoldPositiveDenominator: 1, RecallNumerator: 1, RecallDenominator: 1}
+		evidence.Baseline.Cases = append(evidence.Baseline.Cases, row)
+		evidence.Routed.Cases = append(evidence.Routed.Cases, row)
+	}
+	raw, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "routing-evidence.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := execute(context.Background(), []string{"analyze-routing", "--evidence", path}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Evidence docbenchmark.RoutingClearanceEvidence `json:"evidence"`
+		Decision docbenchmark.RoutingClearanceDecision `json:"decision"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Decision.Approved || got.Decision.Reason != "approved" || got.Evidence.PolicyChecksum != evidence.PolicyChecksum {
+		t.Fatalf("output=%s", stdout.String())
+	}
+}
+
 func TestProfileReportCommandRejectsMissingFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := execute(context.Background(), []string{"profile-report"}, &stdout, &stderr)

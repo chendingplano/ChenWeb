@@ -65,6 +65,8 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = withQuietCommandLogs(func() error { return runGoldProfileReport(ctx, args[1:], stdout, stderr) })
 	case "analyze":
 		err = withQuietCommandLogs(func() error { return runGoldAnalyze(ctx, args[1:], stdout, stderr) })
+	case "analyze-routing":
+		err = withQuietCommandLogs(func() error { return runRoutingAnalyze(args[1:], stdout, stderr) })
 	default:
 		emitError(stderr, "usage_error", fmt.Errorf("unknown command %q", args[0]))
 		return 2

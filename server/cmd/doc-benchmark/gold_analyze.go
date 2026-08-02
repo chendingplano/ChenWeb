@@ -42,6 +42,51 @@ type goldRunDocumentResult struct {
 	Results  map[string]any `json:"results,omitempty"`
 }
 
+type routingAnalyzeOutput struct {
+	Evidence docbenchmark.RoutingClearanceEvidence `json:"evidence"`
+	Decision docbenchmark.RoutingClearanceDecision `json:"decision"`
+}
+
+// runRoutingAnalyze evaluates approval-ready routing evidence without writing
+// policy, clearance, or benchmark state.
+func runRoutingAnalyze(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("analyze-routing", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	evidencePath := fs.String("evidence", "", "routing clearance evidence JSON")
+	output := fs.String("output", "", "output JSON file (stdout when omitted)")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	if strings.TrimSpace(*evidencePath) == "" {
+		return fmt.Errorf("%w: --evidence is required", errUsage)
+	}
+	raw, err := os.ReadFile(*evidencePath)
+	if err != nil {
+		return fmt.Errorf("read --evidence: %w", err)
+	}
+	var evidence docbenchmark.RoutingClearanceEvidence
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&evidence); err != nil {
+		return fmt.Errorf("%w: parse --evidence: %v", errUsage, err)
+	}
+	encoded, err := json.MarshalIndent(routingAnalyzeOutput{Evidence: evidence, Decision: docbenchmark.EvaluateRoutingClearance(evidence)}, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	if *output == "" {
+		_, err = stdout.Write(encoded)
+		return err
+	}
+	if dir := filepath.Dir(*output); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(*output, encoded, 0o644)
+}
+
 func runGoldAnalyze(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	fs.SetOutput(stderr)
