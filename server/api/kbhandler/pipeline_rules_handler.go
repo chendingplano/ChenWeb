@@ -11,24 +11,31 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
 type pipelineRuleRecord struct {
-	ID                         int64     `json:"id"`
-	Name                       string    `json:"name"`
-	Priority                   int       `json:"priority"`
-	MatchInputDocType          *string   `json:"match_input_doc_type,omitempty"`
-	MatchSourceLanguage        *string   `json:"match_source_language,omitempty"`
-	MatchKnowledgeStoreBinding *string   `json:"match_knowledge_store_binding,omitempty"`
-	PipelineID                 int64     `json:"pipeline_id"`
-	PipelineName               string    `json:"pipeline_name"`
-	Active                     bool      `json:"active"`
-	PolicyID                   int64     `json:"policy_id"`
-	CreateTime                 time.Time `json:"create_time"`
-	ModifyTime                 time.Time `json:"modify_time"`
+	ID                         int64           `json:"id"`
+	Name                       string          `json:"name"`
+	Priority                   int             `json:"priority"`
+	MatchInputDocType          *string         `json:"match_input_doc_type,omitempty"`
+	MatchSourceLanguage        *string         `json:"match_source_language,omitempty"`
+	MatchKnowledgeStoreBinding *string         `json:"match_knowledge_store_binding,omitempty"`
+	PipelineID                 int64           `json:"pipeline_id"`
+	PipelineName               string          `json:"pipeline_name"`
+	Active                     bool            `json:"active"`
+	PolicyID                   int64           `json:"policy_id"`
+	CreateTime                 time.Time       `json:"create_time"`
+	ModifyTime                 time.Time       `json:"modify_time"`
+	Predicate                  json.RawMessage `json:"predicate,omitempty"`
+	PredicateChecksum          string          `json:"predicate_checksum,omitempty"`
+	PredicateSource            string          `json:"predicate_source,omitempty"`
+	TargetProcessor            string          `json:"target_processor,omitempty"`
+	Effect                     string          `json:"effect,omitempty"`
+	RequiredFacets             []string        `json:"required_facets,omitempty"`
 }
 
 type listPipelineRulesResponse struct {
@@ -125,7 +132,25 @@ func scanPipelineRuleCompatBindingRecord(scan func(dest ...any) error) (pipeline
 	if !applyLegacyPredicateToPipelineRuleRecord(&record, predicateRaw) {
 		return pipelineRuleRecord{}, false, nil
 	}
+	record.Predicate = json.RawMessage(predicateRaw)
+	record.PredicateSource = "legacy_adapter"
 	return record, true, nil
+}
+
+func scanCanonicalPipelineGateRecord(scan func(dest ...any) error) (pipelineRuleRecord, error) {
+	var record pipelineRuleRecord
+	var predicateRaw, requiredFacetsRaw string
+	if err := scan(&record.ID, &record.Name, &record.Priority, &predicateRaw, &record.PredicateChecksum,
+		&record.TargetProcessor, &record.Effect, &requiredFacetsRaw, &record.Active, &record.PolicyID,
+		&record.CreateTime, &record.ModifyTime); err != nil {
+		return pipelineRuleRecord{}, err
+	}
+	record.Predicate = json.RawMessage(predicateRaw)
+	record.PredicateSource = "json"
+	if err := json.Unmarshal([]byte(requiredFacetsRaw), &record.RequiredFacets); err != nil {
+		return pipelineRuleRecord{}, err
+	}
+	return record, nil
 }
 
 func applyLegacyPredicateToPipelineRuleRecord(record *pipelineRuleRecord, predicateRaw string) bool {
@@ -223,6 +248,31 @@ ORDER BY b.priority DESC, b.id`
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to iterate pipeline rules (CWB_KB_PR_004)"})
 	}
 
+	gateRows, err := db.Query(`
+SELECT id, name, priority, COALESCE(predicate, '{}'::jsonb)::text,
+       COALESCE(predicate_checksum, ''), COALESCE(target_processor, ''),
+       COALESCE(effect, ''), COALESCE(required_facets, '[]'::jsonb)::text,
+       active, policy_id, create_time, modify_time
+FROM kb.pipeline_rules
+WHERE target_processor IS NOT NULL
+ORDER BY priority DESC, id`)
+	if err != nil {
+		logger.Error("query canonical pipeline gates failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve pipeline rules (CWB_KB_PR_002)"})
+	}
+	defer gateRows.Close()
+	for gateRows.Next() {
+		record, err := scanCanonicalPipelineGateRecord(gateRows.Scan)
+		if err != nil {
+			logger.Error("scan canonical pipeline gate failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to scan pipeline rules (CWB_KB_PR_003)"})
+		}
+		results = append(results, record)
+	}
+	if err := gateRows.Err(); err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to iterate pipeline rules (CWB_KB_PR_004)"})
+	}
+
 	return c.JSON(http.StatusOK, listPipelineRulesResponse{Status: true, Results: results, Total: len(results)})
 }
 
@@ -233,14 +283,18 @@ func CreatePipelineRule(c echo.Context) error {
 	logger := rc.GetLogger()
 
 	var payload struct {
-		Name                       string  `json:"name"`
-		Priority                   *int    `json:"priority"`
-		MatchInputDocType          *string `json:"match_input_doc_type"`
-		MatchSourceLanguage        *string `json:"match_source_language"`
-		MatchKnowledgeStoreBinding *string `json:"match_knowledge_store_binding"`
-		PipelineID                 *int64  `json:"pipeline_id"`
-		Active                     *bool   `json:"active"`
-		PolicyID                   *int64  `json:"policy_id"`
+		Name                       string          `json:"name"`
+		Priority                   *int            `json:"priority"`
+		MatchInputDocType          *string         `json:"match_input_doc_type"`
+		MatchSourceLanguage        *string         `json:"match_source_language"`
+		MatchKnowledgeStoreBinding *string         `json:"match_knowledge_store_binding"`
+		PipelineID                 *int64          `json:"pipeline_id"`
+		Active                     *bool           `json:"active"`
+		PolicyID                   *int64          `json:"policy_id"`
+		Predicate                  json.RawMessage `json:"predicate"`
+		PredicateChecksum          string          `json:"predicate_checksum"`
+		TargetProcessor            string          `json:"target_processor"`
+		Effect                     string          `json:"effect"`
 	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_PR_101)"})
@@ -248,7 +302,8 @@ func CreatePipelineRule(c echo.Context) error {
 	if strings.TrimSpace(payload.Name) == "" {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "name is required (CWB_KB_PR_102)"})
 	}
-	if payload.PipelineID == nil || *payload.PipelineID <= 0 {
+	isCanonicalGate := len(payload.Predicate) > 0 || strings.TrimSpace(payload.TargetProcessor) != "" || strings.TrimSpace(payload.Effect) != ""
+	if !isCanonicalGate && (payload.PipelineID == nil || *payload.PipelineID <= 0) {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "pipeline_id is required (CWB_KB_PR_103)"})
 	}
 
@@ -273,6 +328,45 @@ func CreatePipelineRule(c echo.Context) error {
 	}
 	if status == "active" {
 		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_110)"})
+	}
+	if isCanonicalGate {
+		targetProcessor := strings.TrimSpace(payload.TargetProcessor)
+		effect := strings.ToLower(strings.TrimSpace(payload.Effect))
+		if targetProcessor == "" {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "target_processor is required (CWB_KB_PR_111)"})
+		}
+		if effect != "require" && effect != "enable" && effect != "skip" && effect != "defer" {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid effect (CWB_KB_PR_112)"})
+		}
+		var predicateDoc semrules.Document
+		if err := json.Unmarshal(payload.Predicate, &predicateDoc); err != nil || semrules.Validate(predicateDoc) != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PR_113)"})
+		}
+		_, checksum, err := semrules.Canonicalize(predicateDoc)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid predicate (CWB_KB_PR_113)"})
+		}
+		if supplied := strings.TrimSpace(payload.PredicateChecksum); supplied != "" && supplied != checksum {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "predicate_checksum mismatch (CWB_KB_PR_114)"})
+		}
+		requiredFacets, err := json.Marshal(semrules.Analyze(predicateDoc).RequiredDocumentFacets)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to encode required facets (CWB_KB_PR_115)"})
+		}
+		var id int64
+		if err := db.QueryRow(`
+INSERT INTO kb.pipeline_rules (
+    name, priority, predicate, predicate_checksum, target_processor, effect,
+    required_facets, active, policy_id, approval_status
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, 'draft')
+RETURNING id`, strings.TrimSpace(payload.Name), priority, string(payload.Predicate), checksum, targetProcessor, effect, string(requiredFacets), active, *policyID).Scan(&id); err != nil {
+			logger.Error("insert canonical processor gate failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline rule (CWB_KB_PR_104)"})
+		}
+		return c.JSON(http.StatusOK, map[string]any{
+			"status": true,
+			"record": map[string]any{"id": id, "name": strings.TrimSpace(payload.Name), "priority": priority, "predicate": json.RawMessage(payload.Predicate), "predicate_checksum": checksum, "predicate_source": "json", "target_processor": targetProcessor, "effect": effect, "required_facets": json.RawMessage(requiredFacets), "active": active, "policy_id": *policyID},
+		})
 	}
 
 	rule := docprocessing.ProductionPipelineRule{

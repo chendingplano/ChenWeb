@@ -72,6 +72,15 @@ ORDER BY b.priority DESC, b.id`)
 		int64(3), "rich-canonical", 9, `{"version":1,"expression":{"kind":"any","items":[{"kind":"fact","path":"document.input_doc_type","op":"eq","value":"pdf"}]}}`, int64(3), "regulated_reference", true, int64(1),
 		time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC), time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC),
 	))
+	gateQuery := regexp.QuoteMeta(`
+SELECT id, name, priority, COALESCE(predicate, '{}'::jsonb)::text,
+       COALESCE(predicate_checksum, ''), COALESCE(target_processor, ''),
+       COALESCE(effect, ''), COALESCE(required_facets, '[]'::jsonb)::text,
+       active, policy_id, create_time, modify_time
+FROM kb.pipeline_rules
+WHERE target_processor IS NOT NULL
+ORDER BY priority DESC, id`)
+	mock.ExpectQuery(gateQuery).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "priority", "predicate", "predicate_checksum", "target_processor", "effect", "required_facets", "active", "policy_id", "create_time", "modify_time"}))
 
 	c, rec := newPipelineRuleContext(t, http.MethodGet, "/api/v1/kb/pipeline-rules", "")
 	if err := ListPipelineRules(c); err != nil {
@@ -94,6 +103,53 @@ ORDER BY b.priority DESC, b.id`)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestListPipelineRulesIncludesCanonicalGates(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	legacyQuery := regexp.QuoteMeta(`
+SELECT b.id, COALESCE(b.name, ''), b.priority,
+       COALESCE(b.predicate, '{}'::jsonb)::text,
+       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+FROM kb.pipeline_bindings b
+JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.binding_kind = 'conditional'
+ORDER BY b.priority DESC, b.id`)
+	mock.ExpectQuery(legacyQuery).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "priority", "predicate", "pipeline_id", "pipeline_name", "active", "policy_id", "create_time", "modify_time"}))
+	gateQuery := regexp.QuoteMeta(`
+SELECT id, name, priority, COALESCE(predicate, '{}'::jsonb)::text,
+       COALESCE(predicate_checksum, ''), COALESCE(target_processor, ''),
+       COALESCE(effect, ''), COALESCE(required_facets, '[]'::jsonb)::text,
+       active, policy_id, create_time, modify_time
+FROM kb.pipeline_rules
+WHERE target_processor IS NOT NULL
+ORDER BY priority DESC, id`)
+	mock.ExpectQuery(gateQuery).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "priority", "predicate", "predicate_checksum", "target_processor", "effect", "required_facets", "active", "policy_id", "create_time", "modify_time"}).AddRow(
+		int64(12), "skip metrics", 15, `{"version":1,"expression":{"kind":"fact","path":"document.doc_kind","op":"eq","value":"narrative"}}`, "sha256:test", "extract_metrics", "skip", `["document.doc_kind"]`, true, int64(1), time.Now(), time.Now(),
+	))
+	c, rec := newPipelineRuleContext(t, http.MethodGet, "/api/v1/kb/pipeline-rules", "")
+	if err := ListPipelineRules(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"predicate_source":"json"`, `"target_processor":"extract_metrics"`, `"effect":"skip"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("response %s missing %s", rec.Body.String(), want)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -160,6 +216,52 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreatePipelineRuleCanonicalGateWritesProcessorRule(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	policyStatusQuery := regexp.QuoteMeta("SELECT status FROM kb.pipeline_policies WHERE id = $1")
+	mock.ExpectQuery(policyStatusQuery).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.pipeline_rules (
+    name, priority, predicate, predicate_checksum, target_processor, effect,
+    required_facets, active, policy_id, approval_status
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, 'draft')
+RETURNING id`)
+	mock.ExpectQuery(insertQuery).
+		WithArgs("skip metrics for narrative", 15, sqlmock.AnyArg(), sqlmock.AnyArg(), "extract_metrics", "skip", sqlmock.AnyArg(), true, int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(12)))
+
+	c, rec := newPipelineRuleContext(t, http.MethodPost, "/api/v1/kb/pipeline-rules", `{
+		"name":"skip metrics for narrative",
+		"priority":15,
+		"predicate":{"version":1,"expression":{"kind":"fact","path":"document.doc_kind","op":"eq","value":"narrative"}},
+		"target_processor":"extract_metrics",
+		"effect":"skip",
+		"policy_id":1
+	}`)
+	if err := CreatePipelineRule(c); err != nil {
+		t.Fatalf("CreatePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"id":12`, `"predicate_source":"json"`, `"target_processor":"extract_metrics"`, `"effect":"skip"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("response %s missing %s", rec.Body.String(), want)
+		}
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
