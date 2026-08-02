@@ -236,11 +236,14 @@ func legacyIn(a, b any) (bool, error) {
 	return false, nil
 }
 
-// Result is the outcome of evaluating a predicate: the boolean value plus a
-// trace of the evaluations that produced it.
+// Result is the outcome of evaluating a predicate. The legacy wrapper uses
+// Value/Trace; P5 callers use Truth/TraceTree/DecisionRelevantMissingPaths.
 type Result struct {
-	Value bool     `json:"value"`
-	Trace []string `json:"trace"`
+	Value                        bool      `json:"value"`
+	Trace                        []string  `json:"trace,omitempty"`
+	Truth                        Truth     `json:"truth,omitempty"`
+	TraceTree                    TraceNode `json:"trace_tree,omitempty"`
+	DecisionRelevantMissingPaths []string  `json:"decision_relevant_missing_paths,omitempty"`
 }
 
 // Evaluate evaluates a predicate tree against a fact set. Facts are looked up
