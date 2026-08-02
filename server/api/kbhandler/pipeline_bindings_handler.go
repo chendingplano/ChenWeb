@@ -72,6 +72,16 @@ func fetchPipelineBindingByID(db *sql.DB, id int64) (pipelineBindingRecord, erro
 	return scanPipelineBindingRecord(row.Scan)
 }
 
+func pipelineBindingPolicyStatus(db *sql.DB, id int64) (string, error) {
+	var status string
+	err := db.QueryRow(`
+SELECT pp.status
+FROM kb.pipeline_bindings b
+JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
+WHERE b.id = $1`, id).Scan(&status)
+	return strings.ToLower(strings.TrimSpace(status)), err
+}
+
 // ListPipelineBindings handles GET /api/v1/kb/pipeline-bindings, optionally
 // filtered by ?ks_store_id=N to look up the binding for one store.
 func ListPipelineBindings(c echo.Context) error {
@@ -187,12 +197,15 @@ func CreatePipelineBinding(c echo.Context) error {
 	db := ApiTypes.ProjectDBHandle
 	policyID := payload.PolicyID
 	if policyID == nil {
-		active, err := activePipelinePolicyID(db)
-		if err != nil {
-			logger.Error("resolve active pipeline policy failed", "err", err)
-			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve active pipeline policy (CWB_KB_PB_106)"})
-		}
-		policyID = &active
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "policy_id is required (CWB_KB_PB_106)"})
+	}
+	status, err := pipelinePolicyStatus(db, *policyID)
+	if err != nil {
+		logger.Error("resolve pipeline policy status failed", "policy_id", *policyID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline policy (CWB_KB_PB_112)"})
+	}
+	if status == "active" {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_113)"})
 	}
 
 	var id int64
@@ -237,6 +250,17 @@ func UpdatePipelineBinding(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	status, err := pipelineBindingPolicyStatus(db, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PB_206)"})
+		}
+		logger.Error("resolve pipeline binding policy status failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline binding policy (CWB_KB_PB_208)"})
+	}
+	if status == "active" {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_209)"})
+	}
 	result, err := db.Exec(
 		"UPDATE kb.pipeline_bindings SET pipeline_id = $1, modify_time = NOW() WHERE id = $2",
 		*payload.PipelineID, id,
@@ -277,6 +301,17 @@ func DeletePipelineBinding(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	status, err := pipelineBindingPolicyStatus(db, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PB_304)"})
+		}
+		logger.Error("resolve pipeline binding policy status failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline binding policy (CWB_KB_PB_305)"})
+	}
+	if status == "active" {
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_306)"})
+	}
 	result, err := db.Exec("DELETE FROM kb.pipeline_bindings WHERE id = $1", id)
 	if err != nil {
 		logger.Error("delete pipeline binding failed", "id", id, "err", err)

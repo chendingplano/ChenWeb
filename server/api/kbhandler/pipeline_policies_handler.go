@@ -26,13 +26,13 @@ type pipelinePolicyRecord struct {
 }
 
 type listPipelinePoliciesResponse struct {
-	Status  bool                    `json:"status"`
+	Status  bool                   `json:"status"`
 	Results []pipelinePolicyRecord `json:"results"`
-	Total   int                     `json:"total"`
+	Total   int                    `json:"total"`
 }
 
 type pipelinePolicyDetailResponse struct {
-	Status bool                  `json:"status"`
+	Status bool                 `json:"status"`
 	Record pipelinePolicyRecord `json:"record"`
 }
 
@@ -75,13 +75,17 @@ func fetchPipelinePolicyByID(db *sql.DB, id int64) (pipelinePolicyRecord, error)
 	return scanPipelinePolicyRecord(row.Scan)
 }
 
-// activePipelinePolicyID returns the id of the currently active policy, used
-// as the default policy_id for new pipeline_bindings/pipeline_rules rows
-// when the caller doesn't specify one explicitly.
+// activePipelinePolicyID returns the id of the currently active policy.
 func activePipelinePolicyID(db *sql.DB) (int64, error) {
 	var id int64
 	err := db.QueryRow("SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1").Scan(&id)
 	return id, err
+}
+
+func pipelinePolicyStatus(db *sql.DB, id int64) (string, error) {
+	var status string
+	err := db.QueryRow("SELECT status FROM kb.pipeline_policies WHERE id = $1", id).Scan(&status)
+	return strings.ToLower(strings.TrimSpace(status)), err
 }
 
 // ListPipelinePolicies handles GET /api/v1/kb/pipeline-policies.

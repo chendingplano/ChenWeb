@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -107,8 +108,8 @@ func TestCreatePipelineRuleSuccess(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	activePolicyQuery := regexp.QuoteMeta("SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1")
-	mock.ExpectQuery(activePolicyQuery).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	policyStatusQuery := regexp.QuoteMeta("SELECT status FROM kb.pipeline_policies WHERE id = $1")
+	mock.ExpectQuery(policyStatusQuery).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
 
 	insertQuery := regexp.QuoteMeta(`
 INSERT INTO kb.pipeline_bindings (
@@ -141,7 +142,8 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 		"priority":10,
 		"match_input_doc_type":" PDF ",
 		"match_source_language":" ZH ",
-		"pipeline_id":3
+		"pipeline_id":3,
+		"policy_id":1
 	}`)
 	if err := CreatePipelineRule(c); err != nil {
 		t.Fatalf("CreatePipelineRule returned error: %v", err)
@@ -158,6 +160,37 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreatePipelineRuleRejectsActivePolicyWrite(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	policyStatusQuery := regexp.QuoteMeta("SELECT status FROM kb.pipeline_policies WHERE id = $1")
+	mock.ExpectQuery(policyStatusQuery).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("active"))
+
+	c, rec := newPipelineRuleContext(t, http.MethodPost, "/api/v1/kb/pipeline-rules", `{
+		"name":"pdf-zh",
+		"match_input_doc_type":"pdf",
+		"pipeline_id":3,
+		"policy_id":1
+	}`)
+	if err := CreatePipelineRule(c); err != nil {
+		t.Fatalf("CreatePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
@@ -197,6 +230,13 @@ func TestUpdatePipelineRuleSuccess(t *testing.T) {
 	oldDB := ApiTypes.ProjectDBHandle
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	statusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_bindings b
+JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
+WHERE b.id = $1 OR b.legacy_rule_id = $1`)
+	mock.ExpectQuery(statusQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
 
 	selectCompatQuery := regexp.QuoteMeta(`
 SELECT b.id, COALESCE(b.name, ''), b.priority,
@@ -238,6 +278,36 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`)
 	}
 }
 
+func TestUpdatePipelineRuleRejectsActivePolicyWrite(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	statusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_bindings b
+JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
+WHERE b.id = $1 OR b.legacy_rule_id = $1`)
+	mock.ExpectQuery(statusQuery).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("active"))
+
+	c, rec := newPipelineRuleIDContext(t, http.MethodPut, "2", `{"priority":20}`)
+	if err := UpdatePipelineRule(c); err != nil {
+		t.Fatalf("UpdatePipelineRule returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestDeletePipelineRuleNotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -249,10 +319,12 @@ func TestDeletePipelineRuleNotFound(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	deleteQuery := regexp.QuoteMeta("DELETE FROM kb.pipeline_bindings WHERE id = $1 OR legacy_rule_id = $1")
-	mock.ExpectExec(deleteQuery).
-		WithArgs(int64(999)).
-		WillReturnResult(sqlmock.NewResult(0, 0))
+	statusQuery := regexp.QuoteMeta(`
+SELECT pp.status
+FROM kb.pipeline_bindings b
+JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
+WHERE b.id = $1 OR b.legacy_rule_id = $1`)
+	mock.ExpectQuery(statusQuery).WithArgs(int64(999)).WillReturnError(sql.ErrNoRows)
 
 	c, rec := newPipelineRuleIDContext(t, http.MethodDelete, "999", "")
 	if err := DeletePipelineRule(c); err != nil {
