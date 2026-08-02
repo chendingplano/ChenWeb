@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
@@ -141,6 +142,7 @@ func TestCreatePipelineBindingSuccess(t *testing.T) {
 	oldDB := ApiTypes.ProjectDBHandle
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	audit := installPolicyAuditFake(t)
 
 	policyStatusQuery := regexp.QuoteMeta("SELECT status FROM kb.pipeline_policies WHERE id = $1")
 	mock.ExpectQuery(policyStatusQuery).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("draft"))
@@ -171,6 +173,9 @@ func TestCreatePipelineBindingSuccess(t *testing.T) {
 	}
 	if !payload.Status || payload.Record.ID != 3 || payload.Record.PipelineName != "narrative_default" {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventBindingAuthored || audit.events[0].SubjectID != 3 {
+		t.Fatalf("audit events=%+v, want one binding_authored event for subject 3", audit.events)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

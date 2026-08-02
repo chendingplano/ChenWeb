@@ -11,6 +11,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -363,6 +364,10 @@ RETURNING id`, strings.TrimSpace(payload.Name), priority, string(payload.Predica
 			logger.Error("insert canonical processor gate failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline rule (CWB_KB_PR_104)"})
 		}
+		writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
+			Kind: policyaudit.EventRuleAuthored, PolicyID: *policyID, SubjectKind: "processor_rule", SubjectID: id,
+			Detail: map[string]any{"target_processor": targetProcessor, "effect": effect, "predicate_checksum": checksum},
+		})
 		return c.JSON(http.StatusOK, map[string]any{
 			"status": true,
 			"record": map[string]any{"id": id, "name": strings.TrimSpace(payload.Name), "priority": priority, "predicate": json.RawMessage(payload.Predicate), "predicate_checksum": checksum, "predicate_source": "json", "target_processor": targetProcessor, "effect": effect, "required_facets": json.RawMessage(requiredFacets), "active": active, "policy_id": *policyID},
@@ -405,6 +410,10 @@ RETURNING id
 		logger.Error("fetch created pipeline rule failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created pipeline rule (CWB_KB_PR_105)"})
 	}
+	writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
+		Kind: policyaudit.EventBindingAuthored, PolicyID: *policyID, SubjectKind: "conditional_binding", SubjectID: id,
+		Detail: map[string]any{"predicate_checksum": checksum, "pipeline_id": *payload.PipelineID, "predicate_source": "legacy_adapter"},
+	})
 
 	return c.JSON(http.StatusOK, pipelineRuleDetailResponse{Status: true, Record: record})
 }

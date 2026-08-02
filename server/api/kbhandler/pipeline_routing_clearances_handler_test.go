@@ -9,6 +9,7 @@ import (
 
 	docbenchmark "github.com/chendingplano/deepdoc/server/api/doc-benchmark"
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -53,6 +54,7 @@ func TestApprovePipelineRoutingClearanceReloadsAndEvaluatesEvidence(t *testing.T
 	writer := &fakeRoutingClearanceWriter{}
 	restore := installRoutingHandlerFakes(t, &ApiTypes.UserInfo{UserName: "owner@example.com", IsOwner: true}, loader, writer)
 	defer restore()
+	audit := installPolicyAuditFake(t)
 	c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"policy_id":7,"policy_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"no recall loss"}`)
 	if err := ApprovePipelineRoutingClearance(c); err != nil {
 		t.Fatal(err)
@@ -62,6 +64,9 @@ func TestApprovePipelineRoutingClearanceReloadsAndEvaluatesEvidence(t *testing.T
 	}
 	if writer.approval.Actor != "owner@example.com" || !writer.approval.Approved {
 		t.Fatalf("approval=%+v", writer.approval)
+	}
+	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventClearanceApproved || audit.events[0].SubjectID != 12 || audit.events[0].Actor != "owner@example.com" {
+		t.Fatalf("audit events=%+v, want one clearance_approved event for subject 12 by owner@example.com", audit.events)
 	}
 }
 
@@ -127,6 +132,7 @@ func TestRevokePipelineRoutingClearanceUsesAuthenticatedActor(t *testing.T) {
 	writer := &fakeRoutingClearanceWriter{}
 	restore := installRoutingHandlerFakes(t, &ApiTypes.UserInfo{UserName: "admin@example.com", Admin: true}, loader, writer)
 	defer restore()
+	audit := installPolicyAuditFake(t)
 	c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/44/revoke", `{"reason":"obsolete evidence"}`)
 	c.SetPath("/api/v1/kb/pipeline-routing-clearances/:id/revoke")
 	c.SetParamNames("id")
@@ -136,6 +142,9 @@ func TestRevokePipelineRoutingClearanceUsesAuthenticatedActor(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK || writer.calls != 1 || writer.revokedID != 44 || writer.revokedBy != "admin@example.com" || writer.reason != "obsolete evidence" {
 		t.Fatalf("code=%d writer=%+v body=%s", rec.Code, writer, rec.Body.String())
+	}
+	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventClearanceRevoked || audit.events[0].SubjectID != 44 || audit.events[0].Actor != "admin@example.com" {
+		t.Fatalf("audit events=%+v, want one clearance_revoked event for subject 44 by admin@example.com", audit.events)
 	}
 }
 

@@ -44,7 +44,15 @@ type PipelineBindingSelection struct {
 	SelectedPipeline string
 	Source           string
 	BindingName      string
-	Trace            []PipelineBindingTrace
+	// BindingID/PredicateChecksum identify the winning kb.pipeline_bindings
+	// row when Source == "conditional_binding" -- E3's FinalizeRoutingPlan
+	// needs both to build the D2 clearance subject
+	// (ConditionalBindingSubjectChecksum) for a suppressive selection. Zero
+	// value for every other source (store_default/system_default), which
+	// never need a P5 clearance.
+	BindingID         int64
+	PredicateChecksum string
+	Trace             []PipelineBindingTrace
 }
 
 type PipelineBindingTrace struct {
@@ -296,6 +304,24 @@ func ResolvePipelineBindings(bindings []PipelineBinding, facts semrules.FactSet,
 	}, nil
 }
 
+// PipelineBindingConflictError marks a decision-relevant DR7 conditional-
+// binding conflict/indeterminacy under PipelineBindingOnConflictBlock, as
+// distinct from a structural/configuration error (unknown pipeline, unknown
+// processor). control.go uses this type -- via IsDecisionRelevantPlanConflict
+// -- to decide whether a planErr must block processing (spec 2026080102
+// section 11) or is merely logged/alarmed as today.
+type PipelineBindingConflictError struct {
+	Priority int
+	Reason   string // "indeterminate" | "conflicting"
+}
+
+func (e *PipelineBindingConflictError) Error() string {
+	if e.Reason == "conflicting" {
+		return fmt.Sprintf("conflicting conditional pipeline bindings at priority %d", e.Priority)
+	}
+	return fmt.Sprintf("indeterminate conditional pipeline bindings at priority %d", e.Priority)
+}
+
 func resolveBindingRank(bindings []PipelineBinding, facts semrules.FactSet) (PipelineBindingSelection, []PipelineBindingTrace, error) {
 	truePipelines := map[string]PipelineBinding{}
 	indeterminatePipelines := map[string]PipelineBinding{}
@@ -322,10 +348,10 @@ func resolveBindingRank(bindings []PipelineBinding, facts semrules.FactSet) (Pip
 		return PipelineBindingSelection{}, trace, nil
 	}
 	if len(truePipelines) == 0 {
-		return PipelineBindingSelection{}, trace, fmt.Errorf("indeterminate conditional pipeline bindings at priority %d", bindings[0].Priority)
+		return PipelineBindingSelection{}, trace, &PipelineBindingConflictError{Priority: bindings[0].Priority, Reason: "indeterminate"}
 	}
 	if len(truePipelines) > 1 {
-		return PipelineBindingSelection{}, trace, fmt.Errorf("conflicting conditional pipeline bindings at priority %d", bindings[0].Priority)
+		return PipelineBindingSelection{}, trace, &PipelineBindingConflictError{Priority: bindings[0].Priority, Reason: "conflicting"}
 	}
 	var selected PipelineBinding
 	for _, binding := range truePipelines {
@@ -333,13 +359,15 @@ func resolveBindingRank(bindings []PipelineBinding, facts semrules.FactSet) (Pip
 	}
 	for pipeline := range indeterminatePipelines {
 		if pipeline != selected.PipelineName {
-			return PipelineBindingSelection{}, trace, fmt.Errorf("indeterminate conditional pipeline bindings at priority %d", bindings[0].Priority)
+			return PipelineBindingSelection{}, trace, &PipelineBindingConflictError{Priority: bindings[0].Priority, Reason: "indeterminate"}
 		}
 	}
 	return PipelineBindingSelection{
-		SelectedPipeline: selected.PipelineName,
-		Source:           "conditional_binding",
-		BindingName:      selected.Name,
+		SelectedPipeline:  selected.PipelineName,
+		Source:            "conditional_binding",
+		BindingName:       selected.Name,
+		BindingID:         selected.ID,
+		PredicateChecksum: selected.PredicateChecksum,
 	}, trace, nil
 }
 

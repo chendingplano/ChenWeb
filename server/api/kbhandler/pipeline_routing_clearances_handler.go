@@ -12,6 +12,7 @@ import (
 
 	docbenchmark "github.com/chendingplano/deepdoc/server/api/doc-benchmark"
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -111,6 +112,11 @@ func writePipelineRoutingClearance(c echo.Context, replace bool) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error": err.Error()})
 	}
+	writePolicyAuditEvent(c, rc, rc.GetLogger(), policyaudit.Event{
+		Kind: policyaudit.EventClearanceApproved, PolicyID: request.PolicyID, PolicyVersion: request.PolicyVersion,
+		SubjectKind: request.SubjectKind, SubjectID: request.SubjectID,
+		Detail: map[string]any{"clearance_id": id, "document_kind": request.DocumentKind, "replace": replace},
+	})
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "id": id, "decision": decision})
 }
 
@@ -141,6 +147,10 @@ func RevokePipelineRoutingClearance(c echo.Context) error {
 	if err := newRoutingClearanceWriter().Revoke(c.Request().Context(), id, user.UserName, request.Reason); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error": err.Error()})
 	}
+	writePolicyAuditEvent(c, rc, rc.GetLogger(), policyaudit.Event{
+		Kind: policyaudit.EventClearanceRevoked, SubjectKind: "routing_clearance", SubjectID: id,
+		Detail: map[string]any{"reason": request.Reason},
+	})
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "id": id})
 }
 
