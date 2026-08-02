@@ -23,10 +23,8 @@ type ProductionPipelineSelection struct {
 type ProductionPipelineBindingResolution struct {
 	RequestedPipeline  string
 	StoreBoundPipeline string
-	// RuleName is the name of the kb.pipeline_rules row that won, set only
-	// when Source == "rule_match". Explains *why* a rule-based selection
-	// happened, the same way StoreBoundPipeline/RequestedPipeline already
-	// explain the other two non-default sources.
+	// RuleName is the name of the policy binding/rule row that won. It keeps
+	// the historical field name for persisted-plan compatibility.
 	RuleName         string
 	Source           string
 	SelectedPipeline string
@@ -36,6 +34,7 @@ type ProductionPipelineBindingResolution struct {
 	// requirement. Zero value means no policy store was consulted.
 	PolicyID      int64
 	PolicyVersion int
+	BindingTrace  []PipelineBindingTrace `json:",omitempty"`
 }
 
 type ProductionPipelineResolution struct {
@@ -89,11 +88,10 @@ func ResolveProductionPipelineSelection(facts ProductionPlanFacts) (ProductionPi
 	}, nil
 }
 
-// ResolveProductionPipelineBinding applies P1's binding precedence:
-// explicit request > facet-matched rule > knowledge-store binding > system
-// default. Rule matching sits between request and store binding because a
-// rule is a more specific, facet-conditioned policy than a store's flat
-// default, but an explicit per-request override always wins outright.
+// ResolveProductionPipelineBinding applies binding precedence:
+// explicit request > canonical conditional/store-default binding >
+// knowledge-store binding > system default. The legacy flat rule matcher is
+// retained only for parity tests while P5 closes out.
 func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipelineBindingResolution, error) {
 	requested := strings.TrimSpace(facts.RequestedPipeline)
 	storeBound := strings.TrimSpace(facts.StoreBoundPipeline)
@@ -110,21 +108,26 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 			PolicyVersion:      facts.ActivePolicyVersion,
 		}, nil
 	}
-	if ruleName, ruleSelected, matched, err := resolveProductionPipelineRuleMatchName(facts.RoutingFacets); err != nil {
-		return ProductionPipelineBindingResolution{}, err
-	} else if matched {
-		if _, ok := LookupProductionPipeline(ruleSelected); !ok {
-			return ProductionPipelineBindingResolution{}, fmt.Errorf("pipeline rule %q selected unknown pipeline %q", ruleName, ruleSelected)
+	if bindings := currentProductionPipelineBindings(); len(bindings) > 0 {
+		selection, err := ResolvePipelineBindings(bindings, BuildPipelineBindingFactSet(facts), PipelineBindingOnConflictBlock)
+		if err != nil {
+			return ProductionPipelineBindingResolution{}, err
 		}
-		return ProductionPipelineBindingResolution{
-			RequestedPipeline:  requested,
-			StoreBoundPipeline: storeBound,
-			RuleName:           ruleName,
-			Source:             "rule_match",
-			SelectedPipeline:   ruleSelected,
-			PolicyID:           facts.ActivePolicyID,
-			PolicyVersion:      facts.ActivePolicyVersion,
-		}, nil
+		if selection.SelectedPipeline != DefaultProductionPipelineName || selection.Source != "system_default" {
+			if _, ok := LookupProductionPipeline(selection.SelectedPipeline); !ok {
+				return ProductionPipelineBindingResolution{}, fmt.Errorf("pipeline binding %q selected unknown pipeline %q", selection.BindingName, selection.SelectedPipeline)
+			}
+			return ProductionPipelineBindingResolution{
+				RequestedPipeline:  requested,
+				StoreBoundPipeline: storeBound,
+				RuleName:           selection.BindingName,
+				Source:             selection.Source,
+				SelectedPipeline:   selection.SelectedPipeline,
+				PolicyID:           facts.ActivePolicyID,
+				PolicyVersion:      facts.ActivePolicyVersion,
+				BindingTrace:       selection.Trace,
+			}, nil
+		}
 	}
 	if storeBound != "" {
 		if _, ok := LookupProductionPipeline(storeBound); !ok {

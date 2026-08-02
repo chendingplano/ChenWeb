@@ -89,18 +89,18 @@ func TestResolveProductionPipelineRuleMatchNameTieDifferentPipelineIsBlockingCon
 	}
 }
 
-func TestResolveProductionPipelineBindingRuleMatchSitsBetweenRequestAndStoreBinding(t *testing.T) {
-	t.Cleanup(func() { SetProductionPipelineRegistry(nil); SetProductionPipelineRules(nil) })
+func TestResolveProductionPipelineBindingCanonicalBindingSitsBetweenRequestAndStoreBinding(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil); SetProductionPipelineBindings(nil) })
 	SetProductionPipelineRegistry([]ProductionPipelineSpec{
 		{Name: "legacy_default", LegacyEquivalent: true},
 		{Name: "store_default"},
-		{Name: "rule_selected"},
+		{Name: "binding_selected"},
 	})
-	SetProductionPipelineRules([]ProductionPipelineRule{
-		{Name: "pdf-rule", Priority: 1, MatchInputDocType: "pdf", PipelineName: "rule_selected"},
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "pdf-binding", "binding_selected", 1, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
 	})
 
-	// Explicit request still wins over a matching rule.
+	// Explicit request still wins over a matching canonical binding.
 	got, err := ResolveProductionPipelineBinding(ProductionPlanFacts{
 		RequestedPipeline:  "legacy_default",
 		StoreBoundPipeline: "store_default",
@@ -113,7 +113,7 @@ func TestResolveProductionPipelineBindingRuleMatchSitsBetweenRequestAndStoreBind
 		t.Fatalf("got=%#v, want explicit_request/legacy_default", got)
 	}
 
-	// No explicit request: a matching rule beats the store binding.
+	// No explicit request: a matching canonical binding beats the store binding.
 	got, err = ResolveProductionPipelineBinding(ProductionPlanFacts{
 		StoreBoundPipeline: "store_default",
 		RoutingFacets:      ProductionRoutingFacets{InputDocType: "pdf"},
@@ -121,8 +121,8 @@ func TestResolveProductionPipelineBindingRuleMatchSitsBetweenRequestAndStoreBind
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
-	if got.Source != "rule_match" || got.SelectedPipeline != "rule_selected" || got.RuleName != "pdf-rule" {
-		t.Fatalf("got=%#v, want rule_match/rule_selected/pdf-rule", got)
+	if got.Source != "conditional_binding" || got.SelectedPipeline != "binding_selected" || got.RuleName != "pdf-binding" {
+		t.Fatalf("got=%#v, want conditional_binding/binding_selected/pdf-binding", got)
 	}
 
 	// No explicit request, no matching rule: falls through to store binding.
@@ -138,16 +138,16 @@ func TestResolveProductionPipelineBindingRuleMatchSitsBetweenRequestAndStoreBind
 	}
 }
 
-func TestResolveProductionPipelineBindingRejectsRuleConflict(t *testing.T) {
-	t.Cleanup(func() { SetProductionPipelineRegistry(nil); SetProductionPipelineRules(nil) })
+func TestResolveProductionPipelineBindingRejectsCanonicalBindingConflict(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil); SetProductionPipelineBindings(nil) })
 	SetProductionPipelineRegistry([]ProductionPipelineSpec{
 		{Name: "legacy_default", LegacyEquivalent: true},
 		{Name: "pipeline_a"},
 		{Name: "pipeline_b"},
 	})
-	SetProductionPipelineRules([]ProductionPipelineRule{
-		{Name: "rule-a", Priority: 1, MatchInputDocType: "pdf", PipelineName: "pipeline_a"},
-		{Name: "rule-b", Priority: 1, MatchSourceLanguage: "en", PipelineName: "pipeline_b"},
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "binding-a", "pipeline_a", 1, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
+		mustLegacyBinding(t, "binding-b", "pipeline_b", 1, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchSourceLanguage: "en"}),
 	})
 
 	_, err := ResolveProductionPipelineBinding(ProductionPlanFacts{
@@ -158,11 +158,11 @@ func TestResolveProductionPipelineBindingRejectsRuleConflict(t *testing.T) {
 	}
 }
 
-func TestResolveProductionPipelineBindingRejectsRuleSelectingUnknownPipeline(t *testing.T) {
-	t.Cleanup(func() { SetProductionPipelineRegistry(nil); SetProductionPipelineRules(nil) })
+func TestResolveProductionPipelineBindingRejectsCanonicalBindingSelectingUnknownPipeline(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil); SetProductionPipelineBindings(nil) })
 	SetProductionPipelineRegistry([]ProductionPipelineSpec{{Name: "legacy_default", LegacyEquivalent: true}})
-	SetProductionPipelineRules([]ProductionPipelineRule{
-		{Name: "bad-rule", Priority: 1, MatchInputDocType: "pdf", PipelineName: "does_not_exist"},
+	SetProductionPipelineBindings([]PipelineBinding{
+		mustLegacyBinding(t, "bad-binding", "does_not_exist", 1, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"}),
 	})
 
 	_, err := ResolveProductionPipelineBinding(ProductionPlanFacts{

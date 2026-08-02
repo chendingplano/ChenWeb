@@ -130,8 +130,8 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := LoadProductionPipelineRegistry(context.Background(), PipelineRegistrySQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
 		logger.Warn("failed to load authored pipeline registry, using legacy-equivalent fallback", "error", err)
 	}
-	if err := LoadProductionPipelineRules(context.Background(), PipelineRuleSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
-		logger.Warn("failed to load authored pipeline rules, no rule-based binding will apply", "error", err)
+	if err := LoadProductionPipelineBindings(context.Background(), PipelineBindingSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
+		logger.Warn("failed to load canonical pipeline bindings, no policy binding will apply", "error", err)
 	}
 	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
