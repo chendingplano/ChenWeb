@@ -123,6 +123,58 @@ func LookupFactPath(path string) (PathSpec, bool) {
 	return defaultFactRegistry.Lookup(path)
 }
 
+// FactSetBuilder merges independently produced facts without silently
+// overwriting two known producers for the same path.
+type FactSetBuilder struct {
+	facts FactSet
+}
+
+func NewFactSetBuilder() *FactSetBuilder {
+	return &FactSetBuilder{facts: FactSet{}}
+}
+
+func (b *FactSetBuilder) Add(fact Fact) error {
+	if b == nil {
+		return errors.New("fact set builder is nil")
+	}
+	if fact.Path == "" {
+		return errors.New("fact path is required")
+	}
+	if fact.State == "" {
+		fact.State = FactKnown
+	}
+	if existing, ok := b.facts[fact.Path]; ok {
+		if existing.State == FactKnown && fact.State == FactKnown {
+			return fmt.Errorf("duplicate known fact producer for %q", fact.Path)
+		}
+		if existing.State == FactKnown && fact.State == FactMissing {
+			return nil
+		}
+	}
+	b.facts[fact.Path] = fact
+	return nil
+}
+
+func (b *FactSetBuilder) AddSet(facts FactSet) error {
+	for _, fact := range facts {
+		if err := b.Add(fact); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *FactSetBuilder) Build() FactSet {
+	if b == nil {
+		return FactSet{}
+	}
+	out := make(FactSet, len(b.facts))
+	for path, fact := range b.facts {
+		out[path] = fact
+	}
+	return out
+}
+
 func newInitialFactRegistry() *FactRegistry {
 	registry := NewFactRegistry()
 	for _, spec := range initialPathSpecs() {

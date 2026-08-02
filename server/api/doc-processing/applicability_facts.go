@@ -34,10 +34,14 @@ type FacetObservation struct {
 }
 
 func (o FacetObservation) ReleaseIDString() string {
-	if o.VocabularyReleaseID == 0 {
+	return int64String(o.VocabularyReleaseID)
+}
+
+func int64String(value int64) string {
+	if value == 0 {
 		return ""
 	}
-	return strconv.FormatInt(o.VocabularyReleaseID, 10)
+	return strconv.FormatInt(value, 10)
 }
 
 // BuildApplicabilityFactSet reduces immutable observations to semrules facts.
