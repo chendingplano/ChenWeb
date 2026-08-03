@@ -173,6 +173,15 @@ SELECT
     NULL,
     'conditional',
     lr.predicate,
+    -- Placeholder only: SQL cannot reproduce Go's SHA-256 Canonicalize
+    -- checksum (it depends on semrules' canonical JSON encoding, including
+    -- the in/not_in set-normalization added by the P5 completion pass).
+    -- Every runtime and compile-time reader (PipelineBindingSQLStore.
+    -- ListPipelineBindings, policy_compile.go's loadBindings) recomputes
+    -- the canonical checksum from `predicate` after loading and never
+    -- trusts this column for routing or clearance matching (P5 review
+    -- 2026080302 finding P5-5). This satisfies
+    -- ck_pipeline_bindings_predicate_checksum_pair only.
     md5(lr.predicate::text),
     lr.id,
     NOW(),

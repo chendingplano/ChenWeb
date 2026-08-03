@@ -215,6 +215,73 @@ ORDER BY b.priority DESC,
 	}
 }
 
+// TestPipelineBindingSQLStoreListPipelineBindingsRecomputesCanonicalChecksum
+// proves the runtime loader trusts its own canonicalization over whatever is
+// stored in kb.pipeline_bindings.predicate_checksum. Migration 20260801000015
+// stores md5(predicate::text) for migrated legacy rows -- which can never
+// equal the Go-computed SHA-256 Canonicalize checksum -- so a clearance
+// approved through the compiler path (which already canonicalizes) would
+// never match at runtime, permanently failing closed to shadow for exactly
+// the migrated P1 class P5 exists to migrate (P5 review 2026080302 finding
+// P5-5).
+func TestPipelineBindingSQLStoreListPipelineBindingsRecomputesCanonicalChecksum(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	doc, canonicalChecksum, err := LegacyRulePredicateDocument(ProductionPipelineRule{MatchInputDocType: "pdf"})
+	if err != nil {
+		t.Fatalf("LegacyRulePredicateDocument: %v", err)
+	}
+	predicateJSON := string(mustJSONForTest(t, doc))
+	const bogusStoredChecksum = "d41d8cd98f00b204e9800998ecf8427e" // md5-shaped, not canonical
+
+	query := regexp.QuoteMeta(`
+SELECT b.id, COALESCE(b.name, ''), b.priority, b.binding_kind,
+       COALESCE(p.name, ''), COALESCE(b.predicate, '{}'::jsonb)::text,
+       COALESCE(b.predicate_checksum, ''), b.active,
+       CASE
+         WHEN b.input_record_id IS NOT NULL THEN 'document'
+         WHEN NULLIF(b.user_id, '') IS NOT NULL THEN 'user'
+         WHEN b.ks_store_id IS NOT NULL THEN 'knowledge_store'
+         WHEN NULLIF(b.tenant_id, '') IS NOT NULL AND b.tenant_id <> '-' THEN 'tenant'
+         ELSE 'system'
+       END AS binding_scope
+FROM kb.pipeline_bindings b
+LEFT JOIN kb.pipelines p ON p.id = b.pipeline_id
+WHERE b.active AND b.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
+ORDER BY b.priority DESC,
+         CASE
+           WHEN b.input_record_id IS NOT NULL THEN 4
+           WHEN NULLIF(b.user_id, '') IS NOT NULL THEN 3
+           WHEN b.ks_store_id IS NOT NULL THEN 2
+           WHEN NULLIF(b.tenant_id, '') IS NOT NULL AND b.tenant_id <> '-' THEN 1
+           ELSE 0
+         END DESC,
+         b.id`)
+	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "name", "priority", "binding_kind", "pipeline_name", "predicate", "predicate_checksum", "active", "binding_scope",
+	}).AddRow(
+		int64(7), "pdf-binding", 10, PipelineBindingKindConditional, "regulated_reference", predicateJSON, bogusStoredChecksum, true, PipelineBindingScopeKnowledgeStore,
+	))
+
+	got, err := (PipelineBindingSQLStore{DB: db}).ListPipelineBindings(context.Background())
+	if err != nil {
+		t.Fatalf("ListPipelineBindings: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d bindings, want 1", len(got))
+	}
+	if got[0].PredicateChecksum != canonicalChecksum {
+		t.Fatalf("PredicateChecksum = %q, want the canonical checksum %q (not the stored value %q)", got[0].PredicateChecksum, canonicalChecksum, bogusStoredChecksum)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
 func TestPipelineBindingSQLStoreRejectsNilDB(t *testing.T) {
 	if _, err := (PipelineBindingSQLStore{}).ListPipelineBindings(context.Background()); err == nil {
 		t.Fatal("expected error for nil db")

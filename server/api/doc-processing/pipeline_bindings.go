@@ -145,6 +145,19 @@ ORDER BY b.priority DESC,
 			if err := json.Unmarshal([]byte(predicateRaw), &binding.Predicate); err != nil {
 				return nil, fmt.Errorf("decode pipeline binding %q predicate: %w", binding.Name, err)
 			}
+			// The runtime resolution path must trust its own
+			// canonicalization over whatever predicate_checksum stores.
+			// Migrated legacy rows (migration 20260801000015) store
+			// md5(predicate::text), which can never equal the SHA-256
+			// Canonicalize checksum policy_compile.go and D2 clearance
+			// lookups use -- recomputing here, not only at compile time,
+			// keeps runtime clearance matching correct without a data
+			// backfill (P5 review 2026080302 finding P5-5).
+			_, canonicalChecksum, err := semrules.Canonicalize(binding.Predicate)
+			if err != nil {
+				return nil, fmt.Errorf("pipeline binding %q predicate: %w", binding.Name, err)
+			}
+			binding.PredicateChecksum = canonicalChecksum
 		}
 		if binding.BindingKind == "" {
 			binding.BindingKind = PipelineBindingKindStoreDefault
