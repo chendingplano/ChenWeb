@@ -256,7 +256,10 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 		var trueTrace semrules.TraceNode
 		for subjectIdx, subject := range subjects {
 			merged := factSnapshots[subjectIdx].Facts
-			res := semrules.EvaluateDocument(doc, merged)
+			res, err := semrules.EvaluateDocumentValidated(doc, merged)
+			if err != nil {
+				return SelectionResult{}, fmt.Errorf("profile %s v%d: %w", profile.ProfileID, profile.Version, err)
+			}
 			snapshot.Evaluations = append(snapshot.Evaluations, ProfileEvaluation{
 				ProfileID:         profile.ProfileID,
 				ProfileVersion:    profile.Version,

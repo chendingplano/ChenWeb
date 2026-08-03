@@ -212,10 +212,10 @@ func ruleApplicabilityGate(scope ReviewScope, facts semrules.FactSet) (func(Prof
 		// Invalid predicates were rejected before activation (spec section 11),
 		// so a malformed rule predicate here is a configuration error, surfaced
 		// as an error rather than a silent exclusion.
-		if _, _, err := semrules.Canonicalize(doc); err != nil {
+		result, err := semrules.EvaluateDocumentValidated(doc, facts)
+		if err != nil {
 			return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
 		}
-		result := semrules.EvaluateDocument(doc, facts)
 		switch result.Truth {
 		case semrules.TruthTrue:
 			return gateApplicable, nil

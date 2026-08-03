@@ -193,6 +193,74 @@ func TestEvaluateDocumentMaskingCascadesToNestedNodes(t *testing.T) {
 	}
 }
 
+// TestEvaluateDocumentStructurallyInvalidPredicateIsTagged proves the legacy
+// (unvalidated) EvaluateDocument entry point tags a structurally invalid
+// predicate with ReasonInvalidPredicate rather than silently degrading to
+// the ambiguous ReasonOperatorError (P5 review 2026080302 finding P5-15).
+func TestEvaluateDocumentStructurallyInvalidPredicateIsTagged(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  Document
+	}{
+		{"not with two children", Document{Version: 1, Expression: Predicate{Kind: "not", Items: []Predicate{
+			{Kind: "fact", Path: "document.input_doc_type", Op: "eq", Value: "pdf"},
+			{Kind: "fact", Path: "document.source_language", Op: "eq", Value: "en"},
+		}}}},
+		{"not with zero children", Document{Version: 1, Expression: Predicate{Kind: "not"}}},
+		{"unknown kind", Document{Version: 1, Expression: Predicate{Kind: "xor"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := Validate(tt.doc); err == nil {
+				t.Fatalf("test fixture is not actually invalid: Validate returned nil")
+			}
+			got := EvaluateDocument(tt.doc, FactSet{})
+			if got.Truth != TruthIndeterminate {
+				t.Fatalf("Truth = %s, want %s", got.Truth, TruthIndeterminate)
+			}
+			if got.TraceTree.ReasonCode != ReasonInvalidPredicate {
+				t.Fatalf("ReasonCode = %q, want %q", got.TraceTree.ReasonCode, ReasonInvalidPredicate)
+			}
+		})
+	}
+}
+
+// TestEvaluateDocumentValidatedRejectsInvalidDocuments proves the new
+// validated entry point surfaces Validate's error instead of evaluating a
+// structurally invalid document at all.
+func TestEvaluateDocumentValidatedRejectsInvalidDocuments(t *testing.T) {
+	invalid := Document{Version: 1, Expression: Predicate{Kind: "not", Items: []Predicate{
+		{Kind: "fact", Path: "document.input_doc_type", Op: "eq", Value: "pdf"},
+		{Kind: "fact", Path: "document.source_language", Op: "eq", Value: "en"},
+	}}}
+	result, err := EvaluateDocumentValidated(invalid, FactSet{})
+	if err == nil {
+		t.Fatal("expected a validation error, got nil")
+	}
+	if result.Truth != "" {
+		t.Fatalf("expected a zero-value Result on validation failure, got Truth=%s", result.Truth)
+	}
+}
+
+// TestEvaluateDocumentValidatedMatchesLegacyForValidDocuments proves the
+// validated entry point returns the identical Result as the legacy entry
+// point for a document that passes Validate.
+func TestEvaluateDocumentValidatedMatchesLegacyForValidDocuments(t *testing.T) {
+	doc := Document{Version: 1, Expression: Predicate{Kind: "all", Items: []Predicate{
+		{Kind: "fact", Path: "document.input_doc_type", Op: "eq", Value: "pdf"},
+	}}}
+	facts := FactSet{"document.input_doc_type": {Path: "document.input_doc_type", State: FactKnown, Value: "pdf"}}
+
+	legacy := EvaluateDocument(doc, facts)
+	validated, err := EvaluateDocumentValidated(doc, facts)
+	if err != nil {
+		t.Fatalf("unexpected error for a valid document: %v", err)
+	}
+	if !reflect.DeepEqual(legacy, validated) {
+		t.Fatalf("EvaluateDocumentValidated = %+v, want identical to EvaluateDocument = %+v", validated, legacy)
+	}
+}
+
 func TestEvaluateDocumentTypedOperators(t *testing.T) {
 	tests := []struct {
 		name  string

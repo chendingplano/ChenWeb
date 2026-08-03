@@ -13,6 +13,15 @@ const (
 	ReasonConflictingFact        = "conflicting_fact"
 	ReasonInvalidFact            = "invalid_fact"
 	ReasonOperatorError          = "operator_error"
+	// ReasonInvalidPredicate marks a structurally invalid predicate node
+	// (wrong child arity, unknown kind) discovered during evaluation --
+	// distinct from ReasonOperatorError (a well-formed predicate whose
+	// operator/authored value failed) so traces are not silently ambiguous
+	// about which failure class occurred. EvaluateDocumentValidated rejects
+	// these before evaluation; EvaluateDocument (legacy, unvalidated
+	// callers) still tags them this way rather than degrading to
+	// operator_error (P5 review 2026080302 finding P5-15).
+	ReasonInvalidPredicate = "invalid_predicate"
 )
 
 // FactSet is the runtime fact input for a predicate document.
@@ -33,8 +42,12 @@ type TraceNode struct {
 	Children          []TraceNode `json:"children,omitempty"`
 }
 
-// EvaluateDocument evaluates a validated predicate document against typed
-// runtime facts and returns a structured three-valued trace.
+// EvaluateDocument evaluates a predicate document against typed runtime
+// facts and returns a structured three-valued trace. It does not itself
+// validate doc -- callers evaluating a document from an unvalidated source
+// should use EvaluateDocumentValidated instead. A structurally invalid node
+// (wrong child arity, unknown kind) is tagged ReasonInvalidPredicate rather
+// than silently degrading to the ambiguous ReasonOperatorError.
 func EvaluateDocument(doc Document, facts FactSet) Result {
 	root, missing := evaluatePredicate(doc.Expression, facts, true)
 	return Result{
@@ -43,6 +56,21 @@ func EvaluateDocument(doc Document, facts FactSet) Result {
 		TraceTree:                    root,
 		DecisionRelevantMissingPaths: orderedUniqueStrings(missing),
 	}
+}
+
+// EvaluateDocumentValidated validates doc before evaluating it, returning
+// Validate's error for a structurally invalid document instead of silently
+// degrading to indeterminate (P5 review 2026080302 finding P5-15). Predicates
+// reaching evaluation are normally already validated at authoring/compile
+// time (e.g. policy_compile.go, semrules.Canonicalize); this is the
+// defense-in-depth entry point for any consumer evaluating a document whose
+// provenance it cannot otherwise guarantee. New consumers should prefer this
+// over the legacy EvaluateDocument.
+func EvaluateDocumentValidated(doc Document, facts FactSet) (Result, error) {
+	if err := Validate(doc); err != nil {
+		return Result{}, err
+	}
+	return EvaluateDocument(doc, facts), nil
 }
 
 func evaluatePredicate(predicate Predicate, facts FactSet, decisionRelevant bool) (TraceNode, []string) {
@@ -55,7 +83,7 @@ func evaluatePredicate(predicate Predicate, facts FactSet, decisionRelevant bool
 		node := TraceNode{Kind: predicate.Kind, DecisionRelevant: decisionRelevant}
 		if len(predicate.Items) != 1 {
 			node.Truth = TruthIndeterminate
-			node.ReasonCode = ReasonOperatorError
+			node.ReasonCode = ReasonInvalidPredicate
 			return node, nil
 		}
 		childNode, missing := evaluatePredicate(predicate.Items[0], facts, decisionRelevant)
@@ -77,7 +105,7 @@ func evaluatePredicate(predicate Predicate, facts FactSet, decisionRelevant bool
 		return TraceNode{
 			Kind:             predicate.Kind,
 			Truth:            TruthIndeterminate,
-			ReasonCode:       ReasonOperatorError,
+			ReasonCode:       ReasonInvalidPredicate,
 			DecisionRelevant: decisionRelevant,
 		}, nil
 	}

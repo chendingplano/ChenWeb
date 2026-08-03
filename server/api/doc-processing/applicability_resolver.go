@@ -58,7 +58,10 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 	}
 
 	// --- Pass 1: evaluate with base facts ---
-	pass1 := evaluateAll(req.Predicates, req.BaseFacts)
+	pass1, err := evaluateAll(req.Predicates, req.BaseFacts)
+	if err != nil {
+		return ResolverResult{}, fmt.Errorf("applicability resolver: pass 1: %w", err)
+	}
 
 	// --- identify decision-relevant missing tier-3 paths ---
 	missing := decisionRelevantTier3Paths(pass1)
@@ -104,7 +107,10 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 	enrichedFacts := enrichFactSet(req.BaseFacts, classifyResult.Observations)
 
 	// --- Pass 2: re-evaluate with enriched facts ---
-	pass2 := evaluateAll(req.Predicates, enrichedFacts)
+	pass2, err := evaluateAll(req.Predicates, enrichedFacts)
+	if err != nil {
+		return ResolverResult{}, fmt.Errorf("applicability resolver: pass 2: %w", err)
+	}
 
 	return ResolverResult{
 		Facts:            enrichedFacts,
@@ -116,12 +122,16 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 }
 
 // evaluateAll evaluates each predicate document against the fact set.
-func evaluateAll(predicates []semrules.Document, facts semrules.FactSet) []semrules.Result {
+func evaluateAll(predicates []semrules.Document, facts semrules.FactSet) ([]semrules.Result, error) {
 	results := make([]semrules.Result, len(predicates))
 	for i, doc := range predicates {
-		results[i] = semrules.EvaluateDocument(doc, facts)
+		result, err := semrules.EvaluateDocumentValidated(doc, facts)
+		if err != nil {
+			return nil, fmt.Errorf("predicate %d: %w", i, err)
+		}
+		results[i] = result
 	}
-	return results
+	return results, nil
 }
 
 // decisionRelevantTier3Paths collects the unique tier-3 producible paths

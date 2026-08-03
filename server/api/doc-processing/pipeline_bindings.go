@@ -345,7 +345,10 @@ func resolveBindingRank(bindings []PipelineBinding, facts semrules.FactSet) (Pip
 	indeterminatePipelines := map[string]PipelineBinding{}
 	trace := make([]PipelineBindingTrace, 0, len(bindings))
 	for _, binding := range bindings {
-		result := semrules.EvaluateDocument(binding.Predicate, facts)
+		result, err := semrules.EvaluateDocumentValidated(binding.Predicate, facts)
+		if err != nil {
+			return PipelineBindingSelection{}, trace, fmt.Errorf("pipeline binding %d predicate: %w", binding.ID, err)
+		}
 		trace = append(trace, PipelineBindingTrace{
 			BindingName:  binding.Name,
 			PipelineName: binding.PipelineName,

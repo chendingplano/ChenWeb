@@ -31,7 +31,10 @@ func TestResolverDecisionRelevantVsMaskedMissingPaths(t *testing.T) {
 
 	// Pass 1: the first child is false, masking the second. No tier-3
 	// path should be decision-relevant.
-	results := evaluateAll(predicates, baseFacts)
+	results, err := evaluateAll(predicates, baseFacts)
+	if err != nil {
+		t.Fatalf("evaluateAll: %v", err)
+	}
 	missing := decisionRelevantTier3Paths(results)
 	if len(missing) != 0 {
 		t.Fatalf("expected no decision-relevant paths when masked, got %v", missing)
@@ -53,7 +56,10 @@ func TestResolverDecisionRelevantUnmaskedTier3Path(t *testing.T) {
 		"document.input_doc_type": {Path: "document.input_doc_type", Value: "standard", State: semrules.FactKnown},
 	}
 
-	results := evaluateAll(predicates, baseFacts)
+	results, err := evaluateAll(predicates, baseFacts)
+	if err != nil {
+		t.Fatalf("evaluateAll: %v", err)
+	}
 	missing := decisionRelevantTier3Paths(results)
 	if len(missing) != 1 || missing[0] != "document.doc_kind" {
 		t.Fatalf("expected [document.doc_kind], got %v", missing)

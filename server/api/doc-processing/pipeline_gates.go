@@ -113,7 +113,10 @@ func ResolveProcessorGate(spec ProcessorSpec, gates []PipelineGate, facts semrul
 		var trueGates, indeterminateGates []PipelineGate
 		results := make(map[int64]semrules.Result, end-start)
 		for _, gate := range candidates[start:end] {
-			result := semrules.EvaluateDocument(gate.Predicate, facts)
+			result, err := semrules.EvaluateDocumentValidated(gate.Predicate, facts)
+			if err != nil {
+				return ProcessorGateResolution{}, fmt.Errorf("processor gate %d predicate: %w", gate.ID, err)
+			}
 			results[gate.ID] = result
 			resolution.Trace = append(resolution.Trace, ProcessorGateTrace{
 				RuleID: gate.ID, RuleName: gate.Name, PredicateChecksum: gate.PredicateChecksum,
