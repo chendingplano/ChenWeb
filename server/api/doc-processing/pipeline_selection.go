@@ -115,7 +115,11 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 		}, nil
 	}
 	if bindings := currentProductionPipelineBindings(); len(bindings) > 0 {
-		selection, err := ResolvePipelineBindings(bindings, BuildPipelineBindingFactSet(facts), PipelineBindingOnConflictBlock)
+		onConflict, onConflictErr := DocPipelineOnConflictFromEnv()
+		if onConflictErr != nil {
+			onConflict = PipelineBindingOnConflictBlock
+		}
+		selection, err := ResolvePipelineBindings(bindings, BuildPipelineBindingFactSet(facts), onConflict)
 		if err != nil {
 			return ProductionPipelineBindingResolution{}, err
 		}

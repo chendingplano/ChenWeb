@@ -43,3 +43,28 @@ func normalizeDocPipelineMode(raw string) (string, error) {
 	}
 	return DocPipelineModeEnforced, nil
 }
+
+// DocPipelineOnConflictFromEnv resolves the DOC_PIPELINE_ON_CONFLICT
+// setting spec 2026080102 sections 5.1/5.2 define for both pipeline-binding
+// and processor-gate conflict/indeterminacy resolution -- previously never
+// read anywhere, leaving bindings hardcoded to PipelineBindingOnConflictBlock
+// and gates hardcoded to PipelineBindingOnConflictFallback (P5 review
+// 2026080302 finding P5-19). Unset defaults to block (fail closed before any
+// processor runs), matching bindings' prior hardcoded default and the
+// spec's fail-closed philosophy; this is a deliberate default-mode change
+// for gates, which previously always used fallback.
+func DocPipelineOnConflictFromEnv() (string, error) {
+	return normalizeDocPipelineOnConflict(os.Getenv("DOC_PIPELINE_ON_CONFLICT"))
+}
+
+func normalizeDocPipelineOnConflict(raw string) (string, error) {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	switch raw {
+	case "":
+		return PipelineBindingOnConflictBlock, nil
+	case PipelineBindingOnConflictBlock, PipelineBindingOnConflictFallback:
+		return raw, nil
+	default:
+		return "", fmt.Errorf("invalid DOC_PIPELINE_ON_CONFLICT %q: must be %q or %q", raw, PipelineBindingOnConflictBlock, PipelineBindingOnConflictFallback)
+	}
+}

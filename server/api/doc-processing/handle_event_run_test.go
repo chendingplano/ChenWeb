@@ -780,6 +780,11 @@ func TestHandleEvent_BlockModeConflictAlarmDedupesByRecordIDAcrossRetries(t *tes
 // still raising a gate_conflict alarm/event so operators see the
 // ambiguity.
 func TestHandleEvent_FallbackModeGateConflictStillExecutes(t *testing.T) {
+	// DOC_PIPELINE_ON_CONFLICT now defaults to block (P5 review 2026080302
+	// finding P5-19: gates previously always hardcoded fallback regardless
+	// of any setting); this test exists specifically to prove fallback-mode
+	// behavior, so it must request fallback explicitly.
+	t.Setenv("DOC_PIPELINE_ON_CONFLICT", "fallback")
 	t.Cleanup(func() { SetProductionPipelineGates(nil) })
 	// document.doc_kind is never populated by BuildPipelineBindingFactSet,
 	// so this predicate is indeterminate (missing fact) for every document.

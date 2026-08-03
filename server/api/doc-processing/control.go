@@ -1554,7 +1554,9 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 // finding P5-11).
 type PolicyLoadError struct{ Err error }
 
-func (e *PolicyLoadError) Error() string { return fmt.Sprintf("load active pipeline policy: %s", e.Err) }
+func (e *PolicyLoadError) Error() string {
+	return fmt.Sprintf("load active pipeline policy: %s", e.Err)
+}
 func (e *PolicyLoadError) Unwrap() error { return e.Err }
 
 func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt LineFileGeneratedEvent) (ProductionPlanFacts, error) {
@@ -1608,6 +1610,9 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 	facts := BuildProductionPlanFactsFromInputRecord(requested, rec)
 	if override := strings.TrimSpace(evt.PipelineOverride); override != "" {
 		facts.RequestedPipeline = override
+	}
+	if len(evt.ProcessorGateOverrides) > 0 {
+		facts.ProcessorGateOverrides = evt.ProcessorGateOverrides
 	}
 	if len(evt.Operations) > 0 {
 		facts.Mode = DocPipelineModePlanOnly

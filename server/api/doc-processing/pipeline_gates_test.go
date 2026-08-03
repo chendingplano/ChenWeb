@@ -147,6 +147,12 @@ func TestPipelineGateSQLStoreLoadsCanonicalActiveGates(t *testing.T) {
 }
 
 func TestProductionPlanPersistsCompleteP5ShadowSnapshot(t *testing.T) {
+	// DOC_PIPELINE_ON_CONFLICT now defaults to block (P5 review 2026080302
+	// finding P5-19); this test's fixture gate is indeterminate (missing
+	// document.doc_kind) and relies on fallback-mode's OnUndetermined
+	// resolution to produce a plan/snapshot at all, so request it
+	// explicitly rather than relying on the old implicit default.
+	t.Setenv("DOC_PIPELINE_ON_CONFLICT", "fallback")
 	oldGates := currentProductionPipelineGates()
 	defer SetProductionPipelineGates(oldGates)
 	gate := gateFixtureForProcessor(11, "extract_metrics", GateEffectSkip)

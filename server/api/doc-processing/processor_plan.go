@@ -257,10 +257,14 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		if facts.ExplicitProcessorOverride {
 			explicit = append(explicit, facts.RequestedProcessors...)
 		}
+		onConflict, onConflictErr := DocPipelineOnConflictFromEnv()
+		if onConflictErr != nil {
+			onConflict = PipelineBindingOnConflictBlock
+		}
 		shadow, shadowErr := BuildProcessorGateShadowPlan(shadowNames, productionProcessorSpecs, currentProductionPipelineGates(), factSet, GateShadowOptions{
 			ExplicitProcessors: explicit,
 			RunOverrides:       facts.ProcessorGateOverrides,
-			OnConflict:         PipelineBindingOnConflictFallback,
+			OnConflict:         onConflict,
 		})
 		if shadowErr != nil {
 			return ProductionProcessorPlan{}, shadowErr

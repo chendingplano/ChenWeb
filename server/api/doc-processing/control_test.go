@@ -1296,6 +1296,33 @@ func TestResolveProductionPlanFactsBuildsFactsFromCurrentInputRecord(t *testing.
 	}
 }
 
+// TestResolveProductionPlanFactsThreadsProcessorGateOverrides proves
+// resolveProductionPlanFacts copies the event's run-scoped processor-gate
+// overrides into ProductionPlanFacts.ProcessorGateOverrides. Previously
+// this field was declared, cloned, and consulted by ResolveProcessorGate's
+// run_override precedence path, but nothing ever populated it, so a
+// run-scoped override could never fire in production (P5 review
+// 2026080302 finding P5-20).
+func TestResolveProductionPlanFactsThreadsProcessorGateOverrides(t *testing.T) {
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{7: {ID: 7}},
+	}
+	svc := &ControlService{InputStore: store}
+	evt := LineFileGeneratedEvent{
+		RecordID:               7,
+		Operations:             []string{"extract_metrics"},
+		ProcessorGateOverrides: map[string]string{"extract_metrics": "skip"},
+	}
+
+	got, err := svc.resolveProductionPlanFacts(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("resolveProductionPlanFacts: %v", err)
+	}
+	if got.ProcessorGateOverrides["extract_metrics"] != "skip" {
+		t.Fatalf("ProcessorGateOverrides=%#v, want extract_metrics=skip", got.ProcessorGateOverrides)
+	}
+}
+
 // recordingAlarmWriter appends every alarm it receives, so tests can assert
 // exactly how many (and which) alarms a code path raised.
 type recordingAlarmWriter struct{ alarms *[]RoutingAlarm }

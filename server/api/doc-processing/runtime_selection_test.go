@@ -100,6 +100,101 @@ func TestDocPipelineModeFromEnvRejectsNonBoolean(t *testing.T) {
 	}
 }
 
+// TestNormalizeDocPipelineOnConflict proves DOC_PIPELINE_ON_CONFLICT parses
+// the shared block/fallback setting spec 2026080102 sections 5.1/5.2 use
+// for both pipeline-binding and processor-gate conflict resolution --
+// previously never read anywhere, leaving bindings hardcoded to block and
+// gates hardcoded to fallback (P5 review 2026080302 finding P5-19).
+func TestNormalizeDocPipelineOnConflict(t *testing.T) {
+	tests := []struct {
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{"", PipelineBindingOnConflictBlock, false},
+		{"block", PipelineBindingOnConflictBlock, false},
+		{"BLOCK", PipelineBindingOnConflictBlock, false},
+		{" fallback ", PipelineBindingOnConflictFallback, false},
+		{"retry", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			got, err := normalizeDocPipelineOnConflict(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %q", tt.raw)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeDocPipelineOnConflict(%q): %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Fatalf("got=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveProductionPipelineBindingRespectsOnConflictEnv proves the
+// binding resolver reads DOC_PIPELINE_ON_CONFLICT instead of always
+// hardcoding block mode -- a same-rank true conflict blocks by default but
+// resolves via the fallback ladder when the env var requests fallback (P5
+// review 2026080302 finding P5-19).
+func TestResolveProductionPipelineBindingRespectsOnConflictEnv(t *testing.T) {
+	pdf := mustLegacyBinding(t, "pdf", "pipeline_a", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchInputDocType: "pdf"})
+	en := mustLegacyBinding(t, "en", "pipeline_b", 10, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{MatchSourceLanguage: "en"})
+	lower := mustLegacyBinding(t, "lower", "pipeline_b", 1, PipelineBindingScopeKnowledgeStore, ProductionPipelineRule{})
+	t.Cleanup(func() { SetProductionPipelineBindings(nil); SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{pdf, en, lower})
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "pipeline_a", DisplayName: "Pipeline A"},
+		{Name: "pipeline_b", DisplayName: "Pipeline B"},
+	})
+
+	facts := ProductionPlanFacts{
+		RoutingFacets: ProductionRoutingFacets{InputDocType: "pdf", SourceLanguage: "en"},
+	}
+
+	if _, err := ResolveProductionPipelineBinding(facts); err == nil {
+		t.Fatal("expected the default (unset env, block mode) to error on a true conflict")
+	}
+
+	t.Setenv("DOC_PIPELINE_ON_CONFLICT", "fallback")
+	got, err := ResolveProductionPipelineBinding(facts)
+	if err != nil {
+		t.Fatalf("expected fallback mode to resolve via the lower rank, got: %v", err)
+	}
+	if got.SelectedPipeline != "pipeline_b" {
+		t.Fatalf("SelectedPipeline = %q, want pipeline_b (the fallback ladder's lower-rank binding)", got.SelectedPipeline)
+	}
+}
+
+// TestBuildProductionProcessorPlanFromFactsGateConflictRespectsOnConflictEnv
+// mirrors the binding test for processor gates: an indeterminate gate
+// (missing tier-3 document.doc_kind) blocks plan construction by default,
+// but resolves via the processor's OnUndetermined default when the env var
+// requests fallback (P5 review 2026080302 finding P5-19).
+func TestBuildProductionProcessorPlanFromFactsGateConflictRespectsOnConflictEnv(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineGates(nil) })
+	indeterminate := gateFixture(1, 10, GateEffectSkip, "standard")
+	SetProductionPipelineGates([]PipelineGate{indeterminate})
+
+	facts := ProductionPlanFacts{
+		RequestedProcessors: []string{"extract_metrics"},
+		Mode:                DocPipelineModeEnforced,
+	}
+
+	if _, err := BuildProductionProcessorPlanFromFacts(facts); err == nil {
+		t.Fatal("expected the default (unset env, block mode) to error on an indeterminate gate")
+	}
+
+	t.Setenv("DOC_PIPELINE_ON_CONFLICT", "fallback")
+	if _, err := BuildProductionProcessorPlanFromFacts(facts); err != nil {
+		t.Fatalf("expected fallback mode to resolve via OnUndetermined, got: %v", err)
+	}
+}
+
 func TestNewProductionRuntimeSuccessfulExplicitAndDefaultSelection(t *testing.T) {
 	original := buildProductionRuntimeComponents
 	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {

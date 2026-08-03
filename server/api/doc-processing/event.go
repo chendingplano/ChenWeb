@@ -23,6 +23,14 @@ type LineFileGeneratedEvent struct {
 	Status           string
 	Operations       []string
 	PipelineOverride string
+	// ProcessorGateOverrides carries run-scoped processor-gate overrides
+	// (processor name -> effect: "require"|"enable"|"skip"|"defer"), parsed
+	// from the event's processor_gate_overrides object. ResolveProcessorGate
+	// gives a run override precedence over policy gates while retaining its
+	// audit annotation (spec 2026080102 section 5.2); this field was
+	// previously always nil, so that precedence path could never fire in
+	// production (P5 review 2026080302 finding P5-20).
+	ProcessorGateOverrides map[string]string
 }
 
 func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error) {
@@ -54,16 +62,46 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 		forceClear = b
 	}
 
+	gateOverrides, gateErr := asStringMap(raw["processor_gate_overrides"])
+	if gateErr != nil {
+		return LineFileGeneratedEvent{}, fmt.Errorf("invalid processor_gate_overrides: %w", gateErr)
+	}
+
 	return LineFileGeneratedEvent{
-		RecordID:         rid,
-		Filename:         firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
-		Force:            force,
-		ForceClear:       forceClear,
-		Type:             strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
-		Status:           strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
-		Operations:       parseOperations(firstPresentValue(raw, "operation", "processor_override", "processor_overrides", "doc-processors", "doc_processors")),
-		PipelineOverride: strings.TrimSpace(asString(raw["pipeline_override"])),
+		RecordID:               rid,
+		Filename:               firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
+		Force:                  force,
+		ForceClear:             forceClear,
+		Type:                   strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
+		Status:                 strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
+		Operations:             parseOperations(firstPresentValue(raw, "operation", "processor_override", "processor_overrides", "doc-processors", "doc_processors")),
+		PipelineOverride:       strings.TrimSpace(asString(raw["pipeline_override"])),
+		ProcessorGateOverrides: gateOverrides,
 	}, nil
+}
+
+// asStringMap converts a decoded JSON object (map[string]any with string
+// values) into a map[string]string. A nil/absent value returns (nil, nil).
+func asStringMap(v any) (map[string]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected an object, got %T", v)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		str, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("value for %q must be a string, got %T", key, value)
+		}
+		out[strings.TrimSpace(key)] = strings.TrimSpace(str)
+	}
+	return out, nil
 }
 
 func decodeEventPayload(payload []byte) (map[string]any, error) {

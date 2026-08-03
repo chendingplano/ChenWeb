@@ -23,6 +23,40 @@ func TestParseLineFileGeneratedEvent_AcceptsJSONEncodedObjectString(t *testing.T
 	}
 }
 
+// TestParseLineFileGeneratedEvent_ParsesProcessorGateOverrides proves the
+// event parser extracts run-scoped processor-gate overrides, previously
+// never read: ProductionPlanFacts.ProcessorGateOverrides was cloned and
+// consulted by ResolveProcessorGate's run_override precedence path, but no
+// producer ever populated it, so that path could never fire in production
+// (P5 review 2026080302 finding P5-20).
+func TestParseLineFileGeneratedEvent_ParsesProcessorGateOverrides(t *testing.T) {
+	payload := []byte(`{"record_id":"1","type":"pdf","status":"success","processor_gate_overrides":{"extract_metrics":"skip","generate_topics":"require"}}`)
+
+	evt, err := ParseLineFileGeneratedEvent(payload)
+	if err != nil {
+		t.Fatalf("ParseLineFileGeneratedEvent() error = %v", err)
+	}
+	want := map[string]string{"extract_metrics": "skip", "generate_topics": "require"}
+	if len(evt.ProcessorGateOverrides) != len(want) {
+		t.Fatalf("ProcessorGateOverrides=%#v, want %#v", evt.ProcessorGateOverrides, want)
+	}
+	for k, v := range want {
+		if evt.ProcessorGateOverrides[k] != v {
+			t.Fatalf("ProcessorGateOverrides[%q]=%q, want %q", k, evt.ProcessorGateOverrides[k], v)
+		}
+	}
+}
+
+func TestParseLineFileGeneratedEvent_AbsentProcessorGateOverridesIsNil(t *testing.T) {
+	evt, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"1","type":"pdf","status":"success"}`))
+	if err != nil {
+		t.Fatalf("ParseLineFileGeneratedEvent() error = %v", err)
+	}
+	if evt.ProcessorGateOverrides != nil {
+		t.Fatalf("ProcessorGateOverrides=%#v, want nil", evt.ProcessorGateOverrides)
+	}
+}
+
 func TestParseLineFileGeneratedEvent_InvalidPayloadIncludesPreview(t *testing.T) {
 	_, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"1""type":"pdf"}`))
 	if err == nil {
