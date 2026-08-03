@@ -3,13 +3,30 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/chendingplano/deepdoc/server/api/ontology/modules"
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 )
+
+// DraftPolicyPromoter is the minimal transaction interface required by the
+// module release flow to ensure a draft pipeline-policy version exists for
+// the source release's approved proposals. Defined in docprocessing to avoid
+// import cycles (modules -> profiles -> docprocessing -> modules). The
+// ontology-compiler command wires the modules.ProposalStore to this interface.
+type DraftPolicyPromoter interface {
+	EnsureDraftFromModuleRelease(ctx context.Context, releaseID int64, releaseChecksum string, proposals []PromotedProposal) (int64, error)
+}
+
+// PromotedProposal is the minimal proposal data the promoter needs to
+// materialize draft policy content.
+type PromotedProposal struct {
+	ProposalID        int64
+	Predicate         json.RawMessage
+	PredicateChecksum string
+}
 
 // PolicyPromotionStore is the production DraftPolicyPromoter. It creates
 // draft pipeline-policy versions from approved module proposals inside the
@@ -27,7 +44,7 @@ type PolicyPromotionStore struct {
 //
 // The draft policy is invisible to resolution until separately activated
 // through the existing authenticated endpoint (E2).
-func (s PolicyPromotionStore) EnsureDraftFromModuleRelease(ctx context.Context, releaseID int64, releaseChecksum string, proposals []modules.PromotedProposal) (int64, error) {
+func (s PolicyPromotionStore) EnsureDraftFromModuleRelease(ctx context.Context, releaseID int64, releaseChecksum string, proposals []PromotedProposal) (int64, error) {
 	if s.DB == nil {
 		return 0, errors.New("db is nil")
 	}
@@ -111,8 +128,8 @@ VALUES (NULL, $1, $2, $3, 0, true, '-', '', 'conditional', $4::jsonb, $5)`,
 // approved proposals from the module's proposal store and promotes them
 // through the DraftPolicyPromoter. It is called by the ontology-compiler
 // command during release creation/activation.
-func PromoteModuleReleaseProposals(ctx context.Context, promoter modules.DraftPolicyPromoter, proposalLister interface {
-	ListApprovedProposals(context.Context, int64) ([]modules.ApplicabilityProposal, error)
+func PromoteModuleReleaseProposals(ctx context.Context, promoter DraftPolicyPromoter, proposalLister interface {
+	ListApprovedProposals(context.Context, int64) ([]proposalRecord, error)
 }, releaseID int64, releaseChecksum string) (int64, error) {
 	if promoter == nil {
 		return 0, nil // no promoter configured; promotion is optional
@@ -124,9 +141,9 @@ func PromoteModuleReleaseProposals(ctx context.Context, promoter modules.DraftPo
 	if len(records) == 0 {
 		return 0, nil // no proposals to promote
 	}
-	proposals := make([]modules.PromotedProposal, len(records))
+	proposals := make([]PromotedProposal, len(records))
 	for i, r := range records {
-		proposals[i] = modules.PromotedProposal{
+		proposals[i] = PromotedProposal{
 			ProposalID:        r.ID,
 			Predicate:         r.Predicate,
 			PredicateChecksum: r.PredicateChecksum,
@@ -135,5 +152,13 @@ func PromoteModuleReleaseProposals(ctx context.Context, promoter modules.DraftPo
 	return promoter.EnsureDraftFromModuleRelease(ctx, releaseID, releaseChecksum, proposals)
 }
 
+// proposalRecord mirrors modules.ApplicabilityProposal's fields needed for
+// promotion, avoiding an import cycle.
+type proposalRecord struct {
+	ID                int64
+	Predicate         json.RawMessage
+	PredicateChecksum string
+}
+
 // Ensure PolicyPromotionStore satisfies DraftPolicyPromoter at compile time.
-var _ modules.DraftPolicyPromoter = PolicyPromotionStore{}
+var _ DraftPolicyPromoter = PolicyPromotionStore{}

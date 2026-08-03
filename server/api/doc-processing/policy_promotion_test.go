@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
-
-	"github.com/chendingplano/deepdoc/server/api/ontology/modules"
 )
 
 func TestPolicyPromotionStoreNilDB(t *testing.T) {
@@ -44,8 +42,8 @@ func TestPromoteModuleReleaseProposalsNilPromoter(t *testing.T) {
 }
 
 func TestPromotedProposalShape(t *testing.T) {
-	// Verify the PromotedProposal type is accessible from modules package.
-	proposal := modules.PromotedProposal{
+	// Verify the PromotedProposal type is accessible.
+	proposal := PromotedProposal{
 		ProposalID:        1,
 		Predicate:         json.RawMessage(`{"version":1}`),
 		PredicateChecksum: "sha256:abc",
@@ -63,5 +61,5 @@ func TestPromotedProposalShape(t *testing.T) {
 
 func TestPolicyPromotionStoreImplementsInterface(t *testing.T) {
 	// Compile-time check that PolicyPromotionStore satisfies DraftPolicyPromoter.
-	var _ modules.DraftPolicyPromoter = PolicyPromotionStore{}
+	var _ DraftPolicyPromoter = PolicyPromotionStore{}
 }
