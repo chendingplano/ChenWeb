@@ -678,6 +678,48 @@ func TestBuildProductionProcessorPlanFromFactsEnforcesPipelineProcessorsAndRecor
 	}
 }
 
+// TestBuildProductionProcessorPlanFromFactsGateShadowCoversBaselineFallbackProcessors
+// proves the gate shadow includes a decision for a processor the selected
+// pipeline excludes but the P5 baseline/store-default fallback pipeline
+// would admit. Without this, an uncleared suppressive-binding fallback to
+// baseline re-admits such a processor with no gate decision to consult,
+// so FinalizeRoutingPlan runs it ungated instead of gate-evaluating it (P5
+// review 2026080302 finding P5-13).
+func TestBuildProductionProcessorPlanFromFactsGateShadowCoversBaselineFallbackProcessors(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
+	SetProductionPipelineRegistry([]ProductionPipelineSpec{
+		{Name: "narrative_default", DisplayName: "Narrative Default", Processors: []string{"generate_topics"}},
+	})
+
+	facts := ProductionPlanFacts{
+		RequestedProcessors: []string{"generate_topics", "extract_provisions"},
+		RequestedPipeline:   "narrative_default",
+		Mode:                DocPipelineModeEnforced,
+	}
+	plan, err := BuildProductionProcessorPlanFromFacts(facts)
+	if err != nil {
+		t.Fatalf("BuildProductionProcessorPlanFromFacts: %v", err)
+	}
+	// Sanity check: extract_provisions really is excluded from the selected
+	// pipeline (this is the P5-13 scenario, not a no-op).
+	if got, want := plan.ExcludedByPolicy(), []string{"extract_provisions"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("excluded by policy=%v want=%v", got, want)
+	}
+	snapshot := plan.RoutingSnapshot()
+	if snapshot == nil {
+		t.Fatal("expected a routing snapshot")
+	}
+	found := false
+	for _, decision := range snapshot.GateShadow.Decisions {
+		if decision.Processor == "extract_provisions" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no gate decision for extract_provisions (baseline-fallback-only processor); GateShadow.Decisions=%#v", snapshot.GateShadow.Decisions)
+	}
+}
+
 func TestBuildProductionProcessorPlanFromFactsPlanOnlyModeNeverExcludes(t *testing.T) {
 	t.Cleanup(func() { SetProductionPipelineRegistry(nil) })
 	SetProductionPipelineRegistry([]ProductionPipelineSpec{

@@ -229,15 +229,35 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		plan.routingSnapshot = cloneP5RoutingSnapshot(facts.RoutingSnapshot)
 	} else {
 		factSet := BuildPipelineBindingFactSet(facts)
-		baselineNames := make([]string, 0, len(specs))
+		baselineSpec, _ := LookupProductionPipeline(DefaultProductionPipelineName)
+		// The gate shadow must cover every processor FinalizeRoutingPlan
+		// could encounter, not only those the selected pipeline admits: an
+		// uncleared suppressive-binding fallback re-admits whatever the P5
+		// baseline/store-default pipeline allows, and a processor with no
+		// gate decision runs ungated instead of being gate-evaluated (P5
+		// review 2026080302 finding P5-13). Union the selected pipeline's
+		// specs with the baseline pipeline's own effective set.
+		shadowNames := make([]string, 0, len(specs))
+		shadowNameSet := map[string]bool{}
 		for _, spec := range specs {
-			baselineNames = append(baselineNames, spec.Name)
+			if !shadowNameSet[spec.Name] {
+				shadowNameSet[spec.Name] = true
+				shadowNames = append(shadowNames, spec.Name)
+			}
+		}
+		baselineEffective, _ := applyPolicyFilter(requested, facts.Mode, baselineSpec)
+		for _, name := range resolveRequiredProcessors(baselineEffective) {
+			norm := normalizeRuntimeName(name)
+			if !shadowNameSet[norm] {
+				shadowNameSet[norm] = true
+				shadowNames = append(shadowNames, norm)
+			}
 		}
 		explicit := []string(nil)
 		if facts.ExplicitProcessorOverride {
 			explicit = append(explicit, facts.RequestedProcessors...)
 		}
-		shadow, shadowErr := BuildProcessorGateShadowPlan(baselineNames, productionProcessorSpecs, currentProductionPipelineGates(), factSet, GateShadowOptions{
+		shadow, shadowErr := BuildProcessorGateShadowPlan(shadowNames, productionProcessorSpecs, currentProductionPipelineGates(), factSet, GateShadowOptions{
 			ExplicitProcessors: explicit,
 			RunOverrides:       facts.ProcessorGateOverrides,
 			OnConflict:         PipelineBindingOnConflictFallback,
@@ -249,7 +269,6 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		if checksumErr != nil {
 			return ProductionProcessorPlan{}, checksumErr
 		}
-		baselineSpec, _ := LookupProductionPipeline(DefaultProductionPipelineName)
 		baselineChecksum, checksumErr := productionPipelineSpecChecksum(baselineSpec)
 		if checksumErr != nil {
 			return ProductionProcessorPlan{}, checksumErr
