@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 func TestIsPhaseAProcessor(t *testing.T) {
@@ -1612,5 +1614,116 @@ func TestNormalizeStoredEventPayload_WrapsInvalidJSON(t *testing.T) {
 	want := `{"_payload_error":"invalid_json","_raw_payload":"{\"record_id\":\"1\"\"type\":\"pdf\"}"}`
 	if got != want {
 		t.Fatalf("normalizeStoredEventPayload()=%s, want %s", got, want)
+	}
+}
+
+// TestDocumentKindFromEnrichedFacts_KnownAndUnknown proves the governed
+// document.doc_kind facet is read only when the resolver marked it known,
+// and that every other state (missing, wrong value type) leaves the
+// document kind empty -- spec 2026080102 section 9 requires an empty
+// document kind to leave clearance coverage lookups shadow-only, never
+// falling back to a different key (P5 review 2026080302 finding P5-6).
+func TestDocumentKindFromEnrichedFacts_KnownAndUnknown(t *testing.T) {
+	tests := []struct {
+		name    string
+		facts   semrules.FactSet
+		wantKey string
+	}{
+		{"known string value", semrules.FactSet{
+			"document.doc_kind": {Path: "document.doc_kind", State: semrules.FactKnown, Value: "regulated_reference"},
+		}, "regulated_reference"},
+		{"absent", semrules.FactSet{}, ""},
+		{"missing state", semrules.FactSet{
+			"document.doc_kind": {Path: "document.doc_kind", State: semrules.FactMissing},
+		}, ""},
+		{"indeterminate state", semrules.FactSet{
+			"document.doc_kind": {Path: "document.doc_kind", State: semrules.FactConflicting},
+		}, ""},
+		{"wrong value type", semrules.FactSet{
+			"document.doc_kind": {Path: "document.doc_kind", State: semrules.FactKnown, Value: 42},
+		}, ""},
+		{"nil enriched facts", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := documentKindFromEnrichedFacts(tt.facts)
+			if got != tt.wantKey {
+				t.Fatalf("documentKindFromEnrichedFacts = %q, want %q", got, tt.wantKey)
+			}
+		})
+	}
+}
+
+// TestControlServiceFinalizeRoutingPlanUsesGovernedDocKindForClearance
+// proves finalizeRoutingPlan keys its clearance lookup on the governed
+// document.doc_kind facet, not the file-format input_doc_type (P5 review
+// 2026080302 finding P5-6). A clearance approved for one document kind must
+// never be treated as covering a record merely because it shares a file
+// format.
+func TestControlServiceFinalizeRoutingPlanUsesGovernedDocKindForClearance(t *testing.T) {
+	stub := &stubClearanceChecker{}
+	svc := &ControlService{RoutingClearances: stub}
+	plan := ProductionProcessorPlan{
+		specs: []ProcessorSpec{{Name: "chunking", Phase: "A"}, {Name: "extract_metrics", Phase: "B"}},
+		facts: ProductionPlanFacts{
+			Mode:                DocPipelineModeEnforced,
+			RequestedProcessors: []string{"chunking", "extract_metrics"},
+			RoutingFacets: ProductionRoutingFacets{
+				InputDocType: "pdf",
+				DocKind:      "regulated_reference",
+			},
+		},
+		pipelineBinding: ProductionPipelineBindingResolution{
+			Source:            "conditional_binding",
+			BindingID:         7,
+			RuleName:          "test-binding",
+			PredicateChecksum: "sha256:abc",
+		},
+		pipelineSpec: ProductionPipelineSpec{Name: "restricted", Processors: []string{"chunking"}},
+	}
+	if _, err := svc.finalizeRoutingPlan(context.Background(), plan); err != nil {
+		t.Fatalf("finalizeRoutingPlan: %v", err)
+	}
+	if len(stub.seen) == 0 {
+		t.Fatal("expected a clearance lookup for the suppressive conditional binding, got none")
+	}
+	if stub.seen[0].DocumentKind != "regulated_reference" {
+		t.Fatalf("clearance subject DocumentKind = %q, want the governed document.doc_kind value %q (not input_doc_type)", stub.seen[0].DocumentKind, "regulated_reference")
+	}
+}
+
+// TestControlServiceFinalizeRoutingPlanEmptyDocKindStillLooksUpClearance
+// proves an unresolved document.doc_kind produces an empty DocumentKind key
+// -- spec section 9's "missing document kind leaves the subject
+// shadow-only" -- rather than silently falling back to input_doc_type.
+func TestControlServiceFinalizeRoutingPlanEmptyDocKindStillLooksUpClearance(t *testing.T) {
+	stub := &stubClearanceChecker{}
+	svc := &ControlService{RoutingClearances: stub}
+	plan := ProductionProcessorPlan{
+		specs: []ProcessorSpec{{Name: "chunking", Phase: "A"}, {Name: "extract_metrics", Phase: "B"}},
+		facts: ProductionPlanFacts{
+			Mode:                DocPipelineModeEnforced,
+			RequestedProcessors: []string{"chunking", "extract_metrics"},
+			RoutingFacets: ProductionRoutingFacets{
+				InputDocType: "pdf",
+				// DocKind deliberately unset -- document.doc_kind unresolved.
+			},
+		},
+		pipelineBinding: ProductionPipelineBindingResolution{
+			Source:            "conditional_binding",
+			BindingID:         7,
+			RuleName:          "test-binding",
+			PredicateChecksum: "sha256:abc",
+		},
+		pipelineSpec: ProductionPipelineSpec{Name: "restricted", Processors: []string{"chunking"}},
+	}
+	if _, err := svc.finalizeRoutingPlan(context.Background(), plan); err != nil {
+		t.Fatalf("finalizeRoutingPlan: %v", err)
+	}
+	if len(stub.seen) == 0 {
+		t.Fatal("expected a clearance lookup for the suppressive conditional binding, got none")
+	}
+	if stub.seen[0].DocumentKind != "" {
+		t.Fatalf("clearance subject DocumentKind = %q, want empty (input_doc_type %q must not be used as a fallback)", stub.seen[0].DocumentKind, "pdf")
 	}
 }

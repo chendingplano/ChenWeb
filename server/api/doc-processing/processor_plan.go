@@ -33,6 +33,17 @@ type ProductionRoutingFacets struct {
 	InputDocType          string
 	SourceLanguage        string
 	HasDocumentNumber     bool
+	// DocKind is the governed document.doc_kind tier-3 facet (spec
+	// 2026080102 section 9's clearance coverage key), populated from the
+	// resolver's EnrichedFacts once known. Empty means unresolved -- spec
+	// section 9 requires an empty document kind to leave the subject
+	// shadow-only, never falling back to InputDocType (the file format, a
+	// different dimension entirely). See documentKindFromEnrichedFacts in
+	// control.go (P5 review 2026080302 finding P5-6). Omitted from
+	// persisted-plan JSON when empty (the common case until the tier-3
+	// classifier is live) to keep existing plan_facts snapshots
+	// byte-compatible.
+	DocKind string `json:",omitempty"`
 }
 
 type ProductionPlanFacts struct {

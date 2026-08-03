@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -668,6 +669,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			}
 			if resolverErr == nil {
 				planFacts.EnrichedFacts = enrichedFacts
+				planFacts.RoutingFacets.DocKind = documentKindFromEnrichedFacts(enrichedFacts)
 			}
 		}
 	}
@@ -1898,6 +1900,27 @@ func (s *ControlService) applyPlanEnforcement(processors []Processor, excluded [
 	return filtered
 }
 
+// documentKindFromEnrichedFacts extracts the governed document.doc_kind
+// tier-3 facet from resolver-enriched facts, if known. Spec 2026080102
+// section 9 requires clearance coverage to key on this governed document
+// kind, not the file-format input_doc_type -- a clearance approved for one
+// document kind must never be treated as covering a record merely because
+// it shares a file format. When the facet is unresolved (nil facts, missing,
+// non-known state, or an unexpected value type), the empty string is
+// returned, which correctly leaves the subject shadow-only rather than
+// falling back to a different key (P5 review 2026080302 finding P5-6).
+func documentKindFromEnrichedFacts(enriched semrules.FactSet) string {
+	fact, ok := enriched["document.doc_kind"]
+	if !ok || fact.State != semrules.FactKnown {
+		return ""
+	}
+	value, ok := fact.Value.(string)
+	if !ok {
+		return ""
+	}
+	return value
+}
+
 // finalizeRoutingPlan builds a RoutingEnforcementRequest from the already
 // resolved plan (E1's pure gate shadow and C1's pure binding selection) and
 // asks FinalizeRoutingPlan to turn it into a real effective processor set,
@@ -1917,7 +1940,7 @@ func (s *ControlService) finalizeRoutingPlan(ctx context.Context, plan Productio
 		Explicit:                 facts.ExplicitProcessorOverride,
 		PolicyID:                 facts.ActivePolicyID,
 		PolicyVersion:            facts.ActivePolicyVersion,
-		DocumentKind:             facts.RoutingFacets.InputDocType,
+		DocumentKind:             facts.RoutingFacets.DocKind,
 		RequestedProcessors:      facts.RequestedProcessors,
 		BindingSource:            binding.Source,
 		BindingID:                binding.BindingID,
