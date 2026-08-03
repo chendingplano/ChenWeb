@@ -102,7 +102,14 @@ func TestPolicyPromotionStoreImplementsInterface(t *testing.T) {
 	var _ DraftPolicyPromoter = PolicyPromotionStore{}
 }
 
-func TestPolicyCompileFailureLeavesActiveUntouched(t *testing.T) {
+// TestEnsureDraftPolicyInsertFailurePropagates proves a failure to INSERT the
+// draft policy row is surfaced to the caller (the release transaction then
+// rolls back in production). The name reflects what the test actually asserts
+// -- a draft-policy insert failure -- rather than the earlier misnomer
+// "PolicyCompileFailureLeavesActiveUntouched" (P5 review 2026080302 criterion
+// 13; the real compile-failure behavior is covered by
+// kbhandler.TestActivatePipelinePolicyCompilerFailureLeavesPriorActiveUntouched).
+func TestEnsureDraftPolicyInsertFailurePropagates(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
 	store := PolicyPromotionStore{}
@@ -134,7 +141,15 @@ func TestPolicyCompileFailureLeavesActiveUntouched(t *testing.T) {
 	}
 }
 
-func TestPolicyActivationFailureRollback(t *testing.T) {
+// TestEnsureDraftPolicyCreatesDraftWithoutActivating proves the success path:
+// EnsureDraftFromModuleRelease materializes the draft policy and its
+// conditional bindings, and never issues an activation query (spec 2026080102
+// section 8: "It never activates routing"). The name reflects what the test
+// actually asserts -- rather than the earlier misnomer
+// "PolicyActivationFailureRollback" (P5 review 2026080302 criterion 13; the
+// real activation-rollback behavior is covered by
+// kbhandler.TestActivatePipelinePolicyTransactionFailureRollsBackArchive).
+func TestEnsureDraftPolicyCreatesDraftWithoutActivating(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
 	store := PolicyPromotionStore{}

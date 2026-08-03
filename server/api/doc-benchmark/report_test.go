@@ -24,7 +24,13 @@ func TestRenderReportDeterministic(t *testing.T) {
 	}
 }
 
-func TestBenchmarkReportRecordsCostYield(t *testing.T) {
+// TestBenchmarkReportCostYieldSerializationRoundTrip is a struct-serialization
+// round-trip: it asserts cost/yield fields survive RenderJSON/Unmarshal. It is
+// NOT the criterion-15 proof -- that is TestBenchmarkReportRoutingOffVsOnDiffers,
+// which runs the analyzer over a routing-off/on pair (P5 review 2026080302
+// criterion-15 note: the old test wore the criterion name while only round-
+// tripping a hand-built report).
+func TestBenchmarkReportCostYieldSerializationRoundTrip(t *testing.T) {
 	cost := 0.042
 	telemetryMean := 1.5
 	r := BenchmarkReport{
@@ -89,7 +95,11 @@ func TestBenchmarkReportRecordsCostYield(t *testing.T) {
 	}
 }
 
-func TestBenchmarkReportRecordsRecallPrecision(t *testing.T) {
+// TestBenchmarkReportRecallPrecisionSerializationRoundTrip is a
+// struct-serialization round-trip for recall/precision aggregates. It is NOT
+// the criterion-15 proof -- that is TestBenchmarkReportRoutingOffVsOnDiffers
+// (P5 review 2026080302 criterion-15 note).
+func TestBenchmarkReportRecallPrecisionSerializationRoundTrip(t *testing.T) {
 	r := BenchmarkReport{
 		ID: "recall-precision-1",
 		Aggregates: []AggregateRow{
@@ -148,4 +158,146 @@ func TestBenchmarkReportRecordsRecallPrecision(t *testing.T) {
 	if !strings.Contains(md, "grounding_recall") {
 		t.Fatal("markdown missing grounding_recall")
 	}
+}
+
+// routingOffFixture is the routing-off (baseline) score set: every processor
+// runs, so extract_metrics records processor_success and detection recall is
+// full-yield; cost is the full-pipeline cost.
+func routingOffFixture() []ScoreUnit {
+	return []ScoreUnit{
+		{CaseID: "case-1", Repetition: 1, Applicable: true, Tags: []string{"document_kind:product_specification"},
+			Scores: []ScoreRow{
+				{Metric: "processor_success", Component: "extract_metrics", AggregationKind: "binary_macro", Direction: "higher", Value: ptr(1.0), Numerator: 1, Denominator: 1},
+				{Metric: "detection_recall", AggregationKind: "count_derived_micro", Direction: "higher", TP: 2, FP: 0, FN: 0},
+				{Metric: "detection_precision", AggregationKind: "count_derived_micro", Direction: "higher", TP: 2, FP: 0, FN: 0},
+				{Metric: "cost", AggregationKind: "operational", Direction: "lower", Value: ptr(0.20)},
+			}},
+		{CaseID: "case-2", Repetition: 1, Applicable: true,
+			Scores: []ScoreRow{
+				{Metric: "processor_success", Component: "extract_metrics", AggregationKind: "binary_macro", Direction: "higher", Value: ptr(1.0), Numerator: 1, Denominator: 1},
+				{Metric: "detection_recall", AggregationKind: "count_derived_micro", Direction: "higher", TP: 1, FP: 0, FN: 0},
+				{Metric: "detection_precision", AggregationKind: "count_derived_micro", Direction: "higher", TP: 1, FP: 0, FN: 0},
+				{Metric: "cost", AggregationKind: "operational", Direction: "lower", Value: ptr(0.10)},
+			}},
+	}
+}
+
+// routingOnFixture is the routing-on (candidate) score set: extract_metrics
+// was skipped by a gate rule with a documented reason, so its
+// processor_success slice is absent, cost is lower, and detection recall drops
+// because the skipped extraction is missing evidence. The skip reason is
+// carried as a case tag so the report's slices attribute the skipped
+// population (spec 2026080102 section 9: "every proposed skip/defer and its
+// explanation trace").
+func routingOnFixture() []ScoreUnit {
+	return []ScoreUnit{
+		{CaseID: "case-1", Repetition: 1, Applicable: true, Tags: []string{"document_kind:product_specification", "skip:extract_metrics:gate_rule_governed_doc_kind"},
+			Scores: []ScoreRow{
+				{Metric: "detection_recall", AggregationKind: "count_derived_micro", Direction: "higher", TP: 1, FP: 0, FN: 1},
+				{Metric: "detection_precision", AggregationKind: "count_derived_micro", Direction: "higher", TP: 1, FP: 0, FN: 0},
+				{Metric: "cost", AggregationKind: "operational", Direction: "lower", Value: ptr(0.05)},
+			}},
+		{CaseID: "case-2", Repetition: 1, Applicable: true, Tags: []string{"skip:extract_metrics:gate_rule_governed_doc_kind"},
+			Scores: []ScoreRow{
+				{Metric: "detection_recall", AggregationKind: "count_derived_micro", Direction: "higher", TP: 1, FP: 0, FN: 0},
+				{Metric: "detection_precision", AggregationKind: "count_derived_micro", Direction: "higher", TP: 1, FP: 0, FN: 0},
+				{Metric: "cost", AggregationKind: "operational", Direction: "lower", Value: ptr(0.02)},
+			}},
+	}
+}
+
+// TestBenchmarkReportRoutingOffVsOnDiffers is the criterion-15 proof (spec
+// 2026080102 section 12 criterion 15): the analyzer run over a routing-off vs
+// routing-on fixture pair records cost, yield (processor_success), and
+// recall/precision that differ as expected, and attributes the explainable
+// skip to its gate-rule reason. It replaces the two serialization round-trips
+// that previously wore the criterion name (P5 review 2026080302 criterion-15
+// note).
+func TestBenchmarkReportRoutingOffVsOnDiffers(t *testing.T) {
+	off, on := routingOffFixture(), routingOnFixture()
+
+	aggOff, err := AggregateScores(off, len(off))
+	if err != nil {
+		t.Fatalf("AggregateScores(off): %v", err)
+	}
+	aggOn, err := AggregateScores(on, len(on))
+	if err != nil {
+		t.Fatalf("AggregateScores(on): %v", err)
+	}
+
+	rowOff := aggregateBy(aggOff, "processor_success", "extract_metrics")
+	rowOn := aggregateBy(aggOn, "processor_success", "extract_metrics")
+	if rowOff == nil || rowOn != nil {
+		t.Fatalf("yield: extract_metrics processor_success present off=%v on=%v, want only off", rowOff != nil, rowOn != nil)
+	}
+	if rowOff.Value == nil || *rowOff.Value != 1.0 {
+		t.Fatalf("processor_success off value = %v, want 1.0", rowOff.Value)
+	}
+
+	costOff := aggregateBy(aggOff, "cost", "")
+	costOn := aggregateBy(aggOn, "cost", "")
+	if costOff == nil || costOn == nil || costOff.Value == nil || costOn.Value == nil {
+		t.Fatalf("cost aggregates missing: off=%v on=%v", costOff, costOn)
+	}
+	if *costOff.Value <= *costOn.Value {
+		t.Fatalf("cost must be lower with routing on: off=%.3f on=%.3f", *costOff.Value, *costOn.Value)
+	}
+
+	recallOff := aggregateBy(aggOff, "detection_recall", "")
+	recallOn := aggregateBy(aggOn, "detection_recall", "")
+	if recallOff == nil || recallOn == nil || recallOff.Value == nil || recallOn.Value == nil {
+		t.Fatalf("detection_recall aggregates missing: off=%v on=%v", recallOff, recallOn)
+	}
+	if *recallOff.Value <= *recallOn.Value {
+		t.Fatalf("detection_recall must drop when the skipped processor's extraction is missing: off=%.3f on=%.3f", *recallOff.Value, *recallOn.Value)
+	}
+
+	// Paired deltas: routing-on is strictly worse on recall (negative delta).
+	deltas, _, err := CompareVariants(VariantComparison{
+		Baseline: off, Candidate: on,
+		DatasetHash: "dataset-hash", BaselineCaseSetHash: "case-set-h", CandidateCaseSetHash: "case-set-h",
+		ScorerVersion: "scorer-v", NormalizationVersion: "norm-v",
+	})
+	if err != nil {
+		t.Fatalf("CompareVariants: %v", err)
+	}
+	delta := pairedDeltaBy(deltas, "detection_recall", "")
+	if delta == nil || delta.Delta == nil || *delta.Delta >= 0 {
+		t.Fatalf("detection_recall paired delta = %+v, want negative", delta)
+	}
+
+	// Explainable skip attribution: the routing-on slices carry the skip tag.
+	slices, err := AggregateSlices(on, len(on))
+	if err != nil {
+		t.Fatalf("AggregateSlices(on): %v", err)
+	}
+	if _, ok := slices["skip:extract_metrics:gate_rule_governed_doc_kind"]; !ok {
+		t.Fatalf("routing-on slices missing the explainable-skip tag, got %v", keys(slices))
+	}
+}
+
+func aggregateBy(rows []AggregateRow, metric, component string) *AggregateRow {
+	for i := range rows {
+		if rows[i].Metric == metric && rows[i].Component == component {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func pairedDeltaBy(deltas []PairedDelta, metric, component string) *PairedDelta {
+	for i := range deltas {
+		if deltas[i].Metric == metric && deltas[i].Component == component {
+			return &deltas[i]
+		}
+	}
+	return nil
+}
+
+func keys(m map[string][]AggregateRow) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
