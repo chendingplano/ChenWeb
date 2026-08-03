@@ -20,16 +20,19 @@ import (
 // tasks add classifier and module-promotion kinds later through this same
 // Writer.
 const (
-	EventRuleAuthored      = "rule_authored"
-	EventBindingAuthored   = "binding_authored"
-	EventPolicyActivated   = "policy_activated"
-	EventBindingConflict   = "binding_conflict"
-	EventGateConflict      = "gate_conflict"
-	EventFallbackApplied   = "fallback_applied"
-	EventClearanceApproved = "clearance_approved"
-	EventClearanceRevoked  = "clearance_revoked"
-	EventDecisionEnforced  = "decision_enforced"
-	EventDecisionShadowed  = "decision_shadowed"
+	EventRuleAuthored         = "rule_authored"
+	EventBindingAuthored      = "binding_authored"
+	EventPolicyActivated      = "policy_activated"
+	EventBindingConflict      = "binding_conflict"
+	EventGateConflict         = "gate_conflict"
+	EventFallbackApplied      = "fallback_applied"
+	EventClearanceApproved    = "clearance_approved"
+	EventClearanceRevoked     = "clearance_revoked"
+	EventDecisionEnforced     = "decision_enforced"
+	EventDecisionShadowed     = "decision_shadowed"
+	EventProposalCreated      = "proposal_created"
+	EventProposalTransitioned = "proposal_transitioned"
+	EventProposalPromoted     = "proposal_promoted"
 )
 
 // Event is one append-only kb.pipeline_policy_events row. Detail must stay

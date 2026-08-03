@@ -64,6 +64,11 @@ type ProductionPlanFacts struct {
 	ExplicitProcessorOverride bool               `json:",omitempty"`
 	ProcessorGateOverrides    map[string]string  `json:",omitempty"`
 	RoutingSnapshot           *P5RoutingSnapshot `json:",omitempty"`
+	// EnrichedFacts carries the two-pass resolver output (P5 spec section 7).
+	// When non-nil, BuildPipelineBindingFactSet merges these on top of the
+	// base facts so tier-3 classifier observations participate in pipeline
+	// binding and processor gate evaluation. Nil means base facts only.
+	EnrichedFacts semrules.FactSet `json:"-"`
 }
 
 // P5RoutingSnapshot is the immutable, self-contained routing evidence stored

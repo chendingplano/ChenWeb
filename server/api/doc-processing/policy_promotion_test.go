@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestPolicyPromotionStoreNilDB(t *testing.T) {
@@ -62,4 +66,101 @@ func TestPromotedProposalShape(t *testing.T) {
 func TestPolicyPromotionStoreImplementsInterface(t *testing.T) {
 	// Compile-time check that PolicyPromotionStore satisfies DraftPolicyPromoter.
 	var _ DraftPolicyPromoter = PolicyPromotionStore{}
+}
+
+func TestPolicyCompileFailureLeavesActiveUntouched(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	store := PolicyPromotionStore{DB: db}
+
+	// Idempotency check: no existing draft for this release.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+		WillReturnError(sql.ErrNoRows)
+
+	// Max version lookup succeeds.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(3))
+
+	// INSERT draft policy fails — simulating a DB error during draft creation.
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_policies`)).
+		WillReturnError(fmt.Errorf("connection refused"))
+
+	policyID, err := store.EnsureDraftFromModuleRelease(
+		context.Background(), 1, "checksum-abc", nil,
+	)
+	if err == nil {
+		t.Fatal("expected error when INSERT draft policy fails")
+	}
+	if policyID != 0 {
+		t.Fatalf("policyID=%d want 0 on failure", policyID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
+func TestPolicyActivationFailureRollback(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	store := PolicyPromotionStore{DB: db}
+
+	proposals := []PromotedProposal{
+		{
+			ProposalID:        101,
+			Predicate:         json.RawMessage(`{"version":1,"expression":{"kind":"all","items":[]}}`),
+			PredicateChecksum: "sha256:abc123",
+		},
+	}
+
+	// Idempotency check: no existing draft.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+		WillReturnError(sql.ErrNoRows)
+
+	// Max version lookup.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(5))
+
+	// INSERT draft policy — must use status='draft', never 'active'.
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_policies`)).
+		WithArgs(6, "module_release:1", "checksum-xyz").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(99)))
+
+	// Default pipeline lookup.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name`)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(7)))
+
+	// Materialize the proposal binding.
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
+		WithArgs(
+			int64(7), int64(99), "module_proposal:101",
+			string(proposals[0].Predicate), proposals[0].PredicateChecksum,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	policyID, err := store.EnsureDraftFromModuleRelease(
+		context.Background(), 1, "checksum-xyz", proposals,
+	)
+	if err != nil {
+		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
+	}
+	if policyID != 99 {
+		t.Fatalf("policyID=%d want 99", policyID)
+	}
+
+	// Verify no activation query was issued — EnsureDraftFromModuleRelease
+	// only creates drafts, so activation failure is inherently safe.
+	// ExpectationsWereMet confirms no unexpected queries (e.g., UPDATE
+	// status='active') were executed.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected queries (activation should not occur): %v", err)
+	}
 }

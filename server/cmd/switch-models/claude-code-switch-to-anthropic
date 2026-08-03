@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CC_SWITCH_SETTINGS="$HOME/.cc-switch/settings.json"
+CC_SWITCH_DB="$HOME/.cc-switch/cc-switch.db"
+CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+PROVIDER_ID="claude-official"
+
+echo "Switching Claude Code to Anthropic (official)..."
+
+# 1. Update cc-switch device settings
+python3 -c "
+import json, sys
+path = '$CC_SWITCH_SETTINGS'
+with open(path) as f:
+    d = json.load(f)
+d['currentProviderClaude'] = '$PROVIDER_ID'
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+"
+echo "  ✓ Updated cc-switch settings → $PROVIDER_ID"
+
+# 2. Update cc-switch database
+sqlite3 "$CC_SWITCH_DB" "
+    UPDATE providers SET is_current=0 WHERE app_type='claude' AND is_current=1;
+    UPDATE providers SET is_current=1 WHERE id='$PROVIDER_ID' AND app_type='claude';
+"
+echo "  ✓ Updated cc-switch database"
+
+# 3. Update Claude Code settings — remove DeepSeek env overrides
+python3 -c "
+import json
+path = '$CLAUDE_SETTINGS'
+with open(path) as f:
+    d = json.load(f)
+d['env'] = {}
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+"
+echo "  ✓ Cleared env overrides in ~/.claude/settings.json"
+
+echo ""
+echo "Done. Restart VS Code (or Claude Code) to use Anthropic models."

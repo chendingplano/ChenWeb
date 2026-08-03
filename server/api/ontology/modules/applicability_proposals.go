@@ -16,11 +16,11 @@ import (
 
 // Proposal status closed vocabulary (spec 2026080102 section 8).
 const (
-	ProposalStatusDraft              = "draft"
-	ProposalStatusInReview           = "in_review"
-	ProposalStatusApproved           = "approved"
-	ProposalStatusIncludedInRelease  = "included_in_release"
-	ProposalStatusRejected           = "rejected"
+	ProposalStatusDraft             = "draft"
+	ProposalStatusInReview          = "in_review"
+	ProposalStatusApproved          = "approved"
+	ProposalStatusIncludedInRelease = "included_in_release"
+	ProposalStatusRejected          = "rejected"
 )
 
 // ApplicabilityProposal is one governed routing proposal carried by an
@@ -204,6 +204,64 @@ SELECT id, module_id, release_id, proposal_kind, predicate, predicate_checksum, 
 FROM kb.ontology_applicability_proposals
 WHERE release_id = $1 AND status IN ($2, $3)
 ORDER BY id`, releaseID, ProposalStatusApproved, ProposalStatusIncludedInRelease)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var proposals []ApplicabilityProposal
+	for rows.Next() {
+		var p ApplicabilityProposal
+		var approvedAt sql.NullTime
+		var includedRelease sql.NullInt64
+		if err := rows.Scan(
+			&p.ID, &p.ModuleID, &p.ReleaseID, &p.ProposalKind,
+			&p.Predicate, &p.PredicateChecksum, &p.Status,
+			&p.SourceReleaseChecksum, &p.ApprovedBy, &approvedAt,
+			&includedRelease, &p.CreatedBy, &p.CreateTime,
+		); err != nil {
+			return nil, err
+		}
+		if approvedAt.Valid {
+			t := approvedAt.Time
+			p.ApprovedAt = &t
+		}
+		if includedRelease.Valid {
+			v := includedRelease.Int64
+			p.IncludedInReleaseID = &v
+		}
+		proposals = append(proposals, p)
+	}
+	return proposals, rows.Err()
+}
+
+// ListProposals returns proposals filtered by release_id and/or status.
+// Pass releaseID <= 0 to skip the release filter; pass empty status to
+// skip the status filter.
+func (s ProposalStore) ListProposals(ctx context.Context, releaseID int64, status string) ([]ApplicabilityProposal, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	query := `
+SELECT id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+       COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
+       included_in_release_id, COALESCE(created_by, ''), create_time
+FROM kb.ontology_applicability_proposals WHERE 1=1`
+	var args []any
+	argN := 1
+	if releaseID > 0 {
+		query += fmt.Sprintf(" AND release_id = $%d", argN)
+		args = append(args, releaseID)
+		argN++
+	}
+	if strings.TrimSpace(status) != "" {
+		query += fmt.Sprintf(" AND status = $%d", argN)
+		args = append(args, strings.TrimSpace(status))
+		argN++
+	}
+	query += " ORDER BY id"
+	_ = argN
+
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

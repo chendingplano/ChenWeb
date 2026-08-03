@@ -24,7 +24,9 @@ import (
 
 	_ "github.com/lib/pq"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/ontology/modules"
+	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 )
 
 func main() {
@@ -118,6 +120,15 @@ func runRelease(args []string) {
 		log.Fatalf("release %s@%s: %v", *moduleID, *version, err)
 	}
 	fmt.Printf("release %s@%s created (id=%d) checksum=%s\n", rel.ModuleID, rel.Version, rel.ID, rel.ContentChecksum)
+
+	// P5 spec section 8: promote approved proposals at release time.
+	promoter := docprocessing.PolicyPromotionStore{DB: db, Audit: policyaudit.SQLStore{DB: db}}
+	lister := proposalListAdapter{store: modules.ProposalStore{DB: db}}
+	if policyID, err := docprocessing.PromoteModuleReleaseProposals(context.Background(), promoter, lister, rel.ID, rel.ContentChecksum); err != nil {
+		log.Printf("warning: proposal promotion failed for release %d: %v", rel.ID, err)
+	} else if policyID > 0 {
+		fmt.Printf("promoted approved proposals into draft policy %d\n", policyID)
+	}
 }
 
 func runActivate(args []string) {
@@ -192,4 +203,28 @@ func runActive(args []string) {
 		}
 		fmt.Printf("%s -> release %d (version %s)\n", active.ModuleID, active.ReleaseID, active.ReleaseVersion)
 	}
+}
+
+// proposalListAdapter wraps modules.ProposalStore to satisfy
+// docprocessing.ApprovedProposalLister, converting ApplicabilityProposal
+// values to PromotedProposal. This avoids the import cycle
+// (modules -> profiles -> docprocessing -> modules).
+type proposalListAdapter struct {
+	store modules.ProposalStore
+}
+
+func (a proposalListAdapter) ListApprovedProposals(ctx context.Context, releaseID int64) ([]docprocessing.PromotedProposal, error) {
+	proposals, err := a.store.ListApprovedProposals(ctx, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]docprocessing.PromotedProposal, len(proposals))
+	for i, p := range proposals {
+		out[i] = docprocessing.PromotedProposal{
+			ProposalID:        p.ID,
+			Predicate:         p.Predicate,
+			PredicateChecksum: p.PredicateChecksum,
+		}
+	}
+	return out, nil
 }

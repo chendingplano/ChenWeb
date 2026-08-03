@@ -258,6 +258,130 @@ func TestLoadProductionPipelineBindingsPropagatesStoreError(t *testing.T) {
 	}
 }
 
+func TestBuildPipelineBindingFactSet(t *testing.T) {
+	t.Run("populated facts produce all expected paths", func(t *testing.T) {
+		facts := ProductionPlanFacts{
+			InputDocType:     " PDF ",
+			SourceLanguage:   " EN ",
+			KnowledgeStoreID: 42,
+			DocumentNumber:   "DOC-001",
+		}
+		fs := BuildPipelineBindingFactSet(facts)
+
+		wantPaths := []struct {
+			path  string
+			value any
+		}{
+			{"document.input_doc_type", "pdf"},
+			{"document.source_language", "en"},
+			{"document.knowledge_store_binding_state", "bound"},
+			{"document.has_document_number", true},
+			{"deployment.knowledge_store", "42"},
+		}
+		for _, w := range wantPaths {
+			fact, ok := fs[w.path]
+			if !ok {
+				t.Fatalf("missing fact %q", w.path)
+			}
+			if fact.State != semrules.FactKnown {
+				t.Fatalf("fact %q state=%s want known", w.path, fact.State)
+			}
+			if fact.Value != w.value {
+				t.Fatalf("fact %q value=%v want %v", w.path, fact.Value, w.value)
+			}
+		}
+	})
+
+	t.Run("empty strings produce no fact for those paths", func(t *testing.T) {
+		facts := ProductionPlanFacts{}
+		fs := BuildPipelineBindingFactSet(facts)
+
+		// Empty InputDocType and SourceLanguage must not produce facts.
+		for _, path := range []string{"document.input_doc_type", "document.source_language"} {
+			if _, ok := fs[path]; ok {
+				t.Fatalf("unexpected fact %q for empty input", path)
+			}
+		}
+
+		// Zero KnowledgeStoreID yields "absent" binding state.
+		bs, ok := fs["document.knowledge_store_binding_state"]
+		if !ok {
+			t.Fatal("missing knowledge_store_binding_state fact")
+		}
+		if bs.Value != "absent" {
+			t.Fatalf("binding state=%v want absent", bs.Value)
+		}
+
+		// has_document_number is present as false.
+		dn, ok := fs["document.has_document_number"]
+		if !ok {
+			t.Fatal("missing has_document_number fact")
+		}
+		if dn.Value != false {
+			t.Fatalf("has_document_number=%v want false", dn.Value)
+		}
+
+		// Zero KnowledgeStoreID must not produce deployment.knowledge_store.
+		if _, ok := fs["deployment.knowledge_store"]; ok {
+			t.Fatal("unexpected deployment.knowledge_store for zero KnowledgeStoreID")
+		}
+	})
+
+	t.Run("routing facets override top-level fields", func(t *testing.T) {
+		facts := ProductionPlanFacts{
+			InputDocType:   "pdf",
+			SourceLanguage: "en",
+			RoutingFacets: ProductionRoutingFacets{
+				InputDocType:   "docx",
+				SourceLanguage: "fr",
+			},
+		}
+		fs := BuildPipelineBindingFactSet(facts)
+
+		if got := fs["document.input_doc_type"].Value; got != "docx" {
+			t.Fatalf("input_doc_type=%v want docx (from facets)", got)
+		}
+		if got := fs["document.source_language"].Value; got != "fr" {
+			t.Fatalf("source_language=%v want fr (from facets)", got)
+		}
+	})
+
+	t.Run("enriched facts merge with base", func(t *testing.T) {
+		facts := ProductionPlanFacts{
+			InputDocType:     "pdf",
+			SourceLanguage:   "en",
+			KnowledgeStoreID: 42,
+			EnrichedFacts: semrules.FactSet{
+				"document.doc_kind": {Path: "document.doc_kind", State: semrules.FactKnown, Value: "standard"},
+				// Override base fact to verify enriched takes precedence.
+				"document.input_doc_type": {Path: "document.input_doc_type", State: semrules.FactKnown, Value: "docx"},
+			},
+		}
+		fs := BuildPipelineBindingFactSet(facts)
+
+		// Enriched-only fact must be present.
+		if got, ok := fs["document.doc_kind"]; !ok || got.Value != "standard" {
+			t.Fatalf("enriched fact doc_kind=%v want standard", got.Value)
+		}
+
+		// Enriched fact overrides base for overlapping paths.
+		if got := fs["document.input_doc_type"].Value; got != "docx" {
+			t.Fatalf("enriched override: input_doc_type=%v want docx", got)
+		}
+
+		// Base facts not in enriched must survive the merge.
+		if _, ok := fs["document.source_language"]; !ok {
+			t.Fatal("base fact source_language missing after merge")
+		}
+		if _, ok := fs["deployment.knowledge_store"]; !ok {
+			t.Fatal("base fact deployment.knowledge_store missing after merge")
+		}
+		if got := fs["document.knowledge_store_binding_state"].Value; got != "bound" {
+			t.Fatalf("binding state=%v want bound after merge", got)
+		}
+	})
+}
+
 func mustLegacyBinding(t *testing.T, name, pipeline string, priority int, scope string, rule ProductionPipelineRule) PipelineBinding {
 	t.Helper()
 	doc, checksum, err := LegacyRulePredicateDocument(rule)

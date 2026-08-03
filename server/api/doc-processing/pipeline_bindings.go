@@ -221,7 +221,25 @@ func BuildPipelineBindingFactSet(facts ProductionPlanFacts) semrules.FactSet {
 	if facts.KnowledgeStoreID > 0 {
 		addKnownPipelineBindingFact(builder, "deployment.knowledge_store", fmt.Sprint(facts.KnowledgeStoreID))
 	}
-	return builder.Build()
+	base := builder.Build()
+
+	// P5 two-pass resolver overlay: enriched facts (base + classifier
+	// observations) replace the base set when present. The resolver's
+	// enrichFactSet already preserves known-over-classifier precedence,
+	// so we only need to ensure deployment-level facts survive.
+	if facts.EnrichedFacts != nil {
+		merged := make(semrules.FactSet, len(facts.EnrichedFacts)+len(base))
+		for path, fact := range facts.EnrichedFacts {
+			merged[path] = fact
+		}
+		for path, fact := range base {
+			if _, exists := merged[path]; !exists {
+				merged[path] = fact
+			}
+		}
+		return merged
+	}
+	return base
 }
 
 func addKnownPipelineBindingFact(builder *semrules.FactSetBuilder, path string, value string) {

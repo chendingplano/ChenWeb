@@ -342,3 +342,99 @@ func TestProfileStoreTransitionStatusAllowsDraftToInReview(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestReviewReloadAfterActivationChange proves criterion 14's "review
+// snapshots reproducible after activation changes": a scope's evaluation uses
+// the profile/release identities pinned in the scope's selected_profiles,
+// never the current module activation pointer. LoadReleasedProfiles reflects
+// the activation change (different releases), but EvaluatePinnedScope still
+// loads rules using the original pinned release id, so the review result is
+// reproducible from the scope record alone.
+func TestReviewReloadAfterActivationChange(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	now := time.Now()
+
+	// Phase 1: original activation -- release 42 is active.
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_active_releases ar")).
+		WillReturnRows(sqlmock.NewRows([]string{"module_id", "release_id", "version", "content_checksum"}).
+			AddRow("ventilator-display", int64(42), "0.1.0", "sha256:aaa"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profiles p\nJOIN kb.ontology_module_releases r ON r.id = p.released_in_release_id")).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "profile_id", "version", "module_id", "status", "title", "applicability", "closed_dimensions", "release_id", "release_version", "create_time", "create_by", "modify_time", "modify_by",
+		}).AddRow(
+			int64(7), "ventilator-display:display_metrics", 1, "ventilator-display", "included_in_release", "Display metrics", []byte(`{}`), []byte(`[]`), int64(42), "0.1.0", now, "curator", now, "curator",
+		))
+	mock.ExpectCommit()
+
+	originalReleased, err := (ProfileStore{DB: db}).LoadReleasedProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("LoadReleasedProfiles (original): %v", err)
+	}
+	if len(originalReleased.Releases) != 1 || originalReleased.Releases[0].ReleaseID != 42 {
+		t.Fatalf("original releases = %#v, want release 42", originalReleased.Releases)
+	}
+
+	// Build a scope pinned to the original release 42.
+	originalScope := ReviewScope{
+		ReviewScopeID:    "scope-1",
+		ClosedDimensions: json.RawMessage(`["display_metrics"]`),
+		TargetObjectIDs:  json.RawMessage(`["obj-1"]`),
+		SelectedProfiles: json.RawMessage(`[{"profile_id":"ventilator-display:display_metrics","profile_version":1,"release_id":42}]`),
+	}
+
+	// Phase 2: activation changes -- module now points to release 99.
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_active_releases ar")).
+		WillReturnRows(sqlmock.NewRows([]string{"module_id", "release_id", "version", "content_checksum"}).
+			AddRow("ventilator-display", int64(99), "0.2.0", "sha256:zzz"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_profiles p\nJOIN kb.ontology_module_releases r ON r.id = p.released_in_release_id")).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "profile_id", "version", "module_id", "status", "title", "applicability", "closed_dimensions", "release_id", "release_version", "create_time", "create_by", "modify_time", "modify_by",
+		}))
+	mock.ExpectCommit()
+
+	afterChange, err := (ProfileStore{DB: db}).LoadReleasedProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("LoadReleasedProfiles (after change): %v", err)
+	}
+	if len(afterChange.Releases) != 1 || afterChange.Releases[0].ReleaseID != 99 {
+		t.Fatalf("post-change releases = %#v, want release 99", afterChange.Releases)
+	}
+
+	// Phase 3: evaluate the original scope after the activation change.
+	// The frozen rule loader records which release id was requested; it must
+	// be the original pinned release 42, never the new activation's 99.
+	ruleLoader := &frozenRuleLoader{rules: []ProfileRule{{
+		ID: 9, RuleID: "r", ProfileID: "ventilator-display:display_metrics", ProfileVersion: 1, ReleaseID: 42,
+		RuleKind: "required_assertion_pattern", Severity: "error",
+		RuleConfig: json.RawMessage(`{"dimension":"display_metrics","predicate_term_id":"measurement:x","quantifier":"exists_conforming"}`),
+	}}}
+	assertionLoader := &stubAssertionLoader{}
+	runs := &stubReviewRunWriter{returnID: 1}
+	svc := ReviewService{
+		Findings:   &memoryFindingWriter{},
+		Rules:      ruleLoader,
+		Assertions: assertionLoader,
+		Runs:       runs,
+	}
+	_, _, err = svc.EvaluatePinnedScope(context.Background(), originalScope, 101, 1)
+	if err != nil {
+		t.Fatalf("EvaluatePinnedScope after activation change: %v", err)
+	}
+	if ruleLoader.gotRelease != 42 {
+		t.Fatalf("rule loader release = %d, want 42 (the scope's pinned release, not the new activation's 99)", ruleLoader.gotRelease)
+	}
+	if ruleLoader.gotProfile != "ventilator-display:display_metrics" || ruleLoader.gotVersion != 1 {
+		t.Fatalf("rule loader = %s v%d, want the scope's pinned profile identity", ruleLoader.gotProfile, ruleLoader.gotVersion)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}

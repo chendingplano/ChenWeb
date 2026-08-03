@@ -124,40 +124,31 @@ VALUES (NULL, $1, $2, $3, 0, true, '-', '', 'conditional', $4::jsonb, $5)`,
 	return policyID, nil
 }
 
+// ApprovedProposalLister is the interface the ontology-compiler adapter must
+// satisfy to feed approved proposals into PromoteModuleReleaseProposals.
+// Returning []PromotedProposal directly avoids the import cycle
+// (modules → profiles → docprocessing → modules): the adapter in the
+// ontology-compiler command converts modules.ApplicabilityProposal values.
+type ApprovedProposalLister interface {
+	ListApprovedProposals(ctx context.Context, releaseID int64) ([]PromotedProposal, error)
+}
+
 // PromoteModuleReleaseProposals is the convenience entry point that loads
 // approved proposals from the module's proposal store and promotes them
 // through the DraftPolicyPromoter. It is called by the ontology-compiler
-// command during release creation/activation.
-func PromoteModuleReleaseProposals(ctx context.Context, promoter DraftPolicyPromoter, proposalLister interface {
-	ListApprovedProposals(context.Context, int64) ([]proposalRecord, error)
-}, releaseID int64, releaseChecksum string) (int64, error) {
+// command during release creation.
+func PromoteModuleReleaseProposals(ctx context.Context, promoter DraftPolicyPromoter, lister ApprovedProposalLister, releaseID int64, releaseChecksum string) (int64, error) {
 	if promoter == nil {
 		return 0, nil // no promoter configured; promotion is optional
 	}
-	records, err := proposalLister.ListApprovedProposals(ctx, releaseID)
+	proposals, err := lister.ListApprovedProposals(ctx, releaseID)
 	if err != nil {
 		return 0, fmt.Errorf("list approved proposals: %w", err)
 	}
-	if len(records) == 0 {
+	if len(proposals) == 0 {
 		return 0, nil // no proposals to promote
 	}
-	proposals := make([]PromotedProposal, len(records))
-	for i, r := range records {
-		proposals[i] = PromotedProposal{
-			ProposalID:        r.ID,
-			Predicate:         r.Predicate,
-			PredicateChecksum: r.PredicateChecksum,
-		}
-	}
 	return promoter.EnsureDraftFromModuleRelease(ctx, releaseID, releaseChecksum, proposals)
-}
-
-// proposalRecord mirrors modules.ApplicabilityProposal's fields needed for
-// promotion, avoiding an import cycle.
-type proposalRecord struct {
-	ID                int64
-	Predicate         json.RawMessage
-	PredicateChecksum string
 }
 
 // Ensure PolicyPromotionStore satisfies DraftPolicyPromoter at compile time.

@@ -53,3 +53,5 @@ config.local.toml
 
 # SDD scratch (briefs, reports, review packages, ledger)
 .superpowers/
+ontology-compiler
+doc-benchmark

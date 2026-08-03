@@ -50,7 +50,13 @@ type ControlService struct {
 	RoutingClearances RoutingClearanceChecker
 	RoutingAlarms     RoutingAlarmWriter
 	PolicyAudit       policyaudit.Writer
-	Now               func() time.Time
+	// Resolver is the optional two-pass applicability resolver (P5 spec
+	// section 7). When non-nil, handleEvent calls ResolveExtractionFacts
+	// after resolveProductionPlanFacts to enrich the fact set with
+	// tier-3 classifier observations before pipeline binding and processor
+	// gate evaluation. When nil, behavior is unchanged (base facts only).
+	Resolver *ApplicabilityResolver
+	Now      func() time.Time
 
 	DocProcessorMode       string
 	MaxDocProcessPipelines int
@@ -652,6 +658,18 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		planFacts = ProductionPlanFacts{RequestedProcessors: append([]string(nil), evt.Operations...)}
 	} else {
 		s.persistDocFacets(ctx, evt.RecordID, planFacts)
+		// P5 two-pass resolver: enrich tier-3 facts before binding/gate eval.
+		// Nil-safe: when Resolver is nil, planFacts.EnrichedFacts stays nil
+		// and downstream BuildPipelineBindingFactSet uses base facts only.
+		if s.Resolver != nil {
+			enrichedFacts, _, resolverErr := s.Resolver.ResolveExtractionFacts(ctx, planFacts, evt.RecordID, 0, "")
+			if resolverErr != nil && s.Logger != nil {
+				s.Logger.Warn("applicability resolver failed, continuing with base facts", "record_id", evt.RecordID, "error", resolverErr)
+			}
+			if resolverErr == nil {
+				planFacts.EnrichedFacts = enrichedFacts
+			}
+		}
 	}
 	plan, planErr := BuildProductionProcessorPlanFromFacts(planFacts)
 	if planErr != nil {

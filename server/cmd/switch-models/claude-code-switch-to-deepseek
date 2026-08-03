@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CC_SWITCH_SETTINGS="$HOME/.cc-switch/settings.json"
+CC_SWITCH_DB="$HOME/.cc-switch/cc-switch.db"
+CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+PROVIDER_ID="4f5bb95f-4d91-410c-b755-0d0bf1248710"
+
+echo "Switching Claude Code to DeepSeek..."
+
+# 1. Update cc-switch device settings
+python3 -c "
+import json, sys
+path = '$CC_SWITCH_SETTINGS'
+with open(path) as f:
+    d = json.load(f)
+d['currentProviderClaude'] = '$PROVIDER_ID'
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+"
+echo "  ✓ Updated cc-switch settings → DeepSeek"
+
+# 2. Update cc-switch database
+sqlite3 "$CC_SWITCH_DB" "
+    UPDATE providers SET is_current=0 WHERE app_type='claude' AND is_current=1;
+    UPDATE providers SET is_current=1 WHERE id='$PROVIDER_ID' AND app_type='claude';
+"
+echo "  ✓ Updated cc-switch database"
+
+# 3. Update Claude Code settings — inject DeepSeek env overrides
+python3 -c "
+import json
+path = '$CLAUDE_SETTINGS'
+with open(path) as f:
+    d = json.load(f)
+d['env'] = {
+    'ANTHROPIC_BASE_URL': 'https://api.deepseek.com/anthropic',
+    'ANTHROPIC_AUTH_TOKEN': 'sk-7091f67ba56b4365b66e31ed3eab6412',
+    'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'deepseek-v4-flash',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL': 'deepseek-v4-flash',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL': 'deepseek-v4-pro'
+}
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+"
+echo "  ✓ Set DeepSeek env overrides in ~/.claude/settings.json"
+
+echo ""
+echo "Done. Restart VS Code (or Claude Code) to use DeepSeek models."

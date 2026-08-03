@@ -465,3 +465,71 @@ func TestSelectRejectsInvalidProfileApplicability(t *testing.T) {
 		t.Fatal("Select must reject an invalid profile applicability predicate")
 	}
 }
+
+// TestScopeCreationLeavesExplicitP4ScopesByteCompatible proves criterion 10's
+// "explicit P4 scopes byte-compatible": P5 deterministic selection populates
+// knowledge_store_id, selection_attempt_id, selection_status, fact_snapshot,
+// and selection_snapshot on the SelectionResult, but an explicit P4 scope
+// (SelectionMode=explicit, P5 fields left at zero) marshals to JSON without
+// any P5 key at all (omitempty), making it byte-identical to a pre-P5 scope
+// row. A P5 selection run cannot alter the serialized content of an explicit
+// scope that was not produced from its result.
+func TestScopeCreationLeavesExplicitP4ScopesByteCompatible(t *testing.T) {
+	// Run P5 deterministic selection -- produces a result with every P5 field
+	// populated (knowledge store, attempt id, status, fact/selection snapshots).
+	selector := Selector{Source: &stubSelectionSource{storeID: 9, released: selectionFixture(selectionProfile("p1", applicabilityTrueUS, `[]`))}}
+	p5Result, err := selector.Select(context.Background(), SelectionRequest{
+		ReviewScopeID:       "scope-p5",
+		ReviewedDocumentIDs: []int64{101},
+		ReviewContext:       selectionReviewContext(),
+		SubjectFacts:        &stubSubjectFactsLoader{facts: semrules.FactSet{}},
+	})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if p5Result.KnowledgeStoreID == 0 || p5Result.SelectionAttemptID == "" || p5Result.SelectionStatus == "" {
+		t.Fatal("P5 selection must populate all P5 fields on the result")
+	}
+
+	// An explicit P4 scope: SelectionMode=explicit, P5 fields at zero values.
+	// This is what a pre-P5 caller or an explicit-mode handler creates -- the
+	// P5 selection result above is never written into this scope.
+	p4Scope := ReviewScope{
+		ReviewScopeID:       "scope-p4",
+		ReviewedDocumentIDs: json.RawMessage(`[101]`),
+		TargetObjectIDs:     json.RawMessage(`[]`),
+		TargetClassTermIDs:  json.RawMessage(`[]`),
+		AsOfDate:            "2026-08-02",
+		Jurisdiction:        "US",
+		SelectedProfiles:    json.RawMessage(`[{"profile_id":"p1","profile_version":1,"release_id":42}]`),
+		SelectionMode:       SelectionModeExplicit,
+		PrecedencePolicy:    json.RawMessage(`{}`),
+		ClosedDimensions:    json.RawMessage(`[]`),
+		SelectedBy:          "reviewer",
+		SelectionReason:     "explicit",
+	}
+
+	raw, err := json.Marshal(p4Scope)
+	if err != nil {
+		t.Fatalf("marshal P4 scope: %v", err)
+	}
+	// Every P5 column is omitempty and zero, so the serialized scope must not
+	// carry any P5 key -- byte-identical to a pre-P5 scope row.
+	for _, key := range []string{"knowledge_store_id", "selection_attempt_id", "selection_status", "fact_snapshot", "selection_snapshot"} {
+		if strings.Contains(string(raw), `"`+key+`"`) {
+			t.Fatalf("explicit P4 scope JSON must not contain P5 key %q (byte-compatible with pre-P5 rows), got: %s", key, raw)
+		}
+	}
+
+	// Round-trip: unmarshal and verify P5 fields stay at zero values.
+	var decoded ReviewScope
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.KnowledgeStoreID != 0 || decoded.SelectionAttemptID != "" || decoded.SelectionStatus != "" || len(decoded.FactSnapshot) != 0 || len(decoded.SelectionSnapshot) != 0 {
+		t.Fatalf("explicit P4 scope must round-trip zero P5 fields, got %#v", decoded)
+	}
+	if decoded.SelectionMode != SelectionModeExplicit {
+		t.Fatalf("selection_mode = %q, want %q", decoded.SelectionMode, SelectionModeExplicit)
+	}
+}
