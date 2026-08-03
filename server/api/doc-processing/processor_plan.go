@@ -392,6 +392,12 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "normalize_assertions", Phase: "C", DependsOn: []string{"extract_metrics", "extract_provisions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
 	{Name: "associate_semantics", Phase: "C", DependsOn: []string{"normalize_assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
 	{Name: "project_semantics", Phase: "C", DependsOn: []string{"associate_semantics"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	// P5 tier-3 mandatory-gated pre-decision classifier (spec 2026080102
+	// section 7). Not dispatched by the ordinary Phase A/B/C wave: the G2
+	// resolver invokes it between the initial applicability pass and the
+	// final freeze. Registered here so isMandatoryProcessor returns true
+	// and ordinary processor-gate rules cannot skip or require it.
+	{Name: "classify_document", Phase: "A", Class: "mandatory_gated", Cost: "cheap_llm", OnUndetermined: "run", Idempotent: true},
 }
 
 func productionProcessorPhase(name string) string {
