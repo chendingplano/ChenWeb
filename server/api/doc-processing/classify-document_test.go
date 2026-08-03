@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
@@ -137,6 +138,27 @@ func TestClassifyDocumentBoundedSample(t *testing.T) {
 	}
 	if strings.Contains(ext.input.InputText, "truncated by the classifier") {
 		t.Fatal("sample was not truncated")
+	}
+}
+
+// TestTruncateSampleCutsOnRuneBoundary proves the sample is truncated
+// without splitting a multi-byte UTF-8 rune, which would corrupt the text
+// sent to the LLM -- the pilot corpus is predominantly Chinese (P5 review
+// 2026080302 finding P5-25).
+func TestTruncateSampleCutsOnRuneBoundary(t *testing.T) {
+	c := &DocumentClassifier{MaxSample: 10}
+	// Each Chinese character is 3 bytes in UTF-8; 10 is not a multiple of 3,
+	// so a byte-boundary cut at exactly 10 splits the 4th character.
+	text := "呼吸机显示模块规格标准文档"
+	got := c.truncateSample(text)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateSample produced invalid UTF-8: %q (bytes %x)", got, []byte(got))
+	}
+	if len(got) > 10 {
+		t.Fatalf("truncated length = %d, want <= 10", len(got))
+	}
+	if len(got) == 0 {
+		t.Fatal("expected a non-empty truncated sample")
 	}
 }
 
@@ -365,6 +387,46 @@ func TestClassifyDocumentLLMFailurePreservesIndeterminate(t *testing.T) {
 	}
 	if len(result.UnresolvedPaths) != 2 {
 		t.Fatalf("expected 2 unresolved paths, got %d", len(result.UnresolvedPaths))
+	}
+	// P5 review 2026080302 finding: "LLM failed" and "LLM legitimately
+	// returned no classification" both surfaced as empty observations with
+	// no way to tell them apart. A genuine LLM call error must set Failed.
+	if !result.Failed {
+		t.Fatal("expected Failed=true for a genuine LLM call error")
+	}
+}
+
+// TestClassifyDocumentWellFormedEmptyResponseIsNotFailed proves a
+// successful LLM call that produces no valid classification for any
+// requested path (every candidate value rejected by the governed
+// vocabulary) is distinguishable from a genuine classifier failure: the
+// observable shape (empty Observations, full UnresolvedPaths) is the same,
+// but Failed must stay false.
+func TestClassifyDocumentWellFormedEmptyResponseIsNotFailed(t *testing.T) {
+	ext := &stubExtractor{
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "not_a_governed_value", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	c := &DocumentClassifier{
+		Extractor:  ext,
+		PromptText: "test prompt",
+		ModelName:  "test-model",
+		Vocabulary: testVocabulary(),
+		Facets:     &stubFacetStore{},
+		Audit:      &stubAudit{},
+	}
+	result, err := c.Classify(context.Background(), testClassifyRequest())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Observations) != 0 {
+		t.Fatalf("expected 0 observations (value rejected by vocabulary), got %d", len(result.Observations))
+	}
+	if result.Failed {
+		t.Fatal("a well-formed LLM response with no valid classification must not be treated as a classifier failure")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
@@ -99,6 +100,14 @@ type ClassifyResult struct {
 	// AlreadyExists is true when the invocation_id already had persisted
 	// observations (stable retry).
 	AlreadyExists bool
+	// Failed is true only when the underlying LLM call itself errored or
+	// its response could not be parsed -- distinct from a well-formed LLM
+	// response that legitimately produced no valid classification for any
+	// requested path (e.g. every candidate value was outside the governed
+	// vocabulary). Both cases leave Observations empty and UnresolvedPaths
+	// full, which previously made them indistinguishable to callers (P5
+	// review 2026080302 finding P5-2).
+	Failed bool
 }
 
 // DocumentClassifier is the injected-client tier-3 classifier (spec section
@@ -233,7 +242,7 @@ func (c *DocumentClassifier) Classify(ctx context.Context, req ClassifyRequest) 
 				"error":               err.Error(),
 			},
 		})
-		return ClassifyResult{UnresolvedPaths: validPaths}, nil
+		return ClassifyResult{UnresolvedPaths: validPaths, Failed: true}, nil
 	}
 
 	// --- parse response ---
@@ -249,7 +258,7 @@ func (c *DocumentClassifier) Classify(ctx context.Context, req ClassifyRequest) 
 				"error":               err.Error(),
 			},
 		})
-		return ClassifyResult{UnresolvedPaths: validPaths}, nil
+		return ClassifyResult{UnresolvedPaths: validPaths, Failed: true}, nil
 	}
 
 	// --- validate against governed vocabulary and persist ---
@@ -339,7 +348,15 @@ func (c *DocumentClassifier) truncateSample(text string) string {
 	if len(text) <= maxSample {
 		return text
 	}
-	return text[:maxSample]
+	// Cut on a rune boundary: a plain byte-index slice can split a
+	// multi-byte UTF-8 rune, corrupting the sample sent to the LLM -- the
+	// pilot corpus is predominantly Chinese (P5 review 2026080302 finding
+	// P5-25). Walk back to the start of the rune straddling the cut point.
+	cut := maxSample
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
 }
 
 func (c *DocumentClassifier) emitAudit(ctx context.Context, event policyaudit.Event) {

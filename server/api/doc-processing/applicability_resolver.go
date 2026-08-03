@@ -131,12 +131,15 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 		VocabularyReleaseID: req.VocabularyReleaseID,
 	}
 	classifyResult, err := r.Classifier.Classify(ctx, classifyReq)
-	if err != nil || (len(classifyResult.Observations) == 0 && len(classifyResult.UnresolvedPaths) > 0) {
+	if err != nil || classifyResult.Failed {
 		// Classifier failure: preserve indeterminate, continue with base facts
 		// (spec section 11: "Tier-3 classifier failure: preserve indeterminate;
-		// do not overwrite prior known facts"). The Classify method returns
-		// nil error with all paths unresolved on LLM failure, so both cases
-		// are handled here.
+		// do not overwrite prior known facts"). The Classify method returns a
+		// nil error with Failed=true on LLM/parse failure, so both cases are
+		// handled here. A well-formed response that legitimately validated no
+		// classifications (Failed=false, Observations empty) falls through to
+		// pass 2 instead, since it is not a failure to preserve indeterminate
+		// for (P5 review 2026080302 finding P5-2).
 		return ResolverResult{
 			Facts:            req.BaseFacts,
 			Traces:           pass1,
