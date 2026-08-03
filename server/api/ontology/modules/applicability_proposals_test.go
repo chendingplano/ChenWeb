@@ -1,8 +1,15 @@
 package modules
 
 import (
+	"context"
 	"encoding/json"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 func TestValidProposalTransitions(t *testing.T) {
@@ -29,18 +36,68 @@ func TestValidProposalTransitions(t *testing.T) {
 	}
 }
 
-func TestPredicateChecksumDeterministic(t *testing.T) {
+// TestCreateProposalStoresCanonicalPredicateAndChecksum proves CreateProposal
+// stores the canonical predicate bytes and their canonical checksum (P5 review
+// 2026080302 finding P5-3). The checksum must be exactly what
+// policy_compile.go's compilePredicate recomputes at promotion time -- bare
+// canonical hex, not a prefixed hash of the client's raw bytes -- otherwise
+// every promoted binding fails the compiler and promotion is a no-op.
+func TestCreateProposalStoresCanonicalPredicateAndChecksum(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
 	raw := json.RawMessage(`{"version":1,"expression":{"kind":"fact","path":"document.doc_kind","op":"eq","value":"product_specification"}}`)
-	c1 := predicateChecksum(raw)
-	c2 := predicateChecksum(raw)
-	if c1 != c2 {
-		t.Fatalf("checksum not deterministic: %q != %q", c1, c2)
+	var doc semrules.Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
 	}
-	if c1 == "" {
-		t.Fatal("checksum is empty")
+	canonical, checksum, err := semrules.Canonicalize(doc)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(c1) < 10 {
-		t.Fatalf("checksum too short: %q", c1)
+	if strings.HasPrefix(checksum, "sha256:") {
+		t.Fatal("canonical checksum must be bare hex, not sha256:-prefixed")
+	}
+	createTime := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.ontology_applicability_proposals
+    (module_id, release_id, proposal_kind, predicate, predicate_checksum, status, source_release_checksum, created_by)
+VALUES ($1, $2, 'routing', $3::jsonb, $4, 'draft', $5, $6)
+RETURNING id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+          COALESCE(source_release_checksum, ''), COALESCE(created_by, ''), create_time`)).
+		WithArgs("test-module", int64(42), string(canonical), checksum, nil, "alice").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "module_id", "release_id", "proposal_kind", "predicate", "predicate_checksum",
+			"status", "source_release_checksum", "created_by", "create_time",
+		}).AddRow(int64(1), "test-module", int64(42), "routing", []byte(canonical), checksum,
+			"draft", "", "alice", createTime))
+
+	store := ProposalStore{DB: db}
+	proposal, err := store.CreateProposal(context.Background(), "test-module", 42, raw, "alice", "")
+	if err != nil {
+		t.Fatalf("CreateProposal: %v", err)
+	}
+	if proposal.PredicateChecksum != checksum {
+		t.Fatalf("predicate_checksum = %q, want %q", proposal.PredicateChecksum, checksum)
+	}
+	// The stored predicate round-trips to the same canonical checksum the
+	// compiler will recompute, i.e. compilePredicate(proposal.Predicate,
+	// proposal.PredicateChecksum) succeeds.
+	var storedDoc semrules.Document
+	if err := json.Unmarshal(proposal.Predicate, &storedDoc); err != nil {
+		t.Fatalf("stored predicate is not a valid document: %v", err)
+	}
+	_, recomputed, err := semrules.Canonicalize(storedDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recomputed != proposal.PredicateChecksum {
+		t.Fatalf("recomputed checksum %q != stored %q", recomputed, proposal.PredicateChecksum)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

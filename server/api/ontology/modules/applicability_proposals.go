@@ -2,9 +2,7 @@ package modules
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,7 +69,15 @@ func (s ProposalStore) CreateProposal(ctx context.Context, moduleID string, rele
 	if err := semrules.Validate(doc); err != nil {
 		return ApplicabilityProposal{}, fmt.Errorf("predicate validation: %w", err)
 	}
-	checksum := predicateChecksum(predicate)
+	// Store the canonical predicate bytes and their canonical checksum so the
+	// checksum is exactly what policy_compile.go recomputes and verifies at
+	// promotion time (P5 review 2026080302 finding P5-3). The previous scheme
+	// hashed the client's raw bytes with a "sha256:" prefix, so every promoted
+	// binding failed the compiler's canonical-checksum check.
+	canonical, checksum, err := semrules.Canonicalize(doc)
+	if err != nil {
+		return ApplicabilityProposal{}, fmt.Errorf("predicate canonicalization: %w", err)
+	}
 
 	var proposal ApplicabilityProposal
 	err = s.DB.QueryRowContext(ctx, `
@@ -80,7 +86,7 @@ INSERT INTO kb.ontology_applicability_proposals
 VALUES ($1, $2, 'routing', $3::jsonb, $4, 'draft', $5, $6)
 RETURNING id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
           COALESCE(source_release_checksum, ''), COALESCE(created_by, ''), create_time`,
-		strings.TrimSpace(moduleID), releaseID, string(predicate), checksum,
+		strings.TrimSpace(moduleID), releaseID, string(canonical), checksum,
 		nullIfEmptyStr(sourceReleaseChecksum), nullIfEmptyStr(createdBy),
 	).Scan(
 		&proposal.ID, &proposal.ModuleID, &proposal.ReleaseID, &proposal.ProposalKind,
@@ -310,11 +316,6 @@ func parsePredicateDocument(raw json.RawMessage) (semrules.Document, error) {
 		return doc, err
 	}
 	return doc, nil
-}
-
-func predicateChecksum(raw json.RawMessage) string {
-	h := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(h[:])
 }
 
 func nullIfEmptyStr(s string) any {
