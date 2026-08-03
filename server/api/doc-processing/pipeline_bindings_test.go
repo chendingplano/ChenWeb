@@ -289,6 +289,32 @@ func TestBuildPipelineBindingFactSet(t *testing.T) {
 			if fact.Value != w.value {
 				t.Fatalf("fact %q value=%v want %v", w.path, fact.Value, w.value)
 			}
+			// P5 review 2026080302 finding P5-16: belowConfidenceThreshold
+			// now treats a nil Confidence as failing any declared
+			// min_confidence bar, so every deterministic fact computed
+			// directly from document metadata must carry an explicit
+			// confidence -- otherwise a policy predicate with a
+			// min_confidence clause would spuriously go indeterminate for
+			// facts that are, in fact, certain.
+			if fact.Confidence == nil {
+				t.Fatalf("fact %q has nil Confidence; deterministic facts must set it explicitly", w.path)
+			}
+		}
+	})
+
+	t.Run("deterministic facts satisfy a min_confidence predicate", func(t *testing.T) {
+		facts := ProductionPlanFacts{InputDocType: "pdf", KnowledgeStoreID: 42, DocumentNumber: "DOC-001"}
+		fs := BuildPipelineBindingFactSet(facts)
+		minConfidence := 1.0
+		doc := semrules.Document{Version: 1, Expression: semrules.Predicate{
+			Kind: "fact", Path: "document.has_document_number", Op: "eq", Value: true, MinConfidence: &minConfidence,
+		}}
+		result, err := semrules.EvaluateDocumentValidated(doc, fs)
+		if err != nil {
+			t.Fatalf("EvaluateDocumentValidated: %v", err)
+		}
+		if result.Truth != semrules.TruthTrue {
+			t.Fatalf("Truth = %s, want true (a deterministic fact must satisfy any min_confidence)", result.Truth)
 		}
 	})
 

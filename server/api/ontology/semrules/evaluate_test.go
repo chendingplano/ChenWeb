@@ -348,6 +348,7 @@ func TestEvaluateDocumentTypedOperators(t *testing.T) {
 
 func TestEvaluateDocumentIndeterminateReasons(t *testing.T) {
 	minimum := 0.8
+	highMinimum := 0.9
 	const opName = "test_operator_error"
 	t.Cleanup(func() {
 		_ = defaultFactRegistry.setOperatorPaths(nil, opName)
@@ -419,6 +420,17 @@ func TestEvaluateDocumentIndeterminateReasons(t *testing.T) {
 			fact:       Fact{Path: "document.has_document_number", State: FactKnown, Value: true},
 			wantTruth:  TruthIndeterminate,
 			wantReason: ReasonOperatorError,
+		},
+		{
+			// P5 review 2026080302 finding P5-16: a min_confidence threshold
+			// on a fact carrying no confidence at all must not be satisfied
+			// by default -- absence of confidence is not proof it meets any
+			// declared bar.
+			name:       "min_confidence on a fact with nil confidence is not satisfied",
+			pred:       Predicate{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "standard", MinConfidence: &highMinimum},
+			fact:       Fact{Path: "document.doc_kind", State: FactKnown, Value: "standard"}, // Confidence: nil
+			wantTruth:  TruthIndeterminate,
+			wantReason: ReasonConfidenceBelowMinimum,
 		},
 	}
 

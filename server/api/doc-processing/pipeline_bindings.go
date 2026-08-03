@@ -217,7 +217,7 @@ func BuildPipelineBindingFactSet(facts ProductionPlanFacts) semrules.FactSet {
 	addKnownPipelineBindingFact(builder, "document.input_doc_type", facets.InputDocType)
 	addKnownPipelineBindingFact(builder, "document.source_language", facets.SourceLanguage)
 	addKnownPipelineBindingFact(builder, "document.knowledge_store_binding_state", facets.KnowledgeStoreBinding)
-	_ = builder.Add(semrules.Fact{Path: "document.has_document_number", State: semrules.FactKnown, Value: facets.HasDocumentNumber})
+	_ = builder.Add(semrules.Fact{Path: "document.has_document_number", State: semrules.FactKnown, Value: facets.HasDocumentNumber, Confidence: deterministicConfidence()})
 	if facts.KnowledgeStoreID > 0 {
 		addKnownPipelineBindingFact(builder, "deployment.knowledge_store", fmt.Sprint(facts.KnowledgeStoreID))
 	}
@@ -242,11 +242,23 @@ func BuildPipelineBindingFactSet(facts ProductionPlanFacts) semrules.FactSet {
 	return base
 }
 
+// deterministicConfidence returns a fresh pointer to 1.0 for facts computed
+// directly from document metadata (not observed/inferred). Since
+// belowConfidenceThreshold treats a nil Confidence as failing any declared
+// min_confidence bar, a deterministic fact must set this explicitly or a
+// policy predicate with a min_confidence clause would spuriously go
+// indeterminate for a fact that is, in fact, certain (P5 review 2026080302
+// finding P5-16).
+func deterministicConfidence() *float64 {
+	confidence := 1.0
+	return &confidence
+}
+
 func addKnownPipelineBindingFact(builder *semrules.FactSetBuilder, path string, value string) {
 	if strings.TrimSpace(value) == "" {
 		return
 	}
-	_ = builder.Add(semrules.Fact{Path: path, State: semrules.FactKnown, Value: strings.ToLower(strings.TrimSpace(value))})
+	_ = builder.Add(semrules.Fact{Path: path, State: semrules.FactKnown, Value: strings.ToLower(strings.TrimSpace(value)), Confidence: deterministicConfidence()})
 }
 
 func ResolvePipelineBindings(bindings []PipelineBinding, facts semrules.FactSet, onConflict string) (PipelineBindingSelection, error) {

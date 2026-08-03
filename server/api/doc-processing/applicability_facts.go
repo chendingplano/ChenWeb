@@ -11,6 +11,13 @@ import (
 )
 
 const (
+	// FacetMethodDeterministic has no production producer yet -- when one is
+	// added, it must set Confidence explicitly (e.g. to 1.0). A nil
+	// Confidence no longer satisfies a declared min_confidence bar (P5
+	// review 2026080302 finding P5-16; see deterministicConfidence in
+	// pipeline_bindings.go for the equivalent P1-era facet fix), so an
+	// observation without one would spuriously go indeterminate against any
+	// min_confidence predicate.
 	FacetMethodDeterministic = "deterministic"
 	FacetMethodMetadata      = "metadata"
 	FacetMethodClassifier    = "classifier"

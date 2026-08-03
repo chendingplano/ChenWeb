@@ -305,9 +305,19 @@ func evaluateFactPredicate(predicate Predicate, facts FactSet, decisionRelevant 
 	}
 }
 
+// belowConfidenceThreshold reports whether fact fails a declared
+// min_confidence bar. A fact carrying no confidence at all does not satisfy
+// any declared threshold -- absence of confidence is not proof it meets one
+// (P5 review 2026080302 finding P5-16). Producers of facts with genuinely
+// unconditional certainty (e.g. deterministic facts computed directly from
+// document metadata) must set Confidence explicitly rather than relying on
+// nil to mean "certain".
 func belowConfidenceThreshold(fact Fact, minimum *float64) bool {
-	if minimum == nil || fact.Confidence == nil {
+	if minimum == nil {
 		return false
+	}
+	if fact.Confidence == nil {
+		return true
 	}
 	return *fact.Confidence < *minimum
 }
