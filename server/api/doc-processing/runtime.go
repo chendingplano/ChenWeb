@@ -82,6 +82,30 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 	return productionRuntimeComponents{inputStore: inputStore, fixed: fixed, processors: all, blocking: NewBlockingProcessor(inputStore, logger)}
 }
 
+// loadProductionPipelinePolicyState loads the authored pipeline registry,
+// canonical policy bindings, and processor gates into the process.
+// Registry-load failure keeps its documented legacy-equivalent fallback (a
+// warning, not an error) -- it predates P5 and preserves P1's "no active
+// policy means legacy behavior" invariant without a database dependency. A
+// binding or gate load failure is different: it would leave the process
+// running with "no policy binding/gate will apply" while behaving as though
+// no active policy existed, which spec 2026080102 section 11 forbids. That
+// failure is returned instead of warned, so NewProductionRuntime fails
+// construction rather than starting in a silently degraded state (P5
+// review 2026080302 finding P5-11).
+func loadProductionPipelinePolicyState(ctx context.Context, logger ApiTypes.JimoLogger, registry PipelineRegistryStore, bindings PipelineBindingStore, gates PipelineGateStore) error {
+	if err := LoadProductionPipelineRegistry(ctx, registry); err != nil && logger != nil {
+		logger.Warn("failed to load authored pipeline registry, using legacy-equivalent fallback", "error", err)
+	}
+	if err := LoadProductionPipelineBindings(ctx, bindings); err != nil {
+		return fmt.Errorf("load canonical pipeline bindings: %w", err)
+	}
+	if err := LoadProductionPipelineGates(ctx, gates); err != nil {
+		return fmt.Errorf("load processor gates: %w", err)
+	}
+	return nil
+}
+
 // NewProductionRuntime builds the same dependency-ordered graph as the
 // doc-processor command. The optional logger argument is accepted as an any
 // value to keep this seam convenient for command and worker callers.
@@ -128,14 +152,21 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if _, err := DocPipelineModeFromEnv(); err != nil {
 		return nil, err
 	}
-	if err := LoadProductionPipelineRegistry(context.Background(), PipelineRegistrySQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
-		logger.Warn("failed to load authored pipeline registry, using legacy-equivalent fallback", "error", err)
-	}
-	if err := LoadProductionPipelineBindings(context.Background(), PipelineBindingSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
-		logger.Warn("failed to load canonical pipeline bindings, no policy binding will apply", "error", err)
-	}
-	if err := LoadProductionPipelineGates(context.Background(), PipelineGateSQLStore{DB: ApiTypes.ProjectDBHandle}); err != nil && logger != nil {
-		logger.Warn("failed to load processor gates, no policy gate will apply", "error", err)
+	// A nil ProjectDBHandle is the established "running without persistence"
+	// mode this function otherwise tolerates throughout (InputStore,
+	// EventStore, etc. are wired unconditionally below and simply no-op
+	// when never called against a real DB). Only fail construction when a
+	// database is actually configured and a genuine load failure occurs;
+	// skipping entirely here preserves that mode instead of turning every
+	// DB-less runtime construction into a hard failure.
+	if ApiTypes.ProjectDBHandle != nil {
+		if err := loadProductionPipelinePolicyState(context.Background(), logger,
+			PipelineRegistrySQLStore{DB: ApiTypes.ProjectDBHandle},
+			PipelineBindingSQLStore{DB: ApiTypes.ProjectDBHandle},
+			PipelineGateSQLStore{DB: ApiTypes.ProjectDBHandle},
+		); err != nil {
+			return nil, err
+		}
 	}
 	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
