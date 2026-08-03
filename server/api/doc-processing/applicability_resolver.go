@@ -181,6 +181,34 @@ func enrichFactSet(base semrules.FactSet, observations []ClassifyObservation) se
 	return enriched
 }
 
+// activeRoutingPredicates collects every predicate document that could
+// influence this record's routing decision: each active conditional
+// binding's predicate (store_default bindings carry none) and every active
+// processor gate's predicate. ResolveExtractionFacts uses this so pass 1 can
+// determine whether ANY of them has an unresolved decision-relevant tier-3
+// path before binding/gate resolution runs -- previously ResolveExtractionFacts
+// never populated ResolverRequest.Predicates at all, so pass 1 always
+// evaluated zero predicates and the classifier could never be reached (P5
+// review 2026080302 finding P5-2).
+func activeRoutingPredicates() []semrules.Document {
+	bindings := currentProductionPipelineBindings()
+	gates := currentProductionPipelineGates()
+	docs := make([]semrules.Document, 0, len(bindings)+len(gates))
+	for _, binding := range bindings {
+		if binding.BindingKind != PipelineBindingKindConditional || binding.Predicate.Expression.Kind == "" {
+			continue
+		}
+		docs = append(docs, binding.Predicate)
+	}
+	for _, gate := range gates {
+		if gate.Predicate.Expression.Kind == "" {
+			continue
+		}
+		docs = append(docs, gate.Predicate)
+	}
+	return docs
+}
+
 // ResolveExtractionFacts is the extraction-routing convenience entry point.
 // It builds tier-1/tier-2 facts from ProductionPlanFacts, resolves with the
 // two-pass classifier, and returns the enriched fact set suitable for
@@ -192,6 +220,7 @@ func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, plan
 		DecisionAttemptID:   fmt.Sprintf("run-%d", runID),
 		InvocationID:        fmt.Sprintf("extraction-%d-%d", recordID, runID),
 		BaseFacts:           baseFacts,
+		Predicates:          activeRoutingPredicates(),
 		VocabularyReleaseID: 0, // pinned by the caller when governed vocabulary is available
 		DocumentSample:      documentSample,
 	}

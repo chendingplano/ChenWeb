@@ -130,6 +130,83 @@ func TestResolverOneInvocationPerRecordExtractionRun(t *testing.T) {
 	}
 }
 
+// TestResolveExtractionFactsCollectsActiveRoutingPredicates proves
+// ResolveExtractionFacts supplies the resolver the active policy's
+// conditional-binding and processor-gate predicates instead of an always-
+// empty list. Before this fix, Predicates was never populated, so pass 1
+// always evaluated zero predicates, decisionRelevantTier3Paths always
+// returned empty, and Resolve returned before ever reaching the classifier
+// -- wiring ControlService.Resolver alone would have changed nothing (P5
+// review 2026080302 finding P5-2). A registered conditional binding whose
+// predicate references the unresolved tier-3 document.doc_kind facet must
+// trigger exactly one classifier invocation.
+func TestResolveExtractionFactsCollectsActiveRoutingPredicates(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineBindings(nil); SetProductionPipelineGates(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{
+		{
+			BindingKind: PipelineBindingKindConditional, PipelineName: "regulated_reference", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{
+				Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "regulated_reference",
+			}},
+		},
+	})
+
+	callCount := 0
+	ext := &countingExtractor{
+		count: &callCount,
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "regulated_reference", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
+
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, 1, "sample document text")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts: %v", err)
+	}
+	if result == nil || !result.Classified {
+		t.Fatalf("expected the classifier to be invoked because the active binding's predicate references document.doc_kind, result=%#v", result)
+	}
+	if callCount != 1 {
+		t.Fatalf("callCount=%d, want 1", callCount)
+	}
+}
+
+// TestResolveExtractionFactsNoClassifierCallForResolvedTierOneTwoPredicate
+// proves a predicate referencing only already-resolved tier-1/2 paths never
+// triggers a classifier call.
+func TestResolveExtractionFactsNoClassifierCallForResolvedTierOneTwoPredicate(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{
+		{
+			BindingKind: PipelineBindingKindConditional, PipelineName: "pdf_pipeline", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{
+				Kind: "fact", Path: "document.input_doc_type", Op: "eq", Value: "pdf",
+			}},
+		},
+	})
+
+	callCount := 0
+	ext := &countingExtractor{count: &callCount, result: map[string]any{}}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: &stubFacetStore{}}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: &stubFacetStore{}}
+
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, 1, "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts: %v", err)
+	}
+	if result != nil && result.Classified {
+		t.Fatalf("expected no classifier invocation for an already-resolved tier-1/2 predicate, result=%#v", result)
+	}
+	if callCount != 0 {
+		t.Fatalf("callCount=%d, want 0", callCount)
+	}
+}
+
 func TestResolverClassifierFailurePreservesIndeterminate(t *testing.T) {
 	// When the classifier fails, the resolver must return base facts
 	// unchanged (preserving indeterminate for missing tier-3 paths).
