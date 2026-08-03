@@ -652,6 +652,34 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		return errors.New("(MID_26042404) preflight input failed")
 	}
 	planFacts, factsErr := s.resolveProductionPlanFacts(ctx, evt)
+	if factsErr != nil {
+		var policyLoadErr *PolicyLoadError
+		if errors.As(factsErr, &policyLoadErr) {
+			alarm := RoutingAlarm{
+				Kind: RoutingAlarmKindPolicyIntegrity, Severity: RoutingAlarmSeverityError,
+				Message: fmt.Sprintf("active pipeline policy failed to load: %s", policyLoadErr.Error()),
+			}
+			alarm.RecordID = evt.RecordID
+			s.raiseRoutingAlarms(ctx, []RoutingAlarm{alarm})
+			s.emitAlarmAuditEvent(ctx, evt.RecordID, 0, 0, 0, alarm)
+			if len(evt.Operations) == 0 {
+				// An implicit request depends on the active policy to
+				// route/gate correctly; a load failure must fail before any
+				// processor runs (spec section 11), matching the
+				// IsDecisionRelevantPlanConflict block below. An explicit
+				// evt.Operations request bypasses policy entirely (existing
+				// precedent) and is unaffected.
+				if s.Logger != nil {
+					s.Logger.Info("finish processing request",
+						"record_id", evt.RecordID,
+						"proc_status", "failed",
+						"ms_used", time.Since(requestStart).Milliseconds(),
+					)
+				}
+				return fmt.Errorf("(MID_26080302) active pipeline policy failed to load: %w", factsErr)
+			}
+		}
+	}
 	if factsErr != nil && s.Logger != nil {
 		s.Logger.Warn("failed resolving production plan facts", "record_id", evt.RecordID, "error", factsErr)
 	}
@@ -1517,6 +1545,18 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 	return true
 }
 
+// PolicyLoadError marks a genuine failure to load the active pipeline
+// policy -- distinct from "no active policy" (sql.ErrNoRows, the legitimate
+// legacy/default state). Spec 2026080102 section 11: "An active-policy
+// pointer that cannot be loaded is an error and must not silently fall back
+// as though no policy existed"; handleEvent fails before any processor runs
+// when it sees this error for an implicit request (P5 review 2026080302
+// finding P5-11).
+type PolicyLoadError struct{ Err error }
+
+func (e *PolicyLoadError) Error() string { return fmt.Sprintf("load active pipeline policy: %s", e.Err) }
+func (e *PolicyLoadError) Unwrap() error { return e.Err }
+
 func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt LineFileGeneratedEvent) (ProductionPlanFacts, error) {
 	mode, modeErr := DocPipelineModeFromEnv()
 	if modeErr != nil {
@@ -1539,9 +1579,20 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 	var policyID int64
 	var policyVersion int
 	if s != nil && s.PolicyStore != nil {
-		if policy, err := s.PolicyStore.GetActivePolicy(ctx); err == nil {
+		policy, err := s.PolicyStore.GetActivePolicy(ctx)
+		switch {
+		case err == nil:
 			policyID = policy.ID
 			policyVersion = policy.Version
+		case errors.Is(err, sql.ErrNoRows):
+			// No active policy is a legitimate state (spec 2026080102
+			// section 11): fall through to the legacy/default path.
+		default:
+			// A genuine load failure must not silently behave as though no
+			// active policy existed (spec section 11) -- surfaced as a
+			// distinguishable error so handleEvent can fail before any
+			// processor runs (P5 review 2026080302 finding P5-11).
+			return ProductionPlanFacts{}, &PolicyLoadError{Err: err}
 		}
 	}
 	if s == nil || s.InputStore == nil {

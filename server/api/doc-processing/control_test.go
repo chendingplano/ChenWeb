@@ -1296,6 +1296,105 @@ func TestResolveProductionPlanFactsBuildsFactsFromCurrentInputRecord(t *testing.
 	}
 }
 
+// recordingAlarmWriter appends every alarm it receives, so tests can assert
+// exactly how many (and which) alarms a code path raised.
+type recordingAlarmWriter struct{ alarms *[]RoutingAlarm }
+
+func (w recordingAlarmWriter) WriteAlarm(_ context.Context, alarm RoutingAlarm) error {
+	*w.alarms = append(*w.alarms, alarm)
+	return nil
+}
+
+// stubFailingPolicyStore returns err for every GetActivePolicy call.
+type stubFailingPolicyStore struct{ err error }
+
+func (s stubFailingPolicyStore) GetActivePolicy(context.Context) (ProductionPipelinePolicy, error) {
+	return ProductionPipelinePolicy{}, s.err
+}
+
+// TestResolveProductionPlanFactsNoActivePolicyIsNotAnError proves the
+// legitimate "zero active policy rows" case (sql.ErrNoRows) is not treated
+// as a load failure -- spec 2026080102 section 11's "no active pipeline
+// policy: use the existing legacy/default path" (P5 review 2026080302
+// finding P5-11).
+func TestResolveProductionPlanFactsNoActivePolicyIsNotAnError(t *testing.T) {
+	svc := &ControlService{PolicyStore: stubFailingPolicyStore{err: sql.ErrNoRows}}
+	got, err := svc.resolveProductionPlanFacts(context.Background(), LineFileGeneratedEvent{RecordID: 1})
+	if err != nil {
+		t.Fatalf("resolveProductionPlanFacts: %v", err)
+	}
+	if got.ActivePolicyID != 0 || got.ActivePolicyVersion != 0 {
+		t.Fatalf("ActivePolicyID/Version = %d/%d, want 0/0 (legacy/default path)", got.ActivePolicyID, got.ActivePolicyVersion)
+	}
+}
+
+// TestResolveProductionPlanFactsPolicyLoadFailureReturnsTypedError proves a
+// genuine active-policy load failure (not "no active policy") is surfaced
+// as a distinguishable error rather than silently discarded -- spec section
+// 11: "An active-policy pointer that cannot be loaded is an error and must
+// not silently fall back as though no policy existed" (P5 review
+// 2026080302 finding P5-11).
+func TestResolveProductionPlanFactsPolicyLoadFailureReturnsTypedError(t *testing.T) {
+	underlying := errors.New("connection refused")
+	svc := &ControlService{PolicyStore: stubFailingPolicyStore{err: underlying}}
+	_, err := svc.resolveProductionPlanFacts(context.Background(), LineFileGeneratedEvent{RecordID: 1})
+	if err == nil {
+		t.Fatal("expected an error for a genuine policy load failure")
+	}
+	var policyLoadErr *PolicyLoadError
+	if !errors.As(err, &policyLoadErr) {
+		t.Fatalf("error = %v, want it to be (or wrap) *PolicyLoadError", err)
+	}
+	if !errors.Is(err, underlying) {
+		t.Fatalf("error does not wrap the underlying cause %v: %v", underlying, err)
+	}
+}
+
+// TestHandleEventBlocksOnPolicyLoadFailureForImplicitRequest proves an
+// implicit (no evt.Operations) request fails before any processor runs when
+// the active policy cannot be loaded, and raises exactly one alarm -- spec
+// section 11 lists "active-policy load failure" alongside the other
+// decision-relevant conflicts that must "fail before processors run and
+// raise exactly one error alarm for the plan" (P5 review 2026080302 finding
+// P5-11).
+func TestHandleEventBlocksOnPolicyLoadFailureForImplicitRequest(t *testing.T) {
+	var alarms []RoutingAlarm
+	svc := &ControlService{
+		PolicyStore:   stubFailingPolicyStore{err: errors.New("connection refused")},
+		RoutingAlarms: recordingAlarmWriter{alarms: &alarms},
+		Processors:    []Processor{fakeProcessor{name: "chunking"}},
+	}
+	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	if err == nil {
+		t.Fatal("expected handleEvent to block on a policy load failure")
+	}
+	if len(alarms) != 1 {
+		t.Fatalf("alarms = %#v, want exactly 1", alarms)
+	}
+	if alarms[0].Kind != RoutingAlarmKindPolicyIntegrity {
+		t.Fatalf("alarm kind = %q, want %q", alarms[0].Kind, RoutingAlarmKindPolicyIntegrity)
+	}
+}
+
+// TestHandleEventPolicyLoadFailureDoesNotBlockExplicitRequest proves an
+// explicit evt.Operations request keeps its existing "bypasses policy
+// entirely" precedent even when the active policy fails to load -- matching
+// the identical guard IsDecisionRelevantPlanConflict blocking already uses.
+func TestHandleEventPolicyLoadFailureDoesNotBlockExplicitRequest(t *testing.T) {
+	got := make([]string, 0, 1)
+	svc := &ControlService{
+		PolicyStore: stubFailingPolicyStore{err: errors.New("connection refused")},
+		Processors:  []Processor{fakeProcessor{name: "chunking", calls: &got}},
+	}
+	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"1","operation":["chunking"]}`))
+	if err != nil {
+		t.Fatalf("handleEvent: %v (explicit request must not block on policy load failure)", err)
+	}
+	if len(got) != 1 || got[0] != "chunking" {
+		t.Fatalf("calls = %v, want [chunking]", got)
+	}
+}
+
 func TestAppendPipelineStatusWithPlanPreservesPlanSnapshotAcrossLaterUpdates(t *testing.T) {
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	facts := ProductionPlanFacts{
