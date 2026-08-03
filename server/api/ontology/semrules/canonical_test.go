@@ -124,6 +124,61 @@ func TestCanonicalizeGoldenBytesAndChecksum(t *testing.T) {
 	}
 }
 
+// TestCanonicalizeInOperandOrderIsInsignificant proves in/not_in are
+// semantically set-valued: reordering operands must not change the
+// canonical checksum (P5 review 2026080302 finding P5-24). Unlike all/any
+// child order (deliberately significant, see
+// TestCanonicalizePreservesAuthoredChildOrder), in/not_in operand order
+// carries no logical meaning.
+func TestCanonicalizeInOperandOrderIsInsignificant(t *testing.T) {
+	a := factDocument("document.input_doc_type", "in", []any{"pdf", "docx"})
+	b := factDocument("document.input_doc_type", "in", []any{"docx", "pdf"})
+	aBytes, aSum, err := Canonicalize(a)
+	if err != nil {
+		t.Fatalf("Canonicalize(a): %v", err)
+	}
+	bBytes, bSum, err := Canonicalize(b)
+	if err != nil {
+		t.Fatalf("Canonicalize(b): %v", err)
+	}
+	if string(aBytes) != string(bBytes) || aSum != bSum {
+		t.Fatalf("in operand order changed canonical result:\n%s\n%s", aBytes, bBytes)
+	}
+
+	na := factDocument("document.numeric_unit_density", "not_in", []any{1, 2, 3})
+	nb := factDocument("document.numeric_unit_density", "not_in", []any{3, 1, 2})
+	naBytes, naSum, err := Canonicalize(na)
+	if err != nil {
+		t.Fatalf("Canonicalize(na): %v", err)
+	}
+	nbBytes, nbSum, err := Canonicalize(nb)
+	if err != nil {
+		t.Fatalf("Canonicalize(nb): %v", err)
+	}
+	if string(naBytes) != string(nbBytes) || naSum != nbSum {
+		t.Fatalf("not_in operand order changed canonical result:\n%s\n%s", naBytes, nbBytes)
+	}
+}
+
+// TestCanonicalizeDedupesInOperands proves duplicate in/not_in operands
+// (possibly introduced by authoring tooling or a set union) do not produce a
+// different checksum than the deduplicated set.
+func TestCanonicalizeDedupesInOperands(t *testing.T) {
+	withDupe := factDocument("document.input_doc_type", "in", []any{"pdf", "docx", "pdf"})
+	deduped := factDocument("document.input_doc_type", "in", []any{"docx", "pdf"})
+	withDupeBytes, withDupeSum, err := Canonicalize(withDupe)
+	if err != nil {
+		t.Fatalf("Canonicalize(withDupe): %v", err)
+	}
+	dedupedBytes, dedupedSum, err := Canonicalize(deduped)
+	if err != nil {
+		t.Fatalf("Canonicalize(deduped): %v", err)
+	}
+	if string(withDupeBytes) != string(dedupedBytes) || withDupeSum != dedupedSum {
+		t.Fatalf("duplicate in operand changed canonical result:\n%s\n%s", withDupeBytes, dedupedBytes)
+	}
+}
+
 func TestCanonicalizeRejectsInvalidDocument(t *testing.T) {
 	if _, _, err := Canonicalize(Document{Version: 99}); err == nil {
 		t.Fatal("Canonicalize succeeded for invalid document")

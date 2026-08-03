@@ -30,9 +30,6 @@ func AnalyzeOverlap(left, right Document) Overlap {
 	}
 
 	leftEqual := true
-	leftHasExtra := false
-	rightHasExtra := false
-	intersecting := false
 	unconstrained := false
 
 	paths := make(map[string]struct{}, len(leftConstraints)+len(rightConstraints))
@@ -48,12 +45,6 @@ func AnalyzeOverlap(left, right Document) Overlap {
 		rightConstraint, rightOK := rightConstraints[path]
 		if !leftOK || !rightOK {
 			unconstrained = true
-			if leftOK {
-				rightHasExtra = true
-			}
-			if rightOK {
-				leftHasExtra = true
-			}
 			leftEqual = false
 			continue
 		}
@@ -63,20 +54,19 @@ func AnalyzeOverlap(left, right Document) Overlap {
 		}
 		if !sameValues(leftConstraint.Values, rightConstraint.Values) {
 			leftEqual = false
-			intersecting = true
 		}
 	}
 
-	if leftEqual && !leftHasExtra && !rightHasExtra {
+	if leftEqual {
 		return Overlap{MayOverlap: true, Analyzable: true, Reason: "equal_constraints"}
 	}
 	if unconstrained {
 		return Overlap{MayOverlap: true, Analyzable: true, Reason: "unconstrained_path"}
 	}
-	if intersecting {
-		return Overlap{MayOverlap: true, Analyzable: true, Reason: "intersecting_constraints"}
-	}
-	return Overlap{MayOverlap: true, Analyzable: true, Reason: "equal_constraints"}
+	// leftEqual is false and unconstrained is false: every path was
+	// constrained on both sides with overlapping but non-identical value
+	// sets -- the only remaining outcome the loop above can produce.
+	return Overlap{MayOverlap: true, Analyzable: true, Reason: "intersecting_constraints"}
 }
 
 func analyzableConstraints(predicate Predicate) (map[string]overlapConstraint, bool, string) {

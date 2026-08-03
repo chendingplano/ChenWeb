@@ -107,6 +107,33 @@ func TestAnalyzeOverlap(t *testing.T) {
 	}
 }
 
+// TestAnalyzeOverlapNeverReportsFalseExceptGenuinelyDisjoint pins the
+// conservative contract AnalyzeOverlap must hold: it may only ever report
+// MayOverlap:false when it has proven the constrained value sets are
+// disjoint. Every other analyzable or unanalyzable shape must return
+// MayOverlap:true (P5 review 2026080302 finding P5-27: the analyzer must
+// stay conservative -- over-reject at compile time, never under-reject).
+func TestAnalyzeOverlapNeverReportsFalseExceptGenuinelyDisjoint(t *testing.T) {
+	cases := []Document{
+		allFacts(fact("document.doc_kind", "eq", "standard")),
+		allFacts(fact("document.doc_kind", "eq", "standard"), fact("document.domain", "eq", "mechanical")),
+		allFacts(fact("document.doc_kind", "in", []any{"standard", "manual"})),
+		allFacts(fact("document.numeric_unit_density", "gt", 3)),
+		Document{Version: 1, Expression: Predicate{Kind: "any", Items: []Predicate{
+			{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "standard"},
+		}}},
+		factDocument("document.doc_kind", "eq", "manual"),
+	}
+	for i, left := range cases {
+		for j, right := range cases {
+			got := AnalyzeOverlap(left, right)
+			if !got.MayOverlap && got.Reason != "disjoint_path_values" {
+				t.Fatalf("cases[%d] vs cases[%d]: MayOverlap=false with reason %q, want MayOverlap=true unless reason is disjoint_path_values", i, j, got.Reason)
+			}
+		}
+	}
+}
+
 func allFacts(items ...Predicate) Document {
 	return Document{Version: 1, Expression: Predicate{Kind: "all", Items: items}}
 }
