@@ -45,70 +45,9 @@ func EvaluateDocument(doc Document, facts FactSet) Result {
 func evaluatePredicate(predicate Predicate, facts FactSet, decisionRelevant bool) (TraceNode, []string) {
 	switch predicate.Kind {
 	case "all":
-		node := TraceNode{Kind: predicate.Kind, DecisionRelevant: decisionRelevant}
-		if len(predicate.Items) == 0 {
-			node.Truth = TruthTrue
-			node.ReasonCode = ReasonMatched
-			return node, nil
-		}
-		var missing []string
-		sawIndeterminate := false
-		masked := false
-		for _, child := range predicate.Items {
-			childNode, childMissing := evaluatePredicate(child, facts, decisionRelevant && !masked)
-			node.Children = append(node.Children, childNode)
-			if childNode.DecisionRelevant {
-				missing = append(missing, childMissing...)
-				switch childNode.Truth {
-				case TruthFalse:
-					node.Truth = TruthFalse
-					node.ReasonCode = ReasonNotMatched
-					masked = true
-				case TruthIndeterminate:
-					sawIndeterminate = true
-				}
-			}
-		}
-		if node.Truth == TruthFalse {
-			return node, missing
-		}
-		if sawIndeterminate {
-			node.Truth = TruthIndeterminate
-			return node, missing
-		}
-		node.Truth = TruthTrue
-		node.ReasonCode = ReasonMatched
-		return node, missing
+		return evaluateAllOrAny(predicate, facts, decisionRelevant, true)
 	case "any":
-		node := TraceNode{Kind: predicate.Kind, DecisionRelevant: decisionRelevant}
-		var missing []string
-		sawIndeterminate := false
-		masked := false
-		for _, child := range predicate.Items {
-			childNode, childMissing := evaluatePredicate(child, facts, decisionRelevant && !masked)
-			node.Children = append(node.Children, childNode)
-			if childNode.DecisionRelevant {
-				missing = append(missing, childMissing...)
-				switch childNode.Truth {
-				case TruthTrue:
-					node.Truth = TruthTrue
-					node.ReasonCode = ReasonMatched
-					masked = true
-				case TruthIndeterminate:
-					sawIndeterminate = true
-				}
-			}
-		}
-		if node.Truth == TruthTrue {
-			return node, missing
-		}
-		if sawIndeterminate {
-			node.Truth = TruthIndeterminate
-			return node, missing
-		}
-		node.Truth = TruthFalse
-		node.ReasonCode = ReasonNotMatched
-		return node, missing
+		return evaluateAllOrAny(predicate, facts, decisionRelevant, false)
 	case "not":
 		node := TraceNode{Kind: predicate.Kind, DecisionRelevant: decisionRelevant}
 		if len(predicate.Items) != 1 {
@@ -139,6 +78,91 @@ func evaluatePredicate(predicate Predicate, facts FactSet, decisionRelevant bool
 			DecisionRelevant: decisionRelevant,
 		}, nil
 	}
+}
+
+// evaluateAllOrAny handles "all" (isAll=true) and "any" (isAll=false) with
+// decision-relevance masking that depends on logical position, not authored
+// position: a child's missing fact is decision-relevant only when no sibling
+// already forces the node's truth value (False for "all", True for "any"),
+// regardless of which child was authored first. A pre-pass over
+// predicateTruth determines whether a deciding sibling exists before the
+// real pass builds the trace, so reordering children never changes the
+// result (P5 review 2026080302 finding P5-7).
+func evaluateAllOrAny(predicate Predicate, facts FactSet, decisionRelevant, isAll bool) (TraceNode, []string) {
+	node := TraceNode{Kind: predicate.Kind, DecisionRelevant: decisionRelevant}
+	if len(predicate.Items) == 0 {
+		if isAll {
+			node.Truth = TruthTrue
+			node.ReasonCode = ReasonMatched
+		} else {
+			node.Truth = TruthFalse
+			node.ReasonCode = ReasonNotMatched
+		}
+		return node, nil
+	}
+
+	deciding := TruthFalse
+	if !isAll {
+		deciding = TruthTrue
+	}
+
+	truths := make([]Truth, len(predicate.Items))
+	hasDeciding := false
+	for i, child := range predicate.Items {
+		truths[i] = predicateTruth(child, facts)
+		if truths[i] == deciding {
+			hasDeciding = true
+		}
+	}
+
+	var missing []string
+	sawIndeterminate := false
+	for i, child := range predicate.Items {
+		// A child stays relevant if it is itself the deciding value (it
+		// explains the outcome) or if no sibling decides the outcome at all.
+		// Only a non-deciding child (e.g. a missing fact) gets masked once a
+		// deciding sibling exists -- independent of authored order.
+		childDecisionRelevant := decisionRelevant && (truths[i] == deciding || !hasDeciding)
+		childNode, childMissing := evaluatePredicate(child, facts, childDecisionRelevant)
+		node.Children = append(node.Children, childNode)
+		if childNode.DecisionRelevant {
+			missing = append(missing, childMissing...)
+		}
+		if truths[i] == TruthIndeterminate {
+			sawIndeterminate = true
+		}
+	}
+
+	switch {
+	case hasDeciding:
+		node.Truth = deciding
+		if isAll {
+			node.ReasonCode = ReasonNotMatched
+		} else {
+			node.ReasonCode = ReasonMatched
+		}
+	case sawIndeterminate:
+		node.Truth = TruthIndeterminate
+	default:
+		if isAll {
+			node.Truth = TruthTrue
+			node.ReasonCode = ReasonMatched
+		} else {
+			node.Truth = TruthFalse
+			node.ReasonCode = ReasonNotMatched
+		}
+	}
+	return node, missing
+}
+
+// predicateTruth computes a predicate's truth value without building a trace
+// or collecting decision-relevant missing paths. Used only by
+// evaluateAllOrAny's pre-pass to find a deciding sibling independent of
+// authored order; truth computation itself does not depend on
+// decisionRelevant, so calling with decisionRelevant=false is safe.
+func predicateTruth(predicate Predicate, facts FactSet) Truth {
+	node, _ := evaluatePredicate(predicate, facts, false)
+	return node.Truth
 }
 
 func evaluateFactPredicate(predicate Predicate, facts FactSet, decisionRelevant bool) (TraceNode, []string) {
