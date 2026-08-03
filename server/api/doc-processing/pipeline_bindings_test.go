@@ -151,6 +151,44 @@ func TestPipelineBindingDR7DecisionTable(t *testing.T) {
 	}
 }
 
+// TestResolvePipelineBindingsStoreDefaultRespectsKnowledgeStore proves a
+// store-scoped default binding for one knowledge store is never selected
+// for a record in a different store -- the pre-fix code returned the first
+// store_default row regardless of KnowledgeStoreID, so a multi-store
+// deployment could route a record to another store's default pipeline (P5
+// review 2026080302 finding P5-18).
+func TestResolvePipelineBindingsStoreDefaultRespectsKnowledgeStore(t *testing.T) {
+	storeA := PipelineBinding{Name: "store-a-default", BindingKind: PipelineBindingKindStoreDefault, PipelineName: "pipeline_a", Active: true, KnowledgeStoreID: 1}
+	storeB := PipelineBinding{Name: "store-b-default", BindingKind: PipelineBindingKindStoreDefault, PipelineName: "pipeline_b", Active: true, KnowledgeStoreID: 2}
+	systemDefault := PipelineBinding{Name: "system-default", BindingKind: PipelineBindingKindStoreDefault, PipelineName: "pipeline_system", Active: true}
+
+	factsForStore := func(id int64) semrules.FactSet {
+		return BuildPipelineBindingFactSet(ProductionPlanFacts{KnowledgeStoreID: id})
+	}
+
+	tests := []struct {
+		name         string
+		bindings     []PipelineBinding
+		facts        semrules.FactSet
+		wantPipeline string
+	}{
+		{"store A record selects store A default, not store B's (authored first)", []PipelineBinding{storeA, storeB}, factsForStore(1), "pipeline_a"},
+		{"store B record selects store B default, not store A's (authored first)", []PipelineBinding{storeB, storeA}, factsForStore(2), "pipeline_b"},
+		{"unmatched store falls back to system-scoped default", []PipelineBinding{storeA, systemDefault}, factsForStore(2), "pipeline_system"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolvePipelineBindings(tt.bindings, tt.facts, "")
+			if err != nil {
+				t.Fatalf("ResolvePipelineBindings: %v", err)
+			}
+			if got.SelectedPipeline != tt.wantPipeline {
+				t.Fatalf("SelectedPipeline = %q, want %q", got.SelectedPipeline, tt.wantPipeline)
+			}
+		})
+	}
+}
+
 func TestPipelineBindingSQLStoreListPipelineBindingsReadsActivePolicyRows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -173,7 +211,8 @@ SELECT b.id, COALESCE(b.name, ''), b.priority, b.binding_kind,
          WHEN b.ks_store_id IS NOT NULL THEN 'knowledge_store'
          WHEN NULLIF(b.tenant_id, '') IS NOT NULL AND b.tenant_id <> '-' THEN 'tenant'
          ELSE 'system'
-       END AS binding_scope
+       END AS binding_scope,
+       b.ks_store_id
 FROM kb.pipeline_bindings b
 LEFT JOIN kb.pipelines p ON p.id = b.pipeline_id
 WHERE b.active AND b.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
@@ -187,11 +226,11 @@ ORDER BY b.priority DESC,
          END DESC,
          b.id`)
 	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "name", "priority", "binding_kind", "pipeline_name", "predicate", "predicate_checksum", "active", "binding_scope",
+		"id", "name", "priority", "binding_kind", "pipeline_name", "predicate", "predicate_checksum", "active", "binding_scope", "ks_store_id",
 	}).AddRow(
-		int64(7), "pdf-binding", 10, PipelineBindingKindConditional, "regulated_reference", predicateJSON, checksum, true, PipelineBindingScopeKnowledgeStore,
+		int64(7), "pdf-binding", 10, PipelineBindingKindConditional, "regulated_reference", predicateJSON, checksum, true, PipelineBindingScopeKnowledgeStore, int64(42),
 	).AddRow(
-		int64(8), "store-default", 0, PipelineBindingKindStoreDefault, "store_default", `{}`, "", true, PipelineBindingScopeKnowledgeStore,
+		int64(8), "store-default", 0, PipelineBindingKindStoreDefault, "store_default", `{}`, "", true, PipelineBindingScopeKnowledgeStore, int64(42),
 	))
 
 	got, err := (PipelineBindingSQLStore{DB: db}).ListPipelineBindings(context.Background())
@@ -248,7 +287,8 @@ SELECT b.id, COALESCE(b.name, ''), b.priority, b.binding_kind,
          WHEN b.ks_store_id IS NOT NULL THEN 'knowledge_store'
          WHEN NULLIF(b.tenant_id, '') IS NOT NULL AND b.tenant_id <> '-' THEN 'tenant'
          ELSE 'system'
-       END AS binding_scope
+       END AS binding_scope,
+       b.ks_store_id
 FROM kb.pipeline_bindings b
 LEFT JOIN kb.pipelines p ON p.id = b.pipeline_id
 WHERE b.active AND b.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
@@ -262,9 +302,9 @@ ORDER BY b.priority DESC,
          END DESC,
          b.id`)
 	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "name", "priority", "binding_kind", "pipeline_name", "predicate", "predicate_checksum", "active", "binding_scope",
+		"id", "name", "priority", "binding_kind", "pipeline_name", "predicate", "predicate_checksum", "active", "binding_scope", "ks_store_id",
 	}).AddRow(
-		int64(7), "pdf-binding", 10, PipelineBindingKindConditional, "regulated_reference", predicateJSON, bogusStoredChecksum, true, PipelineBindingScopeKnowledgeStore,
+		int64(7), "pdf-binding", 10, PipelineBindingKindConditional, "regulated_reference", predicateJSON, bogusStoredChecksum, true, PipelineBindingScopeKnowledgeStore, int64(42),
 	))
 
 	got, err := (PipelineBindingSQLStore{DB: db}).ListPipelineBindings(context.Background())

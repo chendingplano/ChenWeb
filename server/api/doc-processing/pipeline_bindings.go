@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -28,13 +29,19 @@ const (
 )
 
 type PipelineBinding struct {
-	ID                int64
-	Name              string
-	Priority          int
-	Scope             string
-	BindingKind       string
-	PipelineName      string
-	Predicate         semrules.Document
+	ID           int64
+	Name         string
+	Priority     int
+	Scope        string
+	BindingKind  string
+	PipelineName string
+	Predicate    semrules.Document
+	// KnowledgeStoreID is the store this binding is scoped to (kb.
+	// pipeline_bindings.ks_store_id); zero means system-scoped (no store
+	// restriction). Used to select the correct store_default row for the
+	// record's own knowledge store rather than the first store_default row
+	// encountered (P5 review 2026080302 finding P5-18).
+	KnowledgeStoreID  int64
 	PredicateChecksum string
 	Active            bool
 	LegacyRule        *ProductionPipelineRule `json:"-"`
@@ -111,7 +118,8 @@ SELECT b.id, COALESCE(b.name, ''), b.priority, b.binding_kind,
          WHEN b.ks_store_id IS NOT NULL THEN 'knowledge_store'
          WHEN NULLIF(b.tenant_id, '') IS NOT NULL AND b.tenant_id <> '-' THEN 'tenant'
          ELSE 'system'
-       END AS binding_scope
+       END AS binding_scope,
+       b.ks_store_id
 FROM kb.pipeline_bindings b
 LEFT JOIN kb.pipelines p ON p.id = b.pipeline_id
 WHERE b.active AND b.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
@@ -134,12 +142,16 @@ ORDER BY b.priority DESC,
 	for rows.Next() {
 		var binding PipelineBinding
 		var predicateRaw string
+		var ksStoreID sql.NullInt64
 		if err := rows.Scan(
 			&binding.ID, &binding.Name, &binding.Priority, &binding.BindingKind,
 			&binding.PipelineName, &predicateRaw, &binding.PredicateChecksum,
-			&binding.Active, &binding.Scope,
+			&binding.Active, &binding.Scope, &ksStoreID,
 		); err != nil {
 			return nil, err
+		}
+		if ksStoreID.Valid {
+			binding.KnowledgeStoreID = ksStoreID.Int64
 		}
 		if strings.TrimSpace(predicateRaw) != "" && strings.TrimSpace(predicateRaw) != "{}" {
 			if err := json.Unmarshal([]byte(predicateRaw), &binding.Predicate); err != nil {
@@ -320,8 +332,39 @@ func ResolvePipelineBindings(bindings []PipelineBinding, facts semrules.FactSet,
 		start = end
 	}
 
+	// A store-scoped default must only ever apply to its own knowledge
+	// store: a record's own store id (from the deployment.knowledge_store
+	// fact) is matched against binding.KnowledgeStoreID first; only a
+	// system-scoped row (KnowledgeStoreID == 0, no store restriction) is
+	// eligible as a fallback when no store-scoped row matches. The
+	// pre-fix code returned the first store_default row regardless of
+	// store, letting a multi-store deployment route a record to another
+	// store's default pipeline (P5 review 2026080302 finding P5-18).
+	recordStoreID := knowledgeStoreIDFromFacts(facts)
+	if recordStoreID != 0 {
+		for _, binding := range storeDefaults {
+			if binding.PipelineName == "" || binding.KnowledgeStoreID != recordStoreID {
+				continue
+			}
+			trace = append(trace, PipelineBindingTrace{
+				BindingName:  binding.Name,
+				PipelineName: binding.PipelineName,
+				BindingKind:  binding.BindingKind,
+				Priority:     binding.Priority,
+				Scope:        binding.Scope,
+				Truth:        semrules.TruthTrue,
+				Reason:       "store_default",
+			})
+			return PipelineBindingSelection{
+				SelectedPipeline: binding.PipelineName,
+				Source:           "store_default",
+				BindingName:      binding.Name,
+				Trace:            trace,
+			}, nil
+		}
+	}
 	for _, binding := range storeDefaults {
-		if binding.PipelineName == "" {
+		if binding.PipelineName == "" || binding.KnowledgeStoreID != 0 {
 			continue
 		}
 		trace = append(trace, PipelineBindingTrace{
@@ -345,6 +388,25 @@ func ResolvePipelineBindings(bindings []PipelineBinding, facts semrules.FactSet,
 		Source:           "system_default",
 		Trace:            trace,
 	}, nil
+}
+
+// knowledgeStoreIDFromFacts extracts the record's own knowledge store id
+// from the deployment.knowledge_store fact BuildPipelineBindingFactSet
+// produces, returning 0 (no store, or unresolved) when absent.
+func knowledgeStoreIDFromFacts(facts semrules.FactSet) int64 {
+	fact, ok := facts["deployment.knowledge_store"]
+	if !ok || fact.State != semrules.FactKnown {
+		return 0
+	}
+	str, ok := fact.Value.(string)
+	if !ok {
+		return 0
+	}
+	id, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // PipelineBindingConflictError marks a decision-relevant DR7 conditional-
