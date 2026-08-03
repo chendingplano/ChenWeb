@@ -19,6 +19,16 @@ import (
 	"time"
 )
 
+// ErrInvalidFactValue marks an operator error whose cause is the OBSERVED
+// fact value contradicting its declared FactType -- a producer defect, not
+// an authoring/operator defect. evaluateFactPredicate routes an error
+// wrapping this sentinel to ReasonInvalidFact instead of ReasonOperatorError,
+// matching spec 2026080102 §11: invalid facts stay indeterminate/trace-only,
+// while operator failure is fail-closed alarm territory (P5 review
+// 2026080302 finding P5-14). An error on the authored/expected-side operand
+// is a different failure class and must not be wrapped with this sentinel.
+var ErrInvalidFactValue = errors.New("observed fact value does not match declared type")
+
 // Operator is the legacy, untyped operator signature retained for source
 // compatibility with the original evaluator extension seam.
 type Operator func(fact, expected any) (bool, error)
@@ -334,7 +344,7 @@ func typedEqual(fact KnownValue, expected any) (bool, error) {
 	case FactTypeString:
 		observed, ok := fact.Value.(string)
 		if !ok {
-			return false, fmt.Errorf("declared string fact has value of type %T", fact.Value)
+			return false, fmt.Errorf("%w: declared string fact has value of type %T", ErrInvalidFactValue, fact.Value)
 		}
 		want, ok := expected.(string)
 		if !ok {
@@ -344,7 +354,7 @@ func typedEqual(fact KnownValue, expected any) (bool, error) {
 	case FactTypeNumber:
 		observed, err := numericValue(fact.Value)
 		if err != nil {
-			return false, fmt.Errorf("declared number fact: %w", err)
+			return false, fmt.Errorf("%w: declared number fact: %v", ErrInvalidFactValue, err)
 		}
 		want, err := numericValue(expected)
 		if err != nil {
@@ -354,7 +364,7 @@ func typedEqual(fact KnownValue, expected any) (bool, error) {
 	case FactTypeBoolean:
 		observed, ok := fact.Value.(bool)
 		if !ok {
-			return false, fmt.Errorf("declared boolean fact has value of type %T", fact.Value)
+			return false, fmt.Errorf("%w: declared boolean fact has value of type %T", ErrInvalidFactValue, fact.Value)
 		}
 		want, ok := expected.(bool)
 		if !ok {
@@ -364,7 +374,7 @@ func typedEqual(fact KnownValue, expected any) (bool, error) {
 	case FactTypeDate:
 		observed, err := dateValue(fact.Value)
 		if err != nil {
-			return false, fmt.Errorf("declared date fact: %w", err)
+			return false, fmt.Errorf("%w: declared date fact: %v", ErrInvalidFactValue, err)
 		}
 		want, err := dateValue(expected)
 		if err != nil {
@@ -408,12 +418,12 @@ func typedContains(fact KnownValue, expected any) (bool, error) {
 	}
 	rv := reflect.ValueOf(fact.Value)
 	if !rv.IsValid() || (rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array) {
-		return false, fmt.Errorf("declared string_set fact has value of type %T", fact.Value)
+		return false, fmt.Errorf("%w: declared string_set fact has value of type %T", ErrInvalidFactValue, fact.Value)
 	}
 	for i := 0; i < rv.Len(); i++ {
 		item, ok := rv.Index(i).Interface().(string)
 		if !ok {
-			return false, fmt.Errorf("declared string_set fact contains %T", rv.Index(i).Interface())
+			return false, fmt.Errorf("%w: declared string_set fact contains %T", ErrInvalidFactValue, rv.Index(i).Interface())
 		}
 		if item == want {
 			return true, nil
@@ -427,7 +437,7 @@ func typedCompare(fact KnownValue, expected any, want func(int) bool) (bool, err
 	case FactTypeNumber:
 		observed, err := numericValue(fact.Value)
 		if err != nil {
-			return false, fmt.Errorf("declared number fact: %w", err)
+			return false, fmt.Errorf("%w: declared number fact: %v", ErrInvalidFactValue, err)
 		}
 		expectedNumber, err := numericValue(expected)
 		if err != nil {
@@ -437,7 +447,7 @@ func typedCompare(fact KnownValue, expected any, want func(int) bool) (bool, err
 	case FactTypeDate:
 		observed, err := dateValue(fact.Value)
 		if err != nil {
-			return false, fmt.Errorf("declared date fact: %w", err)
+			return false, fmt.Errorf("%w: declared date fact: %v", ErrInvalidFactValue, err)
 		}
 		expectedDate, err := dateValue(expected)
 		if err != nil {

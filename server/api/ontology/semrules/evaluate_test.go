@@ -328,6 +328,30 @@ func TestEvaluateDocumentIndeterminateReasons(t *testing.T) {
 			wantTruth:  TruthIndeterminate,
 			wantReason: ReasonOperatorError,
 		},
+		{
+			// P5 review 2026080302 finding P5-14: a KNOWN fact whose observed
+			// value contradicts its declared FactType is a producer defect,
+			// not an operator failure -- spec §11 routes the two differently
+			// (invalid facts stay indeterminate/trace-only; operator failure
+			// is fail-closed alarm territory).
+			name:       "wrong-typed known fact value is invalid_fact, not operator_error",
+			pred:       Predicate{Kind: "fact", Path: "document.has_document_number", Op: "eq", Value: true},
+			fact:       Fact{Path: "document.has_document_number", State: FactKnown, Value: "not-a-bool"},
+			wantTruth:  TruthIndeterminate,
+			wantReason: ReasonInvalidFact,
+		},
+		{
+			// The authored/expected-side operand is a different failure
+			// class: the observed fact is well-typed, but the predicate's
+			// declared expected value cannot be compared against it. This
+			// stays operator_error (Validate should catch this before
+			// activation; evaluation-time is a defense-in-depth path).
+			name:       "authored expected-value mismatch stays operator_error",
+			pred:       Predicate{Kind: "fact", Path: "document.has_document_number", Op: "eq", Value: "not-a-bool"},
+			fact:       Fact{Path: "document.has_document_number", State: FactKnown, Value: true},
+			wantTruth:  TruthIndeterminate,
+			wantReason: ReasonOperatorError,
+		},
 	}
 
 	for _, tt := range tests {

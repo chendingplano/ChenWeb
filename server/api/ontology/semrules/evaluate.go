@@ -1,6 +1,9 @@
 package semrules
 
-import "sort"
+import (
+	"errors"
+	"sort"
+)
 
 const (
 	ReasonMatched                = "matched"
@@ -233,7 +236,15 @@ func evaluateFactPredicate(predicate Predicate, facts FactSet, decisionRelevant 
 		matched, err := op(KnownValue{Type: spec.Type, Value: fact.Value}, predicate.Value)
 		if err != nil {
 			node.Truth = TruthIndeterminate
-			node.ReasonCode = ReasonOperatorError
+			if errors.Is(err, ErrInvalidFactValue) {
+				// The OBSERVED fact value contradicts its declared type -- a
+				// producer defect, not an operator/authoring defect. Spec
+				// §11 keeps this indeterminate/trace-only rather than the
+				// fail-closed alarm path operator_error can trigger.
+				node.ReasonCode = ReasonInvalidFact
+			} else {
+				node.ReasonCode = ReasonOperatorError
+			}
 			return node, nil
 		}
 		if matched {
