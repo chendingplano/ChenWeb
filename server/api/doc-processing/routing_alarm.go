@@ -15,11 +15,11 @@ import (
 // operators reading alarms_errors directly, since that table predates this
 // column and other producers don't set it.
 const (
-	RoutingAlarmKindBindingConflict  = "binding_conflict"
-	RoutingAlarmKindGateConflict     = "gate_conflict"
-	RoutingAlarmKindOperatorFailure  = "operator_failure"
-	RoutingAlarmKindPolicyIntegrity  = "policy_integrity_failure"
-	RoutingAlarmKindFallbackWarning  = "fallback_warning"
+	RoutingAlarmKindBindingConflict = "binding_conflict"
+	RoutingAlarmKindGateConflict    = "gate_conflict"
+	RoutingAlarmKindOperatorFailure = "operator_failure"
+	RoutingAlarmKindPolicyIntegrity = "policy_integrity_failure"
+	RoutingAlarmKindFallbackWarning = "fallback_warning"
 	// RoutingAlarmKindPlanBuildFailure covers a BuildProductionProcessorPlanFromFacts
 	// error that is NOT a decision-relevant DR7 binding/gate conflict (e.g. an
 	// unknown pipeline/processor name, a broken spec registration) -- a

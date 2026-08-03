@@ -425,3 +425,26 @@ func sameSet(got, want []string) bool {
 	sort.Strings(w)
 	return reflect.DeepEqual(g, w)
 }
+
+// TestRestoreMandatoryProcessorsDerivedFromRegistry proves the mandatory
+// processor safety net is derived from isMandatoryProcessor over the
+// production registry, not a hardcoded pair: static_analyzer/chunking are
+// restored (their names make isMandatoryProcessor true regardless of class),
+// a mandatory-class processor (classify_document, mandatory_gated) is restored
+// too, and a name absent from the registry is not (P5 review 2026080302
+// finding P5-29).
+func TestRestoreMandatoryProcessorsDerivedFromRegistry(t *testing.T) {
+	got := restoreMandatoryProcessors(
+		[]string{"extract_metrics"},
+		[]string{"extract_metrics", "static_analyzer", "chunking", "classify_document", "not_a_processor"},
+	)
+	set := stringSet(got)
+	for _, want := range []string{"extract_metrics", "static_analyzer", "chunking", "classify_document"} {
+		if !set[want] {
+			t.Fatalf("result %v missing mandatory processor %q", got, want)
+		}
+	}
+	if set["not_a_processor"] {
+		t.Fatalf("result %v must not restore a name absent from the registry", got)
+	}
+}

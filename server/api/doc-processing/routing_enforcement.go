@@ -261,20 +261,37 @@ func removeProcessorName(list []string, target string) []string {
 	return out
 }
 
-// restoreMandatoryProcessors is a defense-in-depth safety net: static
-// analysis/chunking should never be excluded by construction
-// (isMandatoryProcessor forces Effect=require in ResolveProcessorGate, and
-// applyPolicyFilter exempts them from the pipeline allowlist), but this
-// guarantees it explicitly rather than relying on those invariants alone.
+// restoreMandatoryProcessors is a defense-in-depth safety net: mandatory
+// processors should never be excluded by construction (isMandatoryProcessor
+// forces Effect=require in ResolveProcessorGate, and applyPolicyFilter exempts
+// them from the pipeline allowlist), but this guarantees it explicitly rather
+// than relying on those invariants alone. The mandatory set is derived from
+// isMandatoryProcessor over the production registry rather than a hardcoded
+// pair, so a newly declared mandatory-class processor can never silently fall
+// through the safety net (P5 review 2026080302 finding P5-29).
 func restoreMandatoryProcessors(kept, requested []string) []string {
 	keptSet := stringSet(kept)
 	out := append([]string(nil), kept...)
 	for _, name := range requested {
 		norm := normalizeRuntimeName(name)
-		if (norm == "static_analyzer" || norm == "chunking") && !keptSet[norm] {
+		if keptSet[norm] {
+			continue
+		}
+		if spec := findProductionProcessorSpec(norm); spec != nil && isMandatoryProcessor(*spec) {
 			out = append(out, name)
 			keptSet[norm] = true
 		}
 	}
 	return out
+}
+
+// findProductionProcessorSpec returns the registry spec for a normalized
+// processor name, or nil when the name is not a declared production processor.
+func findProductionProcessorSpec(name string) *ProcessorSpec {
+	for i := range productionProcessorSpecs {
+		if productionProcessorSpecs[i].Name == normalizeRuntimeName(name) {
+			return &productionProcessorSpecs[i]
+		}
+	}
+	return nil
 }

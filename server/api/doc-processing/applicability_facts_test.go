@@ -1,6 +1,7 @@
 package docprocessing
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -103,4 +104,30 @@ func TestBuildApplicabilityFactSetUsesCanonicalNamespaces(t *testing.T) {
 
 func ptrFloat64(v float64) *float64 {
 	return &v
+}
+
+// TestNormalizeObservationValueJsonNumberMatchesGoFloat proves a JSONB-decoded
+// json.Number("2.0") and a Go float64(2) produce the same fact-value key, so
+// the same facet written by two code paths is not misflagged as a conflicting
+// value (P5 review 2026080302 finding P5-28).
+func TestNormalizeObservationValueJsonNumberMatchesGoFloat(t *testing.T) {
+	k1 := canonicalFactValueKey(json.Number("2.0"))
+	k2 := canonicalFactValueKey(float64(2))
+	if k1 != k2 {
+		t.Fatalf("json.Number(2.0) key %q != float64(2) key %q", k1, k2)
+	}
+
+	// End-to-end: two same-rank observations that are numerically equal reduce
+	// to a single known fact, not a conflict.
+	facts := ReduceFacetObservations([]FacetObservation{
+		{Path: "document.threshold", Value: json.Number("2.0"), State: semrules.FactKnown, Method: FacetMethodMetadata},
+		{Path: "document.threshold", Value: float64(2), State: semrules.FactKnown, Method: FacetMethodMetadata},
+	})
+	fact := facts["document.threshold"]
+	if fact.State == semrules.FactConflicting {
+		t.Fatalf("numerically equal observations must not conflict: %+v", fact)
+	}
+	if fact.State != semrules.FactKnown {
+		t.Fatalf("state = %s, want known", fact.State)
+	}
 }

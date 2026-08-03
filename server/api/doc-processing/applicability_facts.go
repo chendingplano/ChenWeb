@@ -194,6 +194,25 @@ func canonicalFactValueKey(value any) string {
 }
 
 func normalizeObservationValue(value any) any {
+	// Normalise numeric encodings first so a JSONB-decoded json.Number("2.0")
+	// and a Go float64(2) produce the SAME fact-value key. Without this, the
+	// same facet written by two code paths would key as `2.0` and `2` and be
+	// misflagged as a conflicting value (P5 review 2026080302 finding P5-28).
+	switch v := value.(type) {
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return canonicalNumberKey(f)
+		}
+		return value
+	case float64:
+		return canonicalNumberKey(v)
+	case float32:
+		return canonicalNumberKey(float64(v))
+	case int:
+		return canonicalNumberKey(float64(v))
+	case int64:
+		return canonicalNumberKey(float64(v))
+	}
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() || (rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array) {
 		return value
@@ -208,6 +227,15 @@ func normalizeObservationValue(value any) any {
 	}
 	sort.Strings(values)
 	return values
+}
+
+// canonicalNumberKey renders a float with no trailing zeros ("2", not "2.0")
+// so numerically equal observations share a fact-value key regardless of
+// whether they were decoded from JSONB (json.Number) or produced in Go
+// (float64/int). 'g' formatting also avoids exponent leakage ("2e+06" -> not
+// applicable here, but large magnitudes stay stable).
+func canonicalNumberKey(v float64) any {
+	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
 func sortedValueList(values map[string]any) []any {
