@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +24,31 @@ var newPipelinePolicyCompiler = func() docprocessing.PolicyCompiler {
 
 var recompilePipelinePolicyInTx = func(ctx context.Context, tx *sql.Tx, policyID int64) (docprocessing.CompiledPolicy, error) {
 	return (docprocessing.PolicyCompilerSQLStore{DB: tx}).CompilePolicy(ctx, policyID)
+}
+
+// reloadPipelinePolicyBindingsAndGates reloads the in-process canonical
+// binding and gate sets after a successful activation, so a running process
+// picks up the new policy immediately -- without this, activation had no
+// effect on a running process until restart, leaving E2's atomic activation
+// endpoint inert (P5 review 2026080302 finding P5-12). Multi-process
+// deployments still require an out-of-band restart/reload signal per
+// process; that remains a documented carry-forward, not solved here.
+var reloadPipelinePolicyBindingsAndGates = func(ctx context.Context, db *sql.DB) error {
+	if err := docprocessing.LoadProductionPipelineBindings(ctx, docprocessing.PipelineBindingSQLStore{DB: db}); err != nil {
+		return fmt.Errorf("reload pipeline bindings: %w", err)
+	}
+	if err := docprocessing.LoadProductionPipelineGates(ctx, docprocessing.PipelineGateSQLStore{DB: db}); err != nil {
+		return fmt.Errorf("reload pipeline gates: %w", err)
+	}
+	return nil
+}
+
+// writeRoutingPolicyAlarm raises an operator alarm on the shared
+// alarms_errors table. A reload failure after a successful activation
+// commit uses this instead of failing the request -- the activation itself
+// already committed and must not be misrepresented as rolled back.
+var writeRoutingPolicyAlarm = func(ctx context.Context, db *sql.DB, alarm docprocessing.RoutingAlarm) error {
+	return (docprocessing.RoutingAlarmSQLWriter{DB: db}).WriteAlarm(ctx, alarm)
 }
 
 type pipelinePolicyRecord struct {
@@ -46,6 +72,11 @@ type listPipelinePoliciesResponse struct {
 type pipelinePolicyDetailResponse struct {
 	Status bool                 `json:"status"`
 	Record pipelinePolicyRecord `json:"record"`
+	// Warning is set only when activation committed successfully but the
+	// in-process reload (P5 review 2026080302 finding P5-12) failed --
+	// the policy is active in the database but this process still needs a
+	// restart to route/gate against it.
+	Warning string `json:"warning,omitempty"`
 }
 
 const pipelinePolicySelectColumns = `
@@ -273,5 +304,22 @@ func ActivatePipelinePolicy(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve activated pipeline policy (CWB_KB_PP_209)"})
 	}
 
-	return c.JSON(http.StatusOK, pipelinePolicyDetailResponse{Status: true, Record: record})
+	response := pipelinePolicyDetailResponse{Status: true, Record: record}
+	// The activation already committed above; a reload failure here must
+	// not be reported as though activation itself failed, and must not
+	// trigger a rollback of an already-committed transaction (P5 review
+	// 2026080302 finding P5-12).
+	if reloadErr := reloadPipelinePolicyBindingsAndGates(c.Request().Context(), db); reloadErr != nil {
+		logger.Error("in-process pipeline policy reload failed after activation", "id", id, "err", reloadErr)
+		alarm := docprocessing.RoutingAlarm{
+			Kind: docprocessing.RoutingAlarmKindPolicyIntegrity, Severity: docprocessing.RoutingAlarmSeverityError,
+			Message: fmt.Sprintf("pipeline policy %d activated but in-process reload failed: %s; this process requires a restart to apply it", id, reloadErr),
+		}
+		if err := writeRoutingPolicyAlarm(c.Request().Context(), db, alarm); err != nil {
+			logger.Error("failed to write pipeline policy reload alarm", "id", id, "err", err)
+		}
+		response.Warning = "activated, but in-process reload failed; this process requires a restart to apply it"
+	}
+
+	return c.JSON(http.StatusOK, response)
 }

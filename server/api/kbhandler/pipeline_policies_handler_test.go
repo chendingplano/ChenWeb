@@ -51,16 +51,22 @@ func newPipelinePolicyIDContext(t *testing.T, id, body string) (echo.Context, *h
 
 func installPolicyActivationFakes(t *testing.T, user *ApiTypes.UserInfo, compiler docprocessing.PolicyCompiler) func() {
 	t.Helper()
-	oldAuth, oldCompiler, oldRecompile := EchoFactory.DefaultAuthenticator, newPipelinePolicyCompiler, recompilePipelinePolicyInTx
+	oldAuth, oldCompiler, oldRecompile, oldReload := EchoFactory.DefaultAuthenticator, newPipelinePolicyCompiler, recompilePipelinePolicyInTx, reloadPipelinePolicyBindingsAndGates
 	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) { return user, nil }
 	newPipelinePolicyCompiler = func() docprocessing.PolicyCompiler { return compiler }
 	recompilePipelinePolicyInTx = func(ctx context.Context, _ *sql.Tx, policyID int64) (docprocessing.CompiledPolicy, error) {
 		return compiler.CompilePolicy(ctx, policyID)
 	}
+	// Default to a no-op so every pre-existing activation test (which
+	// mocks only the activation transaction's own queries) is unaffected
+	// by the P5-12 reload step; tests that care about reload override this
+	// explicitly.
+	reloadPipelinePolicyBindingsAndGates = func(context.Context, *sql.DB) error { return nil }
 	return func() {
 		EchoFactory.DefaultAuthenticator = oldAuth
 		newPipelinePolicyCompiler = oldCompiler
 		recompilePipelinePolicyInTx = oldRecompile
+		reloadPipelinePolicyBindingsAndGates = oldReload
 	}
 }
 
@@ -133,6 +139,108 @@ func TestActivatePipelinePolicyCompilesLocksAndActivatesAtomically(t *testing.T)
 	}
 	if len(audit.events) != 1 || audit.events[0].Kind != policyaudit.EventPolicyActivated || audit.events[0].PolicyID != 2 || audit.events[0].Actor != "owner@example.com" {
 		t.Fatalf("audit events=%+v, want one policy_activated event for policy 2 by owner@example.com", audit.events)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestActivatePipelinePolicyReloadsBindingsAndGatesAfterCommit proves
+// activation reloads the in-process binding/gate set immediately after
+// commit, so a running process picks up the new policy without a restart --
+// E2's atomic activation endpoint was otherwise inert against a running
+// process (P5 review 2026080302 finding P5-12).
+func TestActivatePipelinePolicyReloadsBindingsAndGatesAfterCommit(t *testing.T) {
+	db, mock := installPolicyDB(t)
+	compiler := &fakePolicyCompiler{compiled: docprocessing.CompiledPolicy{PolicyID: 2, Version: 2, Checksum: "sha256:compiled"}}
+	restore := installPolicyActivationFakes(t, &ApiTypes.UserInfo{UserName: "owner@example.com", IsOwner: true}, compiler)
+	defer restore()
+	installPolicyAuditFake(t)
+
+	var reloadCalls int
+	reloadPipelinePolicyBindingsAndGates = func(_ context.Context, gotDB *sql.DB) error {
+		reloadCalls++
+		if gotDB != db {
+			t.Fatalf("reload called with a different *sql.DB than the activation transaction's")
+		}
+		return nil
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(checksum, ''), status FROM kb.pipeline_policies WHERE id = $1 FOR UPDATE")).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"checksum", "status"}).AddRow("", "draft"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET checksum = $1, modify_time = NOW() WHERE id = $2")).WithArgs("sha256:compiled", int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET status = 'archived', modify_time = NOW() WHERE status = 'active' AND id <> $1")).WithArgs(int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET status = 'active', activated_at = NOW(), activated_by = $1, checksum = $3, modify_time = NOW() WHERE id = $2 AND status = 'draft' AND checksum = $3")).WithArgs("owner@example.com", int64(2), "sha256:compiled").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit().WillReturnError(nil)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT" + pipelinePolicySelectColumns + "\nWHERE id = $1")).WithArgs(int64(2)).WillReturnRows(policyRows().AddRow(int64(2), 2, "active", nil, "sha256:compiled", time.Now(), "owner@example.com", time.Now(), time.Now()))
+
+	c, rec := newPipelinePolicyIDContext(t, "2", `{}`)
+	if err := ActivatePipelinePolicy(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if reloadCalls != 1 {
+		t.Fatalf("reload calls = %d, want exactly 1", reloadCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestActivatePipelinePolicyReloadFailureDoesNotRollBackButRaisesAlarmAndWarns
+// proves a reload failure after a successful commit does not misrepresent
+// DB state by rolling back an already-committed activation; it raises a
+// policy_integrity_failure alarm and surfaces a warning in the response
+// instead (P5 review 2026080302 finding P5-12).
+func TestActivatePipelinePolicyReloadFailureDoesNotRollBackButRaisesAlarmAndWarns(t *testing.T) {
+	_, mock := installPolicyDB(t)
+	compiler := &fakePolicyCompiler{compiled: docprocessing.CompiledPolicy{PolicyID: 2, Version: 2, Checksum: "sha256:compiled"}}
+	restore := installPolicyActivationFakes(t, &ApiTypes.UserInfo{UserName: "owner@example.com", IsOwner: true}, compiler)
+	defer restore()
+	installPolicyAuditFake(t)
+
+	reloadErr := errors.New("connection refused")
+	reloadPipelinePolicyBindingsAndGates = func(context.Context, *sql.DB) error { return reloadErr }
+	var alarms []docprocessing.RoutingAlarm
+	oldAlarm := writeRoutingPolicyAlarm
+	writeRoutingPolicyAlarm = func(_ context.Context, _ *sql.DB, alarm docprocessing.RoutingAlarm) error {
+		alarms = append(alarms, alarm)
+		return nil
+	}
+	defer func() { writeRoutingPolicyAlarm = oldAlarm }()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(checksum, ''), status FROM kb.pipeline_policies WHERE id = $1 FOR UPDATE")).WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"checksum", "status"}).AddRow("", "draft"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET checksum = $1, modify_time = NOW() WHERE id = $2")).WithArgs("sha256:compiled", int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET status = 'archived', modify_time = NOW() WHERE status = 'active' AND id <> $1")).WithArgs(int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.pipeline_policies SET status = 'active', activated_at = NOW(), activated_by = $1, checksum = $3, modify_time = NOW() WHERE id = $2 AND status = 'draft' AND checksum = $3")).WithArgs("owner@example.com", int64(2), "sha256:compiled").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT" + pipelinePolicySelectColumns + "\nWHERE id = $1")).WithArgs(int64(2)).WillReturnRows(policyRows().AddRow(int64(2), 2, "active", nil, "sha256:compiled", time.Now(), "owner@example.com", time.Now(), time.Now()))
+
+	c, rec := newPipelinePolicyIDContext(t, "2", `{}`)
+	if err := ActivatePipelinePolicy(c); err != nil {
+		t.Fatal(err)
+	}
+	// The activation already committed (mock.ExpectCommit above proves no
+	// rollback happened -- sqlmock would fail ExpectationsWereMet otherwise
+	// since ExpectCommit, not a rollback, was the only expectation set).
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s (activation must still succeed despite reload failure)", rec.Code, rec.Body.String())
+	}
+	var payload pipelinePolicyDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Record.Status != "active" {
+		t.Fatalf("record status = %q, want active (commit must not be rolled back)", payload.Record.Status)
+	}
+	if payload.Warning == "" {
+		t.Fatal("expected a non-empty Warning surfaced in the response")
+	}
+	if len(alarms) != 1 || alarms[0].Kind != docprocessing.RoutingAlarmKindPolicyIntegrity {
+		t.Fatalf("alarms = %#v, want exactly one policy_integrity_failure alarm", alarms)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
