@@ -2,11 +2,46 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
+
+// VocabularyReleaseStore resolves the active document-authority module
+// release id. Defined here (not imported from ontology/modules) to avoid an
+// import cycle: modules -> profiles -> docprocessing.
+type VocabularyReleaseStore interface {
+	ActiveDocumentAuthorityReleaseID(ctx context.Context) (int64, error)
+}
+
+// VocabularyReleaseSQLStore is the production VocabularyReleaseStore. It
+// reads the same kb.ontology_active_releases table
+// ontology/profiles.ProfileStore.LoadReleasedProfiles already pins releases
+// from, so classify_document's governed vocabulary tracks the same
+// activation pointer review-profile selection does.
+type VocabularyReleaseSQLStore struct{ DB *sql.DB }
+
+func (s VocabularyReleaseSQLStore) ActiveDocumentAuthorityReleaseID(ctx context.Context) (int64, error) {
+	if s.DB == nil {
+		return 0, errors.New("db is nil")
+	}
+	var releaseID int64
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT release_id FROM kb.ontology_active_releases WHERE module_id = 'document-authority' AND deactivated_at IS NULL`,
+	).Scan(&releaseID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No active document-authority release yet: 0 means "unpinned",
+		// matching the pre-fix hardcoded behavior for this case.
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return releaseID, nil
+}
 
 // ApplicabilityResolver orchestrates the two-pass semrules evaluation with
 // optional tier-3 classification between passes (spec 2026080102 section 7).
@@ -15,6 +50,12 @@ import (
 type ApplicabilityResolver struct {
 	Classifier *DocumentClassifier
 	Facets     FacetObservationStore
+	// VocabularyReleases resolves the active document-authority module
+	// release id, pinning classify_document's governed-vocabulary
+	// provenance. May be nil, in which case VocabularyReleaseID stays 0 --
+	// "no resolver exists" (P5 review 2026080302 finding P5-2), same as
+	// before this field existed.
+	VocabularyReleases VocabularyReleaseStore
 }
 
 // ResolverRequest is the immutable input for one two-pass resolution.
@@ -213,15 +254,34 @@ func activeRoutingPredicates() []semrules.Document {
 // It builds tier-1/tier-2 facts from ProductionPlanFacts, resolves with the
 // two-pass classifier, and returns the enriched fact set suitable for
 // pipeline binding and processor gate evaluation.
-func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, planFacts ProductionPlanFacts, recordID int64, runID int64, documentSample string) (semrules.FactSet, *ResolverResult, error) {
+//
+// attemptKey identifies this specific routing-decision attempt independent
+// of any kb.doc_process_runs row -- routing must be decided before that row
+// exists (before dispatch), so a run id cannot serve this purpose. It must
+// be stable across a retry/redelivery of the same event (so the classifier's
+// stable-retry-via-invocation-id correctly avoids a duplicate LLM call) and
+// distinct across a genuinely new processing attempt (so a stale observation
+// is never silently reused forever). Callers should pass the just-generated
+// line file's own name, which is attempt-unique by construction (a fresh
+// parse produces a fresh file) -- see resolverAttemptKey in control.go.
+// Previously this was runID, hardcoded to 0 at the only call site because no
+// run row exists yet, which collapsed every invocation for a record to the
+// same invocation_id (P5 review 2026080302 finding P5-2).
+func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, planFacts ProductionPlanFacts, recordID int64, attemptKey string, documentSample string) (semrules.FactSet, *ResolverResult, error) {
 	baseFacts := BuildPipelineBindingFactSet(planFacts)
+	var vocabularyReleaseID int64
+	if r.VocabularyReleases != nil {
+		if id, err := r.VocabularyReleases.ActiveDocumentAuthorityReleaseID(ctx); err == nil {
+			vocabularyReleaseID = id
+		}
+	}
 	req := ResolverRequest{
 		RecordID:            recordID,
-		DecisionAttemptID:   fmt.Sprintf("run-%d", runID),
-		InvocationID:        fmt.Sprintf("extraction-%d-%d", recordID, runID),
+		DecisionAttemptID:   fmt.Sprintf("extract-%s", attemptKey),
+		InvocationID:        fmt.Sprintf("extraction-%d-%s", recordID, attemptKey),
 		BaseFacts:           baseFacts,
 		Predicates:          activeRoutingPredicates(),
-		VocabularyReleaseID: 0, // pinned by the caller when governed vocabulary is available
+		VocabularyReleaseID: vocabularyReleaseID,
 		DocumentSample:      documentSample,
 	}
 	result, err := r.Resolve(ctx, req)

@@ -57,7 +57,13 @@ type ProductionPlanFacts struct {
 	DocumentNumber      string
 	ParserName          string
 	DocumentTitle       string
-	RoutingFacets       ProductionRoutingFacets
+	// ResultFilename/StagingFilename locate the already-parsed line file on
+	// disk (never the raw upload), so the P5 two-pass resolver can read a
+	// bounded document sample for classify_document without a second DB
+	// fetch. Transient: not part of the persisted routing snapshot.
+	ResultFilename  string `json:"-"`
+	StagingFilename string `json:"-"`
+	RoutingFacets   ProductionRoutingFacets
 	// Mode is the resolved DocPipelineMode for this plan (DocPipelineModePlanOnly
 	// or DocPipelineModeEnforced). Zero value ("") behaves as plan-only, so
 	// callers that don't set it (tests, the constructor-time BuildProductionProcessorPlan
@@ -161,6 +167,8 @@ func BuildProductionPlanFactsFromInputRecord(requested []string, rec DocMetadata
 		DocumentNumber:      rec.DocumentNumber,
 		ParserName:          rec.ParserName,
 		DocumentTitle:       rec.Title,
+		ResultFilename:      rec.ResultFilename,
+		StagingFilename:     rec.StagingFilename,
 		RoutingFacets:       routingFacets,
 	}
 }

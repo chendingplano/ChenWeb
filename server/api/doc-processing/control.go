@@ -1,6 +1,7 @@
 package docprocessing
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -691,7 +692,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		// Nil-safe: when Resolver is nil, planFacts.EnrichedFacts stays nil
 		// and downstream BuildPipelineBindingFactSet uses base facts only.
 		if s.Resolver != nil {
-			enrichedFacts, _, resolverErr := s.Resolver.ResolveExtractionFacts(ctx, planFacts, evt.RecordID, 0, "")
+			enrichedFacts, _, resolverErr := s.Resolver.ResolveExtractionFacts(ctx, planFacts, evt.RecordID, resolverAttemptKey(evt), boundedDocumentSample(evt, planFacts))
 			if resolverErr != nil && s.Logger != nil {
 				s.Logger.Warn("applicability resolver failed, continuing with base facts", "record_id", evt.RecordID, "error", resolverErr)
 			}
@@ -1965,6 +1966,62 @@ func (s *ControlService) applyPlanEnforcement(processors []Processor, excluded [
 // non-known state, or an unexpected value type), the empty string is
 // returned, which correctly leaves the subject shadow-only rather than
 // falling back to a different key (P5 review 2026080302 finding P5-6).
+// resolverAttemptKey derives the P5 two-pass resolver's attempt identity
+// from the event that triggered this dispatch. It must be stable across a
+// retry/redelivery of the same event (so the classifier's stable-retry-via-
+// invocation-id correctly avoids a duplicate LLM call) and distinct across a
+// genuinely new processing attempt (so a stale observation is never
+// silently reused). A run id cannot serve this purpose: routing must be
+// decided before any kb.doc_process_runs row exists (before dispatch).
+// evt.Filename -- the just-generated line file's own name -- is
+// attempt-unique by construction, since a fresh parse produces a fresh
+// file (P5 review 2026080302 finding P5-2).
+func resolverAttemptKey(evt LineFileGeneratedEvent) string {
+	if filename := strings.TrimSpace(evt.Filename); filename != "" {
+		return filename
+	}
+	// Should not happen for a real LineFileGeneratedEvent, but avoid an
+	// empty attempt key: the record id at least gives retries of the same
+	// record a stable (if coarser) key.
+	return fmt.Sprintf("record-%d", evt.RecordID)
+}
+
+// boundedDocumentSample reads a bounded prefix of the already-parsed line
+// file's extracted text content (never the raw upload) for classify_document.
+// A read failure degrades to an empty sample rather than aborting the
+// request -- the classifier already treats an empty/unusable sample the
+// same as any other unresolved tier-3 facet (P5 review 2026080302 finding
+// P5-2: the call site previously hardcoded an empty string).
+func boundedDocumentSample(evt LineFileGeneratedEvent, facts ProductionPlanFacts) string {
+	path, err := ResolveInputFilePath(evt, facts.ResultFilename, facts.ParserName, facts.StagingFilename)
+	if err != nil || strings.TrimSpace(path) == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	var sb strings.Builder
+	sc := bufio.NewScanner(f)
+	for sc.Scan() && sb.Len() < DefaultClassifyDocumentMaxSample {
+		line, err := parseLine(sc.Text())
+		if err != nil || line.Content == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(line.Content)
+	}
+	sample := sb.String()
+	if len(sample) > DefaultClassifyDocumentMaxSample {
+		sample = sample[:DefaultClassifyDocumentMaxSample]
+	}
+	return sample
+}
+
 func documentKindFromEnrichedFacts(enriched semrules.FactSet) string {
 	fact, ok := enriched["document.doc_kind"]
 	if !ok || fact.State != semrules.FactKnown {

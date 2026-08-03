@@ -2,9 +2,12 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
@@ -130,6 +133,206 @@ func TestResolverOneInvocationPerRecordExtractionRun(t *testing.T) {
 	}
 }
 
+// TestResolveExtractionFactsAttemptKeyIsStablePerAttemptDistinctAcrossAttempts
+// proves ResolveExtractionFacts derives DecisionAttemptID/InvocationID from
+// an attempt key independent of any run id -- runID=0 at the control.go call
+// site (no kb.doc_process_runs row exists yet when routing must be decided)
+// previously collapsed every invocation for a record to the same
+// invocation_id, permanently short-circuiting later genuine reprocessing
+// attempts via the stable-retry path (P5 review 2026080302 finding P5-2). A
+// retry using the SAME attempt key must reuse the classifier's cached
+// observation (no second LLM call); a genuinely new attempt (different key)
+// must invoke the classifier again.
+func TestResolveExtractionFactsAttemptKeyIsStablePerAttemptDistinctAcrossAttempts(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{
+		{
+			BindingKind: PipelineBindingKindConditional, PipelineName: "regulated_reference", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{
+				Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "regulated_reference",
+			}},
+		},
+	})
+
+	callCount := 0
+	ext := &countingExtractor{
+		count: &callCount,
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "regulated_reference", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
+
+	planFacts := ProductionPlanFacts{InputDocType: "pdf"}
+	_, r1, err := resolver.ResolveExtractionFacts(context.Background(), planFacts, 1, "line-file-aaa.txt", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts (attempt 1): %v", err)
+	}
+	if !r1.Classified || callCount != 1 {
+		t.Fatalf("attempt 1: Classified=%v callCount=%d, want true/1", r1.Classified, callCount)
+	}
+
+	// Same attempt key (a retry of the same event/message): must not
+	// invoke the classifier again.
+	_, r2, err := resolver.ResolveExtractionFacts(context.Background(), planFacts, 1, "line-file-aaa.txt", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts (retry): %v", err)
+	}
+	if !r2.Classified || callCount != 1 {
+		t.Fatalf("retry: Classified=%v callCount=%d, want true/1 (stable retry must not re-invoke)", r2.Classified, callCount)
+	}
+
+	// Different attempt key (a genuinely new reprocessing attempt): must
+	// invoke the classifier again, not silently reuse the stale observation.
+	_, r3, err := resolver.ResolveExtractionFacts(context.Background(), planFacts, 1, "line-file-bbb.txt", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts (attempt 2): %v", err)
+	}
+	if !r3.Classified || callCount != 2 {
+		t.Fatalf("attempt 2: Classified=%v callCount=%d, want true/2 (a new attempt must not reuse a prior attempt's stale observation)", r3.Classified, callCount)
+	}
+}
+
+// TestVocabularyReleaseSQLStoreReadsActiveDocumentAuthorityRelease proves
+// the production VocabularyReleaseStore reads the active document-authority
+// module release id from kb.ontology_active_releases -- the same table
+// ProfileStore.LoadReleasedProfiles already pins releases from -- and
+// treats "no active release yet" (sql.ErrNoRows) as 0, not an error.
+func TestVocabularyReleaseSQLStoreReadsActiveDocumentAuthorityRelease(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT release_id FROM kb.ontology_active_releases WHERE module_id = 'document-authority' AND deactivated_at IS NULL")).
+		WillReturnRows(sqlmock.NewRows([]string{"release_id"}).AddRow(int64(7)))
+
+	got, err := (VocabularyReleaseSQLStore{DB: db}).ActiveDocumentAuthorityReleaseID(context.Background())
+	if err != nil {
+		t.Fatalf("ActiveDocumentAuthorityReleaseID: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("got=%d, want 7", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVocabularyReleaseSQLStoreNoActiveReleaseReturnsZero(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT release_id FROM kb.ontology_active_releases WHERE module_id = 'document-authority' AND deactivated_at IS NULL")).
+		WillReturnError(sql.ErrNoRows)
+
+	got, err := (VocabularyReleaseSQLStore{DB: db}).ActiveDocumentAuthorityReleaseID(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error for sql.ErrNoRows, got: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("got=%d, want 0", got)
+	}
+}
+
+func TestVocabularyReleaseSQLStoreRejectsNilDB(t *testing.T) {
+	if _, err := (VocabularyReleaseSQLStore{}).ActiveDocumentAuthorityReleaseID(context.Background()); err == nil {
+		t.Fatal("expected error for nil db")
+	}
+}
+
+// stubVocabularyReleaseStore returns a fixed release id for testing.
+type stubVocabularyReleaseStore struct {
+	releaseID int64
+	err       error
+}
+
+func (s stubVocabularyReleaseStore) ActiveDocumentAuthorityReleaseID(context.Context) (int64, error) {
+	return s.releaseID, s.err
+}
+
+// TestResolveExtractionFactsResolvesVocabularyReleaseID proves the resolver
+// pins the active document-authority module release id on classifier
+// observations instead of always hardcoding 0 -- "no governed-vocabulary
+// source exists" was the previous state (P5 review 2026080302 finding
+// P5-2).
+func TestResolveExtractionFactsResolvesVocabularyReleaseID(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{
+		{
+			BindingKind: PipelineBindingKindConditional, PipelineName: "regulated_reference", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{
+				Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "regulated_reference",
+			}},
+		},
+	})
+
+	ext := &countingExtractor{
+		count: new(int),
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "regulated_reference", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store, VocabularyReleases: stubVocabularyReleaseStore{releaseID: 42}}
+
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, "attempt-1", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts: %v", err)
+	}
+	if result == nil || !result.Classified {
+		t.Fatalf("expected the classifier to be invoked, result=%#v", result)
+	}
+	if len(store.inserted) != 1 || store.inserted[0].VocabularyReleaseID != 42 {
+		t.Fatalf("inserted observations = %#v, want VocabularyReleaseID=42", store.inserted)
+	}
+}
+
+// TestResolveExtractionFactsVocabularyReleaseIDStaysZeroWhenNoResolver
+// proves a nil VocabularyReleases (the default) preserves today's behavior
+// exactly -- VocabularyReleaseID stays 0.
+func TestResolveExtractionFactsVocabularyReleaseIDStaysZeroWhenNoResolver(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{
+		{
+			BindingKind: PipelineBindingKindConditional, PipelineName: "regulated_reference", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{
+				Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "regulated_reference",
+			}},
+		},
+	})
+	ext := &countingExtractor{
+		count: new(int),
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "regulated_reference", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
+
+	_, _, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, "attempt-1", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts: %v", err)
+	}
+	if len(store.inserted) != 1 || store.inserted[0].VocabularyReleaseID != 0 {
+		t.Fatalf("inserted observations = %#v, want VocabularyReleaseID=0", store.inserted)
+	}
+}
+
 // TestResolveExtractionFactsCollectsActiveRoutingPredicates proves
 // ResolveExtractionFacts supplies the resolver the active policy's
 // conditional-binding and processor-gate predicates instead of an always-
@@ -164,7 +367,7 @@ func TestResolveExtractionFactsCollectsActiveRoutingPredicates(t *testing.T) {
 	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
 	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
 
-	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, 1, "sample document text")
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, "attempt-1", "sample document text")
 	if err != nil {
 		t.Fatalf("ResolveExtractionFacts: %v", err)
 	}
@@ -195,7 +398,7 @@ func TestResolveExtractionFactsNoClassifierCallForResolvedTierOneTwoPredicate(t 
 	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: &stubFacetStore{}}
 	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: &stubFacetStore{}}
 
-	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, 1, "sample")
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, "attempt-1", "sample")
 	if err != nil {
 		t.Fatalf("ResolveExtractionFacts: %v", err)
 	}

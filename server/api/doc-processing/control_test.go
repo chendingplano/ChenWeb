@@ -1853,3 +1853,89 @@ func TestControlServiceFinalizeRoutingPlanEmptyDocKindStillLooksUpClearance(t *t
 		t.Fatalf("clearance subject DocumentKind = %q, want empty (input_doc_type %q must not be used as a fallback)", stub.seen[0].DocumentKind, "pdf")
 	}
 }
+
+// TestResolverAttemptKeyUsesEventFilename proves the P5 two-pass resolver's
+// attempt identity comes from the just-generated line file's own name --
+// attempt-unique by construction, since a fresh parse produces a fresh file
+// -- rather than a run id that does not exist yet at this call site (P5
+// review 2026080302 finding P5-2).
+func TestResolverAttemptKeyUsesEventFilename(t *testing.T) {
+	key := resolverAttemptKey(LineFileGeneratedEvent{RecordID: 7, Filename: "line-file-aaa.txt"})
+	if key != "line-file-aaa.txt" {
+		t.Fatalf("key = %q, want the event's own filename", key)
+	}
+}
+
+// TestResolverAttemptKeyFallsBackToRecordIDWhenFilenameAbsent proves the
+// fallback (no filename on the event, which should not happen for a real
+// LineFileGeneratedEvent) is still stable for the same record rather than
+// empty or random.
+func TestResolverAttemptKeyFallsBackToRecordIDWhenFilenameAbsent(t *testing.T) {
+	key := resolverAttemptKey(LineFileGeneratedEvent{RecordID: 7})
+	if key == "" {
+		t.Fatal("expected a non-empty fallback key")
+	}
+	if key2 := resolverAttemptKey(LineFileGeneratedEvent{RecordID: 7}); key != key2 {
+		t.Fatalf("fallback key must be stable for the same record: %q vs %q", key, key2)
+	}
+}
+
+// TestBoundedDocumentSampleReadsParsedLineFileContentOnly proves the P5
+// classify_document sample is extracted from the already-parsed line file's
+// text content field, never the raw tab-separated line format or the raw
+// upload (P5 review 2026080302 finding P5-2: "no document sample" was the
+// previous behavior -- an empty string hardcoded at the call site).
+func TestBoundedDocumentSampleReadsParsedLineFileContentOnly(t *testing.T) {
+	dir := t.TempDir()
+	lineFile := filepath.Join(dir, "lines.txt")
+	content := "1\t1\tparagraph\tFont\t10\t[0,0,1,1]\tFirst line of text\n" +
+		"2\t1\tparagraph\tFont\t10\t[0,0,1,1]\tSecond line of text\n"
+	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+	evt := LineFileGeneratedEvent{RecordID: 1, Filename: lineFile}
+
+	sample := boundedDocumentSample(evt, ProductionPlanFacts{})
+	if !strings.Contains(sample, "First line of text") || !strings.Contains(sample, "Second line of text") {
+		t.Fatalf("sample = %q, want both parsed line contents", sample)
+	}
+	if strings.Contains(sample, "\t") || strings.Contains(sample, "[0,0,1,1]") {
+		t.Fatalf("sample = %q, must contain only extracted text, not raw line-file fields", sample)
+	}
+}
+
+// TestBoundedDocumentSampleIsBounded proves the sample never exceeds
+// DefaultClassifyDocumentMaxSample, so a huge document cannot balloon the
+// classifier's LLM input.
+func TestBoundedDocumentSampleIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	lineFile := filepath.Join(dir, "lines.txt")
+	longText := strings.Repeat("x", 200)
+	var sb strings.Builder
+	for i := 0; i < 50; i++ {
+		sb.WriteString(fmt.Sprintf("%d\t1\tparagraph\tFont\t10\t[0,0,1,1]\t%s\n", i+1, longText))
+	}
+	if err := os.WriteFile(lineFile, []byte(sb.String()), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+	evt := LineFileGeneratedEvent{RecordID: 1, Filename: lineFile}
+
+	sample := boundedDocumentSample(evt, ProductionPlanFacts{})
+	if len(sample) == 0 {
+		t.Fatal("expected a non-empty bounded sample")
+	}
+	if len(sample) > DefaultClassifyDocumentMaxSample {
+		t.Fatalf("sample length = %d, want <= %d", len(sample), DefaultClassifyDocumentMaxSample)
+	}
+}
+
+// TestBoundedDocumentSampleReturnsEmptyOnMissingFile proves a read failure
+// degrades to an empty sample rather than aborting the request -- the
+// classifier already treats an empty/unusable sample as any other
+// unresolved tier-3 facet.
+func TestBoundedDocumentSampleReturnsEmptyOnMissingFile(t *testing.T) {
+	evt := LineFileGeneratedEvent{RecordID: 1, Filename: "/nonexistent/path/does-not-exist.txt"}
+	if sample := boundedDocumentSample(evt, ProductionPlanFacts{}); sample != "" {
+		t.Fatalf("sample = %q, want empty on read failure", sample)
+	}
+}
