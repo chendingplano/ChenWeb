@@ -228,6 +228,41 @@ func TestReviewServiceRuleApplicabilityEmitsIndeterminateOnDecisionRelevant(t *t
 	}
 }
 
+// TestReviewServiceEmitsIndeterminateFindingForIndeterminateOnlyPinnedProfile
+// proves a profile pinned with Outcome=indeterminate (P5 review 2026080302
+// finding P5-9: a profile with zero true subjects but a decision-relevant
+// indeterminate one is now pinned rather than silently absent) routes every
+// one of its rules to an explicit indeterminate finding, instead of running
+// normal rule-level applicability and assertion-pattern evaluation. The
+// rule's own applicability predicate is trivially true and a satisfying
+// assertion is available, proving the indeterminate profile-level outcome
+// -- not the rule's own gate -- is what produced the indeterminate result.
+func TestReviewServiceEmitsIndeterminateFindingForIndeterminateOnlyPinnedProfile(t *testing.T) {
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	scope := ReviewScope{
+		ReviewScopeID: "scope-1", Jurisdiction: "US", ClosedDimensions: json.RawMessage(`["display_metrics"]`),
+		SelectionSnapshot: json.RawMessage(`{"releases":[{"module_id":"m","release_id":42,"version":"0.1.0","content_checksum":"sha256:aaa"}],"selected":[{"profile_id":"p","profile_version":1,"release_id":42,"closed_dimensions":["display_metrics"],"outcome":"indeterminate"}],"evaluations":[],"status":"indeterminate"}`),
+	}
+	rule := ProfileRule{
+		ID: 9, RuleID: "r", ProfileID: "p", ProfileVersion: 1, ReleaseID: 42,
+		RuleKind: "required_assertion_pattern", Severity: "error",
+		RuleConfig: json.RawMessage(`{"dimension":"display_metrics","predicate_term_id":"x","quantifier":"exists_conforming"}`),
+		// No Applicability set: a trivial predicate is always applicable.
+	}
+	assertions := []ReviewAssertion{{AssertionID: 1, PredicateTermID: "x", Status: "accepted"}}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{rule}, assertions, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Category != ResultIndeterminate {
+		t.Fatalf("results = %#v, want one indeterminate result (profile-level indeterminacy must override the rule's own true gate and satisfying assertion)", results)
+	}
+	if len(w.findings) != 1 || w.findings[0].Category != ResultIndeterminate || w.findings[0].ProfileRuleID != 9 {
+		t.Fatalf("findings = %#v, want one indeterminate finding for the rule", w.findings)
+	}
+}
+
 // TestReviewServiceRuleApplicabilityNonDecisionRelevantIsTraceOnly proves an
 // indeterminate applicability whose profile closed dimensions do NOT intersect
 // the scope's closed dimensions stays trace-only: no result, no finding.

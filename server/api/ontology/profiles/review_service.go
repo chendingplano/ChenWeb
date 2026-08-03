@@ -136,8 +136,27 @@ func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope
 	if err != nil {
 		return nil, err
 	}
+	profileOutcomes, err := pinnedProfileOutcomes(scope)
+	if err != nil {
+		return nil, err
+	}
 	results := make([]RuleEvaluationResult, 0, len(rules))
 	for _, rule := range rules {
+		if profileOutcomes[profileKey(rule.ProfileID, rule.ProfileVersion)] == semrules.TruthIndeterminate {
+			// The rule's own profile was pinned only because it is
+			// indeterminate on a decision-relevant closed dimension for
+			// every subject (P5 review 2026080302 finding P5-9) -- the
+			// profile's membership in this scope is itself unresolved, so
+			// the rule's own applicability gate and assertion-pattern
+			// evaluation are skipped entirely rather than producing a
+			// misleadingly normal result (spec section 11).
+			result := RuleEvaluationResult{Category: ResultIndeterminate, Reason: "profile selection is indeterminate on a requested closed dimension"}
+			results = append(results, result)
+			if err := s.Findings.Persist(ctx, OntologyFinding{InputRecordID: inputRecordID, RunID: runID, ReviewRunID: reviewRunID, ScopeID: scope.ReviewScopeID, ProfileRuleID: rule.ID, Category: result.Category, Severity: rule.Severity, Title: rule.RuleID, Description: result.Reason}); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		gate, err := applicability(rule)
 		if err != nil {
 			return nil, err
@@ -374,4 +393,26 @@ func pinnedProfileClosedDimensions(scope ReviewScope) (map[string][]string, erro
 		closed[profileKey(entry.ProfileID, entry.ProfileVersion)] = entry.ClosedDimensions
 	}
 	return closed, nil
+}
+
+// pinnedProfileOutcomes reads the frozen profile/release entries from the
+// scope's selection_snapshot, keyed by profile identity, and returns each
+// profile's selection Outcome. A profile absent from the result (P4 explicit
+// scopes, and any profile pinned before the Outcome field existed) is the
+// zero value, never semrules.TruthIndeterminate, so EvaluateAndPersist falls
+// through to normal rule evaluation for it -- preserving existing behavior
+// exactly (P5 review 2026080302 finding P5-9).
+func pinnedProfileOutcomes(scope ReviewScope) (map[string]semrules.Truth, error) {
+	if len(scope.SelectionSnapshot) == 0 {
+		return map[string]semrules.Truth{}, nil
+	}
+	var snapshot SelectionSnapshot
+	if err := json.Unmarshal(scope.SelectionSnapshot, &snapshot); err != nil {
+		return nil, fmt.Errorf("selection_snapshot: %w", err)
+	}
+	outcomes := make(map[string]semrules.Truth, len(snapshot.Selected))
+	for _, entry := range snapshot.Selected {
+		outcomes[profileKey(entry.ProfileID, entry.ProfileVersion)] = entry.Outcome
+	}
+	return outcomes, nil
 }

@@ -241,6 +241,25 @@ func TestSelectMarksScopeIndeterminateWhenProfileClosedDimensionsIntersectReques
 	if len(result.Snapshot.Evaluations) != 1 || result.Snapshot.Evaluations[0].Outcome != semrules.TruthIndeterminate {
 		t.Fatalf("evaluations = %#v", result.Snapshot.Evaluations)
 	}
+	// P5 review 2026080302 finding P5-9: a profile with zero true subjects
+	// but a decision-relevant indeterminate one must still be pinned (not
+	// silently absent from SelectedProfiles/scope.SelectedProfiles) so the
+	// review step can produce an explicit indeterminate result -- spec
+	// section 11's "continue review with explicit indeterminate
+	// applicability results", not merely a scope-level status flag.
+	if len(result.Snapshot.Selected) != 1 {
+		t.Fatalf("selected = %#v, want the indeterminate-only profile pinned", result.Snapshot.Selected)
+	}
+	pinned := result.Snapshot.Selected[0]
+	if pinned.ProfileID != "p-indet" || pinned.Outcome != semrules.TruthIndeterminate {
+		t.Fatalf("pinned profile = %#v, want p-indet with Outcome=indeterminate", pinned)
+	}
+	if len(pinned.Subjects) != 1 || pinned.Subjects[0].DocumentID != 101 {
+		t.Fatalf("pinned subjects = %#v, want the indeterminate subject recorded", pinned.Subjects)
+	}
+	if len(result.SelectedProfiles) != 1 || result.SelectedProfiles[0].ProfileID != "p-indet" {
+		t.Fatalf("SelectedProfiles = %#v, want the indeterminate-only profile included (so its rules are loaded and evaluated)", result.SelectedProfiles)
+	}
 }
 
 func TestSelectKeepsStatusCompleteWhenIndeterminateClosedDimensionsDoNotIntersect(t *testing.T) {

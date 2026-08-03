@@ -73,6 +73,14 @@ type SelectedIdentity struct {
 	ProfileID      string `json:"profile_id"`
 	ProfileVersion int    `json:"profile_version"`
 	ReleaseID      int64  `json:"release_id"`
+	// Outcome distinguishes a profile pinned because it is true for at
+	// least one subject (semrules.TruthTrue) from one pinned only because
+	// it is indeterminate on a decision-relevant closed dimension for
+	// every subject (semrules.TruthIndeterminate; P5 review 2026080302
+	// finding P5-9). Absent/empty (old persisted scopes, and every scope
+	// this selector produced before the fix) is treated as True by
+	// EvaluatePinnedScope, preserving byte compatibility.
+	Outcome semrules.Truth `json:"outcome,omitempty"`
 }
 
 // SelectionResult is the frozen deterministic selection, kept strongly typed
@@ -254,6 +262,8 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 
 		var subjectsTrue []SelectionSubject
 		var trueTrace semrules.TraceNode
+		var subjectsIndeterminate []SelectionSubject
+		var indeterminateTrace semrules.TraceNode
 		for subjectIdx, subject := range subjects {
 			merged := factSnapshots[subjectIdx].Facts
 			res, err := semrules.EvaluateDocumentValidated(doc, merged)
@@ -273,11 +283,16 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 				subjectsTrue = append(subjectsTrue, subject)
 				trueTrace = res.TraceTree
 			}
-			if res.Truth == semrules.TruthIndeterminate && intersects {
-				indeterminate = true
+			if res.Truth == semrules.TruthIndeterminate {
+				subjectsIndeterminate = append(subjectsIndeterminate, subject)
+				indeterminateTrace = res.TraceTree
+				if intersects {
+					indeterminate = true
+				}
 			}
 		}
-		if len(subjectsTrue) > 0 {
+		switch {
+		case len(subjectsTrue) > 0:
 			snapshot.Selected = append(snapshot.Selected, SelectedProfile{
 				ProfileID:         profile.ProfileID,
 				ProfileVersion:    profile.Version,
@@ -288,6 +303,27 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 				PredicateChecksum: checksum,
 				Outcome:           semrules.TruthTrue,
 				Trace:             trueTrace,
+			})
+		case intersects && len(subjectsIndeterminate) > 0:
+			// Zero true subjects, but this profile is indeterminate on a
+			// closed dimension the request actually asked about: pin it
+			// anyway so it is not silently absent from SelectedProfiles --
+			// otherwise its rules never load and the scope's
+			// selection_status=indeterminate flag is the only signal an
+			// operator ever sees (P5 review 2026080302 finding P5-9).
+			// EvaluatePinnedScope routes an Outcome=indeterminate profile to
+			// an explicit indeterminate finding per rule instead of normal
+			// evaluation (spec section 11).
+			snapshot.Selected = append(snapshot.Selected, SelectedProfile{
+				ProfileID:         profile.ProfileID,
+				ProfileVersion:    profile.Version,
+				ReleaseID:         profile.ReleaseID,
+				ReleaseChecksum:   releaseChecksums[profile.ReleaseID],
+				ClosedDimensions:  profileClosed,
+				Subjects:          subjectsIndeterminate,
+				PredicateChecksum: checksum,
+				Outcome:           semrules.TruthIndeterminate,
+				Trace:             indeterminateTrace,
 			})
 		}
 	}
@@ -390,6 +426,7 @@ func selectedIdentities(selected []SelectedProfile) []SelectedIdentity {
 			ProfileID:      entry.ProfileID,
 			ProfileVersion: entry.ProfileVersion,
 			ReleaseID:      entry.ReleaseID,
+			Outcome:        entry.Outcome,
 		})
 	}
 	return identities
