@@ -413,7 +413,7 @@ func productionProcessorPhase(name string) string {
 func selectableProductionProcessorOrder() []string {
 	out := make([]string, 0, len(productionProcessorSpecs))
 	for _, spec := range productionProcessorSpecs {
-		if spec.Name == "static_analyzer" || spec.Name == "chunking" {
+		if spec.Name == "static_analyzer" || spec.Name == "chunking" || spec.Name == "classify_document" {
 			continue
 		}
 		out = append(out, spec.Name)
