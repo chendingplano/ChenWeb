@@ -614,3 +614,140 @@ func (c *countingExtractor) ExtractJSON(ctx context.Context, in llmclients.JSONE
 	*c.count++
 	return c.result, c.err
 }
+
+// TestResolveReviewFactsEnrichesWithClassification proves the review-side
+// entry point performs the same two-pass orchestration as extraction routing:
+// a decision-relevant missing tier-3 path triggers the classifier, whose
+// validated observation is persisted (only as a facet observation) and merged
+// into the returned fact set the selector evaluates against.
+func TestResolveReviewFactsEnrichesWithClassification(t *testing.T) {
+	ext := &stubExtractor{
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "product_specification", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store, VocabularyReleases: stubVocabularyReleaseStore{releaseID: 42}}
+
+	baseFacts := semrules.FactSet{
+		"review.jurisdiction": {Path: "review.jurisdiction", Value: "US", State: semrules.FactKnown},
+	}
+	predicates := []semrules.Document{
+		{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "product_specification"}},
+	}
+	enriched, err := resolver.ResolveReviewFacts(context.Background(), 11, "scope-abc", baseFacts, predicates, "sample")
+	if err != nil {
+		t.Fatalf("ResolveReviewFacts: %v", err)
+	}
+	fact, ok := enriched["document.doc_kind"]
+	if !ok || fact.State != semrules.FactKnown || fact.Value != "product_specification" {
+		t.Fatalf("enriched doc_kind fact = %#v, want product_specification", fact)
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("inserted facet observations = %d, want 1 (review-time writes only facet observations)", len(store.inserted))
+	}
+	if store.inserted[0].Method != FacetMethodClassifier {
+		t.Fatalf("inserted method = %q, want classifier", store.inserted[0].Method)
+	}
+	if store.inserted[0].VocabularyReleaseID != 42 {
+		t.Fatalf("inserted vocabulary_release_id = %d, want 42", store.inserted[0].VocabularyReleaseID)
+	}
+}
+
+// TestResolveReviewFactsSkipsTrivialPredicates proves the review entry point
+// tolerates a trivial/unconditional applicability predicate (empty expression,
+// produced by profileApplicability) alongside real ones.
+func TestResolveReviewFactsSkipsTrivialPredicates(t *testing.T) {
+	ext := &stubExtractor{
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "product_specification", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
+
+	predicates := []semrules.Document{
+		{Version: 1}, // trivial: no expression
+		{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "product_specification"}},
+	}
+	enriched, err := resolver.ResolveReviewFacts(context.Background(), 11, "scope-abc", semrules.FactSet{}, predicates, "sample")
+	if err != nil {
+		t.Fatalf("ResolveReviewFacts: %v", err)
+	}
+	fact, ok := enriched["document.doc_kind"]
+	if !ok || fact.Value != "product_specification" {
+		t.Fatalf("enriched doc_kind fact = %#v, want product_specification", fact)
+	}
+}
+
+// TestResolveReviewFactsFailurePreservesBaseFacts proves a genuine LLM
+// failure on the review side preserves indeterminate: base facts come back
+// unchanged and no facet observation is persisted.
+func TestResolveReviewFactsFailurePreservesBaseFacts(t *testing.T) {
+	ext := &stubExtractor{err: errors.New("LLM timeout")}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
+
+	baseFacts := semrules.FactSet{
+		"review.jurisdiction": {Path: "review.jurisdiction", Value: "US", State: semrules.FactKnown},
+	}
+	predicates := []semrules.Document{
+		{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "product_specification"}},
+	}
+	enriched, err := resolver.ResolveReviewFacts(context.Background(), 11, "scope-abc", baseFacts, predicates, "sample")
+	if err != nil {
+		t.Fatalf("ResolveReviewFacts: %v", err)
+	}
+	if len(enriched) != 1 {
+		t.Fatalf("facts = %#v, want base facts unchanged", enriched)
+	}
+	if _, ok := enriched["document.doc_kind"]; ok {
+		t.Fatal("doc_kind must not be added after classifier failure")
+	}
+	if len(store.inserted) != 0 {
+		t.Fatalf("inserted observations = %d, want 0 after failure", len(store.inserted))
+	}
+}
+
+// TestResolveReviewFactsIdentityIsStableAcrossRetries proves the review
+// invocation identity is keyed on the stable review-scope id, so a retry of
+// the same scope creation reuses the same invocation_id and the classifier's
+// stable-retry returns the already-persisted observation without a second
+// LLM call (at most one classifier invocation per record/review-selection-
+// attempt).
+func TestResolveReviewFactsIdentityIsStableAcrossRetries(t *testing.T) {
+	ext := &countingExtractor{
+		count: new(int),
+		result: map[string]any{
+			"classifications": []any{
+				map[string]any{"path": "document.doc_kind", "value": "product_specification", "confidence": 0.9, "evidence": "x"},
+			},
+		},
+	}
+	store := &stubFacetStore{}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: store}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: store}
+
+	predicates := []semrules.Document{
+		{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "product_specification"}},
+	}
+	// First attempt: classifier runs once.
+	if _, err := resolver.ResolveReviewFacts(context.Background(), 11, "scope-abc", semrules.FactSet{}, predicates, "sample"); err != nil {
+		t.Fatalf("ResolveReviewFacts attempt 1: %v", err)
+	}
+	// Retry of the same scope creation: the classifier's stable-retry finds
+	// the persisted invocation and does not call the LLM again.
+	if _, err := resolver.ResolveReviewFacts(context.Background(), 11, "scope-abc", semrules.FactSet{}, predicates, "sample"); err != nil {
+		t.Fatalf("ResolveReviewFacts attempt 2: %v", err)
+	}
+	if *ext.count != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (stable retry across the same scope)", *ext.count)
+	}
+}

@@ -1997,6 +1997,13 @@ func boundedDocumentSample(evt LineFileGeneratedEvent, facts ProductionPlanFacts
 	if err != nil || strings.TrimSpace(path) == "" {
 		return ""
 	}
+	return readBoundedDocumentSample(path)
+}
+
+// readBoundedDocumentSample reads a bounded prefix of an already-parsed line
+// file's extracted text content (never the raw upload). A missing/unreadable
+// file degrades to an empty sample.
+func readBoundedDocumentSample(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
 		return ""

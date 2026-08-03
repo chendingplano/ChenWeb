@@ -124,6 +124,27 @@ type Selector struct {
 	Source SelectionSource
 	Alarms SelectionAlarmWriter
 	Logger SelectionLogger
+	// Enricher (may be nil) runs the optional review-time tier-3
+	// classification pass (spec 2026080102 section 7: "optional
+	// classify_document for newly decision-relevant missing facets") for each
+	// subject, between the selector's initial profile-applicability pass and
+	// its final freeze. When nil, the selector evaluates base facts unchanged,
+	// preserving pre-classifier behaviour.
+	Enricher ReviewFactEnricher
+}
+
+// ReviewFactEnricher performs the optional tier-3 classification pass for one
+// review subject before profile applicability is evaluated. EnrichReviewFacts
+// returns the fact set the selector must evaluate profile predicates against
+// -- base facts plus any validated tier-3 observations -- so a profile whose
+// predicate needs a facet the pipeline never extracted can still be selected
+// when the document actually warrants it. Implementations must never rerun
+// extraction or Phase D, must persist only facet observations, and must invoke
+// the classifier at most once per (document, selection attempt); attemptKey is
+// the stable review-scope identity that makes that deduplication possible
+// across retries. May be nil on the Selector (see Selector.Enricher).
+type ReviewFactEnricher interface {
+	EnrichReviewFacts(ctx context.Context, subject SelectionSubject, attemptKey string, base semrules.FactSet, predicates []semrules.Document) (semrules.FactSet, error)
 }
 
 // SelectionSnapshot is the immutable selection record persisted as
@@ -239,6 +260,29 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 	subjects := buildSubjects(req.ReviewedDocumentIDs, req.TargetObjectIDs)
 	requestClosed := toSet(req.ClosedDimensions)
 
+	// profileApplicability is called once per profile up front so the per-
+	// subject enrichment pass can see every released profile predicate at once:
+	// the tier-3 classifier classifies any decision-relevant missing path any
+	// profile needs, not just the first profile's (spec section 7).
+	type profileApplicabilityInfo struct {
+		profile  Profile
+		doc      semrules.Document
+		checksum string
+		closed   []string
+	}
+	infos := make([]profileApplicabilityInfo, 0, len(released.Profiles))
+	profileDocs := make([]semrules.Document, 0, len(released.Profiles))
+	for _, profile := range released.Profiles {
+		doc, checksum, profileClosed, err := profileApplicability(profile)
+		if err != nil {
+			return SelectionResult{}, fmt.Errorf("profile %s v%d: %w", profile.ProfileID, profile.Version, err)
+		}
+		infos = append(infos, profileApplicabilityInfo{profile: profile, doc: doc, checksum: checksum, closed: profileClosed})
+		if doc.Expression.Kind != "" {
+			profileDocs = append(profileDocs, doc)
+		}
+	}
+
 	indeterminate := false
 	factSnapshots := make([]SubjectFactSnapshot, 0, len(subjects))
 	for _, subject := range subjects {
@@ -250,15 +294,23 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 		if err != nil {
 			return SelectionResult{}, fmt.Errorf("subject facts for document %d: %w", subject.DocumentID, err)
 		}
+		// Optional tier-3 pass: enrich with classifier observations before the
+		// final profile-applicability freeze. The attempt key is the stable
+		// review-scope id (not the random selection-attempt id), so the
+		// classifier's stable-retry deduplicates across retries of the same
+		// scope creation. A nil enricher leaves merged unchanged.
+		if s.Enricher != nil {
+			merged, err = s.Enricher.EnrichReviewFacts(ctx, subject, req.ReviewScopeID, merged, profileDocs)
+			if err != nil {
+				return SelectionResult{}, fmt.Errorf("subject facts for document %d: %w", subject.DocumentID, err)
+			}
+		}
 		factSnapshots = append(factSnapshots, SubjectFactSnapshot{Subject: subject, Facts: merged})
 	}
 
-	for _, profile := range released.Profiles {
-		doc, checksum, profileClosed, err := profileApplicability(profile)
-		if err != nil {
-			return SelectionResult{}, fmt.Errorf("profile %s v%d: %w", profile.ProfileID, profile.Version, err)
-		}
-		intersects := hasIntersection(toSet(profileClosed), requestClosed)
+	for _, info := range infos {
+		profile := info.profile
+		intersects := hasIntersection(toSet(info.closed), requestClosed)
 
 		var subjectsTrue []SelectionSubject
 		var trueTrace semrules.TraceNode
@@ -266,7 +318,7 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 		var indeterminateTrace semrules.TraceNode
 		for subjectIdx, subject := range subjects {
 			merged := factSnapshots[subjectIdx].Facts
-			res, err := semrules.EvaluateDocumentValidated(doc, merged)
+			res, err := semrules.EvaluateDocumentValidated(info.doc, merged)
 			if err != nil {
 				return SelectionResult{}, fmt.Errorf("profile %s v%d: %w", profile.ProfileID, profile.Version, err)
 			}
@@ -274,7 +326,7 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 				ProfileID:         profile.ProfileID,
 				ProfileVersion:    profile.Version,
 				ReleaseID:         profile.ReleaseID,
-				PredicateChecksum: checksum,
+				PredicateChecksum: info.checksum,
 				Subject:           subject,
 				Outcome:           res.Truth,
 				Trace:             res.TraceTree,
@@ -298,9 +350,9 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 				ProfileVersion:    profile.Version,
 				ReleaseID:         profile.ReleaseID,
 				ReleaseChecksum:   releaseChecksums[profile.ReleaseID],
-				ClosedDimensions:  profileClosed,
+				ClosedDimensions:  info.closed,
 				Subjects:          subjectsTrue,
-				PredicateChecksum: checksum,
+				PredicateChecksum: info.checksum,
 				Outcome:           semrules.TruthTrue,
 				Trace:             trueTrace,
 			})
@@ -319,9 +371,9 @@ func (s Selector) Select(ctx context.Context, req SelectionRequest) (SelectionRe
 				ProfileVersion:    profile.Version,
 				ReleaseID:         profile.ReleaseID,
 				ReleaseChecksum:   releaseChecksums[profile.ReleaseID],
-				ClosedDimensions:  profileClosed,
+				ClosedDimensions:  info.closed,
 				Subjects:          subjectsIndeterminate,
-				PredicateChecksum: checksum,
+				PredicateChecksum: info.checksum,
 				Outcome:           semrules.TruthIndeterminate,
 				Trace:             indeterminateTrace,
 			})

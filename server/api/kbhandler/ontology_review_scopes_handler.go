@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/profiles"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -110,7 +111,7 @@ func defaultJSONArray(raw json.RawMessage) []byte {
 	return raw
 }
 
-func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewScope, logger profiles.SelectionLogger) (profiles.ReviewScope, error) {
+func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewScope, logger ApiTypes.JimoLogger) (profiles.ReviewScope, error) {
 	db := ApiTypes.ProjectDBHandle
 	if db == nil {
 		return profiles.ReviewScope{}, errors.New("db is nil")
@@ -134,6 +135,16 @@ func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewSc
 		Source: profiles.ProfileStore{DB: db},
 		Alarms: profiles.SelectionAlarmSQLWriter{DB: db},
 		Logger: logger,
+	}
+	// Wire the optional tier-3 classification pass (spec 2026080102 section 7)
+	// when CLASSIFY_DOCUMENT_ENABLED=true. NewProductionApplicabilityResolver
+	// degrades to nil on configuration failure (logging a warning), leaving the
+	// selector to evaluate base facts -- the same opt-in behaviour as the
+	// extraction runtime (D4).
+	if docprocessing.ClassifyDocumentEnabledFromEnv() {
+		if resolver := docprocessing.NewProductionApplicabilityResolver(db, logger); resolver != nil {
+			selector.Enricher = reviewFactEnricher{resolver: resolver, db: db}
+		}
 	}
 	selection, err := selector.Select(ctx, profiles.SelectionRequest{
 		ReviewScopeID:       scope.ReviewScopeID,

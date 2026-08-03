@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 // VocabularyReleaseStore resolves the active document-authority module
@@ -56,6 +57,34 @@ type ApplicabilityResolver struct {
 	// "no resolver exists" (P5 review 2026080302 finding P5-2), same as
 	// before this field existed.
 	VocabularyReleases VocabularyReleaseStore
+}
+
+// NewProductionApplicabilityResolver builds the production tier-3 resolver
+// (real LLM classifier, SQL facet/audit stores, active release pinning) from
+// environment configuration. It degrades to a nil resolver on configuration
+// failure, logging a warning -- see buildProductionResolver. The review-scope
+// handler calls this when CLASSIFY_DOCUMENT_ENABLED is set so deterministic
+// review-profile selection can classify decision-relevant missing facets too.
+func NewProductionApplicabilityResolver(db *sql.DB, logger ApiTypes.JimoLogger) *ApplicabilityResolver {
+	return buildProductionResolver(db, logger)
+}
+
+// BoundedDocumentSampleForRecord sources the bounded classifier sample for a
+// reviewed document from its already-parsed line file (never the raw upload),
+// the same source the extraction-routing path uses. The line-file location is
+// read from kb.inputs (result/staging filename + parser name), so the review
+// path needs no event payload. A missing/unreadable line file degrades to an
+// empty sample.
+func BoundedDocumentSampleForRecord(ctx context.Context, db *sql.DB, recordID int64) string {
+	rec, err := (DocMetadataSQLStore{DB: db}).GetInputRecord(ctx, recordID)
+	if err != nil {
+		return ""
+	}
+	path, err := ResolveInputFilePath(LineFileGeneratedEvent{RecordID: recordID}, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+	if err != nil {
+		return ""
+	}
+	return readBoundedDocumentSample(path)
 }
 
 // ResolverRequest is the immutable input for one two-pass resolution.
@@ -292,4 +321,51 @@ func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, plan
 		return baseFacts, nil, err
 	}
 	return result.Facts, &result, nil
+}
+
+// ResolveReviewFacts is the review-side deterministic-selection entry point
+// (spec 2026080102 section 7: "optional classify_document for newly
+// decision-relevant missing facets"; section 6 flow "initial semrules
+// profile-applicability pass -> optional classify_document -> final semrules
+// pass and immutable review-scope freeze"). It mirrors ResolveExtractionFacts
+// but for profile applicability: base is the merged review-context + subject
+// fact set and predicates are the released profile applicability documents
+// under consideration, so decision relevance spans the whole profile set.
+//
+// scopeID is the stable review-scope identity: it becomes the decision/
+// invocation identity, so retries of the same scope creation reuse the same
+// invocation_id and the classifier's stable-retry (at most one LLM call per
+// record/review-selection-attempt) deduplicates across them. Trivial
+// predicates (empty expression, i.e. unconditional applicability) carry no
+// tier-3 references and are dropped. Review-time calls write only facet
+// observations -- the classifier never reruns extraction or Phase D.
+func (r *ApplicabilityResolver) ResolveReviewFacts(ctx context.Context, recordID int64, scopeID string, base semrules.FactSet, predicates []semrules.Document, documentSample string) (semrules.FactSet, error) {
+	// Trivial/unconditional applicability documents have no expression and so
+	// no tier-3 references; keep only the ones that can be decision-relevant.
+	relevant := make([]semrules.Document, 0, len(predicates))
+	for _, doc := range predicates {
+		if doc.Expression.Kind != "" {
+			relevant = append(relevant, doc)
+		}
+	}
+	var vocabularyReleaseID int64
+	if r.VocabularyReleases != nil {
+		if id, err := r.VocabularyReleases.ActiveDocumentAuthorityReleaseID(ctx); err == nil {
+			vocabularyReleaseID = id
+		}
+	}
+	req := ResolverRequest{
+		RecordID:            recordID,
+		DecisionAttemptID:   fmt.Sprintf("review-select-%s", scopeID),
+		InvocationID:        fmt.Sprintf("review-select-%d-%s", recordID, scopeID),
+		BaseFacts:           base,
+		Predicates:          relevant,
+		VocabularyReleaseID: vocabularyReleaseID,
+		DocumentSample:      documentSample,
+	}
+	result, err := r.Resolve(ctx, req)
+	if err != nil {
+		return base, err
+	}
+	return result.Facts, nil
 }

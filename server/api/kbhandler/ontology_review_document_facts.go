@@ -50,3 +50,20 @@ func (l reviewDocumentFactsLoader) LoadSubjectFacts(ctx context.Context, subject
 		deployment,
 	)
 }
+
+// reviewFactEnricher adapts docprocessing.ApplicabilityResolver to
+// profiles.ReviewFactEnricher so deterministic review-scope selection runs the
+// optional tier-3 classification pass (spec 2026080102 section 7: "optional
+// classify_document for newly decision-relevant missing facets"). The document
+// sample comes from the reviewed document's already-parsed line file, never
+// the raw upload; a missing line file degrades to an empty sample and the
+// classifier simply resolves nothing extra.
+type reviewFactEnricher struct {
+	resolver *docprocessing.ApplicabilityResolver
+	db       *sql.DB
+}
+
+func (e reviewFactEnricher) EnrichReviewFacts(ctx context.Context, subject profiles.SelectionSubject, attemptKey string, base semrules.FactSet, predicates []semrules.Document) (semrules.FactSet, error) {
+	sample := docprocessing.BoundedDocumentSampleForRecord(ctx, e.db, subject.DocumentID)
+	return e.resolver.ResolveReviewFacts(ctx, subject.DocumentID, attemptKey, base, predicates, sample)
+}
