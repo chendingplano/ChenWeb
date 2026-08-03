@@ -1,0 +1,268 @@
+package modules
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
+)
+
+// Proposal status closed vocabulary (spec 2026080102 section 8).
+const (
+	ProposalStatusDraft              = "draft"
+	ProposalStatusInReview           = "in_review"
+	ProposalStatusApproved           = "approved"
+	ProposalStatusIncludedInRelease  = "included_in_release"
+	ProposalStatusRejected           = "rejected"
+)
+
+// ApplicabilityProposal is one governed routing proposal carried by an
+// ontology module release. The predicate is validated through semrules
+// before the proposal can transition to approved.
+type ApplicabilityProposal struct {
+	ID                    int64           `json:"id"`
+	ModuleID              string          `json:"module_id"`
+	ReleaseID             int64           `json:"release_id"`
+	ProposalKind          string          `json:"proposal_kind"`
+	Predicate             json.RawMessage `json:"predicate"`
+	PredicateChecksum     string          `json:"predicate_checksum"`
+	Status                string          `json:"status"`
+	SourceReleaseChecksum string          `json:"source_release_checksum,omitempty"`
+	ApprovedBy            string          `json:"approved_by,omitempty"`
+	ApprovedAt            *time.Time      `json:"approved_at,omitempty"`
+	IncludedInReleaseID   *int64          `json:"included_in_release_id,omitempty"`
+	CreatedBy             string          `json:"created_by,omitempty"`
+	CreateTime            time.Time       `json:"create_time"`
+}
+
+// ProposalStore persists applicability proposals and their lifecycle
+// transitions.
+type ProposalStore struct {
+	DB *sql.DB
+}
+
+// CreateProposal inserts a new draft proposal. The predicate is validated
+// through semrules before insertion.
+func (s ProposalStore) CreateProposal(ctx context.Context, moduleID string, releaseID int64, predicate json.RawMessage, createdBy, sourceReleaseChecksum string) (ApplicabilityProposal, error) {
+	if s.DB == nil {
+		return ApplicabilityProposal{}, errors.New("db is nil")
+	}
+	if strings.TrimSpace(moduleID) == "" {
+		return ApplicabilityProposal{}, errors.New("module_id is required")
+	}
+	if releaseID <= 0 {
+		return ApplicabilityProposal{}, errors.New("release_id is required")
+	}
+	if len(predicate) == 0 {
+		return ApplicabilityProposal{}, errors.New("predicate is required")
+	}
+
+	doc, err := parsePredicateDocument(predicate)
+	if err != nil {
+		return ApplicabilityProposal{}, fmt.Errorf("invalid predicate: %w", err)
+	}
+	if err := semrules.Validate(doc); err != nil {
+		return ApplicabilityProposal{}, fmt.Errorf("predicate validation: %w", err)
+	}
+	checksum := predicateChecksum(predicate)
+
+	var proposal ApplicabilityProposal
+	err = s.DB.QueryRowContext(ctx, `
+INSERT INTO kb.ontology_applicability_proposals
+    (module_id, release_id, proposal_kind, predicate, predicate_checksum, status, source_release_checksum, created_by)
+VALUES ($1, $2, 'routing', $3::jsonb, $4, 'draft', $5, $6)
+RETURNING id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+          COALESCE(source_release_checksum, ''), COALESCE(created_by, ''), create_time`,
+		strings.TrimSpace(moduleID), releaseID, string(predicate), checksum,
+		nullIfEmptyStr(sourceReleaseChecksum), nullIfEmptyStr(createdBy),
+	).Scan(
+		&proposal.ID, &proposal.ModuleID, &proposal.ReleaseID, &proposal.ProposalKind,
+		&proposal.Predicate, &proposal.PredicateChecksum, &proposal.Status,
+		&proposal.SourceReleaseChecksum, &proposal.CreatedBy, &proposal.CreateTime,
+	)
+	return proposal, err
+}
+
+// TransitionProposal moves a proposal to the next status. Valid transitions:
+// draft -> in_review, in_review -> approved, in_review -> rejected,
+// approved -> included_in_release.
+func (s ProposalStore) TransitionProposal(ctx context.Context, id int64, targetStatus, actor string, includedInReleaseID *int64) (ApplicabilityProposal, error) {
+	if s.DB == nil {
+		return ApplicabilityProposal{}, errors.New("db is nil")
+	}
+	if id <= 0 {
+		return ApplicabilityProposal{}, errors.New("id is required")
+	}
+
+	current, err := s.GetProposal(ctx, id)
+	if err != nil {
+		return ApplicabilityProposal{}, err
+	}
+	if !validProposalTransition(current.Status, targetStatus) {
+		return ApplicabilityProposal{}, fmt.Errorf("invalid transition from %q to %q", current.Status, targetStatus)
+	}
+
+	var approvedBy any
+	var approvedAt any
+	var includedRelease any
+	if targetStatus == ProposalStatusApproved {
+		if strings.TrimSpace(actor) == "" {
+			return ApplicabilityProposal{}, errors.New("actor is required for approval")
+		}
+		approvedBy = actor
+		approvedAt = time.Now()
+	}
+	if targetStatus == ProposalStatusIncludedInRelease {
+		if includedInReleaseID == nil || *includedInReleaseID <= 0 {
+			return ApplicabilityProposal{}, errors.New("included_in_release_id is required")
+		}
+		includedRelease = *includedInReleaseID
+	}
+
+	var proposal ApplicabilityProposal
+	var approvedAtScan sql.NullTime
+	var includedReleaseScan sql.NullInt64
+	err = s.DB.QueryRowContext(ctx, `
+UPDATE kb.ontology_applicability_proposals
+SET status = $2, approved_by = COALESCE($3, approved_by), approved_at = COALESCE($4, approved_at),
+    included_in_release_id = COALESCE($5, included_in_release_id), modify_time = NOW()
+WHERE id = $1
+RETURNING id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+          COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
+          included_in_release_id, COALESCE(created_by, ''), create_time`,
+		id, targetStatus, approvedBy, approvedAt, includedRelease,
+	).Scan(
+		&proposal.ID, &proposal.ModuleID, &proposal.ReleaseID, &proposal.ProposalKind,
+		&proposal.Predicate, &proposal.PredicateChecksum, &proposal.Status,
+		&proposal.SourceReleaseChecksum, &proposal.ApprovedBy, &approvedAtScan,
+		&includedReleaseScan, &proposal.CreatedBy, &proposal.CreateTime,
+	)
+	if err != nil {
+		return ApplicabilityProposal{}, err
+	}
+	if approvedAtScan.Valid {
+		t := approvedAtScan.Time
+		proposal.ApprovedAt = &t
+	}
+	if includedReleaseScan.Valid {
+		v := includedReleaseScan.Int64
+		proposal.IncludedInReleaseID = &v
+	}
+	return proposal, nil
+}
+
+// GetProposal reads one proposal by id.
+func (s ProposalStore) GetProposal(ctx context.Context, id int64) (ApplicabilityProposal, error) {
+	if s.DB == nil {
+		return ApplicabilityProposal{}, errors.New("db is nil")
+	}
+	var proposal ApplicabilityProposal
+	var approvedAt sql.NullTime
+	var includedRelease sql.NullInt64
+	err := s.DB.QueryRowContext(ctx, `
+SELECT id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+       COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
+       included_in_release_id, COALESCE(created_by, ''), create_time
+FROM kb.ontology_applicability_proposals WHERE id = $1`, id,
+	).Scan(
+		&proposal.ID, &proposal.ModuleID, &proposal.ReleaseID, &proposal.ProposalKind,
+		&proposal.Predicate, &proposal.PredicateChecksum, &proposal.Status,
+		&proposal.SourceReleaseChecksum, &proposal.ApprovedBy, &approvedAt,
+		&includedRelease, &proposal.CreatedBy, &proposal.CreateTime,
+	)
+	if err != nil {
+		return ApplicabilityProposal{}, err
+	}
+	if approvedAt.Valid {
+		t := approvedAt.Time
+		proposal.ApprovedAt = &t
+	}
+	if includedRelease.Valid {
+		v := includedRelease.Int64
+		proposal.IncludedInReleaseID = &v
+	}
+	return proposal, nil
+}
+
+// ListApprovedProposals returns all approved proposals for a given release,
+// used by H2's draft-policy promotion.
+func (s ProposalStore) ListApprovedProposals(ctx context.Context, releaseID int64) ([]ApplicabilityProposal, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+       COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
+       included_in_release_id, COALESCE(created_by, ''), create_time
+FROM kb.ontology_applicability_proposals
+WHERE release_id = $1 AND status IN ($2, $3)
+ORDER BY id`, releaseID, ProposalStatusApproved, ProposalStatusIncludedInRelease)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var proposals []ApplicabilityProposal
+	for rows.Next() {
+		var p ApplicabilityProposal
+		var approvedAt sql.NullTime
+		var includedRelease sql.NullInt64
+		if err := rows.Scan(
+			&p.ID, &p.ModuleID, &p.ReleaseID, &p.ProposalKind,
+			&p.Predicate, &p.PredicateChecksum, &p.Status,
+			&p.SourceReleaseChecksum, &p.ApprovedBy, &approvedAt,
+			&includedRelease, &p.CreatedBy, &p.CreateTime,
+		); err != nil {
+			return nil, err
+		}
+		if approvedAt.Valid {
+			t := approvedAt.Time
+			p.ApprovedAt = &t
+		}
+		if includedRelease.Valid {
+			v := includedRelease.Int64
+			p.IncludedInReleaseID = &v
+		}
+		proposals = append(proposals, p)
+	}
+	return proposals, rows.Err()
+}
+
+func validProposalTransition(from, to string) bool {
+	switch from {
+	case ProposalStatusDraft:
+		return to == ProposalStatusInReview
+	case ProposalStatusInReview:
+		return to == ProposalStatusApproved || to == ProposalStatusRejected
+	case ProposalStatusApproved:
+		return to == ProposalStatusIncludedInRelease
+	}
+	return false
+}
+
+func parsePredicateDocument(raw json.RawMessage) (semrules.Document, error) {
+	var doc semrules.Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return doc, err
+	}
+	return doc, nil
+}
+
+func predicateChecksum(raw json.RawMessage) string {
+	h := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(h[:])
+}
+
+func nullIfEmptyStr(s string) any {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return s
+}
