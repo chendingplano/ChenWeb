@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -23,7 +24,10 @@ func TestValidProposalTransitions(t *testing.T) {
 		{ProposalStatusInReview, ProposalStatusApproved, true},
 		{ProposalStatusInReview, ProposalStatusRejected, true},
 		{ProposalStatusInReview, ProposalStatusDraft, false},
-		{ProposalStatusApproved, ProposalStatusIncludedInRelease, true},
+		// approved has no manual outgoing transition: inclusion in a release
+		// is a release-transaction consequence (P5 review 2026080302 finding
+		// P5-17), never an HTTP call with a caller-supplied release id.
+		{ProposalStatusApproved, ProposalStatusIncludedInRelease, false},
 		{ProposalStatusApproved, ProposalStatusRejected, false},
 		{ProposalStatusRejected, ProposalStatusDraft, false},
 		{ProposalStatusIncludedInRelease, ProposalStatusApproved, false},
@@ -158,9 +162,97 @@ func TestTransitionProposalRequiresActorForApproval(t *testing.T) {
 	// This test verifies the validation logic without a real DB.
 	// The actual DB interaction is tested in live validation (I2).
 	store := ProposalStore{}
-	_, err := store.TransitionProposal(nil, 0, ProposalStatusApproved, "", nil)
+	_, err := store.TransitionProposal(nil, 0, ProposalStatusApproved, "")
 	if err == nil {
 		t.Fatal("expected error for zero id")
+	}
+}
+
+// TestTransitionProposalConcurrentTransitionConflict proves the TOCTOU guard
+// (P5 review 2026080302 finding P5-17): the UPDATE is guarded by the expected
+// current status, so a concurrent transition that moved the proposal first
+// surfaces a conflict (zero rows updated) instead of silently overwriting the
+// winner's status.
+func TestTransitionProposalConcurrentTransitionConflict(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	createTime := time.Now()
+	// GetProposal reads the current status as 'draft'.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+       COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
+       included_in_release_id, COALESCE(created_by, ''), create_time
+FROM kb.ontology_applicability_proposals WHERE id = $1`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "module_id", "release_id", "proposal_kind", "predicate", "predicate_checksum",
+			"status", "source_release_checksum", "approved_by", "approved_at",
+			"included_in_release_id", "created_by", "create_time",
+		}).AddRow(int64(7), "vent", int64(42), "routing", []byte(`{"version":1}`), "abc",
+			"draft", "", "", nil, nil, "alice", createTime))
+	// A concurrent transaction already transitioned it, so the guarded UPDATE
+	// matches zero rows (RETURNING yields no row).
+	mock.ExpectQuery(regexp.QuoteMeta(`UPDATE kb.ontology_applicability_proposals`)).
+		WithArgs(int64(7), "in_review", nil, nil, "draft").
+		WillReturnError(sql.ErrNoRows)
+
+	store := ProposalStore{DB: db}
+	_, err = store.TransitionProposal(context.Background(), 7, ProposalStatusInReview, "alice")
+	if err == nil {
+		t.Fatal("expected a conflict error when a concurrent transition moved the proposal")
+	}
+	if !strings.Contains(err.Error(), "concurrent transition") {
+		t.Fatalf("error = %v, want concurrent-transition conflict", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTransitionProposalSucceedsWithExpectedStatus proves a guarded transition
+// succeeds when the row is still in the expected status, returning the updated
+// proposal.
+func TestTransitionProposalSucceedsWithExpectedStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	createTime := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
+       COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
+       included_in_release_id, COALESCE(created_by, ''), create_time
+FROM kb.ontology_applicability_proposals WHERE id = $1`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "module_id", "release_id", "proposal_kind", "predicate", "predicate_checksum",
+			"status", "source_release_checksum", "approved_by", "approved_at",
+			"included_in_release_id", "created_by", "create_time",
+		}).AddRow(int64(7), "vent", int64(42), "routing", []byte(`{"version":1}`), "abc",
+			"draft", "", "", nil, nil, "alice", createTime))
+	mock.ExpectQuery(regexp.QuoteMeta(`UPDATE kb.ontology_applicability_proposals`)).
+		WithArgs(int64(7), "in_review", nil, nil, "draft").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "module_id", "release_id", "proposal_kind", "predicate", "predicate_checksum",
+			"status", "source_release_checksum", "approved_by", "approved_at",
+			"included_in_release_id", "created_by", "create_time",
+		}).AddRow(int64(7), "vent", int64(42), "routing", []byte(`{"version":1}`), "abc",
+			"in_review", "", "", nil, nil, "alice", createTime))
+
+	store := ProposalStore{DB: db}
+	proposal, err := store.TransitionProposal(context.Background(), 7, ProposalStatusInReview, "alice")
+	if err != nil {
+		t.Fatalf("TransitionProposal: %v", err)
+	}
+	if proposal.Status != ProposalStatusInReview {
+		t.Fatalf("status = %q, want in_review", proposal.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

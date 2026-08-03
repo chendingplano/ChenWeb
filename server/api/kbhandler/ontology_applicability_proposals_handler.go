@@ -77,8 +77,7 @@ func GetApplicabilityProposal(c echo.Context) error {
 }
 
 type transitionProposalRequest struct {
-	Status              string `json:"status"`
-	IncludedInReleaseID *int64 `json:"included_in_release_id,omitempty"`
+	Status string `json:"status"`
 }
 
 // TransitionApplicabilityProposal transitions a proposal's status.
@@ -105,7 +104,7 @@ func TransitionApplicabilityProposal(c echo.Context) error {
 
 	store := newProposalStore()
 	proposal, err := store.TransitionProposal(
-		c.Request().Context(), id, request.Status, user.UserName, request.IncludedInReleaseID,
+		c.Request().Context(), id, request.Status, user.UserName,
 	)
 	if err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"status": false, "error": err.Error()})

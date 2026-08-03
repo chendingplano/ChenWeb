@@ -71,6 +71,35 @@ func TestActivateCallsPromoteHookInsideTransaction(t *testing.T) {
 	}
 }
 
+// TestMarkApprovedProposalsIncluded proves the release transaction marks only
+// the module's approved proposals as included_in_release, keyed on module and
+// approved status -- a proposal can never claim a release that did not carry
+// it (P5 review 2026080302 finding P5-17), and there is no manual
+// approved -> included_in_release HTTP transition anymore.
+func TestMarkApprovedProposalsIncluded(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_applicability_proposals`)).
+		WithArgs(int64(99), "ventilator").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	if err := markApprovedProposalsIncluded(context.Background(), tx, "ventilator", 99); err != nil {
+		t.Fatalf("markApprovedProposalsIncluded: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestActivateRollsBackWhenPromoteFails proves a promotion failure rolls the
 // activation transaction back instead of leaving the release activated without
 // its draft policy.

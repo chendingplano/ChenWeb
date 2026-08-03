@@ -97,9 +97,17 @@ RETURNING id, module_id, release_id, proposal_kind, predicate, predicate_checksu
 }
 
 // TransitionProposal moves a proposal to the next status. Valid transitions:
-// draft -> in_review, in_review -> approved, in_review -> rejected,
-// approved -> included_in_release.
-func (s ProposalStore) TransitionProposal(ctx context.Context, id int64, targetStatus, actor string, includedInReleaseID *int64) (ApplicabilityProposal, error) {
+// draft -> in_review, in_review -> approved, in_review -> rejected.
+// approved -> included_in_release is NOT a manual transition: a proposal is
+// included only as a consequence of the module release transaction that
+// carries it (P5 review 2026080302 finding P5-17), so a caller-supplied
+// release id can never claim inclusion in a release that does not contain it.
+//
+// The update is guarded by the expected current status, so a concurrent double
+// transition cannot both succeed: only the transaction whose UPDATE matches
+// the row at that status wins, and the loser surfaces a conflict instead of
+// silently overwriting the winner's status.
+func (s ProposalStore) TransitionProposal(ctx context.Context, id int64, targetStatus, actor string) (ApplicabilityProposal, error) {
 	if s.DB == nil {
 		return ApplicabilityProposal{}, errors.New("db is nil")
 	}
@@ -117,19 +125,12 @@ func (s ProposalStore) TransitionProposal(ctx context.Context, id int64, targetS
 
 	var approvedBy any
 	var approvedAt any
-	var includedRelease any
 	if targetStatus == ProposalStatusApproved {
 		if strings.TrimSpace(actor) == "" {
 			return ApplicabilityProposal{}, errors.New("actor is required for approval")
 		}
 		approvedBy = actor
 		approvedAt = time.Now()
-	}
-	if targetStatus == ProposalStatusIncludedInRelease {
-		if includedInReleaseID == nil || *includedInReleaseID <= 0 {
-			return ApplicabilityProposal{}, errors.New("included_in_release_id is required")
-		}
-		includedRelease = *includedInReleaseID
 	}
 
 	var proposal ApplicabilityProposal
@@ -138,18 +139,24 @@ func (s ProposalStore) TransitionProposal(ctx context.Context, id int64, targetS
 	err = s.DB.QueryRowContext(ctx, `
 UPDATE kb.ontology_applicability_proposals
 SET status = $2, approved_by = COALESCE($3, approved_by), approved_at = COALESCE($4, approved_at),
-    included_in_release_id = COALESCE($5, included_in_release_id), modify_time = NOW()
-WHERE id = $1
+    modify_time = NOW()
+WHERE id = $1 AND status = $5
 RETURNING id, module_id, release_id, proposal_kind, predicate, predicate_checksum, status,
           COALESCE(source_release_checksum, ''), COALESCE(approved_by, ''), approved_at,
           included_in_release_id, COALESCE(created_by, ''), create_time`,
-		id, targetStatus, approvedBy, approvedAt, includedRelease,
+		id, targetStatus, approvedBy, approvedAt, current.Status,
 	).Scan(
 		&proposal.ID, &proposal.ModuleID, &proposal.ReleaseID, &proposal.ProposalKind,
 		&proposal.Predicate, &proposal.PredicateChecksum, &proposal.Status,
 		&proposal.SourceReleaseChecksum, &proposal.ApprovedBy, &approvedAtScan,
 		&includedReleaseScan, &proposal.CreatedBy, &proposal.CreateTime,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The row no longer matched `status = $expected`: a concurrent
+		// transition already moved it. Treat that as a conflict rather than
+		// overwriting the winner's status (P5 review 2026080302 finding P5-17).
+		return ApplicabilityProposal{}, fmt.Errorf("proposal %d is not in status %q (concurrent transition?)", id, current.Status)
+	}
 	if err != nil {
 		return ApplicabilityProposal{}, err
 	}
@@ -305,7 +312,10 @@ func validProposalTransition(from, to string) bool {
 	case ProposalStatusInReview:
 		return to == ProposalStatusApproved || to == ProposalStatusRejected
 	case ProposalStatusApproved:
-		return to == ProposalStatusIncludedInRelease
+		// No manual transition out of approved: inclusion in a release is a
+		// consequence of the release transaction, not an HTTP call (P5 review
+		// 2026080302 finding P5-17).
+		return false
 	}
 	return false
 }

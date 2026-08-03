@@ -170,10 +170,36 @@ WHERE module_id = $2 AND id <> $1 AND superseded_by_release_id IS NULL`,
 		}
 	}
 
+	// Approved proposals of this module become included_in_release as a
+	// consequence of the release transaction, not a manual HTTP transition
+	// (P5 review 2026080302 finding P5-17): a proposal can never claim a
+	// release that did not carry it. This runs on the same tx so it commits or
+	// rolls back with the release.
+	if err := markApprovedProposalsIncluded(ctx, tx, strings.TrimSpace(moduleID), releaseID); err != nil {
+		return Release{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return Release{}, err
 	}
 	return s.GetReleaseByID(ctx, releaseID)
+}
+
+// markApprovedProposalsIncluded marks a module's approved proposals as
+// included in the given release, inside the release transaction. This is the
+// ONLY path that activates an approved proposal: a proposal can never claim a
+// release that did not carry it (P5 review 2026080302 finding P5-17), so there
+// is no manual approved -> included_in_release HTTP transition.
+func markApprovedProposalsIncluded(ctx context.Context, tx *sql.Tx, moduleID string, releaseID int64) error {
+	_, err := tx.ExecContext(ctx, `
+UPDATE kb.ontology_applicability_proposals
+SET status = 'included_in_release', included_in_release_id = $1, modify_time = NOW()
+WHERE module_id = $2 AND status = 'approved'`,
+		releaseID, moduleID)
+	if err != nil {
+		return fmt.Errorf("mark approved proposals included: %w", err)
+	}
+	return nil
 }
 
 func snapTitle(snap snapshot) string {
