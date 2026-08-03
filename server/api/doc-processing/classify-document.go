@@ -7,12 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // ClassifyDocumentName is the canonical processor name for the mandatory-gated
@@ -455,14 +460,14 @@ func LoadClassifyDocumentPrompt() (promptText, promptRef, promptPath string, err
 }
 
 // NewDocumentClassifier builds a classifier with the versioned prompt and
-// the supplied dependencies. modelName defaults to the
-// CLASSIFY_DOCUMENT_MODEL_NAME environment variable when empty.
-func NewDocumentClassifier(extractor LLMJSONExtractor, facets FacetObservationStore, audit policyaudit.Writer, vocabulary GovernedVocabulary) (*DocumentClassifier, error) {
+// the supplied dependencies. Callers resolve modelName themselves (see
+// newProductionDocumentClassifier) since it and the extractor's credentials
+// come from the same model-config lookup.
+func NewDocumentClassifier(extractor LLMJSONExtractor, modelName string, facets FacetObservationStore, audit policyaudit.Writer, vocabulary GovernedVocabulary) (*DocumentClassifier, error) {
 	promptText, promptRef, promptPath, err := LoadClassifyDocumentPrompt()
 	if err != nil {
 		return nil, fmt.Errorf("classify_document: load prompt: %w", err)
 	}
-	modelName := envString("CLASSIFY_DOCUMENT_MODEL_NAME", "deepseek-chat")
 	return &DocumentClassifier{
 		Extractor:  extractor,
 		PromptText: promptText,
@@ -473,4 +478,58 @@ func NewDocumentClassifier(extractor LLMJSONExtractor, facets FacetObservationSt
 		Facets:     facets,
 		Audit:      audit,
 	}, nil
+}
+
+// ClassifyDocumentEnabledFromEnv resolves the CLASSIFY_DOCUMENT_ENABLED
+// setting. Unset (or any value that does not parse as a boolean true)
+// resolves to disabled -- D4's documented default of 'false' (P5 review
+// 2026080302 finding P5-2).
+func ClassifyDocumentEnabledFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("CLASSIFY_DOCUMENT_ENABLED"))
+	if raw == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(raw)
+	return err == nil && enabled
+}
+
+// DefaultGovernedVocabulary is the pinned, statically-declared allowed-value
+// set for the document-authority tier-3 fact paths (spec 2026080102 section
+// 7: "no dynamic vocabulary resolution" is documented future work). These
+// values match the terminology used across the P0 benchmark corpus.
+func DefaultGovernedVocabulary() GovernedVocabulary {
+	return GovernedVocabulary{
+		Paths: map[string][]string{
+			"document.doc_kind":         {"product_specification", "regulated_reference", "narrative_research", "test_report"},
+			"document.domain":           {"medical_devices", "pharmaceuticals", "industrial_equipment"},
+			"document.normative_status": {"mandatory", "recommended", "informative"},
+			"document.jurisdiction":     {"CN", "US", "EU", "ISO"},
+		},
+	}
+}
+
+// newProductionDocumentClassifier builds the real, network-backed
+// DocumentClassifier from environment configuration. CLASSIFY_DOCUMENT_MODEL_NAME
+// must name a model ref present in MODEL_DEF_FILE -- the same convention
+// every other production LLM extractor in this package uses (e.g.
+// newLLMCategoryCreator in artifact_category_wiring.go), so the classifier's
+// APIKey/BaseURL come from a real model profile instead of an invented
+// bare-model-name default with no credential story.
+func newProductionDocumentClassifier(facets FacetObservationStore, audit policyaudit.Writer) (*DocumentClassifier, error) {
+	_, _, modelCfg, err := loadModelConfigFromEnvKeys([]string{"CLASSIFY_DOCUMENT_MODEL_NAME"}, "MODEL_DEF_FILE")
+	if err != nil {
+		return nil, err
+	}
+	timeoutSec := modelCfg.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 100
+	}
+	extractor := &llmclients.OpenAIJSONClient{
+		HTTPClient:  &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+		ModelName:   modelCfg.ModelName,
+		APIKey:      modelCfg.APIKey,
+		BaseURL:     modelCfg.BaseURL,
+		ProfileName: modelCfg.ProfileName,
+	}
+	return NewDocumentClassifier(extractor, modelCfg.ModelName, facets, audit, DefaultGovernedVocabulary())
 }

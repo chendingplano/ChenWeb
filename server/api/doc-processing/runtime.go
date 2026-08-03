@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -93,6 +94,30 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 // failure is returned instead of warned, so NewProductionRuntime fails
 // construction rather than starting in a silently degraded state (P5
 // review 2026080302 finding P5-11).
+// buildProductionResolver constructs the tier-3 applicability resolver from
+// production dependencies (spec 2026080102 section 7). It is nil-safe: a
+// configuration failure (missing model config, missing prompt) logs a warning
+// and returns nil, so routing degrades to today's behaviour instead of failing
+// the whole runtime -- the same graceful-degrade convention newMetricCategoryResolver
+// uses for the LLM category creator. The governing document-authority release
+// id is resolved lazily per record via VocabularyReleases, not at construction.
+func buildProductionResolver(db *sql.DB, logger ApiTypes.JimoLogger) *ApplicabilityResolver {
+	classifier, err := newProductionDocumentClassifier(SQLStore{DB: db}, policyaudit.SQLStore{DB: db})
+	if err != nil {
+		if logger != nil {
+			logger.Warn("classify_document: tier-3 classifier unavailable; routing proceeds without classification",
+				"env", "CLASSIFY_DOCUMENT_MODEL_NAME/MODEL_DEF_FILE",
+				"error", err.Error())
+		}
+		return nil
+	}
+	return &ApplicabilityResolver{
+		Classifier:         classifier,
+		Facets:             SQLStore{DB: db},
+		VocabularyReleases: VocabularyReleaseSQLStore{DB: db},
+	}
+}
+
 func loadProductionPipelinePolicyState(ctx context.Context, logger ApiTypes.JimoLogger, registry PipelineRegistryStore, bindings PipelineBindingStore, gates PipelineGateStore) error {
 	if err := LoadProductionPipelineRegistry(ctx, registry); err != nil && logger != nil {
 		logger.Warn("failed to load authored pipeline registry, using legacy-equivalent fallback", "error", err)
@@ -169,6 +194,14 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 		}
 	}
 	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	// The tier-3 applicability resolver is opt-in (D4: CLASSIFY_DOCUMENT_ENABLED
+	// defaults to false). When disabled the ControlService carries no Resolver,
+	// keeping behaviour byte-identical to the pre-classifier runtime; when
+	// enabled, buildProductionResolver degrades to nil on config failure rather
+	// than failing construction.
+	if ClassifyDocumentEnabledFromEnv() {
+		control.Resolver = buildProductionResolver(ApiTypes.ProjectDBHandle, logger)
+	}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err

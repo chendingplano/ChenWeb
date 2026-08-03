@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -583,5 +585,88 @@ func TestClassifyDocumentPersistedObservationShape(t *testing.T) {
 	}
 	if !strings.HasPrefix(obs.SourceFingerprint, "sha256:") {
 		t.Fatalf("source_fingerprint = %q, want sha256: prefix", obs.SourceFingerprint)
+	}
+}
+
+func TestClassifyDocumentEnabledFromEnvDefaultsFalse(t *testing.T) {
+	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "")
+	if ClassifyDocumentEnabledFromEnv() {
+		t.Fatal("expected disabled by default")
+	}
+}
+
+func TestClassifyDocumentEnabledFromEnvTrue(t *testing.T) {
+	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "true")
+	if !ClassifyDocumentEnabledFromEnv() {
+		t.Fatal("expected enabled when set to true")
+	}
+}
+
+func TestClassifyDocumentEnabledFromEnvInvalidIsDisabled(t *testing.T) {
+	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "not-a-bool")
+	if ClassifyDocumentEnabledFromEnv() {
+		t.Fatal("expected disabled for an unparseable value")
+	}
+}
+
+// TestNewProductionDocumentClassifierBuildsFromModelDefFile proves the
+// production constructor resolves its LLM client credentials the same way
+// every other real extractor in this package does (loadModelConfigFromEnvKeys
+// against MODEL_DEF_FILE), rather than the placeholder bare-model-name
+// default the earlier draft used with no corresponding APIKey/BaseURL.
+func TestNewProductionDocumentClassifierBuildsFromModelDefFile(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[classify-document-model]
+host = "cloud"
+model_name = "deepseek-chat"
+api_key = "sk-test-classify"
+base_url = "https://api.deepseek.com"
+timeout_sec = 45
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+	promptPath := filepath.Join(tmp, "prompt-classify-document-v1.md")
+	if err := os.WriteFile(promptPath, []byte("classify the document's governed attributes"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	t.Setenv("PROMPT_DIR", tmp)
+	t.Setenv("MODEL_DEF_FILE", modelsPath)
+	t.Setenv("CLASSIFY_DOCUMENT_MODEL_NAME", "classify-document-model")
+
+	classifier, err := newProductionDocumentClassifier(nil, nil)
+	if err != nil {
+		t.Fatalf("newProductionDocumentClassifier: %v", err)
+	}
+	if classifier.ModelName != "deepseek-chat" {
+		t.Fatalf("model name = %q, want deepseek-chat", classifier.ModelName)
+	}
+	client, ok := classifier.Extractor.(*llmclients.OpenAIJSONClient)
+	if !ok {
+		t.Fatalf("extractor type = %T, want *llmclients.OpenAIJSONClient", classifier.Extractor)
+	}
+	if client.APIKey != "sk-test-classify" {
+		t.Fatalf("api key = %q, want sk-test-classify", client.APIKey)
+	}
+	if client.BaseURL != "https://api.deepseek.com" {
+		t.Fatalf("base url = %q, want https://api.deepseek.com", client.BaseURL)
+	}
+	if classifier.PromptText == "" {
+		t.Fatal("expected the versioned prompt to be loaded")
+	}
+	if len(classifier.Vocabulary.Paths) == 0 {
+		t.Fatal("expected the default governed vocabulary to be set")
+	}
+}
+
+// TestNewProductionDocumentClassifierMissingModelConfigReturnsError proves
+// a missing/unconfigured CLASSIFY_DOCUMENT_MODEL_NAME fails loudly rather
+// than silently building a client with empty credentials.
+func TestNewProductionDocumentClassifierMissingModelConfigReturnsError(t *testing.T) {
+	t.Setenv("CLASSIFY_DOCUMENT_MODEL_NAME", "")
+	if _, err := newProductionDocumentClassifier(nil, nil); err == nil {
+		t.Fatal("expected an error when CLASSIFY_DOCUMENT_MODEL_NAME is unset")
 	}
 }
