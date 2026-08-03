@@ -11,37 +11,71 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestPolicyPromotionStoreNilDB(t *testing.T) {
+// beginPromotionTx opens a sqlmock-backed transaction. sqlmock matches
+// transaction lifecycle expectations explicitly, so every test that needs a
+// *sql.Tx must declare ExpectBegin.
+func beginPromotionTx(t *testing.T) (*sql.DB, sqlmock.Sqlmock, *sql.Tx) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	return db, mock, tx
+}
+
+func TestPolicyPromotionStoreNilTx(t *testing.T) {
 	store := PolicyPromotionStore{}
-	_, err := store.EnsureDraftFromModuleRelease(context.Background(), 1, "checksum", nil)
+	_, err := store.EnsureDraftFromModuleRelease(context.Background(), nil, 1, "checksum", nil)
 	if err == nil {
-		t.Fatal("expected error for nil DB")
+		t.Fatal("expected error for nil tx")
 	}
 }
 
 func TestPolicyPromotionStoreRequiresReleaseID(t *testing.T) {
-	store := PolicyPromotionStore{DB: &sql.DB{}}
-	_, err := store.EnsureDraftFromModuleRelease(context.Background(), 0, "checksum", nil)
+	_, _, tx := beginPromotionTx(t)
+	store := PolicyPromotionStore{}
+	_, err := store.EnsureDraftFromModuleRelease(context.Background(), tx, 0, "checksum", nil)
 	if err == nil {
 		t.Fatal("expected error for zero release_id")
 	}
 }
 
 func TestPolicyPromotionStoreRequiresChecksum(t *testing.T) {
-	store := PolicyPromotionStore{DB: &sql.DB{}}
-	_, err := store.EnsureDraftFromModuleRelease(context.Background(), 1, "", nil)
+	_, _, tx := beginPromotionTx(t)
+	store := PolicyPromotionStore{}
+	_, err := store.EnsureDraftFromModuleRelease(context.Background(), tx, 1, "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty checksum")
 	}
 }
 
-func TestPromoteModuleReleaseProposalsNilPromoter(t *testing.T) {
-	policyID, err := PromoteModuleReleaseProposals(context.Background(), nil, nil, 1, "checksum")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if policyID != 0 {
-		t.Fatalf("expected 0 policy_id for nil promoter, got %d", policyID)
+func TestPromoteModuleReleaseProposalsNilPromoterOrLister(t *testing.T) {
+	_, _, tx := beginPromotionTx(t)
+	// Nil promoter and nil lister must both be optional, never a panic (P5
+	// review 2026080302 finding P5-10's nil-lister panic).
+	for _, tc := range []struct {
+		name     string
+		promoter DraftPolicyPromoter
+		lister   ApprovedProposalLister
+	}{
+		{"nil promoter", nil, nil},
+		{"nil lister", PolicyPromotionStore{}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policyID, err := PromoteModuleReleaseProposals(context.Background(), tx, tc.promoter, tc.lister, 1, "checksum")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if policyID != 0 {
+				t.Fatalf("expected 0 policy_id, got %d", policyID)
+			}
+		})
 	}
 }
 
@@ -69,15 +103,11 @@ func TestPolicyPromotionStoreImplementsInterface(t *testing.T) {
 }
 
 func TestPolicyCompileFailureLeavesActiveUntouched(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
+	_, mock, tx := beginPromotionTx(t)
 
-	store := PolicyPromotionStore{DB: db}
+	store := PolicyPromotionStore{}
 
-	// Idempotency check: no existing draft for this release.
+	// Idempotency check: no existing policy for this release.
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
 		WillReturnError(sql.ErrNoRows)
 
@@ -90,7 +120,7 @@ func TestPolicyCompileFailureLeavesActiveUntouched(t *testing.T) {
 		WillReturnError(fmt.Errorf("connection refused"))
 
 	policyID, err := store.EnsureDraftFromModuleRelease(
-		context.Background(), 1, "checksum-abc", nil,
+		context.Background(), tx, 1, "checksum-abc", nil,
 	)
 	if err == nil {
 		t.Fatal("expected error when INSERT draft policy fails")
@@ -105,13 +135,9 @@ func TestPolicyCompileFailureLeavesActiveUntouched(t *testing.T) {
 }
 
 func TestPolicyActivationFailureRollback(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
+	_, mock, tx := beginPromotionTx(t)
 
-	store := PolicyPromotionStore{DB: db}
+	store := PolicyPromotionStore{}
 
 	proposals := []PromotedProposal{
 		{
@@ -121,7 +147,7 @@ func TestPolicyActivationFailureRollback(t *testing.T) {
 		},
 	}
 
-	// Idempotency check: no existing draft.
+	// Idempotency check: no existing policy.
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
 		WillReturnError(sql.ErrNoRows)
 
@@ -147,7 +173,7 @@ func TestPolicyActivationFailureRollback(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	policyID, err := store.EnsureDraftFromModuleRelease(
-		context.Background(), 1, "checksum-xyz", proposals,
+		context.Background(), tx, 1, "checksum-xyz", proposals,
 	)
 	if err != nil {
 		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
@@ -162,5 +188,88 @@ func TestPolicyActivationFailureRollback(t *testing.T) {
 	// status='active') were executed.
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected queries (activation should not occur): %v", err)
+	}
+}
+
+// TestPromotionIdempotentAcrossDraftAndActivatedStates proves the idempotency
+// key matches a policy in ANY state for the same source release, not just a
+// draft (P5 review 2026080302 finding P5-10's wrong idempotency key): after a
+// release is activated its draft became active, and re-promoting must return
+// the existing policy without minting a duplicate version.
+func TestPromotionIdempotentAcrossDraftAndActivatedStates(t *testing.T) {
+	_, mock, tx := beginPromotionTx(t)
+
+	// An existing policy (any status) for this release's source_ref.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+		WithArgs("module_release:1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(55)))
+
+	policyID, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
+		context.Background(), tx, 1, "checksum-xyz", []PromotedProposal{{ProposalID: 7, Predicate: json.RawMessage(`{}`), PredicateChecksum: "c"}},
+	)
+	if err != nil {
+		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
+	}
+	if policyID != 55 {
+		t.Fatalf("policyID=%d want existing 55", policyID)
+	}
+	// No INSERT/version query may have been issued.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected queries (idempotent hit must issue no inserts): %v", err)
+	}
+}
+
+// TestPromotionCreatesDistinctDraftForDistinctRelease proves a genuinely new
+// release (a different source_ref) gets its own draft policy rather than
+// reusing the previous release's.
+func TestPromotionCreatesDistinctDraftForDistinctRelease(t *testing.T) {
+	_, mock, tx := beginPromotionTx(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+		WithArgs("module_release:2").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(5))
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_policies`)).
+		WithArgs(6, "module_release:2", "checksum-2").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(88)))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name`)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(7)))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
+		WithArgs(int64(7), int64(88), "module_proposal:8", `{}`, "d").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	policyID, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
+		context.Background(), tx, 2, "checksum-2", []PromotedProposal{{ProposalID: 8, Predicate: json.RawMessage(`{}`), PredicateChecksum: "d"}},
+	)
+	if err != nil {
+		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
+	}
+	if policyID != 88 {
+		t.Fatalf("policyID=%d want 88", policyID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPromotionVersionScanErrorPropagates proves a failed MAX(version) lookup
+// is surfaced instead of silently minting version 1 from a zero value (P5
+// review 2026080302 finding P5-10).
+func TestPromotionVersionScanErrorPropagates(t *testing.T) {
+	_, mock, tx := beginPromotionTx(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
+		WillReturnError(fmt.Errorf("connection refused"))
+
+	if _, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
+		context.Background(), tx, 1, "checksum", nil,
+	); err == nil {
+		t.Fatal("expected the MAX(version) scan error to propagate")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

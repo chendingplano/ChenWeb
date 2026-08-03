@@ -47,6 +47,13 @@ type ActiveRelease struct {
 // ReleaseStore persists module releases and the activation pointer.
 type ReleaseStore struct {
 	DB *sql.DB
+	// Promote (may be nil) runs approved-proposal promotion inside the release
+	// transaction, after the release row exists and before commit, so it is
+	// atomic with release creation/activation and rolls back with it on failure
+	// (P5 review 2026080302 finding P5-4). Injected by the composition root
+	// (cmd/ontology-compiler), which holds both this store and the doc-processing
+	// promoter, so the ontology modules domain stays decoupled.
+	Promote func(ctx context.Context, tx *sql.Tx, releaseID int64, releaseChecksum string) error
 }
 
 const releaseColumns = `
@@ -152,6 +159,15 @@ SET superseded_by_release_id = $1, modify_time = NOW()
 WHERE module_id = $2 AND id <> $1 AND superseded_by_release_id IS NULL`,
 		releaseID, strings.TrimSpace(moduleID)); err != nil {
 		return Release{}, err
+	}
+
+	// Promote approved proposals into a draft pipeline policy inside this
+	// transaction (spec 2026080102 section 8: release creation carries the
+	// module's routing proposals). A promotion failure rolls the release back.
+	if s.Promote != nil {
+		if err := s.Promote(ctx, tx, releaseID, checksum); err != nil {
+			return Release{}, fmt.Errorf("promote approved proposals: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -335,6 +351,26 @@ RETURNING id`,
 	).Scan(&id); err != nil {
 		return ActiveRelease{}, fmt.Errorf("activate release: %w", err)
 	}
+
+	// Activating a module also ensures its draft policy content exists (spec
+	// 2026080102 section 8: "Importing or activating the module creates or
+	// updates draft pipeline-policy content"). EnsureDraftFromModuleRelease is
+	// idempotent per source release, so this is a no-op when creation already
+	// promoted. It runs inside this transaction and rolls the activation back
+	// on failure.
+	if s.Promote != nil {
+		var checksum string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT content_checksum FROM kb.ontology_module_releases WHERE id = $1`,
+			releaseID,
+		).Scan(&checksum); err != nil {
+			return ActiveRelease{}, fmt.Errorf("resolve release checksum for promotion: %w", err)
+		}
+		if err := s.Promote(ctx, tx, releaseID, checksum); err != nil {
+			return ActiveRelease{}, fmt.Errorf("promote approved proposals: %w", err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return ActiveRelease{}, err
 	}

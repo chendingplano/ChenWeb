@@ -114,20 +114,34 @@ func runRelease(args []string) {
 
 	db := connect()
 	defer db.Close()
-	rs := modules.ReleaseStore{DB: db}
+	// Promotion runs inside ReleaseStore.CreateRelease's transaction (P5
+	// review 2026080302 finding P5-4): approved proposals are materialized as
+	// a draft policy atomically with the release, and a promotion failure
+	// rolls the release back instead of degrading to a warning after commit.
+	rs := modules.ReleaseStore{DB: db, Promote: promotionHook(db)}
 	rel, err := rs.CreateRelease(context.Background(), *moduleID, *version, *by)
 	if err != nil {
 		log.Fatalf("release %s@%s: %v", *moduleID, *version, err)
 	}
 	fmt.Printf("release %s@%s created (id=%d) checksum=%s\n", rel.ModuleID, rel.Version, rel.ID, rel.ContentChecksum)
+}
 
-	// P5 spec section 8: promote approved proposals at release time.
-	promoter := docprocessing.PolicyPromotionStore{DB: db, Audit: policyaudit.SQLStore{DB: db}}
-	lister := proposalListAdapter{store: modules.ProposalStore{DB: db}}
-	if policyID, err := docprocessing.PromoteModuleReleaseProposals(context.Background(), promoter, lister, rel.ID, rel.ContentChecksum); err != nil {
-		log.Printf("warning: proposal promotion failed for release %d: %v", rel.ID, err)
-	} else if policyID > 0 {
-		fmt.Printf("promoted approved proposals into draft policy %d\n", policyID)
+// promotionHook returns the ReleaseStore.Promote hook: promote the release's
+// approved proposals into a draft pipeline policy on the given transaction.
+// It is nil-safe (a nil lister/promoter means no promotion configured) and
+// reports the draft policy id to stdout when one was created.
+func promotionHook(db *sql.DB) func(context.Context, *sql.Tx, int64, string) error {
+	return func(ctx context.Context, tx *sql.Tx, releaseID int64, releaseChecksum string) error {
+		promoter := docprocessing.PolicyPromotionStore{Audit: policyaudit.SQLStore{DB: db}}
+		lister := proposalListAdapter{store: modules.ProposalStore{DB: db}}
+		policyID, err := docprocessing.PromoteModuleReleaseProposals(ctx, tx, promoter, lister, releaseID, releaseChecksum)
+		if err != nil {
+			return err
+		}
+		if policyID > 0 {
+			fmt.Printf("promoted approved proposals into draft policy %d\n", policyID)
+		}
+		return nil
 	}
 }
 
@@ -140,7 +154,9 @@ func runActivate(args []string) {
 
 	db := connect()
 	defer db.Close()
-	rs := modules.ReleaseStore{DB: db}
+	// Activation also ensures the module's draft policy content exists
+	// (spec 2026080102 section 8), atomically with the activation pointer.
+	rs := modules.ReleaseStore{DB: db, Promote: promotionHook(db)}
 	active, err := rs.Activate(context.Background(), *moduleID, *releaseID, *by)
 	if err != nil {
 		log.Fatalf("activate %s release %d: %v", *moduleID, *releaseID, err)
