@@ -181,17 +181,24 @@ func (s ReviewService) EvaluateAndPersist(ctx context.Context, scope ReviewScope
 }
 
 // ruleApplicabilityGate builds the per-rule applicability gate for the frozen
-// scope, evaluating each pinned rule's applicability predicate against the
-// frozen per-subject fact base supplied by ruleApplicabilityGateFacts (the
-// scope's fact_snapshot entry for the executed input record, with the review
-// context as fallback). The fact base is derived from the scope's own frozen
-// fields, never from mutable current configuration, so a scope's applicability
-// result stays reproducible from the scope record alone (acceptance criterion
-// 14). decisionRelevant reports whether an indeterminate applicability is
-// decision-relevant: a tier-3 missing path is decision-relevant exactly when
-// the rule's profile closed dimensions intersect the scope's closed dimensions
-// (spec section 6).
-func ruleApplicabilityGate(scope ReviewScope, facts semrules.FactSet) (func(ProfileRule) (ruleApplicabilityGateResult, error), func(ProfileRule) bool, error) {
+// scope, evaluating each pinned rule's applicability predicate against every
+// frozen per-target fact base supplied by ruleApplicabilityGateFacts (one
+// entry per pinned target object on the executed input record, or a single
+// review-context-only entry as fallback). A rule is applicable if it is true
+// for ANY pinned target -- consistent with how EvaluatePinnedScope already
+// pools assertions and findings across all of a scope's targets rather than
+// evaluating per target -- indeterminate if no target is true but at least
+// one is indeterminate, and inapplicable only if it is false for every
+// target. Matching on document id alone and consulting only the first
+// snapshot entry silently picked an arbitrary target's facts to gate every
+// rule (P5 review 2026080302 finding P5-8). The fact base is derived from
+// the scope's own frozen fields, never from mutable current configuration,
+// so a scope's applicability result stays reproducible from the scope
+// record alone (acceptance criterion 14). decisionRelevant reports whether
+// an indeterminate applicability is decision-relevant: a tier-3 missing path
+// is decision-relevant exactly when the rule's profile closed dimensions
+// intersect the scope's closed dimensions (spec section 6).
+func ruleApplicabilityGate(scope ReviewScope, factsPerTarget []semrules.FactSet) (func(ProfileRule) (ruleApplicabilityGateResult, error), func(ProfileRule) bool, error) {
 	profileClosed, err := pinnedProfileClosedDimensions(scope)
 	if err != nil {
 		return nil, nil, err
@@ -209,21 +216,26 @@ func ruleApplicabilityGate(scope ReviewScope, facts semrules.FactSet) (func(Prof
 		if err := json.Unmarshal(rule.Applicability, &doc); err != nil {
 			return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
 		}
-		// Invalid predicates were rejected before activation (spec section 11),
-		// so a malformed rule predicate here is a configuration error, surfaced
-		// as an error rather than a silent exclusion.
-		result, err := semrules.EvaluateDocumentValidated(doc, facts)
-		if err != nil {
-			return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
+		sawIndeterminate := false
+		for _, facts := range factsPerTarget {
+			// Invalid predicates were rejected before activation (spec section
+			// 11), so a malformed rule predicate here is a configuration
+			// error, surfaced as an error rather than a silent exclusion.
+			result, err := semrules.EvaluateDocumentValidated(doc, facts)
+			if err != nil {
+				return gateInapplicable, fmt.Errorf("rule %s applicability: %w", rule.RuleID, err)
+			}
+			switch result.Truth {
+			case semrules.TruthTrue:
+				return gateApplicable, nil
+			case semrules.TruthIndeterminate:
+				sawIndeterminate = true
+			}
 		}
-		switch result.Truth {
-		case semrules.TruthTrue:
-			return gateApplicable, nil
-		case semrules.TruthFalse:
-			return gateInapplicable, nil
-		default:
+		if sawIndeterminate {
 			return gateIndeterminate, nil
 		}
+		return gateInapplicable, nil
 	}
 	decisionRelevant := func(rule ProfileRule) bool {
 		// A rule inherits its profile's closed dimensions from the frozen
@@ -236,16 +248,17 @@ func ruleApplicabilityGate(scope ReviewScope, facts semrules.FactSet) (func(Prof
 	return applicability, decisionRelevant, nil
 }
 
-// ruleApplicabilityGateFacts resolves the fact base for rule-level
-// applicability: the scope's frozen per-subject fact snapshot entry for the
-// executed input record (review context + document + deployment facts merged
-// at selection time), so a rule whose applicability references document.* or
-// deployment.* (first-class paths per spec section 3.3) is evaluated against
-// the facts that actually selected the profile. Fallback: when the scope has
-// no fact_snapshot or no entry matches the input record (explicit-mode scopes,
-// and P4-era scopes), the review-context-only facts are used, preserving the
+// ruleApplicabilityGateFacts resolves the fact base(s) for rule-level
+// applicability: one frozen per-target fact snapshot entry per pinned target
+// object on the executed input record (review context + document +
+// deployment facts merged at selection time), so a rule whose applicability
+// references document.*, object.*, or deployment.* (first-class paths per
+// spec section 3.3) is evaluated against the facts that actually selected
+// the profile for that target. Fallback: when the scope has no fact_snapshot
+// or no entry matches the input record (explicit-mode scopes, and P4-era
+// scopes), a single review-context-only fact set is returned, preserving the
 // previous behavior exactly.
-func ruleApplicabilityGateFacts(scope ReviewScope, ctx *ReviewApplicabilityContext, inputRecordID int64) (semrules.FactSet, error) {
+func ruleApplicabilityGateFacts(scope ReviewScope, ctx *ReviewApplicabilityContext, inputRecordID int64) ([]semrules.FactSet, error) {
 	context := ReviewApplicabilityContext{}
 	if ctx != nil {
 		context = *ctx
@@ -263,12 +276,12 @@ func ruleApplicabilityGateFacts(scope ReviewScope, ctx *ReviewApplicabilityConte
 	if err != nil {
 		return nil, err
 	}
-	frozen, ok, err := frozenSubjectFacts(scope, inputRecordID)
+	frozen, ok, err := frozenSubjectFactsForDocument(scope, inputRecordID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return reviewFacts, nil
+		return []semrules.FactSet{reviewFacts}, nil
 	}
 	// The snapshot facts already include the review context (merged at
 	// selection time), so the review context must not be re-added: a duplicate
@@ -276,10 +289,16 @@ func ruleApplicabilityGateFacts(scope ReviewScope, ctx *ReviewApplicabilityConte
 	return frozen, nil
 }
 
-// frozenSubjectFacts returns the frozen per-subject fact set from the scope's
-// fact_snapshot whose subject's document id matches the executed input record.
-// ok is false when the scope has no fact_snapshot or no entry matches.
-func frozenSubjectFacts(scope ReviewScope, inputRecordID int64) (semrules.FactSet, bool, error) {
+// frozenSubjectFactsForDocument returns every frozen per-subject fact set
+// from the scope's fact_snapshot whose subject's document id matches the
+// executed input record -- one entry per pinned target object on that
+// document, since a scope may pin several targets with differing per-target
+// facts (e.g. object.class). ok is false when the scope has no fact_snapshot
+// or no entry matches. Matching on document id alone and returning only the
+// first entry silently picked an arbitrary target's facts to gate every
+// rule (P5 review 2026080302 finding P5-8); ruleApplicabilityGate now
+// consults every returned entry instead.
+func frozenSubjectFactsForDocument(scope ReviewScope, inputRecordID int64) ([]semrules.FactSet, bool, error) {
 	if len(scope.FactSnapshot) == 0 {
 		return nil, false, nil
 	}
@@ -287,12 +306,16 @@ func frozenSubjectFacts(scope ReviewScope, inputRecordID int64) (semrules.FactSe
 	if err := json.Unmarshal(scope.FactSnapshot, &snapshots); err != nil {
 		return nil, false, fmt.Errorf("fact_snapshot: %w", err)
 	}
+	var matches []semrules.FactSet
 	for _, entry := range snapshots {
 		if entry.Subject.DocumentID == inputRecordID {
-			return entry.Facts, true, nil
+			matches = append(matches, entry.Facts)
 		}
 	}
-	return nil, false, nil
+	if len(matches) == 0 {
+		return nil, false, nil
+	}
+	return matches, true, nil
 }
 
 // scopeClosedDimensions returns the request's closed dimensions frozen in the

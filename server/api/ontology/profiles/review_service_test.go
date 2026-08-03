@@ -316,6 +316,61 @@ func TestReviewServiceRuleApplicabilityUsesFrozenSubjectFactSnapshot(t *testing.
 	}
 }
 
+// TestReviewServiceRuleApplicabilityConsultsEveryPinnedTargetNotJustFirst
+// proves a rule's applicability is decided by consulting every pinned
+// target's own frozen facts, not by matching on document id alone and
+// arbitrarily using whichever entry the snapshot lists first. A scope with
+// two targets on the same document, whose object.class facts differ, must
+// find a rule applicable when the SECOND target's facts satisfy it even
+// though the FIRST target's do not (P5 review 2026080302 finding P5-8).
+func TestReviewServiceRuleApplicabilityConsultsEveryPinnedTargetNotJustFirst(t *testing.T) {
+	baseFacts, err := BuildReviewContextFacts(ReviewApplicabilityContext{Jurisdiction: "US"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonMatchingClassFacts := semrules.FactSet{}
+	for k, v := range baseFacts {
+		nonMatchingClassFacts[k] = v
+	}
+	nonMatchingClassFacts["object.class"] = semrules.Fact{Path: "object.class", State: semrules.FactKnown, Value: []string{"housing"}}
+
+	matchingClassFacts := semrules.FactSet{}
+	for k, v := range baseFacts {
+		matchingClassFacts[k] = v
+	}
+	matchingClassFacts["object.class"] = semrules.Fact{Path: "object.class", State: semrules.FactKnown, Value: []string{"display_module"}}
+
+	const applicabilityDisplayModule = `{"version":1,"expression":{"kind":"fact","path":"object.class","op":"contains","value":"display_module"}}`
+
+	// The non-matching target is listed FIRST in the snapshot -- the exact
+	// shape that made the pre-fix code pick the wrong target's facts.
+	snapshot, err := json.Marshal([]SubjectFactSnapshot{
+		{Subject: SelectionSubject{DocumentID: 2, TargetObjectID: "obj-housing"}, Facts: nonMatchingClassFacts},
+		{Subject: SelectionSubject{DocumentID: 2, TargetObjectID: "obj-display"}, Facts: matchingClassFacts},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ReviewScope{
+		ReviewScopeID:    "scope-1",
+		Jurisdiction:     "US",
+		ClosedDimensions: json.RawMessage(`["display_metrics"]`),
+		FactSnapshot:     snapshot,
+	}
+	w := &memoryFindingWriter{}
+	s := ReviewService{Findings: w}
+	results, err := s.EvaluateAndPersist(context.Background(), scope, []ProfileRule{applicabilityRule(9, "r", applicabilityDisplayModule)}, nil, 2, 3, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Category != ResultMissing {
+		t.Fatalf("results = %#v, want the rule applicable (evaluated normally) because the second target's object.class matches", results)
+	}
+	if len(w.findings) != 1 {
+		t.Fatalf("findings = %#v, want one normal finding -- a rule applicable to any pinned target must not be silently excluded", w.findings)
+	}
+}
+
 // TestReviewServiceRuleApplicabilityFallsBackWithoutFrozenSubjectFacts proves
 // a scope with no matching FactSnapshot subject (empty fact_snapshot, or no
 // entry whose document id matches the input record) falls back to
