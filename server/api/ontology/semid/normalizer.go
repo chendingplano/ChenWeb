@@ -12,16 +12,22 @@ type KeyBundle struct {
 
 // Normalizer is a versioned, deterministic surface normalizer. Families
 // declare a normalizer profile; the kernel runs it over every surface.
+// When NormFunc is non-nil, it replaces the built-in normalization logic,
+// allowing families to supply arbitrary pipelines without editing the kernel.
 type Normalizer struct {
-	Name    string
-	Version int
+	Name     string
+	Version  int
+	NormFunc func(string) KeyBundle // nil = use built-in
 }
 
-// Normalize turns a surface into its key bundle. Version 1 is the basic
-// profile (lowercase, trim, collapse whitespace). Version 2 additionally
-// strips punctuation. A version change re-indexes the keys -- surfaces and
-// links are preserved, only the keys change (ADR kernel test 18).
+// Normalize turns a surface into its key bundle. When NormFunc is set,
+// it delegates to the family-supplied function. Otherwise, version 1 is
+// the basic profile (lowercase, trim, collapse whitespace) and version 2
+// additionally strips punctuation.
 func (n Normalizer) Normalize(surface string) KeyBundle {
+	if n.NormFunc != nil {
+		return n.NormFunc(surface)
+	}
 	s := strings.ToLower(strings.TrimSpace(surface))
 	if n.Version >= 2 {
 		s = stripPunct(s)
