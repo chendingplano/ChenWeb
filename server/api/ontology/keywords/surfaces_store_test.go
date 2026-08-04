@@ -159,7 +159,7 @@ func TestListSurfacesByNormKey(t *testing.T) {
 	ctx := context.Background()
 
 	mock.ExpectQuery(regexp.QuoteMeta(
-		`SELECT ` + surfaceColumns + ` ` + surfaceFrom + ` WHERE norm_key = $1 AND scope = $2 ORDER BY confidence DESC`)).
+		`SELECT `+surfaceColumns+` `+surfaceFrom+` WHERE norm_key = $1 AND scope = $2 ORDER BY confidence DESC`)).
 		WithArgs("hello world", "_").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",

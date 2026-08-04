@@ -170,7 +170,7 @@ func TestUpdateConceptLabel(t *testing.T) {
 	ctx := context.Background()
 
 	mock.ExpectQuery(regexp.QuoteMeta(
-		`UPDATE kb.keyword_concepts SET pref_label = $2, gloss = $3, modify_time = NOW() WHERE concept_id = $1 RETURNING ` + conceptColumns)).
+		`UPDATE kb.keyword_concepts SET pref_label = $2, gloss = $3, modify_time = NOW() WHERE concept_id = $1 RETURNING `+conceptColumns)).
 		WithArgs("kw:test", "Updated", nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
@@ -208,7 +208,7 @@ func TestTransitionConceptStatus(t *testing.T) {
 
 	// Second query: UPDATE with status transition.
 	mock.ExpectQuery(regexp.QuoteMeta(
-		`UPDATE kb.keyword_concepts SET status = $2, modify_time = NOW() WHERE concept_id = $1 RETURNING ` + conceptColumns)).
+		`UPDATE kb.keyword_concepts SET status = $2, modify_time = NOW() WHERE concept_id = $1 RETURNING `+conceptColumns)).
 		WithArgs("kw:test", "provisional").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
