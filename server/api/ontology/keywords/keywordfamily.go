@@ -40,6 +40,13 @@ func (kf *KeywordFamily) ensureDefaults() {
 	}
 }
 
+// modeActive reports whether the family's resolver mode permits resolution.
+// Only "observe" and "on" are active; every other value (including "") is
+// treated as off so the gate fails closed.
+func (kf *KeywordFamily) modeActive() bool {
+	return kf.ResolverMode == "observe" || kf.ResolverMode == "on"
+}
+
 // FamilyName implements semid.FamilyAdapter.
 func (kf *KeywordFamily) FamilyName() string { return "keyword" }
 
@@ -73,7 +80,9 @@ func (kf *KeywordFamily) Scope(surface string) string { return "_" }
 // Tiers 5-6 (fuzzy/ANN) are deferred and return empty.
 func (kf *KeywordFamily) CandidateNodes(ctx context.Context, surface, scope string) ([]semid.NodeCandidate, error) {
 	kf.ensureDefaults()
-	if kf.ResolverMode == "off" || kf.DB == nil {
+	// Fail closed: any mode other than observe/on is inert. An empty or
+	// unrecognized ResolverMode must never leave resolution running.
+	if !kf.modeActive() || kf.DB == nil {
 		return nil, nil
 	}
 
@@ -245,7 +254,7 @@ func (kf *KeywordFamily) lookupByKeyKind(ctx context.Context, keyKind, keyValue,
 func (kf *KeywordFamily) ResolveSurface(ctx context.Context, surface, scope, artifactRef, contextText string) (*semid.Resolution, error) {
 	kf.ensureDefaults()
 
-	if kf.ResolverMode == "off" || kf.DB == nil {
+	if !kf.modeActive() || kf.DB == nil {
 		return nil, nil
 	}
 

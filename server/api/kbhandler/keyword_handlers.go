@@ -3,7 +3,6 @@ package kbhandler
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
@@ -366,9 +365,12 @@ func ResolveKeywordSurface(c echo.Context) error {
 		payload.Scope = "_"
 	}
 
+	// K6: the mode gate must fail closed. ResolverMode() maps an unset
+	// KEYWORD_RESOLVER_MODE to "off"; reading os.Getenv directly left the
+	// endpoint resolving and writing whenever the variable was unset.
 	kf := &keywords.KeywordFamily{
 		DB:           ApiTypes.ProjectDBHandle,
-		ResolverMode: os.Getenv("KEYWORD_RESOLVER_MODE"),
+		ResolverMode: keywords.ResolverMode(),
 	}
 	res, err := kf.ResolveSurface(c.Request().Context(), payload.Surface, payload.Scope, "", "")
 	if err != nil {

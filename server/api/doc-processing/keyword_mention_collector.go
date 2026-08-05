@@ -34,13 +34,16 @@ type KeywordMentionCollector struct {
 }
 
 // CollectFromText extracts keyword candidates from text and resolves each
-// through the keyword family. In observe mode: writes mentions, surfaces/keys
-// for matched concepts, and unresolved backlog for misses. In off mode: no-op.
+// through the keyword family. In observe/on modes: writes mentions,
+// surfaces/keys for matched concepts, and unresolved backlog for misses.
+// In off mode: no-op.
 func (mc *KeywordMentionCollector) CollectFromText(ctx context.Context, artifactRef, text, ksID string) error {
 	if mc.DB == nil || mc.KeywordFamily == nil {
 		return nil
 	}
-	if !keywords.IsObserveMode() {
+	// K7: gate on "not off", not on observe-only — collection must stay on
+	// when the resolver mode flips to "on".
+	if keywords.ResolverMode() == "off" {
 		return nil
 	}
 
