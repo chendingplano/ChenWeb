@@ -20,66 +20,69 @@ type TermFamily struct {
 // FamilyName implements FamilyAdapter.
 func (f TermFamily) FamilyName() string { return "ontology_term" }
 
-// Normalizer implements FamilyAdapter.
-func (f TermFamily) Normalizer() Normalizer {
-	if f.NormalizerVersion <= 0 {
-		f.NormalizerVersion = 1
-	}
-	return Normalizer{Name: "basic", Version: f.NormalizerVersion}
-}
-
 // AutoAcceptPolicy implements FamilyAdapter. Governed: always off.
+// MaxCandidates is explicit (K10): at its zero value tie-detection is gated
+// off and `ambiguous` becomes unreachable for the term family.
 func (f TermFamily) AutoAcceptPolicy() AutoAcceptPolicy {
-	return AutoAcceptPolicy{Enabled: false, MinScore: 0}
+	return AutoAcceptPolicy{Enabled: false, MinScore: 0, MaxCandidates: 1}
 }
 
-// Scope implements FamilyAdapter: the term family scopes by module.
-func (f TermFamily) Scope(surface string) string { return "" }
+func (f TermFamily) normVersion() int {
+	if f.NormalizerVersion <= 0 {
+		return CurrentNormalizerVersion
+	}
+	return f.NormalizerVersion
+}
 
-// CandidateNodes implements FamilyAdapter. It blocks on the module scope and
-// returns existing terms whose term_id or a label matches the surface
-// (lexically, after the normalizer). Blocking is intentionally cheap; richer
-// trigram/vector blocking joins the keyword family in P3.
-func (f TermFamily) CandidateNodes(ctx context.Context, surface, scope string) ([]NodeCandidate, error) {
+// CandidateNodes implements FamilyAdapter. It returns the module's terms
+// whose term_id or a label normalizes to the same canonical key as the
+// input. Comparison runs through the one shared normalizer in Go — never
+// SQL LOWER, which is not full Unicode case folding (D3).
+func (f TermFamily) CandidateNodes(ctx context.Context, input, scope string) ([]NodeCandidate, error) {
 	if f.DB == nil {
 		return nil, nil
 	}
-	bundle := f.Normalizer().Normalize(surface)
-	key := bundle.CanonicalKey
-	if key == "" {
+	n := Normalizer{Version: f.normVersion()}
+	queryKey := n.Normalize(input).Bundle().CanonicalKey
+	if queryKey == "" {
 		return nil, nil
 	}
+
 	const stmt = `
-SELECT DISTINCT t.term_id, COALESCE(l.label, '')
+SELECT t.term_id, COALESCE(l.label, '')
 FROM kb.ontology_terms t
-LEFT JOIN LATERAL (
-	SELECT l.label
-	FROM kb.ontology_term_labels l
-	WHERE l.term_id = t.term_id
-	  AND LOWER(l.label) = $2
-	  AND l.status NOT IN ('rejected', 'superseded')
-	LIMIT 1
-) l ON true
+LEFT JOIN kb.ontology_term_labels l
+	ON l.term_id = t.term_id
+   AND l.status NOT IN ('rejected', 'superseded')
 WHERE ($1 = '' OR t.module_id = $1)
-  AND t.status NOT IN ('rejected', 'superseded')
-  AND (t.term_id = $2 OR LOWER(l.label) = $2)`
-	rows, err := f.DB.QueryContext(ctx, stmt, scope, key)
+  AND t.status NOT IN ('rejected', 'superseded')`
+	rows, err := f.DB.QueryContext(ctx, stmt, scope)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	seen := map[string]bool{}
 	out := make([]NodeCandidate, 0)
 	for rows.Next() {
 		var id, label string
 		if err := rows.Scan(&id, &label); err != nil {
 			return nil, err
 		}
-		kb := f.Normalizer().Normalize(label)
-		if kb.CanonicalKey == "" {
-			kb = KeyBundle{CanonicalKey: key} // term_id match, no label
+		if seen[id] {
+			continue
 		}
-		out = append(out, NodeCandidate{NodeID: id, KeyBundle: kb})
+		for _, s := range []string{label, localName(id)} {
+			if strings.TrimSpace(s) == "" {
+				continue
+			}
+			kb := n.Normalize(s).Bundle()
+			if kb.CanonicalKey == queryKey {
+				seen[id] = true
+				out = append(out, NodeCandidate{NodeID: id, KeyBundle: kb, Method: "tier1_norm"})
+				break
+			}
+		}
 	}
 	return out, rows.Err()
 }
@@ -126,11 +129,12 @@ WHERE id = $1`, candidateID).Scan(&payload, &module)
 		scope = module.String
 	}
 
-	res, err := (Kernel{Family: f}).Resolve(ctx, surface)
+	// K9: the module is the scope the search runs with — passed to Resolve,
+	// not overwritten on the result after the fact.
+	res, err := (Kernel{Family: f, Normalizer: Normalizer{Version: f.normVersion()}}).Resolve(ctx, surface, scope)
 	if err != nil {
 		return Resolution{}, err
 	}
-	res.Scope = scope
 
 	matchesJSON, _ := json.Marshal(res.Matches)
 	if _, err := f.DB.ExecContext(ctx, `

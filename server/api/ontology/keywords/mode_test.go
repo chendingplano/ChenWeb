@@ -25,12 +25,19 @@ func TestResolverModeFromUnsetIsOff(t *testing.T) {
 // the same fail-closed rule K6 enforces at the REST layer.
 func TestKeywordFamilyUnsetModeIsInert(t *testing.T) {
 	kf := &KeywordFamily{} // ResolverMode == ""
-	res, err := kf.ResolveSurface(nil, "test", "_", "", "")
+	res, err := kf.ResolveSurface(nil, "test", "_")
 	if err != nil {
 		t.Fatalf("ResolveSurface (unset mode): %v", err)
 	}
-	if res != nil {
-		t.Error("expected nil resolution when ResolverMode is unset")
+	if res.Verdict != "" {
+		t.Errorf("expected zero resolution when ResolverMode is unset, got verdict %q", res.Verdict)
+	}
+	observed, err := kf.ObserveSurface(nil, "test", "_", "art", "ctx")
+	if err != nil {
+		t.Fatalf("ObserveSurface (unset mode): %v", err)
+	}
+	if observed != nil {
+		t.Error("expected nil observation when ResolverMode is unset")
 	}
 	candidates, err := kf.CandidateNodes(nil, "test", "_")
 	if err != nil {

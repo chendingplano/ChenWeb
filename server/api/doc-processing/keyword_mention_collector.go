@@ -60,7 +60,7 @@ func (mc *KeywordMentionCollector) CollectFromText(ctx context.Context, artifact
 		}
 		seen[token] = true
 
-		_, err := mc.KeywordFamily.ResolveSurface(ctx, token, scope, artifactRef, "")
+		_, err := mc.KeywordFamily.ObserveSurface(ctx, token, scope, artifactRef, "")
 		if err != nil {
 			// Best-effort: log but don't fail the batch.
 			continue

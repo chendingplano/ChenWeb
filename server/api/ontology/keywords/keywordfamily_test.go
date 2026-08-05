@@ -2,6 +2,8 @@ package keywords
 
 import (
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
 func TestKeywordFamilyName(t *testing.T) {
@@ -25,54 +27,50 @@ func TestKeywordFamilyAutoAcceptPolicy(t *testing.T) {
 	}
 }
 
-func TestKeywordFamilyNormalizer(t *testing.T) {
-	kf := &KeywordFamily{NormalizerVersion: 1}
-	n := kf.Normalizer()
-	if n.Name != "keyword" {
-		t.Errorf("Name: got %q, want %q", n.Name, "keyword")
-	}
-	if n.Version != 1 {
-		t.Errorf("Version: got %d, want 1", n.Version)
-	}
-	if n.NormFunc == nil {
-		t.Fatal("NormFunc should not be nil")
-	}
-	kb := n.Normalize("Hello World")
-	if kb.CanonicalKey != "hello world" {
-		t.Errorf("CanonicalKey: got %q, want %q", kb.CanonicalKey, "hello world")
-	}
-	if len(kb.AlternateKeys) < 3 {
-		t.Errorf("expected at least 3 alternate keys, got %d", len(kb.AlternateKeys))
-	}
-}
-
-func TestKeywordFamilyScope(t *testing.T) {
+// D3: the family carries no normalizer of its own — it runs the one shared
+// semid pipeline, defaulting to the current normalizer version.
+func TestKeywordFamilyDefaultsToCurrentNormalizerVersion(t *testing.T) {
 	kf := &KeywordFamily{}
-	if kf.Scope("anything") != "_" {
-		t.Errorf("Scope: got %q, want %q", kf.Scope("anything"), "_")
+	kf.ensureDefaults()
+	if kf.NormalizerVersion != semid.CurrentNormalizerVersion {
+		t.Errorf("NormalizerVersion: got %d, want %d", kf.NormalizerVersion, semid.CurrentNormalizerVersion)
+	}
+	if kf.normalizer().Version != semid.CurrentNormalizerVersion {
+		t.Errorf("normalizer().Version: got %d, want %d", kf.normalizer().Version, semid.CurrentNormalizerVersion)
 	}
 }
 
 func TestKeywordFamilyResolveSurfaceOff(t *testing.T) {
 	kf := &KeywordFamily{ResolverMode: "off"}
-	res, err := kf.ResolveSurface(nil, "test", "_", "", "")
+	res, err := kf.ResolveSurface(nil, "test", "_")
 	if err != nil {
 		t.Fatalf("ResolveSurface (off): %v", err)
 	}
-	if res != nil {
-		t.Error("expected nil resolution in off mode")
+	if res.Verdict != "" {
+		t.Errorf("expected zero resolution in off mode, got verdict %q", res.Verdict)
 	}
 }
 
 func TestKeywordFamilyResolveSurfaceNoDB(t *testing.T) {
 	// No DB + observe mode should still no-op gracefully.
 	kf := &KeywordFamily{ResolverMode: "observe"}
-	res, err := kf.ResolveSurface(nil, "test", "_", "", "")
+	res, err := kf.ResolveSurface(nil, "test", "_")
 	if err != nil {
 		t.Fatalf("ResolveSurface (observe, no DB): %v", err)
 	}
+	if res.Verdict != "" {
+		t.Errorf("expected zero resolution when DB is nil, got verdict %q", res.Verdict)
+	}
+}
+
+func TestKeywordFamilyObserveSurfaceOff(t *testing.T) {
+	kf := &KeywordFamily{ResolverMode: "off"}
+	res, err := kf.ObserveSurface(nil, "test", "_", "art", "ctx")
+	if err != nil {
+		t.Fatalf("ObserveSurface (off): %v", err)
+	}
 	if res != nil {
-		t.Error("expected nil resolution when DB is nil")
+		t.Error("expected nil resolution in off mode")
 	}
 }
 
@@ -95,25 +93,5 @@ func TestKeywordFamilyCandidateNodesNoDB(t *testing.T) {
 	}
 	if len(candidates) != 0 {
 		t.Errorf("expected 0 candidates with nil DB, got %d", len(candidates))
-	}
-}
-
-func TestKeywordNormalizerToSemidKeyBundleMapping(t *testing.T) {
-	// Verify the mapping produces valid semid KeyBundle for tiers.
-	n := KeywordNormalizer{Version: 1}
-	kb := n.Normalize("Hello World")
-
-	canonical, alternates := kb.ToSemidKeyBundle()
-	if canonical != "hello world" {
-		t.Errorf("canonical: got %q", canonical)
-	}
-
-	// alternates should contain alnum, sorted, phonetic, initials.
-	found := make(map[string]bool)
-	for _, a := range alternates {
-		found[a] = true
-	}
-	if !found[kb.Initials] {
-		t.Errorf("initials %q not found in alternates: %v", kb.Initials, alternates)
 	}
 }

@@ -5,33 +5,6 @@ import (
 	"testing"
 )
 
-// ---- ADR kernel test 18: normalizer determinism and versioned re-index ----
-
-func TestNormalizerDeterministicAcrossRuns(t *testing.T) {
-	n := Normalizer{Name: "basic", Version: 1}
-	a := n.Normalize("  Display   Module  ")
-	b := n.Normalize("display module")
-	if a.CanonicalKey != b.CanonicalKey || a.CanonicalKey != "display module" {
-		t.Fatalf("expected deterministic key %q, got %q and %q", "display module", a.CanonicalKey, b.CanonicalKey)
-	}
-}
-
-func TestNormalizerVersionBumpReindexesWithoutLosingSurface(t *testing.T) {
-	n1 := Normalizer{Name: "basic", Version: 1}
-	n2 := Normalizer{Name: "basic", Version: 2}
-	// Punctuation-bearing surface: v1 keeps it, v2 strips it -> a re-index.
-	if got := n1.Normalize("display, module").CanonicalKey; got != "display, module" {
-		t.Fatalf("v1 key %q", got)
-	}
-	if got := n2.Normalize("display, module").CanonicalKey; got != "display module" {
-		t.Fatalf("v2 key %q", got)
-	}
-	// Clean surface: keys are identical across versions (no data lost).
-	if n1.Normalize("display module").CanonicalKey != n2.Normalize("display module").CanonicalKey {
-		t.Fatal("expected clean surfaces to re-index identically")
-	}
-}
-
 // ---- ADR kernel test 19: merge tombstone, stale-id resolution, unmerge ----
 
 func TestMergeTombstoneResolveStaleAndUnmerge(t *testing.T) {
@@ -94,35 +67,128 @@ func TestNeverMergeBlocksAutomaticMerge(t *testing.T) {
 	}
 }
 
-// ---- kernel adjudication: governed families never auto-accept ----
+// ---- kernel ----
 
 type fakeFamily struct {
-	nodes []NodeCandidate
+	nodes     []NodeCandidate
+	policy    AutoAcceptPolicy
+	inputSeen string
+	scopeSeen string
 }
 
-func (f fakeFamily) FamilyName() string                       { return "fake" }
-func (f fakeFamily) Normalizer() Normalizer                   { return Normalizer{Name: "basic", Version: 1} }
-func (f fakeFamily) AutoAcceptPolicy() AutoAcceptPolicy       { return AutoAcceptPolicy{Enabled: false} }
-func (f fakeFamily) Scope(string) string                      { return "" }
-func (f fakeFamily) CandidateNodes(ctx context.Context, s, scope string) ([]NodeCandidate, error) {
+func (f *fakeFamily) FamilyName() string                 { return "fake" }
+func (f *fakeFamily) AutoAcceptPolicy() AutoAcceptPolicy { return f.policy }
+func (f *fakeFamily) CandidateNodes(ctx context.Context, input, scope string) ([]NodeCandidate, error) {
+	f.inputSeen = input
+	f.scopeSeen = scope
 	return f.nodes, nil
 }
 
+// Governed families never auto-accept: even a perfect match ends at
+// human_review. Also asserts K2: the caller's scope reaches both the
+// candidate search and the resolution.
 func TestKernelResolveGovernedFamilyEndsAtHumanReview(t *testing.T) {
-	// Even a perfect candidate match must end at human review for a governed
-	// family (terms): adjudication is a change set, never an auto-accept.
-	fam := fakeFamily{nodes: []NodeCandidate{
-		{NodeID: "core:assertion", KeyBundle: KeyBundle{CanonicalKey: "assertion"}},
-	}}
-	res, err := (Kernel{Family: fam}).Resolve(context.Background(), "Assertion")
+	fam := &fakeFamily{
+		nodes: []NodeCandidate{
+			{NodeID: "core:assertion", KeyBundle: KeyBundle{CanonicalKey: "assertion"}, Method: "tier1_norm"},
+		},
+		policy: AutoAcceptPolicy{Enabled: false, MaxCandidates: 1},
+	}
+	res, err := (Kernel{Family: fam, Normalizer: Normalizer{Version: CurrentNormalizerVersion}}).Resolve(context.Background(), "Assertion", "mea")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if res.Verdict != VerdictHumanReview {
 		t.Fatalf("governed family must end at human_review, got %s", res.Verdict)
 	}
+	if res.Scope != "mea" || fam.scopeSeen != "mea" {
+		t.Errorf("scope must round-trip into the search and the resolution (K2): res.Scope=%q, search scope=%q", res.Scope, fam.scopeSeen)
+	}
+	if res.Input != "Assertion" {
+		t.Errorf("Input: got %q, want %q", res.Input, "Assertion")
+	}
 	if len(res.Matches) != 1 || res.Matches[0].NodeID != "core:assertion" || res.Matches[0].Score != 1.0 {
 		t.Fatalf("unexpected matches: %#v", res.Matches)
+	}
+	// §8.3: human_review carries the top-1 id, flagged for sampling.
+	if res.ResolvedNodeID != "core:assertion" || res.Method != "tier1_norm" {
+		t.Errorf("human_review must carry the top-1 id and method (§8.3): got %q/%q", res.ResolvedNodeID, res.Method)
+	}
+}
+
+// §8.3/D11: ambiguous carries the top-1 plus the tied set.
+func TestKernelAmbiguousCarriesTop1(t *testing.T) {
+	fam := &fakeFamily{
+		nodes: []NodeCandidate{
+			{NodeID: "kwc_b", KeyBundle: KeyBundle{CanonicalKey: "assertion"}, Method: "tier1_norm"},
+			{NodeID: "kwc_a", KeyBundle: KeyBundle{CanonicalKey: "assertion"}, Method: "tier1_norm"},
+		},
+		policy: AutoAcceptPolicy{Enabled: true, MinScore: 0.8, MaxCandidates: 1},
+	}
+	res, err := (Kernel{Family: fam, Normalizer: Normalizer{Version: CurrentNormalizerVersion}}).Resolve(context.Background(), "assertion", "_")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.Verdict != VerdictAmbiguous {
+		t.Fatalf("tied top candidates must be ambiguous, got %s", res.Verdict)
+	}
+	if res.ResolvedNodeID != "kwc_a" {
+		t.Errorf("ambiguous must carry the deterministic top-1, got %q", res.ResolvedNodeID)
+	}
+	if res.Method != "tier1_norm" {
+		t.Errorf("ambiguous must carry the top-1 method, got %q", res.Method)
+	}
+	if len(res.Matches) != 2 {
+		t.Errorf("the tied set must be preserved, got %d matches", len(res.Matches))
+	}
+}
+
+func TestKernelNoCandidatesDefers(t *testing.T) {
+	fam := &fakeFamily{policy: AutoAcceptPolicy{Enabled: true, MinScore: 0.8, MaxCandidates: 1}}
+	res, err := (Kernel{Family: fam, Normalizer: Normalizer{Version: CurrentNormalizerVersion}}).Resolve(context.Background(), "anything", "_")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.Verdict != VerdictDeferred {
+		t.Fatalf("no candidates must defer, got %s", res.Verdict)
+	}
+	if res.ResolvedNodeID != "" {
+		t.Errorf("deferred carries no id on the collector path, got %q", res.ResolvedNodeID)
+	}
+}
+
+// Score is symmetric over the two bundles: the tier-2/tier-4 bridges need a
+// query key to match a stored alternate, and vice versa.
+func TestScoreSymmetricAlternateMatch(t *testing.T) {
+	// Tier 4 shape: the query's canonical key hits a stored initials key.
+	query := KeyBundle{CanonicalKey: "vdm"}
+	cand := KeyBundle{CanonicalKey: "visual display module", AlternateKeys: []string{"visualdisplaymodule", "vdm"}}
+	if s := Score(query, cand); s != 0.8 {
+		t.Errorf("initials bridge: got %v, want 0.8", s)
+	}
+	// Tier 2 shape: a shared alternate key (e.g. alnum) on both sides.
+	q2 := KeyBundle{CanonicalKey: "c++ tools", AlternateKeys: []string{"ctools"}}
+	c2 := KeyBundle{CanonicalKey: "c tools", AlternateKeys: []string{"ctools"}}
+	if s := Score(q2, c2); s != 0.8 {
+		t.Errorf("shared alternate: got %v, want 0.8", s)
+	}
+	// Candidate canonical inside the query's alternates (sorted bridge).
+	q3 := KeyBundle{CanonicalKey: "module display", AlternateKeys: []string{"display module"}}
+	c3 := KeyBundle{CanonicalKey: "display module"}
+	if s := Score(q3, c3); s != 0.8 {
+		t.Errorf("sorted bridge: got %v, want 0.8", s)
+	}
+	// Exact canonical match.
+	if s := Score(KeyBundle{CanonicalKey: "x"}, KeyBundle{CanonicalKey: "x"}); s != 1.0 {
+		t.Errorf("exact: got %v, want 1.0", s)
+	}
+	// No shared key, no prefix.
+	if s := Score(KeyBundle{CanonicalKey: "alpha"}, KeyBundle{CanonicalKey: "beta"}); s != 0 {
+		t.Errorf("disjoint: got %v, want 0", s)
+	}
+	// Mutual prefix >= 3 chars.
+	if s := Score(KeyBundle{CanonicalKey: "cloud"}, KeyBundle{CanonicalKey: "cloud computing"}); s != 0.5 {
+		t.Errorf("prefix: got %v, want 0.5", s)
 	}
 }
 
@@ -140,9 +206,14 @@ func TestAdjudicateVerdicts(t *testing.T) {
 	if v := Adjudicate([]ScoredMatch{{NodeID: "n", Score: 0.5}}, AutoAcceptPolicy{Enabled: true, MinScore: 0.9, MaxCandidates: 1}); v != VerdictHumanReview {
 		t.Fatalf("expected human_review, got %s", v)
 	}
-	// Tied top candidates -> ambiguous.
+	// Tied top candidates beyond MaxCandidates -> ambiguous.
 	tied := []ScoredMatch{{NodeID: "a", Score: 1.0}, {NodeID: "b", Score: 1.0}}
 	if v := Adjudicate(tied, AutoAcceptPolicy{Enabled: true, MinScore: 0.9, MaxCandidates: 1}); v != VerdictAmbiguous {
 		t.Fatalf("expected ambiguous, got %s", v)
+	}
+	// Governed family with explicit MaxCandidates (K10): ties are detectable
+	// again — ambiguous before the enabled/min-score gate.
+	if v := Adjudicate(tied, AutoAcceptPolicy{Enabled: false, MaxCandidates: 1}); v != VerdictAmbiguous {
+		t.Fatalf("expected ambiguous for governed tie with explicit MaxCandidates, got %s", v)
 	}
 }
