@@ -5,67 +5,10 @@ import (
 	"testing"
 )
 
-// ---- ADR kernel test 19: merge tombstone, stale-id resolution, unmerge ----
-
-func TestMergeTombstoneResolveStaleAndUnmerge(t *testing.T) {
-	g := NewMergeGraph()
-	if err := g.Merge("A", "B"); err != nil {
-		t.Fatalf("Merge: %v", err)
-	}
-	if to, ok := g.MergedInto("A"); !ok || to != "B" {
-		t.Fatalf("expected A.merged_into=B, got %q ok=%v", to, ok)
-	}
-	if got := g.Resolve("A"); got != "B" {
-		t.Fatalf("stale id A should resolve to B, got %q", got)
-	}
-	// The losing row is kept (tombstone), not deleted.
-	if _, ok := g.MergedInto("A"); !ok {
-		t.Fatal("tombstone A must be retained")
-	}
-	g.Unmerge("A")
-	if got := g.Resolve("A"); got != "A" {
-		t.Fatalf("after unmerge A should resolve to itself, got %q", got)
-	}
-}
-
-// ---- ADR kernel test 20: no transitive closure over pairwise merges ----
-
-func TestMergeNoTransitiveClosure(t *testing.T) {
-	g := NewMergeGraph()
-	if err := g.Merge("A", "B"); err != nil {
-		t.Fatalf("Merge A->B: %v", err)
-	}
-	if err := g.Merge("B", "C"); err != nil {
-		t.Fatalf("Merge B->C: %v", err)
-	}
-	// Resolution follows the chain, but no A->C decision is fabricated.
-	if got := g.Resolve("A"); got != "C" {
-		t.Fatalf("expected A to resolve to C via the chain, got %q", got)
-	}
-	if to, ok := g.MergedInto("A"); !ok || to != "B" {
-		t.Fatalf("A's tombstone must stay B (no A->C decision row), got %q ok=%v", to, ok)
-	}
-	// Only two pairwise decisions exist.
-	if len(g.mergedInto) != 2 {
-		t.Fatalf("expected exactly 2 pairwise decisions, got %d", len(g.mergedInto))
-	}
-}
-
-// ---- ADR kernel test 21: never_merge is never violated ----
-
-func TestNeverMergeBlocksAutomaticMerge(t *testing.T) {
-	g := NewMergeGraph()
-	g.SetNeverMerge("A", "B")
-	if !g.IsNeverMerge("A", "B") || !g.IsNeverMerge("B", "A") {
-		t.Fatal("never_merge pair must be symmetric")
-	}
-	if err := g.Merge("A", "B"); err == nil {
-		t.Fatal("expected Merge A->B to be blocked by never_merge")
-	}
-	if err := g.Merge("B", "A"); err == nil {
-		t.Fatal("expected Merge B->A to be blocked by never_merge")
-	}
-}
+// Merge guardrails (ADR kernel tests 19-21) live with the persisted merge
+// implementation: see keywords/concepts_store_test.go. D7 deleted the
+// in-memory MergeGraph; its four guardrails are enforced by
+// ConceptStore.MergeConcept backed by kb.semid_never_merge.
 
 // ---- kernel ----
 

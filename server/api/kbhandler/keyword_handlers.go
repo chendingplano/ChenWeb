@@ -1,7 +1,9 @@
 package kbhandler
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -156,12 +158,55 @@ func MergeKeywordConcept(c echo.Context) error {
 	}
 
 	store := keywords.ConceptStore{DB: ApiTypes.ProjectDBHandle}
-	_, err := store.MergeConcept(c.Request().Context(), conceptID, payload.TargetID)
+	merged, err := store.MergeConcept(c.Request().Context(), conceptID, payload.TargetID)
 	if err != nil {
 		logger.Error("merge keyword concept failed", "from", conceptID, "to", payload.TargetID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to merge keyword concept (CWB_KB_KW_053)"})
+		return conceptStoreError(c, err, "failed to merge keyword concept (CWB_KB_KW_053)")
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "message": "merged"})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "message": "merged", "record": merged})
+}
+
+// UnmergeKeywordConcept handles POST /api/v1/kb/keyword-concepts/:concept_id/unmerge
+// It reverses a merge (§14.4): surfaces whose origin_concept is the concept
+// move back to it, and its tombstone is cleared with the restore status.
+func UnmergeKeywordConcept(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_KW_060")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	conceptID := strings.TrimSpace(c.Param("concept_id"))
+	if conceptID == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid concept_id (CWB_KB_KW_061)"})
+	}
+	var payload struct {
+		Status string `json:"status"`
+	}
+	_ = json.NewDecoder(c.Request().Body).Decode(&payload)
+	if payload.Status == "" {
+		payload.Status = "active"
+	}
+
+	store := keywords.ConceptStore{DB: ApiTypes.ProjectDBHandle}
+	restored, err := store.UnmergeConcept(c.Request().Context(), conceptID, payload.Status)
+	if err != nil {
+		logger.Error("unmerge keyword concept failed", "concept_id", conceptID, "err", err)
+		return conceptStoreError(c, err, "failed to unmerge keyword concept (CWB_KB_KW_062)")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "message": "unmerged", "record": restored})
+}
+
+// conceptStoreError maps concept-store guardrail errors to HTTP statuses:
+// sql.ErrNoRows → 404, keywords.ErrMergeRejected → 409 with the guardrail
+// reason, anything else → 500.
+func conceptStoreError(c echo.Context, err error, fallback string) error {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "keyword concept not found (CWB_KB_KW_054)"})
+	case errors.Is(err, keywords.ErrMergeRejected):
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: fallback})
+	}
 }
 
 // -- Surface handlers ---------------------------------------------------------

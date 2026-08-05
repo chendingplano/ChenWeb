@@ -300,7 +300,19 @@ func (kf *KeywordFamily) ResolveSurface(ctx context.Context, surface, scope stri
 	if !kf.modeActive() || kf.DB == nil {
 		return semid.Resolution{}, nil
 	}
-	return kf.kernel().Resolve(ctx, surface, scope)
+	res, err := kf.kernel().Resolve(ctx, surface, scope)
+	if err != nil {
+		return semid.Resolution{}, err
+	}
+	// §14.1 item 3: resolution chases merged_into so a caller that stored a
+	// tombstone id still sees the survivor. Surfaces are re-pointed at merge
+	// time, so this normally costs one primary-key lookup of a live concept.
+	if res.ResolvedNodeID != "" {
+		if survivor, err := kf.ConceptStore.FollowMerge(ctx, res.ResolvedNodeID); err == nil {
+			res.ResolvedNodeID = survivor
+		}
+	}
+	return res, nil
 }
 
 // ObserveSurface is the observing entry point (§9.3): it writes the mention
