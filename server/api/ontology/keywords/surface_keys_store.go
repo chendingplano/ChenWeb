@@ -7,7 +7,7 @@ import (
 
 // SurfaceKey is one derived alternate key for a surface. Keys are derived
 // data — always written alongside the surface, never authored independently.
-// key_kind is one of: alnum, sorted, phonetic, initials.
+// key_kind is one of: alnum, sorted, phonetic, initials, singular.
 type SurfaceKey struct {
 	SurfaceID   string `json:"surface_id"`
 	KeyKind     string `json:"key_kind"`
@@ -21,6 +21,7 @@ var AllowedKeyKinds = map[string]bool{
 	"sorted":   true,
 	"phonetic": true,
 	"initials": true,
+	"singular": true,
 }
 
 // SurfaceKeyStore persists derived surface key rows.

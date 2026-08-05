@@ -173,35 +173,33 @@ func CreateKeywordSurface(c echo.Context) error {
 	logger := rc.GetLogger()
 
 	var payload struct {
-		ConceptID   string  `json:"concept_id"`
-		Surface     string  `json:"surface"`
-		NormKey     string  `json:"norm_key"`
-		NormVersion int     `json:"norm_version"`
-		LabelRole   string  `json:"label_role"`
-		AliasType   string  `json:"alias_type"`
-		Lang        string  `json:"lang"`
-		Scope       string  `json:"scope"`
-		Confidence  float64 `json:"confidence"`
-		Provenance  string  `json:"provenance"`
-		Locked      bool    `json:"locked"`
+		ConceptID  string  `json:"concept_id"`
+		Surface    string  `json:"surface"`
+		LabelRole  string  `json:"label_role"`
+		AliasType  string  `json:"alias_type"`
+		Lang       string  `json:"lang"`
+		Scope      string  `json:"scope"`
+		Confidence float64 `json:"confidence"`
+		Provenance string  `json:"provenance"`
+		Locked     bool    `json:"locked"`
 	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_KW_101)"})
 	}
 
+	// K3/D6: norm_key and norm_version are not accepted — the server derives
+	// every key from the surface.
 	store := keywords.SurfaceStore{DB: ApiTypes.ProjectDBHandle}
 	created, err := store.CreateSurface(c.Request().Context(), keywords.Surface{
-		ConceptID:   payload.ConceptID,
-		Surface:     payload.Surface,
-		NormKey:     payload.NormKey,
-		NormVersion: payload.NormVersion,
-		LabelRole:   payload.LabelRole,
-		AliasType:   payload.AliasType,
-		Lang:        payload.Lang,
-		Scope:       payload.Scope,
-		Confidence:  payload.Confidence,
-		Provenance:  payload.Provenance,
-		Locked:      payload.Locked,
+		ConceptID:  payload.ConceptID,
+		Surface:    payload.Surface,
+		LabelRole:  payload.LabelRole,
+		AliasType:  payload.AliasType,
+		Lang:       payload.Lang,
+		Scope:      payload.Scope,
+		Confidence: payload.Confidence,
+		Provenance: payload.Provenance,
+		Locked:     payload.Locked,
 	})
 	if err != nil {
 		logger.Error("create keyword surface failed", "err", err)

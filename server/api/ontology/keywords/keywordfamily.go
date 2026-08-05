@@ -28,16 +28,16 @@ type KeywordFamily struct {
 
 // ensureDefaults sets up store instances from DB when not explicitly provided.
 func (kf *KeywordFamily) ensureDefaults() {
+	if kf.NormalizerVersion <= 0 {
+		kf.NormalizerVersion = semid.CurrentNormalizerVersion
+	}
 	if kf.ConceptStore.DB == nil && kf.DB != nil {
 		kf.ConceptStore = ConceptStore{DB: kf.DB}
-		kf.SurfaceStore = SurfaceStore{DB: kf.DB}
+		kf.SurfaceStore = SurfaceStore{DB: kf.DB, NormalizerVersion: kf.NormalizerVersion}
 		kf.SurfaceKeyStore = SurfaceKeyStore{DB: kf.DB}
 		kf.MentionStore = MentionStore{DB: kf.DB}
 		kf.UnresolvedStore = UnresolvedStore{DB: kf.DB}
 		kf.RewriteRuleStore = RewriteRuleStore{DB: kf.DB}
-	}
-	if kf.NormalizerVersion <= 0 {
-		kf.NormalizerVersion = semid.CurrentNormalizerVersion
 	}
 }
 

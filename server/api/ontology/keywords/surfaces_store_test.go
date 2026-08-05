@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
 func TestCreateSurface(t *testing.T) {
@@ -18,33 +19,55 @@ func TestCreateSurface(t *testing.T) {
 	store := SurfaceStore{DB: db}
 	ctx := context.Background()
 
+	// No norm_key/norm_version supplied: the store derives them (D6).
 	sf := Surface{
-		ConceptID:   "kw:test",
-		Surface:     "hello world",
-		NormKey:     "hello world",
-		NormVersion: 1,
-		LabelRole:   "pref",
-		AliasType:   "synonym",
-		Lang:        "en",
-		Scope:       "_",
-		Provenance:  "human:tester",
-		Confidence:  1.0,
+		ConceptID:  "kw:test",
+		Surface:    "hello world",
+		LabelRole:  "pref",
+		AliasType:  "synonym",
+		Lang:       "en",
+		Scope:      "_",
+		Provenance: "human:tester",
+		Confidence: 1.0,
 	}
+	wantNorm := "hello world"
+	wantVersion := semid.CurrentNormalizerVersion
 	// Pre-compute the derived surface_id so the mock arg matches.
 	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`INSERT INTO kb.keyword_surfaces`)).
-		WithArgs(sf.SurfaceID, sf.ConceptID, sf.Surface, sf.NormKey, sf.NormVersion,
+		WithArgs(sf.SurfaceID, sf.ConceptID, sf.Surface, wantNorm, wantVersion,
 			sf.LabelRole, sf.AliasType, sf.Lang, sf.Scope, sf.Confidence,
 			sf.Provenance, sf.Locked, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
 			"label_role", "alias_type", "lang", "scope", "confidence",
 			"provenance", "locked", "evidence", "create_time", "modify_time",
-		}).AddRow(sf.SurfaceID, sf.ConceptID, sf.Surface, sf.NormKey, sf.NormVersion,
+		}).AddRow(sf.SurfaceID, sf.ConceptID, sf.Surface, wantNorm, wantVersion,
 			sf.LabelRole, sf.AliasType, "en", "_", 1.0,
 			"human:tester", false, nil, testNow, testNow))
+
+	// K1: the derived keys are written with the surface, in the same
+	// transaction. "sorted" equals the norm key and is omitted; "singular"
+	// is written even when it equals the norm key (plural bridge).
+	mock.ExpectExec(regexp.QuoteMeta(
+		`DELETE FROM kb.keyword_surface_keys WHERE surface_id = $1`)).
+		WithArgs(sf.SurfaceID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	for _, k := range []struct{ kind, value string }{
+		{"alnum", "helloworld"},
+		{"phonetic", "hhllw"},
+		{"initials", "hw"},
+		{"singular", "hello world"},
+	} {
+		mock.ExpectExec(regexp.QuoteMeta(
+			`INSERT INTO kb.keyword_surface_keys (surface_id, key_kind, key_value, norm_version)`)).
+			WithArgs(sf.SurfaceID, k.kind, k.value, wantVersion).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectCommit()
 
 	result, err := store.CreateSurface(ctx, sf)
 	if err != nil {
@@ -55,6 +78,9 @@ func TestCreateSurface(t *testing.T) {
 	}
 	if result.Surface != "hello world" {
 		t.Errorf("expected surface 'hello world', got %s", result.Surface)
+	}
+	if result.NormKey != wantNorm || result.NormVersion != wantVersion {
+		t.Errorf("expected derived key %q v%d, got %q v%d", wantNorm, wantVersion, result.NormKey, result.NormVersion)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
@@ -69,10 +95,12 @@ func TestCreateSurfaceValidation(t *testing.T) {
 		name string
 		sf   Surface
 	}{
-		{"missing surface", Surface{ConceptID: "kw:x", NormKey: "x", LabelRole: "pref", AliasType: "synonym", Provenance: "human:"}},
-		{"missing concept_id", Surface{Surface: "x", NormKey: "x", LabelRole: "pref", AliasType: "synonym", Provenance: "human:"}},
-		{"missing norm_key", Surface{Surface: "x", ConceptID: "kw:x", LabelRole: "pref", AliasType: "synonym", Provenance: "human:"}},
-		{"invalid label_role", Surface{Surface: "x", ConceptID: "kw:x", NormKey: "x", LabelRole: "bogus", AliasType: "synonym", Provenance: "human:"}},
+		{"missing surface", Surface{ConceptID: "kw:x", LabelRole: "pref", AliasType: "synonym", Provenance: "human:"}},
+		{"missing concept_id", Surface{Surface: "x", LabelRole: "pref", AliasType: "synonym", Provenance: "human:"}},
+		// K3: a caller-authored norm_key that disagrees with the derived
+		// key is rejected.
+		{"mismatched norm_key rejected", Surface{Surface: "x", ConceptID: "kw:x", NormKey: "wrong", LabelRole: "pref", AliasType: "synonym", Provenance: "human:"}},
+		{"invalid label_role", Surface{Surface: "x", ConceptID: "kw:x", LabelRole: "bogus", AliasType: "synonym", Provenance: "human:"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

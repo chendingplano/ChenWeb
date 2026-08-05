@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
 // Surface is one keyword surface form. SurfaceID is opaque and content-derived
@@ -65,9 +67,24 @@ func deriveSurfaceID(conceptID, surface, labelRole string) string {
 	return "kws_" + hex.EncodeToString(h[:6])
 }
 
-// SurfaceStore persists keyword surface rows.
+// SurfaceStore persists keyword surface rows. NormalizerVersion is the
+// version derived keys are produced at (D6: keys = surface + version); it
+// defaults to the current normalizer version.
 type SurfaceStore struct {
-	DB DBX
+	DB                DBX
+	NormalizerVersion int
+}
+
+func (s SurfaceStore) normVersion() int {
+	if s.NormalizerVersion <= 0 {
+		return semid.CurrentNormalizerVersion
+	}
+	return s.NormalizerVersion
+}
+
+// txBeginner is implemented by handles that can open transactions (*sql.DB).
+type txBeginner interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
 const surfaceColumns = `surface_id, concept_id, surface, norm_key, norm_version, label_role, alias_type, lang, scope, confidence, provenance, locked, evidence, create_time, modify_time`
@@ -92,10 +109,20 @@ func scanSurface(scan func(dest ...any) error) (Surface, error) {
 	return s, nil
 }
 
-// CreateSurface inserts a new keyword surface. SurfaceID is derived from
-// concept_id + surface + label_role, making it deterministic for idempotent
-// upserts.
+// CreateSurface inserts a new keyword surface together with its derived keys
+// (K1). Keys are derived server-side from the surface (D6): a caller-supplied
+// norm_key that does not match the derived key is rejected, never trusted
+// (K3). SurfaceID is derived from concept_id + surface + label_role, making
+// it deterministic for idempotent upserts.
 func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, error) {
+	version := s.normVersion()
+	ks := (semid.Normalizer{Version: version}).Normalize(sf.Surface)
+	if sf.NormKey != "" && sf.NormKey != ks.Norm {
+		return Surface{}, fmt.Errorf("norm_key %q does not match derived key %q: keys are derived from the surface, never authored (K3/D6)", sf.NormKey, ks.Norm)
+	}
+	sf.NormKey = ks.Norm
+	sf.NormVersion = version
+
 	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
 	if sf.LabelRole == "" {
 		sf.LabelRole = "pref"
@@ -109,13 +136,46 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 	if sf.Confidence == 0 {
 		sf.Confidence = 1.0
 	}
-	if sf.NormVersion == 0 {
-		sf.NormVersion = 1
-	}
 	if err := validateSurface(sf); err != nil {
 		return Surface{}, err
 	}
-	row := s.DB.QueryRowContext(ctx, `
+
+	keys := derivedSurfaceKeys(ks, sf.SurfaceID, version)
+
+	// The surface row and its derived keys are written together (K1), in a
+	// transaction when the handle supports it.
+	if beginner, ok := s.DB.(txBeginner); ok {
+		tx, err := beginner.BeginTx(ctx, nil)
+		if err != nil {
+			return Surface{}, err
+		}
+		created, err := insertSurfaceRow(ctx, tx, sf)
+		if err != nil {
+			_ = tx.Rollback()
+			return Surface{}, err
+		}
+		if err := (SurfaceKeyStore{DB: tx}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
+			_ = tx.Rollback()
+			return Surface{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Surface{}, err
+		}
+		return created, nil
+	}
+
+	created, err := insertSurfaceRow(ctx, s.DB, sf)
+	if err != nil {
+		return Surface{}, err
+	}
+	if err := (SurfaceKeyStore{DB: s.DB}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
+		return Surface{}, err
+	}
+	return created, nil
+}
+
+func insertSurfaceRow(ctx context.Context, db DBX, sf Surface) (Surface, error) {
+	row := db.QueryRowContext(ctx, `
 		INSERT INTO kb.keyword_surfaces
 			(surface_id, concept_id, surface, norm_key, norm_version, label_role, alias_type, lang, scope, confidence, provenance, locked, evidence)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -129,6 +189,27 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 			return ""
 		}()))
 	return scanSurface(row.Scan)
+}
+
+// derivedSurfaceKeys maps the normalizer's key set onto stored key rows.
+// The singular row is written even when it equals the norm key: it is the
+// plural→singular bridge (a query "analyses" finds a stored "analysis"
+// through it). Other keys equal to the norm key carry no lookup signal —
+// tier 1 already matches the norm key — and are omitted.
+func derivedSurfaceKeys(ks semid.KeySet, surfaceID string, version int) []SurfaceKey {
+	keys := make([]SurfaceKey, 0, 5)
+	add := func(kind, value string, allowNormEqual bool) {
+		if value == "" || (!allowNormEqual && value == ks.Norm) {
+			return
+		}
+		keys = append(keys, SurfaceKey{SurfaceID: surfaceID, KeyKind: kind, KeyValue: value, NormVersion: version})
+	}
+	add("alnum", ks.Alnum, false)
+	add("sorted", ks.Sorted, false)
+	add("phonetic", ks.Phonetic, false)
+	add("initials", ks.Initials, false)
+	add("singular", ks.Singular, true)
+	return keys
 }
 
 // GetSurface retrieves a surface by its opaque surface_id.
