@@ -383,12 +383,21 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 
 	ks := kf.normalizer().Normalize(surface)
 
-	// D11 auto-first: a targeted name that matches no concept still gets a
-	// decision — mint a provisional concept and assign it. This runs before
-	// the decision-log append so the decision row captures the final
-	// resolution (method + assigned node), keeping the decision attributable.
+	// D11 auto-first: a targeted name with no reliable match still gets a
+	// decision — mint a provisional concept and assign it, on both no
+	// candidate (deferred) and weak-evidence (human_review) misses. The two
+	// are treated alike because neither carries evidence worth attaching
+	// to: unlike ambiguous (strong evidence, tied), human_review's top
+	// candidate scored below the accept threshold, and attaching to it
+	// anyway risks mis-filing the name onto an established concept's
+	// surface set (2026080403-spec §4 D11, revised; F5, 2026080601-bug).
+	// res.Matches is left untouched, so the rejected weak candidate's id,
+	// method, and score stay in the decision-log output for sampling — it
+	// is recorded, not assigned. This runs before the decision-log append
+	// so the decision row captures the final resolution (method + assigned
+	// node), keeping the decision attributable.
 	autoCreated := false
-	if targeted && res.Verdict == semid.VerdictDeferred {
+	if targeted && (res.Verdict == semid.VerdictDeferred || res.Verdict == semid.VerdictHumanReview) {
 		conceptID, err := kf.autoCreateConcept(ctx, surface, ks, scope)
 		if err != nil {
 			return nil, err
@@ -422,10 +431,12 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 	if decisionID > 0 {
 		occ.DecisionLogID = &decisionID
 	}
-	// F6: ambiguous and human_review verdicts carry a top-1 too (§8.3/D11) —
-	// persist it on the occurrence row whenever one exists, not only on
-	// auto_accept/auto-create, so the assignment is queryable as a set
-	// without parsing decision-log JSON.
+	// F6: persist whatever concept the resolution finally landed on —
+	// auto_accept's match, ambiguous's top-1, or an auto-created concept
+	// (deferred/human_review on the targeted path) — whenever one exists,
+	// so the assignment is queryable as a set without parsing decision-log
+	// JSON. A collector-path human_review that wasn't auto-created still
+	// carries its (weak) top-1 here, same as before F5.
 	if res.ResolvedNodeID != "" {
 		occ.ConceptID = &res.ResolvedNodeID
 	}
@@ -468,24 +479,31 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 				}
 			}
 		}
-	case semid.VerdictDeferred:
-		// A targeted miss was already decided by auto-creation (D11); only
+	case semid.VerdictDeferred, semid.VerdictHumanReview:
+		// A targeted miss (no candidate) or weak-evidence result (below
+		// threshold) was already decided by auto-creation (D11); only
 		// collector misses queue in the backlog. K5: the backlog PK is
 		// (norm_key, scope) — pass the derived norm key, never the raw
 		// surface.
+		//
+		// human_review cannot occur today for the keyword family (every
+		// built tier 0-4 scores 1.0 or 0.8, at or above KeywordFamily's 0.8
+		// MinScore); step 11's continuous fuzzy/embedding scores make it
+		// the normal below-threshold path, and auto-create is the F5 fix
+		// for it (2026080601-bug), superseding F5's original decision text
+		// (queue + flag top-1) once D11 §4 was revised to auto-create
+		// rather than attach on a weak candidate.
 		if !autoCreated {
 			if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
 				return nil, err
 			}
 		}
-	case semid.VerdictAmbiguous, semid.VerdictHumanReview:
+	case semid.VerdictAmbiguous:
 		// K5: the backlog PK is (norm_key, scope) — pass the derived norm
-		// key, never the raw surface. F5: human_review previously fell
-		// through this switch with no case at all — no backlog row, no
-		// queryable trace — the exact silent hole D11 exists to eliminate.
-		// It cannot occur today (every built tier scores 1.0 or 0.8, at or
-		// above KeywordFamily's 0.8 MinScore), but step 11's continuous
-		// fuzzy/embedding scores make it the normal below-threshold path.
+		// key, never the raw surface. Unaffected by the D11 below-threshold
+		// correction: ambiguous is strong-but-tied evidence, so it still
+		// attaches its top-1 pick (set on occ.ConceptID above) and always
+		// queues the backlog, targeted or not.
 		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
 			return nil, err
 		}
