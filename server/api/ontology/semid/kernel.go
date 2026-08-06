@@ -22,6 +22,13 @@ type NodeCandidate struct {
 	// change-set a governed family produces.
 	Payload any
 	Method  string
+	// PrecomputedScore carries a continuous similarity score the family
+	// computed itself (tier 5 edit distance, tier 6 embedding cosine) for
+	// evidence that isn't a shared derived key and so can't be scored by
+	// Score(surface, candidate KeyBundle) alone (spec 2026080403 §13.1).
+	// nil for tiers 0-4, whose evidence is a shared key and is scored by
+	// Score as before.
+	PrecomputedScore *float64
 }
 
 // FamilyAdapter declares what differs between identity families. The kernel
@@ -92,6 +99,9 @@ func (k Kernel) Resolve(ctx context.Context, input, scope string) (Resolution, e
 	matches := make([]ScoredMatch, 0, len(candidates))
 	for _, c := range candidates {
 		s := Score(bundle, c.KeyBundle)
+		if c.PrecomputedScore != nil {
+			s = *c.PrecomputedScore
+		}
 		if s > 0 {
 			matches = append(matches, ScoredMatch{NodeID: c.NodeID, Score: s, Reason: scoreReason(s), Method: c.Method})
 		}

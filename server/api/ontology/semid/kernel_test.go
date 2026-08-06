@@ -160,3 +160,44 @@ func TestAdjudicateVerdicts(t *testing.T) {
 		t.Fatalf("expected ambiguous for governed tie with explicit MaxCandidates, got %s", v)
 	}
 }
+
+// fixedScoreFamily is a minimal FamilyAdapter whose one candidate carries a
+// PrecomputedScore that Score(bundle, KeyBundle{}) could never produce on
+// its own (KeyBundle{} has no canonical/alternate keys, so Score returns 0).
+type fixedScoreFamily struct {
+	score float64
+}
+
+func (f fixedScoreFamily) FamilyName() string { return "fixed" }
+func (f fixedScoreFamily) AutoAcceptPolicy() AutoAcceptPolicy {
+	return AutoAcceptPolicy{Enabled: true, MinScore: 0.8, MaxCandidates: 1}
+}
+func (f fixedScoreFamily) CandidateNodes(ctx context.Context, input, scope string) ([]NodeCandidate, error) {
+	s := f.score
+	return []NodeCandidate{{NodeID: "n1", Method: "tier5_fuzzy", PrecomputedScore: &s}}, nil
+}
+
+func TestKernelResolveUsesPrecomputedScore(t *testing.T) {
+	k := Kernel{Family: fixedScoreFamily{score: 0.9}, Normalizer: Normalizer{Version: CurrentNormalizerVersion}}
+	res, err := k.Resolve(context.Background(), "kubernets", "_")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(res.Matches) != 1 || res.Matches[0].Score != 0.9 {
+		t.Fatalf("expected one match scored 0.9, got %+v", res.Matches)
+	}
+	if res.Verdict != VerdictAutoAccept {
+		t.Fatalf("expected auto_accepted at score 0.9 >= MinScore 0.8, got %s", res.Verdict)
+	}
+}
+
+func TestKernelResolveDropsZeroPrecomputedScore(t *testing.T) {
+	k := Kernel{Family: fixedScoreFamily{score: 0}, Normalizer: Normalizer{Version: CurrentNormalizerVersion}}
+	res, err := k.Resolve(context.Background(), "x", "_")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(res.Matches) != 0 || res.Verdict != VerdictDeferred {
+		t.Fatalf("expected deferred with zero matches, got verdict=%s matches=%+v", res.Verdict, res.Matches)
+	}
+}
