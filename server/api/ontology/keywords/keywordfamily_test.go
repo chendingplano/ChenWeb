@@ -294,6 +294,10 @@ func TestResolveSurfaceTier5AutoAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	// "observe" is the family's shipped KEYWORD_RESOLVER_MODE: resolution runs
+	// but no downstream consumer is connected. modeActive() returns true only
+	// for "observe"/"on" — without it the family's entry points no-op and
+	// this test would exercise nothing.
 	kf := &KeywordFamily{DB: db, ResolverMode: "observe"}
 	kf.ensureDefaults()
 	ctx := context.Background()
@@ -345,8 +349,11 @@ func TestResolveSurfaceTier5AutoAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSurface: %v", err)
 	}
+	if len(res.Matches) != 1 {
+		t.Errorf("expected exactly one auto-accepted match, got %d (%+v)", len(res.Matches), res.Matches)
+	}
 	if res.Verdict != semid.VerdictAutoAccept {
-		t.Fatalf("expected auto_accepted, got verdict=%s matches=%+v", res.Verdict, res.Matches)
+		t.Errorf("expected auto_accepted, got verdict=%s matches=%+v", res.Verdict, res.Matches)
 	}
 	if res.ResolvedNodeID != "kwc_k8s" {
 		t.Errorf("expected kwc_k8s, got %s", res.ResolvedNodeID)

@@ -36,7 +36,9 @@ import (
 )
 
 func main() {
-	log.SetFlags(0)
+	// Timestamps on every log line: this binary is typically run under an
+	// external scheduler, and the run's audit trail needs them.
+	log.SetFlags(log.LstdFlags | log.LUTC)
 	scope := flag.String("scope", "_", "keyword scope to reconcile")
 	flag.Parse()
 
@@ -139,7 +141,9 @@ func embeddingClientFromEnv() (*llmclients.OpenAIJSONClient, string, error) {
 		TokenReservePerCall:  def.TokenReservePerCall,
 	}, nil)
 	if err != nil {
-		return nil, "", err
+		// Name the entry that failed so the operator can tell which model
+		// config the client-construction error refers to.
+		return nil, "", fmt.Errorf("create embedding client for KEYWORD_RECONCILE_EMBEDDING_MODEL_NAME entry %q (model %s): %w", modelRef, def.ModelName, err)
 	}
 	return client, def.ModelName, nil
 }

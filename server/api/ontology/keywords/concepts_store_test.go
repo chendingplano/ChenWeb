@@ -657,7 +657,8 @@ func TestListAutoCreatedProvisional(t *testing.T) {
 // TestSearchSimilarPrefLabel is reconciliation's lexical blocking query (§13
 // R3): pg_trgm similarity over pref_label, bounded to live concepts and
 // excluding the concept itself, so the reconciler can block "Luminence" to
-// "Luminance" without a concept matching itself.
+// "Luminance" without a concept matching itself. limit=0 exercises the
+// default-limit path: the method substitutes 10, so the mock expects 10.
 func TestSearchSimilarPrefLabel(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -667,13 +668,20 @@ func TestSearchSimilarPrefLabel(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
+	// Match the full query, not just a WHERE substring, so the ORDER BY
+	// similarity(pref_label, $2) DESC and the LIMIT $5 are pinned alongside
+	// the predicate (sqlmock collapses whitespace on both sides).
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT ` + conceptColumns + ` ` + conceptFrom +
+			` WHERE scope = $1 AND status IN ('active', 'provisional')` +
+			` AND concept_id != $4 AND similarity(pref_label, $2) > $3` +
+			` ORDER BY similarity(pref_label, $2) DESC LIMIT $5`)).
 		WithArgs("_", "Luminence", 0.3, "kwc_l", 10).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow("kwc_established", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
 
-	out, err := store.SearchSimilarPrefLabel(ctx, "Luminence", "_", "kwc_l", 0.3, 10)
+	out, err := store.SearchSimilarPrefLabel(ctx, "Luminence", "_", "kwc_l", 0.3, 0)
 	if err != nil {
 		t.Fatalf("SearchSimilarPrefLabel: %v", err)
 	}

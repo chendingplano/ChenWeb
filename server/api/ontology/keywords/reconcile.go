@@ -118,6 +118,14 @@ func (r *Reconciler) Run(ctx context.Context) (ReconcileStats, error) {
 		if err != nil {
 			return stats, err
 		}
+		// Known limitation (documented, not fixed): MergeConcept — its own
+		// transaction — and this decision-log append are NOT atomic. If the
+		// append fails after the merge committed, the merge persists with no
+		// audit row, and a retry will not re-merge the tombstoned concept (it
+		// left the auto-created-provisional population when its status flipped
+		// to 'merged'). Inherent to the approved propagate-errors design;
+		// atomic merge+audit is out of scope for the minimum reconciliation
+		// loop.
 		if _, err := r.DecisionLog.Append(ctx, semid.DecisionLogEntry{
 			Family:  "keyword_reconcile",
 			Scope:   r.Scope,
@@ -174,6 +182,13 @@ func (r *Reconciler) findMergeTarget(ctx context.Context, cand Concept, live []C
 			if target.ConceptID == cand.ConceptID || merged[target.ConceptID] {
 				continue
 			}
+			// The digit veto here runs on the raw pref labels, not normalized
+			// forms. The normalizer's NFKC step (semid §6.3) folds full-width
+			// digits (U+FF10–U+FF19) to ASCII, but digitsOnly extracts only
+			// ASCII 0-9, so a full-width-only digit difference (e.g. 版２ vs
+			// 版３) is invisible to the veto in this semantic branch. The
+			// lexical path above normalizes both sides first and so sees
+			// full-width digits already folded.
 			targetEmbed, ok := liveEmbeds[target.ConceptID]
 			if !ok || digitsDiffer(cand.PrefLabel, target.PrefLabel) {
 				continue
