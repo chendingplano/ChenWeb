@@ -1045,7 +1045,7 @@ func TestReconcilerMergesCrossLingualProvisional(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`WHERE status IN ('active', 'provisional')`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`status IN ('active', 'provisional')`)).
 		WithArgs("_").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
