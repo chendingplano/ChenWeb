@@ -18,6 +18,11 @@ func TestComparisonStoreCreateScopeAndPersistDirectionalCell(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
+	releasedMetricTermRows := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, now, nil, now, nil)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("time_to_alarm").WillReturnRows(releasedMetricTermRows())
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_comparison_scopes")).
 		WithArgs("comparison-scope-1", `["display-1"]`, `["time_to_alarm"]`, "2026-08-01", `[{"module_id":"ventilator-display","release_id":42}]`, `[{"profile_id":"ventilator-display:display_metrics","release_id":42}]`, `{"authority":"GB 9706.212-2020"}`, `{"time_to_alarm":true}`, "reviewer", "fixture").
 		WillReturnRows(sqlmock.NewRows([]string{"comparison_scope_id", "target_object_ids", "metric_keys", "as_of_date", "module_releases", "profile_releases", "precedence_policy", "closed_dimensions", "selected_by", "selection_reason", "create_time"}).
@@ -26,6 +31,7 @@ func TestComparisonStoreCreateScopeAndPersistDirectionalCell(t *testing.T) {
 		WithArgs("comparison-scope-1", int64(99), "assertion:1234", "comparison-v1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "comparison_scope_id", "input_record_id", "assertion_watermark", "comparator_version", "create_time"}).
 			AddRow(7, "comparison-scope-1", 99, "assertion:1234", "comparison-v1", now))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("time_to_alarm").WillReturnRows(releasedMetricTermRows())
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.ontology_comparison_cells")).
 		WithArgs(int64(7), "display-1", "time_to_alarm", "enterprise", int64(101), `[{"assertion_id":101,"citation":"enterprise.pdf#p12"}]`, int64(0), "GB", int64(202), `[{"assertion_id":202,"citation":"GB-9706.212-2020#5.3"}]`, int64(1), string(Stronger), "subject_to_authority", "subject's satisfying set is a strict subset").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -47,6 +53,44 @@ func TestComparisonStoreCreateScopeAndPersistDirectionalCell(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestComparisonStoreCreateScopeRejectsMetricKeyThatIsNotAReleasedMetricDefinitionTerm(t *testing.T) {
+	cases := []struct {
+		name string
+		rows func() *sqlmock.Rows
+	}{
+		{"unknown term id", func() *sqlmock.Rows {
+			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"})
+		}},
+		{"wrong term_kind", func() *sqlmock.Rows {
+			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
+				AddRow(1, "time_to_alarm", 1, "unit", "measurement", "included_in_release", nil, nil, nil, time.Now(), nil, time.Now(), nil)
+		}},
+		{"not yet released", func() *sqlmock.Rows {
+			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
+				AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "draft", nil, nil, nil, time.Now(), nil, time.Now(), nil)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer db.Close()
+			mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("time_to_alarm").WillReturnRows(tc.rows())
+			_, err = (ComparisonStore{DB: db}).CreateScope(context.Background(), ComparisonScope{
+				ComparisonScopeID: "comparison-scope-1", TargetObjectIDs: json.RawMessage(`["display-1"]`), MetricKeys: json.RawMessage(`["time_to_alarm"]`), AsOfDate: "2026-08-01", ModuleReleases: json.RawMessage(`[{"module_id":"ventilator-display","release_id":42}]`), ProfileReleases: json.RawMessage(`[{"profile_id":"ventilator-display:display_metrics","release_id":42}]`),
+			})
+			if err == nil {
+				t.Fatal("CreateScope: want error, got nil")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

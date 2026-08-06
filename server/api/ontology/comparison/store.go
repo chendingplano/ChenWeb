@@ -2,8 +2,10 @@ package comparison
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -58,6 +60,31 @@ type ComparisonCell struct {
 
 type ComparisonStore struct{ DB terms.DBX }
 
+// validateMetricKey enforces the §2.4 decision: metric_key is not a separate
+// key space, it is a governed metric_definition term id. This mirrors the
+// termExists check in ontology/assertions.AssociateSemantics (the only other
+// place a governed-term reference is validated) rather than a DB foreign key,
+// because kb.ontology_terms has no single-column unique key on term_id alone
+// (only (term_id, version), since terms are versioned) — every other
+// term-id-reference column in this schema (predicate_term_id, subject_term_id,
+// etc.) is validated the same way, in Go, not via FK.
+func (s ComparisonStore) validateMetricKey(ctx context.Context, metricKey string) error {
+	t, err := (terms.TermStore{DB: s.DB}).GetTermLatest(ctx, metricKey)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("metric_key %q is not a governed term id (§2.4: metric_key must be a released metric_definition term)", metricKey)
+		}
+		return err
+	}
+	if t.TermKind != "metric_definition" {
+		return fmt.Errorf("metric_key %q resolves to a %q term, not metric_definition", metricKey, t.TermKind)
+	}
+	if t.Status != "included_in_release" {
+		return fmt.Errorf("metric_key %q is not a released term (status %q)", metricKey, t.Status)
+	}
+	return nil
+}
+
 // GetScope reloads the original immutable comparison selection, including the
 // release snapshots and closure policy used by a historical run.
 func (s ComparisonStore) GetScope(ctx context.Context, scopeID string) (ComparisonScope, error) {
@@ -79,6 +106,15 @@ func (s ComparisonStore) CreateScope(ctx context.Context, scope ComparisonScope)
 	}
 	if strings.TrimSpace(scope.ComparisonScopeID) == "" || scope.AsOfDate == "" || len(scope.TargetObjectIDs) == 0 || len(scope.MetricKeys) == 0 || len(scope.ModuleReleases) == 0 || len(scope.ProfileReleases) == 0 {
 		return ComparisonScope{}, errors.New("comparison scope identity, targets, metrics, as_of_date, module_releases, and profile_releases are required")
+	}
+	var metricKeys []string
+	if err := json.Unmarshal(scope.MetricKeys, &metricKeys); err != nil {
+		return ComparisonScope{}, fmt.Errorf("metric_keys must be a JSON array of governed term ids: %w", err)
+	}
+	for _, mk := range metricKeys {
+		if err := s.validateMetricKey(ctx, mk); err != nil {
+			return ComparisonScope{}, err
+		}
 	}
 	if len(scope.PrecedencePolicy) == 0 {
 		scope.PrecedencePolicy = json.RawMessage(`{}`)
@@ -112,6 +148,9 @@ func (s ComparisonStore) PersistCell(ctx context.Context, cell ComparisonCell) e
 	}
 	if cell.RunID == 0 || strings.TrimSpace(cell.TargetObjectID) == "" || strings.TrimSpace(cell.MetricKey) == "" || strings.TrimSpace(cell.SubjectFamily) == "" || strings.TrimSpace(cell.AuthorityFamily) == "" || cell.Verdict == "" || cell.Direction != "subject_to_authority" || strings.TrimSpace(cell.Rationale) == "" {
 		return errors.New("comparison cell provenance and directional verdict are required")
+	}
+	if err := s.validateMetricKey(ctx, cell.MetricKey); err != nil {
+		return err
 	}
 	if len(cell.SubjectAssertions) == 0 {
 		cell.SubjectAssertions = json.RawMessage(`[]`)
