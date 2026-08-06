@@ -51,6 +51,7 @@ var coreModule = moduleContent{
 		{ID: "core:asserted_by", Kind: "property", Def: "Relates an assertion to the agent or source that made it.", Labels: enPref("asserted by")},
 		{ID: "core:has_polarity", Kind: "property", Def: "The polarity of a claim (positive or negative).", Labels: enPref("has polarity")},
 		{ID: "core:has_confidence", Kind: "property", Def: "The confidence assigned to a claim.", Labels: enPref("has confidence")},
+		{ID: "core:aligns_to_term", Kind: "property", Def: "Binds a keyword concept to the governed term it is an accepted alias of (spec 2026080403 §16.1/§16.2, REQ-2). The assignment side of the governed bridge: auto-proposed, auto-accepted above a threshold, with method/score/evidence recorded on the assertion.", Labels: enPref("aligns to term")},
 	},
 }
 
