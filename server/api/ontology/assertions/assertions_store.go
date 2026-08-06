@@ -14,7 +14,7 @@ import (
 // subject_ref_kind/object_ref_kind (ADR DR9).
 var AllowedRefKinds = map[string]bool{
 	"object_node": true, "ontology_term": true, "assertion": true,
-	"artifact": true, "literal": true,
+	"artifact": true, "literal": true, "keyword_concept": true,
 }
 
 // Assertion is one revision of a qualified semantic assertion (spec §8.3).
