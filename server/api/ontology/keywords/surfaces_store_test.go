@@ -50,15 +50,15 @@ func TestCreateSurface(t *testing.T) {
 			"human:tester", false, nil, testNow, testNow))
 
 	// K1: the derived keys are written with the surface, in the same
-	// transaction. "sorted" equals the norm key and is omitted; "singular"
-	// is written even when it equals the norm key (plural bridge).
+	// transaction. "sorted" equals the norm key and is omitted; "phonetic"
+	// is not persisted (no tier reads it, §20.2); "singular" is written
+	// even when it equals the norm key (plural bridge).
 	mock.ExpectExec(regexp.QuoteMeta(
 		`DELETE FROM kb.keyword_surface_keys WHERE surface_id = $1`)).
 		WithArgs(sf.SurfaceID).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	for _, k := range []struct{ kind, value string }{
 		{"alnum", "helloworld"},
-		{"phonetic", "hhllw"},
 		{"initials", "hw"},
 		{"singular", "hello world"},
 	} {
@@ -224,6 +224,63 @@ func TestUpdateSurfaceLock(t *testing.T) {
 
 	if err := store.UpdateSurfaceLock(ctx, "kws_x", true); err != nil {
 		t.Fatalf("UpdateSurfaceLock: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// The surface id hashes concept|surface|role — so the role default must be
+// applied before the id is derived (§20.2). An empty LabelRole becomes
+// "pref" in both the row and the id.
+func TestCreateSurfaceDefaultsRoleBeforeDerivingID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := SurfaceStore{DB: db}
+	ctx := context.Background()
+
+	sf := Surface{
+		ConceptID:  "kwc_role",
+		Surface:    "luminance",
+		AliasType:  "pref",
+		Provenance: "human:tester",
+	}
+	wantID := deriveSurfaceID(sf.ConceptID, sf.Surface, "pref")
+	ks := (semid.Normalizer{Version: semid.CurrentNormalizerVersion}).Normalize(sf.Surface)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
+		WithArgs(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
+			"pref", sf.AliasType, "en", "_", 1.0, sf.Provenance, false, nil).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
+			"label_role", "alias_type", "lang", "scope", "confidence",
+			"provenance", "locked", "evidence", "create_time", "modify_time",
+		}).AddRow(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
+			"pref", sf.AliasType, "en", "_", 1.0, sf.Provenance, false, nil, testNow, testNow))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.keyword_surface_keys WHERE surface_id =`)).
+		WithArgs(wantID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	for _, k := range derivedSurfaceKeys(ks, wantID, semid.CurrentNormalizerVersion) {
+		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.keyword_surface_keys`)).
+			WithArgs(wantID, k.KeyKind, k.KeyValue, semid.CurrentNormalizerVersion).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectCommit()
+
+	created, err := store.CreateSurface(ctx, sf)
+	if err != nil {
+		t.Fatalf("CreateSurface: %v", err)
+	}
+	if created.LabelRole != "pref" {
+		t.Errorf("LabelRole: got %q, want pref", created.LabelRole)
+	}
+	if created.SurfaceID != wantID {
+		t.Errorf("SurfaceID: got %q, want %q (derived from the defaulted role)", created.SurfaceID, wantID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)

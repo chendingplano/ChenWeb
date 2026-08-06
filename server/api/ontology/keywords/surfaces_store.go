@@ -123,10 +123,13 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 	sf.NormKey = ks.Norm
 	sf.NormVersion = version
 
-	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
 	if sf.LabelRole == "" {
 		sf.LabelRole = "pref"
 	}
+	// The id is derived after the role default: the scheme hashes
+	// concept|surface|role, so the hashed role must be the stored role
+	// (§20.2 "surface_id hashed before role defaulting").
+	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
 	if sf.Lang == "" {
 		sf.Lang = "en"
 	}
@@ -206,7 +209,10 @@ func derivedSurfaceKeys(ks semid.KeySet, surfaceID string, version int) []Surfac
 	}
 	add("alnum", ks.Alnum, false)
 	add("sorted", ks.Sorted, false)
-	add("phonetic", ks.Phonetic, false)
+	// phonetic is deliberately not persisted: no tier reads it (Double
+	// Metaphone is deferred, §20.1), and writing key rows nothing queries
+	// is the §20.2 "dead phonetic key" defect. The schema CHECK still
+	// permits the kind for when a phonetic tier lands.
 	add("initials", ks.Initials, false)
 	add("singular", ks.Singular, true)
 	return keys
