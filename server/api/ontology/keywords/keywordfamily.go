@@ -2,8 +2,11 @@ package keywords
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
@@ -318,11 +321,16 @@ func (kf *KeywordFamily) ResolveSurface(ctx context.Context, surface, scope stri
 // ObserveSurface is the observing entry point (§9.3): it runs the pure
 // resolution, appends the decision log, writes the occurrence record linked
 // to that decision (K4), and applies the verdict side effects — surface
-// persistence on auto_accepted, and the unresolved backlog keyed on the
-// derived norm key (K5) on deferred/ambiguous. artifactType/artifactID/
-// contextText are consumer-supplied provenance, opaque to the resolver
-// (§9.5). An inert family returns nil, nil.
-func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, artifactType, artifactID, contextText string) (*semid.Resolution, error) {
+// persistence on auto_accepted, the unresolved backlog keyed on the derived
+// norm key (K5) on deferred/ambiguous, and, for targeted names only, the
+// D11 auto-create branch: a targeted miss mints a provisional concept
+// instead of queueing. targeted marks a name the producer asserted *is* a
+// name (the REST resolve path); the mention collector passes false and keeps
+// backlog-only behaviour, since it tokenizes all prose and would otherwise
+// mint a concept per junk token. artifactType/artifactID/contextText are
+// consumer-supplied provenance, opaque to the resolver (§9.5). An inert
+// family returns nil, nil.
+func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, artifactType, artifactID, contextText string, targeted bool) (*semid.Resolution, error) {
 	kf.ensureDefaults()
 	if !kf.modeActive() || kf.DB == nil {
 		return nil, nil
@@ -331,6 +339,23 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 	res, err := kf.ResolveSurface(ctx, surface, scope)
 	if err != nil {
 		return nil, err
+	}
+
+	ks := kf.normalizer().Normalize(surface)
+
+	// D11 auto-first: a targeted name that matches no concept still gets a
+	// decision — mint a provisional concept and assign it. This runs before
+	// the decision-log append so the decision row captures the final
+	// resolution (method + assigned node), keeping the decision attributable.
+	autoCreated := false
+	if targeted && res.Verdict == semid.VerdictDeferred {
+		conceptID, err := kf.autoCreateConcept(ctx, surface, ks, scope)
+		if err != nil {
+			return nil, err
+		}
+		res.ResolvedNodeID = conceptID
+		res.Method = "auto_created"
+		autoCreated = true
 	}
 
 	input, _ := json.Marshal(map[string]any{"surface": surface, "scope": scope})
@@ -345,8 +370,10 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 	})
 
 	// K4: the occurrence carries the observed string, the derived norm key,
-	// the resolution outcome, and the decision-log link from this call.
-	ks := kf.normalizer().Normalize(surface)
+	// the resolution outcome, and the decision-log link from this call. An
+	// auto-created concept is assigned exactly like an accepted match; the
+	// status stays unresolved because the concept is provisional, not
+	// governed (§9.5).
 	occ := Occurrence{
 		ArtifactType:     artifactType,
 		ArtifactID:       artifactID,
@@ -359,7 +386,7 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 	if decisionID > 0 {
 		occ.DecisionLogID = &decisionID
 	}
-	if res.Verdict == semid.VerdictAutoAccept && res.ResolvedNodeID != "" {
+	if res.ResolvedNodeID != "" && (res.Verdict == semid.VerdictAutoAccept || autoCreated) {
 		occ.ConceptID = &res.ResolvedNodeID
 	}
 	if _, err := kf.OccurrenceStore.InsertOccurrence(ctx, occ); err != nil {
@@ -394,7 +421,17 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 				})
 			}
 		}
-	case semid.VerdictDeferred, semid.VerdictAmbiguous:
+	case semid.VerdictDeferred:
+		// A targeted miss was already decided by auto-creation (D11); only
+		// collector misses queue in the backlog. K5: the backlog PK is
+		// (norm_key, scope) — pass the derived norm key, never the raw
+		// surface.
+		if !autoCreated {
+			if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, contextText); err != nil {
+				return nil, err
+			}
+		}
+	case semid.VerdictAmbiguous:
 		// K5: the backlog PK is (norm_key, scope) — pass the derived norm
 		// key, never the raw surface.
 		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, contextText); err != nil {
@@ -403,6 +440,56 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 	}
 
 	return &res, nil
+}
+
+// autoCreateConcept mints the provisional concept a targeted miss decides on
+// (D11) and persists the observed name as its pref surface. Both rows carry
+// the markers that make the auto-created population findable as a set:
+// gloss_source "auto:d11" on the concept, provenance "auto:resolver" on the
+// surface. The concept id is a content hash of (norm_key, scope), so
+// repeated misses on the same normalized name converge on the same concept.
+func (kf *KeywordFamily) autoCreateConcept(ctx context.Context, surface string, ks semid.KeySet, scope string) (string, error) {
+	conceptID := autoConceptID(ks.Norm, scope)
+	created, err := kf.ConceptStore.CreateConcept(ctx, Concept{
+		ConceptID:   conceptID,
+		PrefLabel:   surface,
+		Scope:       scope,
+		Status:      "provisional",
+		GlossSource: "auto:d11",
+	})
+	if err != nil {
+		// A concurrent miss may have minted the same content-hashed id:
+		// converge on the existing live concept instead of failing the call.
+		if existing, gerr := kf.ConceptStore.GetConcept(ctx, conceptID); gerr == nil &&
+			(existing.Status == "active" || existing.Status == "provisional") {
+			return existing.ConceptID, nil
+		}
+		return "", fmt.Errorf("auto-create concept %s: %w", conceptID, err)
+	}
+
+	// The name becomes the concept's pref surface; keys are derived
+	// server-side from the surface (D6).
+	if _, err := kf.SurfaceStore.CreateSurface(ctx, Surface{
+		ConceptID:  created.ConceptID,
+		Surface:    surface,
+		LabelRole:  "pref",
+		AliasType:  "pref",
+		Provenance: "auto:resolver",
+		Scope:      scope,
+		Confidence: 1.0,
+	}); err != nil {
+		return "", fmt.Errorf("auto-create pref surface for %s: %w", created.ConceptID, err)
+	}
+	return created.ConceptID, nil
+}
+
+// autoConceptID derives the opaque, content-based id of an auto-created
+// keyword concept — kwc_<sha256[:12]> of norm_key|scope, mirroring the
+// surface-id scheme (deriveSurfaceID). Deterministic, so repeated misses
+// converge on one concept.
+func autoConceptID(normKey, scope string) string {
+	h := sha256.Sum256([]byte(normKey + "|" + scope))
+	return "kwc_" + hex.EncodeToString(h[:6])
 }
 
 // statusForVerdict maps a kernel verdict to the §9.5 resolution statuses.

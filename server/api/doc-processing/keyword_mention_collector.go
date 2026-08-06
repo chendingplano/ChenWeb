@@ -61,8 +61,10 @@ func (mc *KeywordMentionCollector) CollectFromText(ctx context.Context, artifact
 		seen[token] = true
 
 		// K4: the occurrence carries consumer provenance and a context
-		// snippet — the old mention row stored neither.
-		_, err := mc.KeywordFamily.ObserveSurface(ctx, token, scope, "document", artifactRef, contextSnippet(text, token))
+		// snippet — the old mention row stored neither. targeted=false: the
+		// collector tokenizes all prose and must never auto-create concepts
+		// (D11 scope limit) — misses queue in the backlog only.
+		_, err := mc.KeywordFamily.ObserveSurface(ctx, token, scope, "document", artifactRef, contextSnippet(text, token), false)
 		if err != nil {
 			// Best-effort: log but don't fail the batch.
 			continue

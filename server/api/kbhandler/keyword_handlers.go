@@ -415,7 +415,10 @@ func ResolveKeywordSurface(c echo.Context) error {
 		DB:           ApiTypes.ProjectDBHandle,
 		ResolverMode: keywords.ResolverMode(),
 	}
-	res, err := kf.ObserveSurface(c.Request().Context(), payload.Surface, payload.Scope, "", "", "")
+	// The resolve endpoint is the targeted path (D11): a producer asserting
+	// a field *is* a name — a miss may auto-create a provisional concept.
+	// The mention collector is the only non-targeted caller.
+	res, err := kf.ObserveSurface(c.Request().Context(), payload.Surface, payload.Scope, "", "", "", true)
 	if err != nil {
 		logger.Error("resolve keyword surface failed", "surface", payload.Surface, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve keyword surface (CWB_KB_KW_303)"})
