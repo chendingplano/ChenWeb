@@ -267,8 +267,12 @@ func retagMethod(matches []semid.NodeCandidate, method string) []semid.NodeCandi
 }
 
 // lookupByKeyKind joins kb.keyword_surface_keys against kb.keyword_surfaces
-// for one key kind/value within scope. Candidates carry honest bundles: the
-// concept's stored norm key as canonical, the matched key value as an
+// for one key kind/value within scope, at the family's current normalizer
+// version (F8/N4: an alternate key computed under a stale version must not
+// match a query computed under the current one — two versions would
+// otherwise serve reads simultaneously, exactly what tier 1's own
+// norm_version filter already prevents). Candidates carry honest bundles:
+// the concept's stored norm key as canonical, the matched key value as an
 // alternate so Score can see the bridge. Candidates are deduplicated by
 // concept — two surfaces of one concept are not two candidates.
 func (kf *KeywordFamily) lookupByKeyKind(ctx context.Context, keyKind, keyValue, scope, method string) ([]semid.NodeCandidate, bool) {
@@ -276,8 +280,8 @@ func (kf *KeywordFamily) lookupByKeyKind(ctx context.Context, keyKind, keyValue,
 		SELECT s.concept_id, s.norm_key
 		FROM kb.keyword_surface_keys sk
 		JOIN kb.keyword_surfaces s ON s.surface_id = sk.surface_id
-		WHERE sk.key_kind = $1 AND sk.key_value = $2 AND s.scope = $3
-		LIMIT 10`, keyKind, keyValue, scope)
+		WHERE sk.key_kind = $1 AND sk.key_value = $2 AND s.scope = $3 AND sk.norm_version = $4
+		LIMIT 10`, keyKind, keyValue, scope, kf.NormalizerVersion)
 	if err != nil || rows == nil {
 		return nil, false
 	}
@@ -418,7 +422,11 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 	if decisionID > 0 {
 		occ.DecisionLogID = &decisionID
 	}
-	if res.ResolvedNodeID != "" && (res.Verdict == semid.VerdictAutoAccept || autoCreated) {
+	// F6: ambiguous and human_review verdicts carry a top-1 too (§8.3/D11) —
+	// persist it on the occurrence row whenever one exists, not only on
+	// auto_accept/auto-create, so the assignment is queryable as a set
+	// without parsing decision-log JSON.
+	if res.ResolvedNodeID != "" {
 		occ.ConceptID = &res.ResolvedNodeID
 	}
 	if _, err := kf.OccurrenceStore.InsertOccurrence(ctx, *occ); err != nil {
@@ -442,7 +450,12 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 			}
 			if !exists {
 				// Keys are derived server-side from the surface (D6).
-				_, _ = kf.SurfaceStore.CreateSurface(ctx, Surface{
+				// CreateSurface is idempotent on the uniqueness key (F3): a
+				// second distinct literal for an already-observed
+				// norm_key/concept/scope/role/lang returns the existing
+				// surface instead of erroring, so this only fails on a real
+				// write error — which must not be swallowed.
+				if _, err := kf.SurfaceStore.CreateSurface(ctx, Surface{
 					ConceptID:  res.ResolvedNodeID,
 					Surface:    surface,
 					LabelRole:  "alt",
@@ -450,7 +463,9 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 					Provenance: "llm:observe",
 					Scope:      scope,
 					Confidence: 0.8,
-				})
+				}); err != nil {
+					return nil, err
+				}
 			}
 		}
 	case semid.VerdictDeferred:
@@ -463,9 +478,14 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 				return nil, err
 			}
 		}
-	case semid.VerdictAmbiguous:
+	case semid.VerdictAmbiguous, semid.VerdictHumanReview:
 		// K5: the backlog PK is (norm_key, scope) — pass the derived norm
-		// key, never the raw surface.
+		// key, never the raw surface. F5: human_review previously fell
+		// through this switch with no case at all — no backlog row, no
+		// queryable trace — the exact silent hole D11 exists to eliminate.
+		// It cannot occur today (every built tier scores 1.0 or 0.8, at or
+		// above KeywordFamily's 0.8 MinScore), but step 11's continuous
+		// fuzzy/embedding scores make it the normal below-threshold path.
 		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
 			return nil, err
 		}
@@ -490,11 +510,26 @@ func (kf *KeywordFamily) autoCreateConcept(ctx context.Context, surface string, 
 		GlossSource: "auto:d11",
 	})
 	if err != nil {
-		// A concurrent miss may have minted the same content-hashed id:
-		// converge on the existing live concept instead of failing the call.
-		if existing, gerr := kf.ConceptStore.GetConcept(ctx, conceptID); gerr == nil &&
-			(existing.Status == "active" || existing.Status == "provisional") {
-			return existing.ConceptID, nil
+		// F11: a concurrent miss may have minted the same content-hashed id
+		// (conceptID = sha256(norm_key|scope)[:6]) — converge on it instead
+		// of failing the call. The scope check is what's cheaply verifiable
+		// here (Concept carries no norm_key column to check against); a
+		// same-scope collision between unrelated norm keys is treated as
+		// negligible at pilot scale (48-bit hash), not proven impossible.
+		existing, gerr := kf.ConceptStore.GetConcept(ctx, conceptID)
+		if gerr == nil && existing.Scope == scope {
+			switch existing.Status {
+			case "active", "provisional":
+				return existing.ConceptID, nil
+			case "merged":
+				// The loser of this race observed the winner's concept
+				// after it was already merged into a survivor — chase the
+				// tombstone instead of erroring on a status this caller
+				// has no way to act on.
+				if survivor, ferr := kf.ConceptStore.FollowMerge(ctx, existing.ConceptID); ferr == nil {
+					return survivor, nil
+				}
+			}
 		}
 		return "", fmt.Errorf("auto-create concept %s: %w", conceptID, err)
 	}

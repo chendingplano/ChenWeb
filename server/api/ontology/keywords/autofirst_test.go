@@ -51,7 +51,7 @@ func expectTotalMiss(mock sqlmock.Sqlmock, ks semid.KeySet, scope string) {
 			continue
 		}
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT s.concept_id, s.norm_key FROM kb.keyword_surface_keys sk`)).
-			WithArgs(pair.kind, pair.value, scope).
+			WithArgs(pair.kind, pair.value, scope, semid.CurrentNormalizerVersion).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}))
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+rewriteRuleColumns+` `+rewriteRuleFrom+` WHERE enabled = true AND scope =`)).
@@ -61,7 +61,7 @@ func expectTotalMiss(mock sqlmock.Sqlmock, ks semid.KeySet, scope string) {
 		}))
 	if r := utf8.RuneCountInString(ks.Norm); r >= 2 && r <= 8 {
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT s.concept_id, s.norm_key FROM kb.keyword_surface_keys sk`)).
-			WithArgs("initials", ks.Norm, scope).
+			WithArgs("initials", ks.Norm, scope, semid.CurrentNormalizerVersion).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}))
 	}
 }
@@ -101,13 +101,13 @@ func TestObserveSurfaceTargetedMissAutoCreates(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(sid, wantID, surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", "pref", "en", scope, 1.0, "auto:resolver", false, nil).
+			"pref", "pref", "und", scope, 1.0, "auto:resolver", false, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
 			"label_role", "alias_type", "lang", "scope", "confidence", "provenance",
 			"locked", "evidence", "create_time", "modify_time",
 		}).AddRow(sid, wantID, surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", "pref", "en", scope, 1.0, "auto:resolver", false, nil, testNow, testNow))
+			"pref", "pref", "und", scope, 1.0, "auto:resolver", false, nil, testNow, testNow))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.keyword_surface_keys WHERE surface_id =`)).
 		WithArgs(sid).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -237,6 +237,63 @@ func TestAutoCreateConceptConvergesOnExisting(t *testing.T) {
 	}
 	if got != wantID {
 		t.Errorf("got %q, want %q", got, wantID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// F11: if the loser of the auto-create race observes the winner's concept
+// after reconciliation already merged it into a survivor, autoCreateConcept
+// must chase the tombstone (FollowMerge) rather than hard-erroring on a
+// "merged" status the caller has no way to act on.
+func TestAutoCreateConceptFollowsMergeOnConflict(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	kf := &KeywordFamily{DB: db, ResolverMode: "observe"}
+	kf.ensureDefaults()
+	ctx := context.Background()
+
+	const surface = "Luminance"
+	const scope = "_"
+	ks := kf.normalizer().Normalize(surface)
+	wantID := autoConceptID(ks.Norm, scope)
+	const survivorID = "kwc_survivor"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_concepts`)).
+		WithArgs(wantID, surface, nil, scope, "provisional", "auto:d11").
+		WillReturnError(errors.New("duplicate key value violates unique constraint"))
+	// autoCreateConcept's own guard read: the id it just tried to mint is
+	// already merged into survivorID.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
+		WithArgs(wantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).AddRow(wantID, surface, nil, scope, "merged", survivorID, "auto:d11", testNow, testNow))
+	// FollowMerge re-reads wantID (cycle-guarded chase, D7 no-transitive-
+	// closure — it always re-derives from the stored chain, never trusts a
+	// cached hop), then reads the survivor, which is live.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
+		WithArgs(wantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).AddRow(wantID, surface, nil, scope, "merged", survivorID, "auto:d11", testNow, testNow))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
+		WithArgs(survivorID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).AddRow(survivorID, "Luminance", nil, scope, "active", nil, "human:tester", testNow, testNow))
+
+	got, err := kf.autoCreateConcept(ctx, surface, ks, scope)
+	if err != nil {
+		t.Fatalf("autoCreateConcept: %v", err)
+	}
+	if got != survivorID {
+		t.Errorf("got %q, want the survivor %q", got, survivorID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)

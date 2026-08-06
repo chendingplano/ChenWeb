@@ -82,7 +82,7 @@ func queueTotalMiss(mock sqlmock.Sqlmock, name, scope string) {
 			continue
 		}
 		mock.ExpectQuery(regexp.QuoteMeta(altKeySQL)).
-			WithArgs(pair.kind, pair.value, scope).
+			WithArgs(pair.kind, pair.value, scope, semid.CurrentNormalizerVersion).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}))
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(rulesSQL)).
@@ -92,7 +92,7 @@ func queueTotalMiss(mock sqlmock.Sqlmock, name, scope string) {
 		}))
 	if r := utf8.RuneCountInString(ks.Norm); r >= 2 && r <= 8 {
 		mock.ExpectQuery(regexp.QuoteMeta(altKeySQL)).
-			WithArgs("initials", ks.Norm, scope).
+			WithArgs("initials", ks.Norm, scope, semid.CurrentNormalizerVersion).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}))
 	}
 }
@@ -222,6 +222,37 @@ func TestResolveNameTermResolved(t *testing.T) {
 	}
 	if res.Method != "term_exact" || res.Confidence != 1.0 {
 		t.Errorf("method/confidence: got %q/%v", res.Method, res.Confidence)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// F1: a case/whitespace variant of a released term's label must still
+// term_resolve — matching must run on Norm, not the trim-space-only Exact
+// key. "  LUMINANCE  " normalizes to the same key as a released "Luminance".
+func TestResolveNameTermResolvedCaseFold(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	r := NewResolver(newFamily(db))
+	ctx := context.Background()
+
+	mock.ExpectQuery(regexp.QuoteMeta(termQuerySQL)).
+		WillReturnRows(termRows(
+			[]any{"core:luminance", "unit", "core", "Luminance", "en", "prefLabel"},
+		))
+	queueTotalMiss(mock, "  LUMINANCE  ", "_")
+
+	res, err := r.ResolveName(ctx, ResolveNameRequest{Name: "  LUMINANCE  ", Scope: "_"})
+	if err != nil {
+		t.Fatalf("ResolveName: %v", err)
+	}
+	if res.Status != StatusTermResolved || res.TermID != "core:luminance" {
+		t.Errorf("case/whitespace variant must term-resolve: status %q term %q", res.Status, res.TermID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)

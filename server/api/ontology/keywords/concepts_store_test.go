@@ -277,6 +277,9 @@ func TestMergeConcept(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	// F10: the guardrail reads run inside the merge's transaction, with
+	// FOR UPDATE holding a row lock through to the write.
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 		WithArgs("kw:from").
 		WillReturnRows(conceptRow("kw:from", "active", nil))
@@ -287,7 +290,6 @@ func TestMergeConcept(t *testing.T) {
 		WithArgs("keyword", "kw:from", "kw:target").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
-	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(
 		`UPDATE kb.keyword_concepts SET status = 'merged', merged_into = $2, modify_time = NOW() WHERE concept_id = $1`)).
 		WithArgs("kw:from", "kw:target").
@@ -333,9 +335,11 @@ func TestMergeConceptGuardrails(t *testing.T) {
 	t.Run("nonexistent source", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
+		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:ghost").
 			WillReturnError(sql.ErrNoRows)
+		mock.ExpectRollback()
 		_, err := (ConceptStore{DB: db}).MergeConcept(ctx, "kw:ghost", "kw:target")
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("expected sql.ErrNoRows, got %v", err)
@@ -348,12 +352,14 @@ func TestMergeConceptGuardrails(t *testing.T) {
 	t.Run("already-merged source", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
+		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:from").
 			WillReturnRows(conceptRow("kw:from", "merged", "kw:other"))
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:target").
 			WillReturnRows(conceptRow("kw:target", "active", nil))
+		mock.ExpectRollback()
 		_, err := (ConceptStore{DB: db}).MergeConcept(ctx, "kw:from", "kw:target")
 		if !errors.Is(err, ErrMergeRejected) {
 			t.Errorf("expected ErrMergeRejected, got %v", err)
@@ -366,12 +372,14 @@ func TestMergeConceptGuardrails(t *testing.T) {
 	t.Run("tombstone target", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
+		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:from").
 			WillReturnRows(conceptRow("kw:from", "active", nil))
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:target").
 			WillReturnRows(conceptRow("kw:target", "merged", "kw:x"))
+		mock.ExpectRollback()
 		_, err := (ConceptStore{DB: db}).MergeConcept(ctx, "kw:from", "kw:target")
 		if !errors.Is(err, ErrMergeRejected) {
 			t.Errorf("expected ErrMergeRejected, got %v", err)
@@ -384,6 +392,7 @@ func TestMergeConceptGuardrails(t *testing.T) {
 	t.Run("never_merge blocks the merge", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
+		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:a").
 			WillReturnRows(conceptRow("kw:a", "active", nil))
@@ -393,6 +402,7 @@ func TestMergeConceptGuardrails(t *testing.T) {
 		mock.ExpectQuery(regexp.QuoteMeta(neverMergeSQL)).
 			WithArgs("keyword", "kw:a", "kw:b").
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		mock.ExpectRollback()
 		_, err := (ConceptStore{DB: db}).MergeConcept(ctx, "kw:a", "kw:b")
 		if !errors.Is(err, ErrMergeRejected) {
 			t.Errorf("expected ErrMergeRejected for never_merge, got %v", err)

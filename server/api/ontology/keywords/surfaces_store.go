@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -131,7 +132,11 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 	// (§20.2 "surface_id hashed before role defaulting").
 	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
 	if sf.Lang == "" {
-		sf.Lang = "en"
+		// F9/§7 item 1: "und" (undetermined, BCP 47), never "en" — a
+		// caller-unspecified language must not assert English, since the
+		// pilot corpus is predominantly Chinese and lang is now part of the
+		// surface uniqueness key (migration 20260805000002).
+		sf.Lang = "und"
 	}
 	if sf.Scope == "" {
 		sf.Scope = "_"
@@ -146,20 +151,27 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 	keys := derivedSurfaceKeys(ks, sf.SurfaceID, version)
 
 	// The surface row and its derived keys are written together (K1), in a
-	// transaction when the handle supports it.
+	// transaction when the handle supports it. Keys are upserted only when a
+	// row was actually inserted (F3): on a uniqueness-key conflict,
+	// insertSurfaceRow returns the pre-existing row, whose surface_id
+	// differs from sf.SurfaceID — upserting `keys` (built against the
+	// candidate's own id) under the existing row's id would tag key rows
+	// with an id that was never inserted.
 	if beginner, ok := s.DB.(txBeginner); ok {
 		tx, err := beginner.BeginTx(ctx, nil)
 		if err != nil {
 			return Surface{}, err
 		}
-		created, err := insertSurfaceRow(ctx, tx, sf)
+		created, inserted, err := insertSurfaceRow(ctx, tx, sf)
 		if err != nil {
 			_ = tx.Rollback()
 			return Surface{}, err
 		}
-		if err := (SurfaceKeyStore{DB: tx}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
-			_ = tx.Rollback()
-			return Surface{}, err
+		if inserted {
+			if err := (SurfaceKeyStore{DB: tx}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
+				_ = tx.Rollback()
+				return Surface{}, err
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return Surface{}, err
@@ -167,21 +179,29 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 		return created, nil
 	}
 
-	created, err := insertSurfaceRow(ctx, s.DB, sf)
+	created, inserted, err := insertSurfaceRow(ctx, s.DB, sf)
 	if err != nil {
 		return Surface{}, err
 	}
-	if err := (SurfaceKeyStore{DB: s.DB}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
-		return Surface{}, err
+	if inserted {
+		if err := (SurfaceKeyStore{DB: s.DB}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
+			return Surface{}, err
+		}
 	}
 	return created, nil
 }
 
-func insertSurfaceRow(ctx context.Context, db DBX, sf Surface) (Surface, error) {
+// insertSurfaceRow inserts the surface, or — on a uniqueness-key conflict
+// (F3: a second distinct literal normalizing into an already-occupied
+// (norm_key, concept_id, scope, label_role, lang)) — returns the existing
+// row instead of erroring. The bool reports whether a new row was actually
+// inserted, so the caller knows whether derived keys need writing.
+func insertSurfaceRow(ctx context.Context, db DBX, sf Surface) (Surface, bool, error) {
 	row := db.QueryRowContext(ctx, `
 		INSERT INTO kb.keyword_surfaces
 			(surface_id, concept_id, surface, norm_key, norm_version, label_role, alias_type, lang, scope, confidence, provenance, locked, evidence)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT (norm_key, concept_id, scope, label_role, lang) DO NOTHING
 		RETURNING `+surfaceColumns,
 		sf.SurfaceID, sf.ConceptID, sf.Surface, sf.NormKey, sf.NormVersion,
 		sf.LabelRole, sf.AliasType, sf.Lang, sf.Scope, sf.Confidence,
@@ -191,6 +211,26 @@ func insertSurfaceRow(ctx context.Context, db DBX, sf Surface) (Surface, error) 
 			}
 			return ""
 		}()))
+	created, err := scanSurface(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, gerr := getSurfaceByUniqueKey(ctx, db, sf.NormKey, sf.ConceptID, sf.Scope, sf.LabelRole, sf.Lang)
+		return existing, false, gerr
+	}
+	if err != nil {
+		return Surface{}, false, err
+	}
+	return created, true, nil
+}
+
+// getSurfaceByUniqueKey reads the surface occupying a given uniqueness key
+// (norm_key, concept_id, scope, label_role, lang) — the row insertSurfaceRow
+// conflicted against.
+func getSurfaceByUniqueKey(ctx context.Context, db DBX, normKey, conceptID, scope, labelRole, lang string) (Surface, error) {
+	row := db.QueryRowContext(ctx, `
+		SELECT `+surfaceColumns+`
+		`+surfaceFrom+`
+		WHERE norm_key = $1 AND concept_id = $2 AND scope = $3 AND label_role = $4 AND lang = $5`,
+		normKey, conceptID, scope, labelRole, lang)
 	return scanSurface(row.Scan)
 }
 

@@ -87,6 +87,76 @@ func TestCreateSurface(t *testing.T) {
 	}
 }
 
+// F3: a second distinct literal that normalizes into an already-occupied
+// (norm_key, concept_id, scope, label_role, lang) must not error — the
+// INSERT's ON CONFLICT DO NOTHING leaves no row to RETURN, and the store
+// falls back to reading the existing row. Derived keys must NOT be
+// (re-)written under the *new* candidate's surface_id, since that id was
+// never inserted — only the pre-existing row's id is valid.
+func TestCreateSurfaceConflictReturnsExisting(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := SurfaceStore{DB: db}
+	ctx := context.Background()
+
+	// "LUMINANCE" and "luminance" share a norm_key/concept/scope/role/lang
+	// but have different surface_ids (content-derived from the verbatim
+	// text) — exactly Appendix A Stage 3's second-variant case.
+	sf := Surface{
+		ConceptID:  "kwc_l",
+		Surface:    "LUMINANCE",
+		LabelRole:  "alt",
+		AliasType:  "synonym",
+		Lang:       "en",
+		Scope:      "_",
+		Provenance: "llm:observe",
+		Confidence: 0.8,
+	}
+	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
+	existingID := deriveSurfaceID(sf.ConceptID, "luminance", sf.LabelRole)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
+		WithArgs(sf.SurfaceID, sf.ConceptID, sf.Surface, "luminance", semid.CurrentNormalizerVersion,
+			sf.LabelRole, sf.AliasType, sf.Lang, sf.Scope, sf.Confidence,
+			sf.Provenance, sf.Locked, nil).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
+			"label_role", "alias_type", "lang", "scope", "confidence",
+			"provenance", "locked", "evidence", "create_time", "modify_time",
+		})) // no rows: ON CONFLICT DO NOTHING
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT ` + surfaceColumns + ` ` + surfaceFrom + ` WHERE norm_key = $1 AND concept_id = $2 AND scope = $3 AND label_role = $4 AND lang = $5`)).
+		WithArgs("luminance", sf.ConceptID, sf.Scope, sf.LabelRole, sf.Lang).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
+			"label_role", "alias_type", "lang", "scope", "confidence",
+			"provenance", "locked", "evidence", "create_time", "modify_time",
+		}).AddRow(existingID, sf.ConceptID, "luminance", "luminance", semid.CurrentNormalizerVersion,
+			sf.LabelRole, sf.AliasType, "en", "_", 0.8, "llm:observe", false, nil, testNow, testNow))
+	mock.ExpectCommit()
+	// Deliberately no ExpectExec for DELETE/INSERT on kb.keyword_surface_keys:
+	// no new row was inserted, so no keys may be written under sf.SurfaceID.
+
+	result, err := store.CreateSurface(ctx, sf)
+	if err != nil {
+		t.Fatalf("CreateSurface: %v", err)
+	}
+	if result.SurfaceID != existingID {
+		t.Errorf("expected the pre-existing row's surface_id %s, got %s", existingID, result.SurfaceID)
+	}
+	if result.Surface != "luminance" {
+		t.Errorf("expected the pre-existing row's surface text, got %q", result.Surface)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations (a key write under the wrong surface_id would show up here): %v", err)
+	}
+}
+
 func TestCreateSurfaceValidation(t *testing.T) {
 	store := SurfaceStore{DB: nil}
 	ctx := context.Background()
@@ -255,13 +325,13 @@ func TestCreateSurfaceDefaultsRoleBeforeDerivingID(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", sf.AliasType, "en", "_", 1.0, sf.Provenance, false, nil).
+			"pref", sf.AliasType, "und", "_", 1.0, sf.Provenance, false, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
 			"label_role", "alias_type", "lang", "scope", "confidence",
 			"provenance", "locked", "evidence", "create_time", "modify_time",
 		}).AddRow(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", sf.AliasType, "en", "_", 1.0, sf.Provenance, false, nil, testNow, testNow))
+			"pref", sf.AliasType, "und", "_", 1.0, sf.Provenance, false, nil, testNow, testNow))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.keyword_surface_keys WHERE surface_id =`)).
 		WithArgs(wantID).
 		WillReturnResult(sqlmock.NewResult(0, 0))

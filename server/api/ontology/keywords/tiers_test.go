@@ -2,6 +2,7 @@ package keywords
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"regexp"
 	"testing"
@@ -86,7 +87,7 @@ func queueTierHit(mock sqlmock.Sqlmock, tier int, surface, scope string) string 
 				continue
 			}
 			mock.ExpectQuery(regexp.QuoteMeta(altKeySQL)).
-				WithArgs(pair.kind, pair.value, scope).
+				WithArgs(pair.kind, pair.value, scope, version).
 				WillReturnRows(emptyPairRows())
 		}
 	}
@@ -121,11 +122,11 @@ func queueTierHit(mock sqlmock.Sqlmock, tier int, surface, scope string) string 
 	case 2:
 		// The first non-empty alternate key (alnum) hits; later keys never run.
 		mock.ExpectQuery(regexp.QuoteMeta(altKeySQL)).
-			WithArgs("alnum", ks.Alnum, scope).
+			WithArgs("alnum", ks.Alnum, scope, version).
 			WillReturnRows(emptyPairRows().AddRow(wantID, ks.Norm))
 	case 4:
 		mock.ExpectQuery(regexp.QuoteMeta(altKeySQL)).
-			WithArgs("initials", ks.Norm, scope).
+			WithArgs("initials", ks.Norm, scope, version).
 			WillReturnRows(emptyPairRows().AddRow(wantID, "display luminance"))
 	}
 	return wantID
@@ -224,13 +225,13 @@ func TestResolveScopeRoundTrip(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(sid, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", "pref", "en", scope, 1.0, "human:tester", false, nil).
+			"pref", "pref", "und", scope, 1.0, "human:tester", false, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
 			"label_role", "alias_type", "lang", "scope", "confidence",
 			"provenance", "locked", "evidence", "create_time", "modify_time",
 		}).AddRow(sid, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", "pref", "en", scope, 1.0, "human:tester", false, nil, testNow, testNow))
+			"pref", "pref", "und", scope, 1.0, "human:tester", false, nil, testNow, testNow))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.keyword_surface_keys WHERE surface_id =`)).
 		WithArgs(sid).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -262,5 +263,66 @@ func TestResolveScopeRoundTrip(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// F6: an ambiguous verdict must persist its top-1 concept id on the
+// occurrence row, not just carry it in the in-memory Resolution — otherwise
+// the assignment §8.3/D11 promise ("ambiguous carries the top-1") is only
+// recoverable by parsing decision-log JSON.
+func TestObserveSurfaceAmbiguousPersistsTopOneConceptID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	kf := &KeywordFamily{DB: db, ResolverMode: "observe"}
+	ctx := context.Background()
+	const surface = "Luminance"
+	const scope = "_"
+	ks := kf.normalizer().Normalize(surface)
+
+	// Tier 0 misses; tier 1 ties two concepts on the same norm_key. Sorted
+	// best-first with a NodeID tie-break (kernel.go), kwc_a sorts first.
+	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
+		WithArgs(ks.Exact, scope).
+		WillReturnRows(emptyConceptRows())
+	mock.ExpectQuery(regexp.QuoteMeta(tier1SQL)).
+		WithArgs(ks.Norm, scope, semid.CurrentNormalizerVersion).
+		WillReturnRows(emptyPairRows().AddRow("kwc_a", ks.Norm).AddRow("kwc_b", ks.Norm))
+	// FollowMerge on the top-1.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+conceptColumns+` `+conceptFrom+` WHERE concept_id =`)).
+		WithArgs("kwc_a").
+		WillReturnRows(conceptRows("kwc_a", "Luminance A", scope, "active", "human:tester"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.semid_decision_log`)).
+		WithArgs("keyword", scope, sqlmock.AnyArg(), sqlmock.AnyArg(), "ambiguous",
+			nil, nil, "keyword_family", 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(43))
+
+	// F6: concept_id carries the top-1 (kwc_a), not nil.
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_occurrences`)).
+		WithArgs("document", "art:1", "", surface, ks.Norm, scope,
+			"ctx", nil, "kwc_a", nil, "ambiguous", int64(43)).
+		WillReturnRows(sqlmock.NewRows([]string{"occurrence_id"}).AddRow(11))
+
+	// F5: ambiguous still queues the backlog (unchanged from before this fix).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, hits FROM kb.keyword_unresolved`)).
+		WithArgs(ks.Norm, scope).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.keyword_unresolved`)).
+		WithArgs(ks.Norm, scope, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	res, err := kf.ObserveSurface(ctx, surface, scope, "document", "art:1", "ctx", true)
+	if err != nil {
+		t.Fatalf("ObserveSurface: %v", err)
+	}
+	if res.Verdict != semid.VerdictAmbiguous || res.ResolvedNodeID != "kwc_a" {
+		t.Errorf("verdict/top-1: got %q/%q", res.Verdict, res.ResolvedNodeID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations (concept_id must be kwc_a, not nil): %v", err)
 	}
 }

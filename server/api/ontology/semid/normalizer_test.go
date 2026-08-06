@@ -114,8 +114,28 @@ func TestNormalizerCJKPassthrough(t *testing.T) {
 	if ks.Alnum != "数据库索引" {
 		t.Errorf("CJK Alnum must keep Han characters, got %q", ks.Alnum)
 	}
-	if ks.Singular != "数据库 索引" {
-		t.Errorf("CJK Singular must be untouched, got %q", ks.Singular)
+	// F7: singularization is an English-only operation and must not run at
+	// all on a non-Latin string — not run-and-happen-to-be-a-no-op, which is
+	// what an unguarded call produces for suffix patterns that never match
+	// CJK text but would wrongly fire on any Latin fragment mixed into an
+	// otherwise-CJK string (e.g. "显示屏幕亮度 nits" → "nit").
+	if ks.Singular != "" {
+		t.Errorf("CJK Singular must be empty (the English singularizer must not run), got %q", ks.Singular)
+	}
+}
+
+// F7: a mixed CJK/Latin string is classified non-Latin by latinProfile (Han
+// count >= Latin count), so the Latin fragment must not be singularized
+// either — the bug this regression test targets ran singularKey
+// unconditionally, singularizing "nits" to "nit" inside a majority-CJK
+// string despite the Latin gate already protecting possessives/articles.
+func TestNormalizerSingularNeverRunsOnNonLatinProfile(t *testing.T) {
+	n := Normalizer{Version: CurrentNormalizerVersion}
+	if latinProfile("显示屏幕亮度 nits") {
+		t.Fatal("test premise violated: expected latinProfile to be false for this string")
+	}
+	if got := n.Normalize("显示屏幕亮度 nits").Singular; got != "" {
+		t.Errorf("Singular must be empty when latinProfile is false, got %q", got)
 	}
 }
 

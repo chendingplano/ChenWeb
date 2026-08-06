@@ -78,13 +78,13 @@ func TestExitSurfaceCRUD(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", sf.AliasType, "en", "_", 1.0, sf.Provenance, false, nil).
+			"pref", sf.AliasType, "und", "_", 1.0, sf.Provenance, false, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
 			"label_role", "alias_type", "lang", "scope", "confidence",
 			"provenance", "locked", "evidence", "create_time", "modify_time",
 		}).AddRow(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
-			"pref", sf.AliasType, "en", "_", 1.0, sf.Provenance, false, nil, testNow, testNow))
+			"pref", sf.AliasType, "und", "_", 1.0, sf.Provenance, false, nil, testNow, testNow))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.keyword_surface_keys WHERE surface_id =`)).
 		WithArgs(wantID).
 		WillReturnResult(sqlmock.NewResult(0, 0))

@@ -11,6 +11,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
+	"github.com/lib/pq"
 )
 
 // ResolutionStatus is the §9.5 outcome vocabulary. All five are normal
@@ -279,12 +280,23 @@ func (r *Resolver) prefName(ctx context.Context, conceptID string) string {
 // (ontology/modules/releases_store.go), so the double filter selects
 // exactly the released content. Term rows are versioned — dedup by term_id
 // happens in Go.
+//
+// F2: term_kind/module_id/lang are pushed down here to cut the scanned and
+// normalized row set — the pilot's QUDT import alone seeds 4151 quantity
+// terms (§17.2), and this runs on every ResolveName call. This is a
+// row-reduction, not the full fix: label comparison still needs Go-side
+// normalization (NFKC/case-fold has no SQL equivalent here), so an
+// unfiltered request still scans every released label. A persisted
+// normalized-label column + index would close that gap; deferred.
 const releasedTermSQL = `
 SELECT t.term_id, t.term_kind, t.module_id, l.label, l.lang, l.label_role
 FROM kb.ontology_terms t
 JOIN kb.ontology_term_labels l ON l.term_id = t.term_id
 WHERE t.status = 'included_in_release'
-  AND l.status = 'included_in_release'`
+  AND l.status = 'included_in_release'
+  AND ($1::text[] IS NULL OR t.term_kind = ANY($1))
+  AND ($2::text[] IS NULL OR t.module_id = ANY($2))
+  AND ($3 = '' OR l.lang = $3)`
 
 type termHit struct {
 	termID   string
@@ -300,10 +312,11 @@ type labelRow struct {
 }
 
 // matchReleasedTerm returns the single released term whose label matches
-// the request's name exactly, or nil. "Exact" is the tier-0 semantics:
-// trim-space equality through the shared normalizer's Exact key — never
-// SQL LOWER, which is not full Unicode case folding (D3). Two or more
-// distinct terms matching is ambiguous by definition, so no TermID is
+// the request's name after normalization, or nil. Comparison runs on Norm —
+// the same NFKC/full-case-fold/whitespace key tier 1 matches on — never
+// SQL LOWER (not full Unicode case folding) and never Exact (trim-space
+// only: "luminance" would not match a released "Luminance", F1). Two or
+// more distinct terms matching is ambiguous by definition, so no TermID is
 // assigned and the call falls through to the lexical layer. Accepted
 // aligns_to_term alignments (REQ-2/3) will extend this lookup once the
 // predicate terms are seeded (§16.1).
@@ -311,12 +324,13 @@ func (r *Resolver) matchReleasedTerm(ctx context.Context, req ResolveNameRequest
 	if r.Family == nil || r.Family.DB == nil {
 		return nil, nil
 	}
-	queryKey := n.Normalize(req.Name).Exact
+	queryKey := n.Normalize(req.Name).Norm
 	if queryKey == "" {
 		return nil, nil
 	}
 
-	rows, err := r.Family.DB.QueryContext(ctx, releasedTermSQL)
+	rows, err := r.Family.DB.QueryContext(ctx, releasedTermSQL,
+		arrayOrNil(req.ExpectedTermKinds), arrayOrNil(req.ExpectedModules), req.Language)
 	if err != nil {
 		return nil, err
 	}
@@ -329,6 +343,9 @@ func (r *Resolver) matchReleasedTerm(ctx context.Context, req ResolveNameRequest
 		if err := rows.Scan(&termID, &termKind, &moduleID, &label, &lang, &role); err != nil {
 			return nil, err
 		}
+		// Authoritative in Go even though the SQL already filters (F2): the
+		// mock-backed test suite can't evaluate a real WHERE clause, and
+		// this stays correct regardless of what the driver returns.
 		if len(req.ExpectedTermKinds) > 0 && !containsString(req.ExpectedTermKinds, termKind) {
 			continue
 		}
@@ -350,7 +367,7 @@ func (r *Resolver) matchReleasedTerm(ctx context.Context, req ResolveNameRequest
 	var matched []string
 	for termID, ls := range labels {
 		for _, l := range ls {
-			if n.Normalize(l.label).Exact == queryKey {
+			if n.Normalize(l.label).Norm == queryKey {
 				matched = append(matched, termID)
 				break
 			}
@@ -388,6 +405,16 @@ func pickPrefName(labels []labelRow, lang string) string {
 		return fallbackPref
 	}
 	return fallbackAny
+}
+
+// arrayOrNil produces a driver value for the $1::text[] IS NULL OR ... form:
+// an empty/nil slice ("accepts every kind") must bind to SQL NULL, not an
+// empty array literal, which would match nothing.
+func arrayOrNil(list []string) any {
+	if len(list) == 0 {
+		return nil
+	}
+	return pq.Array(list)
 }
 
 func containsString(list []string, s string) bool {

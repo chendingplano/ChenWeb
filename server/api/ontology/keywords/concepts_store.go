@@ -247,37 +247,21 @@ func (s ConceptStore) MergeConcept(ctx context.Context, fromID, toID string) (Co
 		return Concept{}, fmt.Errorf("%w: cannot merge a concept into itself", ErrMergeRejected)
 	}
 
-	from, err := s.GetConcept(ctx, fromID)
-	if err != nil {
-		return Concept{}, fmt.Errorf("source concept %s: %w", fromID, err)
-	}
-	to, err := s.GetConcept(ctx, toID)
-	if err != nil {
-		return Concept{}, fmt.Errorf("target concept %s: %w", toID, err)
-	}
-
-	// Only live concepts may merge, and only into a live target: re-pointing
-	// surfaces at a tombstone would leave the surface path returning it.
-	if from.Status != "active" && from.Status != "provisional" {
-		return Concept{}, fmt.Errorf("%w: source %s is %s (already-merged concepts must be unmerged first)", ErrMergeRejected, fromID, from.Status)
-	}
-	if from.MergedInto != nil {
-		return Concept{}, fmt.Errorf("%w: source %s already merged into %s; unmerge first", ErrMergeRejected, fromID, *from.MergedInto)
-	}
-	if to.Status != "active" && to.Status != "provisional" {
-		return Concept{}, fmt.Errorf("%w: target %s is %s", ErrMergeRejected, toID, to.Status)
-	}
-
-	if blocked, err := s.isNeverMerge(ctx, fromID, toID); err != nil {
-		return Concept{}, err
-	} else if blocked {
-		return Concept{}, fmt.Errorf("%w: %s and %s are asserted never_merge", ErrMergeRejected, fromID, toID)
-	}
-
-	// Tombstone + surface re-point in one transaction (§14.1).
+	// F10: the guardrail reads run inside the same transaction as the write,
+	// with FOR UPDATE holding a row lock on both concepts until commit —
+	// closing the window between the check and applyMerge where a
+	// concurrent status change, competing merge, or never_merge assertion
+	// could invalidate a guardrail that already appeared to pass. Falls
+	// back to an unlocked check-then-apply when the handle can't open a
+	// transaction (tests only in practice; production always goes through
+	// *sql.DB).
 	if beginner, ok := s.DB.(txBeginner); ok {
 		tx, err := beginner.BeginTx(ctx, nil)
 		if err != nil {
+			return Concept{}, err
+		}
+		if err := s.mergeGuards(ctx, tx, fromID, toID); err != nil {
+			_ = tx.Rollback()
 			return Concept{}, err
 		}
 		if err := applyMerge(ctx, tx, fromID, toID); err != nil {
@@ -287,13 +271,64 @@ func (s ConceptStore) MergeConcept(ctx context.Context, fromID, toID string) (Co
 		if err := tx.Commit(); err != nil {
 			return Concept{}, err
 		}
-	} else {
-		if err := applyMerge(ctx, s.DB, fromID, toID); err != nil {
-			return Concept{}, err
-		}
+		return s.GetConcept(ctx, toID)
 	}
 
+	if err := s.mergeGuards(ctx, s.DB, fromID, toID); err != nil {
+		return Concept{}, err
+	}
+	if err := applyMerge(ctx, s.DB, fromID, toID); err != nil {
+		return Concept{}, err
+	}
 	return s.GetConcept(ctx, toID)
+}
+
+// mergeGuards enforces D7's guardrails: both concepts must exist, only live
+// concepts (active/provisional) participate, an already-merged source is
+// refused (unmerge first), and the persisted never_merge assertion
+// (kb.semid_never_merge via semid.NeverMergeStore) is consulted. Reads go
+// through getConceptForUpdate so a caller passing a transaction handle
+// holds the row lock through to applyMerge (F10).
+func (s ConceptStore) mergeGuards(ctx context.Context, db DBX, fromID, toID string) error {
+	from, err := getConceptForUpdate(ctx, db, fromID)
+	if err != nil {
+		return fmt.Errorf("source concept %s: %w", fromID, err)
+	}
+	to, err := getConceptForUpdate(ctx, db, toID)
+	if err != nil {
+		return fmt.Errorf("target concept %s: %w", toID, err)
+	}
+
+	// Only live concepts may merge, and only into a live target: re-pointing
+	// surfaces at a tombstone would leave the surface path returning it.
+	if from.Status != "active" && from.Status != "provisional" {
+		return fmt.Errorf("%w: source %s is %s (already-merged concepts must be unmerged first)", ErrMergeRejected, fromID, from.Status)
+	}
+	if from.MergedInto != nil {
+		return fmt.Errorf("%w: source %s already merged into %s; unmerge first", ErrMergeRejected, fromID, *from.MergedInto)
+	}
+	if to.Status != "active" && to.Status != "provisional" {
+		return fmt.Errorf("%w: target %s is %s", ErrMergeRejected, toID, to.Status)
+	}
+
+	if blocked, err := isNeverMerge(ctx, db, fromID, toID); err != nil {
+		return err
+	} else if blocked {
+		return fmt.Errorf("%w: %s and %s are asserted never_merge", ErrMergeRejected, fromID, toID)
+	}
+	return nil
+}
+
+// getConceptForUpdate reads a concept, locking the row (FOR UPDATE) when db
+// is a transaction handle — a plain *sql.DB takes no lock, since there is
+// no enclosing transaction to hold it in.
+func getConceptForUpdate(ctx context.Context, db DBX, conceptID string) (Concept, error) {
+	row := db.QueryRowContext(ctx, `
+		SELECT `+conceptColumns+`
+		`+conceptFrom+`
+		WHERE concept_id = $1
+		FOR UPDATE`, conceptID)
+	return scanConcept(row.Scan)
 }
 
 func applyMerge(ctx context.Context, db DBX, fromID, toID string) error {
@@ -314,13 +349,15 @@ func applyMerge(ctx context.Context, db DBX, fromID, toID string) error {
 
 // isNeverMerge consults the persisted never_merge assertions
 // (semid.NeverMergeStore writes the same table) for the keyword family. The
-// pair is unordered; Add normalizes lexicographically.
-func (s ConceptStore) isNeverMerge(ctx context.Context, a, b string) (bool, error) {
+// pair is unordered; Add normalizes lexicographically. Takes a DBX rather
+// than a store receiver so mergeGuards can share it between the transaction
+// path and the unlocked fallback (F10).
+func isNeverMerge(ctx context.Context, db DBX, a, b string) (bool, error) {
 	if a > b {
 		a, b = b, a
 	}
 	var exists bool
-	err := s.DB.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM kb.semid_never_merge
 			WHERE family = $1 AND node_a = $2 AND node_b = $3

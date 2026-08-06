@@ -105,6 +105,16 @@ func (n Normalizer) Normalize(surface string) KeySet {
 	}
 
 	tokens := strings.Fields(s)
+	// F7: singularization is an English rule (irregular plurals, the
+	// ss/us/is/ics guards, the suffix rules) — it must stay behind the same
+	// latin gate as possessives/articles above. Without it, a mixed
+	// CJK/Latin string like "显示屏幕亮度 nits" ran the English suffix rule on
+	// "nits" despite latinProfile reporting false for the string as a
+	// whole (§6.3 item 2, §6.4 fix item (a) recurring one gate downstream).
+	singular := ""
+	if latin {
+		singular = singularKey(tokens, caseSignal)
+	}
 	ks := KeySet{
 		Exact:    strings.TrimSpace(surface),
 		Norm:     s,
@@ -112,7 +122,7 @@ func (n Normalizer) Normalize(surface string) KeySet {
 		Sorted:   sortedKey(tokens),
 		Phonetic: phoneticKey(s),
 		Initials: initialsKey(tokens),
-		Singular: singularKey(tokens, caseSignal),
+		Singular: singular,
 	}
 	return ks
 }

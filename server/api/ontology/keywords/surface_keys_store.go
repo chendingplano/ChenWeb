@@ -61,27 +61,3 @@ func (s SurfaceKeyStore) UpsertSurfaceKeys(ctx context.Context, surfaceID string
 	}
 	return nil
 }
-
-// LookupByKeyKind finds surface keys matching a specific key kind and value.
-// Used by KeywordFamily.CandidateNodes for tier 2/4 lookups.
-func (s SurfaceKeyStore) LookupByKeyKind(ctx context.Context, keyKind, keyValue string, normVersion int) ([]SurfaceKey, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT sk.surface_id, sk.key_kind, sk.key_value, sk.norm_version
-		FROM kb.keyword_surface_keys sk
-		WHERE sk.key_kind = $1 AND sk.key_value = $2 AND sk.norm_version = $3`,
-		keyKind, keyValue, normVersion)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []SurfaceKey
-	for rows.Next() {
-		var sk SurfaceKey
-		if err := rows.Scan(&sk.SurfaceID, &sk.KeyKind, &sk.KeyValue, &sk.NormVersion); err != nil {
-			return nil, err
-		}
-		out = append(out, sk)
-	}
-	return out, rows.Err()
-}
