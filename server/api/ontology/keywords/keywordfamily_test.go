@@ -278,3 +278,80 @@ func TestKeywordFamilyCandidateNodesReachesTier5(t *testing.T) {
 		t.Errorf("unmet expectations: %v", err)
 	}
 }
+
+// TestResolveSurfaceTier5AutoAccepts drives the whole stack end to end (task
+// 5, spec §18.2's required-test-set framing): KeywordFamily.ResolveSurface ->
+// normalizer -> tier ladder (miss tiers 0-4, hit tier 5) -> Kernel.Resolve's
+// scoring/adjudication -> ConceptStore.FollowMerge's post-resolution chase,
+// ending in auto_accepted for a real misspelling ("kubernets" ->
+// "Kubernetes"). The tier 0-4 mock sequence mirrors
+// TestKeywordFamilyCandidateNodesReachesTier5 above (Task 4); this test
+// additionally exercises Resolve's scoring/adjudication and the FollowMerge
+// lookup that CandidateNodes alone never reaches.
+func TestResolveSurfaceTier5AutoAccepts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	kf := &KeywordFamily{DB: db, ResolverMode: "observe"}
+	kf.ensureDefaults()
+	ctx := context.Background()
+	ks := kf.normalizer().Normalize("kubernets")
+	version := kf.NormalizerVersion
+
+	// Tier 0: exact surface match misses.
+	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
+		WithArgs(ks.Exact, "_").
+		WillReturnRows(emptyConceptRows())
+	// Tier 1: norm key match misses.
+	mock.ExpectQuery(regexp.QuoteMeta(tier1SQL)).
+		WithArgs(ks.Norm, "_", version).
+		WillReturnRows(emptyPairRows())
+	// Tier 2: alnum, sorted, singular alternate keys all miss. "kubernets"
+	// has Alnum == Sorted == Norm and a distinct Singular ("kubernet"), so
+	// all three kinds issue their own query.
+	for _, pair := range []struct{ kind, value string }{
+		{"alnum", ks.Alnum},
+		{"sorted", ks.Sorted},
+		{"singular", ks.Singular},
+	} {
+		mock.ExpectQuery(regexp.QuoteMeta(altKeySQL)).
+			WithArgs(pair.kind, pair.value, "_", version).
+			WillReturnRows(emptyPairRows())
+	}
+	// Tier 3: no enabled rewrite rules -> immediate miss, no retry queries.
+	mock.ExpectQuery(regexp.QuoteMeta(rulesSQL)).
+		WithArgs("_").
+		WillReturnRows(emptyRuleRows())
+	// Tier 4 (initials) issues no query at all: "kubernets" normalizes to 9
+	// runes, above tier4InitialsMatch's 2-8 rune gate.
+	// Tier 5: the canonical-pref veto query misses, then the trigram-blocked
+	// fuzzy query hits with a single candidate ("kubernetes", edit distance
+	// 1, similarity 0.9) -- above the family's 0.8 auto-accept threshold.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (`)).
+		WithArgs(ks.Exact).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
+		WithArgs("_", version, ks.Norm).
+		WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).AddRow("kwc_k8s", "kubernetes"))
+	// FollowMerge inside ResolveSurface reads the resolved concept: a live
+	// concept (merged_into nil) resolves to itself.
+	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
+		WithArgs("kwc_k8s").
+		WillReturnRows(conceptRows("kwc_k8s", "Kubernetes", "_", "active", "none"))
+
+	res, err := kf.ResolveSurface(ctx, "kubernets", "_")
+	if err != nil {
+		t.Fatalf("ResolveSurface: %v", err)
+	}
+	if res.Verdict != semid.VerdictAutoAccept {
+		t.Fatalf("expected auto_accepted, got verdict=%s matches=%+v", res.Verdict, res.Matches)
+	}
+	if res.ResolvedNodeID != "kwc_k8s" {
+		t.Errorf("expected kwc_k8s, got %s", res.ResolvedNodeID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
