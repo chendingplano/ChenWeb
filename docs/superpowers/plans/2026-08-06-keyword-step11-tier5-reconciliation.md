@@ -1244,7 +1244,10 @@ func (r *Reconciler) Run(ctx context.Context) (ReconcileStats, error) {
 			continue
 		}
 
-		absorbCount, survCount := r.surfaceCounts(ctx, cand.ConceptID, target.ConceptID)
+		absorbCount, survCount, err := r.surfaceCounts(ctx, cand.ConceptID, target.ConceptID)
+		if err != nil {
+			return stats, err
+		}
 		absorbedID, survivorID := electMergeDirection(cand, target, absorbCount, survCount)
 
 		// ConceptStore.MergeConcept already checks kb.semid_never_merge
@@ -1258,15 +1261,23 @@ func (r *Reconciler) Run(ctx context.Context) (ReconcileStats, error) {
 		}
 		merged[absorbedID] = true
 
-		input, _ := json.Marshal(map[string]any{"absorbed": absorbedID, "survivor": survivorID, "method": method, "score": score})
-		_, _ = r.DecisionLog.Append(ctx, semid.DecisionLogEntry{
+		input, err := json.Marshal(map[string]any{"absorbed": absorbedID, "survivor": survivorID, "method": method, "score": score})
+		if err != nil {
+			return stats, err
+		}
+		if _, err := r.DecisionLog.Append(ctx, semid.DecisionLogEntry{
 			Family:  "keyword_reconcile",
 			Scope:   r.Scope,
 			Input:   input,
 			Output:  input,
 			Verdict: "auto_merged",
 			Actor:   "keyword_reconciler",
-		})
+		}); err != nil {
+			// A tier-6 auto-merge exists precisely to produce an auditable trail
+			// (ADR DR15): a failed append must surface as a run error, not as a
+			// silent success with no record of the merge.
+			return stats, err
+		}
 		stats.Merged++
 	}
 	return stats, nil
@@ -1348,10 +1359,19 @@ func (r *Reconciler) embedConcepts(ctx context.Context, live []Concept) (map[str
 	return out, nil
 }
 
-func (r *Reconciler) surfaceCounts(ctx context.Context, a, b string) (int, int) {
-	as, _ := r.SurfaceStore.ListSurfacesByConcept(ctx, a)
-	bs, _ := r.SurfaceStore.ListSurfacesByConcept(ctx, b)
-	return len(as), len(bs)
+// surfaceCounts loads surface counts for both concepts, propagating the first
+// query error so a transient read failure can't silently flip the
+// absorbed/survivor direction electMergeDirection picks.
+func (r *Reconciler) surfaceCounts(ctx context.Context, a, b string) (int, int, error) {
+	as, err := r.SurfaceStore.ListSurfacesByConcept(ctx, a)
+	if err != nil {
+		return 0, 0, err
+	}
+	bs, err := r.SurfaceStore.ListSurfacesByConcept(ctx, b)
+	if err != nil {
+		return 0, 0, err
+	}
+	return len(as), len(bs), nil
 }
 
 // electMergeDirection picks the survivor: prefer the concept with more
