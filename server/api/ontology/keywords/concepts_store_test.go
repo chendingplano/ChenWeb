@@ -492,6 +492,10 @@ func TestUnmergeConcept(t *testing.T) {
 		WillReturnRows(conceptRow("kw:from", "merged", "kw:target"))
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(
+		`WITH RECURSIVE chain AS ( SELECT concept_id FROM kb.keyword_concepts WHERE merged_into = $1 UNION ALL SELECT c.concept_id FROM kb.keyword_concepts c JOIN chain ON c.merged_into = chain.concept_id ) UPDATE kb.keyword_surfaces SET concept_id = $1, modify_time = NOW() WHERE origin_concept IN (SELECT concept_id FROM chain)`)).
+		WithArgs("kw:from").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(
 		`UPDATE kb.keyword_surfaces SET concept_id = $1, origin_concept = NULL, modify_time = NOW() WHERE origin_concept = $1`)).
 		WithArgs("kw:from").
 		WillReturnResult(sqlmock.NewResult(0, 3))
@@ -510,6 +514,58 @@ func TestUnmergeConcept(t *testing.T) {
 	}
 	if c.Status != "active" || c.MergedInto != nil {
 		t.Errorf("expected restored active concept with no tombstone, got status=%s merged_into=%v", c.Status, c.MergedInto)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// F4 (2026080601-bug), decision recorded in 2026080403-spec §14.4: unmerging
+// a middle link in a chain (kw:a merged into kw:b, then kw:b merged into
+// kw:c) must reposition kw:a's surfaces back to kw:b too — origin_concept is
+// root-preserving (§14.1 item 2), so those surfaces already read
+// origin_concept = "kw:a", not "kw:b", even though they physically sit on
+// kw:c. Repositioning must not touch kw:a's own concept row: unmerging
+// kw:b reverses kw:b→kw:c only, not kw:a→kw:b, which is a separate,
+// still-valid decision (the mock has no expectation touching kw:a, so any
+// unexpected read/write of it fails the test).
+func TestUnmergeConceptRepositionsChainedSurfaces(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := ConceptStore{DB: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
+		WithArgs("kw:b").
+		WillReturnRows(conceptRow("kw:b", "merged", "kw:c"))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(
+		`WITH RECURSIVE chain AS ( SELECT concept_id FROM kb.keyword_concepts WHERE merged_into = $1 UNION ALL SELECT c.concept_id FROM kb.keyword_concepts c JOIN chain ON c.merged_into = chain.concept_id ) UPDATE kb.keyword_surfaces SET concept_id = $1, modify_time = NOW() WHERE origin_concept IN (SELECT concept_id FROM chain)`)).
+		WithArgs("kw:b").
+		WillReturnResult(sqlmock.NewResult(0, 2)) // kw:a's surfaces, repositioned kw:c -> kw:b
+	mock.ExpectExec(regexp.QuoteMeta(
+		`UPDATE kb.keyword_surfaces SET concept_id = $1, origin_concept = NULL, modify_time = NOW() WHERE origin_concept = $1`)).
+		WithArgs("kw:b").
+		WillReturnResult(sqlmock.NewResult(0, 1)) // kw:b's own native surfaces
+	mock.ExpectExec(regexp.QuoteMeta(
+		`UPDATE kb.keyword_concepts SET status = $2, merged_into = NULL, modify_time = NOW() WHERE concept_id = $1`)).
+		WithArgs("kw:b", "active").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
+		WithArgs("kw:b").
+		WillReturnRows(conceptRow("kw:b", "active", nil))
+
+	c, err := store.UnmergeConcept(ctx, "kw:b", "active")
+	if err != nil {
+		t.Fatalf("UnmergeConcept: %v", err)
+	}
+	if c.Status != "active" || c.MergedInto != nil {
+		t.Errorf("expected kw:b restored active with no tombstone, got status=%s merged_into=%v", c.Status, c.MergedInto)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)

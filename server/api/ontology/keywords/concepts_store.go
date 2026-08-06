@@ -393,6 +393,15 @@ func (s ConceptStore) FollowMerge(ctx context.Context, conceptID string) (string
 // UnmergeConcept reverses MergeConcept (§14.4): surfaces whose
 // origin_concept is fromID move back to fromID, and fromID's tombstone is
 // cleared with restoreStatus, which must be "active" or "provisional".
+//
+// Chained merges (A merged into B, then B merged into C) need one more step:
+// origin_concept is root-preserving (COALESCE in applyMerge), so A's
+// surfaces already carry origin_concept = A, not B, even though they
+// physically sit on C. Unmerging B must reposition those too — walking
+// merged_into backward from B — or they stay stranded on C forever (F4,
+// 2026080601-bug). This only repositions the chained surfaces; it does not
+// restore A itself, which stays merged into B: unmerging B reverses exactly
+// the B→C merge, not A→B, which is a separate decision (§14.4).
 func (s ConceptStore) UnmergeConcept(ctx context.Context, fromID, restoreStatus string) (Concept, error) {
 	if restoreStatus != "active" && restoreStatus != "provisional" {
 		return Concept{}, fmt.Errorf("%w: restore status must be active or provisional, got %q", ErrMergeRejected, restoreStatus)
@@ -427,6 +436,24 @@ func (s ConceptStore) UnmergeConcept(ctx context.Context, fromID, restoreStatus 
 }
 
 func applyUnmerge(ctx context.Context, db DBX, fromID, restoreStatus string) error {
+	// Reposition surfaces belonging to any concept transitively merged into
+	// fromID (the chained case, F4). Their origin_concept is left as-is —
+	// it still correctly names their true root — only their concept_id
+	// moves back to fromID, matching the state right before fromID's own
+	// merge. mergeGuards refuses re-merging an already-merged source, so
+	// merged_into cannot cycle; no cycle guard is needed here.
+	if _, err := db.ExecContext(ctx, `
+		WITH RECURSIVE chain AS (
+			SELECT concept_id FROM kb.keyword_concepts WHERE merged_into = $1
+			UNION ALL
+			SELECT c.concept_id FROM kb.keyword_concepts c
+			JOIN chain ON c.merged_into = chain.concept_id
+		)
+		UPDATE kb.keyword_surfaces
+		SET concept_id = $1, modify_time = NOW()
+		WHERE origin_concept IN (SELECT concept_id FROM chain)`, fromID); err != nil {
+		return fmt.Errorf("reposition chained surfaces of %s: %w", fromID, err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE kb.keyword_surfaces
 		SET concept_id = $1, origin_concept = NULL, modify_time = NOW()
