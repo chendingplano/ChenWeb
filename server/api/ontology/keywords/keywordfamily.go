@@ -88,7 +88,9 @@ func (kf *KeywordFamily) kernel() semid.Kernel {
 
 // CandidateNodes implements semid.FamilyAdapter. Multi-tier candidate
 // generation with early exit at the first tier that produces candidates
-// (§9.1). Tiers 5-6 (fuzzy/ANN) are deferred and return empty.
+// (§9.1). Tier 5 (fuzzy edit-distance) is built. Tier 6 (multilingual
+// embedding, cross-lingual identity) is reconciliation-only -- it never
+// runs on this online path (spec §22 Q2; keywords.Reconciler, offline).
 func (kf *KeywordFamily) CandidateNodes(ctx context.Context, surface, scope string) ([]semid.NodeCandidate, error) {
 	kf.ensureDefaults()
 	// Fail closed: any mode other than observe/on is inert. An empty or
@@ -125,8 +127,13 @@ func (kf *KeywordFamily) CandidateNodes(ctx context.Context, surface, scope stri
 		return matches, nil
 	}
 
-	// Tiers 5-6: fuzzy/ANN — deferred. Tier 7: miss — the caller writes the
-	// backlog (or auto-creates on targeted names, D11).
+	// Tier 5: fuzzy (trigram-blocked, edit-distance-gated) — misspellings.
+	if matches, ok := kf.tier5FuzzyMatch(ctx, ks, scope); ok {
+		return matches, nil
+	}
+
+	// Tier 7: miss — the caller writes the backlog (or auto-creates on
+	// targeted names, D11).
 	return nil, nil
 }
 
@@ -257,6 +264,105 @@ func (kf *KeywordFamily) tier4InitialsMatch(ctx context.Context, ks semid.KeySet
 		return nil, false
 	}
 	return kf.lookupByKeyKind(ctx, "initials", ks.Norm, scope, "tier4_initials")
+}
+
+// canonicalPrefExists implements §9.2's canonical veto: "a query that is
+// itself an exact pref_label never fuzzy-matches elsewhere." The check is
+// scope-independent by design -- if "Iran" is a real, established word
+// anywhere in the store, it must never be treated as a typo of some
+// unrelated concept just because tiers 0-4 missed within one caller's
+// scope.
+func (kf *KeywordFamily) canonicalPrefExists(ctx context.Context, surface string) (bool, error) {
+	var exists bool
+	err := kf.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM kb.keyword_surfaces
+			WHERE surface = $1 AND label_role = 'pref'
+		)`, surface).Scan(&exists)
+	return exists, err
+}
+
+// tier5FuzzyMatch implements the fuzzy tier (spec §9.1 tier 5): misspellings
+// like kubernets -> Kubernetes. Blocked by a pg_trgm similarity() query
+// (cheap, indexed, migration 20260806000001) against norm_key; the real
+// gating is the length-banded edit-distance rule and the three absolute
+// vetoes from §9.2, applied in Go because pg_trgm's similarity() alone
+// cannot express them. Scores are continuous (§13.1) and carried via
+// PrecomputedScore -- Score(surface, candidate KeyBundle) has no way to
+// compute an edit distance from two derived-key bundles alone.
+func (kf *KeywordFamily) tier5FuzzyMatch(ctx context.Context, ks semid.KeySet, scope string) ([]semid.NodeCandidate, bool) {
+	runeLen := utf8.RuneCountInString(ks.Norm)
+	if runeLen <= 4 {
+		return nil, false // §9.2: no fuzzy matching at all below length 5
+	}
+	if canonical, err := kf.canonicalPrefExists(ctx, ks.Exact); err != nil || canonical {
+		return nil, false
+	}
+
+	rows, err := kf.DB.QueryContext(ctx, `
+		SELECT s.concept_id, s.norm_key
+		FROM kb.keyword_surfaces s
+		WHERE s.scope = $1 AND s.norm_version = $2
+		  AND similarity(s.norm_key, $3) > 0.3
+		ORDER BY similarity(s.norm_key, $3) DESC
+		LIMIT 20`, scope, kf.NormalizerVersion, ks.Norm)
+	if err != nil || rows == nil {
+		return nil, false
+	}
+	defer rows.Close()
+
+	best := map[string]float64{}
+	for rows.Next() {
+		var conceptID, candNorm string
+		if err := rows.Scan(&conceptID, &candNorm); err != nil {
+			continue
+		}
+		if score, ok := fuzzyCandidateScore(ks.Norm, candNorm, runeLen); ok && score > best[conceptID] {
+			best[conceptID] = score
+		}
+	}
+	if len(best) == 0 {
+		return nil, false
+	}
+	candidates := make([]semid.NodeCandidate, 0, len(best))
+	for conceptID, score := range best {
+		s := score
+		candidates = append(candidates, semid.NodeCandidate{
+			NodeID:           conceptID,
+			Method:           "tier5_fuzzy",
+			PrecomputedScore: &s,
+		})
+	}
+	return candidates, true
+}
+
+// fuzzyCandidateScore applies §9.2's three absolute vetoes and the
+// length-banded edit-distance rule to one query/candidate pair, returning
+// the continuous score to use if the pair survives. queryRuneLen is the
+// query's own length (bands are keyed on the query, not the candidate).
+// Shared with the offline reconciler's lexical blocking pass (Task 6).
+func fuzzyCandidateScore(queryNorm, candNorm string, queryRuneLen int) (float64, bool) {
+	if candNorm == queryNorm {
+		return 0, false // tier 1 already handles exact norm-key equality
+	}
+	if digitsDiffer(queryNorm, candNorm) || hasNegationAffixMismatch(queryNorm, candNorm) {
+		return 0, false
+	}
+	dist := runeLevenshtein(queryNorm, candNorm)
+	switch {
+	case queryRuneLen <= 8:
+		if dist > 1 || firstRune(queryNorm) != firstRune(candNorm) {
+			return 0, false
+		}
+	default: // queryRuneLen >= 9
+		if dist > 2 {
+			return 0, false
+		}
+		if sim := normalizedSimilarity(queryNorm, candNorm); sim < 0.88 {
+			return 0, false
+		}
+	}
+	return normalizedSimilarity(queryNorm, candNorm), true
 }
 
 func retagMethod(matches []semid.NodeCandidate, method string) []semid.NodeCandidate {
