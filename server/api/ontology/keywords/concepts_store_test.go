@@ -6,10 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
 var testNow = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
@@ -672,9 +676,9 @@ func TestSearchSimilarPrefLabel(t *testing.T) {
 	// similarity(pref_label, $2) DESC and the LIMIT $5 are pinned alongside
 	// the predicate (sqlmock collapses whitespace on both sides).
 	mock.ExpectQuery(regexp.QuoteMeta(
-		`SELECT ` + conceptColumns + ` ` + conceptFrom +
-			` WHERE scope = $1 AND status IN ('active', 'provisional')` +
-			` AND concept_id != $4 AND similarity(pref_label, $2) > $3` +
+		`SELECT `+conceptColumns+` `+conceptFrom+
+			` WHERE scope = $1 AND status IN ('active', 'provisional')`+
+			` AND concept_id != $4 AND similarity(pref_label, $2) > $3`+
 			` ORDER BY similarity(pref_label, $2) DESC LIMIT $5`)).
 		WithArgs("_", "Luminence", 0.3, "kwc_l", 10).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -691,4 +695,155 @@ func TestSearchSimilarPrefLabel(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
 	}
+}
+
+// TestMergeConceptAlignmentGate exercises spec §14.2 inside the merge
+// transaction (Task 4): when the Alignments field is wired, MergeConcept runs
+// the alignment conflict gate — an accepted aligns_to_term on the absorbed
+// side follows to the survivor atomically with the tombstone, and two concepts
+// aligned to two distinct governed terms are refused (evidence they are not
+// the same thing outranks whatever similarity proposed the merge).
+//
+// Concept ids kwc_a/kwc_b are in lexicographic order, so isNeverMerge's pair
+// swap is a no-op and the never_merge query args stay (fromID, toID). All
+// three cases take the txBeginner path (sqlmock's DB handle), mirroring the
+// query order of TestReconcilerMergesCrossLingualProvisional with the two
+// alignment reads interleaved after isNeverMerge and before applyMerge.
+func TestMergeConceptAlignmentGate(t *testing.T) {
+	ctx := context.Background()
+
+	// wiredAlign flips the gate on: MergeConcept guards on
+	// Alignments.Assertions.DB being non-nil. The gate's own reads/writes take
+	// an explicit db arg (the merge tx), so this DB field only opens the gate.
+	wiredAlign := func(db *sql.DB) AlignmentsStore {
+		return AlignmentsStore{
+			Assertions:  assertions.AssertionStore{DB: db},
+			DecisionLog: semid.DecisionLogStore{DB: db},
+			Scope:       "_",
+		}
+	}
+
+	t.Run("absorbed aligned, survivor unaligned: alignment follows", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		store := ConceptStore{DB: db, Alignments: wiredAlign(db)}
+		fromID, toID := "kwc_a", "kwc_b"
+
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(fromID).WillReturnRows(conceptRow(fromID, "provisional", nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(toID).WillReturnRows(conceptRow(toID, "active", nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semid_never_merge")).
+			WithArgs("keyword", fromID, toID).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		// Alignment reads run on the merge tx.
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
+			WithArgs(fromID).WillReturnRows(alignmentReadRow(1, fromID, testTermID, []byte(testQualifiers), testScore))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
+			WithArgs(toID).WillReturnRows(noAlignmentRow())
+		// FollowMerge re-points the absorbed-side accepted alignment.
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
+			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_concepts")).
+			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_surfaces")).
+			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(toID).WillReturnRows(conceptRow(toID, "active", nil))
+
+		merged, err := store.MergeConcept(ctx, fromID, toID)
+		if err != nil {
+			t.Fatalf("MergeConcept: %v", err)
+		}
+		if merged.ConceptID != toID {
+			t.Errorf("expected survivor %s, got %s", toID, merged.ConceptID)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("both aligned to the same term: merges, alignment follows", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		store := ConceptStore{DB: db, Alignments: wiredAlign(db)}
+		fromID, toID := "kwc_a", "kwc_b"
+
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(fromID).WillReturnRows(conceptRow(fromID, "provisional", nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(toID).WillReturnRows(conceptRow(toID, "active", nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semid_never_merge")).
+			WithArgs("keyword", fromID, toID).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
+			WithArgs(fromID).WillReturnRows(alignmentReadRow(1, fromID, testTermID, []byte(testQualifiers), testScore))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
+			WithArgs(toID).WillReturnRows(alignmentReadRow(2, toID, testTermID, []byte(testQualifiers), testScore))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
+			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_concepts")).
+			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_surfaces")).
+			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(toID).WillReturnRows(conceptRow(toID, "active", nil))
+
+		merged, err := store.MergeConcept(ctx, fromID, toID)
+		if err != nil {
+			t.Fatalf("MergeConcept: %v", err)
+		}
+		if merged.ConceptID != toID {
+			t.Errorf("expected survivor %s, got %s", toID, merged.ConceptID)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("aligned to different terms: refused", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		store := ConceptStore{DB: db, Alignments: wiredAlign(db)}
+		fromID, toID := "kwc_a", "kwc_b"
+
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(fromID).WillReturnRows(conceptRow(fromID, "provisional", nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
+			WithArgs(toID).WillReturnRows(conceptRow(toID, "active", nil))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semid_never_merge")).
+			WithArgs("keyword", fromID, toID).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
+			WithArgs(fromID).WillReturnRows(alignmentReadRow(1, fromID, testTermID, []byte(testQualifiers), testScore))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
+			WithArgs(toID).WillReturnRows(alignmentReadRow(2, toID, testOtherTermID, []byte(testQualifiers), testScore))
+		// No follow, no applyMerge, no commit: the conflict rolls the tx back.
+		mock.ExpectRollback()
+
+		_, err = store.MergeConcept(ctx, fromID, toID)
+		if !errors.Is(err, ErrMergeRejected) {
+			t.Fatalf("expected ErrMergeRejected, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "different governed terms") {
+			t.Errorf("expected message mentioning different governed terms, got %q", err.Error())
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
 }

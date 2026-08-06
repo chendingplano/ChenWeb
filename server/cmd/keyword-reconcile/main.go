@@ -29,6 +29,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -52,8 +53,15 @@ func main() {
 	}
 
 	r := &keywords.Reconciler{
-		DB:           db,
-		ConceptStore: keywords.ConceptStore{DB: db},
+		DB: db,
+		ConceptStore: keywords.ConceptStore{
+			DB: db,
+			Alignments: keywords.AlignmentsStore{
+				Assertions:  assertions.AssertionStore{DB: db},
+				DecisionLog: semid.DecisionLogStore{DB: db},
+				Scope:       "_",
+			},
+		},
 		SurfaceStore: keywords.SurfaceStore{DB: db},
 		DecisionLog:  semid.DecisionLogStore{DB: db},
 		Embeddings:   &llmEmbeddingClient{client: embedClient, modelName: modelName},

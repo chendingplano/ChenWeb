@@ -59,6 +59,13 @@ var conceptStatusTransitions = map[string]map[string]bool{
 // ConceptStore persists keyword concept rows.
 type ConceptStore struct {
 	DB DBX
+	// Alignments, when wired, makes the §14.2 merge gate live: MergeConcept
+	// refuses a merge where both sides carry accepted aligns_to_term
+	// assertions to different governed terms, and re-points an alignment on
+	// the absorbed side to the survivor inside the merge transaction. Left
+	// zero-valued, the gate is skipped (every existing caller stays
+	// unchanged; the gate is live only where the field is wired).
+	Alignments AlignmentsStore
 }
 
 const conceptColumns = `concept_id, pref_label, gloss, scope, status, merged_into, gloss_source, create_time, modify_time`
@@ -296,9 +303,12 @@ func (s ConceptStore) TransitionStatus(ctx context.Context, conceptID, to string
 // stays reversible (§14.4). Without the re-point, every surface would still
 // carry the tombstone id and every resolve would return it.
 //
-// §14.2: once aligns_to_term assertions exist (REQ-2/3), this transaction
-// must also refuse conflicting alignments and carry a matching alignment to
-// the survivor. Not wired yet — the assertion table does not exist.
+// §14.2: when the Alignments gate is wired (Alignments.Assertions.DB
+// non-nil), this transaction also refuses a merge where both concepts carry
+// accepted aligns_to_term assertions to different governed terms — evidence
+// they are not the same thing outranks whatever similarity proposed the
+// merge — and re-points an accepted alignment on the absorbed side to the
+// survivor atomically with the tombstone. Left unwired, the gate is skipped.
 // §14.3: this endpoint performs human-initiated merges only. Automatic
 // (reconciliation) merges are additionally restricted to auto-created
 // provisional concepts; that policy lives with the reconciler, not here.
@@ -327,6 +337,25 @@ func (s ConceptStore) MergeConcept(ctx context.Context, fromID, toID string) (Co
 			_ = tx.Rollback()
 			return Concept{}, err
 		}
+		// §14.2: an accepted aligns_to_term on the absorbed side follows to the
+		// survivor as part of the merge transaction; two concepts aligned to two
+		// distinct governed terms are evidence they are not the same thing, and
+		// that evidence outranks whatever similarity proposed the merge.
+		if s.Alignments.Assertions.DB != nil {
+			conflict, err := s.Alignments.MergeConflict(ctx, tx, fromID, toID)
+			if err != nil {
+				_ = tx.Rollback()
+				return Concept{}, err
+			}
+			if conflict {
+				_ = tx.Rollback()
+				return Concept{}, fmt.Errorf("%w: concepts %s and %s are aligned to different governed terms", ErrMergeRejected, fromID, toID)
+			}
+			if err := s.Alignments.FollowMerge(ctx, tx, fromID, toID); err != nil {
+				_ = tx.Rollback()
+				return Concept{}, err
+			}
+		}
 		if err := applyMerge(ctx, tx, fromID, toID); err != nil {
 			_ = tx.Rollback()
 			return Concept{}, err
@@ -339,6 +368,21 @@ func (s ConceptStore) MergeConcept(ctx context.Context, fromID, toID string) (Co
 
 	if err := s.mergeGuards(ctx, s.DB, fromID, toID); err != nil {
 		return Concept{}, err
+	}
+	// §14.2 gate, non-transactional form: same reads/writes on s.DB (the
+	// unlocked fallback has no enclosing transaction to roll back — tests only
+	// in practice; production always goes through *sql.DB).
+	if s.Alignments.Assertions.DB != nil {
+		conflict, err := s.Alignments.MergeConflict(ctx, s.DB, fromID, toID)
+		if err != nil {
+			return Concept{}, err
+		}
+		if conflict {
+			return Concept{}, fmt.Errorf("%w: concepts %s and %s are aligned to different governed terms", ErrMergeRejected, fromID, toID)
+		}
+		if err := s.Alignments.FollowMerge(ctx, s.DB, fromID, toID); err != nil {
+			return Concept{}, err
+		}
 	}
 	if err := applyMerge(ctx, s.DB, fromID, toID); err != nil {
 		return Concept{}, err

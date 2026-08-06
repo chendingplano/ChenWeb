@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -157,7 +159,17 @@ func MergeKeywordConcept(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_KW_052)"})
 	}
 
-	store := keywords.ConceptStore{DB: ApiTypes.ProjectDBHandle}
+	store := keywords.ConceptStore{
+		DB: ApiTypes.ProjectDBHandle,
+		// §14.2 gate: the human merge endpoint also refuses a merge where both
+		// sides carry accepted aligns_to_term assertions to different governed
+		// terms, and follows the absorbed side's alignment to the survivor.
+		Alignments: keywords.AlignmentsStore{
+			Assertions:  assertions.AssertionStore{DB: ApiTypes.ProjectDBHandle},
+			DecisionLog: semid.DecisionLogStore{DB: ApiTypes.ProjectDBHandle},
+			Scope:       "_",
+		},
+	}
 	merged, err := store.MergeConcept(c.Request().Context(), conceptID, payload.TargetID)
 	if err != nil {
 		logger.Error("merge keyword concept failed", "from", conceptID, "to", payload.TargetID, "err", err)
