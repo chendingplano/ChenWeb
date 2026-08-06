@@ -621,3 +621,66 @@ func TestDuplicateConceptID(t *testing.T) {
 		t.Errorf("unmet expectations: %v", err)
 	}
 }
+
+// TestListAutoCreatedProvisional exercises the reconciler's merge-target scan
+// (§14.3): only D11-minted provisional concepts (gloss_source='auto:d11') are
+// eligible for automatic merges, since a fresh provisional concept has no
+// curated content to lose. limit=0 exercises the default-limit path (500).
+func TestListAutoCreatedProvisional(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := ConceptStore{DB: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`WHERE scope = $1 AND status = 'provisional' AND gloss_source = 'auto:d11'`)).
+		WithArgs("_", 500).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).AddRow("kwc_l", "Luminance", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
+
+	out, err := store.ListAutoCreatedProvisional(ctx, "_", 0)
+	if err != nil {
+		t.Fatalf("ListAutoCreatedProvisional: %v", err)
+	}
+	if len(out) != 1 || out[0].ConceptID != "kwc_l" {
+		t.Errorf("unexpected result: %+v", out)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// TestSearchSimilarPrefLabel is reconciliation's lexical blocking query (§13
+// R3): pg_trgm similarity over pref_label, bounded to live concepts and
+// excluding the concept itself, so the reconciler can block "Luminence" to
+// "Luminance" without a concept matching itself.
+func TestSearchSimilarPrefLabel(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := ConceptStore{DB: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
+		WithArgs("_", "Luminence", 0.3, "kwc_l", 10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).AddRow("kwc_established", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
+
+	out, err := store.SearchSimilarPrefLabel(ctx, "Luminence", "_", "kwc_l", 0.3, 10)
+	if err != nil {
+		t.Fatalf("SearchSimilarPrefLabel: %v", err)
+	}
+	if len(out) != 1 || out[0].ConceptID != "kwc_established" {
+		t.Errorf("unexpected result: %+v", out)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}

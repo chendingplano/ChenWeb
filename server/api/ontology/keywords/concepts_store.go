@@ -176,6 +176,69 @@ func (s ConceptStore) ListConcepts(ctx context.Context, scope string) ([]Concept
 	return out, rows.Err()
 }
 
+// ListAutoCreatedProvisional returns concepts D11's targeted-miss path
+// minted (status='provisional', gloss_source='auto:d11') -- the population
+// keywords.Reconciler scans for a merge target, per spec §14.3: this
+// population is the only one automatic reconciliation merges (a fresh
+// provisional concept has no curated content to lose).
+func (s ConceptStore) ListAutoCreatedProvisional(ctx context.Context, scope string, limit int) ([]Concept, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT `+conceptColumns+`
+		`+conceptFrom+`
+		WHERE scope = $1 AND status = 'provisional' AND gloss_source = 'auto:d11'
+		ORDER BY create_time
+		LIMIT $2`, scope, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Concept
+	for rows.Next() {
+		c, err := scanConcept(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SearchSimilarPrefLabel is reconciliation's lexical blocking query (spec
+// §13 R3: "lexical (pg_trgm) ... to k candidates"), backed by migration
+// 20260806000001's trigram index on pref_label. excludeConceptID keeps a
+// concept from matching itself.
+func (s ConceptStore) SearchSimilarPrefLabel(ctx context.Context, label, scope, excludeConceptID string, minSimilarity float64, limit int) ([]Concept, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT `+conceptColumns+`
+		`+conceptFrom+`
+		WHERE scope = $1 AND status IN ('active', 'provisional')
+		  AND concept_id != $4
+		  AND similarity(pref_label, $2) > $3
+		ORDER BY similarity(pref_label, $2) DESC
+		LIMIT $5`, scope, label, minSimilarity, excludeConceptID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Concept
+	for rows.Next() {
+		c, err := scanConcept(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // UpdateConceptLabel updates the display attributes of a concept.
 func (s ConceptStore) UpdateConceptLabel(ctx context.Context, conceptID, prefLabel, gloss string) (Concept, error) {
 	if prefLabel == "" {
