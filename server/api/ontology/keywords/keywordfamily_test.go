@@ -167,6 +167,49 @@ func TestTier5FuzzyMatchGuardrails(t *testing.T) {
 			t.Errorf("expected the digit veto to reject 'release v2' vs 'release v3', got ok=%v matches=%+v", ok, matches)
 		}
 	})
+
+	// The two subtests below cover the 5-8 rune band of fuzzyCandidateScore
+	// (dist>1 cutoff plus the extra firstRune check), which the subtests
+	// above never exercise: "kubernets" and "release v2" both normalize to
+	// 9+ runes and only reach the >=9 band's dist<=2/similarity>=0.88 rule.
+	t.Run("5-8 rune band: edit distance 1 with matching first rune matches", func(t *testing.T) {
+		ks := kf.normalizer().Normalize("nginx") // 5 runes
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (`)).
+			WithArgs(ks.Exact).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
+			WithArgs("_", kf.NormalizerVersion, ks.Norm).
+			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
+				AddRow("kwc_nginx", "nginz")) // substitution x->z, dist 1, first rune 'n' == 'n'
+		matches, ok := kf.tier5FuzzyMatch(ctx, ks, "_")
+		if !ok || len(matches) != 1 {
+			t.Fatalf("expected one fuzzy match for nginx/nginz, got ok=%v matches=%+v", ok, matches)
+		}
+		if matches[0].NodeID != "kwc_nginx" || matches[0].Method != "tier5_fuzzy" {
+			t.Errorf("unexpected candidate: %+v", matches[0])
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("5-8 rune band: edit distance 1 with mismatched first rune does not match", func(t *testing.T) {
+		ks := kf.normalizer().Normalize("nginx") // 5 runes
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (`)).
+			WithArgs(ks.Exact).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
+			WithArgs("_", kf.NormalizerVersion, ks.Norm).
+			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
+				AddRow("kwc_anginx", "anginx")) // leading insertion, dist 1, first rune 'n' != 'a'
+		matches, ok := kf.tier5FuzzyMatch(ctx, ks, "_")
+		if ok || matches != nil {
+			t.Errorf("expected the first-rune gate to reject nginx/anginx despite dist 1, got ok=%v matches=%+v", ok, matches)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
 }
 
 // TestKeywordFamilyCandidateNodesReachesTier5 drives CandidateNodes end to
