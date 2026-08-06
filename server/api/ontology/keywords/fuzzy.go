@@ -99,7 +99,7 @@ var negationAffixPrefixes = []string{"un", "non", "de", "anti"}
 // hasNegationAffixMismatch implements §9.2's negation/affix veto: exactly one
 // of a/b is the other with a negation prefix or the "-less" suffix attached
 // (e.g. "compliant"/"noncompliant", "encrypted"/"unencrypted",
-// "harmful"/"harmless"). This is deliberately a *pairwise* check -- testing
+// "harm"/"harmless"). This is deliberately a *pairwise* check -- testing
 // "does this affix prefix this one string" in isolation would veto ordinary
 // words like "design" or "deploy" that merely start with "de".
 func hasNegationAffixMismatch(a, b string) bool {
@@ -109,23 +109,8 @@ func hasNegationAffixMismatch(a, b string) bool {
 		}
 	}
 	if a != b {
-		// Check for exact "-less" suffix match: "harmless" vs "harm"
 		if strings.TrimSuffix(a, "less") == b || strings.TrimSuffix(b, "less") == a {
 			return true
-		}
-		// Check for "-less" suffix where the base is a prefix of the other:
-		// "harmful" vs "harmless" (harmless base "harm" is prefix of "harmful")
-		if strings.HasSuffix(a, "less") {
-			base := strings.TrimSuffix(a, "less")
-			if base != "" && strings.HasPrefix(b, base) && b != base {
-				return true
-			}
-		}
-		if strings.HasSuffix(b, "less") {
-			base := strings.TrimSuffix(b, "less")
-			if base != "" && strings.HasPrefix(a, base) && a != base {
-				return true
-			}
 		}
 	}
 	return false

@@ -268,14 +268,27 @@ func TestHasNegationAffixMismatch(t *testing.T) {
 	if !hasNegationAffixMismatch("encrypted", "unencrypted") {
 		t.Error("encrypted vs unencrypted must veto")
 	}
-	if !hasNegationAffixMismatch("harmful", "harmless") {
-		t.Error("harmful vs harmless must veto")
+	if !hasNegationAffixMismatch("harm", "harmless") {
+		t.Error("harm vs harmless must veto -- root vs root+'-less' is the negation-suffix case §9.2 names")
 	}
 	if hasNegationAffixMismatch("design", "deploy") {
 		t.Error("design vs deploy must not veto -- 'de' is not a real negation prefix here")
 	}
 	if hasNegationAffixMismatch("kubernets", "kubernetes") {
 		t.Error("kubernets vs kubernetes must not veto")
+	}
+	// "harmful" vs "harmless" (two different derivational suffixes on the
+	// same root, not a bare root vs "root+less") is deliberately NOT vetoed
+	// here: §9.2 names "-less" as a negation suffix, not a same-root
+	// different-suffix detector, and a same-root-prefix check for that
+	// broader pattern is unsafe -- it also fires on unrelated words that
+	// merely share a prefix before "-less", including real typo pairs tier
+	// 5 exists to catch:
+	if hasNegationAffixMismatch("wireless", "wireles") {
+		t.Error("wireless vs wireles is a one-letter-deletion typo (edit distance 1) and must not veto")
+	}
+	if hasNegationAffixMismatch("classless", "classic") {
+		t.Error("classless vs classic share no negation relationship and must not veto")
 	}
 }
 
@@ -398,9 +411,16 @@ var negationAffixPrefixes = []string{"un", "non", "de", "anti"}
 // hasNegationAffixMismatch implements §9.2's negation/affix veto: exactly one
 // of a/b is the other with a negation prefix or the "-less" suffix attached
 // (e.g. "compliant"/"noncompliant", "encrypted"/"unencrypted",
-// "harmful"/"harmless"). This is deliberately a *pairwise* check -- testing
+// "harm"/"harmless"). This is deliberately a *pairwise* check -- testing
 // "does this affix prefix this one string" in isolation would veto ordinary
-// words like "design" or "deploy" that merely start with "de".
+// words like "design" or "deploy" that merely start with "de". The "-less"
+// branch is exact-match only (root vs root+"less"), not a prefix check: a
+// prefix check ("does b start with a's root") also fires on unrelated words
+// sharing a prefix before "-less", including real typo pairs tier 5 exists
+// to catch (e.g. "wireless"/"wireles", edit distance 1) -- do not broaden
+// this to catch same-root-different-suffix pairs like "harmful"/"harmless";
+// that is a different, unsafe-to-approximate linguistic pattern, not the
+// negation suffix §9.2 names.
 func hasNegationAffixMismatch(a, b string) bool {
 	for _, p := range negationAffixPrefixes {
 		if a == p+b || b == p+a {

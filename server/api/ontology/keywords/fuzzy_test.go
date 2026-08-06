@@ -47,14 +47,22 @@ func TestHasNegationAffixMismatch(t *testing.T) {
 	if !hasNegationAffixMismatch("encrypted", "unencrypted") {
 		t.Error("encrypted vs unencrypted must veto")
 	}
-	if !hasNegationAffixMismatch("harmful", "harmless") {
-		t.Error("harmful vs harmless must veto")
+	if !hasNegationAffixMismatch("harm", "harmless") {
+		t.Error("harm vs harmless must veto (root vs root+-less)")
 	}
 	if hasNegationAffixMismatch("design", "deploy") {
 		t.Error("design vs deploy must not veto -- 'de' is not a real negation prefix here")
 	}
 	if hasNegationAffixMismatch("kubernets", "kubernetes") {
 		t.Error("kubernets vs kubernetes must not veto")
+	}
+	// Regression tests: words that share a prefix but aren't negation pairs
+	// must not veto, even if one ends with "-less" or has other suffix differences
+	if hasNegationAffixMismatch("wireless", "wireles") {
+		t.Error("wireless vs wireles must not veto (one-character typo, not negation pair)")
+	}
+	if hasNegationAffixMismatch("classless", "classic") {
+		t.Error("classless vs classic must not veto (different suffixes, not negation pair)")
 	}
 }
 
