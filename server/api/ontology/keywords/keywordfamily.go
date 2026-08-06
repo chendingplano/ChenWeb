@@ -51,6 +51,21 @@ func (kf *KeywordFamily) modeActive() bool {
 	return kf.ResolverMode == "observe" || kf.ResolverMode == "on"
 }
 
+// Mode returns the family's effective resolver mode; unset or unrecognized
+// values fail closed to "off" (K6).
+func (kf *KeywordFamily) Mode() string {
+	if kf.modeActive() {
+		return kf.ResolverMode
+	}
+	return "off"
+}
+
+// NormVersion returns the family's effective normalizer version.
+func (kf *KeywordFamily) NormVersion() int {
+	kf.ensureDefaults()
+	return kf.NormalizerVersion
+}
+
 // FamilyName implements semid.FamilyAdapter.
 func (kf *KeywordFamily) FamilyName() string { return "keyword" }
 
@@ -318,23 +333,44 @@ func (kf *KeywordFamily) ResolveSurface(ctx context.Context, surface, scope stri
 	return res, nil
 }
 
-// ObserveSurface is the observing entry point (§9.3): it runs the pure
+// ObserveSurface is the flat-argument wrapper over ObserveOccurrence used
+// by the REST resolve path and the mention collector.
+func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, artifactType, artifactID, contextText string, targeted bool) (*semid.Resolution, error) {
+	return kf.ObserveOccurrence(ctx, &Occurrence{
+		ArtifactType: artifactType,
+		ArtifactID:   artifactID,
+		RawName:      surface,
+		Scope:        scope,
+		ContextText:  contextText,
+	}, targeted)
+}
+
+// ObserveOccurrence is the observing entry point (§9.3): it runs the pure
 // resolution, appends the decision log, writes the occurrence record linked
 // to that decision (K4), and applies the verdict side effects — surface
 // persistence on auto_accepted, the unresolved backlog keyed on the derived
 // norm key (K5) on deferred/ambiguous, and, for targeted names only, the
 // D11 auto-create branch: a targeted miss mints a provisional concept
 // instead of queueing. targeted marks a name the producer asserted *is* a
-// name (the REST resolve path); the mention collector passes false and keeps
-// backlog-only behaviour, since it tokenizes all prose and would otherwise
-// mint a concept per junk token. artifactType/artifactID/contextText are
-// consumer-supplied provenance, opaque to the resolver (§9.5). An inert
-// family returns nil, nil.
-func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, artifactType, artifactID, contextText string, targeted bool) (*semid.Resolution, error) {
+// name (the REST resolve path, the names facade); the mention collector
+// passes false and keeps backlog-only behaviour, since it tokenizes all
+// prose and would otherwise mint a concept per junk token.
+//
+// The occurrence's consumer-supplied fields (artifact provenance,
+// field_path, context_text, chunk_ref — opaque to the resolver, §9.5) pass
+// through into the row as given; the resolver contributes the norm key, the
+// decision link, the concept assignment, and the status. A governed TermID
+// already set by the caller (the names facade) marks the row
+// term_resolved — the governed answer wins. An inert family returns
+// nil, nil.
+func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence, targeted bool) (*semid.Resolution, error) {
 	kf.ensureDefaults()
 	if !kf.modeActive() || kf.DB == nil {
 		return nil, nil
 	}
+
+	surface := occ.RawName
+	scope := occ.Scope
 
 	res, err := kf.ResolveSurface(ctx, surface, scope)
 	if err != nil {
@@ -371,17 +407,13 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 
 	// K4: the occurrence carries the observed string, the derived norm key,
 	// the resolution outcome, and the decision-log link from this call. An
-	// auto-created concept is assigned exactly like an accepted match; the
-	// status stays unresolved because the concept is provisional, not
-	// governed (§9.5).
-	occ := Occurrence{
-		ArtifactType:     artifactType,
-		ArtifactID:       artifactID,
-		RawName:          surface,
-		NormKey:          ks.Norm,
-		Scope:            scope,
-		ContextText:      contextText,
-		ResolutionStatus: statusForVerdict(res.Verdict),
+	// auto-created concept is assigned exactly like an accepted match;
+	// without a term link the status stays unresolved because the concept
+	// is provisional, not governed (§9.5).
+	occ.NormKey = ks.Norm
+	occ.ResolutionStatus = statusForVerdict(res.Verdict)
+	if occ.TermID != nil && *occ.TermID != "" {
+		occ.ResolutionStatus = "term_resolved"
 	}
 	if decisionID > 0 {
 		occ.DecisionLogID = &decisionID
@@ -389,7 +421,7 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 	if res.ResolvedNodeID != "" && (res.Verdict == semid.VerdictAutoAccept || autoCreated) {
 		occ.ConceptID = &res.ResolvedNodeID
 	}
-	if _, err := kf.OccurrenceStore.InsertOccurrence(ctx, occ); err != nil {
+	if _, err := kf.OccurrenceStore.InsertOccurrence(ctx, *occ); err != nil {
 		return nil, err
 	}
 
@@ -427,14 +459,14 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 		// (norm_key, scope) — pass the derived norm key, never the raw
 		// surface.
 		if !autoCreated {
-			if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, contextText); err != nil {
+			if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
 				return nil, err
 			}
 		}
 	case semid.VerdictAmbiguous:
 		// K5: the backlog PK is (norm_key, scope) — pass the derived norm
 		// key, never the raw surface.
-		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, contextText); err != nil {
+		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
 			return nil, err
 		}
 	}
