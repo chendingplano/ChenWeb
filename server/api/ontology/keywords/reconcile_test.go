@@ -2,6 +2,7 @@ package keywords
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"testing"
 
@@ -133,4 +134,137 @@ func TestElectMergeDirectionPrefersRicherConcept(t *testing.T) {
 	if absorbed != "kwc_poor" || survivor != "kwc_rich" {
 		t.Errorf("expected kwc_poor absorbed into kwc_rich, got absorbed=%s survivor=%s", absorbed, survivor)
 	}
+}
+
+// TestReconcilerRunPropagatesDecisionLogError replicates the success-path mock
+// sequence from TestReconcilerMergesCrossLingualProvisional through the merge
+// (BeginTx ... Commit ... GetConcept survivor) but makes the decision-log
+// append fail. The merge's audit row (ADR DR15) must not be silently lost:
+// Run must surface the append error and report Merged=0.
+func TestReconcilerRunPropagatesDecisionLogError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`gloss_source = 'auto:d11'`)).
+		WithArgs("_", 500).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
+	mock.ExpectQuery(regexp.QuoteMeta(`status IN ('active', 'provisional')`)).
+		WithArgs("_").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}).
+			AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow).
+			AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
+	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
+		WithArgs("_", "亮度", reconcileLexicalBlockMin, "kwc_b", reconcileTopK).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+		}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
+		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
+		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
+	}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
+		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
+		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
+	}).AddRow("kws_l", "kwc_l", "Luminance", "luminance", semid.CurrentNormalizerVersion, "pref", "pref", "und", "_", 1.0, "human:", false, nil, testNow, testNow))
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
+		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
+		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+	}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
+		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
+		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+	}).AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.semid_never_merge`)).
+		WithArgs("keyword", "kwc_b", "kwc_l").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_concepts`)).
+		WithArgs("kwc_b", "kwc_l").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_surfaces`)).
+		WithArgs("kwc_b", "kwc_l").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
+		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
+		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
+	}).AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
+	injected := errors.New("decision log append failed")
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.semid_decision_log`)).
+		WillReturnError(injected)
+
+	r := &Reconciler{
+		DB:           db,
+		ConceptStore: ConceptStore{DB: db},
+		SurfaceStore: SurfaceStore{DB: db},
+		DecisionLog:  semid.DecisionLogStore{DB: db},
+		Embeddings: &fakeEmbeddingClient{vectors: map[string][]float64{
+			"亮度":        {1, 0, 0},
+			"Luminance": {0.95, 0.05, 0},
+		}},
+		Scope: "_",
+	}
+	stats, err := r.Run(context.Background())
+	if !errors.Is(err, injected) {
+		t.Fatalf("expected decision-log append error to propagate, got %v", err)
+	}
+	if stats.Merged != 0 {
+		t.Errorf("expected Merged=0 when the audit append fails, got %+v", stats)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// TestSurfaceCountsPropagatesError covers the surface-count reads that feed
+// electMergeDirection: a transient ListSurfacesByConcept failure on either
+// side must surface as an error rather than silently flipping the
+// absorbed/survivor direction (e.g. absorbing an established concept into an
+// auto-created provisional).
+func TestSurfaceCountsPropagatesError(t *testing.T) {
+	injected := errors.New("surface query failed")
+
+	t.Run("first query errors", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		r := &Reconciler{SurfaceStore: SurfaceStore{DB: db}}
+		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
+			WithArgs("a").WillReturnError(injected)
+		_, _, err = r.surfaceCounts(context.Background(), "a", "b")
+		if !errors.Is(err, injected) {
+			t.Fatalf("expected first-query error to propagate, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("second query errors", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		r := &Reconciler{SurfaceStore: SurfaceStore{DB: db}}
+		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
+			WithArgs("a").WillReturnRows(sqlmock.NewRows([]string{
+			"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
+		}))
+		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
+			WithArgs("b").WillReturnError(injected)
+		_, _, err = r.surfaceCounts(context.Background(), "a", "b")
+		if !errors.Is(err, injected) {
+			t.Fatalf("expected second-query error to propagate, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
 }
