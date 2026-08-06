@@ -32,7 +32,7 @@ func TestKeywordFamilyUnsetModeIsInert(t *testing.T) {
 	if res.Verdict != "" {
 		t.Errorf("expected zero resolution when ResolverMode is unset, got verdict %q", res.Verdict)
 	}
-	observed, err := kf.ObserveSurface(nil, "test", "_", "art", "ctx")
+	observed, err := kf.ObserveSurface(nil, "test", "_", "document", "art", "ctx")
 	if err != nil {
 		t.Fatalf("ObserveSurface (unset mode): %v", err)
 	}

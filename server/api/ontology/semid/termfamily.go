@@ -146,7 +146,7 @@ WHERE id = $1`, candidateID, string(matchesJSON)); err != nil {
 
 	input, _ := json.Marshal(map[string]any{"candidate_id": candidateID, "surface": surface, "scope": scope})
 	output, _ := json.Marshal(res)
-	_ = (DecisionLogStore{DB: f.DB}).Append(ctx, DecisionLogEntry{
+	_, _ = (DecisionLogStore{DB: f.DB}).Append(ctx, DecisionLogEntry{
 		Family:  f.FamilyName(),
 		Scope:   scope,
 		Input:   input,

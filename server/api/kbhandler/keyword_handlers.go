@@ -415,7 +415,7 @@ func ResolveKeywordSurface(c echo.Context) error {
 		DB:           ApiTypes.ProjectDBHandle,
 		ResolverMode: keywords.ResolverMode(),
 	}
-	res, err := kf.ObserveSurface(c.Request().Context(), payload.Surface, payload.Scope, "", "")
+	res, err := kf.ObserveSurface(c.Request().Context(), payload.Surface, payload.Scope, "", "", "")
 	if err != nil {
 		logger.Error("resolve keyword surface failed", "surface", payload.Surface, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve keyword surface (CWB_KB_KW_303)"})

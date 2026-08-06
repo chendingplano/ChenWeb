@@ -65,7 +65,7 @@ func TestKeywordFamilyResolveSurfaceNoDB(t *testing.T) {
 
 func TestKeywordFamilyObserveSurfaceOff(t *testing.T) {
 	kf := &KeywordFamily{ResolverMode: "off"}
-	res, err := kf.ObserveSurface(nil, "test", "_", "art", "ctx")
+	res, err := kf.ObserveSurface(nil, "test", "_", "document", "art", "ctx")
 	if err != nil {
 		t.Fatalf("ObserveSurface (off): %v", err)
 	}

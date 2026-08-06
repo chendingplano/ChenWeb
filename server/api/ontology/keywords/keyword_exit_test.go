@@ -87,12 +87,12 @@ func TestConceptAndSurfaceStoreContracts(t *testing.T) {
 	var cs ConceptStore
 	var ss SurfaceStore
 	var rs RewriteRuleStore
-	var ms MentionStore
+	var os OccurrenceStore
 	var us UnresolvedStore
 	// Compilation check: all store types are defined.
 	_ = cs
 	_ = ss
 	_ = rs
-	_ = ms
+	_ = os
 	_ = us
 }

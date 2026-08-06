@@ -21,7 +21,7 @@ type KeywordFamily struct {
 	ConceptStore     ConceptStore
 	SurfaceStore     SurfaceStore
 	SurfaceKeyStore  SurfaceKeyStore
-	MentionStore     MentionStore
+	OccurrenceStore  OccurrenceStore
 	UnresolvedStore  UnresolvedStore
 	RewriteRuleStore RewriteRuleStore
 }
@@ -35,7 +35,7 @@ func (kf *KeywordFamily) ensureDefaults() {
 		kf.ConceptStore = ConceptStore{DB: kf.DB}
 		kf.SurfaceStore = SurfaceStore{DB: kf.DB, NormalizerVersion: kf.NormalizerVersion}
 		kf.SurfaceKeyStore = SurfaceKeyStore{DB: kf.DB}
-		kf.MentionStore = MentionStore{DB: kf.DB}
+		kf.OccurrenceStore = OccurrenceStore{DB: kf.DB}
 		kf.UnresolvedStore = UnresolvedStore{DB: kf.DB}
 		kf.RewriteRuleStore = RewriteRuleStore{DB: kf.DB}
 	}
@@ -315,22 +315,17 @@ func (kf *KeywordFamily) ResolveSurface(ctx context.Context, surface, scope stri
 	return res, nil
 }
 
-// ObserveSurface is the observing entry point (§9.3): it writes the mention
-// row, runs the pure resolution, appends the decision log, and applies the
-// verdict side effects — surface persistence on auto_accepted, and the
-// unresolved backlog keyed on the derived norm key (K5) on
-// deferred/ambiguous. An inert family returns nil, nil.
-func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, artifactRef, contextText string) (*semid.Resolution, error) {
+// ObserveSurface is the observing entry point (§9.3): it runs the pure
+// resolution, appends the decision log, writes the occurrence record linked
+// to that decision (K4), and applies the verdict side effects — surface
+// persistence on auto_accepted, and the unresolved backlog keyed on the
+// derived norm key (K5) on deferred/ambiguous. artifactType/artifactID/
+// contextText are consumer-supplied provenance, opaque to the resolver
+// (§9.5). An inert family returns nil, nil.
+func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, artifactType, artifactID, contextText string) (*semid.Resolution, error) {
 	kf.ensureDefaults()
 	if !kf.modeActive() || kf.DB == nil {
 		return nil, nil
-	}
-
-	if _, err := kf.MentionStore.InsertMention(ctx, Mention{
-		ArtifactRef: &artifactRef,
-		ContextText: &contextText,
-	}); err != nil {
-		return nil, err
 	}
 
 	res, err := kf.ResolveSurface(ctx, surface, scope)
@@ -340,7 +335,7 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 
 	input, _ := json.Marshal(map[string]any{"surface": surface, "scope": scope})
 	output, _ := json.Marshal(res)
-	_ = (semid.DecisionLogStore{DB: kf.DB}).Append(ctx, semid.DecisionLogEntry{
+	decisionID, _ := (semid.DecisionLogStore{DB: kf.DB}).Append(ctx, semid.DecisionLogEntry{
 		Family:  kf.FamilyName(),
 		Scope:   scope,
 		Input:   input,
@@ -349,7 +344,28 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 		Actor:   "keyword_family",
 	})
 
+	// K4: the occurrence carries the observed string, the derived norm key,
+	// the resolution outcome, and the decision-log link from this call.
 	ks := kf.normalizer().Normalize(surface)
+	occ := Occurrence{
+		ArtifactType:     artifactType,
+		ArtifactID:       artifactID,
+		RawName:          surface,
+		NormKey:          ks.Norm,
+		Scope:            scope,
+		ContextText:      contextText,
+		ResolutionStatus: statusForVerdict(res.Verdict),
+	}
+	if decisionID > 0 {
+		occ.DecisionLogID = &decisionID
+	}
+	if res.Verdict == semid.VerdictAutoAccept && res.ResolvedNodeID != "" {
+		occ.ConceptID = &res.ResolvedNodeID
+	}
+	if _, err := kf.OccurrenceStore.InsertOccurrence(ctx, occ); err != nil {
+		return nil, err
+	}
+
 	switch res.Verdict {
 	case semid.VerdictAutoAccept:
 		// Ensure the accepted surface row exists. The human_review arm
@@ -366,16 +382,15 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 				}
 			}
 			if !exists {
+				// Keys are derived server-side from the surface (D6).
 				_, _ = kf.SurfaceStore.CreateSurface(ctx, Surface{
-					ConceptID:   res.ResolvedNodeID,
-					Surface:     surface,
-					NormKey:     ks.Norm,
-					NormVersion: kf.NormalizerVersion,
-					LabelRole:   "alt",
-					AliasType:   "synonym",
-					Provenance:  "llm:observe",
-					Scope:       scope,
-					Confidence:  0.8,
+					ConceptID:  res.ResolvedNodeID,
+					Surface:    surface,
+					LabelRole:  "alt",
+					AliasType:  "synonym",
+					Provenance: "llm:observe",
+					Scope:      scope,
+					Confidence: 0.8,
 				})
 			}
 		}
@@ -388,4 +403,19 @@ func (kf *KeywordFamily) ObserveSurface(ctx context.Context, surface, scope, art
 	}
 
 	return &res, nil
+}
+
+// statusForVerdict maps a kernel verdict to the §9.5 resolution statuses.
+// Keyword resolution is lexical — it never produces a term id, so an
+// accepted match is lexical_resolved; undecided verdicts are unresolved
+// (the decision log carries the top-1 for human_review).
+func statusForVerdict(v semid.Verdict) string {
+	switch v {
+	case semid.VerdictAutoAccept:
+		return "lexical_resolved"
+	case semid.VerdictAmbiguous:
+		return "ambiguous"
+	default:
+		return "unresolved"
+	}
 }

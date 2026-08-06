@@ -82,10 +82,11 @@ func (s UnresolvedStore) UpsertUnresolved(ctx context.Context, normKey, scope, s
 		}
 	}
 
-	// Reservoir sample contexts (cap at 5, ≤200 chars each).
+	// Reservoir sample contexts (cap at 5, ≤200 runes each — byte-slicing
+	// split multi-byte CJK into invalid UTF-8, §10.5).
 	if contextText != "" {
-		if len(contextText) > 200 {
-			contextText = contextText[:200]
+		if runes := []rune(contextText); len(runes) > 200 {
+			contextText = string(runes[:200])
 		}
 		contexts = append(contexts, contextText)
 		if len(contexts) > 5 {

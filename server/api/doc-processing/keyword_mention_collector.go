@@ -60,13 +60,42 @@ func (mc *KeywordMentionCollector) CollectFromText(ctx context.Context, artifact
 		}
 		seen[token] = true
 
-		_, err := mc.KeywordFamily.ObserveSurface(ctx, token, scope, artifactRef, "")
+		// K4: the occurrence carries consumer provenance and a context
+		// snippet — the old mention row stored neither.
+		_, err := mc.KeywordFamily.ObserveSurface(ctx, token, scope, "document", artifactRef, contextSnippet(text, token))
 		if err != nil {
 			// Best-effort: log but don't fail the batch.
 			continue
 		}
 	}
 	return nil
+}
+
+// contextSnippet returns up to 200 runes of text surrounding the first
+// occurrence of token, so backlog contexts are valid UTF-8 even for CJK.
+func contextSnippet(text, token string) string {
+	lowerText := strings.ToLower(text)
+	lowerToken := strings.ToLower(token)
+	idx := strings.Index(lowerText, lowerToken)
+	if idx < 0 {
+		idx = 0
+	}
+	runes := []rune(text)
+	// Re-locate on rune boundaries: count runes before the byte index.
+	start := len([]rune(text[:idx]))
+	lo := start - 80
+	if lo < 0 {
+		lo = 0
+	}
+	hi := start + len([]rune(token)) + 80
+	if hi > len(runes) {
+		hi = len(runes)
+	}
+	snippet := string(runes[lo:hi])
+	if len([]rune(snippet)) > 200 {
+		snippet = string([]rune(snippet)[:200])
+	}
+	return snippet
 }
 
 // extractKeywordCandidates tokenizes text and returns candidate keyword tokens.

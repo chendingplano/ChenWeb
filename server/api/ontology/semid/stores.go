@@ -26,9 +26,12 @@ type DecisionLogStore struct {
 	DB *sql.DB
 }
 
-func (s DecisionLogStore) Append(ctx context.Context, e DecisionLogEntry) error {
+// Append records one kernel decision and returns the decision-log row id,
+// so the caller can link its own evidence record (e.g. a keyword
+// occurrence, K4) to the exact decision that produced it.
+func (s DecisionLogStore) Append(ctx context.Context, e DecisionLogEntry) (int64, error) {
 	if s.DB == nil {
-		return errors.New("db is nil")
+		return 0, errors.New("db is nil")
 	}
 	input := e.Input
 	if len(input) == 0 {
@@ -41,12 +44,14 @@ func (s DecisionLogStore) Append(ctx context.Context, e DecisionLogEntry) error 
 	const stmt = `
 INSERT INTO kb.semid_decision_log
 	(family, scope, input, output, verdict, model, prompt_version, actor, tokens)
-VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9)`
-	_, err := s.DB.ExecContext(ctx, stmt,
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9)
+RETURNING id`
+	var id int64
+	err := s.DB.QueryRowContext(ctx, stmt,
 		e.Family, nullableString(e.Scope), string(input), string(output), e.Verdict,
 		nullableString(e.Model), nullableString(e.PromptVersion), nullableString(e.Actor), e.Tokens,
-	)
-	return err
+	).Scan(&id)
+	return id, err
 }
 
 // NeverMerge is a family-scoped never-merge assertion.
