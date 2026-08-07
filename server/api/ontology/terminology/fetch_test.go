@@ -274,7 +274,7 @@ func TestApproveDraftWritesApprovalInPlace(t *testing.T) {
 		t.Fatalf("review status before approve = %q", got)
 	}
 
-	st, err := ApproveDraft(dir, ResourceUCUM, "alice@example.test", now)
+	st, err := ApproveDraft(dir, ResourceUCUM, "alice@example.test", "license and role confirmed against fixture", now)
 	if err != nil {
 		t.Fatalf("ApproveDraft: %v", err)
 	}
@@ -295,8 +295,15 @@ func TestApproveDraftWritesApprovalInPlace(t *testing.T) {
 	if m.Policy.ApprovedBy != "alice@example.test" || m.Policy.ApprovedAt == nil || !m.Policy.ApprovedAt.Equal(now) {
 		t.Fatalf("approval fields = %+v", m.Policy)
 	}
+	if m.Policy.ReviewComments != "license and role confirmed against fixture" ||
+		m.Policy.ReviewedBy != "alice@example.test" || m.Policy.ReviewedAt == nil || !m.Policy.ReviewedAt.Equal(now) {
+		t.Fatalf("review fields = %+v", m.Policy)
+	}
 	if got, _ := DraftReviewStatus(dir, ResourceUCUM); got != keywords.LicenseReviewApproved {
 		t.Fatalf("review status after approve = %q", got)
+	}
+	if got, _ := ReadDraftReview(dir, ResourceUCUM); got.Status != keywords.LicenseReviewApproved || got.Comments != m.Policy.ReviewComments {
+		t.Fatalf("ReadDraftReview = %+v", got)
 	}
 }
 
@@ -304,8 +311,11 @@ func TestApproveDraftFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 
-	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", now); !errors.Is(err, ErrNotDownloaded) {
+	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", "", now); !errors.Is(err, ErrNotDownloaded) {
 		t.Fatalf("not downloaded: err = %v", err)
+	}
+	if _, err := DisapproveDraft(dir, ResourceSIRP, "alice", "bad license", now); !errors.Is(err, ErrNotDownloaded) {
+		t.Fatalf("disapprove not downloaded: err = %v", err)
 	}
 
 	// Downloaded but no draft (e.g. operator already moved it).
@@ -316,7 +326,7 @@ func TestApproveDraftFailsClosed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"sirp","downloaded":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", now); !errors.Is(err, ErrNoDraftManifest) {
+	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", "", now); !errors.Is(err, ErrNoDraftManifest) {
 		t.Fatalf("no draft: err = %v", err)
 	}
 
@@ -324,15 +334,54 @@ func TestApproveDraftFailsClosed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"bipm-sirp-quantity","policy":{"license_review_status":"approved","approved_by":"bob","approved_at":"2026-08-07T12:00:00Z"},"artifacts":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", now); !errors.Is(err, ErrAlreadyApproved) {
+	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", "", now); !errors.Is(err, ErrAlreadyApproved) {
 		t.Fatalf("already approved: err = %v", err)
 	}
+	// Disapproving an approved draft fails closed too.
+	if _, err := DisapproveDraft(dir, ResourceSIRP, "alice", "retract", now); !errors.Is(err, ErrAlreadyApproved) {
+		t.Fatalf("disapprove already approved: err = %v", err)
+	}
 
-	// Missing approver.
+	// Reset to pending, then disapprove: comments and reviewer are saved.
 	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"bipm-sirp-quantity","policy":{"license_review_status":"pending_review"},"artifacts":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApproveDraft(dir, ResourceSIRP, " ", now); err == nil {
+	if _, err := DisapproveDraft(dir, ResourceSIRP, "carol@example.test", "scope out of pilot; license unclear", now); err != nil {
+		t.Fatalf("DisapproveDraft: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(sourceDir, "manifest.draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Policy.LicenseReviewStatus != LicenseReviewDisapproved {
+		t.Fatalf("license_review_status = %q", m.Policy.LicenseReviewStatus)
+	}
+	if m.Policy.ReviewComments != "scope out of pilot; license unclear" || m.Policy.ReviewedBy != "carol@example.test" || m.Policy.ReviewedAt == nil {
+		t.Fatalf("review fields = %+v", m.Policy)
+	}
+	if got, _ := DraftReviewStatus(dir, ResourceSIRP); got != LicenseReviewDisapproved {
+		t.Fatalf("review status after disapprove = %q", got)
+	}
+	// Re-disapproving (or approving) a decided draft fails closed.
+	if _, err := DisapproveDraft(dir, ResourceSIRP, "carol", "again", now); !errors.Is(err, ErrAlreadyDisapproved) {
+		t.Fatalf("already disapproved: err = %v", err)
+	}
+	if _, err := ApproveDraft(dir, ResourceSIRP, "carol", "", now); !errors.Is(err, ErrAlreadyDisapproved) {
+		t.Fatalf("approve already disapproved: err = %v", err)
+	}
+
+	// Missing reviewer/approver.
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"bipm-sirp-quantity","policy":{"license_review_status":"pending_review"},"artifacts":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApproveDraft(dir, ResourceSIRP, " ", "", now); err == nil {
 		t.Fatal("empty approved_by must error")
+	}
+	if _, err := DisapproveDraft(dir, ResourceSIRP, " ", "no reviewer", now); err == nil {
+		t.Fatal("empty reviewer must error")
 	}
 }

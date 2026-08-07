@@ -18,8 +18,12 @@ export type TerminologyResource = {
 	artifact: string;
 	source_url: string;
 	manifest_draft: string;
-	/** Draft manifest license_review_status: "pending_review", "approved", or "". */
+	/** Draft manifest license_review_status: "pending_review", "approved",
+	 * "disapproved", or "" when there is no draft. */
 	review_status: string;
+	review_comments: string;
+	reviewed_by: string;
+	reviewed_at: string | null;
 	error: string;
 };
 
@@ -32,6 +36,44 @@ type DownloadResponse = {
 	status: boolean;
 	resource: TerminologyResource;
 };
+
+export type ImportCounts = {
+	entries: number;
+	labels: number;
+	relations: number;
+	negative_decisions: number;
+	ucum_codes: number;
+	artifacts: number;
+};
+
+export type ImportResult = {
+	source: string;
+	release: string;
+	counts: ImportCounts;
+	replayed: boolean;
+};
+
+/** Outcome of the offline import started after an approval. ok is true only
+ * when the import committed; error explains failures (approval still stands). */
+export type ImportOutcome = {
+	ok: boolean;
+	result?: ImportResult;
+	error?: string;
+};
+
+type ApproveResponse = {
+	status: boolean;
+	resource: TerminologyResource;
+	import: ImportOutcome;
+};
+
+function encodeForm(fields: Record<string, string>): string {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(fields)) {
+		if (value) params.set(key, value);
+	}
+	return params.toString();
+}
 
 async function getJSON<T>(url: string, fetchFn: typeof fetch): Promise<T> {
 	const res = await fetchFn(url, { credentials: 'same-origin' });
@@ -79,28 +121,60 @@ export async function downloadTerminologyResource(
 	return body.resource;
 }
 
-/** Mark one pending draft manifest as license-reviewed and approved. The
- * server records approved_by as the authenticated user unless overridden. */
+/** Mark one pending draft manifest as license-reviewed and approved, then
+ * start importing it. The server records approved_by as the authenticated
+ * user unless overridden, plus the operator's review comments. Returns the
+ * updated resource and the import outcome. */
 export async function approveTerminologyResource(
 	source: string,
-	approvedBy?: string,
-	fetchFn: typeof fetch = fetch
-): Promise<TerminologyResource> {
-	const body = approvedBy ? `approved_by=${encodeURIComponent(approvedBy)}` : '';
+	opts: { approvedBy?: string; comments?: string; fetchFn?: typeof fetch } = {}
+): Promise<{ resource: TerminologyResource; import: ImportOutcome }> {
+	const { approvedBy, comments, fetchFn = fetch } = opts;
+	const body = encodeForm({ approved_by: approvedBy ?? '', comments: comments ?? '' });
 	const res = await fetchFn(`/api/v1/terminology-resources/${encodeURIComponent(source)}/approve`, {
 		method: 'POST',
 		credentials: 'same-origin',
 		headers: body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
 		body: body || undefined
 	});
-	let data: DownloadResponse;
+	let data: ApproveResponse;
 	try {
-		data = (await res.json()) as DownloadResponse;
+		data = (await res.json()) as ApproveResponse;
 	} catch {
 		throw new Error(`approve failed: ${res.status}`);
 	}
 	if (!res.ok || !data.status) {
 		throw new Error((data as { error?: string })?.error ?? `approve failed: ${res.status}`);
+	}
+	return { resource: data.resource, import: data.import };
+}
+
+/** Record an operator rejection of one pending draft manifest. The server
+ * saves the comments and reviewer, marks the draft disapproved, and never
+ * imports it. */
+export async function disapproveTerminologyResource(
+	source: string,
+	opts: { reviewedBy?: string; comments?: string; fetchFn?: typeof fetch } = {}
+): Promise<TerminologyResource> {
+	const { reviewedBy, comments, fetchFn = fetch } = opts;
+	const body = encodeForm({ reviewed_by: reviewedBy ?? '', comments: comments ?? '' });
+	const res = await fetchFn(
+		`/api/v1/terminology-resources/${encodeURIComponent(source)}/disapprove`,
+		{
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
+			body: body || undefined
+		}
+	);
+	let data: DownloadResponse;
+	try {
+		data = (await res.json()) as DownloadResponse;
+	} catch {
+		throw new Error(`disapprove failed: ${res.status}`);
+	}
+	if (!res.ok || !data.status) {
+		throw new Error((data as { error?: string })?.error ?? `disapprove failed: ${res.status}`);
 	}
 	return data.resource;
 }

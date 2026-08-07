@@ -293,24 +293,37 @@
 
 **Interfaces:**
 - The resources API now reports the draft manifest's `review_status`
-  (`pending_review`, `approved`, or empty) per downloaded resource.
+  (`pending_review`, `approved`, `disapproved`, or empty) plus the saved
+  review comments, reviewer, and review time per downloaded resource.
 - The Review page (System Admin > Resources > Review External Resources) lists
   only downloaded resources whose draft manifest is still `pending_review`,
   in the same card style as the External Terminology Resources page.
 - `POST /api/v1/terminology-resources/:source/approve` completes the operator
   license review in place: it writes `license_review_status=approved` plus
-  `approved_by` (authenticated user email unless overridden) and `approved_at`
-  into the draft manifest. It fails closed when the source is not downloaded,
-  has no draft, or is already approved. Approving never imports anything.
-- Each pending card has a "Mark approved" button (with confirmation) that
-  calls the approve API and removes the resource from the list.
+  `approved_by` (authenticated user email unless overridden), `approved_at`,
+  and the operator's review comments into the draft manifest, then starts the
+  offline import of the now-approved local manifest. It fails closed when the
+  source is not downloaded, has no draft, or is already decided. Approval is
+  persisted even if the import fails so the operator can retry.
+- `POST /api/v1/terminology-resources/:source/disapprove` saves the operator's
+  review comments and reviewer, marks the draft `disapproved`, and never
+  imports anything. It fails closed on the same preconditions.
+- Each pending card has a "Review" button that opens a dialog showing the
+  resource details, a multi-line comments field, and Approve / Disapprove /
+  Cancel actions. Approve (with confirmation) marks the entry reviewed and
+  approved and starts the import; Disapprove (with confirmation) saves the
+  comments and marks the resource `disapproved`. A direct "Mark approved"
+  button (with confirmation) remains below it.
 
 - [x] Surface `review_status` from the draft manifest in the resources API.
 - [x] Add the Review page and filter to downloaded + `pending_review` only.
 - [x] Add fetch-package and handler tests for pending/approved/no-draft states.
-- [x] Implement `POST .../:source/approve` with fail-closed state checks and
-      logging; add terminology + handler tests.
-- [x] Add the "Mark approved" button to the Review page.
+- [x] Implement `POST .../:source/approve` with fail-closed state checks,
+      comment saving, and import-on-approve; add terminology + handler tests.
+- [x] Implement `POST .../:source/disapprove` with fail-closed state checks
+      and comment saving; add terminology + handler tests.
+- [x] Add the "Review" dialog (resource details, comments, Approve /
+      Disapprove / Cancel) and keep the "Mark approved" button on the page.
 - [x] Run go tests/build/vet, svelte-check, and eslint on the new frontend files.
 - [x] Update §13.2 and the documentation-impact section; commit with `jj`.
 
@@ -326,6 +339,9 @@
   subset) are now downloadable automatically with SHA-256 and an unapproved
   draft manifest; IEC 60050-845 remains permission-gated by design. Downloaded
   sources surface on a Review page until their draft manifest is approved.
+  Approval records the operator's review comments and starts the offline
+  import of the approved local manifest; disapproval saves the comments,
+  marks the draft `disapproved`, and never imports.
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
   §21, I2), the Stage-0/1 tooling commits (Tasks 0–9), the live integration
@@ -335,7 +351,7 @@
 - **Which docs were updated?** `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`
   (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
   (status, §12.3, §13 implementation/commands/formats/acceptance, §13.2 fetch
-  tool/API), this plan (Tasks 9–10), the governing
+  tool/approve/disapprove API), this plan (Tasks 9–10), the governing
   `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
   and the stored coverage report under `docs/superpowers/reports/`.
 - **Which docs are now stale?** The keyword spec's §13.1 "embedding may
@@ -348,7 +364,8 @@
   backlog, the license review/approval of each fetched draft manifest, and a
   published production seed release remain deliberately outside tooling
   authority. The download tool automates retrieval but cannot approve a
-  manifest or import anything.
+  manifest or import anything; the admin Review dialog is the operator gate
+  that writes the approval/rejection into the local draft manifest.
 
 ## Completion boundary
 

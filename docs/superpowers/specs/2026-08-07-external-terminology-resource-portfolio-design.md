@@ -572,14 +572,20 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 #   GET  /api/v1/terminology-resources
 #   POST /api/v1/terminology-resources/:source/download
 #   POST /api/v1/terminology-resources/:source/approve   (operator license review)
-# Each response includes review_status (pending_review | approved | "") read
-# from the source's manifest.draft.json. The Review page (System Admin >
+#   POST /api/v1/terminology-resources/:source/disapprove (operator rejection)
+# Each response includes review_status (pending_review | approved |
+# disapproved | "") plus the saved review_comments/reviewed_by/reviewed_at
+# read from the source's manifest.draft.json. The Review page (System Admin >
 # Resources > Review External Resources) lists only downloaded resources whose
 # review_status is still pending_review. The approve endpoint completes the
 # review in place: license_review_status=approved plus approved_by (signed-in
-# user email unless overridden) and approved_at; it fails closed unless the
-# source is downloaded with a pending draft. Approval is a local file edit and
-# never imports.
+# user email unless overridden), approved_at, and the operator's review
+# comments, then starts the offline import of the approved local manifest
+# (approval persists even if the import fails so the operator can retry). The
+# disapprove endpoint saves the operator's comments and reviewer, marks the
+# draft disapproved, and never imports. Both fail closed unless the source is
+# downloaded with a pending draft. Approval is a local file edit plus import;
+# nothing is fetched from the network.
 # Storage defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 ```
 

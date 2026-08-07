@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
@@ -47,10 +48,20 @@ type resourceView struct {
 	SourceURL          string     `json:"source_url"`
 	ManifestDraft      string     `json:"manifest_draft"`
 	// ReviewStatus is the draft manifest's license_review_status
-	// ("pending_review", "approved", or "" when there is no draft). The
-	// Review page lists downloaded resources still pending review.
-	ReviewStatus string `json:"review_status"`
-	Error        string `json:"error"`
+	// ("pending_review", "approved", "disapproved", or "" when there is no
+	// draft). The Review page lists downloaded resources still pending review.
+	ReviewStatus   string     `json:"review_status"`
+	ReviewComments string     `json:"review_comments"`
+	ReviewedBy     string     `json:"reviewed_by"`
+	ReviewedAt     *time.Time `json:"reviewed_at"`
+	Error          string     `json:"error"`
+}
+
+// importOutcome reports the result of the import started after approval.
+type importOutcome struct {
+	OK     bool                      `json:"ok"`
+	Result *terminology.ImportResult `json:"result,omitempty"`
+	Error  string                    `json:"error,omitempty"`
 }
 
 // terminologyDir resolves the fetch storage directory. TERMINOLOGY_DIR is the
@@ -77,8 +88,11 @@ func viewFor(dir string, res terminology.Resource, st terminology.FetchStatus) r
 		Error: st.Error,
 	}
 	if st.Downloaded {
-		if rev, err := terminology.DraftReviewStatus(dir, res.ID); err == nil {
-			v.ReviewStatus = rev
+		if rev, err := terminology.ReadDraftReview(dir, res.ID); err == nil {
+			v.ReviewStatus = rev.Status
+			v.ReviewComments = rev.Comments
+			v.ReviewedBy = rev.ReviewedBy
+			v.ReviewedAt = rev.ReviewedAt
 		} else {
 			v.Error = err.Error()
 		}
@@ -112,7 +126,10 @@ func ListResources(c echo.Context) error {
 
 // ApproveResource completes the operator license review of one pending draft
 // manifest: it records license_review_status=approved plus approved_by
-// (authenticated user email unless the body overrides it) and approved_at.
+// (authenticated user email unless the body overrides it), approved_at, and
+// the review comments, then starts the offline import of the now-approved
+// local manifest. Approval is persisted even if the import fails so the
+// operator can retry the import; the response reports both.
 func ApproveResource(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_TER_001")
 	defer rc.Close()
@@ -136,18 +153,80 @@ func ApproveResource(c echo.Context) error {
 	if approvedBy == "" {
 		return c.JSON(http.StatusBadRequest, errorResponse{false, "approved_by is required"})
 	}
-	st, err := terminology.ApproveDraft(dir, id, approvedBy, time.Now().UTC())
+	comments := strings.TrimSpace(c.FormValue("comments"))
+	st, err := terminology.ApproveDraft(dir, id, approvedBy, comments, time.Now().UTC())
 	if err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, terminology.ErrNotDownloaded) ||
 			errors.Is(err, terminology.ErrNoDraftManifest) ||
-			errors.Is(err, terminology.ErrAlreadyApproved) {
+			errors.Is(err, terminology.ErrAlreadyApproved) ||
+			errors.Is(err, terminology.ErrAlreadyDisapproved) {
 			code = http.StatusConflict
 		}
 		logger.Warn("approve terminology draft failed", "source", string(id), "err", err)
 		return c.JSON(code, errorResponse{false, err.Error()})
 	}
 	logger.Info("approved terminology draft", "source", string(id), "approved_by", approvedBy)
+
+	outcome := importOutcome{}
+	manifestPath := filepath.Join(dir, string(id), "manifest.draft.json")
+	if db := ApiTypes.ProjectDBHandle; db != nil {
+		result, importErr := (terminology.Runner{DB: db}).Import(c.Request().Context(), manifestPath)
+		if importErr != nil {
+			outcome.Error = importErr.Error()
+			logger.Warn("import after approval failed", "source", string(id), "err", importErr)
+		} else {
+			outcome.OK = true
+			outcome.Result = &result
+			logger.Info("imported approved terminology release", "source", result.Source, "release", result.Release, "replayed", result.Replayed)
+		}
+	} else {
+		outcome.Error = "database handle is not configured; run terminology-import import manually"
+	}
+	res, _ := terminology.ResourceByID(id)
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome})
+}
+
+// DisapproveResource records an operator rejection of one pending draft
+// manifest: license_review_status becomes disapproved and the review comments
+// and reviewer are saved. It never imports anything.
+func DisapproveResource(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_TER_002")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	dir := terminologyDir()
+	if dir == "" {
+		logger.Error("TERMINOLOGY_DIR is not configured")
+		return c.JSON(http.StatusInternalServerError, errorResponse{false, "TERMINOLOGY_DIR or DATA_HOME_DIR is not set"})
+	}
+	id := terminology.ResourceID(c.Param("source"))
+	if _, ok := terminology.ResourceByID(id); !ok {
+		return c.JSON(http.StatusNotFound, errorResponse{false, "unknown resource: " + string(id)})
+	}
+	reviewer := strings.TrimSpace(c.FormValue("reviewed_by"))
+	if reviewer == "" {
+		if u := rc.IsAuthenticated(); u != nil {
+			reviewer = strings.TrimSpace(u.Email)
+		}
+	}
+	if reviewer == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "reviewer is required"})
+	}
+	comments := strings.TrimSpace(c.FormValue("comments"))
+	st, err := terminology.DisapproveDraft(dir, id, reviewer, comments, time.Now().UTC())
+	if err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, terminology.ErrNotDownloaded) ||
+			errors.Is(err, terminology.ErrNoDraftManifest) ||
+			errors.Is(err, terminology.ErrAlreadyApproved) ||
+			errors.Is(err, terminology.ErrAlreadyDisapproved) {
+			code = http.StatusConflict
+		}
+		logger.Warn("disapprove terminology draft failed", "source", string(id), "err", err)
+		return c.JSON(code, errorResponse{false, err.Error()})
+	}
+	logger.Info("disapproved terminology draft", "source", string(id), "reviewed_by", reviewer)
 	res, _ := terminology.ResourceByID(id)
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st)})
 }

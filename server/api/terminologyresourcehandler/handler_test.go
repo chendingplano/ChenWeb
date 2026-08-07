@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
 
@@ -187,6 +188,12 @@ func findView(views []resourceView, id string) resourceView {
 }
 
 func TestApproveResourceApprovesPendingDraft(t *testing.T) {
+	// ApproveResource starts an import after approval; pin the global DB to
+	// nil so the test never touches a real database and asserts the fallback.
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = nil
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
 	dir := t.TempDir()
 	t.Setenv("TERMINOLOGY_DIR", dir)
 	sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
@@ -212,6 +219,7 @@ func TestApproveResourceApprovesPendingDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Request().Form.Set("approved_by", "alice@example.test")
+	c.Request().Form.Set("comments", "license and scope verified")
 
 	if err := ApproveResource(c); err != nil {
 		t.Fatalf("ApproveResource: %v", err)
@@ -221,6 +229,10 @@ func TestApproveResourceApprovesPendingDraft(t *testing.T) {
 	}
 	var body struct {
 		Resource resourceView `json:"resource"`
+		Import   struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"import"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -231,6 +243,12 @@ func TestApproveResourceApprovesPendingDraft(t *testing.T) {
 	if !body.Resource.Downloaded {
 		t.Fatal("resource view must still show the download state")
 	}
+	if body.Resource.ReviewComments != "license and scope verified" {
+		t.Fatalf("review_comments = %q, want the submitted comments", body.Resource.ReviewComments)
+	}
+	if body.Import.OK || !strings.Contains(body.Import.Error, "database handle is not configured") {
+		t.Fatalf("import outcome = %+v, want the no-DB fallback error", body.Import)
+	}
 
 	// The draft on disk now carries the approval.
 	b, err := os.ReadFile(filepath.Join(sourceDir, "manifest.draft.json"))
@@ -239,6 +257,9 @@ func TestApproveResourceApprovesPendingDraft(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"approved_by": "alice@example.test"`) {
 		t.Fatalf("draft missing approved_by: %s", b)
+	}
+	if !strings.Contains(string(b), `"review_comments": "license and scope verified"`) {
+		t.Fatalf("draft missing review_comments: %s", b)
 	}
 }
 
@@ -324,6 +345,162 @@ func TestApproveResourceFailsClosed(t *testing.T) {
 		}
 		c.Request().Form.Set("approved_by", "alice")
 		if err := ApproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
+		}
+	})
+}
+
+func TestDisapproveResourceRecordsRejection(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMINOLOGY_DIR", dir)
+	sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pending := `{"adapter":"ucum","policy":{"license_review_status":"pending_review"},"artifacts":[]}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(pending), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/disapprove", nil)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c := e.NewContext(req, rec)
+	c.SetParamNames("source")
+	c.SetParamValues("ucum")
+	if err := c.Request().ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	c.Request().Form.Set("reviewed_by", "alice@example.test")
+	c.Request().Form.Set("comments", "license terms not acceptable for redistribution")
+
+	if err := DisapproveResource(c); err != nil {
+		t.Fatalf("DisapproveResource: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Resource resourceView `json:"resource"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Resource.ReviewStatus != "disapproved" {
+		t.Fatalf("review_status = %q, want disapproved", body.Resource.ReviewStatus)
+	}
+	if body.Resource.ReviewComments != "license terms not acceptable for redistribution" {
+		t.Fatalf("review_comments = %q, want the submitted comments", body.Resource.ReviewComments)
+	}
+
+	// The draft on disk carries the rejection and the reviewer.
+	b, err := os.ReadFile(filepath.Join(sourceDir, "manifest.draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"license_review_status": "disapproved"`,
+		`"reviewed_by": "alice@example.test"`,
+		`"review_comments": "license terms not acceptable for redistribution"`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("draft missing %s: %s", want, b)
+		}
+	}
+	if strings.Contains(string(b), `"approved_by"`) {
+		t.Fatalf("disapproved draft must not carry approval fields: %s", b)
+	}
+}
+
+func TestDisapproveResourceFailsClosed(t *testing.T) {
+	e := echo.New()
+
+	t.Run("unknown source", func(t *testing.T) {
+		t.Setenv("TERMINOLOGY_DIR", t.TempDir())
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/nope/disapprove", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("nope")
+		if err := DisapproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	})
+
+	t.Run("missing reviewer", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("TERMINOLOGY_DIR", dir)
+		sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"ucum","policy":{"license_review_status":"pending_review"},"artifacts":[]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/disapprove", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("ucum")
+		if err := DisapproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+	})
+
+	t.Run("not downloaded", func(t *testing.T) {
+		t.Setenv("TERMINOLOGY_DIR", t.TempDir())
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/disapprove", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("ucum")
+		if err := c.Request().ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		c.Request().Form.Set("reviewed_by", "alice")
+		if err := DisapproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
+		}
+	})
+
+	t.Run("already disapproved", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("TERMINOLOGY_DIR", dir)
+		sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"ucum","policy":{"license_review_status":"disapproved","reviewed_by":"bob","reviewed_at":"2026-08-07T12:00:00Z"},"artifacts":[]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/disapprove", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("ucum")
+		if err := c.Request().ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		c.Request().Form.Set("reviewed_by", "alice")
+		if err := DisapproveResource(c); err != nil {
 			t.Fatal(err)
 		}
 		if rec.Code != http.StatusConflict {

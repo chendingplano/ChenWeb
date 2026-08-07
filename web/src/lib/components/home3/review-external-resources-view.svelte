@@ -3,12 +3,16 @@
 	import {
 		listTerminologyResources,
 		approveTerminologyResource,
+		disapproveTerminologyResource,
 		type TerminologyResource
 	} from '$lib/services/terminologyResourceService';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import ClipboardCheckIcon from '@lucide/svelte/icons/clipboard-check';
+	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
 	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
+	import CircleXIcon from '@lucide/svelte/icons/circle-x';
+	import XIcon from '@lucide/svelte/icons/x';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -33,6 +37,13 @@
 	let pageError = $state<string | null>(null);
 	let approving = $state<Record<string, boolean>>({});
 
+	// --- Review dialog state ---
+	let reviewTarget = $state<TerminologyResource | null>(null);
+	let reviewComments = $state('');
+	let reviewBusy = $state(false);
+	let dialogError = $state<string | null>(null);
+	let closeButton = $state<HTMLButtonElement | null>(null);
+
 	// Only downloaded resources whose draft manifest is still pending review.
 	let pending = $derived(
 		resources.filter((r) => r.downloaded && r.review_status === 'pending_review')
@@ -40,6 +51,12 @@
 
 	onMount(() => {
 		refresh();
+	});
+
+	$effect(() => {
+		if (reviewTarget) {
+			requestAnimationFrame(() => closeButton?.focus());
+		}
 	});
 
 	function formatBytes(n: number): string {
@@ -80,19 +97,94 @@
 	async function approve(r: TerminologyResource) {
 		if (
 			!confirm(
-				`Approve the "${r.name}" draft manifest? This records license_review_status=approved with the signed-in user and removes it from this list.`
+				`Approve the "${r.name}" draft manifest and start importing it? This records license_review_status=approved with the signed-in user, removes it from this list, and runs the offline import of the local manifest.`
 			)
 		) {
 			return;
 		}
 		approving = { ...approving, [r.id]: true };
 		try {
-			await approveTerminologyResource(r.id);
+			const { import: outcome } = await approveTerminologyResource(r.id);
 			await refresh();
+			if (!outcome.ok) {
+				pageError = `"${r.name}" was approved, but the import did not run: ${outcome.error ?? 'unknown error'}`;
+			}
 		} catch (e) {
 			pageError = e instanceof Error ? e.message : `Failed to approve ${r.name}`;
 		} finally {
 			approving = { ...approving, [r.id]: false };
+		}
+	}
+
+	function openReview(r: TerminologyResource) {
+		reviewTarget = r;
+		reviewComments = '';
+		reviewBusy = false;
+		dialogError = null;
+	}
+
+	function closeReview() {
+		if (reviewBusy) return;
+		reviewTarget = null;
+		reviewComments = '';
+		dialogError = null;
+	}
+
+	function handleDialogKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && !reviewBusy) {
+			event.preventDefault();
+			closeReview();
+		}
+	}
+
+	async function approveFromDialog() {
+		const r = reviewTarget;
+		if (!r) return;
+		if (
+			!confirm(
+				`Approve "${r.name}" and start importing it? This marks the resource as reviewed and approved, saves your review comments, and runs the offline import of the local manifest.`
+			)
+		) {
+			return;
+		}
+		reviewBusy = true;
+		dialogError = null;
+		try {
+			const { import: outcome } = await approveTerminologyResource(r.id, {
+				comments: reviewComments.trim()
+			});
+			reviewTarget = null;
+			await refresh();
+			if (!outcome.ok) {
+				pageError = `"${r.name}" was approved, but the import did not run: ${outcome.error ?? 'unknown error'}`;
+			}
+		} catch (e) {
+			dialogError = e instanceof Error ? e.message : `Failed to approve ${r.name}`;
+		} finally {
+			reviewBusy = false;
+		}
+	}
+
+	async function disapproveFromDialog() {
+		const r = reviewTarget;
+		if (!r) return;
+		if (
+			!confirm(
+				`Disapprove "${r.name}"? Your review comments will be saved and the resource will be marked disapproved; it leaves this list and nothing is imported.`
+			)
+		) {
+			return;
+		}
+		reviewBusy = true;
+		dialogError = null;
+		try {
+			await disapproveTerminologyResource(r.id, { comments: reviewComments.trim() });
+			reviewTarget = null;
+			await refresh();
+		} catch (e) {
+			dialogError = e instanceof Error ? e.message : `Failed to disapprove ${r.name}`;
+		} finally {
+			reviewBusy = false;
 		}
 	}
 </script>
@@ -252,25 +344,26 @@
 					class="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-relaxed"
 					style="background:{inputBg};"
 				>
-					<div class="font-medium" style="color:{textPrimary};">What approval requires</div>
+					<div class="font-medium" style="color:{textPrimary};">What review requires</div>
 					<ul class="mt-1 list-disc pl-4" style="color:{textSecondary};">
 						<li>Confirm license, role, scopes, relations, and checksum in {r.manifest_draft}.</li>
 						<li>
-							Mark approved below to write <code class="font-mono" style="color:{mono};"
-								>license_review_status</code
-							>, <code class="font-mono" style="color:{mono};">approved_by</code>, and
-							<code class="font-mono" style="color:{mono};">approved_at</code>.
-						</li>
-						<li>
-							Import with <code class="font-mono" style="color:{mono};"
-								>terminology-import import</code
-							>.
+							Open <span class="font-medium" style="color:{textPrimary};">Review</span> to inspect the
+							resource, add comments, then approve (starts import) or disapprove.
 						</li>
 					</ul>
 				</div>
 
-				<!-- Approve action -->
-				<div class="mt-auto pt-3">
+				<!-- Review + approve actions -->
+				<div class="mt-auto space-y-2 pt-3">
+					<button
+						onclick={() => openReview(r)}
+						class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150"
+						style="background:{accentTint}; color:{accent}; border:1px solid {accent}55;"
+					>
+						<ClipboardListIcon class="h-3.5 w-3.5" />
+						Review
+					</button>
 					<button
 						onclick={() => approve(r)}
 						disabled={approving[r.id]}
@@ -292,3 +385,194 @@
 		{/each}
 	</div>
 </div>
+
+<!-- Review dialog -->
+{#if reviewTarget}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(10,12,20,0.6);"
+		role="presentation"
+		onclick={(event) => {
+			if (event.target === event.currentTarget) closeReview();
+		}}
+	>
+		<div
+			tabindex="-1"
+			class="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Review {reviewTarget.name}"
+			onkeydown={handleDialogKeydown}
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 20px 50px rgba(0,0,0,0.35);"
+		>
+			<!-- Dialog header -->
+			<div
+				class="flex flex-shrink-0 items-center justify-between gap-3 px-5 py-4"
+				style="border-bottom:1px solid {borderColor};"
+			>
+				<div class="flex min-w-0 items-center gap-2">
+					<ClipboardListIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+					<h2 class="truncate text-sm font-semibold" style="color:{textPrimary};">
+						Review — {reviewTarget.name}
+					</h2>
+				</div>
+				<button
+					bind:this={closeButton}
+					onclick={closeReview}
+					disabled={reviewBusy}
+					class="cursor-pointer rounded p-1.5 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+					style="background:{inputBg}; color:{textMuted}; border:1px solid {borderColor};"
+					aria-label="Close review dialog"
+				>
+					<XIcon class="h-4 w-4" />
+				</button>
+			</div>
+
+			<!-- Dialog body -->
+			<div class="flex-1 space-y-3 overflow-y-auto px-5 py-4" style="scrollbar-width:thin;">
+				<p class="text-xs leading-relaxed" style="color:{textSecondary};">
+					{reviewTarget.description}
+				</p>
+
+				<div class="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
+					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">URL</div>
+						<!-- eslint-disable svelte/no-navigation-without-resolve -->
+						<a
+							href={reviewTarget.url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="mt-0.5 block truncate font-medium underline-offset-2 hover:underline"
+							style="color:{accent};"
+						>
+							{reviewTarget.url}
+						</a>
+						<!-- eslint-enable svelte/no-navigation-without-resolve -->
+					</div>
+					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">Release</div>
+						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
+							{reviewTarget.release || '—'}
+						</div>
+					</div>
+					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">License</div>
+						<!-- eslint-disable svelte/no-navigation-without-resolve -->
+						<a
+							href={reviewTarget.license_url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="mt-0.5 block truncate font-medium underline-offset-2 hover:underline"
+							style="color:{textPrimary};"
+						>
+							{reviewTarget.license}
+						</a>
+						<!-- eslint-enable svelte/no-navigation-without-resolve -->
+					</div>
+					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">Review status</div>
+						<div class="mt-0.5 font-medium" style="color:{amber};">
+							{reviewTarget.review_status || '—'}
+						</div>
+					</div>
+					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">Downloaded at</div>
+						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
+							{formatDate(reviewTarget.downloaded_at)}
+						</div>
+					</div>
+					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">Size</div>
+						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
+							{formatBytes(reviewTarget.size_bytes) || '—'}
+						</div>
+					</div>
+					<div class="rounded-lg px-2.5 py-2 sm:col-span-2" style="background:{inputBg};">
+						<div style="color:{textMuted};">SHA-256</div>
+						<div class="mt-0.5 font-mono font-medium break-all" style="color:{mono};">
+							{reviewTarget.sha256 || '—'}
+						</div>
+					</div>
+					{#if reviewTarget.artifact}
+						<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+							<div style="color:{textMuted};">Artifact</div>
+							<div class="mt-0.5 font-medium break-all" style="color:{textPrimary};">
+								{reviewTarget.artifact}
+							</div>
+						</div>
+					{/if}
+					{#if reviewTarget.manifest_draft}
+						<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
+							<div style="color:{textMuted};">Draft manifest</div>
+							<div class="mt-0.5 font-medium break-all" style="color:{textPrimary};">
+								{reviewTarget.manifest_draft}
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<!-- Review comments -->
+				<div>
+					<label
+						for="review-comments"
+						class="block text-[11px] font-medium"
+						style="color:{textPrimary};"
+					>
+						Review comments
+					</label>
+					<textarea
+						id="review-comments"
+						bind:value={reviewComments}
+						rows={5}
+						disabled={reviewBusy}
+						placeholder="License, scope, role, relations, checksum — anything the operator considered during review."
+						class="mt-1 w-full resize-y rounded-lg px-3 py-2 text-xs leading-relaxed transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+						style="background:{inputBg}; color:{textPrimary}; border:1px solid {borderColor}; outline:none;"
+					></textarea>
+				</div>
+
+				{#if dialogError}
+					<div
+						class="rounded-lg px-3 py-2 text-xs"
+						style="background:{dangerTint}; color:{dangerColor}; border:1px solid {dangerColor}33;"
+					>
+						{dialogError}
+					</div>
+				{/if}
+			</div>
+
+			<!-- Dialog footer -->
+			<div
+				class="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 px-5 py-4"
+				style="border-top:1px solid {borderColor};"
+			>
+				<button
+					onclick={closeReview}
+					disabled={reviewBusy}
+					class="cursor-pointer rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+					style="background:{inputBg}; color:{textSecondary}; border:1px solid {borderColor};"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={disapproveFromDialog}
+					disabled={reviewBusy}
+					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+					style="background:{dangerColor}; color:#FFFFFF; border:none;"
+				>
+					<CircleXIcon class="h-3.5 w-3.5" />
+					{reviewBusy ? 'Working…' : 'Disapprove'}
+				</button>
+				<button
+					onclick={approveFromDialog}
+					disabled={reviewBusy}
+					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+					style="background:{green}; color:#FFFFFF; border:none;"
+				>
+					<CheckCircle2Icon class="h-3.5 w-3.5" />
+					{reviewBusy ? 'Working…' : 'Approve'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}

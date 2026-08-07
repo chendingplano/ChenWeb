@@ -31,6 +31,10 @@ import (
 // keywords.SourcePolicy.Validate, so a draft can never be imported.
 const LicenseReviewPending = "pending_review"
 
+// LicenseReviewDisapproved marks a fetched manifest draft that the operator
+// reviewed and rejected. Like LicenseReviewPending it is not importable.
+const LicenseReviewDisapproved = "disapproved"
+
 // Approval-state sentinel errors returned by ApproveDraft so the handler can
 // map them to client-visible status codes without string matching.
 var (
@@ -40,6 +44,8 @@ var (
 	ErrNoDraftManifest = errors.New("resource has no draft manifest to approve")
 	// ErrAlreadyApproved means the draft manifest already passed review.
 	ErrAlreadyApproved = errors.New("draft manifest is already approved")
+	// ErrAlreadyDisapproved means the draft manifest was already rejected.
+	ErrAlreadyDisapproved = errors.New("draft manifest is already disapproved")
 )
 
 const defaultUserAgent = "ChenWeb terminology-fetch/1.0 (go)"
@@ -315,46 +321,136 @@ func DraftReviewStatus(destDir string, id ResourceID) (string, error) {
 
 // ApproveDraft completes the operator license review of one downloaded
 // source's draft manifest in place: it sets license_review_status to approved
-// and records approved_by/approved_at. It fails closed when the source is not
-// downloaded, has no draft, or is already approved. The approved manifest is
-// still a local file; nothing is imported.
-func ApproveDraft(destDir string, id ResourceID, approvedBy string, at time.Time) (FetchStatus, error) {
+// and records approved_by/approved_at plus the review comments and reviewer.
+// It fails closed when the source is not downloaded, has no draft, or has
+// already been decided. The approved manifest is still a local file; importing
+// it is a separate step (Runner.Import).
+func ApproveDraft(destDir string, id ResourceID, approvedBy, comments string, at time.Time) (FetchStatus, error) {
 	if strings.TrimSpace(approvedBy) == "" {
 		return FetchStatus{}, errors.New("approved_by is required")
 	}
-	st, err := ReadStatus(destDir, id)
+	st, manifestPath, m, err := loadReviewableDraft(destDir, id)
 	if err != nil {
 		return st, err
 	}
-	if !st.Downloaded {
-		return st, fmt.Errorf("%w: %s", ErrNotDownloaded, id)
-	}
-	manifestPath := filepath.Join(destDir, string(id), "manifest.draft.json")
-	b, err := os.ReadFile(manifestPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return st, fmt.Errorf("%w: %s", ErrNoDraftManifest, id)
-	}
-	if err != nil {
-		return st, fmt.Errorf("read %s draft manifest: %w", id, err)
-	}
-	var m Manifest
-	if err := json.Unmarshal(b, &m); err != nil {
-		return st, fmt.Errorf("decode %s draft manifest: %w", id, err)
-	}
-	if m.Policy.LicenseReviewStatus == keywords.LicenseReviewApproved {
-		return st, fmt.Errorf("%w: %s", ErrAlreadyApproved, id)
+	if decided(m) {
+		return st, fmt.Errorf("%w: %s", alreadyDecidedErr(m), id)
 	}
 	m.Policy.LicenseReviewStatus = keywords.LicenseReviewApproved
 	m.Policy.ApprovedBy = strings.TrimSpace(approvedBy)
 	m.Policy.ApprovedAt = &at
-	approved, err := json.MarshalIndent(m, "", "  ")
+	m.Policy.ReviewComments = strings.TrimSpace(comments)
+	m.Policy.ReviewedBy = strings.TrimSpace(approvedBy)
+	m.Policy.ReviewedAt = &at
+	if err := writeManifest(manifestPath, m); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+// DisapproveDraft records an operator rejection: license_review_status becomes
+// LicenseReviewDisapproved and the review comments and reviewer are saved. It
+// fails closed like ApproveDraft, and never imports anything.
+func DisapproveDraft(destDir string, id ResourceID, reviewer, comments string, at time.Time) (FetchStatus, error) {
+	if strings.TrimSpace(reviewer) == "" {
+		return FetchStatus{}, errors.New("reviewer is required")
+	}
+	st, manifestPath, m, err := loadReviewableDraft(destDir, id)
 	if err != nil {
 		return st, err
 	}
-	if err := atomicWrite(manifestPath, approved); err != nil {
-		return st, fmt.Errorf("write %s draft manifest: %w", id, err)
+	if decided(m) {
+		return st, fmt.Errorf("%w: %s", alreadyDecidedErr(m), id)
+	}
+	m.Policy.LicenseReviewStatus = LicenseReviewDisapproved
+	m.Policy.ReviewComments = strings.TrimSpace(comments)
+	m.Policy.ReviewedBy = strings.TrimSpace(reviewer)
+	m.Policy.ReviewedAt = &at
+	if err := writeManifest(manifestPath, m); err != nil {
+		return st, err
 	}
 	return st, nil
+}
+
+// loadReviewableDraft returns the persisted status, draft manifest path, and
+// decoded manifest for a downloaded source with a draft to review.
+func loadReviewableDraft(destDir string, id ResourceID) (FetchStatus, string, Manifest, error) {
+	st, err := ReadStatus(destDir, id)
+	if err != nil {
+		return st, "", Manifest{}, err
+	}
+	if !st.Downloaded {
+		return st, "", Manifest{}, fmt.Errorf("%w: %s", ErrNotDownloaded, id)
+	}
+	manifestPath := filepath.Join(destDir, string(id), "manifest.draft.json")
+	b, err := os.ReadFile(manifestPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return st, "", Manifest{}, fmt.Errorf("%w: %s", ErrNoDraftManifest, id)
+	}
+	if err != nil {
+		return st, "", Manifest{}, fmt.Errorf("read %s draft manifest: %w", id, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return st, "", Manifest{}, fmt.Errorf("decode %s draft manifest: %w", id, err)
+	}
+	return st, manifestPath, m, nil
+}
+
+func decided(m Manifest) bool {
+	return m.Policy.LicenseReviewStatus == keywords.LicenseReviewApproved ||
+		m.Policy.LicenseReviewStatus == LicenseReviewDisapproved
+}
+
+func alreadyDecidedErr(m Manifest) error {
+	if m.Policy.LicenseReviewStatus == LicenseReviewDisapproved {
+		return ErrAlreadyDisapproved
+	}
+	return ErrAlreadyApproved
+}
+
+func writeManifest(manifestPath string, m Manifest) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := atomicWrite(manifestPath, b); err != nil {
+		return fmt.Errorf("write draft manifest: %w", err)
+	}
+	return nil
+}
+
+// DraftReview is the operator review state recorded in a source's draft
+// manifest: disposition (pending_review | approved | disapproved), comments,
+// and reviewer identity/time when a decision was made.
+type DraftReview struct {
+	Status     string     `json:"status"`
+	Comments   string     `json:"comments,omitempty"`
+	ReviewedBy string     `json:"reviewed_by,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+}
+
+// ReadDraftReview returns the full review record for a source's draft
+// manifest. A missing draft yields an empty review (status "").
+func ReadDraftReview(destDir string, id ResourceID) (DraftReview, error) {
+	b, err := os.ReadFile(filepath.Join(destDir, string(id), "manifest.draft.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return DraftReview{}, nil
+	}
+	if err != nil {
+		return DraftReview{}, fmt.Errorf("read %s draft manifest: %w", id, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return DraftReview{}, fmt.Errorf("decode %s draft manifest: %w", id, err)
+	}
+	dr := DraftReview{
+		Status:     strings.TrimSpace(m.Policy.LicenseReviewStatus),
+		Comments:   strings.TrimSpace(m.Policy.ReviewComments),
+		ReviewedBy: strings.TrimSpace(m.Policy.ReviewedBy),
+		ReviewedAt: m.Policy.ReviewedAt,
+	}
+	return dr, nil
 }
 
 // ReadStatus loads one resource's persisted status; a never-fetched resource

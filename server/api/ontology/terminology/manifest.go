@@ -40,8 +40,11 @@ type ManifestPolicy struct {
 	Languages              []string               `json:"languages"`
 	AdapterVersion         string                 `json:"adapter_version"`
 	ProvenanceLocator      string                 `json:"provenance_locator"`
-	ApprovedBy             string                 `json:"approved_by"`
-	ApprovedAt             *time.Time             `json:"approved_at"`
+	ApprovedBy             string                 `json:"approved_by,omitempty"`
+	ApprovedAt             *time.Time             `json:"approved_at,omitempty"`
+	ReviewComments         string                 `json:"review_comments,omitempty"`
+	ReviewedBy             string                 `json:"reviewed_by,omitempty"`
+	ReviewedAt             *time.Time             `json:"reviewed_at,omitempty"`
 	IdentityAuthority      bool                   `json:"identity_authority"`
 	Notes                  string                 `json:"notes,omitempty"`
 }
