@@ -61,6 +61,16 @@ func TestQUDTAdapterPreservesLanguagesAndRelationDistinctions(t *testing.T) {
 	if _, ok := relations["broader\x00qudt-quantity-kind\x00http://qudt.org/vocab/quantitykind/RadiometricQuantity"]; !ok {
 		t.Fatalf("broader relation missing: %+v", relations)
 	}
+	brightnessRelations := map[string]CatalogRelation{}
+	for _, relation := range snapshot.Relations {
+		if relation.SubjectExternalID == "http://qudt.org/vocab/quantitykind/Brightness" {
+			brightnessRelations[relation.Relation+"\x00"+relation.ObjectExternalID] = relation
+		}
+	}
+	closeMatch, ok := brightnessRelations["close_match\x00http://qudt.org/vocab/quantitykind/Luminance"]
+	if !ok || closeMatch.Relation != "close_match" {
+		t.Fatalf("skos:closeMatch must be retained as a non-authoritative close_match: %+v", brightnessRelations)
+	}
 }
 
 func TestQUDTAdapterRetainsDeprecationAndReplacement(t *testing.T) {

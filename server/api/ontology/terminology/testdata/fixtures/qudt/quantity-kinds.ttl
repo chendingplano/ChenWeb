@@ -21,7 +21,8 @@
 <http://qudt.org/vocab/quantitykind/Brightness> a qudt:QuantityKind ;
     rdfs:label "Brightness"@en ;
     rdfs:label "视亮度"@zh ;
-    skos:related <http://qudt.org/vocab/quantitykind/Luminance> .
+    skos:related <http://qudt.org/vocab/quantitykind/Luminance> ;
+    skos:closeMatch <http://qudt.org/vocab/quantitykind/Luminance> .
 
 <http://qudt.org/vocab/quantitykind/LuminousIntensityOld> a qudt:QuantityKind ;
     owl:deprecated true ;

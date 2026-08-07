@@ -197,6 +197,9 @@
 
 **Interfaces:**
 - QUDT preserves all approved language-tagged labels and alternatives, source IRIs, release, deprecation/replacement, and exact/broader/narrower/related/Wikidata relation distinctions.
+- SKOS similarity links such as `skos:closeMatch` are retained as
+  non-authoritative `close_match` relations, never upgraded to exact
+  equivalence; unknown SKOS/OWL predicates still fail closed.
 - Configured QUDT `siExactMatch`/approved exact-match predicates normalize explicit SIRP persistent-identifier crosswalks; generic `wikidataMatch` remains proposal-only and cannot authorize.
 - Existing governed quantity import behavior remains compatible, but parsing is shared with the terminology adapter rather than duplicated.
 - A reviewed promotion file maps native catalog identities/local surfaces to established keyword concepts and records full evidence triples. It validates concept/scope/status, source policy, required unit/dimension constraints, existing alignments, `never_merge`, and authoritative negative evidence; it is idempotent and acquires the family lock.

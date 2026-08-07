@@ -33,7 +33,7 @@
     {
       "id": "quantity-kinds.ttl",
       "path": "quantity-kinds.ttl",
-      "sha256": "c681becbf57ecbd786c58dd690e16b591c437d6dda1ce81825209976cbad1052",
+      "sha256": "636cb46b2f25747e68321693557ebdaa6abdd18294537dda7154a304f9d8eca1",
       "media_type": "text/turtle",
       "provenance_locator": "https://qudt.org/vocab/quantitykind/quantity-kinds.ttl"
     }

@@ -37,6 +37,7 @@ const (
 	qudtSymbol         = "http://qudt.org/schema/qudt/symbol"
 	qudtSIExactMatch   = "http://qudt.org/schema/qudt/siExactMatch"
 	qudtSKOSExactMatch = "http://www.w3.org/2004/02/skos/core#exactMatch"
+	qudtSKOSCloseMatch = "http://www.w3.org/2004/02/skos/core#closeMatch"
 	qudtWikidataMatch  = "http://qudt.org/schema/qudt/wikidataMatch"
 	qudtSKOSBroader    = "http://www.w3.org/2004/02/skos/core#broader"
 	qudtSKOSNarrower   = "http://www.w3.org/2004/02/skos/core#narrower"
@@ -47,7 +48,7 @@ const (
 var qudtAllowedPredicates = map[string]bool{
 	qudtRDFType: true, qudtRDFSLabel: true, qudtSKOSPrefLabel: true, qudtSKOSAltLabel: true,
 	qudtOWLDeprecated: true, qudtDeprecated: true, qudtSymbol: true,
-	qudtSIExactMatch: true, qudtSKOSExactMatch: true, qudtWikidataMatch: true,
+	qudtSIExactMatch: true, qudtSKOSExactMatch: true, qudtSKOSCloseMatch: true, qudtWikidataMatch: true,
 	qudtSKOSBroader: true, qudtSKOSNarrower: true, qudtSKOSRelated: true, qudtReplaces: true,
 }
 
@@ -188,6 +189,12 @@ func ParseQUDTGraph(content []byte) ([]QUDTQuantityKind, error) {
 		case qudtSKOSRelated:
 			acc.relations[relationKey(subject, "related", "", "", triple.Object.RawValue())] = QUDTRelation{
 				Relation: "related", ObjectExternal: triple.Object.RawValue(),
+			}
+		case qudtSKOSCloseMatch:
+			// closeMatch is a SKOS similarity link, never an exact
+			// equivalence: it stays a non-authoritative close_match relation.
+			acc.relations[relationKey(subject, "close_match", "", "", triple.Object.RawValue())] = QUDTRelation{
+				Relation: "close_match", ObjectExternal: triple.Object.RawValue(),
 			}
 		case qudtReplaces:
 			acc.relations[relationKey(subject, "replaces", "", "", triple.Object.RawValue())] = QUDTRelation{
