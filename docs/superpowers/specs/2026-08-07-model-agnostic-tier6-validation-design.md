@@ -223,7 +223,7 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - Results remain identical when fake embeddings are rescaled or shifted while candidate ordering is preserved.
 - Matching `(source, external_id)` with a different release does not authorize a merge.
 - Multiple identity triples to one target merge once; triples mapping to different targets reject once.
-- Unregistered/non-authoritative source releases defer.
+- Registered but non-authoritative source releases defer. An attempted unregistered insert fails the foreign key; a simulated/corrupt unregistered lookup fails the reconciliation run.
 - Tier-5 behavior remains score/guardrail-driven and does not consult embedding scores.
 - Tier-5 equal top scores within `1e-9` cannot authorize by themselves: unique external authority may resolve the tie; otherwise the candidate defers.
 - Automatic direction always absorbs the scanned D11 provisional into an active target; provisional targets defer.
