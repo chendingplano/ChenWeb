@@ -644,7 +644,7 @@
 										{#each child.children as gc (gc.id)}
 											<button
 												onclick={() => selectItem(item, gc)}
-												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors duration-150"
+												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
 												style="
 													color: {isGrandchildActive(gc) ? accent : textMuted};
 													background: {isGrandchildActive(gc) ? accentTint : 'transparent'};
@@ -678,7 +678,7 @@
 								<!-- Flat leaf child (existing behaviour) -->
 								<button
 									onclick={() => selectItem(item, child)}
-									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors duration-150"
+									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
 									style="
 										color: {isChildActive(child) ? accent : textMuted};
 										background: {isChildActive(child) ? accentTint : 'transparent'};
