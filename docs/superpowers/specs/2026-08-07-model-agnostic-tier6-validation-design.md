@@ -117,7 +117,7 @@ Veto aggregation is explicit:
 
 The candidate-level decision table is binding:
 
-| Tier-5 state | Authoritative active targets | Embedding proposals | Outcome before pair vetoes |
+| Tier-5 state | Authoritative active targets | Other proposals/evidence | Outcome before pair vetoes |
 |---|---:|---:|---|
 | unique valid target | any | any | validate the tier-5 target; conflicting authority to a different target rejects |
 | tie | exactly 1 | any | validate the authoritative target |
@@ -129,6 +129,8 @@ The candidate-level decision table is binding:
 | none | 0 | 0 | `no_candidate` |
 
 “Validate” produces `auto_merge` only when all pair vetoes pass; otherwise it produces `reject`. A tier-5 target and a unique authoritative target that name the same concept are one proposal. If they name different concepts, authoritative identity is a candidate-global conflict and rejects rather than allowing the tier-5 merge.
+
+“Other proposals/evidence” means an embedding proposal or candidate surface evidence with a non-empty external ID that cannot authorize: no external mapping, a registered but non-authoritative source release, or a mapping to a non-active target. Any such evidence prevents `no_candidate` and produces `deferred_unvalidated` when no stronger path decides the candidate. An external mapping to a provisional target never becomes an automatic survivor.
 
 ### 5.3 Apply and audit
 
@@ -153,15 +155,17 @@ This deliberately serializes keyword identity mutations across scopes. The minim
 
 Lexical queries and embedding calls may assemble provisional proposals outside this lock because they have no write authority. Every scanned candidate then opens one decision transaction, acquires the family lock, performs exhaustive authority and veto reads, selects exactly one outcome from the decision table, appends exactly one decision-log row, and commits. `auto_merge` additionally applies the merge in that transaction. `defer`, `reject`, and `no_candidate` hold the same lock through their decision-log write, so the logged evidence and outcome share one linearization point.
 
-After acquiring the locks:
+After acquiring the family lock, execute in this order:
 
-1. Lock both concept rows and recheck candidate status/origin, active survivor, equal concept scope, and requested run scope.
-2. Lock every surface row for both concepts. Reject when an absorbed surface is locked. Recompute digit signatures over all surfaces; when either concept has digit-bearing surfaces, the two sets must agree exactly. This is conservative by design.
-3. Rerun the exhaustive authoritative-mapping query for every evidence triple on the candidate while holding the family lock. Reject unless the active target set is still exactly the chosen singleton. Lock all source, surface-evidence, and external-ID rows returned by that exhaustive query and revalidate `identity_authority`; revalidating only the originally chosen rows is insufficient.
-4. Recheck `kb.semid_never_merge` inside the transaction.
-5. Require a wired `AlignmentsStore`; recheck its different-term conflict and perform alignment-follow inside the transaction.
-6. Apply the tombstone and surface re-point with `origin_concept` provenance.
-7. Append the decision-log row through the same transaction, then commit.
+1. Lock and recheck the scanned candidate row (`status='provisional'`, `gloss_source='auto:d11'`, requested scope), then lock all candidate surfaces.
+2. Rerun the exhaustive external-evidence/mapping query. Lock all source, candidate surface-evidence, and external-ID rows it returns; classify authoritative active targets and non-authorizing external evidence from current transactional state.
+3. Select the one candidate-level outcome using the binding table. Target-less branches (`no_candidate`, tier-5 tie without authority, invalid/provisional external target, or multi-authority conflict) do not attempt to lock a second concept. Append their audit row and commit.
+4. Only for a `validate` branch, lock the chosen target concept and all its surfaces. Recheck target `status='active'`, equal concept scope, and requested run scope. Reject when an absorbed candidate surface is locked. Recompute digit signatures over every surface on both concepts; when either concept has digit-bearing surfaces, the two sets must agree exactly.
+5. Apply method-specific authority revalidation:
+   - for `tier6_external_identity`, the authoritative active-target set must be exactly the chosen singleton;
+   - for `tier5_fuzzy`, zero authoritative targets or one authoritative target equal to the chosen tier-5 target may proceed, while any different or multiple authoritative targets reject as a candidate-global identity conflict.
+6. Recheck `kb.semid_never_merge`. Require a wired `AlignmentsStore`, recheck its different-term conflict, and prepare alignment-follow inside the transaction.
+7. If any validate-branch veto fires, append the candidate's `reject` audit row and commit without merging. Otherwise apply the tombstone, surface re-point with `origin_concept`, alignment-follow, and `auto_merge` audit row, then commit.
 
 Implementation should refactor the existing merge transaction body into a transaction-accepting helper used by both `MergeConcept` and reconciliation. It must not validate evidence outside one transaction and then call the current self-transactional method, which would create a time-of-check/time-of-use authorization race. The shared advisory-lock helper and its use by every veto/evidence writer are part of this slice, not optional hardening.
 
@@ -175,11 +179,11 @@ Each scanned candidate writes exactly one auditable decision containing:
 
 Embedding scores stay observable for later evaluation but never determine the outcome. Tier-5 edit-distance scores retain their deterministic threshold and unique-top role.
 
-`no_candidate` means no valid tier-5 proposal, no authoritative active target, and no embedding proposal after blocking. It writes a candidate-level decision row with an empty proposal list. `defer`, `reject`, and `no_candidate` log in their candidate decision transaction; `auto_merge` logs atomically with the merge. The CLI reports mutually exclusive candidate counts: `merged`, `deferred_unvalidated`, `rejected`, and `no_candidate`. Their sum equals `scanned`. A missing evidence/alignment store or query error fails the run; it does not degrade to score-only merging.
+`no_candidate` means no valid tier-5 proposal, no external identity evidence/proposal of any strength, and no embedding proposal after blocking. It writes a candidate-level decision row with an empty proposal list. Non-authorizing external evidence—including a missing mapping, non-authoritative source release, or inactive/provisional mapped target—produces `deferred_unvalidated` when no stronger path decides the candidate. `defer`, `reject`, and `no_candidate` log in their candidate decision transaction; `auto_merge` logs atomically with the merge. The CLI reports mutually exclusive candidate counts: `merged`, `deferred_unvalidated`, `rejected`, and `no_candidate`. Their sum equals `scanned`. A missing evidence/alignment store or query error fails the run; it does not degrade to score-only merging.
 
 ## 6. Error handling and operational behavior
 
-- Missing, unregistered, or non-authoritative source/release: defer with an explicit reason.
+- Missing mappings, non-authoritative source releases, and mappings to inactive/provisional targets defer with explicit reasons. After the migration, an unregistered source/release violates the foreign-key contract and fails the run as data corruption rather than becoming a decision.
 - Conflicting exact identities: reject and surface the conflicting triples and concepts.
 - Evidence query failure: fail the reconciliation run so no unaudited partial policy is applied.
 - Decision-log failure rolls back an automatic merge because audit and application share a transaction.
