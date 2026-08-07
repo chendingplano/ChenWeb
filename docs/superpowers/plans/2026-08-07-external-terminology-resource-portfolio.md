@@ -128,15 +128,15 @@
 - Each decided candidate writes exactly one canonical decision row inside its transaction, including outcome, authority, claims, vetoes, embedding model/rank/score diagnostics, and candidate ID.
 - CLI wires required alignments and triple provider, requires a model ID when embeddings are configured, and prints partial counters on failure.
 
-- [ ] Replace old threshold-oriented tests with the complete candidate decision table before changing implementation.
-- [ ] Add tests for high cosine/no identity defer, low cosine/exact identity merge, affine-rescaled embeddings, top-10 boundary, provider-only target, unique Tier-5/no-authority merge, Tier-5/contradictory-authority reject, all non-authorizing relation types, conflicting authority, ties, fixed direction, veto dominance, and partial failure counters.
-- [ ] Run tests to capture the expected failures against the old reconciler.
-- [ ] Implement proposal assembly separately from transaction-time decision validation.
-- [ ] Inside each candidate transaction follow the binding order: acquire the family lock; lock/recheck candidate and all candidate surfaces; recompute Tier 5; load exhaustive provider claims while providers lock/stabilize all backing rows; decide and audit targetless outcomes before target locking; for validate branches lock/recheck target and surfaces; revalidate method authority and every veto; merge if authorized; append audit; commit.
-- [ ] Delete the `tier6EmbeddingMinScore` authority rule and old direction election.
-- [ ] Wire the command and update summary output.
-- [ ] Run keyword reconciler package/command tests.
-- [ ] Commit with `jj commit -m "keywords: make tier 6 identity-authorized and model agnostic"`.
+- [x] Replace old threshold-oriented tests with the complete candidate decision table before changing implementation.
+- [x] Add tests for high cosine/no identity defer, low cosine/exact identity merge, affine-rescaled embeddings, top-10 boundary, provider-only target, unique Tier-5/no-authority merge, Tier-5/contradictory-authority reject, all non-authorizing relation types, conflicting authority, ties, fixed direction, veto dominance, and partial failure counters.
+- [x] Run tests to capture the expected failures against the old reconciler.
+- [x] Implement proposal assembly separately from transaction-time decision validation.
+- [x] Inside each candidate transaction follow the binding order: acquire the family lock; lock/recheck candidate and all candidate surfaces; recompute Tier 5; load exhaustive provider claims while providers lock/stabilize all backing rows; decide and audit targetless outcomes before target locking; for validate branches lock/recheck target and surfaces; revalidate method authority and every veto; merge if authorized; append audit; commit.
+- [x] Delete the `tier6EmbeddingMinScore` authority rule and old direction election.
+- [x] Wire the command and update summary output.
+- [x] Run keyword reconciler package/command tests.
+- [x] Commit with `jj commit -m "keywords: make tier 6 identity-authorized and model agnostic"`.
 
 ## Task 5: Deterministic adapter library and import runner
 

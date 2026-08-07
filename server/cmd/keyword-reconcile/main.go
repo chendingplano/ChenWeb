@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	keyword-reconcile --scope=_
+//	keyword-reconcile --scope=_ --identity-deployment-key=qudt-production
 //
 // Requires KEYWORD_RECONCILE_EMBEDDING_MODEL_NAME to name an entry in
 // .models.toml (e.g. qwen3-embedding-0-6b-llama-cpp or
@@ -17,11 +17,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -41,7 +43,13 @@ func main() {
 	// external scheduler, and the run's audit trail needs them.
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	scope := flag.String("scope", "_", "keyword scope to reconcile")
+	var deploymentKeys repeatedFlag
+	flag.Var(&deploymentKeys, "identity-deployment-key", "enabled governed identity deployment key (repeatable; at least one required)")
 	flag.Parse()
+	keys, err := canonicalDeploymentKeys(deploymentKeys)
+	if err != nil {
+		log.Fatalf("identity deployment allowlist: %v", err)
+	}
 
 	db := connect()
 	defer db.Close()
@@ -62,17 +70,49 @@ func main() {
 				Scope:       "_",
 			},
 		},
-		SurfaceStore: keywords.SurfaceStore{DB: db},
-		DecisionLog:  semid.DecisionLogStore{DB: db},
-		Embeddings:   &llmEmbeddingClient{client: embedClient, modelName: modelName},
-		Scope:        *scope,
+		EvidenceProviders: []keywords.IdentityEvidenceProvider{
+			keywords.TripleEvidenceProvider{DeploymentKeys: keys},
+		},
+		Embeddings:       &llmEmbeddingClient{client: embedClient, modelName: modelName},
+		EmbeddingModelID: modelName,
+		Scope:            *scope,
 	}
 	stats, err := r.Run(ctx)
 	if err != nil {
-		log.Fatalf("reconcile run failed: %v", err)
+		fmt.Fprintf(os.Stderr, "%s error=%v\n", formatStats(*scope, stats), err)
+		os.Exit(1)
 	}
-	fmt.Printf("keyword-reconcile scope=%s scanned=%d merged=%d skipped_vetoed=%d skipped_no_candidate=%d\n",
-		*scope, stats.Scanned, stats.Merged, stats.SkippedVetoed, stats.SkippedNoCandidate)
+	fmt.Println(formatStats(*scope, stats))
+}
+
+type repeatedFlag []string
+
+func (f *repeatedFlag) String() string         { return strings.Join(*f, ",") }
+func (f *repeatedFlag) Set(value string) error { *f = append(*f, value); return nil }
+
+func canonicalDeploymentKeys(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, errors.New("at least one --identity-deployment-key is required")
+	}
+	keys := make([]string, len(values))
+	for i, value := range values {
+		keys[i] = strings.TrimSpace(value)
+		if keys[i] == "" {
+			return nil, errors.New("deployment key is blank")
+		}
+	}
+	sort.Strings(keys)
+	for i := 1; i < len(keys); i++ {
+		if keys[i] == keys[i-1] {
+			return nil, fmt.Errorf("duplicate deployment key %q", keys[i])
+		}
+	}
+	return keys, nil
+}
+
+func formatStats(scope string, stats keywords.ReconcileStats) string {
+	return fmt.Sprintf("keyword-reconcile scope=%s scanned=%d decided=%d failed=%d merged=%d deferred_unvalidated=%d rejected=%d no_candidate=%d",
+		scope, stats.Scanned, stats.Decided, stats.Failed, stats.Merged, stats.DeferredUnvalidated, stats.Rejected, stats.NoCandidate)
 }
 
 func connect() *sql.DB {

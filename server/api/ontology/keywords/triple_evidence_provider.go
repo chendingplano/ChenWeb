@@ -151,7 +151,7 @@ func (provider TripleEvidenceProvider) LoadClaims(ctx context.Context, tx *sql.T
 		}
 		if mapped && sourceState.identityAuthority && enabledSources[sourceKey] &&
 			containsString(sourceState.allowedScopes, candidate.Scope) &&
-			mapping.status == "active" && mapping.scope == candidate.Scope {
+			mapping.status == "active" {
 			claim.Authority = IdentityAuthorityAuthoritative
 			claim.AuthorityRef = sourceRef.Key
 		}

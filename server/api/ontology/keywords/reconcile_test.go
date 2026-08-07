@@ -2,634 +2,1000 @@ package keywords
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
-// fakeEmbeddingClient returns a fixed vector per input text, keyed by exact
-// text match -- deterministic and DB-free, so cosine similarity in tests is
-// exactly computable by hand.
-type fakeEmbeddingClient struct {
-	vectors map[string][]float64
+func authoritativeClaim(candidate, target string) IdentityClaim {
+	ref := EvidenceRef{Key: "authority", Kind: "authority_configuration", Locator: "fixture:authority"}
+	return IdentityClaim{ProviderID: TripleEvidenceProviderID, CandidateConceptID: candidate, TargetConceptID: target, Relation: IdentityRelationExactEquivalent, Authority: IdentityAuthorityAuthoritative, AuthorityRef: ref.Key, EvidenceRefs: []EvidenceRef{ref}}
 }
 
-func (f *fakeEmbeddingClient) EmbedBatch(ctx context.Context, texts []string) ([][]float64, error) {
-	out := make([][]float64, len(texts))
-	for i, t := range texts {
-		out[i] = f.vectors[t]
-	}
-	return out, nil
-}
-
-// jsonContainsMethod is a sqlmock.Argument matcher for the decision-log
-// Input/Output JSON: it verifies the merge method the Reconciler set (e.g.
-// "tier6_embedding") is present without pinning the exact float rendering of
-// the same blob's score field.
-type jsonContainsMethod string
-
-func (m jsonContainsMethod) Match(v driver.Value) bool {
-	s, ok := v.(string)
-	return ok && strings.Contains(s, `"method":`+string(m))
-}
-
-func TestReconcilerMergesCrossLingualProvisional(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	// One auto-created provisional concept ("亮度") plus one established
-	// concept ("Luminance") that is NOT lexically similar (different
-	// scripts) but IS semantically close (high cosine similarity) --
-	// exactly the Appendix A Stage 4/5 shape tier 6 exists for.
-	mock.ExpectQuery(regexp.QuoteMeta(`gloss_source = 'auto:d11'`)).
-		WithArgs("_", 500).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	// ListConcepts runs WHERE scope = $1 AND status IN ('active', 'provisional');
-	// the status-IN fragment matches it (ordered mode consumes it before
-	// SearchSimilarPrefLabel, which matches the similarity(...) expectation).
-	mock.ExpectQuery(regexp.QuoteMeta(`status IN ('active', 'provisional')`)).
-		WithArgs("_").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).
-			AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow).
-			AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	// Lexical blocking finds nothing (disjoint scripts).
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
-		WithArgs("_", "亮度", reconcileLexicalBlockMin, "kwc_b", reconcileTopK).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}))
-	// electMergeDirection loads surface counts for both sides.
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
-		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-	}))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
-		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-	}).AddRow("kws_l", "kwc_l", "Luminance", "luminance", semid.CurrentNormalizerVersion, "pref", "pref", "und", "_", 1.0, "human:", false, nil, testNow, testNow))
-	// MergeConcept(kwc_b -> kwc_l): mergeGuards reads both rows FOR UPDATE,
-	// applyMerge tombstones + re-points surfaces, then GetConcept re-reads
-	// the survivor. sqlmock's DB handle satisfies txBeginner, so
-	// MergeConcept takes the transactional path.
-	mock.ExpectBegin()
-	expectKeywordIdentityLock(mock)
-	expectKeywordIdentityLock(mock)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.semid_never_merge`)).
-		WithArgs("keyword", "kwc_b", "kwc_l").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_concepts`)).
-		WithArgs("kwc_b", "kwc_l").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_surfaces`)).
-		WithArgs("kwc_b", "kwc_l").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	// Decision log entry. The Method the Reconciler sets on the entry (the
-	// merge evidence that produced it) is carried inside the Input/Output
-	// JSON; jsonContainsMethod asserts it names tier 6 without pinning the
-	// exact float rendering of the same blob's score field.
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.semid_decision_log`)).
-		WithArgs(
-			"keyword_reconcile",
-			"_",
-			jsonContainsMethod(`"tier6_embedding"`),
-			jsonContainsMethod(`"tier6_embedding"`),
-			"auto_merged",
-			nil,
-			nil,
-			"keyword_reconciler",
-			0,
-		).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
-
-	r := &Reconciler{
-		DB:           db,
-		ConceptStore: ConceptStore{DB: db},
-		SurfaceStore: SurfaceStore{DB: db},
-		DecisionLog:  semid.DecisionLogStore{DB: db},
-		Embeddings: &fakeEmbeddingClient{vectors: map[string][]float64{
-			"亮度":        {1, 0, 0},
-			"Luminance": {0.95, 0.05, 0}, // cosine ~0.998 -- well above tier6EmbeddingMinScore
-		}},
-		Scope: "_",
-	}
-	stats, err := r.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if stats.Scanned != 1 || stats.Merged != 1 {
-		t.Errorf("unexpected stats: %+v", stats)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet expectations: %v", err)
-	}
-}
-
-func TestCosineSimilarity(t *testing.T) {
-	if got := cosineSimilarity([]float64{1, 0}, []float64{1, 0}); got != 1 {
-		t.Errorf("identical vectors: got %v, want 1", got)
-	}
-	if got := cosineSimilarity([]float64{1, 0}, []float64{0, 1}); got != 0 {
-		t.Errorf("orthogonal vectors: got %v, want 0", got)
-	}
-}
-
-func TestElectMergeDirectionPrefersRicherConcept(t *testing.T) {
-	richer := Concept{ConceptID: "kwc_rich"}
-	poorer := Concept{ConceptID: "kwc_poor"}
-	absorbed, survivor := electMergeDirection(poorer, richer, 0, 3) // poorer has 0 surfaces, richer has 3
-	if absorbed != "kwc_poor" || survivor != "kwc_rich" {
-		t.Errorf("expected kwc_poor absorbed into kwc_rich, got absorbed=%s survivor=%s", absorbed, survivor)
-	}
-}
-
-// TestReconcilerRunPropagatesDecisionLogError replicates the success-path mock
-// sequence from TestReconcilerMergesCrossLingualProvisional through the merge
-// (BeginTx ... Commit ... GetConcept survivor) but makes the decision-log
-// append fail. The merge's audit row (ADR DR15) must not be silently lost:
-// Run must surface the append error and report Merged=0.
-func TestReconcilerRunPropagatesDecisionLogError(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`gloss_source = 'auto:d11'`)).
-		WithArgs("_", 500).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`status IN ('active', 'provisional')`)).
-		WithArgs("_").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).
-			AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow).
-			AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
-		WithArgs("_", "亮度", reconcileLexicalBlockMin, "kwc_b", reconcileTopK).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
-		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-	}))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
-		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-	}).AddRow("kws_l", "kwc_l", "Luminance", "luminance", semid.CurrentNormalizerVersion, "pref", "pref", "und", "_", 1.0, "human:", false, nil, testNow, testNow))
-	mock.ExpectBegin()
-	expectKeywordIdentityLock(mock)
-	expectKeywordIdentityLock(mock)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_b", "亮度", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.semid_never_merge`)).
-		WithArgs("keyword", "kwc_b", "kwc_l").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_concepts`)).
-		WithArgs("kwc_b", "kwc_l").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_surfaces`)).
-		WithArgs("kwc_b", "kwc_l").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_l").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_l", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	injected := errors.New("decision log append failed")
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.semid_decision_log`)).
-		WillReturnError(injected)
-
-	r := &Reconciler{
-		DB:           db,
-		ConceptStore: ConceptStore{DB: db},
-		SurfaceStore: SurfaceStore{DB: db},
-		DecisionLog:  semid.DecisionLogStore{DB: db},
-		Embeddings: &fakeEmbeddingClient{vectors: map[string][]float64{
-			"亮度":        {1, 0, 0},
-			"Luminance": {0.95, 0.05, 0},
-		}},
-		Scope: "_",
-	}
-	stats, err := r.Run(context.Background())
-	if !errors.Is(err, injected) {
-		t.Fatalf("expected decision-log append error to propagate, got %v", err)
-	}
-	// Scanned-before-merged semantics: the candidate is counted Scanned at the
-	// top of its loop iteration, before the merge commits, so even a
-	// post-commit append failure still reports Scanned=1 with Merged=0.
-	if stats.Scanned != 1 || stats.Merged != 0 {
-		t.Errorf("expected Scanned=1 and Merged=0 when the audit append fails, got %+v", stats)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet expectations: %v", err)
-	}
-}
-
-// TestSurfaceCountsPropagatesError covers the surface-count reads that feed
-// electMergeDirection: a transient ListSurfacesByConcept failure on either
-// side must surface as an error rather than silently flipping the
-// absorbed/survivor direction (e.g. absorbing an established concept into an
-// auto-created provisional).
-func TestSurfaceCountsPropagatesError(t *testing.T) {
-	injected := errors.New("surface query failed")
-
-	t.Run("first query errors", func(t *testing.T) {
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		r := &Reconciler{SurfaceStore: SurfaceStore{DB: db}}
-		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-			WithArgs("a").WillReturnError(injected)
-		_, _, err = r.surfaceCounts(context.Background(), "a", "b")
-		if !errors.Is(err, injected) {
-			t.Fatalf("expected first-query error to propagate, got %v", err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("unmet expectations: %v", err)
-		}
-	})
-
-	t.Run("second query errors", func(t *testing.T) {
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		r := &Reconciler{SurfaceStore: SurfaceStore{DB: db}}
-		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-			WithArgs("a").WillReturnRows(sqlmock.NewRows([]string{
-			"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-		}))
-		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-			WithArgs("b").WillReturnError(injected)
-		_, _, err = r.surfaceCounts(context.Background(), "a", "b")
-		if !errors.Is(err, injected) {
-			t.Fatalf("expected second-query error to propagate, got %v", err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("unmet expectations: %v", err)
-		}
-	})
-}
-
-// TestFindMergeTargetLexicalTier5 covers the tier-5 lexical path through the
-// reconciler: a misspelled pref label is blocked by pg_trgm and survives
-// fuzzyCandidateScore's guardrails (dist 1 at 9 runes, similarity 8/9 >=
-// 0.88), so findMergeTarget returns it as a "tier5_fuzzy" target with no
-// embedding evidence at all (the empty liveEmbeds map skips the semantic
-// loop entirely).
-func TestFindMergeTargetLexicalTier5(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
-		WithArgs("_", "Luminence", reconcileLexicalBlockMin, "kwc_p", reconcileTopK).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_est", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-
-	cand := Concept{ConceptID: "kwc_p", PrefLabel: "Luminence"}
-	live := []Concept{
-		cand,
-		{ConceptID: "kwc_est", PrefLabel: "Luminance"},
-	}
-	r := &Reconciler{DB: db, ConceptStore: ConceptStore{DB: db}, Scope: "_"}
-
-	target, method, score, ok, err := r.findMergeTarget(context.Background(), cand, live, map[string][]float64{}, map[string]bool{})
-	if err != nil {
-		t.Fatalf("findMergeTarget: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected a lexical tier-5 target for Luminence/Luminance, got none")
-	}
-	if target.ConceptID != "kwc_est" || method != "tier5_fuzzy" {
-		t.Errorf("expected kwc_est via tier5_fuzzy, got target=%s method=%s", target.ConceptID, method)
-	}
-	if score < 0.88 {
-		t.Errorf("expected edit-distance score >= 0.88, got %v", score)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet expectations: %v", err)
-	}
-}
-
-// TestFindMergeTargetDigitsDifferVeto covers §9.2's digit veto on the
-// semantic path: the embedding cosine is well above tier6EmbeddingMinScore,
-// but two pref labels that differ in any digit never merge. The veto runs on
-// the raw pref labels in this branch (no normalization here, unlike the
-// lexical path).
-func TestFindMergeTargetDigitsDifferVeto(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	// No lexical hit: the digit veto must fire in the semantic loop, not in
-	// fuzzyCandidateScore.
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
-		WithArgs("_", "Release v2", reconcileLexicalBlockMin, "kwc_p", reconcileTopK).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}))
-
-	cand := Concept{ConceptID: "kwc_p", PrefLabel: "Release v2"}
-	target := Concept{ConceptID: "kwc_t", PrefLabel: "Release v3"}
-	live := []Concept{cand, target}
-	liveEmbeds := map[string][]float64{
-		"kwc_p": {1, 0},
-		"kwc_t": {0.99, 0.01}, // cosine ~0.99 -- well above tier6EmbeddingMinScore
-	}
-	r := &Reconciler{DB: db, ConceptStore: ConceptStore{DB: db}, Scope: "_"}
-
-	_, _, _, ok, err := r.findMergeTarget(context.Background(), cand, live, liveEmbeds, map[string]bool{})
-	if err != nil {
-		t.Fatalf("findMergeTarget: %v", err)
-	}
-	if ok {
-		t.Errorf("expected the digit veto to block Release v2 vs Release v3 despite high cosine, got a target")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet expectations: %v", err)
-	}
-}
-
-// TestReconcilerRunCountsSkippedNoCandidate covers the no-target outcome of a
-// Run: an auto-created provisional concept with no lexical or semantic match
-// is Scanned (counted before the merge) but SkippedNoCandidate, with no merge
-// or decision-log write (the mock has no merge/INSERT expectations, so any
-// write fails the test).
-func TestReconcilerRunCountsSkippedNoCandidate(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`gloss_source = 'auto:d11'`)).
-		WithArgs("_", 500).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_p", "Lumination", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`status IN ('active', 'provisional')`)).
-		WithArgs("_").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_p", "Lumination", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	// Lexical blocking finds no similar label (the concept excludes itself).
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
-		WithArgs("_", "Lumination", reconcileLexicalBlockMin, "kwc_p", reconcileTopK).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}))
-
-	r := &Reconciler{
-		DB:           db,
-		ConceptStore: ConceptStore{DB: db},
-		SurfaceStore: SurfaceStore{DB: db},
-		DecisionLog:  semid.DecisionLogStore{DB: db},
-		// Embeddings nil: embedConcepts returns an empty map and tier 6 is
-		// skipped, so the no-candidate decision rests on the lexical pass alone.
-		Scope: "_",
-	}
-	stats, err := r.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if stats.Scanned != 1 || stats.SkippedNoCandidate != 1 || stats.Merged != 0 {
-		t.Errorf("unexpected stats: %+v", stats)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet expectations: %v", err)
-	}
-}
-
-// TestReconcilerRunCountsSkippedVetoed covers the vetoed outcome of a Run: a
-// lexical target is found and surfaces counted, but MergeConcept refuses
-// (persisted never_merge assertion -> ErrMergeRejected), so Run counts
-// SkippedVetoed and skips the decision-log append entirely.
-func TestReconcilerRunCountsSkippedVetoed(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`gloss_source = 'auto:d11'`)).
-		WithArgs("_", 500).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_p", "Luminence", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`status IN ('active', 'provisional')`)).
-		WithArgs("_").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).
-			AddRow("kwc_p", "Luminence", nil, "_", "provisional", nil, "auto:d11", testNow, testNow).
-			AddRow("kwc_est", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	// Lexical blocking finds the misspelling target.
-	mock.ExpectQuery(regexp.QuoteMeta(`similarity(pref_label, $2) > $3`)).
-		WithArgs("_", "Luminence", reconcileLexicalBlockMin, "kwc_p", reconcileTopK).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-		}).AddRow("kwc_est", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	// electMergeDirection reads surface counts for both sides (0 each; the
-	// equal-count tie-break picks the lexicographically smaller id, so
-	// absorbed=kwc_p, survivor=kwc_est).
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-		WithArgs("kwc_p").WillReturnRows(sqlmock.NewRows([]string{
-		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-	}))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces`)).
-		WithArgs("kwc_est").WillReturnRows(sqlmock.NewRows([]string{
-		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
-	}))
-	// MergeConcept: mergeGuards reads both rows FOR UPDATE, then the persisted
-	// never_merge assertion (kwc_est < kwc_p lexicographically, per
-	// isNeverMerge's pair normalization) blocks -> ErrMergeRejected, rollback.
-	mock.ExpectBegin()
-	expectKeywordIdentityLock(mock)
-	expectKeywordIdentityLock(mock)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_p").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_p", "Luminence", nil, "_", "provisional", nil, "auto:d11", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
-		WithArgs("kwc_est").WillReturnRows(sqlmock.NewRows([]string{
-		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
-	}).AddRow("kwc_est", "Luminance", nil, "_", "active", nil, "none", testNow, testNow))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.semid_never_merge`)).
-		WithArgs("keyword", "kwc_est", "kwc_p").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectRollback()
-
-	r := &Reconciler{
-		DB:           db,
-		ConceptStore: ConceptStore{DB: db},
-		SurfaceStore: SurfaceStore{DB: db},
-		DecisionLog:  semid.DecisionLogStore{DB: db},
-		Scope:        "_",
-	}
-	stats, err := r.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if stats.Scanned != 1 || stats.SkippedVetoed != 1 || stats.Merged != 0 {
-		t.Errorf("unexpected stats: %+v", stats)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("unmet expectations: %v", err)
-	}
-}
-
-// TestElectMergeDirectionTieBreaks covers the equal-surface tie-breaks of
-// electMergeDirection that TestElectMergeDirectionPrefersRicherConcept does
-// not: with equal surface counts, the earlier CreateTime survives; with both
-// equal, the lexicographically smaller concept_id survives for determinism.
-func TestElectMergeDirectionTieBreaks(t *testing.T) {
-	early := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
-	late := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	cases := []struct {
-		name         string
-		cand, target Concept
-		wantAbsorbed string
-		wantSurvivor string
+func TestCandidateDecisionTable(t *testing.T) {
+	tests := []struct {
+		name        string
+		tier5       tier5Result
+		claims      []IdentityClaim
+		proposals   []ReconcileProposal
+		wantOutcome string
+		wantTarget  string
 	}{
-		{"equal surfaces, cand earlier", Concept{ConceptID: "kwc_a", CreateTime: early}, Concept{ConceptID: "kwc_b", CreateTime: late}, "kwc_b", "kwc_a"},
-		{"equal surfaces, target earlier", Concept{ConceptID: "kwc_a", CreateTime: late}, Concept{ConceptID: "kwc_b", CreateTime: early}, "kwc_a", "kwc_b"},
-		{"equal surfaces+time, cand lexicographically smaller", Concept{ConceptID: "kwc_a", CreateTime: early}, Concept{ConceptID: "kwc_b", CreateTime: early}, "kwc_b", "kwc_a"},
-		{"equal surfaces+time, target lexicographically smaller", Concept{ConceptID: "kwc_b", CreateTime: early}, Concept{ConceptID: "kwc_a", CreateTime: early}, "kwc_b", "kwc_a"},
+		{"tier5 unique", tier5Result{State: tier5Unique, TargetConceptID: "a"}, nil, nil, outcomeValidate, "a"},
+		{"tier5 same authority", tier5Result{State: tier5Unique, TargetConceptID: "a"}, []IdentityClaim{authoritativeClaim("c", "a")}, nil, outcomeValidate, "a"},
+		{"tier5 contradictory authority", tier5Result{State: tier5Unique, TargetConceptID: "a"}, []IdentityClaim{authoritativeClaim("c", "b")}, nil, outcomeReject, ""},
+		{"tier5 multiple authority", tier5Result{State: tier5Unique, TargetConceptID: "a"}, []IdentityClaim{authoritativeClaim("c", "a"), authoritativeClaim("c", "b")}, nil, outcomeReject, ""},
+		{"tie one authority", tier5Result{State: tier5Tie}, []IdentityClaim{authoritativeClaim("c", "a")}, nil, outcomeValidate, "a"},
+		{"tie multiple authority", tier5Result{State: tier5Tie}, []IdentityClaim{authoritativeClaim("c", "a"), authoritativeClaim("c", "b")}, nil, outcomeReject, ""},
+		{"tie no authority", tier5Result{State: tier5Tie}, nil, nil, outcomeDeferred, ""},
+		{"none one authority", tier5Result{State: tier5None}, []IdentityClaim{authoritativeClaim("c", "a")}, nil, outcomeValidate, "a"},
+		{"none multiple authority", tier5Result{State: tier5None}, []IdentityClaim{authoritativeClaim("c", "a"), authoritativeClaim("c", "b")}, nil, outcomeReject, ""},
+		{"nonauthorizing evidence defers", tier5Result{State: tier5None}, []IdentityClaim{{TargetConceptID: "a", Relation: IdentityRelationRelated, Authority: IdentityAuthorityNonAuthoritative}}, nil, outcomeDeferred, ""},
+		{"exact nonauthoritative evidence defers", tier5Result{State: tier5None}, []IdentityClaim{{TargetConceptID: "a", Relation: IdentityRelationExactEquivalent, Authority: IdentityAuthorityNonAuthoritative}}, nil, outcomeDeferred, ""},
+		{"targetless evidence defers", tier5Result{State: tier5None}, []IdentityClaim{{Relation: IdentityRelationExactEquivalent, Authority: IdentityAuthorityNonAuthoritative}}, nil, outcomeDeferred, ""},
+		{"embedding only defers", tier5Result{State: tier5None}, nil, []ReconcileProposal{{TargetConceptID: "a", Methods: []ReconcileProposalMethod{{Method: methodEmbedding}}}}, outcomeDeferred, ""},
+		{"nothing", tier5Result{State: tier5None}, nil, nil, outcomeNoCandidate, ""},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			absorbed, survivor := electMergeDirection(tc.cand, tc.target, 0, 0)
-			if absorbed != tc.wantAbsorbed || survivor != tc.wantSurvivor {
-				t.Errorf("electMergeDirection(%s, %s) = absorbed=%s survivor=%s, want absorbed=%s survivor=%s",
-					tc.cand.ConceptID, tc.target.ConceptID, absorbed, survivor, tc.wantAbsorbed, tc.wantSurvivor)
+	active := map[string]Concept{"a": {ConceptID: "a", Status: "active"}, "b": {ConceptID: "b", Status: "active"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chooseCandidateDecision(tt.tier5, tt.claims, tt.proposals, active)
+			if got.Outcome != tt.wantOutcome || got.TargetConceptID != tt.wantTarget {
+				t.Fatalf("got outcome=%s target=%s, want %s/%s", got.Outcome, got.TargetConceptID, tt.wantOutcome, tt.wantTarget)
 			}
 		})
 	}
 }
 
-func TestCosineSimilarityZeroNorm(t *testing.T) {
-	zero := []float64{0, 0}
-	if got := cosineSimilarity(zero, []float64{1, 0}); got != 0 {
-		t.Errorf("zero-norm first vector: got %v, want 0", got)
-	}
-	if got := cosineSimilarity([]float64{1, 0}, zero); got != 0 {
-		t.Errorf("zero-norm second vector: got %v, want 0", got)
-	}
-	if got := cosineSimilarity([]float64{1}, []float64{1, 0}); got != 0 {
-		t.Errorf("mismatched lengths: got %v, want 0", got)
-	}
-	if got := cosineSimilarity(nil, nil); got != 0 {
-		t.Errorf("empty vectors: got %v, want 0", got)
+func TestAllNonAuthorizingRelationsDefer(t *testing.T) {
+	for _, relation := range []IdentityRelation{IdentityRelationRelated, IdentityRelationBroader, IdentityRelationNarrower, IdentityRelationTranslation, IdentityRelationProbabilistic, IdentityRelationOther} {
+		t.Run(string(relation), func(t *testing.T) {
+			decision := chooseCandidateDecision(tier5Result{}, []IdentityClaim{{TargetConceptID: "a", Relation: relation, Authority: IdentityAuthorityNonAuthoritative}}, nil, map[string]Concept{"a": {ConceptID: "a", Status: "active"}})
+			if decision.Outcome != outcomeDeferred {
+				t.Fatalf("got %s", decision.Outcome)
+			}
+		})
 	}
 }
 
-// shortVectorClient simulates an EmbedBatch response shorter than the live
-// concept set (e.g. the provider returned fewer vectors than requested).
-type shortVectorClient struct{}
-
-func (shortVectorClient) EmbedBatch(_ context.Context, _ []string) ([][]float64, error) {
-	return [][]float64{{1, 0}}, nil
+func TestEmbeddingScoreNeverAuthorizesAndProviderRankNeverTruncates(t *testing.T) {
+	active := map[string]Concept{"outside": {ConceptID: "outside", Status: "active"}}
+	high := 0.999999
+	embeddingOnly := chooseCandidateDecision(tier5Result{}, nil, []ReconcileProposal{{TargetConceptID: "wrong", Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: 1, Score: &high}}}}, active)
+	if embeddingOnly.Outcome != outcomeDeferred {
+		t.Fatalf("high cosine authorized: %+v", embeddingOnly)
+	}
+	low := -0.75
+	providerOnly := chooseCandidateDecision(tier5Result{}, []IdentityClaim{authoritativeClaim("c", "outside")}, []ReconcileProposal{{TargetConceptID: "wrong", Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: 10, Score: &low}}}}, active)
+	if providerOnly.Outcome != outcomeValidate || providerOnly.TargetConceptID != "outside" {
+		t.Fatalf("provider-only target lost: %+v", providerOnly)
+	}
+	for _, status := range []string{"provisional", "merged", "deprecated"} {
+		inactive := map[string]Concept{"outside": {ConceptID: "outside", Status: status}}
+		got := chooseCandidateDecision(tier5Result{}, []IdentityClaim{authoritativeClaim("c", "outside")}, nil, inactive)
+		if got.Outcome != outcomeDeferred {
+			t.Fatalf("%s authoritative target got %+v", status, got)
+		}
+	}
 }
 
-// TestEmbedConcepts covers embedConcepts' defensive edges: a nil client and
-// an empty live set short-circuit to an empty map (no EmbedBatch call), a
-// short response maps only the vectors that are actually present, and a nil
-// vector entry is dropped.
-func TestEmbedConcepts(t *testing.T) {
-	ctx := context.Background()
-	c1 := Concept{ConceptID: "kwc_1", PrefLabel: "alpha"}
-	c2 := Concept{ConceptID: "kwc_2", PrefLabel: "beta"}
+func TestCrossScopeAuthorityIsCandidateGlobalThenPairVetoed(t *testing.T) {
+	claims := []IdentityClaim{authoritativeClaim("candidate", "cross")}
+	globalActive := map[string]Concept{"cross": {ConceptID: "cross", Status: "active", Scope: "other"}}
+	contradiction := chooseCandidateDecision(tier5Result{State: tier5Unique, TargetConceptID: "local"}, claims, nil, globalActive)
+	if contradiction.Outcome != outcomeReject {
+		t.Fatalf("Tier5 cross-scope contradiction was ignored: %+v", contradiction)
+	}
+	chosen := chooseCandidateDecision(tier5Result{}, claims, nil, globalActive)
+	if chosen.Outcome != outcomeValidate || chosen.TargetConceptID != "cross" {
+		t.Fatalf("cross-scope authority did not reach pair validation: %+v", chosen)
+	}
 
-	t.Run("nil client short-circuits to empty map", func(t *testing.T) {
-		r := &Reconciler{}
-		out, err := r.embedConcepts(ctx, []Concept{c1, c2})
-		if err != nil {
-			t.Fatalf("embedConcepts: %v", err)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectNeverMergeFalse(mock, "candidate", "cross")
+	expectNoAlignment(mock, "candidate")
+	expectNoAlignment(mock, "cross")
+	r := Reconciler{Scope: "_", ConceptStore: ConceptStore{Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+	vetoes, err := r.pairVetoes(context.Background(), tx, Concept{ConceptID: "candidate", Status: "provisional", GlossSource: "auto:d11", Scope: "_"}, globalActive["cross"], nil, nil, candidateDecision{Method: methodIdentity, TargetConceptID: "cross"}, claims, globalActive)
+	if err != nil || !contains(strings.Join(vetoes, ","), "scope_conflict") {
+		t.Fatalf("vetoes=%v err=%v", vetoes, err)
+	}
+	mock.ExpectRollback()
+	_ = tx.Rollback()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPositiveAuthorityHardVetoes(t *testing.T) {
+	tests := []struct {
+		name                              string
+		candidateSurfaces, targetSurfaces []Surface
+		neverMerge, alignmentConflict     bool
+		want                              string
+	}{
+		{name: "absorbed surface lock", candidateSurfaces: []Surface{{Surface: "metric", Locked: true}}, want: "absorbed_surface_locked"},
+		{name: "digit set", candidateSurfaces: []Surface{{Surface: "metric 2"}}, targetSurfaces: []Surface{{Surface: "metric 3"}}, want: "digit_conflict"},
+		{name: "never merge", neverMerge: true, want: "never_merge"},
+		{name: "alignment", alignmentConflict: true, want: "alignment_conflict"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectBegin()
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			mock.ExpectQuery("FROM kb.semid_never_merge").WithArgs("keyword", "candidate", "target").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(tt.neverMerge))
+			if tt.alignmentConflict {
+				expectAlignment(mock, "candidate", "term-a")
+				expectAlignment(mock, "target", "term-b")
+			} else {
+				expectNoAlignment(mock, "candidate")
+				expectNoAlignment(mock, "target")
+			}
+			claim := authoritativeClaim("candidate", "target")
+			active := map[string]Concept{"target": {ConceptID: "target", Status: "active", Scope: "_"}}
+			r := Reconciler{Scope: "_", ConceptStore: ConceptStore{Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+			vetoes, err := r.pairVetoes(context.Background(), tx, Concept{ConceptID: "candidate", Status: "provisional", GlossSource: "auto:d11", Scope: "_"}, active["target"], tt.candidateSurfaces, tt.targetSurfaces, candidateDecision{Method: methodIdentity, TargetConceptID: "target"}, []IdentityClaim{claim}, active)
+			if err != nil || !contains(strings.Join(vetoes, ","), tt.want) {
+				t.Fatalf("vetoes=%v err=%v", vetoes, err)
+			}
+			mock.ExpectRollback()
+			_ = tx.Rollback()
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestAuditProposalsDedupeTargetsAndAreByteStableAcrossInputOrder(t *testing.T) {
+	score := .42
+	embedding := ReconcileProposal{TargetConceptID: "target", Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: 2, Score: &score, ModelID: "m", CandidateSetSize: 11, CandidateSetLimit: 10}}, Claims: []IdentityClaim{}}
+	scoreZ := .8
+	embeddingZ := ReconcileProposal{TargetConceptID: "z", Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: 1, Score: &scoreZ, ModelID: "m", CandidateSetSize: 11, CandidateSetLimit: 10}}, Claims: []IdentityClaim{}}
+	claim := authoritativeClaim("candidate", "target")
+	other := IdentityClaim{ProviderID: TripleEvidenceProviderID, CandidateConceptID: "candidate", TargetConceptID: "z", Relation: IdentityRelationExactEquivalent, Authority: IdentityAuthorityNonAuthoritative, EvidenceRefs: []EvidenceRef{{Key: "z", Kind: "mapping", Locator: "fixture:z"}}}
+	tier5 := tier5Result{Scored: []tier5ScoredTarget{{ConceptID: "target", Score: .9}}}
+	one := mergeAuditProposals([]ReconcileProposal{embedding, embeddingZ}, tier5, []IdentityClaim{claim, other})
+	two := mergeAuditProposals([]ReconcileProposal{embeddingZ, embedding}, tier5, []IdentityClaim{other, claim})
+	left, _ := json.Marshal(one)
+	right, _ := json.Marshal(two)
+	if string(left) != string(right) {
+		t.Fatalf("audit changed with claim order:\n%s\n%s", left, right)
+	}
+	if len(one) != 2 || one[0].TargetConceptID != "target" || len(one[0].Methods) != 3 || len(one[0].Claims) != 1 {
+		t.Fatalf("target aggregation failed: %+v", one)
+	}
+}
+
+func TestTier5FourCharacterBoundaryAndTie(t *testing.T) {
+	n := semid.Normalizer{Version: semid.CurrentNormalizerVersion}
+	active := []Concept{{ConceptID: "a", PrefLabel: "kuber", Status: "active"}, {ConceptID: "b", PrefLabel: "kuberx", Status: "active"}}
+	if got := recomputeTier5("kube", active, n); got.State != tier5None {
+		t.Fatalf("four characters must be excluded: %+v", got)
+	}
+	if got := recomputeTier5("kubers", active, n); got.State != tier5Tie {
+		t.Fatalf("equal top score must tie: %+v", got)
+	}
+	near := []tier5ScoredTarget{{ConceptID: "a", Score: .9000000000}, {ConceptID: "b", Score: .8999999995}}
+	if got := selectTier5(near); got.State != tier5Tie {
+		t.Fatalf("scores within 1e-9 must tie: %+v", got)
+	}
+}
+
+func TestTier5SortIsExactAndTieEpsilonOnlyAppliesToTopTwo(t *testing.T) {
+	input := []tier5ScoredTarget{{ConceptID: "c", Score: 0.9000000000}, {ConceptID: "a", Score: 0.9000000015}, {ConceptID: "b", Score: 0.9000000008}}
+	for _, shuffled := range [][]tier5ScoredTarget{input, {input[2], input[0], input[1]}, {input[1], input[2], input[0]}} {
+		got := selectTier5(shuffled)
+		if got.State != tier5Tie {
+			t.Fatalf("expected top-two epsilon tie: %+v", got)
 		}
-		if len(out) != 0 {
-			t.Errorf("expected empty map for nil client, got %+v", out)
+		if got.Scored[0].ConceptID != "a" || got.Scored[1].ConceptID != "b" || got.Scored[2].ConceptID != "c" {
+			t.Fatalf("non-exact/transitive ordering: %+v", got.Scored)
+		}
+	}
+}
+
+func TestAllSurfaceDigitSignatureVeto(t *testing.T) {
+	surfaces := func(values ...string) []Surface {
+		out := make([]Surface, len(values))
+		for i, value := range values {
+			out[i].Surface = value
+		}
+		return out
+	}
+	if !equalDigitSignatureSets(surfaces("v2", "release 3"), surfaces("版本２", "release-3")) {
+		t.Fatal("equivalent all-surface digit sets rejected")
+	}
+	if equalDigitSignatureSets(surfaces("v2", "release 3"), surfaces("v2")) {
+		t.Fatal("missing digit-bearing surface was not vetoed")
+	}
+	if equalDigitSignatureSets(surfaces("v2"), nil) {
+		t.Fatal("one-sided digits were not vetoed")
+	}
+}
+
+type orderedEmbeddingClient struct {
+	vectors [][]float64
+	err     error
+}
+
+func (f orderedEmbeddingClient) EmbedBatch(context.Context, []string) ([][]float64, error) {
+	return f.vectors, f.err
+}
+
+func TestEmbeddingTopTenBoundAndAffineScaleIndependence(t *testing.T) {
+	concepts := []Concept{{ConceptID: "candidate", PrefLabel: "candidate", Status: "provisional"}}
+	for i := 1; i <= 11; i++ {
+		concepts = append(concepts, Concept{ConceptID: string(rune('a' + i - 1)), PrefLabel: "target", Status: "active"})
+	}
+	vecs := make(map[string][]float64)
+	vecs["candidate"] = []float64{1, 0}
+	for i := 1; i <= 11; i++ {
+		angle := float64(i) * .04
+		vecs[concepts[i].ConceptID] = []float64{math.Cos(angle), math.Sin(angle)}
+	}
+	one := embeddingProposals(concepts[0], concepts, vecs, "model-a")
+	if len(one) != reconcileEmbeddingTopK || one[9].Methods[0].Rank != 10 {
+		t.Fatalf("top-10 boundary wrong: %+v", one)
+	}
+	for _, proposal := range one {
+		if proposal.Methods[0].CandidateSetSize != 11 || proposal.Methods[0].CandidateSetLimit != 10 {
+			t.Fatalf("wrong full candidate pool metadata: %+v", proposal)
+		}
+	}
+	for id, vector := range vecs {
+		vecs[id] = []float64{vector[0] * 7, vector[1] * 7}
+	}
+	two := embeddingProposals(concepts[0], concepts, vecs, "model-b")
+	for i := range one {
+		if one[i].TargetConceptID != two[i].TargetConceptID {
+			t.Fatalf("ranking changed at %d", i)
+		}
+	}
+	if one[9].TargetConceptID == concepts[11].ConceptID {
+		t.Fatal("position 11 entered bounded proposals")
+	}
+}
+
+func TestAffineScoreTransformPreservesDecisionAndProposalOrder(t *testing.T) {
+	makeProposals := func(scale, shift float64) []ReconcileProposal {
+		result := []ReconcileProposal{}
+		for rank, item := range []struct {
+			id    string
+			score float64
+		}{{"a", .8}, {"b", .5}} {
+			score := item.score*scale + shift
+			result = append(result, ReconcileProposal{TargetConceptID: item.id, Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: rank + 1, Score: &score, ModelID: "m", CandidateSetSize: 2, CandidateSetLimit: 10}}, Claims: []IdentityClaim{}})
+		}
+		return result
+	}
+	base, transformed := makeProposals(1, 0), makeProposals(7, 13)
+	for _, proposals := range [][]ReconcileProposal{base, transformed} {
+		if got := chooseCandidateDecision(tier5Result{}, nil, proposals, nil); got.Outcome != outcomeDeferred {
+			t.Fatalf("score authorized outcome: %+v", got)
+		}
+		audit := mergeAuditProposals(proposals, tier5Result{}, nil)
+		if audit[0].TargetConceptID != "a" || audit[1].TargetConceptID != "b" {
+			t.Fatalf("proposal semantics changed: %+v", audit)
+		}
+	}
+}
+
+func TestAffineScoreTransformPreservesTransactionalDeferredAudit(t *testing.T) {
+	for _, transform := range []struct {
+		name         string
+		scale, shift float64
+	}{{"base", 1, 0}, {"affine", 7, 13}} {
+		t.Run(transform.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			now := time.Unix(7, 0).UTC()
+			expectDecisionPrefix(mock, now, "亮度", sqlmock.NewRows(conceptTestColumns()))
+			scoreA, scoreB := .8*transform.scale+transform.shift, .5*transform.scale+transform.shift
+			proposals := []ReconcileProposal{
+				{TargetConceptID: "a", Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: 1, Score: &scoreA, ModelID: "model", CandidateSetSize: 2, CandidateSetLimit: 10}}, Claims: []IdentityClaim{}},
+				{TargetConceptID: "b", Methods: []ReconcileProposalMethod{{Method: methodEmbedding, Rank: 2, Score: &scoreB, ModelID: "model", CandidateSetSize: 2, CandidateSetLimit: 10}}, Claims: []IdentityClaim{}},
+			}
+			mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeDeferred, "model", nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+			mock.ExpectCommit()
+			r := Reconciler{DB: db, Scope: "_", EmbeddingModelID: "model", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{}}}
+			outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, proposals)
+			if err != nil || outcome != outcomeDeferred {
+				t.Fatalf("outcome=%s err=%v", outcome, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestValidateReconcilerConfiguration(t *testing.T) {
+	triple := TripleEvidenceProvider{}
+	tests := []struct {
+		name string
+		r    Reconciler
+		want string
+	}{
+		{"missing provider", Reconciler{}, "required identity evidence provider"},
+		{"embedding missing model", Reconciler{EvidenceProviders: []IdentityEvidenceProvider{triple}, Embeddings: orderedEmbeddingClient{}}, "EmbeddingModelID"},
+		{"model without embeddings", Reconciler{EvidenceProviders: []IdentityEvidenceProvider{triple}, EmbeddingModelID: "model"}, "EmbeddingModelID"},
+		{"missing alignment", Reconciler{EvidenceProviders: []IdentityEvidenceProvider{triple}}, "alignment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.r.validateConfiguration(); err == nil || !contains(err.Error(), tt.want) {
+				t.Fatalf("got %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunBindsAllScanReadsToReconcilerDB(t *testing.T) {
+	primary, primaryMock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Close()
+	other, otherMock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	primaryMock.ExpectQuery("status = 'provisional'.*gloss_source = 'auto:d11'").WithArgs("_", 500).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	primaryMock.ExpectQuery("status IN \\('active', 'provisional'\\)").WithArgs("_").WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	r := Reconciler{DB: primary, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{}}, ConceptStore: ConceptStore{DB: other, Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: primary}}}}
+	stats, err := r.Run(context.Background())
+	if err != nil || stats != (ReconcileStats{}) {
+		t.Fatalf("stats=%+v err=%v", stats, err)
+	}
+	if err := primaryMock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if err := otherMock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("split scan handle was used: %v", err)
+	}
+
+	// A nil embedded store handle is equally safe: Reconciler.DB owns scans.
+	primaryMock.ExpectQuery("status = 'provisional'.*gloss_source = 'auto:d11'").WithArgs("_", 500).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	primaryMock.ExpectQuery("status IN \\('active', 'provisional'\\)").WithArgs("_").WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	r.ConceptStore.DB = nil
+	if _, err := r.Run(context.Background()); err != nil {
+		t.Fatalf("nil ConceptStore.DB leaked into scan: %v", err)
+	}
+	if err := primaryMock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStatsInvariants(t *testing.T) {
+	for _, s := range []ReconcileStats{{Scanned: 4, Decided: 4, Merged: 1, DeferredUnvalidated: 1, Rejected: 1, NoCandidate: 1}, {Scanned: 2, Decided: 1, Failed: 1, Merged: 1}} {
+		if err := s.Validate(); err != nil {
+			t.Fatalf("valid stats rejected: %v", err)
+		}
+	}
+	if err := (ReconcileStats{Scanned: 3, Decided: 1, Failed: 1}).Validate(); err == nil {
+		t.Fatal("invalid partial failure accepted")
+	}
+	if err := (ReconcileStats{Scanned: 1, Decided: 1, Merged: -1, NoCandidate: 2}).Validate(); err == nil {
+		t.Fatal("negative outcome counter accepted")
+	}
+}
+
+func TestEmbeddingOutputFailsClosed(t *testing.T) {
+	concepts := []Concept{{ConceptID: "c", PrefLabel: "candidate"}}
+	for _, vectors := range [][][]float64{nil, {{}}, {{math.NaN()}}, {{math.Inf(1)}}} {
+		r := Reconciler{Embeddings: orderedEmbeddingClient{vectors: vectors}}
+		if _, err := r.embedConcepts(context.Background(), concepts); err == nil {
+			t.Fatalf("accepted malformed vectors %#v", vectors)
+		}
+	}
+}
+
+type failingSecondProvider struct{ calls int }
+
+func (p *failingSecondProvider) ProviderID() string { return TripleEvidenceProviderID }
+func (p *failingSecondProvider) LoadClaims(_ context.Context, _ *sql.Tx, _ CandidateIdentityContext) ([]IdentityClaim, error) {
+	p.calls++
+	if p.calls == 2 {
+		return nil, errors.New("provider unavailable")
+	}
+	return []IdentityClaim{}, nil
+}
+
+type authoritativeFixtureProvider struct{ target string }
+
+func (p authoritativeFixtureProvider) ProviderID() string { return TripleEvidenceProviderID }
+func (p authoritativeFixtureProvider) LoadClaims(_ context.Context, _ *sql.Tx, candidate CandidateIdentityContext) ([]IdentityClaim, error) {
+	return []IdentityClaim{authoritativeClaim(candidate.CandidateConceptID, p.target)}, nil
+}
+
+type markedAuthoritativeProvider struct{ target string }
+
+func (p markedAuthoritativeProvider) ProviderID() string { return TripleEvidenceProviderID }
+func (p markedAuthoritativeProvider) LoadClaims(ctx context.Context, tx *sql.Tx, candidate CandidateIdentityContext) ([]IdentityClaim, error) {
+	var marker int
+	if err := tx.QueryRowContext(ctx, "SELECT provider_marker").Scan(&marker); err != nil {
+		return nil, err
+	}
+	return []IdentityClaim{authoritativeClaim(candidate.CandidateConceptID, p.target)}, nil
+}
+
+type panicProvider struct{}
+
+func (panicProvider) ProviderID() string { return TripleEvidenceProviderID }
+func (panicProvider) LoadClaims(context.Context, *sql.Tx, CandidateIdentityContext) ([]IdentityClaim, error) {
+	panic("stale candidate must not query providers")
+}
+
+type claimsFixtureProvider struct{ claims []IdentityClaim }
+
+func (p claimsFixtureProvider) ProviderID() string { return TripleEvidenceProviderID }
+func (p claimsFixtureProvider) LoadClaims(context.Context, *sql.Tx, CandidateIdentityContext) ([]IdentityClaim, error) {
+	return p.claims, nil
+}
+
+func conceptTestColumns() []string {
+	return []string{"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time"}
+}
+
+func addConceptRow(rows *sqlmock.Rows, id, label, status string, created time.Time) *sqlmock.Rows {
+	return addConceptRowScope(rows, id, label, "_", status, created)
+}
+
+func addConceptRowScope(rows *sqlmock.Rows, id, label, scope, status string, created time.Time) *sqlmock.Rows {
+	return rows.AddRow(id, label, nil, scope, status, nil, "auto:d11", created, created)
+}
+
+func surfaceTestRows(now time.Time, conceptID string, values ...Surface) *sqlmock.Rows {
+	rows := sqlmock.NewRows(strings.Split(surfaceColumns, ", "))
+	for i, surface := range values {
+		rows.AddRow(fmt.Sprintf("s%d", i), conceptID, surface.Surface, surface.Surface, semid.CurrentNormalizerVersion, "pref", "alias", "und", "_", 1.0, "fixture", surface.Locked, nil, now, now)
+	}
+	return rows
+}
+
+func TestReconcilerUniqueTier5NoAuthorityMergeThenThreeCandidatePartialFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(1, 0).UTC()
+	candidates := sqlmock.NewRows(conceptTestColumns())
+	addConceptRow(candidates, "c1", "kubernets", "provisional", now)
+	for _, id := range []string{"c2", "c3"} {
+		addConceptRow(candidates, id, id, "provisional", now)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts\n\t\tWHERE scope = $1 AND status = 'provisional' AND gloss_source = 'auto:d11'")).
+		WithArgs("_", 500).WillReturnRows(candidates)
+	live := sqlmock.NewRows(conceptTestColumns())
+	addConceptRow(live, "c1", "kubernets", "provisional", now)
+	for _, id := range []string{"c2", "c3"} {
+		addConceptRow(live, id, id, "provisional", now)
+	}
+	addConceptRow(live, "target", "kubernetes", "active", now)
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE scope = $1 AND status IN ('active', 'provisional')")).WithArgs("_").WillReturnRows(live)
+
+	// Candidate one reaches a deterministic Tier-5 merge and audit and commits.
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("c1").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "c1", "kubernets", "provisional", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+ORDER BY surface_id FOR UPDATE").WithArgs("c1").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	mock.ExpectQuery("WHERE scope = \\$1 AND status = 'active'").WithArgs("_", "kubernets", reconcileLexicalBlockMin, "c1", reconcileLexicalTopK).WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "kubernetes", "active", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "kubernetes", "active", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+ORDER BY surface_id FOR UPDATE").WithArgs("target").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	expectNeverMergeFalse(mock, "c1", "target")
+	expectNoAlignment(mock, "c1")
+	expectNoAlignment(mock, "target")
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("c1").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "c1", "kubernets", "provisional", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "kubernetes", "active", now))
+	expectNeverMergeFalse(mock, "c1", "target")
+	expectNoAlignment(mock, "c1")
+	expectNoAlignment(mock, "target")
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.semantic_assertions").WithArgs("c1", "target").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE kb.keyword_concepts").WithArgs("c1", "target").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.keyword_surfaces").WithArgs("c1", "target").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeAutoMerge, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectCommit()
+
+	// Candidate two fails during the exhaustive provider read. Its transaction
+	// rolls back; candidate three is never attempted.
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("c2").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "c2", "c2", "provisional", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+ORDER BY surface_id FOR UPDATE").WithArgs("c2").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	mock.ExpectQuery("WHERE scope = \\$1 AND status = 'active'").WithArgs("_", "c2", reconcileLexicalBlockMin, "c2", reconcileLexicalTopK).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	mock.ExpectRollback()
+
+	provider := &failingSecondProvider{}
+	r := Reconciler{
+		DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{provider},
+		ConceptStore: ConceptStore{DB: db, Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}},
+	}
+	stats, err := r.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("got %v", err)
+	}
+	want := ReconcileStats{Scanned: 2, Decided: 1, Failed: 1, Merged: 1}
+	if stats != want {
+		t.Fatalf("got %+v, want %+v", stats, want)
+	}
+	if err := stats.Validate(); err != nil {
+		t.Fatalf("partial counters invalid: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls=%d", provider.calls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcilerTier5TieLowCosineExactIdentityOutsideTopTenMerges(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(2, 0).UTC()
+	mock.ExpectQuery("status = 'provisional'.*gloss_source = 'auto:d11'").WithArgs("_", 500).
+		WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "kubers", "provisional", now))
+	live := sqlmock.NewRows(conceptTestColumns())
+	addConceptRow(live, "candidate", "kubers", "provisional", now)
+	addConceptRow(live, "target", "Luminance", "active", now)
+	for i := 0; i < 10; i++ {
+		addConceptRow(live, fmt.Sprintf("decoy-%02d", i), fmt.Sprintf("Decoy %d", i), "active", now)
+	}
+	mock.ExpectQuery("status IN \\('active', 'provisional'\\)").WithArgs("_").WillReturnRows(live)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").
+		WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "kubers", "provisional", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	tieRows := sqlmock.NewRows(conceptTestColumns())
+	addConceptRow(tieRows, "tie-a", "kuber", "active", now)
+	addConceptRow(tieRows, "tie-b", "kuberx", "active", now)
+	mock.ExpectQuery("WHERE scope = \\$1 AND status = 'active'").WithArgs("_", "kubers", reconcileLexicalBlockMin, "candidate", reconcileLexicalTopK).
+		WillReturnRows(tieRows)
+	mock.ExpectQuery("SELECT provider_marker").WillReturnRows(sqlmock.NewRows([]string{"marker"}).AddRow(1))
+	mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", "active", now))
+
+	// Validation locks and rechecks the chosen target only after the provider
+	// has returned the exhaustive authoritative set.
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").
+		WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", "active", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+ORDER BY surface_id FOR UPDATE").WithArgs("target").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	expectNeverMergeFalse(mock, "candidate", "target")
+	expectNoAlignment(mock, "candidate")
+	expectNoAlignment(mock, "target")
+
+	// MergeConceptTx revalidates guards inside the same caller-owned tx, then
+	// follows alignments, applies candidate -> target, and only then audits.
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").
+		WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "kubers", "provisional", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").
+		WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", "active", now))
+	expectNeverMergeFalse(mock, "candidate", "target")
+	expectNoAlignment(mock, "candidate")
+	expectNoAlignment(mock, "target")
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.semantic_assertions").WithArgs("candidate", "target").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE kb.keyword_concepts").WithArgs("candidate", "target").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.keyword_surfaces").WithArgs("candidate", "target").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", providerOnlyAuditMatcher{target: "target"}, providerOnlyAuditMatcher{target: "target"}, outcomeAutoMerge, "orthogonal-model", nil, "keyword_reconciler", 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectCommit()
+
+	r := Reconciler{
+		DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{markedAuthoritativeProvider{target: "target"}},
+		ConceptStore: ConceptStore{DB: db, Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}},
+		Embeddings: orderedEmbeddingClient{vectors: func() [][]float64 {
+			vectors := [][]float64{{1, 0}, {0, 1}}
+			for i := 0; i < 10; i++ {
+				angle := float64(i+1) * .03
+				vectors = append(vectors, []float64{math.Cos(angle), math.Sin(angle)})
+			}
+			return vectors
+		}()}, EmbeddingModelID: "orthogonal-model",
+	}
+	stats, err := r.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats != (ReconcileStats{Scanned: 1, Decided: 1, Merged: 1}) {
+		t.Fatalf("stats=%+v", stats)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type providerOnlyAuditMatcher struct{ target string }
+
+func (m providerOnlyAuditMatcher) Match(value driver.Value) bool {
+	raw, ok := value.(string)
+	if !ok {
+		return false
+	}
+	var audit reconcileAudit
+	if json.Unmarshal([]byte(raw), &audit) != nil {
+		return false
+	}
+	embeddingCount := 0
+	targetIsProviderOnly := false
+	for _, proposal := range audit.Proposals {
+		if proposal.TargetConceptID == m.target {
+			if len(proposal.Claims) == 0 {
+				return false
+			}
+			for _, method := range proposal.Methods {
+				if method.Method == methodEmbedding {
+					return false
+				}
+			}
+			targetIsProviderOnly = true
+		}
+		for _, method := range proposal.Methods {
+			if method.Method == methodEmbedding {
+				embeddingCount++
+				if method.Rank < 1 || method.Rank > 10 || method.CandidateSetSize != 11 || method.CandidateSetLimit != 10 {
+					return false
+				}
+			}
+		}
+	}
+	return targetIsProviderOnly && embeddingCount == 10
+}
+
+func TestReconcilerHighCosineWithoutIdentityDefersAndAudits(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(3, 0).UTC()
+	mock.ExpectQuery("status = 'provisional'.*gloss_source = 'auto:d11'").WithArgs("_", 500).WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+	live := sqlmock.NewRows(conceptTestColumns())
+	addConceptRow(live, "candidate", "亮度", "provisional", now)
+	addConceptRow(live, "target", "Luminance", "active", now)
+	mock.ExpectQuery("status IN \\('active', 'provisional'\\)").WithArgs("_").WillReturnRows(live)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	mock.ExpectQuery("similarity\\(pref_label, \\$2\\)").WithArgs("_", "亮度", reconcileLexicalBlockMin, "candidate", reconcileLexicalTopK).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeDeferred, "high-cosine", nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(8))
+	mock.ExpectCommit()
+	r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{&failingSecondProvider{}}, Embeddings: orderedEmbeddingClient{vectors: [][]float64{{1, 0}, {.999999, .001}}}, EmbeddingModelID: "high-cosine", ConceptStore: ConceptStore{DB: db, Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+	stats, err := r.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats != (ReconcileStats{Scanned: 1, Decided: 1, DeferredUnvalidated: 1}) {
+		t.Fatalf("stats=%+v", stats)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcilerPositiveAuthorityHardVetoesAuditReject(t *testing.T) {
+	tests := []struct {
+		name              string
+		candidate, target []Surface
+		targetScope       string
+		never, alignment  bool
+	}{
+		{name: "absorbed surface lock", candidate: []Surface{{Surface: "metric", Locked: true}}, targetScope: "_"},
+		{name: "scope", targetScope: "other"},
+		{name: "never merge", targetScope: "_", never: true},
+		{name: "alignment", targetScope: "_", alignment: true},
+		{name: "all surface digits", candidate: []Surface{{Surface: "metric 2"}}, target: []Surface{{Surface: "metric 3"}}, targetScope: "_"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			now := time.Unix(8, 0).UTC()
+			mock.ExpectBegin()
+			mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+			mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(surfaceTestRows(now, "candidate", tt.candidate...))
+			mock.ExpectQuery("similarity\\(pref_label, \\$2\\)").WithArgs("_", "亮度", reconcileLexicalBlockMin, "candidate", reconcileLexicalTopK).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+			mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnRows(addConceptRowScope(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", tt.targetScope, "active", now))
+			mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").WillReturnRows(addConceptRowScope(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", tt.targetScope, "active", now))
+			mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("target").WillReturnRows(surfaceTestRows(now, "target", tt.target...))
+			mock.ExpectQuery("FROM kb.semid_never_merge").WithArgs("keyword", "candidate", "target").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(tt.never))
+			if tt.alignment {
+				expectAlignment(mock, "candidate", "term-a")
+				expectAlignment(mock, "target", "term-b")
+			} else {
+				expectNoAlignment(mock, "candidate")
+				expectNoAlignment(mock, "target")
+			}
+			mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeReject, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+			mock.ExpectCommit()
+			r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{claims: []IdentityClaim{authoritativeClaim("candidate", "target")}}}, ConceptStore: ConceptStore{Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+			outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+			if err != nil || outcome != outcomeReject {
+				t.Fatalf("outcome=%s err=%v", outcome, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestReconcilerTripleProviderCrossScopeAuthorityReachesCoreScopeVeto(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(9, 0).UTC()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(surfaceTestRows(now, "candidate", Surface{Surface: "亮度"}))
+	mock.ExpectQuery("similarity\\(pref_label, \\$2\\)").WithArgs("_", "亮度", reconcileLexicalBlockMin, "candidate", reconcileLexicalTopK).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).AddRow(1, "catalog", "metric-1", "r1"))
+	mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePoliciesSQL)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"source", "release", "identity_authority", "allowed_scopes"}).AddRow("catalog", "r1", true, "{_}"))
+	mock.ExpectQuery(regexp.QuoteMeta(tripleConfiguredDeploymentsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"deployment_key", "source", "release", "enabled"}).AddRow("production", "catalog", "r1", true))
+	mock.ExpectQuery(regexp.QuoteMeta(tripleExternalMappingsSQL)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"source", "external_id", "release", "concept_id", "status", "scope"}).AddRow("catalog", "metric-1", "r1", "cross", "active", "other"))
+	mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnRows(addConceptRowScope(sqlmock.NewRows(conceptTestColumns()), "cross", "Luminance", "other", "active", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("cross").WillReturnRows(addConceptRowScope(sqlmock.NewRows(conceptTestColumns()), "cross", "Luminance", "other", "active", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("cross").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	expectNeverMergeFalse(mock, "candidate", "cross")
+	expectNoAlignment(mock, "candidate")
+	expectNoAlignment(mock, "cross")
+	mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeReject, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectCommit()
+	r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{TripleEvidenceProvider{DeploymentKeys: []string{"production"}}}, ConceptStore: ConceptStore{Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+	outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+	if err != nil || outcome != outcomeReject {
+		t.Fatalf("outcome=%s err=%v", outcome, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStaleCandidateIsAuditedBeforeTier5OrProviderReads(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(4, 0).UTC()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "stale", "active", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeReject, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
+	mock.ExpectCommit()
+	r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{panicProvider{}}, ConceptStore: ConceptStore{Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+	outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+	if err != nil || outcome != outcomeReject {
+		t.Fatalf("outcome=%s err=%v", outcome, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDecisionLogFailureRollsBackMergeTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(5, 0).UTC()
+	mock.ExpectQuery("status = 'provisional'.*gloss_source = 'auto:d11'").WithArgs("_", 500).WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+	live := sqlmock.NewRows(conceptTestColumns())
+	addConceptRow(live, "candidate", "亮度", "provisional", now)
+	addConceptRow(live, "target", "Luminance", "active", now)
+	mock.ExpectQuery("status IN \\('active', 'provisional'\\)").WithArgs("_").WillReturnRows(live)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	mock.ExpectQuery("similarity\\(pref_label, \\$2\\)").WithArgs("_", "亮度", reconcileLexicalBlockMin, "candidate", reconcileLexicalTopK).WillReturnRows(sqlmock.NewRows(conceptTestColumns()))
+	mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", "active", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", "active", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("target").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	expectNeverMergeFalse(mock, "candidate", "target")
+	expectNoAlignment(mock, "candidate")
+	expectNoAlignment(mock, "target")
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", "亮度", "provisional", now))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("target").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "target", "Luminance", "active", now))
+	expectNeverMergeFalse(mock, "candidate", "target")
+	expectNoAlignment(mock, "candidate")
+	expectNoAlignment(mock, "target")
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.semantic_assertions").WithArgs("candidate", "target").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE kb.keyword_concepts").WithArgs("candidate", "target").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.keyword_surfaces").WithArgs("candidate", "target").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WillReturnError(errors.New("audit unavailable"))
+	mock.ExpectRollback()
+	r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{authoritativeFixtureProvider{target: "target"}}, ConceptStore: ConceptStore{DB: db, Alignments: AlignmentsStore{Assertions: assertions.AssertionStore{DB: db}}}}
+	stats, err := r.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "audit unavailable") {
+		t.Fatalf("err=%v", err)
+	}
+	if stats != (ReconcileStats{Scanned: 1, Failed: 1}) {
+		t.Fatalf("stats=%+v", stats)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTargetlessDecisionBranchesAuditWithoutTargetLock(t *testing.T) {
+	now := time.Unix(6, 0).UTC()
+	t.Run("tier5 tie", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectDecisionPrefix(mock, now, "kubers", addConceptRow(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "a", "kuber", "active", now), "b", "kuberx", "active", now))
+		mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeDeferred, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectCommit()
+		r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{}}}
+		outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+		if err != nil || outcome != outcomeDeferred {
+			t.Fatalf("%s %v", outcome, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
-
-	t.Run("empty live set short-circuits to empty map", func(t *testing.T) {
-		r := &Reconciler{Embeddings: &fakeEmbeddingClient{}}
-		out, err := r.embedConcepts(ctx, nil)
-		if err != nil {
-			t.Fatalf("embedConcepts: %v", err)
+	t.Run("inactive authority", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectDecisionPrefix(mock, now, "亮度", sqlmock.NewRows(conceptTestColumns()))
+		mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "inactive", "Luminance", "provisional", now))
+		mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeDeferred, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectCommit()
+		r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{claims: []IdentityClaim{authoritativeClaim("candidate", "inactive")}}}}
+		outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+		if err != nil || outcome != outcomeDeferred {
+			t.Fatalf("%s %v", outcome, err)
 		}
-		if len(out) != 0 {
-			t.Errorf("expected empty map for no live concepts, got %+v", out)
-		}
-	})
-
-	t.Run("short vector list maps only present vectors", func(t *testing.T) {
-		r := &Reconciler{Embeddings: shortVectorClient{}}
-		out, err := r.embedConcepts(ctx, []Concept{c1, c2})
-		if err != nil {
-			t.Fatalf("embedConcepts: %v", err)
-		}
-		if len(out) != 1 {
-			t.Errorf("expected only the first concept to map, got %+v", out)
-		}
-		if _, ok := out["kwc_1"]; !ok {
-			t.Errorf("expected kwc_1 to have a vector, got %+v", out)
-		}
-		if _, ok := out["kwc_2"]; ok {
-			t.Errorf("expected kwc_2 to be absent (short response), got %+v", out)
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
-
-	t.Run("nil vectors skipped", func(t *testing.T) {
-		r := &Reconciler{Embeddings: &fakeEmbeddingClient{vectors: map[string][]float64{
-			"alpha": {1, 0}, // "beta" missing -> nil vector
-		}}}
-		out, err := r.embedConcepts(ctx, []Concept{c1, c2})
-		if err != nil {
-			t.Fatalf("embedConcepts: %v", err)
+	t.Run("tier5 tie multiple authority", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		tieRows := sqlmock.NewRows(conceptTestColumns())
+		addConceptRow(tieRows, "tie-a", "kuber", "active", now)
+		addConceptRow(tieRows, "tie-b", "kuberx", "active", now)
+		expectDecisionPrefix(mock, now, "kubers", tieRows)
+		rows := sqlmock.NewRows(conceptTestColumns())
+		addConceptRow(rows, "a", "A", "active", now)
+		addConceptRow(rows, "b", "B", "active", now)
+		mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnRows(rows)
+		mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeReject, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectCommit()
+		r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{claims: []IdentityClaim{authoritativeClaim("candidate", "a"), authoritativeClaim("candidate", "b")}}}}
+		outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+		if err != nil || outcome != outcomeReject {
+			t.Fatalf("%s %v", outcome, err)
 		}
-		if len(out) != 1 {
-			t.Errorf("expected one mapped vector, got %+v", out)
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
-		if _, ok := out["kwc_1"]; !ok {
-			t.Errorf("expected kwc_1 mapped, got %+v", out)
+	})
+	t.Run("none no claims no embeddings", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectDecisionPrefix(mock, now, "亮度", sqlmock.NewRows(conceptTestColumns()))
+		mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", emptyProposalAuditMatcher{}, emptyProposalAuditMatcher{}, outcomeNoCandidate, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectCommit()
+		r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{}}}
+		outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+		if err != nil || outcome != outcomeNoCandidate {
+			t.Fatalf("%s %v", outcome, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("tier5 contradictory authority", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectDecisionPrefix(mock, now, "kubernets", addConceptRow(sqlmock.NewRows(conceptTestColumns()), "local", "kubernetes", "active", now))
+		mock.ExpectQuery("WHERE concept_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "other", "K8s", "active", now))
+		mock.ExpectQuery("INSERT INTO kb.semid_decision_log").WithArgs("keyword_reconcile", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), outcomeReject, nil, nil, "keyword_reconciler", 0).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectCommit()
+		r := Reconciler{DB: db, Scope: "_", EvidenceProviders: []IdentityEvidenceProvider{claimsFixtureProvider{claims: []IdentityClaim{authoritativeClaim("candidate", "other")}}}}
+		outcome, err := r.decideCandidate(context.Background(), Concept{ConceptID: "candidate"}, nil)
+		if err != nil || outcome != outcomeReject {
+			t.Fatalf("%s %v", outcome, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
+
+type emptyProposalAuditMatcher struct{}
+
+func (emptyProposalAuditMatcher) Match(value driver.Value) bool {
+	raw, ok := value.(string)
+	if !ok {
+		return false
+	}
+	var audit reconcileAudit
+	return json.Unmarshal([]byte(raw), &audit) == nil && len(audit.Proposals) == 0 && len(audit.Claims) == 0 && audit.Outcome == outcomeNoCandidate
+}
+
+func expectDecisionPrefix(mock sqlmock.Sqlmock, now time.Time, label string, shortlist *sqlmock.Rows) {
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("WHERE concept_id = \\$1[[:space:]]+FOR UPDATE").WithArgs("candidate").WillReturnRows(addConceptRow(sqlmock.NewRows(conceptTestColumns()), "candidate", label, "provisional", now))
+	mock.ExpectQuery("ORDER BY surface_id FOR UPDATE").WithArgs("candidate").WillReturnRows(sqlmock.NewRows(strings.Split(surfaceColumns, ", ")))
+	mock.ExpectQuery("similarity\\(pref_label, \\$2\\)").WithArgs("_", label, reconcileLexicalBlockMin, "candidate", reconcileLexicalTopK).WillReturnRows(shortlist)
+}
+
+func expectNeverMergeFalse(mock sqlmock.Sqlmock, a, b string) {
+	if a > b {
+		a, b = b, a
+	}
+	mock.ExpectQuery("FROM kb.semid_never_merge").WithArgs("keyword", a, b).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+}
+
+func expectNoAlignment(mock sqlmock.Sqlmock, conceptID string) {
+	mock.ExpectQuery("FROM kb.semantic_assertions").WithArgs(conceptID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "subject_ref_id", "object_ref_kind", "object_ref_id", "status", "qualifiers", "confidence", "decision_reason"}))
+}
+
+func expectAlignment(mock sqlmock.Sqlmock, conceptID, termID string) {
+	mock.ExpectQuery("FROM kb.semantic_assertions").WithArgs(conceptID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "subject_ref_id", "object_ref_kind", "object_ref_id", "status", "qualifiers", "confidence", "decision_reason"}).
+			AddRow(1, conceptID, "ontology_term", termID, "accepted", []byte(`{"method":"fixture"}`), 1.0, "fixture"))
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }

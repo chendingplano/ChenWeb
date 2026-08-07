@@ -239,15 +239,16 @@ func TestTripleEvidenceProviderRetainsNonAuthorizingEvidence(t *testing.T) {
 	provider := TripleEvidenceProvider{DeploymentKeys: []string{"production"}}
 	deploy := []tripleDeploymentRow{{key: "production", source: "qudt", release: "3.1", enabled: true}}
 	tests := []struct {
-		name       string
-		row        tripleEvidenceRow
-		wantTarget string
+		name          string
+		row           tripleEvidenceRow
+		wantTarget    string
+		wantAuthority IdentityAuthority
 	}{
 		{name: "blank legacy ID", row: tripleEvidenceRow{id: 10, source: "legacy", externalID: "", release: "", allowedScopes: "{}"}},
 		{name: "missing mapping", row: tripleEvidenceRow{id: 11, source: "qudt", externalID: "missing", release: "3.1", authority: true}},
 		{name: "inactive mapping", row: tripleEvidenceRow{id: 12, source: "qudt", externalID: "old", release: "3.1", authority: true, target: "inactive", status: "deprecated", scope: "scope"}, wantTarget: "inactive"},
 		{name: "provisional mapping", row: tripleEvidenceRow{id: 13, source: "qudt", externalID: "new", release: "3.1", authority: true, target: "provisional", status: "provisional", scope: "scope"}, wantTarget: "provisional"},
-		{name: "scope mismatch", row: tripleEvidenceRow{id: 14, source: "qudt", externalID: "unit", release: "3.1", authority: true, target: "unit", status: "active", scope: "unit"}, wantTarget: "unit"},
+		{name: "scope mismatch remains authoritative for core veto", row: tripleEvidenceRow{id: 14, source: "qudt", externalID: "unit", release: "3.1", authority: true, target: "unit", status: "active", scope: "unit"}, wantTarget: "unit", wantAuthority: IdentityAuthorityAuthoritative},
 		{name: "non-authoritative source", row: tripleEvidenceRow{id: 15, source: "qudt", externalID: "proposal", release: "3.1", target: "proposal", status: "active", scope: "scope"}, wantTarget: "proposal"},
 	}
 	for _, tt := range tests {
@@ -257,7 +258,11 @@ func TestTripleEvidenceProviderRetainsNonAuthorizingEvidence(t *testing.T) {
 				keys, deployments = TripleEvidenceProvider{}, nil
 			}
 			claims := loadTripleClaims(t, keys, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"surface"}}, []tripleEvidenceRow{tt.row}, deployments)
-			if len(claims) != 1 || claims[0].TargetConceptID != tt.wantTarget || claims[0].Authority != IdentityAuthorityNonAuthoritative {
+			wantAuthority := tt.wantAuthority
+			if wantAuthority == "" {
+				wantAuthority = IdentityAuthorityNonAuthoritative
+			}
+			if len(claims) != 1 || claims[0].TargetConceptID != tt.wantTarget || claims[0].Authority != wantAuthority {
 				t.Fatalf("claims = %#v", claims)
 			}
 		})
