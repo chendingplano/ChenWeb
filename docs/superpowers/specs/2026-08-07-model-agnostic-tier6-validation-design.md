@@ -809,3 +809,397 @@ The alternatives considered for normalized merge authority were:
 - **Option C — evidence aggregation:** Combine several weaker claims into an automatic decision. Potentially useful later, but requires calibration before we know the available resources.
 
 **Decision: Option A.** Providers may normalize arbitrary evidence and relation types, but only an authoritative `exact_equivalent` claim may authorize Tier 6. The core validator owns this rule; adapters cannot opt into source-specific confidence thresholds or merge policies. Non-exact or non-authoritative claims remain useful for audit and review prioritization, but produce `deferred_unvalidated` when no stronger path decides the candidate.
+
+## 11. Background: Trigram
+PostgreSQL **trigram similarity** is a fuzzy string matching technique provided by the **`pg_trgm` extension**. Instead of treating text as words (like full-text search), it treats text as a sequence of overlapping **3-character substrings (trigrams)**. It is one of the most useful features for typo tolerance, approximate matching, and search-as-you-type.
+
+For a system like SemOS, trigram similarity is often a good complement to BM25 and embeddings because it solves a different problem: finding strings that are *lexically similar* rather than *semantically similar*.
+
+## How trigrams work
+
+Suppose we have the word:
+
+```
+postgres
+```
+
+`pg_trgm` conceptually pads the string with spaces and generates overlapping 3-character windows:
+
+```
+"  p"
+" po"
+"pos"
+"ost"
+"stg"
+"tgr"
+"gre"
+"res"
+"es "
+"s  "
+```
+
+(Exact padding rules are internal to PostgreSQL.)
+
+Now consider another word:
+
+```
+postgress
+```
+
+It shares almost all of the same trigrams.
+
+The similarity score is computed from the overlap between the trigram sets.
+
+The result is a number between
+
+```
+0.0   completely different
+1.0   identical
+```
+
+For example:
+
+| String A | String B  | Similarity |
+| -------- | --------- | ---------: |
+| postgres | postgres  |        1.0 |
+| postgres | postgress |       ~0.9 |
+| postgres | postgre   |       ~0.8 |
+| postgres | mysql     |       ~0.0 |
+
+---
+
+## Enabling pg_trgm
+
+```sql
+CREATE EXTENSION pg_trgm;
+```
+
+---
+
+## similarity()
+
+The basic function is
+
+```sql
+SELECT similarity('postgres', 'postgress');
+```
+
+Example output
+
+```
+ similarity
+------------
+0.888889
+```
+
+Another example
+
+```sql
+SELECT similarity('response time',
+                  'response latency');
+```
+
+might return something around
+
+```
+0.45
+```
+
+because many character sequences overlap.
+
+---
+
+## The `%` operator
+
+More useful than `similarity()` is the `%` operator.
+
+```sql
+SELECT *
+FROM metrics
+WHERE metric_name % 'respons time';
+```
+
+This returns rows whose similarity exceeds the configured threshold.
+
+Default threshold
+
+```sql
+SHOW pg_trgm.similarity_threshold;
+```
+
+Usually
+
+```
+0.3
+```
+
+You can change it
+
+```sql
+SET pg_trgm.similarity_threshold = 0.5;
+```
+
+Higher threshold
+
+* fewer results
+* higher precision
+
+Lower threshold
+
+* more results
+* higher recall
+
+---
+
+## Ordering by similarity
+
+Very common:
+
+```sql
+SELECT
+    metric_name,
+    similarity(metric_name, 'respons time') AS score
+FROM metrics
+ORDER BY score DESC;
+```
+
+Example
+
+```
+response time      0.95
+response latency   0.52
+latency            0.31
+```
+
+---
+
+## Fast indexing
+
+Without an index:
+
+```
+similarity(...)
+```
+
+must compare every row.
+
+With pg_trgm:
+
+```sql
+CREATE INDEX metric_name_trgm
+ON metrics
+USING GIN (metric_name gin_trgm_ops);
+```
+
+or
+
+```sql
+CREATE INDEX metric_name_trgm
+ON metrics
+USING GiST (metric_name gist_trgm_ops);
+```
+
+Then
+
+```sql
+WHERE metric_name % 'respons time'
+```
+
+becomes very fast even on millions of rows.
+
+GIN is usually preferred for lookup-heavy workloads, while GiST can be advantageous for some nearest-neighbor style queries and update patterns.
+
+---
+
+## Distance operator
+
+There is also
+
+```sql
+<
+->
+```
+
+(the "distance" operator)
+
+```sql
+SELECT
+    metric_name,
+    metric_name <-> 'respons time'
+FROM metrics
+ORDER BY metric_name <-> 'respons time';
+```
+
+Smaller distance means more similar.
+
+```
+0.0
+```
+
+means identical.
+
+---
+
+## KNN search
+
+GiST indexes support K-nearest-neighbor queries:
+
+```sql
+SELECT *
+FROM metrics
+ORDER BY metric_name <-> 'respons time'
+LIMIT 20;
+```
+
+This efficiently returns the closest matches without scanning the whole table.
+
+---
+
+## Trigram vs. Full-Text Search (BM25-like)
+
+This is where many people get confused.
+
+Suppose the query is
+
+```
+respons time
+```
+
+### Trigram
+
+Looks at characters.
+
+```
+respons
+response
+```
+
+These are very similar.
+
+Good.
+
+---
+
+Suppose
+
+```
+response time
+```
+
+vs
+
+```
+latency
+```
+
+Character overlap is tiny.
+
+Similarity is low.
+
+Yet they may mean the same thing.
+
+Trigram cannot tell.
+
+---
+
+### Full-text search
+
+Full-text search tokenizes text.
+
+```
+response
+time
+```
+
+becomes
+
+```
+response
+time
+```
+
+It knows nothing about character edits.
+
+```
+respons
+```
+
+becomes
+
+```
+respons
+```
+
+which is a different token.
+
+Unless stemming or dictionaries help, it will not match.
+
+---
+
+So
+
+| Feature              | Trigram | Full Text  |
+| -------------------- | ------- | ---------- |
+| Typo tolerant        | ✔       | Usually no |
+| Misspellings         | ✔       | Poor       |
+| Character similarity | ✔       | No         |
+| Word similarity      | No      | Yes        |
+| Semantic similarity  | No      | No         |
+| Fast indexing        | ✔       | ✔          |
+
+---
+
+## Trigram vs. Embeddings
+
+Embeddings solve a completely different problem.
+
+Query
+
+```
+response time
+```
+
+Embedding search might retrieve
+
+```
+latency
+```
+
+because they are semantically related.
+
+Trigram similarity will not.
+
+Conversely,
+
+```
+respons tiem
+```
+
+(an accidental misspelling)
+
+Embedding models may produce degraded vectors, while trigram similarity still recognizes the intended string because most character trigrams overlap.
+
+---
+
+## Where trigram shines in SemOS
+
+Given your architecture—BM25, vector search, graph traversal, and ontology-driven retrieval—trigram similarity fills an important lexical matching niche.
+
+Typical uses include:
+
+* Resolving user typos (`latncy` → `latency`)
+* Matching abbreviations or minor spelling variants before consulting a canonical alias database
+* Finding near-duplicate extracted keywords during reconciliation (e.g., `response time`, `response-time`, `response times`)
+* Suggesting likely metric or category names during interactive search
+* Detecting duplicate entity names during ingestion
+
+However, it should not replace semantic retrieval. A practical pipeline is often:
+
+1. Normalize text (case, punctuation, etc.).
+2. Check a canonical alias dictionary if available.
+3. Use trigram similarity to catch lexical variations and typos.
+4. Use BM25/full-text search for keyword relevance.
+5. Use embeddings for semantic similarity.
+6. Optionally expand results through graph traversal or ontology relationships.
+
+This layered approach leverages the strengths of each technique: deterministic lexical matching from trigrams, relevance scoring from BM25, semantic understanding from embeddings, and structured relationships from your knowledge graph.
