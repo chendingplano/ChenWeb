@@ -90,6 +90,8 @@ type OccurrenceRecord struct {
 	OccurrenceID     int64
 	ArtifactType     string
 	ArtifactID       string
+	FieldPath        string
+	RawName          string
 	ConceptID        string
 	NormKey          string
 	Scope            string
@@ -103,21 +105,45 @@ type CorpusData struct {
 }
 
 type ConceptInventory struct {
-	ConceptID         string   `json:"concept_id"`
-	PrefLabel         string   `json:"pref_label"`
-	Status            string   `json:"status"`
-	Frequency         int      `json:"frequency"`
-	EligibleFrequency int      `json:"eligible_frequency"`
-	ExactAuthority    bool     `json:"exact_authority"`
-	Languages         []string `json:"languages"`
-	Surfaces          []string `json:"surfaces"`
+	ConceptID         string            `json:"concept_id"`
+	PrefLabel         string            `json:"pref_label"`
+	Status            string            `json:"status"`
+	Frequency         int               `json:"frequency"`
+	EligibleFrequency int               `json:"eligible_frequency"`
+	ExactAuthority    bool              `json:"exact_authority"`
+	Languages         []string          `json:"observed_languages"`
+	ObservedSurfaces  []ObservedSurface `json:"observed_surfaces"`
+}
+
+type OccurrenceProvenance struct {
+	OccurrenceID int64  `json:"occurrence_id"`
+	ArtifactType string `json:"artifact_type"`
+	ArtifactID   string `json:"artifact_id"`
+	FieldPath    string `json:"field_path"`
+}
+
+type ObservedSurface struct {
+	Surface     string                 `json:"surface"`
+	NormKey     string                 `json:"norm_key"`
+	Lang        string                 `json:"lang"`
+	Frequency   int                    `json:"frequency"`
+	Occurrences []OccurrenceProvenance `json:"occurrences"`
+}
+
+type CatalogSurfaceProposal struct {
+	ConceptID string `json:"concept_id"`
+	Surface   string `json:"surface"`
+	NormKey   string `json:"norm_key"`
+	Lang      string `json:"lang"`
 }
 
 type BilingualBacklogItem struct {
-	ConceptID        string   `json:"concept_id"`
-	PrefLabel        string   `json:"pref_label"`
-	Frequency        int      `json:"frequency"`
-	MissingLanguages []string `json:"missing_languages"`
+	ConceptID                       string                   `json:"concept_id"`
+	PrefLabel                       string                   `json:"pref_label"`
+	Frequency                       int                      `json:"frequency"`
+	MissingLanguages                []string                 `json:"missing_languages"`
+	ObservedSurfaces                []ObservedSurface        `json:"observed_surfaces"`
+	ProposedMissingLanguageSurfaces []CatalogSurfaceProposal `json:"proposed_missing_language_surfaces"`
 }
 
 type ContextSensitiveSurface struct {
@@ -172,11 +198,8 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 		}
 	}
 
-	surfaceSets := make(map[string]map[string]struct{})
-	languageSets := make(map[string]map[string]struct{})
+	catalogByConcept := make(map[string][]SurfaceRecord)
 	normConcepts := make(map[string]map[string]struct{})
-	normSurfaces := make(map[string]map[string]struct{})
-	termConcepts := make(map[string]map[string]struct{})
 	for _, surface := range data.Surfaces {
 		if surface.Scope != acceptance.Scope {
 			continue
@@ -184,14 +207,20 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 		if _, ok := concepts[surface.ConceptID]; !ok {
 			continue
 		}
-		addSet(surfaceSets, surface.ConceptID, surface.Surface)
-		addSet(languageSets, surface.ConceptID, primaryLanguage(surface.Lang))
+		catalogByConcept[surface.ConceptID] = append(catalogByConcept[surface.ConceptID], surface)
 		addSet(normConcepts, surface.NormKey, surface.ConceptID)
-		addSet(normSurfaces, surface.NormKey, surface.Surface)
-		addSet(termConcepts, normalizedTerm(surface.Surface), surface.ConceptID)
 	}
-	for id, concept := range concepts {
-		addSet(termConcepts, normalizedTerm(concept.PrefLabel), id)
+	for id := range catalogByConcept {
+		sort.Slice(catalogByConcept[id], func(i, j int) bool {
+			left, right := catalogByConcept[id][i], catalogByConcept[id][j]
+			if left.Lang != right.Lang {
+				return left.Lang < right.Lang
+			}
+			if left.Surface != right.Surface {
+				return left.Surface < right.Surface
+			}
+			return left.NormKey < right.NormKey
+		})
 	}
 
 	selectedOccurrences := make([]OccurrenceRecord, 0, len(data.Occurrences))
@@ -214,14 +243,46 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 	totalFrequency := make(map[string]int)
 	eligibleFrequency := make(map[string]int)
 	normFrequency := make(map[string]int)
+	observed := make(map[string]map[string]*ObservedSurface)
+	observedLanguages := make(map[string]map[string]struct{})
+	normObservedSurfaces := make(map[string]map[string]struct{})
+	normObservedConcepts := make(map[string]map[string]struct{})
+	termConcepts := make(map[string]map[string]struct{})
 	for _, occurrence := range selectedOccurrences {
 		normFrequency[occurrence.NormKey]++
+		if occurrence.RawName != "" {
+			addSet(normObservedSurfaces, occurrence.NormKey, occurrence.RawName)
+		}
 		if _, ok := concepts[occurrence.ConceptID]; !ok {
 			continue
 		}
 		totalFrequency[occurrence.ConceptID]++
+		surface, lang := observedSurfaceIdentity(occurrence, catalogByConcept[occurrence.ConceptID])
+		key := surface + "\x00" + occurrence.NormKey + "\x00" + lang
+		if observed[occurrence.ConceptID] == nil {
+			observed[occurrence.ConceptID] = make(map[string]*ObservedSurface)
+		}
+		entry := observed[occurrence.ConceptID][key]
+		if entry == nil {
+			entry = &ObservedSurface{Surface: surface, NormKey: occurrence.NormKey, Lang: lang}
+			observed[occurrence.ConceptID][key] = entry
+		}
+		entry.Frequency++
+		entry.Occurrences = append(entry.Occurrences, OccurrenceProvenance{
+			OccurrenceID: occurrence.OccurrenceID, ArtifactType: occurrence.ArtifactType,
+			ArtifactID: occurrence.ArtifactID, FieldPath: occurrence.FieldPath,
+		})
+		addSet(observedLanguages, occurrence.ConceptID, lang)
+		addSet(normObservedSurfaces, occurrence.NormKey, surface)
+		addSet(normObservedConcepts, occurrence.NormKey, occurrence.ConceptID)
+		addSet(termConcepts, normalizedTerm(surface), occurrence.ConceptID)
 		if !contextNorms[occurrence.NormKey] {
 			eligibleFrequency[occurrence.ConceptID]++
+		}
+	}
+	for id, concept := range concepts {
+		if totalFrequency[id] > 0 {
+			addSet(termConcepts, normalizedTerm(concept.PrefLabel), id)
 		}
 	}
 
@@ -239,7 +300,7 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 			ConceptID: id, PrefLabel: concept.PrefLabel, Status: concept.Status,
 			Frequency: totalFrequency[id], EligibleFrequency: eligibleFrequency[id],
 			ExactAuthority: concept.ExactAuthority,
-			Languages:      sortedSet(languageSets[id]), Surfaces: sortedSet(surfaceSets[id]),
+			Languages:      sortedSet(observedLanguages[id]), ObservedSurfaces: sortedObservedSurfaces(observed[id]),
 		}
 		report.Inventory = append(report.Inventory, item)
 		report.EligibleFrequency += item.EligibleFrequency
@@ -248,10 +309,12 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 		} else if item.EligibleFrequency > 0 {
 			report.HighFrequencyUncovered = append(report.HighFrequencyUncovered, item)
 		}
-		missing := missingBilingualLanguages(languageSets[id])
+		missing := missingBilingualLanguages(observedLanguages[id])
 		if len(missing) > 0 {
 			report.UnresolvedBilingualPairs = append(report.UnresolvedBilingualPairs, BilingualBacklogItem{
-				ConceptID: id, PrefLabel: concept.PrefLabel, Frequency: item.Frequency, MissingLanguages: missing,
+				ConceptID: id, PrefLabel: concept.PrefLabel, Frequency: item.Frequency,
+				MissingLanguages: missing, ObservedSurfaces: item.ObservedSurfaces,
+				ProposedMissingLanguageSurfaces: catalogProposals(id, missing, catalogByConcept[id]),
 			})
 		}
 	}
@@ -261,7 +324,7 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 			continue
 		}
 		report.ContextSensitiveSurfaces = append(report.ContextSensitiveSurfaces, ContextSensitiveSurface{
-			NormKey: norm, Surfaces: sortedSet(normSurfaces[norm]), ConceptIDs: sortedSet(normConcepts[norm]), Frequency: normFrequency[norm],
+			NormKey: norm, Surfaces: sortedSet(normObservedSurfaces[norm]), ConceptIDs: sortedSet(normObservedConcepts[norm]), Frequency: normFrequency[norm],
 		})
 	}
 	sortInventory(report.Inventory)
@@ -330,6 +393,88 @@ func sortedSet(set map[string]struct{}) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func observedSurfaceIdentity(occurrence OccurrenceRecord, catalog []SurfaceRecord) (string, string) {
+	raw := occurrence.RawName
+	surface := raw
+	matchedLanguages := make(map[string]struct{})
+	for _, candidate := range catalog {
+		if (raw != "" && normalizedTerm(candidate.Surface) == normalizedTerm(raw)) ||
+			(raw == "" && candidate.NormKey == occurrence.NormKey) {
+			if surface == "" {
+				surface = candidate.Surface
+			}
+			matchedLanguages[primaryLanguage(candidate.Lang)] = struct{}{}
+		}
+	}
+	if len(matchedLanguages) == 1 {
+		for lang := range matchedLanguages {
+			return surface, lang
+		}
+	}
+	return surface, "und"
+}
+
+func sortedObservedSurfaces(grouped map[string]*ObservedSurface) []ObservedSurface {
+	out := make([]ObservedSurface, 0, len(grouped))
+	for _, item := range grouped {
+		sort.Slice(item.Occurrences, func(i, j int) bool {
+			left, right := item.Occurrences[i], item.Occurrences[j]
+			if left.ArtifactType != right.ArtifactType {
+				return left.ArtifactType < right.ArtifactType
+			}
+			if left.ArtifactID != right.ArtifactID {
+				return left.ArtifactID < right.ArtifactID
+			}
+			if left.FieldPath != right.FieldPath {
+				return left.FieldPath < right.FieldPath
+			}
+			return left.OccurrenceID < right.OccurrenceID
+		})
+		out = append(out, *item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Frequency != out[j].Frequency {
+			return out[i].Frequency > out[j].Frequency
+		}
+		if out[i].Surface != out[j].Surface {
+			return out[i].Surface < out[j].Surface
+		}
+		if out[i].Lang != out[j].Lang {
+			return out[i].Lang < out[j].Lang
+		}
+		return out[i].NormKey < out[j].NormKey
+	})
+	return out
+}
+
+func catalogProposals(conceptID string, missing []string, catalog []SurfaceRecord) []CatalogSurfaceProposal {
+	missingSet := make(map[string]bool, len(missing))
+	for _, lang := range missing {
+		missingSet[lang] = true
+	}
+	seen := make(map[string]bool)
+	var out []CatalogSurfaceProposal
+	for _, surface := range catalog {
+		lang := primaryLanguage(surface.Lang)
+		key := surface.Surface + "\x00" + surface.NormKey + "\x00" + lang
+		if !missingSet[lang] || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, CatalogSurfaceProposal{ConceptID: conceptID, Surface: surface.Surface, NormKey: surface.NormKey, Lang: lang})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Lang != out[j].Lang {
+			return out[i].Lang < out[j].Lang
+		}
+		if out[i].Surface != out[j].Surface {
+			return out[i].Surface < out[j].Surface
+		}
+		return out[i].NormKey < out[j].NormKey
+	})
 	return out
 }
 
@@ -435,7 +580,8 @@ func (r SQLReader) Load(ctx context.Context, query CoverageQuery) (CorpusData, e
 	rows.Close()
 
 	rows, err = r.DB.QueryContext(ctx, `
-		SELECT occurrence_id, artifact_type, artifact_id, COALESCE(concept_id, ''), norm_key, scope, resolution_status
+		SELECT occurrence_id, artifact_type, artifact_id, field_path, raw_name,
+		       COALESCE(concept_id, ''), norm_key, scope, resolution_status
 		FROM kb.keyword_occurrences
 		WHERE scope = $1
 		ORDER BY occurrence_id`, query.Scope)
@@ -445,7 +591,10 @@ func (r SQLReader) Load(ctx context.Context, query CoverageQuery) (CorpusData, e
 	defer rows.Close()
 	for rows.Next() {
 		var row OccurrenceRecord
-		if err := rows.Scan(&row.OccurrenceID, &row.ArtifactType, &row.ArtifactID, &row.ConceptID, &row.NormKey, &row.Scope, &row.ResolutionStatus); err != nil {
+		if err := rows.Scan(
+			&row.OccurrenceID, &row.ArtifactType, &row.ArtifactID, &row.FieldPath,
+			&row.RawName, &row.ConceptID, &row.NormKey, &row.Scope, &row.ResolutionStatus,
+		); err != nil {
 			return CorpusData{}, fmt.Errorf("scan occurrence: %w", err)
 		}
 		data.Occurrences = append(data.Occurrences, row)
