@@ -585,7 +585,10 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 # disapprove endpoint saves the operator's comments and reviewer, marks the
 # draft disapproved, and never imports. Both fail closed unless the source is
 # downloaded with a pending draft. Approval is a local file edit plus import;
-# nothing is fetched from the network.
+# nothing is fetched from the network. A release already registered with
+# byte-identical content (for example after a re-download and re-approval) is
+# treated as an idempotent replay instead of an immutability error; content
+# drift still fails and requires a new release/snapshot identity.
 # Storage defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 ```
 

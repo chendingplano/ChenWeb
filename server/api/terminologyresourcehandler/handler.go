@@ -7,6 +7,7 @@ package terminologyresourcehandler
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -171,20 +172,49 @@ func ApproveResource(c echo.Context) error {
 	outcome := importOutcome{}
 	manifestPath := filepath.Join(dir, string(id), "manifest.draft.json")
 	if db := ApiTypes.ProjectDBHandle; db != nil {
-		result, importErr := (terminology.Runner{DB: db}).Import(c.Request().Context(), manifestPath)
-		if importErr != nil {
-			outcome.Error = importErr.Error()
-			logger.Warn("import after approval failed", "source", string(id), "err", importErr)
-		} else {
+		if alreadyImportedIdentical(c.Request().Context(), db, manifestPath) {
+			// The release is already registered with byte-identical content
+			// (for example after a re-download and re-approval): the desired
+			// end state already holds, so the import is an idempotent replay.
 			outcome.OK = true
-			outcome.Result = &result
-			logger.Info("imported approved terminology release", "source", result.Source, "release", result.Release, "replayed", result.Replayed)
+			logger.Info("approved terminology release already imported with identical content", "source", string(id))
+		} else {
+			result, importErr := (terminology.Runner{DB: db}).Import(c.Request().Context(), manifestPath)
+			if importErr != nil {
+				outcome.Error = importErr.Error()
+				logger.Warn("import after approval failed", "source", string(id), "err", importErr)
+			} else {
+				outcome.OK = true
+				outcome.Result = &result
+				logger.Info("imported approved terminology release", "source", result.Source, "release", result.Release, "replayed", result.Replayed)
+			}
 		}
 	} else {
 		outcome.Error = "database handle is not configured; run terminology-import import manually"
 	}
 	res, _ := terminology.ResourceByID(id)
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome})
+}
+
+// alreadyImportedIdentical reports whether the approved local manifest is an
+// exact-content replay of an already imported release: the release exists in
+// kb.keyword_sources and its registered content checksum matches the
+// manifest's. The immutable release guard would otherwise reject the
+// re-import because a re-download/re-approval changes retrieved_at and
+// approved_at, so this treats identical content as an idempotent replay.
+func alreadyImportedIdentical(ctx context.Context, db *sql.DB, manifestPath string) bool {
+	manifest, _, err := terminology.ParseAndVerifyManifest(manifestPath)
+	if err != nil {
+		return false
+	}
+	var registered string
+	if err := db.QueryRowContext(ctx,
+		`SELECT content_checksum FROM kb.keyword_sources WHERE source = $1 AND release = $2`,
+		manifest.Policy.Source, manifest.Policy.Release,
+	).Scan(&registered); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(registered), strings.TrimSpace(manifest.Policy.ContentChecksum))
 }
 
 // DisapproveResource records an operator rejection of one pending draft

@@ -307,7 +307,9 @@
   and the operator's review comments into the draft manifest, then starts the
   offline import of the now-approved local manifest. It fails closed when the
   source is not downloaded, has no draft, or is already decided. Approval is
-  persisted even if the import fails so the operator can retry.
+  persisted even if the import fails so the operator can retry; a release
+  already registered with byte-identical content is replayed idempotently
+  rather than rejected by the immutable-release guard.
 - `POST /api/v1/terminology-resources/:source/disapprove` saves the operator's
   review comments and reviewer, marks the draft `disapproved`, and never
   imports anything. It fails closed on the same preconditions.

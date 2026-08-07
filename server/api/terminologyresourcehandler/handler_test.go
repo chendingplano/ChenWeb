@@ -1,14 +1,17 @@
 package terminologyresourcehandler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
@@ -507,4 +510,157 @@ func TestDisapproveResourceFailsClosed(t *testing.T) {
 			t.Fatalf("status = %d, want 409", rec.Code)
 		}
 	})
+}
+
+// writeQUDTDraftFromFixture writes a pending QUDT draft manifest plus its
+// artifact (from the terminology conformance fixture) into sourceDir, so the
+// post-approval manifest passes ParseAndVerifyManifest.
+func writeQUDTDraftFromFixture(t *testing.T, sourceDir string) {
+	t.Helper()
+	fixtureDir := filepath.Join("..", "ontology", "terminology", "testdata", "fixtures", "qudt")
+	raw, err := os.ReadFile(filepath.Join(fixtureDir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var draft map[string]any
+	if err := json.Unmarshal(raw, &draft); err != nil {
+		t.Fatal(err)
+	}
+	policy := draft["policy"].(map[string]any)
+	policy["license_review_status"] = "pending_review"
+	delete(policy, "approved_by")
+	delete(policy, "approved_at")
+	draftB, err := json.Marshal(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), draftB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ttl, err := os.ReadFile(filepath.Join(fixtureDir, "quantity-kinds.ttl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "quantity-kinds.ttl"), ttl, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApproveResourceAlreadyImportedIsReplay(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMINOLOGY_DIR", dir)
+	sourceDir := filepath.Join(dir, string(terminology.ResourceQUDT))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"qudt","downloaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeQUDTDraftFromFixture(t, sourceDir)
+
+	// The release is already registered with byte-identical content, so the
+	// post-approval import must be an idempotent replay, not an error.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT content_checksum FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
+		WithArgs("qudt-quantity-kind", "3.5.0").
+		WillReturnRows(sqlmock.NewRows([]string{"content_checksum"}).AddRow("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"))
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/qudt/approve", nil)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c := e.NewContext(req, rec)
+	c.SetParamNames("source")
+	c.SetParamValues("qudt")
+	if err := c.Request().ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	c.Request().Form.Set("approved_by", "alice@example.test")
+
+	if err := ApproveResource(c); err != nil {
+		t.Fatalf("ApproveResource: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Resource resourceView `json:"resource"`
+		Import   struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"import"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Resource.ReviewStatus != "approved" {
+		t.Fatalf("review_status = %q, want approved", body.Resource.ReviewStatus)
+	}
+	if !body.Import.OK || body.Import.Error != "" {
+		t.Fatalf("import outcome = %+v, want an ok replay without an error", body.Import)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestAlreadyImportedIdenticalRejectsDrift(t *testing.T) {
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, string(terminology.ResourceQUDT))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The helper parses a valid approved manifest, so reuse the conformance
+	// fixture as-is (approved policy + artifact) instead of a pending draft.
+	fixtureDir := filepath.Join("..", "ontology", "terminology", "testdata", "fixtures", "qudt")
+	raw, err := os.ReadFile(filepath.Join(fixtureDir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ttl, err := os.ReadFile(filepath.Join(fixtureDir, "quantity-kinds.ttl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "quantity-kinds.ttl"), ttl, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(sourceDir, "manifest.draft.json")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	t.Run("missing release is not a replay", func(t *testing.T) {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT content_checksum FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
+			WithArgs("qudt-quantity-kind", "3.5.0").
+			WillReturnError(sql.ErrNoRows)
+		if alreadyImportedIdentical(t.Context(), db, manifestPath) {
+			t.Fatal("unregistered release must not be treated as a replay")
+		}
+	})
+
+	t.Run("different checksum is drift, not a replay", func(t *testing.T) {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT content_checksum FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
+			WithArgs("qudt-quantity-kind", "3.5.0").
+			WillReturnRows(sqlmock.NewRows([]string{"content_checksum"}).AddRow("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"))
+		if alreadyImportedIdentical(t.Context(), db, manifestPath) {
+			t.Fatal("a different registered checksum must not be treated as a replay")
+		}
+	})
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
 }
