@@ -203,14 +203,14 @@
 - A separate provenance-preserving negative promotion records a reviewed scoped non-equivalence as a `never_merge` veto linked to its source triples, reviewer, and decision timestamp. Non-equivalence never becomes a lowered score.
 - Proposal-only, context-only, or non-exact relations cannot be promoted as authoritative evidence.
 
-- [ ] Add failing QUDT tests demonstrating preservation of `en`, `zh`, `fr`, and `und`, exact versus `wikidataMatch`, and deprecation/replacement.
-- [ ] Add a SIRP/QUDT fixture proving QUDT Luminance → SIRP LUMA normalization through an explicit exact crosswalk, and proving the adjacent Wikidata mapping stays non-authoritative.
-- [ ] Add failing promotion tests for unknown concepts, provisional targets, scope mismatch, non-authoritative policy, relation mismatch, conflicting unit/dimension, conflicting alignment, authoritative non-equivalence, and full-triple idempotence.
-- [ ] Add failing negative-promotion tests for incomplete provenance/scope, proposal-only distinctions, and a conflict where positive identity exists but the authoritative `never_merge` veto wins.
-- [ ] Extract/implement the QUDT adapter and keep the existing command functional.
-- [ ] Implement reviewed positive promotion into `keyword_external_ids`/`keyword_surface_evidence` and negative promotion into the provenance-linked `never_merge` path.
-- [ ] Run QUDT, terminology, and keyword tests.
-- [ ] Commit with `jj commit -m "ontology: preserve QUDT semantics and promote reviewed identities"`.
+- [x] Add failing QUDT tests demonstrating preservation of `en`, `zh`, `fr`, and `und`, exact versus `wikidataMatch`, and deprecation/replacement.
+- [x] Add a SIRP/QUDT fixture proving QUDT Luminance → SIRP LUMA normalization through an explicit exact crosswalk, and proving the adjacent Wikidata mapping stays non-authoritative.
+- [x] Add failing promotion tests for unknown concepts, provisional targets, scope mismatch, non-authoritative policy, relation mismatch, conflicting unit/dimension, conflicting alignment, authoritative non-equivalence, and full-triple idempotence.
+- [x] Add failing negative-promotion tests for incomplete provenance/scope, proposal-only distinctions, and a conflict where positive identity exists but the authoritative `never_merge` veto wins.
+- [x] Extract/implement the QUDT adapter and keep the existing command functional.
+- [x] Implement reviewed positive promotion into `keyword_external_ids`/`keyword_surface_evidence` and negative promotion into the provenance-linked `never_merge` path.
+- [x] Run QUDT, terminology, and keyword tests.
+- [x] Commit with `jj commit -m "ontology: preserve QUDT semantics and promote reviewed identities"`.
 
 ## Task 8: Live acceptance, documentation, and final review
 

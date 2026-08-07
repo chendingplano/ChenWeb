@@ -1,0 +1,41 @@
+{
+  "adapter": "qudt-quantity-kind",
+  "policy": {
+    "provider_id": "qudt",
+    "source": "qudt-quantity-kind",
+    "source_subset": "quantity-kinds",
+    "release": "3.5.0",
+    "retrieved_at": "2026-08-07T00:00:00Z",
+    "content_checksum": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "license": "CC-BY-4.0",
+    "license_review_status": "approved",
+    "authority_role": "exact_identity_authority",
+    "authoritative_relations": [
+      "exact_equivalent"
+    ],
+    "allowed_scopes": [
+      "quantity"
+    ],
+    "languages": [
+      "en",
+      "fr",
+      "zh",
+      "und"
+    ],
+    "adapter_version": "3.5.0",
+    "provenance_locator": "https://qudt.org/vocab/quantitykind",
+    "approved_by": "ontology-board",
+    "approved_at": "2026-08-07T00:00:00Z",
+    "identity_authority": true,
+    "notes": "synthetic QUDT conformance fixture"
+  },
+  "artifacts": [
+    {
+      "id": "quantity-kinds.ttl",
+      "path": "quantity-kinds.ttl",
+      "sha256": "c681becbf57ecbd786c58dd690e16b591c437d6dda1ce81825209976cbad1052",
+      "media_type": "text/turtle",
+      "provenance_locator": "https://qudt.org/vocab/quantitykind/quantity-kinds.ttl"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix qudt: <http://qudt.org/schema/qudt/> .
+
+<http://qudt.org/vocab/quantitykind/Luminance> a qudt:QuantityKind ;
+    rdfs:label "Luminance"@en ;
+    rdfs:label "Luminance"@en ;
+    rdfs:label "亮度"@zh ;
+    rdfs:label "Luminance énergétique"@fr ;
+    rdfs:label "luminance"@und ;
+    qudt:symbol "Lv" ;
+    qudt:siExactMatch <https://si-digital-framework.org/quantities/LUMA> ;
+    qudt:wikidataMatch <http://www.wikidata.org/entity/Q355386> ;
+    skos:broader <http://qudt.org/vocab/quantitykind/RadiometricQuantity> .
+
+<http://qudt.org/vocab/quantitykind/RadiometricQuantity> a qudt:QuantityKind ;
+    rdfs:label "Radiometric Quantity"@en .
+
+<http://qudt.org/vocab/quantitykind/Brightness> a qudt:QuantityKind ;
+    rdfs:label "Brightness"@en ;
+    rdfs:label "视亮度"@zh ;
+    skos:related <http://qudt.org/vocab/quantitykind/Luminance> .
+
+<http://qudt.org/vocab/quantitykind/LuminousIntensityOld> a qudt:QuantityKind ;
+    owl:deprecated true ;
+    rdfs:label "luminous intensity (obsolete)"@en .
+
+<http://qudt.org/vocab/quantitykind/LuminousIntensityNew> a qudt:QuantityKind ;
+    rdfs:label "luminous intensity"@en ;
+    qudt:replaces <http://qudt.org/vocab/quantitykind/LuminousIntensityOld> .

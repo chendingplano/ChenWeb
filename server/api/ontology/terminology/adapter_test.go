@@ -22,6 +22,7 @@ var adapterFixtures = []adapterFixture{
 	{"iec", "testdata/fixtures/iec", IECSeedAdapter{}},
 	{"wikidata", "testdata/fixtures/wikidata", WikidataAdapter{}},
 	{"ucum", "testdata/fixtures/ucum", UCUMAdapter{}},
+	{"qudt", "testdata/fixtures/qudt", QUDTAdapter{}},
 }
 
 func convertFixture(t *testing.T, fixture adapterFixture) (keywords.SourcePolicy, CatalogSnapshot) {
