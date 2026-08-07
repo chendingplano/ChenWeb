@@ -121,20 +121,20 @@ Only `auto_merge` reaches application. Direction is fixed: `absorbed=scanned D11
 
 Authorization and application occur in one database transaction under a shared identity-lock protocol:
 
-Before reading or changing identity state, acquire transaction-scoped PostgreSQL advisory locks for both concept IDs in sorted order. The lock key is a stable hash of `(family, concept_id)`. The same helper is mandatory in every domain writer that can change the decision while it is in flight:
+Before reading or changing keyword identity state, acquire one transaction-scoped PostgreSQL advisory lock with a stable, namespaced key for the whole keyword identity family. The same helper is mandatory in every domain writer that can change a decision while it is in flight:
 
 - automatic and manual concept merge;
 - `NeverMergeStore.Add`/remove for the affected keyword concepts;
 - `AlignmentsStore.EnsureAccepted`, retraction, and merge-follow;
 - external-ID and surface-evidence create/update/delete operations.
 
-Writers acquire all affected keys in sorted order before their reads or writes. This serializes an absent-veto check with a concurrent veto insertion; locking only existing rows is insufficient because an absent row cannot be row-locked. Direct SQL that bypasses domain stores is administrative repair and must hold the same advisory locks or run while reconciliation is stopped.
+This deliberately serializes keyword identity mutations across scopes. The minimum reconciliation loop is offline and identity writes are rare; the lower write concurrency buys a simple invariant that also covers global external identities whose affected concepts cannot be known before lookup. Concept and evidence rows are still row-locked after the family lock. This serializes an absent-veto check with a concurrent veto insertion; locking only existing rows is insufficient because an absent row cannot be row-locked. Direct SQL that bypasses domain stores is administrative repair and must hold the same family lock or run while reconciliation is stopped.
 
 After acquiring the locks:
 
 1. Lock both concept rows and recheck candidate status/origin, active survivor, equal concept scope, and requested run scope.
 2. Lock every surface row for both concepts. Reject when an absorbed surface is locked. Recompute digit signatures over all surfaces; when either concept has digit-bearing surfaces, the two sets must agree exactly. This is conservative by design.
-3. Lock the chosen `keyword_sources`, `keyword_surface_evidence`, and `keyword_external_ids` rows and revalidate the authoritative triples and `identity_authority` flag.
+3. Rerun the exhaustive authoritative-mapping query for every evidence triple on the candidate while holding the family lock. Reject unless the active target set is still exactly the chosen singleton. Lock all source, surface-evidence, and external-ID rows returned by that exhaustive query and revalidate `identity_authority`; revalidating only the originally chosen rows is insufficient.
 4. Recheck `kb.semid_never_merge` inside the transaction.
 5. Require a wired `AlignmentsStore`; recheck its different-term conflict and perform alignment-follow inside the transaction.
 6. Apply the tombstone and surface re-point with `origin_concept` provenance.
@@ -194,7 +194,8 @@ Down sequence first aborts with a clear error if dropping release would collapse
 - Automatic direction always absorbs the scanned D11 provisional into an active target; provisional targets defer.
 - Existing `never_merge`, all-surface digit, absorbed-surface lock, alignment, and scope vetoes dominate positive evidence and are rechecked in the merge transaction.
 - Retracting evidence concurrently with reconciliation either completes before validation and prevents the merge, or blocks until the merge transaction commits; it cannot invalidate authorization between validation and apply.
-- Concurrent insertion of `never_merge` or a conflicting alignment follows the same advisory-lock ordering: either the veto commits first and rejects the merge, or the merge commits first and the later writer observes the tombstone/current identity before deciding.
+- Concurrent insertion of `never_merge`, a conflicting alignment, new surface evidence, or a conflicting external mapping follows the same family-lock protocol: either the mutation commits first and the exhaustive in-transaction reread rejects the merge, or the merge commits first and the later writer observes the tombstone/current identity before deciding.
+- A dedicated concurrency test inserts a second authoritative mapping to another active target after proposal assembly; it must block on the family lock or commit first and force the exhaustive reread to reject.
 - Exhaustive authoritative mappings are never truncated by embedding top K; authority overflow or lookup failure fails closed.
 - `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
 - SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, both source/release foreign keys, and guarded Down behavior.
