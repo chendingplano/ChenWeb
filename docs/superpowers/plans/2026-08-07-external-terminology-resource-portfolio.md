@@ -296,13 +296,21 @@
   (`pending_review`, `approved`, or empty) per downloaded resource.
 - The Review page (System Admin > Resources > Review External Resources) lists
   only downloaded resources whose draft manifest is still `pending_review`,
-  in the same card style as the External Terminology Resources page, with the
-  approval checklist (license/role/scope/relations/checksum confirmation,
-  `approved_by`/`approved_at`, then `terminology-import`).
+  in the same card style as the External Terminology Resources page.
+- `POST /api/v1/terminology-resources/:source/approve` completes the operator
+  license review in place: it writes `license_review_status=approved` plus
+  `approved_by` (authenticated user email unless overridden) and `approved_at`
+  into the draft manifest. It fails closed when the source is not downloaded,
+  has no draft, or is already approved. Approving never imports anything.
+- Each pending card has a "Mark approved" button (with confirmation) that
+  calls the approve API and removes the resource from the list.
 
 - [x] Surface `review_status` from the draft manifest in the resources API.
 - [x] Add the Review page and filter to downloaded + `pending_review` only.
 - [x] Add fetch-package and handler tests for pending/approved/no-draft states.
+- [x] Implement `POST .../:source/approve` with fail-closed state checks and
+      logging; add terminology + handler tests.
+- [x] Add the "Mark approved" button to the Review page.
 - [x] Run go tests/build/vet, svelte-check, and eslint on the new frontend files.
 - [x] Update §13.2 and the documentation-impact section; commit with `jj`.
 

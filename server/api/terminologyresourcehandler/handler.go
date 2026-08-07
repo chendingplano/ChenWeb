@@ -7,6 +7,7 @@ package terminologyresourcehandler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
+	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
@@ -106,6 +108,48 @@ func ListResources(c echo.Context) error {
 		views = append(views, viewFor(dir, res, st))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "resources": views})
+}
+
+// ApproveResource completes the operator license review of one pending draft
+// manifest: it records license_review_status=approved plus approved_by
+// (authenticated user email unless the body overrides it) and approved_at.
+func ApproveResource(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_TER_001")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	dir := terminologyDir()
+	if dir == "" {
+		logger.Error("TERMINOLOGY_DIR is not configured")
+		return c.JSON(http.StatusInternalServerError, errorResponse{false, "TERMINOLOGY_DIR or DATA_HOME_DIR is not set"})
+	}
+	id := terminology.ResourceID(c.Param("source"))
+	if _, ok := terminology.ResourceByID(id); !ok {
+		return c.JSON(http.StatusNotFound, errorResponse{false, "unknown resource: " + string(id)})
+	}
+	approvedBy := strings.TrimSpace(c.FormValue("approved_by"))
+	if approvedBy == "" {
+		if u := rc.IsAuthenticated(); u != nil {
+			approvedBy = strings.TrimSpace(u.Email)
+		}
+	}
+	if approvedBy == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "approved_by is required"})
+	}
+	st, err := terminology.ApproveDraft(dir, id, approvedBy, time.Now().UTC())
+	if err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, terminology.ErrNotDownloaded) ||
+			errors.Is(err, terminology.ErrNoDraftManifest) ||
+			errors.Is(err, terminology.ErrAlreadyApproved) {
+			code = http.StatusConflict
+		}
+		logger.Warn("approve terminology draft failed", "source", string(id), "err", err)
+		return c.JSON(code, errorResponse{false, err.Error()})
+	}
+	logger.Info("approved terminology draft", "source", string(id), "approved_by", approvedBy)
+	res, _ := terminology.ResourceByID(id)
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st)})
 }
 
 // DownloadResource fetches one resource and returns its updated status.

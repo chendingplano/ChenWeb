@@ -571,10 +571,15 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 # Admin page API (System Admin > Resources > External Terminology Resources):
 #   GET  /api/v1/terminology-resources
 #   POST /api/v1/terminology-resources/:source/download
+#   POST /api/v1/terminology-resources/:source/approve   (operator license review)
 # Each response includes review_status (pending_review | approved | "") read
 # from the source's manifest.draft.json. The Review page (System Admin >
 # Resources > Review External Resources) lists only downloaded resources whose
-# review_status is still pending_review.
+# review_status is still pending_review. The approve endpoint completes the
+# review in place: license_review_status=approved plus approved_by (signed-in
+# user email unless overridden) and approved_at; it fails closed unless the
+# source is downloaded with a pending draft. Approval is a local file edit and
+# never imports.
 # Storage defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 ```
 

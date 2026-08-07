@@ -299,6 +299,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// local artifacts + unapproved draft manifests under TERMINOLOGY_DIR.
 	apiGroup.GET("/terminology-resources", terminologyresourcehandler.ListResources)
 	apiGroup.POST("/terminology-resources/:source/download", terminologyresourcehandler.DownloadResource)
+	apiGroup.POST("/terminology-resources/:source/approve", terminologyresourcehandler.ApproveResource)
 
 	// Training-video management (Resources > Videos > Training).
 	// Filesystem storage under VIDEO_DIR + kb.videos metadata.

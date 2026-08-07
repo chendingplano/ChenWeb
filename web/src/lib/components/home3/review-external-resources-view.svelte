@@ -2,11 +2,13 @@
 	import { onMount } from 'svelte';
 	import {
 		listTerminologyResources,
+		approveTerminologyResource,
 		type TerminologyResource
 	} from '$lib/services/terminologyResourceService';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import ClipboardCheckIcon from '@lucide/svelte/icons/clipboard-check';
+	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -18,6 +20,7 @@
 	let accentTint = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
 	let amber = $derived(darkMode ? '#FBBF24' : '#D97706');
 	let amberTint = $derived(darkMode ? 'rgba(251,191,36,0.15)' : 'rgba(217,119,6,0.10)');
+	let green = $derived(darkMode ? '#34D399' : '#059669');
 	let dangerColor = $derived(darkMode ? '#F87171' : '#DC2626');
 	let dangerTint = $derived(darkMode ? 'rgba(248,113,113,0.15)' : 'rgba(220,38,38,0.10)');
 	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
@@ -28,6 +31,7 @@
 	let resources = $state<TerminologyResource[]>([]);
 	let loading = $state(false);
 	let pageError = $state<string | null>(null);
+	let approving = $state<Record<string, boolean>>({});
 
 	// Only downloaded resources whose draft manifest is still pending review.
 	let pending = $derived(
@@ -70,6 +74,25 @@
 			pageError = e instanceof Error ? e.message : 'Failed to load terminology resources';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function approve(r: TerminologyResource) {
+		if (
+			!confirm(
+				`Approve the "${r.name}" draft manifest? This records license_review_status=approved with the signed-in user and removes it from this list.`
+			)
+		) {
+			return;
+		}
+		approving = { ...approving, [r.id]: true };
+		try {
+			await approveTerminologyResource(r.id);
+			await refresh();
+		} catch (e) {
+			pageError = e instanceof Error ? e.message : `Failed to approve ${r.name}`;
+		} finally {
+			approving = { ...approving, [r.id]: false };
 		}
 	}
 </script>
@@ -231,12 +254,12 @@
 				>
 					<div class="font-medium" style="color:{textPrimary};">What approval requires</div>
 					<ul class="mt-1 list-disc pl-4" style="color:{textSecondary};">
-						<li>Confirm license, role, scopes, relations, and checksum.</li>
+						<li>Confirm license, role, scopes, relations, and checksum in {r.manifest_draft}.</li>
 						<li>
-							Set <code class="font-mono" style="color:{mono};">license_review_status</code> to
-							<code class="font-mono" style="color:{mono};">approved</code> and add
-							<code class="font-mono" style="color:{mono};">approved_by</code> /
-							<code class="font-mono" style="color:{mono};">approved_at</code> in {r.manifest_draft}.
+							Mark approved below to write <code class="font-mono" style="color:{mono};"
+								>license_review_status</code
+							>, <code class="font-mono" style="color:{mono};">approved_by</code>, and
+							<code class="font-mono" style="color:{mono};">approved_at</code>.
 						</li>
 						<li>
 							Import with <code class="font-mono" style="color:{mono};"
@@ -244,6 +267,19 @@
 							>.
 						</li>
 					</ul>
+				</div>
+
+				<!-- Approve action -->
+				<div class="mt-auto pt-3">
+					<button
+						onclick={() => approve(r)}
+						disabled={approving[r.id]}
+						class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+						style="background:{green}; color:#FFFFFF; border:none;"
+					>
+						<CheckCircle2Icon class="h-3.5 w-3.5" />
+						{approving[r.id] ? 'Approving…' : 'Mark approved'}
+					</button>
 				</div>
 
 				<!-- Notes -->

@@ -78,3 +78,29 @@ export async function downloadTerminologyResource(
 	}
 	return body.resource;
 }
+
+/** Mark one pending draft manifest as license-reviewed and approved. The
+ * server records approved_by as the authenticated user unless overridden. */
+export async function approveTerminologyResource(
+	source: string,
+	approvedBy?: string,
+	fetchFn: typeof fetch = fetch
+): Promise<TerminologyResource> {
+	const body = approvedBy ? `approved_by=${encodeURIComponent(approvedBy)}` : '';
+	const res = await fetchFn(`/api/v1/terminology-resources/${encodeURIComponent(source)}/approve`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
+		body: body || undefined
+	});
+	let data: DownloadResponse;
+	try {
+		data = (await res.json()) as DownloadResponse;
+	} catch {
+		throw new Error(`approve failed: ${res.status}`);
+	}
+	if (!res.ok || !data.status) {
+		throw new Error((data as { error?: string })?.error ?? `approve failed: ${res.status}`);
+	}
+	return data.resource;
+}

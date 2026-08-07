@@ -31,6 +31,17 @@ import (
 // keywords.SourcePolicy.Validate, so a draft can never be imported.
 const LicenseReviewPending = "pending_review"
 
+// Approval-state sentinel errors returned by ApproveDraft so the handler can
+// map them to client-visible status codes without string matching.
+var (
+	// ErrNotDownloaded means the source has no downloaded artifact.
+	ErrNotDownloaded = errors.New("resource is not downloaded")
+	// ErrNoDraftManifest means the source has no manifest.draft.json to approve.
+	ErrNoDraftManifest = errors.New("resource has no draft manifest to approve")
+	// ErrAlreadyApproved means the draft manifest already passed review.
+	ErrAlreadyApproved = errors.New("draft manifest is already approved")
+)
+
 const defaultUserAgent = "ChenWeb terminology-fetch/1.0 (go)"
 
 // ResourceID identifies one portfolio resource the page can manage.
@@ -300,6 +311,50 @@ func DraftReviewStatus(destDir string, id ResourceID) (string, error) {
 		return "", fmt.Errorf("decode %s draft manifest: %w", id, err)
 	}
 	return strings.TrimSpace(m.Policy.LicenseReviewStatus), nil
+}
+
+// ApproveDraft completes the operator license review of one downloaded
+// source's draft manifest in place: it sets license_review_status to approved
+// and records approved_by/approved_at. It fails closed when the source is not
+// downloaded, has no draft, or is already approved. The approved manifest is
+// still a local file; nothing is imported.
+func ApproveDraft(destDir string, id ResourceID, approvedBy string, at time.Time) (FetchStatus, error) {
+	if strings.TrimSpace(approvedBy) == "" {
+		return FetchStatus{}, errors.New("approved_by is required")
+	}
+	st, err := ReadStatus(destDir, id)
+	if err != nil {
+		return st, err
+	}
+	if !st.Downloaded {
+		return st, fmt.Errorf("%w: %s", ErrNotDownloaded, id)
+	}
+	manifestPath := filepath.Join(destDir, string(id), "manifest.draft.json")
+	b, err := os.ReadFile(manifestPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return st, fmt.Errorf("%w: %s", ErrNoDraftManifest, id)
+	}
+	if err != nil {
+		return st, fmt.Errorf("read %s draft manifest: %w", id, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return st, fmt.Errorf("decode %s draft manifest: %w", id, err)
+	}
+	if m.Policy.LicenseReviewStatus == keywords.LicenseReviewApproved {
+		return st, fmt.Errorf("%w: %s", ErrAlreadyApproved, id)
+	}
+	m.Policy.LicenseReviewStatus = keywords.LicenseReviewApproved
+	m.Policy.ApprovedBy = strings.TrimSpace(approvedBy)
+	m.Policy.ApprovedAt = &at
+	approved, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return st, err
+	}
+	if err := atomicWrite(manifestPath, approved); err != nil {
+		return st, fmt.Errorf("write %s draft manifest: %w", id, err)
+	}
+	return st, nil
 }
 
 // ReadStatus loads one resource's persisted status; a never-fetched resource

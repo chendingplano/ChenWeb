@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
@@ -183,4 +184,150 @@ func findView(views []resourceView, id string) resourceView {
 		}
 	}
 	return resourceView{}
+}
+
+func TestApproveResourceApprovesPendingDraft(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMINOLOGY_DIR", dir)
+	sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pending := `{"adapter":"ucum","policy":{"license_review_status":"pending_review"},"artifacts":[]}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(pending), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/approve", nil)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c := e.NewContext(req, rec)
+	c.SetParamNames("source")
+	c.SetParamValues("ucum")
+	if err := c.Request().ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	c.Request().Form.Set("approved_by", "alice@example.test")
+
+	if err := ApproveResource(c); err != nil {
+		t.Fatalf("ApproveResource: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Resource resourceView `json:"resource"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Resource.ReviewStatus != "approved" {
+		t.Fatalf("review_status = %q, want approved", body.Resource.ReviewStatus)
+	}
+	if !body.Resource.Downloaded {
+		t.Fatal("resource view must still show the download state")
+	}
+
+	// The draft on disk now carries the approval.
+	b, err := os.ReadFile(filepath.Join(sourceDir, "manifest.draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"approved_by": "alice@example.test"`) {
+		t.Fatalf("draft missing approved_by: %s", b)
+	}
+}
+
+func TestApproveResourceFailsClosed(t *testing.T) {
+	e := echo.New()
+
+	t.Run("unknown source", func(t *testing.T) {
+		t.Setenv("TERMINOLOGY_DIR", t.TempDir())
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/nope/approve", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("nope")
+		if err := ApproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	})
+
+	t.Run("missing approver", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("TERMINOLOGY_DIR", dir)
+		sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"ucum","policy":{"license_review_status":"pending_review"},"artifacts":[]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/approve", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("ucum")
+		if err := ApproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+	})
+
+	t.Run("not downloaded", func(t *testing.T) {
+		t.Setenv("TERMINOLOGY_DIR", t.TempDir())
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/approve", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("ucum")
+		if err := c.Request().ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		c.Request().Form.Set("approved_by", "alice")
+		if err := ApproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
+		}
+	})
+
+	t.Run("already approved", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("TERMINOLOGY_DIR", dir)
+		sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"ucum","policy":{"license_review_status":"approved","approved_by":"bob","approved_at":"2026-08-07T12:00:00Z"},"artifacts":[]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/ucum/approve", nil), rec)
+		c.SetParamNames("source")
+		c.SetParamValues("ucum")
+		if err := c.Request().ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		c.Request().Form.Set("approved_by", "alice")
+		if err := ApproveResource(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
+		}
+	})
 }

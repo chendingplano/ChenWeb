@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 )
 
 func TestResourcesCatalog(t *testing.T) {
@@ -248,5 +251,88 @@ func TestDraftReviewStatus(t *testing.T) {
 	}
 	if _, err := DraftReviewStatus(dir, ResourceUCUM); err == nil {
 		t.Fatal("malformed draft must error")
+	}
+}
+
+func TestApproveDraftWritesApprovalInPlace(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+
+	// Build a downloaded source with a pending draft (as Fetch would).
+	sourceDir := filepath.Join(dir, string(ResourceUCUM))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pending := `{"adapter":"ucum","policy":{"provider_id":"ucum","source":"ucum","source_subset":"essence","release":"2.2","retrieved_at":"2026-08-07T12:00:00Z","content_checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","license":"UCUM-License-1.1","license_review_status":"pending_review","authority_role":"context_only","allowed_scopes":["display"],"languages":["en"],"adapter_version":"0.1.0","provenance_locator":"https://example.test/essence.xml"},"artifacts":[{"id":"ucum-essence.xml","path":"ucum-essence.xml","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","media_type":"application/xml","provenance_locator":"https://example.test/essence.xml"}]}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(pending), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := DraftReviewStatus(dir, ResourceUCUM); got != LicenseReviewPending {
+		t.Fatalf("review status before approve = %q", got)
+	}
+
+	st, err := ApproveDraft(dir, ResourceUCUM, "alice@example.test", now)
+	if err != nil {
+		t.Fatalf("ApproveDraft: %v", err)
+	}
+	if !st.Downloaded {
+		t.Fatalf("status lost download state: %+v", st)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, string(ResourceUCUM), "manifest.draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Policy.LicenseReviewStatus != keywords.LicenseReviewApproved {
+		t.Fatalf("license_review_status = %q", m.Policy.LicenseReviewStatus)
+	}
+	if m.Policy.ApprovedBy != "alice@example.test" || m.Policy.ApprovedAt == nil || !m.Policy.ApprovedAt.Equal(now) {
+		t.Fatalf("approval fields = %+v", m.Policy)
+	}
+	if got, _ := DraftReviewStatus(dir, ResourceUCUM); got != keywords.LicenseReviewApproved {
+		t.Fatalf("review status after approve = %q", got)
+	}
+}
+
+func TestApproveDraftFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+
+	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", now); !errors.Is(err, ErrNotDownloaded) {
+		t.Fatalf("not downloaded: err = %v", err)
+	}
+
+	// Downloaded but no draft (e.g. operator already moved it).
+	sourceDir := filepath.Join(dir, string(ResourceSIRP))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"sirp","downloaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", now); !errors.Is(err, ErrNoDraftManifest) {
+		t.Fatalf("no draft: err = %v", err)
+	}
+
+	// Already approved.
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"bipm-sirp-quantity","policy":{"license_review_status":"approved","approved_by":"bob","approved_at":"2026-08-07T12:00:00Z"},"artifacts":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApproveDraft(dir, ResourceSIRP, "alice", now); !errors.Is(err, ErrAlreadyApproved) {
+		t.Fatalf("already approved: err = %v", err)
+	}
+
+	// Missing approver.
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(`{"adapter":"bipm-sirp-quantity","policy":{"license_review_status":"pending_review"},"artifacts":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApproveDraft(dir, ResourceSIRP, " ", now); err == nil {
+		t.Fatal("empty approved_by must error")
 	}
 }
