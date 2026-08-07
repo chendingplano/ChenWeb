@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "scope": "display",
+  "corpus": [
+    {
+      "artifact_type": "pilot-doc",
+      "artifact_ids": [
+        "pilot-001",
+        "pilot-002",
+        "pilot-003",
+        "pilot-004",
+        "pilot-005"
+      ]
+    }
+  ],
+  "target_seed_release": {
+    "source": "iec-60050-845",
+    "release": "2020"
+  },
+  "target_coverage": 0.8,
+  "eligible_frequency": 6,
+  "covered_frequency": 5,
+  "coverage": 0.8333333333333334,
+  "target_met": true,
+  "risk_terms": [
+    "luminance",
+    "brightness",
+    "contrast"
+  ],
+  "uncovered_risk_terms": [
+    "brightness",
+    "contrast"
+  ],
+  "risk_terms_met": false,
+  "ready": false,
+  "approval": "operator_required",
+  "approver": "operator@example.test",
+  "inventory": [
+    {
+      "concept_id": "kw:luminance",
+      "pref_label": "Luminance",
+      "status": "active",
+      "frequency": 3,
+      "eligible_frequency": 3,
+      "exact_authority": true,
+      "observed_languages": [
+        "en",
+        "zh"
+      ],
+      "observed_surfaces": [
+        {
+          "surface": "亮度",
+          "norm_key": "亮度",
+          "lang": "zh",
+          "frequency": 2,
+          "occurrences": [
+            {
+              "occurrence_id": 1,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-001",
+              "field_path": "body"
+            },
+            {
+              "occurrence_id": 2,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-001",
+              "field_path": "body"
+            }
+          ]
+        },
+        {
+          "surface": "Luminance",
+          "norm_key": "luminance",
+          "lang": "en",
+          "frequency": 1,
+          "occurrences": [
+            {
+              "occurrence_id": 3,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-002",
+              "field_path": "body"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "kw:brightness",
+      "pref_label": "Brightness",
+      "status": "active",
+      "frequency": 2,
+      "eligible_frequency": 2,
+      "exact_authority": true,
+      "observed_languages": [
+        "zh"
+      ],
+      "observed_surfaces": [
+        {
+          "surface": "视亮度",
+          "norm_key": "视亮度",
+          "lang": "zh",
+          "frequency": 2,
+          "occurrences": [
+            {
+              "occurrence_id": 4,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-003",
+              "field_path": "body"
+            },
+            {
+              "occurrence_id": 5,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-003",
+              "field_path": "body"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "kw:contrast",
+      "pref_label": "Contrast",
+      "status": "active",
+      "frequency": 1,
+      "eligible_frequency": 1,
+      "exact_authority": false,
+      "observed_languages": [
+        "en"
+      ],
+      "observed_surfaces": [
+        {
+          "surface": "Contrast",
+          "norm_key": "contrast",
+          "lang": "en",
+          "frequency": 1,
+          "occurrences": [
+            {
+              "occurrence_id": 6,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-004",
+              "field_path": "body"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "unresolved_bilingual_pairs": [
+    {
+      "concept_id": "kw:brightness",
+      "pref_label": "Brightness",
+      "frequency": 2,
+      "missing_languages": [
+        "en"
+      ],
+      "observed_surfaces": [
+        {
+          "surface": "视亮度",
+          "norm_key": "视亮度",
+          "lang": "zh",
+          "frequency": 2,
+          "occurrences": [
+            {
+              "occurrence_id": 4,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-003",
+              "field_path": "body"
+            },
+            {
+              "occurrence_id": 5,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-003",
+              "field_path": "body"
+            }
+          ]
+        }
+      ],
+      "proposed_missing_language_surfaces": [
+        {
+          "concept_id": "kw:brightness",
+          "surface": "Brightness",
+          "norm_key": "brightness",
+          "lang": "en"
+        }
+      ]
+    },
+    {
+      "concept_id": "kw:contrast",
+      "pref_label": "Contrast",
+      "frequency": 1,
+      "missing_languages": [
+        "zh"
+      ],
+      "observed_surfaces": [
+        {
+          "surface": "Contrast",
+          "norm_key": "contrast",
+          "lang": "en",
+          "frequency": 1,
+          "occurrences": [
+            {
+              "occurrence_id": 6,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-004",
+              "field_path": "body"
+            }
+          ]
+        }
+      ],
+      "proposed_missing_language_surfaces": null
+    }
+  ],
+  "context_sensitive_surfaces": null,
+  "high_frequency_uncovered_concepts": [
+    {
+      "concept_id": "kw:contrast",
+      "pref_label": "Contrast",
+      "status": "active",
+      "frequency": 1,
+      "eligible_frequency": 1,
+      "exact_authority": false,
+      "observed_languages": [
+        "en"
+      ],
+      "observed_surfaces": [
+        {
+          "surface": "Contrast",
+          "norm_key": "contrast",
+          "lang": "en",
+          "frequency": 1,
+          "occurrences": [
+            {
+              "occurrence_id": 6,
+              "artifact_type": "pilot-doc",
+              "artifact_id": "pilot-004",
+              "field_path": "body"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

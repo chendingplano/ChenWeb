@@ -337,17 +337,29 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 
 ### 7.2 Live PostgreSQL proof
 
-Against rebuilt `chenweb_test`:
+Implemented as `server/api/ontology/keywords/reconcile_identity_integration_test.go`
+(skips unless `TEST_DATABASE_URL` points at a migrated `chenweb_test`). The live
+proof, verified 2026-08-07 against a rebuilt database, asserts:
 
-1. Register a versioned bilingual fixture source.
-2. Create an established `Luminance` concept with an external-ID mapping.
-3. Create a D11 provisional `亮度` concept with surface evidence carrying the same identity triple.
-4. Run `cmd/keyword-reconcile` through either configured multilingual embedding model.
-5. Assert one merge in the fixed provisional-to-active direction, the surface moves with origin provenance, and the decision log names exact external identity as authority while retaining model/score diagnostics.
-6. Repeat with high fake/live similarity but no identity evidence and assert defer.
-7. Repeat import/reconciliation and assert idempotence.
+1. `亮度` merges into active `Luminance` by exact identity even though the fake
+   embedding client ranks `Brightness` first (cosine ≈ 0.99) and `Luminance`
+   far behind (cosine ≈ 0.14) — the invariant, not a particular cosine.
+2. `视亮度` carrying evidence for IEV `845-22-059` defers while the reviewed
+   mapping is absent (targetless evidence never authorizes), then merges into
+   `Brightness` after the reviewed promotion for `845-22-059` is applied.
+3. A bare context-sensitive surface with high cosine but no identity evidence
+   defers; a candidate carrying conflicting authoritative evidence for both
+   mappings rejects; every decided candidate has exactly one audit row per
+   decision.
+4. A reviewed luminance/brightness `different_from` promotion writes the
+   provenance-linked `never_merge` veto, and the family advisory lock
+   serializes a concurrent promotion replay against an identity merge without
+   deadlock, leaving exactly one mapping, one evidence row, and one veto.
 
-The live test is about the invariant, not achieving a particular cosine.
+The live test uses a deterministic fake embedding client; the offline
+`cmd/keyword-reconcile` path additionally accepts either configured
+multilingual embedding model. Re-import of every stage-1 fixture was verified
+idempotent (`replayed=true` on the second import).
 
 ## 8. Non-goals and deferred work
 
@@ -361,7 +373,13 @@ The live test is about the invariant, not achieving a particular cosine.
 
 ## 9. Documentation impact
 
-Implementation must update the keyword spec's §13.1 claim that embedding similarity may itself auto-accept, record the new validation contract in §13 R6 and §21, and close or narrow the I2 reconciliation gap. The master handoff update remains pending. `KnowledgeStore` edits must be made only after its pre-existing working-copy changes are resolved.
+Implementation updated the keyword spec's §13.1 claim that embedding
+similarity may itself auto-accept, recorded the new validation contract in
+§13 R6 and §21, and closed the I2 reconciliation gap: automatic merges now
+require an authoritative `exact_equivalent` identity claim and no hard veto.
+The `KnowledgeStore` governing spec synchronization (§13.1, R6, §21, I2) is
+part of the portfolio plan's completion boundary and is applied only after
+its pre-existing working-copy changes are resolved.
 
 ## 10. Background
 

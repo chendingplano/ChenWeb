@@ -126,6 +126,8 @@ func TestAdapterContractFailClosedUnknownRelations(t *testing.T) {
 	}{
 		{adapterFixture{"sirp", "testdata/fixtures/sirp", SIRPAdapter{}}, "testdata/malformed/sirp/unknown-relation.ttl", "unknown SIRP relation predicate"},
 		{adapterFixture{"sirp", "testdata/fixtures/sirp", SIRPAdapter{}}, "testdata/malformed/sirp/not-turtle.ttl", "parse"},
+		{adapterFixture{"qudt", "testdata/fixtures/qudt", QUDTAdapter{}}, "testdata/malformed/qudt/unknown-relation.ttl", "unknown QUDT relation predicate"},
+		{adapterFixture{"qudt", "testdata/fixtures/qudt", QUDTAdapter{}}, "testdata/malformed/qudt/not-turtle.ttl", "parse"},
 		{adapterFixture{"iec", "testdata/fixtures/iec", IECSeedAdapter{}}, "testdata/malformed/iec/unreviewed-exact.json", "reviewer"},
 		{adapterFixture{"iec", "testdata/fixtures/iec", IECSeedAdapter{}}, "testdata/malformed/iec/copied-definition.json", "unknown field"},
 		{adapterFixture{"iec", "testdata/fixtures/iec", IECSeedAdapter{}}, "testdata/malformed/iec/duplicate-entry.json", "duplicated"},

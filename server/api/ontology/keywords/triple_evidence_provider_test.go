@@ -196,6 +196,31 @@ func TestTripleEvidenceProviderRejectsInvalidDeploymentConfiguration(t *testing.
 	}
 }
 
+func TestTripleEvidenceProviderFailsClosedOnMissingDeployment(t *testing.T) {
+	// A configured deployment pointer that the query does not return must
+	// fail the run instead of silently downgrading every claim.
+	mock, tx := beginTripleProviderTest(t)
+	mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).
+		WithArgs(pq.Array([]string{"surface"})).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).
+			AddRow(7, "qudt", "QK-1", "3.1"))
+	mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePoliciesSQL)).
+		WithArgs(pq.Array([]string{"qudt"}), pq.Array([]string{"3.1"})).
+		WillReturnRows(sqlmock.NewRows([]string{"source", "release", "identity_authority", "allowed_scopes"}).
+			AddRow("qudt", "3.1", true, "{quantity}"))
+	mock.ExpectQuery(regexp.QuoteMeta(tripleConfiguredDeploymentsSQL)).
+		WithArgs(pq.Array([]string{"production"})).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_key", "source", "release", "enabled"}))
+	_, err := (TripleEvidenceProvider{DeploymentKeys: []string{"production"}}).LoadClaims(
+		context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "quantity", SurfaceIDs: []string{"surface"}})
+	if err == nil || !strings.Contains(err.Error(), "unregistered keyword identity deployment key") {
+		t.Fatalf("error = %v, want unregistered deployment key failure", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTripleEvidenceProviderDeploymentAllowlistControlsAuthority(t *testing.T) {
 	evidence := []tripleEvidenceRow{{id: 7, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, allowedScopes: "{quantity}", target: "established", status: "active", scope: "quantity"}}
 	candidate := CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "quantity", SurfaceIDs: []string{"surface"}}

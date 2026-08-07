@@ -121,6 +121,12 @@ func TestQUDTSIRPCrosswalkNormalizesUnderExactPolicy(t *testing.T) {
 	if crosswalk == nil {
 		t.Fatal("QUDT Luminance must normalize to SIRP LUMA through the exact crosswalk")
 	}
+	if crosswalk.ObjectRelease != SIRPRelease {
+		t.Fatalf("QUDT->SIRP crosswalk release = %q, want %q", crosswalk.ObjectRelease, SIRPRelease)
+	}
+	if crosswalk.ObjectSource != SIRPSourceID {
+		t.Fatalf("QUDT->SIRP crosswalk source = %q, want %q", crosswalk.ObjectSource, SIRPSourceID)
+	}
 }
 
 func TestParseQUDTGraphSharedWithImportCommand(t *testing.T) {

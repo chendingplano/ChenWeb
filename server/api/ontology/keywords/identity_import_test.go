@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
@@ -39,7 +40,7 @@ func validPromotionFile() ReviewedPromotionFile {
 	}
 }
 
-func expectPositivePromotionValidation(mock sqlmock.Sqlmock, file ReviewedPromotionFile, promotion PositivePromotion) {
+func expectPositivePromotionValidation(mock sqlmock.Sqlmock, file ReviewedPromotionFile, promotion PositivePromotion, evidenceConcepts ...string) {
 	mock.ExpectQuery(regexp.QuoteMeta(promotionConceptSQL)).
 		WithArgs(promotion.ConceptID).
 		WillReturnRows(sqlmock.NewRows([]string{"scope", "status"}).AddRow(file.Scope, "active"))
@@ -67,12 +68,24 @@ func expectPositivePromotionValidation(mock sqlmock.Sqlmock, file ReviewedPromot
 	mock.ExpectQuery(regexp.QuoteMeta(promotionSurfaceSQL)).
 		WithArgs("kws_luminance").
 		WillReturnRows(sqlmock.NewRows([]string{"concept_id"}).AddRow(promotion.ConceptID))
+	surfaceConceptRows := sqlmock.NewRows([]string{"concept_id"})
+	for _, concept := range evidenceConcepts {
+		surfaceConceptRows.AddRow(concept)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(promotionSurfaceEvidenceConceptsSQL)).
+		WithArgs(pq.Array([]string{"kws_luminance"}), promotion.ConceptID).
+		WillReturnRows(surfaceConceptRows)
 }
 
 func expectNegativePromotionValidation(mock sqlmock.Sqlmock, file ReviewedPromotionFile, negative NegativePromotion) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT allowed_scopes FROM kb.keyword_sources WHERE source = $1 AND release = $2`)).
 		WithArgs(file.Source, file.Release).
 		WillReturnRows(sqlmock.NewRows([]string{"allowed_scopes"}).AddRow("{display}"))
+	for _, node := range []string{negative.NodeA, negative.NodeB} {
+		mock.ExpectQuery(regexp.QuoteMeta(promotionConceptSQL)).
+			WithArgs(node).
+			WillReturnRows(sqlmock.NewRows([]string{"scope", "status"}).AddRow(file.Scope, "active"))
+	}
 	for _, triple := range negative.Triples {
 		mock.ExpectQuery(regexp.QuoteMeta(promotionPolicySQL)).
 			WithArgs(triple.Source, triple.Release).
@@ -401,6 +414,13 @@ func TestNegativePromotionRejectsIncompleteProvenance(t *testing.T) {
 		!strings.Contains(err.Error(), "node_a, node_b, and scope") {
 		t.Fatalf("error = %v", err)
 	}
+
+	file = validPromotionFile()
+	file.NegativePromotions[0].NodeB = file.NegativePromotions[0].NodeA
+	if _, err := (PromotionStore{DB: nil}).ApplyReviewedPromotion(context.Background(), file); err == nil ||
+		!strings.Contains(err.Error(), "must be distinct") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestNegativePromotionRejectsProposalOnlyDistinction(t *testing.T) {
@@ -417,6 +437,11 @@ func TestNegativePromotionRejectsProposalOnlyDistinction(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT allowed_scopes FROM kb.keyword_sources WHERE source = $1 AND release = $2`)).
 		WithArgs(file.Source, file.Release).
 		WillReturnRows(sqlmock.NewRows([]string{"allowed_scopes"}).AddRow("{display}"))
+	for _, node := range []string{file.NegativePromotions[0].NodeA, file.NegativePromotions[0].NodeB} {
+		mock.ExpectQuery(regexp.QuoteMeta(promotionConceptSQL)).
+			WithArgs(node).
+			WillReturnRows(sqlmock.NewRows([]string{"scope", "status"}).AddRow(file.Scope, "active"))
+	}
 	mock.ExpectQuery(regexp.QuoteMeta(promotionPolicySQL)).
 		WithArgs("iec-60050-845", "2020").
 		WillReturnRows(sqlmock.NewRows([]string{"authority_role", "license_review_status", "authoritative_relations", "allowed_scopes", "identity_authority"}).
@@ -467,6 +492,158 @@ func TestNegativePromotionVetoWinsOverPositiveIdentity(t *testing.T) {
 	}
 	if !vetoed {
 		t.Fatal("authoritative never_merge veto must win over positive identity")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPromotionRejectsNeverMergeVetoOnEvidenceLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	file := validPromotionFile()
+	promotion := file.Promotions[0]
+
+	// The promoted surface already carries evidence for another external
+	// identity that maps to kw:other, and the operators have asserted
+	// never_merge between kw:luminance and kw:other: promotion must fail.
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	expectPositivePromotionValidation(mock, file, promotion, "kw:other")
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semid_never_merge")).
+		WithArgs("keyword", "kw:luminance", "kw:other").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectRollback()
+
+	_, err = (PromotionStore{DB: db}).ApplyReviewedPromotion(context.Background(), file)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with never_merge veto") {
+		t.Fatalf("error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPromotionRejectsConflictingAlignmentOnEvidenceLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	file := validPromotionFile()
+	promotion := file.Promotions[0]
+
+	// The promoted surface already carries evidence for another external
+	// identity that maps to kw:other, and kw:luminance/kw:other are aligned
+	// to different governed terms: promotion must fail (§7.3 item 4).
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	expectPositivePromotionValidation(mock, file, promotion, "kw:other")
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semid_never_merge")).
+		WithArgs("keyword", "kw:luminance", "kw:other").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+		WithArgs("kw:luminance").
+		WillReturnRows(alignmentReadRow(1, "kw:luminance", testTermID, []byte(testQualifiers), testScore))
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+		WithArgs("kw:other").
+		WillReturnRows(alignmentReadRow(2, "kw:other", testOtherTermID, []byte(testQualifiers), testScore))
+	mock.ExpectRollback()
+
+	_, err = (PromotionStore{DB: db}).ApplyReviewedPromotion(context.Background(), file)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with alignment") {
+		t.Fatalf("error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPromotionRejectsStagingConstraintsPromotionOmits(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	file := validPromotionFile()
+	file.Promotions[0].UnitConstraints = nil
+	file.Promotions[0].DimensionConstraints = nil
+
+	// The staging entry declares unit/dimension constraints the promotion
+	// omits: the comparison must be symmetric and refuse the promotion.
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(promotionConceptSQL)).
+		WithArgs("kw:luminance").
+		WillReturnRows(sqlmock.NewRows([]string{"scope", "status"}).AddRow("display", "active"))
+	mock.ExpectQuery(regexp.QuoteMeta(promotionPolicySQL)).
+		WithArgs(file.Source, file.Release).
+		WillReturnRows(sqlmock.NewRows([]string{"authority_role", "license_review_status", "authoritative_relations", "allowed_scopes", "identity_authority"}).
+			AddRow("exact_identity_authority", "approved", "{exact_equivalent}", "{display}", true))
+	mock.ExpectQuery(regexp.QuoteMeta(promotionDeploymentSQL)).
+		WithArgs(file.DeploymentKey).
+		WillReturnRows(sqlmock.NewRows([]string{"source", "release", "enabled"}).AddRow(file.Source, file.Release, true))
+	mock.ExpectQuery(regexp.QuoteMeta(promotionStagingEntrySQL)).
+		WithArgs(file.Source, file.Release, "845-21-050").
+		WillReturnRows(sqlmock.NewRows([]string{"native_payload"}).
+			AddRow([]byte(`{"unit_constraints":["cd/m2"],"dimension_constraints":["J.L-2"]}`)))
+	mock.ExpectRollback()
+
+	_, err = (PromotionStore{DB: db}).ApplyReviewedPromotion(context.Background(), file)
+	if err == nil || !strings.Contains(err.Error(), "promotion declares none") {
+		t.Fatalf("error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNegativePromotionRejectsInvalidVetoNode(t *testing.T) {
+	// Unknown node concept fails closed.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := validPromotionFile()
+	file.Promotions = nil
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT allowed_scopes FROM kb.keyword_sources WHERE source = $1 AND release = $2`)).
+		WithArgs(file.Source, file.Release).
+		WillReturnRows(sqlmock.NewRows([]string{"allowed_scopes"}).AddRow("{display}"))
+	mock.ExpectQuery(regexp.QuoteMeta(promotionConceptSQL)).
+		WithArgs("kw:luminance").WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+	_, err = (PromotionStore{DB: db}).ApplyReviewedPromotion(context.Background(), file)
+	if err == nil || !strings.Contains(err.Error(), `unknown concept "kw:luminance" in never_merge veto`) {
+		t.Fatalf("error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	// A non-active veto node is refused.
+	db, mock, err = sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT allowed_scopes FROM kb.keyword_sources WHERE source = $1 AND release = $2`)).
+		WithArgs(file.Source, file.Release).
+		WillReturnRows(sqlmock.NewRows([]string{"allowed_scopes"}).AddRow("{display}"))
+	mock.ExpectQuery(regexp.QuoteMeta(promotionConceptSQL)).
+		WithArgs("kw:luminance").
+		WillReturnRows(sqlmock.NewRows([]string{"scope", "status"}).AddRow("display", "provisional"))
+	mock.ExpectRollback()
+	_, err = (PromotionStore{DB: db}).ApplyReviewedPromotion(context.Background(), file)
+	if err == nil || !strings.Contains(err.Error(), "must be active") {
+		t.Fatalf("error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -14,29 +14,23 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
 
-	"github.com/deiu/rdf2go"
 	_ "github.com/lib/pq"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/modules"
+	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terms"
 )
 
 const (
-	pRDFType    = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-	pRDFSLabel  = "http://www.w3.org/2000/01/rdf-schema#label"
-	pSKOSAlt    = "http://www.w3.org/2004/02/skos/core#altLabel"
-	pQUDTSymbol = "http://qudt.org/schema/qudt/symbol"
-	pQUDTDepr   = "http://qudt.org/schema/qudt/deprecated"
-
 	unitClass = "http://qudt.org/schema/qudt/Unit"
 	qkClass   = "http://qudt.org/schema/qudt/QuantityKind"
 	dimClass  = "http://qudt.org/schema/qudt/DimensionVector"
@@ -99,66 +93,29 @@ func parseTerms(path, class, idPrefix string) []importedTerm {
 		log.Fatalf("open %s: %v", path, err)
 	}
 	defer f.Close()
-
-	g := rdf2go.NewGraph("")
-	if err := g.Parse(bufio.NewReader(f), "text/turtle"); err != nil {
+	content, err := io.ReadAll(f)
+	if err != nil {
+		log.Fatalf("read %s: %v", path, err)
+	}
+	resources, err := terminology.ParseQUDTGraph(content)
+	if err != nil {
 		log.Fatalf("parse %s: %v", path, err)
 	}
-
-	type acc struct {
-		symbol string
-		labels []string // lexical forms, first = prefLabel candidate
-		depr   bool
-	}
-	bySubject := make(map[string]*acc)
-	var order []string
-
-	// Pass 1: collect the subjects that are instances of the target class.
-	for t := range g.IterTriples() {
-		if t.Predicate.RawValue() == pRDFType && t.Object.RawValue() == class {
-			subj := t.Subject.RawValue()
-			if _, ok := bySubject[subj]; !ok {
-				bySubject[subj] = &acc{}
-				order = append(order, subj)
-			}
-		}
-	}
-	// Pass 2: one linear scan; gather labels/symbol/deprecated only for the
-	// collected subjects (cheaper than a per-subject query).
-	for t := range g.IterTriples() {
-		a, ok := bySubject[t.Subject.RawValue()]
-		if !ok {
+	out := make([]importedTerm, 0, len(resources))
+	for _, resource := range resources {
+		if resource.Class != class {
 			continue
 		}
-		switch t.Predicate.RawValue() {
-		case pRDFSLabel:
-			if lit, ok := t.Object.(rdf2go.Literal); ok {
-				a.labels = append(a.labels, lit.RawValue())
-			}
-		case pQUDTSymbol:
-			if lit, ok := t.Object.(rdf2go.Literal); ok {
-				a.symbol = lit.RawValue()
-			}
-		case pQUDTDepr:
-			if lit, ok := t.Object.(rdf2go.Literal); ok && strings.EqualFold(lit.RawValue(), "true") {
-				a.depr = true
-			}
-		}
-	}
-
-	out := make([]importedTerm, 0, len(order))
-	for _, subj := range order {
-		a := bySubject[subj]
-		if a.depr {
+		if resource.Deprecated {
 			continue // skip deprecated QUDT entries
 		}
-		label := pickLabel(a.labels)
+		label := pickLabel(resource.Labels)
 		out = append(out, importedTerm{
-			TermID:    "quantity:" + idPrefix + localName(subj),
+			TermID:    "quantity:" + idPrefix + localName(resource.IRI),
 			Kind:      termKindFor(idPrefix),
-			SourceIRI: subj,
+			SourceIRI: resource.IRI,
 			PrefLabel: label,
-			Symbol:    a.symbol,
+			Symbol:    resource.Symbol,
 		})
 	}
 	return out
@@ -175,28 +132,23 @@ func termKindFor(prefix string) string {
 	}
 }
 
-func pickLabel(labels []string) string {
+// pickLabel selects the en preferred label for the legacy quantity module
+// prefLabel, falling back to any preferred label and then the first label.
+func pickLabel(labels []terminology.QUDTLabel) string {
 	for _, l := range labels {
-		if isLikelyEnglish(l) {
-			return l
+		if l.Role == "preferred" && l.Language == "en" {
+			return l.Value
+		}
+	}
+	for _, l := range labels {
+		if l.Role == "preferred" {
+			return l.Value
 		}
 	}
 	if len(labels) > 0 {
-		return labels[0]
+		return labels[0].Value
 	}
 	return ""
-}
-
-// isLikelyEnglish is a cheap heuristic: QUDT labels are mostly ASCII for the
-// en forms; CJK/Cyrillic/etc. marks non-English. Not a language detector --
-// good enough to pick a prefLabel.
-func isLikelyEnglish(s string) bool {
-	for _, r := range s {
-		if r > 0x2E80 {
-			return false
-		}
-	}
-	return true
 }
 
 func localName(iri string) string {
@@ -204,11 +156,6 @@ func localName(iri string) string {
 		return iri[i+1:]
 	}
 	return iri
-}
-
-func subject(iri string) rdf2go.Term {
-	r := rdf2go.NewResource(iri)
-	return r
 }
 
 // importTerms batch-inserts terms, their prefLabels, and exact mappings back

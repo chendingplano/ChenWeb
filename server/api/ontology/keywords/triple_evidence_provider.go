@@ -316,6 +316,11 @@ func loadTripleConfiguredDeployments(ctx context.Context, tx *sql.Tx, keys []str
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close configured keyword identity deployments: %w", err)
 	}
+	for _, key := range keys {
+		if !seenKeys[key] {
+			return nil, fmt.Errorf("unregistered keyword identity deployment key %q", key)
+		}
+	}
 	return enabledSources, nil
 }
 

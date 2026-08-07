@@ -18,6 +18,11 @@ import (
 // quantities. QUDT siExactMatch crosswalks reference these persistent IDs.
 const SIRPSourceID = "bipm-sirp-quantity"
 
+// SIRPRelease is the governed release pinned by the SIRP adapter. QUDT
+// siExactMatch crosswalks carry this release so promotion can distinguish an
+// authoritative SIRP mapping from proposal-only links.
+const SIRPRelease = "1.0.0"
+
 const (
 	qudtQuantityKindClass = "http://qudt.org/schema/qudt/QuantityKind"
 	qudtUnitClass         = "http://qudt.org/schema/qudt/Unit"
@@ -63,11 +68,14 @@ type QUDTRelation struct {
 	ObjectExternal string
 }
 
-// QUDTQuantityKind is the identity-relevant projection of one QUDT
-// quantity-kind resource. Deprecation and replacement are retained rather
-// than silently dropped.
+// QUDTQuantityKind is the identity-relevant projection of one QUDT resource.
+// Class records the rdf:type so callers can project the subset they own; the
+// QUDT adapter emits quantity kinds only, while the legacy quantity import
+// command also consumes units and dimension vectors. Deprecation and
+// replacement are retained rather than silently dropped.
 type QUDTQuantityKind struct {
 	IRI        string
+	Class      string
 	Deprecated bool
 	Symbol     string
 	Labels     []QUDTLabel
@@ -75,8 +83,12 @@ type QUDTQuantityKind struct {
 }
 
 // ParseQUDTGraph parses a QUDT Turtle artifact into identity-relevant
-// quantity-kind resources. Language tags are preserved; unknown relation
-// predicates fail closed instead of being upgraded.
+// resources. Only subjects explicitly typed as a supported QUDT class are
+// collected; class-less resources and unrelated classes (for example unit or
+// dimension-vector definitions that leak into a quantity-kinds artifact) are
+// ignored rather than emitted or rejected. Language tags are preserved;
+// unknown relation predicates on collected subjects fail closed instead of
+// being upgraded.
 func ParseQUDTGraph(content []byte) ([]QUDTQuantityKind, error) {
 	graph := rdf2go.NewGraph("")
 	if err := graph.Parse(bufio.NewReader(strings.NewReader(string(content))), "text/turtle"); err != nil {
@@ -84,15 +96,41 @@ func ParseQUDTGraph(content []byte) ([]QUDTQuantityKind, error) {
 	}
 
 	type accumulator struct {
+		class      string
 		deprecated bool
 		symbol     string
 		labels     map[string]bool
 		relations  map[string]QUDTRelation
 	}
 	subjects := map[string]*accumulator{}
-	var order []string
+	// Pass 1: collect only subjects typed as a supported QUDT class.
+	for triple := range graph.IterTriples() {
+		if triple.Predicate.RawValue() != qudtRDFType {
+			continue
+		}
+		class := triple.Object.RawValue()
+		if class != qudtQuantityKindClass && class != qudtUnitClass && class != qudtDimensionClass {
+			continue
+		}
+		subject := triple.Subject.RawValue()
+		if _, ok := subjects[subject]; !ok {
+			subjects[subject] = &accumulator{class: class, labels: map[string]bool{}, relations: map[string]QUDTRelation{}}
+		}
+	}
+	if len(subjects) == 0 {
+		return nil, errors.New("qudt turtle contains no supported QUDT resources")
+	}
+
+	// Pass 2: gather labels/symbol/deprecation/relations only for collected
+	// subjects. Unknown relation predicates fail closed instead of being
+	// silently upgraded or dropped.
 	for triple := range graph.IterTriples() {
 		predicate := triple.Predicate.RawValue()
+		subject := triple.Subject.RawValue()
+		acc, ok := subjects[subject]
+		if !ok {
+			continue
+		}
 		if !qudtAllowedPredicates[predicate] {
 			if strings.HasPrefix(predicate, "http://www.w3.org/2004/02/skos/core#") ||
 				strings.HasPrefix(predicate, "http://www.w3.org/2002/07/owl#") {
@@ -100,19 +138,9 @@ func ParseQUDTGraph(content []byte) ([]QUDTQuantityKind, error) {
 			}
 			continue
 		}
-		subject := triple.Subject.RawValue()
-		acc, ok := subjects[subject]
-		if !ok {
-			acc = &accumulator{labels: map[string]bool{}, relations: map[string]QUDTRelation{}}
-			subjects[subject] = acc
-			order = append(order, subject)
-		}
 		switch predicate {
 		case qudtRDFType:
-			class := triple.Object.RawValue()
-			if class != qudtQuantityKindClass && class != qudtUnitClass && class != qudtDimensionClass {
-				return nil, fmt.Errorf("QUDT subject %q has unsupported class %q", subject, class)
-			}
+			// Pass 1 already decided membership; nothing to add here.
 		case qudtOWLDeprecated, qudtDeprecated:
 			if literal, ok := triple.Object.(*rdf2go.Literal); ok && strings.EqualFold(literal.Value, "true") {
 				acc.deprecated = true
@@ -167,14 +195,11 @@ func ParseQUDTGraph(content []byte) ([]QUDTQuantityKind, error) {
 			}
 		}
 	}
-	if len(subjects) == 0 {
-		return nil, errors.New("qudt turtle contains no quantity-kind resources")
-	}
 
-	out := make([]QUDTQuantityKind, 0, len(order))
-	for _, subject := range order {
+	out := make([]QUDTQuantityKind, 0, len(subjects))
+	for subject := range subjects {
 		acc := subjects[subject]
-		resource := QUDTQuantityKind{IRI: subject, Deprecated: acc.deprecated, Symbol: acc.symbol}
+		resource := QUDTQuantityKind{IRI: subject, Class: acc.class, Deprecated: acc.deprecated, Symbol: acc.symbol}
 		for key := range acc.labels {
 			parts := strings.Split(key, "\x00")
 			resource.Labels = append(resource.Labels, QUDTLabel{Value: parts[2], Language: parts[0], Role: parts[1]})
@@ -223,11 +248,17 @@ func (a QUDTAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 	}
 	snapshot := CatalogSnapshot{}
 	for _, resource := range resources {
+		if resource.Class != qudtQuantityKindClass {
+			continue
+		}
 		entryStatus := "current"
 		if resource.Deprecated {
 			entryStatus = "deprecated"
 		}
-		payload, _ := json.Marshal(map[string]any{"deprecated": resource.Deprecated, "symbol": resource.Symbol})
+		payload, err := json.Marshal(map[string]any{"deprecated": resource.Deprecated, "symbol": resource.Symbol})
+		if err != nil {
+			return CatalogSnapshot{}, fmt.Errorf("encode qudt payload: %w", err)
+		}
 		snapshot.Entries = append(snapshot.Entries, CatalogEntry{
 			ExternalID: resource.IRI, EntryStatus: entryStatus, ProvenanceLocator: resource.IRI, NativePayload: payload,
 		})
@@ -243,6 +274,9 @@ func (a QUDTAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 				objectSource = policy.Source
 			}
 			objectRelease := relation.ObjectRelease
+			if objectRelease == "" && objectSource == SIRPSourceID {
+				objectRelease = SIRPRelease
+			}
 			if objectRelease == "" && objectSource == policy.Source {
 				objectRelease = policy.Release
 			}
@@ -252,6 +286,9 @@ func (a QUDTAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 				ProvenanceLocator: resource.IRI,
 			})
 		}
+	}
+	if len(snapshot.Entries) == 0 {
+		return CatalogSnapshot{}, errors.New("qudt artifact contains no quantity-kind resources")
 	}
 	normalizeSnapshot(&snapshot)
 	return snapshot, nil

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "scope": "display",
+  "corpus": [
+    { "artifact_type": "pilot-doc", "artifact_ids": ["pilot-001", "pilot-002", "pilot-003", "pilot-004", "pilot-005"] }
+  ],
+  "target_coverage": 0.8,
+  "risk_terms": ["luminance", "brightness", "contrast"],
+  "approver": "operator@example.test",
+  "target_seed_release": { "source": "iec-60050-845", "release": "2020" }
+}

@@ -220,19 +220,51 @@
 - Modify: `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`
 - Modify: `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
 
-- [ ] Rebuild/apply migrations to `chenweb_test` and verify Up plus guarded Down/Up.
-- [ ] Import the versioned bilingual fixture and reviewed mapping twice.
-- [ ] Prove `亮度` merges into active `Luminance` by exact identity regardless of cosine, while reviewed luminance/brightness non-equivalence is promoted and vetoes a deliberately conflicting positive proposal.
-- [ ] Prove only a reviewed mapping to IEV `845-22-059` can converge `brightness`/`视亮度`; bare brightness surfaces remain unpromoted and context-sensitive.
-- [ ] Prove high cosine without identity defers, conflicting identities reject, and every decided candidate has one audit row.
-- [ ] Run concurrency tests for evidence retraction, conflicting mapping insertion, `never_merge`, alignment, concept/surface mutation, and family-lock serialization.
-- [ ] Run `go test ./server/api/ontology/keywords/... ./server/api/ontology/terminology/... ./server/cmd/keyword-reconcile/... ./server/cmd/terminology-import/... ./server/cmd/qudt-import/...`.
-- [ ] Run `go test ./...` and `go vet ./...`; investigate every failure.
-- [ ] Run the coverage command against the selected pilot scope, store the unresolved-pair backlog and pass/fail report, and require operator approval before calling a production seed release ready.
-- [ ] Update implementation status, operational commands, source-manifest/diff/rollback format, and the five documentation-impact questions required by workspace policy.
-- [ ] Synchronize the governing KnowledgeStore keyword spec (§13.1, R6, §21, and I2). If that separate repository has unrelated changes, stop and have the user resolve them; do not declare completion while the governing spec is stale.
-- [ ] Obtain independent spec-compliance review, then code-quality review; fix and re-run verification.
-- [ ] Commit documentation/test closure, verify a single linear `jj log`, and report actual resource files intentionally not distributed with the repository.
+- [x] Rebuild/apply migrations to `chenweb_test` and verify Up plus guarded Down/Up.
+- [x] Import the versioned bilingual fixture and reviewed mapping twice.
+- [x] Prove `亮度` merges into active `Luminance` by exact identity regardless of cosine, while reviewed luminance/brightness non-equivalence is promoted and vetoes a deliberately conflicting positive proposal.
+- [x] Prove only a reviewed mapping to IEV `845-22-059` can converge `brightness`/`视亮度`; bare brightness surfaces remain unpromoted and context-sensitive.
+- [x] Prove high cosine without identity defers, conflicting identities reject, and every decided candidate has one audit row.
+- [x] Run concurrency coverage: lock-order unit tests for every identity
+  mutation writer (concept create/update/status, surface create/lock,
+  `never_merge`/alignment/external-mapping/evidence writes) plus the live
+  family-lock serialization test and the transactional in-transaction reread
+  that defeats concurrent evidence retraction and conflicting mapping
+  insertion.
+- [x] Run `go test ./server/api/ontology/keywords/... ./server/api/ontology/terminology/... ./server/cmd/keyword-reconcile/... ./server/cmd/terminology-import/... ./server/cmd/qudt-import/...`.
+- [x] Run `go test ./...` and `go vet ./...`; investigate every failure.
+- [x] Run the coverage command against the selected pilot scope, store the unresolved-pair backlog and pass/fail report, and require operator approval before calling a production seed release ready.
+- [x] Update implementation status, operational commands, source-manifest/diff/rollback format, and the five documentation-impact questions required by workspace policy.
+- [x] Synchronize the governing KnowledgeStore keyword spec (§13.1, R6, §21, and I2). If that separate repository has unrelated changes, stop and have the user resolve them; do not declare completion while the governing spec is stale.
+- [x] Obtain independent spec-compliance review, then code-quality review; fix and re-run verification.
+- [x] Commit documentation/test closure, verify a single linear `jj log`, and report actual resource files intentionally not distributed with the repository.
+
+## Documentation impact (workspace policy)
+
+- **What knowledge changed?** Tier 6 no longer trusts cosine as merge
+  authority; exact identity requires an authoritative, enabled,
+  license-approved `exact_equivalent` claim from governed `(source,
+  external_id, release)` evidence. Reviewed promotion is the only writer into
+  `keyword_external_ids`/`keyword_surface_evidence`/the provenance-linked
+  `never_merge` veto; negative evidence is a veto, never a lowered score.
+- **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
+  specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
+  §21, I2), the Stage-0/1 tooling commits (Tasks 0–8), and the new live
+  integration test `server/api/ontology/keywords/reconcile_identity_integration_test.go`.
+- **Which docs were updated?** `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`
+  (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
+  (status, §12.3, new §13 implementation/commands/formats/acceptance), this
+  plan, `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
+  and the stored coverage report under `docs/superpowers/reports/`.
+- **Which docs are now stale?** The keyword spec's §13.1 "embedding may
+  auto-accept" wording (revised in place), the §0 "Never validated live" row
+  (closed by I2), and §20.1.12 I2 (resolved). No applied migration changed;
+  `project_migrations/20260807000001` remains the only governed-source migration.
+- **What was intentionally left undocumented?** Production resource files are
+  not distributed with the repository (synthetic fixtures stand in for real
+  SIRP/QUDT/IEC/Wikidata artifacts); operator approval of the coverage
+  backlog and a published production seed release remain deliberately outside
+  tooling authority.
 
 ## Completion boundary
 

@@ -1,6 +1,6 @@
 # External Terminology Resource Portfolio for Tier-6 Reconciliation
 
-**Status:** Approved direction and implementation design (Option 3: governed dual-track portfolio, 2026-08-07)<br>
+**Status:** Approved direction and implementation design (Option 3: governed dual-track portfolio, 2026-08-07); Stage-0/1 tooling implemented and live-accepted 2026-08-07 — production activation still requires operator bootstrap (§13.3)<br>
 **Task:** Resolve the selection/design portion of the authoritative-catalog gap in Tier-6 design §10.9.1; the operational blocker remains until the portfolio is built and passes §10<br>
 **Scope:** External terminology research and ingestion policy; no Tier-6 implementation changes<br>
 **Governing design:** `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`<br>
@@ -526,6 +526,99 @@ The portfolio bootstrap is complete only when all of the following pass.
 - legal review of each intended distribution model;
 - whether negative source assertions require a dedicated table or reuse the existing `never_merge` mechanism with scoped provenance.
 
+### 12.3 Resolved by the Stage-0/1 implementation
+
+- Structured source-policy governance: `project_migrations/20260807000001_govern_keyword_identity_sources.sql` adds role, scopes, relations, checksum, license review, adapter version, provenance, approval and `identity_authority` columns, immutability triggers, artifact/catalog/label/relation/negative-decision/UCUM staging tables, and the audited `keyword_identity_deployments` pointer.
+- Negative source assertions: a dedicated `kb.keyword_catalog_negative_decisions` staging table (adapter-owned) feeds a provenance-preserving promotion that writes the scoped `never_merge` veto; non-equivalence is never a lowered score.
+- QUDT importer change plan: shared `ParseQUDTGraph` + `QUDTAdapter` (Task 7) preserves language tags, deprecation/replacement, exact vs `wikidataMatch`, and `siExactMatch` → SIRP persistent-identifier crosswalks; the legacy `cmd/qudt-import` command remains functional.
+- SIRP adapter: `SIRPAdapter` plus the explicit SIRP/QUDT Luminance → LUMA fixture prove the exact crosswalk normalizes while the adjacent Wikidata mapping stays proposal-only.
+
+## 13. Implementation status, operational commands, and acceptance
+
+### 13.1 Stage-0/1 tooling
+
+All Stage-0/1 tooling from the portfolio plan
+(`docs/superpowers/plans/2026-08-07-external-terminology-resource-portfolio.md`) is
+implemented and committed: corpus/coverage measurement, the governed source
+registry and generic catalog schema, the source-agnostic identity-evidence
+contract, transaction-scoped merge/audit primitives, deterministic Tier-6
+validation, the immutable terminology import runner with diff/rollback, the
+stage-1 adapters (SIRP, IEC seed, Wikidata, UCUM, QUDT), and reviewed
+positive/negative promotion into `keyword_external_ids`,
+`keyword_surface_evidence`, and the provenance-linked `never_merge` veto.
+
+### 13.2 Operational commands
+
+```text
+# Import one immutable local source release (never fetches live URLs).
+terminology-import import --manifest <manifest.json>
+# Report a release diff between two manifests (json|summary).
+terminology-import diff --base <base.json> --candidate <candidate.json> [--format json|summary]
+# Move the audited deployment pointer; rollback restores the prior pointer.
+terminology-import activate --deployment-key tier6-primary --source iec-60050-845 --release 2020 --changed-by <operator>
+terminology-import rollback --deployment-key tier6-primary --changed-by <operator>
+# Measure pilot-scope coverage against a reviewed seed release (read-only).
+terminology-coverage --acceptance acceptance.json [--format json|summary]
+# Offline Tier-6 reconciliation with exact-identity authority.
+keyword-reconcile --scope display --identity-deployment-key tier6-primary
+# Legacy quantity-module QUDT import (unchanged behavior).
+qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions dimensions.ttl
+```
+
+### 13.3 Source manifest, diff, and rollback format
+
+Each manifest is a reproducible source file plus its release policy:
+
+```json
+{
+  "adapter": "iec-seed",
+  "policy": {
+    "provider_id": "iec", "source": "iec-60050-845", "source_subset": "pilot",
+    "release": "2020", "retrieved_at": "2026-08-07T00:00:00Z",
+    "content_checksum": "<sha256>", "license": "iec-reviewed-seed-2020",
+    "license_review_status": "approved", "authority_role": "exact_identity_authority",
+    "authoritative_relations": ["exact_equivalent"], "allowed_scopes": ["display"],
+    "languages": ["en", "zh"], "adapter_version": "0.1.0",
+    "provenance_locator": "https://example.test/iec-seed/v1",
+    "approved_by": "ontology-board", "approved_at": "2026-08-07T00:00:00Z",
+    "identity_authority": true
+  },
+  "artifacts": [
+    {"id": "seed.json", "path": "seed.json", "sha256": "<sha256>",
+     "media_type": "application/json", "provenance_locator": "https://example.test/iec-seed/seed.json"}
+  ]
+}
+```
+
+An exact replay is idempotent; any changed checksum, policy, scope, rights,
+approval, or payload fails and requires a new release/snapshot identity.
+`diff` reports added/retired/replaced entries, labels, relations, negative
+decisions, UCUM codes, artifacts, and policy changes between two manifests.
+`rollback` restores the previous audited `keyword_identity_deployments`
+pointer and appends a `rollback` history row; every activation/rollback
+records `changed_by` and `changed_at`.
+
+### 13.4 Acceptance status
+
+Live acceptance ran against a freshly rebuilt `chenweb_test`: all 220 project
+migrations applied (plus guarded Down/Up round-trip), all five stage-1
+fixtures imported twice with idempotent replay, and `tier6-primary` enabled on
+`iec-60050-845/2020`. The integration test suite
+(`reconcile_identity_integration_test.go`) proved exact-identity merges
+independent of cosine, deferral without a reviewed mapping, conflict
+rejection, audit-row invariants, and family-lock serialization.
+
+The pilot-scope coverage report (`docs/superpowers/reports/2026-08-07-external-terminology-resource-portfolio/coverage-report.json`)
+against the seed release reports `ready=false`: coverage 83.33% meets the
+80% target, but risk terms `brightness`/`contrast` are not covered, the
+bilingual backlog (`kw:brightness` missing `en`, `kw:contrast` missing `zh`)
+is recorded, and approval remains `operator_required`. Per the acceptance
+criterion, production seed activation requires the operator to review the
+backlog, approve the acceptance criteria, and publish a versioned seed
+release — tooling reports readiness and cannot self-approve.
+
+## 14. Recommended implementation sequence
+
 ## 13. Recommended implementation sequence
 
 1. Measure the pilot corpus and select the seed scope.
@@ -539,7 +632,7 @@ The portfolio bootstrap is complete only when all of the following pass.
 9. Publish the first versioned seed release and enable it for Tier-6 validation.
 10. Evaluate coverage and false proposals before adding LOINC or another domain source.
 
-## 14. Primary-source index
+## 15. Primary-source index
 
 - BIPM, [SI Reference Point 1.0.0 release](https://www.bipm.org/en/-/2026-06-18-the-first-stable-version-of-the-si-reference-point) and [service](https://si-digital-framework.org/SI)
 - BIPM, [SI Brochure, 9th edition, updated 2026](https://www.bipm.org/en/publications/si-brochure/)
