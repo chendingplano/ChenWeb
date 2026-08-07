@@ -15,7 +15,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	ontologycandidates "github.com/chendingplano/deepdoc/server/api/ontology/candidates"
+	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
+	"github.com/chendingplano/deepdoc/server/api/ontology/names"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -123,6 +127,132 @@ type MetricsStore interface {
 	SaveMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
 	GetMetricsByInputRecordID(ctx context.Context, inputRecordID int64) ([]map[string]any, error)
 	UpsertMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
+}
+
+// nameResolver is the subset of names.Resolver the decorator needs — declared
+// here so the decorator is unit-testable without a live DB. The concrete
+// *names.Resolver satisfies it.
+type nameResolver interface {
+	ResolveNames(ctx context.Context, reqs []names.ResolveNameRequest) ([]names.NameResolution, error)
+}
+
+// ResolvingMetricsStore wraps a MetricsStore so every metric row is resolved
+// through names.Resolver before it is persisted (spec §16.3, REQ-3): the one
+// seam where the resolver is called, whatever write path reached the store.
+// keyword_concept_id is populated from resolution.ConceptID (fast, ungoverned);
+// metric_definition_term_id only from resolution.TermID on term_resolved
+// (governed). Values already written by the extraction are never overwritten.
+// extract_metrics itself is untouched — no prompt change.
+type ResolvingMetricsStore struct {
+	Inner    MetricsStore
+	Resolver nameResolver
+}
+
+// SaveMetrics resolves every metric's name, then persists via Inner (spec
+// step 12, REQ-3). A batch resolver error aborts the write.
+func (s *ResolvingMetricsStore) SaveMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error) {
+	resolved, err := s.resolveAll(ctx, req.Metrics)
+	if err != nil {
+		return 0, err
+	}
+	req.Metrics = resolved
+	return s.Inner.SaveMetrics(ctx, req)
+}
+
+// UpsertMetrics resolves every metric's name, then persists via Inner (spec
+// step 12, REQ-3) — the merge path keeps the governed term ids on re-merge.
+func (s *ResolvingMetricsStore) UpsertMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error) {
+	resolved, err := s.resolveAll(ctx, req.Metrics)
+	if err != nil {
+		return 0, err
+	}
+	req.Metrics = resolved
+	return s.Inner.UpsertMetrics(ctx, req)
+}
+
+// MetricsExist delegates verbatim to Inner.
+func (s *ResolvingMetricsStore) MetricsExist(ctx context.Context, inputRecordID int64) (bool, error) {
+	return s.Inner.MetricsExist(ctx, inputRecordID)
+}
+
+// DeleteMetricsByInputRecordID delegates verbatim to Inner.
+func (s *ResolvingMetricsStore) DeleteMetricsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error) {
+	return s.Inner.DeleteMetricsByInputRecordID(ctx, inputRecordID)
+}
+
+// GetMetricsByInputRecordID delegates verbatim to Inner.
+func (s *ResolvingMetricsStore) GetMetricsByInputRecordID(ctx context.Context, inputRecordID int64) ([]map[string]any, error) {
+	return s.Inner.GetMetricsByInputRecordID(ctx, inputRecordID)
+}
+
+// resolveAll resolves the distinct trimmed metric_name strings in one
+// ResolveNames batch (scope "_", the metrics pipeline's keyword scope) and
+// annotates the metric maps in place. Empty or non-string metric names are
+// skipped (not resolved). A batch error propagates — ResolveNames aborts on
+// first error, which is acceptable for a persistence seam (spec §16.3, REQ-3).
+func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[string]any) ([]map[string]any, error) {
+	if len(metrics) == 0 {
+		return metrics, nil
+	}
+	var reqs []names.ResolveNameRequest
+	seen := make(map[string]struct{}, len(metrics))
+	for _, m := range metrics {
+		name := strings.TrimSpace(asString(m["metric_name"]))
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		reqs = append(reqs, names.ResolveNameRequest{Name: name, Scope: "_"})
+	}
+	if len(reqs) == 0 {
+		return metrics, nil
+	}
+	resolutions, err := s.Resolver.ResolveNames(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]names.NameResolution, len(reqs))
+	for i, r := range resolutions {
+		byName[reqs[i].Name] = r
+	}
+	for _, m := range metrics {
+		name := strings.TrimSpace(asString(m["metric_name"]))
+		res, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if res.ConceptID != "" {
+			if _, exists := m["keyword_concept_id"]; !exists {
+				m["keyword_concept_id"] = res.ConceptID
+			}
+		}
+		if res.Status == names.StatusTermResolved {
+			if _, exists := m["metric_definition_term_id"]; !exists {
+				m["metric_definition_term_id"] = res.TermID
+			}
+		}
+	}
+	return metrics, nil
+}
+
+// newResolvingMetricsStore builds the §16.3 consumer: the concrete store
+// wrapped by the resolver-backed decorator. The one place the resolver is
+// constructed for the metrics pipeline (spec step 12, REQ-3).
+func newResolvingMetricsStore(db *sql.DB) MetricsStore {
+	return &ResolvingMetricsStore{
+		Inner: MetricsSQLStore{DB: db},
+		Resolver: names.NewResolverWithAlignments(
+			&keywords.KeywordFamily{DB: db, ResolverMode: keywords.ResolverMode()},
+			&keywords.AlignmentsStore{
+				Assertions:  assertions.AssertionStore{DB: db},
+				DecisionLog: semid.DecisionLogStore{DB: db},
+				Scope:       "_",
+			},
+		),
+	}
 }
 
 type metricExtInfoSeed struct {
@@ -2640,10 +2770,12 @@ INSERT INTO kb.metrics (
 	category_paths,
 	category_paths_en,
 	search_document,
-	ext_info
+	ext_info,
+	keyword_concept_id,
+	metric_definition_term_id
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -2692,6 +2824,18 @@ VALUES (
 		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
 		categoryPathsEnJSON, _ := json.Marshal(metric["category_paths_en"])
 
+		// keyword_concept_id / metric_definition_term_id are populated by the
+		// ResolvingMetricsStore decorator (spec §16.3, REQ-3). Bind NULL when
+		// absent so the two nullable columns stay NULL instead of ''.
+		var keywordConceptIDVal any
+		if id := strings.TrimSpace(asString(metric["keyword_concept_id"])); id != "" {
+			keywordConceptIDVal = id
+		}
+		var metricDefTermIDVal any
+		if id := strings.TrimSpace(asString(metric["metric_definition_term_id"])); id != "" {
+			metricDefTermIDVal = id
+		}
+
 		_, err = s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
@@ -2730,6 +2874,8 @@ VALUES (
 			string(categoryPathsEnJSON),
 			searchDocument,
 			string(extInfo),
+			keywordConceptIDVal,
+			metricDefTermIDVal,
 		)
 		if err != nil {
 			return inserted, err
@@ -2764,10 +2910,10 @@ INSERT INTO kb.metrics (
 	metric_value, value_data_type, value_range_type, value_class, value_class_en, formula_or_definition,
 	threshold_or_target, measurement_frequency, confidence, is_explicit_metric, table_name_or_section,
 	reasoning_tags, metric_categories, metric_categories_en, category_paths, category_paths_en,
-	search_document, ext_info
+	search_document, ext_info, keyword_concept_id, metric_definition_term_id
 ) VALUES (
 	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,
-	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb
+	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39
 )
 ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE SET
 	metric_name = EXCLUDED.metric_name, metric_name_en = EXCLUDED.metric_name_en,
@@ -2783,7 +2929,8 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 	measurement_frequency = EXCLUDED.measurement_frequency, metric_categories = EXCLUDED.metric_categories,
 	metric_categories_en = EXCLUDED.metric_categories_en, category_paths = EXCLUDED.category_paths,
 	category_paths_en = EXCLUDED.category_paths_en, search_document = EXCLUDED.search_document,
-	ext_info = EXCLUDED.ext_info`
+	ext_info = EXCLUDED.ext_info, keyword_concept_id = EXCLUDED.keyword_concept_id,
+	metric_definition_term_id = EXCLUDED.metric_definition_term_id`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
 		strings.EqualFold(strings.TrimSpace(req.Language), "english")
@@ -2818,6 +2965,18 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
 		categoryPathsEnJSON, _ := json.Marshal(metric["category_paths_en"])
 
+		// keyword_concept_id / metric_definition_term_id are populated by the
+		// ResolvingMetricsStore decorator (spec §16.3, REQ-3). Bind NULL when
+		// absent so the two nullable columns stay NULL instead of ''.
+		var keywordConceptIDVal any
+		if id := strings.TrimSpace(asString(metric["keyword_concept_id"])); id != "" {
+			keywordConceptIDVal = id
+		}
+		var metricDefTermIDVal any
+		if id := strings.TrimSpace(asString(metric["metric_definition_term_id"])); id != "" {
+			metricDefTermIDVal = id
+		}
+
 		res, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal, req.InputRecordID, strings.TrimSpace(asString(metric["metric_id"])),
 			strings.TrimSpace(asString(metric["metric_name"])), metricNameEn, string(sourceSpansJSON),
@@ -2838,6 +2997,7 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 			strings.TrimSpace(asString(metric["table_name_or_section"])), string(reasoningTagsJSON),
 			string(metricCategoriesJSON), string(metricCategoriesEnJSON), string(categoryPathsJSON),
 			string(categoryPathsEnJSON), searchDocument, string(extInfo),
+			keywordConceptIDVal, metricDefTermIDVal,
 		)
 		if err != nil {
 			return affected, err

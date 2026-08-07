@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/names"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -1342,6 +1343,8 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			"null",
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -1418,7 +1421,7 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-			sqlmock.AnyArg(), sqlmock.AnyArg()).
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
@@ -1831,5 +1834,208 @@ func TestMetricsProcessor_ProcessChunk_NoOpWhenSkipping(t *testing.T) {
 	if extractor.structuredCalledCount != 0 || extractor.calledCount != 0 {
 		t.Fatalf("expected zero LLM calls when skipping, got structured=%d plain=%d",
 			extractor.structuredCalledCount, extractor.calledCount)
+	}
+}
+
+// ── ResolvingMetricsStore decorator (spec step 12, REQ-3) ─────────────────────
+
+// scriptedNameResolver is a nameResolver fake returning a fixed resolution per
+// name, so the decorator's ResolveNames batch call is testable without a live
+// keyword DB.
+type scriptedNameResolver struct {
+	resolutions map[string]names.NameResolution
+	requests    []names.ResolveNameRequest
+	err         error
+}
+
+func (s *scriptedNameResolver) ResolveNames(_ context.Context, reqs []names.ResolveNameRequest) ([]names.NameResolution, error) {
+	s.requests = append(s.requests, reqs...)
+	if s.err != nil {
+		return nil, s.err
+	}
+	out := make([]names.NameResolution, 0, len(reqs))
+	for _, req := range reqs {
+		out = append(out, s.resolutions[req.Name])
+	}
+	return out, nil
+}
+
+func TestResolvingMetricsStoreResolvesNames(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Luminance": {RawName: "Luminance", Status: names.StatusTermResolved, ConceptID: "kwc_l", TermID: "mea:Luminance"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		InputRecordID: 42,
+		Metrics: []map[string]any{
+			{"metric_name": "Luminance", "metric_id": "42_1", "unit": "cd/m²"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	got := inner.lastSave.Metrics
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	m := got[0]
+	if m["keyword_concept_id"] != "kwc_l" {
+		t.Fatalf("keyword_concept_id=%#v, want kwc_l", m["keyword_concept_id"])
+	}
+	if m["metric_definition_term_id"] != "mea:Luminance" {
+		t.Fatalf("metric_definition_term_id=%#v, want mea:Luminance", m["metric_definition_term_id"])
+	}
+	if m["metric_id"] != "42_1" || m["unit"] != "cd/m²" {
+		t.Fatalf("other keys were touched: %#v", m)
+	}
+	if len(resolver.requests) != 1 {
+		t.Fatalf("ResolveNames batch calls=%d, want 1", len(resolver.requests))
+	}
+	if r := resolver.requests[0]; r.Name != "Luminance" || r.Scope != "_" {
+		t.Fatalf("request=%+v, want {Name:Luminance Scope:_}", r)
+	}
+}
+
+func TestResolvingMetricsStoreLexicalSetsConceptOnly(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Brightness": {RawName: "Brightness", Status: names.StatusLexicalResolved, ConceptID: "kwc_b"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_name": "Brightness"}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	m := inner.lastSave.Metrics[0]
+	if m["keyword_concept_id"] != "kwc_b" {
+		t.Fatalf("keyword_concept_id=%#v, want kwc_b", m["keyword_concept_id"])
+	}
+	if _, ok := m["metric_definition_term_id"]; ok {
+		t.Fatalf("metric_definition_term_id must be absent on lexical-only resolution, got %#v", m["metric_definition_term_id"])
+	}
+}
+
+func TestResolvingMetricsStoreNeverOverwrites(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Luminance": {RawName: "Luminance", Status: names.StatusTermResolved, ConceptID: "kwc_other", TermID: "mea:Other"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_name":               "Luminance",
+			"keyword_concept_id":        "kwc_prior",
+			"metric_definition_term_id": "mea:Existing",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	m := inner.lastSave.Metrics[0]
+	if m["keyword_concept_id"] != "kwc_prior" {
+		t.Fatalf("keyword_concept_id=%#v, want kwc_prior preserved (never overwrite)", m["keyword_concept_id"])
+	}
+	if m["metric_definition_term_id"] != "mea:Existing" {
+		t.Fatalf("metric_definition_term_id=%#v, want mea:Existing preserved (never overwrite)", m["metric_definition_term_id"])
+	}
+}
+
+func TestResolvingMetricsStoreDisabledPassThrough(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Luminance": {RawName: "Luminance", Status: names.StatusDisabled},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		InputRecordID: 42,
+		Metrics: []map[string]any{
+			{"metric_name": "Luminance", "metric_id": "42_1"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	m := inner.lastSave.Metrics[0]
+	if _, ok := m["keyword_concept_id"]; ok {
+		t.Fatalf("keyword_concept_id must be absent when resolver disabled, got %#v", m["keyword_concept_id"])
+	}
+	if _, ok := m["metric_definition_term_id"]; ok {
+		t.Fatalf("metric_definition_term_id must be absent when resolver disabled, got %#v", m["metric_definition_term_id"])
+	}
+	if len(m) != 2 || m["metric_name"] != "Luminance" || m["metric_id"] != "42_1" {
+		t.Fatalf("request not passed through byte-for-byte: %#v", m)
+	}
+}
+
+func TestResolvingMetricsStoreRoutesBothWritePaths(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Luminance": {RawName: "Luminance", Status: names.StatusTermResolved, ConceptID: "kwc_l", TermID: "mea:Luminance"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_name": "Luminance"}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if got := inner.lastSave.Metrics[0]["keyword_concept_id"]; got != "kwc_l" {
+		t.Fatalf("SaveMetrics path did not resolve, keyword_concept_id=%#v", got)
+	}
+
+	if _, err := s.UpsertMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_name": "Luminance"}},
+	}); err != nil {
+		t.Fatalf("UpsertMetrics: %v", err)
+	}
+	if got := inner.lastUpsert.Metrics[0]["keyword_concept_id"]; got != "kwc_l" {
+		t.Fatalf("UpsertMetrics path did not resolve, keyword_concept_id=%#v", got)
+	}
+
+	// The interface's other three methods delegate verbatim to Inner.
+	ctx := context.Background()
+	if _, err := s.MetricsExist(ctx, 1); err != nil {
+		t.Fatalf("MetricsExist: %v", err)
+	}
+	if inner.metricsExistCalls != 1 {
+		t.Fatalf("MetricsExist did not delegate, calls=%d", inner.metricsExistCalls)
+	}
+	if _, err := s.DeleteMetricsByInputRecordID(ctx, 1); err != nil {
+		t.Fatalf("DeleteMetricsByInputRecordID: %v", err)
+	}
+	if inner.deleteCalled != 1 {
+		t.Fatalf("DeleteMetricsByInputRecordID did not delegate, calls=%d", inner.deleteCalled)
+	}
+	if _, err := s.GetMetricsByInputRecordID(ctx, 1); err != nil {
+		t.Fatalf("GetMetricsByInputRecordID: %v", err)
+	}
+}
+
+func TestResolvingMetricsStorePropagatesBatchError(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{err: errors.New("kernel down")}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	_, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_name": "Luminance"}},
+	})
+	if err == nil || err.Error() != "kernel down" {
+		t.Fatalf("SaveMetrics err=%v, want propagated batch error", err)
+	}
+	if inner.saveCalled != 0 {
+		t.Fatalf("inner store must not be reached on resolver error, saveCalled=%d", inner.saveCalled)
 	}
 }

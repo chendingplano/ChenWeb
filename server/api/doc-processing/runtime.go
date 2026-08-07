@@ -70,7 +70,7 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 		NewEntityProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewRelationProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewInventoryItemsProcessor(inputStore, InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
-		NewMetricsProcessor(inputStore, MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
+		NewMetricsProcessor(inputStore, newResolvingMetricsStore(ApiTypes.ProjectDBHandle), newClient(), logger),
 		NewMetricDefinitionsProcessor(newClient()),
 		NewProductStructureProcessor(),
 		NewTestMethodsProcessor(newClient()),
