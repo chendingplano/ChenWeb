@@ -147,6 +147,8 @@ SELECT pg_advisory_xact_lock(1264011588, 1);
 `1264011588` is the fixed namespace value for ASCII `KWID`; the second key is lock-contract version 1. These constants are part of the persistence contract and must not be recomputed with a process- or database-version-dependent hash. The same helper is mandatory in every domain writer that can change a decision while it is in flight:
 
 - automatic and manual concept merge;
+- concept create/update/status operations that change `pref_label`, `scope`, `status`, or `gloss_source`;
+- surface create/update/lock/delete operations;
 - `NeverMergeStore.Add`/remove for the affected keyword concepts;
 - `AlignmentsStore.EnsureAccepted`, retraction, and merge-follow;
 - external-ID and surface-evidence create/update/delete operations.
@@ -158,14 +160,15 @@ Lexical queries and embedding calls may assemble provisional proposals outside t
 After acquiring the family lock, execute in this order:
 
 1. Lock and recheck the scanned candidate row (`status='provisional'`, `gloss_source='auto:d11'`, requested scope), then lock all candidate surfaces.
-2. Rerun the exhaustive external-evidence/mapping query. Lock all source, candidate surface-evidence, and external-ID rows it returns; classify authoritative active targets and non-authorizing external evidence from current transactional state.
-3. Select the one candidate-level outcome using the binding table. Target-less branches (`no_candidate`, tier-5 tie without authority, invalid/provisional external target, or multi-authority conflict) do not attempt to lock a second concept. Append their audit row and commit.
-4. Only for a `validate` branch, lock the chosen target concept and all its surfaces. Recheck target `status='active'`, equal concept scope, and requested run scope. Reject when an absorbed candidate surface is locked. Recompute digit signatures over every surface on both concepts; when either concept has digit-bearing surfaces, the two sets must agree exactly.
-5. Apply method-specific authority revalidation:
+2. Recompute the complete tier-5 active-target query, edit-distance scores, unique-top/tie rule, and spelling guardrails from current transactional state. The pre-lock tier-5 proposal is diagnostic only and cannot authorize a merge.
+3. Rerun the exhaustive external-evidence/mapping query. Lock all source, candidate surface-evidence, and external-ID rows it returns; classify authoritative active targets and non-authorizing external evidence from current transactional state.
+4. Select the one candidate-level outcome using the binding table. Target-less branches (`no_candidate`, tier-5 tie without authority, invalid/provisional external target, or multi-authority conflict) do not attempt to lock a second concept. Append their audit row and commit.
+5. Only for a `validate` branch, lock the chosen target concept and all its surfaces. Recheck target `status='active'`, equal concept scope, and requested run scope. Reject when an absorbed candidate surface is locked. Recompute digit signatures over every surface on both concepts; when either concept has digit-bearing surfaces, the two sets must agree exactly.
+6. Apply method-specific authority revalidation:
    - for `tier6_external_identity`, the authoritative active-target set must be exactly the chosen singleton;
    - for `tier5_fuzzy`, zero authoritative targets or one authoritative target equal to the chosen tier-5 target may proceed, while any different or multiple authoritative targets reject as a candidate-global identity conflict.
-6. Recheck `kb.semid_never_merge`. Require a wired `AlignmentsStore`, recheck its different-term conflict, and prepare alignment-follow inside the transaction.
-7. If any validate-branch veto fires, append the candidate's `reject` audit row and commit without merging. Otherwise apply the tombstone, surface re-point with `origin_concept`, alignment-follow, and `auto_merge` audit row, then commit.
+7. Recheck `kb.semid_never_merge`. Require a wired `AlignmentsStore`, recheck its different-term conflict, and prepare alignment-follow inside the transaction.
+8. If any validate-branch veto fires, append the candidate's `reject` audit row and commit without merging. Otherwise apply the tombstone, surface re-point with `origin_concept`, alignment-follow, and `auto_merge` audit row, then commit.
 
 Implementation should refactor the existing merge transaction body into a transaction-accepting helper used by both `MergeConcept` and reconciliation. It must not validate evidence outside one transaction and then call the current self-transactional method, which would create a time-of-check/time-of-use authorization race. The shared advisory-lock helper and its use by every veto/evidence writer are part of this slice, not optional hardening.
 
@@ -231,6 +234,7 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - Retracting evidence concurrently with reconciliation either completes before validation and prevents the merge, or blocks until the merge transaction commits; it cannot invalidate authorization between validation and apply.
 - Concurrent insertion of `never_merge`, a conflicting alignment, new surface evidence, or a conflicting external mapping follows the same family-lock protocol: either the mutation commits first and the exhaustive in-transaction reread rejects the merge, or the merge commits first and the later writer observes the tombstone/current identity before deciding.
 - A dedicated concurrency test inserts a second authoritative mapping to another active target after proposal assembly; it must block on the family lock or commit first and force the exhaustive reread to reject.
+- A concurrent concept-label/status or surface mutation after pre-lock tier-5 assembly must block or commit first; the in-transaction tier-5 recomputation must then change/defer/reject the stale proposal rather than applying it.
 - Exhaustive authoritative mappings are never truncated by embedding top K; authority overflow or lookup failure fails closed.
 - `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
 - Table-driven tests cover every row of the candidate-level decision table, including the exact distinction between `deferred_unvalidated` and `no_candidate`.
