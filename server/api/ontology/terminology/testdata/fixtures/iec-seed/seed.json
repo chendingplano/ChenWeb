@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {"external_id": "845-21-050", "entry_status": "current", "provenance_locator": "https://example.test/iec-seed/845-21-050"},
+    {"external_id": "845-22-059", "entry_status": "current", "provenance_locator": "https://example.test/iec-seed/845-22-059"}
+  ],
+  "labels": [
+    {"external_id": "845-21-050", "language": "en", "label_role": "preferred", "label": "luminance", "provenance_locator": "https://example.test/iec-seed/845-21-050"},
+    {"external_id": "845-21-050", "language": "zh", "label_role": "preferred", "label": "亮度", "provenance_locator": "https://example.test/iec-seed/845-21-050"},
+    {"external_id": "845-22-059", "language": "en", "label_role": "preferred", "label": "brightness", "provenance_locator": "https://example.test/iec-seed/845-22-059"},
+    {"external_id": "845-22-059", "language": "zh", "label_role": "preferred", "label": "视亮度", "provenance_locator": "https://example.test/iec-seed/845-22-059"}
+  ],
+  "relations": [],
+  "negative_decisions": [
+    {"subject_external_id": "845-21-050", "object_source": "iec-seed", "object_release": "v1", "object_external_id": "845-22-059", "relation": "different_from", "reason": "luminance is photometric density; brightness is a perceived attribute", "provenance_locator": "https://example.test/iec-seed/review/2026-08-07"}
+  ],
+  "ucum_codes": []
+}

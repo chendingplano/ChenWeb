@@ -1,0 +1,32 @@
+{
+  "adapter": "synthetic-seed",
+  "policy": {
+    "provider_id": "synthetic-provider",
+    "source": "iec-seed",
+    "source_subset": "pilot",
+    "release": "v1",
+    "retrieved_at": "2026-08-07T00:00:00Z",
+    "content_checksum": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "license": "CC0-1.0",
+    "license_review_status": "approved",
+    "authority_role": "exact_identity_authority",
+    "authoritative_relations": ["exact_equivalent"],
+    "allowed_scopes": ["display"],
+    "languages": ["en", "zh"],
+    "adapter_version": "0.1.0",
+    "provenance_locator": "https://example.test/iec-seed/v1",
+    "approved_by": "ontology-board",
+    "approved_at": "2026-08-07T00:00:00Z",
+    "identity_authority": true,
+    "notes": "synthetic pilot seed fixture; no real IEC content"
+  },
+  "artifacts": [
+    {
+      "id": "seed.json",
+      "path": "seed.json",
+      "sha256": "180c0cc63b6dd70cc90a3bff39fd0d2ccf1494cf531077c1ace02c27cf68293d",
+      "media_type": "application/json",
+      "provenance_locator": "https://example.test/iec-seed/seed.json"
+    }
+  ]
+}

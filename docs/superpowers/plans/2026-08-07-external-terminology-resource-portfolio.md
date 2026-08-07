@@ -156,14 +156,14 @@
 - A release-diff operation reports additions, retirements, replacements, label/relation changes, artifact/checksum changes, and policy/license changes before a new release may be approved. Activation appends an audited deployment event and advances a separate enabled-release pointer. Rollback appends a compensating event and advances that pointer to the prior immutable release; source-release policy, artifacts, historical deployment events, and audit evidence are never rewritten or deleted.
 - Promotion from staging to identity triples is a separate explicit reviewed mapping input, never an inference from labels.
 
-- [ ] Add failing manifest tests for path confinement, checksum mismatch, missing release/revision, invalid authority combinations, duplicate artifacts, and deterministic JSON.
-- [ ] Add failing runner tests for all-or-nothing first import, identical replay, changed-payload/reused-release rejection, and rollback on adapter failure.
-- [ ] Implement strict manifest parsing/checksum validation and adapter registry.
-- [ ] Implement transaction-scoped immutable catalog import/verification and the local-file-only CLI.
-- [ ] Add release-diff tests/output and tested lock-protected activation/rollback operations over the separate deployment pointer, including audit history and rejection when the selected release is absent or unapproved.
-- [ ] Add fixture manifests with synthetic data only.
-- [ ] Run terminology package/command tests.
-- [ ] Commit with `jj commit -m "ontology: add governed terminology import runner"`.
+- [x] Add failing manifest tests for path confinement, checksum mismatch, missing release/revision, invalid authority combinations, duplicate artifacts, and deterministic JSON.
+- [x] Add failing runner tests for all-or-nothing first import, identical replay, changed-payload/reused-release rejection, and rollback on adapter failure.
+- [x] Implement strict manifest parsing/checksum validation and adapter registry.
+- [x] Implement transaction-scoped immutable catalog import/verification and the local-file-only CLI.
+- [x] Add release-diff tests/output and tested lock-protected activation/rollback operations over the separate deployment pointer, including audit history and rejection when the selected release is absent or unapproved.
+- [x] Add fixture manifests with synthetic data only.
+- [x] Run terminology package/command tests.
+- [x] Commit with `jj commit -m "ontology: add governed terminology import runner"`.
 
 ## Task 6: Stage-1 SIRP, IEC seed, Wikidata, and UCUM adapters
 
