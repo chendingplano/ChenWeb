@@ -85,7 +85,7 @@ Conflict rules:
 Candidate-level processing has deterministic precedence:
 
 1. Scan only `status='provisional' AND gloss_source='auto:d11'` candidates in the requested scope.
-2. Tier 5 considers only active targets in that scope. One unique top-scoring target passing the existing edit-distance threshold and spelling vetoes may proceed as `tier5_fuzzy`; when the top two scores differ by at most `1e-9`, the result is a tie and defers. Tier 5 does not require external identity because it is deterministic spelling evidence, not model output.
+2. Tier 5 considers only active targets in that scope. One unique top-scoring target passing the existing edit-distance threshold and spelling vetoes may proceed as `tier5_fuzzy`; when the top two scores differ by at most `1e-9`, tier 5 cannot authorize. Tier 5 does not require external identity because it is deterministic spelling evidence, not model output. A tier-5 tie still permits exhaustive external-identity validation: a unique authoritative external target may resolve the ambiguity, but embedding rank alone may not.
 3. If tier 5 does not authorize a target, tier 6 forms the deduplicated union of active targets from embedding rank and exact external mappings. Deduplication is by target concept ID; all methods and evidence remain attached to the target proposal.
 4. Only embedding proposals are bounded to top K. Authoritative mappings for the scanned candidate are loaded exhaustively and are never truncated or ordered by embedding score. Zero mapped active targets defers the top embedding proposal; exactly one mapped active target proceeds to validation regardless of embedding rank; more than one mapped active target rejects the entire candidate. If exhaustive authority lookup cannot complete, the run fails closed.
 
@@ -115,20 +115,43 @@ Veto aggregation is explicit:
 - Scope, active-target, digit, surface-lock, `never_merge`, and alignment conflicts are pair-local on the chosen absorbed/survivor pair, but any one produces the candidate's single `reject` outcome.
 - Other embedding proposals are retained in the audit payload but cannot produce additional outcomes after a unique authoritative target is chosen.
 
+The candidate-level decision table is binding:
+
+| Tier-5 state | Authoritative active targets | Embedding proposals | Outcome before pair vetoes |
+|---|---:|---:|---|
+| unique valid target | any | any | validate the tier-5 target; conflicting authority to a different target rejects |
+| tie | exactly 1 | any | validate the authoritative target |
+| tie | more than 1 | any | `reject` |
+| tie | 0 | any | `deferred_unvalidated` |
+| none | exactly 1 | any | validate the authoritative target |
+| none | more than 1 | any | `reject` |
+| none | 0 | at least 1 | `deferred_unvalidated` |
+| none | 0 | 0 | `no_candidate` |
+
+“Validate” produces `auto_merge` only when all pair vetoes pass; otherwise it produces `reject`. A tier-5 target and a unique authoritative target that name the same concept are one proposal. If they name different concepts, authoritative identity is a candidate-global conflict and rejects rather than allowing the tier-5 merge.
+
 ### 5.3 Apply and audit
 
 Only `auto_merge` reaches application. Direction is fixed: `absorbed=scanned D11 provisional`, `survivor=chosen active target`. `electMergeDirection` is bypassed for automatic reconciliation, so surface count, age, or lexical concept ID can never tombstone the established target.
 
 Authorization and application occur in one database transaction under a shared identity-lock protocol:
 
-Before reading or changing keyword identity state, acquire one transaction-scoped PostgreSQL advisory lock with a stable, namespaced key for the whole keyword identity family. The same helper is mandatory in every domain writer that can change a decision while it is in flight:
+Before reading or changing keyword identity state, call `AcquireKeywordIdentityMutationLock(ctx, tx)`, which executes exactly:
+
+```sql
+SELECT pg_advisory_xact_lock(1264011588, 1);
+```
+
+`1264011588` is the fixed namespace value for ASCII `KWID`; the second key is lock-contract version 1. These constants are part of the persistence contract and must not be recomputed with a process- or database-version-dependent hash. The same helper is mandatory in every domain writer that can change a decision while it is in flight:
 
 - automatic and manual concept merge;
 - `NeverMergeStore.Add`/remove for the affected keyword concepts;
 - `AlignmentsStore.EnsureAccepted`, retraction, and merge-follow;
 - external-ID and surface-evidence create/update/delete operations.
 
-This deliberately serializes keyword identity mutations across scopes. The minimum reconciliation loop is offline and identity writes are rare; the lower write concurrency buys a simple invariant that also covers global external identities whose affected concepts cannot be known before lookup. Concept and evidence rows are still row-locked after the family lock. This serializes an absent-veto check with a concurrent veto insertion; locking only existing rows is insufficient because an absent row cannot be row-locked. Direct SQL that bypasses domain stores is administrative repair and must hold the same family lock or run while reconciliation is stopped.
+This deliberately serializes keyword identity mutations across scopes. The minimum reconciliation loop is offline and identity writes are rare; the lower write concurrency buys a simple invariant that also covers global external identities whose affected concepts cannot be known before lookup. Concept and evidence rows are still row-locked after the family lock. This serializes an absent-veto check with a concurrent veto insertion; locking only existing rows is insufficient because an absent row cannot be row-locked. Direct SQL that bypasses domain stores is administrative repair and must acquire the same two-key advisory lock or run while reconciliation is stopped.
+
+Lexical queries and embedding calls may assemble provisional proposals outside this lock because they have no write authority. Every scanned candidate then opens one decision transaction, acquires the family lock, performs exhaustive authority and veto reads, selects exactly one outcome from the decision table, appends exactly one decision-log row, and commits. `auto_merge` additionally applies the merge in that transaction. `defer`, `reject`, and `no_candidate` hold the same lock through their decision-log write, so the logged evidence and outcome share one linearization point.
 
 After acquiring the locks:
 
@@ -152,7 +175,7 @@ Each scanned candidate writes exactly one auditable decision containing:
 
 Embedding scores stay observable for later evaluation but never determine the outcome. Tier-5 edit-distance scores retain their deterministic threshold and unique-top role.
 
-`no_candidate` also writes a candidate-level decision row with an empty proposal list. `defer`, `reject`, and `no_candidate` log in their own short transaction; `auto_merge` logs atomically with the merge. The CLI reports mutually exclusive candidate counts: `merged`, `deferred_unvalidated`, `rejected`, and `no_candidate`. Their sum equals `scanned`. A missing evidence/alignment store or query error fails the run; it does not degrade to score-only merging.
+`no_candidate` means no valid tier-5 proposal, no authoritative active target, and no embedding proposal after blocking. It writes a candidate-level decision row with an empty proposal list. `defer`, `reject`, and `no_candidate` log in their candidate decision transaction; `auto_merge` logs atomically with the merge. The CLI reports mutually exclusive candidate counts: `merged`, `deferred_unvalidated`, `rejected`, and `no_candidate`. Their sum equals `scanned`. A missing evidence/alignment store or query error fails the run; it does not degrade to score-only merging.
 
 ## 6. Error handling and operational behavior
 
@@ -177,7 +200,15 @@ Up sequence:
 7. Run diagnostic queries and abort with source/release counts if any evidence or external-mapping orphan remains.
 8. Add composite foreign keys from both evidence and external mappings to `keyword_sources(source, release)` using restrictive update/delete behavior.
 
-Down sequence first aborts with a clear error if dropping release would collapse two evidence rows onto the old uniqueness key. Otherwise it drops the two foreign keys, restores the old uniqueness key, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
+The migration uses explicit constraint names:
+
+- drop legacy unique `keyword_surface_evidence_surface_id_source_external_id_key`;
+- add `uq_keyword_surface_evidence_source_external_release` on `(surface_id, source, external_id, release)`;
+- add `fk_keyword_surface_evidence_source_release` and `fk_keyword_external_ids_source_release`, both referencing the existing primary key `keyword_sources_pkey (source, release)` with `ON UPDATE RESTRICT ON DELETE RESTRICT`.
+
+Legacy placeholder inserts supply only `source`, `release`, `license`, and `notes`; `retrieved_at` remains NULL. Evidence placeholders select distinct `source, ''`. External-mapping placeholders select distinct `source, release` from `kb.keyword_external_ids`, preserving each stored release. Both use `ON CONFLICT (source, release) DO NOTHING`. A `DO` block checks both left joins for NULL source rows and raises an exception with orphan counts before either foreign key is added.
+
+Down sequence first checks for duplicate `(surface_id, source, external_id)` groups and raises an exception if dropping release would collapse them. Otherwise it drops the two named foreign keys, drops the new named unique constraint, restores `keyword_surface_evidence_surface_id_source_external_id_key`, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
 
 ## 7. Tests and acceptance
 
@@ -190,7 +221,7 @@ Down sequence first aborts with a clear error if dropping release would collapse
 - Multiple identity triples to one target merge once; triples mapping to different targets reject once.
 - Unregistered/non-authoritative source releases defer.
 - Tier-5 behavior remains score/guardrail-driven and does not consult embedding scores.
-- Tier-5 equal top scores within `1e-9` defer; one unique top score may proceed.
+- Tier-5 equal top scores within `1e-9` cannot authorize by themselves: unique external authority may resolve the tie; otherwise the candidate defers.
 - Automatic direction always absorbs the scanned D11 provisional into an active target; provisional targets defer.
 - Existing `never_merge`, all-surface digit, absorbed-surface lock, alignment, and scope vetoes dominate positive evidence and are rechecked in the merge transaction.
 - Retracting evidence concurrently with reconciliation either completes before validation and prevents the merge, or blocks until the merge transaction commits; it cannot invalidate authorization between validation and apply.
@@ -198,6 +229,7 @@ Down sequence first aborts with a clear error if dropping release would collapse
 - A dedicated concurrency test inserts a second authoritative mapping to another active target after proposal assembly; it must block on the family lock or commit first and force the exhaustive reread to reject.
 - Exhaustive authoritative mappings are never truncated by embedding top K; authority overflow or lookup failure fails closed.
 - `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
+- Table-driven tests cover every row of the candidate-level decision table, including the exact distinction between `deferred_unvalidated` and `no_candidate`.
 - SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, both source/release foreign keys, and guarded Down behavior.
 
 ### 7.2 Live PostgreSQL proof
