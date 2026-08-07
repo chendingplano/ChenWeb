@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
@@ -28,6 +29,13 @@ const (
 	decisionSQL   = "INSERT INTO kb.semid_decision_log"
 	occurrenceSQL = "INSERT INTO kb.keyword_occurrences"
 	normKeySQL    = "WHERE norm_key = $1 AND scope = $2"
+
+	// aligns_to_term (Task 3) query fingerprints.
+	acceptedForConceptQ = "AND subject_ref_id = $1"
+	releasedExistsQ     = "SELECT EXISTS"
+	getLatestQ          = "logical_identity_key = $1"
+	assertionInsertQ    = "INSERT INTO kb.semantic_assertions"
+	termPrefNameQ       = "WHERE l.term_id = $1"
 )
 
 func newFamily(db *sql.DB) *keywords.KeywordFamily {
@@ -500,6 +508,310 @@ func TestResolveAndObserveTermResolvedWritesOnce(t *testing.T) {
 	if res.ConceptID != "kwc_n8" {
 		t.Errorf("concept link: got %q", res.ConceptID)
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// alignEvidence and alignQualifiersJSON mirror keywords/alignment_test.go for
+// the auto-align evidence string the resolver's ResolveAndObserve writes
+// (encoding/json sorts map keys: evidence < method).
+const alignEvidence = "pref_label exact match to a released metric_definition label (auto-assign, §16.1)"
+
+const alignQualifiersJSON = `{"evidence":"pref_label exact match to a released metric_definition label (auto-assign, §16.1)","method":"term_exact"}`
+
+// alignAssertionRow is a full 37-column kb.semantic_assertions row as returned
+// by CreateAssertion, carrying an accepted keyword_concept -> ontology_term
+// alignment (mirrors keywords/alignment_test.go's row).
+func alignAssertionRow(id int64, conceptID, termID string) *sqlmock.Rows {
+	lk := "kwc:" + conceptID + ":core:aligns_to_term:" + termID
+	return sqlmock.NewRows([]string{
+		"id", "logical_identity_key", "revision", "subject_ref_kind", "subject_ref_id",
+		"subject_object_id", "predicate_term_id", "object_ref_kind", "object_ref_id",
+		"object_object_id", "object_literal", "assertion_kind_term_id", "polarity",
+		"modality", "qualifiers", "confidence", "value_form", "numeric_value", "lower_value",
+		"upper_value", "lower_inclusive", "upper_inclusive", "comparator", "unit_term_id",
+		"quantity_kind_term_id", "raw_text", "status", "decision_reason",
+		"dependency_fingerprint", "superseded_by", "valid_time_start", "valid_time_end",
+		"transaction_time", "create_time", "create_by", "modify_time", "modify_by",
+	}).AddRow(
+		id, lk, 1, "keyword_concept", conceptID,
+		nil, "core:aligns_to_term", "ontology_term", termID,
+		nil, []byte("null"), nil, "positive",
+		nil, []byte(alignQualifiersJSON), 1.0, nil, nil, nil,
+		nil, nil, nil, nil, nil,
+		nil, "", "accepted", alignEvidence,
+		nil, nil, nil, nil,
+		testNow, testNow, nil, testNow, nil,
+	)
+}
+
+// alignReadRow is the focused AcceptedForConcept row (8 columns).
+func alignReadRow(id int64, conceptID, termID string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "subject_ref_id", "object_ref_kind", "object_ref_id", "status", "qualifiers", "confidence", "decision_reason",
+	}).AddRow(id, conceptID, "ontology_term", termID, "accepted", []byte(alignQualifiersJSON), 1.0, alignEvidence)
+}
+
+func noAlignRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "subject_ref_id", "object_ref_kind", "object_ref_id", "status", "qualifiers", "confidence", "decision_reason",
+	})
+}
+
+// REQ-2 (spec §16.2): a name that matches no released label still resolves to
+// a governed term when the concept it auto-accepts is aligned to one. The read
+// path stays write-free — no INSERT/UPDATE/decision-log expectations are
+// queued, so ExpectationsWereMet proves it.
+func TestResolveNameTermResolvedViaAlignment(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	r := NewResolverWithAlignments(newFamily(db), &keywords.AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	})
+	ctx := context.Background()
+
+	// Released-term lookup on the raw name finds nothing; the lexical layer
+	// auto-accepts kwc_b; kwc_b is already aligned to mea:Luminance.
+	mock.ExpectQuery(regexp.QuoteMeta(termQuerySQL)).
+		WillReturnRows(termRows())
+	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
+		WithArgs("亮度", "_").
+		WillReturnRows(sqlmock.NewRows([]string{"concept_id"}).AddRow("kwc_b"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_b").
+		WillReturnRows(conceptRow("kwc_b", "亮度"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_b").
+		WillReturnRows(conceptRow("kwc_b", "亮度"))
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptQ)).
+		WithArgs("kwc_b").
+		WillReturnRows(alignReadRow(1, "kwc_b", "mea:Luminance"))
+	mock.ExpectQuery(regexp.QuoteMeta(termPrefNameQ)).
+		WithArgs("mea:Luminance").
+		WillReturnRows(sqlmock.NewRows([]string{"label"}).AddRow("Luminance"))
+
+	res, err := r.ResolveName(ctx, ResolveNameRequest{Name: "亮度", Scope: "_"})
+	if err != nil {
+		t.Fatalf("ResolveName: %v", err)
+	}
+	if res.Status != StatusTermResolved {
+		t.Errorf("status: got %q, want term_resolved", res.Status)
+	}
+	if res.TermID != "mea:Luminance" || res.TermPrefName != "Luminance" {
+		t.Errorf("term: got %q/%q, want mea:Luminance/Luminance", res.TermID, res.TermPrefName)
+	}
+	if res.TermKind != "metric_definition" {
+		t.Errorf("term kind: got %q, want metric_definition", res.TermKind)
+	}
+	if res.Method != "aligns_to_term" || res.Confidence != 1.0 {
+		t.Errorf("method/confidence: got %q/%v", res.Method, res.Confidence)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// §16.1 D11 auto-assign producer: a concept whose pref_label exactly matches a
+// released metric_definition label is aligned to it on the observe path, and
+// the returned resolution (and its occurrence) become term_resolved.
+func TestResolveAndObserveAutoAlignsOnExactLabel(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	r := NewResolverWithAlignments(newFamily(db), &keywords.AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	})
+	ctx := context.Background()
+
+	// --- Read pass (ResolveName): the raw name matches no released label, the
+	// lexical layer auto-accepts kwc_l (pref_label "Luminance"), and the
+	// alignment-follow read finds no accepted alignment yet. ---
+	mock.ExpectQuery(regexp.QuoteMeta(termQuerySQL)).
+		WillReturnRows(termRows())
+	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
+		WithArgs("亮度", "_").
+		WillReturnRows(sqlmock.NewRows([]string{"concept_id"}).AddRow("kwc_l"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_l").
+		WillReturnRows(conceptRow("kwc_l", "Luminance"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_l").
+		WillReturnRows(conceptRow("kwc_l", "Luminance"))
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptQ)).
+		WithArgs("kwc_l").
+		WillReturnRows(noAlignRows())
+
+	// --- Auto-align: "Luminance" exactly matches the released mea:Luminance
+	// term, and EnsureAccepted mints the alignment (conflict gate, released
+	// guard, idempotency probe, assertion INSERT, DR15 audit row). ---
+	mock.ExpectQuery(regexp.QuoteMeta(termQuerySQL)).
+		WillReturnRows(termRows(
+			[]any{"mea:Luminance", "metric_definition", "mea", "Luminance", "en", "prefLabel"},
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptQ)).
+		WithArgs("kwc_l").
+		WillReturnRows(noAlignRows())
+	mock.ExpectQuery(regexp.QuoteMeta(releasedExistsQ)).
+		WithArgs("mea:Luminance", "metric_definition").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(releasedExistsQ)).
+		WithArgs("core:aligns_to_term", "property").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(getLatestQ)).
+		WithArgs("kwc:kwc_l:core:aligns_to_term:mea:Luminance").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(assertionInsertQ)).
+		WithArgs(
+			"kwc:kwc_l:core:aligns_to_term:mea:Luminance", "keyword_concept", "kwc_l", nil,
+			"core:aligns_to_term", "ontology_term", "mea:Luminance", nil, "null", nil,
+			"positive", nil, alignQualifiersJSON, 1.0, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil, nil, nil, nil,
+		).
+		WillReturnRows(alignAssertionRow(1, "kwc_l", "mea:Luminance"))
+	mock.ExpectQuery(regexp.QuoteMeta(decisionSQL)).
+		WithArgs("keyword_align", "_", `{"concept_id":"kwc_l","term_id":"mea:Luminance"}`, sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+
+	// --- Observe write: deterministic kernel re-run, exactly one decision and
+	// one linked occurrence carrying the auto-aligned term, and no extra
+	// surface write (the surface already exists). ---
+	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
+		WithArgs("亮度", "_").
+		WillReturnRows(sqlmock.NewRows([]string{"concept_id"}).AddRow("kwc_l"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_l").
+		WillReturnRows(conceptRow("kwc_l", "Luminance"))
+	mock.ExpectQuery(regexp.QuoteMeta(decisionSQL)).
+		WithArgs("keyword", "_", sqlmock.AnyArg(), sqlmock.AnyArg(), "auto_accepted",
+			nil, nil, "keyword_family", 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(42))
+	mock.ExpectQuery(regexp.QuoteMeta(occurrenceSQL)).
+		WithArgs("metric", "m:1", "metric_name", "亮度", "亮度", "_",
+			"the luminance of the display", "chunk-1", "kwc_l", "mea:Luminance",
+			"term_resolved", int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"occurrence_id"}).AddRow(7))
+	mock.ExpectQuery(regexp.QuoteMeta(normKeySQL)).
+		WithArgs("亮度", "_").
+		WillReturnRows(surfaceRow("kws_l", "kwc_l", "亮度", "亮度"))
+
+	res, err := r.ResolveAndObserve(ctx,
+		ResolveNameRequest{Name: "亮度", Scope: "_"},
+		NameOccurrence{
+			ArtifactType: "metric",
+			ArtifactID:   "m:1",
+			FieldPath:    "metric_name",
+			RawName:      "亮度",
+			Scope:        "_",
+			Context:      "the luminance of the display",
+			ChunkRef:     "chunk-1",
+		})
+	if err != nil {
+		t.Fatalf("ResolveAndObserve: %v", err)
+	}
+	if res.Status != StatusTermResolved {
+		t.Errorf("status: got %q, want term_resolved", res.Status)
+	}
+	if res.TermID != "mea:Luminance" || res.TermPrefName != "Luminance" {
+		t.Errorf("term: got %q/%q, want mea:Luminance/Luminance", res.TermID, res.TermPrefName)
+	}
+	if res.TermKind != "metric_definition" || res.Method != "aligns_to_term" || res.Confidence != 1.0 {
+		t.Errorf("term layer: kind/method/confidence %q/%q/%v", res.TermKind, res.Method, res.Confidence)
+	}
+	if res.ConceptID != "kwc_l" {
+		t.Errorf("concept link: got %q", res.ConceptID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// A disabled resolver stays inert even with an alignments store wired — no
+// alignment write, no occurrence, no reads at all.
+func TestResolveAndObserveDisabledWritesNothing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	r := NewResolverWithAlignments(&keywords.KeywordFamily{DB: db, ResolverMode: "off"}, &keywords.AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	})
+	ctx := context.Background()
+
+	res, err := r.ResolveAndObserve(ctx, ResolveNameRequest{Name: "亮度", Scope: "_"}, NameOccurrence{})
+	if err != nil {
+		t.Fatalf("ResolveAndObserve: %v", err)
+	}
+	if res.Status != StatusDisabled {
+		t.Errorf("status: got %q, want disabled", res.Status)
+	}
+	if res.TermID != "" || res.ConceptID != "" {
+		t.Errorf("disabled resolution must carry no identity: %#v", res)
+	}
+	// Zero queries queued — ExpectationsWereMet fails on any read or write.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// The governed layer's own exact label match is authoritative over a
+// stale/conflicting alignment: the alignment-follow runs only on the
+// no-governed-hit path, so no AcceptedForConcept query is even issued here.
+func TestResolveNameAlignmentDoesNotOverrideDifferentTerm(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	r := NewResolverWithAlignments(newFamily(db), &keywords.AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	})
+	ctx := context.Background()
+
+	mock.ExpectQuery(regexp.QuoteMeta(termQuerySQL)).
+		WillReturnRows(termRows(
+			[]any{"mea:Luminance", "metric_definition", "mea", "Luminance", "en", "prefLabel"},
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
+		WithArgs("Luminance", "_").
+		WillReturnRows(sqlmock.NewRows([]string{"concept_id"}).AddRow("kwc_d"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_d").
+		WillReturnRows(conceptRow("kwc_d", "Luminance"))
+	mock.ExpectQuery(regexp.QuoteMeta(conceptSQL)).
+		WithArgs("kwc_d").
+		WillReturnRows(conceptRow("kwc_d", "Luminance"))
+
+	res, err := r.ResolveName(ctx, ResolveNameRequest{Name: "Luminance", Scope: "_", ExpectedTermKinds: []string{"metric_definition"}})
+	if err != nil {
+		t.Fatalf("ResolveName: %v", err)
+	}
+	if res.Status != StatusTermResolved || res.TermID != "mea:Luminance" {
+		t.Errorf("governed exact match must win: status %q term %q", res.Status, res.TermID)
+	}
+	if res.Method != "term_exact" || res.TermKind != "metric_definition" {
+		t.Errorf("term layer: method/kind %q/%q", res.Method, res.TermKind)
+	}
+	// No acceptedForConcept expectation was queued — if the alignment-follow
+	// block consulted the store, ExpectationsWereMet would fail.
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
 	}

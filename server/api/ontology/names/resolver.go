@@ -8,6 +8,7 @@ package names
 
 import (
 	"context"
+	"errors"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
@@ -100,10 +101,22 @@ type NameResolver interface {
 // ontology terms (governed layer).
 type Resolver struct {
 	Family *keywords.KeywordFamily
+	// alignments, when wired, lets an accepted aligns_to_term carry a concept
+	// to StatusTermResolved even when the raw name is not a released label
+	// (REQ-2, §16.2), and mints alignments on the observe path for concepts
+	// whose pref_label exactly matches a released metric_definition label
+	// (§16.1). Nil keeps today's behavior — every existing caller is unchanged.
+	alignments *keywords.AlignmentsStore
 }
 
 func NewResolver(family *keywords.KeywordFamily) *Resolver {
 	return &Resolver{Family: family}
+}
+
+// NewResolverWithAlignments returns a resolver that reads (and, on the
+// observe path, writes) aligns_to_term assertions (spec step 12, REQ-2).
+func NewResolverWithAlignments(family *keywords.KeywordFamily, alignments *keywords.AlignmentsStore) *Resolver {
+	return &Resolver{Family: family, alignments: alignments}
 }
 
 // ResolveName resolves one name and writes nothing — no occurrence, no
@@ -169,6 +182,23 @@ func (r *Resolver) ResolveName(ctx context.Context, req ResolveNameRequest) (Nam
 		out.Method = "term_exact"
 		out.Confidence = 1.0
 	}
+	// REQ-2 (spec §16.2): an accepted aligns_to_term on the resolved concept is
+	// the second way a name reaches a governed term — the cross-lingual/merged
+	// case, where the raw string is not a released label but the concept it
+	// resolved to is aligned to one. The governed layer's own exact label match
+	// (term != nil above) stays authoritative, so this runs only on the
+	// no-governed-hit path; a read error degrades to the lexical result rather
+	// than failing the resolve.
+	if term == nil && r.alignments != nil && res.Verdict == semid.VerdictAutoAccept && res.ResolvedNodeID != "" {
+		if hit, err := r.alignments.AcceptedForConcept(ctx, r.alignments.Assertions.DB, res.ResolvedNodeID); err == nil && hit != nil {
+			out.Status = StatusTermResolved
+			out.TermID = hit.ObjectTermID
+			out.TermKind = "metric_definition"
+			out.Method = "aligns_to_term"
+			out.Confidence = 1.0
+			out.TermPrefName = r.termPrefName(ctx, hit.ObjectTermID)
+		}
+	}
 	return out, nil
 }
 
@@ -212,6 +242,35 @@ func (r *Resolver) ResolveAndObserve(ctx context.Context, req ResolveNameRequest
 	}
 	if res.Status == StatusDisabled {
 		return res, nil
+	}
+	// §16.1 D11 auto-assign producer: a concept whose pref_label exactly matches
+	// a released metric_definition label is aligned to it (exact normalized match
+	// only — conservative, per D10's under-merge bias). The freshly minted
+	// alignment is applied to this resolution so the returned result and the
+	// occurrence below both see term_resolved. A conflict (already aligned to a
+	// different term) is a state, not a failure: it is not overridden and the
+	// observe proceeds; any other error propagates (the audit row for the
+	// observe must not be lost behind a swallowed alignment error, DR15).
+	if r.alignments != nil && res.Status == StatusLexicalResolved && res.ConceptID != "" && res.ConceptPrefName != "" {
+		term, err := r.matchLabelToReleasedTerm(ctx, res.ConceptPrefName, []string{"metric_definition"})
+		if err != nil {
+			return res, err
+		}
+		if term != nil {
+			if _, err := r.alignments.EnsureAccepted(ctx, res.ConceptID, term.termID, "term_exact", 1.0,
+				"pref_label exact match to a released metric_definition label (auto-assign, §16.1)"); err != nil {
+				if !errors.Is(err, keywords.ErrAlignmentConflict) {
+					return res, err
+				}
+			} else {
+				res.Status = StatusTermResolved
+				res.TermID = term.termID
+				res.TermKind = "metric_definition"
+				res.Method = "aligns_to_term"
+				res.TermPrefName = term.prefName
+				res.Confidence = 1.0
+			}
+		}
 	}
 	if occ.RawName == "" {
 		occ.RawName = req.Name
@@ -275,6 +334,25 @@ func (r *Resolver) prefName(ctx context.Context, conceptID string) string {
 	return c.PrefLabel
 }
 
+// termPrefName returns a released term's preferred label (best-effort; "" on
+// error or absence) — used only for the alignment-follow resolution's
+// TermPrefName, which is display, not identity.
+func (r *Resolver) termPrefName(ctx context.Context, termID string) string {
+	if termID == "" || r.Family == nil || r.Family.DB == nil {
+		return ""
+	}
+	var label string
+	err := r.Family.DB.QueryRowContext(ctx, `
+SELECT l.label FROM kb.ontology_term_labels l
+WHERE l.term_id = $1 AND l.status = 'included_in_release'
+ORDER BY (l.label_role = 'prefLabel') DESC, (l.lang = 'en') DESC
+LIMIT 1`, termID).Scan(&label)
+	if err != nil {
+		return ""
+	}
+	return label
+}
+
 // releasedTermSQL joins governed terms to their labels; the release
 // lifecycle sets status='included_in_release' on both tables
 // (ontology/modules/releases_store.go), so the double filter selects
@@ -328,37 +406,46 @@ func (r *Resolver) matchReleasedTerm(ctx context.Context, req ResolveNameRequest
 	if queryKey == "" {
 		return nil, nil
 	}
+	return r.lookupReleasedTerm(ctx, queryKey, req.ExpectedTermKinds, req.ExpectedModules, req.Language)
+}
 
+// lookupReleasedTerm returns the single released term with a released label
+// whose normalization equals queryKey (kinds/modules/lang-filtered), or nil.
+// Exactly-one-distinct-term wins; a miss or an ambiguous multi-term match
+// withholds the TermID (§9.5 layer rule).
+func (r *Resolver) lookupReleasedTerm(ctx context.Context, queryKey string, kinds, modules []string, lang string) (*termHit, error) {
 	rows, err := r.Family.DB.QueryContext(ctx, releasedTermSQL,
-		arrayOrNil(req.ExpectedTermKinds), arrayOrNil(req.ExpectedModules), req.Language)
+		arrayOrNil(kinds), arrayOrNil(modules), lang)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	n := semid.Normalizer{Version: r.Family.NormVersion()}
+
 	terms := map[string]*termHit{}    // term_id -> hit skeleton
 	labels := map[string][]labelRow{} // term_id -> released labels (filtered)
 	for rows.Next() {
-		var termID, termKind, moduleID, label, lang, role string
-		if err := rows.Scan(&termID, &termKind, &moduleID, &label, &lang, &role); err != nil {
+		var termID, termKind, moduleID, label, rowLang, role string
+		if err := rows.Scan(&termID, &termKind, &moduleID, &label, &rowLang, &role); err != nil {
 			return nil, err
 		}
 		// Authoritative in Go even though the SQL already filters (F2): the
 		// mock-backed test suite can't evaluate a real WHERE clause, and
 		// this stays correct regardless of what the driver returns.
-		if len(req.ExpectedTermKinds) > 0 && !containsString(req.ExpectedTermKinds, termKind) {
+		if len(kinds) > 0 && !containsString(kinds, termKind) {
 			continue
 		}
-		if len(req.ExpectedModules) > 0 && !containsString(req.ExpectedModules, moduleID) {
+		if len(modules) > 0 && !containsString(modules, moduleID) {
 			continue
 		}
-		if req.Language != "" && lang != req.Language {
+		if lang != "" && rowLang != lang {
 			continue
 		}
 		if _, ok := terms[termID]; !ok {
 			terms[termID] = &termHit{termID: termID, termKind: termKind, moduleID: moduleID}
 		}
-		labels[termID] = append(labels[termID], labelRow{label: label, lang: lang, role: role})
+		labels[termID] = append(labels[termID], labelRow{label: label, lang: rowLang, role: role})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -378,8 +465,23 @@ func (r *Resolver) matchReleasedTerm(ctx context.Context, req ResolveNameRequest
 		return nil, nil
 	}
 	hit := terms[matched[0]]
-	hit.prefName = pickPrefName(labels[hit.termID], req.Language)
+	hit.prefName = pickPrefName(labels[hit.termID], lang)
 	return hit, nil
+}
+
+// matchLabelToReleasedTerm is the same lookup against an arbitrary label
+// (not a ResolveNameRequest) — used by the observe-path auto-align to test
+// a concept's pref_label against released metric_definition labels (§16.1).
+func (r *Resolver) matchLabelToReleasedTerm(ctx context.Context, label string, kinds []string) (*termHit, error) {
+	if r.Family == nil || r.Family.DB == nil {
+		return nil, nil
+	}
+	n := semid.Normalizer{Version: r.Family.NormVersion()}
+	queryKey := n.Normalize(label).Norm
+	if queryKey == "" {
+		return nil, nil
+	}
+	return r.lookupReleasedTerm(ctx, queryKey, kinds, nil, "")
 }
 
 // pickPrefName prefers the released prefLabel in the requested language,
