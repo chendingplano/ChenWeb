@@ -85,9 +85,9 @@ Conflict rules:
 Candidate-level processing has deterministic precedence:
 
 1. Scan only `status='provisional' AND gloss_source='auto:d11'` candidates in the requested scope.
-2. Tier 5 considers only active targets in that scope. One unique target passing the existing edit-distance threshold and spelling vetoes may proceed as `tier5_fuzzy`; a tie defers. Tier 5 does not require external identity because it is deterministic spelling evidence, not model output.
+2. Tier 5 considers only active targets in that scope. One unique top-scoring target passing the existing edit-distance threshold and spelling vetoes may proceed as `tier5_fuzzy`; when the top two scores differ by at most `1e-9`, the result is a tie and defers. Tier 5 does not require external identity because it is deterministic spelling evidence, not model output.
 3. If tier 5 does not authorize a target, tier 6 forms the deduplicated union of active targets from embedding rank and exact external mappings. Deduplication is by target concept ID; all methods and evidence remain attached to the target proposal.
-4. Aggregate all authoritative triples on the scanned candidate. Zero mapped active targets defers the top embedding proposal; exactly one mapped active target proceeds to validation regardless of embedding rank; more than one mapped active target rejects the entire candidate.
+4. Only embedding proposals are bounded to top K. Authoritative mappings for the scanned candidate are loaded exhaustively and are never truncated or ordered by embedding score. Zero mapped active targets defers the top embedding proposal; exactly one mapped active target proceeds to validation regardless of embedding rank; more than one mapped active target rejects the entire candidate. If exhaustive authority lookup cannot complete, the run fails closed.
 
 Each candidate-target proposal carries:
 
@@ -119,7 +119,18 @@ Veto aggregation is explicit:
 
 Only `auto_merge` reaches application. Direction is fixed: `absorbed=scanned D11 provisional`, `survivor=chosen active target`. `electMergeDirection` is bypassed for automatic reconciliation, so surface count, age, or lexical concept ID can never tombstone the established target.
 
-Authorization and application occur in one database transaction:
+Authorization and application occur in one database transaction under a shared identity-lock protocol:
+
+Before reading or changing identity state, acquire transaction-scoped PostgreSQL advisory locks for both concept IDs in sorted order. The lock key is a stable hash of `(family, concept_id)`. The same helper is mandatory in every domain writer that can change the decision while it is in flight:
+
+- automatic and manual concept merge;
+- `NeverMergeStore.Add`/remove for the affected keyword concepts;
+- `AlignmentsStore.EnsureAccepted`, retraction, and merge-follow;
+- external-ID and surface-evidence create/update/delete operations.
+
+Writers acquire all affected keys in sorted order before their reads or writes. This serializes an absent-veto check with a concurrent veto insertion; locking only existing rows is insufficient because an absent row cannot be row-locked. Direct SQL that bypasses domain stores is administrative repair and must hold the same advisory locks or run while reconciliation is stopped.
+
+After acquiring the locks:
 
 1. Lock both concept rows and recheck candidate status/origin, active survivor, equal concept scope, and requested run scope.
 2. Lock every surface row for both concepts. Reject when an absorbed surface is locked. Recompute digit signatures over all surfaces; when either concept has digit-bearing surfaces, the two sets must agree exactly. This is conservative by design.
@@ -129,7 +140,7 @@ Authorization and application occur in one database transaction:
 6. Apply the tombstone and surface re-point with `origin_concept` provenance.
 7. Append the decision-log row through the same transaction, then commit.
 
-Implementation should refactor the existing merge transaction body into a transaction-accepting helper used by both `MergeConcept` and reconciliation. It must not validate evidence outside one transaction and then call the current self-transactional method, which would create a time-of-check/time-of-use authorization race.
+Implementation should refactor the existing merge transaction body into a transaction-accepting helper used by both `MergeConcept` and reconciliation. It must not validate evidence outside one transaction and then call the current self-transactional method, which would create a time-of-check/time-of-use authorization race. The shared advisory-lock helper and its use by every veto/evidence writer are part of this slice, not optional hardening.
 
 Each scanned candidate writes exactly one auditable decision containing:
 
@@ -139,7 +150,7 @@ Each scanned candidate writes exactly one auditable decision containing:
 - every considered proposal, the final candidate-level outcome, and reason;
 - actor, scope, absorbed/survivor IDs when applied.
 
-Scores stay observable for later evaluation but never determine the outcome.
+Embedding scores stay observable for later evaluation but never determine the outcome. Tier-5 edit-distance scores retain their deterministic threshold and unique-top role.
 
 `no_candidate` also writes a candidate-level decision row with an empty proposal list. `defer`, `reject`, and `no_candidate` log in their own short transaction; `auto_merge` logs atomically with the merge. The CLI reports mutually exclusive candidate counts: `merged`, `deferred_unvalidated`, `rejected`, and `no_candidate`. Their sum equals `scanned`. A missing evidence/alignment store or query error fails the run; it does not degrade to score-only merging.
 
@@ -157,13 +168,14 @@ Create a new goose migration; never edit applied migration `20260805000003`.
 
 Up sequence:
 
-1. Add nullable `keyword_surface_evidence.release` and `keyword_sources.identity_authority DEFAULT FALSE`.
+1. Add nullable `keyword_surface_evidence.release` and `keyword_sources.identity_authority BOOLEAN NOT NULL DEFAULT FALSE`.
 2. Backfill evidence release to `''`.
-3. Insert missing `(source, '')` registry placeholders referenced by legacy surface evidence or external mappings, with empty license, `identity_authority=FALSE`, and notes identifying migration backfill.
-4. Make evidence release non-null with default `''`.
-5. Replace the evidence uniqueness constraint with `(surface_id, source, external_id, release)`.
-6. Add composite foreign keys from both evidence and external mappings to `keyword_sources(source, release)` using restrictive update/delete behavior.
-7. Run diagnostic queries before constraint creation and abort with source/release counts if any orphan remains.
+3. Insert missing `(source, '')` registry placeholders referenced by legacy surface evidence, with empty license, `identity_authority=FALSE`, and notes identifying migration backfill.
+4. Insert missing registry placeholders for every exact `(source, release)` pair already referenced by `keyword_external_ids`, preserving non-empty releases and using `identity_authority=FALSE`.
+5. Make evidence release non-null with default `''`.
+6. Replace the evidence uniqueness constraint with `(surface_id, source, external_id, release)`.
+7. Run diagnostic queries and abort with source/release counts if any evidence or external-mapping orphan remains.
+8. Add composite foreign keys from both evidence and external mappings to `keyword_sources(source, release)` using restrictive update/delete behavior.
 
 Down sequence first aborts with a clear error if dropping release would collapse two evidence rows onto the old uniqueness key. Otherwise it drops the two foreign keys, restores the old uniqueness key, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
 
@@ -178,9 +190,12 @@ Down sequence first aborts with a clear error if dropping release would collapse
 - Multiple identity triples to one target merge once; triples mapping to different targets reject once.
 - Unregistered/non-authoritative source releases defer.
 - Tier-5 behavior remains score/guardrail-driven and does not consult embedding scores.
+- Tier-5 equal top scores within `1e-9` defer; one unique top score may proceed.
 - Automatic direction always absorbs the scanned D11 provisional into an active target; provisional targets defer.
 - Existing `never_merge`, all-surface digit, absorbed-surface lock, alignment, and scope vetoes dominate positive evidence and are rechecked in the merge transaction.
 - Retracting evidence concurrently with reconciliation either completes before validation and prevents the merge, or blocks until the merge transaction commits; it cannot invalidate authorization between validation and apply.
+- Concurrent insertion of `never_merge` or a conflicting alignment follows the same advisory-lock ordering: either the veto commits first and rejects the merge, or the merge commits first and the later writer observes the tombstone/current identity before deciding.
+- Exhaustive authoritative mappings are never truncated by embedding top K; authority overflow or lookup failure fails closed.
 - `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
 - SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, both source/release foreign keys, and guarded Down behavior.
 
