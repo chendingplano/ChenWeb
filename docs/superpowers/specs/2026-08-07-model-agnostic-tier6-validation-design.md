@@ -63,27 +63,50 @@ type IdentityEvidenceProvider interface {
 	LoadClaims(ctx context.Context, tx *sql.Tx, candidate CandidateIdentityContext) ([]IdentityClaim, error)
 }
 
+type CandidateIdentityContext struct {
+	CandidateConceptID string
+	Scope              string
+	SurfaceIDs         []string
+}
+
 type IdentityClaim struct {
 	ProviderID         string
 	CandidateConceptID string
 	TargetConceptID    string // empty when evidence is present but not mapped
 	Relation           IdentityRelation
 	Authority          IdentityAuthority
+	AuthorityRef       string // EvidenceRef.Key; required when authoritative
 	EvidenceRefs       []EvidenceRef
+}
+
+type EvidenceRef struct {
+	Key     string // stable and unique within ProviderID
+	Kind    string
+	Locator string
 }
 ```
 
-The exact Go names may change during planning, but the behavioral boundary is binding:
+The exact Go names may change during planning, but the fields and behavioral boundary are binding:
 
 - A provider owns adaptation from its resource-specific local schema into normalized claims.
 - `ProviderID` and `EvidenceRefs` preserve native provenance; the core does not interpret provider-specific identifier syntax.
-- Providers may emit `exact_equivalent`, `related`, `broader`, `narrower`, `translation`, or other typed claims.
+- `IdentityRelation` has the closed values `exact_equivalent`, `related`, `broader`, `narrower`, `translation`, `probabilistic`, and `other`. `IdentityAuthority` has the closed values `non_authoritative` and `authoritative`. Provider-specific subtypes belong in evidence references, not new core policy values.
 - Only `Relation=exact_equivalent` together with `Authority=authoritative` contributes a Tier-6 authoritative target. The core validator applies this fixed rule uniformly across providers. Providers cannot introduce their own score threshold or merge policy.
-- `Authority=authoritative` must derive from explicit, persisted governance configuration and defaults to non-authoritative. An adapter cannot promote a source-native confidence value, relation, or API response to authority on its own.
+- `Authority=authoritative` must derive from explicit, persisted governance configuration and defaults to non-authoritative. An authoritative claim requires a non-empty `AuthorityRef` naming one of its `EvidenceRefs` with `Kind=authority_configuration`. The referenced record identifies the persisted governance decision. An adapter cannot promote a source-native confidence value, relation, or API response to authority on its own. A new provider cannot emit authoritative claims until its persisted authority configuration and reference format are added to this design or a successor design.
 - A claim with no mapped active target is still returned as non-authorizing evidence so the result is `deferred_unvalidated`, not `no_candidate`.
 - Each provider query is exhaustive for the scanned candidate. Provider output is never restricted by embedding top K.
-- Providers run inside the candidate's SQL decision transaction and must lock or otherwise transactionally stabilize all local rows that authorize or veto the decision. A resource that cannot provide a locally imported, transactionally stable snapshot may supply non-authorizing proposals, but cannot be registered as an automatic identity authority.
+- Providers run inside the candidate's SQL decision transaction and must lock or otherwise transactionally stabilize all local rows that authorize or veto the decision. A resource that cannot provide a locally imported, transactionally stable PostgreSQL snapshot cannot be enabled as an identity-evidence provider in this slice; a future design may expose it as a non-authorizing proposal source outside this interface.
 - Any enabled provider failure fails the candidate run closed; the reconciler does not silently continue with fewer sources.
+
+The core validates registration once before scanning: provider IDs must be non-empty and unique, and the mandatory `triple_external_identity` provider must be present exactly once. The core supplies `SurfaceIDs` sorted and deduplicated. It validates every returned claim before using or logging it:
+
+- `claim.ProviderID` must equal the invoked provider's ID, and `CandidateConceptID` must equal the requested candidate.
+- Relation and authority values must be members of the closed enums.
+- An authoritative `exact_equivalent` claim must have a non-empty target, at least one evidence reference, and a valid `AuthorityRef`; any authoritative non-exact claim is malformed rather than silently downgraded.
+- Every evidence reference must have non-empty `Key`, `Kind`, and `Locator`. Within one provider, the same key must always identify the same `(Kind, Locator)`; a collision is malformed.
+- Malformed registration or claim output is a provider normalization failure and fails the run closed before the claim can influence a decision.
+
+Audit normalization is deterministic. A claim's canonical key is the tuple `(ProviderID, CandidateConceptID, TargetConceptID, Relation, Authority, AuthorityRef)`. Duplicate claims with that key are collapsed by taking the set union of their evidence references. Evidence references are deduplicated and sorted by `(Key, Kind, Locator)`; claims are sorted by their canonical key. The decision payload uses typed audit DTOs with fixed JSON field order; unordered maps are prohibited unless converted to sorted key/value arrays first. All authorizing and non-authorizing claims, including targetless claims, are written to the candidate audit record. Provider registration order, provider output order, and SQL row order cannot change the serialized audit payload.
 
 This interface is generic across imported schemas, not a license to query live Internet services during reconciliation. External data is imported or snapshotted first so its release, provenance, authority, and decision-time consistency are auditable.
 
@@ -102,11 +125,12 @@ Two schema corrections are required:
 
 `kb.keyword_external_ids` also gains a composite foreign key to `kb.keyword_sources(source, release)`. Both halves of an authoritative identity must therefore refer to the same registered source release.
 
-`TripleEvidenceProvider` reads these three tables. It emits an authoritative `exact_equivalent` claim when a provisional concept has any surface-evidence row whose `(source, external_id, release)` equals an external-ID mapping on a candidate target and that source release has `identity_authority=TRUE`. The triple is the initial provider's storage representation, not the core validator's universal storage contract.
+`TripleEvidenceProvider` has the stable provider ID `triple_external_identity` and reads these three tables. It emits an authoritative `exact_equivalent` claim when a provisional concept has any surface-evidence row whose non-blank `(source, external_id, release)` equals an external-ID mapping on a candidate target and that source release has `identity_authority=TRUE`. Its `AuthorityRef` names the matching `kb.keyword_sources` row, while its other evidence references identify the surface-evidence and external-mapping rows. The triple is the initial provider's storage representation, not the core validator's universal storage contract.
 
 Conflict rules:
 
 - The existing primary key permits one concept per `(source, external_id, release)`. An attempted duplicate mapping is a database constraint failure, not a validator outcome.
+- `kb.keyword_external_ids.external_id` must be non-blank. Legacy `keyword_surface_evidence` rows may retain `external_id=''` to mean provenance without an external identity, but `TripleEvidenceProvider` returns them only as non-authorizing targetless evidence; they can never match or authorize.
 - Across all enabled providers, authoritative exact-equivalence claims mapping the provisional concept to different live concepts reject the whole candidate.
 - Multiple authoritative claims—including multiple triples or claims from different providers—that all map to the same established target strengthen one decision; they do not create multiple proposals or writes.
 - `related`, `broad`, `narrow`, textual similarity, or a shared source without a shared external ID never count as exact identity.
@@ -124,7 +148,7 @@ Candidate-level processing has deterministic precedence:
 1. Scan only `status='provisional' AND gloss_source='auto:d11'` candidates in the requested scope.
 2. Tier 5 considers only active targets in that scope. One unique top-scoring target passing the existing edit-distance threshold and spelling vetoes may proceed as `tier5_fuzzy`; when the top two scores differ by at most `1e-9`, tier 5 cannot authorize. Tier 5 does not require external identity because it is deterministic spelling evidence, not model output. A tier-5 tie still permits exhaustive identity-evidence validation: a unique authoritative target may resolve the ambiguity, but embedding rank alone may not.
 3. If tier 5 does not authorize a target, tier 6 forms the deduplicated union of active targets from embedding rank and target-bearing normalized claims returned by all enabled identity-evidence providers. Deduplication is by target concept ID; all methods, claims, and native evidence references remain attached to the target proposal.
-4. The current embedding candidate bound is the compile-time constant `reconcileTopK=10`; it is not runtime-configurable. The redesign preserves that initial default. Only embedding proposals are bounded to top K. Provider claims for the scanned candidate are loaded exhaustively and are never truncated or ordered by embedding score. Zero authoritative active targets defers the top embedding proposal; exactly one proceeds to validation regardless of embedding rank or absence from the embedding top 10; more than one rejects the entire candidate. If any enabled provider cannot complete its exhaustive lookup, the run fails closed.
+4. Current code has no embedding top-K list: it compares the candidate with every live concept and retains only the single best result above `0.90`. The existing compile-time `reconcileTopK=10` is actually passed only to the lexical SQL shortlist despite its broader comment. The redesign introduces a distinct compile-time `reconcileEmbeddingTopK=10`, initially not runtime-configurable, and retains the lexical bound separately as `reconcileLexicalTopK=10`. Only embedding proposals are bounded to semantic top K. Provider claims for the scanned candidate are loaded exhaustively and are never truncated or ordered by embedding score. Zero authoritative active targets defers the top embedding proposals; exactly one proceeds to validation regardless of embedding rank or absence from the embedding top 10; more than one rejects the entire candidate. If any enabled provider cannot complete its exhaustive lookup, the run fails closed.
 
 Each candidate-target proposal carries:
 
@@ -140,9 +164,10 @@ Provider-returned targets are added exhaustively to the candidate union; only it
 
 A validator receives the candidate-level aggregate and returns exactly one of:
 
-- `auto_merge`: a unique tier-5 target or one uniquely mapped authoritative tier-6 target, and no veto;
-- `defer`: plausible candidate but insufficient authoritative evidence;
+- `auto_merge`: a unique tier-5 target or one unique authoritative exact-equivalence tier-6 target, and no veto;
+- `deferred_unvalidated`: plausible candidate but insufficient authoritative evidence;
 - `reject`: deterministic conflict, invalid evidence, or hard veto.
+- `no_candidate`: no valid tier-5 proposal, provider claim, or embedding proposal.
 
 For tier 6, the initial validator recognizes only normalized authoritative `exact_equivalent` claims as positive authority. `TripleEvidenceProvider` is the first producer of such claims. Quantity/unit and context validators are separate future components, not empty hooks that silently pass.
 
@@ -212,7 +237,7 @@ Implementation should refactor the existing merge transaction body into a transa
 Each scanned candidate writes exactly one auditable decision containing:
 
 - embedding model identifier and raw ranking scores;
-- normalized authoritative claims and their native evidence references;
+- every canonical normalized claim—authorizing, non-authorizing, mapped, and targetless—and its native evidence and authority references;
 - vetoes or conflicts found;
 - every considered proposal, the final candidate-level outcome, and reason;
 - actor, scope, absorbed/survivor IDs when applied.
@@ -242,17 +267,19 @@ Up sequence:
 5. Make evidence release non-null with default `''`.
 6. Replace the evidence uniqueness constraint with `(surface_id, source, external_id, release)`.
 7. Run diagnostic queries and abort with source/release counts if any evidence or external-mapping orphan remains.
-8. Add composite foreign keys from both evidence and external mappings to `keyword_sources(source, release)` using restrictive update/delete behavior.
+8. Abort with a count if any existing `keyword_external_ids.external_id` is blank, then add a non-blank external-ID CHECK to that mapping table. Do not add the CHECK to `keyword_surface_evidence`, where a blank ID remains valid non-authorizing provenance.
+9. Add composite foreign keys from both evidence and external mappings to `keyword_sources(source, release)` using restrictive update/delete behavior.
 
 The migration uses explicit constraint names:
 
 - drop legacy unique `keyword_surface_evidence_surface_id_source_external_id_key`;
 - add `uq_keyword_surface_evidence_source_external_release` on `(surface_id, source, external_id, release)`;
+- add `ck_keyword_external_ids_nonblank_external_id` as `CHECK (btrim(external_id) <> '')`;
 - add `fk_keyword_surface_evidence_source_release` and `fk_keyword_external_ids_source_release`, both referencing the existing primary key `keyword_sources_pkey (source, release)` with `ON UPDATE RESTRICT ON DELETE RESTRICT`.
 
 Legacy placeholder inserts supply only `source`, `release`, `license`, and `notes`; `retrieved_at` remains NULL. Evidence placeholders select distinct `source, ''`. External-mapping placeholders select distinct `source, release` from `kb.keyword_external_ids`, preserving each stored release. Both use `ON CONFLICT (source, release) DO NOTHING`. A `DO` block checks both left joins for NULL source rows and raises an exception with orphan counts before either foreign key is added.
 
-Down sequence first checks for duplicate `(surface_id, source, external_id)` groups and raises an exception if dropping release would collapse them. Otherwise it drops the two named foreign keys, drops the new named unique constraint, restores `keyword_surface_evidence_surface_id_source_external_id_key`, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
+Down sequence first checks for duplicate `(surface_id, source, external_id)` groups and raises an exception if dropping release would collapse them. Otherwise it drops the two named foreign keys, drops `ck_keyword_external_ids_nonblank_external_id`, drops the new named unique constraint, restores `keyword_surface_evidence_surface_id_source_external_id_key`, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
 
 ## 7. Tests and acceptance
 
@@ -264,8 +291,12 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - Provider contract tests prove that different resource-specific schemas normalize to the same claim shape and therefore produce the same validator outcome.
 - Only authoritative `exact_equivalent` claims authorize; related, broader, narrower, translation-only, probabilistic, non-authoritative, and unmapped claims defer when no stronger path exists.
 - A provider target outside the embedding top 10 is still considered and may merge; embedding rank never truncates provider claims.
+- Embedding positions 10 and 11 prove the new semantic bound exactly, while a provider-only target absent from all embedding results remains eligible.
 - Any enabled provider failure fails closed, and a provider without transactionally stable local evidence cannot emit authoritative claims.
+- Empty/duplicate provider IDs and malformed claims—including wrong provider/candidate IDs, unknown enums, authoritative claims without a target or authority reference, and colliding evidence-reference keys—fail closed before decision.
+- Shuffling provider registration, provider output, SQL rows, duplicate claims, and evidence-reference order produces byte-identical canonical audit JSON; duplicate claims retain the union of all distinct evidence references.
 - Matching `(source, external_id)` with a different release does not authorize a merge.
+- Blank external IDs in legacy surface evidence remain non-authorizing; blank external IDs in `keyword_external_ids` fail the migration CHECK and can never authorize.
 - Multiple identity triples to one target merge once; triples mapping to different targets reject once.
 - Registered but non-authoritative source releases defer. An attempted unregistered insert fails the foreign key; a simulated/corrupt unregistered lookup fails the reconciliation run.
 - Tier-5 behavior remains score/guardrail-driven and does not consult embedding scores.
@@ -279,7 +310,7 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - Exhaustive authoritative claims are never truncated by embedding top K; authority overflow or provider lookup failure fails closed.
 - `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
 - Table-driven tests cover every row of the candidate-level decision table, including the exact distinction between `deferred_unvalidated` and `no_candidate`.
-- SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, both source/release foreign keys, and guarded Down behavior.
+- SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, the non-blank mapped external-ID CHECK, both source/release foreign keys, and guarded Down behavior.
 
 ### 7.2 Live PostgreSQL proof
 
@@ -310,6 +341,8 @@ The live test is about the invariant, not achieving a particular cosine.
 Implementation must update the keyword spec's §13.1 claim that embedding similarity may itself auto-accept, record the new validation contract in §13 R6 and §21, and close or narrow the I2 reconciliation gap. The master handoff update remains pending. `KnowledgeStore` edits must be made only after its pre-existing working-copy changes are resolved.
 
 ## 10. Background
+
+This section explains the discussions that led to the design. Sections 2–8 are normative if explanatory wording here ever drifts from them.
 
 | Tier | Current code | Revised behavior |
 |---|---|---|
@@ -396,7 +429,7 @@ Under the revised model-agnostic design:
 5. Scope, digit, surface-lock, `never_merge`, and alignment conflicts can still veto the merge.
 6. Validation, merge, alignment movement, and audit logging occur atomically in one serialized transaction.
 
-The binding design is in [2026-08-07-model-agnostic-tier6-validation-design.md](/Users/cding/Workspace/ChenWeb/docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md:80).
+The binding provider and decision contracts are in §§4–5 above.
 
 ### 10.3 Where External-Identity Mappings Come From
 
@@ -442,7 +475,7 @@ The data could originate from:
 
 But ordinary user keywords, Internet search results, or LLM output do **not** automatically become authoritative.
 
-One important current limitation: the schema foundations exist, but the approved redesign does not yet build the catalog importer or curator UI. Selecting and bootstrapping authoritative sources remains a separate required step.
+One important current limitation: the schema foundations exist, but the revised design does not yet build the catalog importer or curator UI. Selecting and bootstrapping authoritative sources remains a separate required step.
 
 ### 10.4 Current Status of External Resources
 
@@ -472,7 +505,7 @@ For Tier 6 to be operational, we still need to decide:
 - Cosine values: used to find and rank proposals, but not to authorize or select the authoritative target.
 - Other information: used primarily as safety vetoes.
 
-Conceptually, the reconciler performs this exact join:
+The initial `TripleEvidenceProvider` performs this exact join and returns normalized claims to the reconciler:
 
 ```text
 provisional candidate's surfaces
@@ -486,7 +519,7 @@ external-ID mapping
 active established concept in the same scope
 ```
 
-It then deduplicates the resulting concept IDs and counts them:
+The reconciler combines these normalized claims with every other enabled provider's exhaustive result, deduplicates the authoritative active target concept IDs, and counts them:
 
 | Distinct authoritative active targets | Result |
 |---:|---|
@@ -512,7 +545,11 @@ METRIC-0042 → Luminance
 The result is `Luminance`, even though it ranked second by cosine. The embedding suggested
 where to look; the exact identity mapping made the decision.
 
-**Answer to Question 01:** Yes, with one important qualification. Embeddings select and rank only the semantic proposal list. The current default is the compile-time constant `reconcileTopK=10`, and it is not runtime-configurable. The redesign initially retains that value. Identity-evidence providers are queried independently and exhaustively: an authoritative target outside the embedding top 10—or absent from embedding results entirely—is still added to the candidate union and can be selected. The normalized authoritative claim, not cosine or rank, authorizes Tier 6.
+#### Embedding candidate bound
+
+Current code does not select an embedding top N. It compares against every live concept and retains only the single best result above the fixed `0.90` threshold. The existing compile-time `reconcileTopK=10` is used by the lexical SQL shortlist, not the embedding loop.
+
+The revised design introduces `reconcileEmbeddingTopK=10` as a new compile-time semantic proposal bound; it is initially not runtime-configurable. Identity-evidence providers are queried independently and exhaustively: an authoritative target outside the embedding top 10—or absent from embedding results entirely—is still added to the candidate union and can be selected. The normalized authoritative claim, not cosine or rank, authorizes Tier 6.
 
 Before merging, the reconciler still checks:
 
@@ -684,7 +721,7 @@ This is a design decision, not a current operational blocker.
 
 The current schema can support resources with stable, versioned identifiers, but not necessarily resources that provide:
 
-- Unversioned identifiers
+- Unstable or unversioned identifiers that lack a durable source-scoped identity; stable genuinely unversioned identifiers remain supported with `release=''`
 - Synonym sets rather than IDs
 - Cross-references between different vocabularies
 - Broader/narrower relationships
@@ -735,6 +772,7 @@ type IdentityClaim struct {
     TargetConceptID    string
     Relation           IdentityRelation
     Authority          IdentityAuthority
+    AuthorityRef       string
     EvidenceRefs       []EvidenceRef
 }
 ```
