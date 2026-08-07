@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CC_SWITCH_SETTINGS="$HOME/.cc-switch/settings.json"
+CC_SWITCH_DB="$HOME/.cc-switch/cc-switch.db"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CODEX_CONFIG="$CODEX_HOME/config.toml"
+CODEX_AUTH="$CODEX_HOME/auth.json"
+PROVIDER_ID="codex-official"
+
+echo "Switching Codex to OpenAI (official)..."
+
+# 1. Update cc-switch device settings
+python3 -c "
+import json, sys
+path = '$CC_SWITCH_SETTINGS'
+with open(path) as f:
+    d = json.load(f)
+d['currentProviderCodex'] = '$PROVIDER_ID'
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+"
+echo "  ✓ Updated cc-switch settings → $PROVIDER_ID"
+
+# 2. Update cc-switch database
+sqlite3 "$CC_SWITCH_DB" "
+    UPDATE providers SET is_current=0 WHERE app_type='codex' AND is_current=1;
+    UPDATE providers SET is_current=1 WHERE id='$PROVIDER_ID' AND app_type='codex';
+"
+echo "  ✓ Updated cc-switch database"
+
+# 3. Apply the provider's stored config/auth to Codex
+python3 - "$PROVIDER_ID" "$CC_SWITCH_DB" "$CODEX_CONFIG" "$CODEX_AUTH" <<'PYEOF'
+import json, sqlite3, sys
+
+provider_id, db_path, config_path, auth_path = sys.argv[1:]
+conn = sqlite3.connect(db_path)
+row = conn.execute(
+    "SELECT settings_config FROM providers WHERE app_type='codex' AND id=?",
+    (provider_id,),
+).fetchone()
+if row is None:
+    print(f"error: provider '{provider_id}' not found in cc-switch database")
+    sys.exit(1)
+d = json.loads(row[0])
+with open(config_path, 'w') as f:
+    f.write(d['config'])
+with open(auth_path, 'w') as f:
+    json.dump(d['auth'], f, indent=2)
+    f.write('\n')
+print("  ✓ Wrote Codex config.toml and auth.json")
+PYEOF
+
+echo ""
+echo "Done. Restart Codex to use OpenAI models."
