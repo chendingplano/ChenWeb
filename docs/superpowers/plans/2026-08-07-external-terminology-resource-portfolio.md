@@ -82,12 +82,12 @@
 - Authorizing provider calls run inside the candidate transaction and lock/stabilize every source-policy/deployment, surface-evidence, and external-mapping row they read after the family advisory lock. Providers may read mapped-concept status to normalize claims but do not row-lock every possible target; Task 4 locks only the chosen target after targetless/conflict outcomes are selected.
 - Evidence-reference keys use unpadded base64url components and remain reversible for Unicode, delimiters, and empty releases.
 
-- [ ] Add table-driven failing tests for every valid/invalid relation-authority combination, duplicate providers, malformed claims, ordering, deduplication, and canonical JSON.
-- [ ] Add failing SQL-provider tests for matching and mismatched releases, non-authoritative sources, blank legacy IDs, missing mappings, inactive/provisional mappings, corrupt/unregistered source rows, multiple triples to one target, conflicting targets, provider-only targets, and the required backing-row locks.
-- [ ] Implement the generic contract and normalizer without source-specific branches.
-- [ ] Implement `TripleEvidenceProvider` using the full triple and policy relation.
-- [ ] Run the focused tests twice with shuffled inputs to prove determinism.
-- [ ] Commit with `jj commit -m "keywords: normalize external identity evidence"`.
+- [x] Add table-driven failing tests for every valid/invalid relation-authority combination, duplicate providers, malformed claims, ordering, deduplication, and canonical JSON.
+- [x] Add failing SQL-provider tests for matching and mismatched releases, non-authoritative sources, blank legacy IDs, missing mappings, inactive/provisional mappings, corrupt/unregistered source rows, multiple triples to one target, conflicting targets, provider-only targets, and the required backing-row locks.
+- [x] Implement the generic contract and normalizer without source-specific branches.
+- [x] Implement `TripleEvidenceProvider` using the full triple and policy relation.
+- [x] Run the focused tests twice with shuffled inputs to prove determinism.
+- [x] Commit with `jj commit -m "keywords: normalize external identity evidence"`.
 
 ## Task 3: Transaction-scoped merge and audit primitives
 

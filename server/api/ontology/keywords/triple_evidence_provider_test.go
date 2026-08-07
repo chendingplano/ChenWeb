@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 )
 
 type tripleEvidenceRow struct {
@@ -18,13 +20,19 @@ type tripleEvidenceRow struct {
 	release       string
 	authority     bool
 	allowedScopes any
-	enabled       []bool
 	target        string
-	status        string
-	scope         string
+	status        any
+	scope         any
 }
 
-func beginTripleProviderTest(t *testing.T) (*sql.DB, sqlmock.Sqlmock, *sql.Tx) {
+type tripleDeploymentRow struct {
+	key     string
+	source  string
+	release string
+	enabled bool
+}
+
+func beginTripleProviderTest(t *testing.T) (sqlmock.Sqlmock, *sql.Tx) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -40,175 +48,351 @@ func beginTripleProviderTest(t *testing.T) (*sql.DB, sqlmock.Sqlmock, *sql.Tx) {
 		_ = tx.Rollback()
 		_ = db.Close()
 	})
-	return db, mock, tx
+	return mock, tx
 }
 
-func expectTripleProviderRows(mock sqlmock.Sqlmock, rows []tripleEvidenceRow) {
+func expectTripleProviderBatch(mock sqlmock.Sqlmock, evidence []tripleEvidenceRow, deployments []tripleDeploymentRow, configuredKeys []string) {
 	evidenceRows := sqlmock.NewRows([]string{"id", "source", "external_id", "release"})
-	for _, row := range rows {
+	for _, row := range evidence {
 		evidenceRows.AddRow(row.id, row.source, row.externalID, row.release)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).
-		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(evidenceRows)
+	mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(evidenceRows)
 
-	seenSources := make(map[string]bool)
-	for _, row := range rows {
-		sourceKey := row.source + "\x00" + row.release
-		if !seenSources[sourceKey] {
-			seenSources[sourceKey] = true
-			allowedScopes := row.allowedScopes
-			if allowedScopes == nil {
-				allowedScopes = "{quantity,scope}"
-			}
-			mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePolicySQL)).
-				WithArgs(row.source, row.release).
-				WillReturnRows(sqlmock.NewRows([]string{"identity_authority", "allowed_scopes"}).AddRow(row.authority, allowedScopes))
-			deploymentRows := sqlmock.NewRows([]string{"enabled"})
-			for _, enabled := range row.enabled {
-				deploymentRows.AddRow(enabled)
-			}
-			mock.ExpectQuery(regexp.QuoteMeta(tripleDeploymentsSQL)).
-				WithArgs(row.source, row.release).
-				WillReturnRows(deploymentRows)
+	sourceRows := sqlmock.NewRows([]string{"source", "release", "identity_authority", "allowed_scopes"})
+	seenSources := map[string]bool{}
+	type sourcePair struct{ source, release string }
+	var sourcePairs []sourcePair
+	for _, row := range evidence {
+		key := row.source + "\x00" + row.release
+		if seenSources[key] {
+			continue
 		}
+		seenSources[key] = true
+		sourcePairs = append(sourcePairs, sourcePair{source: row.source, release: row.release})
+		allowedScopes := row.allowedScopes
+		if allowedScopes == nil {
+			allowedScopes = "{quantity,scope}"
+		}
+		sourceRows.AddRow(row.source, row.release, row.authority, allowedScopes)
 	}
-	seenMappings := make(map[string]bool)
-	for _, row := range rows {
-		sourceKey := row.source + "\x00" + row.release
+	sort.Slice(sourcePairs, func(i, j int) bool {
+		return sourcePairs[i].source < sourcePairs[j].source || (sourcePairs[i].source == sourcePairs[j].source && sourcePairs[i].release < sourcePairs[j].release)
+	})
+	sources, releases := make([]string, len(sourcePairs)), make([]string, len(sourcePairs))
+	for index, pair := range sourcePairs {
+		sources[index], releases[index] = pair.source, pair.release
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePoliciesSQL)).WithArgs(pq.Array(sources), pq.Array(releases)).WillReturnRows(sourceRows)
+
+	if len(configuredKeys) > 0 {
+		canonicalKeys := append([]string(nil), configuredKeys...)
+		sort.Strings(canonicalKeys)
+		deploymentRows := sqlmock.NewRows([]string{"deployment_key", "source", "release", "enabled"})
+		for _, row := range deployments {
+			deploymentRows.AddRow(row.key, row.source, row.release, row.enabled)
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(tripleConfiguredDeploymentsSQL)).
+			WithArgs(pq.Array(canonicalKeys)).WillReturnRows(deploymentRows)
+	}
+
+	mappingRows := sqlmock.NewRows([]string{"source", "external_id", "release", "concept_id", "status", "scope"})
+	hasMappingRequest := false
+	seenMappings := map[string]bool{}
+	type externalTriple struct{ source, externalID, release string }
+	var externalTriples []externalTriple
+	for _, row := range evidence {
 		if strings.TrimSpace(row.externalID) == "" {
 			continue
 		}
-		mappingKey := sourceKey + "\x00" + row.externalID
-		if seenMappings[mappingKey] {
+		hasMappingRequest = true
+		key := row.source + "\x00" + row.externalID + "\x00" + row.release
+		if seenMappings[key] {
 			continue
 		}
-		seenMappings[mappingKey] = true
-		mappingRows := sqlmock.NewRows([]string{"concept_id", "status", "scope"})
+		seenMappings[key] = true
+		externalTriples = append(externalTriples, externalTriple{source: row.source, externalID: row.externalID, release: row.release})
 		if row.target != "" {
-			mappingRows.AddRow(row.target, row.status, row.scope)
+			mappingRows.AddRow(row.source, row.externalID, row.release, row.target, row.status, row.scope)
 		}
-		mock.ExpectQuery(regexp.QuoteMeta(tripleExternalMappingSQL)).
-			WithArgs(row.source, row.externalID, row.release).
-			WillReturnRows(mappingRows)
+	}
+	if hasMappingRequest {
+		sort.Slice(externalTriples, func(i, j int) bool {
+			if externalTriples[i].source != externalTriples[j].source {
+				return externalTriples[i].source < externalTriples[j].source
+			}
+			if externalTriples[i].externalID != externalTriples[j].externalID {
+				return externalTriples[i].externalID < externalTriples[j].externalID
+			}
+			return externalTriples[i].release < externalTriples[j].release
+		})
+		sources, externalIDs, releases := make([]string, len(externalTriples)), make([]string, len(externalTriples)), make([]string, len(externalTriples))
+		for index, triple := range externalTriples {
+			sources[index], externalIDs[index], releases[index] = triple.source, triple.externalID, triple.release
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(tripleExternalMappingsSQL)).
+			WithArgs(pq.Array(sources), pq.Array(externalIDs), pq.Array(releases)).WillReturnRows(mappingRows)
 	}
 }
 
-func TestTripleEvidenceProviderAuthorizesOnlyGovernedEnabledActiveSameScopeMapping(t *testing.T) {
-	tests := []struct {
-		name           string
-		row            tripleEvidenceRow
-		candidateScope string
-		wantTarget     string
-		wantAuthority  IdentityAuthority
-	}{
-		{name: "authoritative in governed scope", row: tripleEvidenceRow{id: 7, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, allowedScopes: "{quantity}", enabled: []bool{true}, target: "established", status: "active", scope: "quantity"}, wantTarget: "established", wantAuthority: IdentityAuthorityAuthoritative},
-		{name: "release mismatch is unmapped", row: tripleEvidenceRow{id: 8, source: "qudt", externalID: "QK-1", release: "3.2", authority: true, enabled: []bool{true}}, wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "non-authoritative source", row: tripleEvidenceRow{id: 9, source: "qudt", externalID: "QK-1", release: "3.1", enabled: []bool{true}, target: "established", status: "active", scope: "quantity"}, wantTarget: "established", wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "no enabled deployment", row: tripleEvidenceRow{id: 10, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{false}, target: "established", status: "active", scope: "quantity"}, wantTarget: "established", wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "missing mapping", row: tripleEvidenceRow{id: 11, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{true}}, wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "inactive target retained", row: tripleEvidenceRow{id: 12, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{true}, target: "inactive", status: "deprecated", scope: "quantity"}, wantTarget: "inactive", wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "provisional target retained", row: tripleEvidenceRow{id: 13, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{true}, target: "provisional", status: "provisional", scope: "quantity"}, wantTarget: "provisional", wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "scope mismatch target retained", row: tripleEvidenceRow{id: 14, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{true}, target: "other-scope", status: "active", scope: "unit"}, wantTarget: "other-scope", wantAuthority: IdentityAuthorityNonAuthoritative},
-		{name: "candidate and target scope not governed", row: tripleEvidenceRow{id: 16, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, allowedScopes: "{quantity}", enabled: []bool{true}, target: "unit-target", status: "active", scope: "unit"}, candidateScope: "unit", wantTarget: "unit-target", wantAuthority: IdentityAuthorityNonAuthoritative},
+func loadTripleClaims(t *testing.T, provider TripleEvidenceProvider, candidate CandidateIdentityContext, evidence []tripleEvidenceRow, deployments []tripleDeploymentRow) []IdentityClaim {
+	t.Helper()
+	mock, tx := beginTripleProviderTest(t)
+	expectTripleProviderBatch(mock, evidence, deployments, provider.DeploymentKeys)
+	claims, err := provider.LoadClaims(context.Background(), tx, candidate)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	return claims
+}
+
+func TestTripleEvidenceProviderValidatesAndCanonicalizesCandidateContext(t *testing.T) {
+	provider := TripleEvidenceProvider{}
+	for _, tt := range []struct {
+		name      string
+		candidate CandidateIdentityContext
+	}{
+		{name: "blank candidate", candidate: CandidateIdentityContext{CandidateConceptID: " ", Scope: "scope"}},
+		{name: "blank scope", candidate: CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "\t"}},
+		{name: "blank surface", candidate: CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s", " "}}},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, mock, tx := beginTripleProviderTest(t)
-			expectTripleProviderRows(mock, []tripleEvidenceRow{tt.row})
-			candidateScope := tt.candidateScope
-			if candidateScope == "" {
-				candidateScope = "quantity"
+			_, err := provider.LoadClaims(context.Background(), nil, tt.candidate)
+			if err == nil || !strings.Contains(err.Error(), "candidate") {
+				t.Fatalf("error = %v, want candidate context error", err)
 			}
-			claims, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{
-				CandidateConceptID: "candidate", Scope: candidateScope, SurfaceIDs: []string{"surface"},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(claims) != 1 {
-				t.Fatalf("len(claims) = %d, want 1", len(claims))
-			}
-			claim := claims[0]
-			if claim.TargetConceptID != tt.wantTarget || claim.Authority != tt.wantAuthority || claim.Relation != IdentityRelationExactEquivalent {
-				t.Fatalf("claim = %#v, want target %q authority %q", claim, tt.wantTarget, tt.wantAuthority)
-			}
-			if tt.wantAuthority == IdentityAuthorityAuthoritative && claim.AuthorityRef != claim.EvidenceRefs[0].Key {
-				t.Fatalf("AuthorityRef = %q, refs = %#v", claim.AuthorityRef, claim.EvidenceRefs)
-			}
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatal(err)
+		})
+	}
+
+	mock, tx := beginTripleProviderTest(t)
+	mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).
+		WithArgs(pq.Array([]string{"a", "b"})).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "source", "external_id", "release"}))
+	claims, err := provider.LoadClaims(context.Background(), tx, CandidateIdentityContext{
+		CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"b", "a", "b"},
+	})
+	if err != nil || len(claims) != 0 {
+		t.Fatalf("claims = %#v, error = %v", claims, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+
+	mock, tx = beginTripleProviderTest(t)
+	claims, err = provider.LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope"})
+	if err != nil || len(claims) != 0 {
+		t.Fatalf("empty surface claims = %#v, error = %v", claims, err)
+	}
+}
+
+func TestTripleEvidenceProviderRejectsInvalidDeploymentConfiguration(t *testing.T) {
+	for _, keys := range [][]string{{"production", "production"}, {"production", " "}} {
+		_, err := (TripleEvidenceProvider{DeploymentKeys: keys}).LoadClaims(context.Background(), nil, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope"})
+		if err == nil || !strings.Contains(err.Error(), "deployment") {
+			t.Fatalf("keys %q error = %v", keys, err)
+		}
+	}
+}
+
+func TestTripleEvidenceProviderDeploymentAllowlistControlsAuthority(t *testing.T) {
+	evidence := []tripleEvidenceRow{{id: 7, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, allowedScopes: "{quantity}", target: "established", status: "active", scope: "quantity"}}
+	candidate := CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "quantity", SurfaceIDs: []string{"surface"}}
+	for _, tt := range []struct {
+		name        string
+		provider    TripleEvidenceProvider
+		deployments []tripleDeploymentRow
+		want        IdentityAuthority
+	}{
+		{name: "enabled intended", provider: TripleEvidenceProvider{DeploymentKeys: []string{"production"}}, deployments: []tripleDeploymentRow{{key: "production", source: "qudt", release: "3.1", enabled: true}}, want: IdentityAuthorityAuthoritative},
+		{name: "disabled intended ignores enabled staging", provider: TripleEvidenceProvider{DeploymentKeys: []string{"production"}}, deployments: []tripleDeploymentRow{{key: "production", source: "qudt", release: "3.1", enabled: false}}, want: IdentityAuthorityNonAuthoritative},
+		{name: "empty keys authorize nothing", provider: TripleEvidenceProvider{}, want: IdentityAuthorityNonAuthoritative},
+		{name: "enabled intended points elsewhere", provider: TripleEvidenceProvider{DeploymentKeys: []string{"production"}}, deployments: []tripleDeploymentRow{{key: "production", source: "qudt", release: "3.0", enabled: true}}, want: IdentityAuthorityNonAuthoritative},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := loadTripleClaims(t, tt.provider, candidate, evidence, tt.deployments)
+			if len(claims) != 1 || claims[0].Authority != tt.want {
+				t.Fatalf("claims = %#v, want authority %q", claims, tt.want)
 			}
 		})
 	}
 }
 
-func TestTripleEvidenceProviderBlankLegacyExternalIDRemainsTargetlessEvidence(t *testing.T) {
-	_, mock, tx := beginTripleProviderTest(t)
-	row := tripleEvidenceRow{id: 15, source: "legacy", externalID: "", release: "", allowedScopes: "{}", enabled: []bool{true}}
-	expectTripleProviderRows(mock, []tripleEvidenceRow{row})
-	claims, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"surface"}})
-	if err != nil {
-		t.Fatal(err)
+func TestTripleEvidenceProviderConfiguredPortfolioEnablesMultipleReleases(t *testing.T) {
+	provider := TripleEvidenceProvider{DeploymentKeys: []string{"qudt-production", "ucum-production"}}
+	evidence := []tripleEvidenceRow{
+		{id: 1, source: "qudt", externalID: "QK", release: "3.1", authority: true, target: "quantity", status: "active", scope: "scope"},
+		{id: 2, source: "ucum", externalID: "m", release: "2.2", authority: true, target: "unit", status: "active", scope: "scope"},
 	}
-	if len(claims) != 1 || claims[0].TargetConceptID != "" || claims[0].Authority != IdentityAuthorityNonAuthoritative {
+	deployments := []tripleDeploymentRow{
+		{key: "ucum-production", source: "ucum", release: "2.2", enabled: true},
+		{key: "qudt-production", source: "qudt", release: "3.1", enabled: true},
+	}
+	claims := loadTripleClaims(t, provider, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}}, evidence, deployments)
+	if len(claims) != 2 || claims[0].Authority != IdentityAuthorityAuthoritative || claims[1].Authority != IdentityAuthorityAuthoritative {
 		t.Fatalf("claims = %#v", claims)
-	}
-	if len(claims[0].EvidenceRefs) != 2 {
-		t.Fatalf("refs = %#v, want source and evidence only", claims[0].EvidenceRefs)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
-func TestTripleEvidenceProviderCanonicalReferenceEncoding(t *testing.T) {
-	_, mock, tx := beginTripleProviderTest(t)
-	row := tripleEvidenceRow{id: 42, source: "源:a/b", externalID: "ID:α/β", release: "", authority: true, enabled: []bool{true}, target: "provider-only-target", status: "active", scope: "scope"}
-	expectTripleProviderRows(mock, []tripleEvidenceRow{row})
-	claims, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"only-candidate-surface"}})
+func TestTripleEvidenceProviderRetainsNonAuthorizingEvidence(t *testing.T) {
+	provider := TripleEvidenceProvider{DeploymentKeys: []string{"production"}}
+	deploy := []tripleDeploymentRow{{key: "production", source: "qudt", release: "3.1", enabled: true}}
+	tests := []struct {
+		name       string
+		row        tripleEvidenceRow
+		wantTarget string
+	}{
+		{name: "blank legacy ID", row: tripleEvidenceRow{id: 10, source: "legacy", externalID: "", release: "", allowedScopes: "{}"}},
+		{name: "missing mapping", row: tripleEvidenceRow{id: 11, source: "qudt", externalID: "missing", release: "3.1", authority: true}},
+		{name: "inactive mapping", row: tripleEvidenceRow{id: 12, source: "qudt", externalID: "old", release: "3.1", authority: true, target: "inactive", status: "deprecated", scope: "scope"}, wantTarget: "inactive"},
+		{name: "provisional mapping", row: tripleEvidenceRow{id: 13, source: "qudt", externalID: "new", release: "3.1", authority: true, target: "provisional", status: "provisional", scope: "scope"}, wantTarget: "provisional"},
+		{name: "scope mismatch", row: tripleEvidenceRow{id: 14, source: "qudt", externalID: "unit", release: "3.1", authority: true, target: "unit", status: "active", scope: "unit"}, wantTarget: "unit"},
+		{name: "non-authoritative source", row: tripleEvidenceRow{id: 15, source: "qudt", externalID: "proposal", release: "3.1", target: "proposal", status: "active", scope: "scope"}, wantTarget: "proposal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keys, deployments := provider, deploy
+			if tt.row.source == "legacy" {
+				keys, deployments = TripleEvidenceProvider{}, nil
+			}
+			claims := loadTripleClaims(t, keys, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"surface"}}, []tripleEvidenceRow{tt.row}, deployments)
+			if len(claims) != 1 || claims[0].TargetConceptID != tt.wantTarget || claims[0].Authority != IdentityAuthorityNonAuthoritative {
+				t.Fatalf("claims = %#v", claims)
+			}
+		})
+	}
+}
+
+func TestTripleEvidenceProviderSourceScopeGovernance(t *testing.T) {
+	provider := TripleEvidenceProvider{DeploymentKeys: []string{"production"}}
+	deployments := []tripleDeploymentRow{{key: "production", source: "catalog", release: "r", enabled: true}}
+	candidate := CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "unit", SurfaceIDs: []string{"surface"}}
+	evidence := []tripleEvidenceRow{{id: 20, source: "catalog", externalID: "id", release: "r", authority: true, allowedScopes: "{quantity}", target: "unit-target", status: "active", scope: "unit"}}
+	claims := loadTripleClaims(t, provider, candidate, evidence, deployments)
+	if len(claims) != 1 || claims[0].Authority != IdentityAuthorityNonAuthoritative || claims[0].TargetConceptID != "unit-target" {
+		t.Fatalf("claims = %#v", claims)
+	}
+}
+
+func TestTripleEvidenceProviderMalformedSourceScopesFailClosed(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		scopes any
+	}{
+		{name: "null", scopes: nil},
+		{name: "blank member", scopes: "{\"\t\"}"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, tx := beginTripleProviderTest(t)
+			mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(
+				sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).AddRow(int64(1), "corrupt", "id", "r"))
+			mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePoliciesSQL)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(
+				sqlmock.NewRows([]string{"source", "release", "identity_authority", "allowed_scopes"}).AddRow("corrupt", "r", true, tt.scopes))
+			_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
+			if err == nil || !strings.Contains(err.Error(), "allowed_scopes") {
+				t.Fatalf("error = %v, want allowed_scopes corruption", err)
+			}
+		})
+	}
+}
+
+func TestTripleEvidenceProviderFailsClosedOnMissingSourceOrCorruptMapping(t *testing.T) {
+	t.Run("missing source", func(t *testing.T) {
+		mock, tx := beginTripleProviderTest(t)
+		mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(
+			sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).AddRow(int64(1), "missing", "id", "r"))
+		mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePoliciesSQL)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(
+			sqlmock.NewRows([]string{"source", "release", "identity_authority", "allowed_scopes"}))
+		_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
+		if err == nil || !strings.Contains(err.Error(), "unregistered") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestTripleEvidenceProviderCorruptMappedConceptFailsClosed(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status any
+		scope  any
+	}{
+		{name: "missing", status: nil, scope: nil},
+		{name: "blank scope", status: "active", scope: " "},
+		{name: "unknown status", status: "unknown", scope: "scope"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, tx := beginTripleProviderTest(t)
+			mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(
+				sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).AddRow(int64(1), "qudt", "id", "r"))
+			mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePoliciesSQL)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(
+				sqlmock.NewRows([]string{"source", "release", "identity_authority", "allowed_scopes"}).AddRow("qudt", "r", false, "{scope}"))
+			mock.ExpectQuery(regexp.QuoteMeta(tripleExternalMappingsSQL)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(
+				sqlmock.NewRows([]string{"source", "external_id", "release", "concept_id", "status", "scope"}).AddRow("qudt", "id", "r", "missing-concept", tt.status, tt.scope))
+			_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
+			if err == nil || !strings.Contains(err.Error(), "concept") {
+				t.Fatalf("error = %v, want corrupt concept", err)
+			}
+		})
+	}
+}
+
+func TestTripleEvidenceProviderUsesAtMostFourQueriesAndIsOrderIndependent(t *testing.T) {
+	provider := TripleEvidenceProvider{DeploymentKeys: []string{"b-production", "a-production"}}
+	evidence := []tripleEvidenceRow{
+		{id: 5, source: "b", externalID: "2", release: "r2", authority: true, target: "target-b", status: "active", scope: "scope"},
+		{id: 1, source: "a", externalID: "1", release: "r1", authority: true, target: "target-a", status: "active", scope: "scope"},
+		{id: 4, source: "b", externalID: "2", release: "r2", authority: true, target: "target-b", status: "active", scope: "scope"},
+		{id: 3, source: "a", externalID: "missing", release: "r1", authority: true},
+		{id: 2, source: "a", externalID: "", release: "r1", authority: true},
+	}
+	deployments := []tripleDeploymentRow{
+		{key: "b-production", source: "b", release: "r2", enabled: true},
+		{key: "a-production", source: "a", release: "r1", enabled: true},
+	}
+	candidate := CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"z", "a", "z"}}
+	claimsOne := loadTripleClaims(t, provider, candidate, evidence, deployments)
+	for left, right := 0, len(evidence)-1; left < right; left, right = left+1, right-1 {
+		evidence[left], evidence[right] = evidence[right], evidence[left]
+	}
+	for left, right := 0, len(deployments)-1; left < right; left, right = left+1, right-1 {
+		deployments[left], deployments[right] = deployments[right], deployments[left]
+	}
+	claimsTwo := loadTripleClaims(t, provider, candidate, evidence, deployments)
+	jsonOne, err := CanonicalIdentityClaimsJSON(TripleEvidenceProviderID, "candidate", claimsOne)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []EvidenceRef{
-		{Key: "keyword_source:5rqQOmEvYg:", Kind: "authority_configuration", Locator: "postgres:kb.keyword_sources/5rqQOmEvYg/"},
-		{Key: "keyword_surface_evidence:42", Kind: "candidate_surface_evidence", Locator: "postgres:kb.keyword_surface_evidence/42"},
-		{Key: "keyword_external_id:5rqQOmEvYg:SUQ6zrEvzrI:", Kind: "target_external_mapping", Locator: "postgres:kb.keyword_external_ids/5rqQOmEvYg/SUQ6zrEvzrI/"},
+	jsonTwo, err := CanonicalIdentityClaimsJSON(TripleEvidenceProviderID, "candidate", claimsTwo)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(claims) != 1 || len(claims[0].EvidenceRefs) != len(want) {
-		t.Fatalf("claims = %#v", claims)
+	if string(jsonOne) != string(jsonTwo) {
+		t.Fatalf("canonical output differs:\n%s\n%s", jsonOne, jsonTwo)
 	}
-	for i := range want {
-		if claims[0].EvidenceRefs[i] != want[i] {
-			t.Errorf("ref[%d] = %#v, want %#v", i, claims[0].EvidenceRefs[i], want[i])
-		}
-	}
-	if claims[0].AuthorityRef != want[0].Key {
-		t.Errorf("AuthorityRef = %q, want %q", claims[0].AuthorityRef, want[0].Key)
+}
+
+func TestTripleEvidenceProviderSQLFailureFailsClosed(t *testing.T) {
+	mock, tx := beginTripleProviderTest(t)
+	mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnError(errors.New("database unavailable"))
+	_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
+	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestTripleEvidenceReferenceEncoding(t *testing.T) {
-	tests := []struct {
-		name       string
-		source     string
-		externalID string
-		release    string
-		wantSource EvidenceRef
-		wantMap    EvidenceRef
+	for _, tt := range []struct {
+		name, source, externalID, release string
+		wantSource, wantMap               EvidenceRef
 	}{
-		{
-			name: "ASCII", source: "qudt", externalID: "QK-1", release: "3.1",
+		{name: "ASCII", source: "qudt", externalID: "QK-1", release: "3.1",
 			wantSource: EvidenceRef{Key: "keyword_source:cXVkdA:My4x", Kind: "authority_configuration", Locator: "postgres:kb.keyword_sources/cXVkdA/My4x"},
-			wantMap:    EvidenceRef{Key: "keyword_external_id:cXVkdA:UUstMQ:My4x", Kind: "target_external_mapping", Locator: "postgres:kb.keyword_external_ids/cXVkdA/UUstMQ/My4x"},
-		},
-		{
-			name: "Unicode delimiters and empty release", source: "源:a/b", externalID: "ID:α/β", release: "",
+			wantMap:    EvidenceRef{Key: "keyword_external_id:cXVkdA:UUstMQ:My4x", Kind: "target_external_mapping", Locator: "postgres:kb.keyword_external_ids/cXVkdA/UUstMQ/My4x"}},
+		{name: "Unicode delimiters empty release", source: "源:a/b", externalID: "ID:α/β", release: "",
 			wantSource: EvidenceRef{Key: "keyword_source:5rqQOmEvYg:", Kind: "authority_configuration", Locator: "postgres:kb.keyword_sources/5rqQOmEvYg/"},
-			wantMap:    EvidenceRef{Key: "keyword_external_id:5rqQOmEvYg:SUQ6zrEvzrI:", Kind: "target_external_mapping", Locator: "postgres:kb.keyword_external_ids/5rqQOmEvYg/SUQ6zrEvzrI/"},
-		},
-	}
-	for _, tt := range tests {
+			wantMap:    EvidenceRef{Key: "keyword_external_id:5rqQOmEvYg:SUQ6zrEvzrI:", Kind: "target_external_mapping", Locator: "postgres:kb.keyword_external_ids/5rqQOmEvYg/SUQ6zrEvzrI/"}},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tripleSourceEvidenceRef(tt.source, tt.release); got != tt.wantSource {
 				t.Errorf("source ref = %#v, want %#v", got, tt.wantSource)
@@ -218,105 +402,9 @@ func TestTripleEvidenceReferenceEncoding(t *testing.T) {
 			}
 		})
 	}
-	if got := tripleSurfaceEvidenceRef(42); got.Key != "keyword_surface_evidence:42" || got.Locator != "postgres:kb.keyword_surface_evidence/42" {
+	if got := tripleSurfaceEvidenceRef(42); got.Key != "keyword_surface_evidence:42" {
 		t.Errorf("surface ref = %#v", got)
 	}
-}
-
-func TestTripleEvidenceProviderMultipleTriplesAreRetainedBeforeCanonicalDedup(t *testing.T) {
-	rows := []tripleEvidenceRow{
-		{id: 3, source: "a", externalID: "one", release: "", authority: true, enabled: []bool{true}, target: "same", status: "active", scope: "scope"},
-		{id: 1, source: "b", externalID: "two", release: "2026", authority: true, enabled: []bool{true}, target: "same", status: "active", scope: "scope"},
-		{id: 2, source: "c", externalID: "three", release: "2026", authority: true, enabled: []bool{true}, target: "different", status: "active", scope: "scope"},
-	}
-	_, mock, tx := beginTripleProviderTest(t)
-	expectTripleProviderRows(mock, rows)
-	claims, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(claims) != 3 {
-		t.Fatalf("len = %d, want 3", len(claims))
-	}
-	normalized, err := NormalizeIdentityClaims(TripleEvidenceProviderID, "candidate", claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(normalized) != 3 {
-		t.Fatalf("different authority refs preserve all triples, len = %d", len(normalized))
-	}
-}
-
-func TestTripleEvidenceProviderSameTripleClaimsCanonicalizeByUnioningEvidence(t *testing.T) {
-	rows := []tripleEvidenceRow{
-		{id: 21, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{true}, target: "same", status: "active", scope: "scope"},
-		{id: 22, source: "qudt", externalID: "QK-1", release: "3.1", authority: true, enabled: []bool{true}, target: "same", status: "active", scope: "scope"},
-	}
-	_, mock, tx := beginTripleProviderTest(t)
-	expectTripleProviderRows(mock, rows)
-	claims, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s1", "s2"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(claims) != 2 {
-		t.Fatalf("raw claims len = %d, want 2", len(claims))
-	}
-	normalized, err := NormalizeIdentityClaims(TripleEvidenceProviderID, "candidate", claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(normalized) != 1 || len(normalized[0].EvidenceRefs) != 4 {
-		t.Fatalf("normalized claims = %#v, want one claim with source, mapping, and two evidence refs", normalized)
-	}
-}
-
-func TestTripleEvidenceProviderFailsClosed(t *testing.T) {
-	t.Run("nil transaction", func(t *testing.T) {
-		_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), nil, CandidateIdentityContext{})
-		if err == nil || !strings.Contains(err.Error(), "transaction") {
-			t.Fatalf("error = %v", err)
-		}
-	})
-	t.Run("unregistered source", func(t *testing.T) {
-		_, mock, tx := beginTripleProviderTest(t)
-		mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).AddRow(int64(1), "missing", "id", "r"),
-		)
-		mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePolicySQL)).WithArgs("missing", "r").WillReturnError(sql.ErrNoRows)
-		_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
-		if err == nil || !strings.Contains(err.Error(), "unregistered") {
-			t.Fatalf("error = %v", err)
-		}
-	})
-	for _, tt := range []struct {
-		name          string
-		allowedScopes any
-	}{
-		{name: "null allowed scopes", allowedScopes: nil},
-		{name: "malformed allowed scopes", allowedScopes: `{" "}`},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			_, mock, tx := beginTripleProviderTest(t)
-			mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnRows(
-				sqlmock.NewRows([]string{"id", "source", "external_id", "release"}).AddRow(int64(1), "corrupt", "id", "r"),
-			)
-			mock.ExpectQuery(regexp.QuoteMeta(tripleSourcePolicySQL)).WithArgs("corrupt", "r").WillReturnRows(
-				sqlmock.NewRows([]string{"identity_authority", "allowed_scopes"}).AddRow(true, tt.allowedScopes),
-			)
-			_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{CandidateConceptID: "candidate", Scope: "scope", SurfaceIDs: []string{"s"}})
-			if err == nil || !strings.Contains(err.Error(), "allowed_scopes") {
-				t.Fatalf("error = %v, want allowed_scopes corruption", err)
-			}
-		})
-	}
-	t.Run("query failure", func(t *testing.T) {
-		_, mock, tx := beginTripleProviderTest(t)
-		mock.ExpectQuery(regexp.QuoteMeta(tripleEvidenceRowsSQL)).WithArgs(sqlmock.AnyArg()).WillReturnError(errors.New("database unavailable"))
-		_, err := (TripleEvidenceProvider{}).LoadClaims(context.Background(), tx, CandidateIdentityContext{SurfaceIDs: []string{"s"}})
-		if err == nil || !strings.Contains(err.Error(), "database unavailable") {
-			t.Fatalf("error = %v", err)
-		}
-	})
 }
 
 func TestTripleEvidenceProviderID(t *testing.T) {
