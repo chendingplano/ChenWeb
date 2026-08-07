@@ -18,6 +18,8 @@ export type TerminologyResource = {
 	artifact: string;
 	source_url: string;
 	manifest_draft: string;
+	/** Draft manifest license_review_status: "pending_review", "approved", or "". */
+	review_status: string;
 	error: string;
 };
 

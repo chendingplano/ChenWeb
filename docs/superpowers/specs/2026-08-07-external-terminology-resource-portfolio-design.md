@@ -571,6 +571,10 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 # Admin page API (System Admin > Resources > External Terminology Resources):
 #   GET  /api/v1/terminology-resources
 #   POST /api/v1/terminology-resources/:source/download
+# Each response includes review_status (pending_review | approved | "") read
+# from the source's manifest.draft.json. The Review page (System Admin >
+# Resources > Review External Resources) lists only downloaded resources whose
+# review_status is still pending_review.
 # Storage defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 ```
 

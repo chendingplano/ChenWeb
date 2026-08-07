@@ -280,6 +280,32 @@
 - [x] Update §13.2 operational commands and the documentation-impact section.
 - [x] Commit with `jj commit` and verify a single linear `jj log`.
 
+## Task 10: Review page for downloaded, unreviewed resources
+
+**Files:**
+- Create: `web/src/lib/components/home3/review-external-resources-view.svelte`
+- Modify: `server/api/ontology/terminology/fetch.go` (+ `fetch_test.go`),
+  `server/api/terminologyresourcehandler/handler.go` (+ `handler_test.go`),
+  `web/src/lib/services/terminologyResourceService.ts`,
+  `web/src/lib/components/home3/nav-rail.svelte`,
+  `web/src/lib/components/home3/content-panel.svelte`
+- Modify: `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
+
+**Interfaces:**
+- The resources API now reports the draft manifest's `review_status`
+  (`pending_review`, `approved`, or empty) per downloaded resource.
+- The Review page (System Admin > Resources > Review External Resources) lists
+  only downloaded resources whose draft manifest is still `pending_review`,
+  in the same card style as the External Terminology Resources page, with the
+  approval checklist (license/role/scope/relations/checksum confirmation,
+  `approved_by`/`approved_at`, then `terminology-import`).
+
+- [x] Surface `review_status` from the draft manifest in the resources API.
+- [x] Add the Review page and filter to downloaded + `pending_review` only.
+- [x] Add fetch-package and handler tests for pending/approved/no-draft states.
+- [x] Run go tests/build/vet, svelte-check, and eslint on the new frontend files.
+- [x] Update §13.2 and the documentation-impact section; commit with `jj`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
@@ -290,17 +316,18 @@
   `never_merge` veto; negative evidence is a veto, never a lowered score.
   Four of the five portfolio resources (QUDT, UCUM, BIPM SIRP, Wikidata pilot
   subset) are now downloadable automatically with SHA-256 and an unapproved
-  draft manifest; IEC 60050-845 remains permission-gated by design.
+  draft manifest; IEC 60050-845 remains permission-gated by design. Downloaded
+  sources surface on a Review page until their draft manifest is approved.
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
   §21, I2), the Stage-0/1 tooling commits (Tasks 0–9), the live integration
   test `server/api/ontology/keywords/reconcile_identity_integration_test.go`,
-  and the new fetch/handler/CLI tests plus the External Terminology Resources
-  admin page.
+  the new fetch/handler/CLI tests, and the External Terminology Resources and
+  Review External Resources admin pages.
 - **Which docs were updated?** `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`
   (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
   (status, §12.3, §13 implementation/commands/formats/acceptance, §13.2 fetch
-  tool/API), this plan (Task 9), the governing
+  tool/API), this plan (Tasks 9–10), the governing
   `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
   and the stored coverage report under `docs/superpowers/reports/`.
 - **Which docs are now stale?** The keyword spec's §13.1 "embedding may

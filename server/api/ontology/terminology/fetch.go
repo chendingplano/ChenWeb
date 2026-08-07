@@ -283,6 +283,25 @@ func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOpti
 	return st, nil
 }
 
+// DraftReviewStatus returns the license_review_status recorded in the
+// source's draft manifest: LicenseReviewPending while the fetch is fresh,
+// "approved" if the operator edited the draft in place, or "" when no draft
+// exists (never fetched, or already approved and moved to a real manifest).
+func DraftReviewStatus(destDir string, id ResourceID) (string, error) {
+	b, err := os.ReadFile(filepath.Join(destDir, string(id), "manifest.draft.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s draft manifest: %w", id, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return "", fmt.Errorf("decode %s draft manifest: %w", id, err)
+	}
+	return strings.TrimSpace(m.Policy.LicenseReviewStatus), nil
+}
+
 // ReadStatus loads one resource's persisted status; a never-fetched resource
 // returns Downloaded=false.
 func ReadStatus(destDir string, id ResourceID) (FetchStatus, error) {

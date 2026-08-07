@@ -57,6 +57,10 @@ func TestListResourcesMergesPersistedStatus(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(statusDir, "status.json"), []byte(`{"source":"sirp","release":"1.0.0","downloaded":true,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":42}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A pending draft manifest means the resource awaits review.
+	if err := os.WriteFile(filepath.Join(statusDir, "manifest.draft.json"), []byte(`{"adapter":"bipm-sirp-quantity","policy":{"license_review_status":"pending_review"},"artifacts":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -73,6 +77,58 @@ func TestListResourcesMergesPersistedStatus(t *testing.T) {
 	sirp := findView(body.Resources, "sirp")
 	if !sirp.Downloaded || sirp.Release != "1.0.0" || sirp.SizeBytes != 42 {
 		t.Fatalf("sirp view = %+v", sirp)
+	}
+	if sirp.ReviewStatus != "pending_review" {
+		t.Fatalf("sirp review_status = %q, want pending_review", sirp.ReviewStatus)
+	}
+}
+
+func TestListResourcesReviewStatusReflectsApproval(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMINOLOGY_DIR", dir)
+
+	for _, tc := range []struct {
+		name  string
+		draft string
+		want  string
+	}{
+		{"approved draft in place", `{"adapter":"ucum","policy":{"license_review_status":"approved"},"artifacts":[]}`, "approved"},
+		{"no draft after approval move", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sourceDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+			if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"ucum","downloaded":true}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			draftPath := filepath.Join(sourceDir, "manifest.draft.json")
+			if tc.draft != "" {
+				if err := os.WriteFile(draftPath, []byte(tc.draft), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Remove(draftPath); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+
+			e := echo.New()
+			rec := httptest.NewRecorder()
+			c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/v1/terminology-resources", nil), rec)
+			if err := ListResources(c); err != nil {
+				t.Fatalf("ListResources: %v", err)
+			}
+			var body struct {
+				Resources []resourceView `json:"resources"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			ucum := findView(body.Resources, "ucum")
+			if ucum.ReviewStatus != tc.want {
+				t.Fatalf("ucum review_status = %q, want %q", ucum.ReviewStatus, tc.want)
+			}
+		})
 	}
 }
 

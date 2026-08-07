@@ -281,6 +281,10 @@
 						{
 							id: 'sysadmin-resources-external-terminology',
 							label: 'External Terminology Resources'
+						},
+						{
+							id: 'sysadmin-resources-review-external-terminology',
+							label: 'Review External Resources'
 						}
 					]
 				},

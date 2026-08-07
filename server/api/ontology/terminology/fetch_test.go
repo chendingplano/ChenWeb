@@ -211,3 +211,42 @@ func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
+
+func TestDraftReviewStatus(t *testing.T) {
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, string(ResourceUCUM))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// No draft yet -> no review status.
+	if got, err := DraftReviewStatus(dir, ResourceUCUM); err != nil || got != "" {
+		t.Fatalf("no draft: got=%q err=%v", got, err)
+	}
+
+	// Fresh fetch writes a pending draft.
+	pending := `{"adapter":"ucum","policy":{"license_review_status":"pending_review"},"artifacts":[]}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(pending), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DraftReviewStatus(dir, ResourceUCUM); err != nil || got != LicenseReviewPending {
+		t.Fatalf("pending draft: got=%q err=%v", got, err)
+	}
+
+	// Operator approval edits the draft in place.
+	approved := `{"adapter":"ucum","policy":{"license_review_status":"approved","approved_by":"ontology-board"},"artifacts":[]}`
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte(approved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DraftReviewStatus(dir, ResourceUCUM); err != nil || got != "approved" {
+		t.Fatalf("approved draft: got=%q err=%v", got, err)
+	}
+
+	// Malformed draft surfaces an error so the handler fails visibly.
+	if err := os.WriteFile(filepath.Join(sourceDir, "manifest.draft.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DraftReviewStatus(dir, ResourceUCUM); err == nil {
+		t.Fatal("malformed draft must error")
+	}
+}

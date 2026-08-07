@@ -44,7 +44,11 @@ type resourceView struct {
 	Artifact           string     `json:"artifact"`
 	SourceURL          string     `json:"source_url"`
 	ManifestDraft      string     `json:"manifest_draft"`
-	Error              string     `json:"error"`
+	// ReviewStatus is the draft manifest's license_review_status
+	// ("pending_review", "approved", or "" when there is no draft). The
+	// Review page lists downloaded resources still pending review.
+	ReviewStatus string `json:"review_status"`
+	Error        string `json:"error"`
 }
 
 // terminologyDir resolves the fetch storage directory. TERMINOLOGY_DIR is the
@@ -60,7 +64,7 @@ func terminologyDir() string {
 	return ""
 }
 
-func viewFor(res terminology.Resource, st terminology.FetchStatus) resourceView {
+func viewFor(dir string, res terminology.Resource, st terminology.FetchStatus) resourceView {
 	v := resourceView{
 		ID: string(res.ID), Name: res.Name, Description: res.Description,
 		URL: res.URL, Release: res.Release, License: res.License,
@@ -69,6 +73,13 @@ func viewFor(res terminology.Resource, st terminology.FetchStatus) resourceView 
 		Downloaded: st.Downloaded, SHA256: st.SHA256, SizeBytes: st.SizeBytes,
 		Artifact: st.Artifact, SourceURL: st.SourceURL, ManifestDraft: st.ManifestDraft,
 		Error: st.Error,
+	}
+	if st.Downloaded {
+		if rev, err := terminology.DraftReviewStatus(dir, res.ID); err == nil {
+			v.ReviewStatus = rev
+		} else {
+			v.Error = err.Error()
+		}
 	}
 	if !st.DownloadedAt.IsZero() {
 		t := st.DownloadedAt
@@ -92,7 +103,7 @@ func ListResources(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, errorResponse{false, err.Error()})
 		}
-		views = append(views, viewFor(res, st))
+		views = append(views, viewFor(dir, res, st))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "resources": views})
 }
@@ -124,5 +135,5 @@ func DownloadResource(c echo.Context) error {
 		}
 		return c.JSON(code, errorResponse{false, err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(res, st)})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st)})
 }
