@@ -276,7 +276,13 @@
 				{
 					id: 'sysadmin-resources',
 					label: 'Resources',
-					children: [{ id: 'sysadmin-resources-videos', label: 'Videos' }]
+					children: [
+						{ id: 'sysadmin-resources-videos', label: 'Videos' },
+						{
+							id: 'sysadmin-resources-external-terminology',
+							label: 'External Terminology Resources'
+						}
+					]
 				},
 				{ id: 'sysadmin-schedules', label: 'Schedules' },
 				{ id: 'sysadmin-page-config', label: 'Page Content' }

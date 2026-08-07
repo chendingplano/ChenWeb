@@ -239,6 +239,47 @@
 - [x] Obtain independent spec-compliance review, then code-quality review; fix and re-run verification.
 - [x] Commit documentation/test closure, verify a single linear `jj log`, and report actual resource files intentionally not distributed with the repository.
 
+## Task 9: Automated resource download and admin page
+
+**Files:**
+- Create: `server/api/ontology/terminology/fetch.go` + `fetch_test.go`
+- Create: `server/api/terminologyresourcehandler/handler.go` + `handler_test.go`
+- Create: `server/cmd/terminology-fetch/main.go` + `main_test.go`
+- Create: `web/src/lib/services/terminologyResourceService.ts`
+- Create: `web/src/lib/components/home3/external-terminology-resources-view.svelte`
+- Modify: `server/api/routes.go`, `web/src/lib/components/home3/nav-rail.svelte`,
+  `web/src/lib/components/home3/content-panel.svelte`
+- Modify: `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
+
+**Interfaces:**
+- Downloads stay an explicit bootstrap step separate from import: the fetch
+  tool/API writes local artifacts, computes SHA-256, and drafts an unapproved
+  manifest (`license_review_status=pending_review`, no `approved_by`/`approved_at`)
+  that `terminology-import` rejects until the operator completes the license
+  review. Import commands remain offline.
+- Freely downloadable sources (no permission): QUDT (`qudt.org/download/3.5.0/qudt-all.ttl`,
+  CC-BY-4.0), UCUM (`raw.githubusercontent.com/ucum-org/ucum/v2.2/ucum-essence.xml`,
+  UCUM License 1.1), BIPM SIRP (`si-digital-framework.org/quantities`, CC-BY-3.0-IGO),
+  Wikidata pilot entity subset via `wbgetentities` pinned by `lastrevid` (CC0).
+  IEC 60050-845 (IEV) is copyright-gated: the tool refuses it and the page shows
+  "Requires license" instead of a download button.
+- The admin page (System Admin > Resources > External Terminology Resources)
+  lists every resource as a card with name, source URL, release, license,
+  download status, download time, SHA-256, size, artifact/draft-manifest names,
+  and a Download / Re-download button.
+
+- [x] Verify live URLs are reachable and record real artifact sizes/releases.
+- [x] Implement the shared fetch package with SHA-256, size limits, persisted
+  `status.json`, and unapproved draft manifests; refuse permission-gated sources.
+- [x] Add `GET /api/v1/terminology-resources` and
+  `POST /api/v1/terminology-resources/:source/download`.
+- [x] Add the `terminology-fetch` CLI (`list`, `status`, `fetch`).
+- [x] Add the admin page under System Admin > Resources and wire the nav.
+- [x] Run fetch/handler/CLI tests, `go build ./...`, `go vet ./...`,
+  `svelte-check`, and eslint on the new frontend files; fix every new issue.
+- [x] Update §13.2 operational commands and the documentation-impact section.
+- [x] Commit with `jj commit` and verify a single linear `jj log`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
@@ -247,14 +288,20 @@
   external_id, release)` evidence. Reviewed promotion is the only writer into
   `keyword_external_ids`/`keyword_surface_evidence`/the provenance-linked
   `never_merge` veto; negative evidence is a veto, never a lowered score.
+  Four of the five portfolio resources (QUDT, UCUM, BIPM SIRP, Wikidata pilot
+  subset) are now downloadable automatically with SHA-256 and an unapproved
+  draft manifest; IEC 60050-845 remains permission-gated by design.
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
-  §21, I2), the Stage-0/1 tooling commits (Tasks 0–8), and the new live
-  integration test `server/api/ontology/keywords/reconcile_identity_integration_test.go`.
+  §21, I2), the Stage-0/1 tooling commits (Tasks 0–9), the live integration
+  test `server/api/ontology/keywords/reconcile_identity_integration_test.go`,
+  and the new fetch/handler/CLI tests plus the External Terminology Resources
+  admin page.
 - **Which docs were updated?** `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`
   (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
-  (status, §12.3, new §13 implementation/commands/formats/acceptance), this
-  plan, `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
+  (status, §12.3, §13 implementation/commands/formats/acceptance, §13.2 fetch
+  tool/API), this plan (Task 9), the governing
+  `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
   and the stored coverage report under `docs/superpowers/reports/`.
 - **Which docs are now stale?** The keyword spec's §13.1 "embedding may
   auto-accept" wording (revised in place), the §0 "Never validated live" row
@@ -263,9 +310,11 @@
 - **What was intentionally left undocumented?** Production resource files are
   not distributed with the repository (synthetic fixtures stand in for real
   SIRP/QUDT/IEC/Wikidata artifacts); operator approval of the coverage
-  backlog and a published production seed release remain deliberately outside
-  tooling authority.
+  backlog, the license review/approval of each fetched draft manifest, and a
+  published production seed release remain deliberately outside tooling
+  authority. The download tool automates retrieval but cannot approve a
+  manifest or import anything.
 
 ## Completion boundary
 
-This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling. It does not claim that the production portfolio is bootstrapped: it does not download or redistribute external datasets, scrape IEC/CIE/ISO pages, create a curator UI, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation requires operators to supply approved local SIRP/QUDT/Wikidata/UCUM artifacts and the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
+This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus admin page (Task 9). It does not claim that the production portfolio is bootstrapped: the download tool retrieves the four freely available sources into local artifacts with unapproved draft manifests, but it does not redistribute datasets, scrape IEC/CIE/ISO pages, approve manifests, import anything, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.

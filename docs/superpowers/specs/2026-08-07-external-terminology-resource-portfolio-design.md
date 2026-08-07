@@ -550,6 +550,11 @@ positive/negative promotion into `keyword_external_ids`,
 ### 13.2 Operational commands
 
 ```text
+# Download one freely available resource (network-enabled bootstrap only;
+# writes local artifact + SHA-256 + unapproved draft manifest).
+terminology-fetch list
+terminology-fetch status [--dir <dir>] [--source <id>]
+terminology-fetch fetch --source <id> --dir <dir> [--titles a,b,c]
 # Import one immutable local source release (never fetches live URLs).
 terminology-import import --manifest <manifest.json>
 # Report a release diff between two manifests (json|summary).
@@ -563,7 +568,24 @@ terminology-coverage --acceptance acceptance.json [--format json|summary]
 keyword-reconcile --scope display --identity-deployment-key tier6-primary
 # Legacy quantity-module QUDT import (unchanged behavior).
 qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions dimensions.ttl
+# Admin page API (System Admin > Resources > External Terminology Resources):
+#   GET  /api/v1/terminology-resources
+#   POST /api/v1/terminology-resources/:source/download
+# Storage defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 ```
+
+Freely downloadable sources (no permission required): QUDT
+(`https://qudt.org/download/3.5.0/qudt-all.ttl`, CC-BY-4.0), UCUM
+(`https://raw.githubusercontent.com/ucum-org/ucum/v2.2/ucum-essence.xml`, UCUM
+License 1.1), BIPM SIRP (`https://si-digital-framework.org/quantities`,
+CC-BY-3.0-IGO), and a revision-pinned Wikidata pilot entity subset
+(`wbgetentities`, CC0). IEC 60050-845 (IEV) is copyright-gated: retrieval is
+refused by the tool and the page shows "Requires license"; only a licensed,
+reviewed seed file is acceptable. Every fetched artifact records its retrieval
+time and SHA-256; the draft manifest is written with
+`license_review_status=pending_review` and no approval fields, so
+`terminology-import` fails closed until an operator completes the license
+review and approval (the only remaining manual gate).
 
 ### 13.3 Source manifest, diff, and rollback format
 

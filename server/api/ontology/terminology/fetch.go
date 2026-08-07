@@ -1,0 +1,476 @@
+// Fetch-side tooling for the external terminology portfolio. Downloads are an
+// explicit operator bootstrap step separate from import: Fetch writes local
+// artifacts, computes SHA-256, and drafts an unapproved manifest
+// (license_review_status=pending_review) that terminology-import refuses until
+// an operator completes the license review and approval fields. Import
+// commands themselves never fetch live URLs.
+package terminology
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
+)
+
+// LicenseReviewPending marks a fetched manifest draft that has not passed the
+// operator license review. It is intentionally not a value accepted by
+// keywords.SourcePolicy.Validate, so a draft can never be imported.
+const LicenseReviewPending = "pending_review"
+
+const defaultUserAgent = "ChenWeb terminology-fetch/1.0 (go)"
+
+// ResourceID identifies one portfolio resource the page can manage.
+type ResourceID string
+
+// The five portfolio resources. Four are freely downloadable; IEC 60050-845
+// (IEV) is copyright-gated and requires a licensed reviewed seed file.
+const (
+	ResourceQUDT     ResourceID = "qudt"
+	ResourceUCUM     ResourceID = "ucum"
+	ResourceSIRP     ResourceID = "sirp"
+	ResourceWikidata ResourceID = "wikidata"
+	ResourceIEC      ResourceID = "iec-60050-845"
+)
+
+// Resource is the static catalog entry shown on the admin page. Governance
+// fields mirror the fixture manifests so a draft manifest can be written
+// directly from one entry.
+type Resource struct {
+	ID                     ResourceID
+	Name                   string
+	Description            string
+	URL                    string
+	Release                string
+	License                string
+	LicenseURL             string
+	Downloadable           bool
+	PermissionRequired     bool
+	Notes                  string
+	Artifact               string
+	MediaType              string
+	MaxBytes               int64
+	ProviderID             string
+	Source                 string
+	SourceSubset           string
+	Adapter                string
+	AdapterVersion         string
+	AuthorityRole          keywords.AuthorityRole
+	AuthoritativeRelations []string
+	AllowedScopes          []string
+	Languages              []string
+	IdentityAuthority      bool
+}
+
+var resources = []Resource{
+	{
+		ID: ResourceQUDT, Name: "QUDT Quantity Kinds & Units",
+		Description: "QUDT 3.5.0 catalog: quantity kinds, units, and dimension vectors as one Turtle graph.",
+		URL:         "https://qudt.org/download/3.5.0/qudt-all.ttl",
+		Release:     "3.5.0", License: "CC-BY-4.0",
+		LicenseURL:   "https://www.qudt.org/catalog/qudt-catalog.html",
+		Downloadable: true, Artifact: "qudt-all.ttl", MediaType: "text/turtle", MaxBytes: 256 << 20,
+		ProviderID: "qudt", Source: "qudt", SourceSubset: "catalog",
+		Adapter: "qudt-quantity-kind", AdapterVersion: "3.5.0",
+		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
+		AllowedScopes: []string{"quantity"}, Languages: []string{"en", "fr", "zh", "und"},
+		IdentityAuthority: true,
+		Notes:             "CC-BY-4.0 for units/quantity-kinds; some scale vocabularies are CC-BY-SA 3.0 US.",
+	},
+	{
+		ID: ResourceUCUM, Name: "UCUM Essence",
+		Description: "UCUM 2.2 essence XML: the case-sensitive prefixes and units used for unit-code identity.",
+		URL:         "https://raw.githubusercontent.com/ucum-org/ucum/v2.2/ucum-essence.xml",
+		Release:     "2.2", License: "UCUM-License-1.1",
+		LicenseURL:   "https://ucum.org/license",
+		Downloadable: true, Artifact: "ucum-essence.xml", MediaType: "application/xml", MaxBytes: 16 << 20,
+		ProviderID: "ucum", Source: "ucum", SourceSubset: "essence",
+		Adapter: "ucum", AdapterVersion: "0.1.0",
+		AuthorityRole: keywords.ContextOnly, AuthoritativeRelations: nil,
+		AllowedScopes: []string{"display"}, Languages: []string{"en"},
+		IdentityAuthority: false,
+		Notes:             "No-charge, royalty-free UCUM License 1.1; no registration required.",
+	},
+	{
+		ID: ResourceSIRP, Name: "BIPM SI Reference Point",
+		Description: "BIPM SIRP 1.0.0 quantities index (149 quantities with persistent identifiers and expressions).",
+		URL:         "https://si-digital-framework.org/quantities",
+		Release:     "1.0.0", License: "CC-BY-3.0-IGO",
+		LicenseURL:   "https://github.com/TheBIPM/SI_Digital_Framework/blob/main/LICENCE",
+		Downloadable: true, Artifact: "quantities.json", MediaType: "application/json", MaxBytes: 16 << 20,
+		ProviderID: "bipm", Source: "bipm-sirp-quantity", SourceSubset: "quantities",
+		Adapter: "bipm-sirp-quantity", AdapterVersion: "1.0.0",
+		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
+		AllowedScopes: []string{"quantity"}, Languages: []string{"en", "fr"},
+		IdentityAuthority: true,
+		Notes:             "Served per-resource over the SI Digital Framework API; no bulk snapshot exists.",
+	},
+	{
+		ID: ResourceWikidata, Name: "Wikidata (pilot entities)",
+		Description:  "Revision-pinned Wikidata proposal snapshot for the pilot entities (multilingual labels, aliases, descriptions).",
+		URL:          "https://www.wikidata.org/w/api.php",
+		Release:      "", // set at fetch time: dump-<YYYY-MM-DD>
+		License:      "CC0-1.0",
+		LicenseURL:   "https://www.wikidata.org/wiki/Wikidata:Licensing",
+		Downloadable: true, Artifact: "snapshot.jsonl", MediaType: "application/x-ndjson", MaxBytes: 32 << 20,
+		ProviderID: "wikimedia", Source: "wikidata", SourceSubset: "pilot",
+		Adapter: "wikidata", AdapterVersion: "0.1.0",
+		AuthorityRole: keywords.ProposalOnly, AuthoritativeRelations: nil,
+		AllowedScopes: []string{"display"}, Languages: []string{"en", "zh"},
+		IdentityAuthority: false,
+		Notes:             "CC0 dump/API data. Full dumps are multi-GB; this fetches a pinned entity subset for the pilot corpus.",
+	},
+	{
+		ID: ResourceIEC, Name: "IEC 60050-845 (IEV)",
+		Description: "International Electrotechnical Vocabulary, chapter 845 (lighting).",
+		URL:         "https://www.electropedia.org/",
+		Release:     "2020", License: "IEC copyright (licensed)",
+		LicenseURL:   "https://webstore.iec.ch/en/copyright",
+		Downloadable: false, PermissionRequired: true,
+		Notes: "IEC content is copyright-gated. Browsing electropedia.org does not grant bulk reuse; provide a licensed, reviewed seed file instead.",
+	},
+}
+
+// Resources returns the catalog sorted by ID for stable display order.
+func Resources() []Resource {
+	out := make([]Resource, len(resources))
+	copy(out, resources)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// ResourceByID returns one catalog entry.
+func ResourceByID(id ResourceID) (Resource, bool) {
+	for _, r := range resources {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return Resource{}, false
+}
+
+// FetchStatus is the persisted per-source download state under
+// <terminology-dir>/<source>/status.json.
+type FetchStatus struct {
+	Source        string    `json:"source"`
+	Release       string    `json:"release"`
+	Downloaded    bool      `json:"downloaded"`
+	DownloadedAt  time.Time `json:"downloaded_at,omitempty"`
+	SHA256        string    `json:"sha256,omitempty"`
+	SizeBytes     int64     `json:"size_bytes,omitempty"`
+	Artifact      string    `json:"artifact,omitempty"`
+	SourceURL     string    `json:"source_url,omitempty"`
+	ManifestDraft string    `json:"manifest_draft,omitempty"`
+	Error         string    `json:"error,omitempty"`
+}
+
+type fetchConfig struct {
+	client      *http.Client
+	urlOverride map[ResourceID]string
+	wikidata    []string
+	now         time.Time
+}
+
+// FetchOption customizes one download (tests use URL overrides + clients).
+type FetchOption func(*fetchConfig)
+
+// WithClient replaces the default HTTP client.
+func WithClient(c *http.Client) FetchOption {
+	return func(cfg *fetchConfig) { cfg.client = c }
+}
+
+// WithURLOverride points one resource at a different source URL (tests).
+func WithURLOverride(id ResourceID, u string) FetchOption {
+	return func(cfg *fetchConfig) { cfg.urlOverride[id] = u }
+}
+
+// WithWikidataTitles sets the enwiki titles fetched for the Wikidata pilot
+// snapshot. Defaults to the pilot corpus titles.
+func WithWikidataTitles(titles []string) FetchOption {
+	return func(cfg *fetchConfig) { cfg.wikidata = titles }
+}
+
+// WithNow pins the retrieval clock (tests).
+func WithNow(now time.Time) FetchOption {
+	return func(cfg *fetchConfig) { cfg.now = now }
+}
+
+func defaultWikidataTitles() []string {
+	return []string{"Luminance", "Brightness", "Contrast"}
+}
+
+// Fetch downloads one resource into destDir/<source>/ and records status.json
+// plus an unapproved manifest draft. It fails for permission-gated resources
+// (IEC) and for any HTTP/checksum-unverifiable result.
+func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOption) (FetchStatus, error) {
+	res, ok := ResourceByID(id)
+	if !ok {
+		return FetchStatus{}, fmt.Errorf("unknown terminology resource %q", id)
+	}
+	if !res.Downloadable {
+		return FetchStatus{}, fmt.Errorf("resource %q requires permission and cannot be downloaded automatically", id)
+	}
+
+	cfg := fetchConfig{client: &http.Client{Timeout: 10 * time.Minute}, urlOverride: map[ResourceID]string{}, now: time.Now().UTC()}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	client := cfg.client
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Minute}
+	}
+
+	sourceDir := filepath.Join(destDir, string(id))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		return FetchStatus{}, fmt.Errorf("create %s: %w", sourceDir, err)
+	}
+
+	sourceURL := res.URL
+	if override, ok := cfg.urlOverride[id]; ok && override != "" {
+		sourceURL = override
+	}
+	artifactPath := filepath.Join(sourceDir, res.Artifact)
+
+	var (
+		sha  string
+		size int64
+		rel  = res.Release
+		err  error
+	)
+	switch id {
+	case ResourceWikidata:
+		titles := cfg.wikidata
+		if len(titles) == 0 {
+			titles = defaultWikidataTitles()
+		}
+		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, titles, res.MaxBytes)
+		if rel == "" {
+			rel = "dump-" + cfg.now.Format("2006-01-02")
+		}
+	default:
+		sha, size, err = downloadToFile(ctx, client, sourceURL, artifactPath, res.MaxBytes)
+	}
+	if err != nil {
+		st := FetchStatus{Source: string(id), Release: rel, Downloaded: false, Error: err.Error()}
+		_ = writeStatusFile(sourceDir, st)
+		return st, err
+	}
+
+	st := FetchStatus{
+		Source: string(id), Release: rel, Downloaded: true, DownloadedAt: cfg.now,
+		SHA256: sha, SizeBytes: size, Artifact: res.Artifact,
+		SourceURL: sourceURL, ManifestDraft: "manifest.draft.json",
+	}
+	if err := writeDraftManifest(sourceDir, res, st); err != nil {
+		return st, fmt.Errorf("write draft manifest: %w", err)
+	}
+	if err := writeStatusFile(sourceDir, st); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+// ReadStatus loads one resource's persisted status; a never-fetched resource
+// returns Downloaded=false.
+func ReadStatus(destDir string, id ResourceID) (FetchStatus, error) {
+	b, err := os.ReadFile(filepath.Join(destDir, string(id), "status.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return FetchStatus{Source: string(id)}, nil
+	}
+	if err != nil {
+		return FetchStatus{}, err
+	}
+	var st FetchStatus
+	if err := json.Unmarshal(b, &st); err != nil {
+		return FetchStatus{}, fmt.Errorf("decode %s status: %w", id, err)
+	}
+	return st, nil
+}
+
+func writeStatusFile(sourceDir string, st FetchStatus) error {
+	b, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filepath.Join(sourceDir, "status.json"), b)
+}
+
+// writeDraftManifest emits an unapproved manifest (pending_review, no
+// approved_by/approved_at) so terminology-import fails closed until the
+// operator completes the license review.
+func writeDraftManifest(sourceDir string, res Resource, st FetchStatus) error {
+	m := Manifest{
+		Adapter: res.Adapter,
+		Policy: ManifestPolicy{
+			ProviderID: res.ProviderID, Source: res.Source, SourceSubset: res.SourceSubset,
+			Release: st.Release, RetrievedAt: st.DownloadedAt, ContentChecksum: st.SHA256,
+			License: res.License, LicenseReviewStatus: LicenseReviewPending,
+			AuthorityRole: res.AuthorityRole, AuthoritativeRelations: res.AuthoritativeRelations,
+			AllowedScopes: res.AllowedScopes, Languages: res.Languages,
+			AdapterVersion: res.AdapterVersion, ProvenanceLocator: st.SourceURL,
+			IdentityAuthority: res.IdentityAuthority,
+			Notes:             "downloaded by terminology-fetch; awaiting operator license review and approval",
+		},
+		Artifacts: []ManifestArtifact{{
+			ID: res.Artifact, Path: res.Artifact, SHA256: st.SHA256,
+			MediaType: res.MediaType, ProvenanceLocator: st.SourceURL,
+		}},
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filepath.Join(sourceDir, "manifest.draft.json"), b)
+}
+
+func atomicWrite(path string, b []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".write-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+func downloadToFile(ctx context.Context, client *http.Client, sourceURL, destPath string, maxBytes int64) (string, int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("User-Agent", defaultUserAgent)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, fmt.Errorf("GET %s: %s", sourceURL, resp.Status)
+	}
+	return writeStreamed(resp.Body, destPath, maxBytes)
+}
+
+func writeStreamed(r io.Reader, destPath string, maxBytes int64) (string, int64, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".fetch-*")
+	if err != nil {
+		return "", 0, err
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		tmp.Close()
+		return "", 0, err
+	}
+	if written > maxBytes {
+		tmp.Close()
+		return "", 0, fmt.Errorf("response exceeds %d bytes", maxBytes)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", 0, err
+	}
+	if err := os.Rename(tmp.Name(), destPath); err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), written, nil
+}
+
+// fetchWikidataSnapshot calls wbgetentities for the pinned pilot titles and
+// writes one JSON object per entity (labels, aliases, descriptions, claims,
+// sitelinks, lastrevid) as JSONL. It returns the effective source URL used.
+func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, titles []string, maxBytes int64) (string, int64, string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", 0, "", err
+	}
+	q := u.Query()
+	q.Set("action", "wbgetentities")
+	q.Set("sites", "enwiki")
+	q.Set("titles", strings.Join(titles, "|"))
+	q.Set("props", "labels|aliases|descriptions|claims|sitelinks")
+	q.Set("languages", "en|zh|fr")
+	q.Set("format", "json")
+	u.RawQuery = q.Encode()
+	effectiveURL := u.String()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, effectiveURL, nil)
+	if err != nil {
+		return "", 0, "", err
+	}
+	req.Header.Set("User-Agent", defaultUserAgent)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, "", fmt.Errorf("GET %s: %s", effectiveURL, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return "", 0, "", err
+	}
+	if int64(len(body)) > maxBytes {
+		return "", 0, "", fmt.Errorf("response exceeds %d bytes", maxBytes)
+	}
+	var payload struct {
+		Entities map[string]json.RawMessage `json:"entities"`
+		Error    *struct {
+			Info string `json:"info"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", 0, "", fmt.Errorf("decode wbgetentities response: %w", err)
+	}
+	if payload.Error != nil {
+		return "", 0, "", fmt.Errorf("wikidata API error: %s", payload.Error.Info)
+	}
+	if len(payload.Entities) == 0 {
+		return "", 0, "", errors.New("wikidata API returned no entities")
+	}
+
+	var buf bytes.Buffer
+	h := sha256.New()
+	mw := io.MultiWriter(&buf, h)
+	ids := make([]string, 0, len(payload.Entities))
+	for id := range payload.Entities {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		line, err := json.Marshal(payload.Entities[id])
+		if err != nil {
+			return "", 0, "", err
+		}
+		line = append(line, '\n')
+		if _, err := mw.Write(line); err != nil {
+			return "", 0, "", err
+		}
+	}
+	if int64(buf.Len()) > maxBytes {
+		return "", 0, "", fmt.Errorf("snapshot exceeds %d bytes", maxBytes)
+	}
+	if err := atomicWrite(destPath, buf.Bytes()); err != nil {
+		return "", 0, "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), int64(buf.Len()), effectiveURL, nil
+}

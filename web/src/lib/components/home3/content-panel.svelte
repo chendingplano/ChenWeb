@@ -39,6 +39,7 @@
 	import DocFacetsView from '$lib/components/home3/doc-facets-view.svelte';
 	import KbSearchLabView from '$lib/components/home3/kb-search-lab-view.svelte';
 	import VideoManagementView from '$lib/components/home3/video-management-view.svelte';
+	import ExternalTerminologyResourcesView from '$lib/components/home3/external-terminology-resources-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
 	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
 	import Canvas01 from '$lib/components/shared-ui/canvas-01.svelte';
@@ -280,6 +281,8 @@
 			<ProjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-videos'}
 			<VideoManagementView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-resources-external-terminology'}
+			<ExternalTerminologyResourcesView {darkMode} />
 		{:else if activeMenu?.childId === 'videos-training'}
 			<TrainingVideoViewer {darkMode} />
 		{:else if activeMenu?.childId === 'docs-users-manual'}

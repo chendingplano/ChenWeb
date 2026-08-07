@@ -43,6 +43,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
+	"github.com/chendingplano/deepdoc/server/api/terminologyresourcehandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
@@ -293,6 +294,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/page-config/admin/pages/:pageKey/entries", pageconfighandler.UpsertEntry)
 	apiGroup.PUT("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.UpsertEntry)
 	apiGroup.DELETE("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.DeleteEntry)
+
+	// External Terminology Resources (System Admin > Resources). Downloads write
+	// local artifacts + unapproved draft manifests under TERMINOLOGY_DIR.
+	apiGroup.GET("/terminology-resources", terminologyresourcehandler.ListResources)
+	apiGroup.POST("/terminology-resources/:source/download", terminologyresourcehandler.DownloadResource)
 
 	// Training-video management (Resources > Videos > Training).
 	// Filesystem storage under VIDEO_DIR + kb.videos metadata.
