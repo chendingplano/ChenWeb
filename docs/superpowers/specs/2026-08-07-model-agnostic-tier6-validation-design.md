@@ -97,7 +97,7 @@ Each candidate-target proposal carries:
 - all exact-identity triples supporting that target;
 - no authority to write.
 
-Exact external mappings are added to the bounded candidate union. This ensures authoritative evidence is not lost merely because an embedding model ranks the true cross-lingual match poorly.
+Exact external mappings are added exhaustively to the candidate union; only its embedding-derived portion is bounded. This ensures authoritative evidence is not lost merely because an embedding model ranks the true cross-lingual match poorly.
 
 ### 5.2 Deterministic validation
 
