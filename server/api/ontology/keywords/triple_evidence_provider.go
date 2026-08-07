@@ -18,7 +18,7 @@ WHERE e.surface_id = ANY($1)
 ORDER BY e.id
 FOR SHARE OF e`
 
-const tripleSourcePolicySQL = `SELECT s.identity_authority
+const tripleSourcePolicySQL = `SELECT s.identity_authority, s.allowed_scopes
 FROM kb.keyword_sources s
 WHERE s.source = $1 AND s.release = $2
 FOR SHARE OF s`
@@ -52,6 +52,7 @@ type tripleEvidenceRowData struct {
 type tripleSourceState struct {
 	identityAuthority bool
 	enabled           bool
+	allowedScopes     []string
 }
 
 type tripleMappingState struct {
@@ -135,6 +136,7 @@ func (TripleEvidenceProvider) LoadClaims(ctx context.Context, tx *sql.Tx, candid
 			EvidenceRefs:       refs,
 		}
 		if mapping.found && sourceState.identityAuthority && sourceState.enabled &&
+			containsString(sourceState.allowedScopes, candidate.Scope) &&
 			mapping.status == "active" && mapping.scope == candidate.Scope {
 			claim.Authority = IdentityAuthorityAuthoritative
 			claim.AuthorityRef = sourceRef.Key
@@ -146,12 +148,22 @@ func (TripleEvidenceProvider) LoadClaims(ctx context.Context, tx *sql.Tx, candid
 
 func loadTripleSourceState(ctx context.Context, tx *sql.Tx, source, release string) (tripleSourceState, error) {
 	var state tripleSourceState
-	if err := tx.QueryRowContext(ctx, tripleSourcePolicySQL, source, release).Scan(&state.identityAuthority); err != nil {
+	var allowedScopes pq.StringArray
+	if err := tx.QueryRowContext(ctx, tripleSourcePolicySQL, source, release).Scan(&state.identityAuthority, &allowedScopes); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return tripleSourceState{}, fmt.Errorf("unregistered keyword identity source %q release %q", source, release)
 		}
 		return tripleSourceState{}, fmt.Errorf("load keyword identity source %q release %q: %w", source, release, err)
 	}
+	if allowedScopes == nil || (state.identityAuthority && len(allowedScopes) == 0) {
+		return tripleSourceState{}, fmt.Errorf("keyword identity source %q release %q has malformed allowed_scopes", source, release)
+	}
+	for _, scope := range allowedScopes {
+		if strings.TrimSpace(scope) == "" {
+			return tripleSourceState{}, fmt.Errorf("keyword identity source %q release %q has malformed allowed_scopes", source, release)
+		}
+	}
+	state.allowedScopes = append([]string(nil), allowedScopes...)
 	rows, err := tx.QueryContext(ctx, tripleDeploymentsSQL, source, release)
 	if err != nil {
 		return tripleSourceState{}, fmt.Errorf("load keyword identity deployments for %q release %q: %w", source, release, err)

@@ -59,6 +59,13 @@ type EvidenceRef struct {
 	Locator string `json:"locator"`
 }
 
+// IdentityClaimBatch tags one exhaustive provider result so results from
+// multiple providers can be validated independently and globally ordered.
+type IdentityClaimBatch struct {
+	ProviderID string
+	Claims     []IdentityClaim
+}
+
 var validIdentityRelations = map[IdentityRelation]bool{
 	IdentityRelationExactEquivalent: true,
 	IdentityRelationRelated:         true,
@@ -256,6 +263,42 @@ func identityClaimLess(left, right IdentityClaim) bool {
 // audit payload. It performs validation and normalization before marshaling.
 func CanonicalIdentityClaimsJSON(providerID, candidateConceptID string, claims []IdentityClaim) ([]byte, error) {
 	normalized, err := NormalizeIdentityClaims(providerID, candidateConceptID, claims)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalized)
+}
+
+// NormalizeIdentityClaimBatches validates and deduplicates each provider
+// independently, then globally sorts all claims by the canonical tuple.
+func NormalizeIdentityClaimBatches(candidateConceptID string, batches []IdentityClaimBatch) ([]IdentityClaim, error) {
+	seenProviders := make(map[string]bool, len(batches))
+	var normalized []IdentityClaim
+	for batchIndex, batch := range batches {
+		if strings.TrimSpace(batch.ProviderID) == "" {
+			return nil, fmt.Errorf("identity claim batch %d provider ID is blank", batchIndex)
+		}
+		if seenProviders[batch.ProviderID] {
+			return nil, fmt.Errorf("duplicate identity claim batch provider ID %q", batch.ProviderID)
+		}
+		seenProviders[batch.ProviderID] = true
+		providerClaims, err := NormalizeIdentityClaims(batch.ProviderID, candidateConceptID, batch.Claims)
+		if err != nil {
+			return nil, fmt.Errorf("normalize identity claim batch %q: %w", batch.ProviderID, err)
+		}
+		normalized = append(normalized, providerClaims...)
+	}
+	sort.Slice(normalized, func(i, j int) bool { return identityClaimLess(normalized[i], normalized[j]) })
+	if normalized == nil {
+		normalized = []IdentityClaim{}
+	}
+	return normalized, nil
+}
+
+// CanonicalIdentityClaimBatchesJSON emits deterministic typed audit JSON for
+// every enabled provider, independent of provider and SQL output order.
+func CanonicalIdentityClaimBatchesJSON(candidateConceptID string, batches []IdentityClaimBatch) ([]byte, error) {
+	normalized, err := NormalizeIdentityClaimBatches(candidateConceptID, batches)
 	if err != nil {
 		return nil, err
 	}

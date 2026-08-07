@@ -99,14 +99,99 @@ func TestNormalizeIdentityClaimsAcceptsClosedEnums(t *testing.T) {
 		IdentityRelationOther,
 	}
 	for _, relation := range relations {
-		claim := IdentityClaim{
-			ProviderID: "provider", CandidateConceptID: "candidate", Relation: relation,
-			Authority:    IdentityAuthorityNonAuthoritative,
-			EvidenceRefs: []EvidenceRef{{Key: string(relation), Kind: "test", Locator: "test:" + string(relation)}},
+		for _, authority := range []IdentityAuthority{IdentityAuthorityNonAuthoritative, IdentityAuthorityAuthoritative} {
+			t.Run(string(relation)+"/"+string(authority), func(t *testing.T) {
+				claim := IdentityClaim{
+					ProviderID: "provider", CandidateConceptID: "candidate", Relation: relation,
+					Authority: authority, EvidenceRefs: []EvidenceRef{{Key: "authority", Kind: "authority_configuration", Locator: "postgres:authority"}},
+				}
+				if authority == IdentityAuthorityAuthoritative {
+					claim.TargetConceptID = "target"
+					claim.AuthorityRef = "authority"
+				}
+				_, err := NormalizeIdentityClaims("provider", "candidate", []IdentityClaim{claim})
+				if authority == IdentityAuthorityAuthoritative && relation != IdentityRelationExactEquivalent {
+					if err == nil || !strings.Contains(err.Error(), "exact_equivalent") {
+						t.Fatalf("error = %v, want authoritative non-exact rejection", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("valid relation/authority pair rejected: %v", err)
+				}
+			})
 		}
-		if _, err := NormalizeIdentityClaims("provider", "candidate", []IdentityClaim{claim}); err != nil {
-			t.Errorf("relation %q rejected: %v", relation, err)
+	}
+}
+
+func TestNormalizeIdentityClaimBatchesValidatesBatchIDs(t *testing.T) {
+	valid := IdentityClaimBatch{ProviderID: "a", Claims: []IdentityClaim{{
+		ProviderID: "a", CandidateConceptID: "candidate", Relation: IdentityRelationOther,
+		Authority: IdentityAuthorityNonAuthoritative,
+	}}}
+	tests := []struct {
+		name    string
+		batches []IdentityClaimBatch
+		wantErr string
+	}{
+		{name: "blank", batches: []IdentityClaimBatch{{ProviderID: " "}}, wantErr: "blank"},
+		{name: "duplicate", batches: []IdentityClaimBatch{valid, {ProviderID: "a"}}, wantErr: "duplicate"},
+		{name: "claim mismatch", batches: []IdentityClaimBatch{{ProviderID: "b", Claims: valid.Claims}}, wantErr: "provider"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NormalizeIdentityClaimBatches("candidate", tt.batches)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCanonicalIdentityClaimBatchesJSONIgnoresBatchAndOutputOrder(t *testing.T) {
+	batchA := IdentityClaimBatch{ProviderID: "alpha", Claims: []IdentityClaim{
+		{ProviderID: "alpha", CandidateConceptID: "candidate", TargetConceptID: "z", Relation: IdentityRelationRelated, Authority: IdentityAuthorityNonAuthoritative, EvidenceRefs: []EvidenceRef{{Key: "provider-scoped", Kind: "test", Locator: "test:alpha:z"}}},
+		{ProviderID: "alpha", CandidateConceptID: "candidate", TargetConceptID: "a", Relation: IdentityRelationOther, Authority: IdentityAuthorityNonAuthoritative, EvidenceRefs: []EvidenceRef{{Key: "alpha:a", Kind: "test", Locator: "test:alpha:a"}}},
+	}}
+	batchBeta := IdentityClaimBatch{ProviderID: "beta", Claims: []IdentityClaim{
+		{ProviderID: "beta", CandidateConceptID: "candidate", TargetConceptID: "b", Relation: IdentityRelationTranslation, Authority: IdentityAuthorityNonAuthoritative, EvidenceRefs: []EvidenceRef{{Key: "provider-scoped", Kind: "different-kind", Locator: "test:beta:b"}}},
+		{ProviderID: "beta", CandidateConceptID: "candidate", TargetConceptID: "b", Relation: IdentityRelationTranslation, Authority: IdentityAuthorityNonAuthoritative, EvidenceRefs: []EvidenceRef{{Key: "beta:c", Kind: "test", Locator: "test:beta:c"}}},
+	}}
+	batchGamma := IdentityClaimBatch{ProviderID: "gamma", Claims: []IdentityClaim{
+		{ProviderID: "gamma", CandidateConceptID: "candidate", Relation: IdentityRelationProbabilistic, Authority: IdentityAuthorityNonAuthoritative},
+	}}
+	permutations := [][]IdentityClaimBatch{
+		{batchA, batchBeta, batchGamma}, {batchA, batchGamma, batchBeta},
+		{batchBeta, batchA, batchGamma}, {batchBeta, batchGamma, batchA},
+		{batchGamma, batchA, batchBeta}, {batchGamma, batchBeta, batchA},
+	}
+	var canonical []byte
+	for i, batches := range permutations {
+		for batchIndex := range batches {
+			claims := append([]IdentityClaim(nil), batches[batchIndex].Claims...)
+			for left, right := 0, len(claims)-1; left < right; left, right = left+1, right-1 {
+				claims[left], claims[right] = claims[right], claims[left]
+			}
+			batches[batchIndex].Claims = claims
 		}
+		got, err := CanonicalIdentityClaimBatchesJSON("candidate", batches)
+		if err != nil {
+			t.Fatalf("permutation %d: %v", i, err)
+		}
+		if i == 0 {
+			canonical = got
+		} else if string(got) != string(canonical) {
+			t.Fatalf("permutation %d differs:\n%s\n%s", i, got, canonical)
+		}
+	}
+	if strings.Count(string(canonical), `"provider_id"`) != 4 {
+		t.Fatalf("JSON = %s, want four globally sorted/deduplicated claims", canonical)
+	}
+	alpha := strings.Index(string(canonical), `"provider_id":"alpha"`)
+	beta := strings.Index(string(canonical), `"provider_id":"beta"`)
+	gamma := strings.Index(string(canonical), `"provider_id":"gamma"`)
+	if !(alpha >= 0 && alpha < beta && beta < gamma) {
+		t.Fatalf("providers not globally canonical: %s", canonical)
 	}
 }
 
