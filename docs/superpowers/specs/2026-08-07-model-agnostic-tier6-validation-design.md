@@ -96,7 +96,7 @@ The exact Go names may change during planning, but the fields and behavioral bou
 - A claim with no mapped active target is still returned as non-authorizing evidence so the result is `deferred_unvalidated`, not `no_candidate`.
 - Each provider query is exhaustive for the scanned candidate. Provider output is never restricted by embedding top K.
 - Providers run inside the candidate's SQL decision transaction and must lock or otherwise transactionally stabilize all local rows that authorize or veto the decision. A resource that cannot provide a locally imported, transactionally stable PostgreSQL snapshot cannot be enabled as an identity-evidence provider in this slice; a future design may expose it as a non-authorizing proposal source outside this interface.
-- Any enabled provider failure fails the candidate run closed; the reconciler does not silently continue with fewer sources.
+- Any enabled provider failure rolls back the current candidate transaction and fails the entire `Reconciler.Run`; no later candidate is processed and the reconciler does not silently continue with fewer sources. Earlier candidate transactions, if any, remain committed with their audit rows.
 
 The core validates registration once before scanning: provider IDs must be non-empty and unique, and the mandatory `triple_external_identity` provider must be present exactly once. The core supplies `SurfaceIDs` sorted and deduplicated. It validates every returned claim before using or logging it:
 
@@ -125,12 +125,22 @@ Two schema corrections are required:
 
 `kb.keyword_external_ids` also gains a composite foreign key to `kb.keyword_sources(source, release)`. Both halves of an authoritative identity must therefore refer to the same registered source release.
 
-`TripleEvidenceProvider` has the stable provider ID `triple_external_identity` and reads these three tables. It emits an authoritative `exact_equivalent` claim when a provisional concept has any surface-evidence row whose non-blank `(source, external_id, release)` equals an external-ID mapping on a candidate target and that source release has `identity_authority=TRUE`. Its `AuthorityRef` names the matching `kb.keyword_sources` row, while its other evidence references identify the surface-evidence and external-mapping rows. The triple is the initial provider's storage representation, not the core validator's universal storage contract.
+`TripleEvidenceProvider` has the stable provider ID `triple_external_identity` and reads these three tables. It emits an authoritative `exact_equivalent` claim when a provisional concept has any surface-evidence row whose `source` and `external_id` are non-blank and whose exact `(source, external_id, release)` equals an external-ID mapping on a candidate target, with that source release having `identity_authority=TRUE`. `release` may be `''` for a genuinely unversioned resource; empty release is a value that must still match exactly on both sides.
+
+The initial provider uses canonical evidence references. `b64(x)` below means unpadded RFC 4648 base64url (`base64.RawURLEncoding`) over the exact UTF-8 bytes:
+
+| Row | `EvidenceRef.Key` | `Kind` | `Locator` |
+|---|---|---|---|
+| source authority | `keyword_source:<b64(source)>:<b64(release)>` | `authority_configuration` | `postgres:kb.keyword_sources/<b64(source)>/<b64(release)>` |
+| candidate evidence | `keyword_surface_evidence:<decimal id>` | `candidate_surface_evidence` | `postgres:kb.keyword_surface_evidence/<decimal id>` |
+| target mapping | `keyword_external_id:<b64(source)>:<b64(external_id)>:<b64(release)>` | `target_external_mapping` | `postgres:kb.keyword_external_ids/<b64(source)>/<b64(external_id)>/<b64(release)>` |
+
+`AuthorityRef` is exactly the source-authority `EvidenceRef.Key`. Decimal IDs use base-10 ASCII without leading zeros. These encodings make empty releases, punctuation, Unicode, and delimiter characters unambiguous and make audit JSON reproducible. The triple is the initial provider's storage representation, not the core validator's universal storage contract.
 
 Conflict rules:
 
 - The existing primary key permits one concept per `(source, external_id, release)`. An attempted duplicate mapping is a database constraint failure, not a validator outcome.
-- `kb.keyword_external_ids.external_id` must be non-blank. Legacy `keyword_surface_evidence` rows may retain `external_id=''` to mean provenance without an external identity, but `TripleEvidenceProvider` returns them only as non-authorizing targetless evidence; they can never match or authorize.
+- `kb.keyword_sources.source` and `kb.keyword_external_ids.external_id` must be non-blank. Legacy `keyword_surface_evidence` rows may retain `external_id=''` to mean provenance without an external identity, but `TripleEvidenceProvider` returns them only as non-authorizing targetless evidence; they can never match or authorize. An empty `release` remains valid and participates in exact matching.
 - Across all enabled providers, authoritative exact-equivalence claims mapping the provisional concept to different live concepts reject the whole candidate.
 - Multiple authoritative claims—including multiple triples or claims from different providers—that all map to the same established target strengthen one decision; they do not create multiple proposals or writes.
 - `related`, `broad`, `narrow`, textual similarity, or a shared source without a shared external ID never count as exact identity.
@@ -267,19 +277,20 @@ Up sequence:
 5. Make evidence release non-null with default `''`.
 6. Replace the evidence uniqueness constraint with `(surface_id, source, external_id, release)`.
 7. Run diagnostic queries and abort with source/release counts if any evidence or external-mapping orphan remains.
-8. Abort with a count if any existing `keyword_external_ids.external_id` is blank, then add a non-blank external-ID CHECK to that mapping table. Do not add the CHECK to `keyword_surface_evidence`, where a blank ID remains valid non-authorizing provenance.
+8. Abort with counts if any existing `keyword_sources.source` or `keyword_external_ids.external_id` is blank, then add non-blank CHECKs to those tables. Do not add an external-ID CHECK to `keyword_surface_evidence`, where a blank ID remains valid non-authorizing provenance. Do not require a non-blank release.
 9. Add composite foreign keys from both evidence and external mappings to `keyword_sources(source, release)` using restrictive update/delete behavior.
 
 The migration uses explicit constraint names:
 
 - drop legacy unique `keyword_surface_evidence_surface_id_source_external_id_key`;
 - add `uq_keyword_surface_evidence_source_external_release` on `(surface_id, source, external_id, release)`;
+- add `ck_keyword_sources_nonblank_source` as `CHECK (btrim(source) <> '')`;
 - add `ck_keyword_external_ids_nonblank_external_id` as `CHECK (btrim(external_id) <> '')`;
 - add `fk_keyword_surface_evidence_source_release` and `fk_keyword_external_ids_source_release`, both referencing the existing primary key `keyword_sources_pkey (source, release)` with `ON UPDATE RESTRICT ON DELETE RESTRICT`.
 
 Legacy placeholder inserts supply only `source`, `release`, `license`, and `notes`; `retrieved_at` remains NULL. Evidence placeholders select distinct `source, ''`. External-mapping placeholders select distinct `source, release` from `kb.keyword_external_ids`, preserving each stored release. Both use `ON CONFLICT (source, release) DO NOTHING`. A `DO` block checks both left joins for NULL source rows and raises an exception with orphan counts before either foreign key is added.
 
-Down sequence first checks for duplicate `(surface_id, source, external_id)` groups and raises an exception if dropping release would collapse them. Otherwise it drops the two named foreign keys, drops `ck_keyword_external_ids_nonblank_external_id`, drops the new named unique constraint, restores `keyword_surface_evidence_surface_id_source_external_id_key`, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
+Down sequence first checks for duplicate `(surface_id, source, external_id)` groups and raises an exception if dropping release would collapse them. Otherwise it drops the two named foreign keys, drops `ck_keyword_sources_nonblank_source` and `ck_keyword_external_ids_nonblank_external_id`, drops the new named unique constraint, restores `keyword_surface_evidence_surface_id_source_external_id_key`, drops evidence release, and drops `identity_authority`. Placeholder source rows are retained as provenance rather than destructively guessed away.
 
 ## 7. Tests and acceptance
 
@@ -296,7 +307,8 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - Empty/duplicate provider IDs and malformed claims—including wrong provider/candidate IDs, unknown enums, authoritative claims without a target or authority reference, and colliding evidence-reference keys—fail closed before decision.
 - Shuffling provider registration, provider output, SQL rows, duplicate claims, and evidence-reference order produces byte-identical canonical audit JSON; duplicate claims retain the union of all distinct evidence references.
 - Matching `(source, external_id)` with a different release does not authorize a merge.
-- Blank external IDs in legacy surface evidence remain non-authorizing; blank external IDs in `keyword_external_ids` fail the migration CHECK and can never authorize.
+- Empty release matches and may authorize when both sides use the same authoritative unversioned source release. Blank sources and mapped external IDs fail migration CHECKs; blank external IDs in legacy surface evidence remain non-authorizing and can never match or authorize.
+- Triple-provider tests pin the exact base64url evidence-reference keys, kinds, locators, and `AuthorityRef` for ASCII, Unicode, delimiter-bearing, and empty-release fixtures.
 - Multiple identity triples to one target merge once; triples mapping to different targets reject once.
 - Registered but non-authoritative source releases defer. An attempted unregistered insert fails the foreign key; a simulated/corrupt unregistered lookup fails the reconciliation run.
 - Tier-5 behavior remains score/guardrail-driven and does not consult embedding scores.
@@ -310,7 +322,7 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - Exhaustive authoritative claims are never truncated by embedding top K; authority overflow or provider lookup failure fails closed.
 - `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
 - Table-driven tests cover every row of the candidate-level decision table, including the exact distinction between `deferred_unvalidated` and `no_candidate`.
-- SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, the non-blank mapped external-ID CHECK, both source/release foreign keys, and guarded Down behavior.
+- SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, both non-blank CHECKs, both source/release foreign keys, and guarded Down behavior.
 
 ### 7.2 Live PostgreSQL proof
 
