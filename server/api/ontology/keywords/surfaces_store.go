@@ -150,45 +150,28 @@ func (s SurfaceStore) CreateSurface(ctx context.Context, sf Surface) (Surface, e
 
 	keys := derivedSurfaceKeys(ks, sf.SurfaceID, version)
 
-	// The surface row and its derived keys are written together (K1), in a
-	// transaction when the handle supports it. Keys are upserted only when a
-	// row was actually inserted (F3): on a uniqueness-key conflict,
+	// The surface row and its derived keys are written together (K1). Keys are
+	// upserted only when a row was actually inserted (F3): on a uniqueness-key conflict,
 	// insertSurfaceRow returns the pre-existing row, whose surface_id
 	// differs from sf.SurfaceID — upserting `keys` (built against the
 	// candidate's own id) under the existing row's id would tag key rows
 	// with an id that was never inserted.
-	if beginner, ok := s.DB.(txBeginner); ok {
-		tx, err := beginner.BeginTx(ctx, nil)
+	var created Surface
+	err := withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		var inserted bool
+		var err error
+		created, inserted, err = insertSurfaceRow(ctx, db, sf)
 		if err != nil {
-			return Surface{}, err
-		}
-		created, inserted, err := insertSurfaceRow(ctx, tx, sf)
-		if err != nil {
-			_ = tx.Rollback()
-			return Surface{}, err
+			return err
 		}
 		if inserted {
-			if err := (SurfaceKeyStore{DB: tx}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
-				_ = tx.Rollback()
-				return Surface{}, err
+			if err := (SurfaceKeyStore{DB: db}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
+				return err
 			}
 		}
-		if err := tx.Commit(); err != nil {
-			return Surface{}, err
-		}
-		return created, nil
-	}
-
-	created, inserted, err := insertSurfaceRow(ctx, s.DB, sf)
-	if err != nil {
-		return Surface{}, err
-	}
-	if inserted {
-		if err := (SurfaceKeyStore{DB: s.DB}).UpsertSurfaceKeys(ctx, created.SurfaceID, keys); err != nil {
-			return Surface{}, err
-		}
-	}
-	return created, nil
+		return nil
+	})
+	return created, err
 }
 
 // insertSurfaceRow inserts the surface, or — on a uniqueness-key conflict
@@ -317,16 +300,18 @@ func (s SurfaceStore) ListSurfacesByNormKey(ctx context.Context, normKey, scope 
 // UpdateSurfaceLock locks or unlocks a surface. Locked surfaces may not be
 // modified by the reconciler.
 func (s SurfaceStore) UpdateSurfaceLock(ctx context.Context, surfaceID string, locked bool) error {
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE kb.keyword_surfaces
-		SET locked = $2, modify_time = NOW()
-		WHERE surface_id = $1`, surfaceID, locked)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("surface %s not found", surfaceID)
-	}
-	return nil
+	return withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		res, err := db.ExecContext(ctx, `
+			UPDATE kb.keyword_surfaces
+			SET locked = $2, modify_time = NOW()
+			WHERE surface_id = $1`, surfaceID, locked)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("surface %s not found", surfaceID)
+		}
+		return nil
+	})
 }

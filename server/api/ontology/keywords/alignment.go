@@ -149,13 +149,19 @@ func (s AlignmentsStore) MergeConflict(ctx context.Context, db DBX, a, b string)
 // absorbed concept to the survivor (spec §14.1, REQ-2/3). It runs on the
 // passed db so a caller merging inside a transaction carries the re-point
 // atomically with the tombstone. No decision-log row is written here: the
-// DecisionLogStore needs a *sql.DB, not a tx, and the merge transaction is the
-// caller's audit boundary.
+// caller owns the merge transaction's audit boundary.
 func (s AlignmentsStore) FollowMerge(ctx context.Context, db DBX, absorbedID, survivorID string) error {
 	if db == nil {
 		return errors.New("db is nil")
 	}
-	_, err := db.ExecContext(ctx, followMergeSQL, absorbedID, survivorID)
+	tx, ok := db.(*sql.Tx)
+	if !ok {
+		return errors.New("alignment follow-merge requires caller-owned transaction")
+	}
+	if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, followMergeSQL, absorbedID, survivorID)
 	return err
 }
 
@@ -168,7 +174,19 @@ func (s AlignmentsStore) EnsureAccepted(ctx context.Context, conceptID, termID, 
 	if s.Assertions.DB == nil {
 		return Alignment{}, errors.New("db is nil")
 	}
-	db := s.Assertions.DB
+	var result Alignment
+	err := withKeywordIdentityMutation(ctx, s.Assertions.DB, func(db DBX) error {
+		txStore := s
+		txStore.Assertions.DB = db
+		txStore.DecisionLog.DB = db
+		var err error
+		result, err = txStore.ensureAccepted(ctx, db, conceptID, termID, method, score, evidence)
+		return err
+	})
+	return result, err
+}
+
+func (s AlignmentsStore) ensureAccepted(ctx context.Context, db DBX, conceptID, termID, method string, score float64, evidence string) (Alignment, error) {
 
 	// Conflict gate (spec §14.2): never auto-decide between two distinct terms
 	// for one concept.
@@ -237,9 +255,9 @@ func (s AlignmentsStore) EnsureAccepted(ctx context.Context, conceptID, termID, 
 		return Alignment{}, err
 	}
 
-	// DR15 audit row on a real write (observe path only — never inside a merge
-	// tx; the DecisionLogStore needs a *sql.DB). The returned id is ignored:
-	// nothing links to it yet, but a failed append must still surface.
+	// DR15 audit row on a real write. The assertion and audit stores are bound
+	// to the same transaction by EnsureAccepted. The returned id is ignored:
+	// nothing links to it yet, but a failed append must still roll back both.
 	input, _ := json.Marshal(map[string]string{"concept_id": conceptID, "term_id": termID})
 	output, _ := json.Marshal(created)
 	if _, err := s.DecisionLog.Append(ctx, semid.DecisionLogEntry{

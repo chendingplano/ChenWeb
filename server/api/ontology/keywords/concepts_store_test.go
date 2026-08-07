@@ -28,12 +28,15 @@ func TestCreateConcept(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`INSERT INTO kb.keyword_concepts (concept_id, pref_label, gloss, scope, status, gloss_source)`)).
 		WithArgs("kw:test", "Test Concept", nil, "_", "active", "none").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow("kw:test", "Test Concept", nil, "_", "active", nil, "none", testNow, testNow))
+	mock.ExpectCommit()
 
 	c, err := store.CreateConcept(ctx, Concept{ConceptID: "kw:test", PrefLabel: "Test Concept"})
 	if err != nil {
@@ -175,12 +178,15 @@ func TestUpdateConceptLabel(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`UPDATE kb.keyword_concepts SET pref_label = $2, gloss = $3, modify_time = NOW() WHERE concept_id = $1 RETURNING `+conceptColumns)).
 		WithArgs("kw:test", "Updated", nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow("kw:test", "Updated", nil, "_", "active", nil, "none", testNow, testNow))
+	mock.ExpectCommit()
 
 	c, err := store.UpdateConceptLabel(ctx, "kw:test", "Updated", "")
 	if err != nil {
@@ -204,6 +210,8 @@ func TestTransitionConceptStatus(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	// First query: GetConcept for current state.
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id = $1`)).
@@ -219,6 +227,7 @@ func TestTransitionConceptStatus(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow("kw:test", "Test", nil, "_", "provisional", nil, "none", testNow, testNow))
+	mock.ExpectCommit()
 
 	c, err := store.TransitionStatus(ctx, "kw:test", "provisional")
 	if err != nil {
@@ -242,6 +251,8 @@ func TestTransitionConceptStatusIllegal(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	// GetConcept: current status is 'merged' (cannot transition further).
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id = $1`)).
@@ -249,6 +260,7 @@ func TestTransitionConceptStatusIllegal(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow("kw:test", "Test", nil, "_", "merged", nil, "none", testNow, testNow))
+	mock.ExpectRollback()
 
 	_, err = store.TransitionStatus(ctx, "kw:test", "deprecated")
 	if err == nil {
@@ -284,6 +296,8 @@ func TestMergeConcept(t *testing.T) {
 	// F10: the guardrail reads run inside the merge's transaction, with
 	// FOR UPDATE holding a row lock through to the write.
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 		WithArgs("kw:from").
 		WillReturnRows(conceptRow("kw:from", "active", nil))
@@ -340,6 +354,8 @@ func TestMergeConceptGuardrails(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:ghost").
 			WillReturnError(sql.ErrNoRows)
@@ -357,6 +373,8 @@ func TestMergeConceptGuardrails(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:from").
 			WillReturnRows(conceptRow("kw:from", "merged", "kw:other"))
@@ -377,6 +395,8 @@ func TestMergeConceptGuardrails(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:from").
 			WillReturnRows(conceptRow("kw:from", "active", nil))
@@ -397,6 +417,8 @@ func TestMergeConceptGuardrails(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:a").
 			WillReturnRows(conceptRow("kw:a", "active", nil))
@@ -491,10 +513,11 @@ func TestUnmergeConcept(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 		WithArgs("kw:from").
 		WillReturnRows(conceptRow("kw:from", "merged", "kw:target"))
-	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(
 		`WITH RECURSIVE chain AS ( SELECT concept_id FROM kb.keyword_concepts WHERE merged_into = $1 UNION ALL SELECT c.concept_id FROM kb.keyword_concepts c JOIN chain ON c.merged_into = chain.concept_id ) UPDATE kb.keyword_surfaces SET concept_id = $1, modify_time = NOW() WHERE origin_concept IN (SELECT concept_id FROM chain)`)).
 		WithArgs("kw:from").
@@ -507,10 +530,10 @@ func TestUnmergeConcept(t *testing.T) {
 		`UPDATE kb.keyword_concepts SET status = $2, merged_into = NULL, modify_time = NOW() WHERE concept_id = $1`)).
 		WithArgs("kw:from", "active").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 		WithArgs("kw:from").
 		WillReturnRows(conceptRow("kw:from", "active", nil))
+	mock.ExpectCommit()
 
 	c, err := store.UnmergeConcept(ctx, "kw:from", "active")
 	if err != nil {
@@ -543,10 +566,11 @@ func TestUnmergeConceptRepositionsChainedSurfaces(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 		WithArgs("kw:b").
 		WillReturnRows(conceptRow("kw:b", "merged", "kw:c"))
-	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(
 		`WITH RECURSIVE chain AS ( SELECT concept_id FROM kb.keyword_concepts WHERE merged_into = $1 UNION ALL SELECT c.concept_id FROM kb.keyword_concepts c JOIN chain ON c.merged_into = chain.concept_id ) UPDATE kb.keyword_surfaces SET concept_id = $1, modify_time = NOW() WHERE origin_concept IN (SELECT concept_id FROM chain)`)).
 		WithArgs("kw:b").
@@ -559,10 +583,10 @@ func TestUnmergeConceptRepositionsChainedSurfaces(t *testing.T) {
 		`UPDATE kb.keyword_concepts SET status = $2, merged_into = NULL, modify_time = NOW() WHERE concept_id = $1`)).
 		WithArgs("kw:b", "active").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 		WithArgs("kw:b").
 		WillReturnRows(conceptRow("kw:b", "active", nil))
+	mock.ExpectCommit()
 
 	c, err := store.UnmergeConcept(ctx, "kw:b", "active")
 	if err != nil {
@@ -589,9 +613,12 @@ func TestUnmergeConceptGuardrails(t *testing.T) {
 	t.Run("not merged", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
+		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).
 			WithArgs("kw:from").
 			WillReturnRows(conceptRow("kw:from", "active", nil))
+		mock.ExpectRollback()
 		_, err := (ConceptStore{DB: db}).UnmergeConcept(ctx, "kw:from", "active")
 		if !errors.Is(err, ErrMergeRejected) {
 			t.Errorf("expected ErrMergeRejected, got %v", err)
@@ -600,6 +627,89 @@ func TestUnmergeConceptGuardrails(t *testing.T) {
 			t.Errorf("unmet expectations: %v", err)
 		}
 	})
+}
+
+type nonTransactionalConceptDB struct{}
+
+func (nonTransactionalConceptDB) ExecContext(context.Context, string, ...any) (sql.Result, error) {
+	panic("unexpected ExecContext")
+}
+
+func (nonTransactionalConceptDB) QueryContext(context.Context, string, ...any) (*sql.Rows, error) {
+	panic("unexpected QueryContext")
+}
+
+func (nonTransactionalConceptDB) QueryRowContext(context.Context, string, ...any) *sql.Row {
+	panic("unexpected QueryRowContext")
+}
+
+func TestUnmergeConceptRejectsNonTransactionalHandleBeforeRead(t *testing.T) {
+	_, err := (ConceptStore{DB: nonTransactionalConceptDB{}}).UnmergeConcept(context.Background(), "kw:from", "active")
+	if err == nil || !strings.Contains(err.Error(), "transaction-capable") {
+		t.Fatalf("UnmergeConcept error = %v, want transaction-capable rejection", err)
+	}
+}
+
+func TestUnmergeConceptUsesCallerOwnedTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectKeywordIdentityLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).WithArgs("kw:from").
+		WillReturnRows(conceptRow("kw:from", "merged", "kw:target"))
+	mock.ExpectExec(regexp.QuoteMeta("WITH RECURSIVE chain AS")).WithArgs("kw:from").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_surfaces SET concept_id = $1, origin_concept = NULL")).WithArgs("kw:from").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_concepts SET status = $2, merged_into = NULL")).WithArgs("kw:from", "active").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).WithArgs("kw:from").
+		WillReturnRows(conceptRow("kw:from", "active", nil))
+	mock.ExpectRollback()
+
+	got, err := (ConceptStore{DB: tx}).UnmergeConcept(ctx, "kw:from", "active")
+	if err != nil {
+		t.Fatalf("UnmergeConcept: %v", err)
+	}
+	if got.Status != "active" {
+		t.Fatalf("status = %q, want active", got.Status)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("caller rollback: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnmergeConceptRollsBackAllWritesOnFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(getConceptSQL)).WithArgs("kw:from").
+		WillReturnRows(conceptRow("kw:from", "merged", "kw:target"))
+	mock.ExpectExec(regexp.QuoteMeta("WITH RECURSIVE chain AS")).WithArgs("kw:from").
+		WillReturnError(errors.New("write failed"))
+	mock.ExpectRollback()
+
+	if _, err := (ConceptStore{DB: db}).UnmergeConcept(context.Background(), "kw:from", "active"); err == nil {
+		t.Fatal("UnmergeConcept succeeded despite write failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDuplicateConceptID(t *testing.T) {
@@ -612,10 +722,13 @@ func TestDuplicateConceptID(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`INSERT INTO kb.keyword_concepts (concept_id, pref_label, gloss, scope, status, gloss_source)`)).
 		WithArgs("kw:dup", "Duplicate", nil, "_", "active", "none").
 		WillReturnError(fmt.Errorf(`duplicate key value violates unique constraint "keyword_concepts_pkey"`))
+	mock.ExpectRollback()
 
 	_, err = store.CreateConcept(ctx, Concept{ConceptID: "kw:dup", PrefLabel: "Duplicate"})
 	if err == nil {
@@ -733,6 +846,8 @@ func TestMergeConceptAlignmentGate(t *testing.T) {
 		fromID, toID := "kwc_a", "kwc_b"
 
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
 			WithArgs(fromID).WillReturnRows(conceptRow(fromID, "provisional", nil))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
@@ -746,6 +861,7 @@ func TestMergeConceptAlignmentGate(t *testing.T) {
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
 			WithArgs(toID).WillReturnRows(noAlignmentRow())
 		// FollowMerge re-points the absorbed-side accepted alignment.
+		expectKeywordIdentityLock(mock)
 		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
 			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_concepts")).
@@ -778,6 +894,8 @@ func TestMergeConceptAlignmentGate(t *testing.T) {
 		fromID, toID := "kwc_a", "kwc_b"
 
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
 			WithArgs(fromID).WillReturnRows(conceptRow(fromID, "provisional", nil))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
@@ -789,6 +907,7 @@ func TestMergeConceptAlignmentGate(t *testing.T) {
 			WithArgs(fromID).WillReturnRows(alignmentReadRow(1, fromID, testTermID, []byte(testQualifiers), testScore))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions")).
 			WithArgs(toID).WillReturnRows(alignmentReadRow(2, toID, testTermID, []byte(testQualifiers), testScore))
+		expectKeywordIdentityLock(mock)
 		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
 			WithArgs(fromID, toID).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.keyword_concepts")).
@@ -821,6 +940,8 @@ func TestMergeConceptAlignmentGate(t *testing.T) {
 		fromID, toID := "kwc_a", "kwc_b"
 
 		mock.ExpectBegin()
+		expectKeywordIdentityLock(mock)
+		expectKeywordIdentityLock(mock)
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).
 			WithArgs(fromID).WillReturnRows(conceptRow(fromID, "provisional", nil))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts")).

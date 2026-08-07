@@ -92,6 +92,8 @@ func TestAlignmentsStoreEnsureAccepted(t *testing.T) {
 	ctx := context.Background()
 
 	// --- First call: full write path ---
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	// 1. Conflict gate: no existing accepted alignment.
 	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
 		WithArgs(testConceptID).
@@ -121,6 +123,7 @@ func TestAlignmentsStoreEnsureAccepted(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
 		WithArgs("keyword_align", "_", `{"concept_id":"concept_a","term_id":"mea:Luminance"}`, sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	mock.ExpectCommit()
 
 	al, err := store.EnsureAccepted(ctx, testConceptID, testTermID, testMethod, testScore, testEvidence)
 	if err != nil {
@@ -143,6 +146,8 @@ func TestAlignmentsStoreEnsureAccepted(t *testing.T) {
 	// The conflict check, the released guard, and GetLatest rerun, but no
 	// further INSERT / decision-log expectations are set, so ExpectationsWereMet
 	// fails the test if a second write were attempted.
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
 		WithArgs(testConceptID).
 		WillReturnRows(alignmentReadRow(1, testConceptID, testTermID, []byte(testQualifiers), testScore))
@@ -155,6 +160,7 @@ func TestAlignmentsStoreEnsureAccepted(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(getLatestByLK)).
 		WithArgs(testLK).
 		WillReturnRows(alignmentAssertionRow(1, testLK, testConceptID, testTermID, testEvidence, []byte(testQualifiers), testScore))
+	mock.ExpectCommit()
 
 	al2, err := store.EnsureAccepted(ctx, testConceptID, testTermID, testMethod, testScore, testEvidence)
 	if err != nil {
@@ -186,6 +192,8 @@ func TestAlignmentsStoreConflict(t *testing.T) {
 	ctx := context.Background()
 
 	// First: align to termA (full write path).
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
 		WithArgs(testConceptID).
 		WillReturnRows(noAlignmentRow())
@@ -209,6 +217,7 @@ func TestAlignmentsStoreConflict(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
 		WithArgs("keyword_align", "_", `{"concept_id":"concept_a","term_id":"mea:Luminance"}`, sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	mock.ExpectCommit()
 
 	if _, err := store.EnsureAccepted(ctx, testConceptID, testTermID, testMethod, testScore, testEvidence); err != nil {
 		t.Fatalf("first EnsureAccepted: %v", err)
@@ -216,9 +225,12 @@ func TestAlignmentsStoreConflict(t *testing.T) {
 
 	// Second: the same concept to a *different* term is refused at the conflict
 	// gate; nothing else runs (no more expectations).
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
 		WithArgs(testConceptID).
 		WillReturnRows(alignmentReadRow(1, testConceptID, testTermID, []byte(testQualifiers), testScore))
+	mock.ExpectRollback()
 
 	_, err = store.EnsureAccepted(ctx, testConceptID, testOtherTermID, testMethod, testScore, testEvidence)
 	if !errors.Is(err, ErrAlignmentConflict) {
@@ -300,6 +312,8 @@ func TestAlignmentsStoreFollowMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(followMergeSQL)).
 		WithArgs("kwc_absorbed", "kwc_survivor").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -314,6 +328,40 @@ func TestAlignmentsStoreFollowMerge(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
+func TestAlignmentsStoreEnsureAcceptedRollsBackAssertionWhenAuditFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	}
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).WithArgs(testConceptID).WillReturnRows(noAlignmentRow())
+	mock.ExpectQuery(regexp.QuoteMeta(releasedTermExistsSQL)).WithArgs(testTermID, "metric_definition").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(releasedTermExistsSQL)).WithArgs(alignPredicateTermID, "property").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(getLatestByLK)).WithArgs(testLK).WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
+		WillReturnRows(alignmentAssertionRow(1, testLK, testConceptID, testTermID, testEvidence, []byte(testQualifiers), testScore))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
+		WillReturnError(errors.New("audit unavailable"))
+	mock.ExpectRollback()
+
+	if _, err := store.EnsureAccepted(context.Background(), testConceptID, testTermID, testMethod, testScore, testEvidence); err == nil {
+		t.Fatal("EnsureAccepted succeeded despite failed audit")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
 // DBX is the subset of database/sql that keyword stores need. Both
@@ -110,6 +112,34 @@ func validateConcept(c Concept) error {
 	return nil
 }
 
+func withKeywordIdentityMutation(ctx context.Context, db DBX, write func(DBX) error) error {
+	if db == nil {
+		return errors.New("db is nil")
+	}
+	if tx, ok := db.(*sql.Tx); ok {
+		if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+			return err
+		}
+		return write(tx)
+	}
+	beginner, ok := db.(txBeginner)
+	if !ok {
+		return errors.New("keyword identity mutation requires transaction-capable database")
+	}
+	tx, err := beginner.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+		return err
+	}
+	if err := write(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // CreateConcept inserts a new keyword concept.
 func (s ConceptStore) CreateConcept(ctx context.Context, c Concept) (Concept, error) {
 	if c.Status == "" {
@@ -124,18 +154,24 @@ func (s ConceptStore) CreateConcept(ctx context.Context, c Concept) (Concept, er
 	if err := validateConcept(c); err != nil {
 		return Concept{}, err
 	}
-	row := s.DB.QueryRowContext(ctx, `
-		INSERT INTO kb.keyword_concepts (concept_id, pref_label, gloss, scope, status, gloss_source)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING `+conceptColumns,
-		c.ConceptID, c.PrefLabel, nullableString(func() string {
-			if c.Gloss != nil {
-				return *c.Gloss
-			}
-			return ""
-		}()), c.Scope, c.Status, c.GlossSource,
-	)
-	return scanConcept(row.Scan)
+	var created Concept
+	err := withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		row := db.QueryRowContext(ctx, `
+			INSERT INTO kb.keyword_concepts (concept_id, pref_label, gloss, scope, status, gloss_source)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING `+conceptColumns,
+			c.ConceptID, c.PrefLabel, nullableString(func() string {
+				if c.Gloss != nil {
+					return *c.Gloss
+				}
+				return ""
+			}()), c.Scope, c.Status, c.GlossSource,
+		)
+		var err error
+		created, err = scanConcept(row.Scan)
+		return err
+	})
+	return created, err
 }
 
 // GetConcept retrieves a concept by its immutable concept_id.
@@ -251,13 +287,19 @@ func (s ConceptStore) UpdateConceptLabel(ctx context.Context, conceptID, prefLab
 	if prefLabel == "" {
 		return Concept{}, fmt.Errorf("pref_label is required")
 	}
-	row := s.DB.QueryRowContext(ctx, `
-		UPDATE kb.keyword_concepts
-		SET pref_label = $2, gloss = $3, modify_time = NOW()
-		WHERE concept_id = $1
-		RETURNING `+conceptColumns,
-		conceptID, prefLabel, nullableString(gloss))
-	return scanConcept(row.Scan)
+	var updated Concept
+	err := withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		row := db.QueryRowContext(ctx, `
+			UPDATE kb.keyword_concepts
+			SET pref_label = $2, gloss = $3, modify_time = NOW()
+			WHERE concept_id = $1
+			RETURNING `+conceptColumns,
+			conceptID, prefLabel, nullableString(gloss))
+		var err error
+		updated, err = scanConcept(row.Scan)
+		return err
+	})
+	return updated, err
 }
 
 // TransitionStatus enforces the concept status state machine.
@@ -266,27 +308,30 @@ func (s ConceptStore) TransitionStatus(ctx context.Context, conceptID, to string
 		return Concept{}, fmt.Errorf("invalid status: %s", to)
 	}
 
-	current, err := s.GetConcept(ctx, conceptID)
-	if err != nil {
-		return Concept{}, err
-	}
-
-	if to == current.Status {
-		return current, nil
-	}
-
-	allowed, ok := conceptStatusTransitions[current.Status]
-	if !ok || !allowed[to] {
-		return Concept{}, fmt.Errorf("%w: %s → %s", errIllegalConceptTransition, current.Status, to)
-	}
-
-	row := s.DB.QueryRowContext(ctx, `
-		UPDATE kb.keyword_concepts
-		SET status = $2, modify_time = NOW()
-		WHERE concept_id = $1
-		RETURNING `+conceptColumns,
-		conceptID, to)
-	return scanConcept(row.Scan)
+	var result Concept
+	err := withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		current, err := (ConceptStore{DB: db}).GetConcept(ctx, conceptID)
+		if err != nil {
+			return err
+		}
+		if to == current.Status {
+			result = current
+			return nil
+		}
+		allowed, ok := conceptStatusTransitions[current.Status]
+		if !ok || !allowed[to] {
+			return fmt.Errorf("%w: %s → %s", errIllegalConceptTransition, current.Status, to)
+		}
+		row := db.QueryRowContext(ctx, `
+			UPDATE kb.keyword_concepts
+			SET status = $2, modify_time = NOW()
+			WHERE concept_id = $1
+			RETURNING `+conceptColumns,
+			conceptID, to)
+		result, err = scanConcept(row.Scan)
+		return err
+	})
+	return result, err
 }
 
 // MergeConcept tombstones fromID into toID (D7, §14). The MergeGraph
@@ -319,44 +364,31 @@ func (s ConceptStore) MergeConcept(ctx context.Context, fromID, toID string) (Co
 	if fromID == toID {
 		return Concept{}, fmt.Errorf("%w: cannot merge a concept into itself", ErrMergeRejected)
 	}
+	if tx, ok := s.DB.(*sql.Tx); ok {
+		if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+			return Concept{}, err
+		}
+		if err := s.MergeConceptTx(ctx, tx, fromID, toID); err != nil {
+			return Concept{}, err
+		}
+		return (ConceptStore{DB: tx}).GetConcept(ctx, toID)
+	}
 
 	// F10: the guardrail reads run inside the same transaction as the write,
 	// with FOR UPDATE holding a row lock on both concepts until commit —
 	// closing the window between the check and applyMerge where a
 	// concurrent status change, competing merge, or never_merge assertion
-	// could invalidate a guardrail that already appeared to pass. Falls
-	// back to an unlocked check-then-apply when the handle can't open a
-	// transaction (tests only in practice; production always goes through
-	// *sql.DB).
+	// could invalidate a guardrail that already appeared to pass.
 	if beginner, ok := s.DB.(txBeginner); ok {
 		tx, err := beginner.BeginTx(ctx, nil)
 		if err != nil {
 			return Concept{}, err
 		}
-		if err := s.mergeGuards(ctx, tx, fromID, toID); err != nil {
+		if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
 			_ = tx.Rollback()
 			return Concept{}, err
 		}
-		// §14.2: an accepted aligns_to_term on the absorbed side follows to the
-		// survivor as part of the merge transaction; two concepts aligned to two
-		// distinct governed terms are evidence they are not the same thing, and
-		// that evidence outranks whatever similarity proposed the merge.
-		if s.Alignments.Assertions.DB != nil {
-			conflict, err := s.Alignments.MergeConflict(ctx, tx, fromID, toID)
-			if err != nil {
-				_ = tx.Rollback()
-				return Concept{}, err
-			}
-			if conflict {
-				_ = tx.Rollback()
-				return Concept{}, fmt.Errorf("%w: concepts %s and %s are aligned to different governed terms", ErrMergeRejected, fromID, toID)
-			}
-			if err := s.Alignments.FollowMerge(ctx, tx, fromID, toID); err != nil {
-				_ = tx.Rollback()
-				return Concept{}, err
-			}
-		}
-		if err := applyMerge(ctx, tx, fromID, toID); err != nil {
+		if err := s.MergeConceptTx(ctx, tx, fromID, toID); err != nil {
 			_ = tx.Rollback()
 			return Concept{}, err
 		}
@@ -366,28 +398,42 @@ func (s ConceptStore) MergeConcept(ctx context.Context, fromID, toID string) (Co
 		return s.GetConcept(ctx, toID)
 	}
 
-	if err := s.mergeGuards(ctx, s.DB, fromID, toID); err != nil {
-		return Concept{}, err
+	return Concept{}, errors.New("keyword concept merge requires transaction-capable database")
+}
+
+// MergeConceptTx applies the supplied fromID -> toID merge within a
+// caller-owned transaction. It acquires the keyword identity mutation lock;
+// the caller retains commit or rollback ownership so it can append the
+// corresponding decision audit atomically.
+func (s ConceptStore) MergeConceptTx(ctx context.Context, tx *sql.Tx, fromID, toID string) error {
+	if tx == nil {
+		return errors.New("tx is nil")
 	}
-	// §14.2 gate, non-transactional form: same reads/writes on s.DB (the
-	// unlocked fallback has no enclosing transaction to roll back — tests only
-	// in practice; production always goes through *sql.DB).
+	if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+		return err
+	}
+	if fromID == "" || toID == "" {
+		return fmt.Errorf("%w: merge requires two concept ids", ErrMergeRejected)
+	}
+	if fromID == toID {
+		return fmt.Errorf("%w: cannot merge a concept into itself", ErrMergeRejected)
+	}
+	if err := s.mergeGuards(ctx, tx, fromID, toID); err != nil {
+		return err
+	}
 	if s.Alignments.Assertions.DB != nil {
-		conflict, err := s.Alignments.MergeConflict(ctx, s.DB, fromID, toID)
+		conflict, err := s.Alignments.MergeConflict(ctx, tx, fromID, toID)
 		if err != nil {
-			return Concept{}, err
+			return err
 		}
 		if conflict {
-			return Concept{}, fmt.Errorf("%w: concepts %s and %s are aligned to different governed terms", ErrMergeRejected, fromID, toID)
+			return fmt.Errorf("%w: concepts %s and %s are aligned to different governed terms", ErrMergeRejected, fromID, toID)
 		}
-		if err := s.Alignments.FollowMerge(ctx, s.DB, fromID, toID); err != nil {
-			return Concept{}, err
+		if err := s.Alignments.FollowMerge(ctx, tx, fromID, toID); err != nil {
+			return err
 		}
 	}
-	if err := applyMerge(ctx, s.DB, fromID, toID); err != nil {
-		return Concept{}, err
-	}
-	return s.GetConcept(ctx, toID)
+	return applyMerge(ctx, tx, fromID, toID)
 }
 
 // mergeGuards enforces D7's guardrails: both concepts must exist, only live
@@ -513,33 +559,22 @@ func (s ConceptStore) UnmergeConcept(ctx context.Context, fromID, restoreStatus 
 	if restoreStatus != "active" && restoreStatus != "provisional" {
 		return Concept{}, fmt.Errorf("%w: restore status must be active or provisional, got %q", ErrMergeRejected, restoreStatus)
 	}
-	current, err := s.GetConcept(ctx, fromID)
-	if err != nil {
-		return Concept{}, err
-	}
-	if current.Status != "merged" {
-		return Concept{}, fmt.Errorf("%w: concept %s is not merged (status %s)", ErrMergeRejected, fromID, current.Status)
-	}
-
-	if beginner, ok := s.DB.(txBeginner); ok {
-		tx, err := beginner.BeginTx(ctx, nil)
+	var restored Concept
+	err := withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		current, err := (ConceptStore{DB: db}).GetConcept(ctx, fromID)
 		if err != nil {
-			return Concept{}, err
+			return err
 		}
-		if err := applyUnmerge(ctx, tx, fromID, restoreStatus); err != nil {
-			_ = tx.Rollback()
-			return Concept{}, err
+		if current.Status != "merged" {
+			return fmt.Errorf("%w: concept %s is not merged (status %s)", ErrMergeRejected, fromID, current.Status)
 		}
-		if err := tx.Commit(); err != nil {
-			return Concept{}, err
+		if err := applyUnmerge(ctx, db, fromID, restoreStatus); err != nil {
+			return err
 		}
-	} else {
-		if err := applyUnmerge(ctx, s.DB, fromID, restoreStatus); err != nil {
-			return Concept{}, err
-		}
-	}
-
-	return s.GetConcept(ctx, fromID)
+		restored, err = (ConceptStore{DB: db}).GetConcept(ctx, fromID)
+		return err
+	})
+	return restored, err
 }
 
 func applyUnmerge(ctx context.Context, db DBX, fromID, restoreStatus string) error {

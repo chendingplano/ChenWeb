@@ -178,7 +178,7 @@ func TestResolveSurfaceTier0AutoAccepts(t *testing.T) {
 	kf := &KeywordFamily{DB: db, ResolverMode: "observe"}
 	wantID := queueTierHit(mock, 0, "Luminance", "_")
 	// FollowMerge: the resolved id is a live concept.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+conceptColumns+` `+conceptFrom+` WHERE concept_id =`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
 		WithArgs(wantID).
 		WillReturnRows(conceptRows(wantID, "Luminance", "_", "active", "human:tester"))
 
@@ -223,6 +223,7 @@ func TestResolveScopeRoundTrip(t *testing.T) {
 	ks := (semid.Normalizer{Version: semid.CurrentNormalizerVersion}).Normalize(sf.Surface)
 
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(sid, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
 			"pref", "pref", "und", scope, 1.0, "human:tester", false, nil).
@@ -250,7 +251,7 @@ func TestResolveScopeRoundTrip(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(tier0SQL)).
 		WithArgs("Luminance", scope).
 		WillReturnRows(emptyConceptRows().AddRow("kwc_scope"))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+conceptColumns+` `+conceptFrom+` WHERE concept_id =`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
 		WithArgs("kwc_scope").
 		WillReturnRows(conceptRows("kwc_scope", "Luminance", scope, "active", "human:tester"))
 
@@ -292,7 +293,7 @@ func TestObserveSurfaceAmbiguousPersistsTopOneConceptID(t *testing.T) {
 		WithArgs(ks.Norm, scope, semid.CurrentNormalizerVersion).
 		WillReturnRows(emptyPairRows().AddRow("kwc_a", ks.Norm).AddRow("kwc_b", ks.Norm))
 	// FollowMerge on the top-1.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+conceptColumns+` `+conceptFrom+` WHERE concept_id =`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
 		WithArgs("kwc_a").
 		WillReturnRows(conceptRows("kwc_a", "Luminance A", scope, "active", "human:tester"))
 

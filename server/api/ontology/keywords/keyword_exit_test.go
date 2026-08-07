@@ -26,9 +26,12 @@ func TestExitConceptCRUD(t *testing.T) {
 	store := ConceptStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_concepts`)).
 		WithArgs("kwc_e1", "Luminance", nil, "_", "active", "human:exit").
 		WillReturnRows(conceptRows("kwc_e1", "Luminance", "_", "active", "human:exit"))
+	mock.ExpectCommit()
 	created, err := store.CreateConcept(ctx, Concept{
 		ConceptID:   "kwc_e1",
 		PrefLabel:   "Luminance",
@@ -76,6 +79,7 @@ func TestExitSurfaceCRUD(t *testing.T) {
 	ks := (semid.Normalizer{Version: semid.CurrentNormalizerVersion}).Normalize(sf.Surface)
 
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
 			"pref", sf.AliasType, "und", "_", 1.0, sf.Provenance, false, nil).

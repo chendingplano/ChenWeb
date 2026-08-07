@@ -86,6 +86,8 @@ func TestReconcilerMergesCrossLingualProvisional(t *testing.T) {
 	// the survivor. sqlmock's DB handle satisfies txBeginner, so
 	// MergeConcept takes the transactional path.
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
 		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
 		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
@@ -202,6 +204,8 @@ func TestReconcilerRunPropagatesDecisionLogError(t *testing.T) {
 		"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role", "alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence", "create_time", "modify_time",
 	}).AddRow("kws_l", "kwc_l", "Luminance", "luminance", semid.CurrentNormalizerVersion, "pref", "pref", "und", "_", 1.0, "human:", false, nil, testNow, testNow))
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
 		WithArgs("kwc_b").WillReturnRows(sqlmock.NewRows([]string{
 		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
@@ -479,6 +483,8 @@ func TestReconcilerRunCountsSkippedVetoed(t *testing.T) {
 	// never_merge assertion (kwc_est < kwc_p lexicographically, per
 	// isNeverMerge's pair normalization) blocks -> ErrMergeRejected, rollback.
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_concepts`)).
 		WithArgs("kwc_p").WillReturnRows(sqlmock.NewRows([]string{
 		"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",

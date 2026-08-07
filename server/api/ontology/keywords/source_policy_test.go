@@ -102,10 +102,14 @@ func TestSourcePolicyStoreCanonicalizesCollectionsAndPostgresTimes(t *testing.T)
 	dbPolicy.AuthoritativeRelations = []string{"exact_equivalent"}
 	dbPolicy.AllowedScopes = []string{"display-metric"}
 	dbPolicy.Languages = []string{"en", "zh-CN"}
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.keyword_sources")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+sourcePolicyColumns+" FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
 		WithArgs(p.Source, p.Release).WillReturnRows(sourcePolicyRows(dbPolicy))
+	mock.ExpectCommit()
 
 	if err := (SourcePolicyStore{DB: db}).Register(context.Background(), p); err != nil {
 		t.Fatalf("Register canonical replay: %v", err)
@@ -177,10 +181,17 @@ func TestSourcePolicyStoreRegisterExactReplayAndMutation(t *testing.T) {
 
 			got := p
 			tt.mutate(&got)
+			mock.ExpectBegin()
+			expectKeywordIdentityLock(mock)
 			mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.keyword_sources")).
 				WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT "+sourcePolicyColumns+" FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
 				WithArgs(p.Source, p.Release).WillReturnRows(sourcePolicyRows(p))
+			if tt.wantErr == nil {
+				mock.ExpectCommit()
+			} else {
+				mock.ExpectRollback()
+			}
 
 			err = (SourcePolicyStore{DB: db}).Register(context.Background(), got)
 			if !errors.Is(err, tt.wantErr) {
@@ -218,7 +229,14 @@ func TestSourcePolicyStoreWrapsRegistrationInsertErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
+			if tc.name == "source policy" {
+				mock.ExpectBegin()
+				expectKeywordIdentityLock(mock)
+			}
 			mock.ExpectExec("INSERT INTO kb\\.keyword_").WillReturnError(writeErr)
+			if tc.name == "source policy" {
+				mock.ExpectRollback()
+			}
 			err = tc.run(SourcePolicyStore{DB: db})
 			if err == nil || !errors.Is(err, writeErr) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want wrapped %q", err, tc.want)

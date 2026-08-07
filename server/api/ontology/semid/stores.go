@@ -23,7 +23,30 @@ type DecisionLogEntry struct {
 
 // DecisionLogStore appends kernel decisions (ADR DR15 audit).
 type DecisionLogStore struct {
-	DB *sql.DB
+	DB decisionDB
+}
+
+type decisionDB interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// dbx is the minimum database handle used by the shared stores. Both *sql.DB
+// and *sql.Tx satisfy it, allowing an audit append to share its caller's
+// transaction without importing a higher-level identity package.
+type dbx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// AcquireKeywordIdentityMutationLock serializes decision-sensitive keyword
+// identity mutations for the lifetime of tx.
+func AcquireKeywordIdentityMutationLock(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1264011588, 1);`)
+	return err
 }
 
 // Append records one kernel decision and returns the decision-log row id,
@@ -67,7 +90,7 @@ type NeverMerge struct {
 
 // NeverMergeStore persists never-merge assertions.
 type NeverMergeStore struct {
-	DB *sql.DB
+	DB dbx
 }
 
 // Add records a never-merge assertion. The pair is unordered (normalized
@@ -83,8 +106,37 @@ func (s NeverMergeStore) Add(ctx context.Context, family, nodeA, nodeB, reason, 
 INSERT INTO kb.semid_never_merge (family, node_a, node_b, reason, actor)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (family, node_a, node_b) DO NOTHING`
-	_, err := s.DB.ExecContext(ctx, stmt, family, nodeA, nodeB, nullableString(reason), nullableString(actor))
-	return err
+	write := func(db dbx) error {
+		_, err := db.ExecContext(ctx, stmt, family, nodeA, nodeB, nullableString(reason), nullableString(actor))
+		return err
+	}
+	if family != "keyword" {
+		return write(s.DB)
+	}
+	if tx, ok := s.DB.(*sql.Tx); ok {
+		if err := AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+			return err
+		}
+		return write(tx)
+	}
+	beginner, ok := s.DB.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	if !ok {
+		return errors.New("keyword never-merge mutation requires transaction-capable database")
+	}
+	tx, err := beginner.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+		return err
+	}
+	if err := write(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // IsNeverMerge reports whether the unordered pair is asserted never-mergeable.

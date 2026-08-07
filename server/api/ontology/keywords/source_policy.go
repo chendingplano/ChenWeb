@@ -193,10 +193,16 @@ func (s SourcePolicyStore) Register(ctx context.Context, policy SourcePolicy) er
 		return errors.New("source policy store database is nil")
 	}
 
+	return withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		return registerSourcePolicy(ctx, db, policy)
+	})
+}
+
+func registerSourcePolicy(ctx context.Context, db DBX, policy SourcePolicy) error {
 	insert := `INSERT INTO kb.keyword_sources (` + sourcePolicyColumns + `)
 	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 	ON CONFLICT (source, release) DO NOTHING`
-	if _, err := s.DB.ExecContext(ctx, insert,
+	if _, err := db.ExecContext(ctx, insert,
 		policy.ProviderID, policy.Source, policy.SourceSubset, policy.Release, policy.RetrievedAt,
 		policy.ContentChecksum, policy.License, policy.LicenseReviewStatus, policy.AuthorityRole,
 		pq.Array(policy.AuthoritativeRelations), pq.Array(policy.AllowedScopes), pq.Array(policy.Languages),
@@ -205,7 +211,7 @@ func (s SourcePolicyStore) Register(ctx context.Context, policy SourcePolicy) er
 	); err != nil {
 		return fmt.Errorf("insert source policy: %w", err)
 	}
-	row := s.DB.QueryRowContext(ctx,
+	row := db.QueryRowContext(ctx,
 		`SELECT `+sourcePolicyColumns+` FROM kb.keyword_sources WHERE source = $1 AND release = $2`,
 		policy.Source, policy.Release,
 	)
@@ -380,36 +386,26 @@ func (s SourcePolicyStore) SetDeployment(ctx context.Context, change DeploymentC
 	if err := change.validate(); err != nil {
 		return err
 	}
-	beginner, ok := s.DB.(txBeginner)
-	if !ok {
-		return errors.New("source policy deployment requires transaction-capable database")
-	}
-	tx, err := beginner.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin source deployment: %w", err)
-	}
-	defer tx.Rollback()
+	return withKeywordIdentityMutation(ctx, s.DB, func(db DBX) error {
+		return setDeployment(ctx, db, change)
+	})
+}
 
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1264011588, 1);`); err != nil {
-		return fmt.Errorf("lock keyword identity deployment: %w", err)
-	}
+func setDeployment(ctx context.Context, db DBX, change DeploymentChange) error {
 	var source, release string
 	var enabled bool
-	err = tx.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT source, release, enabled FROM kb.keyword_identity_deployments WHERE deployment_key = $1 FOR UPDATE`,
 		change.DeploymentKey,
 	).Scan(&source, &release, &enabled)
 	if err == nil && source == change.Source && release == change.Release && enabled == change.Enabled {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit idempotent source deployment: %w", err)
-		}
 		return nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read source deployment: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `INSERT INTO kb.keyword_identity_deployments
+	if _, err := db.ExecContext(ctx, `INSERT INTO kb.keyword_identity_deployments
 		(deployment_key, source, release, enabled, changed_by)
 	VALUES ($1,$2,$3,$4,$5)
 	ON CONFLICT (deployment_key) DO UPDATE SET
@@ -419,15 +415,12 @@ func (s SourcePolicyStore) SetDeployment(ctx context.Context, change DeploymentC
 	); err != nil {
 		return fmt.Errorf("write source deployment pointer: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO kb.keyword_identity_deployment_history
+	if _, err := db.ExecContext(ctx, `INSERT INTO kb.keyword_identity_deployment_history
 		(deployment_key, source, release, enabled, action, changed_by)
 	VALUES ($1,$2,$3,$4,$5,$6)`,
 		change.DeploymentKey, change.Source, change.Release, change.Enabled, change.Action, change.ChangedBy,
 	); err != nil {
 		return fmt.Errorf("append source deployment history: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit source deployment: %w", err)
 	}
 	return nil
 }

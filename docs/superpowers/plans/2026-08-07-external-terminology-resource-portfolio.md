@@ -105,12 +105,12 @@
 - Every mutation that can invalidate a reconciliation decision uses the keyword-family advisory transaction lock: `SELECT pg_advisory_xact_lock(1264011588, 1);`.
 - Automatic merge always absorbs the scanned `status='provisional', gloss_source='auto:d11'` concept into an active target.
 
-- [ ] Add failing tests proving audit rollback with merge rollback and fixed merge direction.
-- [ ] Add failing lock-order tests for merge, evidence/source/mapping mutations, `never_merge`, alignment, concept-label/status, and surface mutations used by reconciliation.
-- [ ] Refactor merge/audit stores to accept a caller-owned transaction while preserving existing public behavior.
-- [ ] Add the lock helper and wire every relevant mutation path before its decision-sensitive write.
-- [ ] Run concept/alignment/semid tests.
-- [ ] Commit with `jj commit -m "keywords: make reconciliation writes transaction atomic"`.
+- [x] Add failing tests proving audit rollback with merge rollback and fixed merge direction.
+- [x] Add failing lock-order tests for merge, evidence/source/mapping mutations, `never_merge`, alignment, concept-label/status, and surface mutations used by reconciliation.
+- [x] Refactor merge/audit stores to accept a caller-owned transaction while preserving existing public behavior.
+- [x] Add the lock helper and wire every relevant mutation path before its decision-sensitive write.
+- [x] Run concept/alignment/semid tests.
+- [x] Commit with `jj commit -m "keywords: make reconciliation writes transaction atomic"`.
 
 ## Task 4: Replace cosine authority with deterministic Tier-6 validation
 

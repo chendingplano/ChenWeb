@@ -54,7 +54,7 @@ func expectTotalMiss(mock sqlmock.Sqlmock, ks semid.KeySet, scope string) {
 			WithArgs(pair.kind, pair.value, scope, semid.CurrentNormalizerVersion).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}))
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+rewriteRuleColumns+` `+rewriteRuleFrom+` WHERE enabled = true AND scope =`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + rewriteRuleColumns + ` ` + rewriteRuleFrom + ` WHERE enabled = true AND scope =`)).
 		WithArgs(scope).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"rule_id", "pattern", "replacement", "scope", "enabled", "provenance", "create_time", "modify_time",
@@ -90,15 +90,19 @@ func TestObserveSurfaceTargetedMissAutoCreates(t *testing.T) {
 	expectTotalMiss(mock, ks, scope)
 
 	// Auto-created provisional concept, marked for set-based sampling.
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_concepts`)).
 		WithArgs(wantID, surface, nil, scope, "provisional", "auto:d11").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into", "gloss_source", "create_time", "modify_time",
 		}).AddRow(wantID, surface, nil, scope, "provisional", nil, "auto:d11", testNow, testNow))
+	mock.ExpectCommit()
 
 	// Its pref surface + derived keys in one transaction.
 	sid := deriveSurfaceID(wantID, surface, "pref")
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(sid, wantID, surface, ks.Norm, semid.CurrentNormalizerVersion,
 			"pref", "pref", "und", scope, 1.0, "auto:resolver", false, nil).
@@ -222,9 +226,12 @@ func TestAutoCreateConceptConvergesOnExisting(t *testing.T) {
 	ks := kf.normalizer().Normalize(surface)
 	wantID := autoConceptID(ks.Norm, scope)
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_concepts`)).
 		WithArgs(wantID, surface, nil, scope, "provisional", "auto:d11").
 		WillReturnError(errors.New("duplicate key value violates unique constraint"))
+	mock.ExpectRollback()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).
 		WithArgs(wantID).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -264,9 +271,12 @@ func TestAutoCreateConceptFollowsMergeOnConflict(t *testing.T) {
 	wantID := autoConceptID(ks.Norm, scope)
 	const survivorID = "kwc_survivor"
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_concepts`)).
 		WithArgs(wantID, surface, nil, scope, "provisional", "auto:d11").
 		WillReturnError(errors.New("duplicate key value violates unique constraint"))
+	mock.ExpectRollback()
 	// autoCreateConcept's own guard read: the id it just tried to mint is
 	// already merged into survivorID.
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + conceptColumns + ` ` + conceptFrom + ` WHERE concept_id =`)).

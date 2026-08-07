@@ -36,6 +36,7 @@ func TestCreateSurface(t *testing.T) {
 	sf.SurfaceID = deriveSurfaceID(sf.ConceptID, sf.Surface, sf.LabelRole)
 
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(sf.SurfaceID, sf.ConceptID, sf.Surface, wantNorm, wantVersion,
@@ -120,6 +121,7 @@ func TestCreateSurfaceConflictReturnsExisting(t *testing.T) {
 	existingID := deriveSurfaceID(sf.ConceptID, "luminance", sf.LabelRole)
 
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(sf.SurfaceID, sf.ConceptID, sf.Surface, "luminance", semid.CurrentNormalizerVersion,
 			sf.LabelRole, sf.AliasType, sf.Lang, sf.Scope, sf.Confidence,
@@ -130,7 +132,7 @@ func TestCreateSurfaceConflictReturnsExisting(t *testing.T) {
 			"provenance", "locked", "evidence", "create_time", "modify_time",
 		})) // no rows: ON CONFLICT DO NOTHING
 	mock.ExpectQuery(regexp.QuoteMeta(
-		`SELECT ` + surfaceColumns + ` ` + surfaceFrom + ` WHERE norm_key = $1 AND concept_id = $2 AND scope = $3 AND label_role = $4 AND lang = $5`)).
+		`SELECT `+surfaceColumns+` `+surfaceFrom+` WHERE norm_key = $1 AND concept_id = $2 AND scope = $3 AND label_role = $4 AND lang = $5`)).
 		WithArgs("luminance", sf.ConceptID, sf.Scope, sf.LabelRole, sf.Lang).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"surface_id", "concept_id", "surface", "norm_key", "norm_version",
@@ -287,10 +289,13 @@ func TestUpdateSurfaceLock(t *testing.T) {
 	store := SurfaceStore{DB: db}
 	ctx := context.Background()
 
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectExec(regexp.QuoteMeta(
 		`UPDATE kb.keyword_surfaces SET locked = $2, modify_time = NOW() WHERE surface_id = $1`)).
 		WithArgs("kws_x", true).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	if err := store.UpdateSurfaceLock(ctx, "kws_x", true); err != nil {
 		t.Fatalf("UpdateSurfaceLock: %v", err)
@@ -323,6 +328,7 @@ func TestCreateSurfaceDefaultsRoleBeforeDerivingID(t *testing.T) {
 	ks := (semid.Normalizer{Version: semid.CurrentNormalizerVersion}).Normalize(sf.Surface)
 
 	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.keyword_surfaces`)).
 		WithArgs(wantID, sf.ConceptID, sf.Surface, ks.Norm, semid.CurrentNormalizerVersion,
 			"pref", sf.AliasType, "und", "_", 1.0, sf.Provenance, false, nil).

@@ -660,6 +660,9 @@ func TestResolveAndObserveAutoAlignsOnExactLabel(t *testing.T) {
 		WillReturnRows(termRows(
 			[]any{"mea:Luminance", "metric_definition", "mea", "Luminance", "en", "prefLabel"},
 		))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(1264011588, 1);")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptQ)).
 		WithArgs("kwc_l").
 		WillReturnRows(noAlignRows())
@@ -683,6 +686,7 @@ func TestResolveAndObserveAutoAlignsOnExactLabel(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(decisionSQL)).
 		WithArgs("keyword_align", "_", `{"concept_id":"kwc_l","term_id":"mea:Luminance"}`, sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	mock.ExpectCommit()
 
 	// --- Observe write: deterministic kernel re-run, exactly one decision and
 	// one linked occurrence carrying the auto-aligned term, and no extra
