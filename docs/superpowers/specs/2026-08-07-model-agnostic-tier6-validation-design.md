@@ -227,7 +227,7 @@ SELECT pg_advisory_xact_lock(1264011588, 1);
 
 This deliberately serializes keyword identity mutations across scopes. The minimum reconciliation loop is offline and identity writes are rare; the lower write concurrency buys a simple invariant that also covers global external identities whose affected concepts cannot be known before lookup. Concept and evidence rows are still row-locked after the family lock. This serializes an absent-veto check with a concurrent veto insertion; locking only existing rows is insufficient because an absent row cannot be row-locked. Direct SQL that bypasses domain stores is administrative repair and must acquire the same two-key advisory lock or run while reconciliation is stopped.
 
-Lexical queries and embedding calls may assemble provisional proposals outside this lock because they have no write authority. Identity-evidence provider calls that may authorize run inside the lock and transaction. Every scanned candidate opens one decision transaction, acquires the family lock, performs exhaustive provider, authority, and veto reads, selects exactly one outcome from the decision table, appends exactly one decision-log row, and commits. `auto_merge` additionally applies the merge in that transaction. `defer`, `reject`, and `no_candidate` hold the same lock through their decision-log write, so the logged evidence and outcome share one linearization point.
+Lexical queries and embedding calls may assemble provisional proposals outside this lock because they have no write authority. Identity-evidence provider calls that may authorize run inside the lock and transaction. Every attempted candidate opens one decision transaction, acquires the family lock, performs exhaustive provider, authority, and veto reads, selects exactly one outcome from the decision table, appends exactly one decision-log row, and commits. `auto_merge` additionally applies the merge in that transaction. `deferred_unvalidated`, `reject`, and `no_candidate` hold the same lock through their decision-log write, so the logged evidence and outcome share one linearization point. If any step returns an error, that candidate transaction rolls back, so it contributes neither a committed outcome nor an audit row.
 
 After acquiring the family lock, execute in this order:
 
@@ -244,7 +244,7 @@ After acquiring the family lock, execute in this order:
 
 Implementation should refactor the existing merge transaction body into a transaction-accepting helper used by both `MergeConcept` and reconciliation. It must not validate evidence outside one transaction and then call the current self-transactional method, which would create a time-of-check/time-of-use authorization race. The shared advisory-lock helper and its use by every veto/evidence writer are part of this slice, not optional hardening.
 
-Each scanned candidate writes exactly one auditable decision containing:
+Each successfully decided candidate writes exactly one auditable decision containing:
 
 - embedding model identifier and raw ranking scores;
 - every canonical normalized claim—authorizing, non-authorizing, mapped, and targetless—and its native evidence and authority references;
@@ -254,7 +254,17 @@ Each scanned candidate writes exactly one auditable decision containing:
 
 Embedding scores stay observable for later evaluation but never determine the outcome. Tier-5 edit-distance scores retain their deterministic threshold and unique-top role.
 
-`no_candidate` means no valid tier-5 proposal, no normalized provider evidence/proposal of any strength, and no embedding proposal after blocking. It writes a candidate-level decision row with an empty proposal list. Non-authorizing evidence—including a non-exact relation, missing target mapping, non-authoritative source, or inactive/provisional mapped target—produces `deferred_unvalidated` when no stronger path decides the candidate. `defer`, `reject`, and `no_candidate` log in their candidate decision transaction; `auto_merge` logs atomically with the merge. The CLI reports mutually exclusive candidate counts: `merged`, `deferred_unvalidated`, `rejected`, and `no_candidate`. Their sum equals `scanned`. A missing required provider/alignment store or query error fails the run; it does not degrade to score-only merging.
+`no_candidate` means no valid tier-5 proposal, no normalized provider evidence/proposal of any strength, and no embedding proposal after blocking. It writes a candidate-level decision row with an empty proposal list. Non-authorizing evidence—including a non-exact relation, missing target mapping, non-authoritative source, or inactive/provisional mapped target—produces `deferred_unvalidated` when no stronger path decides the candidate. `deferred_unvalidated`, `reject`, and `no_candidate` log in their candidate decision transaction; `auto_merge` logs atomically with the merge. A missing required provider/alignment store or query error fails the run; it does not degrade to score-only merging.
+
+`ReconcileStats` distinguishes attempts from committed decisions:
+
+- `Scanned` counts candidates whose decision transaction was attempted.
+- `Decided` counts candidate decision transactions that committed.
+- `Failed` is `0` or `1`; fail-fast processing permits at most the current failed candidate.
+- `Merged + DeferredUnvalidated + Rejected + NoCandidate == Decided` on every return path.
+- On success, `Failed=0` and `Scanned=Decided`, so the four outcome counts also sum to `Scanned` and every scanned candidate has exactly one audit row.
+- On a candidate error, its transaction rolls back, `Failed=1`, and `Scanned=Decided+1`. Earlier decided candidates retain their outcomes and audit rows; the failing candidate has neither; later candidates are not processed or counted.
+- An error before any candidate attempt returns all counters as zero. The CLI prints the partial counters with the error and exits nonzero; it prints the ordinary success summary only when `Failed=0`.
 
 ## 6. Error handling and operational behavior
 
@@ -320,7 +330,8 @@ Down sequence first checks for duplicate `(surface_id, source, external_id)` gro
 - A dedicated concurrency test inserts a second authoritative mapping to another active target after proposal assembly; it must block on the family lock or commit first and force the exhaustive reread to reject.
 - A concurrent concept-label/status or surface mutation after pre-lock tier-5 assembly must block or commit first; the in-transaction tier-5 recomputation must then change/defer/reject the stale proposal rather than applying it.
 - Exhaustive authoritative claims are never truncated by embedding top K; authority overflow or provider lookup failure fails closed.
-- `merged + deferred_unvalidated + rejected + no_candidate == scanned`, with one decision-log row per scanned candidate.
+- Successful-run accounting satisfies `merged + deferred_unvalidated + rejected + no_candidate == decided == scanned`, with one decision-log row per scanned candidate.
+- A three-candidate failure test commits the first candidate's merge and audit, forces a provider error on the second, verifies the second transaction and audit are absent, verifies the third is never processed, and asserts `scanned=2`, `decided=1`, `failed=1`, with outcome counts summing to `decided`.
 - Table-driven tests cover every row of the candidate-level decision table, including the exact distinction between `deferred_unvalidated` and `no_candidate`.
 - SQL tests cover evidence lookup, the new release/authority columns, placeholder backfill, uniqueness, both non-blank CHECKs, both source/release foreign keys, and guarded Down behavior.
 
