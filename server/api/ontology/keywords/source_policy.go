@@ -321,7 +321,7 @@ func canonicalPostgresTime(value time.Time) time.Time {
 
 func sortedUniqueTrimmed(values []string) []string {
 	if len(values) == 0 {
-		return nil
+		return []string{}
 	}
 	out := make([]string, len(values))
 	for i, value := range values {

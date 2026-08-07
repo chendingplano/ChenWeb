@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "external_id": "845-21-050",
+      "status": "current",
+      "scope": "display",
+      "decision": "exact",
+      "surfaces": [{"language": "en", "surface": "luminance"}],
+      "provenance_locator": "https://example.test/845-21-050"
+    }
+  ]
+}

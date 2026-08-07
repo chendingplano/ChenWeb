@@ -1,0 +1,17 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix sio: <https://si-digital-framework.org/ont#> .
+
+<https://si-digital-framework.org/quantities/LUMA> a sio:Quantity ;
+    rdfs:label "luminance"@en ;
+    rdfs:label "luminance"@en ;
+    rdfs:label "luminance énergétique"@fr ;
+    skos:altLabel "photometric luminance"@en ;
+    skos:exactMatch <https://si-digital-framework.org/quantities/LUMINANCE-OBSOLETE> .
+
+<https://si-digital-framework.org/quantities/LUMINANCE-OBSOLETE> a sio:Quantity ;
+    owl:deprecated true ;
+    rdfs:label "luminance (obsolete)"@en ;
+    skos:exactMatch <https://si-digital-framework.org/quantities/LUMA> .

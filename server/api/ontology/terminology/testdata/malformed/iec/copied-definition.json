@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "external_id": "845-21-050",
+      "status": "current",
+      "decision": "contextual",
+      "reviewer": "domain-board",
+      "reviewed_at": "2026-08-01T00:00:00Z",
+      "definition": "quotient of luminous flux by area",
+      "surfaces": [{"language": "en", "surface": "luminance"}],
+      "provenance_locator": "https://example.test/845-21-050"
+    }
+  ]
+}

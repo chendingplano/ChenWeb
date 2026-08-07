@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<units xmlns="http://unitsofmeasure.org/ucum-essence">
+  <unit Code="cd" CODE="cd" dim="J"><printSymbol>cd</printSymbol><name>candela</name></unit>
+  <unit Code="cd" CODE="cd" dim="J"><printSymbol>cd</printSymbol><name>candela again</name></unit>
+</units>

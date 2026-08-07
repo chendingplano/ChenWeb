@@ -180,12 +180,12 @@
 - Wikidata streams revision-pinned JSONL containing Q-ID/revision, labels/aliases, external IDs, different-from/broader/narrower/unit statements; all output is proposal/context only.
 - UCUM reads official essence XML into the unit-code staging registry and emits no keyword identity claims.
 
-- [ ] Write conformance fixtures first, including malformed, deprecated/replaced, multilingual, relation-distinction, and duplicate cases.
-- [ ] Add shared adapter contract tests proving deterministic ordering, idempotent keys, provenance retention, and fail-closed unknown relations.
-- [ ] Implement each adapter behind the same interface; keep source-specific parsing out of the keyword package.
-- [ ] Add a luminance/brightness fixture proving distinct IEV identities and exact EN/ZH luminance mapping.
-- [ ] Run all terminology tests and the import CLI against every fixture twice.
-- [ ] Commit with `jj commit -m "ontology: import stage 1 terminology snapshots"`.
+- [x] Write conformance fixtures first, including malformed, deprecated/replaced, multilingual, relation-distinction, and duplicate cases.
+- [x] Add shared adapter contract tests proving deterministic ordering, idempotent keys, provenance retention, and fail-closed unknown relations.
+- [x] Implement each adapter behind the same interface; keep source-specific parsing out of the keyword package.
+- [x] Add a luminance/brightness fixture proving distinct IEV identities and exact EN/ZH luminance mapping.
+- [x] Run all terminology tests and the import CLI against every fixture twice.
+- [x] Commit with `jj commit -m "ontology: import stage 1 terminology snapshots"`.
 
 ## Task 7: Extend QUDT and connect reviewed promotion
 

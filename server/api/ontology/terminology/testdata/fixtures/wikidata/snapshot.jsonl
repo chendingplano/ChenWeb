@@ -1,0 +1,2 @@
+{"id":"Q355386","revision":123456789,"labels":{"en":"luminance","zh":"亮度"},"aliases":{"en":["luminous density"]},"external_ids":[{"property":"P1628","value":"http://qudt.org/vocab/quantitykind/Luminance"}],"statements":[{"type":"different_from","object":"Q358951"},{"type":"broader","object":"Q11425"}],"retrieved_at":"2026-08-07T00:00:00Z"}
+{"id":"Q358951","revision":987654321,"labels":{"en":"brightness","zh":"视亮度"},"statements":[{"type":"different_from","object":"Q355386"},{"type":"unit_statement","object":"cd/m2"}],"retrieved_at":"2026-08-07T00:00:00Z"}

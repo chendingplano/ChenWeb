@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "external_id": "845-21-050",
+      "status": "current",
+      "publication_date": "2020-01-15",
+      "retrieved_at": "2026-08-07T00:00:00Z",
+      "scope": "display",
+      "unit_constraints": ["cd/m2"],
+      "dimension_constraints": ["J.L-2"],
+      "decision": "exact",
+      "reviewer": "domain-board",
+      "reviewed_at": "2026-08-01T00:00:00Z",
+      "surfaces": [
+        {"language": "en", "surface": "luminance", "role": "preferred"},
+        {"language": "zh", "surface": "亮度", "role": "preferred"}
+      ],
+      "provenance_locator": "https://example.test/iec-60050-845/845-21-050"
+    },
+    {
+      "external_id": "845-22-059",
+      "status": "current",
+      "publication_date": "2020-01-15",
+      "retrieved_at": "2026-08-07T00:00:00Z",
+      "scope": "display",
+      "decision": "exact",
+      "reviewer": "domain-board",
+      "reviewed_at": "2026-08-01T00:00:00Z",
+      "surfaces": [
+        {"language": "en", "surface": "brightness", "role": "preferred"},
+        {"language": "zh", "surface": "视亮度", "role": "preferred"}
+      ],
+      "provenance_locator": "https://example.test/iec-60050-845/845-22-059"
+    }
+  ],
+  "negative_decisions": [
+    {
+      "subject_external_id": "845-21-050",
+      "object_external_id": "845-22-059",
+      "relation": "different_from",
+      "reason": "luminance is photometric density; brightness is a perceived attribute",
+      "scope": "display",
+      "reviewer": "domain-board",
+      "reviewed_at": "2026-08-01T00:00:00Z",
+      "provenance_locator": "https://example.test/iec-60050-845/review/2026-08-01"
+    }
+  ]
+}

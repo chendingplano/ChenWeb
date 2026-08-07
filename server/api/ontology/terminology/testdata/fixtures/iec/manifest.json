@@ -1,0 +1,39 @@
+{
+  "adapter": "iec-seed",
+  "policy": {
+    "provider_id": "iec",
+    "source": "iec-60050-845",
+    "source_subset": "pilot",
+    "release": "2020",
+    "retrieved_at": "2026-08-07T00:00:00Z",
+    "content_checksum": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "license": "iec-reviewed-seed-2020",
+    "license_review_status": "approved",
+    "authority_role": "exact_identity_authority",
+    "authoritative_relations": [
+      "exact_equivalent"
+    ],
+    "allowed_scopes": [
+      "display"
+    ],
+    "languages": [
+      "en",
+      "zh"
+    ],
+    "adapter_version": "0.1.0",
+    "provenance_locator": "https://example.test/iec-60050-845/2020",
+    "approved_by": "ontology-board",
+    "approved_at": "2026-08-07T00:00:00Z",
+    "identity_authority": true,
+    "notes": "synthetic reviewed IEC seed fixture"
+  },
+  "artifacts": [
+    {
+      "id": "seed.json",
+      "path": "seed.json",
+      "sha256": "a605fe6d76b325d0df5ce5a2ade9fb72d5cf89562942ec425b3c1085f15a6a9c",
+      "media_type": "application/json",
+      "provenance_locator": "https://example.test/iec-60050-845/seed.json"
+    }
+  ]
+}

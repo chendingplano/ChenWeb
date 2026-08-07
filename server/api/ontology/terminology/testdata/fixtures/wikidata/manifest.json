@@ -1,0 +1,37 @@
+{
+  "adapter": "wikidata",
+  "policy": {
+    "provider_id": "wikimedia",
+    "source": "wikidata",
+    "source_subset": "pilot",
+    "release": "dump-2026-08-07",
+    "retrieved_at": "2026-08-07T00:00:00Z",
+    "content_checksum": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "license": "CC0-1.0",
+    "license_review_status": "approved",
+    "authority_role": "proposal_only",
+    "authoritative_relations": [],
+    "allowed_scopes": [
+      "display"
+    ],
+    "languages": [
+      "en",
+      "zh"
+    ],
+    "adapter_version": "0.1.0",
+    "provenance_locator": "https://example.test/wikidata/dump-2026-08-07",
+    "approved_by": "ontology-board",
+    "approved_at": "2026-08-07T00:00:00Z",
+    "identity_authority": false,
+    "notes": "synthetic Wikidata proposal snapshot"
+  },
+  "artifacts": [
+    {
+      "id": "snapshot.jsonl",
+      "path": "snapshot.jsonl",
+      "sha256": "991eabd84fed53a7d1b95e5c6d273250e420f46fa3d4081e5daaf5d398381c45",
+      "media_type": "application/x-ndjson",
+      "provenance_locator": "https://example.test/wikidata/snapshot.jsonl"
+    }
+  ]
+}

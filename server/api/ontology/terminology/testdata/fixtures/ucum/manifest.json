@@ -1,0 +1,36 @@
+{
+  "adapter": "ucum",
+  "policy": {
+    "provider_id": "ucum",
+    "source": "ucum",
+    "source_subset": "essence",
+    "release": "2.2",
+    "retrieved_at": "2026-08-07T00:00:00Z",
+    "content_checksum": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "license": "UCUM-License-1.1",
+    "license_review_status": "approved",
+    "authority_role": "context_only",
+    "authoritative_relations": [],
+    "allowed_scopes": [
+      "display"
+    ],
+    "languages": [
+      "en"
+    ],
+    "adapter_version": "0.1.0",
+    "provenance_locator": "https://example.test/ucum/2.2",
+    "approved_by": "ontology-board",
+    "approved_at": "2026-08-07T00:00:00Z",
+    "identity_authority": false,
+    "notes": "synthetic UCUM essence fixture"
+  },
+  "artifacts": [
+    {
+      "id": "ucum-essence.xml",
+      "path": "ucum-essence.xml",
+      "sha256": "bea253a39dd2fb43e24c1eef0321d9e481dd1e76eefd66f158343c0f784c0b9d",
+      "media_type": "application/xml",
+      "provenance_locator": "https://example.test/ucum/ucum-essence.xml"
+    }
+  ]
+}
