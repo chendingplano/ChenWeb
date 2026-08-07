@@ -110,8 +110,18 @@ func (p SourcePolicy) Validate() error {
 	if len(p.AllowedScopes) == 0 {
 		return errors.New("source policy requires at least one allowed scope")
 	}
+	for _, scope := range p.AllowedScopes {
+		if strings.TrimSpace(scope) == "" {
+			return errors.New("source policy allowed scopes cannot contain blank values")
+		}
+	}
 	if len(p.Languages) == 0 {
 		return errors.New("source policy requires at least one language")
+	}
+	for _, language := range p.Languages {
+		if strings.TrimSpace(language) == "" {
+			return errors.New("source policy languages cannot contain blank values")
+		}
 	}
 	if p.ApprovedAt == nil || p.ApprovedAt.IsZero() {
 		return errors.New("source policy approved_at is required")
@@ -291,17 +301,32 @@ func scanSourcePolicy(scan func(...any) error) (SourcePolicy, error) {
 }
 
 func canonicalSourcePolicy(p SourcePolicy) SourcePolicy {
-	p.AuthoritativeRelations = sortedUnique(p.AuthoritativeRelations)
-	p.AllowedScopes = sortedUnique(p.AllowedScopes)
-	p.Languages = sortedUnique(p.Languages)
+	p.RetrievedAt = canonicalPostgresTime(p.RetrievedAt)
+	if p.ApprovedAt != nil {
+		approvedAt := canonicalPostgresTime(*p.ApprovedAt)
+		p.ApprovedAt = &approvedAt
+	}
+	p.AuthoritativeRelations = sortedUniqueTrimmed(p.AuthoritativeRelations)
+	p.AllowedScopes = sortedUniqueTrimmed(p.AllowedScopes)
+	p.Languages = sortedUniqueTrimmed(p.Languages)
 	return p
 }
 
-func sortedUnique(values []string) []string {
+func canonicalPostgresTime(value time.Time) time.Time {
+	if value.IsZero() {
+		return value
+	}
+	return value.UTC().Truncate(time.Microsecond)
+}
+
+func sortedUniqueTrimmed(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
-	out := append([]string(nil), values...)
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = strings.TrimSpace(value)
+	}
 	sort.Strings(out)
 	n := 0
 	for _, value := range out {

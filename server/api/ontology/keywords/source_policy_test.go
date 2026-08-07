@@ -53,7 +53,9 @@ func TestSourcePolicyValidateRejectsIncompleteAndUnsafePolicies(t *testing.T) {
 		{"unknown role", func(p *SourcePolicy) { p.AuthorityRole = "trusted" }},
 		{"unknown relation", func(p *SourcePolicy) { p.AuthoritativeRelations = []string{"same_as"} }},
 		{"missing scope", func(p *SourcePolicy) { p.AllowedScopes = nil }},
+		{"blank scope member", func(p *SourcePolicy) { p.AllowedScopes = []string{"display-metric", " \t"} }},
 		{"missing language", func(p *SourcePolicy) { p.Languages = nil }},
+		{"blank language member", func(p *SourcePolicy) { p.Languages = []string{"en", "  "} }},
 		{"missing adapter", func(p *SourcePolicy) { p.AdapterVersion = "" }},
 		{"missing provenance", func(p *SourcePolicy) { p.ProvenanceLocator = "" }},
 		{"missing approver", func(p *SourcePolicy) { p.ApprovedBy = "" }},
@@ -72,6 +74,41 @@ func TestSourcePolicyValidateRejectsIncompleteAndUnsafePolicies(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+func TestSourcePolicyStoreCanonicalizesCollectionsAndPostgresTimes(t *testing.T) {
+	t.Parallel()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	p := validExactSourcePolicy()
+	nowWithMonotonic := time.Now()
+	p.RetrievedAt = nowWithMonotonic.Add(789 * time.Nanosecond)
+	approved := nowWithMonotonic.In(time.FixedZone("review-zone", -7*60*60)).Add(321 * time.Nanosecond)
+	p.ApprovedAt = &approved
+	p.AuthoritativeRelations = []string{" exact_equivalent ", "exact_equivalent"}
+	p.AllowedScopes = []string{" display-metric ", "display-metric"}
+	p.Languages = []string{" zh-CN ", "en"}
+
+	dbPolicy := p
+	dbPolicy.RetrievedAt = time.UnixMicro(p.RetrievedAt.UnixMicro()).UTC()
+	dbApproved := time.UnixMicro(p.ApprovedAt.UnixMicro()).UTC()
+	dbPolicy.ApprovedAt = &dbApproved
+	dbPolicy.AuthoritativeRelations = []string{"exact_equivalent"}
+	dbPolicy.AllowedScopes = []string{"display-metric"}
+	dbPolicy.Languages = []string{"en", "zh-CN"}
+	mock.ExpectQuery(regexp.QuoteMeta("WITH attempted AS ( INSERT INTO kb.keyword_sources")).
+		WillReturnRows(sourcePolicyRows(dbPolicy))
+
+	if err := (SourcePolicyStore{DB: db}).Register(context.Background(), p); err != nil {
+		t.Fatalf("Register canonical replay: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

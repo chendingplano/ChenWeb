@@ -36,6 +36,7 @@ ALTER TABLE kb.keyword_surface_evidence
     DROP CONSTRAINT keyword_surface_evidence_surface_id_source_external_id_key,
     ADD CONSTRAINT uq_keyword_surface_evidence_source_external_release UNIQUE (surface_id, source, external_id, release);
 
+-- +goose StatementBegin
 DO $$
 DECLARE
     evidence_orphans BIGINT;
@@ -74,6 +75,13 @@ BEGIN
     END IF;
 END
 $$;
+-- +goose StatementEnd
+
+CREATE FUNCTION kb.keyword_nonblank_text_array(input_values TEXT[])
+RETURNS BOOLEAN
+LANGUAGE SQL
+IMMUTABLE
+AS 'SELECT cardinality(input_values) > 0 AND COALESCE(bool_and(value !~ ''^[[:space:]]*$''), FALSE) FROM unnest(input_values) AS value';
 
 ALTER TABLE kb.keyword_sources
     ADD CONSTRAINT ck_keyword_sources_nonblank_source CHECK (btrim(source) <> ''),
@@ -88,9 +96,17 @@ ALTER TABLE kb.keyword_sources
     ),
     ADD CONSTRAINT ck_keyword_sources_identity_authority_consistent CHECK (
         identity_authority = (
-            authority_role = 'exact_identity_authority'
+            btrim(provider_id) <> ''
+            AND btrim(source_subset) <> ''
+            AND content_checksum ~ '^[0-9a-f]{64}$'
+            AND btrim(license) <> ''
+            AND authority_role = 'exact_identity_authority'
             AND license_review_status = 'approved'
             AND 'exact_equivalent' = ANY(authoritative_relations)
+            AND kb.keyword_nonblank_text_array(allowed_scopes)
+            AND kb.keyword_nonblank_text_array(languages)
+            AND btrim(adapter_version) <> ''
+            AND btrim(provenance_locator) <> ''
             AND approved_by IS NOT NULL AND btrim(approved_by) <> ''
             AND approved_at IS NOT NULL
         )
@@ -153,10 +169,12 @@ CREATE TABLE kb.keyword_catalog_relations (
     release                     TEXT NOT NULL,
     subject_external_id         TEXT NOT NULL,
     relation                    TEXT NOT NULL,
+    object_source               TEXT NOT NULL,
+    object_release              TEXT NOT NULL,
     object_external_id          TEXT NOT NULL,
     provenance_locator          TEXT NOT NULL DEFAULT '',
     native_payload              JSONB NOT NULL DEFAULT '{}'::jsonb,
-    PRIMARY KEY (source, release, subject_external_id, relation, object_external_id),
+    PRIMARY KEY (source, release, subject_external_id, relation, object_source, object_release, object_external_id),
     FOREIGN KEY (source, release, subject_external_id)
         REFERENCES kb.keyword_catalog_entries (source, release, external_id)
         ON UPDATE RESTRICT ON DELETE RESTRICT
@@ -166,12 +184,14 @@ CREATE TABLE kb.keyword_catalog_negative_decisions (
     source              TEXT NOT NULL,
     release             TEXT NOT NULL,
     subject_external_id TEXT NOT NULL,
+    object_source       TEXT NOT NULL,
+    object_release      TEXT NOT NULL,
     object_external_id  TEXT NOT NULL,
     relation            TEXT NOT NULL,
     reason              TEXT NOT NULL,
     provenance_locator  TEXT NOT NULL DEFAULT '',
     native_payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
-    PRIMARY KEY (source, release, subject_external_id, object_external_id, relation),
+    PRIMARY KEY (source, release, subject_external_id, object_source, object_release, object_external_id, relation),
     FOREIGN KEY (source, release, subject_external_id)
         REFERENCES kb.keyword_catalog_entries (source, release, external_id)
         ON UPDATE RESTRICT ON DELETE RESTRICT
@@ -214,6 +234,7 @@ CREATE TABLE kb.keyword_identity_deployment_history (
         ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
+-- +goose StatementBegin
 CREATE FUNCTION kb.reject_keyword_identity_immutable_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -222,6 +243,7 @@ BEGIN
     RAISE EXCEPTION '% is immutable; register a new source release or snapshot', TG_TABLE_NAME;
 END
 $$;
+-- +goose StatementEnd
 
 CREATE TRIGGER keyword_sources_immutable
 BEFORE UPDATE OR DELETE ON kb.keyword_sources
@@ -257,6 +279,7 @@ FOR EACH ROW EXECUTE FUNCTION kb.reject_keyword_identity_immutable_mutation();
 
 -- +goose Down
 
+-- +goose StatementBegin
 DO $$
 DECLARE
     collapsing_groups BIGINT;
@@ -275,6 +298,7 @@ BEGIN
     END IF;
 END
 $$;
+-- +goose StatementEnd
 
 DROP TRIGGER keyword_identity_deployment_history_append_only ON kb.keyword_identity_deployment_history;
 DROP TRIGGER keyword_ucum_codes_immutable ON kb.keyword_ucum_codes;
@@ -305,6 +329,7 @@ ALTER TABLE kb.keyword_sources
     DROP CONSTRAINT ck_keyword_sources_license_review_status,
     DROP CONSTRAINT ck_keyword_sources_checksum,
     DROP CONSTRAINT ck_keyword_sources_identity_authority_consistent;
+DROP FUNCTION kb.keyword_nonblank_text_array(TEXT[]);
 ALTER TABLE kb.keyword_external_ids
     DROP CONSTRAINT ck_keyword_external_ids_nonblank_external_id;
 ALTER TABLE kb.keyword_surface_evidence
