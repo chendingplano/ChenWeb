@@ -30,11 +30,26 @@ func TestKeywordResolutionPersistsGovernedMetricIDsInPostgres(t *testing.T) {
 		t.Fatalf("open test database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := db.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		t.Fatalf("ping test database: %v", err)
 	}
 
-	ctx := context.Background()
+	var alignPredicateReleased bool
+	if err := db.QueryRowContext(ctx, `
+SELECT EXISTS (
+	SELECT 1 FROM kb.ontology_terms
+	WHERE term_id = 'core:aligns_to_term'
+	  AND term_kind = 'property'
+	  AND status = 'included_in_release'
+)`).Scan(&alignPredicateReleased); err != nil {
+		t.Fatalf("check core:aligns_to_term prerequisite: %v", err)
+	}
+	if !alignPredicateReleased {
+		t.Skip("core:aligns_to_term prerequisite is not released; freshly migrate the test database, then run PG_DB_NAME=<test-db> go run ./server/cmd/ontology-seed --module core")
+	}
+
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	moduleID := "i2_metric_" + suffix
 	termID := "i2:metric_" + suffix
@@ -46,7 +61,8 @@ func TestKeywordResolutionPersistsGovernedMetricIDsInPostgres(t *testing.T) {
 	inputRecordID := time.Now().UnixNano()
 
 	t.Cleanup(func() {
-		cleanupCtx := context.Background()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		statements := []struct {
 			query string
 			args  []any
@@ -176,10 +192,7 @@ WHERE subject_ref_kind = 'keyword_concept' AND subject_ref_id = $1
 		t.Fatalf("accepted aligns_to_term assertion count = %d, want 1", alignmentCount)
 	}
 
-	metricsStore := &ResolvingMetricsStore{
-		Inner:    MetricsSQLStore{DB: db},
-		Resolver: resolver,
-	}
+	metricsStore := newResolvingMetricsStore(db)
 	inserted, err := metricsStore.SaveMetrics(ctx, SaveMetricsRequest{
 		InputRecordID: inputRecordID,
 		Language:      "en",
