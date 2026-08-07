@@ -81,7 +81,13 @@ CREATE FUNCTION kb.keyword_nonblank_text_array(input_values TEXT[])
 RETURNS BOOLEAN
 LANGUAGE SQL
 IMMUTABLE
-AS 'SELECT cardinality(input_values) > 0 AND COALESCE(bool_and(value !~ ''^[[:space:]]*$''), FALSE) FROM unnest(input_values) AS value';
+AS 'SELECT cardinality(input_values) > 0 AND COALESCE(bool_and(value IS NOT NULL AND value !~ ''^[[:space:]]*$''), FALSE) FROM unnest(input_values) AS value';
+
+CREATE FUNCTION kb.keyword_valid_identity_relations(input_values TEXT[])
+RETURNS BOOLEAN
+LANGUAGE SQL
+IMMUTABLE
+AS 'SELECT COALESCE(bool_and(value IS NOT NULL AND value IN (''exact_equivalent'', ''related'', ''broader'', ''narrower'', ''translation'', ''probabilistic'', ''other'')), TRUE) FROM unnest(input_values) AS value';
 
 ALTER TABLE kb.keyword_sources
     ADD CONSTRAINT ck_keyword_sources_nonblank_source CHECK (btrim(source) <> ''),
@@ -90,6 +96,9 @@ ALTER TABLE kb.keyword_sources
     ),
     ADD CONSTRAINT ck_keyword_sources_license_review_status CHECK (
         license_review_status IN ('unreviewed', 'approved', 'rejected')
+    ),
+    ADD CONSTRAINT ck_keyword_sources_authoritative_relations CHECK (
+        kb.keyword_valid_identity_relations(authoritative_relations)
     ),
     ADD CONSTRAINT ck_keyword_sources_checksum CHECK (
         content_checksum = '' OR content_checksum ~ '^[0-9a-f]{64}$'
@@ -102,7 +111,7 @@ ALTER TABLE kb.keyword_sources
             AND btrim(license) <> ''
             AND authority_role = 'exact_identity_authority'
             AND license_review_status = 'approved'
-            AND 'exact_equivalent' = ANY(authoritative_relations)
+            AND COALESCE('exact_equivalent' = ANY(authoritative_relations), FALSE)
             AND kb.keyword_nonblank_text_array(allowed_scopes)
             AND kb.keyword_nonblank_text_array(languages)
             AND btrim(adapter_version) <> ''
@@ -327,9 +336,11 @@ ALTER TABLE kb.keyword_sources
     DROP CONSTRAINT ck_keyword_sources_nonblank_source,
     DROP CONSTRAINT ck_keyword_sources_authority_role,
     DROP CONSTRAINT ck_keyword_sources_license_review_status,
+    DROP CONSTRAINT ck_keyword_sources_authoritative_relations,
     DROP CONSTRAINT ck_keyword_sources_checksum,
     DROP CONSTRAINT ck_keyword_sources_identity_authority_consistent;
 DROP FUNCTION kb.keyword_nonblank_text_array(TEXT[]);
+DROP FUNCTION kb.keyword_valid_identity_relations(TEXT[]);
 ALTER TABLE kb.keyword_external_ids
     DROP CONSTRAINT ck_keyword_external_ids_nonblank_external_id;
 ALTER TABLE kb.keyword_surface_evidence

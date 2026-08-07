@@ -57,7 +57,10 @@ func TestKeywordIdentitySourceMigrationContract(t *testing.T) {
 		"constraint ck_keyword_external_ids_nonblank_external_id check (btrim(external_id) <> '')",
 		"btrim(provider_id) <> ''",
 		"cardinality(input_values) > 0",
-		"bool_and(value !~ ''^[[:space:]]*$'')",
+		"bool_and(value is not null and value !~ ''^[[:space:]]*$'')",
+		"coalesce('exact_equivalent' = any(authoritative_relations), false)",
+		"constraint ck_keyword_sources_authoritative_relations",
+		"value in (''exact_equivalent'', ''related'', ''broader'', ''narrower'', ''translation'', ''probabilistic'', ''other'')",
 		"kb.keyword_nonblank_text_array(allowed_scopes)",
 		"kb.keyword_nonblank_text_array(languages)",
 		"constraint fk_keyword_surface_evidence_source_release foreign key (source, release)",
@@ -191,21 +194,28 @@ func TestKeywordIdentitySourceMigrationThroughGoose(t *testing.T) {
 		 license_review_status, authority_role, authoritative_relations, allowed_scopes, languages,
 		 adapter_version, provenance_locator, approved_by, approved_at, identity_authority)
 		VALUES ('provider', $1, 'subset', '1', now(), repeat('a', 64), 'license',
-		 'approved', 'exact_identity_authority', ARRAY['exact_equivalent'], $2, $3,
+		 'approved', 'exact_identity_authority', $2, $3, $4,
 		 'adapter/v1', 'file:///artifact', 'reviewer', now(), TRUE)`
-	if _, err := db.ExecContext(ctx, governedInsert, "valid-authority", pq.Array([]string{"scope"}), pq.Array([]string{"en"})); err != nil {
+	if _, err := db.ExecContext(ctx, governedInsert, "valid-authority", pq.Array([]string{"exact_equivalent"}), pq.Array([]string{"scope"}), pq.Array([]string{"en"})); err != nil {
 		t.Fatalf("database rejected complete identity authority: %v", err)
 	}
+	exact, scope, english := "exact_equivalent", "scope", "en"
 	for _, tc := range []struct {
 		name      string
 		source    string
-		scopes    []string
-		languages []string
+		relations any
+		scopes    any
+		languages any
 	}{
-		{"blank scope", "unsafe-scope", []string{" "}, []string{"en"}},
-		{"blank language", "unsafe-language", []string{"scope"}, []string{"\t"}},
+		{"blank scope", "unsafe-scope", pq.Array([]string{exact}), pq.Array([]string{" "}), pq.Array([]string{english})},
+		{"blank language", "unsafe-language", pq.Array([]string{exact}), pq.Array([]string{scope}), pq.Array([]string{"\t"})},
+		{"NULL-only scope", "unsafe-null-scope", pq.Array([]string{exact}), pq.Array([]*string{nil}), pq.Array([]string{english})},
+		{"mixed NULL scope", "unsafe-mixed-scope", pq.Array([]string{exact}), pq.Array([]*string{&scope, nil}), pq.Array([]string{english})},
+		{"NULL-only language", "unsafe-null-language", pq.Array([]string{exact}), pq.Array([]string{scope}), pq.Array([]*string{nil})},
+		{"mixed NULL language", "unsafe-mixed-language", pq.Array([]string{exact}), pq.Array([]string{scope}), pq.Array([]*string{&english, nil})},
+		{"NULL authoritative relation", "unsafe-null-relation", pq.Array([]*string{nil}), pq.Array([]string{scope}), pq.Array([]string{english})},
 	} {
-		if _, err := db.ExecContext(ctx, governedInsert, tc.source, pq.Array(tc.scopes), pq.Array(tc.languages)); err == nil {
+		if _, err := db.ExecContext(ctx, governedInsert, tc.source, tc.relations, tc.scopes, tc.languages); err == nil {
 			t.Errorf("database accepted identity authority with %s", tc.name)
 		}
 	}
