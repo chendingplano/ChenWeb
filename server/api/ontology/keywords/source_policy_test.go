@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,20 +96,44 @@ func TestSourcePolicyStoreCanonicalizesCollectionsAndPostgresTimes(t *testing.T)
 	p.Languages = []string{" zh-CN ", "en"}
 
 	dbPolicy := p
-	dbPolicy.RetrievedAt = time.UnixMicro(p.RetrievedAt.UnixMicro()).UTC()
-	dbApproved := time.UnixMicro(p.ApprovedAt.UnixMicro()).UTC()
+	dbPolicy.RetrievedAt = p.RetrievedAt.UTC().Round(time.Microsecond)
+	dbApproved := p.ApprovedAt.UTC().Round(time.Microsecond)
 	dbPolicy.ApprovedAt = &dbApproved
 	dbPolicy.AuthoritativeRelations = []string{"exact_equivalent"}
 	dbPolicy.AllowedScopes = []string{"display-metric"}
 	dbPolicy.Languages = []string{"en", "zh-CN"}
-	mock.ExpectQuery(regexp.QuoteMeta("WITH attempted AS ( INSERT INTO kb.keyword_sources")).
-		WillReturnRows(sourcePolicyRows(dbPolicy))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.keyword_sources")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+sourcePolicyColumns+" FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
+		WithArgs(p.Source, p.Release).WillReturnRows(sourcePolicyRows(dbPolicy))
 
 	if err := (SourcePolicyStore{DB: db}).Register(context.Background(), p); err != nil {
 		t.Fatalf("Register canonical replay: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCanonicalPostgresTimeRoundsToMicroseconds(t *testing.T) {
+	t.Parallel()
+	zone := time.FixedZone("non-utc", 5*60*60+30*60)
+	base := time.Date(2026, 8, 7, 12, 34, 56, 0, zone)
+	for _, tc := range []struct {
+		name string
+		in   time.Time
+		want time.Time
+	}{
+		{"below half microsecond", base.Add(499 * time.Nanosecond), base.UTC()},
+		{"half microsecond rounds up", base.Add(500 * time.Nanosecond), base.UTC().Add(time.Microsecond)},
+		{"round carries second", base.Add(999999600 * time.Nanosecond), base.UTC().Add(time.Second)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := canonicalPostgresTime(tc.in)
+			if !got.Equal(tc.want) || got.Location() != time.UTC {
+				t.Fatalf("canonicalPostgresTime(%v) = %v (%v), want %v UTC", tc.in, got, got.Location(), tc.want)
+			}
+		})
 	}
 }
 
@@ -152,12 +177,51 @@ func TestSourcePolicyStoreRegisterExactReplayAndMutation(t *testing.T) {
 
 			got := p
 			tt.mutate(&got)
-			mock.ExpectQuery(regexp.QuoteMeta("WITH attempted AS ( INSERT INTO kb.keyword_sources")).
-				WillReturnRows(sourcePolicyRows(p))
+			mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.keyword_sources")).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT "+sourcePolicyColumns+" FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
+				WithArgs(p.Source, p.Release).WillReturnRows(sourcePolicyRows(p))
 
 			err = (SourcePolicyStore{DB: db}).Register(context.Background(), got)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Register error = %v, want %v", err, tt.wantErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSourcePolicyStoreWrapsRegistrationInsertErrors(t *testing.T) {
+	t.Parallel()
+	writeErr := errors.New("write failed")
+	for _, tc := range []struct {
+		name string
+		run  func(SourcePolicyStore) error
+		want string
+	}{
+		{"source policy", func(store SourcePolicyStore) error {
+			return store.Register(context.Background(), validExactSourcePolicy())
+		}, "insert source policy: write failed"},
+		{"source artifact", func(store SourcePolicyStore) error {
+			p := validExactSourcePolicy()
+			return store.RegisterArtifact(context.Background(), SourceArtifact{
+				Source: p.Source, Release: p.Release, ArtifactID: "artifact",
+				ContentChecksum: p.ContentChecksum, ProvenanceLocator: p.ProvenanceLocator,
+			})
+		}, "insert source artifact: write failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectExec("INSERT INTO kb\\.keyword_").WillReturnError(writeErr)
+			err = tc.run(SourcePolicyStore{DB: db})
+			if err == nil || !errors.Is(err, writeErr) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want wrapped %q", err, tc.want)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatal(err)
@@ -195,10 +259,12 @@ func TestSourcePolicyStoreRegisterArtifactExactReplayAndPayloadMutation(t *testi
 			defer db.Close()
 			got := a
 			got.Payload = tc.payload
-			mock.ExpectQuery(regexp.QuoteMeta("WITH attempted AS ( INSERT INTO kb.keyword_source_artifacts")).
-				WillReturnRows(sqlmock.NewRows([]string{
-					"source", "release", "artifact_id", "content_checksum", "media_type", "provenance_locator", "payload",
-				}).AddRow(a.Source, a.Release, a.ArtifactID, a.ContentChecksum, a.MediaType, a.ProvenanceLocator, a.Payload))
+			mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.keyword_source_artifacts")).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT source, release, artifact_id, content_checksum, media_type, provenance_locator, payload FROM kb.keyword_source_artifacts WHERE source = $1 AND release = $2 AND artifact_id = $3")).
+				WithArgs(a.Source, a.Release, a.ArtifactID).WillReturnRows(sqlmock.NewRows([]string{
+				"source", "release", "artifact_id", "content_checksum", "media_type", "provenance_locator", "payload",
+			}).AddRow(a.Source, a.Release, a.ArtifactID, a.ContentChecksum, a.MediaType, a.ProvenanceLocator, a.Payload))
 
 			err = (SourcePolicyStore{DB: db}).RegisterArtifact(context.Background(), got)
 			if !errors.Is(err, tc.wantErr) {
@@ -208,6 +274,29 @@ func TestSourcePolicyStoreRegisterArtifactExactReplayAndPayloadMutation(t *testi
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestSourcePolicyStoreRejectsRollbackBeforeTransaction(t *testing.T) {
+	t.Parallel()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	change := DeploymentChange{
+		DeploymentKey: "tier6-primary", Source: "qudt-quantity-kind", Release: "3.5.0",
+		Enabled: true, Action: DeploymentAction("rollback"), ChangedBy: "operator@example.test",
+	}
+	err = (SourcePolicyStore{DB: db}).SetDeployment(context.Background(), change)
+	if err == nil {
+		t.Fatal("rollback must remain unavailable until deployment history validation is implemented")
+	}
+	if !strings.Contains(err.Error(), `unknown deployment action "rollback"`) {
+		t.Fatalf("rollback error = %v, want validation rejection", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("rollback started a database transaction: %v", err)
 	}
 }
 

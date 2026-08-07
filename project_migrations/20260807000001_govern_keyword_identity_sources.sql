@@ -107,6 +107,7 @@ ALTER TABLE kb.keyword_sources
         identity_authority = (
             btrim(provider_id) <> ''
             AND btrim(source_subset) <> ''
+            AND retrieved_at IS NOT NULL
             AND content_checksum ~ '^[0-9a-f]{64}$'
             AND btrim(license) <> ''
             AND authority_role = 'exact_identity_authority'

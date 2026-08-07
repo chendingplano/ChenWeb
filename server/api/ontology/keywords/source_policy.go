@@ -193,24 +193,21 @@ func (s SourcePolicyStore) Register(ctx context.Context, policy SourcePolicy) er
 		return errors.New("source policy store database is nil")
 	}
 
-	query := `WITH attempted AS (
-	INSERT INTO kb.keyword_sources (` + sourcePolicyColumns + `)
+	insert := `INSERT INTO kb.keyword_sources (` + sourcePolicyColumns + `)
 	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-	ON CONFLICT (source, release) DO NOTHING
-	RETURNING ` + sourcePolicyColumns + `
-)
-SELECT ` + sourcePolicyColumns + ` FROM attempted
-UNION ALL
-SELECT ` + sourcePolicyColumns + ` FROM kb.keyword_sources
-WHERE source = $2 AND release = $4 AND NOT EXISTS (SELECT 1 FROM attempted)
-LIMIT 1`
-
-	row := s.DB.QueryRowContext(ctx, query,
+	ON CONFLICT (source, release) DO NOTHING`
+	if _, err := s.DB.ExecContext(ctx, insert,
 		policy.ProviderID, policy.Source, policy.SourceSubset, policy.Release, policy.RetrievedAt,
 		policy.ContentChecksum, policy.License, policy.LicenseReviewStatus, policy.AuthorityRole,
 		pq.Array(policy.AuthoritativeRelations), pq.Array(policy.AllowedScopes), pq.Array(policy.Languages),
 		policy.AdapterVersion, policy.ProvenanceLocator, policy.ApprovedBy, policy.ApprovedAt,
 		policy.IdentityAuthority, policy.Notes,
+	); err != nil {
+		return fmt.Errorf("insert source policy: %w", err)
+	}
+	row := s.DB.QueryRowContext(ctx,
+		`SELECT `+sourcePolicyColumns+` FROM kb.keyword_sources WHERE source = $1 AND release = $2`,
+		policy.Source, policy.Release,
 	)
 	existing, err := scanSourcePolicy(row.Scan)
 	if err != nil {
@@ -232,23 +229,20 @@ func (s SourcePolicyStore) RegisterArtifact(ctx context.Context, artifact Source
 	if s.DB == nil {
 		return errors.New("source policy store database is nil")
 	}
-	query := `WITH attempted AS (
-	INSERT INTO kb.keyword_source_artifacts
+	insert := `INSERT INTO kb.keyword_source_artifacts
 		(source, release, artifact_id, content_checksum, media_type, provenance_locator, payload)
 	VALUES ($1,$2,$3,$4,$5,$6,$7)
-	ON CONFLICT (source, release, artifact_id) DO NOTHING
-	RETURNING source, release, artifact_id, content_checksum, media_type, provenance_locator, payload
-)
-SELECT source, release, artifact_id, content_checksum, media_type, provenance_locator, payload FROM attempted
-UNION ALL
-SELECT source, release, artifact_id, content_checksum, media_type, provenance_locator, payload
-FROM kb.keyword_source_artifacts
-WHERE source = $1 AND release = $2 AND artifact_id = $3 AND NOT EXISTS (SELECT 1 FROM attempted)
-LIMIT 1`
-	var existing SourceArtifact
-	if err := s.DB.QueryRowContext(ctx, query,
+	ON CONFLICT (source, release, artifact_id) DO NOTHING`
+	if _, err := s.DB.ExecContext(ctx, insert,
 		artifact.Source, artifact.Release, artifact.ArtifactID, artifact.ContentChecksum,
 		artifact.MediaType, artifact.ProvenanceLocator, artifact.Payload,
+	); err != nil {
+		return fmt.Errorf("insert source artifact: %w", err)
+	}
+	var existing SourceArtifact
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT source, release, artifact_id, content_checksum, media_type, provenance_locator, payload FROM kb.keyword_source_artifacts WHERE source = $1 AND release = $2 AND artifact_id = $3`,
+		artifact.Source, artifact.Release, artifact.ArtifactID,
 	).Scan(
 		&existing.Source, &existing.Release, &existing.ArtifactID, &existing.ContentChecksum,
 		&existing.MediaType, &existing.ProvenanceLocator, &existing.Payload,
@@ -316,7 +310,7 @@ func canonicalPostgresTime(value time.Time) time.Time {
 	if value.IsZero() {
 		return value
 	}
-	return value.UTC().Truncate(time.Microsecond)
+	return value.UTC().Round(time.Microsecond)
 }
 
 func sortedUniqueTrimmed(values []string) []string {
@@ -353,7 +347,6 @@ type DeploymentAction string
 const (
 	DeploymentActivate DeploymentAction = "activate"
 	DeploymentDisable  DeploymentAction = "disable"
-	DeploymentRollback DeploymentAction = "rollback"
 )
 
 type DeploymentChange struct {
@@ -369,7 +362,7 @@ func (c DeploymentChange) validate() error {
 	if strings.TrimSpace(c.DeploymentKey) == "" || strings.TrimSpace(c.Source) == "" || strings.TrimSpace(c.ChangedBy) == "" {
 		return errors.New("deployment change requires deployment_key, source, and changed_by")
 	}
-	if c.Action != DeploymentActivate && c.Action != DeploymentDisable && c.Action != DeploymentRollback {
+	if c.Action != DeploymentActivate && c.Action != DeploymentDisable {
 		return fmt.Errorf("unknown deployment action %q", c.Action)
 	}
 	if c.Action == DeploymentActivate && !c.Enabled {

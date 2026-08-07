@@ -58,13 +58,13 @@
 - Add a separate lock-protected, audited deployment/enablement pointer (and append-only deployment history) so activation or rollback never mutates the immutable source-release policy or its artifacts.
 - `SourcePolicyStore.Register` validates closed enums, authoritative relation policy, checksum shape, and approval requirements before insert-or-verify-identical registration; it never updates a historical source release in place.
 
-- [ ] Write migration contract tests first: assert new columns, named constraints/FKs, placeholder backfill, guarded Down order, and staging-table authority separation.
-- [ ] Run the focused tests and record the expected red result.
-- [ ] Add the goose migration with a reversible, guarded Down section.
-- [ ] Write store tests for rejected incomplete authority policies, exact-replay idempotence, and rejection of any attempt to mutate historical source-release or artifact metadata.
-- [ ] Implement the smallest source-policy model/store that passes them.
-- [ ] Run keyword-package tests and migration contract tests.
-- [ ] Commit with `jj commit -m "keywords: add governed terminology source registry"`.
+- [x] Write migration contract tests first: assert new columns, named constraints/FKs, placeholder backfill, guarded Down order, and staging-table authority separation.
+- [x] Run the focused tests and record the expected red result.
+- [x] Add the goose migration with a reversible, guarded Down section.
+- [x] Write store tests for rejected incomplete authority policies, exact-replay idempotence, and rejection of any attempt to mutate historical source-release or artifact metadata.
+- [x] Implement the smallest source-policy model/store that passes them.
+- [x] Run keyword-package tests and migration contract tests.
+- [x] Commit with `jj commit -m "keywords: add governed terminology source registry"`.
 
 ## Task 2: Source-agnostic identity evidence contract
 
