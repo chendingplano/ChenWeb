@@ -36,11 +36,11 @@
 - Compare an imported/reviewed seed release with that inventory and report exact-authority coverage, unresolved bilingual pairs, ambiguous/context-sensitive surfaces, and high-frequency uncovered concepts.
 - Read an operator-authored acceptance file containing the selected corpus/scope, target coverage, risk terms, approver, and target seed release; tooling reports readiness but cannot approve itself.
 
-- [ ] Write failing tests for stable frequency ordering, scope isolation, unresolved-pair backlog generation, context-sensitive exclusions, and target pass/fail calculations.
-- [ ] Implement read-only inventory and coverage calculation.
-- [ ] Implement CLI JSON/summary output suitable for storing with a seed-release review.
-- [ ] Run coverage package/command tests.
-- [ ] Commit with `jj commit -m "ontology: measure terminology seed coverage"`.
+- [x] Write failing tests for stable frequency ordering, scope isolation, unresolved-pair backlog generation, context-sensitive exclusions, and target pass/fail calculations.
+- [x] Implement read-only inventory and coverage calculation.
+- [x] Implement CLI JSON/summary output suitable for storing with a seed-release review.
+- [x] Run coverage package/command tests.
+- [x] Commit with `jj commit -m "ontology: measure terminology seed coverage"`.
 
 ## Task 1: Governed source registry and generic catalog schema
 

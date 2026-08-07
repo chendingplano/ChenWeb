@@ -2,8 +2,10 @@ package terminology
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -39,7 +41,7 @@ func TestBuildCoverageOrdersConceptsByFrequencyThenIdentity(t *testing.T) {
 
 func TestBuildCoverageIsolatesSelectedScopeAndCorpus(t *testing.T) {
 	acceptance := Acceptance{
-		SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec", ArtifactIDs: []string{"pilot-1"}}}, Approver: "board",
+		SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec", ArtifactIDs: []string{"pilot-1"}}}, TargetCoverage: 0.5, Approver: "board",
 		TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"},
 	}
 	report, err := BuildCoverage(acceptance, CorpusData{
@@ -63,7 +65,7 @@ func TestBuildCoverageIsolatesSelectedScopeAndCorpus(t *testing.T) {
 }
 
 func TestBuildCoverageGeneratesUnresolvedBilingualBacklog(t *testing.T) {
-	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
+	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
 		Concepts: []ConceptRecord{
 			{ConceptID: "english-only", PrefLabel: "Luminance", Scope: "display", Status: "active"},
 			{ConceptID: "bilingual", PrefLabel: "Contrast", Scope: "display", Status: "active"},
@@ -93,7 +95,7 @@ func TestBuildCoverageGeneratesUnresolvedBilingualBacklog(t *testing.T) {
 }
 
 func TestBuildCoverageDoesNotCountOffCorpusCatalogAliasAsObserved(t *testing.T) {
-	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec", ArtifactIDs: []string{"pilot"}}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
+	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec", ArtifactIDs: []string{"pilot"}}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
 		Concepts: []ConceptRecord{{ConceptID: "luminance", PrefLabel: "Luminance", Scope: "display", Status: "active"}},
 		Surfaces: []SurfaceRecord{
 			{ConceptID: "luminance", Surface: "luminance", NormKey: "luminance", Lang: "en", Scope: "display"},
@@ -125,7 +127,7 @@ func TestBuildCoverageDoesNotCountOffCorpusCatalogAliasAsObserved(t *testing.T) 
 }
 
 func TestBuildCoverageDoesNotInventBilingualPairAcrossConcepts(t *testing.T) {
-	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
+	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
 		Concepts: []ConceptRecord{
 			{ConceptID: "english", PrefLabel: "Brightness", Scope: "display", Status: "active"},
 			{ConceptID: "chinese", PrefLabel: "亮度", Scope: "display", Status: "provisional"},
@@ -153,7 +155,7 @@ func TestBuildCoverageDoesNotInventBilingualPairAcrossConcepts(t *testing.T) {
 }
 
 func TestBuildCoverageDoesNotInferLanguageFromScript(t *testing.T) {
-	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
+	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
 		Concepts: []ConceptRecord{{ConceptID: "unmatched", PrefLabel: "Unmatched", Scope: "display", Status: "active"}},
 		Occurrences: []OccurrenceRecord{
 			{OccurrenceID: 1, ArtifactType: "spec", RawName: "Unregistered Latin", Scope: "display", ConceptID: "unmatched", NormKey: "unregistered latin"},
@@ -174,7 +176,7 @@ func TestBuildCoverageDoesNotInferLanguageFromScript(t *testing.T) {
 }
 
 func TestBuildCoverageTreatsAmbiguousCatalogLanguageMatchAsUndetermined(t *testing.T) {
-	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
+	report, err := BuildCoverage(Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}, CorpusData{
 		Concepts: []ConceptRecord{{ConceptID: "ambiguous-lang", PrefLabel: "Shared", Scope: "display", Status: "active"}},
 		Surfaces: []SurfaceRecord{
 			{ConceptID: "ambiguous-lang", Surface: "shared", NormKey: "shared", Lang: "en", Scope: "display"},
@@ -256,6 +258,50 @@ func TestBuildCoverageCalculatesTargetAndRiskReadiness(t *testing.T) {
 	}
 }
 
+func TestAcceptanceRejectsMissingTargetCoverage(t *testing.T) {
+	acceptance := Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}
+	if err := acceptance.Validate(); err == nil || !strings.Contains(err.Error(), "target_coverage") {
+		t.Fatalf("err=%v, want target_coverage validation", err)
+	}
+}
+
+func TestBuildCoverageEmptyEligibleCorpusIsNotReady(t *testing.T) {
+	acceptance := Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}
+	report, err := BuildCoverage(acceptance, CorpusData{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.EligibleFrequency != 0 || report.TargetMet || report.Ready {
+		t.Fatalf("empty corpus report=%+v", report)
+	}
+}
+
+func TestBuildCoverageRiskTermRequiresEligibleObservation(t *testing.T) {
+	acceptance := Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec"}}, TargetCoverage: 1, RiskTerms: []string{"brightness"}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}
+	report, err := BuildCoverage(acceptance, CorpusData{
+		Concepts: []ConceptRecord{
+			{ConceptID: "eligible", PrefLabel: "Luminance", Scope: "display", Status: "active", ExactAuthority: true},
+			{ConceptID: "ambiguous", PrefLabel: "Brightness", Scope: "display", Status: "active", ExactAuthority: true},
+		},
+		Surfaces: []SurfaceRecord{
+			{ConceptID: "eligible", Surface: "luminance", NormKey: "luminance", Lang: "en", Scope: "display"},
+			{ConceptID: "ambiguous", Surface: "brightness", NormKey: "brightness", Lang: "en", Scope: "display"},
+			{ConceptID: "ambiguous", Surface: "display level", NormKey: "display level", Lang: "en", Scope: "display"},
+		},
+		Occurrences: []OccurrenceRecord{
+			{OccurrenceID: 1, ArtifactType: "spec", RawName: "luminance", Scope: "display", ConceptID: "eligible", NormKey: "luminance", ResolutionStatus: "lexical_resolved"},
+			{OccurrenceID: 2, ArtifactType: "spec", RawName: "brightness", Scope: "display", ConceptID: "ambiguous", NormKey: "brightness", ResolutionStatus: "ambiguous"},
+			{OccurrenceID: 3, ArtifactType: "spec", RawName: "display level", Scope: "display", ConceptID: "ambiguous", NormKey: "display level", ResolutionStatus: "lexical_resolved"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.TargetMet || report.RiskTermsMet || report.Ready || !reflect.DeepEqual(report.UncoveredRiskTerms, []string{"brightness"}) {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
 type recordingReader struct {
 	query CoverageQuery
 }
@@ -267,7 +313,7 @@ func (r *recordingReader) Load(_ context.Context, query CoverageQuery) (CorpusDa
 
 func TestMeasurePassesAcceptanceSelectionToReader(t *testing.T) {
 	r := &recordingReader{}
-	acceptance := Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec", ArtifactIDs: []string{"pilot"}}}, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}
+	acceptance := Acceptance{SchemaVersion: 1, Scope: "display", Corpus: []CorpusRef{{ArtifactType: "spec", ArtifactIDs: []string{"pilot"}}}, TargetCoverage: 0.5, Approver: "board", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}}
 	if _, err := Measure(context.Background(), r, acceptance); err != nil {
 		t.Fatal(err)
 	}
@@ -283,6 +329,7 @@ func TestSQLReaderLoadsObservedSurfaceAndOccurrenceProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts c")).
 		WithArgs("display", "iec-seed", "v1").
 		WillReturnRows(sqlmock.NewRows([]string{"concept_id", "pref_label", "scope", "status", "exact_authority"}).
@@ -295,6 +342,7 @@ func TestSQLReaderLoadsObservedSurfaceAndOccurrenceProvenance(t *testing.T) {
 		WithArgs("display").
 		WillReturnRows(sqlmock.NewRows([]string{"occurrence_id", "artifact_type", "artifact_id", "field_path", "raw_name", "concept_id", "norm_key", "scope", "resolution_status"}).
 			AddRow(9, "spec", "pilot", "metrics[0].name", "Luminance", "c1", "luminance", "display", "lexical_resolved"))
+	mock.ExpectCommit()
 
 	data, err := (SQLReader{DB: db}).Load(context.Background(), CoverageQuery{Scope: "display", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}})
 	if err != nil {
@@ -303,6 +351,27 @@ func TestSQLReaderLoadsObservedSurfaceAndOccurrenceProvenance(t *testing.T) {
 	want := OccurrenceRecord{OccurrenceID: 9, ArtifactType: "spec", ArtifactID: "pilot", FieldPath: "metrics[0].name", RawName: "Luminance", ConceptID: "c1", NormKey: "luminance", Scope: "display", ResolutionStatus: "lexical_resolved"}
 	if !reflect.DeepEqual(data.Occurrences, []OccurrenceRecord{want}) {
 		t.Fatalf("occurrences=%+v", data.Occurrences)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLReaderRollsBackSnapshotOnReadError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.keyword_concepts c")).
+		WithArgs("display", "iec-seed", "v1").
+		WillReturnError(errors.New("read failed"))
+	mock.ExpectRollback()
+
+	_, err = (SQLReader{DB: db}).Load(context.Background(), CoverageQuery{Scope: "display", TargetSeedRelease: SeedRelease{Source: "iec-seed", Release: "v1"}})
+	if err == nil || !strings.Contains(err.Error(), "query concepts") {
+		t.Fatalf("err=%v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

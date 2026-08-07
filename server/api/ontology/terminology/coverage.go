@@ -48,8 +48,8 @@ func (a Acceptance) Validate() error {
 			return fmt.Errorf("corpus[%d].artifact_type is required", i)
 		}
 	}
-	if a.TargetCoverage < 0 || a.TargetCoverage > 1 {
-		return fmt.Errorf("target_coverage must be between 0 and 1")
+	if a.TargetCoverage <= 0 || a.TargetCoverage > 1 {
+		return fmt.Errorf("target_coverage must be greater than 0 and at most 1")
 	}
 	if strings.TrimSpace(a.Approver) == "" {
 		return fmt.Errorf("approver is required")
@@ -275,17 +275,11 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 		addSet(observedLanguages, occurrence.ConceptID, lang)
 		addSet(normObservedSurfaces, occurrence.NormKey, surface)
 		addSet(normObservedConcepts, occurrence.NormKey, occurrence.ConceptID)
-		addSet(termConcepts, normalizedTerm(surface), occurrence.ConceptID)
 		if !contextNorms[occurrence.NormKey] {
 			eligibleFrequency[occurrence.ConceptID]++
+			addSet(termConcepts, normalizedTerm(surface), occurrence.ConceptID)
 		}
 	}
-	for id, concept := range concepts {
-		if totalFrequency[id] > 0 {
-			addSet(termConcepts, normalizedTerm(concept.PrefLabel), id)
-		}
-	}
-
 	report := CoverageReport{
 		SchemaVersion: AcceptanceSchemaVersion, Scope: acceptance.Scope,
 		Corpus: acceptance.Corpus, TargetSeedRelease: acceptance.TargetSeedRelease,
@@ -345,12 +339,12 @@ func BuildCoverage(acceptance Acceptance, data CorpusData) (CoverageReport, erro
 	if report.EligibleFrequency > 0 {
 		report.Coverage = float64(report.CoveredFrequency) / float64(report.EligibleFrequency)
 	}
-	report.TargetMet = report.Coverage >= acceptance.TargetCoverage
+	report.TargetMet = report.EligibleFrequency > 0 && report.Coverage >= acceptance.TargetCoverage
 	for _, risk := range acceptance.RiskTerms {
 		ids := termConcepts[normalizedTerm(risk)]
 		covered := len(ids) > 0
 		for id := range ids {
-			if !concepts[id].ExactAuthority || totalFrequency[id] == 0 {
+			if !concepts[id].ExactAuthority || eligibleFrequency[id] == 0 {
 				covered = false
 				break
 			}
@@ -517,17 +511,23 @@ func inCorpus(occurrence OccurrenceRecord, corpus []CorpusRef) bool {
 	return false
 }
 
-type SQLQueryer interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+type SQLBeginner interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 }
 
 type SQLReader struct {
-	DB SQLQueryer
+	DB SQLBeginner
 }
 
 func (r SQLReader) Load(ctx context.Context, query CoverageQuery) (CorpusData, error) {
 	var data CorpusData
-	rows, err := r.DB.QueryContext(ctx, `
+	tx, err := r.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return CorpusData{}, fmt.Errorf("begin read-only coverage snapshot: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
 		SELECT c.concept_id, c.pref_label, c.scope, c.status,
 		       EXISTS (
 		           SELECT 1
@@ -556,7 +556,7 @@ func (r SQLReader) Load(ctx context.Context, query CoverageQuery) (CorpusData, e
 	}
 	rows.Close()
 
-	rows, err = r.DB.QueryContext(ctx, `
+	rows, err = tx.QueryContext(ctx, `
 		SELECT s.concept_id, s.surface, s.norm_key, s.lang, s.scope
 		FROM kb.keyword_surfaces s
 		JOIN kb.keyword_concepts c ON c.concept_id = s.concept_id
@@ -579,7 +579,7 @@ func (r SQLReader) Load(ctx context.Context, query CoverageQuery) (CorpusData, e
 	}
 	rows.Close()
 
-	rows, err = r.DB.QueryContext(ctx, `
+	rows, err = tx.QueryContext(ctx, `
 		SELECT occurrence_id, artifact_type, artifact_id, field_path, raw_name,
 		       COALESCE(concept_id, ''), norm_key, scope, resolution_status
 		FROM kb.keyword_occurrences
@@ -601,6 +601,12 @@ func (r SQLReader) Load(ctx context.Context, query CoverageQuery) (CorpusData, e
 	}
 	if err := rows.Err(); err != nil {
 		return CorpusData{}, fmt.Errorf("iterate occurrences: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return CorpusData{}, fmt.Errorf("close occurrences: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return CorpusData{}, fmt.Errorf("commit read-only coverage snapshot: %w", err)
 	}
 	return data, nil
 }

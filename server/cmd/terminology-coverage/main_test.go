@@ -102,6 +102,21 @@ func TestExecuteRejectsMissingGovernanceFields(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsMissingTargetCoverage(t *testing.T) {
+	path := writeAcceptance(t, `{
+  "schema_version": 1,
+  "scope": "display",
+  "corpus": [{"artifact_type":"spec"}],
+  "approver": "ontology-board",
+  "target_seed_release": {"source":"iec-seed","release":"v1"}
+}`)
+	var stdout, stderr bytes.Buffer
+	code := execute(context.Background(), []string{"--acceptance", path}, &stdout, &stderr, nil)
+	if code != 2 || !strings.Contains(stderr.String(), "target_coverage") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func writeAcceptance(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "acceptance.json")
