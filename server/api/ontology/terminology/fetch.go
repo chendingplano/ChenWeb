@@ -87,6 +87,10 @@ type Resource struct {
 	// Cadence is the upstream update cadence shown on the admin page
 	// ("weekly" for Wikidata); empty means the release is pinned/fixed.
 	Cadence string
+	// Accept is the HTTP Accept header requested from the upstream endpoint
+	// when non-empty. SIRP's /quantities endpoint content-negotiates Turtle
+	// and returns a flat JSON array otherwise.
+	Accept string
 	ProviderID             string
 	Source                 string
 	SourceSubset           string
@@ -136,8 +140,9 @@ var resources = []Resource{
 		URL:         "https://si-digital-framework.org/quantities",
 		Release:     "1.0.0", License: "CC-BY-3.0-IGO",
 		LicenseURL:   "https://github.com/TheBIPM/SI_Digital_Framework/blob/main/LICENCE",
-		Downloadable: true, Artifact: "quantities.json", MediaType: "application/json", MaxBytes: 16 << 20,
-		ExpectedSizeBytes: 1 << 20, // quantities index is well under 1 MB
+		Downloadable: true, Artifact: "quantities.ttl", MediaType: "text/turtle", MaxBytes: 16 << 20,
+		Accept: "text/turtle", // /quantities returns JSON unless Turtle is requested
+		ExpectedSizeBytes: 64 << 10, // measured 2026-08-07 quantities.ttl is ~48 KB
 		ProviderID: "bipm", Source: "bipm-sirp-quantity", SourceSubset: "quantities",
 		Adapter: "bipm-sirp-quantity", AdapterVersion: "1.0.0",
 		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
@@ -322,7 +327,7 @@ func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOpti
 			rel = "dump-" + cfg.now.Format("2006-01-02")
 		}
 	default:
-		sha, size, err = downloadToFile(ctx, client, sourceURL, artifactPath, res.MaxBytes, onProgress)
+		sha, size, err = downloadToFile(ctx, client, sourceURL, artifactPath, res.MaxBytes, res.Accept, onProgress)
 	}
 	if err != nil {
 		st := FetchStatus{Source: string(id), Release: rel, Downloaded: false, Error: err.Error()}
@@ -566,10 +571,13 @@ func atomicWrite(path string, b []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-func downloadToFile(ctx context.Context, client *http.Client, sourceURL, destPath string, maxBytes int64, onProgress func(done, total int64)) (string, int64, error) {
+func downloadToFile(ctx context.Context, client *http.Client, sourceURL, destPath string, maxBytes int64, accept string, onProgress func(done, total int64)) (string, int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return "", 0, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
 	}
 	req.Header.Set("User-Agent", defaultUserAgent)
 	resp, err := client.Do(req)

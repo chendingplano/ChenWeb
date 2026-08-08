@@ -156,6 +156,11 @@ func TestSIRPAdapterPreservesIdentitiesLanguagesAndDeprecation(t *testing.T) {
 	if obsolete.ExternalID != "https://si-digital-framework.org/quantities/LUMINANCE-OBSOLETE" || obsolete.EntryStatus != "deprecated" {
 		t.Fatalf("obsolete=%+v", obsolete)
 	}
+	for _, entry := range snapshot.Entries {
+		if entry.ExternalID == "https://si-digital-framework.org/quantities/" {
+			t.Fatalf("the ontology header must not be imported as an entry: %+v", snapshot.Entries)
+		}
+	}
 
 	lumaLabels := map[string]string{}
 	obsoleteLabels := map[string]string{}

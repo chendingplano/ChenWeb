@@ -202,6 +202,32 @@ func TestFetchHTTPErrorPersistsStatus(t *testing.T) {
 	}
 }
 
+func TestFetchSIRPRequestsTurtleAndWritesTTLArtifact(t *testing.T) {
+	payload := "@prefix si: <https://si-digital-framework.org/SI#> .\n" +
+		"<https://si-digital-framework.org/quantities/LUMA> a si:QuantityKind ;" +
+		" skos:prefLabel \"luminance\"@en .\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "text/turtle" {
+			t.Errorf("Accept = %q, want text/turtle", got)
+		}
+		w.Header().Set("Content-Type", "text/turtle")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	st, err := Fetch(context.Background(), ResourceSIRP, dir, WithURLOverride(ResourceSIRP, srv.URL))
+	if err != nil {
+		t.Fatalf("Fetch sirp: %v", err)
+	}
+	if st.Artifact != "quantities.ttl" || st.SHA256 != sha256Hex(payload) {
+		t.Fatalf("status = %+v, want quantities.ttl artifact", st)
+	}
+	if _, err := os.Stat(filepath.Join(dir, string(ResourceSIRP), "quantities.ttl")); err != nil {
+		t.Fatalf("quantities.ttl artifact missing: %v", err)
+	}
+}
+
 func TestFetchReportsProgressWhileDownloading(t *testing.T) {
 	chunks := [][]byte{
 		bytes.Repeat([]byte("a"), 4096),

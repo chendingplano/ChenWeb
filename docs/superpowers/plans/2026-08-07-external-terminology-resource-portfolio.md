@@ -394,6 +394,41 @@ Wikidata pilot snapshot (`dump-2026-08-08`, 44,417 bytes) into
 External Terminology Resources page now lists the fresh Wikidata draft under
 Review External Resources for operator approval.
 
+## Task 12: SIRP Turtle fetch and adapter alignment
+
+**Problem:** The BIPM SIRP `/quantities` endpoint content-negotiates: it
+returns a flat JSON array by default and Turtle only when the request sends
+`Accept: text/turtle`. The catalog entry declared a `quantities.json` JSON
+artifact while the adapter parsed Turtle, so the first live SIRP approval
+failed with `sirp turtle parse: ... expected predicate`, and the ontology's
+real `si:QuantityKind` class did not match the adapter's `ont#Quantity`.
+
+**Files:**
+- Modify: `server/api/ontology/terminology/fetch.go` (+ `fetch_test.go`),
+  `server/api/ontology/terminology/sirp.go`,
+  `server/api/ontology/terminology/adapter_test.go`,
+  `server/api/ontology/terminology/testdata/fixtures/sirp/quantities.ttl`,
+  `server/api/ontology/terminology/testdata/fixtures/sirp/manifest.json`,
+  `server/api/ontology/terminology/testdata/malformed/sirp/unknown-relation.ttl`
+
+**Interfaces:**
+- The SIRP catalog entry now declares `quantities.ttl` (`text/turtle`), and
+  the fetch sends a per-resource `Accept` header (`text/turtle` for SIRP) so
+  the endpoint serves the Turtle representation the adapter consumes.
+- The adapter recognizes subjects typed `si:QuantityKind` as quantities and
+  ignores the ontology header, provenance entities, and blank-node unit
+  expressions; unknown skos/owl/rdfs predicates on quantity subjects still
+  fail closed.
+
+- [x] Reproduce the SIRP parse failure against the real downloaded artifact.
+- [x] Request Turtle via `Accept` and align the catalog artifact/media type.
+- [x] Adapt the parser to the real `si:QuantityKind` ontology structure.
+- [x] Update fixtures/manifest checksums and adapter/fetch tests.
+- [x] Re-fetch SIRP and verify the real file converts (149 entries, 447
+      labels: en+fr preferred plus code alternative labels; 0 relations —
+      the current dump carries no exactMatch links).
+- [x] Update this plan; commit with `jj`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge

@@ -1,17 +1,28 @@
-@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
-@prefix sio: <https://si-digital-framework.org/ont#> .
+@prefix si: <https://si-digital-framework.org/SI#> .
+@prefix quantities: <https://si-digital-framework.org/quantities/> .
+@prefix units: <https://si-digital-framework.org/SI/units/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<https://si-digital-framework.org/quantities/LUMA> a sio:Quantity ;
-    rdfs:label "luminance"@en ;
-    rdfs:label "luminance"@en ;
-    rdfs:label "luminance énergétique"@fr ;
+quantities: a owl:Ontology ;
+    rdfs:comment "Ontology, part of the SI reference point, covering quantities" ;
+    skos:prefLabel "SI Reference Point - Quantities"^^xsd:string .
+
+quantities:LUMA a si:QuantityKind ;
+    skos:altLabel "LUMA"^^xsd:string ;
+    skos:prefLabel "luminance"@en ;
+    skos:prefLabel "luminance"@en ;
+    skos:prefLabel "luminance énergétique"@fr ;
     skos:altLabel "photometric luminance"@en ;
-    skos:exactMatch <https://si-digital-framework.org/quantities/LUMINANCE-OBSOLETE> .
+    skos:exactMatch <https://si-digital-framework.org/quantities/LUMINANCE-OBSOLETE> ;
+    si:hasUnit [ a si:UnitProduct ;
+        si:hasLeftUnitTerm [ a si:UnitPower ;
+            si:hasUnitBase units:candela ] ] .
 
-<https://si-digital-framework.org/quantities/LUMINANCE-OBSOLETE> a sio:Quantity ;
+quantities:LUMINANCE-OBSOLETE a si:QuantityKind ;
+    skos:altLabel "LUMINANCE-OBSOLETE"^^xsd:string ;
+    skos:prefLabel "luminance (obsolete)"@en ;
     owl:deprecated true ;
-    rdfs:label "luminance (obsolete)"@en ;
     skos:exactMatch <https://si-digital-framework.org/quantities/LUMA> .

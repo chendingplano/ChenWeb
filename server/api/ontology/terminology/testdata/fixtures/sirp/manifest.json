@@ -31,7 +31,7 @@
     {
       "id": "quantities.ttl",
       "path": "quantities.ttl",
-      "sha256": "27d1e977e3ccc58cf84cb4d2d7ce3861e2dc576c386bbff5285e7b8036df4fb0",
+      "sha256": "0ff8b91dd34ced2bfc70f8ea1b0439b93730f10dffe41b7d4a99ce07f2b06bc6",
       "media_type": "text/turtle",
       "provenance_locator": "https://si-digital-framework.org/quantities.ttl"
     }

@@ -14,7 +14,11 @@ import (
 )
 
 const (
-	sirpQuantityClass = "https://si-digital-framework.org/ont#Quantity"
+	// The SIRP quantities endpoint serves an ontology document whose
+	// quantities are typed si:QuantityKind; the same document also carries an
+	// owl:Ontology header, provenance entities, and blank-node unit
+	// expressions that are not quantities.
+	sirpQuantityClass = "https://si-digital-framework.org/SI#QuantityKind"
 
 	sirpRDFType        = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
 	sirpRDFSLabel      = "http://www.w3.org/2000/01/rdf-schema#label"
@@ -65,7 +69,24 @@ func (a SIRPAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 	}
 	quantities := map[string]*quantity{}
 	for triple := range graph.IterTriples() {
+		if triple.Predicate.RawValue() == sirpRDFType && triple.Object.RawValue() == sirpQuantityClass {
+			subject := triple.Subject.RawValue()
+			quantities[subject] = &quantity{labels: map[string]bool{}, relations: map[string]bool{}}
+		}
+	}
+	if len(quantities) == 0 {
+		return CatalogSnapshot{}, errors.New("sirp turtle contains no quantities")
+	}
+
+	for triple := range graph.IterTriples() {
 		predicate := triple.Predicate.RawValue()
+		subject := triple.Subject.RawValue()
+		q, ok := quantities[subject]
+		if !ok {
+			// Ontology header, provenance entities, and blank-node unit
+			// expressions are not quantities; ignore their triples.
+			continue
+		}
 		if !sirpAllowedPredicates[predicate] {
 			for _, namespace := range relationPredicateNamespaces {
 				if strings.HasPrefix(predicate, namespace) {
@@ -74,17 +95,7 @@ func (a SIRPAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 			}
 			continue
 		}
-		subject := triple.Subject.RawValue()
-		q, ok := quantities[subject]
-		if !ok {
-			q = &quantity{labels: map[string]bool{}, relations: map[string]bool{}}
-			quantities[subject] = q
-		}
 		switch predicate {
-		case sirpRDFType:
-			if triple.Object.RawValue() != sirpQuantityClass {
-				return CatalogSnapshot{}, fmt.Errorf("SIRP subject %q is not a quantity", subject)
-			}
 		case sirpOWLDeprecated:
 			q.deprecated = true
 		case sirpRDFSLabel, sirpSKOSPrefLabel, sirpSKOSAltLabel:
@@ -110,9 +121,6 @@ func (a SIRPAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 		case sirpSKOSRelated:
 			q.relations[relationKey(subject, "related", policy.Source, policy.Release, triple.Object.RawValue())] = true
 		}
-	}
-	if len(quantities) == 0 {
-		return CatalogSnapshot{}, errors.New("sirp turtle contains no quantities")
 	}
 
 	snapshot := CatalogSnapshot{}
