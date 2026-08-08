@@ -80,6 +80,13 @@ type Resource struct {
 	Artifact               string
 	MediaType              string
 	MaxBytes               int64
+	// ExpectedSizeBytes is the typical artifact size in bytes shown before
+	// download; 0 means the size varies with the snapshot (for example the
+	// weekly Wikidata pilot subset).
+	ExpectedSizeBytes int64
+	// Cadence is the upstream update cadence shown on the admin page
+	// ("weekly" for Wikidata); empty means the release is pinned/fixed.
+	Cadence string
 	ProviderID             string
 	Source                 string
 	SourceSubset           string
@@ -100,6 +107,7 @@ var resources = []Resource{
 		Release:     "3.5.0", License: "CC-BY-4.0",
 		LicenseURL:   "https://www.qudt.org/catalog/qudt-catalog.html",
 		Downloadable: true, Artifact: "qudt-all.ttl", MediaType: "text/turtle", MaxBytes: 256 << 20,
+		ExpectedSizeBytes: 6_858_424, // measured 2026-08-07 qudt-all.ttl
 		ProviderID: "qudt", Source: "qudt", SourceSubset: "catalog",
 		Adapter: "qudt-quantity-kind", AdapterVersion: "3.5.0",
 		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
@@ -114,6 +122,7 @@ var resources = []Resource{
 		Release:     "2.2", License: "UCUM-License-1.1",
 		LicenseURL:   "https://ucum.org/license",
 		Downloadable: true, Artifact: "ucum-essence.xml", MediaType: "application/xml", MaxBytes: 16 << 20,
+		ExpectedSizeBytes: 2 << 20, // ucum-essence.xml is ~1.5 MB
 		ProviderID: "ucum", Source: "ucum", SourceSubset: "essence",
 		Adapter: "ucum", AdapterVersion: "0.1.0",
 		AuthorityRole: keywords.ContextOnly, AuthoritativeRelations: nil,
@@ -128,6 +137,7 @@ var resources = []Resource{
 		Release:     "1.0.0", License: "CC-BY-3.0-IGO",
 		LicenseURL:   "https://github.com/TheBIPM/SI_Digital_Framework/blob/main/LICENCE",
 		Downloadable: true, Artifact: "quantities.json", MediaType: "application/json", MaxBytes: 16 << 20,
+		ExpectedSizeBytes: 1 << 20, // quantities index is well under 1 MB
 		ProviderID: "bipm", Source: "bipm-sirp-quantity", SourceSubset: "quantities",
 		Adapter: "bipm-sirp-quantity", AdapterVersion: "1.0.0",
 		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
@@ -143,6 +153,8 @@ var resources = []Resource{
 		License:      "CC0-1.0",
 		LicenseURL:   "https://www.wikidata.org/wiki/Wikidata:Licensing",
 		Downloadable: true, Artifact: "snapshot.jsonl", MediaType: "application/x-ndjson", MaxBytes: 32 << 20,
+		ExpectedSizeBytes: 0, // varies with the pinned entity subset; cap below
+		Cadence:           "weekly", // Wikipedia/Wikidata publishes fresh dumps weekly
 		ProviderID: "wikimedia", Source: "wikidata", SourceSubset: "pilot",
 		Adapter: "wikidata", AdapterVersion: "0.1.0",
 		AuthorityRole: keywords.ProposalOnly, AuthoritativeRelations: nil,
@@ -179,19 +191,34 @@ func ResourceByID(id ResourceID) (Resource, bool) {
 	return Resource{}, false
 }
 
+// Dir resolves the fetch storage directory from TERMINOLOGY_DIR, else
+// <DATA_HOME_DIR>/terminology. Empty means neither is configured.
+func Dir() string {
+	if v := strings.TrimSpace(os.Getenv("TERMINOLOGY_DIR")); v != "" {
+		return v
+	}
+	if home := strings.TrimSpace(os.Getenv("DATA_HOME_DIR")); home != "" {
+		return filepath.Join(home, "terminology")
+	}
+	return ""
+}
+
 // FetchStatus is the persisted per-source download state under
 // <terminology-dir>/<source>/status.json.
 type FetchStatus struct {
-	Source        string    `json:"source"`
-	Release       string    `json:"release"`
-	Downloaded    bool      `json:"downloaded"`
-	DownloadedAt  time.Time `json:"downloaded_at,omitempty"`
-	SHA256        string    `json:"sha256,omitempty"`
-	SizeBytes     int64     `json:"size_bytes,omitempty"`
-	Artifact      string    `json:"artifact,omitempty"`
-	SourceURL     string    `json:"source_url,omitempty"`
-	ManifestDraft string    `json:"manifest_draft,omitempty"`
-	Error         string    `json:"error,omitempty"`
+	Source         string    `json:"source"`
+	Release        string    `json:"release"`
+	Downloaded     bool      `json:"downloaded"`
+	Downloading    bool      `json:"downloading,omitempty"`
+	DownloadedBytes int64    `json:"downloaded_bytes,omitempty"`
+	TotalBytes     int64     `json:"total_bytes,omitempty"`
+	DownloadedAt   time.Time `json:"downloaded_at,omitempty"`
+	SHA256         string    `json:"sha256,omitempty"`
+	SizeBytes      int64     `json:"size_bytes,omitempty"`
+	Artifact       string    `json:"artifact,omitempty"`
+	SourceURL      string    `json:"source_url,omitempty"`
+	ManifestDraft  string    `json:"manifest_draft,omitempty"`
+	Error          string    `json:"error,omitempty"`
 }
 
 type fetchConfig struct {
@@ -261,10 +288,27 @@ func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOpti
 	}
 	artifactPath := filepath.Join(sourceDir, res.Artifact)
 
+	// Mark the download as in progress so the admin page can render progress
+	// while it streams; the final write below overwrites this state.
+	rel := res.Release
+	_ = writeStatusFile(sourceDir, FetchStatus{Source: string(id), Release: rel, Downloading: true})
+
+	lastProgress := time.Time{}
+	onProgress := func(done, total int64) {
+		now := time.Now().UTC()
+		if now.Sub(lastProgress) < 500*time.Millisecond {
+			return
+		}
+		lastProgress = now
+		_ = writeStatusFile(sourceDir, FetchStatus{
+			Source: string(id), Release: rel, Downloading: true,
+			DownloadedBytes: done, TotalBytes: total,
+		})
+	}
+
 	var (
 		sha  string
 		size int64
-		rel  = res.Release
 		err  error
 	)
 	switch id {
@@ -273,12 +317,12 @@ func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOpti
 		if len(titles) == 0 {
 			titles = defaultWikidataTitles()
 		}
-		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, titles, res.MaxBytes)
+		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, titles, res.MaxBytes, onProgress)
 		if rel == "" {
 			rel = "dump-" + cfg.now.Format("2006-01-02")
 		}
 	default:
-		sha, size, err = downloadToFile(ctx, client, sourceURL, artifactPath, res.MaxBytes)
+		sha, size, err = downloadToFile(ctx, client, sourceURL, artifactPath, res.MaxBytes, onProgress)
 	}
 	if err != nil {
 		st := FetchStatus{Source: string(id), Release: rel, Downloaded: false, Error: err.Error()}
@@ -522,7 +566,7 @@ func atomicWrite(path string, b []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-func downloadToFile(ctx context.Context, client *http.Client, sourceURL, destPath string, maxBytes int64) (string, int64, error) {
+func downloadToFile(ctx context.Context, client *http.Client, sourceURL, destPath string, maxBytes int64, onProgress func(done, total int64)) (string, int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return "", 0, err
@@ -536,17 +580,42 @@ func downloadToFile(ctx context.Context, client *http.Client, sourceURL, destPat
 	if resp.StatusCode != http.StatusOK {
 		return "", 0, fmt.Errorf("GET %s: %s", sourceURL, resp.Status)
 	}
-	return writeStreamed(resp.Body, destPath, maxBytes)
+	total := resp.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	return writeStreamed(resp.Body, destPath, maxBytes, func(written int64) {
+		if onProgress != nil {
+			onProgress(written, total)
+		}
+	})
 }
 
-func writeStreamed(r io.Reader, destPath string, maxBytes int64) (string, int64, error) {
+// progressWriter reports bytes written through it without storing them, so
+// io.Copy can stream progress for one download.
+type progressWriter struct {
+	cb func(int64)
+}
+
+func (w *progressWriter) Write(b []byte) (int, error) {
+	if w.cb != nil {
+		w.cb(int64(len(b)))
+	}
+	return len(b), nil
+}
+
+func writeStreamed(r io.Reader, destPath string, maxBytes int64, onProgress func(written int64)) (string, int64, error) {
 	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".fetch-*")
 	if err != nil {
 		return "", 0, err
 	}
 	defer os.Remove(tmp.Name())
 	h := sha256.New()
-	written, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(r, maxBytes+1))
+	writers := []io.Writer{tmp, h}
+	if onProgress != nil {
+		writers = append(writers, &progressWriter{cb: onProgress})
+	}
+	written, err := io.Copy(io.MultiWriter(writers...), io.LimitReader(r, maxBytes+1))
 	if err != nil {
 		tmp.Close()
 		return "", 0, err
@@ -567,7 +636,7 @@ func writeStreamed(r io.Reader, destPath string, maxBytes int64) (string, int64,
 // fetchWikidataSnapshot calls wbgetentities for the pinned pilot titles and
 // writes one JSON object per entity (labels, aliases, descriptions, claims,
 // sitelinks, lastrevid) as JSONL. It returns the effective source URL used.
-func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, titles []string, maxBytes int64) (string, int64, string, error) {
+func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, titles []string, maxBytes int64, onProgress func(done, total int64)) (string, int64, string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", 0, "", err
@@ -598,6 +667,9 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return "", 0, "", err
+	}
+	if onProgress != nil {
+		onProgress(int64(len(body)), int64(len(body)))
 	}
 	if int64(len(body)) > maxBytes {
 		return "", 0, "", fmt.Errorf("response exceeds %d bytes", maxBytes)
@@ -641,6 +713,9 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 	}
 	if err := atomicWrite(destPath, buf.Bytes()); err != nil {
 		return "", 0, "", err
+	}
+	if onProgress != nil {
+		onProgress(int64(buf.Len()), int64(buf.Len()))
 	}
 	return hex.EncodeToString(h.Sum(nil)), int64(buf.Len()), effectiveURL, nil
 }

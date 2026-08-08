@@ -1,11 +1,13 @@
 package terminology
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -197,6 +199,65 @@ func TestFetchHTTPErrorPersistsStatus(t *testing.T) {
 	st, rerr := ReadStatus(dir, ResourceUCUM)
 	if rerr != nil || st.Downloaded || st.Error == "" {
 		t.Fatalf("status = %+v err=%v", st, rerr)
+	}
+}
+
+func TestFetchReportsProgressWhileDownloading(t *testing.T) {
+	chunks := [][]byte{
+		bytes.Repeat([]byte("a"), 4096),
+		bytes.Repeat([]byte("b"), 4096),
+		bytes.Repeat([]byte("c"), 4096),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/turtle")
+		w.Header().Set("Content-Length", fmt.Sprint(len(chunks[0])+len(chunks[1])+len(chunks[2])))
+		fl, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("response writer does not support flushing")
+			return
+		}
+		for _, c := range chunks {
+			_, _ = w.Write(c)
+			fl.Flush()
+			time.Sleep(150 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	type result struct {
+		st  FetchStatus
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		st, err := Fetch(context.Background(), ResourceQUDT, dir, WithURLOverride(ResourceQUDT, srv.URL))
+		done <- result{st: st, err: err}
+	}()
+
+	// The server persists a "downloading" status with bytes so far while the
+	// artifact still streams; poll until we observe one mid-download.
+	var sawProgress bool
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := ReadStatus(dir, ResourceQUDT)
+		if err == nil && st.Downloading && st.DownloadedBytes > 0 && st.TotalBytes > 0 {
+			sawProgress = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !sawProgress {
+		t.Fatal("did not observe a downloading progress status during fetch")
+	}
+
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("Fetch: %v", got.err)
+	}
+	wantSize := int64(len(chunks[0]) + len(chunks[1]) + len(chunks[2]))
+	if !got.st.Downloaded || got.st.SizeBytes != wantSize || got.st.Downloading {
+		t.Fatalf("final status = %+v, want downloaded size %d with downloading=false", got.st, wantSize)
 	}
 }
 

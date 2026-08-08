@@ -50,6 +50,17 @@ func TestListResourcesReportsNeverDownloaded(t *testing.T) {
 	if !iec.PermissionRequired || iec.CanDownload {
 		t.Fatalf("IEC view must be permission-gated: %+v", iec)
 	}
+	qudt := findView(body.Resources, string(terminology.ResourceQUDT))
+	if qudt.ExpectedSizeBytes <= 0 {
+		t.Fatalf("QUDT expected_size_bytes = %d, want > 0", qudt.ExpectedSizeBytes)
+	}
+	wd := findView(body.Resources, string(terminology.ResourceWikidata))
+	if wd.Cadence != "weekly" {
+		t.Fatalf("Wikidata update_cadence = %q, want weekly", wd.Cadence)
+	}
+	if wd.MaxBytes <= 0 {
+		t.Fatalf("Wikidata max_bytes = %d, want > 0", wd.MaxBytes)
+	}
 }
 
 func TestListResourcesMergesPersistedStatus(t *testing.T) {
@@ -134,6 +145,35 @@ func TestListResourcesReviewStatusReflectsApproval(t *testing.T) {
 				t.Fatalf("ucum review_status = %q, want %q", ucum.ReviewStatus, tc.want)
 			}
 		})
+	}
+}
+
+func TestListResourcesExposesDownloadingProgress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMINOLOGY_DIR", dir)
+	statusDir := filepath.Join(dir, string(terminology.ResourceUCUM))
+	if err := os.MkdirAll(statusDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "status.json"), []byte(`{"source":"ucum","downloading":true,"downloaded_bytes":1234,"total_bytes":8192}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/v1/terminology-resources", nil), rec)
+	if err := ListResources(c); err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	var body struct {
+		Resources []resourceView `json:"resources"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	ucum := findView(body.Resources, string(terminology.ResourceUCUM))
+	if !ucum.Downloading || ucum.DownloadedBytes != 1234 || ucum.TotalBytes != 8192 {
+		t.Fatalf("ucum view = %+v, want downloading progress", ucum)
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,8 +42,14 @@ type resourceView struct {
 	Notes              string     `json:"notes"`
 	Downloaded         bool       `json:"downloaded"`
 	DownloadedAt       *time.Time `json:"downloaded_at"`
+	Downloading        bool       `json:"downloading"`
+	DownloadedBytes    int64      `json:"downloaded_bytes"`
+	TotalBytes         int64      `json:"total_bytes"`
 	SHA256             string     `json:"sha256"`
 	SizeBytes          int64      `json:"size_bytes"`
+	ExpectedSizeBytes  int64      `json:"expected_size_bytes"`
+	MaxBytes           int64      `json:"max_bytes"`
+	Cadence            string     `json:"update_cadence"`
 	Artifact           string     `json:"artifact"`
 	SourceURL          string     `json:"source_url"`
 	ManifestDraft      string     `json:"manifest_draft"`
@@ -69,13 +74,7 @@ type importOutcome struct {
 // explicit override; DATA_HOME_DIR is the fallback so downloads work on any
 // deployment that already sets it (mirrors videohandler).
 func terminologyDir() string {
-	if v := strings.TrimSpace(os.Getenv("TERMINOLOGY_DIR")); v != "" {
-		return v
-	}
-	if home := strings.TrimSpace(os.Getenv("DATA_HOME_DIR")); home != "" {
-		return filepath.Join(home, "terminology")
-	}
-	return ""
+	return terminology.Dir()
 }
 
 func viewFor(dir string, res terminology.Resource, st terminology.FetchStatus) resourceView {
@@ -85,6 +84,8 @@ func viewFor(dir string, res terminology.Resource, st terminology.FetchStatus) r
 		LicenseURL: res.LicenseURL, CanDownload: res.Downloadable,
 		PermissionRequired: res.PermissionRequired, Notes: res.Notes,
 		Downloaded: st.Downloaded, SHA256: st.SHA256, SizeBytes: st.SizeBytes,
+		Downloading: st.Downloading, DownloadedBytes: st.DownloadedBytes, TotalBytes: st.TotalBytes,
+		ExpectedSizeBytes: res.ExpectedSizeBytes, MaxBytes: res.MaxBytes, Cadence: res.Cadence,
 		Artifact: st.Artifact, SourceURL: st.SourceURL, ManifestDraft: st.ManifestDraft,
 		Error: st.Error,
 	}

@@ -341,6 +341,49 @@ re-approving an already imported release with byte-identical content reports
 an idempotent replay rather than an immutable-release error. The Approve /
 Disapprove / Cancel dialog flows with comments were verified in the browser.
 
+## Task 11: Download sizes, progress, and weekly Wikidata refresh
+
+**Files:**
+- Modify: `server/api/ontology/terminology/fetch.go` (+ `fetch_test.go`),
+  `server/api/terminologyresourcehandler/handler.go` (+ `handler_test.go`),
+  `server/api/kbhandler/scheduler_jobs.go` (+ `scheduler_jobs_test.go`),
+  `web/src/lib/services/terminologyResourceService.ts`,
+  `web/src/lib/components/home3/external-terminology-resources-view.svelte`
+- Modify: `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
+
+**Interfaces:**
+- The resources API now reports each resource's expected artifact size
+  (`expected_size_bytes`, measured for QUDT/UCUM/BIPM SIRP; 0 for Wikidata
+  where the snapshot varies with the pinned entity subset, capped at
+  `max_bytes`) and the upstream update cadence (`update_cadence`: `weekly`
+  for Wikidata, empty when the release is pinned). While a download streams,
+  the source's `status.json` carries live progress
+  (`downloading`/`downloaded_bytes`/`total_bytes`) that the API surfaces so
+  the page can render a progress bar without long-polling the download POST.
+- The External Terminology Resources page shows "Expected size" and "Update
+  cadence" on every card, and while a download runs renders a spinner plus a
+  progress bar (percent + bytes when the server knows the total; an
+  indeterminate bar otherwise) by polling the resources API once per second.
+- A new scheduler job type `terminology_refresh` ("Refresh External
+  Terminology Resources") re-fetches the configured sources (param
+  `sources`, comma-separated, default `wikidata`) into the local fetch
+  store, writing fresh artifacts plus unapproved draft manifests for
+  operator review. It never imports: import still requires approval of the
+  new draft. Operators create a weekly schedule row in `kb.scheduled_jobs`
+  (interval 604800s, e.g. via the System Admin > Schedules page) so
+  Wikidata's weekly dump cadence maps to an automated re-fetch.
+
+- [x] Add expected sizes and cadence to the resource catalog and API view.
+- [x] Persist `downloading`/`downloaded_bytes`/`total_bytes` progress in
+      `status.json` while fetching and report it in the resources API.
+- [x] Render expected size, cadence, spinner, and progress bar on the
+      External Terminology Resources page.
+- [x] Register the `terminology_refresh` scheduler job and add per-source
+      error-path tests.
+- [x] Run go tests/build/vet, svelte-check, eslint, and prettier on the
+      changed files.
+- [x] Update §13.2 and the documentation-impact section; commit with `jj`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
@@ -358,7 +401,12 @@ Disapprove / Cancel dialog flows with comments were verified in the browser.
   marks the draft `disapproved`, and never imports. The QUDT adapter retains
   `skos:closeMatch` as a non-authoritative `close_match` relation, and the
   approve flow replays releases already registered with byte-identical
-  content instead of surfacing an immutable-release error.
+  content instead of surfacing an immutable-release error. Admin resource
+  cards now show expected sizes and update cadence before download, stream
+  live download progress (spinner + progress bar) from `status.json`, and
+  Wikidata's weekly dump cadence is mapped to an automated
+  `terminology_refresh` scheduler job that re-fetches into new unapproved
+  draft manifests (import still requires operator approval).
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
   §21, I2), the Stage-0/1 tooling commits (Tasks 0–10), the live integration
@@ -368,7 +416,8 @@ Disapprove / Cancel dialog flows with comments were verified in the browser.
 - **Which docs were updated?** `docs/superpowers/specs/2026-08-07-model-agnostic-tier6-validation-design.md`
   (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
   (status, §12.3, §13 implementation/commands/formats/acceptance, §13.2 fetch
-  tool/approve/disapprove API), this plan (Tasks 9–10), the governing
+  tool/approve/disapprove API, sizes/progress/weekly refresh), this plan
+  (Tasks 9–11), the governing
   `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
   and the stored coverage report under `docs/superpowers/reports/`.
 - **Which docs are now stale?** The keyword spec's §13.1 "embedding may
@@ -386,4 +435,4 @@ Disapprove / Cancel dialog flows with comments were verified in the browser.
 
 ## Completion boundary
 
-This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus the admin pages (Tasks 9–10). Task 10 is the operator gate: the Review dialog approves or disapproves each fetched draft manifest (recording comments and reviewer) and starts the offline import on approval; QUDT 3.5.0 is the first live import, and re-approving identical content replays idempotently. It does not claim that the production portfolio is bootstrapped: the remaining free sources (UCUM, BIPM SIRP, Wikidata pilot subset) still await operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
+This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus the admin pages (Tasks 9–10). Task 10 is the operator gate: the Review dialog approves or disapproves each fetched draft manifest (recording comments and reviewer) and starts the offline import on approval; QUDT 3.5.0 is the first live import, and re-approving identical content replays idempotently. Task 11 adds expected sizes and update cadence to the resource cards, live download progress, and the `terminology_refresh` scheduler job so Wikidata's weekly cadence can be automated as scheduled re-fetches that always land in unapproved draft manifests. It does not claim that the production portfolio is bootstrapped: the remaining free sources (UCUM, BIPM SIRP, Wikidata pilot subset) still await operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.

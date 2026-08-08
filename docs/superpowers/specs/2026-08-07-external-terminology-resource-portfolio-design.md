@@ -573,6 +573,14 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 #   POST /api/v1/terminology-resources/:source/download
 #   POST /api/v1/terminology-resources/:source/approve   (operator license review)
 #   POST /api/v1/terminology-resources/:source/disapprove (operator rejection)
+# Each resource carries expected_size_bytes (typical artifact size before
+# download; 0 when the snapshot varies, e.g. the Wikidata pilot subset, which
+# is capped by max_bytes), update_cadence ("" pinned | "weekly" for Wikidata),
+# and live download progress (downloading / downloaded_bytes / total_bytes)
+# persisted to the source's status.json while the server streams a download.
+# The admin page shows expected size and cadence on every card and renders a
+# spinner + progress bar during downloads by polling this endpoint once per
+# second (the download POST blocks until the stream completes).
 # Each response includes review_status (pending_review | approved |
 # disapproved | "") plus the saved review_comments/reviewed_by/reviewed_at
 # read from the source's manifest.draft.json. The Review page (System Admin >
@@ -589,6 +597,12 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 # byte-identical content (for example after a re-download and re-approval) is
 # treated as an idempotent replay instead of an immutability error; content
 # drift still fails and requires a new release/snapshot identity.
+# Scheduled weekly re-fetch (Wikidata publishes fresh dumps weekly): create a
+# kb.scheduled_jobs row with job_type "terminology_refresh" (label "Refresh
+# External Terminology Resources", registered in DefaultSchedulerRegistry),
+# params {"sources":"wikidata"}, interval 604800 seconds via the System
+# Admin > Schedules page. The job writes fresh artifacts plus unapproved
+# draft manifests for review and never imports anything.
 # Storage defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 ```
 

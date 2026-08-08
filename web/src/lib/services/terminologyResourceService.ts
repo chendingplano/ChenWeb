@@ -13,8 +13,18 @@ export type TerminologyResource = {
 	notes: string;
 	downloaded: boolean;
 	downloaded_at: string | null;
+	/** True while the server is streaming a (re-)download for this source. */
+	downloading: boolean;
+	downloaded_bytes: number;
+	total_bytes: number;
 	sha256: string;
 	size_bytes: number;
+	/** Typical artifact size in bytes before download; 0 = varies. */
+	expected_size_bytes: number;
+	/** Hard server-side size cap enforced during fetch. */
+	max_bytes: number;
+	/** Upstream update cadence ("weekly" for Wikidata); empty = pinned. */
+	update_cadence: string;
 	artifact: string;
 	source_url: string;
 	manifest_draft: string;

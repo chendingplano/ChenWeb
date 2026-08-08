@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -33,7 +35,47 @@ func DefaultSchedulerRegistry() scheduler.Registry {
 			Label: "Backfill Search Embeddings",
 			Run:   runBackfillSearchEmbeddingsJob,
 		},
+		"terminology_refresh": scheduler.JobDescriptor{
+			Label: "Refresh External Terminology Resources",
+			Run:   runTerminologyRefreshJob,
+		},
 	}
+}
+
+// runTerminologyRefreshJob re-fetches freely downloadable terminology
+// resources into the local fetch store, writing fresh artifacts plus
+// unapproved draft manifests for operator review. The "sources" param is a
+// comma-separated list of resource IDs (default "wikidata", which updates
+// weekly upstream); each re-fetch gets a fresh retrieved_at and, for
+// Wikidata, a new dump-<date> release identity. Import still requires
+// operator approval, so a scheduled refresh never imports anything.
+func runTerminologyRefreshJob(ctx context.Context, params map[string]any, logger ApiTypes.JimoLogger) (map[string]any, error) {
+	dir := terminology.Dir()
+	if dir == "" {
+		return nil, fmt.Errorf("TERMINOLOGY_DIR or DATA_HOME_DIR is not set")
+	}
+	raw := stringParam(params, "sources", "wikidata")
+	results := make([]map[string]any, 0, 1)
+	for _, part := range strings.Split(raw, ",") {
+		id := terminology.ResourceID(strings.TrimSpace(part))
+		if id == "" {
+			continue
+		}
+		if _, ok := terminology.ResourceByID(id); !ok {
+			results = append(results, map[string]any{"source": string(id), "error": "unknown terminology resource"})
+			continue
+		}
+		st, err := terminology.Fetch(ctx, id, dir)
+		if err != nil {
+			results = append(results, map[string]any{"source": string(id), "error": err.Error()})
+			continue
+		}
+		results = append(results, map[string]any{
+			"source": string(id), "downloaded": st.Downloaded, "release": st.Release,
+			"size_bytes": st.SizeBytes,
+		})
+	}
+	return map[string]any{"sources": results}, nil
 }
 
 func runResolveEntityObjectsJob(ctx context.Context, params map[string]any, logger ApiTypes.JimoLogger) (map[string]any, error) {

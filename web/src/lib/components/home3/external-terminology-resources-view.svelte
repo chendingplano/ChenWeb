@@ -9,6 +9,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import LockIcon from '@lucide/svelte/icons/lock';
+	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -33,6 +34,7 @@
 	let loading = $state(false);
 	let pageError = $state<string | null>(null);
 	let downloading = $state<Record<string, boolean>>({});
+	let progress = $state<Record<string, { done: number; total: number; startedAt: number }>>({});
 
 	onMount(() => {
 		refresh();
@@ -61,6 +63,22 @@
 		return sha ? `${sha.slice(0, 16)}…` : '';
 	}
 
+	function expectedSizeLabel(r: TerminologyResource): string {
+		if (r.expected_size_bytes > 0) return `≈ ${formatBytes(r.expected_size_bytes)}`;
+		if (r.max_bytes > 0) return `Varies (≤ ${formatBytes(r.max_bytes)})`;
+		return '—';
+	}
+
+	function cadenceLabel(r: TerminologyResource): string {
+		if (!r.update_cadence) return 'Pinned';
+		return r.update_cadence.charAt(0).toUpperCase() + r.update_cadence.slice(1);
+	}
+
+	function formatDuration(ms: number): string {
+		const s = Math.max(0, Math.round(ms / 1000));
+		return `${s}s`;
+	}
+
 	async function refresh() {
 		loading = true;
 		pageError = null;
@@ -75,13 +93,38 @@
 
 	async function download(r: TerminologyResource) {
 		downloading = { ...downloading, [r.id]: true };
+		const startedAt = Date.now();
+		progress = { ...progress, [r.id]: { done: 0, total: 0, startedAt } };
+		// The POST blocks until the server finishes streaming, so poll the
+		// status endpoint for server-side progress while it runs.
+		const timer = setInterval(async () => {
+			try {
+				const list = await listTerminologyResources();
+				const live = list.find((x) => x.id === r.id);
+				if (!live) return;
+				if (live.downloading) {
+					progress = {
+						...progress,
+						[r.id]: { done: live.downloaded_bytes, total: live.total_bytes, startedAt }
+					};
+				} else if (live.downloaded || live.error) {
+					clearInterval(timer);
+				}
+			} catch {
+				// Transient poll failure; the next tick retries.
+			}
+		}, 1000);
 		try {
 			await downloadTerminologyResource(r.id);
-			await refresh();
 		} catch (e) {
 			pageError = e instanceof Error ? e.message : `Failed to download ${r.name}`;
 		} finally {
+			clearInterval(timer);
 			downloading = { ...downloading, [r.id]: false };
+			const rest = { ...progress };
+			delete rest[r.id];
+			progress = rest;
+			await refresh();
 		}
 	}
 
@@ -187,6 +230,20 @@
 					</div>
 				</div>
 
+				<!-- Expected size + update cadence -->
+				<div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
+						<div style="color:{textMuted};">Expected size</div>
+						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
+							{expectedSizeLabel(r)}
+						</div>
+					</div>
+					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
+						<div style="color:{textMuted};">Update cadence</div>
+						<div class="mt-0.5 font-medium" style="color:{textPrimary};">{cadenceLabel(r)}</div>
+					</div>
+				</div>
+
 				<!-- Downloaded metadata -->
 				{#if r.downloaded}
 					<div
@@ -229,6 +286,45 @@
 					</div>
 				{/if}
 
+				<!-- Download progress -->
+				{#if progress[r.id]}
+					{@const p = progress[r.id]}
+					{@const pct = p.total > 0 ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0}
+					<div
+						class="mt-2 space-y-1.5 rounded-lg px-2.5 py-2 text-[11px]"
+						style="background:{accentTint}; border:1px solid {accent}40;"
+					>
+						<div class="flex items-center justify-between gap-2">
+							<span class="flex items-center gap-1.5 font-medium" style="color:{accent};">
+								<LoaderCircleIcon class="h-3.5 w-3.5" style="animation:spin 1s linear infinite;" />
+								Downloading…
+							</span>
+							<span style="color:{textSecondary};">
+								{p.total > 0
+									? `${formatBytes(p.done)} / ${formatBytes(p.total)} · ${pct}%`
+									: `${formatBytes(p.done) || '0 B'} so far`}
+								· {formatDuration(Date.now() - p.startedAt)}
+							</span>
+						</div>
+						<div
+							class="relative h-1.5 w-full overflow-hidden rounded-full"
+							style="background:{inputBg};"
+						>
+							{#if p.total > 0}
+								<div
+									class="h-full rounded-full"
+									style="width:{pct}%; background:{accent}; transition:width 0.4s ease;"
+								></div>
+							{:else}
+								<div
+									class="indeterminate absolute top-0 h-full rounded-full"
+									style="background:{accent};"
+								></div>
+							{/if}
+						</div>
+					</div>
+				{/if}
+
 				<!-- Notes -->
 				{#if r.notes}
 					<p class="mt-2 text-[11px] leading-relaxed italic" style="color:{textMuted};">
@@ -245,7 +341,11 @@
 							class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 							style="background:{accent}; color:#FFFFFF; border:none;"
 						>
-							<DownloadIcon class="h-3.5 w-3.5" />
+							{#if downloading[r.id]}
+								<LoaderCircleIcon class="h-3.5 w-3.5" style="animation:spin 1s linear infinite;" />
+							{:else}
+								<DownloadIcon class="h-3.5 w-3.5" />
+							{/if}
 							{downloading[r.id] ? 'Downloading…' : r.downloaded ? 'Re-download' : 'Download'}
 						</button>
 					{:else}
@@ -264,3 +364,23 @@
 		{/each}
 	</div>
 </div>
+
+<style>
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.indeterminate {
+		width: 35%;
+		animation: indeterminate 1.2s ease-in-out infinite;
+	}
+	@keyframes indeterminate {
+		0% {
+			left: -35%;
+		}
+		100% {
+			left: 100%;
+		}
+	}
+</style>
