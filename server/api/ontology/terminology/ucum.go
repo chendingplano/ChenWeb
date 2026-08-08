@@ -1,17 +1,21 @@
 package terminology
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 )
 
 type ucumUnitsXML struct {
-	XMLName xml.Name      `xml:"units"`
+	XMLName xml.Name      `xml:"root"`
 	Units   []ucumUnitXML `xml:"unit"`
 }
 
@@ -34,7 +38,9 @@ func (a UCUMAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 		return CatalogSnapshot{}, errors.New("ucum adapter requires exactly one xml artifact")
 	}
 	var essence ucumUnitsXML
-	if err := xml.Unmarshal(artifacts[0].Content, &essence); err != nil {
+	decoder := xml.NewDecoder(bytes.NewReader(artifacts[0].Content))
+	decoder.CharsetReader = ucumCharsetReader
+	if err := decoder.Decode(&essence); err != nil {
 		return CatalogSnapshot{}, fmt.Errorf("parse ucum essence xml: %w", err)
 	}
 	if len(essence.Units) == 0 {
@@ -57,6 +63,22 @@ func (a UCUMAdapter) Convert(ctx context.Context, policy keywords.SourcePolicy, 
 	}
 	normalizeSnapshot(&snapshot)
 	return snapshot, nil
+}
+
+// ucumCharsetReader lets encoding/xml decode the official UCUM essence,
+// which declares encoding="ascii" while carrying a pure-ASCII payload.
+// Unknown legacy labels fail closed rather than guessing at the encoding.
+func ucumCharsetReader(charset string, input io.Reader) (io.Reader, error) {
+	switch strings.ToLower(strings.TrimSpace(charset)) {
+	case "", "utf-8", "utf8", "us-ascii", "ascii":
+		return input, nil
+	case "iso-8859-1", "latin1":
+		return transform.NewReader(input, charmap.ISO8859_1.NewDecoder()), nil
+	case "windows-1252", "cp1252":
+		return transform.NewReader(input, charmap.Windows1252.NewDecoder()), nil
+	default:
+		return nil, fmt.Errorf("unsupported xml charset %q", charset)
+	}
 }
 
 func init() { _ = RegisterAdapter(UCUMAdapter{}) }

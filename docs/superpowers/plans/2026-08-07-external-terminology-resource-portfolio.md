@@ -429,6 +429,39 @@ real `si:QuantityKind` class did not match the adapter's `ont#Quantity`.
       the current dump carries no exactMatch links).
 - [x] Update this plan; commit with `jj`.
 
+## Task 13: UCUM essence XML charset and root alignment
+
+**Problem:** The official UCUM essence v2.2 declares
+`<?xml version="1.0" encoding="ascii"?>` and uses `<root>` as its document
+element. Go's `encoding/xml` rejects the ascii declaration unless a
+CharsetReader is installed, and the adapter expected a `<units>` root (the
+fixture shape), so the first live UCUM approval failed with `xml: encoding
+"ascii" declared but Decoder.CharsetReader is nil`, then `expected element
+type <units> but have <root>`.
+
+**Files:**
+- Modify: `server/api/ontology/terminology/ucum.go`,
+  `server/api/ontology/terminology/adapter_test.go`,
+  `server/api/ontology/terminology/testdata/fixtures/ucum/ucum-essence.xml`,
+  `server/api/ontology/terminology/testdata/fixtures/ucum/manifest.json`,
+  `server/api/ontology/terminology/testdata/malformed/ucum/duplicate-code.xml`,
+  `server/api/ontology/terminology/testdata/malformed/ucum/missing-code.xml`
+
+**Interfaces:**
+- The UCUM adapter installs a CharsetReader that passes
+  ascii/us-ascii/utf-8 through and decodes iso-8859-1/windows-1252; unknown
+  labels fail closed rather than guessing.
+- The document element is now `<root>` (the real essence shape). The real
+  file yields 305 unit codes; SI base units are implicit in UCUM (no `<unit>`
+  entries), and upstream carries no `dim` attributes, so dimensions are empty.
+
+- [x] Reproduce the charset and root-element failures on the real artifact.
+- [x] Add the CharsetReader and switch the document element to `<root>`.
+- [x] Update fixtures/manifest checksums and malformed fixtures; add an
+      ascii-declared essence regression test.
+- [x] Re-fetch UCUM and verify the real file converts (305 unit codes).
+- [x] Update this plan; commit with `jj`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge

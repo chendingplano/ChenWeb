@@ -28,7 +28,7 @@
     {
       "id": "ucum-essence.xml",
       "path": "ucum-essence.xml",
-      "sha256": "bea253a39dd2fb43e24c1eef0321d9e481dd1e76eefd66f158343c0f784c0b9d",
+      "sha256": "9f61d7c4663c7069b7340266df2fe739e030d618913012441e49daf23fe621db",
       "media_type": "application/xml",
       "provenance_locator": "https://example.test/ucum/ucum-essence.xml"
     }

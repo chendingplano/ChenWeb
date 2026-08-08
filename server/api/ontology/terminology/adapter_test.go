@@ -300,3 +300,29 @@ func TestUCUMAdapterEmitsUnitCodesOnly(t *testing.T) {
 		t.Fatalf("cd/m2=%+v", byCode["cd/m2"])
 	}
 }
+
+func TestUCUMAdapterAcceptsASCIIDeclaredEssence(t *testing.T) {
+	// The official UCUM essence declares encoding="ascii"; Go's xml decoder
+	// rejects that unless a CharsetReader is installed.
+	content := []byte(`<?xml version="1.0" encoding="ascii"?>
+<root xmlns="http://unitsofmeasure.org/ucum-essence">
+  <unit Code="cd" CODE="cd" dim="J" isMetric="yes" class="si"><printSymbol>cd</printSymbol><name>candela</name></unit>
+  <unit Code="m" CODE="m" dim="L" isMetric="yes" class="si"><printSymbol>m</printSymbol><name>metre</name></unit>
+</root>`)
+	snapshot, err := (UCUMAdapter{}).Convert(context.Background(), keywords.SourcePolicy{Source: "ucum", Release: "2.2"}, []VerifiedArtifact{{
+		ManifestArtifact: ManifestArtifact{
+			ID: "ucum-essence.xml", Path: "ucum-essence.xml", SHA256: "00",
+			MediaType: "application/xml", ProvenanceLocator: "https://example.test/essence.xml",
+		},
+		ResolvedPath: "ucum-essence.xml", Content: content,
+	}})
+	if err != nil {
+		t.Fatalf("convert ascii-declared essence: %v", err)
+	}
+	if len(snapshot.UCUMCodes) != 2 {
+		t.Fatalf("ucum codes=%+v", snapshot.UCUMCodes)
+	}
+	if snapshot.UCUMCodes[0].Code != "cd" || snapshot.UCUMCodes[1].Code != "m" {
+		t.Fatalf("unexpected codes: %+v", snapshot.UCUMCodes)
+	}
+}
