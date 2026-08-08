@@ -4948,3 +4948,13 @@ The commands below switch Codex to use deepseek-v4-flash
 - bash: codex --model deepseek-v4-flash 
 - cc-switch: switch to deepseek
 - Restart VS Code
+
+## DeepSeek Prices
+| Type | Flash | Pro|
+|----------|-------|--------|
+| Input (Cache Hit) | $0.0028	| $0.003625 |
+| Input (Cache Miss) | $0.14	| $0.435 |
+| Output | $0.28	| $0.87 |
+| Concurrency Limit |	2500	| 500 |
+
+Note: max output length: 384KB
