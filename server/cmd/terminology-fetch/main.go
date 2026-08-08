@@ -9,7 +9,7 @@
 //
 //	terminology-fetch list
 //	terminology-fetch status [--dir <dir>] [--source <id>]
-//	terminology-fetch fetch --source <id> --dir <dir> [--titles a,b,c]
+//	terminology-fetch fetch --source <id> --dir <dir> [--ids Q1|Q2|...]
 //
 // The directory defaults to TERMINOLOGY_DIR, else <DATA_HOME_DIR>/terminology.
 package main
@@ -131,7 +131,7 @@ func runFetch(ctx context.Context, args []string, stdout, stderr io.Writer, appl
 	fs.SetOutput(stderr)
 	dirFlag := fs.String("dir", "", "storage directory (default TERMINOLOGY_DIR or DATA_HOME_DIR/terminology)")
 	sourceFlag := fs.String("source", "", "resource id to download (required)")
-	titlesFlag := fs.String("titles", "", "wikidata enwiki titles, pipe-separated (default: pilot corpus)")
+	idsFlag := fs.String("ids", "", "wikidata entity ids (Q-IDs), pipe-separated (default: QUDT-linked set)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -146,8 +146,8 @@ func runFetch(ctx context.Context, args []string, stdout, stderr io.Writer, appl
 		return 2
 	}
 	opts := []terminology.FetchOption{terminology.WithClient(&http.Client{Timeout: 10 * time.Minute})}
-	if *titlesFlag != "" {
-		opts = append(opts, terminology.WithWikidataTitles(strings.Split(*titlesFlag, "|")))
+	if *idsFlag != "" {
+		opts = append(opts, terminology.WithWikidataIDs(strings.Split(*idsFlag, "|")))
 	}
 	st, err := application.fetch(ctx, dir, terminology.ResourceID(source), opts...)
 	if err != nil {
@@ -171,7 +171,7 @@ commands:
   list                           print the resource catalog as JSON
   status --dir <dir> [--source <id>]
                                  print persisted download status (one or all)
-  fetch --source <id> --dir <dir> [--titles a,b,c]
+  fetch --source <id> --dir <dir> [--ids Q1|Q2|...]
                                  download one freely available resource
 
 resources: qudt, ucum, sirp, wikidata (free); iec-60050-845 (permission-gated)

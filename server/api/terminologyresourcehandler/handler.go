@@ -273,8 +273,8 @@ func DownloadResource(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, errorResponse{false, "unknown resource: " + string(id)})
 	}
 	opts := []terminology.FetchOption{terminology.WithClient(&http.Client{Timeout: downloadTimeout})}
-	if titles := c.QueryParam("titles"); titles != "" {
-		opts = append(opts, terminology.WithWikidataTitles(strings.Split(titles, "|")))
+	if ids := c.QueryParam("ids"); ids != "" {
+		opts = append(opts, terminology.WithWikidataIDs(strings.Split(ids, "|")))
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), downloadTimeout)
 	defer cancel()

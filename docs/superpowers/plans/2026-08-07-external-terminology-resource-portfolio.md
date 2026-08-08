@@ -498,6 +498,44 @@ revision could be pinned.
       labels, 2 broader relations, 6 different-from decisions).
 - [x] Update this plan; commit with `jj`.
 
+## Task 15: Expand Wikidata from 3 pilot entities to the QUDT-linked set
+
+**Problem:** The Wikidata resource shipped as a 3-entity pilot
+(`Luminance|Brightness|Contrast`), so its snapshot was ~2.5 KB while QUDT
+(1,500+ quantity kinds), UCUM (305 codes), and SIRP (149 entries) imported
+real vocabularies. The user asked whether Wikidata was real or testing only:
+the pipeline was real, but the pinned subset was intentionally minimal.
+
+**Files:**
+- Modify: `server/api/ontology/terminology/fetch.go` (+ `fetch_test.go`,
+  `wikidata_entities.txt`), `server/api/terminologyresourcehandler/handler.go`,
+  `server/cmd/terminology-fetch/main.go`,
+  `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
+
+**Interfaces:**
+- The default entity set is now the 1,521 unique Wikidata Q-IDs that QUDT
+  3.5.0 links via `qudt:wikidataMatch` (516 quantity kinds + 1,042 units),
+  embedded as `wikidata_entities.txt`. The resource is renamed to "Wikidata
+  (QUDT-linked entities)" and reports an expected size of ~1.16 MB.
+- `fetchWikidataSnapshot` now takes Q-IDs and calls wbgetentities in batches
+  of 50 (`ids` parameter, `props=info|labels|aliases|claims`), merges the
+  batches, skips missing/unrevisioned entities, and writes the same sorted
+  normalized `WikidataLine` JSONL as before. `WithWikidataTitles` is renamed
+  to `WithWikidataIDs`; the CLI and download API take `ids` instead of
+  `titles`.
+- The fetch throttles politely: 1 s between batches and 429 retries with
+  exponential backoff honoring `Retry-After` (max 8 attempts, 60 s cap), so
+  the weekly `terminology_refresh` job stays within Wikimedia's anonymous
+  rate limits.
+
+- [x] Generate and embed the QUDT-linked entity list (1,521 Q-IDs).
+- [x] Batch wbgetentities by `ids` with missing-entity skipping.
+- [x] Add inter-batch delay and 429 retry with backoff.
+- [x] Rename the option/CLI/API to entity IDs and update the catalog card.
+- [x] Re-fetch and verify: 1,521 entities, ~1.16 MB, converts through the
+      adapter (7,963 labels, 1,092 broader relations, 837 negative decisions).
+- [x] Update this plan and the design doc; commit with `jj`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
@@ -525,7 +563,10 @@ revision could be pinned.
   entries) drafts now succeed: SIRP is fetched as Turtle and parsed as
   `si:QuantityKind`, UCUM's ascii-declared `<root>` essence is decoded, and
   the Wikidata fetch normalizes raw wbgetentities responses into the
-  revision-pinned `WikidataLine` schema the adapter consumes.
+  revision-pinned `WikidataLine` schema the adapter consumes. Wikidata now
+  covers the 1,521 entities QUDT 3.5.0 links via `qudt:wikidataMatch`
+  (quantity kinds + units) instead of the 3-entity pilot, fetched in
+  batches of 50 with polite throttling for the weekly refresh.
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
   §21, I2), the Stage-0/1 tooling commits (Tasks 0–10), the live integration
@@ -536,7 +577,7 @@ revision could be pinned.
   (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
   (status, §12.3, §13 implementation/commands/formats/acceptance, §13.2 fetch
   tool/approve/disapprove API, sizes/progress/weekly refresh), this plan
-  (Tasks 9–14), the governing
+  (Tasks 9–15), the governing
   `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
   and the stored coverage report under `docs/superpowers/reports/`.
 - **Which docs are now stale?** The keyword spec's §13.1 "embedding may
@@ -556,4 +597,4 @@ revision could be pinned.
 
 This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus the admin pages (Tasks 9–10). Task 10 is the operator gate: the Review dialog approves or disapproves each fetched draft manifest (recording comments and reviewer) and starts the offline import on approval; QUDT 3.5.0 is the first live import, and re-approving identical content replays idempotently. Task 11 adds expected sizes and update cadence to the resource cards, live download progress, and the `terminology_refresh` scheduler job so Wikidata's weekly cadence can be automated as scheduled re-fetches that always land in unapproved draft manifests. Tasks 12–14 align the
   live SIRP, UCUM, and Wikidata artifacts to their adapters so approving those fetched drafts
-  imports successfully. It does not claim that the production portfolio is bootstrapped: the remaining free source (Wikidata pilot subset) still awaits operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
+  imports successfully. It does not claim that the production portfolio is bootstrapped: the remaining free source (the QUDT-linked Wikidata draft) still awaits operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.

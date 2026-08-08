@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
@@ -67,19 +70,19 @@ const (
 // fields mirror the fixture manifests so a draft manifest can be written
 // directly from one entry.
 type Resource struct {
-	ID                     ResourceID
-	Name                   string
-	Description            string
-	URL                    string
-	Release                string
-	License                string
-	LicenseURL             string
-	Downloadable           bool
-	PermissionRequired     bool
-	Notes                  string
-	Artifact               string
-	MediaType              string
-	MaxBytes               int64
+	ID                 ResourceID
+	Name               string
+	Description        string
+	URL                string
+	Release            string
+	License            string
+	LicenseURL         string
+	Downloadable       bool
+	PermissionRequired bool
+	Notes              string
+	Artifact           string
+	MediaType          string
+	MaxBytes           int64
 	// ExpectedSizeBytes is the typical artifact size in bytes shown before
 	// download; 0 means the size varies with the snapshot (for example the
 	// weekly Wikidata pilot subset).
@@ -90,7 +93,7 @@ type Resource struct {
 	// Accept is the HTTP Accept header requested from the upstream endpoint
 	// when non-empty. SIRP's /quantities endpoint content-negotiates Turtle
 	// and returns a flat JSON array otherwise.
-	Accept string
+	Accept                 string
 	ProviderID             string
 	Source                 string
 	SourceSubset           string
@@ -112,7 +115,7 @@ var resources = []Resource{
 		LicenseURL:   "https://www.qudt.org/catalog/qudt-catalog.html",
 		Downloadable: true, Artifact: "qudt-all.ttl", MediaType: "text/turtle", MaxBytes: 256 << 20,
 		ExpectedSizeBytes: 6_858_424, // measured 2026-08-07 qudt-all.ttl
-		ProviderID: "qudt", Source: "qudt", SourceSubset: "catalog",
+		ProviderID:        "qudt", Source: "qudt", SourceSubset: "catalog",
 		Adapter: "qudt-quantity-kind", AdapterVersion: "3.5.0",
 		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
 		AllowedScopes: []string{"quantity"}, Languages: []string{"en", "fr", "zh", "und"},
@@ -127,7 +130,7 @@ var resources = []Resource{
 		LicenseURL:   "https://ucum.org/license",
 		Downloadable: true, Artifact: "ucum-essence.xml", MediaType: "application/xml", MaxBytes: 16 << 20,
 		ExpectedSizeBytes: 2 << 20, // ucum-essence.xml is ~1.5 MB
-		ProviderID: "ucum", Source: "ucum", SourceSubset: "essence",
+		ProviderID:        "ucum", Source: "ucum", SourceSubset: "essence",
 		Adapter: "ucum", AdapterVersion: "0.1.0",
 		AuthorityRole: keywords.ContextOnly, AuthoritativeRelations: nil,
 		AllowedScopes: []string{"display"}, Languages: []string{"en"},
@@ -141,9 +144,9 @@ var resources = []Resource{
 		Release:     "1.0.0", License: "CC-BY-3.0-IGO",
 		LicenseURL:   "https://github.com/TheBIPM/SI_Digital_Framework/blob/main/LICENCE",
 		Downloadable: true, Artifact: "quantities.ttl", MediaType: "text/turtle", MaxBytes: 16 << 20,
-		Accept: "text/turtle", // /quantities returns JSON unless Turtle is requested
-		ExpectedSizeBytes: 64 << 10, // measured 2026-08-07 quantities.ttl is ~48 KB
-		ProviderID: "bipm", Source: "bipm-sirp-quantity", SourceSubset: "quantities",
+		Accept:            "text/turtle", // /quantities returns JSON unless Turtle is requested
+		ExpectedSizeBytes: 64 << 10,      // measured 2026-08-07 quantities.ttl is ~48 KB
+		ProviderID:        "bipm", Source: "bipm-sirp-quantity", SourceSubset: "quantities",
 		Adapter: "bipm-sirp-quantity", AdapterVersion: "1.0.0",
 		AuthorityRole: keywords.ExactIdentityAuthority, AuthoritativeRelations: []string{"exact_equivalent"},
 		AllowedScopes: []string{"quantity"}, Languages: []string{"en", "fr"},
@@ -151,21 +154,21 @@ var resources = []Resource{
 		Notes:             "Served per-resource over the SI Digital Framework API; no bulk snapshot exists.",
 	},
 	{
-		ID: ResourceWikidata, Name: "Wikidata (pilot entities)",
-		Description:  "Revision-pinned Wikidata proposal snapshot for the pilot entities (multilingual labels, aliases, descriptions).",
+		ID: ResourceWikidata, Name: "Wikidata (QUDT-linked entities)",
+		Description:  "Revision-pinned Wikidata proposal snapshot for the QUDT-linked quantity-kind and unit entities (multilingual labels, aliases, external ids, statements).",
 		URL:          "https://www.wikidata.org/w/api.php",
 		Release:      "", // set at fetch time: dump-<YYYY-MM-DD>
 		License:      "CC0-1.0",
 		LicenseURL:   "https://www.wikidata.org/wiki/Wikidata:Licensing",
 		Downloadable: true, Artifact: "snapshot.jsonl", MediaType: "application/x-ndjson", MaxBytes: 32 << 20,
-		ExpectedSizeBytes: 0, // varies with the pinned entity subset; cap below
-		Cadence:           "weekly", // Wikipedia/Wikidata publishes fresh dumps weekly
-		ProviderID: "wikimedia", Source: "wikidata", SourceSubset: "pilot",
+		ExpectedSizeBytes: 1_163_008, // measured 2026-08-08 QUDT-linked snapshot; varies with entity revisions
+		Cadence:           "weekly",  // Wikipedia/Wikidata publishes fresh dumps weekly
+		ProviderID:        "wikimedia", Source: "wikidata", SourceSubset: "pilot",
 		Adapter: "wikidata", AdapterVersion: "0.1.0",
 		AuthorityRole: keywords.ProposalOnly, AuthoritativeRelations: nil,
 		AllowedScopes: []string{"display"}, Languages: []string{"en", "zh"},
 		IdentityAuthority: false,
-		Notes:             "CC0 dump/API data. Full dumps are multi-GB; this fetches a pinned entity subset for the pilot corpus.",
+		Notes:             "CC0 dump/API data. Full dumps are multi-GB; this fetches the entities QUDT 3.5.0 links via qudt:wikidataMatch (1,521 Q-IDs: quantity kinds and units), batched 50 per wbgetentities request.",
 	},
 	{
 		ID: ResourceIEC, Name: "IEC 60050-845 (IEV)",
@@ -211,19 +214,19 @@ func Dir() string {
 // FetchStatus is the persisted per-source download state under
 // <terminology-dir>/<source>/status.json.
 type FetchStatus struct {
-	Source         string    `json:"source"`
-	Release        string    `json:"release"`
-	Downloaded     bool      `json:"downloaded"`
-	Downloading    bool      `json:"downloading,omitempty"`
-	DownloadedBytes int64    `json:"downloaded_bytes,omitempty"`
-	TotalBytes     int64     `json:"total_bytes,omitempty"`
-	DownloadedAt   time.Time `json:"downloaded_at,omitempty"`
-	SHA256         string    `json:"sha256,omitempty"`
-	SizeBytes      int64     `json:"size_bytes,omitempty"`
-	Artifact       string    `json:"artifact,omitempty"`
-	SourceURL      string    `json:"source_url,omitempty"`
-	ManifestDraft  string    `json:"manifest_draft,omitempty"`
-	Error          string    `json:"error,omitempty"`
+	Source          string    `json:"source"`
+	Release         string    `json:"release"`
+	Downloaded      bool      `json:"downloaded"`
+	Downloading     bool      `json:"downloading,omitempty"`
+	DownloadedBytes int64     `json:"downloaded_bytes,omitempty"`
+	TotalBytes      int64     `json:"total_bytes,omitempty"`
+	DownloadedAt    time.Time `json:"downloaded_at,omitempty"`
+	SHA256          string    `json:"sha256,omitempty"`
+	SizeBytes       int64     `json:"size_bytes,omitempty"`
+	Artifact        string    `json:"artifact,omitempty"`
+	SourceURL       string    `json:"source_url,omitempty"`
+	ManifestDraft   string    `json:"manifest_draft,omitempty"`
+	Error           string    `json:"error,omitempty"`
 }
 
 type fetchConfig struct {
@@ -246,10 +249,10 @@ func WithURLOverride(id ResourceID, u string) FetchOption {
 	return func(cfg *fetchConfig) { cfg.urlOverride[id] = u }
 }
 
-// WithWikidataTitles sets the enwiki titles fetched for the Wikidata pilot
-// snapshot. Defaults to the pilot corpus titles.
-func WithWikidataTitles(titles []string) FetchOption {
-	return func(cfg *fetchConfig) { cfg.wikidata = titles }
+// WithWikidataIDs sets the Wikidata entity IDs (Q-IDs) fetched for the
+// snapshot. Defaults to the QUDT-linked entity set.
+func WithWikidataIDs(ids []string) FetchOption {
+	return func(cfg *fetchConfig) { cfg.wikidata = ids }
 }
 
 // WithNow pins the retrieval clock (tests).
@@ -257,9 +260,19 @@ func WithNow(now time.Time) FetchOption {
 	return func(cfg *fetchConfig) { cfg.now = now }
 }
 
-func defaultWikidataTitles() []string {
-	return []string{"Luminance", "Brightness", "Contrast"}
-}
+//go:embed wikidata_entities.txt
+var wikidataEntitiesText string
+
+var defaultWikidataEntityIDs = sync.OnceValue(func() []string {
+	ids := []string{}
+	for _, line := range strings.Split(wikidataEntitiesText, "\n") {
+		if id := strings.TrimSpace(line); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+})
 
 // Fetch downloads one resource into destDir/<source>/ and records status.json
 // plus an unapproved manifest draft. It fails for permission-gated resources
@@ -318,11 +331,11 @@ func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOpti
 	)
 	switch id {
 	case ResourceWikidata:
-		titles := cfg.wikidata
-		if len(titles) == 0 {
-			titles = defaultWikidataTitles()
+		ids := cfg.wikidata
+		if len(ids) == 0 {
+			ids = defaultWikidataEntityIDs()
 		}
-		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, titles, res.MaxBytes, cfg.now, onProgress)
+		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, ids, res.MaxBytes, cfg.now, onProgress)
 		if rel == "" {
 			rel = "dump-" + cfg.now.Format("2006-01-02")
 		}
@@ -641,73 +654,142 @@ func writeStreamed(r io.Reader, destPath string, maxBytes int64, onProgress func
 	return hex.EncodeToString(h.Sum(nil)), written, nil
 }
 
-// fetchWikidataSnapshot calls wbgetentities for the pinned pilot titles and
-// writes one normalized WikidataLine JSON object per entity as JSONL. It
-// returns the effective source URL used.
-func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, titles []string, maxBytes int64, now time.Time, onProgress func(done, total int64)) (string, int64, string, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return "", 0, "", err
-	}
-	q := u.Query()
-	q.Set("action", "wbgetentities")
-	q.Set("sites", "enwiki")
-	q.Set("titles", strings.Join(titles, "|"))
-	q.Set("props", "info|labels|aliases|descriptions|claims|sitelinks")
-	q.Set("languages", "en|zh|fr")
-	q.Set("format", "json")
-	u.RawQuery = q.Encode()
-	effectiveURL := u.String()
+// wikidataBatchSize is the wbgetentities per-request entity limit for
+// non-bot clients. Batch delay and 429 backoff keep the weekly refresh within
+// Wikimedia's anonymous rate limits.
+const (
+	wikidataBatchSize   = 50
+	wikidataBatchDelay  = time.Second
+	wikidataMaxAttempts = 8
+	wikidataMaxBackoff  = 60 * time.Second
+)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, effectiveURL, nil)
-	if err != nil {
-		return "", 0, "", err
+// fetchWikidataSnapshot calls wbgetentities for the requested entity IDs in
+// batches and writes one normalized WikidataLine JSON object per resolved
+// entity as JSONL. Missing/redirected entities are skipped. It returns the
+// effective source URL of the first batch.
+func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, ids []string, maxBytes int64, now time.Time, onProgress func(done, total int64)) (string, int64, string, error) {
+	if len(ids) == 0 {
+		return "", 0, "", errors.New("wikidata entity list is empty")
 	}
-	req.Header.Set("User-Agent", defaultUserAgent)
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, "", err
+	// Sort a copy so batching and snapshot order are deterministic regardless
+	// of how the caller ordered the IDs.
+	ids = append([]string(nil), ids...)
+	sort.Strings(ids)
+	effectiveURL := ""
+	entities := map[string]wikidataRawEntity{}
+	downloaded := int64(0)
+	for start := 0; start < len(ids); start += wikidataBatchSize {
+		end := start + wikidataBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		u, err := url.Parse(baseURL)
+		if err != nil {
+			return "", 0, "", err
+		}
+		q := u.Query()
+		q.Set("action", "wbgetentities")
+		q.Set("ids", strings.Join(batch, "|"))
+		q.Set("props", "info|labels|aliases|claims")
+		q.Set("languages", "en|zh|fr")
+		q.Set("format", "json")
+		u.RawQuery = q.Encode()
+		batchURL := u.String()
+		if effectiveURL == "" {
+			effectiveURL = batchURL
+		}
+
+		var body []byte
+		for attempt := 0; attempt < wikidataMaxAttempts; attempt++ {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, batchURL, nil)
+			if err != nil {
+				return "", 0, "", err
+			}
+			req.Header.Set("User-Agent", defaultUserAgent)
+			resp, err := client.Do(req)
+			if err != nil {
+				return "", 0, "", err
+			}
+			if resp.StatusCode == http.StatusTooManyRequests && attempt < wikidataMaxAttempts-1 {
+				wait := time.Duration(1<<attempt) * time.Second
+				if ra := resp.Header.Get("Retry-After"); ra != "" {
+					if seconds, err := strconv.Atoi(ra); err == nil && seconds > 0 {
+						wait = time.Duration(seconds) * time.Second
+					}
+				}
+				if wait > wikidataMaxBackoff {
+					wait = wikidataMaxBackoff
+				}
+				resp.Body.Close()
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return "", 0, "", ctx.Err()
+				}
+				continue
+			}
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				return "", 0, "", fmt.Errorf("GET %s: %s", batchURL, resp.Status)
+			}
+			body, err = io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+			resp.Body.Close()
+			if err != nil {
+				return "", 0, "", err
+			}
+			break
+		}
+		if int64(len(body)) > maxBytes {
+			return "", 0, "", fmt.Errorf("response exceeds %d bytes", maxBytes)
+		}
+		downloaded += int64(len(body))
+		if onProgress != nil {
+			// Total is unknown ahead of the stream; report cumulative bytes.
+			onProgress(downloaded, 0)
+		}
+		if end < len(ids) {
+			select {
+			case <-time.After(wikidataBatchDelay):
+			case <-ctx.Done():
+				return "", 0, "", ctx.Err()
+			}
+		}
+
+		var payload struct {
+			Entities map[string]wikidataRawEntity `json:"entities"`
+			Error    *struct {
+				Info string `json:"info"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return "", 0, "", fmt.Errorf("decode wbgetentities response: %w", err)
+		}
+		if payload.Error != nil {
+			return "", 0, "", fmt.Errorf("wikidata API error: %s", payload.Error.Info)
+		}
+		for id, entity := range payload.Entities {
+			if entity.Missing != "" || entity.LastRevID <= 0 {
+				continue // unknown or deleted entity: no revision to pin
+			}
+			entities[id] = entity
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", 0, "", fmt.Errorf("GET %s: %s", effectiveURL, resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if err != nil {
-		return "", 0, "", err
-	}
-	if onProgress != nil {
-		onProgress(int64(len(body)), int64(len(body)))
-	}
-	if int64(len(body)) > maxBytes {
-		return "", 0, "", fmt.Errorf("response exceeds %d bytes", maxBytes)
-	}
-	var payload struct {
-		Entities map[string]wikidataRawEntity `json:"entities"`
-		Error    *struct {
-			Info string `json:"info"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", 0, "", fmt.Errorf("decode wbgetentities response: %w", err)
-	}
-	if payload.Error != nil {
-		return "", 0, "", fmt.Errorf("wikidata API error: %s", payload.Error.Info)
-	}
-	if len(payload.Entities) == 0 {
+	if len(entities) == 0 {
 		return "", 0, "", errors.New("wikidata API returned no entities")
 	}
 
 	var buf bytes.Buffer
 	h := sha256.New()
 	mw := io.MultiWriter(&buf, h)
-	ids := make([]string, 0, len(payload.Entities))
-	for id := range payload.Entities {
-		ids = append(ids, id)
+	sorted := make([]string, 0, len(entities))
+	for id := range entities {
+		sorted = append(sorted, id)
 	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		line, err := normalizeWikidataEntity(payload.Entities[id], now)
+	sort.Strings(sorted)
+	for _, id := range sorted {
+		line, err := normalizeWikidataEntity(entities[id], now)
 		if err != nil {
 			return "", 0, "", err
 		}
@@ -736,6 +818,7 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 type wikidataRawEntity struct {
 	ID        string `json:"id"`
 	LastRevID int64  `json:"lastrevid"`
+	Missing   string `json:"missing"`
 	Labels    map[string]struct {
 		Language string `json:"language"`
 		Value    string `json:"value"`
@@ -838,4 +921,3 @@ func wikidataStatementTypeForProperty(property string) string {
 	}
 	return ""
 }
-

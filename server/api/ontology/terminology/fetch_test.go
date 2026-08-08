@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,11 +112,11 @@ func TestFetchWikidataWritesJSONLSnapshot(t *testing.T) {
 		if got := r.URL.Query().Get("action"); got != "wbgetentities" {
 			t.Errorf("action = %q", got)
 		}
-		if got := r.URL.Query().Get("titles"); got != "Luminance|Brightness" {
-			t.Errorf("titles = %q", got)
+		if got := r.URL.Query().Get("ids"); got != "Q221656|Q355386" {
+			t.Errorf("ids = %q", got)
 		}
-		if got := r.URL.Query().Get("props"); !strings.Contains(got, "info") {
-			t.Errorf("props = %q, want it to include info", got)
+		if got := r.URL.Query().Get("props"); got != "info|labels|aliases|claims" {
+			t.Errorf("props = %q, want info|labels|aliases|claims", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"entities":{
@@ -129,7 +130,7 @@ func TestFetchWikidataWritesJSONLSnapshot(t *testing.T) {
 	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 	st, err := Fetch(context.Background(), ResourceWikidata, dir,
 		WithURLOverride(ResourceWikidata, srv.URL),
-		WithWikidataTitles([]string{"Luminance", "Brightness"}),
+		WithWikidataIDs([]string{"Q355386", "Q221656"}),
 		WithNow(now))
 	if err != nil {
 		t.Fatalf("Fetch wikidata: %v", err)
@@ -188,13 +189,13 @@ func TestFetchWikidataWritesJSONLSnapshot(t *testing.T) {
 
 func TestFetchWikidataAPIErrorFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"error":{"info":"no such title: LuminanceXYZ"}}`))
+		_, _ = w.Write([]byte(`{"error":{"info":"no such entity id: Q999999"}}`))
 	}))
 	defer srv.Close()
 
 	dir := t.TempDir()
 	_, err := Fetch(context.Background(), ResourceWikidata, dir,
-		WithURLOverride(ResourceWikidata, srv.URL), WithWikidataTitles([]string{"LuminanceXYZ"}))
+		WithURLOverride(ResourceWikidata, srv.URL), WithWikidataIDs([]string{"Q999999"}))
 	if err == nil || !strings.Contains(err.Error(), "wikidata API error") {
 		t.Fatalf("err = %v, want wikidata API error", err)
 	}
@@ -202,6 +203,76 @@ func TestFetchWikidataAPIErrorFails(t *testing.T) {
 	st, rerr := ReadStatus(dir, ResourceWikidata)
 	if rerr != nil || st.Downloaded || !strings.Contains(st.Error, "wikidata API error") {
 		t.Fatalf("status = %+v err=%v", st, rerr)
+	}
+}
+
+func TestFetchWikidataBatchesAndSkipsMissing(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		batches [][]string
+	)
+	ids := make([]string, 0, 120)
+	for i := 1; i <= 120; i++ {
+		ids = append(ids, fmt.Sprintf("Q%d", i))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested := strings.Split(r.URL.Query().Get("ids"), "|")
+		mu.Lock()
+		batches = append(batches, requested)
+		mu.Unlock()
+		if len(requested) > wikidataBatchSize {
+			t.Errorf("batch has %d ids, want <= %d", len(requested), wikidataBatchSize)
+		}
+		entities := map[string]any{}
+		for _, id := range requested {
+			if id == "Q50" {
+				entities[id] = map[string]any{"id": id, "missing": ""}
+				continue
+			}
+			entities[id] = map[string]any{"id": id, "lastrevid": 1234500}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"entities": entities, "success": 1})
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	st, err := Fetch(context.Background(), ResourceWikidata, dir,
+		WithURLOverride(ResourceWikidata, srv.URL), WithWikidataIDs(ids),
+		WithNow(time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)))
+	if err != nil {
+		t.Fatalf("Fetch wikidata: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(batches) != 3 {
+		t.Fatalf("requests = %d, want 3 (50+50+20)", len(batches))
+	}
+	b, err := os.ReadFile(filepath.Join(dir, string(ResourceWikidata), "snapshot.jsonl"))
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 119 {
+		t.Fatalf("snapshot lines = %d, want 119 (Q50 missing)", len(lines))
+	}
+	previous := ""
+	for _, ln := range lines {
+		var e WikidataLine
+		if err := json.Unmarshal([]byte(ln), &e); err != nil {
+			t.Fatalf("decode line %q: %v", ln, err)
+		}
+		if e.ID <= previous {
+			t.Fatalf("lines not sorted by id: %q after %q", e.ID, previous)
+		}
+		previous = e.ID
+	}
+	if strings.Contains(string(b), "Q50") {
+		t.Fatalf("snapshot must skip the missing entity, got %s", string(b))
+	}
+	t.Logf("last line: %s", lines[len(lines)-1])
+	if st.SHA256 == "" || st.SizeBytes != int64(len(b)) {
+		t.Fatalf("status = %+v", st)
 	}
 }
 

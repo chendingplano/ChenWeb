@@ -574,8 +574,9 @@ qudt-import --units units.ttl --quantity-kinds quantity-kinds.ttl --dimensions d
 #   POST /api/v1/terminology-resources/:source/approve   (operator license review)
 #   POST /api/v1/terminology-resources/:source/disapprove (operator rejection)
 # Each resource carries expected_size_bytes (typical artifact size before
-# download; 0 when the snapshot varies, e.g. the Wikidata pilot subset, which
-# is capped by max_bytes), update_cadence ("" pinned | "weekly" for Wikidata),
+# download; measured for QUDT/UCUM/BIPM SIRP and the Wikidata QUDT-linked
+# snapshot, which varies with entity revisions and is capped by max_bytes),
+# update_cadence ("" pinned | "weekly" for Wikidata),
 # and live download progress (downloading / downloaded_bytes / total_bytes)
 # persisted to the source's status.json while the server streams a download.
 # The admin page shows expected size and cadence on every card and renders a
@@ -610,8 +611,10 @@ Freely downloadable sources (no permission required): QUDT
 (`https://qudt.org/download/3.5.0/qudt-all.ttl`, CC-BY-4.0), UCUM
 (`https://raw.githubusercontent.com/ucum-org/ucum/v2.2/ucum-essence.xml`, UCUM
 License 1.1), BIPM SIRP (`https://si-digital-framework.org/quantities`,
-CC-BY-3.0-IGO), and a revision-pinned Wikidata pilot entity subset
-(`wbgetentities`, CC0). IEC 60050-845 (IEV) is copyright-gated: retrieval is
+CC-BY-3.0-IGO), and a revision-pinned Wikidata entity subset
+(`wbgetentities`, CC0) covering the 1,521 entities QUDT 3.5.0 links via
+`qudt:wikidataMatch` (quantity kinds and units), fetched in batches of 50.
+IEC 60050-845 (IEV) is copyright-gated: retrieval is
 refused by the tool and the page shows "Requires license"; only a licensed,
 reviewed seed file is acceptable. Every fetched artifact records its retrieval
 time and SHA-256; the draft manifest is written with
