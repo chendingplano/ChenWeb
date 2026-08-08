@@ -49,6 +49,7 @@ doc-service
 service-pdf-parser
 parser-result-converter
 deepdoc
+doc-processing-policy-seed
 config.local.toml
 
 # SDD scratch (briefs, reports, review packages, ledger)
