@@ -384,6 +384,16 @@ Disapprove / Cancel dialog flows with comments were verified in the browser.
       changed files.
 - [x] Update §13.2 and the documentation-impact section; commit with `jj`.
 
+**Live acceptance:** The weekly schedule was created in
+`kb.scheduled_jobs` (job_type `terminology_refresh`, interval 604800s,
+params `{"sources":"wikidata"}`, enabled, recurring). The first run fired
+automatically on the next scheduler tick and succeeded: it fetched the
+Wikidata pilot snapshot (`dump-2026-08-08`, 44,417 bytes) into
+`/Users/cding/Apps/SemOS/terminology/wikidata/` with a fresh unapproved
+`manifest.draft.json`, and advanced `next_run_at` to 2026-08-14. The
+External Terminology Resources page now lists the fresh Wikidata draft under
+Review External Resources for operator approval.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
