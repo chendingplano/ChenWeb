@@ -411,40 +411,70 @@ func (p ProductionProcessorPlan) ExcludedByPolicy() []string {
 	return append([]string(nil), p.excludedByPolicy...)
 }
 
+// Requires/Produces artifact-kind vocabulary (DR5, ADR 2026072901 §3.6):
+// "lines" (static_analyzer's corrected, line-labeled document) ->
+// "chunks" (chunking's fixed/semantic chunk set) -> most extractors read
+// "chunks" and produce one artifact kind each, named after what they
+// extract. Populated 2026-08-08 so this data exists for whatever later
+// consumes it (a DAG planner, a policy inspector, ...); nothing reads
+// Requires/Produces today -- see the ProcessorSpec doc comment above.
 var productionProcessorSpecs = []ProcessorSpec{
-	{Name: "static_analyzer", Phase: "A"},
-	{Name: "chunking", Phase: "A", DependsOn: []string{"static_analyzer"}},
-	{Name: "generate_summaries", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "generate_topics", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_doc_metadata", Phase: "A", DependsOn: []string{"chunking"}},
-	{Name: "extract_semantic_projections", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_structured_knowledge", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_entity", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_relation", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_inventory_items", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_metrics", Phase: "B", DependsOn: []string{"chunking"}},
-	{Name: "extract_provisions", Phase: "B", DependsOn: []string{"chunking"}},
+	{Name: "static_analyzer", Phase: "A", Produces: []string{"lines"}},
+	{Name: "chunking", Phase: "A", DependsOn: []string{"static_analyzer"}, Requires: []string{"lines"}, Produces: []string{"chunks"}},
+	{Name: "generate_summaries", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"summaries"}},
+	{Name: "generate_topics", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"topics"}},
+	{Name: "extract_doc_metadata", Phase: "A", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"doc_metadata"}},
+	{Name: "extract_semantic_projections", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"semantic_projections"}},
+	{Name: "extract_structured_knowledge", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"structured_knowledge"}},
+	{Name: "extract_entity", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"entities"}},
+	{Name: "extract_relation", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"relations"}},
+	{Name: "extract_inventory_items", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"inventory_items"}},
+	{Name: "extract_metrics", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metrics"}},
+	{Name: "extract_provisions", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"provisions"}},
 	// ADR §8.2 P4 harvesters. They are routed so a governed pipeline chooses
 	// the corpus types for which their candidate output is meaningful.
-	{Name: "extract_metric_definitions", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
-	{Name: "extract_product_structure", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
-	{Name: "extract_test_methods", Phase: "B", DependsOn: []string{"chunking"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
-	{Name: "generate_scene_blocks", Phase: "B", DependsOn: []string{"chunking"}},
+	{Name: "extract_metric_definitions", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metric_definition_candidates"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
+	{Name: "extract_product_structure", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"product_structure_candidates"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
+	{Name: "extract_test_methods", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"test_method_candidates"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},
+	{Name: "generate_scene_blocks", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"scene_blocks"}},
 	// DR8 Phase D (ADR §8.1/§8.2): declared as Phase-C processors since this
 	// planner's phase model has no separate "D" tier -- they run in the same
 	// post-process-indexing tier as the rest of Phase C, ordered last via
 	// PostProcessDependsOn (see phase_d.go). Gated by
 	// SEMANTIC_ASSOCIATION_ENABLED so registering them here does not change
 	// default production behavior.
-	{Name: "normalize_assertions", Phase: "C", DependsOn: []string{"extract_metrics", "extract_provisions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
-	{Name: "associate_semantics", Phase: "C", DependsOn: []string{"normalize_assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
-	{Name: "project_semantics", Phase: "C", DependsOn: []string{"associate_semantics"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
-	// P5 tier-3 mandatory-gated pre-decision classifier (spec 2026080102
-	// section 7). Not dispatched by the ordinary Phase A/B/C wave: the G2
-	// resolver invokes it between the initial applicability pass and the
-	// final freeze. Registered here so isMandatoryProcessor returns true
-	// and ordinary processor-gate rules cannot skip or require it.
-	{Name: "classify_document", Phase: "A", Class: "mandatory_gated", Cost: "cheap_llm", OnUndetermined: "run", Idempotent: true},
+	{Name: "normalize_assertions", Phase: "C", DependsOn: []string{"extract_metrics", "extract_provisions"}, Requires: []string{"metrics", "provisions"}, Produces: []string{"assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	{Name: "associate_semantics", Phase: "C", DependsOn: []string{"normalize_assertions"}, Requires: []string{"assertions"}, Produces: []string{"semantic_associations"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	{Name: "project_semantics", Phase: "C", DependsOn: []string{"associate_semantics"}, Requires: []string{"semantic_associations"}, Produces: []string{"assertion_projections"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	// Tier-1/tier-2 facet producers (ADR §3.5 DR4). Like classify_document
+	// below, neither is dispatched by the ordinary Phase A/B/C wave: tier-1
+	// runs inline inside control.go's line-file-generated handling (right
+	// after persistDocFacets), tier-2 runs inline inside
+	// extract_doc_metadata's HandleEvent (right after its own
+	// UpdateInputMetadata call). Both fire unconditionally whenever their
+	// host event/processor runs -- no independent selection or gate of
+	// their own -- so Class is "mandatory" (isMandatoryProcessor returns
+	// true) rather than routed/gated. Registered here purely for
+	// registry/policy-tooling visibility and DR5 Requires/Produces
+	// bookkeeping; nothing dispatches them through this spec.
+	{Name: "facet_tier1", Phase: "A", DependsOn: []string{"static_analyzer"}, Requires: []string{"lines"}, Produces: []string{"facets"}, Class: "mandatory", Cost: "free", Idempotent: true},
+	{Name: "facet_tier2", Phase: "A", DependsOn: []string{"extract_doc_metadata"}, Requires: []string{"doc_metadata"}, Produces: []string{"facets"}, Class: "mandatory", Cost: "free", Idempotent: true},
+	// P5 tier-3 pre-decision classifier (spec 2026080102 section 7). Not
+	// dispatched by the ordinary Phase A/B/C wave: the G2 resolver
+	// (ApplicabilityResolver.Resolve, applicability_resolver.go) invokes it
+	// directly between the initial applicability pass and the final freeze.
+	// Class "routed" (not mandatory): like any other routed processor it is
+	// gated by an ordinary kb.pipeline_rules row with
+	// target_processor="classify_document" (ResolveProcessorGate, consulted
+	// inside Resolve itself since there is no wave dispatch to gate here).
+	// With no such row authored -- the default -- ResolveProcessorGate's
+	// "processor_default" (Enable) applies, so it still only actually runs
+	// when Resolve's own decisionRelevantTier3Paths check finds an
+	// unresolved tier-3 fact some active predicate needs; skip is only ever
+	// reached from an authored gate rule, never spontaneously. Produces
+	// "facets" -- specifically tier-3 facets (spec ADR §3.5 DR4); tiers 1-2
+	// attach just above.
+	{Name: "classify_document", Phase: "A", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"facets"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "run", Idempotent: true},
 }
 
 func productionProcessorPhase(name string) string {
@@ -460,7 +490,8 @@ func productionProcessorPhase(name string) string {
 func selectableProductionProcessorOrder() []string {
 	out := make([]string, 0, len(productionProcessorSpecs))
 	for _, spec := range productionProcessorSpecs {
-		if spec.Name == "static_analyzer" || spec.Name == "chunking" || spec.Name == "classify_document" {
+		switch spec.Name {
+		case "static_analyzer", "chunking", "classify_document", "facet_tier1", "facet_tier2":
 			continue
 		}
 		out = append(out, spec.Name)

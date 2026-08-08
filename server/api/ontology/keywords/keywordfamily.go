@@ -12,6 +12,11 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
+// defaultFuzzyBlockMinSimilarity is tier 5's default trigram blocking floor
+// (spec 2026080403 §9.1), used when KeywordFamily.FuzzyBlockMinSimilarity is
+// unset.
+const defaultFuzzyBlockMinSimilarity = 0.3
+
 // KeywordFamily adapts the semid kernel to the keyword identity family (DR16).
 // Keywords are ungoverned — auto-accept is enabled for tiers 0-4.
 // Shipped behind KEYWORD_RESOLVER_MODE=observe: resolution runs but no
@@ -20,6 +25,12 @@ type KeywordFamily struct {
 	DB                *sql.DB
 	NormalizerVersion int
 	ResolverMode      string // "off", "observe", "on"
+
+	// FuzzyBlockMinSimilarity is tier 5's trigram blocking floor (spec
+	// 2026080403 §9.1): a candidate's norm_key must clear this
+	// pg_trgm similarity() score before edit-distance scoring even sees it.
+	// Defaults to 0.3 (ensureDefaults) when unset.
+	FuzzyBlockMinSimilarity float64
 
 	ConceptStore     ConceptStore
 	SurfaceStore     SurfaceStore
@@ -33,6 +44,9 @@ type KeywordFamily struct {
 func (kf *KeywordFamily) ensureDefaults() {
 	if kf.NormalizerVersion <= 0 {
 		kf.NormalizerVersion = semid.CurrentNormalizerVersion
+	}
+	if kf.FuzzyBlockMinSimilarity <= 0 {
+		kf.FuzzyBlockMinSimilarity = defaultFuzzyBlockMinSimilarity
 	}
 	if kf.ConceptStore.DB == nil && kf.DB != nil {
 		kf.ConceptStore = ConceptStore{DB: kf.DB}
@@ -303,9 +317,9 @@ func (kf *KeywordFamily) tier5FuzzyMatch(ctx context.Context, ks semid.KeySet, s
 		SELECT s.concept_id, s.norm_key
 		FROM kb.keyword_surfaces s
 		WHERE s.scope = $1 AND s.norm_version = $2
-		  AND similarity(s.norm_key, $3) > 0.3
+		  AND similarity(s.norm_key, $3) > $4
 		ORDER BY similarity(s.norm_key, $3) DESC
-		LIMIT 20`, scope, kf.NormalizerVersion, ks.Norm)
+		LIMIT 20`, scope, kf.NormalizerVersion, ks.Norm, kf.FuzzyBlockMinSimilarity)
 	if err != nil || rows == nil {
 		return nil, false
 	}
@@ -600,7 +614,7 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 		// (queue + flag top-1) once D11 §4 was revised to auto-create
 		// rather than attach on a weak candidate.
 		if !autoCreated {
-			if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
+			if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -609,13 +623,35 @@ func (kf *KeywordFamily) ObserveOccurrence(ctx context.Context, occ *Occurrence,
 		// key, never the raw surface. Unaffected by the D11 below-threshold
 		// correction: ambiguous is strong-but-tied evidence, so it still
 		// attaches its top-1 pick (set on occ.ConceptID above) and always
-		// queues the backlog, targeted or not.
-		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText); err != nil {
+		// queues the backlog, targeted or not — carrying the tied set so
+		// §13's ambiguity reconciliation can re-rank it later with stronger
+		// evidence than the online tiebreak (lowest concept_id) provides.
+		tied := tiedCandidatesFromMatches(res.Matches)
+		if err := kf.UnresolvedStore.UpsertUnresolved(ctx, ks.Norm, scope, surface, occ.ContextText, tied); err != nil {
 			return nil, err
 		}
 	}
 
 	return &res, nil
+}
+
+// tiedCandidatesFromMatches extracts the exact top-score tie from a
+// resolution's sorted matches — the same set Adjudicate itself compared
+// against AutoAcceptPolicy.MaxCandidates to reach VerdictAmbiguous. matches
+// is sorted best-first (Kernel.Resolve), so the tie is a prefix.
+func tiedCandidatesFromMatches(matches []semid.ScoredMatch) []TiedCandidate {
+	if len(matches) == 0 {
+		return nil
+	}
+	top := matches[0].Score
+	tied := make([]TiedCandidate, 0, len(matches))
+	for _, m := range matches {
+		if m.Score != top {
+			break
+		}
+		tied = append(tied, TiedCandidate{ConceptID: m.NodeID, Score: m.Score, Method: m.Method})
+	}
+	return tied
 }
 
 // autoCreateConcept mints the provisional concept a targeted miss decides on

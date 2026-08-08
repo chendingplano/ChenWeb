@@ -63,8 +63,10 @@ type ApplicabilityResolver struct {
 // (real LLM classifier, SQL facet/audit stores, active release pinning) from
 // environment configuration. It degrades to a nil resolver on configuration
 // failure, logging a warning -- see buildProductionResolver. The review-scope
-// handler calls this when CLASSIFY_DOCUMENT_ENABLED is set so deterministic
-// review-profile selection can classify decision-relevant missing facets too.
+// handler always calls this so deterministic review-profile selection can
+// classify decision-relevant missing facets too; classify_document's actual
+// per-document run/skip decision is a routed-processor gate (processor_plan.go),
+// not this construction step.
 func NewProductionApplicabilityResolver(db *sql.DB, logger ApiTypes.JimoLogger) *ApplicabilityResolver {
 	return buildProductionResolver(db, logger)
 }
@@ -142,6 +144,25 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 		}, nil
 	}
 
+	// --- consult classify_document's own processor gate ---
+	// classify_document is Class "routed" (processor_plan.go), not
+	// mandatory: an authored kb.pipeline_rules row with
+	// target_processor="classify_document" can skip it for this document,
+	// the same lever every other routed processor gets. With no such row
+	// (the common case) ResolveProcessorGate's "processor_default" is
+	// Enable, so behavior is unchanged from before this check existed.
+	skip, err := classifyDocumentGatedOff(req.BaseFacts)
+	if err != nil {
+		return ResolverResult{}, fmt.Errorf("applicability resolver: classify_document gate: %w", err)
+	}
+	if skip {
+		return ResolverResult{
+			Facts:            req.BaseFacts,
+			Traces:           pass1,
+			DecisionRelevant: missing,
+		}, nil
+	}
+
 	// --- invoke classifier (if available) ---
 	if r.Classifier == nil {
 		return ResolverResult{
@@ -192,6 +213,23 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 		ClassifyResult:   &classifyResult,
 		DecisionRelevant: missing,
 	}, nil
+}
+
+// classifyDocumentGatedOff reports whether an authored processor gate
+// (kb.pipeline_rules, target_processor="classify_document")
+// resolves to Skip for facts. Absent a registered spec or any matching gate
+// row it returns false (not gated off), matching ResolveProcessorGate's own
+// "processor_default" Enable behavior for a processor no rule targets yet.
+func classifyDocumentGatedOff(facts semrules.FactSet) (bool, error) {
+	spec := findProductionProcessorSpec(ClassifyDocumentName)
+	if spec == nil {
+		return false, nil
+	}
+	decision, err := ResolveProcessorGate(*spec, currentProductionPipelineGates(), facts, GateResolutionOptions{})
+	if err != nil {
+		return false, err
+	}
+	return decision.Effect == GateEffectSkip, nil
 }
 
 // evaluateAll evaluates each predicate document against the fact set.
@@ -299,8 +337,67 @@ func activeRoutingPredicates() []semrules.Document {
 // Previously this was runID, hardcoded to 0 at the only call site because no
 // run row exists yet, which collapsed every invocation for a record to the
 // same invocation_id (P5 review 2026080302 finding P5-2).
+// enrichWithPersistedFacets merges recordID's persisted tier-1/tier-2 facet
+// observations (spec 2026072901 S16.1 "Facet tiers 1-2") into base. This is
+// what makes "cheapest first" real: a decision-relevant path a tier-1/2
+// producer already answered is FactKnown here, before Resolve ever checks
+// whether the tier-3 classifier needs to run.
+//
+// Deliberately excludes FacetMethodClassifier observations: tier-3's own
+// freshness contract is attempt-scoped (ResolveExtractionFacts' stable-retry
+// dedup keys on decision_attempt_id/invocation_id inside the classifier
+// itself, TestResolveExtractionFactsAttemptKeyIsStablePerAttemptDistinct
+// AcrossAttempts), and a genuinely new attempt must still be able to
+// re-classify rather than silently trust however-old a prior classification.
+// Tiers 1-2 don't have that concern -- they're deterministic/idempotent
+// over the document's current content, so "already known, from whenever it
+// was computed" is always valid, not just within one attempt. r.Facets is
+// nil-safe -- callers that never wired a facet store (or tests) get base
+// back unchanged, same as before this method existed.
+//
+// A standalone function, not a method requiring a non-nil *ApplicabilityResolver:
+// s.Resolver (control.go) is nil whenever buildProductionResolver couldn't
+// construct a tier-3 classifier (e.g. no model configured), but tier-1/2
+// enrichment must not be gated behind that -- see mergeTier12Facts' callers
+// in both ResolveExtractionFacts/ResolveReviewFacts and control.go's
+// resolver-less fallback path.
+func mergeTier12Facts(ctx context.Context, facets FacetObservationStore, recordID int64, base semrules.FactSet) semrules.FactSet {
+	if facets == nil || recordID <= 0 {
+		return base
+	}
+	observations, err := facets.ListFacetObservationsAnyRelease(ctx, recordID)
+	if err != nil || len(observations) == 0 {
+		return base
+	}
+	tier12 := make([]FacetObservation, 0, len(observations))
+	for _, obs := range observations {
+		if obs.Method != FacetMethodClassifier {
+			tier12 = append(tier12, obs)
+		}
+	}
+	if len(tier12) == 0 {
+		return base
+	}
+	builder := semrules.NewFactSetBuilder()
+	if err := builder.AddSet(base); err != nil {
+		return base
+	}
+	if err := builder.AddSet(BuildApplicabilityFactSet(tier12)); err != nil {
+		// A persisted observation collided with a routing fact on the same
+		// path (should not happen -- disjoint path namespaces by
+		// construction). Fail safe to the routing-only base rather than
+		// losing it.
+		return base
+	}
+	return builder.Build()
+}
+
+func (r *ApplicabilityResolver) enrichWithPersistedFacets(ctx context.Context, recordID int64, base semrules.FactSet) semrules.FactSet {
+	return mergeTier12Facts(ctx, r.Facets, recordID, base)
+}
+
 func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, planFacts ProductionPlanFacts, recordID int64, attemptKey string, documentSample string) (semrules.FactSet, *ResolverResult, error) {
-	baseFacts := BuildPipelineBindingFactSet(planFacts)
+	baseFacts := r.enrichWithPersistedFacets(ctx, recordID, BuildPipelineBindingFactSet(planFacts))
 	var vocabularyReleaseID int64
 	if r.VocabularyReleases != nil {
 		if id, err := r.VocabularyReleases.ActiveDocumentAuthorityReleaseID(ctx); err == nil {
@@ -340,6 +437,7 @@ func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, plan
 // tier-3 references and are dropped. Review-time calls write only facet
 // observations -- the classifier never reruns extraction or Phase D.
 func (r *ApplicabilityResolver) ResolveReviewFacts(ctx context.Context, recordID int64, scopeID string, base semrules.FactSet, predicates []semrules.Document, documentSample string) (semrules.FactSet, error) {
+	base = r.enrichWithPersistedFacets(ctx, recordID, base)
 	// Trivial/unconditional applicability documents have no expression and so
 	// no tier-3 references; keep only the ones that can be decision-relevant.
 	relevant := make([]semrules.Document, 0, len(predicates))

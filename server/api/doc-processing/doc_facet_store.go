@@ -27,6 +27,14 @@ type DocFacetStore interface {
 type FacetObservationStore interface {
 	InsertFacetObservation(ctx context.Context, observation FacetObservation) (FacetObservation, error)
 	ListFacetObservations(ctx context.Context, recordID, vocabularyReleaseID int64) ([]FacetObservation, error)
+	// ListFacetObservationsAnyRelease returns every observation for a
+	// record regardless of vocabulary_release_id. ListFacetObservations'
+	// exact-release match exists for classify_document's own retry-dedup
+	// (spec section 11: pin one invocation to one release); tiers 1-2 are
+	// deterministic/metadata-derived, not release-scoped LLM output, so
+	// enriching BaseFacts (S16.1 "Facet tiers 1-2") needs everything known
+	// about the record, not one release's slice of it.
+	ListFacetObservationsAnyRelease(ctx context.Context, recordID int64) ([]FacetObservation, error)
 }
 
 func (s SQLStore) UpsertDocFacets(ctx context.Context, rec DocFacetRecord) error {
@@ -160,6 +168,39 @@ FROM kb.doc_facet_values
 WHERE record_id = $1 AND vocabulary_release_id = $2
 ORDER BY path, method, decision_attempt_id, invocation_id, id`
 	rows, err := s.DB.QueryContext(ctx, stmt, recordID, vocabularyReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var observations []FacetObservation
+	for rows.Next() {
+		observation, err := scanFacetObservation(rows)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return observations, nil
+}
+
+func (s SQLStore) ListFacetObservationsAnyRelease(ctx context.Context, recordID int64) ([]FacetObservation, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	if recordID <= 0 {
+		return nil, errors.New("record_id is required")
+	}
+	const stmt = `
+SELECT id, record_id, path, value, state, method, confidence, evidence, source_fingerprint,
+       decision_attempt_id, invocation_id, vocabulary_release_id
+FROM kb.doc_facet_values
+WHERE record_id = $1
+ORDER BY path, method, decision_attempt_id, invocation_id, id`
+	rows, err := s.DB.QueryContext(ctx, stmt, recordID)
 	if err != nil {
 		return nil, err
 	}

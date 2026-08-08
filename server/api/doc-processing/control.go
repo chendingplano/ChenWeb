@@ -43,7 +43,16 @@ type ControlService struct {
 	RunStore          DocProcessRunStore
 	PlanStore         DocProcessPlanStore
 	FacetStore        DocFacetStore
-	PolicyStore       PipelinePolicyStore
+	// Facets persists tier-1/tier-2 facet observations (spec 2026072901
+	// S16.1 "Facet tiers 1-2"). Deliberately independent of Resolver.Facets:
+	// Resolver is nil whenever the tier-3 LLM classifier isn't configured
+	// (buildProductionResolver, runtime.go -- degrades to nil on missing
+	// model config/prompt), and tier 1 must not be accidentally gated
+	// behind tier 3's configuration -- that would invert DR4's "cheapest
+	// first" economics, coupling the free tier to the LLM tier's
+	// availability.
+	Facets      FacetObservationStore
+	PolicyStore PipelinePolicyStore
 	// RoutingClearances/RoutingAlarms/PolicyAudit are E3's clearance-aware
 	// enforcement seams. All three are optional (nil-safe): a nil
 	// RoutingClearances means every suppressive routing decision stays
@@ -688,10 +697,39 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		planFacts = ProductionPlanFacts{RequestedProcessors: append([]string(nil), evt.Operations...)}
 	} else {
 		s.persistDocFacets(ctx, evt.RecordID, planFacts)
-		// P5 two-pass resolver: enrich tier-3 facts before binding/gate eval.
-		// Nil-safe: when Resolver is nil, planFacts.EnrichedFacts stays nil
-		// and downstream BuildPipelineBindingFactSet uses base facts only.
+		// Tier-1 deterministic facets (spec 2026072901 S16.1 "Facet tiers
+		// 1-2"): the line file static_analyzer wrote is guaranteed available
+		// at this point (this handler runs on LineFileGeneratedEvent), so
+		// this can run unconditionally. Gated on s.Facets, not s.Resolver --
+		// tier 1 has no LLM dependency and must not be coupled to whether
+		// the tier-3 classifier happens to be configured (s.Resolver is nil
+		// whenever buildProductionResolver couldn't construct one, e.g. no
+		// classifier model configured in this environment).
+		if s.Facets != nil {
+			if tier1, err := ComputeTier1Facets(ctx, s.InputStore, evt.RecordID); err != nil {
+				if s.Logger != nil {
+					s.Logger.Warn("tier-1 facet computation failed, continuing without it", "record_id", evt.RecordID, "error", err)
+				}
+			} else {
+				// InsertFacetObservation requires a non-empty DecisionAttemptID/
+				// InvocationID (validated before the SQL, doc_facet_store.go) --
+				// reuse the same per-attempt key the resolver call below uses,
+				// tier1-prefixed so it reads distinctly in kb.doc_facet_values
+				// even though path already disambiguates it from tier 3.
+				attemptKey := resolverAttemptKey(evt)
+				for _, obs := range tier1 {
+					obs.DecisionAttemptID = "tier1-" + attemptKey
+					obs.InvocationID = fmt.Sprintf("tier1-%d-%s", evt.RecordID, attemptKey)
+					if _, err := s.Facets.InsertFacetObservation(ctx, obs); err != nil && s.Logger != nil {
+						s.Logger.Warn("tier-1 facet persist failed", "record_id", evt.RecordID, "path", obs.Path, "error", err)
+					}
+				}
+			}
+		}
 		if s.Resolver != nil {
+			// P5 two-pass resolver: enrich tier-3 facts before binding/gate
+			// eval. ResolveExtractionFacts also merges tiers 1-2 internally
+			// (enrichWithPersistedFacets) before ever considering tier 3.
 			enrichedFacts, _, resolverErr := s.Resolver.ResolveExtractionFacts(ctx, planFacts, evt.RecordID, resolverAttemptKey(evt), boundedDocumentSample(evt, planFacts))
 			if resolverErr != nil && s.Logger != nil {
 				s.Logger.Warn("applicability resolver failed, continuing with base facts", "record_id", evt.RecordID, "error", resolverErr)
@@ -700,6 +738,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 				planFacts.EnrichedFacts = enrichedFacts
 				planFacts.RoutingFacets.DocKind = documentKindFromEnrichedFacts(enrichedFacts)
 			}
+		} else if s.Facets != nil {
+			// No tier-3 resolver configured, but tiers 1-2 must still reach
+			// routing/gate predicates -- mirrors ResolveExtractionFacts'
+			// enrichWithPersistedFacets without needing a full
+			// ApplicabilityResolver (which also requires a Classifier).
+			planFacts.EnrichedFacts = mergeTier12Facts(ctx, s.Facets, evt.RecordID, BuildPipelineBindingFactSet(planFacts))
 		}
 	}
 	plan, planErr := BuildProductionProcessorPlanFromFacts(planFacts)

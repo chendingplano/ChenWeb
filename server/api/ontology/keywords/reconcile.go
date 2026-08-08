@@ -36,6 +36,22 @@ const (
 	outcomeDeferred    = "deferred_unvalidated"
 	outcomeReject      = "reject"
 	outcomeNoCandidate = "no_candidate"
+
+	// defaultAmbiguousMargin is ReconcileAmbiguous's default auto-apply
+	// margin (spec 2026080403 §13): the winning candidate's embedding
+	// similarity to the query must exceed the runner-up's by at least this
+	// much. Coarser than tier5TieEpsilon on purpose -- this ranks a handful
+	// of already-plausible candidates, not detecting an exact float tie.
+	defaultAmbiguousMargin = 0.15
+
+	ambiguousOutcomeApplied     = "auto_applied"
+	ambiguousOutcomeCollapsed   = "collapsed_by_merge"
+	ambiguousOutcomeDeferred    = "deferred"
+	ambiguousOutcomeNoCandidate = "no_active_candidate"
+
+	methodAmbiguousMargin    = "ambiguous_embedding_margin"
+	methodAmbiguousLexical   = "ambiguous_lexical_corroboration"
+	methodAmbiguousCollapsed = "ambiguous_collapsed_by_merge"
 )
 
 // ReconcileStats distinguishes attempted candidates from committed decisions.
@@ -74,6 +90,39 @@ type Reconciler struct {
 	Embeddings        EmbeddingClient
 	EmbeddingModelID  string
 	Scope             string
+
+	// AmbiguousMarginThreshold is ReconcileAmbiguous's auto-apply margin.
+	// Defaults to defaultAmbiguousMargin when <= 0.
+	AmbiguousMarginThreshold float64
+}
+
+// AmbiguousReconcileStats distinguishes attempted backlog rows from
+// committed decisions, mirroring ReconcileStats' shape (§13).
+type AmbiguousReconcileStats struct {
+	Scanned     int
+	Decided     int
+	Failed      int
+	AutoApplied int
+	Collapsed   int
+	Deferred    int
+	NoCandidate int
+}
+
+func (s AmbiguousReconcileStats) Validate() error {
+	if s.Failed < 0 || s.Failed > 1 || s.Scanned < 0 || s.Decided < 0 ||
+		s.AutoApplied < 0 || s.Collapsed < 0 || s.Deferred < 0 || s.NoCandidate < 0 {
+		return errors.New("invalid ambiguous reconciliation counters")
+	}
+	if s.AutoApplied+s.Collapsed+s.Deferred+s.NoCandidate != s.Decided {
+		return errors.New("ambiguous reconciliation outcomes do not sum to decided")
+	}
+	if s.Failed == 0 && s.Scanned != s.Decided {
+		return errors.New("successful ambiguous reconciliation must decide every scanned row")
+	}
+	if s.Failed == 1 && s.Scanned != s.Decided+1 {
+		return errors.New("failed ambiguous reconciliation must have exactly one uncommitted attempt")
+	}
+	return nil
 }
 
 type ReconcileProposal struct {
@@ -726,4 +775,309 @@ func dedupeStrings(values []string) []string {
 		}
 	}
 	return out
+}
+
+// ambiguousDecisionAudit is the decision-log payload for one
+// ReconcileAmbiguous row (spec 2026080403 §13, following the ambiguity
+// reconciliation design agreed for the tied-candidate backlog).
+type ambiguousDecisionAudit struct {
+	NormKey          string                       `json:"norm_key"`
+	Scope            string                       `json:"scope"`
+	Query            string                       `json:"query"`
+	Outcome          string                       `json:"outcome"`
+	Method           string                       `json:"method"`
+	WinnerConceptID  string                       `json:"winner_concept_id,omitempty"`
+	EmbeddingModelID string                       `json:"embedding_model_id,omitempty"`
+	Candidates       []ambiguousCandidateEvidence `json:"candidates"`
+}
+
+type ambiguousCandidateEvidence struct {
+	ConceptID      string   `json:"concept_id"`
+	OriginalScore  float64  `json:"original_score"`
+	OriginalMethod string   `json:"original_method"`
+	StillLive      bool     `json:"still_live"`
+	EmbeddingScore *float64 `json:"embedding_score,omitempty"`
+	LexicalMatch   bool     `json:"lexical_match"`
+}
+
+func appendAmbiguousAudit(ctx context.Context, tx *sql.Tx, scope string, audit ambiguousDecisionAudit) error {
+	if audit.Candidates == nil {
+		audit.Candidates = []ambiguousCandidateEvidence{}
+	}
+	payload, err := json.Marshal(audit)
+	if err != nil {
+		return err
+	}
+	_, err = (semid.DecisionLogStore{DB: tx}).Append(ctx, semid.DecisionLogEntry{
+		Family: "keyword_reconcile_ambiguous", Scope: scope, Input: payload, Output: payload,
+		Verdict: audit.Outcome, Model: audit.EmbeddingModelID, Actor: "keyword_reconciler_ambiguous",
+	})
+	return err
+}
+
+// ReconcileAmbiguous re-ranks backlog rows an `ambiguous` verdict logged
+// (spec 2026080403 §13): tiers 0-5 tied across more concepts than
+// KeywordFamily's AutoAcceptPolicy.MaxCandidates allows, so the online path
+// picked the lowest concept_id as an arbitrary tiebreak (§8.3) and queued
+// the tie here (§9.3, VerdictAmbiguous) rather than guessing confidently.
+//
+// This never merges concepts (that stays tier 6's job, D10-conservative,
+// via ReconcileAmbiguous's sibling Run) and never rewrites kb.keyword_
+// occurrences (append-only by design). It only: re-verifies the tied
+// concepts are still live (chasing any merge that happened since), and,
+// for a genuine remaining tie, embeds the original query and ranks it
+// against each live candidate's pref_label -- auto-applying (a new `alt`
+// surface on the winner) only when the top candidate clears a configured
+// margin over the runner-up or is independently corroborated by the same
+// edit-distance check tier 5 uses online. A bare top-1 embedding pick with
+// neither signal is left in the backlog, not silently applied -- embeddings
+// rank here exactly as they do in Run's tier-6 path, they do not decide
+// alone.
+func (r *Reconciler) ReconcileAmbiguous(ctx context.Context) (AmbiguousReconcileStats, error) {
+	var stats AmbiguousReconcileStats
+	if err := r.validateConfiguration(); err != nil {
+		return stats, err
+	}
+	rows, err := (UnresolvedStore{DB: r.DB}).ListAmbiguous(ctx, r.Scope, 0)
+	if err != nil {
+		return stats, err
+	}
+	for _, row := range rows {
+		stats.Scanned++
+		outcome, err := r.decideAmbiguous(ctx, row)
+		if err != nil {
+			stats.Failed = 1
+			return stats, err
+		}
+		stats.Decided++
+		switch outcome {
+		case ambiguousOutcomeApplied:
+			stats.AutoApplied++
+		case ambiguousOutcomeCollapsed:
+			stats.Collapsed++
+		case ambiguousOutcomeDeferred:
+			stats.Deferred++
+		case ambiguousOutcomeNoCandidate:
+			stats.NoCandidate++
+		default:
+			return stats, fmt.Errorf("unknown ambiguous reconciliation outcome %q", outcome)
+		}
+	}
+	return stats, stats.Validate()
+}
+
+// liveAmbiguousCandidate is one tied candidate re-verified against current
+// concept state.
+type liveAmbiguousCandidate struct {
+	Original TiedCandidate
+	Concept  Concept
+}
+
+func (r *Reconciler) decideAmbiguous(ctx context.Context, row Unresolved) (string, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if err := semid.AcquireKeywordIdentityMutationLock(ctx, tx); err != nil {
+		return "", err
+	}
+
+	txConcepts := r.ConceptStore
+	txConcepts.DB = tx
+
+	// Re-verify: chase merged_into for every originally-tied concept, then
+	// keep only distinct, currently-active survivors. A concept that merged
+	// away, was deprecated, or is still provisional is not a safe target to
+	// attach new evidence to with the confidence this pass requires (the
+	// same active-only bar Run's tier-6 targets already use).
+	seen := map[string]bool{}
+	var live []liveAmbiguousCandidate
+	for _, tc := range row.Candidates {
+		survivorID, err := txConcepts.FollowMerge(ctx, tc.ConceptID)
+		if err != nil {
+			continue // tombstoned/unreachable id: drop it, not a hard failure
+		}
+		if seen[survivorID] {
+			continue
+		}
+		seen[survivorID] = true
+		c, err := txConcepts.GetConcept(ctx, survivorID)
+		if err != nil || c.Status != "active" {
+			continue
+		}
+		live = append(live, liveAmbiguousCandidate{Original: tc, Concept: c})
+	}
+
+	audit := ambiguousDecisionAudit{NormKey: row.NormKey, Scope: r.Scope, EmbeddingModelID: r.EmbeddingModelID}
+	if len(row.Surfaces) > 0 {
+		audit.Query = row.Surfaces[0]
+	} else {
+		audit.Query = row.NormKey
+	}
+	for _, c := range live {
+		audit.Candidates = append(audit.Candidates, ambiguousCandidateEvidence{
+			ConceptID: c.Concept.ConceptID, OriginalScore: c.Original.Score, OriginalMethod: c.Original.Method, StillLive: true,
+		})
+	}
+
+	var outcome string
+	switch {
+	case len(live) == 0:
+		outcome = ambiguousOutcomeNoCandidate
+		audit.Outcome, audit.Method = outcome, ""
+		if err := appendAmbiguousAudit(ctx, tx, r.Scope, audit); err != nil {
+			return "", err
+		}
+		if err := (UnresolvedStore{DB: tx}).UpdateUnresolvedStatus(ctx, row.NormKey, r.Scope, "pending", "keyword_reconciler_ambiguous"); err != nil {
+			return "", err
+		}
+	case len(live) == 1:
+		outcome = ambiguousOutcomeCollapsed
+		audit.Outcome, audit.Method, audit.WinnerConceptID = outcome, methodAmbiguousCollapsed, live[0].Concept.ConceptID
+		if err := r.applyAmbiguousWinner(ctx, tx, live[0].Concept.ConceptID, audit.Query, 0.9); err != nil {
+			return "", err
+		}
+		if err := appendAmbiguousAudit(ctx, tx, r.Scope, audit); err != nil {
+			return "", err
+		}
+		if err := (UnresolvedStore{DB: tx}).UpdateUnresolvedStatus(ctx, row.NormKey, r.Scope, "resolved", "keyword_reconciler_ambiguous"); err != nil {
+			return "", err
+		}
+	default:
+		winnerID, method, err := r.rankAmbiguousCandidates(ctx, audit.Query, live, &audit)
+		if err != nil {
+			return "", err
+		}
+		if winnerID != "" {
+			outcome = ambiguousOutcomeApplied
+			audit.Outcome, audit.Method, audit.WinnerConceptID = outcome, method, winnerID
+			if err := r.applyAmbiguousWinner(ctx, tx, winnerID, audit.Query, 0.7); err != nil {
+				return "", err
+			}
+			if err := appendAmbiguousAudit(ctx, tx, r.Scope, audit); err != nil {
+				return "", err
+			}
+			if err := (UnresolvedStore{DB: tx}).UpdateUnresolvedStatus(ctx, row.NormKey, r.Scope, "resolved", "keyword_reconciler_ambiguous"); err != nil {
+				return "", err
+			}
+		} else {
+			outcome = ambiguousOutcomeDeferred
+			audit.Outcome = outcome
+			if err := appendAmbiguousAudit(ctx, tx, r.Scope, audit); err != nil {
+				return "", err
+			}
+			if err := (UnresolvedStore{DB: tx}).UpdateUnresolvedStatus(ctx, row.NormKey, r.Scope, "pending", "keyword_reconciler_ambiguous"); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return outcome, nil
+}
+
+// applyAmbiguousWinner writes a new `alt` surface for the query text on the
+// winning concept. CreateSurface is idempotent on the uniqueness key (F3),
+// so re-running a resolved row is safe. This never touches kb.keyword_
+// occurrences (append-only) -- past occurrences keep the answer the system
+// actually gave at the time; future resolves of this literal now hit tier 1
+// against the winner instead of re-tying, unless the losing candidate also
+// already carries an exact surface for the same literal (a duplicate-
+// concept case reconciliation's merge path, not this one, addresses).
+func (r *Reconciler) applyAmbiguousWinner(ctx context.Context, tx *sql.Tx, conceptID, query string, confidence float64) error {
+	surfaces := SurfaceStore{DB: tx, NormalizerVersion: semid.CurrentNormalizerVersion}
+	_, err := surfaces.CreateSurface(ctx, Surface{
+		ConceptID:  conceptID,
+		Surface:    query,
+		LabelRole:  "alt",
+		AliasType:  "synonym",
+		Provenance: "reconcile:ambiguous",
+		Scope:      r.Scope,
+		Confidence: confidence,
+	})
+	return err
+}
+
+// rankAmbiguousCandidates embeds the query and each live candidate's
+// pref_label, ranks by cosine similarity, and auto-applies the top pick
+// only when it clears AmbiguousMarginThreshold over the runner-up or is
+// independently corroborated by tier 5's own edit-distance check (the same
+// two-signal discipline Run's chooseCandidateDecision already applies to
+// merges -- embeddings rank, they do not decide alone). Returns ("", "")
+// when neither bar is cleared.
+func (r *Reconciler) rankAmbiguousCandidates(ctx context.Context, query string, live []liveAmbiguousCandidate, audit *ambiguousDecisionAudit) (string, string, error) {
+	texts := make([]string, 0, len(live)+1)
+	texts = append(texts, query)
+	for _, c := range live {
+		texts = append(texts, c.Concept.PrefLabel)
+	}
+	vectors, err := r.Embeddings.EmbedBatch(ctx, texts)
+	if err != nil {
+		return "", "", fmt.Errorf("embed ambiguous candidates: %w", err)
+	}
+	if len(vectors) != len(texts) {
+		return "", "", fmt.Errorf("embedding client returned %d vectors for %d texts", len(vectors), len(texts))
+	}
+	queryVector := vectors[0]
+
+	type scored struct {
+		conceptID string
+		score     float64
+	}
+	ranked := make([]scored, len(live))
+	for i, c := range live {
+		s := cosineSimilarity(queryVector, vectors[i+1])
+		ranked[i] = scored{conceptID: c.Concept.ConceptID, score: s}
+		for j := range audit.Candidates {
+			if audit.Candidates[j].ConceptID == c.Concept.ConceptID {
+				sv := s
+				audit.Candidates[j].EmbeddingScore = &sv
+			}
+		}
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score > ranked[j].score
+		}
+		return ranked[i].conceptID < ranked[j].conceptID
+	})
+
+	// Lexical corroboration: tier 5's own edit-distance check, run against
+	// the query and each live candidate's label. If exactly one candidate
+	// clears it, that is independent evidence -- agreement with the top
+	// embedding pick corroborates it regardless of margin.
+	normalizer := semid.Normalizer{Version: semid.CurrentNormalizerVersion}
+	queryNorm := normalizer.Normalize(query).Norm
+	runeLen := utf8.RuneCountInString(queryNorm)
+	lexicalMatches := 0
+	lexicalWinner := ""
+	for i := range audit.Candidates {
+		candNorm := normalizer.Normalize(live[i].Concept.PrefLabel).Norm
+		if _, ok := fuzzyCandidateScore(queryNorm, candNorm, runeLen); ok {
+			audit.Candidates[i].LexicalMatch = true
+			lexicalMatches++
+			lexicalWinner = audit.Candidates[i].ConceptID
+		}
+	}
+	lexicalCorroborates := lexicalMatches == 1 && lexicalWinner == ranked[0].conceptID
+
+	margin := r.AmbiguousMarginThreshold
+	if margin <= 0 {
+		margin = defaultAmbiguousMargin
+	}
+	clearsMargin := len(ranked) >= 2 && (ranked[0].score-ranked[1].score) >= margin
+
+	switch {
+	case clearsMargin && lexicalCorroborates:
+		return ranked[0].conceptID, methodAmbiguousLexical, nil
+	case clearsMargin:
+		return ranked[0].conceptID, methodAmbiguousMargin, nil
+	case lexicalCorroborates:
+		return ranked[0].conceptID, methodAmbiguousLexical, nil
+	default:
+		return "", "", nil
+	}
 }

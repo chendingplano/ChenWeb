@@ -56,13 +56,13 @@ func TestSeedDocProcessingPolicies_CreatesBothPipelinesOnFirstRun(t *testing.T) 
 	// names, so "all" is upserted before "no-entities-relations".
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name = $1`)).
 		WithArgs("all").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, processors, legacy_equivalent)`)).
-		WithArgs("all", "All", sqlmock.AnyArg()).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, description, processors, legacy_equivalent, is_system_default)`)).
+		WithArgs("all", "All", "All", sqlmock.AnyArg(), false).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name = $1`)).
 		WithArgs("no-entities-relations").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, processors, legacy_equivalent)`)).
-		WithArgs("no-entities-relations", "Default", sqlmock.AnyArg()).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, description, processors, legacy_equivalent, is_system_default)`)).
+		WithArgs("no-entities-relations", "No Entities Relations", "Default", sqlmock.AnyArg(), true).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) + 1 FROM kb.pipeline_policies`)).
@@ -81,6 +81,22 @@ func TestSeedDocProcessingPolicies_CreatesBothPipelinesOnFirstRun(t *testing.T) 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
 		WithArgs(int64(7), int64(2), int64(30), "store:Research").
 		WillReturnResult(sqlmock.NewResult(2, 1))
+
+	// SeedDocProcessingPolicies also writes one unconditional (always-true
+	// predicate, "require" effect) kb.pipeline_rules row per processor named
+	// in each policy's processors list, iterating policy names then
+	// processors both sorted -- "all" (extract_entity, extract_metrics)
+	// before "no-entities-relations" (extract_metrics, generate_topics).
+	for _, args := range [][2]string{
+		{"all: extract_entity", "extract_entity"},
+		{"all: extract_metrics", "extract_metrics"},
+		{"no-entities-relations: extract_metrics", "extract_metrics"},
+		{"no-entities-relations: generate_topics", "generate_topics"},
+	} {
+		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.pipeline_rules`)).
+			WithArgs(args[0], sqlmock.AnyArg(), sqlmock.AnyArg(), args[1], int64(30)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
 
 	// PolicyCompilerSQLStore.CompilePolicy (policy_compile.go's loadDefinition)
 	// issues, in order: version lookup, all pipelines, this policy's
@@ -135,6 +151,9 @@ func TestSeedDocProcessingPolicies_CreatesBothPipelinesOnFirstRun(t *testing.T) 
 	if result.BindingsWritten != 2 {
 		t.Errorf("BindingsWritten = %d, want 2", result.BindingsWritten)
 	}
+	if result.RulesWritten != 4 {
+		t.Errorf("RulesWritten = %d, want 4", result.RulesWritten)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
 	}
@@ -150,13 +169,13 @@ func TestSeedDocProcessingPolicies_UnknownKnowledgeStoreRollsBack(t *testing.T) 
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name = $1`)).
 		WithArgs("all").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, processors, legacy_equivalent)`)).
-		WithArgs("all", "All", sqlmock.AnyArg()).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, description, processors, legacy_equivalent, is_system_default)`)).
+		WithArgs("all", "All", "All", sqlmock.AnyArg(), false).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name = $1`)).
 		WithArgs("no-entities-relations").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, processors, legacy_equivalent)`)).
-		WithArgs("no-entities-relations", "Default", sqlmock.AnyArg()).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipelines (name, display_name, description, processors, legacy_equivalent, is_system_default)`)).
+		WithArgs("no-entities-relations", "No Entities Relations", "Default", sqlmock.AnyArg(), true).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) + 1 FROM kb.pipeline_policies`)).
 		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(3))

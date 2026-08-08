@@ -20,8 +20,10 @@ type pipelineRecord struct {
 	ID               int64     `json:"id"`
 	Name             string    `json:"name"`
 	DisplayName      *string   `json:"display_name,omitempty"`
+	Description      *string   `json:"description,omitempty"`
 	Processors       []string  `json:"processors,omitempty"`
 	LegacyEquivalent bool      `json:"legacy_equivalent"`
+	IsSystemDefault  bool      `json:"is_system_default"`
 	CreateTime       time.Time `json:"create_time"`
 	ModifyTime       time.Time `json:"modify_time"`
 }
@@ -38,7 +40,7 @@ type pipelineDetailResponse struct {
 }
 
 const pipelineListColumns = `
-    id, name, display_name, processors, legacy_equivalent,
+    id, name, display_name, description, processors, legacy_equivalent, is_system_default,
     create_time, modify_time
 FROM kb.pipelines`
 
@@ -46,10 +48,11 @@ func scanPipelineRecord(scan func(dest ...any) error) (pipelineRecord, error) {
 	var (
 		record      pipelineRecord
 		displayName sql.NullString
+		description sql.NullString
 		processors  pq.StringArray
 	)
 	if err := scan(
-		&record.ID, &record.Name, &displayName, &processors, &record.LegacyEquivalent,
+		&record.ID, &record.Name, &displayName, &description, &processors, &record.LegacyEquivalent, &record.IsSystemDefault,
 		&record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineRecord{}, err
@@ -57,6 +60,10 @@ func scanPipelineRecord(scan func(dest ...any) error) (pipelineRecord, error) {
 	if displayName.Valid && strings.TrimSpace(displayName.String) != "" {
 		v := displayName.String
 		record.DisplayName = &v
+	}
+	if description.Valid && strings.TrimSpace(description.String) != "" {
+		v := description.String
+		record.Description = &v
 	}
 	record.Processors = []string(processors)
 	return record, nil
@@ -112,8 +119,10 @@ func CreatePipeline(c echo.Context) error {
 	var (
 		name             string
 		displayName      any
+		description      any
 		processors       any = pq.Array([]string{})
 		legacyEquivalent bool
+		isSystemDefault  bool
 	)
 
 	if raw, ok := payload["name"]; ok {
@@ -134,6 +143,20 @@ func CreatePipeline(c echo.Context) error {
 			displayName = *value
 		}
 	}
+	if raw, ok := payload["description"]; ok {
+		value, err := decodeStringValue(raw, false)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid description: %v (CWB_KB_P_108)", err)})
+		}
+		if value != nil {
+			description = *value
+		}
+	}
+	if raw, ok := payload["is_system_default"]; ok {
+		if err := json.Unmarshal(raw, &isSystemDefault); err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid is_system_default: %v (CWB_KB_P_109)", err)})
+		}
+	}
 	if raw, ok := payload["processors"]; ok {
 		value, err := decodeStringArrayValue(raw)
 		if err != nil {
@@ -152,14 +175,14 @@ func CreatePipeline(c echo.Context) error {
 	db := ApiTypes.ProjectDBHandle
 	const insertQuery = `
 INSERT INTO kb.pipelines (
-    name, display_name, processors, legacy_equivalent
+    name, display_name, description, processors, legacy_equivalent, is_system_default
 ) VALUES (
-    $1, $2, $3, $4
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING id
 `
 	var id int64
-	if err := db.QueryRow(insertQuery, name, displayName, processors, legacyEquivalent).Scan(&id); err != nil {
+	if err := db.QueryRow(insertQuery, name, displayName, description, processors, legacyEquivalent, isSystemDefault).Scan(&id); err != nil {
 		logger.Error("insert pipeline failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
 	}
@@ -221,6 +244,22 @@ func UpdatePipeline(c echo.Context) error {
 			} else {
 				addSet(field, *value)
 			}
+		case "description":
+			value, err := decodeStringValue(raw, false)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid description: %v (CWB_KB_P_212)", err)})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+		case "is_system_default":
+			var v bool
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid is_system_default: %v (CWB_KB_P_213)", err)})
+			}
+			addSet(field, v)
 		case "processors":
 			value, err := decodeStringArrayValue(raw)
 			if err != nil {

@@ -26,10 +26,10 @@ func enPref(label string) []seedLabel {
 // information artifact, assertion, evidence, agent, role, and the semantic-role
 // and part-hierarchy predicates (DR20).
 var coreModule = moduleContent{
-	ModuleID: "core",
-	Version:  "1.0.0",
-	Title:    "Core semantic module",
-	Owner:    "platform",
+	ModuleID:  "core",
+	Version:   "1.0.0",
+	Title:     "Core semantic module",
+	Owner:     "platform",
 	DependsOn: []string{},
 	Terms: []seedTerm{
 		{ID: "core:referent", Kind: "class", Def: "A canonical real-world or conceptual entity that SemOS tracks under governed identity.", Labels: enPref("referent")},
@@ -86,6 +86,30 @@ var documentAuthorityModule = moduleContent{
 		{ID: "da:doc_kind_regulation", Kind: "concept", Def: "Facet value: the document is a regulation.", Labels: enPref("facet value: regulation")},
 		{ID: "da:doc_kind_report", Kind: "concept", Def: "Facet value: the document is a report.", Labels: enPref("facet value: report")},
 		{ID: "da:doc_kind_manual", Kind: "concept", Def: "Facet value: the document is a manual.", Labels: enPref("facet value: manual")},
+		// Tier-1 facet keys (spec ADR 2026072901 §3.5 DR4; §16.1 "Facet
+		// tiers 1-2"): deterministic, computed once from the static
+		// analyzer's line file, no doc_metadata or LLM dependency. Value
+		// kinds are numeric/boolean, not enumerated -- unlike doc_kind,
+		// these are measurements, not a fixed vocabulary, so no permitted-
+		// value terms are seeded for them.
+		{ID: "da:page_count", Kind: "concept", Def: "Facet key: the document's page count.", Labels: enPref("facet: page count")},
+		{ID: "da:toc_presence", Kind: "concept", Def: "Facet key: whether the document has a detected table of contents.", Labels: enPref("facet: table-of-contents presence")},
+		{ID: "da:heading_count", Kind: "concept", Def: "Facet key: the number of lines classified as a heading.", Labels: enPref("facet: heading count")},
+		{ID: "da:language_mix", Kind: "concept", Def: "Facet key: the CJK-to-Latin character ratio across the document's lines.", Labels: enPref("facet: language mix")},
+		{ID: "da:table_line_ratio", Kind: "concept", Def: "Facet key: the fraction of lines classified as tabular.", Labels: enPref("facet: table-line ratio")},
+		{ID: "da:numeric_unit_density", Kind: "concept", Def: "Facet key: the fraction of lines containing a number-with-unit pattern.", Labels: enPref("facet: numeric-with-unit density")},
+		{ID: "da:modal_verb_density", Kind: "concept", Def: "Facet key: the fraction of lines containing a normative modal verb (shall/must/应/必须).", Labels: enPref("facet: modal-verb density")},
+		{ID: "da:figure_density", Kind: "concept", Def: "Facet key: the fraction of lines that look like a figure or table caption.", Labels: enPref("facet: figure density")},
+		// Tier-2 facet keys: derived from extract_doc_metadata's
+		// already-extracted output (doc_no, publish_date), no new LLM call.
+		{ID: "da:publish_date_facet", Kind: "concept", Def: "Facet key: the document's publish date, from extract_doc_metadata.", Labels: enPref("facet: publish date")},
+		{ID: "da:authority_hint", Kind: "concept", Def: "Facet key: the issuing-body hint derived from the document number's prefix pattern (GB/ISO/IEC/ANSI/...).", Labels: enPref("facet: authority hint")},
+		{ID: "da:authority_hint_gb", Kind: "concept", Def: "Facet value: document number matches a Chinese national/industry standard prefix (GB/GB-T/HG/JB/...).", Labels: enPref("facet value: GB/China")},
+		{ID: "da:authority_hint_iso", Kind: "concept", Def: "Facet value: document number matches an ISO prefix.", Labels: enPref("facet value: ISO")},
+		{ID: "da:authority_hint_iec", Kind: "concept", Def: "Facet value: document number matches an IEC prefix.", Labels: enPref("facet value: IEC")},
+		{ID: "da:authority_hint_ansi", Kind: "concept", Def: "Facet value: document number matches an ANSI prefix.", Labels: enPref("facet value: ANSI")},
+		{ID: "da:authority_hint_astm", Kind: "concept", Def: "Facet value: document number matches an ASTM prefix.", Labels: enPref("facet value: ASTM")},
+		{ID: "da:authority_hint_unknown", Kind: "concept", Def: "Facet value: document number present but its prefix matches no known authority pattern.", Labels: enPref("facet value: unknown authority")},
 		{ID: "da:normative_value", Kind: "concept", Def: "Facet value: the document is normative.", Labels: enPref("facet value: normative")},
 		{ID: "da:informative_value", Kind: "concept", Def: "Facet value: the document is informative.", Labels: enPref("facet value: informative")},
 	},

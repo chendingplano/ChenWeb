@@ -1,9 +1,15 @@
-// Command keyword-reconcile runs one offline reconciliation pass over the
-// keyword lexicon (spec 2026080403 §19 step 11): it merges D11 auto-created
+// Command keyword-reconcile runs two offline reconciliation passes over the
+// keyword lexicon (spec 2026080403 §13). First, it merges D11 auto-created
 // provisional concepts into their true match using tier 5 (edit distance)
-// and tier 6 (multilingual embedding) evidence. Not wired into any live
-// server or cron -- run manually or via an external scheduler, per the
-// spec's §22 Q2 decision to keep tier 6 off the online resolve path.
+// and tier 6 (multilingual embedding) evidence (§19 step 11). Second, it
+// re-ranks `ambiguous`-verdict backlog rows (tied candidates the online
+// path could not confidently pick between) by embedding the original query
+// against each still-live tied concept, auto-applying only when a clear
+// margin or independent lexical corroboration backs the top pick -- the
+// same two-signal discipline as the merge pass, never cosine alone. Not
+// wired into any live server or cron -- run manually or via an external
+// scheduler, per the spec's §22 Q2 decision to keep tier 6 off the online
+// resolve path.
 //
 // Usage:
 //
@@ -83,6 +89,18 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(formatStats(*scope, stats))
+
+	// Second pass, same run: re-rank backlog rows an `ambiguous` verdict
+	// logged (spec 2026080403 §13). Independent of the merge pass above --
+	// it never touches D11 provisional concepts, only tied-candidate
+	// backlog rows -- so a failure here does not roll back Run's results
+	// (already committed row by row) and is reported separately.
+	ambiguousStats, err := r.ReconcileAmbiguous(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s error=%v\n", formatAmbiguousStats(*scope, ambiguousStats), err)
+		os.Exit(1)
+	}
+	fmt.Println(formatAmbiguousStats(*scope, ambiguousStats))
 }
 
 type repeatedFlag []string
@@ -113,6 +131,11 @@ func canonicalDeploymentKeys(values []string) ([]string, error) {
 func formatStats(scope string, stats keywords.ReconcileStats) string {
 	return fmt.Sprintf("keyword-reconcile scope=%s scanned=%d decided=%d failed=%d merged=%d deferred_unvalidated=%d rejected=%d no_candidate=%d",
 		scope, stats.Scanned, stats.Decided, stats.Failed, stats.Merged, stats.DeferredUnvalidated, stats.Rejected, stats.NoCandidate)
+}
+
+func formatAmbiguousStats(scope string, stats keywords.AmbiguousReconcileStats) string {
+	return fmt.Sprintf("keyword-reconcile-ambiguous scope=%s scanned=%d decided=%d failed=%d auto_applied=%d collapsed=%d deferred=%d no_active_candidate=%d",
+		scope, stats.Scanned, stats.Decided, stats.Failed, stats.AutoApplied, stats.Collapsed, stats.Deferred, stats.NoCandidate)
 }
 
 func connect() *sql.DB {

@@ -136,15 +136,14 @@ func createDeterministicReviewScope(ctx context.Context, scope profiles.ReviewSc
 		Alarms: profiles.SelectionAlarmSQLWriter{DB: db},
 		Logger: logger,
 	}
-	// Wire the optional tier-3 classification pass (spec 2026080102 section 7)
-	// when CLASSIFY_DOCUMENT_ENABLED=true. NewProductionApplicabilityResolver
-	// degrades to nil on configuration failure (logging a warning), leaving the
-	// selector to evaluate base facts -- the same opt-in behaviour as the
-	// extraction runtime (D4).
-	if docprocessing.ClassifyDocumentEnabledFromEnv() {
-		if resolver := docprocessing.NewProductionApplicabilityResolver(db, logger); resolver != nil {
-			selector.Enricher = reviewFactEnricher{resolver: resolver, db: db}
-		}
+	// Wire the tier-3 classification pass (spec 2026080102 section 7).
+	// NewProductionApplicabilityResolver degrades to nil on configuration
+	// failure (missing model config/prompt, logging a warning), leaving the
+	// selector to evaluate base facts -- classify_document itself is a
+	// routed processor (processor_plan.go) gated per-document by an
+	// authored kb.pipeline_rules row, not by an env var.
+	if resolver := docprocessing.NewProductionApplicabilityResolver(db, logger); resolver != nil {
+		selector.Enricher = reviewFactEnricher{resolver: resolver, db: db}
 	}
 	selection, err := selector.Select(ctx, profiles.SelectionRequest{
 		ReviewScopeID:       scope.ReviewScopeID,

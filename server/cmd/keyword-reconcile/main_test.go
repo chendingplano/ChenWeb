@@ -29,3 +29,15 @@ func TestFormatStatsIncludesPartialFailureCounters(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatAmbiguousStatsIncludesAllCounters(t *testing.T) {
+	got := formatAmbiguousStats("metrics", keywords.AmbiguousReconcileStats{
+		Scanned: 3, Decided: 2, Failed: 1, AutoApplied: 1, Collapsed: 1,
+	})
+	for _, field := range []string{"keyword-reconcile-ambiguous", "scope=metrics", "scanned=3", "decided=2",
+		"failed=1", "auto_applied=1", "collapsed=1", "deferred=0", "no_active_candidate=0"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("%q missing %q", got, field)
+		}
+	}
+}

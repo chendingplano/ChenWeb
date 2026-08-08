@@ -215,11 +215,11 @@ func TestExitMentionCollector(t *testing.T) {
 		WithArgs("document", "doc:1", "", "Luminance", ks.Norm, "_",
 			"ctx", nil, nil, nil, "unresolved", int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"occurrence_id"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, hits FROM kb.keyword_unresolved`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, candidates, hits FROM kb.keyword_unresolved`)).
 		WithArgs(ks.Norm, "_").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.keyword_unresolved`)).
-		WithArgs(ks.Norm, "_", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(ks.Norm, "_", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	res, err := kf.ObserveSurface(ctx, "Luminance", "_", "document", "doc:1", "ctx", false)
@@ -271,25 +271,25 @@ func TestExitUnresolvedBacklog(t *testing.T) {
 	ctx := context.Background()
 
 	// First sighting: no row → insert. JSON columns arrive as []byte.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, hits FROM kb.keyword_unresolved`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, candidates, hits FROM kb.keyword_unresolved`)).
 		WithArgs("luminance", "_").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.keyword_unresolved`)).
-		WithArgs("luminance", "_", []byte(`["Luminance"]`), []byte(`["ctx one"]`)).
+		WithArgs("luminance", "_", []byte(`["Luminance"]`), []byte(`["ctx one"]`), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := store.UpsertUnresolved(ctx, "luminance", "_", "Luminance", "ctx one"); err != nil {
+	if err := store.UpsertUnresolved(ctx, "luminance", "_", "Luminance", "ctx one", nil); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 
 	// Second, distinct surface: the row exists → update merges surfaces.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, hits FROM kb.keyword_unresolved`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, candidates, hits FROM kb.keyword_unresolved`)).
 		WithArgs("luminance", "_").
-		WillReturnRows(sqlmock.NewRows([]string{"surfaces", "contexts", "hits"}).
-			AddRow([]byte(`["Luminance"]`), []byte(`["ctx one"]`), 1))
+		WillReturnRows(sqlmock.NewRows([]string{"surfaces", "contexts", "candidates", "hits"}).
+			AddRow([]byte(`["Luminance"]`), []byte(`["ctx one"]`), nil, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.keyword_unresolved`)).
-		WithArgs("luminance", "_", []byte(`["Luminance","Brightness"]`), []byte(`["ctx one","ctx two"]`)).
+		WithArgs("luminance", "_", []byte(`["Luminance","Brightness"]`), []byte(`["ctx one","ctx two"]`), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := store.UpsertUnresolved(ctx, "luminance", "_", "Brightness", "ctx two"); err != nil {
+	if err := store.UpsertUnresolved(ctx, "luminance", "_", "Brightness", "ctx two", nil); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 

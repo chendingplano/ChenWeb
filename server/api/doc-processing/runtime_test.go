@@ -100,12 +100,15 @@ func TestProductionRuntimeResolvedConfigIsRedactedAndDeterministic(t *testing.T)
 	}
 }
 
-// TestNewProductionRuntimeResolverNilWhenFlagOff proves the tier-3
-// applicability resolver stays unset by default (D4: CLASSIFY_DOCUMENT_ENABLED
-// defaults to false), keeping the runtime byte-identical to the pre-classifier
-// build -- no model config, prompt, or DB is touched when the flag is off.
-func TestNewProductionRuntimeResolverNilWhenFlagOff(t *testing.T) {
-	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "")
+// TestNewProductionRuntimeResolverNilWhenModelNotConfigured proves the tier-3
+// applicability resolver is always attempted (classify_document is a routed
+// processor, gated per-document, not by a construction-time flag), but stays
+// nil in an environment with no classifier model configured -- the same
+// graceful degrade buildProductionResolver has always used, now the only gate
+// left on Resolver construction.
+func TestNewProductionRuntimeResolverNilWhenModelNotConfigured(t *testing.T) {
+	t.Setenv("MODEL_DEF_FILE", "")
+	t.Setenv("CLASSIFY_DOCUMENT_MODEL_NAME", "")
 	original := buildProductionRuntimeComponents
 	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {
 		return productionRuntimeComponents{
@@ -124,15 +127,16 @@ func TestNewProductionRuntimeResolverNilWhenFlagOff(t *testing.T) {
 		t.Fatalf("NewProductionRuntime: %v", err)
 	}
 	if r.Control.Resolver != nil {
-		t.Fatal("expected Resolver to stay nil when CLASSIFY_DOCUMENT_ENABLED is unset")
+		t.Fatal("expected Resolver to stay nil when no classifier model is configured")
 	}
 }
 
-// TestNewProductionRuntimeResolverWiredWhenFlagOn proves that with
-// CLASSIFY_DOCUMENT_ENABLED=true the production ControlService carries a
-// non-nil Resolver whose Classifier was built through the real constructor
-// path (model config + versioned prompt), not an injected stub.
-func TestNewProductionRuntimeResolverWiredWhenFlagOn(t *testing.T) {
+// TestNewProductionRuntimeResolverWiredWhenModelConfigured proves that the
+// production ControlService always carries a non-nil Resolver, whose
+// Classifier was built through the real constructor path (model config +
+// versioned prompt, not an injected stub), whenever a classifier model is
+// configured -- no separate enable flag required.
+func TestNewProductionRuntimeResolverWiredWhenModelConfigured(t *testing.T) {
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, ".models.toml")
 	modelsBody := `
@@ -150,7 +154,6 @@ timeout_sec = 45
 	if err := os.WriteFile(promptPath, []byte("classify the document's governed attributes"), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
 	}
-	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "true")
 	t.Setenv("MODEL_DEF_FILE", modelsPath)
 	t.Setenv("CLASSIFY_DOCUMENT_MODEL_NAME", "classify-document-model")
 	t.Setenv("PROMPT_DIR", tmp)
@@ -173,7 +176,7 @@ timeout_sec = 45
 		t.Fatalf("NewProductionRuntime: %v", err)
 	}
 	if r.Control.Resolver == nil {
-		t.Fatal("expected Resolver to be wired when CLASSIFY_DOCUMENT_ENABLED=true")
+		t.Fatal("expected Resolver to be wired when a classifier model is configured")
 	}
 	if r.Control.Resolver.Classifier == nil {
 		t.Fatal("expected Resolver.Classifier to be non-nil")

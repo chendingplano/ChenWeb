@@ -751,3 +751,59 @@ func TestResolveReviewFactsIdentityIsStableAcrossRetries(t *testing.T) {
 		t.Fatalf("LLM calls = %d, want 1 (stable retry across the same scope)", *ext.count)
 	}
 }
+
+func TestMergeTier12FactsMergesDeterministicAndMetadataObservations(t *testing.T) {
+	conf := 1.0
+	store := &stubFacetStore{observations: []FacetObservation{
+		{RecordID: 1, Path: "document.page_count", Value: 12, Method: FacetMethodDeterministic, Confidence: &conf},
+		{RecordID: 1, Path: "document.authority_hint", Value: "gb", Method: FacetMethodMetadata, Confidence: &conf},
+	}}
+	got := mergeTier12Facts(context.Background(), store, 1, semrules.FactSet{})
+	if got["document.page_count"].Value != 12 {
+		t.Errorf("page_count: got %+v", got["document.page_count"])
+	}
+	if got["document.authority_hint"].Value != "gb" {
+		t.Errorf("authority_hint: got %+v", got["document.authority_hint"])
+	}
+}
+
+func TestMergeTier12FactsExcludesClassifierObservations(t *testing.T) {
+	// tier-3's own freshness contract is attempt-scoped; mergeTier12Facts
+	// must never let a persisted classifier observation short-circuit a
+	// later attempt's re-classification (see
+	// TestResolveExtractionFactsAttemptKeyIsStablePerAttemptDistinctAcrossAttempts,
+	// which depends on this exclusion).
+	conf := 0.9
+	store := &stubFacetStore{observations: []FacetObservation{
+		{RecordID: 1, Path: "document.doc_kind", Value: "test_report", Method: FacetMethodClassifier, Confidence: &conf},
+	}}
+	got := mergeTier12Facts(context.Background(), store, 1, semrules.FactSet{})
+	if _, ok := got["document.doc_kind"]; ok {
+		t.Errorf("expected a classifier observation to be excluded, got %+v", got)
+	}
+}
+
+func TestMergeTier12FactsFailsSafeToBaseOnPathCollision(t *testing.T) {
+	// Two FactKnown producers for the same path is a builder error (should
+	// not happen -- tier-1/2 and routing facts occupy disjoint path
+	// namespaces by construction); mergeTier12Facts must fail closed to the
+	// unmodified base rather than letting either value leak through
+	// unpredictably.
+	conf := 1.0
+	store := &stubFacetStore{observations: []FacetObservation{
+		{RecordID: 1, Path: "document.input_doc_type", Value: "should-not-apply", Method: FacetMethodDeterministic, Confidence: &conf},
+	}}
+	base := semrules.FactSet{"document.input_doc_type": {Path: "document.input_doc_type", State: semrules.FactKnown, Value: "pdf"}}
+	got := mergeTier12Facts(context.Background(), store, 1, base)
+	if got["document.input_doc_type"].Value != "pdf" {
+		t.Errorf("expected fail-safe to the original base fact, got %+v", got["document.input_doc_type"])
+	}
+}
+
+func TestMergeTier12FactsNilFacetsReturnsBaseUnchanged(t *testing.T) {
+	base := semrules.FactSet{"document.input_doc_type": {Path: "document.input_doc_type", State: semrules.FactKnown, Value: "pdf"}}
+	got := mergeTier12Facts(context.Background(), nil, 1, base)
+	if len(got) != 1 || got["document.input_doc_type"].Value != "pdf" {
+		t.Errorf("expected base unchanged, got %+v", got)
+	}
+}

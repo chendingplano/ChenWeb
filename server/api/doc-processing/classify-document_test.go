@@ -54,6 +54,16 @@ func (s *stubFacetStore) ListFacetObservations(_ context.Context, recordID, voca
 	return out, nil
 }
 
+func (s *stubFacetStore) ListFacetObservationsAnyRelease(_ context.Context, recordID int64) ([]FacetObservation, error) {
+	var out []FacetObservation
+	for _, obs := range s.observations {
+		if obs.RecordID == recordID {
+			out = append(out, obs)
+		}
+	}
+	return out, nil
+}
+
 // stubAudit captures policyaudit events.
 type stubAudit struct {
 	events []policyaudit.Event
@@ -347,18 +357,20 @@ func TestClassifyDocumentContentSafeAuditEvent(t *testing.T) {
 	}
 }
 
-func TestClassifyDocumentMandatoryGatedImmunity(t *testing.T) {
-	// classify_document must be recognized as mandatory_gated so ordinary
-	// processor-gate rules cannot skip or require it.
+func TestClassifyDocumentIsRoutedNotMandatory(t *testing.T) {
+	// classify_document must be Class "routed" (not mandatory), so an
+	// authored kb.pipeline_rules row targeting it by name can
+	// actually skip it -- the same lever every other routed processor gets.
+	// isMandatoryProcessor's require-immunity must not apply to it.
 	found := false
 	for _, spec := range productionProcessorSpecs {
 		if spec.Name == ClassifyDocumentName {
 			found = true
-			if spec.Class != "mandatory_gated" {
-				t.Fatalf("classify_document class = %q, want mandatory_gated", spec.Class)
+			if spec.Class != "routed" {
+				t.Fatalf("classify_document class = %q, want routed", spec.Class)
 			}
-			if !isMandatoryProcessor(spec) {
-				t.Fatal("isMandatoryProcessor returned false for classify_document")
+			if isMandatoryProcessor(spec) {
+				t.Fatal("isMandatoryProcessor returned true for classify_document, want false")
 			}
 			break
 		}
@@ -585,27 +597,6 @@ func TestClassifyDocumentPersistedObservationShape(t *testing.T) {
 	}
 	if !strings.HasPrefix(obs.SourceFingerprint, "sha256:") {
 		t.Fatalf("source_fingerprint = %q, want sha256: prefix", obs.SourceFingerprint)
-	}
-}
-
-func TestClassifyDocumentEnabledFromEnvDefaultsFalse(t *testing.T) {
-	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "")
-	if ClassifyDocumentEnabledFromEnv() {
-		t.Fatal("expected disabled by default")
-	}
-}
-
-func TestClassifyDocumentEnabledFromEnvTrue(t *testing.T) {
-	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "true")
-	if !ClassifyDocumentEnabledFromEnv() {
-		t.Fatal("expected enabled when set to true")
-	}
-}
-
-func TestClassifyDocumentEnabledFromEnvInvalidIsDisabled(t *testing.T) {
-	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "not-a-bool")
-	if ClassifyDocumentEnabledFromEnv() {
-		t.Fatal("expected disabled for an unparseable value")
 	}
 }
 

@@ -198,6 +198,29 @@ func initialPathSpecs() []PathSpec {
 		{Path: "document.knowledge_store_binding_state", Namespace: "document", Type: FactTypeString, Operators: stringOps},
 		{Path: "document.has_document_number", Namespace: "document", Type: FactTypeBoolean, Operators: booleanOps},
 		{Path: "document.numeric_unit_density", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		// Tier-1 deterministic facets (spec 2026072901 S3.5 DR4, S16.1 "Facet
+		// tiers 1-2"): computed once from the static analyzer's line file by
+		// ComputeTier1Facets (server/api/doc-processing/facet_tier1.go). No
+		// GovernedValueScheme -- these are measurements, not a classifier
+		// vocabulary, and Tier3Producible is deliberately false: the
+		// tier-3 LLM classifier has no prompt support for producing a page
+		// count or a density ratio, so there is no fallback path for these
+		// if tier 1 can't determine one.
+		{Path: "document.page_count", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		{Path: "document.toc_presence", Namespace: "document", Type: FactTypeBoolean, Operators: booleanOps},
+		{Path: "document.heading_count", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		{Path: "document.table_line_ratio", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		{Path: "document.modal_verb_density", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		{Path: "document.figure_density", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		{Path: "document.language_mix", Namespace: "document", Type: FactTypeNumber, Operators: numberOps},
+		// Tier-2 facets: derived from extract_doc_metadata's already-
+		// extracted output (doc_no, publish_date) by ComputeTier2Facets.
+		// publish_date is FactTypeString, not FactTypeDate: the extractor's
+		// raw output isn't guaranteed ISO-normalized (see
+		// normalizePublishDateForColumn), and a string-typed fact degrades
+		// safely to "unusable for gt/lt" rather than failing to parse.
+		{Path: "document.publish_date", Namespace: "document", Type: FactTypeString, Operators: stringOps},
+		{Path: "document.authority_hint", Namespace: "document", Type: FactTypeString, Operators: stringOps},
 		{Path: "document.doc_kind", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "document.doc_kind"},
 		{Path: "document.domain", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "document.domain"},
 		{Path: "document.normative_status", Namespace: "document", Type: FactTypeString, Operators: stringOps, Tier3Producible: true, GovernedValueScheme: "document.normative_status"},

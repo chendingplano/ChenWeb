@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -478,19 +476,6 @@ func NewDocumentClassifier(extractor LLMJSONExtractor, modelName string, facets 
 		Facets:     facets,
 		Audit:      audit,
 	}, nil
-}
-
-// ClassifyDocumentEnabledFromEnv resolves the CLASSIFY_DOCUMENT_ENABLED
-// setting. Unset (or any value that does not parse as a boolean true)
-// resolves to disabled -- D4's documented default of 'false' (P5 review
-// 2026080302 finding P5-2).
-func ClassifyDocumentEnabledFromEnv() bool {
-	raw := strings.TrimSpace(os.Getenv("CLASSIFY_DOCUMENT_ENABLED"))
-	if raw == "" {
-		return false
-	}
-	enabled, err := strconv.ParseBool(raw)
-	return err == nil && enabled
 }
 
 // DefaultGovernedVocabulary is the pinned, statically-declared allowed-value

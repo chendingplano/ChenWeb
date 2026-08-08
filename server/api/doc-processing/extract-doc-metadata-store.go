@@ -24,6 +24,7 @@ type DocMetadataInputRecord struct {
 	FileName           string
 	Title              string
 	DocMetadataJSON    string // raw JSON from kb.inputs.doc_metadata; "" when not loaded
+	PublishDate        string // "" when not yet extracted; added for tier-2 facets (spec 2026072901 S16.1)
 }
 
 type DocMetadataUpdate struct {
@@ -60,7 +61,8 @@ SELECT i.id,
        COALESCE(i.status::text, '[]'),
        COALESCE(i.file_name, ''),
        COALESCE(i.title, ''),
-       COALESCE(i.doc_metadata::text, '')
+       COALESCE(i.doc_metadata::text, ''),
+       COALESCE(i.publish_date::text, '')
 FROM kb.inputs i
 LEFT JOIN kb.pipeline_bindings pb ON pb.ks_store_id = i.ks_store_id
     AND pb.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
@@ -83,6 +85,7 @@ WHERE i.id = $1`
 		&rec.FileName,
 		&rec.Title,
 		&rec.DocMetadataJSON,
+		&rec.PublishDate,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

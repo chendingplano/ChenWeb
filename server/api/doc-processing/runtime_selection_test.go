@@ -615,6 +615,51 @@ func TestProductionProcessorSpecsStayInSyncWithLegacyPhaseClassifier(t *testing.
 	}
 }
 
+// TestProductionProcessorSpecsRequiresProducesAreConsistent is a data-only
+// check on the DR5 Requires/Produces vocabulary populated 2026-08-08 (ADR
+// 2026072901 S16.1 "DAG planner" row): nothing consumes these fields yet
+// (that's the deferred part), but every declared value should still be
+// internally coherent, so a typo here doesn't sit undetected until whatever
+// eventually reads it. For every processor with a declared Requires, at
+// least one of its DependsOn processors must Produce that artifact kind.
+func TestProductionProcessorSpecsRequiresProducesAreConsistent(t *testing.T) {
+	produces := map[string]map[string]bool{} // processor name -> set of artifact kinds it produces
+	for _, spec := range productionProcessorSpecs {
+		produces[spec.Name] = map[string]bool{}
+		for _, kind := range spec.Produces {
+			if kind == "" {
+				t.Errorf("processor %q declares an empty Produces entry", spec.Name)
+			}
+			produces[spec.Name][kind] = true
+		}
+	}
+	for _, spec := range productionProcessorSpecs {
+		if spec.Class == "mandatory_gated" {
+			// Dispatched outside the ordinary DependsOn-driven wave (see the
+			// declaration's own comment: invoked directly by the G2 resolver,
+			// not through the Phase A/B/C mechanism), so it has no DependsOn
+			// entry to check against even though its Requires is accurate.
+			continue
+		}
+		for _, required := range spec.Requires {
+			if required == "" {
+				t.Errorf("processor %q declares an empty Requires entry", spec.Name)
+				continue
+			}
+			satisfied := false
+			for _, dep := range spec.DependsOn {
+				if produces[dep][required] {
+					satisfied = true
+					break
+				}
+			}
+			if !satisfied {
+				t.Errorf("processor %q requires %q, but none of its DependsOn %v produces it", spec.Name, required, spec.DependsOn)
+			}
+		}
+	}
+}
+
 func TestBuildProductionProcessorPlanExposesLegacyExecutionOrder(t *testing.T) {
 	plan, err := BuildProductionProcessorPlan([]string{"extract_provisions", "generate_topics", "extract_doc_metadata"})
 	if err != nil {

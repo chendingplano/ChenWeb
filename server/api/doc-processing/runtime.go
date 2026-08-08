@@ -193,15 +193,15 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			return nil, err
 		}
 	}
-	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
-	// The tier-3 applicability resolver is opt-in (D4: CLASSIFY_DOCUMENT_ENABLED
-	// defaults to false). When disabled the ControlService carries no Resolver,
-	// keeping behaviour byte-identical to the pre-classifier runtime; when
-	// enabled, buildProductionResolver degrades to nil on config failure rather
-	// than failing construction.
-	if ClassifyDocumentEnabledFromEnv() {
-		control.Resolver = buildProductionResolver(ApiTypes.ProjectDBHandle, logger)
-	}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, Facets: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	// The tier-3 applicability resolver is always constructed; classify_document
+	// itself is a routed processor (processor_plan.go) gated per-document via
+	// an authored kb.pipeline_rules row, not an env var.
+	// buildProductionResolver degrades to nil on config failure (missing
+	// model config/prompt) rather than failing construction, so an
+	// environment with no classifier model configured behaves exactly as
+	// before -- ControlService simply carries no Resolver.
+	control.Resolver = buildProductionResolver(ApiTypes.ProjectDBHandle, logger)
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err

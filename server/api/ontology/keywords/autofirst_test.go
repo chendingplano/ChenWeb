@@ -185,11 +185,11 @@ func TestObserveSurfaceCollectorMissQueuesBacklog(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"occurrence_id"}).AddRow(8))
 
 	// Backlog upsert: no existing row → insert keyed on the norm key (K5).
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, hits FROM kb.keyword_unresolved`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, candidates, hits FROM kb.keyword_unresolved`)).
 		WithArgs(ks.Norm, scope).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.keyword_unresolved`)).
-		WithArgs(ks.Norm, scope, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(ks.Norm, scope, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	res, err := kf.ObserveSurface(ctx, surface, scope, "document", "art:1", "ctx", false)

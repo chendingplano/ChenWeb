@@ -309,11 +309,11 @@ func TestObserveSurfaceAmbiguousPersistsTopOneConceptID(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"occurrence_id"}).AddRow(11))
 
 	// F5: ambiguous still queues the backlog (unchanged from before this fix).
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, hits FROM kb.keyword_unresolved`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT surfaces, contexts, candidates, hits FROM kb.keyword_unresolved`)).
 		WithArgs(ks.Norm, scope).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.keyword_unresolved`)).
-		WithArgs(ks.Norm, scope, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(ks.Norm, scope, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	res, err := kf.ObserveSurface(ctx, surface, scope, "document", "art:1", "ctx", true)

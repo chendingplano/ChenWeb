@@ -29,7 +29,8 @@ SELECT i.id,
        COALESCE(i.status::text, '[]'),
        COALESCE(i.file_name, ''),
        COALESCE(i.title, ''),
-       COALESCE(i.doc_metadata::text, '')
+       COALESCE(i.doc_metadata::text, ''),
+       COALESCE(i.publish_date::text, '')
 FROM kb.inputs i
 LEFT JOIN kb.pipeline_bindings pb ON pb.ks_store_id = i.ks_store_id
     AND pb.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
@@ -39,7 +40,7 @@ WHERE i.id = $1`)
 	mock.ExpectQuery(query).
 		WithArgs(int64(91)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "ks_store_id", "requested_pipeline", "bound_pipeline_name", "type", "source_language", "document_number", "parser_name", "result_filename", "staging_filename", "status", "file_name", "title", "doc_metadata",
+			"id", "ks_store_id", "requested_pipeline", "bound_pipeline_name", "type", "source_language", "document_number", "parser_name", "result_filename", "staging_filename", "status", "file_name", "title", "doc_metadata", "publish_date",
 		}).AddRow(
 			int64(91),
 			int64(42),
@@ -55,6 +56,7 @@ WHERE i.id = $1`)
 			"input.pdf",
 			"Ventilator display module",
 			`{"title":"Ventilator display module"}`,
+			"2021-06-01",
 		))
 
 	store := DocMetadataSQLStore{DB: db}
@@ -86,6 +88,9 @@ WHERE i.id = $1`)
 	}
 	if got, want := rec.Title, "Ventilator display module"; got != want {
 		t.Fatalf("Title=%q want=%q", got, want)
+	}
+	if got, want := rec.PublishDate, "2021-06-01"; got != want {
+		t.Fatalf("PublishDate=%q want=%q", got, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet: %v", err)

@@ -135,7 +135,7 @@ func TestTier5FuzzyMatchGuardrails(t *testing.T) {
 			WithArgs(ks.Exact).
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
-			WithArgs("_", kf.NormalizerVersion, ks.Norm).
+			WithArgs("_", kf.NormalizerVersion, ks.Norm, kf.FuzzyBlockMinSimilarity).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
 				AddRow("kwc_k8s", "kubernetes"))
 		matches, ok := kf.tier5FuzzyMatch(ctx, ks, "_")
@@ -159,7 +159,7 @@ func TestTier5FuzzyMatchGuardrails(t *testing.T) {
 			WithArgs(ks.Exact).
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
-			WithArgs("_", kf.NormalizerVersion, ks.Norm).
+			WithArgs("_", kf.NormalizerVersion, ks.Norm, kf.FuzzyBlockMinSimilarity).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
 				AddRow("kwc_v3", "release v3"))
 		matches, ok := kf.tier5FuzzyMatch(ctx, ks, "_")
@@ -178,7 +178,7 @@ func TestTier5FuzzyMatchGuardrails(t *testing.T) {
 			WithArgs(ks.Exact).
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
-			WithArgs("_", kf.NormalizerVersion, ks.Norm).
+			WithArgs("_", kf.NormalizerVersion, ks.Norm, kf.FuzzyBlockMinSimilarity).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
 				AddRow("kwc_nginx", "nginz")) // substitution x->z, dist 1, first rune 'n' == 'n'
 		matches, ok := kf.tier5FuzzyMatch(ctx, ks, "_")
@@ -199,7 +199,7 @@ func TestTier5FuzzyMatchGuardrails(t *testing.T) {
 			WithArgs(ks.Exact).
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 		mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
-			WithArgs("_", kf.NormalizerVersion, ks.Norm).
+			WithArgs("_", kf.NormalizerVersion, ks.Norm, kf.FuzzyBlockMinSimilarity).
 			WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
 				AddRow("kwc_anginx", "anginx")) // leading insertion, dist 1, first rune 'n' != 'a'
 		matches, ok := kf.tier5FuzzyMatch(ctx, ks, "_")
@@ -210,6 +210,54 @@ func TestTier5FuzzyMatchGuardrails(t *testing.T) {
 			t.Errorf("unmet expectations: %v", err)
 		}
 	})
+}
+
+// TestFuzzyBlockMinSimilarityDefault proves ensureDefaults sets tier 5's
+// blocking floor to 0.3 (spec 2026080403 §9.1) when the caller leaves it
+// unset, and leaves an explicitly-set value alone.
+func TestFuzzyBlockMinSimilarityDefault(t *testing.T) {
+	unset := &KeywordFamily{}
+	unset.ensureDefaults()
+	if unset.FuzzyBlockMinSimilarity != 0.3 {
+		t.Errorf("default FuzzyBlockMinSimilarity: got %v, want 0.3", unset.FuzzyBlockMinSimilarity)
+	}
+
+	custom := &KeywordFamily{FuzzyBlockMinSimilarity: 0.55}
+	custom.ensureDefaults()
+	if custom.FuzzyBlockMinSimilarity != 0.55 {
+		t.Errorf("ensureDefaults overwrote an explicit FuzzyBlockMinSimilarity: got %v, want 0.55", custom.FuzzyBlockMinSimilarity)
+	}
+}
+
+// TestFuzzyBlockMinSimilarityConfigurable proves a non-default threshold
+// actually reaches tier 5's blocking query, not just the struct field: with
+// FuzzyBlockMinSimilarity set to 0.6, sqlmock only satisfies the expectation
+// if the query's fourth bound parameter is 0.6, not the 0.3 default.
+func TestFuzzyBlockMinSimilarityConfigurable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	kf := &KeywordFamily{DB: db, ResolverMode: "observe", FuzzyBlockMinSimilarity: 0.6}
+	kf.ensureDefaults()
+	ctx := context.Background()
+
+	ks := kf.normalizer().Normalize("kubernets")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (`)).
+		WithArgs(ks.Exact).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
+		WithArgs("_", kf.NormalizerVersion, ks.Norm, 0.6).
+		WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).
+			AddRow("kwc_k8s", "kubernetes"))
+
+	if _, ok := kf.tier5FuzzyMatch(ctx, ks, "_"); !ok {
+		t.Fatalf("expected a fuzzy match")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("query did not use the configured threshold 0.6: %v", err)
+	}
 }
 
 // TestKeywordFamilyCandidateNodesReachesTier5 drives CandidateNodes end to
@@ -264,7 +312,7 @@ func TestKeywordFamilyCandidateNodesReachesTier5(t *testing.T) {
 		WithArgs(ks.Exact).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
-		WithArgs("_", version, ks.Norm).
+		WithArgs("_", version, ks.Norm, kf.FuzzyBlockMinSimilarity).
 		WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).AddRow("kwc_k8s", "kubernetes"))
 
 	candidates, err := kf.CandidateNodes(ctx, "kubernets", "_")
@@ -337,7 +385,7 @@ func TestResolveSurfaceTier5AutoAccepts(t *testing.T) {
 		WithArgs(ks.Exact).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.keyword_surfaces s`)).
-		WithArgs("_", version, ks.Norm).
+		WithArgs("_", version, ks.Norm, kf.FuzzyBlockMinSimilarity).
 		WillReturnRows(sqlmock.NewRows([]string{"concept_id", "norm_key"}).AddRow("kwc_k8s", "kubernetes"))
 	// FollowMerge inside ResolveSurface reads the resolved concept: a live
 	// concept (merged_into nil) resolves to itself.
@@ -361,4 +409,36 @@ func TestResolveSurfaceTier5AutoAccepts(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
 	}
+}
+
+func TestTiedCandidatesFromMatches(t *testing.T) {
+	t.Run("no matches", func(t *testing.T) {
+		if got := tiedCandidatesFromMatches(nil); got != nil {
+			t.Errorf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("tie is an exact-score prefix, non-tied tail excluded", func(t *testing.T) {
+		matches := []semid.ScoredMatch{
+			{NodeID: "kwc_a", Score: 0.8, Method: "tier1_norm"},
+			{NodeID: "kwc_b", Score: 0.8, Method: "tier1_norm"},
+			{NodeID: "kwc_c", Score: 0.5, Method: "tier5_fuzzy"},
+		}
+		got := tiedCandidatesFromMatches(matches)
+		want := []TiedCandidate{
+			{ConceptID: "kwc_a", Score: 0.8, Method: "tier1_norm"},
+			{ConceptID: "kwc_b", Score: 0.8, Method: "tier1_norm"},
+		}
+		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("single top match is not a tie but is still returned", func(t *testing.T) {
+		matches := []semid.ScoredMatch{{NodeID: "kwc_a", Score: 0.9, Method: "tier0_exact"}}
+		got := tiedCandidatesFromMatches(matches)
+		if len(got) != 1 || got[0].ConceptID != "kwc_a" {
+			t.Errorf("got %+v, want one candidate kwc_a", got)
+		}
+	})
 }

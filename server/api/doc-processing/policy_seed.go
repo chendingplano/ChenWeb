@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/lib/pq"
 )
 
@@ -21,18 +23,33 @@ type DocProcessingPolicySeedResult struct {
 	// BindingsWritten counts the one system-wide default binding plus one
 	// per cfg.Bindings entry.
 	BindingsWritten int
+	// RulesWritten counts the unconditional kb.pipeline_rules gate rows
+	// written -- one per processor named in each policy's processors list.
+	RulesWritten int
 }
+
+// alwaysTruePredicate is the trivial "all of zero conditions" predicate
+// document: vacuously true for every fact set (semrules/evaluate.go
+// evaluateAllOrAny). Used to give each seeded processor an unconditional
+// Tier-2 gate row -- PipelineGateSQLStore.ListPipelineGates only loads rows
+// with predicate IS NOT NULL, so a NULL predicate would never be consulted
+// by ResolveProcessorGate at all.
+var alwaysTruePredicate = semrules.Document{Version: 1, Expression: semrules.Predicate{Kind: "all"}}
 
 // SeedDocProcessingPolicies upserts cfg's policies into kb.pipelines (by
 // name), authors a new draft kb.pipeline_policies version carrying one
 // system-wide store_default binding (cfg.DefaultPolicyName()) plus one
-// store_default binding per cfg.Bindings entry, compiles that version, and
-// activates it -- archiving whatever policy was previously active. Every
-// write happens in one transaction; any failure rolls everything back and
-// leaves the previously active policy untouched. Safe to call repeatedly:
-// each call creates and activates a new policy version rather than mutating
-// a previous one. Activation is a full replacement, not a merge: once this
-// commits, only the bindings this function wrote are active, so any
+// store_default binding per cfg.Bindings entry, one unconditional
+// kb.pipeline_rules gate row per processor named in each policy's processors
+// list (require effect, always-true predicate -- makes kb.pipeline_rules a
+// real Tier-2 mirror of the Tier-1 processors list, since nothing else
+// authors Tier-2 gates today), compiles that version, and activates it --
+// archiving whatever policy was previously active. Every write happens in
+// one transaction; any failure rolls everything back and leaves the
+// previously active policy untouched. Safe to call repeatedly: each call
+// creates and activates a new policy version rather than mutating a
+// previous one. Activation is a full replacement, not a merge: once this
+// commits, only the bindings/rules this function wrote are active, so any
 // bindings/gates/rules authored under the previously active policy via
 // other paths (e.g. the REST API) stop being consulted immediately.
 func SeedDocProcessingPolicies(ctx context.Context, db *sql.DB, cfg DocProcessingPolicySeedConfig) (DocProcessingPolicySeedResult, error) {
@@ -118,6 +135,26 @@ VALUES ($1, $2, $3, $4, 0, true, 'store_default')`,
 		result.BindingsWritten++
 	}
 
+	predicateJSON, predicateChecksum, err := semrules.Canonicalize(alwaysTruePredicate)
+	if err != nil {
+		return DocProcessingPolicySeedResult{}, fmt.Errorf("canonicalize always-true predicate: %w", err)
+	}
+	for _, name := range policyNames {
+		processors := append([]string(nil), cfg.Policies[name].Processors...)
+		sort.Strings(processors)
+		for _, processor := range processors {
+			ruleName := fmt.Sprintf("%s: %s", name, processor)
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO kb.pipeline_rules
+    (name, priority, predicate, predicate_checksum, target_processor, effect, active, policy_id, approval_status)
+VALUES ($1, 0, $2::jsonb, $3, $4, 'require', true, $5, 'approved')`,
+				ruleName, string(predicateJSON), predicateChecksum, processor, policyID); err != nil {
+				return DocProcessingPolicySeedResult{}, fmt.Errorf("insert rule %q: %w", ruleName, err)
+			}
+			result.RulesWritten++
+		}
+	}
+
 	compiled, err := (PolicyCompilerSQLStore{DB: tx}).CompilePolicy(ctx, policyID)
 	if err != nil {
 		return DocProcessingPolicySeedResult{}, fmt.Errorf("compile policy: %w", err)
@@ -141,21 +178,37 @@ WHERE id = $2`, compiled.Checksum, policyID); err != nil {
 	return result, nil
 }
 
+// titleFromPipelineName derives a short display name from a config section
+// name (e.g. "no-entities-relations" -> "No Entities Relations"), since
+// config only supplies a name and a paragraph-length description, not a
+// separate short title.
+func titleFromPipelineName(name string) string {
+	words := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	for i, w := range words {
+		if w == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
+}
+
 func upsertDocProcessingPipeline(ctx context.Context, tx *sql.Tx, name string, policy DocProcessingPolicySeedPolicy) (id int64, created bool, err error) {
+	displayName := titleFromPipelineName(name)
 	err = tx.QueryRowContext(ctx, `SELECT id FROM kb.pipelines WHERE name = $1`, name).Scan(&id)
 	switch {
 	case err == nil:
 		if _, execErr := tx.ExecContext(ctx, `
-UPDATE kb.pipelines SET display_name = $1, processors = $2, modify_time = NOW() WHERE id = $3`,
-			policy.Description, pq.Array(policy.Processors), id); execErr != nil {
+UPDATE kb.pipelines SET display_name = $1, description = $2, processors = $3, is_system_default = $4, modify_time = NOW() WHERE id = $5`,
+			displayName, policy.Description, pq.Array(policy.Processors), policy.IsDefault, id); execErr != nil {
 			return 0, false, execErr
 		}
 		return id, false, nil
 	case errors.Is(err, sql.ErrNoRows):
 		if scanErr := tx.QueryRowContext(ctx, `
-INSERT INTO kb.pipelines (name, display_name, processors, legacy_equivalent)
-VALUES ($1, $2, $3, false)
-RETURNING id`, name, policy.Description, pq.Array(policy.Processors)).Scan(&id); scanErr != nil {
+INSERT INTO kb.pipelines (name, display_name, description, processors, legacy_equivalent, is_system_default)
+VALUES ($1, $2, $3, $4, false, $5)
+RETURNING id`, name, displayName, policy.Description, pq.Array(policy.Processors), policy.IsDefault).Scan(&id); scanErr != nil {
 			return 0, false, scanErr
 		}
 		return id, true, nil

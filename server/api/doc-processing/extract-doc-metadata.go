@@ -22,7 +22,15 @@ import (
 const defaultDocMetaStatusTime = "20060102 15:04:05"
 
 type ExtractDocMetadataProcessor struct {
-	Store        DocMetadataStore
+	Store DocMetadataStore
+	// Facets is optional (nil-safe): when set, a successful extraction also
+	// computes and persists tier-2 facets (spec 2026072901 S16.1 "Facet
+	// tiers 1-2") from the just-extracted doc_no/publish_date, right where
+	// they become known -- doc_metadata isn't available any earlier than
+	// this processor's own successful update, so this is the natural
+	// write point regardless of which resolver call later reads them back
+	// (ApplicabilityResolver.enrichWithPersistedFacets).
+	Facets       FacetObservationStore
 	Client       LLMJSONExtractor
 	Logger       ApiTypes.JimoLogger
 	ProcLogger   DocProcLogger
@@ -64,6 +72,7 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 	applyStructureModelConfigToExtractor(client, modelCfg)
 	return &ExtractDocMetadataProcessor{
 		Store:        store,
+		Facets:       SQLStore{DB: ApiTypes.ProjectDBHandle},
 		Client:       client,
 		Logger:       logger,
 		ProcLogger:   DocProcLogger{DB: ApiTypes.ProjectDBHandle},
@@ -223,6 +232,24 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	}
 	if err := p.Store.UpdateInputMetadata(ctx, rec.ID, upd); err != nil {
 		return fmt.Errorf("(MID_26042416) update kb.inputs metadata: %w", err)
+	}
+	if p.Facets != nil {
+		// InsertFacetObservation requires a non-empty DecisionAttemptID/
+		// InvocationID (validated before the SQL, doc_facet_store.go).
+		// eventIDFromContext can be "" outside a real event (e.g. tests, or
+		// a call with no event context), same reason resolverAttemptKey
+		// (control.go) falls back to the record id.
+		attemptKey := eventIDFromContext(ctx)
+		if attemptKey == "" {
+			attemptKey = fmt.Sprintf("record-%d", rec.ID)
+		}
+		for _, obs := range tier2FacetsFromSource(rec.ID, upd.DocNo, upd.PublishDate) {
+			obs.DecisionAttemptID = "tier2-" + attemptKey
+			obs.InvocationID = fmt.Sprintf("tier2-%d-%s", rec.ID, attemptKey)
+			if _, err := p.Facets.InsertFacetObservation(ctx, obs); err != nil {
+				p.Logger.Warn("tier-2 facet persist failed", "record_id", rec.ID, "path", obs.Path, "error", err)
+			}
+		}
 	}
 
 	p.Logger.Info("metadata extracted",

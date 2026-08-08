@@ -75,7 +75,7 @@ var P5AcceptanceCriteria = map[int][]string{
 	11: {
 		"TestResolverDecisionRelevantUnmaskedTier3Path",
 		"TestResolverOneInvocationPerRecordExtractionRun",
-		"TestClassifyDocumentMandatoryGatedImmunity",
+		"TestClassifyDocumentIsRoutedNotMandatory",
 		"TestResolverEnrichedFactsDoNotOverwriteKnown",
 	},
 	// 12. module proposals produce draft policy without changing active routing
