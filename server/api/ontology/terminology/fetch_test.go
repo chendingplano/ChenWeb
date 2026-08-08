@@ -114,16 +114,23 @@ func TestFetchWikidataWritesJSONLSnapshot(t *testing.T) {
 		if got := r.URL.Query().Get("titles"); got != "Luminance|Brightness" {
 			t.Errorf("titles = %q", got)
 		}
+		if got := r.URL.Query().Get("props"); !strings.Contains(got, "info") {
+			t.Errorf("props = %q, want it to include info", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"entities":{"Q355386":{"id":"Q355386","lastrevid":2490316763,"labels":{"en":{"language":"en","value":"luminance"}}},"Q221656":{"id":"Q221656","lastrevid":2490000001}},"success":1}`))
+		_, _ = w.Write([]byte(`{"entities":{
+			"Q355386":{"id":"Q355386","lastrevid":2490316763,"labels":{"en":{"language":"en","value":"luminance"},"zh":{"language":"zh","value":"亮度"}},"aliases":{"en":[{"language":"en","value":"luminous density"}]},"claims":{"P646":[{"mainsnak":{"snaktype":"value","datatype":"external-id","datavalue":{"value":"Luminance"}}}],"P1889":[{"mainsnak":{"snaktype":"value","datatype":"wikibase-item","datavalue":{"value":{"id":"Q358951"}}}}],"P279":[{"mainsnak":{"snaktype":"value","datatype":"wikibase-item","datavalue":{"value":{"id":"Q11425"}}}}]}},
+			"Q221656":{"id":"Q221656","lastrevid":2490000001}
+		},"success":1}`))
 	}))
 	defer srv.Close()
 
 	dir := t.TempDir()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 	st, err := Fetch(context.Background(), ResourceWikidata, dir,
 		WithURLOverride(ResourceWikidata, srv.URL),
 		WithWikidataTitles([]string{"Luminance", "Brightness"}),
-		WithNow(time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)))
+		WithNow(now))
 	if err != nil {
 		t.Fatalf("Fetch wikidata: %v", err)
 	}
@@ -138,20 +145,44 @@ func TestFetchWikidataWritesJSONLSnapshot(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 JSONL lines, got %d: %s", len(lines), b)
 	}
-	type entityLine struct {
-		ID   string `json:"id"`
-		Last int64  `json:"lastrevid"`
-	}
-	got := map[string]int64{}
+	got := map[string]WikidataLine{}
 	for _, ln := range lines {
-		var e entityLine
+		var e WikidataLine
 		if err := json.Unmarshal([]byte(ln), &e); err != nil {
 			t.Fatalf("decode line %q: %v", ln, err)
 		}
-		got[e.ID] = e.Last
+		got[e.ID] = e
 	}
-	if got["Q355386"] != 2490316763 || got["Q221656"] != 2490000001 {
-		t.Fatalf("entities = %+v", got)
+	// Lines must be the normalized adapter schema: revision-pinned, flat
+	// labels/aliases, external ids and statements projected from claims.
+	main, ok := got["Q355386"]
+	if !ok || main.Revision != 2490316763 {
+		t.Fatalf("Q355386 line = %+v, want revision 2490316763", main)
+	}
+	if main.Labels["en"] != "luminance" || main.Labels["zh"] != "亮度" {
+		t.Fatalf("Q355386 labels = %+v", main.Labels)
+	}
+	if len(main.Aliases["en"]) != 1 || main.Aliases["en"][0] != "luminous density" {
+		t.Fatalf("Q355386 aliases = %+v", main.Aliases)
+	}
+	if len(main.ExternalIDs) != 1 || main.ExternalIDs[0] != (ExternalIDClaim{Property: "P646", Value: "Luminance"}) {
+		t.Fatalf("Q355386 external_ids = %+v", main.ExternalIDs)
+	}
+	wantStatements := []WikidataStatement{{Type: "broader", Object: "Q11425"}, {Type: "different_from", Object: "Q358951"}}
+	if len(main.Statements) != len(wantStatements) {
+		t.Fatalf("Q355386 statements = %+v, want %+v", main.Statements, wantStatements)
+	}
+	for i := range wantStatements {
+		if main.Statements[i] != wantStatements[i] {
+			t.Fatalf("Q355386 statements = %+v, want %+v", main.Statements, wantStatements)
+		}
+	}
+	if !main.RetrievedAt.Equal(now) {
+		t.Fatalf("Q355386 retrieved_at = %v, want %v", main.RetrievedAt, now)
+	}
+	other, ok := got["Q221656"]
+	if !ok || other.Revision != 2490000001 || len(other.Labels) != 0 {
+		t.Fatalf("Q221656 line = %+v", other)
 	}
 }
 

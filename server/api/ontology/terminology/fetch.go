@@ -322,7 +322,7 @@ func Fetch(ctx context.Context, id ResourceID, destDir string, opts ...FetchOpti
 		if len(titles) == 0 {
 			titles = defaultWikidataTitles()
 		}
-		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, titles, res.MaxBytes, onProgress)
+		sha, size, sourceURL, err = fetchWikidataSnapshot(ctx, client, sourceURL, artifactPath, titles, res.MaxBytes, cfg.now, onProgress)
 		if rel == "" {
 			rel = "dump-" + cfg.now.Format("2006-01-02")
 		}
@@ -642,9 +642,9 @@ func writeStreamed(r io.Reader, destPath string, maxBytes int64, onProgress func
 }
 
 // fetchWikidataSnapshot calls wbgetentities for the pinned pilot titles and
-// writes one JSON object per entity (labels, aliases, descriptions, claims,
-// sitelinks, lastrevid) as JSONL. It returns the effective source URL used.
-func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, titles []string, maxBytes int64, onProgress func(done, total int64)) (string, int64, string, error) {
+// writes one normalized WikidataLine JSON object per entity as JSONL. It
+// returns the effective source URL used.
+func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, destPath string, titles []string, maxBytes int64, now time.Time, onProgress func(done, total int64)) (string, int64, string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", 0, "", err
@@ -653,7 +653,7 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 	q.Set("action", "wbgetentities")
 	q.Set("sites", "enwiki")
 	q.Set("titles", strings.Join(titles, "|"))
-	q.Set("props", "labels|aliases|descriptions|claims|sitelinks")
+	q.Set("props", "info|labels|aliases|descriptions|claims|sitelinks")
 	q.Set("languages", "en|zh|fr")
 	q.Set("format", "json")
 	u.RawQuery = q.Encode()
@@ -683,7 +683,7 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 		return "", 0, "", fmt.Errorf("response exceeds %d bytes", maxBytes)
 	}
 	var payload struct {
-		Entities map[string]json.RawMessage `json:"entities"`
+		Entities map[string]wikidataRawEntity `json:"entities"`
 		Error    *struct {
 			Info string `json:"info"`
 		} `json:"error"`
@@ -707,12 +707,16 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		line, err := json.Marshal(payload.Entities[id])
+		line, err := normalizeWikidataEntity(payload.Entities[id], now)
 		if err != nil {
 			return "", 0, "", err
 		}
-		line = append(line, '\n')
-		if _, err := mw.Write(line); err != nil {
+		raw, err := json.Marshal(line)
+		if err != nil {
+			return "", 0, "", err
+		}
+		raw = append(raw, '\n')
+		if _, err := mw.Write(raw); err != nil {
 			return "", 0, "", err
 		}
 	}
@@ -727,3 +731,111 @@ func fetchWikidataSnapshot(ctx context.Context, client *http.Client, baseURL, de
 	}
 	return hex.EncodeToString(h.Sum(nil)), int64(buf.Len()), effectiveURL, nil
 }
+
+// wikidataRawEntity is one entity as returned by the wbgetentities API.
+type wikidataRawEntity struct {
+	ID        string `json:"id"`
+	LastRevID int64  `json:"lastrevid"`
+	Labels    map[string]struct {
+		Language string `json:"language"`
+		Value    string `json:"value"`
+	} `json:"labels"`
+	Aliases map[string][]struct {
+		Language string `json:"language"`
+		Value    string `json:"value"`
+	} `json:"aliases"`
+	Claims map[string][]wikidataRawClaim `json:"claims"`
+}
+
+type wikidataRawClaim struct {
+	Mainsnak wikidataRawSnak `json:"mainsnak"`
+}
+
+type wikidataRawSnak struct {
+	Snaktype  string `json:"snaktype"`
+	Datatype  string `json:"datatype"`
+	Datavalue *struct {
+		Value json.RawMessage `json:"value"`
+	} `json:"datavalue"`
+}
+
+// normalizeWikidataEntity projects one wbgetentities entity into the
+// revision-pinned WikidataLine schema the adapter consumes: labels/aliases
+// are flattened to language->text, external-id/url claims become
+// external_ids, and P1889/P279 item claims become different_from/broader
+// proposal statements.
+func normalizeWikidataEntity(raw wikidataRawEntity, retrievedAt time.Time) (WikidataLine, error) {
+	line := WikidataLine{
+		ID: raw.ID, Revision: raw.LastRevID, RetrievedAt: retrievedAt,
+		Labels: map[string]string{}, Aliases: map[string][]string{},
+	}
+	if strings.TrimSpace(line.ID) == "" {
+		return line, errors.New("wikidata entity is missing its id")
+	}
+	for language, label := range raw.Labels {
+		line.Labels[language] = label.Value
+	}
+	for language, aliases := range raw.Aliases {
+		values := make([]string, 0, len(aliases))
+		for _, alias := range aliases {
+			values = append(values, alias.Value)
+		}
+		line.Aliases[language] = values
+	}
+	for property, claims := range raw.Claims {
+		for _, claim := range claims {
+			snak := claim.Mainsnak
+			if snak.Snaktype != "value" || snak.Datavalue == nil {
+				continue
+			}
+			switch snak.Datatype {
+			case "external-id", "url":
+				var value string
+				if err := json.Unmarshal(snak.Datavalue.Value, &value); err != nil {
+					continue
+				}
+				line.ExternalIDs = append(line.ExternalIDs, ExternalIDClaim{Property: property, Value: value})
+			case "wikibase-item":
+				var item struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(snak.Datavalue.Value, &item); err != nil || item.ID == "" {
+					continue
+				}
+				if statementType := wikidataStatementTypeForProperty(property); statementType != "" {
+					line.Statements = append(line.Statements, WikidataStatement{Type: statementType, Object: item.ID})
+				}
+			}
+		}
+	}
+	// Claim maps iterate in random order; sort so identical API responses
+	// always produce byte-identical artifacts with a stable checksum.
+	sort.Slice(line.ExternalIDs, func(i, j int) bool {
+		if line.ExternalIDs[i].Property != line.ExternalIDs[j].Property {
+			return line.ExternalIDs[i].Property < line.ExternalIDs[j].Property
+		}
+		return line.ExternalIDs[i].Value < line.ExternalIDs[j].Value
+	})
+	sort.Slice(line.Statements, func(i, j int) bool {
+		if line.Statements[i].Type != line.Statements[j].Type {
+			return line.Statements[i].Type < line.Statements[j].Type
+		}
+		return line.Statements[i].Object < line.Statements[j].Object
+	})
+	return line, nil
+}
+
+// wikidataStatementTypeForProperty maps Wikidata item-relation properties to
+// the normalized proposal statement types the adapter understands. P279
+// subclass-of names the broader concept on the entity; P1889 different-from
+// is negative-evidence proposal. Both remain proposal-only, never authority.
+func wikidataStatementTypeForProperty(property string) string {
+	switch property {
+	case "P1889": // different from
+		return "different_from"
+	case "P279": // subclass of; the object is the broader concept
+		return "broader"
+	}
+	return ""
+}
+

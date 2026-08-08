@@ -462,6 +462,42 @@ type <units> but have <root>`.
 - [x] Re-fetch UCUM and verify the real file converts (305 unit codes).
 - [x] Update this plan; commit with `jj`.
 
+## Task 14: Wikidata snapshot normalization to adapter schema
+
+**Problem:** The first live Wikidata approval failed with
+`adapter wikidata: decode wikidata line: json: unknown field "type"` because
+`fetchWikidataSnapshot` wrote the raw wbgetentities entity objects (fields
+`type`, `claims`, `sitelinks`, and `labels` shaped as `{language,value}`
+pairs) while the WikidataAdapter decodes the normalized, revision-pinned
+`WikidataLine` schema with `DisallowUnknownFields`. The raw dump also had no
+`lastrevid` because `info` was not in the requested props, so no entity
+revision could be pinned.
+
+**Files:**
+- Modify: `server/api/ontology/terminology/fetch.go` (+ `fetch_test.go`)
+
+**Interfaces:**
+- The fetch requests `props=info|labels|aliases|descriptions|claims|sitelinks`
+  so `lastrevid` is present, then projects each entity through
+  `normalizeWikidataEntity` into the adapter's `WikidataLine` schema before
+  writing JSONL: labels/aliases flatten to language->text maps,
+  `external-id`/`url` claims become `external_ids`, and the item-relation
+  claims P1889 (different from) and P279 (subclass of; the object is the
+  broader concept) become proposal `different_from`/`broader` statements.
+  External ids and statements are sorted by property/value so identical API
+  responses produce byte-identical artifacts with stable SHA-256 checksums.
+  The adapter is unchanged: the snapshot is now exactly what it always
+  expected.
+
+- [x] Reproduce the unknown-field failure against the real raw artifact.
+- [x] Request `info` and normalize each entity into `WikidataLine`.
+- [x] Sort external ids and statements for deterministic checksums.
+- [x] Update the fetch test to decode normalized lines (revision, flat
+      labels, external ids, statements, retrieved_at).
+- [x] Re-fetch Wikidata and verify the real file converts (3 entries, 12
+      labels, 2 broader relations, 6 different-from decisions).
+- [x] Update this plan; commit with `jj`.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
@@ -484,7 +520,12 @@ type <units> but have <root>`.
   live download progress (spinner + progress bar) from `status.json`, and
   Wikidata's weekly dump cadence is mapped to an automated
   `terminology_refresh` scheduler job that re-fetches into new unapproved
-  draft manifests (import still requires operator approval).
+  draft manifests (import still requires operator approval). Live approvals
+  of the UCUM (305 codes), BIPM SIRP (149 entries), and Wikidata (3 pilot
+  entries) drafts now succeed: SIRP is fetched as Turtle and parsed as
+  `si:QuantityKind`, UCUM's ascii-declared `<root>` essence is decoded, and
+  the Wikidata fetch normalizes raw wbgetentities responses into the
+  revision-pinned `WikidataLine` schema the adapter consumes.
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
   §21, I2), the Stage-0/1 tooling commits (Tasks 0–10), the live integration
@@ -495,7 +536,7 @@ type <units> but have <root>`.
   (§7.2 live proof, §9), `docs/superpowers/specs/2026-08-07-external-terminology-resource-portfolio-design.md`
   (status, §12.3, §13 implementation/commands/formats/acceptance, §13.2 fetch
   tool/approve/disapprove API, sizes/progress/weekly refresh), this plan
-  (Tasks 9–11), the governing
+  (Tasks 9–14), the governing
   `KnowledgeStore/doc-repo/specs/202608/2026080403-spec-keyword-canonicalization-and-reconciliation.md`,
   and the stored coverage report under `docs/superpowers/reports/`.
 - **Which docs are now stale?** The keyword spec's §13.1 "embedding may
@@ -513,4 +554,6 @@ type <units> but have <root>`.
 
 ## Completion boundary
 
-This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus the admin pages (Tasks 9–10). Task 10 is the operator gate: the Review dialog approves or disapproves each fetched draft manifest (recording comments and reviewer) and starts the offline import on approval; QUDT 3.5.0 is the first live import, and re-approving identical content replays idempotently. Task 11 adds expected sizes and update cadence to the resource cards, live download progress, and the `terminology_refresh` scheduler job so Wikidata's weekly cadence can be automated as scheduled re-fetches that always land in unapproved draft manifests. It does not claim that the production portfolio is bootstrapped: the remaining free sources (UCUM, BIPM SIRP, Wikidata pilot subset) still await operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
+This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus the admin pages (Tasks 9–10). Task 10 is the operator gate: the Review dialog approves or disapproves each fetched draft manifest (recording comments and reviewer) and starts the offline import on approval; QUDT 3.5.0 is the first live import, and re-approving identical content replays idempotently. Task 11 adds expected sizes and update cadence to the resource cards, live download progress, and the `terminology_refresh` scheduler job so Wikidata's weekly cadence can be automated as scheduled re-fetches that always land in unapproved draft manifests. Tasks 12–14 align the
+  live SIRP, UCUM, and Wikidata artifacts to their adapters so approving those fetched drafts
+  imports successfully. It does not claim that the production portfolio is bootstrapped: the remaining free source (Wikidata pilot subset) still awaits operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
