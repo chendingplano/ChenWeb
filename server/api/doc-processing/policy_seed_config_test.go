@@ -122,3 +122,83 @@ func TestLoadDocProcessingPolicySeedConfig_MissingFile(t *testing.T) {
 		t.Fatal("expected an error for a missing file")
 	}
 }
+
+func TestDocProcessingPolicySeedConfigValidate_Valid(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{
+		Policies: map[string]DocProcessingPolicySeedPolicy{
+			"no-entities-relations": {IsDefault: true, Processors: []string{"extract_metrics", "generate_topics"}},
+			"all":                   {IsDefault: false, Processors: []string{"extract_metrics", "extract_entity"}},
+		},
+		Bindings: map[string]string{"Research": "all"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
+	}
+	if got := cfg.DefaultPolicyName(); got != "no-entities-relations" {
+		t.Errorf("DefaultPolicyName() = %q, want %q", got, "no-entities-relations")
+	}
+}
+
+func TestDocProcessingPolicySeedConfigValidate_NoDefault(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{
+		Policies: map[string]DocProcessingPolicySeedPolicy{
+			"a": {IsDefault: false, Processors: []string{"extract_metrics"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an error when no policy has is_default = true")
+	}
+}
+
+func TestDocProcessingPolicySeedConfigValidate_TwoDefaults(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{
+		Policies: map[string]DocProcessingPolicySeedPolicy{
+			"a": {IsDefault: true, Processors: []string{"extract_metrics"}},
+			"b": {IsDefault: true, Processors: []string{"extract_metrics"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an error when two policies have is_default = true")
+	}
+}
+
+func TestDocProcessingPolicySeedConfigValidate_EmptyProcessors(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{
+		Policies: map[string]DocProcessingPolicySeedPolicy{
+			"a": {IsDefault: true, Processors: nil},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an error for an empty processors list")
+	}
+}
+
+func TestDocProcessingPolicySeedConfigValidate_UnknownProcessor(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{
+		Policies: map[string]DocProcessingPolicySeedPolicy{
+			"a": {IsDefault: true, Processors: []string{"not_a_real_processor"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an error for an unknown processor name")
+	}
+}
+
+func TestDocProcessingPolicySeedConfigValidate_UnknownBindingPolicy(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{
+		Policies: map[string]DocProcessingPolicySeedPolicy{
+			"a": {IsDefault: true, Processors: []string{"extract_metrics"}},
+		},
+		Bindings: map[string]string{"Research": "does-not-exist"},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an error for a binding referencing an unknown policy")
+	}
+}
+
+func TestDocProcessingPolicySeedConfigValidate_NoPolicies(t *testing.T) {
+	cfg := DocProcessingPolicySeedConfig{}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an error for zero policies")
+	}
+}

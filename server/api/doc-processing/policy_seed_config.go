@@ -112,3 +112,49 @@ func decodeDocProcessingPolicySeedPolicy(section map[string]any) (DocProcessingP
 	}
 	return policy, nil
 }
+
+// Validate enforces the doc-processing-policy-seed rules: at least one
+// policy, exactly one is_default = true, every processor name resolves
+// against the real production processor registry, and every binding names
+// a policy that exists in this same config.
+func (c DocProcessingPolicySeedConfig) Validate() error {
+	if len(c.Policies) == 0 {
+		return fmt.Errorf("no [doc-processing-policy-*] sections found")
+	}
+	var defaultName string
+	for name, policy := range c.Policies {
+		if len(policy.Processors) == 0 {
+			return fmt.Errorf("policy %q: processors must not be empty", name)
+		}
+		if err := validateRequiredProcessors(policy.Processors); err != nil {
+			return fmt.Errorf("policy %q: %w", name, err)
+		}
+		if policy.IsDefault {
+			if defaultName != "" {
+				return fmt.Errorf("multiple default policies: %q and %q", defaultName, name)
+			}
+			defaultName = name
+		}
+	}
+	if defaultName == "" {
+		return fmt.Errorf("no policy has is_default = true")
+	}
+	for store, policyName := range c.Bindings {
+		if _, ok := c.Policies[policyName]; !ok {
+			return fmt.Errorf("binding %q: unknown policy %q", store, policyName)
+		}
+	}
+	return nil
+}
+
+// DefaultPolicyName returns the name of the policy with IsDefault = true.
+// Callers must call Validate first; DefaultPolicyName returns "" if no
+// policy is marked default (Validate would have already rejected that).
+func (c DocProcessingPolicySeedConfig) DefaultPolicyName() string {
+	for name, policy := range c.Policies {
+		if policy.IsDefault {
+			return name
+		}
+	}
+	return ""
+}
