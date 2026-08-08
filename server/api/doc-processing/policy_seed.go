@@ -1,4 +1,5 @@
 // policy_seed.go
+
 package docprocessing
 
 import (
@@ -30,7 +31,10 @@ type DocProcessingPolicySeedResult struct {
 // write happens in one transaction; any failure rolls everything back and
 // leaves the previously active policy untouched. Safe to call repeatedly:
 // each call creates and activates a new policy version rather than mutating
-// a previous one.
+// a previous one. Activation is a full replacement, not a merge: once this
+// commits, only the bindings this function wrote are active, so any
+// bindings/gates/rules authored under the previously active policy via
+// other paths (e.g. the REST API) stop being consulted immediately.
 func SeedDocProcessingPolicies(ctx context.Context, db *sql.DB, cfg DocProcessingPolicySeedConfig) (DocProcessingPolicySeedResult, error) {
 	if db == nil {
 		return DocProcessingPolicySeedResult{}, errors.New("db is nil")

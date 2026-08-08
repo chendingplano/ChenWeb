@@ -1,4 +1,5 @@
 // policy_seed_test.go
+
 package docprocessing
 
 import (
@@ -88,7 +89,7 @@ func TestSeedDocProcessingPolicies_CreatesBothPipelinesOnFirstRun(t *testing.T) 
 	// routing-clearance coverage (also none). Exact query prefixes below are
 	// copied from the real queries in policy_compile.go and from the
 	// existing loadBindings test's row shape (policy_compile_test.go
-	// TestPolicyCompilerSQLStoreLoadBindings*, 13 columns).
+	// TestPolicyCompilerSQLStoreLoadsLegacyAdapterForParity, 13 columns).
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT version FROM kb.pipeline_policies WHERE id=$1`)).
 		WithArgs(int64(30)).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
@@ -117,6 +118,7 @@ func TestSeedDocProcessingPolicies_CreatesBothPipelinesOnFirstRun(t *testing.T) 
 		WithArgs(int64(30)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.pipeline_policies`)).
+		WithArgs(sqlmock.AnyArg(), int64(30)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

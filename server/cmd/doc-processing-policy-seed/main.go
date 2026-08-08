@@ -56,6 +56,7 @@ func main() {
 	fmt.Printf("pipelines updated: %v\n", result.PipelinesUpdated)
 	fmt.Printf("bindings written: %d\n", result.BindingsWritten)
 	fmt.Printf("activated policy id=%d version=%d\n", result.PolicyID, result.PolicyVersion)
+	fmt.Println("NOTE: the activated policy contains ONLY these bindings; anything authored under the previously active policy is now inactive.")
 	fmt.Println("NOTE: restart the doc-processor service for this policy to take effect.")
 }
 

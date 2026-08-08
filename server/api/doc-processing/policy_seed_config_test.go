@@ -1,6 +1,8 @@
 package docprocessing
 
 import (
+	"errors"
+	"os"
 	"testing"
 )
 
@@ -99,7 +101,11 @@ func TestLoadDocProcessingPolicySeedConfig_RealConfigFile(t *testing.T) {
 	// ../../.. from server/api/doc-processing reaches the ChenWeb repo root,
 	// where config.local.toml lives (Task 1 fixed its syntax and added the
 	// bindings table this test relies on).
-	cfg, err := LoadDocProcessingPolicySeedConfig("../../../config.local.toml")
+	path := "../../../config.local.toml"
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		t.Skip("config.local.toml is local-only (gitignored); nothing to validate here")
+	}
+	cfg, err := LoadDocProcessingPolicySeedConfig(path)
 	if err != nil {
 		t.Fatalf("load real config.local.toml: %v", err)
 	}
