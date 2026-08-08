@@ -8,7 +8,7 @@
 
 Today, which doc processors run on every document is one flat, global list: `[doc-processing].required_processors` in `config.toml`. Every knowledge store gets the same processors regardless of what that store actually needs.
 
-DR6 already designed a fix — named pipelines, per-store bindings, and a versioned activation policy — and DR7 already designed the precedence/fallback rules. The 2026-08-08 code-verification pass (ADR §16.1) found that DR6's schema and resolution code are fully built and already wired into per-record processing (`ControlService.handleEvent` → `resolveProductionPlanFacts` → `ResolveProductionPipelineResolution`), but no real policy content has ever been authored: only placeholder pipelines (`legacy_default`, `store_default`, `request_override`) exist, and no `kb.pipeline_policies` row has ever been activated.
+DR6 already designed a fix — named pipelines, per-store bindings, and a versioned activation policy — and DR7 already designed the precedence/fallback rules. The 2026-08-08 code-verification pass (ADR §16.1) found that DR6's schema and resolution code are fully built and already wired into per-record processing (`ControlService.handleEvent` → `resolveProductionPlanFacts` → `ResolveProductionPipelineResolution`), but no real policy content has ever been authored: only placeholder pipelines (`legacy_default`, `store_default`, `request_override`) exist. A bootstrap policy has been active since an early migration, but no real bindings have ever been authored under it — `kb.pipeline_bindings` was empty.
 
 This design authors real content into that existing mechanism. It does not add new resolution logic, new tables, or a new runtime code path.
 
@@ -21,9 +21,11 @@ Term mapping onto the existing schema:
 | This design's term | Existing schema |
 |---|---|
 | Doc Processing Policy | one `kb.pipelines` row: `name`, `processors[]` |
-| "associate a policy with a knowledge store" | one `kb.pipeline_bindings` row, `scope_kind='knowledge_store'`, `scope_key=<ks_store_id>` |
-| default policy | one `kb.pipeline_bindings` row, `scope_kind='system'` |
+| "associate a policy with a knowledge store" | one `kb.pipeline_bindings` row, `binding_kind='store_default'`, `ks_store_id=<id>` |
+| default policy | one `kb.pipeline_bindings` row, `binding_kind='store_default'`, `ks_store_id=NULL` |
 | (all of the above) | held inside one new, activated `kb.pipeline_policies` version |
+
+`kb.pipeline_bindings` has no `scope_kind`/`scope_key` columns. "Scope" (`system`/`knowledge_store`/`user`/`tenant`/`document`) is derived at read time by a SQL `CASE` expression over which of `ks_store_id`/`user_id`/`tenant_id`/`input_record_id` is populated on the row (see `server/api/doc-processing/pipeline_bindings.go` and `policy_compile.go`), not a stored column.
 
 A pipeline's `processors` list is an **allow-list intersected against the request**, not a full override: `static_analyzer`/`chunking`/`extract_doc_metadata` always run regardless of policy (existing `applyPolicyFilter` behavior, unchanged by this design).
 
