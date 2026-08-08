@@ -332,6 +332,15 @@
 - [x] Run go tests/build/vet, svelte-check, and eslint on the new frontend files.
 - [x] Update §13.2 and the documentation-impact section; commit with `jj`.
 
+**Live acceptance:** QUDT 3.5.0 was approved through the admin Review dialog
+and imported into the staging database as the first live import (1223
+quantity-kind entries, 3177 labels, 1342 relations). The `skos:closeMatch`
+predicates in the real `qudt-all.ttl` are retained as non-authoritative
+`close_match` relations instead of failing conversion. Re-downloading and
+re-approving an already imported release with byte-identical content reports
+an idempotent replay rather than an immutable-release error. The Approve /
+Disapprove / Cancel dialog flows with comments were verified in the browser.
+
 ## Documentation impact (workspace policy)
 
 - **What knowledge changed?** Tier 6 no longer trusts cosine as merge
@@ -346,10 +355,13 @@
   sources surface on a Review page until their draft manifest is approved.
   Approval records the operator's review comments and starts the offline
   import of the approved local manifest; disapproval saves the comments,
-  marks the draft `disapproved`, and never imports.
+  marks the draft `disapproved`, and never imports. The QUDT adapter retains
+  `skos:closeMatch` as a non-authoritative `close_match` relation, and the
+  approve flow replays releases already registered with byte-identical
+  content instead of surfacing an immutable-release error.
 - **Which docs/specs/ADRs/tests are affected?** The two 2026-08-07 design
   specs, this plan, the governing KnowledgeStore keyword spec (§13.1, R6,
-  §21, I2), the Stage-0/1 tooling commits (Tasks 0–9), the live integration
+  §21, I2), the Stage-0/1 tooling commits (Tasks 0–10), the live integration
   test `server/api/ontology/keywords/reconcile_identity_integration_test.go`,
   the new fetch/handler/CLI tests, and the External Terminology Resources and
   Review External Resources admin pages.
@@ -374,4 +386,4 @@
 
 ## Completion boundary
 
-This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus admin page (Task 9). It does not claim that the production portfolio is bootstrapped: the download tool retrieves the four freely available sources into local artifacts with unapproved draft manifests, but it does not redistribute datasets, scrape IEC/CIE/ISO pages, approve manifests, import anything, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
+This plan implements the validator plus Stage-0/1 coverage, import, governance, promotion, negative-evidence, release-diff, and rollback tooling, and the network-enabled download tool/API plus the admin pages (Tasks 9–10). Task 10 is the operator gate: the Review dialog approves or disapproves each fetched draft manifest (recording comments and reviewer) and starts the offline import on approval; QUDT 3.5.0 is the first live import, and re-approving identical content replays idempotently. It does not claim that the production portfolio is bootstrapped: the remaining free sources (UCUM, BIPM SIRP, Wikidata pilot subset) still await operator review/approval, and the plan does not redistribute datasets, scrape IEC/CIE/ISO pages, bulk-import licensed IEC content, choose the operator's coverage target, publish a production seed release, or implement Stage-2/3 licensed/clinical adapters. Production activation still requires operators to review/approve each remaining fetched manifest (license, role, scope, relations, checksum), supply the reviewed IEC seed/promotion files, run the corpus/coverage report, approve the acceptance criteria, and publish a versioned seed release before enabling Tier 6.
