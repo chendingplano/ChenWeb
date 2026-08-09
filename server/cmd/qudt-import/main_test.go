@@ -4,16 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 )
 
 const quantityKindsFixture = "../../api/ontology/terminology/testdata/fixtures/qudt/quantity-kinds.ttl"
 
-func TestParseTermsQuantityKindsFixture(t *testing.T) {
-	terms := parseTerms(quantityKindsFixture, qkClass, "qk_")
+func TestParseTermsFromFileQuantityKindsFixture(t *testing.T) {
+	terms := parseTermsFromFile(quantityKindsFixture)
 	if len(terms) != 4 {
 		t.Fatalf("parsed %d terms, want 4 (deprecated LuminousIntensityOld skipped)", len(terms))
 	}
-	byID := map[string]importedTerm{}
+	byID := map[string]terminology.QUDTImportedTerm{}
 	for _, term := range terms {
 		byID[term.TermID] = term
 	}
@@ -35,7 +37,7 @@ func TestParseTermsQuantityKindsFixture(t *testing.T) {
 	}
 }
 
-func TestParseTermsSharedAcrossQUDTClasses(t *testing.T) {
+func TestParseTermsFromFileClassifiesEachClassFromItsOwnRDFType(t *testing.T) {
 	dir := t.TempDir()
 	writeTTL := func(name, body string) string {
 		t.Helper()
@@ -72,21 +74,53 @@ func TestParseTermsSharedAcrossQUDTClasses(t *testing.T) {
 <http://qudt.org/vocab/dimensionvector/L> a qudt:DimensionVector ;
     rdfs:label "Length"@en .
 `)
+	combined := writeTTL("qudt-all.ttl", `@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix qudt: <http://qudt.org/schema/qudt/> .
 
-	unitTerms := parseTerms(units, unitClass, "unit_")
+<http://qudt.org/vocab/unit/M> a qudt:Unit ;
+    rdfs:label "Metre"@en ;
+    qudt:symbol "m" .
+
+<http://qudt.org/vocab/quantitykind/LuminousIntensity> a qudt:QuantityKind ;
+    rdfs:label "luminous intensity"@en .
+
+<http://qudt.org/vocab/dimensionvector/L> a qudt:DimensionVector ;
+    rdfs:label "Length"@en .
+`)
+
+	unitTerms := parseTermsFromFile(units)
 	if len(unitTerms) != 1 || unitTerms[0].TermID != "quantity:unit_M" || unitTerms[0].Kind != "unit" ||
 		unitTerms[0].PrefLabel != "Metre" || unitTerms[0].Symbol != "m" {
 		t.Fatalf("unitTerms=%+v", unitTerms)
 	}
-	qkTerms := parseTerms(quantityKinds, qkClass, "qk_")
+	qkTerms := parseTermsFromFile(quantityKinds)
 	if len(qkTerms) != 1 || qkTerms[0].TermID != "quantity:qk_LuminousIntensity" || qkTerms[0].Kind != "quantity_kind" {
 		t.Fatalf("qkTerms=%+v", qkTerms)
 	}
-	dimTerms := parseTerms(dimensions, dimClass, "dim_")
+	dimTerms := parseTermsFromFile(dimensions)
 	if len(dimTerms) != 1 || dimTerms[0].TermID != "quantity:dim_L" || dimTerms[0].Kind != "dimension" {
 		t.Fatalf("dimTerms=%+v", dimTerms)
 	}
-	if leaked := parseTerms(units, qkClass, "qk_"); len(leaked) != 0 {
-		t.Fatalf("quantity-kind projection leaked unit resources: %+v", leaked)
+
+	// A single combined artifact (e.g. the real qudt-all.ttl) mixing all three
+	// classes must classify each resource correctly in one pass -- this is
+	// exactly the shape the Approve handler feeds it (design.md Decision 2).
+	combinedTerms := parseTermsFromFile(combined)
+	if len(combinedTerms) != 3 {
+		t.Fatalf("combinedTerms=%+v, want 3 (one per class)", combinedTerms)
+	}
+	byID := map[string]terminology.QUDTImportedTerm{}
+	for _, term := range combinedTerms {
+		byID[term.TermID] = term
+	}
+	if byID["quantity:unit_M"].Kind != "unit" {
+		t.Fatalf("combined unit misclassified: %+v", byID["quantity:unit_M"])
+	}
+	if byID["quantity:qk_LuminousIntensity"].Kind != "quantity_kind" {
+		t.Fatalf("combined quantity kind misclassified: %+v", byID["quantity:qk_LuminousIntensity"])
+	}
+	if byID["quantity:dim_L"].Kind != "dimension" {
+		t.Fatalf("combined dimension misclassified: %+v", byID["quantity:dim_L"])
 	}
 }

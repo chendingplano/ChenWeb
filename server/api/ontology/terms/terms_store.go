@@ -197,6 +197,82 @@ RETURNING ` + termColumns
 	return scanTerm(row.Scan)
 }
 
+// termBatchChunkSize bounds how many term rows one INSERT statement carries,
+// keeping a single batch call's parameter count and statement size modest
+// even for QUDT-sized imports (thousands of terms).
+const termBatchChunkSize = 500
+
+// CreateTermsBatch inserts version-1 rows for multiple new terms in chunked
+// multi-row statements, skipping any (term_id, version=1) already present
+// (ON CONFLICT DO NOTHING). It returns only the terms actually inserted, in
+// no particular order across chunks; already-existing terms are silently
+// omitted from the result rather than erroring, matching the create-if-absent
+// semantics `cmd/qudt-import` already relies on.
+func (s TermStore) CreateTermsBatch(ctx context.Context, list []Term) ([]Term, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	var inserted []Term
+	for start := 0; start < len(list); start += termBatchChunkSize {
+		end := start + termBatchChunkSize
+		if end > len(list) {
+			end = len(list)
+		}
+		rows, err := s.insertTermChunk(ctx, list[start:end])
+		if err != nil {
+			return inserted, err
+		}
+		inserted = append(inserted, rows...)
+	}
+	return inserted, nil
+}
+
+func (s TermStore) insertTermChunk(ctx context.Context, chunk []Term) ([]Term, error) {
+	if len(chunk) == 0 {
+		return nil, nil
+	}
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO kb.ontology_terms
+	(term_id, version, term_kind, module_id, status, definition, scope, source_candidate_id, create_by, modify_by)
+VALUES `)
+	args := make([]any, 0, len(chunk)*9)
+	for i, t := range chunk {
+		if err := validateTerm(t); err != nil {
+			return nil, fmt.Errorf("term %q: %w", t.TermID, err)
+		}
+		status := t.Status
+		if status == "" {
+			status = "draft"
+		}
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		base := i * 9
+		fmt.Fprintf(&sb, "($%d,1,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9)
+		args = append(args,
+			strings.TrimSpace(t.TermID), t.TermKind, strings.TrimSpace(t.ModuleID),
+			status, nullableString(t.Definition), nullableString(t.Scope),
+			nullableInt64(t.SourceCandidateID), nullableString(t.CreateBy), nullableString(t.ModifyBy),
+		)
+	}
+	sb.WriteString(" ON CONFLICT (term_id, version) DO NOTHING RETURNING " + termColumns)
+	rows, err := s.DB.QueryContext(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Term, 0, len(chunk))
+	for rows.Next() {
+		t, err := scanTerm(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // GetTermLatest returns the current (highest-version) row for a term_id.
 func (s TermStore) GetTermLatest(ctx context.Context, termID string) (Term, error) {
 	if s.DB == nil {

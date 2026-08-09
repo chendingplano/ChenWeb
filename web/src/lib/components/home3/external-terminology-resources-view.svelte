@@ -3,6 +3,7 @@
 	import {
 		listTerminologyResources,
 		downloadTerminologyResource,
+		setAutoPromoteEnabled,
 		type TerminologyResource
 	} from '$lib/services/terminologyResourceService';
 	import DownloadIcon from '@lucide/svelte/icons/download';
@@ -35,6 +36,7 @@
 	let pageError = $state<string | null>(null);
 	let downloading = $state<Record<string, boolean>>({});
 	let progress = $state<Record<string, { done: number; total: number; startedAt: number }>>({});
+	let togglingPromotion = $state<Record<string, boolean>>({});
 
 	onMount(() => {
 		refresh();
@@ -61,6 +63,21 @@
 
 	function shortSha(sha: string): string {
 		return sha ? `${sha.slice(0, 16)}…` : '';
+	}
+
+	async function toggleAutoPromote(r: TerminologyResource) {
+		const next = !r.auto_promote_enabled;
+		togglingPromotion = { ...togglingPromotion, [r.id]: true };
+		try {
+			const enabled = await setAutoPromoteEnabled(r.id, next);
+			resources = resources.map((x) =>
+				x.id === r.id ? { ...x, auto_promote_enabled: enabled } : x
+			);
+		} catch (e) {
+			pageError = e instanceof Error ? e.message : `Failed to update auto-promotion for ${r.name}`;
+		} finally {
+			togglingPromotion = { ...togglingPromotion, [r.id]: false };
+		}
 	}
 
 	function expectedSizeLabel(r: TerminologyResource): string {
@@ -242,6 +259,33 @@
 						<div style="color:{textMuted};">Update cadence</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">{cadenceLabel(r)}</div>
 					</div>
+				</div>
+
+				<!-- Auto-promote toggle -->
+				<div
+					class="mt-2 flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[11px]"
+					style="background:{inputBg};"
+				>
+					<div>
+						<div class="font-medium" style="color:{textPrimary};">Auto-promote on approve</div>
+						<div class="mt-0.5" style="color:{textMuted};">
+							Staged entries become keyword concepts automatically, flagged for optional review.
+						</div>
+					</div>
+					<button
+						onclick={() => toggleAutoPromote(r)}
+						disabled={togglingPromotion[r.id]}
+						role="switch"
+						aria-checked={r.auto_promote_enabled}
+						aria-label="Toggle auto-promote for {r.name}"
+						class="relative h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+						style="background:{r.auto_promote_enabled ? accent : borderColor};"
+					>
+						<span
+							class="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform duration-150"
+							style="transform: translateX({r.auto_promote_enabled ? '18px' : '2px'});"
+						></span>
+					</button>
 				</div>
 
 				<!-- Downloaded metadata -->

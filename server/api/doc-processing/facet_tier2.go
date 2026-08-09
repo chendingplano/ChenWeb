@@ -4,7 +4,28 @@ import (
 	"context"
 	"regexp"
 	"strings"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
+
+// FacetTier2Name is facet_tier2's ProcessorSpec name (processor_plan.go).
+const FacetTier2Name = "facet_tier2"
+
+// facetTier2GatedOff reports whether an authored processor gate
+// (kb.pipeline_rules, target_processor="facet_tier2") resolves to Skip. See
+// facetTier1GatedOff (facet_tier1.go) for the full contract; this is the
+// same helper for tier 2.
+func facetTier2GatedOff(facts semrules.FactSet) (bool, error) {
+	spec := findProductionProcessorSpec(FacetTier2Name)
+	if spec == nil {
+		return false, nil
+	}
+	decision, err := ResolveProcessorGate(*spec, currentProductionPipelineGates(), facts, GateResolutionOptions{})
+	if err != nil {
+		return false, err
+	}
+	return decision.Effect == GateEffectSkip, nil
+}
 
 // Tier-2 facets (spec ADR 2026072901 S3.5 DR4, S16.1 "Facet tiers 1-2"):
 // derived from extract_doc_metadata's already-extracted output (doc_no,

@@ -30,21 +30,6 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/terms"
 )
 
-const (
-	unitClass = "http://qudt.org/schema/qudt/Unit"
-	qkClass   = "http://qudt.org/schema/qudt/QuantityKind"
-	dimClass  = "http://qudt.org/schema/qudt/DimensionVector"
-)
-
-// importedTerm is one governed term produced by the import.
-type importedTerm struct {
-	TermID    string
-	Kind      string
-	SourceIRI string
-	PrefLabel string
-	Symbol    string
-}
-
 func main() {
 	log.SetFlags(0)
 	unitsPath := flag.String("units", "", "QUDT units TTL")
@@ -61,10 +46,10 @@ func main() {
 	defer db.Close()
 	ctx := context.Background()
 
-	terms_ := []importedTerm{}
-	terms_ = append(terms_, parseTerms(*unitsPath, unitClass, "unit_")...)
-	terms_ = append(terms_, parseTerms(*qkPath, qkClass, "qk_")...)
-	terms_ = append(terms_, parseTerms(*dimPath, dimClass, "dim_")...)
+	terms_ := []terminology.QUDTImportedTerm{}
+	terms_ = append(terms_, parseTermsFromFile(*unitsPath)...)
+	terms_ = append(terms_, parseTermsFromFile(*qkPath)...)
+	terms_ = append(terms_, parseTermsFromFile(*dimPath)...)
 	fmt.Printf("parsed %d terms from QUDT TTL\n", len(terms_))
 
 	importTerms(ctx, db, terms_)
@@ -87,7 +72,12 @@ func main() {
 	fmt.Println("QUDT import complete")
 }
 
-func parseTerms(path, class, idPrefix string) []importedTerm {
+// parseTermsFromFile reads one QUDT TTL file and classifies every resource it
+// contains into governed quantity-module terms (terminology.ClassifyQUDTTerms
+// infers each resource's own kind from its RDF type, so unlike the old
+// per-file class filter, this works unmodified whether a file holds one QUDT
+// class or a mix, e.g. the combined qudt-all.ttl).
+func parseTermsFromFile(path string) []terminology.QUDTImportedTerm {
 	f, err := os.Open(path)
 	if err != nil {
 		log.Fatalf("open %s: %v", path, err)
@@ -101,66 +91,12 @@ func parseTerms(path, class, idPrefix string) []importedTerm {
 	if err != nil {
 		log.Fatalf("parse %s: %v", path, err)
 	}
-	out := make([]importedTerm, 0, len(resources))
-	for _, resource := range resources {
-		if resource.Class != class {
-			continue
-		}
-		if resource.Deprecated {
-			continue // skip deprecated QUDT entries
-		}
-		label := pickLabel(resource.Labels)
-		out = append(out, importedTerm{
-			TermID:    "quantity:" + idPrefix + localName(resource.IRI),
-			Kind:      termKindFor(idPrefix),
-			SourceIRI: resource.IRI,
-			PrefLabel: label,
-			Symbol:    resource.Symbol,
-		})
-	}
-	return out
-}
-
-func termKindFor(prefix string) string {
-	switch prefix {
-	case "unit_":
-		return "unit"
-	case "qk_":
-		return "quantity_kind"
-	default:
-		return "dimension"
-	}
-}
-
-// pickLabel selects the en preferred label for the legacy quantity module
-// prefLabel, falling back to any preferred label and then the first label.
-func pickLabel(labels []terminology.QUDTLabel) string {
-	for _, l := range labels {
-		if l.Role == "preferred" && l.Language == "en" {
-			return l.Value
-		}
-	}
-	for _, l := range labels {
-		if l.Role == "preferred" {
-			return l.Value
-		}
-	}
-	if len(labels) > 0 {
-		return labels[0].Value
-	}
-	return ""
-}
-
-func localName(iri string) string {
-	if i := strings.LastIndex(iri, "/"); i >= 0 {
-		return iri[i+1:]
-	}
-	return iri
+	return terminology.ClassifyQUDTTerms(resources)
 }
 
 // importTerms batch-inserts terms, their prefLabels, and exact mappings back
 // to the source IRIs, skipping term_ids that already exist.
-func importTerms(ctx context.Context, db *sql.DB, list []importedTerm) {
+func importTerms(ctx context.Context, db *sql.DB, list []terminology.QUDTImportedTerm) {
 	ms := modules.ModuleStore{DB: db}
 	if _, err := ms.GetModule(ctx, "quantity"); err != nil {
 		if _, err := ms.CreateModule(ctx, modules.Module{

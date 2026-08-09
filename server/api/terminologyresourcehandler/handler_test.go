@@ -10,11 +10,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 )
 
 func TestListResourcesReportsNeverDownloaded(t *testing.T) {
@@ -611,6 +613,33 @@ func TestApproveResourceAlreadyImportedIsReplay(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT content_checksum FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
 		WithArgs("qudt-quantity-kind", "3.5.0").
 		WillReturnRows(sqlmock.NewRows([]string{"content_checksum"}).AddRow("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"))
+
+	// The replay is not just a keyword-lexicon no-op: the QUDT approve path
+	// also re-runs the governed quantity-term write in its own transaction.
+	// The fixture's 4 terms already exist (ON CONFLICT DO NOTHING), so the
+	// batch insert returns zero rows and no label/mapping/release queries
+	// follow -- releaseQUDTIfPending still checks for pending content, finds
+	// none, and returns without creating a release.
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "term_id", "version", "term_kind", "module_id", "status",
+			"definition", "scope", "source_candidate_id", "create_time", "create_by",
+			"modify_time", "modify_by",
+		}))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_modules")).
+		WithArgs("quantity").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_modules")).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "module_id", "title", "owner", "description", "depends_on", "status",
+			"create_time", "create_by", "modify_time", "modify_by",
+		}).AddRow(int64(1), "quantity", "Quantity kinds, units, and dimensions (QUDT)", "platform", "",
+			pq.StringArray{"core"}, "active", time.Now(), "alice@example.test", time.Now(), "alice@example.test"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM kb.ontology_terms WHERE module_id = $1 AND status = 'approved')")).
+		WithArgs("quantity").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	e := echo.New()
 	rec := httptest.NewRecorder()

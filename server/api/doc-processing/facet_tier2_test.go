@@ -3,6 +3,8 @@ package docprocessing
 import (
 	"context"
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
 func TestTier2FacetsFromSourceEmptyReturnsNothing(t *testing.T) {
@@ -108,5 +110,40 @@ func TestTier2WiringSetsRequiredFieldsInsertFacetObservationValidates(t *testing
 		if err == nil || err.Error() != "db is nil" {
 			t.Errorf("observation %q: expected to clear field validation and fail only on nil DB, got %v", obs[i].Path, err)
 		}
+	}
+}
+
+// TestFacetTier2GatedOffDefaultsToRun mirrors
+// TestFacetTier1GatedOffDefaultsToRun (facet_tier1_test.go): with no
+// kb.pipeline_rules row targeting facet_tier2, facetTier2GatedOff must
+// return false (not skipped).
+func TestFacetTier2GatedOffDefaultsToRun(t *testing.T) {
+	oldGates := currentProductionPipelineGates()
+	defer SetProductionPipelineGates(oldGates)
+	SetProductionPipelineGates(nil)
+
+	skip, err := facetTier2GatedOff(semrules.FactSet{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skip {
+		t.Fatal("facet_tier2 must not be skipped when no gate row targets it")
+	}
+}
+
+// TestFacetTier2GatedOffHonorsAuthoredSkipRule mirrors
+// TestFacetTier1GatedOffHonorsAuthoredSkipRule (facet_tier1_test.go): an
+// authored target_processor="facet_tier2" skip rule must take effect.
+func TestFacetTier2GatedOffHonorsAuthoredSkipRule(t *testing.T) {
+	oldGates := currentProductionPipelineGates()
+	defer SetProductionPipelineGates(oldGates)
+	SetProductionPipelineGates([]PipelineGate{gateFixtureForProcessor(102, FacetTier2Name, GateEffectSkip)})
+
+	skip, err := facetTier2GatedOff(gateFacts("standard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Fatal("facet_tier2 must be skipped once an authored gate row resolves to skip")
 	}
 }

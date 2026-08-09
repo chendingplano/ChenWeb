@@ -430,17 +430,18 @@ func sameSet(got, want []string) bool {
 // processor safety net is derived from isMandatoryProcessor over the
 // production registry, not a hardcoded pair: static_analyzer/chunking are
 // restored (their names make isMandatoryProcessor true regardless of class),
-// a mandatory-class processor (facet_tier1) is restored too, a name absent
-// from the registry is not, and classify_document -- Class "routed", not
-// mandatory, specifically so an authored gate can skip it -- is not restored
-// either (P5 review 2026080302 finding P5-29).
+// a name absent from the registry is not, and routed-class processors --
+// classify_document, and facet_tier1/facet_tier2 as of the 2026-08-10 gate
+// change (spec ADR 2026072901 S3.5) that lets them be individually skipped
+// for debugging/testing -- are not restored either (P5 review 2026080302
+// finding P5-29).
 func TestRestoreMandatoryProcessorsDerivedFromRegistry(t *testing.T) {
 	got := restoreMandatoryProcessors(
 		[]string{"extract_metrics"},
-		[]string{"extract_metrics", "static_analyzer", "chunking", "facet_tier1", "classify_document", "not_a_processor"},
+		[]string{"extract_metrics", "static_analyzer", "chunking", "facet_tier1", "facet_tier2", "classify_document", "not_a_processor"},
 	)
 	set := stringSet(got)
-	for _, want := range []string{"extract_metrics", "static_analyzer", "chunking", "facet_tier1"} {
+	for _, want := range []string{"extract_metrics", "static_analyzer", "chunking"} {
 		if !set[want] {
 			t.Fatalf("result %v missing mandatory processor %q", got, want)
 		}
@@ -448,7 +449,9 @@ func TestRestoreMandatoryProcessorsDerivedFromRegistry(t *testing.T) {
 	if set["not_a_processor"] {
 		t.Fatalf("result %v must not restore a name absent from the registry", got)
 	}
-	if set["classify_document"] {
-		t.Fatalf("result %v must not restore classify_document -- it is routed, not mandatory", got)
+	for _, routed := range []string{"classify_document", "facet_tier1", "facet_tier2"} {
+		if set[routed] {
+			t.Fatalf("result %v must not restore %q -- it is routed, not mandatory", got, routed)
+		}
 	}
 }

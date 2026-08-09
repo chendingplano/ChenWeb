@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -234,20 +235,34 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		return fmt.Errorf("(MID_26042416) update kb.inputs metadata: %w", err)
 	}
 	if p.Facets != nil {
-		// InsertFacetObservation requires a non-empty DecisionAttemptID/
-		// InvocationID (validated before the SQL, doc_facet_store.go).
-		// eventIDFromContext can be "" outside a real event (e.g. tests, or
-		// a call with no event context), same reason resolverAttemptKey
-		// (control.go) falls back to the record id.
-		attemptKey := eventIDFromContext(ctx)
-		if attemptKey == "" {
-			attemptKey = fmt.Sprintf("record-%d", rec.ID)
+		// facetTier2GatedOff consults an authored kb.pipeline_rules row
+		// (target_processor="facet_tier2") so the processor can be
+		// individually disabled for debugging, testing, or bug fixing; a
+		// gate-resolution error fails open (runs) rather than silently
+		// dropping load-bearing facets over a misconfigured rule. See
+		// facetTier1GatedOff (facet_tier1.go) for the full contract.
+		skipTier2, gateErr := facetTier2GatedOff(semrules.FactSet{})
+		if gateErr != nil {
+			p.Logger.Warn("facet_tier2 gate resolution failed, running unconditionally", "record_id", rec.ID, "error", gateErr)
 		}
-		for _, obs := range tier2FacetsFromSource(rec.ID, upd.DocNo, upd.PublishDate) {
-			obs.DecisionAttemptID = "tier2-" + attemptKey
-			obs.InvocationID = fmt.Sprintf("tier2-%d-%s", rec.ID, attemptKey)
-			if _, err := p.Facets.InsertFacetObservation(ctx, obs); err != nil {
-				p.Logger.Warn("tier-2 facet persist failed", "record_id", rec.ID, "path", obs.Path, "error", err)
+		if skipTier2 {
+			p.Logger.Info("facet_tier2 skipped by processor gate", "record_id", rec.ID)
+		} else {
+			// InsertFacetObservation requires a non-empty DecisionAttemptID/
+			// InvocationID (validated before the SQL, doc_facet_store.go).
+			// eventIDFromContext can be "" outside a real event (e.g. tests, or
+			// a call with no event context), same reason resolverAttemptKey
+			// (control.go) falls back to the record id.
+			attemptKey := eventIDFromContext(ctx)
+			if attemptKey == "" {
+				attemptKey = fmt.Sprintf("record-%d", rec.ID)
+			}
+			for _, obs := range tier2FacetsFromSource(rec.ID, upd.DocNo, upd.PublishDate) {
+				obs.DecisionAttemptID = "tier2-" + attemptKey
+				obs.InvocationID = fmt.Sprintf("tier2-%d-%s", rec.ID, attemptKey)
+				if _, err := p.Facets.InsertFacetObservation(ctx, obs); err != nil {
+					p.Logger.Warn("tier-2 facet persist failed", "record_id", rec.ID, "path", obs.Path, "error", err)
+				}
 			}
 		}
 	}

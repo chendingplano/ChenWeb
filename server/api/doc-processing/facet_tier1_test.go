@@ -207,3 +207,40 @@ func TestTier1WiringSetsRequiredFieldsInsertFacetObservationValidates(t *testing
 		}
 	}
 }
+
+// TestFacetTier1GatedOffDefaultsToRun proves the 2026-08-10 gate change (spec
+// ADR 2026072901 S3.5) preserves facet_tier1's always-on default: with no
+// kb.pipeline_rules row targeting it, facetTier1GatedOff must return false
+// (not skipped), matching classify_document's classifyDocumentGatedOff
+// contract for a processor no rule targets yet.
+func TestFacetTier1GatedOffDefaultsToRun(t *testing.T) {
+	oldGates := currentProductionPipelineGates()
+	defer SetProductionPipelineGates(oldGates)
+	SetProductionPipelineGates(nil)
+
+	skip, err := facetTier1GatedOff(semrules.FactSet{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skip {
+		t.Fatal("facet_tier1 must not be skipped when no gate row targets it")
+	}
+}
+
+// TestFacetTier1GatedOffHonorsAuthoredSkipRule proves an authored
+// target_processor="facet_tier1" skip rule actually takes effect -- the
+// lever this gate change exists to provide for debugging, testing, and bug
+// fixing.
+func TestFacetTier1GatedOffHonorsAuthoredSkipRule(t *testing.T) {
+	oldGates := currentProductionPipelineGates()
+	defer SetProductionPipelineGates(oldGates)
+	SetProductionPipelineGates([]PipelineGate{gateFixtureForProcessor(101, FacetTier1Name, GateEffectSkip)})
+
+	skip, err := facetTier1GatedOff(gateFacts("standard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Fatal("facet_tier1 must be skipped once an authored gate row resolves to skip")
+	}
+}

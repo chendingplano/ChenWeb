@@ -26,7 +26,7 @@ const SIRPRelease = "1.0.0"
 const (
 	qudtQuantityKindClass = "http://qudt.org/schema/qudt/QuantityKind"
 	qudtUnitClass         = "http://qudt.org/schema/qudt/Unit"
-	qudtDimensionClass    = "http://qudt.org/schema/qudt/DimensionVector"
+	qudtDimensionClass    = "http://qudt.org/schema/qudt/QuantityKindDimensionVector"
 
 	qudtRDFType        = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
 	qudtRDFSLabel      = "http://www.w3.org/2000/01/rdf-schema#label"

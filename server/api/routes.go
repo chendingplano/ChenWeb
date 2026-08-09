@@ -301,6 +301,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/terminology-resources/:source/download", terminologyresourcehandler.DownloadResource)
 	apiGroup.POST("/terminology-resources/:source/approve", terminologyresourcehandler.ApproveResource)
 	apiGroup.POST("/terminology-resources/:source/disapprove", terminologyresourcehandler.DisapproveResource)
+	apiGroup.PUT("/terminology-resources/:source/promotion-policy", terminologyresourcehandler.SetAutoPromotePolicy)
 
 	// Training-video management (Resources > Videos > Training).
 	// Filesystem storage under VIDEO_DIR + kb.videos metadata.

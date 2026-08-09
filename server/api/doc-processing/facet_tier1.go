@@ -7,7 +7,34 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
+
+// FacetTier1Name is facet_tier1's ProcessorSpec name (processor_plan.go).
+const FacetTier1Name = "facet_tier1"
+
+// facetTier1GatedOff reports whether an authored processor gate
+// (kb.pipeline_rules, target_processor="facet_tier1") resolves to Skip.
+// Absent a registered spec or any matching gate row it returns false (not
+// gated off), matching ResolveProcessorGate's "processor_default" Enable
+// behavior for a processor no rule targets yet -- same contract as
+// classify_document's classifyDocumentGatedOff (applicability_resolver.go).
+// facts is deliberately not the full binding fact set: the common case (no
+// authored gate row) never evaluates a predicate at all, and the intended
+// use -- an unconditional debug/test skip, predicate left empty -- needs no
+// facts either.
+func facetTier1GatedOff(facts semrules.FactSet) (bool, error) {
+	spec := findProductionProcessorSpec(FacetTier1Name)
+	if spec == nil {
+		return false, nil
+	}
+	decision, err := ResolveProcessorGate(*spec, currentProductionPipelineGates(), facts, GateResolutionOptions{})
+	if err != nil {
+		return false, err
+	}
+	return decision.Effect == GateEffectSkip, nil
+}
 
 // Tier-1 deterministic facets (spec ADR 2026072901 S3.5 DR4, S16.1 "Facet
 // tiers 1-2"): computed once from the static analyzer's already-written line

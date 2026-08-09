@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -61,6 +62,10 @@ type resourceView struct {
 	ReviewedBy     string     `json:"reviewed_by"`
 	ReviewedAt     *time.Time `json:"reviewed_at"`
 	Error          string     `json:"error"`
+	// AutoPromoteEnabled reflects kb.keyword_source_promotion_policy: whether
+	// approving this resource auto-promotes its staged catalog entries into
+	// keyword concepts. True (the default) unless an admin disabled it.
+	AutoPromoteEnabled bool `json:"auto_promote_enabled"`
 }
 
 // importOutcome reports the result of the import started after approval.
@@ -87,7 +92,12 @@ func viewFor(dir string, res terminology.Resource, st terminology.FetchStatus) r
 		Downloading: st.Downloading, DownloadedBytes: st.DownloadedBytes, TotalBytes: st.TotalBytes,
 		ExpectedSizeBytes: res.ExpectedSizeBytes, MaxBytes: res.MaxBytes, Cadence: res.Cadence,
 		Artifact: st.Artifact, SourceURL: st.SourceURL, ManifestDraft: st.ManifestDraft,
-		Error: st.Error,
+		Error: st.Error, AutoPromoteEnabled: true,
+	}
+	if db := ApiTypes.ProjectDBHandle; db != nil {
+		if enabled, err := (keywords.PromotionPolicyStore{DB: db}).IsEnabled(context.Background(), res.Source); err == nil {
+			v.AutoPromoteEnabled = enabled
+		}
 	}
 	if st.Downloaded {
 		if rev, err := terminology.ReadDraftReview(dir, res.ID); err == nil {
@@ -171,16 +181,41 @@ func ApproveResource(c echo.Context) error {
 	logger.Info("approved terminology draft", "source", string(id), "approved_by", approvedBy)
 
 	outcome := importOutcome{}
+	var governance qudtGovernanceOutcome
+	hasGovernance := false
 	manifestPath := filepath.Join(dir, string(id), "manifest.draft.json")
+	ctx := c.Request().Context()
 	if db := ApiTypes.ProjectDBHandle; db != nil {
-		if alreadyImportedIdentical(c.Request().Context(), db, manifestPath) {
+		isQUDT := id == terminology.ResourceQUDT
+		if alreadyImportedIdentical(ctx, db, manifestPath) {
 			// The release is already registered with byte-identical content
 			// (for example after a re-download and re-approval): the desired
 			// end state already holds, so the import is an idempotent replay.
 			outcome.OK = true
 			logger.Info("approved terminology release already imported with identical content", "source", string(id))
+			if isQUDT {
+				hasGovernance = true
+				governance = writeQUDTTermsReplay(ctx, db, manifestPath, approvedBy)
+				if !governance.OK {
+					outcome.OK = false
+					outcome.Error = governance.Error
+					logger.Warn("ontology write after approval replay failed", "source", string(id), "err", governance.Error)
+				}
+			}
+		} else if isQUDT {
+			hasGovernance = true
+			var result terminology.ImportResult
+			result, governance = writeQUDTTermsFresh(ctx, db, manifestPath, approvedBy)
+			if governance.OK {
+				outcome.OK = true
+				outcome.Result = &result
+				logger.Info("imported approved terminology release", "source", result.Source, "release", result.Release, "replayed", result.Replayed)
+			} else {
+				outcome.Error = governance.Error
+				logger.Warn("import after approval failed", "source", string(id), "err", governance.Error)
+			}
 		} else {
-			result, importErr := (terminology.Runner{DB: db}).Import(c.Request().Context(), manifestPath)
+			result, importErr := (terminology.Runner{DB: db}).Import(ctx, manifestPath)
 			if importErr != nil {
 				outcome.Error = importErr.Error()
 				logger.Warn("import after approval failed", "source", string(id), "err", importErr)
@@ -190,11 +225,34 @@ func ApproveResource(c echo.Context) error {
 				logger.Info("imported approved terminology release", "source", result.Source, "release", result.Release, "replayed", result.Replayed)
 			}
 		}
+
+		if hasGovernance && governance.OK {
+			version, relErr := releaseQUDTIfPending(ctx, db, approvedBy)
+			if relErr != nil {
+				governance.Error = relErr.Error()
+				outcome.OK = false
+				if outcome.Error == "" {
+					outcome.Error = relErr.Error()
+				}
+				logger.Warn("release quantity module after approval failed", "source", string(id), "err", relErr)
+			} else if version != "" {
+				governance.ReleaseVersion = version
+				logger.Info("released and activated quantity module", "source", string(id), "release", version)
+			}
+		}
+
+		if outcome.OK {
+			triggerCatalogAutoPromotion(ctx, db, id, st, logger)
+		}
 	} else {
 		outcome.Error = "database handle is not configured; run terminology-import import manually"
 	}
 	res, _ := terminology.ResourceByID(id)
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome})
+	respBody := map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome}
+	if hasGovernance {
+		respBody["ontology"] = governance
+	}
+	return c.JSON(http.StatusOK, respBody)
 }
 
 // alreadyImportedIdentical reports whether the approved local manifest is an

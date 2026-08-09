@@ -451,14 +451,22 @@ var productionProcessorSpecs = []ProcessorSpec{
 	// runs inline inside control.go's line-file-generated handling (right
 	// after persistDocFacets), tier-2 runs inline inside
 	// extract_doc_metadata's HandleEvent (right after its own
-	// UpdateInputMetadata call). Both fire unconditionally whenever their
-	// host event/processor runs -- no independent selection or gate of
-	// their own -- so Class is "mandatory" (isMandatoryProcessor returns
-	// true) rather than routed/gated. Registered here purely for
-	// registry/policy-tooling visibility and DR5 Requires/Produces
-	// bookkeeping; nothing dispatches them through this spec.
-	{Name: "facet_tier1", Phase: "A", DependsOn: []string{"static_analyzer"}, Requires: []string{"lines"}, Produces: []string{"facets"}, Class: "mandatory", Cost: "free", Idempotent: true},
-	{Name: "facet_tier2", Phase: "A", DependsOn: []string{"extract_doc_metadata"}, Requires: []string{"doc_metadata"}, Produces: []string{"facets"}, Class: "mandatory", Cost: "free", Idempotent: true},
+	// UpdateInputMetadata call). Class "routed" (not mandatory): each is
+	// individually gated by an ordinary kb.pipeline_rules row with
+	// target_processor="facet_tier1"/"facet_tier2" (facetTier1GatedOff /
+	// facetTier2GatedOff, evaluated inline at the call site since there is
+	// no wave dispatch to gate here -- same pattern classify_document uses).
+	// OnUndetermined "run" so a gate row an operator forgot to scope tightly
+	// enough fails open rather than silently dropping load-bearing tier-1/2
+	// facets. With no gate row authored (the default), ResolveProcessorGate's
+	// "processor_default" (Enable) applies, so behavior is unchanged from
+	// before this became gate-able -- the lever exists for debugging,
+	// testing, and bug fixing, not to change default production behavior.
+	// Registered here purely for registry/policy-tooling
+	// visibility and DR5 Requires/Produces bookkeeping; nothing dispatches
+	// them through this spec.
+	{Name: "facet_tier1", Phase: "A", DependsOn: []string{"static_analyzer"}, Requires: []string{"lines"}, Produces: []string{"facets"}, Class: "routed", Cost: "free", OnUndetermined: "run", Idempotent: true},
+	{Name: "facet_tier2", Phase: "A", DependsOn: []string{"extract_doc_metadata"}, Requires: []string{"doc_metadata"}, Produces: []string{"facets"}, Class: "routed", Cost: "free", OnUndetermined: "run", Idempotent: true},
 	// P5 tier-3 pre-decision classifier (spec 2026080102 section 7). Not
 	// dispatched by the ordinary Phase A/B/C wave: the G2 resolver
 	// (ApplicabilityResolver.Resolve, applicability_resolver.go) invokes it

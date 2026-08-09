@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -144,6 +145,88 @@ RETURNING ` + mappingColumns
 		nullableInt64(m.SourceCandidateID), nullableString(m.CreateBy), nullableString(m.ModifyBy),
 	)
 	return scanMapping(row.Scan)
+}
+
+// mappingBatchChunkSize bounds how many mapping rows one INSERT statement
+// carries (mirrors terms.termBatchChunkSize).
+const mappingBatchChunkSize = 500
+
+// CreateMappingsBatch inserts version-1 mapping rows in chunked multi-row
+// statements, skipping any (mapping_id, version=1) already present
+// (ON CONFLICT DO NOTHING). It returns only the mappings actually inserted.
+func (s MappingStore) CreateMappingsBatch(ctx context.Context, list []Mapping) ([]Mapping, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	var inserted []Mapping
+	for start := 0; start < len(list); start += mappingBatchChunkSize {
+		end := start + mappingBatchChunkSize
+		if end > len(list) {
+			end = len(list)
+		}
+		rows, err := s.insertMappingChunk(ctx, list[start:end])
+		if err != nil {
+			return inserted, err
+		}
+		inserted = append(inserted, rows...)
+	}
+	return inserted, nil
+}
+
+func (s MappingStore) insertMappingChunk(ctx context.Context, chunk []Mapping) ([]Mapping, error) {
+	if len(chunk) == 0 {
+		return nil, nil
+	}
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO kb.ontology_mappings
+	(mapping_id, version, from_term_id, to_term_id, to_iri, relation,
+	 evidence, approval_status, module_id, status, source_candidate_id, create_by, modify_by)
+VALUES `)
+	args := make([]any, 0, len(chunk)*12)
+	for i, m := range chunk {
+		if err := validateMapping(m); err != nil {
+			return nil, fmt.Errorf("mapping %q: %w", m.MappingID, err)
+		}
+		approvalStatus := m.ApprovalStatus
+		if approvalStatus == "" {
+			approvalStatus = "pending"
+		}
+		status := m.Status
+		if status == "" {
+			status = "draft"
+		}
+		evidence := m.Evidence
+		if len(evidence) == 0 {
+			evidence = []byte("null")
+		}
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		base := i * 12
+		fmt.Fprintf(&sb, "($%d,1,$%d,$%d,$%d,$%d,$%d::jsonb,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12)
+		args = append(args,
+			strings.TrimSpace(m.MappingID), strings.TrimSpace(m.FromTermID),
+			nullableString(m.ToTermID), nullableString(m.ToIRI), m.Relation,
+			string(evidence), approvalStatus, strings.TrimSpace(m.ModuleID), status,
+			nullableInt64(m.SourceCandidateID), nullableString(m.CreateBy), nullableString(m.ModifyBy),
+		)
+	}
+	sb.WriteString(" ON CONFLICT (mapping_id, version) DO NOTHING RETURNING " + mappingColumns)
+	rows, err := s.DB.QueryContext(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Mapping, 0, len(chunk))
+	for rows.Next() {
+		m, err := scanMapping(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // ApproveMapping marks a mapping's approval_status approved (required for

@@ -35,6 +35,10 @@ export type TerminologyResource = {
 	reviewed_by: string;
 	reviewed_at: string | null;
 	error: string;
+	/** Whether approving this resource auto-promotes its staged catalog
+	 * entries into keyword concepts. True (the default) unless an admin
+	 * disabled it. */
+	auto_promote_enabled: boolean;
 };
 
 type ListResponse = {
@@ -187,4 +191,32 @@ export async function disapproveTerminologyResource(
 		throw new Error((data as { error?: string })?.error ?? `disapprove failed: ${res.status}`);
 	}
 	return data.resource;
+}
+
+/** Enable or disable automatic promotion of one resource's staged catalog
+ * entries into keyword concepts on future approvals. */
+export async function setAutoPromoteEnabled(
+	source: string,
+	enabled: boolean,
+	fetchFn: typeof fetch = fetch
+): Promise<boolean> {
+	const res = await fetchFn(
+		`/api/v1/terminology-resources/${encodeURIComponent(source)}/promotion-policy`,
+		{
+			method: 'PUT',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: encodeForm({ enabled: String(enabled) })
+		}
+	);
+	let data: { status: boolean; auto_promote_enabled?: boolean; error?: string };
+	try {
+		data = await res.json();
+	} catch {
+		throw new Error(`update promotion policy failed: ${res.status}`);
+	}
+	if (!res.ok || !data.status) {
+		throw new Error(data?.error ?? `update promotion policy failed: ${res.status}`);
+	}
+	return data.auto_promote_enabled ?? enabled;
 }

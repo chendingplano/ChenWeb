@@ -700,13 +700,27 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		// Tier-1 deterministic facets (spec 2026072901 S16.1 "Facet tiers
 		// 1-2"): the line file static_analyzer wrote is guaranteed available
 		// at this point (this handler runs on LineFileGeneratedEvent), so
-		// this can run unconditionally. Gated on s.Facets, not s.Resolver --
-		// tier 1 has no LLM dependency and must not be coupled to whether
-		// the tier-3 classifier happens to be configured (s.Resolver is nil
-		// whenever buildProductionResolver couldn't construct one, e.g. no
-		// classifier model configured in this environment).
+		// this can run unconditionally as far as its own inputs go. Gated on
+		// s.Facets, not s.Resolver -- tier 1 has no LLM dependency and must
+		// not be coupled to whether the tier-3 classifier happens to be
+		// configured (s.Resolver is nil whenever buildProductionResolver
+		// couldn't construct one, e.g. no classifier model configured in
+		// this environment). Independently, facetTier1GatedOff consults an
+		// authored kb.pipeline_rules row (target_processor="facet_tier1")
+		// so the processor can be individually disabled for debugging,
+		// testing, or bug fixing without touching s.Facets/s.Resolver wiring;
+		// a gate-resolution error fails open (runs) rather than silently
+		// dropping load-bearing facets over a misconfigured rule.
 		if s.Facets != nil {
-			if tier1, err := ComputeTier1Facets(ctx, s.InputStore, evt.RecordID); err != nil {
+			skipTier1, gateErr := facetTier1GatedOff(semrules.FactSet{})
+			if gateErr != nil && s.Logger != nil {
+				s.Logger.Warn("facet_tier1 gate resolution failed, running unconditionally", "record_id", evt.RecordID, "error", gateErr)
+			}
+			if skipTier1 {
+				if s.Logger != nil {
+					s.Logger.Info("facet_tier1 skipped by processor gate", "record_id", evt.RecordID)
+				}
+			} else if tier1, err := ComputeTier1Facets(ctx, s.InputStore, evt.RecordID); err != nil {
 				if s.Logger != nil {
 					s.Logger.Warn("tier-1 facet computation failed, continuing without it", "record_id", evt.RecordID, "error", err)
 				}

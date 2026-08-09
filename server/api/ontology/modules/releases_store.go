@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -284,6 +285,33 @@ func idsOfProfileRules(rs []profiles.ProfileRule) []int64 {
 		out = append(out, r.ID)
 	}
 	return out
+}
+
+// NextPatchVersion computes the next release version for a module by bumping
+// the patch component of its highest existing release version, starting at
+// "1.0.0" if the module has no releases yet. Unlike cmd/qudt-import's
+// one-shot hardcoded "1.0.0" (which only ever runs once), this lets a caller
+// create a new release every time it has new content to release.
+func (s ReleaseStore) NextPatchVersion(ctx context.Context, moduleID string) (string, error) {
+	if s.DB == nil {
+		return "", errors.New("db is nil")
+	}
+	version, err := s.latestReleaseVersion(ctx, s.DB, strings.TrimSpace(moduleID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return "1.0.0", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) != 3 {
+		return "", fmt.Errorf("release version %q is not in major.minor.patch form", version)
+	}
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return "", fmt.Errorf("release version %q has non-numeric patch: %w", version, err)
+	}
+	return fmt.Sprintf("%s.%s.%d", parts[0], parts[1], patch+1), nil
 }
 
 // Validate runs the release-time gate for a module without writing anything:

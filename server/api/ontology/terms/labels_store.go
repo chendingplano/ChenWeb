@@ -130,6 +130,89 @@ RETURNING ` + labelColumns
 	return scanTermLabel(row.Scan)
 }
 
+// labelBatchChunkSize bounds how many label rows one INSERT statement
+// carries (mirrors terms.termBatchChunkSize).
+const labelBatchChunkSize = 500
+
+// CreateLabelsBatch inserts version-1 label rows in chunked multi-row
+// statements. Unlike CreateLabel, it does NOT check for an existing prefLabel
+// per (term_id, lang) -- kb.ontology_term_labels has no unique constraint to
+// dedupe against, so this method is only safe to call with labels for terms
+// the caller knows are brand new in this same write (e.g. terms just
+// inserted by CreateTermsBatch in the same transaction), never as a general
+// upsert path.
+func (s LabelStore) CreateLabelsBatch(ctx context.Context, list []TermLabel) ([]TermLabel, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	var inserted []TermLabel
+	for start := 0; start < len(list); start += labelBatchChunkSize {
+		end := start + labelBatchChunkSize
+		if end > len(list) {
+			end = len(list)
+		}
+		rows, err := s.insertLabelChunk(ctx, list[start:end])
+		if err != nil {
+			return inserted, err
+		}
+		inserted = append(inserted, rows...)
+	}
+	return inserted, nil
+}
+
+func (s LabelStore) insertLabelChunk(ctx context.Context, chunk []TermLabel) ([]TermLabel, error) {
+	if len(chunk) == 0 {
+		return nil, nil
+	}
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO kb.ontology_term_labels
+	(term_id, version, label, lang, label_role, status, source_candidate_id, create_by, modify_by)
+VALUES `)
+	args := make([]any, 0, len(chunk)*8)
+	for i, l := range chunk {
+		if err := validateTermLabel(l); err != nil {
+			return nil, fmt.Errorf("label for %q: %w", l.TermID, err)
+		}
+		lang := l.Lang
+		if lang == "" {
+			lang = "en"
+		}
+		role := l.LabelRole
+		if role == "" {
+			role = "prefLabel"
+		}
+		status := l.Status
+		if status == "" {
+			status = "draft"
+		}
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		base := i * 8
+		fmt.Fprintf(&sb, "($%d,1,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
+		args = append(args,
+			strings.TrimSpace(l.TermID), strings.TrimSpace(l.Label), lang, role,
+			status, nullableInt64(l.SourceCandidateID), nullableString(l.CreateBy), nullableString(l.ModifyBy),
+		)
+	}
+	sb.WriteString(" RETURNING " + labelColumns)
+	rows, err := s.DB.QueryContext(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]TermLabel, 0, len(chunk))
+	for rows.Next() {
+		l, err := scanTermLabel(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 func (s LabelStore) prefLabelExists(ctx context.Context, termID, lang string) (bool, error) {
 	const stmt = `
 SELECT EXISTS (
