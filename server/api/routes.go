@@ -448,6 +448,14 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/pipeline-rules", kbhandler.CreatePipelineRule)
 	apiGroup.PUT("/kb/pipeline-rules/:id", kbhandler.UpdatePipelineRule)
 	apiGroup.DELETE("/kb/pipeline-rules/:id", kbhandler.DeletePipelineRule)
+	// Doc Process DAG composite API (ADR 2026081001 DR10): the DAG handler owns
+	// the pipeline-version + rules + bindings lifecycle as one atomic unit.
+	apiGroup.GET("/kb/doc-process-dags", kbhandler.ListDocProcessDAGs)
+	apiGroup.POST("/kb/doc-process-dags", kbhandler.CreateDocProcessDAG)
+	apiGroup.GET("/kb/doc-process-dags/:name", kbhandler.GetDocProcessDAG)
+	apiGroup.PUT("/kb/doc-process-dags/:name", kbhandler.UpdateDocProcessDAG)
+	apiGroup.DELETE("/kb/doc-process-dags/:name", kbhandler.DeleteDocProcessDAG)
+	apiGroup.GET("/kb/doc-process-processors", kbhandler.ListDocProcessProcessors)
 	// No /kb/pipeline-policies routes: ADR 2026081001 DR3 retires kb.pipeline_policies entirely.
 	apiGroup.POST("/kb/pipeline-routing-clearances/approve", kbhandler.ApprovePipelineRoutingClearance)
 	apiGroup.POST("/kb/pipeline-routing-clearances/replace", kbhandler.ReplacePipelineRoutingClearance)

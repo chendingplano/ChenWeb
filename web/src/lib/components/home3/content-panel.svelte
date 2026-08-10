@@ -27,6 +27,7 @@
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import ResolveAmbiguousObjectsView from '$lib/components/home3/resolve-ambiguous-objects-view.svelte';
 	import SchedulesView from '$lib/components/home3/schedules-view.svelte';
+	import DocProcessDagView from '$lib/components/home3/doc-process-dag-view.svelte';
 	import UserManagementView from '$lib/components/home3/user-management-view.svelte';
 	import RoleManagementView from '$lib/components/home3/role-management-view.svelte';
 	import AccessControlsView from '$lib/components/home3/access-controls-view.svelte';
@@ -252,6 +253,8 @@
 			<ResolveAmbiguousObjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-schedules'}
 			<SchedulesView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-process-dag'}
+			<DocProcessDagView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-user-management'}
 			<UserManagementView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-role-management'}

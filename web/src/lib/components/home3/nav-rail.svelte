@@ -289,6 +289,11 @@
 					]
 				},
 				{ id: 'sysadmin-schedules', label: 'Schedules' },
+				{
+					id: 'sysadmin-doc-process-pipeline',
+					label: 'Doc Process Pipeline',
+					children: [{ id: 'sysadmin-doc-process-dag', label: 'Doc Process DAG' }]
+				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]
 		},

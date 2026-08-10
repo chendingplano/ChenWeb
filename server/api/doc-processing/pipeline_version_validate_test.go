@@ -25,6 +25,16 @@ func TestValidatePipelineVersionRejectsMissingProducer(t *testing.T) {
 	}
 }
 
+func TestValidatePipelineVersionRejectsEmptyProcessorSet(t *testing.T) {
+	err := ValidatePipelineVersion(PipelineVersionDraft{})
+	if err == nil {
+		t.Fatal("expected empty processor set rejection")
+	}
+	if !strings.Contains(err.Error(), "at least one doc processor") {
+		t.Fatalf("error should state that at least one processor is required: %v", err)
+	}
+}
+
 func TestValidatePipelineVersionAcceptsSatisfiedClosure(t *testing.T) {
 	err := ValidatePipelineVersion(PipelineVersionDraft{
 		Processors: []string{"extract_metrics", "extract_provisions", "normalize_assertions"},

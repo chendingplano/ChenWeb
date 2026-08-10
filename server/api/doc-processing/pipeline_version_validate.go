@@ -34,6 +34,11 @@ type PipelineVersionDraft struct {
 // proposed pipeline version, once, at creation time. Any failure rejects the
 // whole version; nothing here is re-checked at runtime once a version exists.
 func ValidatePipelineVersion(draft PipelineVersionDraft) error {
+	// A Doc Process DAG must have at least one doc processor. Checked before
+	// the DR8 checks (all three are vacuous passes over an empty set).
+	if len(draft.Processors) == 0 {
+		return fmt.Errorf("pipeline version rejected: at least one doc processor is required")
+	}
 	processors := stringSet(draft.Processors)
 	if err := validateProcessorClosure(draft.Processors, processors); err != nil {
 		return err
