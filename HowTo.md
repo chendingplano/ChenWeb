@@ -4958,3 +4958,8 @@ The commands below switch Codex to use deepseek-v4-flash
 | Concurrency Limit |	2500	| 500 |
 
 Note: max output length: 384KB
+
+## Qwen Prices
+| Model | Input | Output |
+|-------|-------|--------|
+| Qwen 3.8 Max | 

@@ -32,7 +32,7 @@ SELECT r.id, r.name, r.priority,
        p.name
 FROM kb.pipeline_rules r
 JOIN kb.pipelines p ON p.id = r.pipeline_id
-WHERE r.active AND r.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
+WHERE r.active
 ORDER BY r.priority DESC, r.id`
 	rows, err := s.DB.QueryContext(ctx, stmt)
 	if err != nil {

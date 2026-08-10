@@ -215,7 +215,7 @@ SELECT b.id, COALESCE(b.name, ''), b.priority, b.binding_kind,
        b.ks_store_id
 FROM kb.pipeline_bindings b
 LEFT JOIN kb.pipelines p ON p.id = b.pipeline_id
-WHERE b.active AND b.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
+WHERE b.active
 ORDER BY b.priority DESC,
          CASE
            WHEN b.input_record_id IS NOT NULL THEN 4
@@ -291,7 +291,7 @@ SELECT b.id, COALESCE(b.name, ''), b.priority, b.binding_kind,
        b.ks_store_id
 FROM kb.pipeline_bindings b
 LEFT JOIN kb.pipelines p ON p.id = b.pipeline_id
-WHERE b.active AND b.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
+WHERE b.active
 ORDER BY b.priority DESC,
          CASE
            WHEN b.input_record_id IS NOT NULL THEN 4

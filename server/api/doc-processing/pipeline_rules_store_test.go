@@ -24,7 +24,7 @@ SELECT r.id, r.name, r.priority,
        p.name
 FROM kb.pipeline_rules r
 JOIN kb.pipelines p ON p.id = r.pipeline_id
-WHERE r.active AND r.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
+WHERE r.active
 ORDER BY r.priority DESC, r.id`)
 	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "name", "priority", "match_input_doc_type", "match_source_language", "match_knowledge_store_binding", "pipeline_name",

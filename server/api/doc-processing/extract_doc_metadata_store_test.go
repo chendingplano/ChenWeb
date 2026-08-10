@@ -33,7 +33,7 @@ SELECT i.id,
        COALESCE(i.publish_date::text, '')
 FROM kb.inputs i
 LEFT JOIN kb.pipeline_bindings pb ON pb.ks_store_id = i.ks_store_id
-    AND pb.policy_id = (SELECT id FROM kb.pipeline_policies WHERE status = 'active' LIMIT 1)
+    AND pb.active
 LEFT JOIN kb.pipelines bp ON bp.id = pb.pipeline_id
 WHERE i.id = $1`)
 

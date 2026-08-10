@@ -230,7 +230,6 @@ func (s PipelineGateSQLStore) ListPipelineGates(ctx context.Context) ([]Pipeline
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.name,r.priority,r.target_processor,r.effect,r.predicate::text,r.predicate_checksum,r.required_facets::text,r.active
 FROM kb.pipeline_rules r
 WHERE r.active AND r.predicate IS NOT NULL AND r.target_processor IS NOT NULL
-  AND r.policy_id=(SELECT id FROM kb.pipeline_policies WHERE status='active' LIMIT 1)
 ORDER BY r.target_processor,r.priority DESC,r.id`)
 	if err != nil {
 		return nil, err
