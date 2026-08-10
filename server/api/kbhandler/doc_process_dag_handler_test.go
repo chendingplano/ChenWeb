@@ -175,6 +175,42 @@ func TestGetDocProcessDAGSuccess(t *testing.T) {
 	}
 }
 
+// TestGetDocProcessDAGAlwaysEmitsRulesAndBindings: a DAG with no gates and no
+// bindings must still emit `rules` and `bindings` as empty arrays. `omitempty`
+// on an empty slice drops the key entirely, and the frontend's
+// DocProcessDagDetail type requires both keys (the detail panel reads
+// detail.rules.length / detail.bindings.length), so a missing key crashes the
+// detail render — same failure mode the `processors` field was fixed for.
+func TestGetDocProcessDAGAlwaysEmitsRulesAndBindings(t *testing.T) {
+	db, mock := installPolicyDB(t)
+	_ = db
+
+	expectFetchCurrentDAG(mock, "mine", dagPipelineRow(2, "mine", "Mine", nil, `{extract_metrics}`, false, true, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(dagRulesQuery)).WithArgs(int64(2)).
+		WillReturnRows(sqlmock.NewRows(dagRuleCols))
+	mock.ExpectQuery(regexp.QuoteMeta(dagBindingsQuery)).WithArgs(int64(2)).
+		WillReturnRows(sqlmock.NewRows(dagBindingCols))
+
+	c, rec := newDAGNameContext(t, http.MethodGet, "mine", "")
+	if err := GetDocProcessDAG(c); err != nil {
+		t.Fatalf("GetDocProcessDAG returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if !strings.Contains(rec.Body.String(), `"rules":[]`) {
+		t.Fatalf("expected rules key emitted as empty array, got: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"bindings":[]`) {
+		t.Fatalf("expected bindings key emitted as empty array, got: %s", rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestGetDocProcessDAGNotFound(t *testing.T) {
 	db, mock := installPolicyDB(t)
 	_ = db

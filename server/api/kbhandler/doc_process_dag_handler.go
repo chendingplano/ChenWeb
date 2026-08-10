@@ -59,7 +59,11 @@ type dagPipelineRecord struct {
 	Name             string    `json:"name"`
 	DisplayName      *string   `json:"display_name,omitempty"`
 	Description      *string   `json:"description,omitempty"`
-	Processors       []string  `json:"processors,omitempty"`
+	// Processors is always emitted (even when empty) — the frontend's
+	// DocProcessDag type requires it, and `omitempty` on an empty slice would
+	// drop the key entirely, crashing the DAG page render on legacy pipelines
+	// whose processor set is empty (e.g. legacy_default).
+	Processors       []string  `json:"processors"`
 	LegacyEquivalent bool      `json:"legacy_equivalent"`
 	IsSystemDefault  bool      `json:"is_system_default"`
 	Version          int       `json:"version"`
@@ -71,8 +75,13 @@ type dagPipelineRecord struct {
 
 type dagDetailRecord struct {
 	dagPipelineRecord
-	Rules    []dagRuleRecord    `json:"rules,omitempty"`
-	Bindings []dagBindingRecord `json:"bindings,omitempty"`
+	// Rules and Bindings are always emitted (even when empty) — the frontend's
+	// DocProcessDagDetail type requires both keys, and `omitempty` on an empty
+	// slice would drop them entirely, crashing the detail render with a
+	// `detail.rules.length` TypeError on gate-less DAGs (same failure mode the
+	// `processors` field above was fixed for).
+	Rules    []dagRuleRecord    `json:"rules"`
+	Bindings []dagBindingRecord `json:"bindings"`
 }
 
 type listDAGsResponse struct {
