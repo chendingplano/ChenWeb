@@ -41,17 +41,24 @@ type PolicyPromotionStore struct {
 	Audit policyaudit.Writer
 }
 
-// EnsureDraftFromModuleRelease creates a new draft pipeline-policy version
-// carrying the source release's approved proposals as conditional bindings.
-// All queries run on the supplied *sql.Tx so promotion joins the caller's
-// release transaction and rolls back with it on failure (P5 review 2026080302
-// finding P5-4). It is idempotent per source release across draft AND
-// activated states: any policy -- not just a draft -- with the same source_ref
-// is returned without creating a duplicate, so an activated release is never
-// re-promoted (finding P5-10's wrong idempotency key).
+// EnsureDraftFromModuleRelease materializes the source release's approved
+// proposals as inactive ("draft") conditional kb.pipeline_bindings rows
+// against the default pipeline. All queries run on the supplied *sql.Tx so
+// promotion joins the caller's release transaction and rolls back with it on
+// failure (P5 review 2026080302 finding P5-4). It is idempotent per source
+// release: a binding already carrying this release's name is returned
+// without creating a duplicate, so an activated release is never re-promoted
+// (finding P5-10's wrong idempotency key).
 //
-// The draft policy is invisible to resolution until separately activated
-// through the existing authenticated endpoint (E2).
+// ADR 2026081001 DR3 retired kb.pipeline_policies (the "draft version,
+// separately activated" envelope this used to group bindings under); the
+// per-row kb.pipeline_bindings.active flag is the only "is this live" signal
+// left, so it now plays the draft/activate role directly: bindings are
+// inserted with active=false and stay invisible to resolution
+// (ResolveProductionPipelineBinding only reads active=true rows) until
+// separately flipped active through the existing binding-update endpoint --
+// same reviewed-before-live property as before, expressed with one fewer
+// concept.
 func (s PolicyPromotionStore) EnsureDraftFromModuleRelease(ctx context.Context, tx *sql.Tx, releaseID int64, releaseChecksum string, proposals []PromotedProposal) (int64, error) {
 	if tx == nil {
 		return 0, errors.New("tx is required")
@@ -63,13 +70,16 @@ func (s PolicyPromotionStore) EnsureDraftFromModuleRelease(ctx context.Context, 
 		return 0, errors.New("release_checksum is required")
 	}
 
-	// Idempotency: any policy carrying this release's source_ref (draft,
-	// active, or archived) already materialized it; return it as-is.
+	sourceRef := fmt.Sprintf("module_release:%d", releaseID)
+
+	// Idempotency: a binding already named for this release means it was
+	// already materialized; return it as-is rather than duplicating.
 	var existingID int64
 	err := tx.QueryRowContext(ctx, `
-SELECT id FROM kb.pipeline_policies
-WHERE source_ref = $1
-LIMIT 1`, fmt.Sprintf("module_release:%d", releaseID)).Scan(&existingID)
+SELECT id FROM kb.pipeline_bindings
+WHERE name = $1
+ORDER BY id
+LIMIT 1`, sourceRef).Scan(&existingID)
 	if err == nil {
 		return existingID, nil
 	}
@@ -77,65 +87,55 @@ LIMIT 1`, fmt.Sprintf("module_release:%d", releaseID)).Scan(&existingID)
 		return 0, err
 	}
 
-	// Determine the next version number. The scan error is surfaced (it was
-	// silently discarded), and kb.pipeline_policies(version) carries a unique
-	// constraint (migration 20260801000023) as the real guard against two
-	// concurrent promotions minting the same version.
-	var maxVersion int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`).Scan(&maxVersion); err != nil {
-		return 0, fmt.Errorf("next policy version: %w", err)
-	}
-	nextVersion := maxVersion + 1
-
-	// Create the draft policy.
-	var policyID int64
+	// Look up the current version of the default pipeline for conditional
+	// bindings (ADR 2026081001 DR1: only the active version is a valid
+	// binding target).
+	var defaultPipelineID, defaultPipelineVersion int64
 	err = tx.QueryRowContext(ctx, `
-INSERT INTO kb.pipeline_policies (version, status, source_ref, checksum)
-VALUES ($1, 'draft', $2, $3)
-RETURNING id`, nextVersion, fmt.Sprintf("module_release:%d", releaseID), releaseChecksum).Scan(&policyID)
-	if err != nil {
-		return 0, fmt.Errorf("create draft policy: %w", err)
-	}
-
-	// Look up the default pipeline ID for conditional bindings.
-	var defaultPipelineID int64
-	err = tx.QueryRowContext(ctx, `
-SELECT id FROM kb.pipelines WHERE name = $1 LIMIT 1`, DefaultProductionPipelineName).Scan(&defaultPipelineID)
+SELECT id, version FROM kb.pipelines WHERE name = $1 AND status = 'active' LIMIT 1`, DefaultProductionPipelineName).Scan(&defaultPipelineID, &defaultPipelineVersion)
 	if err != nil {
 		return 0, fmt.Errorf("lookup default pipeline: %w", err)
 	}
 
-	// Materialize approved proposals as conditional bindings under the draft.
-	for _, proposal := range proposals {
-		_, err := tx.ExecContext(ctx, `
+	// Materialize approved proposals as inactive conditional bindings.
+	var firstBindingID int64
+	for i, proposal := range proposals {
+		name := sourceRef
+		if len(proposals) > 1 {
+			name = fmt.Sprintf("%s:%d", sourceRef, proposal.ProposalID)
+		}
+		var bindingID int64
+		err := tx.QueryRowContext(ctx, `
 INSERT INTO kb.pipeline_bindings
-    (ks_store_id, pipeline_id, policy_id, name, priority, active, tenant_id, user_id, binding_kind, predicate, predicate_checksum)
-VALUES (NULL, $1, $2, $3, 0, true, '-', '', 'conditional', $4::jsonb, $5)`,
-			defaultPipelineID, policyID,
-			fmt.Sprintf("module_proposal:%d", proposal.ProposalID),
-			string(proposal.Predicate), proposal.PredicateChecksum)
+    (ks_store_id, pipeline_id, name, priority, active, tenant_id, user_id, binding_kind, predicate, predicate_checksum)
+VALUES (NULL, $1, $2, 0, false, '-', '', 'conditional', $3::jsonb, $4)
+RETURNING id`,
+			defaultPipelineID, name, string(proposal.Predicate), proposal.PredicateChecksum).Scan(&bindingID)
 		if err != nil {
 			return 0, fmt.Errorf("materialize proposal %d: %w", proposal.ProposalID, err)
+		}
+		if i == 0 {
+			firstBindingID = bindingID
 		}
 	}
 
 	// Emit audit event.
 	if s.Audit != nil {
 		_ = s.Audit.WriteEvent(ctx, policyaudit.Event{
-			Kind:          "proposal_promoted",
-			PolicyID:      policyID,
-			PolicyVersion: nextVersion,
-			SubjectKind:   "module_release",
-			SubjectID:     releaseID,
+			Kind:            "proposal_promoted",
+			PipelineName:    DefaultProductionPipelineName,
+			PipelineVersion: int(defaultPipelineVersion),
+			SubjectKind:     "module_release",
+			SubjectID:       releaseID,
 			Detail: map[string]any{
-				"release_checksum": releaseChecksum,
-				"proposal_count":   len(proposals),
-				"draft_policy_id":  policyID,
+				"release_checksum":  releaseChecksum,
+				"proposal_count":    len(proposals),
+				"first_binding_id":  firstBindingID,
 			},
 		})
 	}
 
-	return policyID, nil
+	return firstBindingID, nil
 }
 
 // ApprovedProposalLister is the interface the ontology-compiler adapter must

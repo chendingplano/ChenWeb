@@ -69,15 +69,6 @@ type ProductionPlanFacts struct {
 	// callers that don't set it (tests, the constructor-time BuildProductionProcessorPlan
 	// seam) get legacy-equivalent behavior by default.
 	Mode string
-	// ActivePolicyID/ActivePolicyVersion identify the kb.pipeline_policies
-	// row that was active when this plan was built. Zero value means no
-	// policy store was consulted (tests, the constructor-time
-	// BuildProductionProcessorPlan seam) -- resolution behaves identically
-	// either way, since bindings/rules matching is unaffected; these fields
-	// exist purely for the persisted plan's explainability.
-	ActivePolicyID            int64
-	ActivePolicyVersion       int
-	ActivePolicyChecksum      string             `json:",omitempty"`
 	ExplicitProcessorOverride bool               `json:",omitempty"`
 	ProcessorGateOverrides    map[string]string  `json:",omitempty"`
 	RoutingSnapshot           *P5RoutingSnapshot `json:",omitempty"`
@@ -91,10 +82,13 @@ type ProductionPlanFacts struct {
 // P5RoutingSnapshot is the immutable, self-contained routing evidence stored
 // with an execution plan. Runtime registries are never needed to inspect it.
 type P5RoutingSnapshot struct {
-	Facts                    []semrules.Fact         `json:"facts"`
-	PolicyID                 int64                   `json:"policy_id"`
-	PolicyVersion            int                     `json:"policy_version"`
-	PolicyChecksum           string                  `json:"policy_checksum,omitempty"`
+	Facts []semrules.Fact `json:"facts"`
+	// PipelineName/PipelineVersion identify the resolved kb.pipelines
+	// version this plan routed to (ADR 2026081001 DR3) -- strictly more
+	// precise than the retired system-wide policy id/version this replaces,
+	// since it names the actual pipeline used.
+	PipelineName             string                  `json:"pipeline_name"`
+	PipelineVersion          int                     `json:"pipeline_version"`
 	SelectedPipelineChecksum string                  `json:"selected_pipeline_checksum"`
 	BaselinePipelineChecksum string                  `json:"baseline_pipeline_checksum"`
 	BindingTrace             []PipelineBindingTrace  `json:"binding_trace,omitempty"`
@@ -227,9 +221,6 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		DocumentTitle:             facts.DocumentTitle,
 		RoutingFacets:             facts.RoutingFacets,
 		Mode:                      facts.Mode,
-		ActivePolicyID:            facts.ActivePolicyID,
-		ActivePolicyVersion:       facts.ActivePolicyVersion,
-		ActivePolicyChecksum:      facts.ActivePolicyChecksum,
 		ExplicitProcessorOverride: facts.ExplicitProcessorOverride,
 		ProcessorGateOverrides:    cloneStringMap(facts.ProcessorGateOverrides),
 	}}
@@ -287,9 +278,8 @@ func BuildProductionProcessorPlanFromFacts(facts ProductionPlanFacts) (Productio
 		}
 		plan.routingSnapshot = &P5RoutingSnapshot{
 			Facts:                    sortedFactSnapshot(factSet),
-			PolicyID:                 facts.ActivePolicyID,
-			PolicyVersion:            facts.ActivePolicyVersion,
-			PolicyChecksum:           facts.ActivePolicyChecksum,
+			PipelineName:             resolution.Spec.Name,
+			PipelineVersion:          resolution.Spec.Version,
 			SelectedPipelineChecksum: selectedChecksum,
 			BaselinePipelineChecksum: baselineChecksum,
 			BindingTrace:             append([]PipelineBindingTrace(nil), resolution.Binding.BindingTrace...),

@@ -1,5 +1,18 @@
 # Knowledge-Store-Scoped Doc Processing Policies
 
+> **Superseded (2026-08-10):** `kb.pipeline_policies` — the "versioned
+> activation policy" this design's bootstrap tool wrote to — is retired by
+> ADR `2026081001` (`KnowledgeStore/doc-repo/adrs/202608/
+> 2026081001-adr-pipeline-policy-versioning-and-dependency-graph.md`). The
+> `doc-processing-policy-seed` tool described below still exists and is
+> still config-driven from `[doc-processing-policy-*]` sections, but it now
+> authors a new `kb.pipelines` version per policy (superseding the prior
+> version for that name) and upserts `kb.pipeline_bindings` rows by name,
+> instead of minting/activating a `kb.pipeline_policies` row. Everywhere
+> below that mentions `kb.pipeline_policies`, policy activation, or a
+> "versioned activation policy" reflects the pre-ADR model and should be
+> read historically.
+
 **Status:** Draft, pending user approval (2026-08-08)
 **Governing ADR:** `KnowledgeStore/doc-repo/adrs/202607/2026072901-adr-ontology-platform-and-adaptive-pipeline.md` — DR5 (§3.6), DR6 (§3.7), DR7 (§3.8), §16.1 "Outstanding Implementation Work — P1"
 **Scope:** A minimal, config-authored instantiation of the existing DR6 named-pipeline + knowledge-store-binding mechanism. No new schema, no new resolution logic, no frontend.

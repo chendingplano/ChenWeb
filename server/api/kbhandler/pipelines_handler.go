@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -24,8 +26,24 @@ type pipelineRecord struct {
 	Processors       []string  `json:"processors,omitempty"`
 	LegacyEquivalent bool      `json:"legacy_equivalent"`
 	IsSystemDefault  bool      `json:"is_system_default"`
+	Version          int       `json:"version"`
+	PipelineStatus   string    `json:"status"`
 	CreateTime       time.Time `json:"create_time"`
 	ModifyTime       time.Time `json:"modify_time"`
+}
+
+// pipelineRuleDraftPayload is one kb.pipeline_rules row (a processor gate
+// and/or DR6 DAG-edge declaration) authored together with a new pipeline
+// version, in the same request and the same transaction (ADR 2026081001
+// DR2). Predicate/Effect may be omitted for a row that only declares
+// DependsOnProcessors edges with no gate of its own.
+type pipelineRuleDraftPayload struct {
+	Name                string          `json:"name"`
+	Priority            int             `json:"priority"`
+	TargetProcessor     string          `json:"target_processor"`
+	Effect              string          `json:"effect"`
+	Predicate           json.RawMessage `json:"predicate"`
+	DependsOnProcessors []string        `json:"depends_on_processors"`
 }
 
 type listPipelinesResponse struct {
@@ -41,7 +59,7 @@ type pipelineDetailResponse struct {
 
 const pipelineListColumns = `
     id, name, display_name, description, processors, legacy_equivalent, is_system_default,
-    create_time, modify_time
+    version, status, create_time, modify_time
 FROM kb.pipelines`
 
 func scanPipelineRecord(scan func(dest ...any) error) (pipelineRecord, error) {
@@ -53,7 +71,7 @@ func scanPipelineRecord(scan func(dest ...any) error) (pipelineRecord, error) {
 	)
 	if err := scan(
 		&record.ID, &record.Name, &displayName, &description, &processors, &record.LegacyEquivalent, &record.IsSystemDefault,
-		&record.CreateTime, &record.ModifyTime,
+		&record.Version, &record.PipelineStatus, &record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineRecord{}, err
 	}
@@ -120,9 +138,10 @@ func CreatePipeline(c echo.Context) error {
 		name             string
 		displayName      any
 		description      any
-		processors       any = pq.Array([]string{})
+		processors       []string
 		legacyEquivalent bool
 		isSystemDefault  bool
+		ruleDrafts       []pipelineRuleDraftPayload
 	)
 
 	if raw, ok := payload["name"]; ok {
@@ -163,7 +182,7 @@ func CreatePipeline(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid processors: %v (CWB_KB_P_104)", err)})
 		}
 		if value != nil {
-			processors = pq.Array(*value)
+			processors = *value
 		}
 	}
 	if raw, ok := payload["legacy_equivalent"]; ok {
@@ -171,19 +190,121 @@ func CreatePipeline(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid legacy_equivalent: %v (CWB_KB_P_105)", err)})
 		}
 	}
+	if raw, ok := payload["rules"]; ok {
+		if err := json.Unmarshal(raw, &ruleDrafts); err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid rules: %v (CWB_KB_P_110)", err)})
+		}
+	}
+
+	gates := make([]docprocessing.PipelineGate, 0, len(ruleDrafts))
+	for _, draft := range ruleDrafts {
+		gate := docprocessing.PipelineGate{
+			Name:                draft.Name,
+			Priority:            draft.Priority,
+			TargetProcessor:     draft.TargetProcessor,
+			Effect:              draft.Effect,
+			Active:              true,
+			DependsOnProcessors: draft.DependsOnProcessors,
+		}
+		if len(draft.Predicate) > 0 {
+			if err := json.Unmarshal(draft.Predicate, &gate.Predicate); err != nil || semrules.Validate(gate.Predicate) != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid predicate for rule %q (CWB_KB_P_111)", draft.Name)})
+			}
+			_, checksum, err := semrules.Canonicalize(gate.Predicate)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid predicate for rule %q (CWB_KB_P_111)", draft.Name)})
+			}
+			gate.PredicateChecksum = checksum
+			gate.RequiredFacets = semrules.Analyze(gate.Predicate).RequiredDocumentFacets
+		}
+		gates = append(gates, gate)
+	}
+
+	// ADR 2026081001 DR8: reject at creation time, before anything is
+	// written, naming the specific violation.
+	if err := docprocessing.ValidatePipelineVersion(docprocessing.PipelineVersionDraft{Processors: processors, Rules: gates}); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("%v (CWB_KB_P_112)", err)})
+	}
 
 	db := ApiTypes.ProjectDBHandle
+	tx, err := db.Begin()
+	if err != nil {
+		logger.Error("begin pipeline version transaction failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+	}
+	defer tx.Rollback()
+
+	// ADR 2026081001 DR1: lock the current version (if any) so concurrent
+	// authoring for the same name serializes instead of racing on the next
+	// version number.
+	var priorID sql.NullInt64
+	var priorVersion int
+	err = tx.QueryRow(`SELECT id, version FROM kb.pipelines WHERE name = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE`, name).Scan(&priorID, &priorVersion)
+	if err != nil && err != sql.ErrNoRows {
+		logger.Error("lock prior pipeline version failed", "name", name, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+	}
+	nextVersion := priorVersion + 1
+
+	var id int64
 	const insertQuery = `
 INSERT INTO kb.pipelines (
-    name, display_name, description, processors, legacy_equivalent, is_system_default
+    name, display_name, description, processors, legacy_equivalent, is_system_default, version, status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, 'active'
 )
 RETURNING id
 `
-	var id int64
-	if err := db.QueryRow(insertQuery, name, displayName, description, processors, legacyEquivalent, isSystemDefault).Scan(&id); err != nil {
+	if err := tx.QueryRow(insertQuery, name, displayName, description, pq.Array(processors), legacyEquivalent, isSystemDefault, nextVersion).Scan(&id); err != nil {
 		logger.Error("insert pipeline failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+	}
+
+	if priorID.Valid {
+		if _, err := tx.Exec(`UPDATE kb.pipelines SET status = 'superseded', modify_time = NOW() WHERE id = $1`, priorID.Int64); err != nil {
+			logger.Error("supersede prior pipeline version failed", "prior_id", priorID.Int64, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+		}
+	}
+
+	for _, gate := range gates {
+		var predicate, predicateChecksum any
+		if gate.PredicateChecksum != "" {
+			raw, err := json.Marshal(gate.Predicate)
+			if err != nil {
+				logger.Error("marshal rule predicate failed", "err", err)
+				return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+			}
+			predicate = raw
+			predicateChecksum = gate.PredicateChecksum
+		}
+		var effect any
+		if strings.TrimSpace(gate.Effect) != "" {
+			effect = gate.Effect
+		}
+		var targetProcessor any
+		if strings.TrimSpace(gate.TargetProcessor) != "" {
+			targetProcessor = gate.TargetProcessor
+		}
+		requiredFacets, err := json.Marshal(gate.RequiredFacets)
+		if err != nil {
+			logger.Error("marshal rule required facets failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+		}
+		if _, err := tx.Exec(`
+INSERT INTO kb.pipeline_rules (
+    name, priority, pipeline_id, target_processor, effect, predicate, predicate_checksum,
+    required_facets, depends_on_processors, active, approval_status
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, true, 'approved'
+)`, gate.Name, gate.Priority, id, targetProcessor, effect, predicate, predicateChecksum, requiredFacets, pq.Array(gate.DependsOnProcessors)); err != nil {
+			logger.Error("insert pipeline rule failed", "name", gate.Name, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		logger.Error("commit pipeline version transaction failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline (CWB_KB_P_106)"})
 	}
 
@@ -192,6 +313,7 @@ RETURNING id
 		logger.Error("fetch created pipeline failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created pipeline (CWB_KB_P_107)"})
 	}
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline version create")
 
 	return c.JSON(http.StatusOK, pipelineDetailResponse{Status: true, Record: record})
 }
@@ -261,15 +383,10 @@ func UpdatePipeline(c echo.Context) error {
 			}
 			addSet(field, v)
 		case "processors":
-			value, err := decodeStringArrayValue(raw)
-			if err != nil {
-				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid processors: %v (CWB_KB_P_205)", err)})
-			}
-			if value == nil {
-				addSet(field, pq.Array([]string{}))
-			} else {
-				addSet(field, pq.Array(*value))
-			}
+			// ADR 2026081001 DR1: a pipeline version's processors[] is
+			// immutable. Changing it means authoring a new version via
+			// CreatePipeline, never an in-place UPDATE.
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "processors cannot be edited in place; author a new pipeline version instead (CWB_KB_P_205)"})
 		case "legacy_equivalent":
 			var v bool
 			if err := json.Unmarshal(raw, &v); err != nil {
@@ -309,31 +426,6 @@ func UpdatePipeline(c echo.Context) error {
 	return c.JSON(http.StatusOK, pipelineDetailResponse{Status: true, Record: record})
 }
 
-func DeletePipeline(c echo.Context) error {
-	rc := EchoFactory.NewFromEcho(c, "CWB_KB_P_300")
-	defer rc.Close()
-	logger := rc.GetLogger()
-
-	idStr := strings.TrimSpace(c.Param("id"))
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || id <= 0 {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid id (CWB_KB_P_301)"})
-	}
-
-	db := ApiTypes.ProjectDBHandle
-	result, err := db.Exec("DELETE FROM kb.pipelines WHERE id = $1", id)
-	if err != nil {
-		logger.Error("delete pipeline failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to delete pipeline (CWB_KB_P_302)"})
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		logger.Error("rows affected delete pipeline failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to verify pipeline delete (CWB_KB_P_303)"})
-	}
-	if affected == 0 {
-		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_P_304)"})
-	}
-
-	return c.JSON(http.StatusOK, map[string]bool{"status": true})
-}
+// DeletePipeline no longer exists (ADR 2026081001 DR1): a pipeline version
+// is immutable and cannot be deleted out from under whatever binding still
+// points at it. Superseding it with a new version is the only "remove".

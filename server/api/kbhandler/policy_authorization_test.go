@@ -71,7 +71,7 @@ func TestWritePolicyAuditEventDerivesActorFromAuthenticatedUserNotClientInput(t 
 	defer rc.Close()
 
 	writePolicyAuditEvent(c, rc, rc.GetLogger(), policyaudit.Event{
-		Kind: policyaudit.EventBindingAuthored, PolicyID: 1, SubjectKind: "conditional_binding", SubjectID: 9,
+		Kind: policyaudit.EventBindingAuthored, PipelineName: "legacy_default", SubjectKind: "conditional_binding", SubjectID: 9,
 		Actor: "forged-actor", // must be overwritten by the authenticated user, never trusted from a caller
 	})
 

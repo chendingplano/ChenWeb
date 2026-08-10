@@ -1,21 +1,28 @@
 // Command doc-processing-policy-seed authors Doc Processing Policies from a
 // TOML config file's [doc-processing-policy-*] sections into
-// kb.pipelines/kb.pipeline_bindings, then compiles and activates them as a
-// new kb.pipeline_policies version -- archiving whatever was active before.
-// Modeled on server/cmd/ontology-seed. See
-// docs/superpowers/specs/2026-08-08-doc-processing-policy-design.md.
+// kb.pipelines/kb.pipeline_bindings. ADR 2026081001 DR3 retired
+// kb.pipeline_policies: this tool now authors a new kb.pipelines version per
+// configured policy (superseding whatever version was previously current
+// for that name) and upserts the configured store_default bindings to point
+// at them, instead of compiling/activating a single system-wide policy
+// version. Modeled on server/cmd/ontology-seed. See
+// docs/superpowers/specs/2026-08-08-doc-processing-policy-design.md (predates
+// this ADR; the kb.pipeline_policies-shaped bootstrap behavior it documents
+// is superseded).
 //
 // Usage:
 //
 //	doc-processing-policy-seed [--config path/to/config.local.toml]
 //
-// Re-running after editing the config file is safe: kb.pipelines rows are
-// upserted by name, and each run creates and activates a new policy
-// version rather than mutating a previous one in place.
+// Re-running after editing the config file is safe: each configured policy
+// gets a fresh kb.pipelines version, and each configured binding is upserted
+// by name rather than duplicated. Unlike the old policy-activation model,
+// a binding authored outside this config (e.g. via the REST API) is left
+// untouched by a reseed.
 //
-// The seeded policy only takes effect in an already-running doc-processor
+// The seeded pipelines only take effect in an already-running doc-processor
 // process after that process restarts (loadProductionPipelinePolicyState
-// loads the active policy once, at process startup).
+// loads the pipeline/binding/gate registries once, at process startup).
 package main
 
 import (
@@ -56,9 +63,9 @@ func main() {
 	fmt.Printf("pipelines updated: %v\n", result.PipelinesUpdated)
 	fmt.Printf("bindings written: %d\n", result.BindingsWritten)
 	fmt.Printf("rules written: %d\n", result.RulesWritten)
-	fmt.Printf("activated policy id=%d version=%d\n", result.PolicyID, result.PolicyVersion)
-	fmt.Println("NOTE: the activated policy contains ONLY these bindings; anything authored under the previously active policy is now inactive.")
-	fmt.Println("NOTE: restart the doc-processor service for this policy to take effect.")
+	fmt.Printf("pipeline versions: %v\n", result.PipelineVersions)
+	fmt.Println("NOTE: only the two configured binding kinds (system-default, per-store) were touched; any binding authored outside this config is untouched.")
+	fmt.Println("NOTE: restart the doc-processor service for these pipeline versions to take effect.")
 }
 
 func connect() *sql.DB {

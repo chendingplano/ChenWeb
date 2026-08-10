@@ -20,15 +20,17 @@ func TestPipelineRegistrySQLStoreListPipelinesReadsAuthoredSpecs(t *testing.T) {
 SELECT name,
        COALESCE(display_name, ''),
        processors,
-       legacy_equivalent
+       legacy_equivalent,
+       version
 FROM kb.pipelines
+WHERE status = 'active'
 ORDER BY id`)
 	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{
-		"name", "display_name", "processors", "legacy_equivalent",
+		"name", "display_name", "processors", "legacy_equivalent", "version",
 	}).AddRow(
-		"legacy_default", "Legacy Default", `{}`, true,
+		"legacy_default", "Legacy Default", `{}`, true, 1,
 	).AddRow(
-		"narrative_default", "Narrative Default", `{extract_metrics,extract_provisions}`, false,
+		"narrative_default", "Narrative Default", `{extract_metrics,extract_provisions}`, false, 2,
 	))
 
 	store := PipelineRegistrySQLStore{DB: db}
@@ -37,14 +39,14 @@ ORDER BY id`)
 		t.Fatalf("ListPipelines: %v", err)
 	}
 	want := []ProductionPipelineSpec{
-		{Name: "legacy_default", DisplayName: "Legacy Default", Processors: []string{}, LegacyEquivalent: true},
-		{Name: "narrative_default", DisplayName: "Narrative Default", Processors: []string{"extract_metrics", "extract_provisions"}, LegacyEquivalent: false},
+		{Name: "legacy_default", DisplayName: "Legacy Default", Processors: []string{}, LegacyEquivalent: true, Version: 1},
+		{Name: "narrative_default", DisplayName: "Narrative Default", Processors: []string{"extract_metrics", "extract_provisions"}, LegacyEquivalent: false, Version: 2},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d specs, want %d: %#v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i].Name != want[i].Name || got[i].DisplayName != want[i].DisplayName || got[i].LegacyEquivalent != want[i].LegacyEquivalent {
+		if got[i].Name != want[i].Name || got[i].DisplayName != want[i].DisplayName || got[i].LegacyEquivalent != want[i].LegacyEquivalent || got[i].Version != want[i].Version {
 			t.Fatalf("spec[%d]=%#v want=%#v", i, got[i], want[i])
 		}
 		if len(got[i].Processors) != len(want[i].Processors) {

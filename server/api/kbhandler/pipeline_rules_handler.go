@@ -28,7 +28,6 @@ type pipelineRuleRecord struct {
 	PipelineID                 int64           `json:"pipeline_id"`
 	PipelineName               string          `json:"pipeline_name"`
 	Active                     bool            `json:"active"`
-	PolicyID                   int64           `json:"policy_id"`
 	CreateTime                 time.Time       `json:"create_time"`
 	ModifyTime                 time.Time       `json:"modify_time"`
 	Predicate                  json.RawMessage `json:"predicate,omitempty"`
@@ -52,7 +51,7 @@ type pipelineRuleDetailResponse struct {
 
 const pipelineRuleSelectColumns = `
     r.id, r.name, r.priority, r.match_input_doc_type, r.match_source_language, r.match_knowledge_store_binding,
-    r.pipeline_id, p.name, r.active, r.policy_id, r.create_time, r.modify_time
+    r.pipeline_id, p.name, r.active, r.create_time, r.modify_time
 FROM kb.pipeline_rules r
 JOIN kb.pipelines p ON p.id = r.pipeline_id`
 
@@ -65,7 +64,7 @@ func scanPipelineRuleRecord(scan func(dest ...any) error) (pipelineRuleRecord, e
 	)
 	if err := scan(
 		&record.ID, &record.Name, &record.Priority, &matchDocType, &matchLang, &matchBinding,
-		&record.PipelineID, &record.PipelineName, &record.Active, &record.PolicyID, &record.CreateTime, &record.ModifyTime,
+		&record.PipelineID, &record.PipelineName, &record.Active, &record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineRuleRecord{}, err
 	}
@@ -94,7 +93,7 @@ func fetchPipelineRuleCompatBindingByID(db *sql.DB, id int64) (pipelineRuleRecor
 	const query = `
 SELECT b.id, COALESCE(b.name, ''), b.priority,
        COALESCE(b.predicate, '{}'::jsonb)::text,
-       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+       b.pipeline_id, p.name, b.active, b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id
 WHERE b.id = $1 OR b.legacy_rule_id = $1`
@@ -109,16 +108,6 @@ WHERE b.id = $1 OR b.legacy_rule_id = $1`
 	return record, nil
 }
 
-func pipelineRuleCompatBindingPolicyStatus(db *sql.DB, id int64) (string, error) {
-	var status string
-	err := db.QueryRow(`
-SELECT pp.status
-FROM kb.pipeline_bindings b
-JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
-WHERE b.id = $1 OR b.legacy_rule_id = $1`, id).Scan(&status)
-	return strings.ToLower(strings.TrimSpace(status)), err
-}
-
 func scanPipelineRuleCompatBindingRecord(scan func(dest ...any) error) (pipelineRuleRecord, bool, error) {
 	var (
 		record       pipelineRuleRecord
@@ -126,7 +115,7 @@ func scanPipelineRuleCompatBindingRecord(scan func(dest ...any) error) (pipeline
 	)
 	if err := scan(
 		&record.ID, &record.Name, &record.Priority, &predicateRaw,
-		&record.PipelineID, &record.PipelineName, &record.Active, &record.PolicyID, &record.CreateTime, &record.ModifyTime,
+		&record.PipelineID, &record.PipelineName, &record.Active, &record.CreateTime, &record.ModifyTime,
 	); err != nil {
 		return pipelineRuleRecord{}, false, err
 	}
@@ -142,7 +131,7 @@ func scanCanonicalPipelineGateRecord(scan func(dest ...any) error) (pipelineRule
 	var record pipelineRuleRecord
 	var predicateRaw, requiredFacetsRaw string
 	if err := scan(&record.ID, &record.Name, &record.Priority, &predicateRaw, &record.PredicateChecksum,
-		&record.TargetProcessor, &record.Effect, &requiredFacetsRaw, &record.Active, &record.PolicyID,
+		&record.TargetProcessor, &record.Effect, &requiredFacetsRaw, &record.Active,
 		&record.CreateTime, &record.ModifyTime); err != nil {
 		return pipelineRuleRecord{}, err
 	}
@@ -220,7 +209,7 @@ func ListPipelineRules(c echo.Context) error {
 	query := `
 SELECT b.id, COALESCE(b.name, ''), b.priority,
        COALESCE(b.predicate, '{}'::jsonb)::text,
-       b.pipeline_id, p.name, b.active, b.policy_id, b.create_time, b.modify_time
+       b.pipeline_id, p.name, b.active, b.create_time, b.modify_time
 FROM kb.pipeline_bindings b
 JOIN kb.pipelines p ON p.id = b.pipeline_id
 WHERE b.binding_kind = 'conditional'
@@ -253,7 +242,7 @@ ORDER BY b.priority DESC, b.id`
 SELECT id, name, priority, COALESCE(predicate, '{}'::jsonb)::text,
        COALESCE(predicate_checksum, ''), COALESCE(target_processor, ''),
        COALESCE(effect, ''), COALESCE(required_facets, '[]'::jsonb)::text,
-       active, policy_id, create_time, modify_time
+       active, create_time, modify_time
 FROM kb.pipeline_rules
 WHERE target_processor IS NOT NULL
 ORDER BY priority DESC, id`)
@@ -291,7 +280,6 @@ func CreatePipelineRule(c echo.Context) error {
 		MatchKnowledgeStoreBinding *string         `json:"match_knowledge_store_binding"`
 		PipelineID                 *int64          `json:"pipeline_id"`
 		Active                     *bool           `json:"active"`
-		PolicyID                   *int64          `json:"policy_id"`
 		Predicate                  json.RawMessage `json:"predicate"`
 		PredicateChecksum          string          `json:"predicate_checksum"`
 		TargetProcessor            string          `json:"target_processor"`
@@ -318,25 +306,14 @@ func CreatePipelineRule(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	policyID := payload.PolicyID
-	if policyID == nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "policy_id is required (CWB_KB_PR_106)"})
-	}
-	status, err := pipelinePolicyStatus(db, *policyID)
-	if err != nil {
-		logger.Error("resolve pipeline policy status failed", "policy_id", *policyID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline policy (CWB_KB_PR_109)"})
-	}
-	if status == "active" {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_110)"})
-	}
 	if isCanonicalGate {
 		targetProcessor := strings.TrimSpace(payload.TargetProcessor)
 		effect := strings.ToLower(strings.TrimSpace(payload.Effect))
 		if targetProcessor == "" {
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "target_processor is required (CWB_KB_PR_111)"})
 		}
-		if effect != "require" && effect != "enable" && effect != "skip" && effect != "defer" {
+		// ADR 2026081001 DR9: defer is no longer a storable gate effect.
+		if effect != "require" && effect != "enable" && effect != "skip" {
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid effect (CWB_KB_PR_112)"})
 		}
 		var predicateDoc semrules.Document
@@ -358,19 +335,20 @@ func CreatePipelineRule(c echo.Context) error {
 		if err := db.QueryRow(`
 INSERT INTO kb.pipeline_rules (
     name, priority, predicate, predicate_checksum, target_processor, effect,
-    required_facets, active, policy_id, approval_status
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, 'draft')
-RETURNING id`, strings.TrimSpace(payload.Name), priority, string(payload.Predicate), checksum, targetProcessor, effect, string(requiredFacets), active, *policyID).Scan(&id); err != nil {
+    required_facets, active, approval_status
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, 'draft')
+RETURNING id`, strings.TrimSpace(payload.Name), priority, string(payload.Predicate), checksum, targetProcessor, effect, string(requiredFacets), active).Scan(&id); err != nil {
 			logger.Error("insert canonical processor gate failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline rule (CWB_KB_PR_104)"})
 		}
 		writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
-			Kind: policyaudit.EventRuleAuthored, PolicyID: *policyID, SubjectKind: "processor_rule", SubjectID: id,
+			Kind: policyaudit.EventRuleAuthored, SubjectKind: "processor_rule", SubjectID: id,
 			Detail: map[string]any{"target_processor": targetProcessor, "effect": effect, "predicate_checksum": checksum},
 		})
+		reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline rule create")
 		return c.JSON(http.StatusOK, map[string]any{
 			"status": true,
-			"record": map[string]any{"id": id, "name": strings.TrimSpace(payload.Name), "priority": priority, "predicate": json.RawMessage(payload.Predicate), "predicate_checksum": checksum, "predicate_source": "json", "target_processor": targetProcessor, "effect": effect, "required_facets": json.RawMessage(requiredFacets), "active": active, "policy_id": *policyID},
+			"record": map[string]any{"id": id, "name": strings.TrimSpace(payload.Name), "priority": priority, "predicate": json.RawMessage(payload.Predicate), "predicate_checksum": checksum, "predicate_source": "json", "target_processor": targetProcessor, "effect": effect, "required_facets": json.RawMessage(requiredFacets), "active": active},
 		})
 	}
 
@@ -390,16 +368,16 @@ RETURNING id`, strings.TrimSpace(payload.Name), priority, string(payload.Predica
 
 	const insertQuery = `
 INSERT INTO kb.pipeline_bindings (
-    name, priority, binding_kind, predicate, predicate_checksum, pipeline_id, active, policy_id
+    name, priority, binding_kind, predicate, predicate_checksum, pipeline_id, active
 ) VALUES (
-    $1, $2, 'conditional', $3::jsonb, $4, $5, $6, $7
+    $1, $2, 'conditional', $3::jsonb, $4, $5, $6
 )
 RETURNING id
 `
 	var id int64
 	if err := db.QueryRow(
 		insertQuery,
-		strings.TrimSpace(payload.Name), priority, string(predicateJSON), checksum, *payload.PipelineID, active, *policyID,
+		strings.TrimSpace(payload.Name), priority, string(predicateJSON), checksum, *payload.PipelineID, active,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline rule failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline rule (CWB_KB_PR_104)"})
@@ -411,9 +389,10 @@ RETURNING id
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created pipeline rule (CWB_KB_PR_105)"})
 	}
 	writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
-		Kind: policyaudit.EventBindingAuthored, PolicyID: *policyID, SubjectKind: "conditional_binding", SubjectID: id,
+		Kind: policyaudit.EventBindingAuthored, SubjectKind: "conditional_binding", SubjectID: id,
 		Detail: map[string]any{"predicate_checksum": checksum, "pipeline_id": *payload.PipelineID, "predicate_source": "legacy_adapter"},
 	})
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline rule create")
 
 	return c.JSON(http.StatusOK, pipelineRuleDetailResponse{Status: true, Record: record})
 }
@@ -499,17 +478,6 @@ func UpdatePipelineRule(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	status, err := pipelineRuleCompatBindingPolicyStatus(db, id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
-		}
-		logger.Error("resolve pipeline rule policy status failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule policy (CWB_KB_PR_216)"})
-	}
-	if status == "active" {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_217)"})
-	}
 	existing, err := fetchPipelineRuleCompatBindingByID(db, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -599,6 +567,7 @@ func UpdatePipelineRule(c echo.Context) error {
 		logger.Error("fetch updated pipeline rule failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve updated pipeline rule (CWB_KB_PR_212)"})
 	}
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline rule update")
 
 	return c.JSON(http.StatusOK, pipelineRuleDetailResponse{Status: true, Record: record})
 }
@@ -612,22 +581,16 @@ func isCanonicalGateUpdate(payload map[string]json.RawMessage) bool {
 	return false
 }
 
-func updateCanonicalPipelineGate(c echo.Context, logger interface{ Error(string, ...any) }, id int64, payload map[string]json.RawMessage) error {
+func updateCanonicalPipelineGate(c echo.Context, logger ApiTypes.JimoLogger, id int64, payload map[string]json.RawMessage) error {
 	db := ApiTypes.ProjectDBHandle
-	var status string
+	var exists int
 	if err := db.QueryRow(`
-SELECT pp.status
-FROM kb.pipeline_rules r
-JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
-WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&status); err != nil {
+SELECT 1 FROM kb.pipeline_rules WHERE id = $1 AND target_processor IS NOT NULL`, id).Scan(&exists); err != nil {
 		if err == sql.ErrNoRows {
 			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
 		}
-		logger.Error("resolve canonical pipeline gate policy status failed", "id", id, "err", err)
+		logger.Error("resolve canonical pipeline gate failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule (CWB_KB_PR_216)"})
-	}
-	if strings.EqualFold(strings.TrimSpace(status), "active") {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_217)"})
 	}
 	fields := make([]string, 0, len(payload))
 	for field := range payload {
@@ -655,7 +618,8 @@ WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&status); err != n
 			var value string
 			_ = json.Unmarshal(raw, &value)
 			value = strings.ToLower(strings.TrimSpace(value))
-			if value != "require" && value != "enable" && value != "skip" && value != "defer" {
+			// ADR 2026081001 DR9: defer is no longer a storable gate effect.
+			if value != "require" && value != "enable" && value != "skip" {
 				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid effect (CWB_KB_PR_112)"})
 			}
 			add(field, value)
@@ -705,6 +669,7 @@ WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&status); err != n
 	if err != nil || affected == 0 {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_211)"})
 	}
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline rule update")
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "record": response})
 }
 
@@ -729,16 +694,10 @@ func DeletePipelineRule(c echo.Context) error {
 
 	db := ApiTypes.ProjectDBHandle
 	if c.QueryParam("predicate_source") != "legacy_adapter" {
-		var gateStatus string
-		gateStatusErr := db.QueryRow(`
-SELECT pp.status
-FROM kb.pipeline_rules r
-JOIN kb.pipeline_policies pp ON pp.id = r.policy_id
-WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&gateStatus)
-		if gateStatusErr == nil {
-			if strings.EqualFold(strings.TrimSpace(gateStatus), "active") {
-				return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_306)"})
-			}
+		var exists int
+		gateExistsErr := db.QueryRow(`
+SELECT 1 FROM kb.pipeline_rules WHERE id = $1 AND target_processor IS NOT NULL`, id).Scan(&exists)
+		if gateExistsErr == nil {
 			result, err := db.Exec("DELETE FROM kb.pipeline_rules WHERE id = $1 AND target_processor IS NOT NULL", id)
 			if err != nil {
 				logger.Error("delete canonical pipeline gate failed", "id", id, "err", err)
@@ -748,23 +707,13 @@ WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&gateStatus)
 			if err != nil || affected == 0 {
 				return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_304)"})
 			}
+			reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline rule delete")
 			return c.JSON(http.StatusOK, map[string]bool{"status": true})
 		}
-		if gateStatusErr != sql.ErrNoRows {
-			logger.Error("resolve canonical pipeline gate policy status failed", "id", id, "err", gateStatusErr)
-			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule policy (CWB_KB_PR_305)"})
+		if gateExistsErr != sql.ErrNoRows {
+			logger.Error("resolve canonical pipeline gate failed", "id", id, "err", gateExistsErr)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule (CWB_KB_PR_305)"})
 		}
-	}
-	status, err := pipelineRuleCompatBindingPolicyStatus(db, id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_304)"})
-		}
-		logger.Error("resolve pipeline rule policy status failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline rule policy (CWB_KB_PR_305)"})
-	}
-	if status == "active" {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PR_306)"})
 	}
 	result, err := db.Exec("DELETE FROM kb.pipeline_bindings WHERE id = $1 OR legacy_rule_id = $1", id)
 	if err != nil {
@@ -779,6 +728,7 @@ WHERE r.id = $1 AND r.target_processor IS NOT NULL`, id).Scan(&gateStatus)
 	if affected == 0 {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PR_304)"})
 	}
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline rule delete")
 
 	return c.JSON(http.StatusOK, map[string]bool{"status": true})
 }

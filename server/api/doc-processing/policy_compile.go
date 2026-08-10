@@ -1,9 +1,7 @@
 package docprocessing
 
 import (
-	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
-	"github.com/lib/pq"
 )
 
 type PolicyClearanceReference struct {
@@ -37,10 +34,6 @@ type CompiledPolicy struct {
 	BindingChecksums []string `json:"binding_checksums,omitempty"`
 	GateChecksums    []string `json:"gate_checksums,omitempty"`
 	Warnings         []string `json:"warnings,omitempty"`
-}
-
-type PolicyCompiler interface {
-	CompilePolicy(context.Context, int64) (CompiledPolicy, error)
 }
 
 func CompilePolicy(definition PolicyDefinition) (CompiledPolicy, error) {
@@ -207,70 +200,6 @@ func policySubjectKey(kind string, id int64) string {
 	return fmt.Sprintf("%s/%d", strings.TrimSpace(kind), id)
 }
 
-type policyCompileQuerier interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-type PolicyCompilerSQLStore struct{ DB policyCompileQuerier }
-
-func (s PolicyCompilerSQLStore) CompilePolicy(ctx context.Context, policyID int64) (CompiledPolicy, error) {
-	if s.DB == nil {
-		return CompiledPolicy{}, errors.New("db is nil")
-	}
-	definition, err := s.loadDefinition(ctx, policyID)
-	if err != nil {
-		return CompiledPolicy{}, err
-	}
-	return CompilePolicy(definition)
-}
-
-func (s PolicyCompilerSQLStore) loadDefinition(ctx context.Context, policyID int64) (PolicyDefinition, error) {
-	definition := PolicyDefinition{ID: policyID}
-	if err := s.DB.QueryRowContext(ctx, "SELECT version FROM kb.pipeline_policies WHERE id=$1", policyID).Scan(&definition.Version); err != nil {
-		return PolicyDefinition{}, err
-	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT name,COALESCE(display_name,''),processors,legacy_equivalent FROM kb.pipelines ORDER BY name FOR SHARE")
-	if err != nil {
-		return PolicyDefinition{}, err
-	}
-	for rows.Next() {
-		var spec ProductionPipelineSpec
-		var processors pq.StringArray
-		if err := rows.Scan(&spec.Name, &spec.DisplayName, &processors, &spec.LegacyEquivalent); err != nil {
-			_ = rows.Close()
-			return PolicyDefinition{}, err
-		}
-		spec.Processors = []string(processors)
-		definition.Pipelines = append(definition.Pipelines, spec)
-	}
-	if err := rows.Close(); err != nil {
-		return PolicyDefinition{}, err
-	}
-	for _, spec := range productionProcessorSpecs {
-		definition.KnownProcessors = append(definition.KnownProcessors, spec.Name)
-	}
-	if definition.Bindings, err = s.loadBindings(ctx, policyID); err != nil {
-		return PolicyDefinition{}, err
-	}
-	if definition.Gates, err = s.loadGates(ctx, policyID); err != nil {
-		return PolicyDefinition{}, err
-	}
-	coverage, err := s.DB.QueryContext(ctx, "SELECT subject_kind,subject_id,subject_checksum FROM kb.pipeline_routing_clearance_coverage WHERE policy_id=$1 AND policy_version=$2 FOR SHARE", policyID, definition.Version)
-	if err != nil {
-		return PolicyDefinition{}, err
-	}
-	defer coverage.Close()
-	for coverage.Next() {
-		var ref PolicyClearanceReference
-		if err := coverage.Scan(&ref.SubjectKind, &ref.SubjectID, &ref.SubjectChecksum); err != nil {
-			return PolicyDefinition{}, err
-		}
-		definition.ClearanceReferences = append(definition.ClearanceReferences, ref)
-	}
-	return definition, coverage.Err()
-}
-
 func sameStringSlice(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -283,62 +212,3 @@ func sameStringSlice(left, right []string) bool {
 	return true
 }
 
-func (s PolicyCompilerSQLStore) loadBindings(ctx context.Context, policyID int64) ([]PipelineBinding, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT b.id,COALESCE(b.name,''),b.priority,b.binding_kind,p.name,COALESCE(b.predicate,'{}'::jsonb)::text,COALESCE(b.predicate_checksum,''),b.active,
-CASE WHEN b.input_record_id IS NOT NULL THEN 'document' WHEN NULLIF(b.user_id,'') IS NOT NULL THEN 'user' WHEN b.ks_store_id IS NOT NULL THEN 'knowledge_store' WHEN NULLIF(b.tenant_id,'') IS NOT NULL AND b.tenant_id<>'-' THEN 'tenant' ELSE 'system' END,
-b.legacy_rule_id,COALESCE(lr.match_input_doc_type,''),COALESCE(lr.match_source_language,''),COALESCE(lr.match_knowledge_store_binding,'')
-FROM kb.pipeline_bindings b JOIN kb.pipelines p ON p.id=b.pipeline_id LEFT JOIN kb.pipeline_rules lr ON lr.id=b.legacy_rule_id WHERE b.policy_id=$1 ORDER BY b.id FOR SHARE OF b`, policyID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []PipelineBinding
-	for rows.Next() {
-		var binding PipelineBinding
-		var raw, matchDocType, matchLanguage, matchBinding string
-		var legacyRuleID sql.NullInt64
-		if err := rows.Scan(&binding.ID, &binding.Name, &binding.Priority, &binding.BindingKind, &binding.PipelineName, &raw, &binding.PredicateChecksum, &binding.Active, &binding.Scope, &legacyRuleID, &matchDocType, &matchLanguage, &matchBinding); err != nil {
-			return nil, err
-		}
-		if binding.BindingKind == PipelineBindingKindConditional {
-			if err := json.Unmarshal([]byte(raw), &binding.Predicate); err != nil {
-				return nil, err
-			}
-		}
-		if legacyRuleID.Valid {
-			legacy := ProductionPipelineRule{ID: legacyRuleID.Int64, Name: binding.Name, Priority: binding.Priority, MatchInputDocType: matchDocType, MatchSourceLanguage: matchLanguage, MatchKnowledgeStoreBinding: matchBinding, PipelineName: binding.PipelineName}
-			legacyDoc, canonicalChecksum, err := LegacyRulePredicateDocument(legacy)
-			if err != nil || !canonicalPredicatesEqual(legacyDoc, binding.Predicate) {
-				return nil, fmt.Errorf("binding %d legacy adapter parity mismatch", binding.ID)
-			}
-			binding.LegacyRule = &legacy
-			binding.PredicateChecksum = canonicalChecksum
-		}
-		out = append(out, binding)
-	}
-	return out, rows.Err()
-}
-
-func (s PolicyCompilerSQLStore) loadGates(ctx context.Context, policyID int64) ([]PipelineGate, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT id,name,priority,target_processor,effect,predicate::text,predicate_checksum,required_facets::text,active FROM kb.pipeline_rules WHERE policy_id=$1 AND predicate IS NOT NULL ORDER BY id FOR SHARE", policyID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []PipelineGate
-	for rows.Next() {
-		var gate PipelineGate
-		var predicateRaw, facetsRaw string
-		if err := rows.Scan(&gate.ID, &gate.Name, &gate.Priority, &gate.TargetProcessor, &gate.Effect, &predicateRaw, &gate.PredicateChecksum, &facetsRaw, &gate.Active); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(predicateRaw), &gate.Predicate); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(facetsRaw), &gate.RequiredFacets); err != nil {
-			return nil, err
-		}
-		out = append(out, gate)
-	}
-	return out, rows.Err()
-}

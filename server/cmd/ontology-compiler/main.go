@@ -127,19 +127,21 @@ func runRelease(args []string) {
 }
 
 // promotionHook returns the ReleaseStore.Promote hook: promote the release's
-// approved proposals into a draft pipeline policy on the given transaction.
-// It is nil-safe (a nil lister/promoter means no promotion configured) and
-// reports the draft policy id to stdout when one was created.
+// approved proposals into inactive ("draft") conditional pipeline bindings
+// on the given transaction (ADR 2026081001 DR3 retired the separate
+// draft-policy envelope this used to group them under). It is nil-safe (a
+// nil lister/promoter means no promotion configured) and reports the first
+// created binding's id to stdout when one was created.
 func promotionHook(db *sql.DB) func(context.Context, *sql.Tx, int64, string) error {
 	return func(ctx context.Context, tx *sql.Tx, releaseID int64, releaseChecksum string) error {
 		promoter := docprocessing.PolicyPromotionStore{Audit: policyaudit.SQLStore{DB: db}}
 		lister := proposalListAdapter{store: modules.ProposalStore{DB: db}}
-		policyID, err := docprocessing.PromoteModuleReleaseProposals(ctx, tx, promoter, lister, releaseID, releaseChecksum)
+		bindingID, err := docprocessing.PromoteModuleReleaseProposals(ctx, tx, promoter, lister, releaseID, releaseChecksum)
 		if err != nil {
 			return err
 		}
-		if policyID > 0 {
-			fmt.Printf("promoted approved proposals into draft policy %d\n", policyID)
+		if bindingID > 0 {
+			fmt.Printf("promoted approved proposals into draft binding %d\n", bindingID)
 		}
 		return nil
 	}

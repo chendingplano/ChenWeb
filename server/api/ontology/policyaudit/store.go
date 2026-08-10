@@ -40,15 +40,18 @@ const (
 // must never carry document content, matching spec 2026080102 section 10's
 // "predicate values and traces must not log document content" requirement.
 type Event struct {
-	Kind          string
-	PolicyID      int64
-	PolicyVersion int
-	SubjectKind   string
-	SubjectID     int64
-	RunID         int64
-	RecordID      int64
-	Actor         string
-	Detail        map[string]any
+	Kind string
+	// PipelineName/PipelineVersion identify the resolved kb.pipelines
+	// version in effect for this event (ADR 2026081001 DR3) -- replaces the
+	// retired system-wide PolicyID/PolicyVersion.
+	PipelineName    string
+	PipelineVersion int
+	SubjectKind     string
+	SubjectID       int64
+	RunID           int64
+	RecordID        int64
+	Actor           string
+	Detail          map[string]any
 }
 
 // Writer persists policy/routing audit events.
@@ -76,9 +79,9 @@ func (s SQLStore) WriteEvent(ctx context.Context, event Event) error {
 		return err
 	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO kb.pipeline_policy_events
-(event_kind, policy_id, policy_version, subject_kind, subject_id, run_id, record_id, actor, detail)
+(event_kind, pipeline_name, pipeline_version, subject_kind, subject_id, run_id, record_id, actor, detail)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
-		kind, nullIfZeroInt64(event.PolicyID), nullIfZeroInt(event.PolicyVersion), nullIfEmpty(event.SubjectKind),
+		kind, nullIfEmpty(event.PipelineName), nullIfZeroInt(event.PipelineVersion), nullIfEmpty(event.SubjectKind),
 		nullIfZeroInt64(event.SubjectID), nullIfZeroInt64(event.RunID), nullIfZeroInt64(event.RecordID),
 		nullIfEmpty(strings.TrimSpace(event.Actor)), string(detailRaw))
 	return err

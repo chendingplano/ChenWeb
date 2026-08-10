@@ -42,6 +42,12 @@ func (s stubGateStore) ListPipelineGates(context.Context) ([]PipelineGate, error
 	return nil, s.err
 }
 
+type stubProcessorRegistryStore struct{ err error }
+
+func (s stubProcessorRegistryStore) ListProcessorRegistry(context.Context) ([]ProcessorSpec, error) {
+	return nil, s.err
+}
+
 // TestLoadProductionPipelinePolicyStateRegistryFailureKeepsLegacyFallback
 // proves a registry-load failure keeps its documented legacy-equivalent
 // fallback (plan 2026080303 chunk C1) -- only bindings/gates must fail
@@ -49,7 +55,7 @@ func (s stubGateStore) ListPipelineGates(context.Context) ([]PipelineGate, error
 func TestLoadProductionPipelinePolicyStateRegistryFailureKeepsLegacyFallback(t *testing.T) {
 	err := loadProductionPipelinePolicyState(context.Background(), nil,
 		stubRegistryStore{err: errors.New("registry unavailable")},
-		stubBindingStore{}, stubGateStore{})
+		stubBindingStore{}, stubGateStore{}, stubProcessorRegistryStore{})
 	if err != nil {
 		t.Fatalf("registry-load failure must not fail runtime construction, got: %v", err)
 	}
@@ -63,7 +69,7 @@ func TestLoadProductionPipelinePolicyStateRegistryFailureKeepsLegacyFallback(t *
 func TestLoadProductionPipelinePolicyStateBindingFailureFailsConstruction(t *testing.T) {
 	underlying := errors.New("connection refused")
 	err := loadProductionPipelinePolicyState(context.Background(), nil,
-		stubRegistryStore{}, stubBindingStore{err: underlying}, stubGateStore{})
+		stubRegistryStore{}, stubBindingStore{err: underlying}, stubGateStore{}, stubProcessorRegistryStore{})
 	if err == nil {
 		t.Fatal("expected a binding load failure to fail runtime construction")
 	}
@@ -77,7 +83,7 @@ func TestLoadProductionPipelinePolicyStateBindingFailureFailsConstruction(t *tes
 func TestLoadProductionPipelinePolicyStateGateFailureFailsConstruction(t *testing.T) {
 	underlying := errors.New("connection refused")
 	err := loadProductionPipelinePolicyState(context.Background(), nil,
-		stubRegistryStore{}, stubBindingStore{}, stubGateStore{err: underlying})
+		stubRegistryStore{}, stubBindingStore{}, stubGateStore{err: underlying}, stubProcessorRegistryStore{})
 	if err == nil {
 		t.Fatal("expected a gate load failure to fail runtime construction")
 	}

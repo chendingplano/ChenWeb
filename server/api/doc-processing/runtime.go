@@ -118,9 +118,16 @@ func buildProductionResolver(db *sql.DB, logger ApiTypes.JimoLogger) *Applicabil
 	}
 }
 
-func loadProductionPipelinePolicyState(ctx context.Context, logger ApiTypes.JimoLogger, registry PipelineRegistryStore, bindings PipelineBindingStore, gates PipelineGateStore) error {
+func loadProductionPipelinePolicyState(ctx context.Context, logger ApiTypes.JimoLogger, registry PipelineRegistryStore, bindings PipelineBindingStore, gates PipelineGateStore, processorRegistry ProcessorRegistryStore) error {
 	if err := LoadProductionPipelineRegistry(ctx, registry); err != nil && logger != nil {
 		logger.Warn("failed to load authored pipeline registry, using legacy-equivalent fallback", "error", err)
+	}
+	// ADR 2026081001 DR7: kb.processor_registry is expected to be empty for
+	// a long time (incremental adoption); a load failure just means every
+	// processor still resolves from productionProcessorSpecs, same warn-not-
+	// fail convention as the pipeline registry above.
+	if err := LoadProcessorRegistry(ctx, processorRegistry); err != nil && logger != nil {
+		logger.Warn("failed to load processor dependency registry, using hardcoded specs only", "error", err)
 	}
 	if err := LoadProductionPipelineBindings(ctx, bindings); err != nil {
 		return fmt.Errorf("load canonical pipeline bindings: %w", err)
@@ -189,11 +196,12 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			PipelineRegistrySQLStore{DB: ApiTypes.ProjectDBHandle},
 			PipelineBindingSQLStore{DB: ApiTypes.ProjectDBHandle},
 			PipelineGateSQLStore{DB: ApiTypes.ProjectDBHandle},
+			ProcessorRegistrySQLStore{DB: ApiTypes.ProjectDBHandle},
 		); err != nil {
 			return nil, err
 		}
 	}
-	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, Facets: SQLStore{DB: ApiTypes.ProjectDBHandle}, PolicyStore: PipelinePolicySQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, Facets: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
 	// The tier-3 applicability resolver is always constructed; classify_document
 	// itself is a routed processor (processor_plan.go) gated per-document via
 	// an authored kb.pipeline_rules row, not an env var.

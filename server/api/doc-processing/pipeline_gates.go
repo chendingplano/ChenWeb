@@ -2,9 +2,7 @@ package docprocessing
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +30,11 @@ type PipelineGate struct {
 	PredicateChecksum string            `json:"predicate_checksum"`
 	RequiredFacets    []string          `json:"required_facets,omitempty"`
 	Active            bool              `json:"active"`
+	// DependsOnProcessors is the ADR 2026081001 DR6 DAG edge set: sibling
+	// processors, within the same pipeline version, that must finish
+	// successfully before TargetProcessor runs. Orthogonal to Predicate/
+	// Effect (which govern whether a processor runs; this governs when).
+	DependsOnProcessors []string `json:"depends_on_processors,omitempty"`
 }
 
 type ProcessorGateTrace struct {
@@ -47,16 +50,14 @@ type ProcessorGateTrace struct {
 }
 
 type ProcessorGateResolution struct {
-	Processor        string               `json:"processor"`
-	Effect           string               `json:"effect"`
-	Truth            semrules.Truth       `json:"truth"`
-	Source           string               `json:"source"`
-	WinningRuleID    int64                `json:"winning_rule_id,omitempty"`
-	WinningChecksum  string               `json:"winning_checksum,omitempty"`
-	Trace            []ProcessorGateTrace `json:"trace,omitempty"`
-	RuleChecksums    []string             `json:"rule_checksums,omitempty"`
-	DeferredPaths    []string             `json:"deferred_paths,omitempty"`
-	DeferFingerprint string               `json:"defer_fingerprint,omitempty"`
+	Processor       string               `json:"processor"`
+	Effect          string               `json:"effect"`
+	Truth           semrules.Truth       `json:"truth"`
+	Source          string               `json:"source"`
+	WinningRuleID   int64                `json:"winning_rule_id,omitempty"`
+	WinningChecksum string               `json:"winning_checksum,omitempty"`
+	Trace           []ProcessorGateTrace `json:"trace,omitempty"`
+	RuleChecksums   []string             `json:"rule_checksums,omitempty"`
 }
 
 type GateResolutionOptions struct {
@@ -152,16 +153,6 @@ func ResolveProcessorGate(spec ProcessorSpec, gates []PipelineGate, facts semrul
 		resolution.Source = "policy_gate"
 		resolution.WinningRuleID = winner.ID
 		resolution.WinningChecksum = winner.PredicateChecksum
-		if winner.Effect == GateEffectDefer {
-			paths := append([]string(nil), winner.RequiredFacets...)
-			paths = append(paths, semrules.Analyze(winner.Predicate).RequiredPaths...)
-			paths = append(paths, results[winner.ID].DecisionRelevantMissingPaths...)
-			resolution.DeferredPaths = sortedUniqueNonEmpty(paths)
-			if len(resolution.DeferredPaths) == 0 {
-				return ProcessorGateResolution{}, fmt.Errorf("defer gate %d has no dependency facts", winner.ID)
-			}
-			resolution.DeferFingerprint = deferFingerprint(processor, winner.PredicateChecksum, resolution.DeferredPaths)
-		}
 		resolution.RuleChecksums = sortedUniqueNonEmpty(resolution.RuleChecksums)
 		return resolution, nil
 	}
@@ -169,24 +160,16 @@ func ResolveProcessorGate(spec ProcessorSpec, gates []PipelineGate, facts semrul
 	return resolution, nil
 }
 
+// resolveIndeterminateGate is a hard failure now (ADR 2026081001 DR9): the
+// only reason a gate used to fall open to enable/skip on an indeterminate
+// resolution was the old defer/retry model, which DR8 check 3 (gate-fact
+// availability, proven at pipeline-version creation time) makes obsolete --
+// a validated pipeline version's gates never reach here in normal
+// operation. This is a safety net, not an expected path; both conflict
+// modes now fail the same way (the block/fallback distinction no longer
+// applies to this case).
 func resolveIndeterminateGate(spec ProcessorSpec, resolution ProcessorGateResolution, gates []PipelineGate, results map[int64]semrules.Result, options GateResolutionOptions) (ProcessorGateResolution, error) {
-	if options.OnConflict != PipelineBindingOnConflictFallback {
-		return resolution, &PipelineGateResolutionError{Processor: spec.Name, Reason: "decision_relevant_indeterminate"}
-	}
-	resolution.Truth = semrules.TruthIndeterminate
-	resolution.Source = "indeterminate_fallback"
-	resolution.Effect = GateEffectEnable
-	if strings.EqualFold(strings.TrimSpace(spec.OnUndetermined), "skip") {
-		resolution.Effect = GateEffectSkip
-	}
-	var paths []string
-	for _, gate := range gates {
-		paths = append(paths, results[gate.ID].DecisionRelevantMissingPaths...)
-		paths = append(paths, gate.RequiredFacets...)
-	}
-	resolution.DeferredPaths = sortedUniqueNonEmpty(paths)
-	resolution.RuleChecksums = sortedUniqueNonEmpty(resolution.RuleChecksums)
-	return resolution, nil
+	return resolution, &PipelineGateResolutionError{Processor: spec.Name, Reason: "indeterminate_after_validated_pipeline"}
 }
 
 type GateShadowOptions struct {
@@ -199,12 +182,11 @@ type ProcessorGateShadowPlan struct {
 	EffectiveProcessors []string                  `json:"effective_processors"`
 	WouldRun            []string                  `json:"would_run,omitempty"`
 	WouldSkip           []string                  `json:"would_skip,omitempty"`
-	WouldDefer          []string                  `json:"would_defer,omitempty"`
 	Decisions           []ProcessorGateResolution `json:"decisions,omitempty"`
 }
 
-// BuildProcessorGateShadowPlan computes complete would-run/skip/defer
-// decisions while preserving the baseline effective processor list.
+// BuildProcessorGateShadowPlan computes complete would-run/skip decisions
+// while preserving the baseline effective processor list.
 func BuildProcessorGateShadowPlan(baseline []string, specs []ProcessorSpec, gates []PipelineGate, facts semrules.FactSet, options GateShadowOptions) (ProcessorGateShadowPlan, error) {
 	shadow := ProcessorGateShadowPlan{EffectiveProcessors: append([]string(nil), baseline...)}
 	explicit := stringSet(options.ExplicitProcessors)
@@ -230,8 +212,6 @@ func BuildProcessorGateShadowPlan(baseline []string, specs []ProcessorSpec, gate
 			shadow.WouldRun = append(shadow.WouldRun, processor)
 		case GateEffectSkip:
 			shadow.WouldSkip = append(shadow.WouldSkip, processor)
-		case GateEffectDefer:
-			shadow.WouldDefer = append(shadow.WouldDefer, processor)
 		}
 	}
 	return shadow, nil
@@ -315,12 +295,14 @@ func strongestGate(gates []PipelineGate) PipelineGate {
 
 func gateSpecificity(gate PipelineGate) int { return semrules.Analyze(gate.Predicate).Specificity }
 
+// gateEffectRank ranks the three storable gate effects (ADR 2026081001 DR9
+// retired "defer" -- it is no longer a valid rank here, so an
+// already-rejected-at-creation-time "defer" value falls through to the
+// same 0 as any other invalid string).
 func gateEffectRank(effect string) int {
 	switch effect {
 	case GateEffectRequire:
 		return 4
-	case GateEffectDefer:
-		return 3
 	case GateEffectSkip:
 		return 2
 	case GateEffectEnable:
@@ -335,16 +317,6 @@ func validGateEffect(effect string) bool { return gateEffectRank(effect) > 0 }
 func isMandatoryProcessor(spec ProcessorSpec) bool {
 	class := strings.ToLower(strings.TrimSpace(spec.Class))
 	return class == "mandatory" || class == "mandatory_gated" || normalizeRuntimeName(spec.Name) == "static_analyzer" || normalizeRuntimeName(spec.Name) == "chunking"
-}
-
-func deferFingerprint(processor, checksum string, paths []string) string {
-	raw, _ := json.Marshal(struct {
-		Processor string   `json:"processor"`
-		Checksum  string   `json:"checksum"`
-		Paths     []string `json:"paths"`
-	}{processor, checksum, paths})
-	digest := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func sortedUniqueNonEmpty(values []string) []string {

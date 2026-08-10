@@ -24,9 +24,12 @@ type RoutingEnforcementRequest struct {
 	// Explicit is true for the evt.Operations bypass path: nothing is ever
 	// suppressed, matching "explicit-request and named-pipeline precedence
 	// remains unchanged" (spec 2026080102 section 5.1).
-	Explicit      bool
-	PolicyID      int64
-	PolicyVersion int
+	Explicit bool
+	// PipelineName/PipelineVersion identify the resolved kb.pipelines
+	// version D2 clearance lookups key on (ADR 2026081001 DR3) -- replaces
+	// the retired system-wide PolicyID/PolicyVersion.
+	PipelineName    string
+	PipelineVersion int
 	// DocumentKind is the clearance coverage slice key.
 	DocumentKind string
 
@@ -108,9 +111,9 @@ func FinalizeRoutingPlan(ctx context.Context, req RoutingEnforcementRequest, cle
 				result.ShadowPipelineExclusions = delta.RemovedProcessors
 			} else {
 				subject := RoutingClearanceSubject{
-					PolicyID: req.PolicyID, PolicyVersion: req.PolicyVersion,
+					PipelineName: req.PipelineName, PipelineVersion: req.PipelineVersion,
 					SubjectKind: "conditional_binding", SubjectID: req.BindingID,
-					SubjectChecksum: ConditionalBindingSubjectChecksum(req.PolicyVersion, PipelineBinding{
+					SubjectChecksum: ConditionalBindingSubjectChecksum(req.PipelineVersion, PipelineBinding{
 						PipelineName: req.SelectedSpec.Name, PredicateChecksum: req.BindingPredicateChecksum,
 					}, req.SelectedSpec, req.BaselineSpec),
 					DocumentKind: req.DocumentKind, NetPlanDeltaChecksum: deltaChecksum,
@@ -148,7 +151,7 @@ func FinalizeRoutingPlan(ctx context.Context, req RoutingEnforcementRequest, cle
 	kept := make([]string, 0, len(effective))
 	for _, processor := range effective {
 		decision, ok := gateDecisionFor(req.GateShadow, processor)
-		if !ok || (decision.Effect != GateEffectSkip && decision.Effect != GateEffectDefer) {
+		if !ok || decision.Effect != GateEffectSkip {
 			kept = append(kept, processor)
 			continue
 		}
@@ -175,9 +178,9 @@ func FinalizeRoutingPlan(ctx context.Context, req RoutingEnforcementRequest, cle
 			}
 			gate := PipelineGate{TargetProcessor: decision.Processor, Effect: decision.Effect, PredicateChecksum: decision.WinningChecksum}
 			subject := RoutingClearanceSubject{
-				PolicyID: req.PolicyID, PolicyVersion: req.PolicyVersion,
+				PipelineName: req.PipelineName, PipelineVersion: req.PipelineVersion,
 				SubjectKind: "processor_rule", SubjectID: decision.WinningRuleID,
-				SubjectChecksum: ProcessorGateSubjectChecksum(req.PolicyVersion, gate),
+				SubjectChecksum: ProcessorGateSubjectChecksum(req.PipelineVersion, gate),
 				DocumentKind:    req.DocumentKind, NetPlanDeltaChecksum: gateDeltaChecksum,
 			}
 			cleared, alarm := checkRoutingClearance(ctx, clearances, subject)
@@ -235,8 +238,8 @@ func checkRoutingClearance(ctx context.Context, clearances RoutingClearanceCheck
 		case errors.Is(err, ErrMultipleEffectiveRoutingClearances):
 			return false, &RoutingAlarm{
 				Kind: RoutingAlarmKindPolicyIntegrity, Severity: RoutingAlarmSeverityError,
-				Message: fmt.Sprintf("multiple effective routing clearances for %s/%d (policy %d v%d); failing closed to shadow",
-					subject.SubjectKind, subject.SubjectID, subject.PolicyID, subject.PolicyVersion),
+				Message: fmt.Sprintf("multiple effective routing clearances for %s/%d (pipeline %s v%d); failing closed to shadow",
+					subject.SubjectKind, subject.SubjectID, subject.PipelineName, subject.PipelineVersion),
 			}
 		default:
 			return false, &RoutingAlarm{

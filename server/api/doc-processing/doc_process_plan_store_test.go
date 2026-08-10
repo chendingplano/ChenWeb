@@ -62,11 +62,11 @@ RETURNING id`)
 		WithArgs(
 			int64(5),
 			int64(4821),
-			`{"RequestedProcessors":["generate_topics","extract_provisions"],"RequestedPipeline":"","StoreBoundPipeline":"","KnowledgeStoreID":42,"KnowledgeStoreType":"","InputDocType":"pdf","SourceLanguage":"en","DocumentNumber":"YY 9706.252-2021","ParserName":"mineru","DocumentTitle":"Ventilator display module","RoutingFacets":{"KnowledgeStoreBinding":"bound","InputDocType":"pdf","SourceLanguage":"en","HasDocumentNumber":true},"Mode":"","ActivePolicyID":0,"ActivePolicyVersion":0}`,
+			`{"RequestedProcessors":["generate_topics","extract_provisions"],"RequestedPipeline":"","StoreBoundPipeline":"","KnowledgeStoreID":42,"KnowledgeStoreType":"","InputDocType":"pdf","SourceLanguage":"en","DocumentNumber":"YY 9706.252-2021","ParserName":"mineru","DocumentTitle":"Ventilator display module","RoutingFacets":{"KnowledgeStoreBinding":"bound","InputDocType":"pdf","SourceLanguage":"en","HasDocumentNumber":true},"Mode":""}`,
 			`[{"Name":"static_analyzer","Phase":"A","DependsOn":[],"Reason":"mandatory_baseline"},{"Name":"chunking","Phase":"A","DependsOn":["static_analyzer"],"Reason":"implicit_dependency"},{"Name":"generate_topics","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"},{"Name":"extract_provisions","Phase":"B","DependsOn":["chunking"],"Reason":"explicit_request"}]`,
 			`{"PipelineName":"legacy_default","Reason":"system_default"}`,
-			`{"RequestedPipeline":"","StoreBoundPipeline":"","RuleName":"","Source":"system_default","SelectedPipeline":"legacy_default","PolicyID":0,"PolicyVersion":0}`,
-			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true}`,
+			`{"RequestedPipeline":"","StoreBoundPipeline":"","RuleName":"","Source":"system_default","SelectedPipeline":"legacy_default","SelectedPipelineVersion":0}`,
+			`{"Name":"legacy_default","DisplayName":"Legacy Default","Processors":null,"LegacyEquivalent":true,"Version":0}`,
 			sqlmock.AnyArg(),
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(9)))
@@ -120,8 +120,8 @@ func TestPersistedP5PlanReloadIgnoresLaterActivation(t *testing.T) {
 	}
 	defer db.Close()
 	wantSnapshot := &P5RoutingSnapshot{
-		Facts:    []semrules.Fact{{Path: "document.doc_kind", State: semrules.FactKnown, Value: "standard"}},
-		PolicyID: 7, PolicyVersion: 3, PolicyChecksum: "sha256:old-policy",
+		Facts:           []semrules.Fact{{Path: "document.doc_kind", State: semrules.FactKnown, Value: "standard"}},
+		PipelineName:    "old", PipelineVersion: 3,
 		SelectedPipelineChecksum: "sha256:selected", BaselinePipelineChecksum: "sha256:baseline",
 		GateShadow:    ProcessorGateShadowPlan{EffectiveProcessors: []string{"extract_metrics"}, WouldSkip: []string{"extract_metrics"}},
 		RuleChecksums: []string{"sha256:old-rule"},

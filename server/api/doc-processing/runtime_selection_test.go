@@ -170,12 +170,14 @@ func TestResolveProductionPipelineBindingRespectsOnConflictEnv(t *testing.T) {
 	}
 }
 
-// TestBuildProductionProcessorPlanFromFactsGateConflictRespectsOnConflictEnv
-// mirrors the binding test for processor gates: an indeterminate gate
-// (missing tier-3 document.doc_kind) blocks plan construction by default,
-// but resolves via the processor's OnUndetermined default when the env var
-// requests fallback (P5 review 2026080302 finding P5-19).
-func TestBuildProductionProcessorPlanFromFactsGateConflictRespectsOnConflictEnv(t *testing.T) {
+// TestBuildProductionProcessorPlanFromFactsGateConflictAlwaysErrors mirrors
+// the binding test for processor gates: an indeterminate gate (missing
+// tier-3 document.doc_kind) blocks plan construction. Unlike pipeline
+// bindings, gate conflicts no longer have a fallback ladder to resolve via
+// (ADR 2026081001 DR9 retired resolveIndeterminateGate's fallback-to-
+// OnUndetermined branch) -- both block and fallback conflict modes now
+// hard-fail an indeterminate gate the same way.
+func TestBuildProductionProcessorPlanFromFactsGateConflictAlwaysErrors(t *testing.T) {
 	t.Cleanup(func() { SetProductionPipelineGates(nil) })
 	indeterminate := gateFixture(1, 10, GateEffectSkip, "standard")
 	SetProductionPipelineGates([]PipelineGate{indeterminate})
@@ -190,8 +192,8 @@ func TestBuildProductionProcessorPlanFromFactsGateConflictRespectsOnConflictEnv(
 	}
 
 	t.Setenv("DOC_PIPELINE_ON_CONFLICT", "fallback")
-	if _, err := BuildProductionProcessorPlanFromFacts(facts); err != nil {
-		t.Fatalf("expected fallback mode to resolve via OnUndetermined, got: %v", err)
+	if _, err := BuildProductionProcessorPlanFromFacts(facts); err == nil {
+		t.Fatal("expected fallback mode to also error on an indeterminate gate (DR9)")
 	}
 }
 

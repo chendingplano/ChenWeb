@@ -22,12 +22,18 @@ func (s PipelineRegistrySQLStore) ListPipelines(ctx context.Context) ([]Producti
 	if s.DB == nil {
 		return nil, errors.New("db is nil")
 	}
+	// ADR 2026081001 DR1: kb.pipelines keeps every superseded version as its
+	// own row now, so the runtime registry must only load the current
+	// ("active") version of each name -- otherwise a superseded row would
+	// duplicate/shadow the live one.
 	const stmt = `
 SELECT name,
        COALESCE(display_name, ''),
        processors,
-       legacy_equivalent
+       legacy_equivalent,
+       version
 FROM kb.pipelines
+WHERE status = 'active'
 ORDER BY id`
 	rows, err := s.DB.QueryContext(ctx, stmt)
 	if err != nil {
@@ -41,7 +47,7 @@ ORDER BY id`
 			spec       ProductionPipelineSpec
 			processors pq.StringArray
 		)
-		if err := rows.Scan(&spec.Name, &spec.DisplayName, &processors, &spec.LegacyEquivalent); err != nil {
+		if err := rows.Scan(&spec.Name, &spec.DisplayName, &processors, &spec.LegacyEquivalent, &spec.Version); err != nil {
 			return nil, err
 		}
 		spec.Processors = []string(processors)

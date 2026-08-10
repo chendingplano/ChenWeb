@@ -435,7 +435,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/pipelines", kbhandler.ListPipelines)
 	apiGroup.POST("/kb/pipelines", kbhandler.CreatePipeline)
 	apiGroup.PUT("/kb/pipelines/:id", kbhandler.UpdatePipeline)
-	apiGroup.DELETE("/kb/pipelines/:id", kbhandler.DeletePipeline)
+	// No DELETE route: ADR 2026081001 DR1 retires pipeline deletion entirely.
 	apiGroup.GET("/kb/pipeline-bindings", kbhandler.ListPipelineBindings)
 	apiGroup.POST("/kb/pipeline-bindings", kbhandler.CreatePipelineBinding)
 	apiGroup.PUT("/kb/pipeline-bindings/:id", kbhandler.UpdatePipelineBinding)
@@ -448,9 +448,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/pipeline-rules", kbhandler.CreatePipelineRule)
 	apiGroup.PUT("/kb/pipeline-rules/:id", kbhandler.UpdatePipelineRule)
 	apiGroup.DELETE("/kb/pipeline-rules/:id", kbhandler.DeletePipelineRule)
-	apiGroup.GET("/kb/pipeline-policies", kbhandler.ListPipelinePolicies)
-	apiGroup.POST("/kb/pipeline-policies", kbhandler.CreatePipelinePolicy)
-	apiGroup.POST("/kb/pipeline-policies/:id/activate", kbhandler.ActivatePipelinePolicy)
+	// No /kb/pipeline-policies routes: ADR 2026081001 DR3 retires kb.pipeline_policies entirely.
 	apiGroup.POST("/kb/pipeline-routing-clearances/approve", kbhandler.ApprovePipelineRoutingClearance)
 	apiGroup.POST("/kb/pipeline-routing-clearances/replace", kbhandler.ReplacePipelineRoutingClearance)
 	apiGroup.POST("/kb/pipeline-routing-clearances/:id/revoke", kbhandler.RevokePipelineRoutingClearance)

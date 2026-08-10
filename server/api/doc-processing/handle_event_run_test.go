@@ -770,16 +770,15 @@ func TestHandleEvent_BlockModeConflictAlarmDedupesByRecordIDAcrossRetries(t *tes
 	}
 }
 
-// TestHandleEvent_FallbackModeGateConflictStillExecutes proves the
-// fallback-mode counterpart to the block-mode test above: processor-gate
-// resolution is always fallback mode today
-// (BuildProductionProcessorPlanFromFacts hardcodes
-// PipelineBindingOnConflictFallback for gates), so an indeterminate gate
-// decision never produces a planErr and never blocks dispatch -- the
-// affected processor keeps running (DR7 fallback, not a hard failure) while
-// still raising a gate_conflict alarm/event so operators see the
-// ambiguity.
-func TestHandleEvent_FallbackModeGateConflictStillExecutes(t *testing.T) {
+// TestHandleEvent_FallbackModeGateConflictNowBlocksProcessing proves the
+// fallback-mode counterpart to the block-mode test above changed under ADR
+// 2026081001 DR9: resolveIndeterminateGate no longer falls open to
+// enable/skip in fallback mode -- an indeterminate gate decision is a hard
+// processing failure regardless of OnConflict mode now (a safety net that
+// should never trigger once every live pipeline version has passed DR8
+// creation-time validation). The affected processor does not run; the
+// gate_conflict alarm/event still raise so operators see the ambiguity.
+func TestHandleEvent_FallbackModeGateConflictNowBlocksProcessing(t *testing.T) {
 	// DOC_PIPELINE_ON_CONFLICT now defaults to block (P5 review 2026080302
 	// finding P5-19: gates previously always hardcoded fallback regardless
 	// of any setting); this test exists specifically to prove fallback-mode
@@ -828,11 +827,11 @@ func TestHandleEvent_FallbackModeGateConflictStillExecutes(t *testing.T) {
 		"record_id":"4821",
 		"filename":"`+inputPath+`"
 	}`))
-	if err != nil {
-		t.Fatalf("handleEvent: %v (fallback-mode conflicts must not block processing)", err)
+	if err == nil {
+		t.Fatal("handleEvent: expected an error -- DR9 hard-fails an indeterminate gate even in fallback mode")
 	}
-	if len(calls) != 1 {
-		t.Fatalf("processor calls=%v, want extract_metric_definitions to still run under fallback-mode indeterminacy", calls)
+	if len(calls) != 0 {
+		t.Fatalf("processor calls=%v, want extract_metric_definitions NOT to run once the gate conflict blocks processing", calls)
 	}
 	foundAlarm := false
 	for _, alarm := range alarms.written {

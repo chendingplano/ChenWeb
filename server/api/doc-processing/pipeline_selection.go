@@ -13,6 +13,10 @@ type ProductionPipelineSpec struct {
 	DisplayName      string
 	Processors       []string
 	LegacyEquivalent bool
+	// Version is the kb.pipelines.version this spec was loaded from (ADR
+	// 2026081001 DR1). Zero for the legacy-equivalent fallback registry
+	// (defaultProductionPipelines), which has no backing DB row.
+	Version int
 }
 
 type ProductionPipelineSelection struct {
@@ -28,13 +32,12 @@ type ProductionPipelineBindingResolution struct {
 	RuleName         string
 	Source           string
 	SelectedPipeline string
-	// PolicyID/PolicyVersion identify the kb.pipeline_policies row that was
-	// active when this binding was resolved -- DR6's "every run writes...
-	// the policy version, the selected pipeline and why" explainability
-	// requirement. Zero value means no policy store was consulted.
-	PolicyID      int64
-	PolicyVersion int
-	BindingTrace  []PipelineBindingTrace `json:",omitempty"`
+	// SelectedPipelineVersion is the resolved kb.pipelines.version for
+	// SelectedPipeline (ADR 2026081001 DR3) -- replaces the retired
+	// system-wide PolicyID/PolicyVersion provenance; naming the actual
+	// pipeline used is strictly more precise than an opaque policy counter.
+	SelectedPipelineVersion int
+	BindingTrace            []PipelineBindingTrace `json:",omitempty"`
 	// BindingID/PredicateChecksum mirror PipelineBindingSelection's fields
 	// for the winning conditional binding (zero value for every other
 	// source), so callers building a D2 clearance subject don't need to
@@ -102,16 +105,16 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 	requested := strings.TrimSpace(facts.RequestedPipeline)
 	storeBound := strings.TrimSpace(facts.StoreBoundPipeline)
 	if requested != "" {
-		if _, ok := LookupProductionPipeline(requested); !ok {
+		spec, ok := LookupProductionPipeline(requested)
+		if !ok {
 			return ProductionPipelineBindingResolution{}, fmt.Errorf("unknown requested pipeline %q", requested)
 		}
 		return ProductionPipelineBindingResolution{
-			RequestedPipeline:  requested,
-			StoreBoundPipeline: storeBound,
-			Source:             "explicit_request",
-			SelectedPipeline:   requested,
-			PolicyID:           facts.ActivePolicyID,
-			PolicyVersion:      facts.ActivePolicyVersion,
+			RequestedPipeline:       requested,
+			StoreBoundPipeline:      storeBound,
+			Source:                  "explicit_request",
+			SelectedPipeline:        requested,
+			SelectedPipelineVersion: spec.Version,
 		}, nil
 	}
 	if bindings := currentProductionPipelineBindings(); len(bindings) > 0 {
@@ -124,43 +127,43 @@ func ResolveProductionPipelineBinding(facts ProductionPlanFacts) (ProductionPipe
 			return ProductionPipelineBindingResolution{}, err
 		}
 		if selection.SelectedPipeline != DefaultProductionPipelineName || selection.Source != "system_default" {
-			if _, ok := LookupProductionPipeline(selection.SelectedPipeline); !ok {
+			spec, ok := LookupProductionPipeline(selection.SelectedPipeline)
+			if !ok {
 				return ProductionPipelineBindingResolution{}, fmt.Errorf("pipeline binding %q selected unknown pipeline %q", selection.BindingName, selection.SelectedPipeline)
 			}
 			return ProductionPipelineBindingResolution{
-				RequestedPipeline:  requested,
-				StoreBoundPipeline: storeBound,
-				RuleName:           selection.BindingName,
-				Source:             selection.Source,
-				SelectedPipeline:   selection.SelectedPipeline,
-				PolicyID:           facts.ActivePolicyID,
-				PolicyVersion:      facts.ActivePolicyVersion,
-				BindingTrace:       selection.Trace,
-				BindingID:          selection.BindingID,
-				PredicateChecksum:  selection.PredicateChecksum,
+				RequestedPipeline:       requested,
+				StoreBoundPipeline:      storeBound,
+				RuleName:                selection.BindingName,
+				Source:                  selection.Source,
+				SelectedPipeline:        selection.SelectedPipeline,
+				SelectedPipelineVersion: spec.Version,
+				BindingTrace:            selection.Trace,
+				BindingID:               selection.BindingID,
+				PredicateChecksum:       selection.PredicateChecksum,
 			}, nil
 		}
 	}
 	if storeBound != "" {
-		if _, ok := LookupProductionPipeline(storeBound); !ok {
+		spec, ok := LookupProductionPipeline(storeBound)
+		if !ok {
 			return ProductionPipelineBindingResolution{}, fmt.Errorf("unknown store-bound pipeline %q", storeBound)
 		}
 		return ProductionPipelineBindingResolution{
-			RequestedPipeline:  requested,
-			StoreBoundPipeline: storeBound,
-			Source:             "knowledge_store_binding",
-			SelectedPipeline:   storeBound,
-			PolicyID:           facts.ActivePolicyID,
-			PolicyVersion:      facts.ActivePolicyVersion,
+			RequestedPipeline:       requested,
+			StoreBoundPipeline:      storeBound,
+			Source:                  "knowledge_store_binding",
+			SelectedPipeline:        storeBound,
+			SelectedPipelineVersion: spec.Version,
 		}, nil
 	}
+	defaultSpec, _ := LookupProductionPipeline(DefaultProductionPipelineName)
 	return ProductionPipelineBindingResolution{
-		RequestedPipeline:  requested,
-		StoreBoundPipeline: storeBound,
-		Source:             "system_default",
-		SelectedPipeline:   DefaultProductionPipelineName,
-		PolicyID:           facts.ActivePolicyID,
-		PolicyVersion:      facts.ActivePolicyVersion,
+		RequestedPipeline:       requested,
+		StoreBoundPipeline:      storeBound,
+		Source:                  "system_default",
+		SelectedPipeline:        DefaultProductionPipelineName,
+		SelectedPipelineVersion: defaultSpec.Version,
 	}, nil
 }
 

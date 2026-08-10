@@ -55,7 +55,7 @@ func TestApprovePipelineRoutingClearanceReloadsAndEvaluatesEvidence(t *testing.T
 	restore := installRoutingHandlerFakes(t, &ApiTypes.UserInfo{UserName: "owner@example.com", IsOwner: true}, loader, writer)
 	defer restore()
 	audit := installPolicyAuditFake(t)
-	c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"policy_id":7,"policy_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"no recall loss"}`)
+	c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"pipeline_name":"narrative_default","pipeline_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"no recall loss"}`)
 	if err := ApprovePipelineRoutingClearance(c); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestApprovePipelineRoutingClearanceRejectsBodyActorAndPrecomputedDecision(t
 	restore := installRoutingHandlerFakes(t, &ApiTypes.UserInfo{UserName: "owner", IsOwner: true}, loader, writer)
 	defer restore()
 	for _, extra := range []string{`,"actor":"forged"`, `,"approved":true`} {
-		c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"policy_id":7,"policy_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"x"`+extra+`}`)
+		c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"pipeline_name":"narrative_default","pipeline_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"x"`+extra+`}`)
 		if err := ApprovePipelineRoutingClearance(c); err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +93,7 @@ func TestApprovePipelineRoutingClearanceRejectsFailedEvaluation(t *testing.T) {
 	writer := &fakeRoutingClearanceWriter{}
 	restore := installRoutingHandlerFakes(t, &ApiTypes.UserInfo{UserName: "owner", IsOwner: true}, loader, writer)
 	defer restore()
-	c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"policy_id":7,"policy_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"x"}`)
+	c, rec := routingClearanceContext(http.MethodPost, "/api/v1/kb/pipeline-routing-clearances/approve", `{"pipeline_name":"narrative_default","pipeline_version":3,"subject_kind":"processor_rule","subject_id":12,"subject_checksum":"sha256:subject","document_kind":"standard","net_plan_delta_checksum":"sha256:delta","baseline_run_id":"baseline","routed_run_id":"routed","policy_checksum":"sha256:policy","rationale":"x"}`)
 	if err := ApprovePipelineRoutingClearance(c); err != nil {
 		t.Fatal(err)
 	}

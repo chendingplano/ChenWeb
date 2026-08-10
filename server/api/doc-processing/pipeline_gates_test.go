@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"regexp"
 	"testing"
@@ -15,7 +16,7 @@ func TestResolveProcessorGateIteratesRanksAndUsesEffectPrecedence(t *testing.T) 
 	gates := []PipelineGate{
 		gateFixture(1, 30, "skip", "invoice"),
 		gateFixture(2, 20, "enable", "standard"),
-		gateFixture(3, 20, "defer", "standard"),
+		gateFixture(3, 20, "skip", "standard"),
 		gateFixture(4, 20, "require", "standard"),
 		gateFixture(5, 10, "skip", "standard"),
 	}
@@ -36,19 +37,23 @@ func TestResolveProcessorGateTrueOutranksOnlyNonStrongerIndeterminate(t *testing
 		name                string
 		trueEffect          string
 		indeterminateEffect string
+		onConflict          string
 		wantEffect          string
 		wantErr             bool
 	}{
-		{name: "require beats defer", trueEffect: "require", indeterminateEffect: "defer", wantEffect: "require"},
-		{name: "skip cannot beat possible defer", trueEffect: "skip", indeterminateEffect: "defer", wantErr: true},
-		{name: "skip beats possible enable", trueEffect: "skip", indeterminateEffect: "enable", wantEffect: "skip"},
+		{name: "require beats weaker indeterminate enable", trueEffect: "require", indeterminateEffect: "enable", onConflict: PipelineBindingOnConflictBlock, wantEffect: "require"},
+		{name: "skip cannot beat stronger indeterminate require, block mode", trueEffect: "skip", indeterminateEffect: "require", onConflict: PipelineBindingOnConflictBlock, wantErr: true},
+		// ADR 2026081001 DR9: fallback mode no longer falls open here either --
+		// both conflict modes hard-fail an indeterminate resolution now.
+		{name: "skip cannot beat stronger indeterminate require, fallback mode also hard-fails", trueEffect: "skip", indeterminateEffect: "require", onConflict: PipelineBindingOnConflictFallback, wantErr: true},
+		{name: "skip beats weaker indeterminate enable", trueEffect: "skip", indeterminateEffect: "enable", onConflict: PipelineBindingOnConflictBlock, wantEffect: "skip"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			known := gateFixture(1, 10, test.trueEffect, "standard")
 			unknown := gateFixture(2, 10, test.indeterminateEffect, "missing")
 			unknown.Predicate = semrules.Document{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.domain", Op: "eq", Value: "medical"}}
-			got, err := ResolveProcessorGate(ProcessorSpec{Name: "extract_metrics", OnUndetermined: "skip"}, []PipelineGate{known, unknown}, gateFacts("standard"), GateResolutionOptions{OnConflict: PipelineBindingOnConflictBlock})
+			got, err := ResolveProcessorGate(ProcessorSpec{Name: "extract_metrics", OnUndetermined: "skip"}, []PipelineGate{known, unknown}, gateFacts("standard"), GateResolutionOptions{OnConflict: test.onConflict})
 			if (err != nil) != test.wantErr {
 				t.Fatalf("err=%v resolution=%+v", err, got)
 			}
@@ -59,26 +64,20 @@ func TestResolveProcessorGateTrueOutranksOnlyNonStrongerIndeterminate(t *testing
 	}
 }
 
-func TestResolveProcessorGateFallbackDefaultsAndDeferFingerprint(t *testing.T) {
-	unknown := gateFixture(8, 10, GateEffectDefer, "missing")
-	unknown.RequiredFacets = []string{"document.domain", "document.doc_kind"}
+func TestResolveProcessorGateIndeterminateAlwaysHardFailsEvenInFallbackMode(t *testing.T) {
+	// ADR 2026081001 DR9: resolveIndeterminateGate's old fallback-to-enable/
+	// skip branch is gone -- an indeterminate resolution is a hard failure
+	// regardless of OnConflict, a safety net for a pipeline version that
+	// should never reach this state once it has passed DR8 validation.
+	unknown := gateFixture(8, 10, GateEffectRequire, "missing")
 	unknown.Predicate = semrules.Document{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.domain", Op: "eq", Value: "medical"}}
-	got, err := ResolveProcessorGate(ProcessorSpec{Name: "extract_metrics", OnUndetermined: "skip"}, []PipelineGate{unknown}, gateFacts("standard"), GateResolutionOptions{OnConflict: PipelineBindingOnConflictFallback})
-	if err != nil {
-		t.Fatal(err)
+	_, err := ResolveProcessorGate(ProcessorSpec{Name: "extract_metrics", OnUndetermined: "skip"}, []PipelineGate{unknown}, gateFacts("standard"), GateResolutionOptions{OnConflict: PipelineBindingOnConflictFallback})
+	if err == nil {
+		t.Fatal("expected indeterminate gate to hard-fail even in fallback mode")
 	}
-	if got.Effect != GateEffectSkip || got.Source != "indeterminate_fallback" {
-		t.Fatalf("resolution=%+v", got)
-	}
-
-	deferGate := gateFixture(9, 10, GateEffectDefer, "standard")
-	deferGate.RequiredFacets = []string{"document.domain", "document.jurisdiction"}
-	got, err = ResolveProcessorGate(ProcessorSpec{Name: "extract_metrics"}, []PipelineGate{deferGate}, gateFacts("standard"), GateResolutionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Effect != GateEffectDefer || got.DeferFingerprint == "" || !reflect.DeepEqual(got.DeferredPaths, []string{"document.doc_kind", "document.domain", "document.jurisdiction"}) {
-		t.Fatalf("resolution=%+v", got)
+	var gateErr *PipelineGateResolutionError
+	if !errors.As(err, &gateErr) || gateErr.Reason != "indeterminate_after_validated_pipeline" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -113,15 +112,18 @@ func TestBuildProcessorGateShadowPlanDoesNotChangeEffectiveProcessors(t *testing
 	baseline := []string{"static_analyzer", "extract_metrics", "extract_provisions"}
 	gates := []PipelineGate{
 		gateFixtureForProcessor(1, "extract_metrics", GateEffectSkip),
-		gateFixtureForProcessor(2, "extract_provisions", GateEffectDefer),
 	}
-	gates[1].RequiredFacets = []string{"document.domain"}
 	shadow, err := BuildProcessorGateShadowPlan(baseline, productionProcessorSpecs, gates, gateFacts("standard"), GateShadowOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(shadow.EffectiveProcessors, baseline) || !reflect.DeepEqual(shadow.WouldSkip, []string{"extract_metrics"}) || !reflect.DeepEqual(shadow.WouldDefer, []string{"extract_provisions"}) {
+	if !reflect.DeepEqual(shadow.EffectiveProcessors, baseline) || !reflect.DeepEqual(shadow.WouldSkip, []string{"extract_metrics"}) {
 		t.Fatalf("shadow=%+v", shadow)
+	}
+	// extract_provisions has no gate row -> processor_default (Enable) ->
+	// WouldRun, alongside the mandatory static_analyzer.
+	if !reflect.DeepEqual(shadow.WouldRun, []string{"static_analyzer", "extract_provisions"}) {
+		t.Fatalf("shadow.WouldRun=%+v", shadow.WouldRun)
 	}
 }
 
@@ -147,25 +149,24 @@ func TestPipelineGateSQLStoreLoadsCanonicalActiveGates(t *testing.T) {
 }
 
 func TestProductionPlanPersistsCompleteP5ShadowSnapshot(t *testing.T) {
-	// DOC_PIPELINE_ON_CONFLICT now defaults to block (P5 review 2026080302
-	// finding P5-19); this test's fixture gate is indeterminate (missing
-	// document.doc_kind) and relies on fallback-mode's OnUndetermined
-	// resolution to produce a plan/snapshot at all, so request it
-	// explicitly rather than relying on the old implicit default.
-	t.Setenv("DOC_PIPELINE_ON_CONFLICT", "fallback")
+	// The fixture gate must resolve deterministically (ADR 2026081001 DR9:
+	// an indeterminate gate is now a hard failure in every conflict mode,
+	// with no fallback salvage), so it matches against document.input_doc_type
+	// -- a baseline routing fact always known from RoutingFacets, not the
+	// tier-3-only document.doc_kind gateFixtureForProcessor otherwise uses.
 	oldGates := currentProductionPipelineGates()
 	defer SetProductionPipelineGates(oldGates)
 	gate := gateFixtureForProcessor(11, "extract_metrics", GateEffectSkip)
+	gate.Predicate = semrules.Document{Version: 1, Expression: semrules.Predicate{Kind: "fact", Path: "document.input_doc_type", Op: "eq", Value: "pdf"}}
 	SetProductionPipelineGates([]PipelineGate{gate})
 	plan, err := BuildProductionProcessorPlanFromFacts(ProductionPlanFacts{
-		RequestedProcessors: []string{"extract_metrics"}, ActivePolicyID: 5, ActivePolicyVersion: 2,
-		ActivePolicyChecksum: "sha256:policy", RoutingFacets: ProductionRoutingFacets{InputDocType: "pdf"},
+		RequestedProcessors: []string{"extract_metrics"}, RoutingFacets: ProductionRoutingFacets{InputDocType: "pdf"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot := plan.RoutingSnapshot()
-	if snapshot == nil || snapshot.PolicyID != 5 || snapshot.PolicyVersion != 2 || snapshot.PolicyChecksum != "sha256:policy" {
+	if snapshot == nil || snapshot.PipelineName != DefaultProductionPipelineName {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
 	if snapshot.SelectedPipelineChecksum == "" || snapshot.BaselinePipelineChecksum == "" || len(snapshot.Facts) == 0 || len(snapshot.GateShadow.Decisions) == 0 {

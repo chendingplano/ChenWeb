@@ -24,7 +24,6 @@ type pipelineBindingRecord struct {
 	KSStoreID         int64           `json:"ks_store_id,omitempty"`
 	PipelineID        int64           `json:"pipeline_id"`
 	PipelineName      string          `json:"pipeline_name"`
-	PolicyID          int64           `json:"policy_id"`
 	BindingKind       string          `json:"binding_kind"`
 	Predicate         json.RawMessage `json:"predicate,omitempty"`
 	PredicateChecksum string          `json:"predicate_checksum,omitempty"`
@@ -49,7 +48,7 @@ type pipelineBindingDetailResponse struct {
 
 const pipelineBindingSelectColumns = `
     b.id, COALESCE(b.name, ''), b.priority, COALESCE(b.ks_store_id, 0),
-    b.pipeline_id, p.name, b.policy_id, b.binding_kind,
+    b.pipeline_id, p.name, b.binding_kind,
     COALESCE(b.predicate, '{}'::jsonb)::text, COALESCE(b.predicate_checksum, ''), b.active,
     COALESCE(b.tenant_id, '-'), COALESCE(b.user_id, ''), COALESCE(b.input_record_id, 0),
     b.create_time, b.modify_time
@@ -61,7 +60,7 @@ func scanPipelineBindingRecord(scan func(dest ...any) error) (pipelineBindingRec
 	var predicateRaw string
 	if err := scan(
 		&record.ID, &record.Name, &record.Priority, &record.KSStoreID,
-		&record.PipelineID, &record.PipelineName, &record.PolicyID, &record.BindingKind,
+		&record.PipelineID, &record.PipelineName, &record.BindingKind,
 		&predicateRaw, &record.PredicateChecksum, &record.Active,
 		&record.TenantID, &record.UserID, &record.InputRecordID,
 		&record.CreateTime, &record.ModifyTime,
@@ -78,16 +77,6 @@ func fetchPipelineBindingByID(db *sql.DB, id int64) (pipelineBindingRecord, erro
 	query := "SELECT" + pipelineBindingSelectColumns + "\nWHERE b.id = $1"
 	row := db.QueryRow(query, id)
 	return scanPipelineBindingRecord(row.Scan)
-}
-
-func pipelineBindingPolicyStatus(db *sql.DB, id int64) (string, error) {
-	var status string
-	err := db.QueryRow(`
-SELECT pp.status
-FROM kb.pipeline_bindings b
-JOIN kb.pipeline_policies pp ON pp.id = b.policy_id
-WHERE b.id = $1`, id).Scan(&status)
-	return strings.ToLower(strings.TrimSpace(status)), err
 }
 
 // ListPipelineBindings handles GET /api/v1/kb/pipeline-bindings, optionally
@@ -147,7 +136,6 @@ func CreatePipelineBinding(c echo.Context) error {
 		Priority          *int            `json:"priority"`
 		KSStoreID         *int64          `json:"ks_store_id"`
 		PipelineID        *int64          `json:"pipeline_id"`
-		PolicyID          *int64          `json:"policy_id"`
 		BindingKind       string          `json:"binding_kind"`
 		Predicate         json.RawMessage `json:"predicate"`
 		PredicateChecksum string          `json:"predicate_checksum"`
@@ -218,23 +206,10 @@ func CreatePipelineBinding(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	policyID := payload.PolicyID
-	if policyID == nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "policy_id is required (CWB_KB_PB_106)"})
-	}
-	status, err := pipelinePolicyStatus(db, *policyID)
-	if err != nil {
-		logger.Error("resolve pipeline policy status failed", "policy_id", *policyID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline policy (CWB_KB_PB_112)"})
-	}
-	if status == "active" {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_113)"})
-	}
-
 	var id int64
 	if err := db.QueryRow(
-		"INSERT INTO kb.pipeline_bindings (name, priority, ks_store_id, pipeline_id, policy_id, binding_kind, predicate, predicate_checksum, active, tenant_id, user_id, input_record_id) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12) RETURNING id",
-		strings.TrimSpace(payload.Name), priority, ksStoreID, *payload.PipelineID, *policyID, bindingKind, predicate, predicateChecksum, active, tenantID, userID, inputRecordID,
+		"INSERT INTO kb.pipeline_bindings (name, priority, ks_store_id, pipeline_id, binding_kind, predicate, predicate_checksum, active, tenant_id, user_id, input_record_id) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11) RETURNING id",
+		strings.TrimSpace(payload.Name), priority, ksStoreID, *payload.PipelineID, bindingKind, predicate, predicateChecksum, active, tenantID, userID, inputRecordID,
 	).Scan(&id); err != nil {
 		logger.Error("insert pipeline binding failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create pipeline binding (CWB_KB_PB_104)"})
@@ -246,9 +221,10 @@ func CreatePipelineBinding(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created pipeline binding (CWB_KB_PB_105)"})
 	}
 	writePolicyAuditEvent(c, rc, logger, policyaudit.Event{
-		Kind: policyaudit.EventBindingAuthored, PolicyID: *policyID, SubjectKind: bindingKind, SubjectID: id,
+		Kind: policyaudit.EventBindingAuthored, SubjectKind: bindingKind, SubjectID: id,
 		Detail: map[string]any{"predicate_checksum": predicateChecksum, "pipeline_id": *payload.PipelineID, "binding_kind": bindingKind},
 	})
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline binding create")
 
 	return c.JSON(http.StatusOK, pipelineBindingDetailResponse{Status: true, Record: record})
 }
@@ -381,17 +357,6 @@ func UpdatePipelineBinding(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	status, err := pipelineBindingPolicyStatus(db, id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PB_206)"})
-		}
-		logger.Error("resolve pipeline binding policy status failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline binding policy (CWB_KB_PB_208)"})
-	}
-	if status == "active" {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_209)"})
-	}
 	sets = append(sets, "modify_time = NOW()")
 	args = append(args, id)
 	query := fmt.Sprintf("UPDATE kb.pipeline_bindings SET %s WHERE id = $%d", strings.Join(sets, ", "), len(args))
@@ -414,6 +379,7 @@ func UpdatePipelineBinding(c echo.Context) error {
 		logger.Error("fetch updated pipeline binding failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve updated pipeline binding (CWB_KB_PB_207)"})
 	}
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline binding update")
 
 	return c.JSON(http.StatusOK, pipelineBindingDetailResponse{Status: true, Record: record})
 }
@@ -432,17 +398,6 @@ func DeletePipelineBinding(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	status, err := pipelineBindingPolicyStatus(db, id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PB_304)"})
-		}
-		logger.Error("resolve pipeline binding policy status failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve pipeline binding policy (CWB_KB_PB_305)"})
-	}
-	if status == "active" {
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "active policy cannot be edited (CWB_KB_PB_306)"})
-	}
 	result, err := db.Exec("DELETE FROM kb.pipeline_bindings WHERE id = $1", id)
 	if err != nil {
 		logger.Error("delete pipeline binding failed", "id", id, "err", err)
@@ -456,6 +411,7 @@ func DeletePipelineBinding(c echo.Context) error {
 	if affected == 0 {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "record not found (CWB_KB_PB_304)"})
 	}
+	reloadAfterPipelineWrite(c.Request().Context(), db, logger, "pipeline binding delete")
 
 	return c.JSON(http.StatusOK, map[string]bool{"status": true})
 }

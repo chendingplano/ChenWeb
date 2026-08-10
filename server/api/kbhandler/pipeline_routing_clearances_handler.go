@@ -39,8 +39,8 @@ var (
 )
 
 type routingClearanceRequest struct {
-	PolicyID             int64              `json:"policy_id"`
-	PolicyVersion        int                `json:"policy_version"`
+	PipelineName         string             `json:"pipeline_name"`
+	PipelineVersion      int                `json:"pipeline_version"`
 	SubjectKind          string             `json:"subject_kind"`
 	SubjectID            int64              `json:"subject_id"`
 	SubjectChecksum      string             `json:"subject_checksum"`
@@ -113,7 +113,7 @@ func writePipelineRoutingClearance(c echo.Context, replace bool) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error": err.Error()})
 	}
 	writePolicyAuditEvent(c, rc, rc.GetLogger(), policyaudit.Event{
-		Kind: policyaudit.EventClearanceApproved, PolicyID: request.PolicyID, PolicyVersion: request.PolicyVersion,
+		Kind: policyaudit.EventClearanceApproved, PipelineName: request.PipelineName, PipelineVersion: request.PipelineVersion,
 		SubjectKind: request.SubjectKind, SubjectID: request.SubjectID,
 		Detail: map[string]any{"clearance_id": id, "document_kind": request.DocumentKind, "replace": replace},
 	})
@@ -155,8 +155,8 @@ func RevokePipelineRoutingClearance(c echo.Context) error {
 }
 
 func (r routingClearanceRequest) validate() error {
-	if r.PolicyID <= 0 || r.PolicyVersion <= 0 || r.SubjectID <= 0 {
-		return errors.New("policy_id, policy_version, and subject_id must be positive")
+	if strings.TrimSpace(r.PipelineName) == "" || r.PipelineVersion <= 0 || r.SubjectID <= 0 {
+		return errors.New("pipeline_name, pipeline_version, and subject_id must be positive")
 	}
 	values := map[string]string{
 		"subject_kind": r.SubjectKind, "subject_checksum": r.SubjectChecksum,
@@ -200,7 +200,7 @@ func policyAuthorizationResponse(c echo.Context, err error) error {
 func routingApprovalFromEvidence(request routingClearanceRequest, evidence docbenchmark.RoutingClearanceEvidence, decision docbenchmark.RoutingClearanceDecision, actor string) docprocessing.RoutingClearanceApproval {
 	approval := docprocessing.RoutingClearanceApproval{
 		Subject: docprocessing.RoutingClearanceSubject{
-			PolicyID: request.PolicyID, PolicyVersion: request.PolicyVersion,
+			PipelineName: strings.TrimSpace(request.PipelineName), PipelineVersion: request.PipelineVersion,
 			SubjectKind: strings.TrimSpace(request.SubjectKind), SubjectID: request.SubjectID,
 			SubjectChecksum: strings.TrimSpace(request.SubjectChecksum), DocumentKind: strings.TrimSpace(request.DocumentKind),
 			NetPlanDeltaChecksum: strings.TrimSpace(request.NetPlanDeltaChecksum),

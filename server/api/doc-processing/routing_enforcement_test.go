@@ -43,8 +43,8 @@ func gateShadowFor(decisions ...ProcessorGateResolution) ProcessorGateShadowPlan
 func baseEnforcementRequest() RoutingEnforcementRequest {
 	return RoutingEnforcementRequest{
 		Mode:                DocPipelineModeEnforced,
-		PolicyID:            7,
-		PolicyVersion:       3,
+		PipelineName:        "legacy_default",
+		PipelineVersion:     3,
 		DocumentKind:        "standard",
 		RequestedProcessors: []string{"static_analyzer", "chunking", "extract_metrics", "extract_provisions"},
 		BindingSource:       "store_default",
@@ -112,9 +112,9 @@ func TestFinalizeRoutingPlan_ConditionalBindingSelectsPipelineWhenCleared(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjectChecksum := ConditionalBindingSubjectChecksum(req.PolicyVersion, PipelineBinding{PipelineName: "narrow", PredicateChecksum: "sha256:binding"}, req.SelectedSpec, req.BaselineSpec)
+	subjectChecksum := ConditionalBindingSubjectChecksum(req.PipelineVersion, PipelineBinding{PipelineName: "narrow", PredicateChecksum: "sha256:binding"}, req.SelectedSpec, req.BaselineSpec)
 	stub := &stubClearanceChecker{cleared: map[string]bool{
-		subjectKey(RoutingClearanceSubject{PolicyID: 7, PolicyVersion: 3, SubjectKind: "conditional_binding", SubjectID: 42, SubjectChecksum: subjectChecksum, DocumentKind: "standard", NetPlanDeltaChecksum: deltaChecksum}): true,
+		subjectKey(RoutingClearanceSubject{PipelineName: "legacy_default", PipelineVersion: 3, SubjectKind: "conditional_binding", SubjectID: 42, SubjectChecksum: subjectChecksum, DocumentKind: "standard", NetPlanDeltaChecksum: deltaChecksum}): true,
 	}}
 
 	got, err := FinalizeRoutingPlan(context.Background(), req, stub)
@@ -202,13 +202,13 @@ func TestFinalizeRoutingPlan_ProcessorGateExcludesWhenCleared(t *testing.T) {
 		WinningRuleID: 5, WinningChecksum: "sha256:gate",
 	})
 	gate := PipelineGate{TargetProcessor: "extract_provisions", Effect: GateEffectSkip, PredicateChecksum: "sha256:gate"}
-	subjectChecksum := ProcessorGateSubjectChecksum(req.PolicyVersion, gate)
+	subjectChecksum := ProcessorGateSubjectChecksum(req.PipelineVersion, gate)
 	_, gateDelta, err := BuildNetPlanDelta(req.RequestedProcessors, removeProcessorName(req.RequestedProcessors, "extract_provisions"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	stub := &stubClearanceChecker{cleared: map[string]bool{
-		subjectKey(RoutingClearanceSubject{PolicyID: 7, PolicyVersion: 3, SubjectKind: "processor_rule", SubjectID: 5, SubjectChecksum: subjectChecksum, DocumentKind: "standard", NetPlanDeltaChecksum: gateDelta}): true,
+		subjectKey(RoutingClearanceSubject{PipelineName: "legacy_default", PipelineVersion: 3, SubjectKind: "processor_rule", SubjectID: 5, SubjectChecksum: subjectChecksum, DocumentKind: "standard", NetPlanDeltaChecksum: gateDelta}): true,
 	}}
 
 	got, err := FinalizeRoutingPlan(context.Background(), req, stub)
@@ -263,13 +263,13 @@ func TestFinalizeRoutingPlan_PartialClearanceOnlyCoversMatchingSubject(t *testin
 		ProcessorGateResolution{Processor: "extract_provisions", Effect: GateEffectSkip, Source: "policy_gate", WinningRuleID: 6, WinningChecksum: "sha256:gate-b"},
 	)
 	metricsGate := PipelineGate{TargetProcessor: "extract_metrics", Effect: GateEffectSkip, PredicateChecksum: "sha256:gate-a"}
-	metricsChecksum := ProcessorGateSubjectChecksum(req.PolicyVersion, metricsGate)
+	metricsChecksum := ProcessorGateSubjectChecksum(req.PipelineVersion, metricsGate)
 	_, metricsDelta, err := BuildNetPlanDelta(req.RequestedProcessors, removeProcessorName(req.RequestedProcessors, "extract_metrics"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	stub := &stubClearanceChecker{cleared: map[string]bool{
-		subjectKey(RoutingClearanceSubject{PolicyID: 7, PolicyVersion: 3, SubjectKind: "processor_rule", SubjectID: 5, SubjectChecksum: metricsChecksum, DocumentKind: "standard", NetPlanDeltaChecksum: metricsDelta}): true,
+		subjectKey(RoutingClearanceSubject{PipelineName: "legacy_default", PipelineVersion: 3, SubjectKind: "processor_rule", SubjectID: 5, SubjectChecksum: metricsChecksum, DocumentKind: "standard", NetPlanDeltaChecksum: metricsDelta}): true,
 	}}
 
 	got, err := FinalizeRoutingPlan(context.Background(), req, stub)

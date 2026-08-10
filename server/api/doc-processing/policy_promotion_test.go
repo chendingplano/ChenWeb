@@ -102,38 +102,40 @@ func TestPolicyPromotionStoreImplementsInterface(t *testing.T) {
 	var _ DraftPolicyPromoter = PolicyPromotionStore{}
 }
 
-// TestEnsureDraftPolicyInsertFailurePropagates proves a failure to INSERT the
-// draft policy row is surfaced to the caller (the release transaction then
-// rolls back in production). The name reflects what the test actually asserts
-// -- a draft-policy insert failure -- rather than the earlier misnomer
-// "PolicyCompileFailureLeavesActiveUntouched" (P5 review 2026080302 criterion
-// 13; the real compile-failure behavior is covered by
-// kbhandler.TestActivatePipelinePolicyCompilerFailureLeavesPriorActiveUntouched).
-func TestEnsureDraftPolicyInsertFailurePropagates(t *testing.T) {
+// TestEnsureDraftBindingInsertFailurePropagates proves a failure to INSERT
+// the conditional binding row is surfaced to the caller (the release
+// transaction then rolls back in production). ADR 2026081001 DR3 retired
+// the separate kb.pipeline_policies draft row this test originally
+// exercised; promotion now materializes inactive conditional bindings
+// directly (see policy_promotion.go's EnsureDraftFromModuleRelease).
+func TestEnsureDraftBindingInsertFailurePropagates(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
 	store := PolicyPromotionStore{}
+	proposals := []PromotedProposal{{ProposalID: 101, Predicate: json.RawMessage(`{}`), PredicateChecksum: "sha256:abc123"}}
 
-	// Idempotency check: no existing policy for this release.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+	// Idempotency check: no existing binding for this release.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_bindings`)).
+		WithArgs("module_release:1").
 		WillReturnError(sql.ErrNoRows)
 
-	// Max version lookup succeeds.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
-		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(3))
+	// Default pipeline lookup succeeds.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, version FROM kb.pipelines WHERE name = $1 AND status = 'active' LIMIT 1`)).
+		WithArgs(DefaultProductionPipelineName).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "version"}).AddRow(int64(7), int64(2)))
 
-	// INSERT draft policy fails — simulating a DB error during draft creation.
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_policies`)).
+	// INSERT the conditional binding fails — simulating a DB error.
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
 		WillReturnError(fmt.Errorf("connection refused"))
 
-	policyID, err := store.EnsureDraftFromModuleRelease(
-		context.Background(), tx, 1, "checksum-abc", nil,
+	bindingID, err := store.EnsureDraftFromModuleRelease(
+		context.Background(), tx, 1, "checksum-abc", proposals,
 	)
 	if err == nil {
-		t.Fatal("expected error when INSERT draft policy fails")
+		t.Fatal("expected error when INSERT conditional binding fails")
 	}
-	if policyID != 0 {
-		t.Fatalf("policyID=%d want 0 on failure", policyID)
+	if bindingID != 0 {
+		t.Fatalf("bindingID=%d want 0 on failure", bindingID)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -141,15 +143,13 @@ func TestEnsureDraftPolicyInsertFailurePropagates(t *testing.T) {
 	}
 }
 
-// TestEnsureDraftPolicyCreatesDraftWithoutActivating proves the success path:
-// EnsureDraftFromModuleRelease materializes the draft policy and its
-// conditional bindings, and never issues an activation query (spec 2026080102
-// section 8: "It never activates routing"). The name reflects what the test
-// actually asserts -- rather than the earlier misnomer
-// "PolicyActivationFailureRollback" (P5 review 2026080302 criterion 13; the
-// real activation-rollback behavior is covered by
-// kbhandler.TestActivatePipelinePolicyTransactionFailureRollsBackArchive).
-func TestEnsureDraftPolicyCreatesDraftWithoutActivating(t *testing.T) {
+// TestEnsureDraftBindingCreatesInactiveBindingWithoutActivating proves the
+// success path: EnsureDraftFromModuleRelease materializes the proposal as an
+// inactive (active=false) conditional binding and never issues an activation
+// query (spec 2026080102 section 8: "It never activates routing"). ADR
+// 2026081001 DR3: active=false is what "draft, not yet live" means now that
+// kb.pipeline_policies is retired.
+func TestEnsureDraftBindingCreatesInactiveBindingWithoutActivating(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
 	store := PolicyPromotionStore{}
@@ -162,127 +162,112 @@ func TestEnsureDraftPolicyCreatesDraftWithoutActivating(t *testing.T) {
 		},
 	}
 
-	// Idempotency check: no existing policy.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_bindings`)).
+		WithArgs("module_release:1").
 		WillReturnError(sql.ErrNoRows)
 
-	// Max version lookup.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
-		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(5))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, version FROM kb.pipelines WHERE name = $1 AND status = 'active' LIMIT 1`)).
+		WithArgs(DefaultProductionPipelineName).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "version"}).AddRow(int64(7), int64(2)))
 
-	// INSERT draft policy — must use status='draft', never 'active'.
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_policies`)).
-		WithArgs(6, "module_release:1", "checksum-xyz").
+	// active=false is the load-bearing assertion here.
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
+		WithArgs(int64(7), "module_release:1", string(proposals[0].Predicate), proposals[0].PredicateChecksum).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(99)))
 
-	// Default pipeline lookup.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name`)).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(7)))
-
-	// Materialize the proposal binding.
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
-		WithArgs(
-			int64(7), int64(99), "module_proposal:101",
-			string(proposals[0].Predicate), proposals[0].PredicateChecksum,
-		).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	policyID, err := store.EnsureDraftFromModuleRelease(
+	bindingID, err := store.EnsureDraftFromModuleRelease(
 		context.Background(), tx, 1, "checksum-xyz", proposals,
 	)
 	if err != nil {
 		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
 	}
-	if policyID != 99 {
-		t.Fatalf("policyID=%d want 99", policyID)
+	if bindingID != 99 {
+		t.Fatalf("bindingID=%d want 99", bindingID)
 	}
 
-	// Verify no activation query was issued — EnsureDraftFromModuleRelease
-	// only creates drafts, so activation failure is inherently safe.
-	// ExpectationsWereMet confirms no unexpected queries (e.g., UPDATE
-	// status='active') were executed.
+	// ExpectationsWereMet confirms no unexpected queries (e.g., an active=true
+	// UPDATE) were executed -- promotion never activates.
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected queries (activation should not occur): %v", err)
 	}
 }
 
-// TestPromotionIdempotentAcrossDraftAndActivatedStates proves the idempotency
-// key matches a policy in ANY state for the same source release, not just a
-// draft (P5 review 2026080302 finding P5-10's wrong idempotency key): after a
-// release is activated its draft became active, and re-promoting must return
-// the existing policy without minting a duplicate version.
-func TestPromotionIdempotentAcrossDraftAndActivatedStates(t *testing.T) {
+// TestPromotionIdempotentAcrossReRuns proves re-promoting the same release
+// returns the already-materialized binding without creating a duplicate (P5
+// review 2026080302 finding P5-10's wrong idempotency key), regardless of
+// whether that binding has since been activated (active flipped to true) --
+// the idempotency lookup matches on name alone, not on active state.
+func TestPromotionIdempotentAcrossReRuns(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
-	// An existing policy (any status) for this release's source_ref.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_bindings`)).
 		WithArgs("module_release:1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(55)))
 
-	policyID, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
+	bindingID, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
 		context.Background(), tx, 1, "checksum-xyz", []PromotedProposal{{ProposalID: 7, Predicate: json.RawMessage(`{}`), PredicateChecksum: "c"}},
 	)
 	if err != nil {
 		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
 	}
-	if policyID != 55 {
-		t.Fatalf("policyID=%d want existing 55", policyID)
+	if bindingID != 55 {
+		t.Fatalf("bindingID=%d want existing 55", bindingID)
 	}
-	// No INSERT/version query may have been issued.
+	// No INSERT/pipeline-lookup query may have been issued.
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected queries (idempotent hit must issue no inserts): %v", err)
 	}
 }
 
-// TestPromotionCreatesDistinctDraftForDistinctRelease proves a genuinely new
-// release (a different source_ref) gets its own draft policy rather than
+// TestPromotionCreatesDistinctBindingForDistinctRelease proves a genuinely
+// new release (a different source_ref) gets its own binding rather than
 // reusing the previous release's.
-func TestPromotionCreatesDistinctDraftForDistinctRelease(t *testing.T) {
+func TestPromotionCreatesDistinctBindingForDistinctRelease(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_bindings`)).
 		WithArgs("module_release:2").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
-		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(5))
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_policies`)).
-		WithArgs(6, "module_release:2", "checksum-2").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, version FROM kb.pipelines WHERE name = $1 AND status = 'active' LIMIT 1`)).
+		WithArgs(DefaultProductionPipelineName).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "version"}).AddRow(int64(7), int64(2)))
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
+		WithArgs(int64(7), "module_release:2", `{}`, "d").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(88)))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipelines WHERE name`)).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(7)))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.pipeline_bindings`)).
-		WithArgs(int64(7), int64(88), "module_proposal:8", `{}`, "d").
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	policyID, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
+	bindingID, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
 		context.Background(), tx, 2, "checksum-2", []PromotedProposal{{ProposalID: 8, Predicate: json.RawMessage(`{}`), PredicateChecksum: "d"}},
 	)
 	if err != nil {
 		t.Fatalf("EnsureDraftFromModuleRelease: %v", err)
 	}
-	if policyID != 88 {
-		t.Fatalf("policyID=%d want 88", policyID)
+	if bindingID != 88 {
+		t.Fatalf("bindingID=%d want 88", bindingID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// TestPromotionVersionScanErrorPropagates proves a failed MAX(version) lookup
-// is surfaced instead of silently minting version 1 from a zero value (P5
-// review 2026080302 finding P5-10).
-func TestPromotionVersionScanErrorPropagates(t *testing.T) {
+// TestPromotionDefaultPipelineLookupErrorPropagates proves a failed default-
+// pipeline lookup is surfaced instead of silently materializing a binding
+// against a zero-value pipeline id (P5 review 2026080302 finding P5-10's
+// "surface lookup failures" principle, now applied to the pipeline lookup
+// that replaced the retired MAX(version) policy lookup).
+func TestPromotionDefaultPipelineLookupErrorPropagates(t *testing.T) {
 	_, mock, tx := beginPromotionTx(t)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_policies`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM kb.pipeline_bindings`)).
+		WithArgs("module_release:1").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(version), 0) FROM kb.pipeline_policies`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, version FROM kb.pipelines WHERE name = $1 AND status = 'active' LIMIT 1`)).
+		WithArgs(DefaultProductionPipelineName).
 		WillReturnError(fmt.Errorf("connection refused"))
 
 	if _, err := (PolicyPromotionStore{}).EnsureDraftFromModuleRelease(
-		context.Background(), tx, 1, "checksum", nil,
+		context.Background(), tx, 1, "checksum", []PromotedProposal{{ProposalID: 1, Predicate: json.RawMessage(`{}`), PredicateChecksum: "c"}},
 	); err == nil {
-		t.Fatal("expected the MAX(version) scan error to propagate")
+		t.Fatal("expected the default-pipeline lookup error to propagate")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

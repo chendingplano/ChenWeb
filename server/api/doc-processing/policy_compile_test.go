@@ -1,15 +1,12 @@
 package docprocessing
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 )
 
@@ -119,30 +116,6 @@ func TestCompilePolicyChecksumIsStableAcrossStorageOrder(t *testing.T) {
 	}
 	if first.Checksum != second.Checksum {
 		t.Fatalf("checksum drift: %s != %s", first.Checksum, second.Checksum)
-	}
-}
-
-func TestPolicyCompilerSQLStoreLoadsLegacyAdapterForParity(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	legacy := ProductionPipelineRule{ID: 41, MatchInputDocType: "pdf", MatchSourceLanguage: "en", PipelineName: "regulated"}
-	doc, checksum, _ := LegacyRulePredicateDocument(legacy)
-	raw, _ := json.Marshal(doc)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT b.id,COALESCE(b.name,''),b.priority,b.binding_kind,p.name")).WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "name", "priority", "kind", "pipeline", "predicate", "checksum", "active", "scope", "legacy_id", "doc_type", "language", "binding",
-	}).AddRow(int64(9), "legacy", 10, "conditional", "regulated", string(raw), "migration-md5", true, "system", int64(41), "pdf", "en", ""))
-	bindings, err := (PolicyCompilerSQLStore{DB: db}).loadBindings(context.Background(), 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bindings) != 1 || bindings[0].LegacyRule == nil || bindings[0].PredicateChecksum != checksum {
-		t.Fatalf("bindings=%+v", bindings)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 

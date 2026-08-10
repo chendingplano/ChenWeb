@@ -51,7 +51,7 @@ var P5AcceptanceCriteria = map[int][]string{
 	7: {
 		"TestResolveProcessorGateIteratesRanksAndUsesEffectPrecedence",
 		"TestBuildProcessorGateShadowPlanDoesNotChangeEffectiveProcessors",
-		"TestResolveProcessorGateFallbackDefaultsAndDeferFingerprint",
+		"TestResolveProcessorGateIndeterminateAlwaysHardFailsEvenInFallbackMode",
 	},
 	// 8. unresolved conflict blocks and raises exactly one alarm
 	8: {
@@ -84,10 +84,13 @@ var P5AcceptanceCriteria = map[int][]string{
 		"TestPolicyPromotionStoreRequiresReleaseID",
 		"TestPolicyPromotionStoreRequiresChecksum",
 	},
-	// 13. failed policy compilation/activation leaves previous active version
+	// 13. a failed pipeline-version authoring transaction leaves the
+	// previous active version untouched (ADR 2026081001 DR2 retired the
+	// separate policy-activation step this criterion originally named;
+	// atomic version authoring is the replacement mechanism).
 	13: {
-		"kbhandler: TestActivatePipelinePolicyCompilerFailureLeavesPriorActiveUntouched",
-		"kbhandler: TestActivatePipelinePolicyTransactionFailureRollsBackArchive",
+		"kbhandler: TestCreatePipelineMidTransactionFailureRollsBackSupersede",
+		"kbhandler: TestCreatePipelineRejectsFailedClosureValidationBeforeTouchingDB",
 	},
 	// 14. execution/review snapshots reproducible after activation changes
 	14: {

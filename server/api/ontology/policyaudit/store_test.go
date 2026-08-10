@@ -14,11 +14,11 @@ func TestSQLStoreWriteEventInsertsContentSafeRow(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectExec("INSERT INTO kb.pipeline_policy_events").
-		WithArgs("decision_enforced", int64(7), 3, "processor_rule", int64(12), int64(99), int64(4821), "owner@example.com", `{"effect":"skip","processor":"extract_metrics"}`).
+		WithArgs("decision_enforced", "narrative_default", 3, "processor_rule", int64(12), int64(99), int64(4821), "owner@example.com", `{"effect":"skip","processor":"extract_metrics"}`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = SQLStore{DB: db}.WriteEvent(context.Background(), Event{
-		Kind: EventDecisionEnforced, PolicyID: 7, PolicyVersion: 3,
+		Kind: EventDecisionEnforced, PipelineName: "narrative_default", PipelineVersion: 3,
 		SubjectKind: "processor_rule", SubjectID: 12, RunID: 99, RecordID: 4821,
 		Actor: "owner@example.com", Detail: map[string]any{"effect": "skip", "processor": "extract_metrics"},
 	})

@@ -18,8 +18,11 @@ var (
 )
 
 type RoutingClearanceSubject struct {
-	PolicyID             int64
-	PolicyVersion        int
+	// PipelineName/PipelineVersion identify the resolved kb.pipelines
+	// version this clearance subject was evaluated against (ADR 2026081001
+	// DR3) -- replaces the retired system-wide PolicyID/PolicyVersion.
+	PipelineName         string
+	PipelineVersion      int
 	SubjectKind          string
 	SubjectID            int64
 	SubjectChecksum      string
@@ -64,8 +67,8 @@ const routingClearanceEffectiveQuery = `
 SELECT cv.id, cv.clearance_id, c.approved_by
 FROM kb.pipeline_routing_clearance_coverage cv
 JOIN kb.pipeline_routing_clearances c ON c.id = cv.clearance_id
-WHERE cv.policy_id = $1
-  AND cv.policy_version = $2
+WHERE cv.pipeline_name = $1
+  AND cv.pipeline_version = $2
   AND cv.subject_kind = $3
   AND cv.subject_id = $4
   AND cv.document_kind = $5
@@ -82,7 +85,7 @@ func (s RoutingClearanceStore) ResolveEffective(ctx context.Context, subject Rou
 	if s.DB == nil {
 		return EffectiveRoutingClearance{}, errors.New("db is nil")
 	}
-	rows, err := s.DB.QueryContext(ctx, routingClearanceEffectiveQuery, subject.PolicyID, subject.PolicyVersion, strings.TrimSpace(subject.SubjectKind), subject.SubjectID, strings.TrimSpace(subject.DocumentKind), strings.TrimSpace(subject.SubjectChecksum), strings.TrimSpace(subject.NetPlanDeltaChecksum))
+	rows, err := s.DB.QueryContext(ctx, routingClearanceEffectiveQuery, strings.TrimSpace(subject.PipelineName), subject.PipelineVersion, strings.TrimSpace(subject.SubjectKind), subject.SubjectID, strings.TrimSpace(subject.DocumentKind), strings.TrimSpace(subject.SubjectChecksum), strings.TrimSpace(subject.NetPlanDeltaChecksum))
 	if err != nil {
 		return EffectiveRoutingClearance{}, err
 	}
@@ -159,7 +162,7 @@ func (s RoutingClearanceStore) writeApproval(ctx context.Context, approval Routi
 			_ = tx.Rollback()
 		}
 	}()
-	lockKey := strings.Join([]string{fmt.Sprint(approval.Subject.PolicyID), fmt.Sprint(approval.Subject.PolicyVersion), approval.Subject.SubjectKind, fmt.Sprint(approval.Subject.SubjectID), approval.Subject.DocumentKind}, "/")
+	lockKey := strings.Join([]string{approval.Subject.PipelineName, fmt.Sprint(approval.Subject.PipelineVersion), approval.Subject.SubjectKind, fmt.Sprint(approval.Subject.SubjectID), approval.Subject.DocumentKind}, "/")
 	if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
 		return 0, err
 	}
@@ -167,9 +170,9 @@ func (s RoutingClearanceStore) writeApproval(ctx context.Context, approval Routi
 	if replace {
 		rows, queryErr := tx.QueryContext(ctx, `SELECT cv.clearance_id
 FROM kb.pipeline_routing_clearance_coverage cv
-WHERE cv.policy_id=$1 AND cv.policy_version=$2 AND cv.subject_kind=$3 AND cv.subject_id=$4 AND cv.document_kind=$5
+WHERE cv.pipeline_name=$1 AND cv.pipeline_version=$2 AND cv.subject_kind=$3 AND cv.subject_id=$4 AND cv.document_kind=$5
   AND NOT EXISTS (SELECT 1 FROM kb.pipeline_routing_clearance_revocations r WHERE r.clearance_id=cv.clearance_id)
-ORDER BY cv.clearance_id`, approval.Subject.PolicyID, approval.Subject.PolicyVersion, approval.Subject.SubjectKind, approval.Subject.SubjectID, approval.Subject.DocumentKind)
+ORDER BY cv.clearance_id`, approval.Subject.PipelineName, approval.Subject.PipelineVersion, approval.Subject.SubjectKind, approval.Subject.SubjectID, approval.Subject.DocumentKind)
 		if queryErr != nil {
 			return 0, queryErr
 		}
@@ -204,19 +207,19 @@ ORDER BY cv.clearance_id`, approval.Subject.PolicyID, approval.Subject.PolicyVer
 		return 0, err
 	}
 	err = tx.QueryRowContext(ctx, `INSERT INTO kb.pipeline_routing_clearances (
-policy_id, policy_version, document_kind, manifest_checksum, baseline_run_id, routed_run_id,
+pipeline_name, pipeline_version, document_kind, manifest_checksum, baseline_run_id, routed_run_id,
 repetitions, paired_case_count, gold_positive_denominator, processor_failure_count,
 infrastructure_failure_count, scorer_failure_count, baseline_recall_numerator,
 baseline_recall_denominator, routed_recall_numerator, routed_recall_denominator,
 baseline_precision, routed_precision, cost_yield, decision_traces, approved_by, rationale
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21,$22)
-RETURNING id`, approval.Subject.PolicyID, approval.Subject.PolicyVersion, approval.Subject.DocumentKind, approval.ManifestChecksum, approval.BaselineRunID, approval.RoutedRunID, approval.Repetitions, approval.PairedCaseCount, approval.GoldPositiveDenominator, approval.ProcessorFailures, approval.InfrastructureFailures, approval.ScorerFailures, approval.BaselineRecallNumerator, approval.BaselineRecallDenominator, approval.RoutedRecallNumerator, approval.RoutedRecallDenominator, approval.BaselinePrecision, approval.RoutedPrecision, string(costRaw), string(traceRaw), strings.TrimSpace(approval.Actor), strings.TrimSpace(approval.Rationale)).Scan(&clearanceID)
+RETURNING id`, approval.Subject.PipelineName, approval.Subject.PipelineVersion, approval.Subject.DocumentKind, approval.ManifestChecksum, approval.BaselineRunID, approval.RoutedRunID, approval.Repetitions, approval.PairedCaseCount, approval.GoldPositiveDenominator, approval.ProcessorFailures, approval.InfrastructureFailures, approval.ScorerFailures, approval.BaselineRecallNumerator, approval.BaselineRecallDenominator, approval.RoutedRecallNumerator, approval.RoutedRecallDenominator, approval.BaselinePrecision, approval.RoutedPrecision, string(costRaw), string(traceRaw), strings.TrimSpace(approval.Actor), strings.TrimSpace(approval.Rationale)).Scan(&clearanceID)
 	if err != nil {
 		return 0, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO kb.pipeline_routing_clearance_coverage
-(clearance_id, policy_id, policy_version, subject_kind, subject_id, subject_checksum, document_kind, net_plan_delta_checksum, superseded_clearance_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, clearanceID, approval.Subject.PolicyID, approval.Subject.PolicyVersion, approval.Subject.SubjectKind, approval.Subject.SubjectID, approval.Subject.SubjectChecksum, approval.Subject.DocumentKind, approval.Subject.NetPlanDeltaChecksum, superseded); err != nil {
+(clearance_id, pipeline_name, pipeline_version, subject_kind, subject_id, subject_checksum, document_kind, net_plan_delta_checksum, superseded_clearance_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, clearanceID, approval.Subject.PipelineName, approval.Subject.PipelineVersion, approval.Subject.SubjectKind, approval.Subject.SubjectID, approval.Subject.SubjectChecksum, approval.Subject.DocumentKind, approval.Subject.NetPlanDeltaChecksum, superseded); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(); err != nil {
