@@ -84,6 +84,9 @@ run = "go run ./server/cmd/autotester/"
 [tasks.pdf-parser-once]
 run = "go run ./server/cmd/pdf-parser/ --once"
 
+[tasks.llm-usage-report]
+run = "go run ./server/cmd/llm-usage-report/"
+
 [tasks.pdf-parser-migrate]
 run = "go run ./server/cmd/pdf-parser/ --migrate-only"
 

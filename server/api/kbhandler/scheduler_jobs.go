@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/ontology/terminology"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -38,6 +41,10 @@ func DefaultSchedulerRegistry() scheduler.Registry {
 		"terminology_refresh": scheduler.JobDescriptor{
 			Label: "Refresh External Terminology Resources",
 			Run:   runTerminologyRefreshJob,
+		},
+		"collect_llm_usage": scheduler.JobDescriptor{
+			Label: "Collect Coding Assistant LLM Usage",
+			Run:   runCollectLLMUsageJob,
 		},
 	}
 }
@@ -76,6 +83,31 @@ func runTerminologyRefreshJob(ctx context.Context, params map[string]any, logger
 		})
 	}
 	return map[string]any{"sources": results}, nil
+}
+
+// runCollectLLMUsageJob reads the local coding-assistant usage logs (Qwen
+// Code writes per-request records to ~/.qwen/usage/token-usage-*.jsonl) and
+// upserts per-day, per-model aggregates into kb.llm_usage, the daily usage
+// table shared by coding assistants. The "usage_dir" param overrides the log
+// directory and "assistant" the tool name recorded in the table.
+func runCollectLLMUsageJob(ctx context.Context, params map[string]any, logger ApiTypes.JimoLogger) (map[string]any, error) {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return nil, fmt.Errorf("db not initialized")
+	}
+	dir := stringParam(params, "usage_dir", "")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home directory: %w", err)
+		}
+		dir = filepath.Join(home, ".qwen", "usage")
+	}
+	summary, err := llmusage.CollectAssistantUsage(ctx, db, dir, stringParam(params, "assistant", "qwen"))
+	if err != nil {
+		return nil, err
+	}
+	return structToMap(summary), nil
 }
 
 func runResolveEntityObjectsJob(ctx context.Context, params map[string]any, logger ApiTypes.JimoLogger) (map[string]any, error) {
