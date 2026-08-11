@@ -292,7 +292,10 @@
 				{
 					id: 'sysadmin-doc-process-pipeline',
 					label: 'Doc Process Pipeline',
-					children: [{ id: 'sysadmin-doc-process-dag', label: 'Doc Process DAG' }]
+					children: [
+						{ id: 'sysadmin-doc-process-dag', label: 'Doc Process DAG' },
+						{ id: 'sysadmin-doc-process-processors', label: 'Doc Processors' }
+					]
 				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
 			]

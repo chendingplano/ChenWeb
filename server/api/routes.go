@@ -456,6 +456,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/kb/doc-process-dags/:name", kbhandler.UpdateDocProcessDAG)
 	apiGroup.DELETE("/kb/doc-process-dags/:name", kbhandler.DeleteDocProcessDAG)
 	apiGroup.GET("/kb/doc-process-processors", kbhandler.ListDocProcessProcessors)
+	// Doc processor admin catalog (kb.doc_processors) — CRUD for the capsule §7 roster.
+	apiGroup.GET("/kb/doc-processors", kbhandler.ListDocProcessors)
+	apiGroup.POST("/kb/doc-processors", kbhandler.CreateDocProcessor)
+	apiGroup.PUT("/kb/doc-processors/:name", kbhandler.UpdateDocProcessor)
+	apiGroup.DELETE("/kb/doc-processors/:name", kbhandler.DeleteDocProcessor)
 	// No /kb/pipeline-policies routes: ADR 2026081001 DR3 retires kb.pipeline_policies entirely.
 	apiGroup.POST("/kb/pipeline-routing-clearances/approve", kbhandler.ApprovePipelineRoutingClearance)
 	apiGroup.POST("/kb/pipeline-routing-clearances/replace", kbhandler.ReplacePipelineRoutingClearance)
