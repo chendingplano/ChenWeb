@@ -1589,7 +1589,7 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read summary tree leaf: %v", err)
 	}
-	wantTreeContent := "8123_0_0001\n8123_0_0002\n8123_1_0001"
+	wantTreeContent := "8123_sum_0_0001\n8123_sum_0_0002\n8123_sum_1_0001"
 	if strings.TrimSpace(string(treeBody)) != wantTreeContent {
 		t.Fatalf("unexpected summary tree content: %q, want %q", strings.TrimSpace(string(treeBody)), wantTreeContent)
 	}

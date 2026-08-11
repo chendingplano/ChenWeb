@@ -29,7 +29,7 @@ type MetricDefinitionsProcessor struct {
 func NewMetricDefinitionsProcessor(e LLMJSONExtractor) *MetricDefinitionsProcessor {
 	promptText, promptRef, promptPath, promptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_DEFINITIONS_PROMPT"},
-		"prompt-extract-metric-definitions-v1.md",
+		"prompt-extract-metric-definitions-v2.md",
 	)
 	p := &MetricDefinitionsProcessor{Extractor: e, ModelName: strings.TrimSpace(os.Getenv("EXTRACT_METRIC_DEFINITIONS_MODEL_NAME")), PromptText: promptText, PromptRef: promptRef, PromptPath: promptPath, PromptErr: promptErr}
 	if ApiTypes.ProjectDBHandle != nil {

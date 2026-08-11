@@ -10,11 +10,9 @@
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import { createDefaultRecordBrowserFilters } from '$lib/components/home3/topic-tree-record-browser.js';
 	import {
-		ALL_CONFIGURABLE_PROCESSOR_IDS,
-		ALL_PROCESSOR_IDS,
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
-		PIPELINE_STAGES,
+		buildStageDefs,
 		computeStages
 	} from './doc-processor-dashboard-state';
 
@@ -85,17 +83,15 @@
 
 	// ── Restart pipeline dialog (mirrors the doc-processor dashboard) ──────
 	// requiredProcessors: the configurable processors enabled in config.toml.
-	let requiredProcessors = $state<string[]>(ALL_CONFIGURABLE_PROCESSOR_IDS);
+	let requiredProcessors = $state<string[]>([]);
 	let selectableProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
 	let CONFIGURABLE_PROCESSORS = $derived(
-		selectableProcessorIds
-			.map((id) => PIPELINE_STAGES.find((s) => s.id === id))
-			.filter((s) => s !== undefined)
+		buildStageDefs(selectableProcessorIds).filter((s) => selectableProcessorIds.includes(s.id))
 	);
 
 	let restartTarget = $state<KbInputRecord | null>(null);
 	let restartProcessors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(MANDATORY_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let restartParseFile = $state(false);
 	let restartConvert = $state(false);
@@ -591,16 +587,16 @@
 
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
 		const unfinishedStageIds = new Set(
-			computeStages(record)
-				.filter((stage) => stage.status !== 'success' && ALL_PROCESSOR_IDS.includes(stage.id))
+			computeStages(record, selectableProcessorIds)
+				.filter((stage) => stage.status !== 'success' && selectableProcessorIds.includes(stage.id))
 				.map((stage) => stage.id)
 		);
 
 		if (!unfinishedStageIds.size) {
-			return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, selectableProcessorIds.includes(p)]));
+			return Object.fromEntries(selectableProcessorIds.map((p) => [p, true]));
 		}
 
-		return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
+		return Object.fromEntries(selectableProcessorIds.map((p) => [p, unfinishedStageIds.has(p)]));
 	}
 
 	function openRestart(record: KbInputRecord) {
@@ -760,7 +756,7 @@
 		loadRecords();
 		getKbFrontendConfig()
 			.then((cfg) => {
-				requiredProcessors = cfg.required_processors ?? ALL_CONFIGURABLE_PROCESSOR_IDS;
+				requiredProcessors = cfg.required_processors ?? [];
 			})
 			.catch(() => {
 				// Keep defaults on failure

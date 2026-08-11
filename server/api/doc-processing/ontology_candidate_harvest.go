@@ -19,13 +19,18 @@ import (
 // governed metric-definition proposal.  It deliberately carries document
 // evidence rather than treating an extracted value as a definition.
 type metricDefinitionMention struct {
-	CanonicalName string
-	Aliases       []string
-	Definition    string
-	ValueType     string
-	RangeType     string
-	Confidence    float64
-	LineNumbers   []int
+	CanonicalName      string
+	Aliases            []string
+	Definition         string
+	Description        string
+	ObservableProperty string
+	QuantityKind       string
+	PermittedUnits     []string
+	AppliesTo          []string
+	ValueType          string
+	RangeType          string
+	Confidence         float64
+	LineNumbers        []int
 }
 
 type testMethodMention struct {
@@ -182,7 +187,20 @@ func parseMetricDefinitionMentions(payload map[string]any) []metricDefinitionMen
 			}
 		}
 		confidence, _ := m["confidence"].(float64)
-		out = append(out, metricDefinitionMention{CanonicalName: name, Aliases: normalizedStrings(aliases), Definition: strings.TrimSpace(asString(m["definition"])), ValueType: strings.TrimSpace(asString(m["value_type"])), RangeType: strings.TrimSpace(asString(m["range_type"])), Confidence: confidence, LineNumbers: sourceSpanLineNumbers(m["source_line_spans"])})
+		out = append(out, metricDefinitionMention{
+			CanonicalName:      name,
+			Aliases:            normalizedStrings(aliases),
+			Definition:         strings.TrimSpace(asString(m["definition"])),
+			Description:        strings.TrimSpace(asString(m["description"])),
+			ObservableProperty: strings.TrimSpace(asString(m["observable_property"])),
+			QuantityKind:       strings.TrimSpace(asString(m["quantity_kind"])),
+			PermittedUnits:     normalizedStrings(toStringSlice(m["permitted_units"])),
+			AppliesTo:          normalizedStrings(toStringSlice(m["applies_to"])),
+			ValueType:          strings.TrimSpace(asString(m["value_type"])),
+			RangeType:          strings.TrimSpace(asString(m["range_type"])),
+			Confidence:         confidence,
+			LineNumbers:        sourceSpanLineNumbers(m["source_line_spans"]),
+		})
 	}
 	return out
 }
@@ -200,15 +218,20 @@ func buildMetricDefinitionCandidate(recordID int64, m metricDefinitionMention) (
 	}
 	spans := normalizedLineNumbers(m.LineNumbers)
 	payload, err := json.Marshal(map[string]any{
-		"term_id":    "measurement:" + candidateIdentifier(name),
-		"term_kind":  "metric_definition",
-		"module_id":  "measurement",
-		"definition": strings.TrimSpace(m.Definition),
-		"scope":      "document-derived candidate",
-		"label":      name,
-		"aliases":    normalizedStrings(m.Aliases),
-		"value_type": strings.TrimSpace(m.ValueType),
-		"range_type": strings.TrimSpace(m.RangeType),
+		"term_id":             "measurement:" + candidateIdentifier(name),
+		"term_kind":           "metric_definition",
+		"module_id":           "measurement",
+		"definition":          strings.TrimSpace(m.Definition),
+		"description":         strings.TrimSpace(m.Description),
+		"observable_property": strings.TrimSpace(m.ObservableProperty),
+		"quantity_kind":       strings.TrimSpace(m.QuantityKind),
+		"permitted_units":     normalizedStrings(m.PermittedUnits),
+		"applies_to":          normalizedStrings(m.AppliesTo),
+		"scope":               "document-derived candidate",
+		"label":               name,
+		"aliases":             normalizedStrings(m.Aliases),
+		"value_type":          strings.TrimSpace(m.ValueType),
+		"range_type":          strings.TrimSpace(m.RangeType),
 	})
 	if err != nil {
 		return candidates.Candidate{}, fmt.Errorf("marshal metric definition candidate: %w", err)

@@ -31,13 +31,18 @@ func (s *recordingOntologyCandidateSink) CreateCandidate(_ context.Context, c ca
 
 func TestBuildMetricDefinitionCandidatePreservesProvenance(t *testing.T) {
 	candidate, err := buildMetricDefinitionCandidate(42, metricDefinitionMention{
-		CanonicalName: "Air flow rate",
-		Aliases:       []string{"flow rate"},
-		Definition:    "The volume of air delivered per unit time.",
-		ValueType:     "number",
-		RangeType:     "minimum",
-		Confidence:    0.91,
-		LineNumbers:   []int{17, 18},
+		CanonicalName:      "Air flow rate",
+		Aliases:            []string{"flow rate"},
+		Definition:         "The volume of air delivered per unit time.",
+		Description:        "Volumetric airflow delivered by the ventilator.",
+		ObservableProperty: "air flow",
+		QuantityKind:       "volume per time",
+		PermittedUnits:     []string{"L/min"},
+		AppliesTo:          []string{"ventilator"},
+		ValueType:          "number",
+		RangeType:          "minimum",
+		Confidence:         0.91,
+		LineNumbers:        []int{17, 18},
 	})
 	if err != nil {
 		t.Fatalf("buildMetricDefinitionCandidate: %v", err)
@@ -57,6 +62,42 @@ func TestBuildMetricDefinitionCandidatePreservesProvenance(t *testing.T) {
 	}
 	if got := payload["aliases"].([]any); len(got) != 1 || got[0] != "flow rate" {
 		t.Fatalf("aliases = %#v", got)
+	}
+	if payload["observable_property"] != "air flow" || payload["quantity_kind"] != "volume per time" {
+		t.Fatalf("DR23 property fields = %#v", payload)
+	}
+	if got := payload["permitted_units"].([]any); len(got) != 1 || got[0] != "L/min" {
+		t.Fatalf("permitted_units = %#v", got)
+	}
+	if got := payload["applies_to"].([]any); len(got) != 1 || got[0] != "ventilator" {
+		t.Fatalf("applies_to = %#v", got)
+	}
+}
+
+func TestParseMetricDefinitionMentionsCarriesDR23Fields(t *testing.T) {
+	got := parseMetricDefinitionMentions(map[string]any{"metric_definitions": []any{map[string]any{
+		"canonical_name":      "Air flow rate",
+		"aliases":             []any{"flow rate"},
+		"definition":          "The volume of air delivered per unit time.",
+		"description":         "Volumetric airflow delivered by the ventilator.",
+		"observable_property": "air flow",
+		"quantity_kind":       "volume per time",
+		"permitted_units":     []any{"L/min"},
+		"applies_to":          []any{"ventilator"},
+		"value_type":          "number",
+		"range_type":          "minimum",
+		"confidence":          0.9,
+		"source_line_spans":   []any{"17", "18"},
+	}}})
+	if len(got) != 1 {
+		t.Fatalf("mentions = %#v", got)
+	}
+	m := got[0]
+	if m.Description != "Volumetric airflow delivered by the ventilator." || m.ObservableProperty != "air flow" || m.QuantityKind != "volume per time" {
+		t.Fatalf("DR23 fields = %#v", m)
+	}
+	if len(m.PermittedUnits) != 1 || m.PermittedUnits[0] != "L/min" || len(m.AppliesTo) != 1 || m.AppliesTo[0] != "ventilator" {
+		t.Fatalf("DR23 array fields = %#v", m)
 	}
 }
 
@@ -83,7 +124,7 @@ func TestHarvestMetricDefinitionsCreatesReviewCandidateForDefinedMetric(t *testi
 func TestMetricsProcessorHarvestsDefinitionCandidatesAfterMetricExtraction(t *testing.T) {
 	sink := &recordingOntologyCandidateSink{}
 	p := &MetricsProcessor{batchRecordID: 42, CandidateSink: sink}
-	if err := p.harvestMetricDefinitionCandidates(context.Background(), []map[string]any{{
+	if err := p.harvestMetricDefinitionCandidates(context.Background(), 42, []map[string]any{{
 		"metric_name":           "Air flow rate",
 		"formula_or_definition": "The volume of air delivered per unit time.",
 		"source_line_spans":     []string{"17"},

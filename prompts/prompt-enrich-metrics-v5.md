@@ -90,6 +90,18 @@ The applicability/scope clause under which the stated value applies, when the so
 null when no condition is stated. This becomes the assertion's `condition` qualifier, so preserve
 the source wording rather than paraphrasing.
 
+## `formula_or_definition` (the metric's definition)
+
+`formula_or_definition` carries the metric's *definition*: the statement that says what the
+metric means — the property it measures, how it is computed, or the formula that defines it.
+
+- A formula that defines the metric (e.g. "X = A / B", "X 通过公式 Y/Z 计算") is a definition;
+  put the formula here.
+- A definition sentence (e.g. "响应时间是指从输入到输出变化之间的时间间隔") belongs here.
+- A bare value, threshold, or limit (e.g. "≤ 200 ms", "应不大于 200 ms") is an *assertion about*
+  the metric, not its definition — do not put it here.
+- Leave the field empty (or null) when the source states only a value and no definitional content.
+
 ## Output Schema
 
 ```json
@@ -121,6 +133,7 @@ the source wording rather than paraphrasing.
       "condition": "string",
       "threshold_or_target": "string",
       "measurement_frequency": "string",
+      "formula_or_definition": "string",
       "confidence": 0.0,
       "is_explicit_metric": true,
       "reasoning_tags": ["string"],

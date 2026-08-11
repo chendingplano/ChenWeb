@@ -54,7 +54,7 @@ func TestBuildEntityNameGraphConnections(t *testing.T) {
 		categoryConns[0].SourceID != "100_ent_1" ||
 		categoryConns[0].TargetType != "entity" ||
 		categoryConns[0].TargetID != "company" ||
-		categoryConns[0].TargetRecordID != 5 ||
+		categoryConns[0].TargetRecordID != 100 ||
 		categoryConns[0].RelationName != RelationBelongTo ||
 		categoryConns[0].RelationMethod != RelationMethodCategoryName {
 		t.Errorf("category connection wrong: %+v", categoryConns[0])

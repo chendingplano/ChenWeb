@@ -278,8 +278,8 @@ func TestSceneBlocksProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testi
 	if sceneStore.upsertCalled != 1 {
 		t.Fatalf("upsertCalled=%d, want 1", sceneStore.upsertCalled)
 	}
-	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.ObjectID)); got != "7002_1" {
-		t.Fatalf("objectID=%q, want 7002_1", got)
+	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.ObjectID)); got != "7002_sbk_1" {
+		t.Fatalf("objectID=%q, want 7002_sbk_1", got)
 	}
 	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.ModelName)); got != "relation-model" {
 		t.Fatalf("saved model=%q, want relation-model", got)

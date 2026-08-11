@@ -17,12 +17,10 @@
 	import { listDocProcLogs, listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord, type ParseState } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
-		ALL_CONFIGURABLE_PROCESSOR_IDS,
-		ALL_PROCESSOR_IDS,
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
-		PIPELINE_STAGES,
 		buildManualLaunchOperations,
+		buildStageDefs,
 		computeStages,
 		entityExtractionSucceeded,
 		isActiveRecord,
@@ -53,14 +51,16 @@
 
 	// requiredProcessors: the configurable processors that are enabled in config.toml.
 	// Populated once on mount from GET /api/v1/kb/config.
-	let requiredProcessors = $state<string[]>(ALL_CONFIGURABLE_PROCESSOR_IDS);
+	let requiredProcessors = $state<string[]>([]);
 
 	let selectableProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
 
 	// Show Phase A processors plus processors present in requiredProcessors (from config).
-	let CONFIGURABLE_PROCESSORS = $derived(selectableProcessorIds
-		.map(id => PIPELINE_STAGES.find(s => s.id === id))
-		.filter(s => s !== undefined));
+	// buildStageDefs never gates on a static catalog — any id present here gets a
+	// stage def, generic ones included.
+	let CONFIGURABLE_PROCESSORS = $derived(
+		buildStageDefs(selectableProcessorIds).filter((s) => selectableProcessorIds.includes(s.id))
+	);
 
 	// configuredProcessorIds: mandatory + required — the set isActiveRecord checks.
 	let configuredProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
@@ -231,7 +231,7 @@
 	let searchDialogOpen = $state(false);
 	let selectedRecords = $state<KbInputRecord[]>([]);
 	let processors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(MANDATORY_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let parseFileChecked = $state(false);
 	let convertChecked = $state(false);
@@ -297,7 +297,7 @@
 
 	let restartTarget = $state<KbInputRecord | null>(null);
 	let restartProcessors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(MANDATORY_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let restartParseFile = $state(false);
 	let restartConvert = $state(false);
@@ -472,7 +472,7 @@
 	function filterByRunMode(records: KbInputRecord[], mode: RunMode, selectedStageIds: Set<string>): KbInputRecord[] {
 		if (mode === 'force') return records;
 		return records.filter((rec) => {
-			const relevantStages = computeStages(rec).filter((s) => selectedStageIds.has(s.id));
+			const relevantStages = computeStages(rec, selectableProcessorIds).filter((s) => selectedStageIds.has(s.id));
 			return relevantStages.some((s) => {
 				if (mode === 'unfinished') return s.status === 'pending' || s.status === 'in-progress';
 				if (mode === 'failed') return s.status === 'failed';
@@ -612,16 +612,16 @@
 
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
 		const unfinishedStageIds = new Set(
-			computeStages(record)
-				.filter((stage) => stage.status !== 'success' && ALL_PROCESSOR_IDS.includes(stage.id))
+			computeStages(record, selectableProcessorIds)
+				.filter((stage) => stage.status !== 'success' && selectableProcessorIds.includes(stage.id))
 				.map((stage) => stage.id)
 		);
 
 		if (!unfinishedStageIds.size) {
-			return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, selectableProcessorIds.includes(p)]));
+			return Object.fromEntries(selectableProcessorIds.map((p) => [p, true]));
 		}
 
-		return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
+		return Object.fromEntries(selectableProcessorIds.map((p) => [p, unfinishedStageIds.has(p)]));
 	}
 
 	function getFailedSteps(record: KbInputRecord): string[] {
@@ -700,7 +700,7 @@
 	function selectFailedProcessors() {
 		const failedStageIds = new Set<string>();
 		for (const rec of selectedRecords) {
-			for (const stage of computeStages(rec)) {
+			for (const stage of computeStages(rec, selectableProcessorIds)) {
 				if (stage.status === 'failed') failedStageIds.add(stage.id);
 			}
 		}
@@ -712,14 +712,14 @@
 		parseFileChecked = hasParseFailed;
 		convertChecked = !hasParseFailed && hasConvertFailed;
 		processors = Object.fromEntries(
-			ALL_PROCESSOR_IDS.map((p) => [p, !hasParseFailed && !hasConvertFailed && failedStageIds.has(p)])
+			selectableProcessorIds.map((p) => [p, !hasParseFailed && !hasConvertFailed && failedStageIds.has(p)])
 		);
 	}
 
 	function selectIncompletedProcessors() {
 		const incompleteStageIds = new Set<string>();
 		for (const rec of selectedRecords) {
-			for (const stage of computeStages(rec)) {
+			for (const stage of computeStages(rec, selectableProcessorIds)) {
 				if (stage.status !== 'success') incompleteStageIds.add(stage.id);
 			}
 		}
@@ -729,7 +729,7 @@
 		parseFileChecked = hasParseIncomplete;
 		convertChecked = !hasParseIncomplete && hasConvertIncomplete;
 		processors = Object.fromEntries(
-			ALL_PROCESSOR_IDS.map((p) => [p, !hasParseIncomplete && !hasConvertIncomplete && incompleteStageIds.has(p)])
+			selectableProcessorIds.map((p) => [p, !hasParseIncomplete && !hasConvertIncomplete && incompleteStageIds.has(p)])
 		);
 	}
 
@@ -803,7 +803,7 @@
 			const req = cfg.required_processors ?? [];
 			requiredProcessors = req;
 			activePipelineLimit = Math.max(1, cfg.max_doc_process_pipelines ?? 10);
-			processors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, MANDATORY_PROCESSOR_IDS.includes(p) || req.includes(p)]));
+			processors = Object.fromEntries([...MANDATORY_PROCESSOR_IDS, ...req].map((p) => [p, true]));
 		}).catch(() => {
 			// Keep defaults on failure
 		});
@@ -973,7 +973,7 @@
 		{:else}
 			<div class="space-y-3">
 				{#each activePipelines as record (record.id)}
-					{@const stages = visibleStages(computeStages(record), requiredProcessors)}
+					{@const stages = visibleStages(computeStages(record, selectableProcessorIds), requiredProcessors)}
 					<div
 						class="rounded-xl p-4"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"

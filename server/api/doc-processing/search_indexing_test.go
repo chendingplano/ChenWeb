@@ -62,7 +62,7 @@ func TestBuildSummaryRegistryRowsReadsSummaryArtifacts(t *testing.T) {
 	if err := os.MkdirAll(recordDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	body := `summary_id: "1042_1_0001"
+	body := `summary_id: "1042_sum_1_0001"
 record_id: 1042
 level: 1
 lines: ["2:10","2:11"]
@@ -495,6 +495,7 @@ func TestReplaceRegistryRowsDeletesThenInserts(t *testing.T) {
 			`["performance"]`,
 			`["2:10"]`,
 			string(payload),
+			"{}",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -587,7 +588,7 @@ func TestReplaceTopicArtifactsForRecordDeletesThenInserts(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec("INSERT INTO kb.topics").
 		WithArgs(
-			"1",
+			"42_tpc_1",
 			int64(42),
 			1,
 			"requirement",

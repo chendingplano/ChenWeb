@@ -102,7 +102,7 @@ func TestDeriveLineOverlapConnections_singleChunkSingleTarget(t *testing.T) {
 		t.Fatalf("expected 1 connection, got %d", len(got))
 	}
 	c := got[0]
-	if c.SourceType != "chunk" || c.SourceID != "42_1" {
+	if c.SourceType != "chunk" || c.SourceID != "42_chk_1" {
 		t.Errorf("unexpected source: %q / %q", c.SourceType, c.SourceID)
 	}
 	if c.TargetType != "metric" || c.TargetID != "42_1" {
@@ -114,7 +114,7 @@ func TestDeriveLineOverlapConnections_singleChunkSingleTarget(t *testing.T) {
 	if c.SourceRecordID != 42 || c.TargetRecordID != 42 {
 		t.Errorf("unexpected record ids: source=%d target=%d", c.SourceRecordID, c.TargetRecordID)
 	}
-	if c.SourceDesc != "chunk:42_1" || c.TargetDesc != "metric:42_1" {
+	if c.SourceDesc != "chunk:42_chk_1" || c.TargetDesc != "metric:42_1" {
 		t.Errorf("unexpected endpoint descs: %q / %q", c.SourceDesc, c.TargetDesc)
 	}
 	if c.Overlap == nil || c.Overlap.OverlapCount != 3 {
@@ -149,10 +149,10 @@ func TestDeriveLineOverlapConnections_spanAcrossTwoChunks(t *testing.T) {
 	for i := range got {
 		bySource[got[i].SourceID] = got[i].Overlap
 	}
-	if o := bySource["5_1"]; o == nil || !reflect.DeepEqual(o.OverlapLines, []int{9, 10}) {
+	if o := bySource["5_chk_1"]; o == nil || !reflect.DeepEqual(o.OverlapLines, []int{9, 10}) {
 		t.Errorf("chunk 1 overlap wrong: %+v", o)
 	}
-	if o := bySource["5_2"]; o == nil || !reflect.DeepEqual(o.OverlapLines, []int{11, 12}) {
+	if o := bySource["5_chk_2"]; o == nil || !reflect.DeepEqual(o.OverlapLines, []int{11, 12}) {
 		t.Errorf("chunk 2 overlap wrong: %+v", o)
 	}
 }

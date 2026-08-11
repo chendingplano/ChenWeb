@@ -267,8 +267,8 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 		t.Fatalf("saved products=%d, want 1", len(productStore.lastSave.Products))
 	}
 	row := productStore.lastSave.Products[0]
-	if got := strings.TrimSpace(asString(row["product_rel_id"])); got != "5101_1" {
-		t.Fatalf("product_rel_id=%q, want 5101_1", got)
+	if got := strings.TrimSpace(asString(row["product_rel_id"])); got != "5101_prd_1" {
+		t.Fatalf("product_rel_id=%q, want 5101_prd_1", got)
 	}
 	if got := strings.TrimSpace(asString(row["relation_type"])); got != "maintenance_requirement" {
 		t.Fatalf("relation_type=%q", got)

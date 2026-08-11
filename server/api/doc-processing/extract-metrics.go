@@ -657,6 +657,15 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Warn("save metrics to file failed", "record_id", evt.RecordID, "error", fileErr)
 	}
 
+	// Metric-definition harvesting is mode-independent: it must run whether this
+	// processor was invoked via HandleEvent (sequential fallback) or via the
+	// chunk-batch path (FinalizeChunkBatch), so kb.ontology_candidates is fed the
+	// same way regardless of RUN_DOC_PROCESSOR_CONCURRENT.
+	if err := p.harvestMetricDefinitionCandidates(ctx, evt.RecordID, allMetrics); err != nil {
+		p.persistMetricsStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26081101) %s harvest metric definitions: %w", p.Name(), err)
+	}
+
 	// Artifact indexing (search registry, line-overlap connections, connected_artifacts,
 	// category_name links, category-path metrics.txt, and hybrid_search links) is
 	// intentionally NOT done here. It runs in Phase C (post-process) via
@@ -3408,7 +3417,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
 			p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 		}
-		if err := p.harvestMetricDefinitionCandidates(ctx, metrics); err != nil {
+		if err := p.harvestMetricDefinitionCandidates(ctx, p.batchRecordID, metrics); err != nil {
 			return err
 		}
 		return nil
@@ -3446,17 +3455,17 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, dirty); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 	}
-	if err := p.harvestMetricDefinitionCandidates(ctx, dirty); err != nil {
+	if err := p.harvestMetricDefinitionCandidates(ctx, p.batchRecordID, dirty); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (p *MetricsProcessor) harvestMetricDefinitionCandidates(ctx context.Context, metrics []map[string]any) error {
+func (p *MetricsProcessor) harvestMetricDefinitionCandidates(ctx context.Context, recordID int64, metrics []map[string]any) error {
 	if p.CandidateSink == nil || len(metrics) == 0 {
 		return nil
 	}
-	if err := harvestMetricDefinitions(ctx, p.batchRecordID, metrics, p.CandidateSink); err != nil {
+	if err := harvestMetricDefinitions(ctx, recordID, metrics, p.CandidateSink); err != nil {
 		return fmt.Errorf("%s harvest metric definitions: %w", p.Name(), err)
 	}
 	return nil

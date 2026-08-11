@@ -268,6 +268,95 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 	}
 }
 
+// TestMetricsProcessor_HandleEventHarvestsDefinitionCandidates verifies the
+// sequential fallback path (RUN_DOC_PROCESSOR_CONCURRENT=false) converts
+// metrics carrying a definition into kb.ontology_candidates exactly like the
+// chunk-batch path does. Regression for the mode-dependent harvest gap.
+func TestMetricsProcessor_HandleEventHarvestsDefinitionCandidates(t *testing.T) {
+	tmp := t.TempDir()
+	recordID := int64(2006)
+
+	writeTestArtifacts(t, tmp, recordID, filepath.Join(tmp, "ocr_rslt_2006.pdf"), "opendata",
+		strings.Join([]string{
+			"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tIntro",
+			"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tAir flow rate is the volume of air delivered per unit time.",
+		}, "\n"),
+		"lines: [1, 2]\n",
+	)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              recordID,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_2006.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_2006.pdf"),
+		StatusRaw:       "[]",
+	}}
+	metricsStore := &fakeMetricsStore{}
+	sink := &recordingOntologyCandidateSink{}
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{
+			"language": "en",
+			"candidates": []any{
+				map[string]any{
+					"metric_name_hint":  "Air flow rate",
+					"subject_hint":      "air flow",
+					"evidence_quote":    "Air flow rate is the volume of air delivered per unit time.",
+					"source_line_spans": []any{float64(2)},
+					"confidence":        0.9,
+				},
+			},
+		},
+		{
+			"language": "en",
+			"metrics": []any{
+				map[string]any{
+					"metric_name":           "Air flow rate",
+					"source_line_spans":     []any{float64(2)},
+					"formula_or_definition": "The volume of air delivered per unit time.",
+				},
+			},
+			"uncertain_metrics": []any{},
+		},
+	}}
+
+	p := NewMetricsProcessor(inputStore, metricsStore, extractor, nil)
+	p.ChunkDir = tmp
+	p.MentionPromptText = "extract metric candidates"
+	p.MentionPromptRef = "prompt-extract-metric-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "gpt-test-mention"
+	p.RelationPromptText = "enrich metrics"
+	p.RelationPromptRef = "prompt-enrich-metrics-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "gpt-test"
+	p.PromptText = "extract metrics"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "gpt-test"
+	p.CandidateSink = sink
+
+	if err := p.HandleEvent(context.Background(), []byte(fmt.Sprintf(`{"record_id":"%d","force":true}`, recordID))); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if metricsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
+	}
+	if len(sink.got) != 1 {
+		t.Fatalf("harvested %d candidates, want 1 (sequential HandleEvent must harvest metric definitions)", len(sink.got))
+	}
+	if sink.got[0].CandidateKind != "term" || sink.got[0].SourceRef != fmt.Sprintf("input_record:%d", recordID) {
+		t.Fatalf("candidate = %#v", sink.got[0])
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(sink.got[0].ProposedPayload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["term_id"] != "measurement:air_flow_rate" || payload["definition"] != "The volume of air delivered per unit time." {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 // TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer verifies that when
 // TestMetricsProcessor_ExtractsFromLineFileViaChunksArtifact verifies that HandleEvent
 // reads the line file and .chunks artifact, then passes the resolved lines to the LLM.

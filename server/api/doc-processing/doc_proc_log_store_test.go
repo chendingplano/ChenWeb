@@ -37,11 +37,12 @@ INSERT INTO kb.doc_proc_logs (
     log_loc,
     prompt_cache_hit_tokens,
     prompt_cache_miss_tokens,
+    run_id,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, $16, $17, NOW()
+    $14, $15, $16, $17, $18, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -51,7 +52,7 @@ INSERT INTO kb.doc_proc_logs (
 			nil,
 			nil,
 			nil,
-			"doc_proc_summary",
+			EntryTypeGenerateTopics,
 			nil,
 			nil,
 			nil,
@@ -62,11 +63,12 @@ INSERT INTO kb.doc_proc_logs (
 			"MID-26052803",
 			nil,
 			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	logger := DocProcLogger{DB: db}
-	if err := logger.LogSummary(context.Background(), "test_entry_type", DocProcLogRecord{
+	if err := logger.LogSummary(context.Background(), EntryTypeGenerateTopics, DocProcLogRecord{
 		DocProcName:   "generate_summaries",
 		ExtraInfoJSON: &extra,
 		MSUsed:        &msUsed,

@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+	buildStageDefs,
 	computeStages,
 	isActiveRecord,
-	ALL_PROCESSOR_IDS,
 	MANDATORY_PROCESSOR_IDS,
 	MANDATORY_DISPLAY_STAGES,
 	buildManualLaunchOperations,
@@ -21,7 +21,7 @@ function makeRecord(status: StatusEntry[]) {
 test('only blocking is locked in the processor selection UI', () => {
 	assert.deepEqual(MANDATORY_DISPLAY_STAGES.map((stage) => stage.id), ['blocking']);
 	for (const processorID of ['static_analyzer', 'chunking', 'extract_doc_metadata']) {
-		assert.equal(ALL_PROCESSOR_IDS.includes(processorID), true);
+		assert.equal(MANDATORY_PROCESSOR_IDS.includes(processorID), true);
 	}
 });
 
@@ -46,6 +46,31 @@ test('manual launch operations preserve explicit selection when scene blocks is 
 	assert.deepEqual(operations, selectable.filter((id) => id !== 'generate_scene_blocks'));
 });
 
+// buildStageDefs is the sole source of stage metadata: a hard-coded entry for the
+// small set of pipeline pre-stages/mandatory processors (plus generate_scene_blocks,
+// whose success status the backend currently writes under a different operation
+// name — see generate-scene-blocks-processor.go), and a generic entry (derived
+// label, operations == [id]) for anything else. This is what fixes the "Processors
+// to run" checklist not reflecting new entries in config.toml's required_processors:
+// there is no longer a static catalog that can silently drop an unrecognized id.
+test('buildStageDefs generates a usable stage def for any processor id not hard-coded', () => {
+	const defs = buildStageDefs(['extract_metric_definitions']);
+	const def = defs.find((d) => d.id === 'extract_metric_definitions');
+
+	assert.ok(def, 'expected a generated stage def for an id outside the known set');
+	assert.equal(def?.label, 'Extract Metric Definitions');
+	assert.deepEqual(def?.operations, ['extract_metric_definitions']);
+});
+
+test('computeStages reports status for a dynamically configured processor id', () => {
+	const record = makeRecord([{ operation: 'extract_metric_definitions', proc_status: 'success' }]);
+	const stages = computeStages(record, ['extract_metric_definitions']);
+	const stage = stages.find((s) => s.id === 'extract_metric_definitions');
+
+	assert.ok(stage);
+	assert.equal(stage?.status, 'success');
+});
+
 test('scene blocks stage treats extract_scene_blocks success as finished', () => {
 	const record = makeRecord([
 		{ operation: 'static_analyzer', proc_status: 'success' },
@@ -59,15 +84,14 @@ test('scene blocks stage treats extract_scene_blocks success as finished', () =>
 		{ operation: 'extract_products', proc_status: 'success' }
 	]);
 
-	const stages = computeStages(record);
+	const configuredIds = [...MANDATORY_PROCESSOR_IDS, 'extract_metrics', 'extract_provisions',
+		'generate_summaries', 'generate_topics', 'generate_scene_blocks', 'extract_products'];
+	const stages = computeStages(record, configuredIds);
 	const sceneBlocks = stages.find((stage) => stage.id === 'generate_scene_blocks');
 
 	assert.ok(sceneBlocks);
 	assert.equal(sceneBlocks.status, 'success');
-
-	const allExpected = [...MANDATORY_PROCESSOR_IDS, 'extract_metrics', 'extract_provisions',
-		'generate_summaries', 'generate_topics', 'generate_scene_blocks', 'extract_products'];
-	assert.equal(isActiveRecord(record, allExpected), false);
+	assert.equal(isActiveRecord(record, configuredIds), false);
 });
 
 test('record is finished when extract_products is not in expected set and all others are done', () => {
@@ -103,7 +127,7 @@ test('semantic projections stage recognizes legacy hyphenated in-progress status
 		{ operation: 'extract-semantic-projections', proc_status: 'running', progress: '42% (pass 1: 8/19)' }
 	]);
 
-	const stages = computeStages(record);
+	const stages = computeStages(record, ['extract_semantic_projections']);
 	const semanticProjection = stages.find((stage) => stage.id === 'extract_semantic_projections');
 
 	assert.ok(semanticProjection);
@@ -127,16 +151,19 @@ test('chunking stage recognizes topic chunking and fix-size chunking as in-progr
 });
 
 test('visible stages hide processors that are not enabled in config', () => {
-	const stages = visibleStages(computeStages(makeRecord([])), [
-		'extract_metrics',
-		'extract_provisions',
-		'generate_summaries',
-		'generate_topics',
-		'generate_scene_blocks',
-		'extract_semantic_projections',
-		'extract_entity',
-		'extract_relation'
-	]);
+	// extract_products / extract_structured_knowledge are computed (e.g. because an
+	// older record's status still references them) but not in the current required
+	// list, so visibleStages must still hide them.
+	const configuredIds = [
+		'extract_metrics', 'extract_provisions', 'generate_summaries', 'generate_topics',
+		'extract_semantic_projections', 'extract_entity', 'extract_relation',
+		'extract_products', 'extract_structured_knowledge'
+	];
+	const requiredIds = [
+		'extract_metrics', 'extract_provisions', 'generate_summaries', 'generate_topics',
+		'extract_semantic_projections', 'extract_entity', 'extract_relation'
+	];
+	const stages = visibleStages(computeStages(makeRecord([]), configuredIds), requiredIds);
 
 	const stageIds = stages.map((stage) => stage.id);
 
@@ -149,17 +176,22 @@ test('visible stages hide processors that are not enabled in config', () => {
 	assert.equal(stageIds.includes('extract_relation'), true);
 });
 
-test('split entity/relation stages recognize the legacy combined op (back-compat)', () => {
+// extract_entity / extract_relation are fully config-driven (no hard-coded alias
+// table) since EntityProcessor/RelationProcessor always write status under their
+// own canonical op name today (entity-relation-split.go). The legacy combined
+// "extract_entity_relation" op was only ever written by the pre-split processor,
+// so records created before that split display as pending for these two stages
+// rather than in-progress/success — an accepted, intentional gap.
+test('legacy combined entity/relation op is no longer recognized (pre-split records only)', () => {
 	const record = makeRecord([
 		{ operation: 'extract-entity-relation', proc_status: 'running', progress: '67% (8/12)' }
 	]);
 
-	const stages = computeStages(record);
+	const stages = computeStages(record, ['extract_entity', 'extract_relation']);
 	for (const id of ['extract_entity', 'extract_relation']) {
 		const stage = stages.find((s) => s.id === id);
 		assert.ok(stage, `${id} stage missing`);
-		assert.equal(stage.status, 'in-progress');
-		assert.equal(stage.entry?.progress, '67% (8/12)');
+		assert.equal(stage.status, 'pending');
 	}
 });
 
@@ -168,7 +200,7 @@ test('extract_entity stage recognizes its own doc_processing entry', () => {
 		{ operation: 'doc_processing', proc_status: 'running', doc_processor_name: 'extract_entity' }
 	]);
 
-	const stages = computeStages(record);
+	const stages = computeStages(record, ['extract_entity']);
 	const entity = stages.find((stage) => stage.id === 'extract_entity');
 
 	assert.ok(entity);
@@ -182,7 +214,7 @@ test('live doc_processing entry overrides stale stage success for the running pr
 		{ operation: 'doc_processing', proc_status: 'running', doc_processor_name: 'extract_inventory_items' }
 	]);
 
-	const stages = computeStages(record);
+	const stages = computeStages(record, ['extract_inventory_items']);
 	const inventoryItems = stages.find((stage) => stage.id === 'extract_inventory_items');
 
 	assert.ok(inventoryItems);

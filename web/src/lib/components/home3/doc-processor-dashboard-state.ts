@@ -24,6 +24,39 @@ export type StageInfo = {
 	entry?: StatusEntry;
 };
 
+export type StageDef = {
+	id: string;
+	label: string;
+	operations: string[];
+};
+
+// Pipeline pre-stages (not real processors) plus the processors whose status
+// is currently written under an operation name that differs from their id.
+// This is the only hard-coded metadata left — it mirrors the backend's own
+// alias mapping (control.go: processorStatusAliases / primaryProcessorStatusOperation)
+// and exists purely to interpret status entries correctly. It never gates
+// which processors are selectable — see buildStageDefs, which adds a plain
+// entry for any other configured id automatically.
+const KNOWN_STAGE_DEFS: StageDef[] = [
+	{ id: 'staged', label: 'Staged', operations: [] },
+	{ id: 'parsing', label: 'PDF Parser', operations: ['parsing', 'parsed'] },
+	{ id: 'converting', label: 'Result Convert', operations: ['converting', 'converted', 'line-file-generated'] },
+	// Mandatory — always run, never configurable (see MANDATORY_PROCESSOR_IDS).
+	{ id: 'static_analyzer', label: 'Doc Structure Analyzer', operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
+	{
+		id: 'chunking',
+		label: 'Chunking',
+		operations: ['chunking', 'chunked', 'topic_chunking', 'fix_size_chunking']
+	},
+	{ id: 'extract_doc_metadata', label: 'Extract Doc Metadata', operations: ['extract_doc_metadata', 'extract_metadata'] },
+	// Configurable, not mandatory — but generate-scene-blocks-processor.go writes its
+	// success status under "extract_scene_blocks" rather than its own id, so it needs
+	// its alias hard-coded to display correctly.
+	{ id: 'generate_scene_blocks', label: 'Generate Scene Blocks', operations: ['generate_scene_blocks', 'extract_scene_blocks'] }
+];
+
+// Stage IDs shown regardless of [doc-processing].required_processors —
+// the pre-processor pipeline steps plus the always-on mandatory processors.
 export const ALWAYS_VISIBLE_PIPELINE_STAGE_IDS = [
 	'staged',
 	'parsing',
@@ -33,89 +66,33 @@ export const ALWAYS_VISIBLE_PIPELINE_STAGE_IDS = [
 	'extract_doc_metadata'
 ];
 
-// 'operations' lists all status operation names this stage may emit, including legacy aliases.
-export const PIPELINE_STAGES = [
-	{ id: 'staged', label: 'Staged', operations: [] as string[] },
-	{ id: 'parsing', label: 'PDF Parser', operations: ['parsing', 'parsed'] },
-	{ id: 'converting', label: 'Result Convert', operations: ['converting', 'converted', 'line-file-generated'] },
-	{ id: 'static_analyzer', label: 'Doc Structure Analyzer', operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
-	{
-		id: 'chunking',
-		label: 'Chunking',
-		operations: ['chunking', 'chunked', 'topic_chunking', 'fix_size_chunking']
-	},
-	{ id: 'extract_doc_metadata', label: 'Extract Doc Metadata', operations: ['extract_doc_metadata', 'extract_metadata'] },
-	{ id: 'extract_metrics', label: 'Extract Metrics', operations: ['extract_metrics'] },
-	{ id: 'extract_provisions', label: 'Extract Provisions', operations: ['extract_provisions'] },
-	{ id: 'generate_summaries', label: 'Generate Summaries', operations: ['generate_summaries'] },
-	{ id: 'generate_topics', label: 'Generate Topics', operations: ['generate_topics'] },
-	{ id: 'generate_scene_blocks', label: 'Generate Scene Blocks', operations: ['generate_scene_blocks', 'extract_scene_blocks'] },
-	{ id: 'extract_products', label: 'Extract Products', operations: ['extract_products'] },
-	{
-		id: 'extract_semantic_projections',
-		label: 'Extract Semantic Projection',
-		operations: [
-			'extract_semantic_projections',
-			'extract-semantic-projections',
-			'extract-semantic-projection'
-		]
-	},
-	{ id: 'extract_structured_knowledge', label: 'Extract Struct. Knowledge', operations: ['extract_structured_knowledges'] },
-	// ADR 2026061702: entity and relation extraction are independent processors.
-	// The legacy combined ops are kept as aliases on both stages so historical
-	// records (run before the split) still display as complete on both.
-	{
-		id: 'extract_entity',
-		label: 'Extract Entity',
-		operations: [
-			'extract_entity',
-			'extract-entity',
-			'extract_entity_relation',
-			'extract-entity-relation'
-		]
-	},
-	{
-		id: 'extract_relation',
-		label: 'Extract Relation',
-		operations: [
-			'extract_relation',
-			'extract-relation',
-			'extract_entity_relation',
-			'extract-entity-relation'
-		]
-	},
-	{
-		id: 'extract_inventory_items',
-		label: 'Extract Inventory Items',
-		operations: [
-			'extract_inventory_items',
-			'extract-inventory-items'
-		]
-	}
-];
+function humanizeLabel(id: string): string {
+	return id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-// All doc-processor-managed stages (indices 3+). Used to map status entries to UI stages.
-export const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
+// buildStageDefs: KNOWN_STAGE_DEFS plus one generic entry (label derived from
+// the id, operations matching only the id itself) for every configured
+// processor id not already covered above. There is no catalog of "known"
+// processors that gates the UI — anything listed in config.toml's
+// [doc-processing].required_processors becomes a real, displayable,
+// selectable stage without any frontend code change.
+export function buildStageDefs(configuredProcessorIds: string[]): StageDef[] {
+	const knownIds = new Set(KNOWN_STAGE_DEFS.map((s) => s.id));
+	const extra = configuredProcessorIds
+		.filter((id) => !knownIds.has(id))
+		.map((id) => ({ id, label: humanizeLabel(id), operations: [id] }));
+	return [...KNOWN_STAGE_DEFS, ...extra];
+}
 
-// Phase A processors that can be explicitly requested. The blocking processor
-// always runs before these and never appears in operation lists.
+// Phase A processors that always run. The blocking processor always runs
+// before these and never appears in operation lists.
 export const MANDATORY_PROCESSOR_IDS: string[] = ['chunking', 'extract_doc_metadata', 'static_analyzer'];
 
 // Ordered list for the "Processors to run" locked section.
 // Does not include parse_file / convert_parse_result — those are pre-processor optionals.
 export const MANDATORY_DISPLAY_STAGES: { id: string; label: string }[] = [
-	{ id: 'blocking', label: 'Blocking' },
+	{ id: 'blocking', label: 'Blocking' }
 ];
-
-// Configurable via [doc-processing].required_processors in config.toml.
-export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
-	'extract_metrics', 'extract_provisions', 'generate_summaries',
-	'generate_topics', 'generate_scene_blocks', 'extract_products',
-	'extract_semantic_projections', 'extract_structured_knowledge',
-	'extract_entity', 'extract_relation', 'extract_inventory_items'
-];
-
-export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABLE_PROCESSOR_IDS];
 
 export const ENTITY_PROCESSOR_ID = 'extract_entity';
 export const RELATION_PROCESSOR_ID = 'extract_relation';
@@ -123,7 +100,7 @@ export const RELATION_PROCESSOR_ID = 'extract_relation';
 // entityExtractionSucceeded reports whether extract_entity has already completed
 // successfully for a record (so its entities exist for relation linking).
 export function entityExtractionSucceeded(record: PipelineRecord): boolean {
-	const stage = computeStages(record).find((s) => s.id === ENTITY_PROCESSOR_ID);
+	const stage = computeStages(record, [ENTITY_PROCESSOR_ID]).find((s) => s.id === ENTITY_PROCESSOR_ID);
 	return stage?.status === 'success';
 }
 
@@ -164,7 +141,9 @@ export function resolveEntryStatus(entry: StatusEntry): StageStatus {
 	return 'in-progress';
 }
 
-export function computeStages(record: PipelineRecord): StageInfo[] {
+// computeStages: stage info for KNOWN_STAGE_DEFS plus every id in
+// configuredProcessorIds (mandatory + config.toml's required_processors).
+export function computeStages(record: PipelineRecord, configuredProcessorIds: string[] = []): StageInfo[] {
 	const entries = record.status ?? [];
 
 	function stageFor(stageId: string, operations: string[]): { status: StageStatus; entry?: StatusEntry } {
@@ -206,7 +185,7 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 		return { status: 'pending' };
 	}
 
-	return PIPELINE_STAGES.map((stage) => {
+	return buildStageDefs(configuredProcessorIds).map((stage) => {
 		if (stage.id === 'staged') return { id: 'staged', label: stage.label, status: 'success' as StageStatus };
 		const { status, entry } = stageFor(stage.id, stage.operations);
 		return { id: stage.id, label: stage.label, status, entry };
@@ -219,11 +198,11 @@ export function visibleStages(stages: StageInfo[], requiredProcessorIds?: string
 	return stages.filter((stage) => visibleIds.has(stage.id));
 }
 
-// expectedProcessorIds: the set of stage IDs that must reach a final status for the record
-// to be considered finished. Defaults to all DOC_PROCESSOR_STAGES when omitted.
-// Pass MANDATORY_PROCESSOR_IDS + required_processors from server config to match the
-// actual pipeline the backend ran.
-export function isActiveRecord(record: PipelineRecord, expectedProcessorIds?: string[]): boolean {
+// isActiveRecord: expectedProcessorIds (mandatory + config.toml's
+// required_processors) is the exact set of stages that must reach a final
+// status for the record to be considered finished — there is no wider
+// "all processors" universe to fall back to.
+export function isActiveRecord(record: PipelineRecord, expectedProcessorIds: string[]): boolean {
 	const entries = record.status ?? [];
 	if (!entries.length) return true;
 
@@ -238,9 +217,7 @@ export function isActiveRecord(record: PipelineRecord, expectedProcessorIds?: st
 		if (!FINAL_STATUSES.has(ps)) return true;
 	}
 
-	const stagesToCheck = expectedProcessorIds
-		? DOC_PROCESSOR_STAGES.filter((s) => expectedProcessorIds.includes(s.id))
-		: DOC_PROCESSOR_STAGES;
+	const stagesToCheck = buildStageDefs(expectedProcessorIds).filter((s) => expectedProcessorIds.includes(s.id));
 
 	for (const stage of stagesToCheck) {
 		const hasFinal = stage.operations.some((op) => FINAL_STATUSES.has(statusMap.get(op) ?? ''));

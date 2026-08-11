@@ -325,7 +325,16 @@
 </div>
 
 {#if showEditor}
-	<div class="modal-overlay">
+	<div
+		class="modal-overlay"
+		class:dark={darkMode}
+		style:--card={cardBg}
+		style:--border={borderColor}
+		style:--input-bg={surface2}
+		style:--heading={heading}
+		style:--sub={sub}
+		style:--btn={accent}
+	>
 		<div class="modal">
 			<div class="modal-header">
 				<h2>{editing ? `Edit ${editingOriginalName}` : 'New Processor'}</h2>
@@ -381,11 +390,19 @@
 					</label>
 					<label class="wide">
 						<span>Description</span>
-						<input type="text" bind:value={edDescription} placeholder="One-line description" />
+						<textarea
+							bind:value={edDescription}
+							placeholder="Describe the processor and its purpose"
+							rows="3"
+						></textarea>
 					</label>
 					<label class="wide">
 						<span>Notes</span>
-						<input type="text" bind:value={edNotes} placeholder="Free-form notes" />
+						<textarea
+							bind:value={edNotes}
+							placeholder="Free-form notes"
+							rows="3"
+						></textarea>
 					</label>
 				</div>
 				{#if errorMsg}
@@ -705,6 +722,7 @@
 
 	.modal {
 		width: min(560px, 100%);
+		color: var(--heading, #1b1e23);
 		background: var(--card, #ffffff);
 		border: 1px solid var(--border, #e2e5e9);
 		border-radius: 12px;
@@ -743,7 +761,8 @@
 	}
 
 	input[type='text'],
-	select {
+	select,
+	textarea {
 		padding: 0.5rem 0.7rem;
 		border-radius: 8px;
 		border: 1px solid var(--border, #e2e5e9);
@@ -753,8 +772,16 @@
 		outline: none;
 	}
 
+	textarea {
+		resize: vertical;
+		min-height: 84px;
+		line-height: 1.45;
+		font-family: inherit;
+	}
+
 	input[type='text']:focus,
-	select:focus {
+	select:focus,
+	textarea:focus {
 		border-color: var(--btn, #2563eb);
 	}
 

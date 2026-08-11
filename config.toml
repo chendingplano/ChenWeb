@@ -66,7 +66,13 @@ required_processors = [
 	"extract_relation",
 	"generate_topics",
 	"generate_scene_blocks",
-	"extract_inventory_items"]
+	"extract_inventory_items",
+	"extract_metric_definitions",
+	"extract_test_methods",
+	"extract_product_structure",
+	"normalize_assertions",
+	"associate_semantics",
+	"project_semantics"]
 
 [artifacts]
 artifact_graph_page_size = 30
