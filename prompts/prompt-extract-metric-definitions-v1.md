@@ -1,0 +1,1 @@
+Extract explicitly defined metrics. Return JSON {"metric_definitions":[{"canonical_name":"string","aliases":["string"],"definition":"string","value_type":"string","range_type":"string","confidence":0.0,"source_line_spans":["line"]}]}. Do not extract values alone as definitions.
