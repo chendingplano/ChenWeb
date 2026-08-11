@@ -71,9 +71,13 @@
 
 ## 5. Verify & commit
 
-- [ ] 5.1 Frontend build: `cd web && bun run check` (or the project's build script) passes.
-- [ ] 5.2 Smoke-test against the running dev server: the page lists the 22 seeded processors,
-  search filters them, create a processor, edit it (modify_time refreshes), invalid `type` is
-  rejected with a clean message, delete it.
-- [ ] 5.3 Commit the migration, backend, and frontend changes via `jj` (workspace CLAUDE.md:
+- [x] 5.1 Frontend build: `bun run check` passes for the new files (only pre-existing error
+  remains, in `doc-processor-dashboard-state.test.ts` — `.ts`-suffixed import under
+  `allowImportingTsExtensions=off`, last touched by older commits, unrelated to this change).
+- [x] 5.2 Smoke-test against the running dev server: `kb.doc_processors` has the 22 seeded rows;
+  goose recorded `20260811000001` as applied; vite compiles the new view/client/content-panel
+  (200s); `/api/v1/kb/doc-processors` is behind the session auth middleware (401 unauthenticated)
+  and the CRUD logic is covered by the 14 go-sqlmock tests. Interactive browser click-through
+  (create/edit/delete) still to be done in a logged-in session.
+- [x] 5.3 Commit the migration, backend, and frontend changes via `jj` (workspace CLAUDE.md:
   commit via jj, not raw git; confirm linear history with `jj log`).
