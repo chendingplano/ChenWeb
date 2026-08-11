@@ -43,19 +43,19 @@ func TestP2ExitItem1FingerprintDedup(t *testing.T) {
 	// NOTHING returns no row -> the existing candidate is returned reused.
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_candidates")).
 		WithArgs("term", string(payload), "core", "llm", "rec:9", "null", nil, nil, fp, "null",
-			StatusDiscovered, nil, "x", "x").
+			StatusDiscovered, nil, "x", "x", nil).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDiscovered)).
 			AddRow(int64(1), "term", payload, "core", "llm", "rec:9", []byte("null"), nil, nil, fp,
-				[]byte("null"), StatusDiscovered, nil, nil, nil, now, "x", now, "x"))
+				[]byte("null"), StatusDiscovered, nil, nil, nil, now, "x", now, "x", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_candidates")).
 		WithArgs("term", string(payload), "core", "llm", "rec:9", "null", nil, nil, fp, "null",
-			StatusDiscovered, nil, "x", "x").
+			StatusDiscovered, nil, "x", "x", nil).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE fingerprint = $1")).
 		WithArgs(fp).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDiscovered)).
 			AddRow(int64(1), "term", payload, "core", "llm", "rec:9", []byte("null"), nil, nil, fp,
-				[]byte("null"), StatusDiscovered, nil, nil, nil, now, "x", now, "x"))
+				[]byte("null"), StatusDiscovered, nil, nil, nil, now, "x", now, "x", nil))
 
 	store := CandidateStore{DB: db}
 	first, err := store.CreateCandidate(context.Background(), Candidate{
@@ -94,7 +94,7 @@ func TestP2ExitItem3GovernedLifecycle(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusApproved)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusApproved, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusApproved, nil, nil, nil, now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	_, err = store.TransitionStatus(context.Background(), 1, StatusIncludedInRelease, "curator")

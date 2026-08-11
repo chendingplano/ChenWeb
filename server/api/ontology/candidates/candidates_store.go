@@ -26,6 +26,7 @@ type Candidate struct {
 	DiscoveryMethod       string            `json:"discovery_method"`
 	Confidence            *float64          `json:"confidence"`
 	Fingerprint           string            `json:"fingerprint"`
+	IdentityKey           string            `json:"identity_key"`
 	CandidateMatches      json.RawMessage   `json:"candidate_matches"`
 	Status                string            `json:"status"`
 	DecisionReason        string            `json:"decision_reason"`
@@ -54,7 +55,7 @@ const candidateColumns = `
 	id, candidate_kind, proposed_payload, proposed_module_id, source_type,
 	source_ref, source_line_spans, discovery_method, confidence, fingerprint,
 	candidate_matches, status, decision_reason, dependency_fingerprint,
-	proposed_by, create_time, create_by, modify_time, modify_by`
+	proposed_by, create_time, create_by, modify_time, modify_by, identity_key`
 
 const candidateFrom = "FROM kb.ontology_candidates"
 
@@ -72,12 +73,14 @@ func scanCandidate(scan func(dest ...any) error) (Candidate, error) {
 		proposedBy       sql.NullString
 		createBy         sql.NullString
 		modifyBy         sql.NullString
+		identityKey      sql.NullString
 	)
 	if err := scan(
 		&c.ID, &c.CandidateKind, &c.ProposedPayload, &moduleID, &c.SourceType,
 		&sourceRef, &lineSpans, &discoveryMethod, &confidence, &c.Fingerprint,
 		&matches, &c.Status, &decisionReason, &depFingerprint,
 		&proposedBy, &c.CreateTime, &createBy, &c.ModifyTime, &modifyBy,
+		&identityKey,
 	); err != nil {
 		return Candidate{}, err
 	}
@@ -115,6 +118,9 @@ func scanCandidate(scan func(dest ...any) error) (Candidate, error) {
 	if modifyBy.Valid {
 		c.ModifyBy = modifyBy.String
 	}
+	if identityKey.Valid {
+		c.IdentityKey = identityKey.String
+	}
 	return c, nil
 }
 
@@ -149,6 +155,7 @@ func (s CandidateStore) CreateCandidate(ctx context.Context, c Candidate) (Candi
 	if err != nil {
 		return Candidate{}, err
 	}
+	identityKey := IdentityKey(c.CandidateKind, c.ProposedModuleID, c.ProposedPayload)
 	if c.Status == "" {
 		c.Status = StatusDiscovered
 	}
@@ -176,9 +183,9 @@ func (s CandidateStore) CreateCandidate(ctx context.Context, c Candidate) (Candi
 INSERT INTO kb.ontology_candidates
 	(candidate_kind, proposed_payload, proposed_module_id, source_type,
 	 source_ref, source_line_spans, discovery_method, confidence, fingerprint,
-	 candidate_matches, status, proposed_by, create_by, modify_by)
+	 candidate_matches, status, proposed_by, create_by, modify_by, identity_key)
 VALUES ($1, $2::jsonb, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb,
-	$11, $12, $13, $14)
+	$11, $12, $13, $14, $15)
 ON CONFLICT (fingerprint) DO NOTHING
 RETURNING ` + candidateColumns
 
@@ -187,10 +194,11 @@ RETURNING ` + candidateColumns
 		nullableString(c.SourceRef), string(lineSpans), nullableString(c.DiscoveryMethod),
 		nullableFloat(c.Confidence), fp, string(matches), c.Status,
 		nullableString(c.ProposedBy), nullableString(c.CreateBy), nullableString(c.ModifyBy),
+		nullableString(identityKey),
 	)
 	created, err := scanCandidate(row.Scan)
 	if err == nil {
-		return created, nil
+		return s.matchByIdentityKey(ctx, created)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Candidate{}, err
@@ -204,6 +212,84 @@ RETURNING ` + candidateColumns
 	}
 	existing.Reused = true
 	return existing, nil
+}
+
+// candidateMatchEntry is one entry in the candidate_matches JSONB array.
+// match_type discriminates this soft candidate-vs-candidate identity-key
+// signal (design.md Decision 4 of the ontology-candidate-dedup change) from
+// any future term-vs-governed-term entries (e.g. from semid.TermFamily).
+type candidateMatchEntry struct {
+	MatchType   string `json:"match_type"`
+	CandidateID int64  `json:"candidate_id"`
+	MatchedOn   string `json:"matched_on"`
+	DetectedAt  string `json:"detected_at"`
+}
+
+// matchByIdentityKey looks up other non-terminal-status candidates sharing
+// c's identity_key and records a soft match on both sides via
+// candidate_matches (spec §"Identity-key matches are recorded as a soft
+// signal, never block or merge"). It never changes status, never blocks the
+// caller, and only runs for a newly created row (c.IdentityKey == "" is a
+// no-op, matching candidates not eligible for this signal).
+func (s CandidateStore) matchByIdentityKey(ctx context.Context, c Candidate) (Candidate, error) {
+	if c.IdentityKey == "" {
+		return c, nil
+	}
+	const findStmt = `
+SELECT id FROM kb.ontology_candidates
+WHERE identity_key = $1 AND id != $2 AND status NOT IN ('rejected', 'superseded')`
+	rows, err := s.DB.QueryContext(ctx, findStmt, c.IdentityKey, c.ID)
+	if err != nil {
+		return c, err
+	}
+	defer rows.Close()
+
+	var matchIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return c, err
+		}
+		matchIDs = append(matchIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return c, err
+	}
+	if len(matchIDs) == 0 {
+		return c, nil
+	}
+
+	const appendStmt = `
+UPDATE kb.ontology_candidates
+SET candidate_matches = COALESCE(candidate_matches, '[]'::jsonb) || $2::jsonb, modify_time = NOW()
+WHERE id = $1`
+
+	detectedAt := time.Now().UTC().Format(time.RFC3339)
+	newEntries := make([]candidateMatchEntry, 0, len(matchIDs))
+	for _, matchID := range matchIDs {
+		newEntries = append(newEntries, candidateMatchEntry{
+			MatchType: "candidate", CandidateID: matchID, MatchedOn: "identity_key", DetectedAt: detectedAt,
+		})
+		reciprocal, err := json.Marshal([]candidateMatchEntry{{
+			MatchType: "candidate", CandidateID: c.ID, MatchedOn: "identity_key", DetectedAt: detectedAt,
+		}})
+		if err != nil {
+			return c, err
+		}
+		if _, err := s.DB.ExecContext(ctx, appendStmt, matchID, string(reciprocal)); err != nil {
+			return c, err
+		}
+	}
+
+	entriesJSON, err := json.Marshal(newEntries)
+	if err != nil {
+		return c, err
+	}
+	if _, err := s.DB.ExecContext(ctx, appendStmt, c.ID, string(entriesJSON)); err != nil {
+		return c, err
+	}
+	c.CandidateMatches = entriesJSON
+	return c, nil
 }
 
 func (s CandidateStore) byFingerprint(ctx context.Context, fingerprint string) (Candidate, error) {

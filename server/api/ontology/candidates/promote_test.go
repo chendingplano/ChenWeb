@@ -22,7 +22,7 @@ func TestPromoteToContentRequiresApprovedStatus(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDraft)).
 			AddRow(int64(1), "term", []byte(`{"term_id":"core:assertion"}`), "core", "llm", nil,
 				[]byte("null"), nil, nil, "fp", []byte("null"), StatusDraft, nil, nil, nil,
-				now, nil, now, nil))
+				now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	if _, err := store.PromoteToContent(context.Background(), 1, "curator"); err == nil {
@@ -49,7 +49,7 @@ func TestPromoteToContentMaterializesTerm(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusApproved)).
 			AddRow(int64(1), "term", payload, "core", "llm", nil,
 				[]byte("null"), nil, nil, "fp", []byte("null"), StatusApproved, nil, nil, nil,
-				now, nil, now, nil))
+				now, nil, now, nil, nil))
 	// contentExists on kb.ontology_terms -> false (nothing materialized yet).
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM kb.ontology_terms WHERE source_candidate_id = $1)")).
 		WithArgs(int64(1)).
@@ -93,7 +93,7 @@ func TestPromoteToContentSkipsWhenAlreadyMaterialized(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusApproved)).
 			AddRow(int64(1), "term", payload, "core", "llm", nil,
 				[]byte("null"), nil, nil, "fp", []byte("null"), StatusApproved, nil, nil, nil,
-				now, nil, now, nil))
+				now, nil, now, nil, nil))
 	// Content already exists for this candidate -> no INSERT at all.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM kb.ontology_terms WHERE source_candidate_id = $1)")).
 		WithArgs(int64(1)).

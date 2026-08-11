@@ -16,7 +16,7 @@ func candidateRow(id int64, status string) []string {
 		"id", "candidate_kind", "proposed_payload", "proposed_module_id", "source_type",
 		"source_ref", "source_line_spans", "discovery_method", "confidence", "fingerprint",
 		"candidate_matches", "status", "decision_reason", "dependency_fingerprint",
-		"proposed_by", "create_time", "create_by", "modify_time", "modify_by",
+		"proposed_by", "create_time", "create_by", "modify_time", "modify_by", "identity_key",
 	}
 }
 
@@ -36,10 +36,10 @@ func TestCreateCandidateInsertsAndComputesFingerprint(t *testing.T) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_candidates")).
 		WithArgs("term", string(payload), "core", "llm", "rec:1", "null", nil, nil, fp, "null",
-			StatusDiscovered, nil, "tester", "tester").
+			StatusDiscovered, nil, "tester", "tester", nil).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDiscovered)).
 			AddRow(int64(1), "term", payload, "core", "llm", "rec:1", []byte("null"), nil, nil, fp,
-				[]byte("null"), StatusDiscovered, nil, nil, nil, now, "tester", now, "tester"))
+				[]byte("null"), StatusDiscovered, nil, nil, nil, now, "tester", now, "tester", nil))
 
 	store := CandidateStore{DB: db}
 	got, err := store.CreateCandidate(context.Background(), Candidate{
@@ -79,14 +79,14 @@ func TestCreateCandidateReusesExistingOnIdenticalFingerprint(t *testing.T) {
 	// ON CONFLICT (fingerprint) DO NOTHING -> no row returned.
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_candidates")).
 		WithArgs("term", string(payload), "core", "llm", "rec:1", "null", nil, nil, fp, "null",
-			StatusDiscovered, nil, "tester", "tester").
+			StatusDiscovered, nil, "tester", "tester", nil).
 		WillReturnError(sql.ErrNoRows)
 	// Existing candidate is fetched by fingerprint.
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE fingerprint = $1")).
 		WithArgs(fp).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusApproved)).
 			AddRow(int64(7), "term", payload, "core", "llm", "rec:1", []byte("null"), nil, nil, fp,
-				[]byte("null"), StatusApproved, nil, nil, nil, now, "system", now, "system"))
+				[]byte("null"), StatusApproved, nil, nil, nil, now, "system", now, "system", nil))
 
 	store := CandidateStore{DB: db}
 	got, err := store.CreateCandidate(context.Background(), Candidate{
@@ -121,7 +121,7 @@ func TestTransitionStatusMovesDraftToInReview(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDraft)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusDraft, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusDraft, nil, nil, nil, now, nil, now, nil, nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.ontology_candidates")).
 		WithArgs(int64(1), StatusInReview, "curator").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -129,7 +129,7 @@ func TestTransitionStatusMovesDraftToInReview(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusInReview)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusInReview, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusInReview, nil, nil, nil, now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	got, err := store.TransitionStatus(context.Background(), 1, StatusInReview, "curator")
@@ -156,7 +156,7 @@ func TestTransitionStatusRejectsSkipToApproved(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDiscovered)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusDiscovered, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusDiscovered, nil, nil, nil, now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	_, err = store.TransitionStatus(context.Background(), 1, StatusApproved, "curator")
@@ -180,7 +180,7 @@ func TestRetryDeferredRequiresChangedDependencyFingerprint(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDeferred)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusDeferred, nil, "dep-v1", nil, now, nil, now, nil))
+				[]byte("null"), StatusDeferred, nil, "dep-v1", nil, now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	// Same dependency fingerprint -> not eligible.
@@ -212,7 +212,7 @@ func TestDeferCandidateRecordsDependencyFingerprint(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDraft)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusDraft, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusDraft, nil, nil, nil, now, nil, now, nil, nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.ontology_candidates")).
 		WithArgs(int64(1), "dep-v1", "blocked on dependency", "curator").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -220,7 +220,7 @@ func TestDeferCandidateRecordsDependencyFingerprint(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusDeferred)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusDeferred, "blocked on dependency", "dep-v1", nil, now, nil, now, nil))
+				[]byte("null"), StatusDeferred, "blocked on dependency", "dep-v1", nil, now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	got, err := store.DeferCandidate(context.Background(), 1, "dep-v1", "blocked on dependency", "curator")
@@ -252,7 +252,7 @@ func TestDeferCandidateRequiresFingerprintAndEditableState(t *testing.T) {
 		WithArgs(int64(2)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(2, StatusApproved)).
 			AddRow(int64(2), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusApproved, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusApproved, nil, nil, nil, now, nil, now, nil, nil))
 	if _, err := store.DeferCandidate(context.Background(), 2, "dep-v1", "blocked", "curator"); err == nil {
 		t.Fatal("expected error deferring an approved candidate")
 	}
@@ -273,7 +273,7 @@ func TestUpdatePayloadFrozenAfterInReview(t *testing.T) {
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows(candidateRow(1, StatusInReview)).
 			AddRow(int64(1), "term", []byte(`{}`), nil, "manual", nil, []byte("null"), nil, nil, "fp",
-				[]byte("null"), StatusInReview, nil, nil, nil, now, nil, now, nil))
+				[]byte("null"), StatusInReview, nil, nil, nil, now, nil, now, nil, nil))
 
 	store := CandidateStore{DB: db}
 	if _, err := store.UpdatePayload(context.Background(), 1, []byte(`{"x":1}`), "curator"); err == nil {
