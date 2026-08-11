@@ -93,6 +93,49 @@ RETURNING id`)
 	}
 }
 
+func TestCreateDocProcessPlan_NilExcludedByPolicyDoesNotViolateNotNull(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec, excluded_by_policy)
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8)
+RETURNING id`)
+
+	// excluded_by_policy is NOT NULL in the schema. A nil []string (the
+	// common case: ProductionProcessorPlan.ExcludedByPolicy() returns nil
+	// when nothing was excluded) must be sent as an empty array literal,
+	// not as SQL NULL: pq.StringArray(nil).Value() returns NULL while
+	// pq.StringArray{}.Value() returns "{}".
+	mock.ExpectQuery(insertQuery).
+		WithArgs(
+			int64(5),
+			int64(4821),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			"{}",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(9)))
+
+	store := SQLStore{DB: db}
+	if _, err := store.CreateDocProcessPlan(context.Background(), DocProcessPlanRecord{
+		RunID:            5,
+		RecordID:         4821,
+		ExcludedByPolicy: nil,
+	}); err != nil {
+		t.Fatalf("CreateDocProcessPlan: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestCreateDocProcessPlan_RequiresRunIDAndRecordID(t *testing.T) {
 	store := SQLStore{DB: nil}
 	if _, err := store.CreateDocProcessPlan(context.Background(), DocProcessPlanRecord{RunID: 1}); err == nil {

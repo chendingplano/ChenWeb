@@ -79,13 +79,18 @@ func (s SQLStore) CreateDocProcessPlan(ctx context.Context, rec DocProcessPlanRe
 		return 0, err
 	}
 
+	excludedByPolicy := rec.ExcludedByPolicy
+	if excludedByPolicy == nil {
+		excludedByPolicy = []string{}
+	}
+
 	const stmt = `
 INSERT INTO kb.doc_process_plans (run_id, record_id, plan_facts, plan_steps, pipeline_selection, pipeline_binding, pipeline_spec, excluded_by_policy)
 VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8)
 RETURNING id`
 
 	var id int64
-	err = s.DB.QueryRowContext(ctx, stmt, rec.RunID, rec.RecordID, string(factsJSON), string(stepsJSON), string(selectionJSON), string(bindingJSON), string(specJSON), pq.Array(rec.ExcludedByPolicy)).Scan(&id)
+	err = s.DB.QueryRowContext(ctx, stmt, rec.RunID, rec.RecordID, string(factsJSON), string(stepsJSON), string(selectionJSON), string(bindingJSON), string(specJSON), pq.Array(excludedByPolicy)).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
