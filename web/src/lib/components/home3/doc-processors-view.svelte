@@ -18,6 +18,14 @@
 
 	let { darkMode = true }: Props = $props();
 
+	const pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
+	const cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
+	const surface2 = $derived(darkMode ? '#252A3A' : '#ECEEF2');
+	const borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB');
+	const accent = $derived(darkMode ? '#818CF8' : '#6366F1');
+	const heading = $derived(darkMode ? '#E2E8F0' : '#111827');
+	const sub = $derived(darkMode ? '#94A3B8' : '#6B7280');
+
 	let processors = $state<DocProcessor[]>([]);
 	let loading = $state(true);
 	let search = $state('');
@@ -38,9 +46,23 @@
 	let edRequireLLM = $state(false);
 	let edDescription = $state('');
 	let edNotes = $state('');
+	let edRequires = $state('');
 
 	let deleted = $state('');
 	let deleting = $state(false);
+
+	function parseRequiresList(raw: string): string[] {
+		const seen = new Set<string>();
+		const out: string[] = [];
+		for (const part of raw.split(',')) {
+			const v = part.trim();
+			if (v && !seen.has(v)) {
+				seen.add(v);
+				out.push(v);
+			}
+		}
+		return out;
+	}
 
 	function formatTime(iso: string): string {
 		const d = new Date(iso);
@@ -87,6 +109,7 @@
 		edRequireLLM = false;
 		edDescription = '';
 		edNotes = '';
+		edRequires = '';
 		showEditor = true;
 	}
 
@@ -101,6 +124,7 @@
 		edRequireLLM = p.require_llm;
 		edDescription = p.description ?? '';
 		edNotes = p.notes ?? '';
+		edRequires = (p.requires ?? []).join(', ');
 		showEditor = true;
 	}
 
@@ -118,6 +142,7 @@
 			errorMsg = 'display_name is required';
 			return;
 		}
+		const requires = parseRequiresList(edRequires);
 		saving = true;
 		try {
 			if (editing) {
@@ -127,7 +152,8 @@
 					status: edStatus,
 					require_llm: edRequireLLM,
 					description: edDescription ? edDescription : null,
-					notes: edNotes ? edNotes : null
+					notes: edNotes ? edNotes : null,
+					requires
 				});
 				infoMsg = `Updated ${editingOriginalName}`;
 			} else {
@@ -138,7 +164,8 @@
 					status: edStatus,
 					require_llm: edRequireLLM,
 					description: edDescription ? edDescription : undefined,
-					notes: edNotes ? edNotes : undefined
+					notes: edNotes ? edNotes : undefined,
+					requires
 				});
 				infoMsg = `Created ${edName}`;
 			}
@@ -169,7 +196,18 @@
 	onMount(loadAll);
 </script>
 
-<div class="page">
+<div
+	class="page"
+	class:dark={darkMode}
+	style:--page={pageBg}
+	style:--card={cardBg}
+	style:--panel-bg={surface2}
+	style:--border={borderColor}
+	style:--input-bg={surface2}
+	style:--heading={heading}
+	style:--sub={sub}
+	style:--btn={accent}
+>
 	<div class="header">
 		<div class="header-left">
 			<h1>Doc Processors</h1>
@@ -214,6 +252,8 @@
 							<th>Type</th>
 							<th>LLM</th>
 							<th>Status</th>
+							<th>Requires</th>
+							<th>Notes</th>
 							<th>Modified</th>
 							<th class="actions-col">Actions</th>
 						</tr>
@@ -246,6 +286,24 @@
 										class:st-suspended={p.status === 'suspended'}
 									>{p.status}</span
 									>
+								</td>
+								<td>
+									{#if p.requires && p.requires.length}
+										<div class="req-list">
+											{#each p.requires as r (r)}
+												<span class="badge req">{r}</span>
+											{/each}
+										</div>
+									{:else}
+										<span class="muted">—</span>
+									{/if}
+								</td>
+								<td>
+									{#if p.notes}
+										<div class="cell-notes">{p.notes}</div>
+									{:else}
+										<span class="muted">—</span>
+									{/if}
 								</td>
 								<td class="muted">{formatTime(p.modify_time)}</td>
 								<td class="actions-col">
@@ -311,6 +369,15 @@
 					<label class="toggle-label">
 						<span>Requires LLM</span>
 						<input type="checkbox" bind:checked={edRequireLLM} />
+					</label>
+					<label class="wide">
+						<span>Requires (comma-separated name_as_ids)</span>
+						<input
+							type="text"
+							bind:value={edRequires}
+							placeholder="e.g. chunking, extract_metadata"
+						/>
+						<small class="hint">Processors this processor depends on.</small>
 					</label>
 					<label class="wide">
 						<span>Description</span>
@@ -511,6 +578,65 @@
 	.badge.st-suspended {
 		background: rgba(220, 38, 38, 0.14);
 		color: #dc2626;
+	}
+
+	.req-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+	}
+
+	.badge.req {
+		background: rgba(59, 130, 246, 0.12);
+		color: #2563eb;
+	}
+
+	.cell-notes {
+		margin-top: 0.15rem;
+		font-size: 0.78rem;
+		color: var(--sub, #6b7280);
+		max-width: 26rem;
+	}
+
+	.dark .banner.error {
+		color: #f87171;
+	}
+
+	.dark .banner.info {
+		color: #34d399;
+	}
+
+	.dark .badge.type-config {
+		color: #a78bfa;
+	}
+
+	.dark .badge.llm {
+		color: #fbbf24;
+	}
+
+	.dark .badge.st-active {
+		color: #34d399;
+	}
+
+	.dark .badge.st-disabled {
+		color: #94a3b8;
+	}
+
+	.dark .badge.st-suspended {
+		color: #f87171;
+	}
+
+	.dark .badge.req {
+		color: #93c5fd;
+	}
+
+	.dark .btn.danger {
+		color: #f87171;
+	}
+
+	.dark .btn.danger:hover {
+		border-color: #f87171;
+		color: #f87171;
 	}
 
 	.actions-col {

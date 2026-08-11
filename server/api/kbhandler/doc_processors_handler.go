@@ -27,19 +27,20 @@ type docProcessorRecord struct {
 	RequireLLM  bool      `json:"require_llm"`
 	Status      string    `json:"status"`
 	Notes       *string   `json:"notes,omitempty"`
+	Requires    []string  `json:"requires"`
 	CreateTime  time.Time `json:"create_time"`
 	ModifyTime  time.Time `json:"modify_time"`
 }
 
 type listDocProcessorsResponse struct {
-	Status  bool                  `json:"status"`
-	Results []docProcessorRecord  `json:"results"`
-	Total   int                   `json:"total"`
+	Status  bool                 `json:"status"`
+	Results []docProcessorRecord `json:"results"`
+	Total   int                  `json:"total"`
 }
 
 type docProcessorResponse struct {
-	Status bool                 `json:"status"`
-	Record docProcessorRecord   `json:"record"`
+	Status bool               `json:"status"`
+	Record docProcessorRecord `json:"record"`
 }
 
 type docProcessorDeleteResponse struct {
@@ -48,7 +49,7 @@ type docProcessorDeleteResponse struct {
 }
 
 const docProcessorColumns = `
-    name_as_id, display_name, description, type, require_llm, status, notes, create_time, modify_time
+    name_as_id, display_name, description, type, require_llm, status, notes, requires, create_time, modify_time
 FROM kb.doc_processors`
 
 func scanDocProcessorRecord(scan func(dest ...any) error) (docProcessorRecord, error) {
@@ -56,12 +57,19 @@ func scanDocProcessorRecord(scan func(dest ...any) error) (docProcessorRecord, e
 		rec         docProcessorRecord
 		description sql.NullString
 		notes       sql.NullString
+		requiresRaw []byte
 	)
 	if err := scan(
 		&rec.NameAsID, &rec.DisplayName, &description, &rec.Type,
-		&rec.RequireLLM, &rec.Status, &notes, &rec.CreateTime, &rec.ModifyTime,
+		&rec.RequireLLM, &rec.Status, &notes, &requiresRaw, &rec.CreateTime, &rec.ModifyTime,
 	); err != nil {
 		return docProcessorRecord{}, err
+	}
+	rec.Requires = []string{}
+	if len(requiresRaw) > 0 {
+		if err := json.Unmarshal(requiresRaw, &rec.Requires); err != nil {
+			return docProcessorRecord{}, err
+		}
 	}
 	if description.Valid && strings.TrimSpace(description.String) != "" {
 		v := description.String
@@ -77,6 +85,26 @@ func scanDocProcessorRecord(scan func(dest ...any) error) (docProcessorRecord, e
 func fetchDocProcessorByID(db *sql.DB, name string) (docProcessorRecord, error) {
 	query := "SELECT" + docProcessorColumns + "\nWHERE name_as_id = $1"
 	return scanDocProcessorRecord(db.QueryRow(query, name).Scan)
+}
+
+// decodeRequiresList parses a requires payload: a JSON array of strings
+// (null yields an empty list). Values are trimmed and de-duplicated.
+func decodeRequiresList(raw json.RawMessage) ([]string, error) {
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(list))
+	seen := map[string]bool{}
+	for _, item := range list {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func validDocProcessorType(v string) bool {
@@ -191,6 +219,15 @@ func CreateDocProcessor(c echo.Context) error {
 		status = *value
 	}
 
+	requires := []string{}
+	if raw, ok := payload["requires"]; ok {
+		list, err := decodeRequiresList(raw)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "requires must be an array of strings (CWB_KB_DPR_108)"})
+		}
+		requires = list
+	}
+
 	var description, notes any
 	if raw, ok := payload["description"]; ok {
 		value, err := decodeStringValue(raw, false)
@@ -204,7 +241,7 @@ func CreateDocProcessor(c echo.Context) error {
 	if raw, ok := payload["notes"]; ok {
 		value, err := decodeStringValue(raw, false)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid notes: %v (CWB_KB_DPR_108)", err)})
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("invalid notes: %v (CWB_KB_DPR_109)", err)})
 		}
 		if value != nil {
 			notes = *value
@@ -215,24 +252,28 @@ func CreateDocProcessor(c echo.Context) error {
 	var exists bool
 	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM kb.doc_processors WHERE name_as_id = $1)`, nameAsID).Scan(&exists); err != nil {
 		logger.Error("check duplicate doc processor failed", "name_as_id", nameAsID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create doc processor (CWB_KB_DPR_109)"})
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create doc processor (CWB_KB_DPR_110)"})
 	}
 	if exists {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("a doc processor named %q already exists (CWB_KB_DPR_110)", nameAsID)})
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("a doc processor named %q already exists (CWB_KB_DPR_111)", nameAsID)})
 	}
 
+	requiresJSON, err := json.Marshal(requires)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to encode requires (CWB_KB_DPR_112)"})
+	}
 	if _, err := db.Exec(`
-INSERT INTO kb.doc_processors (name_as_id, display_name, description, type, require_llm, status, notes)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		nameAsID, displayName, description, processorType, requireLLM, status, notes); err != nil {
+INSERT INTO kb.doc_processors (name_as_id, display_name, description, type, require_llm, status, notes, requires)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+		nameAsID, displayName, description, processorType, requireLLM, status, notes, string(requiresJSON)); err != nil {
 		logger.Error("insert doc processor failed", "name_as_id", nameAsID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create doc processor (CWB_KB_DPR_111)"})
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create doc processor (CWB_KB_DPR_113)"})
 	}
 
 	rec, err := fetchDocProcessorByID(db, nameAsID)
 	if err != nil {
 		logger.Error("fetch created doc processor failed", "name_as_id", nameAsID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created doc processor (CWB_KB_DPR_112)"})
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to retrieve created doc processor (CWB_KB_DPR_114)"})
 	}
 
 	return c.JSON(http.StatusOK, docProcessorResponse{Status: true, Record: rec})
@@ -309,6 +350,17 @@ func UpdateDocProcessor(c echo.Context) error {
 				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "status must be 'active', 'disabled', or 'suspended' (CWB_KB_DPR_208)"})
 			}
 			addSet(field, *value)
+		case "requires":
+			list, err := decodeRequiresList(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "requires must be an array of strings (CWB_KB_DPR_215)"})
+			}
+			encoded, err := json.Marshal(list)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to encode requires (CWB_KB_DPR_216)"})
+			}
+			args = append(args, string(encoded))
+			sets = append(sets, fmt.Sprintf("requires = $%d::jsonb", len(args)))
 		default:
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("unknown field %q (CWB_KB_DPR_209)", field)})
 		}

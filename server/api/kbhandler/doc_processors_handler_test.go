@@ -39,18 +39,18 @@ const dpFetchQuery = "SELECT" + docProcessorColumns + "\nWHERE name_as_id = $1"
 const dpExistsQuery = `SELECT EXISTS(SELECT 1 FROM kb.doc_processors WHERE name_as_id = $1)`
 
 const dpInsertQuery = `
-INSERT INTO kb.doc_processors (name_as_id, display_name, description, type, require_llm, status, notes)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`
+INSERT INTO kb.doc_processors (name_as_id, display_name, description, type, require_llm, status, notes, requires)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`
 
 const dpDeleteQuery = `DELETE FROM kb.doc_processors WHERE name_as_id = $1`
 
 var dpCols = []string{
 	"name_as_id", "display_name", "description", "type", "require_llm",
-	"status", "notes", "create_time", "modify_time",
+	"status", "notes", "requires", "create_time", "modify_time",
 }
 
-func dpRow(name, display string, desc any, typ string, llm bool, status string, notes any) []driver.Value {
-	return []driver.Value{name, display, desc, typ, llm, status, notes, dpFixedTime, dpFixedTime}
+func dpRow(name, display string, desc any, typ string, llm bool, status string, notes any, requires []byte) []driver.Value {
+	return []driver.Value{name, display, desc, typ, llm, status, notes, requires, dpFixedTime, dpFixedTime}
 }
 
 func expectFetchDocProcessor(mock sqlmock.Sqlmock, name string, row []driver.Value) {
@@ -65,8 +65,8 @@ func TestListDocProcessorsSuccess(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(dpListQuery)).
 		WillReturnRows(sqlmock.NewRows(dpCols).
-			AddRow(dpRow("blocking", "Blocking Processor", "Breaks blocks", "mandatory", false, "active", "seqno 1")...).
-			AddRow(dpRow("extract_metrics", "Extract Metrics", nil, "configurable", true, "suspended", nil)...))
+			AddRow(dpRow("blocking", "Blocking Processor", "Breaks blocks", "mandatory", false, "active", "seqno 1", nil)...).
+			AddRow(dpRow("extract_metrics", "Extract Metrics", nil, "configurable", true, "suspended", nil, []byte(`["chunking"]`))...))
 
 	c, rec := newPipelineContext(t, http.MethodGet, "/api/v1/kb/doc-processors", "")
 	if err := ListDocProcessors(c); err != nil {
@@ -102,7 +102,7 @@ func TestListDocProcessorsSearch(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(dpSearchQuery)).
 		WithArgs("%block%").
 		WillReturnRows(sqlmock.NewRows(dpCols).
-			AddRow(dpRow("blocking", "Blocking Processor", nil, "mandatory", false, "active", nil)...))
+			AddRow(dpRow("blocking", "Blocking Processor", nil, "mandatory", false, "active", nil, nil)...))
 
 	c, rec := newPipelineContext(t, http.MethodGet, "/api/v1/kb/doc-processors?search=block", "")
 	if err := ListDocProcessors(c); err != nil {
@@ -132,9 +132,9 @@ func TestCreateDocProcessorSuccess(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(dpExistsQuery)).WithArgs("extract_metrics").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectExec(regexp.QuoteMeta(dpInsertQuery)).
-		WithArgs("extract_metrics", "Extract Metrics", "Extracts metrics", "configurable", true, "active", "note").
+		WithArgs("extract_metrics", "Extract Metrics", "Extracts metrics", "configurable", true, "active", "note", `[]`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	expectFetchDocProcessor(mock, "extract_metrics", dpRow("extract_metrics", "Extract Metrics", "Extracts metrics", "configurable", true, "active", "note"))
+	expectFetchDocProcessor(mock, "extract_metrics", dpRow("extract_metrics", "Extract Metrics", "Extracts metrics", "configurable", true, "active", "note", []byte(`["chunking"]`)))
 
 	c, rec := newPipelineContext(t, http.MethodPost, "/api/v1/kb/doc-processors", `{
 		"name_as_id":"extract_metrics",
@@ -173,9 +173,9 @@ func TestCreateDocProcessorDefaultsStatusActive(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	// description/notes omitted → NULL args; status omitted → defaults to 'active'.
 	mock.ExpectExec(regexp.QuoteMeta(dpInsertQuery)).
-		WithArgs("chunking", "Chunking", nil, "mandatory", false, "active", nil).
+		WithArgs("chunking", "Chunking", nil, "mandatory", false, "active", nil, `[]`).
 		WillReturnResult(sqlmock.NewResult(2, 1))
-	expectFetchDocProcessor(mock, "chunking", dpRow("chunking", "Chunking", nil, "mandatory", false, "active", nil))
+	expectFetchDocProcessor(mock, "chunking", dpRow("chunking", "Chunking", nil, "mandatory", false, "active", nil, nil))
 
 	c, rec := newPipelineContext(t, http.MethodPost, "/api/v1/kb/doc-processors", `{
 		"name_as_id":"chunking",
@@ -289,7 +289,7 @@ func TestUpdateDocProcessorSuccess(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(updateQuery)).
 		WithArgs("Blocking Processor v2", "configurable", "blocking").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	expectFetchDocProcessor(mock, "blocking", dpRow("blocking", "Blocking Processor v2", nil, "configurable", false, "active", nil))
+	expectFetchDocProcessor(mock, "blocking", dpRow("blocking", "Blocking Processor v2", nil, "configurable", false, "active", nil, nil))
 
 	c, rec := newDocProcessorNameContext(t, http.MethodPut, "blocking", `{
 		"display_name":"Blocking Processor v2",
@@ -440,6 +440,100 @@ func TestDeleteDocProcessorNotFound(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreateDocProcessorWithRequires(t *testing.T) {
+	db, mock := installPolicyDB(t)
+	_ = db
+
+	mock.ExpectQuery(regexp.QuoteMeta(dpExistsQuery)).WithArgs("review_document").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta(dpInsertQuery)).
+		WithArgs("review_document", "Document Review", nil, "configurable", false, "active", nil, `["chunking","extract_metadata"]`).
+		WillReturnResult(sqlmock.NewResult(3, 1))
+	expectFetchDocProcessor(mock, "review_document", dpRow("review_document", "Document Review", nil, "configurable", false, "active", nil, []byte(`["chunking","extract_metadata"]`)))
+
+	c, rec := newPipelineContext(t, http.MethodPost, "/api/v1/kb/doc-processors", `{
+		"name_as_id":"review_document",
+		"display_name":"Document Review",
+		"type":"configurable",
+		"requires":["chunking","extract_metadata"]
+	}`)
+	if err := CreateDocProcessor(c); err != nil {
+		t.Fatalf("CreateDocProcessor returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload docProcessorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(payload.Record.Requires) != 2 || payload.Record.Requires[0] != "chunking" || payload.Record.Requires[1] != "extract_metadata" {
+		t.Fatalf("unexpected requires: %+v", payload.Record.Requires)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreateDocProcessorInvalidRequiresRejected(t *testing.T) {
+	_, mock := installPolicyDB(t)
+
+	c, rec := newPipelineContext(t, http.MethodPost, "/api/v1/kb/doc-processors", `{
+		"name_as_id":"thing",
+		"display_name":"Thing",
+		"type":"configurable",
+		"requires":["chunking", 42]
+	}`)
+	if err := CreateDocProcessor(c); err != nil {
+		t.Fatalf("CreateDocProcessor returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "requires") {
+		t.Fatalf("expected requires error message, got: %s", rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestUpdateDocProcessorRequires(t *testing.T) {
+	db, mock := installPolicyDB(t)
+	_ = db
+
+	const updateQuery = "UPDATE kb.doc_processors SET modify_time = NOW(), requires = $1::jsonb WHERE name_as_id = $2"
+	mock.ExpectExec(regexp.QuoteMeta(updateQuery)).
+		WithArgs(`["chunking"]`, "extract_metrics").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectFetchDocProcessor(mock, "extract_metrics", dpRow("extract_metrics", "Extract Metrics", nil, "configurable", true, "active", nil, []byte(`["chunking"]`)))
+
+	c, rec := newDocProcessorNameContext(t, http.MethodPut, "extract_metrics", `{
+		"requires":["chunking"]
+	}`)
+	if err := UpdateDocProcessor(c); err != nil {
+		t.Fatalf("UpdateDocProcessor returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload docProcessorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(payload.Record.Requires) != 1 || payload.Record.Requires[0] != "chunking" {
+		t.Fatalf("unexpected requires: %+v", payload.Record.Requires)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

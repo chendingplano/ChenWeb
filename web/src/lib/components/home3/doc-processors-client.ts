@@ -19,6 +19,7 @@ export type DocProcessor = {
 	require_llm: boolean;
 	status: DocProcessorStatus;
 	notes?: string;
+	requires: string[];
 	create_time: string;
 	modify_time: string;
 };
@@ -31,6 +32,7 @@ export type CreateProcessorInput = {
 	require_llm?: boolean;
 	status?: DocProcessorStatus;
 	notes?: string;
+	requires?: string[];
 };
 
 export type UpdateProcessorInput = {
@@ -41,6 +43,8 @@ export type UpdateProcessorInput = {
 	require_llm?: boolean;
 	status?: DocProcessorStatus;
 	notes?: string | null;
+	/** empty array clears the dependency list. */
+	requires?: string[];
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
