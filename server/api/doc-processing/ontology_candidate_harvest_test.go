@@ -224,7 +224,7 @@ func TestTestMethodsProcessorPersistsValidatedChunkOutput(t *testing.T) {
 
 func TestMetricDefinitionsProcessorPersistsValidatedChunkOutput(t *testing.T) {
 	sink := &recordingOntologyCandidateSink{}
-	p := &MetricDefinitionsProcessor{Extractor: &fakeJSONExtractor{out: map[string]any{"metric_definitions": []any{map[string]any{"canonical_name": "Air flow rate", "definition": "Volume per time", "source_line_spans": []any{"71"}}}}}, CandidateSink: sink, ModelName: "test-model"}
+	p := &MetricDefinitionsProcessor{Extractor: &fakeJSONExtractor{out: map[string]any{"metric_definitions": []any{map[string]any{"canonical_name": "Air flow rate", "definition": "Volume per time", "source_line_spans": []any{"71"}}}}}, CandidateSink: sink, ModelName: "test-model", Logger: noopLogger{}}
 	chunks := []Chunk{{SeqNo: 1, Lines: []MarkedLine{{Line: Line{LineNo: 71, Content: "Air flow rate is volume per time."}}}}}
 	if err := p.InitChunkBatch(context.Background(), 42, chunks, "doc"); err != nil {
 		t.Fatalf("InitChunkBatch: %v", err)

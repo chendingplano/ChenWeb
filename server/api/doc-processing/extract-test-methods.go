@@ -3,8 +3,6 @@ package docprocessing
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 
 	ontologycandidates "github.com/chendingplano/deepdoc/server/api/ontology/candidates"
@@ -18,6 +16,9 @@ const testMethodsPrompt = `Extract explicitly stated test or measurement procedu
 type TestMethodsProcessor struct {
 	Extractor     LLMJSONExtractor
 	CandidateSink OntologyCandidateSink
+	ModelRef      string
+	ModelCfgPath  string
+	ModelErr      error
 	ModelName     string
 	batchRecordID int64
 	batchChunks   []Chunk
@@ -27,7 +28,12 @@ type TestMethodsProcessor struct {
 }
 
 func NewTestMethodsProcessor(extractor LLMJSONExtractor) *TestMethodsProcessor {
-	p := &TestMethodsProcessor{Extractor: extractor, ModelName: strings.TrimSpace(os.Getenv("EXTRACT_TEST_METHODS_MODEL_NAME"))}
+	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnvKeys(
+		[]string{"EXTRACT_TEST_METHODS_MODEL_NAME"},
+		"MODEL_DEF_FILE",
+	)
+	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	p := &TestMethodsProcessor{Extractor: extractor, ModelRef: modelRef, ModelCfgPath: modelCfgPath, ModelErr: modelErr, ModelName: modelCfg.ModelName}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.CandidateSink = ontologycandidates.CandidateStore{DB: ApiTypes.ProjectDBHandle}
 	}
@@ -38,7 +44,7 @@ func (p *TestMethodsProcessor) HandleEvent(context.Context, []byte) error {
 	return fmt.Errorf("%s requires chunk batching", p.Name())
 }
 func (p *TestMethodsProcessor) InitChunkBatch(_ context.Context, recordID int64, chunks []Chunk, docCtx string) error {
-	if p.Extractor == nil || p.CandidateSink == nil || p.ModelName == "" {
+	if p.Extractor == nil || p.CandidateSink == nil || p.ModelName == "" || p.ModelErr != nil {
 		return fmt.Errorf("%s is not configured", p.Name())
 	}
 	p.batchRecordID, p.batchChunks, p.batchDocCtx, p.batchMentions = recordID, chunks, docCtx, nil
