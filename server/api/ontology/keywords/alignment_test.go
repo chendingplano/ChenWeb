@@ -432,3 +432,158 @@ func TestAlignmentsStoreMergeConflict(t *testing.T) {
 		t.Fatalf("ExpectationsWereMet: %v", err)
 	}
 }
+
+// TestAlignmentsStoreEnsureAcceptedOrCreateReusesExisting verifies ADR
+// 2026081201 DR1's first branch: a concept that already has an accepted
+// alignment is returned as-is -- no term is created, no label is written.
+// ExpectationsWereMet fails the test if EnsureAcceptedOrCreate attempted any
+// of that unnecessary work.
+func TestAlignmentsStoreEnsureAcceptedOrCreateReusesExisting(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	}
+
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+		WithArgs(testConceptID).
+		WillReturnRows(alignmentReadRow(1, testConceptID, testTermID, []byte(testQualifiers), testScore))
+	mock.ExpectCommit()
+
+	al, err := store.EnsureAcceptedOrCreate(context.Background(), testConceptID,
+		TermSynthesisInput{CanonicalName: "should not be used"}, testMethod, testScore, testEvidence)
+	if err != nil {
+		t.Fatalf("EnsureAcceptedOrCreate: %v", err)
+	}
+	if al.ObjectTermID != testTermID {
+		t.Errorf("expected the existing term %q reused, got %q", testTermID, al.ObjectTermID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet (no term/label write expected): %v", err)
+	}
+}
+
+// TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm verifies ADR
+// 2026081201 DR1's create branch end to end: no existing alignment -> a new
+// auto-promoted term is inserted (DR2/DR3 fields), a prefLabel and one
+// altLabel are written (the alias equal to the canonical name is skipped),
+// then the same EnsureAccepted write sequence aligns the concept to it.
+func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	}
+
+	const (
+		conceptID = "concept_new"
+		newTermID = "measurement:concept_new"
+		newLK     = "kwc:concept_new:core:aligns_to_term:measurement:concept_new"
+	)
+	now := time.Now()
+	permittedUnitsJSON := []byte(`["quantity:unit_x"]`)
+
+	mock.ExpectBegin()
+	expectKeywordIdentityLock(mock)
+
+	// D1 step 1: no existing alignment for this concept.
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+		WithArgs(conceptID).
+		WillReturnRows(noAlignmentRow())
+
+	// D1 step 2 / DR2 / DR3: create the term.
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
+		WithArgs(
+			newTermID, "metric_definition", "measurement", "auto-promoted",
+			"def text", "document-derived, auto-promoted (ADR 2026081201)", nil,
+			"number", "exact", permittedUnitsJSON, nil, nil,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "term_id", "version", "term_kind", "module_id", "status",
+			"definition", "scope", "source_candidate_id", "value_type", "range_type",
+			"permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by",
+		}).AddRow(100, newTermID, 1, "metric_definition", "measurement", "auto-promoted",
+			"def text", "document-derived, auto-promoted (ADR 2026081201)", nil,
+			"number", "exact", permittedUnitsJSON, now, nil, now, nil))
+
+	// prefLabel: existence check, then insert.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS")).
+		WithArgs(newTermID, "und").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_term_labels")).
+		WithArgs(newTermID, "Test Metric", "und", "prefLabel", "auto-promoted", nil, nil, nil).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "term_id", "version", "label", "lang", "label_role", "status",
+			"source_candidate_id", "create_time", "create_by", "modify_time", "modify_by",
+		}).AddRow(200, newTermID, 1, "Test Metric", "und", "prefLabel", "auto-promoted", nil, now, nil, now, nil))
+
+	// altLabel: "TM" only -- the "Test Metric" alias equals the canonical
+	// name and must be skipped, and altLabel never checks prefLabelExists.
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_term_labels")).
+		WithArgs(newTermID, "TM", "und", "altLabel", "auto-promoted", nil, nil, nil).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "term_id", "version", "label", "lang", "label_role", "status",
+			"source_candidate_id", "create_time", "create_by", "modify_time", "modify_by",
+		}).AddRow(201, newTermID, 1, "TM", "und", "altLabel", "auto-promoted", nil, now, nil, now, nil))
+
+	// ensureAccepted's own sequence: conflict gate, released guard x2,
+	// idempotency check, the assertion write, the audit row.
+	mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+		WithArgs(conceptID).
+		WillReturnRows(noAlignmentRow())
+	mock.ExpectQuery(regexp.QuoteMeta(releasedTermExistsSQL)).
+		WithArgs(newTermID, "metric_definition").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(releasedTermExistsSQL)).
+		WithArgs(alignPredicateTermID, "property").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta(getLatestByLK)).
+		WithArgs(newLK).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
+		WithArgs(
+			newLK, "keyword_concept", conceptID, nil,
+			alignPredicateTermID, "ontology_term", newTermID, nil, "null", nil,
+			"positive", nil, testQualifiers, testScore, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil, nil, nil, nil,
+		).
+		WillReturnRows(alignmentAssertionRow(2, newLK, conceptID, newTermID, testEvidence, []byte(testQualifiers), testScore))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
+		WithArgs("keyword_align", "_", `{"concept_id":"concept_new","term_id":"measurement:concept_new"}`,
+			sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(2)))
+	mock.ExpectCommit()
+
+	al, err := store.EnsureAcceptedOrCreate(context.Background(), conceptID,
+		TermSynthesisInput{
+			CanonicalName:        "Test Metric",
+			Aliases:              []string{"TM", "Test Metric"},
+			Definition:           "def text",
+			ValueType:            "number",
+			RangeType:            "exact",
+			PermittedUnitTermIDs: []string{"quantity:unit_x"},
+		}, testMethod, testScore, testEvidence)
+	if err != nil {
+		t.Fatalf("EnsureAcceptedOrCreate: %v", err)
+	}
+	if al.ObjectTermID != newTermID {
+		t.Errorf("expected new term %q, got %q", newTermID, al.ObjectTermID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}

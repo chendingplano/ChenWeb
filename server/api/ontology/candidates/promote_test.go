@@ -56,13 +56,14 @@ func TestPromoteToContentMaterializesTerm(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	// CreateTerm inserts version 1 with source_candidate_id = candidate id.
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:assertion", "class", "core", "approved", "An assertion is a qualified claim.", nil, int64(1), "curator", "curator").
+		WithArgs("core:assertion", "class", "core", "approved", "An assertion is a qualified claim.", nil, int64(1), nil, nil, nil, "curator", "curator").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "value_type", "range_type",
+			"permitted_unit_term_ids", "create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(10), "core:assertion", 1, "class", "core", "approved",
-			"An assertion is a qualified claim.", nil, int64(1), now, "curator", now, "curator"))
+			"An assertion is a qualified claim.", nil, int64(1), nil, nil, nil, now, "curator", now, "curator"))
 
 	store := CandidateStore{DB: db}
 	got, err := store.PromoteToContent(context.Background(), 1, "curator")

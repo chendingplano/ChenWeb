@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
+	"github.com/chendingplano/deepdoc/server/api/ontology/terms"
 )
 
 // ErrAlignmentConflict is returned when an accepted aligns_to_term assertion
@@ -44,13 +46,17 @@ WHERE subject_ref_kind = 'keyword_concept'
 ORDER BY id DESC LIMIT 1`
 
 // releasedTermExistsSQL is the released-guard probe: a governed term must be
-// released content (status='included_in_release' on kb.ontology_terms, the
-// same release-lifecycle filter names/resolver.go's releasedTermSQL applies)
-// and the expected term_kind for the slot it fills.
+// usable content -- curator-released (status='included_in_release' on
+// kb.ontology_terms) or auto-promoted (ADR 2026081201 DR2/DR4: usable
+// immediately, distinguished only for attribution, not gated) -- and the
+// expected term_kind for the slot it fills. names/resolver.go's
+// releasedTermSQL (a different call site: matching a raw name string to a
+// governed label) intentionally stays included_in_release-only -- it is
+// not this guard.
 const releasedTermExistsSQL = `
 SELECT EXISTS (
   SELECT 1 FROM kb.ontology_terms t
-  WHERE t.term_id = $1 AND t.status = 'included_in_release' AND t.term_kind = $2)`
+  WHERE t.term_id = $1 AND t.status IN ('included_in_release', 'auto-promoted') AND t.term_kind = $2)`
 
 // followMergeSQL re-points accepted keyword_concept aligns_to_term rows from
 // the absorbed concept to the survivor.
@@ -271,6 +277,126 @@ func (s AlignmentsStore) ensureAccepted(ctx context.Context, db DBX, conceptID, 
 		return Alignment{}, err
 	}
 	return projectAlignment(created), nil
+}
+
+// TermSynthesisInput is the structural, already-extracted data a caller
+// supplies to auto-create a metric_definition term (ADR 2026081201 DR3). No
+// field is authored by an LLM here -- CanonicalName/Definition/ValueType/
+// RangeType/PermittedUnitTermIDs are transcribed from the triggering
+// metric's own extracted fields (or left empty, never guessed). Unit
+// resolution (a raw unit string -> a released `unit` term id) is the
+// caller's job -- keywords must not depend on the names package (names
+// already depends on keywords; a reverse import would cycle).
+type TermSynthesisInput struct {
+	CanonicalName        string
+	Aliases              []string
+	Definition           string
+	ValueType            string
+	RangeType            string
+	PermittedUnitTermIDs []string
+}
+
+// EnsureAcceptedOrCreate is EnsureAccepted extended with ADR 2026081201 DR1:
+// when a concept has no existing accepted aligns_to_term, it auto-creates a
+// new metric_definition term (status='auto-promoted') from synth and
+// aligns the concept to it, instead of leaving the concept unaligned until
+// a curator promotes a candidate. The existing-alignment path is byte-for-
+// byte EnsureAccepted's (same conflict gate, same idempotency, same
+// decision-log write) -- this only adds the create-if-absent branch.
+//
+// No tier 0-6 fuzzy matching runs here (design.md D1): a concept_id is
+// already a deduplicated identity, so the only question left is existence,
+// not similarity. The term-insert and the alignment-insert happen in one
+// transaction (D1 step 3): a term with no alignment, or an alignment to a
+// nonexistent term, must never be observable.
+func (s AlignmentsStore) EnsureAcceptedOrCreate(ctx context.Context, conceptID string, synth TermSynthesisInput, method string, score float64, evidence string) (Alignment, error) {
+	if s.Assertions.DB == nil {
+		return Alignment{}, errors.New("db is nil")
+	}
+	if strings.TrimSpace(conceptID) == "" {
+		return Alignment{}, errors.New("concept id is required")
+	}
+	if strings.TrimSpace(synth.CanonicalName) == "" {
+		return Alignment{}, errors.New("canonical name is required to auto-create a term")
+	}
+	var result Alignment
+	err := withKeywordIdentityMutation(ctx, s.Assertions.DB, func(db DBX) error {
+		txStore := s
+		txStore.Assertions.DB = db
+		txStore.DecisionLog.DB = db
+
+		// Existing-alignment path: identical to EnsureAccepted, run inside
+		// this same transaction so a concurrent creator's write is visible.
+		existing, err := txStore.AcceptedForConcept(ctx, db, conceptID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			result = *existing
+			return nil
+		}
+
+		termID := autoPromotedTermID(conceptID)
+		created, err := terms.TermStore{DB: db}.CreateTerm(ctx, terms.Term{
+			TermID:               termID,
+			TermKind:             "metric_definition",
+			ModuleID:             "measurement",
+			Status:               "auto-promoted",
+			Definition:           strings.TrimSpace(synth.Definition),
+			Scope:                "document-derived, auto-promoted (ADR 2026081201)",
+			ValueType:            strings.TrimSpace(synth.ValueType),
+			RangeType:            strings.TrimSpace(synth.RangeType),
+			PermittedUnitTermIDs: synth.PermittedUnitTermIDs,
+		})
+		if err != nil {
+			return fmt.Errorf("auto-create metric_definition term: %w", err)
+		}
+		labelStore := terms.LabelStore{DB: db}
+		if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
+			TermID:    termID,
+			Label:     synth.CanonicalName,
+			Lang:      "und",
+			LabelRole: "prefLabel",
+			Status:    "auto-promoted",
+		}); err != nil {
+			return fmt.Errorf("auto-create term prefLabel: %w", err)
+		}
+		for _, alias := range synth.Aliases {
+			alias = strings.TrimSpace(alias)
+			if alias == "" || alias == synth.CanonicalName {
+				continue
+			}
+			if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
+				TermID:    termID,
+				Label:     alias,
+				Lang:      "und",
+				LabelRole: "altLabel",
+				Status:    "auto-promoted",
+			}); err != nil {
+				return fmt.Errorf("auto-create term altLabel %q: %w", alias, err)
+			}
+		}
+
+		aligned, err := txStore.ensureAccepted(ctx, db, conceptID, created.TermID, method, score, evidence)
+		if err != nil {
+			return err
+		}
+		result = aligned
+		return nil
+	})
+	return result, err
+}
+
+// autoPromotedTermID derives a deterministic, collision-free term id from
+// the concept id it is being created for -- concept_id is already the
+// deduplicated identity (D1), so folding it directly into the term id (as
+// opposed to slugifying the human-readable label, which two distinct
+// concepts could coincidentally collide on) guarantees exactly one term per
+// concept without a uniqueness race. The lifecycle state belongs in the
+// ontology_terms.status column, not in the stable identifier, so promotion
+// from auto-promoted to approved does not leave an "auto" marker in the ID.
+func autoPromotedTermID(conceptID string) string {
+	return "measurement:" + conceptID
 }
 
 // releasedTermExists probes whether a term is released governed content of

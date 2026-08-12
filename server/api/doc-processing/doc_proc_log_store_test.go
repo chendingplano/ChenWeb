@@ -181,6 +181,74 @@ WHERE id = $1
 	}
 }
 
+func TestDocProcLoggerLogResolveMetric_InsertsResolveMetricEntry(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	recordID := int64(416)
+	artifact := `{"metric_id":"416_mtc_197","metric_name":"垃圾日处理量"}`
+	extra := `{"group_index":4,"total_groups":13}`
+	callID := "416_merge_g4"
+	activity := "merge_resolve_metrics"
+
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.doc_proc_logs (
+    call_reason,
+    doc_proc_name,
+    model_names,
+    prompt_name,
+    record_id,
+    proc_progress,
+    entry_type,
+    pass,
+    llm_call_id,
+    activity_name,
+    artifact,
+    errors,
+    extra_info,
+    ms_used,
+    log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
+    run_id,
+    create_time
+) VALUES (
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, $15, $16, $17, $18, NOW()
+)`)
+	mock.ExpectExec(insertQuery).
+		WithArgs(
+			"extract_metrics", "extract_metrics", "{test-merge-model}",
+			"prompt-merge-resolve-metrics-v1.md", &recordID, nil,
+			EntryTypeResolveMetric, nil, &callID, &activity,
+			&artifact, nil, &extra, nil, "MID-26071203", nil, nil, nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	logger := DocProcLogger{DB: db}
+	if err := logger.LogResolveMetric(context.Background(), DocProcLogRecord{
+		CallReason:    "extract_metrics",
+		DocProcName:   "extract_metrics",
+		ModelNames:    []string{"test-merge-model"},
+		PromptName:    "prompt-merge-resolve-metrics-v1.md",
+		RecordID:      &recordID,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  &artifact,
+		ExtraInfoJSON: &extra,
+	}, "MID-26071203"); err != nil {
+		t.Fatalf("LogResolveMetric: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestDocProcLoggerLogExtractDocMetadata_ProgressUsesCanonicalAliases(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

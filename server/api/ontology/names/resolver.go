@@ -283,8 +283,36 @@ func (r *Resolver) ResolveAndObserve(ctx context.Context, req ResolveNameRequest
 		termID := res.TermID
 		kocc.TermID = &termID
 	}
-	if _, err := r.Family.ObserveOccurrence(ctx, kocc, true); err != nil {
+	observed, err := r.Family.ObserveOccurrence(ctx, kocc, true)
+	if err != nil {
 		return res, err
+	}
+	// D11 auto-creation is a write-path effect: on a targeted deferred/
+	// human_review miss, ObserveOccurrence mints a provisional concept and
+	// assigns it (ResolvedNodeID), but the read-only ResolveName pass above
+	// never sees it (auto-creation deliberately does not happen on the read
+	// path). Without this, the newly created concept exists in
+	// kb.keyword_concepts but is invisible to this call's own caller —
+	// res.Status stays "unresolved" and res.ConceptID stays empty even
+	// though a real assignment was just made. Only fills in what ResolveName
+	// left empty; an existing term/concept resolution from the read pass is
+	// never overwritten.
+	if res.ConceptID == "" && observed != nil && observed.ResolvedNodeID != "" {
+		res.ConceptID = observed.ResolvedNodeID
+		res.ConceptPrefName = r.prefName(ctx, observed.ResolvedNodeID)
+		res.Method = observed.Method
+		if len(observed.Matches) > 0 {
+			res.Confidence = observed.Matches[0].Score
+		}
+		switch observed.Verdict {
+		case semid.VerdictAmbiguous:
+			res.Status = StatusAmbiguous
+		default:
+			// VerdictAutoAccept, or a targeted VerdictDeferred/VerdictHumanReview
+			// resolved via D11 auto-creation — both are a real, usable concept
+			// assignment from the caller's point of view.
+			res.Status = StatusLexicalResolved
+		}
 	}
 	return res, nil
 }
@@ -467,6 +495,19 @@ func (r *Resolver) lookupReleasedTerm(ctx context.Context, queryKey string, kind
 	hit := terms[matched[0]]
 	hit.prefName = pickPrefName(labels[hit.termID], lang)
 	return hit, nil
+}
+
+// MatchUnitLabel resolves a raw unit string (e.g. kb.metrics.metric_unit)
+// to a released `unit`-kind term id, or "" if no exact governed label
+// matches. Exported wrapper around matchLabelToReleasedTerm (ADR 2026081201
+// DR3): reuses the same governed-label-exact-match logic the rest of this
+// package already relies on, rather than a separate hardcoded unit map.
+func (r *Resolver) MatchUnitLabel(ctx context.Context, unit string) (string, error) {
+	hit, err := r.matchLabelToReleasedTerm(ctx, unit, []string{"unit"})
+	if err != nil || hit == nil {
+		return "", err
+	}
+	return hit.termID, nil
 }
 
 // matchLabelToReleasedTerm is the same lookup against an arbitrary label

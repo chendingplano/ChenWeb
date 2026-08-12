@@ -25,6 +25,7 @@ const EntryTypeStaticAnalyzer = "static_analyzer"
 const EntryTypeBlocking = "blocking"
 const EntryTypeExtractMetrics = "extract_metrics"
 const EntryTypeExtractMetricsFinish = "extract_metrics_finish"
+const EntryTypeResolveMetric = "resolve_metric"
 const EntryTypeExtractProjections = "extract_projections"
 const EntryTypeExtractProjectionsFinish = "extract_projections_finish"
 const EntryTypeExtractProvisions = "extract_provisions"
@@ -208,6 +209,14 @@ func (l DocProcLogger) LogExtractMetricsFinish(ctx context.Context, rec DocProcL
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+// LogResolveMetric inserts one trace entry for a newly extracted metric that
+// is part of an ambiguous merge group sent to the merge-resolution LLM.
+func (l DocProcLogger) LogResolveMetric(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeResolveMetric
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 func (l DocProcLogger) LogEnrichMetrics(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeExtractMetrics
 	rec.LogLoc = callerLoc(2)
@@ -312,6 +321,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
 		EntryTypeStaticAnalyzer, EntryTypeBlocking,
 		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish,
+		EntryTypeResolveMetric,
 		EntryTypeExtractProjections,
 		EntryTypeExtractProjectionsFinish,
 		EntryTypeExtractProvisions, EntryTypeExtractProvisionsFinish,

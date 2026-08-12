@@ -129,11 +129,29 @@ type MetricsStore interface {
 	UpsertMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
 }
 
+// MetricIdentityResolver annotates fresh metrics before incremental merge.
+// This is required because the normal resolving store seam runs at upsert,
+// after merge classification has already happened.
+type MetricIdentityResolver interface {
+	ResolveMetricIdentities(ctx context.Context, metrics []map[string]any) error
+}
+
 // nameResolver is the subset of names.Resolver the decorator needs — declared
 // here so the decorator is unit-testable without a live DB. The concrete
-// *names.Resolver satisfies it.
+// *names.Resolver satisfies it. ResolveAndObserve (not the read-only
+// ResolveNames) is required: D11 concept auto-creation is exclusively a
+// write-path effect (ADR 2026081201 design.md Context) — a resolver that
+// never writes can never assign a concept to a metric name seen for the
+// first time, which in practice is almost every metric name.
 type nameResolver interface {
-	ResolveNames(ctx context.Context, reqs []names.ResolveNameRequest) ([]names.NameResolution, error)
+	ResolveAndObserve(ctx context.Context, req names.ResolveNameRequest, occ names.NameOccurrence) (names.NameResolution, error)
+	MatchUnitLabel(ctx context.Context, unit string) (string, error)
+}
+
+// termAligner is the subset of keywords.AlignmentsStore the decorator needs
+// — declared here for the same unit-testability reason as nameResolver.
+type termAligner interface {
+	EnsureAcceptedOrCreate(ctx context.Context, conceptID string, synth keywords.TermSynthesisInput, method string, score float64, evidence string) (keywords.Alignment, error)
 }
 
 // ResolvingMetricsStore wraps a MetricsStore so every metric row is resolved
@@ -144,8 +162,9 @@ type nameResolver interface {
 // (governed). Values already written by the extraction are never overwritten.
 // extract_metrics itself is untouched — no prompt change.
 type ResolvingMetricsStore struct {
-	Inner    MetricsStore
-	Resolver nameResolver
+	Inner      MetricsStore
+	Resolver   nameResolver
+	Alignments termAligner
 }
 
 // SaveMetrics resolves every metric's name, then persists via Inner (spec
@@ -170,6 +189,13 @@ func (s *ResolvingMetricsStore) UpsertMetrics(ctx context.Context, req SaveMetri
 	return s.Inner.UpsertMetrics(ctx, req)
 }
 
+// ResolveMetricIdentities annotates fresh metrics before merge. Upsert safely
+// repeats resolution later and preserves these already-populated identifiers.
+func (s *ResolvingMetricsStore) ResolveMetricIdentities(ctx context.Context, metrics []map[string]any) error {
+	_, err := s.resolveAll(ctx, metrics)
+	return err
+}
+
 // MetricsExist delegates verbatim to Inner.
 func (s *ResolvingMetricsStore) MetricsExist(ctx context.Context, inputRecordID int64) (bool, error) {
 	return s.Inner.MetricsExist(ctx, inputRecordID)
@@ -185,38 +211,67 @@ func (s *ResolvingMetricsStore) GetMetricsByInputRecordID(ctx context.Context, i
 	return s.Inner.GetMetricsByInputRecordID(ctx, inputRecordID)
 }
 
-// resolveAll resolves the distinct trimmed metric_name strings in one
-// ResolveNames batch (scope "_", the metrics pipeline's keyword scope) and
+// resolveAll resolves each distinct trimmed metric_name (scope "_", the
+// metrics pipeline's keyword scope) via ResolveAndObserve — the write-path
+// call, required so D11 concept auto-creation actually fires for a name
+// seen for the first time (see the nameResolver doc comment) — and
 // annotates the metric maps in place. Empty or non-string metric names are
-// skipped (not resolved). A batch error propagates — ResolveNames aborts on
-// first error, which is acceptable for a persistence seam (spec §16.3, REQ-3).
+// skipped (not resolved). When a resolved concept has no governed term yet
+// (ADR 2026081201 DR1), auto-creates one from the representative metric
+// row's own extracted fields (DR3) rather than leaving the term id empty.
+// A resolution or auto-promotion error propagates and aborts the batch,
+// which is acceptable for a persistence seam (spec §16.3, REQ-3).
 func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[string]any) ([]map[string]any, error) {
 	if len(metrics) == 0 {
 		return metrics, nil
 	}
-	var reqs []names.ResolveNameRequest
-	seen := make(map[string]struct{}, len(metrics))
+	firstByName := make(map[string]map[string]any, len(metrics))
+	var order []string
 	for _, m := range metrics {
 		name := strings.TrimSpace(asString(m["metric_name"]))
 		if name == "" {
 			continue
 		}
-		if _, dup := seen[name]; dup {
+		if _, dup := firstByName[name]; dup {
 			continue
 		}
-		seen[name] = struct{}{}
-		reqs = append(reqs, names.ResolveNameRequest{Name: name, Scope: "_"})
+		firstByName[name] = m
+		order = append(order, name)
 	}
-	if len(reqs) == 0 {
+	if len(order) == 0 {
 		return metrics, nil
 	}
-	resolutions, err := s.Resolver.ResolveNames(ctx, reqs)
-	if err != nil {
-		return nil, err
-	}
-	byName := make(map[string]names.NameResolution, len(reqs))
-	for i, r := range resolutions {
-		byName[reqs[i].Name] = r
+	byName := make(map[string]names.NameResolution, len(order))
+	for _, name := range order {
+		res, err := s.Resolver.ResolveAndObserve(ctx,
+			names.ResolveNameRequest{Name: name, Scope: "_"},
+			names.NameOccurrence{ArtifactType: "metric", ArtifactID: name, FieldPath: "metric_name", RawName: name, Scope: "_"},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if s.Alignments != nil && res.ConceptID != "" && res.Status != names.StatusTermResolved {
+			rep := firstByName[name]
+			synth := keywords.TermSynthesisInput{
+				CanonicalName: name,
+				Definition:    strings.TrimSpace(asString(rep["formula_or_definition"])),
+				ValueType:     strings.TrimSpace(asString(rep["value_data_type"])),
+				RangeType:     strings.TrimSpace(asString(rep["value_range_type"])),
+			}
+			if unit := strings.TrimSpace(asString(rep["metric_unit"])); unit != "" {
+				if unitTermID, uerr := s.Resolver.MatchUnitLabel(ctx, unit); uerr == nil && unitTermID != "" {
+					synth.PermittedUnitTermIDs = []string{unitTermID}
+				}
+			}
+			al, aerr := s.Alignments.EnsureAcceptedOrCreate(ctx, res.ConceptID, synth, res.Method, res.Confidence,
+				"auto-promoted via metric resolution (ADR 2026081201)")
+			if aerr != nil {
+				return nil, fmt.Errorf("auto-promote metric_definition term for metric %q: %w", name, aerr)
+			}
+			res.TermID = al.ObjectTermID
+			res.Status = names.StatusTermResolved
+		}
+		byName[name] = res
 	}
 	for _, m := range metrics {
 		name := strings.TrimSpace(asString(m["metric_name"]))
@@ -242,16 +297,18 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 // wrapped by the resolver-backed decorator. The one place the resolver is
 // constructed for the metrics pipeline (spec step 12, REQ-3).
 func newResolvingMetricsStore(db *sql.DB) MetricsStore {
+	alignments := &keywords.AlignmentsStore{
+		Assertions:  assertions.AssertionStore{DB: db},
+		DecisionLog: semid.DecisionLogStore{DB: db},
+		Scope:       "_",
+	}
 	return &ResolvingMetricsStore{
 		Inner: MetricsSQLStore{DB: db},
 		Resolver: names.NewResolverWithAlignments(
 			&keywords.KeywordFamily{DB: db, ResolverMode: keywords.ResolverMode()},
-			&keywords.AlignmentsStore{
-				Assertions:  assertions.AssertionStore{DB: db},
-				DecisionLog: semid.DecisionLogStore{DB: db},
-				Scope:       "_",
-			},
+			alignments,
 		),
+		Alignments: alignments,
 	}
 }
 
@@ -1107,7 +1164,14 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
 		}
-		return metricExtractionResult{}, enrichErr
+		if len(metrics) == 0 {
+			return metricExtractionResult{}, enrichErr
+		}
+		p.Logger.Warn("enrich metric batch failed; retaining successful batch results",
+			"record_id", record_id,
+			"error", enrichErr,
+			"successful_metrics", len(metrics),
+			"record_stage", "partial_enrichment")
 	}
 
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
@@ -2287,6 +2351,61 @@ func (p *MetricsProcessor) logMergeResolve(
 	}
 }
 
+// logResolveMetric writes one resolve_metric entry for each newly extracted
+// metric that remains ambiguous after static filtering. Existing metrics in
+// the group are comparison context, not newly extracted metrics requiring a
+// resolution entry of their own.
+func (p *MetricsProcessor) logResolveMetric(
+	ctx context.Context,
+	recordID int64,
+	callID string,
+	groupIdx, totalGroups int,
+	metric map[string]any,
+	group []map[string]any,
+) {
+	artifact := map[string]any{
+		"metric": metricMergeComparedFields(metric),
+	}
+	artifactBytes, _ := json.Marshal(artifact)
+	artifactStr := string(artifactBytes)
+	closeExistingIDs := make([]string, 0)
+	for _, member := range group {
+		if asString(member["_merge_source"]) == "existing" {
+			closeExistingIDs = append(closeExistingIDs, asString(member["metric_id"]))
+		}
+	}
+	extraInfo := map[string]any{
+		"group_index":               groupIdx,
+		"total_groups":              totalGroups,
+		"group_metric_ids":          metricIDs(group),
+		"close_existing_metric_ids": closeExistingIDs,
+		"resolution":                "pending",
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+	activityName := "merge_resolve_metrics"
+	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
+		DocProcName:   p.Name(),
+		ModelNames:    compactNonEmptyStrings([]string{p.MergeResolveModelName}),
+		PromptName:    p.MergeResolvePromptRef,
+		RecordID:      int64Ptr(recordID),
+		LLMCallID:     &callID,
+		ActivityName:  &activityName,
+		ArtifactJSON:  &artifactStr,
+		ExtraInfoJSON: &extraStr,
+	}
+	if err := p.ProcLogger.LogResolveMetric(ctx, rec, "MID-26071203"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("resolve_metric log skipped: doc processor stopped by user request", "record_id", recordID,
+				"metric_id", asString(metric["metric_id"]))
+		} else {
+			p.Logger.Warn("failed to write resolve_metric log", "record_id", recordID,
+				"metric_id", asString(metric["metric_id"]), "error", err)
+		}
+	}
+}
+
 // logMetricsSummary writes one extract_metrics log entry after the processor finishes.
 func (p *MetricsProcessor) logMetricsSummary(
 	ctx context.Context,
@@ -2647,8 +2766,8 @@ SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_sub
        metric_keywords, metric_keywords_en, metric_unit, metric_unit_en, metric_value,
        value_data_type, value_range_type, value_class, value_class_en,
        formula_or_definition, threshold_or_target, measurement_frequency,
-       metric_categories, metric_categories_en, category_paths, category_paths_en,
-       ext_info
+	       metric_categories, metric_categories_en, category_paths, category_paths_en,
+	       keyword_concept_id, metric_definition_term_id, ext_info
 FROM kb.metrics
 WHERE input_record_id = $1`
 	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
@@ -2664,12 +2783,14 @@ WHERE input_record_id = $1`
 			metricID, name, nameEn, subject, subjectEn, desc, descEn, ctx1, ctxEn        sql.NullString
 			unit, unitEn, value, valueDataType, valueRangeType, valueClass, valueClassEn sql.NullString
 			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn     sql.NullString
+			keywordConceptID, metricDefinitionTermID                                     sql.NullString
 			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
 		)
 		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,
 			&desc, &descEn, &ctx1, &ctxEn, &keywordsJSON, &keywordsEnJSON, &unit, &unitEn, &value,
 			&valueDataType, &valueRangeType, &valueClass, &valueClassEn, &formula, &threshold, &freq,
-			&categories, &categoriesEn, &catPaths, &catPathsEn, &extInfoJSON); err != nil {
+			&categories, &categoriesEn, &catPaths, &catPathsEn, &keywordConceptID,
+			&metricDefinitionTermID, &extInfoJSON); err != nil {
 			return nil, err
 		}
 		m := map[string]any{
@@ -2682,7 +2803,9 @@ WHERE input_record_id = $1`
 			"value_data_type": valueDataType.String, "value_range_type": valueRangeType.String,
 			"value_class": valueClass.String, "value_class_en": valueClassEn.String,
 			"formula_or_definition": formula.String, "threshold_or_target": threshold.String,
-			"measurement_frequency": freq.String,
+			"measurement_frequency":     freq.String,
+			"keyword_concept_id":        keywordConceptID.String,
+			"metric_definition_term_id": metricDefinitionTermID.String,
 		}
 		if spansJSON.Valid {
 			var spans any
@@ -3181,6 +3304,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		"model_name", p.RelationModelName,
 		"prompt_name", p.RelationPromptRef,
 		"total_batches", len(batches),
+		"candidates", len(candidates),
 	)
 
 	pass2Results, pass2Err := runConcurrent(ctx, maxTasks, len(batches), func(concCtx context.Context, i int) (pass2Result, error) {
@@ -3205,7 +3329,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 			if isCtxStopped(concCtx) {
 				return pass2Result{}, ErrPipelineStopped
 			}
-			return pass2Result{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
+			return pass2Result{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w, batch:%d", err, i)
 		}
 		lang := strings.TrimSpace(asString(payload["language"]))
 		metricsRaw, _ := payload["metrics"].([]any)
@@ -3243,7 +3367,6 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		if isCtxStopped(ctx) {
 			return nil, nil, ErrPipelineStopped
 		}
-		return nil, nil, pass2Err
 	}
 
 	metrics := make([]map[string]any, 0, len(candidates))
@@ -3257,6 +3380,9 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		}
 	}
 	metrics = dedupeFinalMetricRows(metrics)
+	if pass2Err != nil {
+		return metrics, uncertain, pass2Err
+	}
 	return metrics, uncertain, nil
 }
 
@@ -3375,6 +3501,11 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	}
 	candidates := mentionsAsCandidates(p.batchMentions)
 	if len(candidates) == 0 {
+		if p.batchForceClear {
+			deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+			p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
+				"deleted_rows", deleted, "new_count", 0)
+		}
 		p.Logger.Info("%s batch: no candidates", p.Name(), "record_id", p.batchRecordID)
 		return nil
 	}
@@ -3386,7 +3517,14 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		if errors.Is(err, ErrPipelineStopped) {
 			return ErrPipelineStopped
 		}
-		return fmt.Errorf("(MID_26062752) %s enrich metrics: %w", p.Name(), err)
+		if len(metrics) == 0 {
+			return fmt.Errorf("(MID_26062752) %s enrich metrics: %w", p.Name(), err)
+		}
+		p.Logger.Warn("enrich metric batch failed; retaining successful batch results",
+			"record_id", p.batchRecordID,
+			"error", err,
+			"successful_metrics", len(metrics),
+			"record_stage", "partial_enrichment")
 	}
 	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
 	if err != nil {
@@ -3421,6 +3559,17 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			return err
 		}
 		return nil
+	}
+	if identityResolver, ok := p.Store.(MetricIdentityResolver); ok {
+		if err := identityResolver.ResolveMetricIdentities(ctx, metrics); err != nil {
+			return fmt.Errorf("%s resolve metric identities before merge: %w", p.Name(), err)
+		}
+		p.Logger.Info("metrics merge: resolved metric identities before classification",
+			"record_id", p.batchRecordID,
+			"metrics", len(metrics),
+			"concept_ids", countMetricIdentity(metrics, "keyword_concept_id"),
+			"term_ids", countMetricIdentity(metrics, "metric_definition_term_id"),
+		)
 	}
 
 	p.Logger.Info("metrics merge (force_clear=false)", "record_id", p.batchRecordID,
@@ -3549,6 +3698,26 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 
 	seqno := newMetricSeqnoCounter(existing)
 	merged := mergeMetrics(existing, candidates, seqno, p.batchRecordID)
+	for _, decision := range merged.Decisions {
+		p.Logger.Info("metrics merge decision", "record_id", p.batchRecordID,
+			"metric_name", decision.MetricName,
+			"candidate_metric_id", decision.CandidateMetricID,
+			"decision", decision.Decision,
+			"reason", decision.Reason,
+			"overlapping_existing_ids", decision.OverlappingMetricIDs,
+			"static_match_ids", decision.StaticMatchIDs,
+			"candidate_fields", decision.CandidateFields,
+			"static_comparisons", decision.Comparisons,
+		)
+	}
+	p.Logger.Info("metrics merge classification summary", "record_id", p.batchRecordID,
+		"existing_count", len(existing),
+		"new_count", len(candidates),
+		"added_count", len(merged.Added),
+		"static_merge_count", len(merged.StaticMerges),
+		"llm_pending_group_count", len(merged.PendingGroups),
+		"llm_pending_metric_count", countPendingMetrics(merged.PendingGroups),
+	)
 
 	var dirty []map[string]any
 	now := p.Now()
@@ -3558,6 +3727,12 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 			{"run_time": now.Format(time.RFC3339), "action": "added"},
 		}}
 		dirty = append(dirty, added)
+	}
+	for _, static := range merged.StaticMerges {
+		static["ext_info"] = map[string]any{"merge_log": []map[string]any{
+			{"run_time": now.Format(time.RFC3339), "action": "merged", "resolution": "static"},
+		}}
+		dirty = append(dirty, static)
 	}
 
 	existingByID := map[string]map[string]any{}
@@ -3572,11 +3747,23 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 
 	groupResults, err := runConcurrent(ctx, maxTasks, len(merged.PendingGroups), func(concCtx context.Context, groupIdx int) ([]map[string]any, error) {
 		group := merged.PendingGroups[groupIdx]
+		callID := fmt.Sprintf("%d_merge_g%d", p.batchRecordID, groupIdx)
+		for _, metric := range group {
+			if asString(metric["_merge_source"]) == "new" {
+				p.logResolveMetric(ctx, p.batchRecordID, callID, groupIdx, len(merged.PendingGroups), metric, group)
+			}
+		}
 		p.Logger.Info("merge resolve: sending pending group to LLM", "record_id", p.batchRecordID,
 			"group", fmt.Sprintf("group:%d/%d", groupIdx+1, len(merged.PendingGroups)),
 			"candidates_in_group", len(group))
+		p.Logger.Info("merge resolve: pending group composition", "record_id", p.batchRecordID,
+			"group", fmt.Sprintf("group:%d/%d", groupIdx+1, len(merged.PendingGroups)),
+			"metric_ids", metricIDs(group),
+			"metric_names", metricNames(group),
+			"existing_count", countMergeSource(group, "existing"),
+			"new_count", countMergeSource(group, "new"),
+		)
 		callStart := p.Now()
-		callID := fmt.Sprintf("%d_merge_g%d", p.batchRecordID, groupIdx)
 		winners, sentCandidates, modelUsed, callErr := p.resolveMergeAmbiguities(concCtx, p.batchRecordID, group)
 		callEnd := p.Now()
 		p.logMergeResolve(ctx, p.batchRecordID, callID, groupIdx, len(merged.PendingGroups),
@@ -3645,9 +3832,46 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 
 	p.Logger.Info("metrics merge complete", "record_id", p.batchRecordID,
 		"existing_loaded", len(existing), "new_enriched", len(newMetrics),
-		"rule3_added", len(merged.Added), "rule4_pending_groups", len(merged.PendingGroups),
+		"rule3_added", len(merged.Added), "static_merges", len(merged.StaticMerges),
+		"rule4_pending_groups", len(merged.PendingGroups),
 		"dirty_result", len(dirty), "record_stage", "merge_complete")
 	return dirty, nil
+}
+
+func countMetricIdentity(metrics []map[string]any, field string) int {
+	count := 0
+	for _, metric := range metrics {
+		if strings.TrimSpace(asString(metric[field])) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func countPendingMetrics(groups [][]map[string]any) int {
+	count := 0
+	for _, group := range groups {
+		count += len(group)
+	}
+	return count
+}
+
+func countMergeSource(group []map[string]any, source string) int {
+	count := 0
+	for _, metric := range group {
+		if asString(metric["_merge_source"]) == source {
+			count++
+		}
+	}
+	return count
+}
+
+func metricNames(metrics []map[string]any) []string {
+	names := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		names = append(names, asString(metric["metric_name"]))
+	}
+	return names
 }
 
 // metricContentEqual compares the fields the merge pipeline actually produces

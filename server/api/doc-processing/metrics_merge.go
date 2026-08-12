@@ -4,12 +4,22 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 )
 
-// metricsIdentical implements ADR 2026071002 DR2 Rule-1: two metrics are the
-// same if these five fields match exactly (mirrors normalizedMetricCandidateKey's
-// field set in dedupeFinalMetricRows, extract-metrics.go).
+// metricsIdentical implements ADR 2026071002 DR2 Rule-1. A resolved keyword
+// concept is the authoritative metric identity: two non-empty equal concept
+// IDs are the same metric even when extraction spelling, values, or spans
+// differ. Unresolved metrics fall back to the legacy content-and-span key.
 func metricsIdentical(a, b map[string]any) bool {
+	conceptA := strings.TrimSpace(asString(a["keyword_concept_id"]))
+	conceptB := strings.TrimSpace(asString(b["keyword_concept_id"]))
+	if conceptA != "" && conceptA == conceptB {
+		return true
+	}
+
 	fields := []string{"metric_name", "metric_subject", "metric_unit", "metric_value"}
 	for _, f := range fields {
 		if strings.TrimSpace(asString(a[f])) != strings.TrimSpace(asString(b[f])) {
@@ -33,6 +43,185 @@ func metricLineSpansOverlap(a, b map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// metricStaticMatch reports whether candidate is a sufficiently specific
+// deterministic match for existing. The metric name is required. At least
+// one additional identifying field must be present on the candidate, and
+// every populated identifying field must agree. metric_value is intentionally
+// excluded: a changed value is a normal reason to reprocess an existing
+// metric, not evidence that it is a different metric. If more than one
+// existing row satisfies this predicate, the caller must retain the group for
+// LLM adjudication.
+func metricStaticMatch(candidate, existing map[string]any) bool {
+	candidateConcept := strings.TrimSpace(asString(candidate["keyword_concept_id"]))
+	if candidateConcept != "" && candidateConcept == strings.TrimSpace(asString(existing["keyword_concept_id"])) {
+		return true
+	}
+	candidateName := strings.TrimSpace(asString(candidate["metric_name"]))
+	existingName := strings.TrimSpace(asString(existing["metric_name"]))
+	if candidateName == "" {
+		return false
+	}
+
+	nameExact := candidateName == existingName
+	if !nameExact && !metricFuzzyLexicalMatch(candidateName, existingName, 0.80) {
+		return false
+	}
+
+	discriminators := []string{
+		"metric_subject", "metric_unit", "value_data_type", "value_range_type",
+		"value_class", "threshold_or_target",
+	}
+	hasDiscriminator := false
+	for _, field := range discriminators {
+		candidateValue := strings.TrimSpace(asString(candidate[field]))
+		if candidateValue == "" {
+			continue
+		}
+		hasDiscriminator = true
+		existingValue := strings.TrimSpace(asString(existing[field]))
+		if field == "metric_subject" && !nameExact {
+			if !metricFuzzyLexicalMatch(candidateValue, existingValue, 0.55) {
+				return false
+			}
+			continue
+		}
+		if candidateValue != existingValue {
+			return false
+		}
+	}
+	if !nameExact && strings.TrimSpace(asString(candidate["metric_unit"])) != strings.TrimSpace(asString(existing["metric_unit"])) {
+		return false
+	}
+	if !nameExact && strings.TrimSpace(asString(candidate["metric_value"])) != strings.TrimSpace(asString(existing["metric_value"])) {
+		return false
+	}
+	return hasDiscriminator
+}
+
+// metricCloseEnough is the second-stage gate between source-span overlap and
+// static matching. It keeps semantically plausible alternatives for LLM
+// adjudication, while preventing unrelated metrics that happen to be printed
+// on the same source line from entering the same pending group.
+func metricCloseEnough(candidate, existing map[string]any) bool {
+	if candidateConcept := strings.TrimSpace(asString(candidate["keyword_concept_id"])); candidateConcept != "" && candidateConcept == strings.TrimSpace(asString(existing["keyword_concept_id"])) {
+		return true
+	}
+
+	name := strings.TrimSpace(asString(candidate["metric_name"]))
+	existingName := strings.TrimSpace(asString(existing["metric_name"]))
+	if name == "" || existingName == "" {
+		return false
+	}
+	if metricLexicalMatch(name, existingName, 0.45, 0.15) {
+		return true
+	}
+
+	subject := strings.TrimSpace(asString(candidate["metric_subject"]))
+	existingSubject := strings.TrimSpace(asString(existing["metric_subject"]))
+	if subject == "" || existingSubject == "" || !metricLexicalMatch(subject, existingSubject, 0.45, 0.15) {
+		return false
+	}
+	// A shared subject is useful evidence only when the measurement shape is
+	// compatible. This avoids grouping unrelated quantities under a broad
+	// subject such as "environment".
+	for _, field := range []string{"value_data_type", "value_range_type"} {
+		candidateValue := strings.TrimSpace(asString(candidate[field]))
+		existingValue := strings.TrimSpace(asString(existing[field]))
+		if candidateValue != "" && existingValue != "" && candidateValue != existingValue {
+			return false
+		}
+	}
+	return true
+}
+
+// metricFuzzyLexicalMatch mirrors the keyword module's tier-1/2 normalization
+// and tier-5 trigram-blocked/edit-distance scoring for the already bounded
+// in-memory merge candidates. It is deliberately stricter than a raw
+// similarity check: short strings do not fuzzy-match, and both lexical
+// signals must clear their floors.
+func metricFuzzyLexicalMatch(candidate, existing string, minimum float64) bool {
+	return metricLexicalMatch(candidate, existing, minimum, 0.30)
+}
+
+func metricLexicalMatch(candidate, existing string, minimum, trigramMinimum float64) bool {
+	normalizer := semid.Normalizer{Version: semid.CurrentNormalizerVersion}
+	a := normalizer.Normalize(candidate)
+	b := normalizer.Normalize(existing)
+	if a.Norm == "" || b.Norm == "" {
+		return false
+	}
+	if a.Norm == b.Norm || a.Alnum == b.Alnum || a.Sorted == b.Sorted {
+		return true
+	}
+	if utf8.RuneCountInString(a.Norm) <= 4 || utf8.RuneCountInString(b.Norm) <= 4 {
+		return false
+	}
+	if firstRune(a.Norm) != firstRune(b.Norm) {
+		return false
+	}
+	return metricTrigramSimilarity(a.Norm, b.Norm) >= trigramMinimum &&
+		metricNormalizedSimilarity(a.Norm, b.Norm) >= minimum
+}
+
+func metricTrigramSimilarity(a, b string) float64 {
+	aSet := metricTrigrams(a)
+	bSet := metricTrigrams(b)
+	if len(aSet) == 0 || len(bSet) == 0 {
+		return 0
+	}
+	intersection := 0
+	for trigram := range aSet {
+		if bSet[trigram] {
+			intersection++
+		}
+	}
+	return float64(intersection) / float64(len(aSet)+len(bSet)-intersection)
+}
+
+func metricTrigrams(s string) map[string]bool {
+	runes := []rune(s)
+	trigrams := make(map[string]bool)
+	for i := 0; i+3 <= len(runes); i++ {
+		trigrams[string(runes[i:i+3])] = true
+	}
+	return trigrams
+}
+
+func metricNormalizedSimilarity(a, b string) float64 {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			curr[j] = min(min(prev[j]+1, curr[j-1]+1), prev[j-1]+cost)
+		}
+		prev, curr = curr, prev
+	}
+	longer := len(ra)
+	if len(rb) > longer {
+		longer = len(rb)
+	}
+	if longer == 0 {
+		return 1
+	}
+	return 1 - float64(prev[len(rb)])/float64(longer)
+}
+
+func firstRune(s string) rune {
+	for _, r := range s {
+		return r
+	}
+	return 0
 }
 
 type metricSpanRange struct{ start, end int }
@@ -133,7 +322,52 @@ func (c *metricSeqnoCounter) Assign(recordID int64) string {
 
 type mergeMetricsResult struct {
 	Added         []map[string]any
+	StaticMerges  []map[string]any
 	PendingGroups [][]map[string]any
+	Decisions     []mergeDecision
+}
+
+type mergeDecision struct {
+	MetricName           string
+	CandidateMetricID    string
+	Decision             string
+	Reason               string
+	OverlappingMetricIDs []string
+	StaticMatchIDs       []string
+	CandidateFields      map[string]any
+	Comparisons          []map[string]any
+}
+
+// metricMergeComparedFields contains every field used by the merge decision:
+// identity fields, static discriminators, and source spans. Keep this explicit
+// and stable so diagnostic logs can be compared directly with kb.metrics.
+func metricMergeComparedFields(metric map[string]any) map[string]any {
+	fields := []string{
+		"metric_id", "keyword_concept_id", "metric_definition_term_id", "metric_name", "metric_subject", "metric_unit", "metric_value",
+		"value_data_type", "value_range_type", "value_class", "threshold_or_target",
+		"source_line_spans",
+	}
+	compared := make(map[string]any, len(fields))
+	for _, field := range fields {
+		if value, ok := metric[field]; ok {
+			compared[field] = value
+		} else {
+			compared[field] = ""
+		}
+	}
+	return compared
+}
+
+func metricStaticComparisons(candidate map[string]any, overlapping []map[string]any) []map[string]any {
+	comparisons := make([]map[string]any, 0, len(overlapping))
+	for _, existing := range overlapping {
+		comparisons = append(comparisons, map[string]any{
+			"existing_metric_id": asString(existing["metric_id"]),
+			"static_match":       metricStaticMatch(candidate, existing),
+			"existing_fields":    metricMergeComparedFields(existing),
+		})
+	}
+	return comparisons
 }
 
 // mergeMetrics implements ADR 2026071002 DR2 Rule-2/3/4. existing is read
@@ -144,38 +378,100 @@ func mergeMetrics(existing, newCandidates []map[string]any, seqno *metricSeqnoCo
 	var result mergeMetricsResult
 	remainingNew := make([]map[string]any, 0, len(newCandidates))
 
-	// Rule-2: discard any new candidate that's an exact duplicate of an existing metric.
+	// Rule-2: discard any new candidate that's an exact duplicate of an existing
+	// metric, including candidates with the same resolved keyword concept ID.
 	for _, cand := range newCandidates {
 		duplicate := false
+		duplicateID := ""
 		for _, ex := range existing {
 			if metricsIdentical(cand, ex) {
 				duplicate = true
+				duplicateID = asString(ex["metric_id"])
 				break
 			}
 		}
 		if !duplicate {
 			remainingNew = append(remainingNew, cand)
+		} else {
+			result.Decisions = append(result.Decisions, mergeDecision{
+				MetricName:      asString(cand["metric_name"]),
+				Decision:        "duplicate_discarded",
+				Reason:          "exact_match",
+				StaticMatchIDs:  []string{duplicateID},
+				CandidateFields: metricMergeComparedFields(cand),
+			})
 		}
 	}
 
 	// Rule-3: any remaining candidate with zero line overlap against existing
-	// metrics is unambiguously new.
+	// metrics is unambiguously new. Same-span existing metrics first pass the
+	// close-enough gate; only those candidates can be statically matched or
+	// sent onward as ambiguous alternatives.
 	stillPending := make([]map[string]any, 0, len(remainingNew))
+	closeExisting := make([]map[string]any, 0, len(existing))
 	for _, cand := range remainingNew {
-		overlapsAny := false
+		overlapping := make([]map[string]any, 0)
 		for _, ex := range existing {
 			if metricLineSpansOverlap(cand, ex) {
-				overlapsAny = true
-				break
+				overlapping = append(overlapping, ex)
 			}
 		}
-		if !overlapsAny {
+		close := make([]map[string]any, 0, len(overlapping))
+		for _, ex := range overlapping {
+			if metricCloseEnough(cand, ex) {
+				close = append(close, ex)
+				closeExisting = append(closeExisting, ex)
+			}
+		}
+		if len(close) == 0 {
 			added := cloneMetricMap(cand)
 			added["metric_id"] = seqno.Assign(recordID)
 			result.Added = append(result.Added, added)
-		} else {
-			stillPending = append(stillPending, cand)
+			result.Decisions = append(result.Decisions, mergeDecision{
+				MetricName:           asString(cand["metric_name"]),
+				CandidateMetricID:    asString(added["metric_id"]),
+				Decision:             "added",
+				Reason:               "no_close_metric_match",
+				OverlappingMetricIDs: metricIDs(overlapping),
+				CandidateFields:      metricMergeComparedFields(cand),
+			})
+			continue
 		}
+
+		staticMatches := make([]map[string]any, 0, len(close))
+		for _, ex := range close {
+			if metricStaticMatch(cand, ex) {
+				staticMatches = append(staticMatches, ex)
+			}
+		}
+		if len(staticMatches) == 1 {
+			merged := mergeStaticMetric(staticMatches[0], cand)
+			result.StaticMerges = append(result.StaticMerges, merged)
+			result.Decisions = append(result.Decisions, mergeDecision{
+				MetricName:           asString(cand["metric_name"]),
+				CandidateMetricID:    asString(merged["metric_id"]),
+				Decision:             "static_merge",
+				Reason:               "one_unique_static_match",
+				OverlappingMetricIDs: metricIDs(close),
+				StaticMatchIDs:       metricIDs(staticMatches),
+				CandidateFields:      metricMergeComparedFields(cand),
+				Comparisons:          metricStaticComparisons(cand, close),
+			})
+			continue
+		}
+		pendingID := seqno.Assign(recordID)
+		cand["metric_id"] = pendingID
+		stillPending = append(stillPending, cand)
+		result.Decisions = append(result.Decisions, mergeDecision{
+			MetricName:           asString(cand["metric_name"]),
+			CandidateMetricID:    pendingID,
+			Decision:             "llm_pending",
+			Reason:               "no_unique_static_match",
+			OverlappingMetricIDs: metricIDs(close),
+			StaticMatchIDs:       metricIDs(staticMatches),
+			CandidateFields:      metricMergeComparedFields(cand),
+			Comparisons:          metricStaticComparisons(cand, close),
+		})
 	}
 
 	// Rule-4: everything left overlaps at least one existing metric. Assign a
@@ -184,15 +480,23 @@ func mergeMetrics(existing, newCandidates []map[string]any, seqno *metricSeqnoCo
 	// source, then group by Metric Groups transitive closure over the union
 	// of existing + pending candidates.
 	tagged := make([]map[string]any, 0, len(existing)+len(stillPending))
+	closeExistingByID := make(map[string]map[string]any, len(closeExisting))
+	for _, ex := range closeExisting {
+		closeExistingByID[asString(ex["metric_id"])] = ex
+	}
 	for _, ex := range existing {
-		e := cloneMetricMap(ex)
-		e["_merge_source"] = "existing"
-		tagged = append(tagged, e)
+		if closeEx, ok := closeExistingByID[asString(ex["metric_id"])]; ok {
+			e := cloneMetricMap(closeEx)
+			e["_merge_source"] = "existing"
+			tagged = append(tagged, e)
+		}
 	}
 	for _, cand := range stillPending {
 		c := cloneMetricMap(cand)
 		c["_merge_source"] = "new"
-		c["metric_id"] = seqno.Assign(recordID)
+		if asString(c["metric_id"]) == "" {
+			c["metric_id"] = seqno.Assign(recordID)
+		}
 		tagged = append(tagged, c)
 	}
 
@@ -219,6 +523,31 @@ func mergeMetrics(existing, newCandidates []map[string]any, seqno *metricSeqnoCo
 		result.PendingGroups = append(result.PendingGroups, group)
 	}
 	return result
+}
+
+func metricIDs(metrics []map[string]any) []string {
+	ids := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		if id := strings.TrimSpace(asString(metric["metric_id"])); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// mergeStaticMetric preserves fields that are not present in the new
+// enrichment result, then overlays the candidate's extracted fields. This
+// mirrors the merge winner reconstruction used after the LLM path.
+func mergeStaticMetric(existing, candidate map[string]any) map[string]any {
+	merged := cloneMetricMap(existing)
+	for key, value := range candidate {
+		if key == "metric_id" || strings.HasPrefix(key, "_") {
+			continue
+		}
+		merged[key] = value
+	}
+	merged["metric_id"] = existing["metric_id"]
+	return merged
 }
 
 func cloneMetricMap(m map[string]any) map[string]any {

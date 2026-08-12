@@ -24,11 +24,12 @@ func ResolverMode() string {
 
 // resolverModeFrom normalizes the raw environment value. Anything other than
 // "observe" or "on" — including the unset value — maps to "off".
+// It defaults to "on"
 func resolverModeFrom(raw string) string {
 	switch strings.TrimSpace(raw) {
-	case "observe", "on":
+	case "off":
 		return strings.TrimSpace(raw)
 	default:
-		return "off"
+		return "on"
 	}
 }

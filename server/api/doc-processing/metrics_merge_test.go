@@ -51,10 +51,10 @@ func TestMetricLineSpansOverlap_False(t *testing.T) {
 // overlap. All three must land in one group.
 func TestComputeMetricGroups_TransitiveChain(t *testing.T) {
 	metrics := []map[string]any{
-		{"source_line_spans": []any{float64(1), float64(2)}},  // A: lines 1-2
-		{"source_line_spans": []any{float64(2), float64(3)}},  // B: lines 2-3 (overlaps A)
-		{"source_line_spans": []any{float64(3), float64(4)}},  // C: lines 3-4 (overlaps B, not A)
-		{"source_line_spans": []any{float64(100)}},            // D: unrelated
+		{"source_line_spans": []any{float64(1), float64(2)}}, // A: lines 1-2
+		{"source_line_spans": []any{float64(2), float64(3)}}, // B: lines 2-3 (overlaps A)
+		{"source_line_spans": []any{float64(3), float64(4)}}, // C: lines 3-4 (overlaps B, not A)
+		{"source_line_spans": []any{float64(100)}},           // D: unrelated
 	}
 	groups := computeMetricGroups(metrics)
 	if len(groups) != 2 {
@@ -141,6 +141,8 @@ func TestMergeMetrics_Rule4_OverlapNotIdenticalGoesToPending(t *testing.T) {
 	existing := []map[string]any{
 		{"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
 			"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)}},
+		{"metric_id": "173_mtc_2", "metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "300", "source_line_spans": []any{float64(2)}},
 	}
 	newCandidates := []map[string]any{
 		// Same line, different value -> not Rule-1 identical, but overlaps -> Rule-4.
@@ -151,17 +153,14 @@ func TestMergeMetrics_Rule4_OverlapNotIdenticalGoesToPending(t *testing.T) {
 	if len(res.Added) != 0 {
 		t.Fatalf("Added=%d, want 0", len(res.Added))
 	}
-	if len(res.PendingGroups) != 1 || len(res.PendingGroups[0]) != 2 {
-		t.Fatalf("PendingGroups=%+v, want 1 group of 2", res.PendingGroups)
+	if len(res.PendingGroups) != 1 || len(res.PendingGroups[0]) != 3 {
+		t.Fatalf("PendingGroups=%+v, want 1 group of 3", res.PendingGroups)
 	}
 	var sawExisting, sawNew bool
 	for _, m := range res.PendingGroups[0] {
 		switch m["_merge_source"] {
 		case "existing":
 			sawExisting = true
-			if m["metric_id"] != "173_mtc_1" {
-				t.Fatalf("existing metric_id=%v, want 173_mtc_1", m["metric_id"])
-			}
 		case "new":
 			sawNew = true
 			if m["metric_id"] == nil || m["metric_id"] == "" {
@@ -170,6 +169,146 @@ func TestMergeMetrics_Rule4_OverlapNotIdenticalGoesToPending(t *testing.T) {
 		}
 	}
 	if !sawExisting || !sawNew {
-		t.Fatalf("expected both existing and new tagged candidates in pending group")
+		t.Fatalf("expected existing and new tagged candidates in pending group")
+	}
+}
+
+func TestMergeMetrics_StaticOverlapMatchAvoidsPendingGroup(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "200", "value_data_type": "number",
+			"source_line_spans": []any{float64(2)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "Latency", "metric_subject": "gw", "metric_unit": "ms",
+			"metric_value": "250", "value_data_type": "number",
+			"source_line_spans": []any{float64(2)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 173)
+	if len(res.PendingGroups) != 0 {
+		t.Fatalf("PendingGroups=%d, want 0 for unique static match", len(res.PendingGroups))
+	}
+	if len(res.StaticMerges) != 1 || res.StaticMerges[0]["metric_id"] != "173_mtc_1" {
+		t.Fatalf("StaticMerges=%+v, want existing metric id", res.StaticMerges)
+	}
+}
+
+func TestMergeMetrics_StaticOverlapFuzzyChineseIdentityAvoidsPendingGroup(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "416_mtc_1", "metric_name": "农村生活垃圾分类类别数量",
+			"metric_subject": "农村生活垃圾分类体系", "metric_unit": "类", "metric_value": "4",
+			"source_line_spans": []any{float64(50)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "农村生活垃圾分类类别数", "metric_subject": "农村生活垃圾",
+			"metric_unit": "类", "metric_value": "4", "source_line_spans": []any{float64(50)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 416)
+	if len(res.StaticMerges) != 1 || len(res.PendingGroups) != 0 {
+		t.Fatalf("StaticMerges=%d PendingGroups=%d, want 1 and 0", len(res.StaticMerges), len(res.PendingGroups))
+	}
+}
+
+func TestMergeMetrics_IdenticalKeywordConceptIsAuthoritative(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "416_mtc_1", "metric_name": "旧名称", "metric_subject": "旧主体",
+			"metric_unit": "类", "metric_value": "4", "keyword_concept_id": "kwc:shared",
+			"source_line_spans": []any{float64(50)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "完全不同的名称", "metric_subject": "完全不同的主体",
+			"metric_unit": "个", "metric_value": "99", "keyword_concept_id": "kwc:shared",
+			"source_line_spans": []any{float64(50)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 416)
+	if len(res.Decisions) != 1 || res.Decisions[0].Decision != "duplicate_discarded" {
+		t.Fatalf("Decisions=%#v, want one duplicate_discarded decision", res.Decisions)
+	}
+	if len(res.StaticMerges) != 0 || len(res.PendingGroups) != 0 {
+		t.Fatalf("StaticMerges=%d PendingGroups=%d, want 0 and 0", len(res.StaticMerges), len(res.PendingGroups))
+	}
+}
+
+func TestMergeMetrics_StaticOverlapMultipleMatchesRemainPending(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)}},
+		{"metric_id": "173_mtc_2", "metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "300", "source_line_spans": []any{float64(2)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "Latency", "metric_subject": "gw", "metric_unit": "ms",
+			"metric_value": "250", "source_line_spans": []any{float64(2)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 173)
+	if len(res.StaticMerges) != 0 {
+		t.Fatalf("StaticMerges=%d, want 0 for ambiguous matches", len(res.StaticMerges))
+	}
+	if len(res.PendingGroups) != 1 || len(res.PendingGroups[0]) != 3 {
+		t.Fatalf("PendingGroups=%+v, want one unresolved group of 3", res.PendingGroups)
+	}
+}
+
+func TestMergeMetrics_FarSameSpanMetricIsExcludedFromPendingGroup(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "416_mtc_1", "metric_name": "最大速度", "metric_subject": "车辆",
+			"metric_unit": "km/h", "metric_value": "80", "source_line_spans": []any{float64(50)}},
+		{"metric_id": "416_mtc_2", "metric_name": "土壤pH值", "metric_subject": "土壤酸碱度",
+			"metric_unit": "pH", "metric_value": "7", "source_line_spans": []any{float64(50)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "车辆运行速度", "metric_subject": "车辆",
+			"metric_unit": "km/h", "metric_value": "85", "source_line_spans": []any{float64(50)}},
+	}
+
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 416)
+	if len(res.PendingGroups) != 1 {
+		t.Fatalf("PendingGroups=%d, want 1", len(res.PendingGroups))
+	}
+	if len(res.PendingGroups[0]) != 2 {
+		t.Fatalf("pending group=%+v, want candidate plus one close existing metric", res.PendingGroups[0])
+	}
+	for _, metric := range res.PendingGroups[0] {
+		if asString(metric["metric_id"]) == "416_mtc_2" {
+			t.Fatalf("far pH metric was retained in pending group: %+v", metric)
+		}
+	}
+}
+
+func TestMergeMetrics_FarOnlySameSpanMetricIsIgnoredAndCandidateAdded(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "416_mtc_2", "metric_name": "土壤pH值", "metric_subject": "土壤酸碱度",
+			"metric_unit": "pH", "metric_value": "7", "source_line_spans": []any{float64(50)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "车辆运行速度", "metric_subject": "车辆",
+			"metric_unit": "km/h", "metric_value": "85", "source_line_spans": []any{float64(50)}},
+	}
+
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 416)
+	if len(res.Added) != 1 || res.Added[0]["metric_id"] != "416_mtc_3" {
+		t.Fatalf("Added=%+v, want the candidate as a new metric", res.Added)
+	}
+	if len(res.PendingGroups) != 0 {
+		t.Fatalf("PendingGroups=%d, want 0", len(res.PendingGroups))
+	}
+}
+
+func TestMergeMetrics_StaticOverlapDistinctIdentitiesResolveIndependently(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_1", "metric_name": "Temperature", "metric_subject": "inlet",
+			"metric_unit": "C", "metric_value": "20", "source_line_spans": []any{float64(2)}},
+		{"metric_id": "173_mtc_2", "metric_name": "Temperature", "metric_subject": "outlet",
+			"metric_unit": "C", "metric_value": "25", "source_line_spans": []any{float64(2)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "Temperature", "metric_subject": "inlet", "metric_unit": "C",
+			"metric_value": "21", "source_line_spans": []any{float64(2)}},
+		{"metric_name": "Temperature", "metric_subject": "outlet", "metric_unit": "C",
+			"metric_value": "26", "source_line_spans": []any{float64(2)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 173)
+	if len(res.StaticMerges) != 2 || len(res.PendingGroups) != 0 {
+		t.Fatalf("StaticMerges=%d PendingGroups=%d, want 2 and 0", len(res.StaticMerges), len(res.PendingGroups))
 	}
 }

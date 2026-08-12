@@ -79,8 +79,13 @@ func (s ComparisonStore) validateMetricKey(ctx context.Context, metricKey string
 	if t.TermKind != "metric_definition" {
 		return fmt.Errorf("metric_key %q resolves to a %q term, not metric_definition", metricKey, t.TermKind)
 	}
-	if t.Status != "included_in_release" {
-		return fmt.Errorf("metric_key %q is not a released term (status %q)", metricKey, t.Status)
+	// ADR 2026081201 DR4: an auto-promoted term is live/usable immediately,
+	// same as a curator-released one — the comparison matrix must not wait
+	// on review that may never come at this volume. Still excludes
+	// draft/in_review/approved/rejected/superseded: those are not yet (or
+	// no longer) a usable identity for anything to key off.
+	if t.Status != "included_in_release" && t.Status != "auto-promoted" {
+		return fmt.Errorf("metric_key %q is not a usable term (status %q, want included_in_release or auto-promoted)", metricKey, t.Status)
 	}
 	return nil
 }

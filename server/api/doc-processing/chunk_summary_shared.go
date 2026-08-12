@@ -442,11 +442,11 @@ func runConcurrent[T any](ctx context.Context, maxTasks, n int, fn func(ctx cont
 	if maxTasks <= 1 || n == 1 {
 		for i := range n {
 			if ctx.Err() != nil {
-				return nil, ctx.Err()
+				return results, ctx.Err()
 			}
 			res, err := fn(ctx, i)
 			if err != nil {
-				return nil, err
+				return results, err
 			}
 			results[i] = res
 		}

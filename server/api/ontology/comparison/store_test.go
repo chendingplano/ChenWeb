@@ -19,8 +19,8 @@ func TestComparisonStoreCreateScopeAndPersistDirectionalCell(t *testing.T) {
 
 	now := time.Now()
 	releasedMetricTermRows := func() *sqlmock.Rows {
-		return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
-			AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, now, nil, now, nil)
+		return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, nil, nil, nil, now, nil, now, nil)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("time_to_alarm").WillReturnRows(releasedMetricTermRows())
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_comparison_scopes")).
@@ -62,15 +62,15 @@ func TestComparisonStoreCreateScopeRejectsMetricKeyThatIsNotAReleasedMetricDefin
 		rows func() *sqlmock.Rows
 	}{
 		{"unknown term id", func() *sqlmock.Rows {
-			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"})
+			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"})
 		}},
 		{"wrong term_kind", func() *sqlmock.Rows {
-			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
-				AddRow(1, "time_to_alarm", 1, "unit", "measurement", "included_in_release", nil, nil, nil, time.Now(), nil, time.Now(), nil)
+			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"}).
+				AddRow(1, "time_to_alarm", 1, "unit", "measurement", "included_in_release", nil, nil, nil, nil, nil, nil, time.Now(), nil, time.Now(), nil)
 		}},
 		{"not yet released", func() *sqlmock.Rows {
-			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
-				AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "draft", nil, nil, nil, time.Now(), nil, time.Now(), nil)
+			return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"}).
+				AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "draft", nil, nil, nil, nil, nil, nil, time.Now(), nil, time.Now(), nil)
 		}},
 	}
 	for _, tc := range cases {
@@ -91,6 +91,30 @@ func TestComparisonStoreCreateScopeRejectsMetricKeyThatIsNotAReleasedMetricDefin
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// TestComparisonStoreValidateMetricKeyAcceptsAutoPromoted verifies ADR
+// 2026081201 DR4: a metric_key resolving to an auto-promoted term is
+// accepted, not just a curator-released one -- the comparison matrix must
+// be usable immediately, without waiting on review that may never come at
+// this volume.
+func TestComparisonStoreValidateMetricKeyAcceptsAutoPromoted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("measurement:kwc_x").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(1, "measurement:kwc_x", 1, "metric_definition", "measurement", "auto-promoted", nil, nil, nil, nil, nil, nil, time.Now(), nil, time.Now(), nil))
+
+	if err := (ComparisonStore{DB: db}).validateMetricKey(context.Background(), "measurement:kwc_x"); err != nil {
+		t.Fatalf("validateMetricKey rejected an auto-promoted term: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

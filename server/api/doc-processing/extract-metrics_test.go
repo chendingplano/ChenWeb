@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/names"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -791,6 +792,48 @@ func TestFinalizeChunkBatch_WipeModeDeletesThenSaves(t *testing.T) {
 	}
 }
 
+func TestEnrichMetricCandidatesKeepsSuccessfulBatchesWhenOneFails(t *testing.T) {
+	ext := &metricsSeqErrExtractor{
+		outs: []map[string]any{
+			{"language": "en", "metrics": []any{map[string]any{
+				"metric_name": "Throughput", "source_line_spans": []any{float64(10)},
+			}}},
+			nil,
+		},
+		errs: []error{nil, errors.New("second enrichment timed out")},
+	}
+	p := makeTestMetricsProcessor(ext, 1)
+	candidates := []metricCandidate{
+		{CandidateID: "c1", ChunkIndex: 0, MetricNameHint: "Throughput"},
+		{CandidateID: "c2", ChunkIndex: 1, MetricNameHint: "Latency"},
+	}
+
+	metrics, _, err := p.enrichMetricCandidates(context.Background(), 416, candidates, "")
+	if err == nil || !strings.Contains(err.Error(), "second enrichment timed out") {
+		t.Fatalf("enrichMetricCandidates error=%v, want the batch failure alongside partial results", err)
+	}
+	if len(metrics) != 1 || metrics[0]["metric_name"] != "Throughput" {
+		t.Fatalf("metrics=%v, want the successful batch result", metrics)
+	}
+}
+
+func TestFinalizeChunkBatch_WipeModeDeletesWhenExtractionFindsNoCandidates(t *testing.T) {
+	metricsStore := &fakeMetricsStore{}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, metricsStore, &fakeJSONExtractor{}, nil)
+	p.batchRecordID = 173
+	p.batchForceClear = true
+
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if metricsStore.deleteCalled != 1 {
+		t.Fatalf("deleteCalled=%d, want 1 when force_clear is enabled even with no candidates", metricsStore.deleteCalled)
+	}
+	if metricsStore.saveCalled != 0 {
+		t.Fatalf("saveCalled=%d, want 0 when extraction finds no candidates", metricsStore.saveCalled)
+	}
+}
+
 func TestFinalizeChunkBatch_MergeMode_UnchangedExistingNotWritten(t *testing.T) {
 	metricsStore := &fakeMetricsStore{
 		existingMetrics: []map[string]any{
@@ -865,9 +908,9 @@ func TestMergeAndCollectDirtyMetrics_MergedWinnerPreservesUntouchedFields(t *tes
 		"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)},
 		"metric_desc": "max end-to-end latency", "metric_context": "SLA section 4",
 	}
-	// mergeAndCollectDirtyMetrics is called directly (not via FinalizeChunkBatch),
-	// so it triggers exactly one LLM call: the Merge Resolution call inside
-	// resolveMergeAmbiguities. Its output is sparse, no desc/context.
+	// This candidate has one deterministic static match, so merge resolution
+	// should not invoke the LLM. Static merging must preserve existing fields
+	// absent from the new enrichment.
 	extractor := &fakeJSONExtractor{outs: []map[string]any{
 		{"winning_metrics": []any{map[string]any{
 			"metric_id": "173_mtc_1", "absorbed_metric_ids": []any{"173_mtc_2"},
@@ -1569,7 +1612,8 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"metric_keywords", "metric_keywords_en", "metric_unit", "metric_unit_en", "metric_value",
 		"value_data_type", "value_range_type", "value_class", "value_class_en",
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
-		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en", "ext_info",
+		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en",
+		"keyword_concept_id", "metric_definition_term_id", "ext_info",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1577,7 +1621,8 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		`["latency"]`, `["latency"]`, "ms", "ms", "200",
 		"number", "maximum", "performance", "performance",
 		"", "<=200", "daily",
-		`["performance"]`, `["performance"]`, `[{"category_path":[{"name":"System Safety"},{"name":"Alarm Thresholds"}]}]`, `[{"category_path":[{"name":"System Safety"}]}]`, `{"language":"zh","schema_version":"2"}`,
+		`["performance"]`, `["performance"]`, `[{"category_path":[{"name":"System Safety"},{"name":"Alarm Thresholds"}]}]`, `[{"category_path":[{"name":"System Safety"}]}]`,
+		"kwc:latency", "mdt:latency", `{"language":"zh","schema_version":"2"}`,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).
@@ -1828,9 +1873,9 @@ func TestMetricsProcessor_Pass1FailFast(t *testing.T) {
 	}
 }
 
-// TestMetricsProcessor_Pass2FailFast verifies that a Pass 2 LLM error causes
-// extractMetricsFromChunksWithLLM to return that error.
-func TestMetricsProcessor_Pass2FailFast(t *testing.T) {
+// TestMetricsProcessor_Pass2KeepsSuccessfulBatches verifies that a Pass 2 LLM
+// error does not discard results from batches that completed successfully.
+func TestMetricsProcessor_Pass2KeepsSuccessfulBatches(t *testing.T) {
 	// Pass 1: 2 chunks, each with one candidate → 2 batches for pass 2.
 	// Pass 2: first batch succeeds, second fails.
 	ext := &metricsSeqErrExtractor{
@@ -1849,12 +1894,12 @@ func TestMetricsProcessor_Pass2FailFast(t *testing.T) {
 	}
 
 	p := makeTestMetricsProcessor(ext, 1) // sequential so the error always fires
-	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
-	if err == nil {
-		t.Fatal("expected error from Pass 2, got nil")
+	result, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
+	if err != nil {
+		t.Fatalf("unexpected error from Pass 2 caller: %v", err)
 	}
-	if !strings.Contains(err.Error(), "enrich batch boom") {
-		t.Errorf("error does not contain expected message: %v", err)
+	if len(result.Metrics) != 1 {
+		t.Fatalf("expected the successful batch result to be retained, got %d metrics", len(result.Metrics))
 	}
 }
 
@@ -1930,24 +1975,24 @@ func TestMetricsProcessor_ProcessChunk_NoOpWhenSkipping(t *testing.T) {
 // ── ResolvingMetricsStore decorator (spec step 12, REQ-3) ─────────────────────
 
 // scriptedNameResolver is a nameResolver fake returning a fixed resolution per
-// name, so the decorator's ResolveNames batch call is testable without a live
-// keyword DB.
+// name, so the decorator's per-name ResolveAndObserve calls are testable
+// without a live keyword DB.
 type scriptedNameResolver struct {
 	resolutions map[string]names.NameResolution
 	requests    []names.ResolveNameRequest
 	err         error
 }
 
-func (s *scriptedNameResolver) ResolveNames(_ context.Context, reqs []names.ResolveNameRequest) ([]names.NameResolution, error) {
-	s.requests = append(s.requests, reqs...)
+func (s *scriptedNameResolver) ResolveAndObserve(_ context.Context, req names.ResolveNameRequest, _ names.NameOccurrence) (names.NameResolution, error) {
+	s.requests = append(s.requests, req)
 	if s.err != nil {
-		return nil, s.err
+		return names.NameResolution{}, s.err
 	}
-	out := make([]names.NameResolution, 0, len(reqs))
-	for _, req := range reqs {
-		out = append(out, s.resolutions[req.Name])
-	}
-	return out, nil
+	return s.resolutions[req.Name], nil
+}
+
+func (s *scriptedNameResolver) MatchUnitLabel(_ context.Context, _ string) (string, error) {
+	return "", nil
 }
 
 func TestResolvingMetricsStoreResolvesNames(t *testing.T) {
@@ -2111,6 +2156,93 @@ func TestResolvingMetricsStoreRoutesBothWritePaths(t *testing.T) {
 	}
 	if _, err := s.GetMetricsByInputRecordID(ctx, 1); err != nil {
 		t.Fatalf("GetMetricsByInputRecordID: %v", err)
+	}
+}
+
+// scriptedTermAligner is a termAligner fake recording each
+// EnsureAcceptedOrCreate call, so the ADR 2026081201 DR1 auto-promotion
+// branch is testable without a live keyword DB.
+type scriptedTermAligner struct {
+	termID string
+	calls  []keywords.TermSynthesisInput
+	err    error
+}
+
+func (a *scriptedTermAligner) EnsureAcceptedOrCreate(_ context.Context, _ string, synth keywords.TermSynthesisInput, _ string, _ float64, _ string) (keywords.Alignment, error) {
+	a.calls = append(a.calls, synth)
+	if a.err != nil {
+		return keywords.Alignment{}, a.err
+	}
+	return keywords.Alignment{ObjectTermID: a.termID}, nil
+}
+
+// TestResolvingMetricsStoreAutoPromotesTermWhenConceptHasNone verifies ADR
+// 2026081201 DR1: a concept resolved without a governed term (lexical/
+// ambiguous, no TermID) triggers EnsureAcceptedOrCreate, synthesizing the
+// term from the representative metric row's own fields (DR3) — and the
+// resulting term id is what ends up on metric_definition_term_id, not left
+// empty the way it would be pre-ADR.
+func TestResolvingMetricsStoreAutoPromotesTermWhenConceptHasNone(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"发芽指数": {RawName: "发芽指数", Status: names.StatusLexicalResolved, ConceptID: "kwc_new", Method: "auto_created", Confidence: 0.8},
+		},
+	}
+	aligner := &scriptedTermAligner{termID: "measurement:kwc_new"}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver, Alignments: aligner}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_name":           "发芽指数",
+			"formula_or_definition": "发芽指数(%) = ...",
+			"value_data_type":       "number",
+			"value_range_type":      "exact",
+			"metric_unit":           "%",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if len(aligner.calls) != 1 {
+		t.Fatalf("EnsureAcceptedOrCreate calls=%d, want 1", len(aligner.calls))
+	}
+	got := aligner.calls[0]
+	if got.CanonicalName != "发芽指数" || got.Definition != "发芽指数(%) = ..." || got.ValueType != "number" || got.RangeType != "exact" {
+		t.Fatalf("unexpected synthesis input: %+v", got)
+	}
+	m := inner.lastSave.Metrics[0]
+	if m["keyword_concept_id"] != "kwc_new" {
+		t.Fatalf("keyword_concept_id=%#v, want kwc_new", m["keyword_concept_id"])
+	}
+	if m["metric_definition_term_id"] != "measurement:kwc_new" {
+		t.Fatalf("metric_definition_term_id=%#v, want the auto-promoted term id", m["metric_definition_term_id"])
+	}
+}
+
+// TestResolvingMetricsStoreSkipsAutoPromoteWhenAlreadyTermResolved confirms
+// EnsureAcceptedOrCreate is not called when the resolver already returned a
+// governed term (e.g. an existing aligns_to_term) -- auto-promotion only
+// fills a gap, it never re-decides an already-resolved identity.
+func TestResolvingMetricsStoreSkipsAutoPromoteWhenAlreadyTermResolved(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Luminance": {RawName: "Luminance", Status: names.StatusTermResolved, ConceptID: "kwc_l", TermID: "mea:Luminance"},
+		},
+	}
+	aligner := &scriptedTermAligner{termID: "should-not-be-used"}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver, Alignments: aligner}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_name": "Luminance"}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if len(aligner.calls) != 0 {
+		t.Fatalf("EnsureAcceptedOrCreate calls=%d, want 0 (already term_resolved)", len(aligner.calls))
+	}
+	if got := inner.lastSave.Metrics[0]["metric_definition_term_id"]; got != "mea:Luminance" {
+		t.Fatalf("metric_definition_term_id=%#v, want mea:Luminance unchanged", got)
 	}
 }
 
