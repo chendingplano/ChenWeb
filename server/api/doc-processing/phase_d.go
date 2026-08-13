@@ -29,7 +29,7 @@ import (
 )
 
 // SemanticAssociationEnabledFromEnv resolves the SEMANTIC_ASSOCIATION_ENABLED
-// setting. Unset (or any value that does not parse as a boolean) resolves to
+// (default: true) setting. Unset (or any value that does not parse as a boolean) resolves to
 // enabled, matching the default of 'true'. An explicit boolean-false value
 // disables the Phase D stages.
 func SemanticAssociationEnabledFromEnv() bool {

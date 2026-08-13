@@ -974,7 +974,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// DR8's Phase D stages (normalize_assertions, associate_semantics,
 	// project_semantics) run here too, as PostProcessIndexer processors
 	// ordered after the rest via PostProcessDependsOn -- see phase_d.go.
-	// Inert unless SEMANTIC_ASSOCIATION_ENABLED, and only invoked at all if
+	// Inert unless SEMANTIC_ASSOCIATION_ENABLED (default: true), and only invoked at all if
 	// present in this run's processors (routed, per ADR §8.2).
 	s.runPostProcessIndexing(ctx, processors, evt.RecordID)
 
