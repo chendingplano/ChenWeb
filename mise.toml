@@ -332,3 +332,86 @@ set -euo pipefail
 export PG_DB_NAME=chenweb_test
 go run ./server/cmd/ontology-compiler $COMPILER_ARGS
 '''
+
+[tasks.ontology-seed]
+description = '''
+Install the curated platform-owned ontology modules into the service database
+and verify the result.
+Usage: mise run ontology-seed              # all curated modules (default)
+       MODULE=measurement mise run ontology-seed
+
+Unlike `ontology-compiler`, this task never overrides PG_DB_NAME, so it targets
+the real service database (miner) rather than chenweb_test. The seeder accepts
+PG_USER_NAME (then PG_USER, then the literal fallback `cding`); the psql
+verification uses that same user resolution.
+
+`ontology-seed` exits nonzero when authoring or releasing fails. This task also
+verifies the resulting active releases. See bug doc-2026081301.
+'''
+run = '''
+set -euo pipefail
+: "${PG_DB_NAME:?set PG_DB_NAME (mise.local.toml sets it to the service database)}"
+: "${PG_PASSWORD:?set PG_PASSWORD}"
+trim_whitespace() {
+  printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+POSTGRES_USER="$(trim_whitespace "${PG_USER_NAME:-}")"
+if [ -z "$POSTGRES_USER" ]; then
+  POSTGRES_USER="$(trim_whitespace "${PG_USER:-}")"
+fi
+if [ -z "$POSTGRES_USER" ]; then
+  POSTGRES_USER=cding
+fi
+
+MODULE="${MODULE:-all}"
+if [ "$MODULE" = "all" ]; then
+  MODULES="core document-authority measurement"
+else
+  MODULES="$MODULE"
+fi
+
+echo "==> seeding curated ontology modules [$MODULES] into database '$PG_DB_NAME'"
+
+PGPASSWORD="$PG_PASSWORD" go run ./server/cmd/ontology-seed --module "$MODULE"
+
+echo "==> verifying released vocabulary in '$PG_DB_NAME'"
+
+psql_q() {
+  PGPASSWORD="$PG_PASSWORD" psql -h "${PG_HOST:-/tmp}" -p "${PG_PORT:-5432}" \
+    -U "$POSTGRES_USER" -d "$PG_DB_NAME" -tAc "$1"
+}
+
+failed=0
+for m in $MODULES; do
+  version=$(psql_q "SELECT r.version FROM kb.ontology_active_releases ar JOIN kb.ontology_module_releases r ON r.id = ar.release_id WHERE ar.module_id = '$m' AND ar.deactivated_at IS NULL")
+  if [ -z "$version" ]; then
+    echo "  FAIL $m: no active release"
+    failed=1
+    continue
+  fi
+  count=$(psql_q "SELECT count(*) FROM kb.ontology_terms WHERE module_id = '$m' AND status = 'included_in_release'")
+  echo "  ok   $m@$version ($count released terms)"
+done
+
+# The terms associate_semantics gates on. A green module release with these
+# missing is the exact production failure this task exists to prevent.
+case " $MODULES " in
+  *" measurement "*)
+    for t in mea:measured_by mea:lower_bound_requirement; do
+      status=$(psql_q "SELECT status FROM kb.ontology_terms WHERE term_id = '$t' ORDER BY id DESC LIMIT 1")
+      if [ "$status" != "included_in_release" ]; then
+        echo "  FAIL $t: status='${status:-<missing>}', associate_semantics requires included_in_release"
+        failed=1
+      else
+        echo "  ok   $t included_in_release"
+      fi
+    done
+    ;;
+esac
+
+if [ "$failed" -ne 0 ]; then
+  echo "==> ontology seed verification FAILED against '$PG_DB_NAME'"
+  exit 1
+fi
+echo "==> ontology seed verified against '$PG_DB_NAME'"
+'''

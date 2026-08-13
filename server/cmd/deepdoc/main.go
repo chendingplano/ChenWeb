@@ -199,9 +199,17 @@ func main() {
 	}
 
 	logger.Info("migrations completed successfully")
-	if err := seed.EnsureCuratedModules(ctx, project_db); err != nil {
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer bootstrapCancel()
+	warnings, err := seed.EnsureCuratedModules(bootstrapCtx, project_db)
+	if err != nil {
 		logger.Error("failed to ensure curated ontology modules", "error", err)
 		os.Exit(1)
+	}
+	for _, warning := range warnings {
+		logger.Warn("deferred curated ontology module",
+			"module_id", warning.ModuleID,
+			"dependency_module_id", warning.DependencyModuleID)
 	}
 
 	natsURL := os.Getenv("NATS_URL")

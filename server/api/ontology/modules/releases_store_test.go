@@ -100,6 +100,140 @@ func TestMarkApprovedProposalsIncluded(t *testing.T) {
 	}
 }
 
+func TestCreateReleasePreserveActiveExcludesCurrentActiveReleaseFromSupersession(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	expectCreateReleasePrerequisites(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.ontology_module_releases`)).
+		WithArgs("core", "1.0.0+seed.changed", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "ontology-seed").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(101)))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_terms SET status = 'included_in_release'`)).
+		WithArgs(int64(101), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_candidates`)).
+		WithArgs(int64(101)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	// This is the seed path: a new release may supersede inactive historical
+	// releases, but must leave the operator-selected active release intact.
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_module_releases
+SET superseded_by_release_id = $1, modify_time = NOW()
+WHERE module_id = $2 AND id <> $1 AND superseded_by_release_id IS NULL
+	AND id NOT IN (
+		SELECT release_id FROM kb.ontology_active_releases
+		WHERE module_id = $2 AND deactivated_at IS NULL
+	)`)).
+		WithArgs(int64(101), "core").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_applicability_proposals`)).
+		WithArgs(int64(101), "core").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_module_releases
+WHERE id = $1`)).
+		WithArgs(int64(101)).
+		WillReturnRows(releaseRows().AddRow(int64(101), "core", "1.0.0+seed.changed", "Core", []byte(`{}`), "checksum", []byte(`{}`), nil, "ontology-seed", timeNow()))
+
+	_, err = (ReleaseStore{DB: db, PreserveActive: true}).CreateRelease(context.Background(), "core", "1.0.0+seed.changed", "ontology-seed")
+	if err != nil {
+		t.Fatalf("CreateRelease: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateReleaseNormallySupersedesAllPriorReleases(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	expectCreateReleasePrerequisites(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.ontology_module_releases`)).
+		WithArgs("core", "1.0.1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "compiler").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(102)))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_terms SET status = 'included_in_release'`)).
+		WithArgs(int64(102), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_candidates`)).
+		WithArgs(int64(102)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_module_releases
+SET superseded_by_release_id = $1, modify_time = NOW()
+WHERE module_id = $2 AND id <> $1 AND superseded_by_release_id IS NULL`)).
+		WithArgs(int64(102), "core").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_applicability_proposals`)).
+		WithArgs(int64(102), "core").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_module_releases
+WHERE id = $1`)).
+		WithArgs(int64(102)).
+		WillReturnRows(releaseRows().AddRow(int64(102), "core", "1.0.1", "Core", []byte(`{}`), "checksum", []byte(`{}`), nil, "compiler", timeNow()))
+
+	_, err = (ReleaseStore{DB: db}).CreateRelease(context.Background(), "core", "1.0.1", "compiler")
+	if err != nil {
+		t.Fatalf("CreateRelease: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func expectCreateReleasePrerequisites(mock sqlmock.Sqlmock) {
+	now := timeNow()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_modules
+WHERE module_id = $1`)).
+		WithArgs("core").
+		WillReturnRows(moduleRows().AddRow(int64(1), "core", "Core", "platform", "", "{}", "active", now, "tester", now, "tester"))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_terms
+WHERE ($1 = '' OR module_id = $1)
+  AND ($2 = '' OR status = $2)`)).
+		WithArgs("core", "approved").
+		WillReturnRows(termRows().AddRow(int64(10), "core:term", 2, "class", "core", "approved", "term", "", nil, "", "", nil, now, "tester", now, "tester"))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_term_labels
+WHERE term_id = $1`)).
+		WithArgs("core:term").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "term_id", "version", "label", "lang", "label_role", "status", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_axioms
+WHERE ($1 = '' OR module_id = $1)`)).
+		WithArgs("core").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "axiom_id", "version", "axiom_kind", "subject_term_id", "predicate_term_id", "object_term_id", "object_iri", "module_id", "status", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_mappings
+WHERE ($1 = '' OR module_id = $1)`)).
+		WithArgs("core").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "mapping_id", "version", "from_term_id", "to_term_id", "to_iri", "relation", "evidence", "approval_status", "module_id", "status", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_profiles
+WHERE module_id = $1 AND status = 'approved'`)).
+		WithArgs("core").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "profile_id", "version", "module_id", "status", "title", "applicability", "closed_dimensions", "create_time", "create_by", "modify_time", "modify_by"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_profile_rules pr`)).
+		WithArgs("core").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "rule_id", "version", "profile_id", "profile_version", "rule_kind", "status", "severity", "rule_config", "applicability", "create_time", "create_by", "modify_time", "modify_by"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_modules
+ORDER BY module_id`)).
+		WillReturnRows(moduleRows().AddRow(int64(1), "core", "Core", "platform", "", "{}", "active", now, "tester", now, "tester"))
+}
+
+func moduleRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "module_id", "title", "owner", "description", "depends_on", "status", "create_time", "create_by", "modify_time", "modify_by"})
+}
+
+func termRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"})
+}
+
+func releaseRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "module_id", "version", "title", "payload", "content_checksum", "dependency_releases", "superseded_by_release_id", "released_by", "released_at"})
+}
+
 // TestActivateRollsBackWhenPromoteFails proves a promotion failure rolls the
 // activation transaction back instead of leaving the release activated without
 // its draft policy.

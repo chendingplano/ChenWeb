@@ -28,8 +28,8 @@ type TermLabel struct {
 }
 
 var AllowedLabelRoles = map[string]bool{
-	"prefLabel": true,
-	"altLabel":  true,
+	"prefLabel":   true,
+	"altLabel":    true,
 	"hiddenLabel": true,
 }
 
@@ -225,6 +225,23 @@ SELECT EXISTS (
 		return false, err
 	}
 	return exists, nil
+}
+
+// SupersedePrefLabels retires every current preferred label for a term and
+// language so a replacement can be created without violating the one-current-
+// prefLabel rule. Callers must create the replacement immediately after this
+// succeeds.
+func (s LabelStore) SupersedePrefLabels(ctx context.Context, termID, lang, by string) error {
+	if s.DB == nil {
+		return errors.New("db is nil")
+	}
+	const stmt = `
+UPDATE kb.ontology_term_labels
+SET status = 'superseded', modify_time = NOW(), modify_by = $3
+WHERE term_id = $1 AND lang = $2 AND label_role = 'prefLabel'
+	AND status NOT IN ('rejected', 'superseded')`
+	_, err := s.DB.ExecContext(ctx, stmt, strings.TrimSpace(termID), lang, nullableString(by))
+	return err
 }
 
 // CreateLabelVersion inserts a new version row for an existing term label.

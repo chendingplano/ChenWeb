@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	_ "github.com/lib/pq"
 
@@ -53,7 +54,7 @@ func connect() *sql.DB {
 		log.Fatal("PG_DB_NAME must be set")
 	}
 	dsn := fmt.Sprintf("host=%s port=%s user=%s dbname=%s sslmode=disable",
-		envOr("PG_HOST", "/tmp"), envOr("PG_PORT", "5432"), envFirst("PG_USER_NAME", "PG_USER", "cding"), dbName)
+		envOr("PG_HOST", "/tmp"), envOr("PG_PORT", "5432"), postgresUserName(), dbName)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
@@ -64,13 +65,13 @@ func connect() *sql.DB {
 	return db
 }
 
-func envFirst(keys ...string) string {
-	for _, key := range keys {
-		if v := os.Getenv(key); v != "" {
-			return v
+func postgresUserName() string {
+	for _, key := range []string{"PG_USER_NAME", "PG_USER"} {
+		if user := strings.TrimSpace(os.Getenv(key)); user != "" {
+			return user
 		}
 	}
-	return ""
+	return "cding"
 }
 
 func envOr(k, d string) string {

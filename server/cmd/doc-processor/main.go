@@ -232,9 +232,15 @@ func main() {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
 	}
-	if err := seed.EnsureCuratedModules(ctx, ApiTypes.ProjectDBHandle); err != nil {
+	warnings, err := seed.EnsureCuratedModules(ctx, ApiTypes.ProjectDBHandle)
+	if err != nil {
 		logger.Error("failed to ensure curated ontology modules", "error", err)
 		os.Exit(1)
+	}
+	for _, warning := range warnings {
+		logger.Warn("deferred curated ontology module",
+			"module_id", warning.ModuleID,
+			"dependency_module_id", warning.DependencyModuleID)
 	}
 	if err := ensureLLMUsageSink(); err != nil {
 		logger.Error("failed to install default llm usage sink", "error", err)

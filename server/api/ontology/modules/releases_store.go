@@ -48,6 +48,11 @@ type ActiveRelease struct {
 // ReleaseStore persists module releases and the activation pointer.
 type ReleaseStore struct {
 	DB *sql.DB
+	// PreserveActive leaves the module's currently active release unsuperseded
+	// when creating a new release. This is for bootstrap/import workflows that
+	// may stage a newer inactive release without changing an operator-selected
+	// activation pointer. The default remains to supersede every prior release.
+	PreserveActive bool
 	// Promote (may be nil) runs approved-proposal promotion inside the release
 	// transaction, after the release row exists and before commit, so it is
 	// atomic with release creation/activation and rolls back with it on failure
@@ -153,11 +158,21 @@ WHERE id IN (
 		return Release{}, err
 	}
 
-	// The new release supersedes any prior release of the same module.
-	if _, err := tx.ExecContext(ctx, `
+	// The new release normally supersedes every prior release of the same
+	// module. Bootstrap/import callers may preserve the currently active
+	// release so an operator-selected activation remains a usable release.
+	supersedeQuery := `
 UPDATE kb.ontology_module_releases
 SET superseded_by_release_id = $1, modify_time = NOW()
-WHERE module_id = $2 AND id <> $1 AND superseded_by_release_id IS NULL`,
+WHERE module_id = $2 AND id <> $1 AND superseded_by_release_id IS NULL`
+	if s.PreserveActive {
+		supersedeQuery += `
+AND id NOT IN (
+	SELECT release_id FROM kb.ontology_active_releases
+	WHERE module_id = $2 AND deactivated_at IS NULL
+)`
+	}
+	if _, err := tx.ExecContext(ctx, supersedeQuery,
 		releaseID, strings.TrimSpace(moduleID)); err != nil {
 		return Release{}, err
 	}
