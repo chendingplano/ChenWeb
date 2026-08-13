@@ -7,12 +7,14 @@
 // "three declared stages that run after Phase C"), sequenced via
 // PostProcessDependsOn so normalize -> associate -> project always run in
 // order for one record. Each stays gated by SEMANTIC_ASSOCIATION_ENABLED
-// (default false, matching the ADR config table) so registering them as
-// selectable/routable processors does not change default production
-// behavior -- the same self-gating pattern P4's routed processors
-// (extract_metric_definitions et al.) already use, since the DR5
+// (default true as of 2026-08-13, superseding the ADR's original config
+// table default of false) via the same self-gating pattern P4's routed
+// processors (extract_metric_definitions et al.) already use, since the DR5
 // Class/Cost/OnUndetermined declarations are metadata only until a runtime
-// DAG enforcer exists to consume them.
+// DAG enforcer exists to consume them. Because that enforcer doesn't exist
+// yet and all three are unconditionally registered in runtime.go, this
+// SEMANTIC_ASSOCIATION_ENABLED check is the only thing gating them -- so
+// flipping its default is enough to turn Phase D on by default.
 package docprocessing
 
 import (
@@ -27,15 +29,19 @@ import (
 )
 
 // SemanticAssociationEnabledFromEnv resolves the SEMANTIC_ASSOCIATION_ENABLED
-// setting. Unset (or any value that does not parse as a boolean true)
-// resolves to disabled, matching the ADR's stated default of 'false'.
+// setting. Unset (or any value that does not parse as a boolean) resolves to
+// enabled, matching the default of 'true'. An explicit boolean-false value
+// disables the Phase D stages.
 func SemanticAssociationEnabledFromEnv() bool {
 	raw := strings.TrimSpace(os.Getenv("SEMANTIC_ASSOCIATION_ENABLED"))
 	if raw == "" {
-		return false
+		return true
 	}
 	enabled, err := strconv.ParseBool(raw)
-	return err == nil && enabled
+	if err != nil {
+		return true
+	}
+	return enabled
 }
 
 // NormalizeAssertionsProcessor is DR8's normalize_assertions stage: every

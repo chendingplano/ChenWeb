@@ -2,10 +2,10 @@ package docprocessing
 
 import "testing"
 
-func TestSemanticAssociationEnabledFromEnvDefaultsFalse(t *testing.T) {
+func TestSemanticAssociationEnabledFromEnvDefaultsTrue(t *testing.T) {
 	t.Setenv("SEMANTIC_ASSOCIATION_ENABLED", "")
-	if SemanticAssociationEnabledFromEnv() {
-		t.Fatal("expected disabled by default")
+	if !SemanticAssociationEnabledFromEnv() {
+		t.Fatal("expected enabled by default")
 	}
 }
 
@@ -16,9 +16,16 @@ func TestSemanticAssociationEnabledFromEnvTrue(t *testing.T) {
 	}
 }
 
-func TestSemanticAssociationEnabledFromEnvInvalidIsDisabled(t *testing.T) {
-	t.Setenv("SEMANTIC_ASSOCIATION_ENABLED", "not-a-bool")
+func TestSemanticAssociationEnabledFromEnvExplicitFalseIsDisabled(t *testing.T) {
+	t.Setenv("SEMANTIC_ASSOCIATION_ENABLED", "false")
 	if SemanticAssociationEnabledFromEnv() {
-		t.Fatal("expected disabled for an unparseable value")
+		t.Fatal("expected disabled when explicitly set to false")
+	}
+}
+
+func TestSemanticAssociationEnabledFromEnvInvalidIsEnabled(t *testing.T) {
+	t.Setenv("SEMANTIC_ASSOCIATION_ENABLED", "not-a-bool")
+	if !SemanticAssociationEnabledFromEnv() {
+		t.Fatal("expected enabled for an unparseable value, falling back to the default")
 	}
 }

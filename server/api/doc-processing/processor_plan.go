@@ -431,8 +431,8 @@ var productionProcessorSpecs = []ProcessorSpec{
 	// planner's phase model has no separate "D" tier -- they run in the same
 	// post-process-indexing tier as the rest of Phase C, ordered last via
 	// PostProcessDependsOn (see phase_d.go). Gated by
-	// SEMANTIC_ASSOCIATION_ENABLED so registering them here does not change
-	// default production behavior.
+	// SEMANTIC_ASSOCIATION_ENABLED, which defaults to true as of 2026-08-13
+	// (see phase_d.go), so these run by default.
 	{Name: "normalize_assertions", Phase: "C", DependsOn: []string{"extract_metrics", "extract_provisions"}, Requires: []string{"metrics", "provisions"}, Produces: []string{"assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
 	{Name: "associate_semantics", Phase: "C", DependsOn: []string{"normalize_assertions"}, Requires: []string{"assertions"}, Produces: []string{"semantic_associations"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
 	{Name: "project_semantics", Phase: "C", DependsOn: []string{"associate_semantics"}, Requires: []string{"semantic_associations"}, Produces: []string{"assertion_projections"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
