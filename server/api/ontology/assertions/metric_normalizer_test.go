@@ -261,6 +261,29 @@ func TestMetricCandidatePayloadCarriesMetricDefinitionTermID(t *testing.T) {
 	}
 }
 
+func TestResolveMetricValueProductionRatioDoesNotFabricateScalar(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("exact_ratio")
+	r.ValueClass = ns("ratio")
+	r.MetricValue = ns("1:10")
+	p := resolveMetricValue(r)
+	if p.ValueForm != "unparsed" || p.NumericValue != nil {
+		t.Fatalf("exact ratio 1:10 must not become a scalar assertion, got %+v", p)
+	}
+}
+
+func TestResolveMetricValueProductionRangeParsesMetricValue(t *testing.T) {
+	for _, raw := range []string{"5.5~8.5", "0℃～4℃"} {
+		r := metricRowFixture()
+		r.ValueRangeType = ns("range")
+		r.MetricValue = ns(raw)
+		p := resolveMetricValue(r)
+		if p.ValueForm != "range" || p.AssertionKind != "interval_requirement" || p.LowerValue == nil || p.UpperValue == nil {
+			t.Fatalf("range %q = %+v, want parsed interval", raw, p)
+		}
+	}
+}
+
 // TestResolveMetricValueRangeUsesValueMinMax locks in design D1: a range row's
 // endpoints come from value_min/value_max, never from re-parsing
 // threshold_or_target (spec: "range values use value_min and value_max without
@@ -360,10 +383,9 @@ func TestResolveMetricValueRangeMissingBoundsFallsBackHonestly(t *testing.T) {
 	r := metricRowFixture()
 	r.ValueRangeType = ns("range")
 	r.ValueClass = ns("requirement")
-	r.MetricValue = ns("500:1 至 2000:1")
-	// value_min/value_max NULL: endpoints can't come from structured columns,
-	// and the spec forbids re-parsing free text for a range row, so this must
-	// be honest unparsed -- not a fabricated interval from the text.
+	r.MetricValue = ns("see table 3")
+	// value_min/value_max NULL and no parseable range expression: this must
+	// remain honest unparsed -- never a fabricated interval.
 	p := resolveMetricValue(r)
 	if p.ValueForm != "unparsed" {
 		t.Fatalf("expected range row without value_min/value_max to be unparsed, got %+v", p)

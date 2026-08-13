@@ -177,7 +177,7 @@ var (
 	reUpperBound = regexp.MustCompile(`(?i)(at most|no more than|not more than|maximum of|<=|≤|不超过|不大于|不高于|不应超过|不得超过)`)
 	// reRangeKeyword matches an explicit range keyword/dash between two
 	// numbers, with optional surrounding whitespace.
-	reRangeKeyword = regexp.MustCompile(`(?i)(-?\d+(?:\.\d+)?)\s*(?:to|~|至|―|–|—)\s*(-?\d+(?:\.\d+)?)`)
+	reRangeKeyword = regexp.MustCompile(`(?i)(-?\d+(?:\.\d+)?)\s*(?:to|~|～|至|―|–|—)\s*(-?\d+(?:\.\d+)?)`)
 	// reRangeHyphen matches a plain ASCII hyphen as a range separator only
 	// when whitespace surrounds it on both sides -- an unspaced hyphen
 	// between two numbers is at least as likely to be part of a standard/
@@ -200,12 +200,7 @@ type parsedThreshold struct {
 }
 
 // structuredValueAssertionKind maps a kb.metrics value_range_type + value_class
-// to the governed assertion kind the normalizer emits (design D1). The values
-// match the closed enum the v4/v5 enrichment prompts emit; exact_value is
-// included even though no governed mea:exact_value term is seeded yet -- such
-// a row defers downstream via the existing no_governed_assertion_kind_term
-// path rather than being fabricated (and the gold corpus is expected to gain
-// exact rows in a benchmark pass).
+// to the governed assertion kind the normalizer emits (design D1).
 var structuredValueAssertionKind = map[string]string{
 	"lower_bound": "lower_bound_requirement",
 	"upper_bound": "upper_bound_requirement",
@@ -217,7 +212,10 @@ var structuredValueAssertionKind = map[string]string{
 // extraction vocabulary and normalization's small structured vocabulary. The
 // extractor has emitted these synonymous values in production; accepting them
 // here lets both independently versioned stages retain a stable contract.
-func canonicalMetricValueRangeType(raw string) string {
+// CanonicalMetricValueRangeType is the extractor/normalizer range contract.
+// Extraction persists this canonical form and normalization retains the same
+// boundary defensively for historical rows.
+func CanonicalMetricValueRangeType(raw string) string {
 	vrt := strings.ToLower(strings.TrimSpace(raw))
 	vrt = strings.ReplaceAll(vrt, "-", "_")
 	vrt = strings.ReplaceAll(vrt, " ", "_")
@@ -256,7 +254,7 @@ var valueClassAssertionKind = map[string]string{
 // never fabricates: a structured row with no parseable number produces an
 // honest unparsed, never a value invented from unrelated text.
 func resolveMetricValue(r metricRow) parsedThreshold {
-	vrt := canonicalMetricValueRangeType(r.ValueRangeType.String)
+	vrt := CanonicalMetricValueRangeType(r.ValueRangeType.String)
 	if vrt == "" {
 		// Legacy row (pre-structured-schema, or extraction left the enum
 		// unset): fall back to the free-text parser unchanged.
@@ -279,6 +277,15 @@ func resolveMetricValue(r metricRow) parsedThreshold {
 				LowerValue: &lo, UpperValue: &hi,
 			}
 		}
+		// The current extractor records production ranges in metric_value but
+		// has not populated value_min/value_max. Parsing only the known range
+		// shape retains a structured interval without inventing endpoints.
+		rawRange := strings.NewReplacer("℃", "", "°C", "", "°", "").Replace(r.MetricValue.String)
+		parsed := parseThresholdOrTarget(rawRange)
+		if parsed.ValueForm == "range" {
+			parsed.AssertionKind = kind
+			return parsed
+		}
 	case "lower_bound", "upper_bound":
 		if v, ok := firstParseableNumber(r.MetricValue.String); ok {
 			comparator := ">="
@@ -291,6 +298,12 @@ func resolveMetricValue(r metricRow) parsedThreshold {
 			}
 		}
 	case "exact":
+		// Ratios such as 1:10 are not scalar exact values. Their representation
+		// is not yet modeled as a governed literal, so preserve them as
+		// unparsed rather than silently accepting the numerator as a value.
+		if strings.Contains(strings.TrimSpace(r.MetricValue.String), ":") {
+			break
+		}
 		if v, ok := firstParseableNumber(r.MetricValue.String); ok {
 			return parsedThreshold{
 				ValueForm: "single", Comparator: "=", AssertionKind: kind,

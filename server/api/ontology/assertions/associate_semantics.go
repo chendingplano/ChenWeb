@@ -136,7 +136,20 @@ WHERE status = 'deferred' AND source_artifact_type = ANY($1)
 	dcStore := DecisionCandidateStore{DB: a.DB}
 	for _, d := range deferred {
 		if d.fingerprint == "unresolved_referent" {
-			needsRenormalization = true
+			if d.artifactType != "metric" {
+				continue
+			}
+			var p metricCandidatePayload
+			if err := json.Unmarshal([]byte(d.payload), &p); err != nil {
+				return fmt.Errorf("decode deferred metric candidate %d: %w", d.id, err)
+			}
+			linked, err := a.metricSubjectObjectLinked(ctx, inputRecordID, p.MetricID)
+			if err != nil {
+				return err
+			}
+			if linked {
+				needsRenormalization = true
+			}
 			continue
 		}
 		if d.artifactType != "metric" {
@@ -172,6 +185,22 @@ WHERE status = 'deferred' AND source_artifact_type = ANY($1)
 		}
 	}
 	return nil
+}
+
+// metricSubjectObjectLinked is the recovery gate for unresolved metric
+// referents. It prevents every association run from re-normalizing unchanged
+// rows while allowing a separately completed object reconciliation to advance
+// the candidate on the next run.
+func (a AssociateSemantics) metricSubjectObjectLinked(ctx context.Context, inputRecordID int64, metricID string) (bool, error) {
+	const stmt = `
+SELECT EXISTS (
+	SELECT 1 FROM kb.artifact_objects
+	WHERE input_record_id = $1 AND artifact_type = 'metric' AND artifact_id = $2
+	  AND NULLIF(BTRIM(object_id), '') IS NOT NULL
+)`
+	var linked bool
+	err := a.DB.QueryRowContext(ctx, stmt, inputRecordID, strings.TrimSpace(metricID)).Scan(&linked)
+	return linked, err
 }
 
 // termExists reports whether a governed, released term exists (spec §10.5:

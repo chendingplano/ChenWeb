@@ -688,6 +688,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		m["metric_id"] = fmt.Sprintf("%d_mtc_%d", evt.RecordID, i+1)
 		allMetrics[i] = m
 	}
+	canonicalizeMetricValueRangeTypes(allMetrics)
 
 	inserted, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
 		InputRecordID: evt.RecordID,
@@ -3526,6 +3527,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			"successful_metrics", len(metrics),
 			"record_stage", "partial_enrichment")
 	}
+	canonicalizeMetricValueRangeTypes(metrics)
 	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
 	if err != nil {
 		return fmt.Errorf("(MID_26062753) %s load record: %w", p.Name(), err)
@@ -3548,6 +3550,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			Metrics:       metrics,
 		}); err != nil {
 			return fmt.Errorf("(MID_26062754) %s save metrics: %w", p.Name(), err)
+		}
+		if err := p.persistCurrentMetricObjects(ctx, p.batchRecordID); err != nil {
+			return fmt.Errorf("(MID_26062755) %s persist metric objects: %w", p.Name(), err)
 		}
 		p.logFinalMetricsSaved(ctx, p.batchRecordID, firstNonEmptyTrimmed(p.batchLang, "unknown"),
 			[]string{firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName)}, p.RelationPromptRef,
@@ -3594,6 +3599,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		}
 		p.Logger.Info("metrics upserted (merge mode)", "record_id", p.batchRecordID,
 			"dirty_count", len(dirty), "rows_affected", inserted)
+		if err := p.persistCurrentMetricObjects(ctx, p.batchRecordID); err != nil {
+			return fmt.Errorf("(MID_26071114) %s persist metric objects: %w", p.Name(), err)
+		}
 	} else {
 		p.Logger.Info("metrics merge: nothing dirty", "record_id", p.batchRecordID,
 			"existing_count", len(p.batchExistingMetrics))
@@ -3608,6 +3616,27 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func canonicalizeMetricValueRangeTypes(metrics []map[string]any) {
+	for _, metric := range metrics {
+		raw := strings.TrimSpace(asString(metric["value_range_type"]))
+		if raw == "" {
+			continue
+		}
+		metric["value_range_type"] = assertions.CanonicalMetricValueRangeType(raw)
+	}
+}
+
+// persistCurrentMetricObjects rebuilds the complete metric-object snapshot
+// after a batch write. metric_id is positional, so retaining rows from a
+// prior extraction run can silently attach an old subject to a new metric.
+func (p *MetricsProcessor) persistCurrentMetricObjects(ctx context.Context, recordID int64) error {
+	metrics, err := p.Store.GetMetricsByInputRecordID(ctx, recordID)
+	if err != nil {
+		return err
+	}
+	return p.persistMetricObjects(ctx, recordID, metrics)
 }
 
 func (p *MetricsProcessor) harvestMetricDefinitionCandidates(ctx context.Context, recordID int64, metrics []map[string]any) error {

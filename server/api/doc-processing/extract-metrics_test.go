@@ -766,13 +766,17 @@ func TestFinalizeChunkBatch_SkipModeIsNoOp(t *testing.T) {
 }
 
 func TestFinalizeChunkBatch_WipeModeDeletesThenSaves(t *testing.T) {
-	metricsStore := &fakeMetricsStore{}
+	metricsStore := &fakeMetricsStore{existingMetrics: []map[string]any{{
+		"metric_id": "173_mtc_1", "metric_subject": "gateway",
+	}}}
+	objectStore := &fakeArtifactObjectsStore{}
 	extractor := &fakeJSONExtractor{outs: []map[string]any{
 		{"metrics": []any{map[string]any{"metric_name": "Latency", "source_line_spans": []any{float64(2)}}}, "uncertain_metrics": []any{}},
 	}}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, metricsStore, extractor, nil)
 	p.batchRecordID = 173
 	p.batchForceClear = true
+	p.ObjectStore = objectStore
 	p.batchMentions = []metricCandidateMention{{
 		MetricNameHint:    "Latency",
 		SourceLineSpans:   []string{"2"},
@@ -789,6 +793,9 @@ func TestFinalizeChunkBatch_WipeModeDeletesThenSaves(t *testing.T) {
 	}
 	if metricsStore.upsertCalled != 0 {
 		t.Fatalf("upsertCalled=%d, want 0 (wipe mode uses SaveMetrics, not UpsertMetrics)", metricsStore.upsertCalled)
+	}
+	if objectStore.called != 1 || objectStore.artifactType != searchArtifactMetric || len(objectStore.objects) != 1 {
+		t.Fatalf("batch write must rebuild metric object links, got %+v", objectStore)
 	}
 }
 

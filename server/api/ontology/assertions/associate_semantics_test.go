@@ -1,6 +1,12 @@
 package assertions
 
-import "testing"
+import (
+	"context"
+	"regexp"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+)
 
 // TestMetricAssertionKindTermIDUsesReleasedCatalogVocabulary locks in the
 // critical contract: exact_value is not a Go-maintained allowlist member.
@@ -34,5 +40,24 @@ func TestGovernedTermDependencyFingerprintChangesOnlyWhenAvailabilityChanges(t *
 	}
 	if missing == released {
 		t.Fatalf("availability change must change fingerprint: %q", missing)
+	}
+}
+
+func TestMetricSubjectObjectLinkedRequiresResolvedObjectID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (\n\tSELECT 1 FROM kb.artifact_objects")).
+		WithArgs(int64(416), "416_mtc_47").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	linked, err := (AssociateSemantics{DB: db}).metricSubjectObjectLinked(context.Background(), 416, "416_mtc_47")
+	if err != nil || linked {
+		t.Fatalf("linked=%t err=%v, want false nil", linked, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

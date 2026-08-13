@@ -142,4 +142,12 @@ func (p *ProjectSemanticsProcessor) logAssociationRunReport(ctx context.Context,
 		"human_decisions", report.HumanDecisions,
 		"reconciles", report.Reconciles(),
 	)
+	if report.ArtifactsExamined > 0 && report.LifecycleCounts[assertions.StatusDeferred]*100 >= report.ArtifactsExamined*50 {
+		p.Logger.Warn("phase_d high deferred candidate rate",
+			"record_id", recordID,
+			"deferred", report.LifecycleCounts[assertions.StatusDeferred],
+			"artifacts_examined", report.ArtifactsExamined,
+			"deferred_by_reason", report.DeferredByReason,
+		)
+	}
 }
