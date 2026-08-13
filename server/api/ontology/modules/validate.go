@@ -111,12 +111,28 @@ func buildSnapshot(ctx context.Context, db terms.DBX, moduleID, version string) 
 // validateDeps checks the module dependency graph for acyclicity and verifies
 // every declared dependency is a registered module.
 func validateDeps(allModules []Module) error {
+	for _, m := range allModules {
+		if err := validateDepsForModule(allModules, m.ModuleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateDepsForModule validates only the target module and its dependency
+// closure. Unrelated registered modules may be temporarily incomplete while
+// their own external importer is being staged; they must not prevent a
+// release of this module.
+func validateDepsForModule(allModules []Module, moduleID string) error {
 	byID := make(map[string]Module, len(allModules))
 	for _, m := range allModules {
 		byID[m.ModuleID] = m
 	}
-	var visit func(id string, visiting map[string]bool) error
-	visit = func(id string, visiting map[string]bool) error {
+	var visit func(id string, visiting, visited map[string]bool) error
+	visit = func(id string, visiting, visited map[string]bool) error {
+		if visited[id] {
+			return nil
+		}
 		if visiting[id] {
 			return fmt.Errorf("dependency cycle detected at module %q", id)
 		}
@@ -130,18 +146,14 @@ func validateDeps(allModules []Module) error {
 			if _, exists := byID[dep]; !exists {
 				return fmt.Errorf("module %q depends on unknown module %q", id, dep)
 			}
-			if err := visit(dep, visiting); err != nil {
+			if err := visit(dep, visiting, visited); err != nil {
 				return err
 			}
 		}
+		visited[id] = true
 		return nil
 	}
-	for _, m := range allModules {
-		if err := visit(m.ModuleID, map[string]bool{}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return visit(moduleID, map[string]bool{}, map[string]bool{})
 }
 
 // pinDependencies resolves each declared dependency to a pinnable release:
@@ -188,7 +200,7 @@ func (s ReleaseStore) validateAndBuildSnapshot(ctx context.Context, db terms.DBX
 	if err != nil {
 		return snapshot{}, nil, err
 	}
-	if err := validateDeps(allModules); err != nil {
+	if err := validateDepsForModule(allModules, moduleID); err != nil {
 		return snapshot{}, nil, err
 	}
 

@@ -500,14 +500,16 @@ WHERE ar.module_id = $1 AND ar.deactivated_at IS NULL`,
 	return version, err
 }
 
-// latestReleaseVersion returns the newest release version of a module.
+// latestReleaseVersion returns the most recently created release of a module.
+// Curated versions carry a content hash after '+', so lexical ordering of
+// version strings does not represent release recency.
 func (s ReleaseStore) latestReleaseVersion(ctx context.Context, db terms.DBX, moduleID string) (string, error) {
 	var version string
 	err := db.QueryRowContext(ctx, `
 SELECT version
 FROM kb.ontology_module_releases
 WHERE module_id = $1
-ORDER BY version DESC
+ORDER BY released_at DESC, id DESC
 LIMIT 1`, strings.TrimSpace(moduleID)).Scan(&version)
 	return version, err
 }

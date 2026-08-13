@@ -398,9 +398,9 @@ done
 case " $MODULES " in
   *" measurement "*)
     for t in mea:measured_by mea:lower_bound_requirement; do
-      status=$(psql_q "SELECT status FROM kb.ontology_terms WHERE term_id = '$t' ORDER BY id DESC LIMIT 1")
-      if [ "$status" != "included_in_release" ]; then
-        echo "  FAIL $t: status='${status:-<missing>}', associate_semantics requires included_in_release"
+      released=$(psql_q "SELECT count(*) FROM kb.ontology_terms WHERE term_id = '$t' AND status = 'included_in_release'")
+      if [ "$released" -eq 0 ]; then
+        echo "  FAIL $t: no included_in_release version, associate_semantics requires a released term"
         failed=1
       else
         echo "  ok   $t included_in_release"

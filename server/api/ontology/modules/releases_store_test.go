@@ -14,6 +14,33 @@ import (
 
 func timeNow() time.Time { return time.Now() }
 
+func TestLatestReleaseVersionUsesReleaseRecency(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT version
+FROM kb.ontology_module_releases
+WHERE module_id = $1
+ORDER BY released_at DESC, id DESC
+LIMIT 1`)).
+		WithArgs("measurement").
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow("1.0.0+seed.newer"))
+
+	got, err := (ReleaseStore{DB: db}).latestReleaseVersion(context.Background(), db, "measurement")
+	if err != nil {
+		t.Fatalf("latestReleaseVersion: %v", err)
+	}
+	if got != "1.0.0+seed.newer" {
+		t.Fatalf("latest release = %q, want newest release", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestActivateCallsPromoteHookInsideTransaction proves the approved-proposal
 // promotion runs inside Activate's own transaction: the Promote hook receives
 // the release id and its content checksum (resolved on the same tx), and the

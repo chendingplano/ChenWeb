@@ -16,7 +16,7 @@ import (
 
 type moduleContent struct {
 	ModuleID  string
-	Version   string
+	Version   string // base semantic version for derived curated releases
 	Title     string
 	Owner     string
 	DependsOn []string
@@ -29,71 +29,86 @@ var curatedModules = map[string]moduleContent{
 	"measurement":        measurementModule,
 }
 
-// DeferredModuleWarning reports a curated module that was intentionally not
-// installed during service bootstrap because its external dependency is not
-// ready yet. It is informational: callers should log it and continue startup.
-type DeferredModuleWarning struct {
+// BootstrapWarning reports a nonfatal bootstrap condition. Curated content is
+// still safe to consume when a dependency is deferred or an operator-selected
+// release is preserved, but the condition must be visible to operators.
+type BootstrapWarning struct {
+	Kind               string
 	ModuleID           string
 	DependencyModuleID string
 }
 
-func (w DeferredModuleWarning) String() string {
+const (
+	WarningDeferredDependency = "deferred_dependency"
+	WarningPendingActivation  = "pending_activation"
+)
+
+func (w BootstrapWarning) String() string {
+	if w.Kind == WarningPendingActivation {
+		return fmt.Sprintf("curated module %s has a newer release pending activation", w.ModuleID)
+	}
 	return fmt.Sprintf("deferred curated module %s: no active release for dependency %s", w.ModuleID, w.DependencyModuleID)
 }
 
 // EnsureCuratedModules authors, releases, and activates the service-critical
 // curated modules. measurement is deferred nonfatally until quantity has an
 // active release, which the QUDT import owns.
-func EnsureCuratedModules(ctx context.Context, db *sql.DB) ([]DeferredModuleWarning, error) {
+func EnsureCuratedModules(ctx context.Context, db *sql.DB) ([]BootstrapWarning, error) {
 	return ensureCuratedModules(ctx, db, SeedCuratedModules)
 }
 
-func ensureCuratedModules(ctx context.Context, db *sql.DB, seedModules func(context.Context, *sql.DB, []string, bool) error) ([]DeferredModuleWarning, error) {
+func ensureCuratedModules(ctx context.Context, db *sql.DB, seedModules func(context.Context, *sql.DB, []string, bool) ([]BootstrapWarning, error)) ([]BootstrapWarning, error) {
 	if db == nil {
 		return nil, errors.New("db is nil")
 	}
-	if err := seedModules(ctx, db, []string{"core", "document-authority"}, false); err != nil {
+	warnings, err := seedModules(ctx, db, []string{"core", "document-authority"}, false)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := (modules.ReleaseStore{DB: db}).GetActiveRelease(ctx, "quantity"); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return []DeferredModuleWarning{{ModuleID: "measurement", DependencyModuleID: "quantity"}}, nil
+			return append(warnings, BootstrapWarning{Kind: WarningDeferredDependency, ModuleID: "measurement", DependencyModuleID: "quantity"}), nil
 		}
 		return nil, fmt.Errorf("get active release for quantity: %w", err)
 	}
-	if err := seedModules(ctx, db, []string{"measurement"}, false); err != nil {
+	measurementWarnings, err := seedModules(ctx, db, []string{"measurement"}, false)
+	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return append(warnings, measurementWarnings...), nil
 }
 
 // SeedCuratedModules installs selected curated modules. authorOnly is kept for
 // the one-off CLI authoring workflow; production callers use
 // EnsureCuratedModules.
-func SeedCuratedModules(ctx context.Context, db *sql.DB, moduleIDs []string, authorOnly bool) error {
+func SeedCuratedModules(ctx context.Context, db *sql.DB, moduleIDs []string, authorOnly bool) ([]BootstrapWarning, error) {
 	if db == nil {
-		return errors.New("db is nil")
+		return nil, errors.New("db is nil")
 	}
+	var warnings []BootstrapWarning
 	for _, id := range moduleIDs {
 		mc, ok := curatedModules[id]
 		if !ok {
-			return fmt.Errorf("unknown curated module %q", id)
+			return nil, fmt.Errorf("unknown curated module %q", id)
 		}
 		if err := authorModule(ctx, db, mc); err != nil {
-			return err
+			return nil, err
 		}
 		if !authorOnly {
-			if err := releaseAndActivate(ctx, db, mc); err != nil {
-				return err
+			moduleWarnings, err := releaseAndActivate(ctx, db, mc)
+			if err != nil {
+				return nil, err
 			}
+			warnings = append(warnings, moduleWarnings...)
 		}
 	}
-	return nil
+	return warnings, nil
 }
 
 func authorModule(ctx context.Context, db *sql.DB, mc moduleContent) error {
 	ms := modules.ModuleStore{DB: db}
-	if _, err := ms.GetModule(ctx, mc.ModuleID); err != nil {
+	module, err := ms.GetModule(ctx, mc.ModuleID)
+	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("get module %s: %w", mc.ModuleID, err)
 		}
@@ -102,6 +117,10 @@ func authorModule(ctx context.Context, db *sql.DB, mc moduleContent) error {
 			DependsOn: mc.DependsOn, Status: "active", CreateBy: "ontology-seed", ModifyBy: "ontology-seed",
 		}); err != nil {
 			return fmt.Errorf("register module %s: %w", mc.ModuleID, err)
+		}
+	} else if module.Title != mc.Title || module.Owner != mc.Owner || !sameStringSlice(module.DependsOn, mc.DependsOn) {
+		if _, err := ms.UpdateModuleMetadata(ctx, mc.ModuleID, mc.Title, mc.Owner, mc.DependsOn, "ontology-seed"); err != nil {
+			return fmt.Errorf("update module %s metadata: %w", mc.ModuleID, err)
 		}
 	}
 
@@ -158,6 +177,18 @@ func authorModule(ctx context.Context, db *sql.DB, mc moduleContent) error {
 		}
 	}
 	return nil
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func hasLabel(labels []terms.TermLabel, want seedLabel) bool {
@@ -255,7 +286,20 @@ func curatedReleaseVersion(mc moduleContent) string {
 		panic(fmt.Sprintf("marshal curated module %s: %v", mc.ModuleID, err))
 	}
 	sum := sha256.Sum256(payload)
-	return "1.0.0+seed." + hex.EncodeToString(sum[:])[:12]
+	baseVersion := mc.Version
+	if baseVersion == "" {
+		baseVersion = "1.0.0"
+	}
+	return baseVersion + "+seed." + hex.EncodeToString(sum[:])[:12]
+}
+
+func nextCuratedReleaseVersion(base string, existing map[string]bool) string {
+	for revision := 2; ; revision++ {
+		candidate := fmt.Sprintf("%s.r%d", base, revision)
+		if !existing[candidate] {
+			return candidate
+		}
+	}
 }
 
 func seedReleaseStore(db *sql.DB) modules.ReleaseStore {
@@ -264,32 +308,85 @@ func seedReleaseStore(db *sql.DB) modules.ReleaseStore {
 	return modules.ReleaseStore{DB: db, PreserveActive: true}
 }
 
-func releaseAndActivate(ctx context.Context, db *sql.DB, mc moduleContent) error {
+func releaseAndActivate(ctx context.Context, db *sql.DB, mc moduleContent) ([]BootstrapWarning, error) {
 	rs := seedReleaseStore(db)
 	version := curatedReleaseVersion(mc)
 	rel, err := rs.GetRelease(ctx, mc.ModuleID, version)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("get release %s@%s: %w", mc.ModuleID, version, err)
+			return nil, fmt.Errorf("get release %s@%s: %w", mc.ModuleID, version, err)
 		}
 		if err := stageContentForNewCuratedRelease(ctx, db, mc); err != nil {
-			return err
+			return nil, err
 		}
 		rel, err = rs.CreateRelease(ctx, mc.ModuleID, version, "ontology-seed")
 		if err != nil {
-			return fmt.Errorf("release %s@%s: %w", mc.ModuleID, version, err)
+			return nil, fmt.Errorf("release %s@%s: %w", mc.ModuleID, version, err)
+		}
+	} else {
+		released, err := curatedContentReleased(ctx, db, mc)
+		if err != nil {
+			return nil, err
+		}
+		if !released {
+			existing := map[string]bool{version: true}
+			for {
+				version = nextCuratedReleaseVersion(curatedReleaseVersion(mc), existing)
+				candidate, lookupErr := rs.GetRelease(ctx, mc.ModuleID, version)
+				if errors.Is(lookupErr, sql.ErrNoRows) {
+					break
+				}
+				if lookupErr != nil {
+					return nil, fmt.Errorf("get release %s@%s: %w", mc.ModuleID, version, lookupErr)
+				}
+				existing[candidate.Version] = true
+			}
+			if err := stageContentForNewCuratedRelease(ctx, db, mc); err != nil {
+				return nil, err
+			}
+			rel, err = rs.CreateRelease(ctx, mc.ModuleID, version, "ontology-seed")
+			if err != nil {
+				return nil, fmt.Errorf("release %s@%s: %w", mc.ModuleID, version, err)
+			}
 		}
 	}
-	_, err = rs.GetActiveRelease(ctx, mc.ModuleID)
+	active, err := rs.GetActiveRelease(ctx, mc.ModuleID)
 	if err == nil {
+		if active.ReleaseID == rel.ID {
+			return nil, nil
+		}
 		// Startup must never replace an operator-selected active release.
-		return nil
+		return []BootstrapWarning{{Kind: WarningPendingActivation, ModuleID: mc.ModuleID}}, nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("get active release for %s: %w", mc.ModuleID, err)
+		return nil, fmt.Errorf("get active release for %s: %w", mc.ModuleID, err)
 	}
 	if _, err := rs.Activate(ctx, mc.ModuleID, rel.ID, "ontology-seed"); err != nil {
-		return fmt.Errorf("activate %s@%s: %w", mc.ModuleID, version, err)
+		return nil, fmt.Errorf("activate %s@%s: %w", mc.ModuleID, version, err)
 	}
-	return nil
+	return nil, nil
+}
+
+func curatedContentReleased(ctx context.Context, db *sql.DB, mc moduleContent) (bool, error) {
+	ts := terms.TermStore{DB: db}
+	ls := terms.LabelStore{DB: db}
+	for _, wantTerm := range mc.Terms {
+		latest, err := ts.GetTermLatest(ctx, wantTerm.ID)
+		if err != nil {
+			return false, fmt.Errorf("get latest curated term %s: %w", wantTerm.ID, err)
+		}
+		if latest.Status != "included_in_release" {
+			return false, nil
+		}
+		labels, err := ls.ListLabels(ctx, wantTerm.ID)
+		if err != nil {
+			return false, fmt.Errorf("list latest curated labels for %s: %w", wantTerm.ID, err)
+		}
+		for _, wantLabel := range wantTerm.Labels {
+			if !hasIncludedLabel(labels, wantLabel) {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }

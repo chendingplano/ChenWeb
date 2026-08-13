@@ -43,8 +43,12 @@ func main() {
 	defer db.Close()
 	ctx := context.Background()
 
-	if err := seed.SeedCuratedModules(ctx, db, targets, *authorOnly); err != nil {
+	warnings, err := seed.SeedCuratedModules(ctx, db, targets, *authorOnly)
+	if err != nil {
 		log.Fatal(err)
+	}
+	for _, warning := range warnings {
+		log.Printf("warning: %s", warning)
 	}
 }
 

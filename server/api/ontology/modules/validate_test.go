@@ -119,6 +119,19 @@ func TestValidateDepsAcceptsDAG(t *testing.T) {
 	}
 }
 
+func TestValidateDepsForModuleIgnoresUnrelatedDanglingModules(t *testing.T) {
+	mods := []Module{
+		{ModuleID: "core"},
+		{ModuleID: "measurement", DependsOn: []string{"quantity"}},
+	}
+	if err := validateDepsForModule(mods, "core"); err != nil {
+		t.Fatalf("unrelated dangling dependency must not block core: %v", err)
+	}
+	if err := validateDepsForModule(mods, "measurement"); err == nil {
+		t.Fatal("target module must still reject its unknown dependency")
+	}
+}
+
 func TestChecksumDeterministicAcrossKeyOrder(t *testing.T) {
 	a := []byte(`{"module_id":"core","terms":[{"term_id":"core:assertion","definition":"x"}]}`)
 	b := []byte(`{"terms":[{"definition":"x","term_id":"core:assertion"}],"module_id":"core"}`)

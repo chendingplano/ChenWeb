@@ -111,8 +111,8 @@ func TestServiceStartupsLogDeferredCuratedModuleWarnings(t *testing.T) {
 			if !strings.Contains(text, "warnings, err := seed.EnsureCuratedModules") {
 				t.Fatalf("%s must receive nonfatal curated module warnings", filename)
 			}
-			if !strings.Contains(text, "deferred curated ontology module") {
-				t.Fatalf("%s must log deferred curated module warnings", filename)
+			if !strings.Contains(text, "warning.String()") {
+				t.Fatalf("%s must log curated module warnings", filename)
 			}
 		})
 	}

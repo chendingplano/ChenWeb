@@ -207,9 +207,10 @@ func main() {
 		os.Exit(1)
 	}
 	for _, warning := range warnings {
-		logger.Warn("deferred curated ontology module",
+		logger.Warn(warning.String(),
 			"module_id", warning.ModuleID,
-			"dependency_module_id", warning.DependencyModuleID)
+			"dependency_module_id", warning.DependencyModuleID,
+			"warning_kind", warning.Kind)
 	}
 
 	natsURL := os.Getenv("NATS_URL")

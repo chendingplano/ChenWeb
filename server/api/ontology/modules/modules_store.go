@@ -140,3 +140,23 @@ WHERE module_id = $1`
 	}
 	return s.GetModule(ctx, moduleID)
 }
+
+// UpdateModuleMetadata replaces the curated identity metadata that is part of
+// the module's release input. Keeping this row current is required because
+// release validation reads dependencies from the registry, not from content.go.
+func (s ModuleStore) UpdateModuleMetadata(ctx context.Context, moduleID, title, owner string, dependsOn []string, by string) (Module, error) {
+	if s.DB == nil {
+		return Module{}, errors.New("db is nil")
+	}
+	if dependsOn == nil {
+		dependsOn = []string{}
+	}
+	const stmt = `
+UPDATE kb.ontology_modules
+SET title = $2, owner = $3, depends_on = $4, modify_time = NOW(), modify_by = $5
+WHERE module_id = $1`
+	if _, err := s.DB.ExecContext(ctx, stmt, strings.TrimSpace(moduleID), nullableString(title), nullableString(owner), pq.Array(dependsOn), nullableString(by)); err != nil {
+		return Module{}, err
+	}
+	return s.GetModule(ctx, moduleID)
+}
