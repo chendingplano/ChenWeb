@@ -207,10 +207,11 @@ func main() {
 		os.Exit(1)
 	}
 	for _, warning := range warnings {
-		logger.Warn(warning.String(),
-			"module_id", warning.ModuleID,
-			"dependency_module_id", warning.DependencyModuleID,
-			"warning_kind", warning.Kind)
+		args := []any{"warning_kind", warning.Kind, "module_id", warning.ModuleID}
+		if warning.DependencyModuleID != "" {
+			args = append(args, "dependency_module_id", warning.DependencyModuleID)
+		}
+		logger.Warn("curated ontology bootstrap warning", args...)
 	}
 
 	natsURL := os.Getenv("NATS_URL")

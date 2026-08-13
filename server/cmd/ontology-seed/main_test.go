@@ -111,8 +111,14 @@ func TestServiceStartupsLogDeferredCuratedModuleWarnings(t *testing.T) {
 			if !strings.Contains(text, "warnings, err := seed.EnsureCuratedModules") {
 				t.Fatalf("%s must receive nonfatal curated module warnings", filename)
 			}
-			if !strings.Contains(text, "warning.String()") {
-				t.Fatalf("%s must log curated module warnings", filename)
+			if !strings.Contains(text, `logger.Warn("curated ontology bootstrap warning", args...)`) {
+				t.Fatalf("%s must log curated module warnings with a static message key", filename)
+			}
+			if !strings.Contains(text, `"warning_kind", warning.Kind`) {
+				t.Fatalf("%s must log the structured warning kind", filename)
+			}
+			if !strings.Contains(text, `if warning.DependencyModuleID != ""`) {
+				t.Fatalf("%s must emit dependency_module_id only when set", filename)
 			}
 		})
 	}

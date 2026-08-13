@@ -140,7 +140,7 @@ func authorModule(ctx context.Context, db *sql.DB, mc moduleContent) error {
 			}); err != nil {
 				return fmt.Errorf("author term %s: %w", t.ID, err)
 			}
-		} else if latest.TermKind != t.Kind || latest.ModuleID != mc.ModuleID || latest.Definition != t.Def {
+		} else if latest.TermKind != t.Kind || latest.ModuleID != mc.ModuleID || latest.Definition != t.Def || !curatedTermStatusUsable(latest.Status) {
 			if _, err := ts.CreateTermVersion(ctx, terms.Term{
 				TermID: t.ID, TermKind: t.Kind, ModuleID: mc.ModuleID,
 				Definition: t.Def, Status: "approved", CreateBy: "ontology-seed", ModifyBy: "ontology-seed",
@@ -177,6 +177,19 @@ func authorModule(ctx context.Context, db *sql.DB, mc moduleContent) error {
 		}
 	}
 	return nil
+}
+
+// curatedTermStatusUsable reports whether the latest version of a curated term
+// can stand as the current content without re-authoring: it is either already
+// approved (staged for the next release) or included in a release. Any other
+// status -- draft, in_review, superseded, rejected, auto-promoted -- is a
+// governance state the seed must repair with a fresh approved version,
+// mirroring how the label path re-authors superseded or rejected labels.
+// Without this, a superseded curated term is never repaired, so the module
+// cuts a new release on every start, or cannot be released at all when it is
+// the module's last curated term.
+func curatedTermStatusUsable(status string) bool {
+	return status == "approved" || status == "included_in_release"
 }
 
 func sameStringSlice(a, b []string) bool {
@@ -324,7 +337,7 @@ func releaseAndActivate(ctx context.Context, db *sql.DB, mc moduleContent) ([]Bo
 			return nil, fmt.Errorf("release %s@%s: %w", mc.ModuleID, version, err)
 		}
 	} else {
-		released, err := curatedContentReleased(ctx, db, mc)
+		released, newest, err := curatedContentReleased(ctx, db, mc)
 		if err != nil {
 			return nil, err
 		}
@@ -348,6 +361,12 @@ func releaseAndActivate(ctx context.Context, db *sql.DB, mc moduleContent) ([]Bo
 			if err != nil {
 				return nil, fmt.Errorf("release %s@%s: %w", mc.ModuleID, version, err)
 			}
+		} else {
+			// The release at the derived version exists, but a later .rN
+			// descendant may actually carry the current content (the revert
+			// flow in the branch above). Activation must target the newest
+			// release, never the stale derived-version release.
+			rel = newest
 		}
 	}
 	active, err := rs.GetActiveRelease(ctx, mc.ModuleID)
@@ -355,37 +374,86 @@ func releaseAndActivate(ctx context.Context, db *sql.DB, mc moduleContent) ([]Bo
 		if active.ReleaseID == rel.ID {
 			return nil, nil
 		}
-		// Startup must never replace an operator-selected active release.
+		// Advance activation when the current pointer was set by the seed
+		// itself, so consumers that read the activation pointer (profile
+		// loaders, classify_document's governed vocabulary) serve the current
+		// curated content. Operator-selected activations (any other actor) are
+		// preserved and surfaced as pending.
+		if active.ActivatedBy == "ontology-seed" {
+			if _, err := rs.Activate(ctx, mc.ModuleID, rel.ID, "ontology-seed"); err != nil {
+				return nil, fmt.Errorf("activate %s@%s: %w", mc.ModuleID, rel.Version, err)
+			}
+			return nil, nil
+		}
 		return []BootstrapWarning{{Kind: WarningPendingActivation, ModuleID: mc.ModuleID}}, nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("get active release for %s: %w", mc.ModuleID, err)
 	}
 	if _, err := rs.Activate(ctx, mc.ModuleID, rel.ID, "ontology-seed"); err != nil {
-		return nil, fmt.Errorf("activate %s@%s: %w", mc.ModuleID, version, err)
+		return nil, fmt.Errorf("activate %s@%s: %w", mc.ModuleID, rel.Version, err)
 	}
 	return nil, nil
 }
 
-func curatedContentReleased(ctx context.Context, db *sql.DB, mc moduleContent) (bool, error) {
+func curatedContentReleased(ctx context.Context, db *sql.DB, mc moduleContent) (bool, modules.Release, error) {
 	ts := terms.TermStore{DB: db}
 	ls := terms.LabelStore{DB: db}
 	for _, wantTerm := range mc.Terms {
 		latest, err := ts.GetTermLatest(ctx, wantTerm.ID)
 		if err != nil {
-			return false, fmt.Errorf("get latest curated term %s: %w", wantTerm.ID, err)
+			return false, modules.Release{}, fmt.Errorf("get latest curated term %s: %w", wantTerm.ID, err)
 		}
 		if latest.Status != "included_in_release" {
-			return false, nil
+			return false, modules.Release{}, nil
 		}
 		labels, err := ls.ListLabels(ctx, wantTerm.ID)
 		if err != nil {
-			return false, fmt.Errorf("list latest curated labels for %s: %w", wantTerm.ID, err)
+			return false, modules.Release{}, fmt.Errorf("list latest curated labels for %s: %w", wantTerm.ID, err)
 		}
 		for _, wantLabel := range wantTerm.Labels {
 			if !hasIncludedLabel(labels, wantLabel) {
-				return false, nil
+				return false, modules.Release{}, nil
 			}
+		}
+	}
+	// The module's newest release must pin exactly the curated dependency set.
+	// A metadata-only revert (Title, Owner, or DependsOn) resolves the derived
+	// version back to an older release while a newer release with stale pins
+	// stays the newest; without this check that revert is silently not
+	// re-released and the newest release's dependency pins stay stale.
+	rs := seedReleaseStore(db)
+	newest, err := rs.LatestRelease(ctx, mc.ModuleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, modules.Release{}, nil
+		}
+		return false, modules.Release{}, fmt.Errorf("get latest release for %s: %w", mc.ModuleID, err)
+	}
+	match, err := dependencyPinsMatch(newest.DependencyReleases, mc.DependsOn)
+	if err != nil {
+		return false, modules.Release{}, err
+	}
+	if !match {
+		return false, modules.Release{}, nil
+	}
+	return true, newest, nil
+}
+
+// dependencyPinsMatch reports whether a release's dependency pins reference
+// exactly the curated dependency module set. Pin versions are ignored; only
+// the module set matters for re-release decisions.
+func dependencyPinsMatch(raw json.RawMessage, want []string) (bool, error) {
+	var pins map[string]string
+	if err := json.Unmarshal(raw, &pins); err != nil {
+		return false, fmt.Errorf("parse dependency pins: %w", err)
+	}
+	if len(pins) != len(want) {
+		return false, nil
+	}
+	for _, dep := range want {
+		if _, ok := pins[dep]; !ok {
+			return false, nil
 		}
 	}
 	return true, nil

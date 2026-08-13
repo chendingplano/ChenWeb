@@ -88,37 +88,6 @@ func TestBuildSnapshotIncludesApprovedProfiles(t *testing.T) {
 	}
 }
 
-func TestValidateDepsRejectsCycles(t *testing.T) {
-	mods := []Module{
-		{ModuleID: "a", DependsOn: []string{"b"}},
-		{ModuleID: "b", DependsOn: []string{"c"}},
-		{ModuleID: "c", DependsOn: []string{"a"}},
-	}
-	if err := validateDeps(mods); err == nil {
-		t.Fatal("expected cycle detection")
-	}
-}
-
-func TestValidateDepsRejectsUnknownDependency(t *testing.T) {
-	mods := []Module{
-		{ModuleID: "a", DependsOn: []string{"ghost"}},
-	}
-	if err := validateDeps(mods); err == nil {
-		t.Fatal("expected unknown dependency error")
-	}
-}
-
-func TestValidateDepsAcceptsDAG(t *testing.T) {
-	mods := []Module{
-		{ModuleID: "core", DependsOn: []string{}},
-		{ModuleID: "quantity", DependsOn: []string{"core"}},
-		{ModuleID: "measurement", DependsOn: []string{"core", "quantity"}},
-	}
-	if err := validateDeps(mods); err != nil {
-		t.Fatalf("expected valid DAG, got %v", err)
-	}
-}
-
 func TestValidateDepsForModuleIgnoresUnrelatedDanglingModules(t *testing.T) {
 	mods := []Module{
 		{ModuleID: "core"},

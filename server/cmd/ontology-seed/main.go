@@ -8,10 +8,13 @@
 //
 //	ontology-seed --module core|document-authority|measurement|all [--author-only]
 //
-// Re-running is safe: existing modules, terms, labels, and releases are
-// skipped rather than overwritten. The quantity module is imported separately
-// (QUDT catalog) and is a dependency of measurement, so measurement is only
-// released once its dependencies have a release to pin.
+// Re-running is safe and idempotent: module metadata is reconciled from the
+// compiled-in content, curated terms and labels that changed since their last
+// release are versioned as approved, and a new content-derived release is cut
+// whenever the compiled-in content has not already been released. The quantity
+// module is imported separately (QUDT catalog) and is a dependency of
+// measurement, so measurement is only released once its dependencies have a
+// release to pin.
 package main
 
 import (

@@ -108,17 +108,6 @@ func buildSnapshot(ctx context.Context, db terms.DBX, moduleID, version string) 
 	}, nil
 }
 
-// validateDeps checks the module dependency graph for acyclicity and verifies
-// every declared dependency is a registered module.
-func validateDeps(allModules []Module) error {
-	for _, m := range allModules {
-		if err := validateDepsForModule(allModules, m.ModuleID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // validateDepsForModule validates only the target module and its dependency
 // closure. Unrelated registered modules may be temporarily incomplete while
 // their own external importer is being staged; they must not prevent a

@@ -303,10 +303,13 @@ func idsOfProfileRules(rs []profiles.ProfileRule) []int64 {
 }
 
 // NextPatchVersion computes the next release version for a module by bumping
-// the patch component of its highest existing release version, starting at
-// "1.0.0" if the module has no releases yet. Unlike cmd/qudt-import's
-// one-shot hardcoded "1.0.0" (which only ever runs once), this lets a caller
-// create a new release every time it has new content to release.
+// the patch component of its most recently created release version, starting
+// at "1.0.0" if the module has no releases yet. Recency is by release
+// creation time (released_at DESC, id DESC), not by lexical ordering of
+// version strings, because curated versions carry a content hash after '+'.
+// Unlike cmd/qudt-import's one-shot hardcoded "1.0.0" (which only ever runs
+// once), this lets a caller create a new release every time it has new
+// content to release.
 func (s ReleaseStore) NextPatchVersion(ctx context.Context, moduleID string) (string, error) {
 	if s.DB == nil {
 		return "", errors.New("db is nil")
@@ -360,6 +363,21 @@ func (s ReleaseStore) GetRelease(ctx context.Context, moduleID, version string) 
 	const stmt = `SELECT ` + releaseColumns + `
 WHERE module_id = $1 AND version = $2`
 	row := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(moduleID), strings.TrimSpace(version))
+	return scanRelease(row.Scan)
+}
+
+// LatestRelease returns the most recently created release of a module.
+// Curated versions carry a content hash after '+', so lexical ordering of
+// version strings does not represent release recency.
+func (s ReleaseStore) LatestRelease(ctx context.Context, moduleID string) (Release, error) {
+	if s.DB == nil {
+		return Release{}, errors.New("db is nil")
+	}
+	const stmt = `SELECT ` + releaseColumns + `
+WHERE module_id = $1
+ORDER BY released_at DESC, id DESC
+LIMIT 1`
+	row := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(moduleID))
 	return scanRelease(row.Scan)
 }
 

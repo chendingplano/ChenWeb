@@ -346,7 +346,9 @@ PG_USER_NAME (then PG_USER, then the literal fallback `cding`); the psql
 verification uses that same user resolution.
 
 `ontology-seed` exits nonzero when authoring or releasing fails. This task also
-verifies the resulting active releases. See bug doc-2026081301.
+verifies the result against the runtime gate: any `included_in_release` version
+of each module's terms, matching what `associate_semantics`' termExists checks,
+not the activation pointer. See bug doc-2026081301.
 '''
 run = '''
 set -euo pipefail
@@ -383,14 +385,19 @@ psql_q() {
 
 failed=0
 for m in $MODULES; do
-  version=$(psql_q "SELECT r.version FROM kb.ontology_active_releases ar JOIN kb.ontology_module_releases r ON r.id = ar.release_id WHERE ar.module_id = '$m' AND ar.deactivated_at IS NULL")
+  version=$(psql_q "SELECT version FROM kb.ontology_module_releases WHERE module_id = '$m' ORDER BY released_at DESC, id DESC LIMIT 1")
   if [ -z "$version" ]; then
-    echo "  FAIL $m: no active release"
+    echo "  FAIL $m: no release exists"
     failed=1
     continue
   fi
   count=$(psql_q "SELECT count(*) FROM kb.ontology_terms WHERE module_id = '$m' AND status = 'included_in_release'")
-  echo "  ok   $m@$version ($count released terms)"
+  if [ "$count" -eq 0 ]; then
+    echo "  FAIL $m: no included_in_release terms; the runtime termExists gate requires a released version"
+    failed=1
+    continue
+  fi
+  echo "  ok   $m newest release $version ($count released terms)"
 done
 
 # The terms associate_semantics gates on. A green module release with these
