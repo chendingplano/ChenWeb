@@ -70,6 +70,9 @@ func TestAssociateSemanticsRunQueriesRegisteredSourceArtifactTypes(t *testing.T)
 	}
 	defer db.Close()
 
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE status = 'deferred' AND source_artifact_type = ANY($1)\n  AND input_record_id = $2")).
+		WithArgs(sqlmock.AnyArg(), int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "source_artifact_type", "proposed_payload", "dependency_fingerprint"}))
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE status IN ('candidate', 'in_review') AND source_artifact_type = ANY($1)")).
 		WithArgs(sqlmock.AnyArg(), int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))

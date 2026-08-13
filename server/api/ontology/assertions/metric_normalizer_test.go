@@ -205,6 +205,62 @@ func TestResolveMetricValueExact(t *testing.T) {
 	}
 }
 
+// TestResolveMetricValueCanonicalizesExtractorRangeVariants locks in the
+// extractor/normalizer contract for the variants emitted by production
+// extract_metrics runs. These must be canonicalized before the structured
+// resolver decides an assertion kind; a nonempty synonym must not suppress
+// an otherwise valid threshold.
+func TestResolveMetricValueCanonicalizesExtractorRangeVariants(t *testing.T) {
+	tests := []struct {
+		name       string
+		rangeType  string
+		value      string
+		comparator string
+		kind       string
+		want       float64
+	}{
+		{name: "min", rangeType: "min", value: "≥30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "minimum", rangeType: "minimum", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "min threshold", rangeType: "min_threshold", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "max", rangeType: "max", value: "≤30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "maximum", rangeType: "maximum", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "exact count", rangeType: "exact_count", value: "4", comparator: "=", kind: "exact_value", want: 4},
+		{name: "exact duration", rangeType: "exact_duration", value: "15", comparator: "=", kind: "exact_value", want: 15},
+		{name: "exact ratio", rangeType: "exact_ratio", value: "3", comparator: "=", kind: "exact_value", want: 3},
+		{name: "exact specification", rangeType: "exact_specification", value: "12", comparator: "=", kind: "exact_value", want: 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := metricRowFixture()
+			r.ValueRangeType = ns(tt.rangeType)
+			r.ValueClass = ns("requirement")
+			r.MetricValue = ns(tt.value)
+
+			p := resolveMetricValue(r)
+			if p.Comparator != tt.comparator || p.AssertionKind != tt.kind {
+				t.Fatalf("resolveMetricValue(%q) = %+v, want comparator=%q kind=%q", tt.rangeType, p, tt.comparator, tt.kind)
+			}
+			if p.NumericValue == nil || *p.NumericValue != tt.want {
+				t.Fatalf("numeric value = %v, want %v", p.NumericValue, tt.want)
+			}
+		})
+	}
+}
+
+func TestMetricCandidatePayloadCarriesMetricDefinitionTermID(t *testing.T) {
+	r := metricRowFixture()
+	r.MetricName = ns("Organic matter")
+	r.MetricDefinitionTermID = ns("mea:organic_matter_mass_fraction")
+	r.ValueRangeType = ns("min")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("≥30")
+
+	payload := metricCandidatePayloadForRow(r)
+	if got := payload["metric_definition_term_id"]; got != "mea:organic_matter_mass_fraction" {
+		t.Fatalf("metric_definition_term_id = %#v, want resolved term id", got)
+	}
+}
+
 // TestResolveMetricValueRangeUsesValueMinMax locks in design D1: a range row's
 // endpoints come from value_min/value_max, never from re-parsing
 // threshold_or_target (spec: "range values use value_min and value_max without

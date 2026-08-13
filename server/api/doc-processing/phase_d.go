@@ -49,7 +49,9 @@ func SemanticAssociationEnabledFromEnv() bool {
 // into candidate qualified assertions.
 type NormalizeAssertionsProcessor struct{}
 
-func NewNormalizeAssertionsProcessor() *NormalizeAssertionsProcessor { return &NormalizeAssertionsProcessor{} }
+func NewNormalizeAssertionsProcessor() *NormalizeAssertionsProcessor {
+	return &NormalizeAssertionsProcessor{}
+}
 func (p *NormalizeAssertionsProcessor) Name() string                              { return "normalize_assertions" }
 func (p *NormalizeAssertionsProcessor) HandleEvent(context.Context, []byte) error { return nil }
 
@@ -65,7 +67,9 @@ func (p *NormalizeAssertionsProcessor) PostProcessIndex(ctx context.Context, rec
 // waits for normalize_assertions to finish this run before starting.
 type AssociateSemanticsProcessor struct{}
 
-func NewAssociateSemanticsProcessor() *AssociateSemanticsProcessor { return &AssociateSemanticsProcessor{} }
+func NewAssociateSemanticsProcessor() *AssociateSemanticsProcessor {
+	return &AssociateSemanticsProcessor{}
+}
 func (p *AssociateSemanticsProcessor) Name() string                              { return "associate_semantics" }
 func (p *AssociateSemanticsProcessor) HandleEvent(context.Context, []byte) error { return nil }
 func (p *AssociateSemanticsProcessor) PostProcessDependsOn() []string {
@@ -132,6 +136,7 @@ func (p *ProjectSemanticsProcessor) logAssociationRunReport(ctx context.Context,
 		"candidates_by_method", report.CandidatesByMethod,
 		"resolution_outcomes", report.ResolutionOutcomes,
 		"lifecycle_counts", report.LifecycleCounts,
+		"deferred_by_reason", report.DeferredByReason,
 		"new_assertions", report.NewAssertions,
 		"deterministic_decisions", report.DeterministicDecisions,
 		"human_decisions", report.HumanDecisions,

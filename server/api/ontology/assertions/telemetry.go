@@ -22,6 +22,7 @@ type AssociationRunReport struct {
 	CandidatesByMethod       map[string]int
 	ResolutionOutcomes       map[string]int
 	LifecycleCounts          map[string]int
+	DeferredByReason         map[string]int
 	NewAssertions            int // distinct resulting_assertion_id values among this record's candidates
 	DeterministicDecisions   int // accepted/rejected candidates decided without a human/LLM actor
 	HumanDecisions           int // candidates whose method is 'human'
@@ -60,6 +61,7 @@ func BuildAssociationRunReport(ctx context.Context, db *sql.DB, inputRecordID in
 		CandidatesByMethod: map[string]int{},
 		ResolutionOutcomes: map[string]int{},
 		LifecycleCounts:    map[string]int{},
+		DeferredByReason:   map[string]int{},
 	}
 	if db == nil {
 		return report, fmt.Errorf("db is nil")
@@ -67,7 +69,7 @@ func BuildAssociationRunReport(ctx context.Context, db *sql.DB, inputRecordID in
 
 	const stmt = `
 SELECT DISTINCT ON (logical_identity_key)
-       method, resolution_outcome, status, resulting_assertion_id
+       method, resolution_outcome, status, dependency_fingerprint, resulting_assertion_id
 FROM kb.semantic_decision_candidates
 WHERE input_record_id = $1
 ORDER BY logical_identity_key, revision DESC`
@@ -80,9 +82,9 @@ ORDER BY logical_identity_key, revision DESC`
 	assertionIDs := map[int64]struct{}{}
 	for rows.Next() {
 		var method, status string
-		var resolutionOutcome sql.NullString
+		var resolutionOutcome, dependencyFingerprint sql.NullString
 		var resultingAssertionID sql.NullInt64
-		if err := rows.Scan(&method, &resolutionOutcome, &status, &resultingAssertionID); err != nil {
+		if err := rows.Scan(&method, &resolutionOutcome, &status, &dependencyFingerprint, &resultingAssertionID); err != nil {
 			return report, err
 		}
 		report.ArtifactsExamined++
@@ -94,6 +96,13 @@ ORDER BY logical_identity_key, revision DESC`
 		}
 		report.ResolutionOutcomes[outcome]++
 		report.LifecycleCounts[status]++
+		if status == StatusDeferred {
+			reason := "unspecified"
+			if dependencyFingerprint.Valid && dependencyFingerprint.String != "" {
+				reason = dependencyFingerprint.String
+			}
+			report.DeferredByReason[reason]++
+		}
 
 		if method == "human" {
 			report.HumanDecisions++

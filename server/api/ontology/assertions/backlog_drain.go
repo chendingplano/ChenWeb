@@ -16,10 +16,11 @@ type DrainReport struct {
 	Rejected           int
 }
 
-// DrainDeferredCandidates re-attempts input records with decision candidates
-// deferred on 'unresolved_referent' -- the ADR 2026070701 DR5 bulk-backfill
-// pattern, reused rather than a new backlog mechanism. Safe to call
-// repeatedly: records with nothing newly resolved make no changes.
+// DrainDeferredCandidates re-attempts records with any deferred semantic
+// candidate. AssociateSemantics performs dependency-aware recovery: changed
+// subject links are re-normalized and governed terms are retried only when
+// their availability fingerprint changed. Safe to call repeatedly: records
+// with unchanged dependencies make no changes.
 //
 // This re-normalizes every registered family (DR11 seam 5) for each
 // affected record rather than flipping the deferred candidate's status
@@ -37,14 +38,6 @@ type DrainReport struct {
 // Re-normalizing every family rather than hardcoding 'metric' means a
 // future family whose normalizer also defers on 'unresolved_referent' is
 // covered without editing this drain.
-//
-// This drain targets specifically the 'unresolved_referent' reason -- the
-// dominant real-world blocker found in this workspace's gold corpus (chunk D
-// of the P3 implementation log: kb.artifact_objects has zero rows for
-// artifact_type='metric'). A governed-term-availability drain is a natural,
-// separable follow-up if a released module is ever rolled back after
-// candidates were deferred on it; it is not built here because no such case
-// has been observed.
 func DrainDeferredCandidates(ctx context.Context, db *sql.DB, limit int) (DrainReport, error) {
 	report := DrainReport{}
 	if db == nil {
@@ -57,8 +50,7 @@ func DrainDeferredCandidates(ctx context.Context, db *sql.DB, limit int) (DrainR
 	const stmt = `
 SELECT DISTINCT input_record_id
 FROM kb.semantic_decision_candidates
-WHERE status = 'deferred' AND dependency_fingerprint = 'unresolved_referent'
-  AND input_record_id IS NOT NULL
+WHERE status = 'deferred' AND input_record_id IS NOT NULL
 ORDER BY input_record_id
 LIMIT $1`
 	rows, err := db.QueryContext(ctx, stmt, limit)

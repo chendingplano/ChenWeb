@@ -46,6 +46,9 @@ func (a AssociateSemantics) Run(ctx context.Context, inputRecordID int64) (Assoc
 	if len(sourceArtifactTypes) == 0 {
 		return report, nil
 	}
+	if err := a.recoverDeferredCandidates(ctx, inputRecordID, sourceArtifactTypes); err != nil {
+		return report, err
+	}
 
 	// Also picks up rows stuck at 'in_review': that status is this stage's own
 	// momentary bookkeeping (transition-in immediately followed by
@@ -94,6 +97,81 @@ WHERE status IN ('candidate', 'in_review') AND source_artifact_type = ANY($1)
 		}
 	}
 	return report, nil
+}
+
+// recoverDeferredCandidates advances only candidates whose prerequisite has
+// materially changed. A newly reconciled referent changes the normalized
+// payload, so it is recovered through re-normalization; governed-term
+// availability leaves the payload intact and uses RetryDeferred with a stable
+// availability fingerprint instead.
+func (a AssociateSemantics) recoverDeferredCandidates(ctx context.Context, inputRecordID int64, sourceArtifactTypes []string) error {
+	const stmt = `
+SELECT id, source_artifact_type, proposed_payload, dependency_fingerprint
+FROM kb.semantic_decision_candidates
+WHERE status = 'deferred' AND source_artifact_type = ANY($1)
+  AND input_record_id = $2`
+	rows, err := a.DB.QueryContext(ctx, stmt, pq.Array(sourceArtifactTypes), inputRecordID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type deferredCandidate struct {
+		id                                 int64
+		artifactType, payload, fingerprint string
+	}
+	var deferred []deferredCandidate
+	for rows.Next() {
+		var d deferredCandidate
+		if err := rows.Scan(&d.id, &d.artifactType, &d.payload, &d.fingerprint); err != nil {
+			return err
+		}
+		deferred = append(deferred, d)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	needsRenormalization := false
+	dcStore := DecisionCandidateStore{DB: a.DB}
+	for _, d := range deferred {
+		if d.fingerprint == "unresolved_referent" {
+			needsRenormalization = true
+			continue
+		}
+		if d.artifactType != "metric" {
+			continue
+		}
+		var p metricCandidatePayload
+		if err := json.Unmarshal([]byte(d.payload), &p); err != nil {
+			return fmt.Errorf("decode deferred metric candidate %d: %w", d.id, err)
+		}
+		kindTermID, supported := metricAssertionKindTermID(p.AssertionKind)
+		if !supported {
+			continue
+		}
+		predicateTermID := "mea:measured_by"
+		predicateOK, err := a.termExists(ctx, predicateTermID)
+		if err != nil {
+			return err
+		}
+		kindOK, err := a.termExists(ctx, kindTermID)
+		if err != nil {
+			return err
+		}
+		fingerprint := governedTermDependencyFingerprint(predicateTermID, predicateOK, kindTermID, kindOK)
+		if fingerprint != d.fingerprint {
+			if _, err := dcStore.RetryDeferred(ctx, d.id, fingerprint, "associate_semantics"); err != nil {
+				return err
+			}
+		}
+	}
+	if needsRenormalization {
+		if err := NormalizeAllFamilies(ctx, a.DB, inputRecordID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // termExists reports whether a governed, released term exists (spec §10.5:
@@ -149,28 +227,46 @@ func init() {
 }
 
 type metricCandidatePayload struct {
-	MetricID        string   `json:"metric_id"`
-	MetricName      string   `json:"metric_name"`
-	Unit            string   `json:"unit"`
-	RawText         string   `json:"raw_text"`
-	ValueForm       string   `json:"value_form"`
-	Comparator      string   `json:"comparator"`
-	AssertionKind   string   `json:"assertion_kind"`
-	SubjectObjectID string   `json:"subject_object_id"`
-	Condition       string   `json:"condition"`
-	NumericValue    *float64 `json:"numeric_value"`
-	LowerValue      *float64 `json:"lower_value"`
-	UpperValue      *float64 `json:"upper_value"`
+	MetricID               string   `json:"metric_id"`
+	MetricName             string   `json:"metric_name"`
+	MetricDefinitionTermID string   `json:"metric_definition_term_id"`
+	Unit                   string   `json:"unit"`
+	RawText                string   `json:"raw_text"`
+	ValueForm              string   `json:"value_form"`
+	Comparator             string   `json:"comparator"`
+	AssertionKind          string   `json:"assertion_kind"`
+	SubjectObjectID        string   `json:"subject_object_id"`
+	Condition              string   `json:"condition"`
+	NumericValue           *float64 `json:"numeric_value"`
+	LowerValue             *float64 `json:"lower_value"`
+	UpperValue             *float64 `json:"upper_value"`
 }
 
-// governedMetricAssertionKinds are the measurement module's assertion-kind
-// properties installed by P2 (server/cmd/ontology-seed). An assertion_kind
-// outside this set -- including the normalizer's 'unparsed' -- has no
-// governed term to reference yet, so it defers rather than inventing one.
-var governedMetricAssertionKinds = map[string]bool{
-	"lower_bound_requirement": true, "upper_bound_requirement": true,
-	"interval_requirement": true, "observed_value": true,
-	"target": true, "reference": true, "capability": true,
+// metricAssertionKindTermID rejects only missing and unparsed values. Every
+// concrete kind is governed by the released ontology catalog through
+// termExists below; keeping a second hardcoded allowlist here previously made
+// a released mea:exact_value unusable.
+func metricAssertionKindTermID(assertionKind string) (string, bool) {
+	assertionKind = strings.TrimSpace(assertionKind)
+	if assertionKind == "" || assertionKind == "unparsed" {
+		return "", false
+	}
+	return "mea:" + assertionKind, true
+}
+
+func metricQualifiers(p metricCandidatePayload) map[string]any {
+	qualifierMap := map[string]any{"metric_name": p.MetricName}
+	if p.MetricDefinitionTermID != "" {
+		qualifierMap["metric_definition_term_id"] = p.MetricDefinitionTermID
+	}
+	if p.Condition != "" {
+		qualifierMap["condition"] = p.Condition
+	}
+	return qualifierMap
+}
+
+func governedTermDependencyFingerprint(predicateTermID string, predicateReleased bool, assertionKindTermID string, assertionKindReleased bool) string {
+	return fmt.Sprintf("governed_terms:%s=%t,%s=%t", predicateTermID, predicateReleased, assertionKindTermID, assertionKindReleased)
 }
 
 func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionCandidateStore, asStore AssertionStore, evStore EvidenceStore, dc DecisionCandidate, inputRecordID int64) (string, error) {
@@ -188,11 +284,11 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 		}
 		return a.deferCandidate(ctx, dcStore, dc, "unresolved_referent")
 	}
-	if !governedMetricAssertionKinds[p.AssertionKind] {
+	assertionKindTermID, supported := metricAssertionKindTermID(p.AssertionKind)
+	if !supported {
 		return a.deferCandidate(ctx, dcStore, dc, "no_governed_assertion_kind_term:"+p.AssertionKind)
 	}
 	predicateTermID := "mea:measured_by"
-	assertionKindTermID := "mea:" + p.AssertionKind
 	predicateOK, err := a.termExists(ctx, predicateTermID)
 	if err != nil {
 		return "", err
@@ -202,7 +298,9 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 		return "", err
 	}
 	if !predicateOK || !kindOK {
-		return a.deferCandidate(ctx, dcStore, dc, "governed_term_not_released:"+predicateTermID+","+assertionKindTermID)
+		return a.deferCandidateWithDependency(ctx, dcStore, dc,
+			"governed_term_not_released:"+predicateTermID+","+assertionKindTermID,
+			governedTermDependencyFingerprint(predicateTermID, predicateOK, assertionKindTermID, kindOK))
 	}
 
 	if _, err := dcStore.SetResolution(ctx, dc.ID, "matched", "subject reconciled; governed terms released"); err != nil {
@@ -223,11 +321,7 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 	if err != nil {
 		return "", err
 	}
-	qualifierMap := map[string]any{"metric_name": p.MetricName}
-	if p.Condition != "" {
-		qualifierMap["condition"] = p.Condition
-	}
-	qualifiers, err := json.Marshal(qualifierMap)
+	qualifiers, err := json.Marshal(metricQualifiers(p))
 	if err != nil {
 		return "", err
 	}
@@ -405,7 +499,11 @@ func (a AssociateSemantics) processProvision(ctx context.Context, dcStore Decisi
 }
 
 func (a AssociateSemantics) deferCandidate(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate, reason string) (string, error) {
-	if _, err := dcStore.DeferCandidate(ctx, dc.ID, reason, reason, "associate_semantics"); err != nil {
+	return a.deferCandidateWithDependency(ctx, dcStore, dc, reason, reason)
+}
+
+func (a AssociateSemantics) deferCandidateWithDependency(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate, reason, dependencyFingerprint string) (string, error) {
+	if _, err := dcStore.DeferCandidate(ctx, dc.ID, dependencyFingerprint, reason, "associate_semantics"); err != nil {
 		return "", err
 	}
 	return "deferred", nil

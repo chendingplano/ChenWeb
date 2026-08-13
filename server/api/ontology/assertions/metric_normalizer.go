@@ -38,23 +38,24 @@ func init() {
 }
 
 type metricRow struct {
-	ID                   int64
-	MetricID             string
-	MetricName           sql.NullString
-	MetricUnit           sql.NullString
-	MetricUnitEn         sql.NullString
-	FormulaOrDefinition  sql.NullString
-	ThresholdOrTarget    sql.NullString
-	MeasurementFrequency sql.NullString
-	Confidence           sql.NullFloat64
-	SourceLineSpans      json.RawMessage
-	SubjectObjectID      sql.NullString
-	ValueRangeType       sql.NullString
-	ValueClass           sql.NullString
-	MetricValue          sql.NullString
-	ValueMin             sql.NullFloat64
-	ValueMax             sql.NullFloat64
-	Condition            sql.NullString
+	ID                     int64
+	MetricID               string
+	MetricDefinitionTermID sql.NullString
+	MetricName             sql.NullString
+	MetricUnit             sql.NullString
+	MetricUnitEn           sql.NullString
+	FormulaOrDefinition    sql.NullString
+	ThresholdOrTarget      sql.NullString
+	MeasurementFrequency   sql.NullString
+	Confidence             sql.NullFloat64
+	SourceLineSpans        json.RawMessage
+	SubjectObjectID        sql.NullString
+	ValueRangeType         sql.NullString
+	ValueClass             sql.NullString
+	MetricValue            sql.NullString
+	ValueMin               sql.NullFloat64
+	ValueMax               sql.NullFloat64
+	Condition              sql.NullString
 }
 
 // Normalize implements Normalizer.
@@ -66,7 +67,7 @@ func (n MetricNormalizer) Normalize(ctx context.Context, db *sql.DB, inputRecord
 
 	const stmt = `
 SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.formula_or_definition,
-       m.threshold_or_target, m.measurement_frequency, m.confidence, m.source_line_spans,
+       m.metric_definition_term_id, m.threshold_or_target, m.measurement_frequency, m.confidence, m.source_line_spans,
        ao.object_id,
        m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition
 FROM kb.metrics m
@@ -82,7 +83,7 @@ WHERE m.input_record_id = $1`
 	dcStore := DecisionCandidateStore{DB: db}
 	for rows.Next() {
 		var r metricRow
-		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition,
+		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition, &r.MetricDefinitionTermID,
 			&r.ThresholdOrTarget, &r.MeasurementFrequency, &r.Confidence, &r.SourceLineSpans, &r.SubjectObjectID,
 			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition); err != nil {
 			return report, err
@@ -94,36 +95,7 @@ WHERE m.input_record_id = $1`
 			report.Skipped++
 			continue
 		}
-		unit := r.MetricUnit.String
-		if unit == "" {
-			unit = r.MetricUnitEn.String
-		}
-		parsed := resolveMetricValue(r)
-
-		payload := map[string]any{
-			"metric_id":      metricID,
-			"metric_name":    r.MetricName.String,
-			"unit":           unit,
-			"raw_text":       r.ThresholdOrTarget.String,
-			"value_form":     parsed.ValueForm,
-			"comparator":     parsed.Comparator,
-			"assertion_kind": parsed.AssertionKind,
-		}
-		if r.Condition.Valid && r.Condition.String != "" {
-			payload["condition"] = r.Condition.String
-		}
-		if r.SubjectObjectID.Valid && r.SubjectObjectID.String != "" {
-			payload["subject_object_id"] = r.SubjectObjectID.String
-		}
-		if parsed.NumericValue != nil {
-			payload["numeric_value"] = *parsed.NumericValue
-		}
-		if parsed.LowerValue != nil {
-			payload["lower_value"] = *parsed.LowerValue
-		}
-		if parsed.UpperValue != nil {
-			payload["upper_value"] = *parsed.UpperValue
-		}
+		payload := metricCandidatePayloadForRow(r)
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
 			return report, err
@@ -156,6 +128,42 @@ WHERE m.input_record_id = $1`
 		}
 	}
 	return report, rows.Err()
+}
+
+func metricCandidatePayloadForRow(r metricRow) map[string]any {
+	unit := r.MetricUnit.String
+	if unit == "" {
+		unit = r.MetricUnitEn.String
+	}
+	parsed := resolveMetricValue(r)
+	payload := map[string]any{
+		"metric_id":      strings.TrimSpace(r.MetricID),
+		"metric_name":    r.MetricName.String,
+		"unit":           unit,
+		"raw_text":       r.ThresholdOrTarget.String,
+		"value_form":     parsed.ValueForm,
+		"comparator":     parsed.Comparator,
+		"assertion_kind": parsed.AssertionKind,
+	}
+	if r.MetricDefinitionTermID.Valid && strings.TrimSpace(r.MetricDefinitionTermID.String) != "" {
+		payload["metric_definition_term_id"] = strings.TrimSpace(r.MetricDefinitionTermID.String)
+	}
+	if r.Condition.Valid && r.Condition.String != "" {
+		payload["condition"] = r.Condition.String
+	}
+	if r.SubjectObjectID.Valid && r.SubjectObjectID.String != "" {
+		payload["subject_object_id"] = r.SubjectObjectID.String
+	}
+	if parsed.NumericValue != nil {
+		payload["numeric_value"] = *parsed.NumericValue
+	}
+	if parsed.LowerValue != nil {
+		payload["lower_value"] = *parsed.LowerValue
+	}
+	if parsed.UpperValue != nil {
+		payload["upper_value"] = *parsed.UpperValue
+	}
+	return payload
 }
 
 // The pilot corpus (ADR OD1: 呼吸机/医疗器械) is predominantly Chinese-language
@@ -205,16 +213,38 @@ var structuredValueAssertionKind = map[string]string{
 	"range":       "interval_requirement",
 }
 
+// canonicalMetricValueRangeType is the compatibility boundary between the
+// extraction vocabulary and normalization's small structured vocabulary. The
+// extractor has emitted these synonymous values in production; accepting them
+// here lets both independently versioned stages retain a stable contract.
+func canonicalMetricValueRangeType(raw string) string {
+	vrt := strings.ToLower(strings.TrimSpace(raw))
+	vrt = strings.ReplaceAll(vrt, "-", "_")
+	vrt = strings.ReplaceAll(vrt, " ", "_")
+	switch vrt {
+	case "min", "minimum", "min_threshold", "lower_limit", "lower_threshold":
+		return "lower_bound"
+	case "max", "maximum", "max_threshold", "upper_limit", "upper_threshold":
+		return "upper_bound"
+	case "exact", "exact_count", "exact_duration", "exact_ratio", "exact_specification":
+		return "exact"
+	case "range", "interval", "between", "value_range":
+		return "range"
+	default:
+		return vrt
+	}
+}
+
 // valueClassAssertionKind refines the assertion kind by value_class, mirroring
 // the parser's requirement-vs-observation distinction: an observed test result
 // is an observed_value even when the source phrasing is a bound.
 var valueClassAssertionKind = map[string]string{
-	"observation":         "observed_value",
-	"requirement":         "",
-	"target":              "target",
-	"reference":           "reference",
-	"design_capability":   "capability",
-	"definition":          "reference",
+	"observation":       "observed_value",
+	"requirement":       "",
+	"target":            "target",
+	"reference":         "reference",
+	"design_capability": "capability",
+	"definition":        "reference",
 }
 
 // resolveMetricValue is the structured-first path (design D1). When the row
@@ -226,7 +256,7 @@ var valueClassAssertionKind = map[string]string{
 // never fabricates: a structured row with no parseable number produces an
 // honest unparsed, never a value invented from unrelated text.
 func resolveMetricValue(r metricRow) parsedThreshold {
-	vrt := strings.TrimSpace(r.ValueRangeType.String)
+	vrt := canonicalMetricValueRangeType(r.ValueRangeType.String)
 	if vrt == "" {
 		// Legacy row (pre-structured-schema, or extraction left the enum
 		// unset): fall back to the free-text parser unchanged.

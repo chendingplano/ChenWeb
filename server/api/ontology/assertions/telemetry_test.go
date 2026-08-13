@@ -24,6 +24,7 @@ func TestAssociationRunReportReconcilesByConstruction(t *testing.T) {
 			"deferred":  1,
 			"candidate": 1,
 		},
+		DeferredByReason: map[string]int{"unresolved_referent": 1},
 	}
 	if !r.Reconciles() {
 		t.Fatalf("expected reconciling report, got %+v", r)
