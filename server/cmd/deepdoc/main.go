@@ -18,6 +18,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmreconcile"
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
+	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
@@ -198,6 +199,10 @@ func main() {
 	}
 
 	logger.Info("migrations completed successfully")
+	if err := seed.EnsureCuratedModules(ctx, project_db); err != nil {
+		logger.Error("failed to ensure curated ontology modules", "error", err)
+		os.Exit(1)
+	}
 
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {

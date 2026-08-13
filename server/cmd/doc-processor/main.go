@@ -16,6 +16,7 @@ import (
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	fileconverters "github.com/chendingplano/deepdoc/server/api/file-converters"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
+	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -229,6 +230,10 @@ func main() {
 
 	if err := config.RunMigrations(ctx, logger); err != nil {
 		logger.Error("migrations failed", "error", err)
+		os.Exit(1)
+	}
+	if err := seed.EnsureCuratedModules(ctx, ApiTypes.ProjectDBHandle); err != nil {
+		logger.Error("failed to ensure curated ontology modules", "error", err)
 		os.Exit(1)
 	}
 	if err := ensureLLMUsageSink(); err != nil {

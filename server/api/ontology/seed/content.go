@@ -3,7 +3,7 @@
 // authored as data (the 2026-07-31 storage decision), released and activated
 // through the module compiler. Terms are the minimum the pilot domain and the
 // facet vocabulary need; nothing here requires a code change to install.
-package main
+package seed
 
 type seedLabel struct {
 	Label string
