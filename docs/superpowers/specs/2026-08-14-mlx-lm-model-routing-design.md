@@ -81,12 +81,17 @@ does not promise MLX-specific thinking behavior.
   construction paths. Parse the new entry through the existing importer as a
   compatibility check only.
 - Run focused shared and ChenWeb Go tests.
-- Start MLX LM bound to `127.0.0.1` and make a local chat-completions request
-  if the service is available, confirming the model endpoint remains
-  reachable.
+- Start MLX LM with `--host 127.0.0.1 --port 8095` and make a local
+  chat-completions request if the service is available, confirming the model
+  endpoint remains reachable.
 
 ## Documentation impact
 
-Update `ThirdParty/mlx-lm/USER_MANUAL.md` with a server command bound to
-`127.0.0.1` that leaves thinking selection to ChenWeb request configuration.
+Update `ThirdParty/mlx-lm/USER_MANUAL.md` with this server command, which
+leaves thinking selection to ChenWeb request configuration:
+
+```sh
+mise run server -- --host 127.0.0.1 --port 8095 --model mlx-community/Qwen3-30B-A3B-4bit
+```
+
 No prompt or database schema changes are needed.
