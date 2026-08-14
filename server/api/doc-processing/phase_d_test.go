@@ -29,3 +29,14 @@ func TestSemanticAssociationEnabledFromEnvInvalidIsEnabled(t *testing.T) {
 		t.Fatal("expected enabled for an unparseable value, falling back to the default")
 	}
 }
+
+// TestNormalizeAssertionsProcessorDependsOnExtractMetrics locks in ADR
+// 2026081401 DR6's ordering requirement: normalize_assertions must not read
+// a record's kb.metrics rows until extract_metrics's Phase C mapping check
+// has finished for that record.
+func TestNormalizeAssertionsProcessorDependsOnExtractMetrics(t *testing.T) {
+	deps := NewNormalizeAssertionsProcessor().PostProcessDependsOn()
+	if len(deps) != 1 || deps[0] != "extract_metrics" {
+		t.Fatalf("PostProcessDependsOn() = %v, want [extract_metrics]", deps)
+	}
+}

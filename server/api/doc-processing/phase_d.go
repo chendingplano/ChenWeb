@@ -55,6 +55,15 @@ func NewNormalizeAssertionsProcessor() *NormalizeAssertionsProcessor {
 func (p *NormalizeAssertionsProcessor) Name() string                              { return "normalize_assertions" }
 func (p *NormalizeAssertionsProcessor) HandleEvent(context.Context, []byte) error { return nil }
 
+// PostProcessDependsOn (ADR 2026081401 DR6 ordering requirement): waits for
+// extract_metrics's Phase C mapping check (when invoked this run) to finish
+// before reading kb.metrics rows, so it never observes a row before its
+// value_range_type_error flag or kb.metric_value_range_type_map proposal
+// exists -- the two Phase C passes would otherwise race.
+func (p *NormalizeAssertionsProcessor) PostProcessDependsOn() []string {
+	return []string{"extract_metrics"}
+}
+
 func (p *NormalizeAssertionsProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
 	if !SemanticAssociationEnabledFromEnv() || ApiTypes.ProjectDBHandle == nil {
 		return nil
@@ -80,7 +89,24 @@ func (p *AssociateSemanticsProcessor) PostProcessIndex(ctx context.Context, reco
 	if !SemanticAssociationEnabledFromEnv() || ApiTypes.ProjectDBHandle == nil {
 		return nil
 	}
-	_, err := (assertions.AssociateSemantics{DB: ApiTypes.ProjectDBHandle}).Run(ctx, recordID)
+	report, err := (assertions.AssociateSemantics{DB: ApiTypes.ProjectDBHandle}).Run(ctx, recordID)
+	// ADR 2026081401 DR3/DR2: the log write lives here, not inside
+	// AssociateSemantics.Run itself -- assertions cannot import
+	// docprocessing (docprocessing already imports assertions; a reverse
+	// import would cycle), and this is the one call site that already has
+	// both the report and a DocProcLogger.
+	if report.MappingMisses > 0 {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		// Best-effort: a logging failure must not mask Run's real error.
+		_ = DocProcLogger{DB: ApiTypes.ProjectDBHandle}.LogAssertionMappingMiss(ctx, DocProcLogRecord{
+			DocProcName: p.Name(),
+			RecordID:    &recordID,
+			Errors:      &errMsg,
+		}, "phase_d.go_AssociateSemanticsProcessor.PostProcessIndex")
+	}
 	return err
 }
 

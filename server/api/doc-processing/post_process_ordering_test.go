@@ -2,6 +2,8 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -76,5 +78,65 @@ func TestRunPostProcessIndexingSkipsAbsentDependencyWithoutHanging(t *testing.T)
 	}
 	if dependent.ranAfter == 0 {
 		t.Fatal("dependent never ran")
+	}
+}
+
+// failingIndexer is a PostProcessIndexer whose PostProcessIndex always
+// returns err.
+type failingIndexer struct {
+	name string
+	err  error
+}
+
+func (p *failingIndexer) Name() string                              { return p.name }
+func (p *failingIndexer) HandleEvent(context.Context, []byte) error { return nil }
+func (p *failingIndexer) PostProcessIndex(context.Context, int64) error {
+	return p.err
+}
+
+// TestRunPostProcessIndexingPersistsFailedStatusOnError locks in ADR
+// 2026081401 DR4: before this fix, a PostProcessIndex error was only logged
+// and recorded on an OTel span -- kb.inputs.status never reflected it, for
+// any processor. Now it must reach kb.inputs.status as "failed", the same
+// way a Phase A/B failure already does.
+func TestRunPostProcessIndexingPersistsFailedStatusOnError(t *testing.T) {
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{42: {ID: 42}},
+	}
+	s := &ControlService{InputStore: store}
+	indexer := &failingIndexer{name: "associate_semantics", err: errors.New("blocked on ungoverned vocabulary")}
+
+	s.runPostProcessIndexing(context.Background(), []Processor{indexer}, 42)
+
+	rec, err := store.GetInputRecord(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("GetInputRecord: %v", err)
+	}
+	if !strings.Contains(rec.StatusRaw, `"proc_status":"failed"`) {
+		t.Fatalf("StatusRaw = %q, want a failed proc_status entry for associate_semantics", rec.StatusRaw)
+	}
+	if !strings.Contains(rec.StatusRaw, `"operation":"associate_semantics"`) {
+		t.Fatalf("StatusRaw = %q, want an entry naming operation associate_semantics", rec.StatusRaw)
+	}
+}
+
+// TestRunPostProcessIndexingLeavesStatusUntouchedOnSuccess locks in that DR4
+// only adds a write on the error path -- a successful PostProcessIndex must
+// not start writing a status entry it didn't write before this change.
+func TestRunPostProcessIndexingLeavesStatusUntouchedOnSuccess(t *testing.T) {
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{42: {ID: 42}},
+	}
+	s := &ControlService{InputStore: store}
+	indexer := &orderedIndexer{name: "associate_semantics", seq: &sequenceCounter{}}
+
+	s.runPostProcessIndexing(context.Background(), []Processor{indexer}, 42)
+
+	rec, err := store.GetInputRecord(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("GetInputRecord: %v", err)
+	}
+	if rec.StatusRaw != "" {
+		t.Fatalf("StatusRaw = %q, want unchanged (empty) on success", rec.StatusRaw)
 	}
 }

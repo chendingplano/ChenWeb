@@ -46,6 +46,14 @@ const EntryTypeGenerateTopics = "generate_topics"
 const EntryTypeReconcileObject = "reconcile_object"
 const EntryTypeDeleteInput = "delete_input"
 
+// EntryTypeAssertionMappingMiss is a family-level entry type (ADR 2026081401
+// DR2): written once per input record per run by extract_metrics (DR6) and,
+// as a backstop, associate_semantics (DR3) when one or more assertions were
+// blocked on an ungoverned value_range_type string. Not metric_-prefixed
+// since the same free-text-vocabulary shape recurs for other assertion
+// families (see kb.metrics.value_class, ADR §7 open question).
+const EntryTypeAssertionMappingMiss = "assertion_mapping_miss"
+
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
 	CallReason    string
@@ -217,6 +225,16 @@ func (l DocProcLogger) LogResolveMetric(ctx context.Context, rec DocProcLogRecor
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+// LogAssertionMappingMiss inserts one summary entry per input record per run
+// when one or more kb.metrics rows' value_range_type had no 'approved'
+// governed mapping (ADR 2026081401 DR2/DR3/DR6). rec.DocProcName identifies
+// which stage raised it ("extract_metrics" or "associate_semantics").
+func (l DocProcLogger) LogAssertionMappingMiss(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeAssertionMappingMiss
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 func (l DocProcLogger) LogEnrichMetrics(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeExtractMetrics
 	rec.LogLoc = callerLoc(2)
@@ -336,7 +354,8 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeGenerateTopics,
 		EntryTypeReconcileObject,
 		EntryTypeDeleteInput,
-		EntryTypeExtractDocMetadata:
+		EntryTypeExtractDocMetadata,
+		EntryTypeAssertionMappingMiss:
 		return true
 	default:
 		return false

@@ -1,8 +1,12 @@
 package assertions
 
 import (
+	"context"
 	"database/sql"
+	"regexp"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestParseThresholdOrTargetLowerBound(t *testing.T) {
@@ -163,12 +167,28 @@ func metricRowFixture() metricRow {
 	return metricRow{MetricID: "m1", MetricUnit: ns("cd/m²")}
 }
 
+// resolveMetricValueLegacy preserves the pre-DR1 call convention
+// (resolveMetricValue(r)) for tests exercising resolveMetricValue's
+// structural parsing, not the governed DB-backed lookup itself --
+// canonicalization here still goes through CanonicalMetricValueRangeType,
+// which is retained exactly for this purpose (see its doc comment).
+// TestResolveMetricValueCanonicalizesProductionVocabularySurvey and
+// TestResolveMetricValueLeavesAmbiguousVocabularyUnparsed exercise
+// ValueRangeTypeMapper.Lookup directly instead (ADR 2026081401 §11).
+func resolveMetricValueLegacy(r metricRow) parsedThreshold {
+	return resolveMetricValue(r, CanonicalMetricValueRangeType(r.ValueRangeType.String))
+}
+
+func metricCandidatePayloadForRowLegacy(r metricRow) map[string]any {
+	return metricCandidatePayloadForRow(r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved")
+}
+
 func TestResolveMetricValueLowerBound(t *testing.T) {
 	r := metricRowFixture()
 	r.ValueRangeType = ns("lower_bound")
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("250")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "single" || p.Comparator != ">=" || p.AssertionKind != "lower_bound_requirement" {
 		t.Fatalf("unexpected resolve: %+v", p)
 	}
@@ -182,7 +202,7 @@ func TestResolveMetricValueUpperBound(t *testing.T) {
 	r.ValueRangeType = ns("upper_bound")
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("120")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.Comparator != "<=" || p.AssertionKind != "upper_bound_requirement" {
 		t.Fatalf("unexpected resolve: %+v", p)
 	}
@@ -196,7 +216,7 @@ func TestResolveMetricValueExact(t *testing.T) {
 	r.ValueRangeType = ns("exact")
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("15")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.Comparator != "=" || p.AssertionKind != "exact_value" {
 		t.Fatalf("unexpected resolve: %+v", p)
 	}
@@ -236,7 +256,7 @@ func TestResolveMetricValueCanonicalizesExtractorRangeVariants(t *testing.T) {
 			r.ValueClass = ns("requirement")
 			r.MetricValue = ns(tt.value)
 
-			p := resolveMetricValue(r)
+			p := resolveMetricValueLegacy(r)
 			if p.Comparator != tt.comparator || p.AssertionKind != tt.kind {
 				t.Fatalf("resolveMetricValue(%q) = %+v, want comparator=%q kind=%q", tt.rangeType, p, tt.comparator, tt.kind)
 			}
@@ -290,6 +310,27 @@ func TestResolveMetricValueCanonicalizesProductionVocabularySurvey(t *testing.T)
 		{name: "Chinese 区间", rangeType: "区间", value: "5.5~8.5", comparator: "between", kind: "interval_requirement"},
 		{name: "Chinese 范围", rangeType: "范围", value: "5.5~8.5", comparator: "between", kind: "interval_requirement"},
 	}
+	// ADR 2026081401 §11: this test now drives resolveMetricValue via the
+	// governed DB-backed ValueRangeTypeMapper (sqlmock, seeded to mirror the
+	// DR5 migration's 'approved' rows) instead of calling
+	// CanonicalMetricValueRangeType directly -- confirms no behavior
+	// regression during cutover.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"raw_value", "canonical_bucket", "status"})
+	for _, tt := range tests {
+		rows.AddRow(normalizeValueRangeTypeRaw(tt.rangeType), CanonicalMetricValueRangeType(tt.rangeType), "approved")
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT raw_value, canonical_bucket, status FROM kb.metric_value_range_type_map")).
+		WillReturnRows(rows)
+
+	mapper := ValueRangeTypeMapper{DB: db, cache: &valueRangeTypeMapCache{}}
+	ctx := context.Background()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := metricRowFixture()
@@ -297,7 +338,15 @@ func TestResolveMetricValueCanonicalizesProductionVocabularySurvey(t *testing.T)
 			r.ValueClass = ns("requirement")
 			r.MetricValue = ns(tt.value)
 
-			p := resolveMetricValue(r)
+			bucket, status, err := mapper.Lookup(ctx, tt.rangeType, 416)
+			if err != nil {
+				t.Fatalf("Lookup(%q) error: %v", tt.rangeType, err)
+			}
+			if status != "approved" {
+				t.Fatalf("Lookup(%q) status = %q, want approved", tt.rangeType, status)
+			}
+
+			p := resolveMetricValue(r, bucket)
 			if p.Comparator != tt.comparator || p.AssertionKind != tt.kind {
 				t.Fatalf("resolveMetricValue(%q) = %+v, want comparator=%q kind=%q", tt.rangeType, p, tt.comparator, tt.kind)
 			}
@@ -312,22 +361,65 @@ func TestResolveMetricValueCanonicalizesProductionVocabularySurvey(t *testing.T)
 			}
 		})
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestResolveMetricValueLeavesAmbiguousVocabularyUnparsed locks in the
 // conservative half of the 2026-08-14 synonym-table expansion: strings whose
 // direction can't be inferred (threshold, target, tolerance, categorical)
-// must keep deferring rather than guess.
+// must keep deferring rather than guess. ADR 2026081401 §11: driven through
+// ValueRangeTypeMapper (sqlmock, seeded with DR5's 'ambiguous' rows) instead
+// of CanonicalMetricValueRangeType directly, and additionally asserts the
+// governed lookup itself reports status "ambiguous" with no usable bucket.
 func TestResolveMetricValueLeavesAmbiguousVocabularyUnparsed(t *testing.T) {
-	for _, vrt := range []string{"threshold", "target", "tolerance", "categorical", "ordinal", "continuous", "binary", "ratio"} {
+	ambiguous := []string{"threshold", "target", "tolerance", "categorical", "ordinal", "continuous", "binary", "ratio"}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"raw_value", "canonical_bucket", "status"})
+	for _, vrt := range ambiguous {
+		rows.AddRow(vrt, nil, "ambiguous")
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT raw_value, canonical_bucket, status FROM kb.metric_value_range_type_map")).
+		WillReturnRows(rows)
+	for range ambiguous {
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.metric_value_range_type_map")).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+
+	mapper := ValueRangeTypeMapper{DB: db, cache: &valueRangeTypeMapCache{}}
+	ctx := context.Background()
+
+	for _, vrt := range ambiguous {
 		r := metricRowFixture()
 		r.ValueRangeType = ns(vrt)
 		r.ValueClass = ns("requirement")
 		r.MetricValue = ns("100")
-		p := resolveMetricValue(r)
+
+		bucket, status, err := mapper.Lookup(ctx, vrt, 416)
+		if err != nil {
+			t.Fatalf("Lookup(%q) error: %v", vrt, err)
+		}
+		if status != "ambiguous" {
+			t.Fatalf("Lookup(%q) status = %q, want ambiguous", vrt, status)
+		}
+		if bucket != "" {
+			t.Fatalf("Lookup(%q) bucket = %q, want empty -- ambiguous is never authoritative", vrt, bucket)
+		}
+
+		p := resolveMetricValue(r, bucket)
 		if p.ValueForm != "unparsed" || p.AssertionKind != "unparsed" {
 			t.Fatalf("expected %q to remain unparsed (direction-ambiguous), got %+v", vrt, p)
 		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -339,7 +431,7 @@ func TestMetricCandidatePayloadCarriesMetricDefinitionTermID(t *testing.T) {
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("≥30")
 
-	payload := metricCandidatePayloadForRow(r)
+	payload := metricCandidatePayloadForRowLegacy(r)
 	if got := payload["metric_definition_term_id"]; got != "mea:organic_matter_mass_fraction" {
 		t.Fatalf("metric_definition_term_id = %#v, want resolved term id", got)
 	}
@@ -350,7 +442,7 @@ func TestResolveMetricValueProductionRatioDoesNotFabricateScalar(t *testing.T) {
 	r.ValueRangeType = ns("exact_ratio")
 	r.ValueClass = ns("ratio")
 	r.MetricValue = ns("1:10")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "unparsed" || p.NumericValue != nil {
 		t.Fatalf("exact ratio 1:10 must not become a scalar assertion, got %+v", p)
 	}
@@ -361,7 +453,7 @@ func TestResolveMetricValueProductionRangeParsesMetricValue(t *testing.T) {
 		r := metricRowFixture()
 		r.ValueRangeType = ns("range")
 		r.MetricValue = ns(raw)
-		p := resolveMetricValue(r)
+		p := resolveMetricValueLegacy(r)
 		if p.ValueForm != "range" || p.AssertionKind != "interval_requirement" || p.LowerValue == nil || p.UpperValue == nil {
 			t.Fatalf("range %q = %+v, want parsed interval", raw, p)
 		}
@@ -378,7 +470,7 @@ func TestResolveMetricValueProductionCompoundRangesRemainUnparsed(t *testing.T) 
 		r := metricRowFixture()
 		r.ValueRangeType = ns("range")
 		r.MetricValue = ns(raw)
-		p := resolveMetricValue(r)
+		p := resolveMetricValueLegacy(r)
 		if p.ValueForm != "unparsed" || p.LowerValue != nil || p.UpperValue != nil {
 			t.Fatalf("compound range %q must remain unparsed, got %+v", raw, p)
 		}
@@ -398,7 +490,7 @@ func TestResolveMetricValueRangeUsesValueMinMax(t *testing.T) {
 	r.MetricValue = ns("500:1 至 2000:1")
 	r.ValueMin = nf(500)
 	r.ValueMax = nf(2000)
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "range" || p.Comparator != "between" || p.AssertionKind != "interval_requirement" {
 		t.Fatalf("unexpected resolve: %+v", p)
 	}
@@ -412,7 +504,7 @@ func TestResolveMetricValueQualitativeHasNoNumericFields(t *testing.T) {
 	r.ValueRangeType = ns("qualitative")
 	r.ValueClass = ns("observation")
 	r.MetricValue = ns("clearly legible")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "qualitative" {
 		t.Fatalf("expected value_form qualitative, got %+v", p)
 	}
@@ -428,7 +520,7 @@ func TestResolveMetricValueLimitAbsentHasNoNumericFields(t *testing.T) {
 	r := metricRowFixture()
 	r.ValueRangeType = ns("limit_absent")
 	r.ValueClass = ns("requirement")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "limit_absent" {
 		t.Fatalf("expected value_form limit_absent, got %+v", p)
 	}
@@ -442,7 +534,7 @@ func TestResolveMetricValueValueClassRefinesKind(t *testing.T) {
 	r.ValueRangeType = ns("lower_bound")
 	r.ValueClass = ns("observation")
 	r.MetricValue = ns("250")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.AssertionKind != "observed_value" {
 		t.Fatalf("expected lower_bound + observation to classify as observed_value, got %q", p.AssertionKind)
 	}
@@ -456,7 +548,7 @@ func TestResolveMetricValueStructuredLowerBoundNonNumericIsUnparsed(t *testing.T
 	r.ValueRangeType = ns("lower_bound")
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("clearly legible")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "unparsed" {
 		t.Fatalf("expected structured lower_bound with non-numeric metric_value to be unparsed, got %+v", p)
 	}
@@ -471,7 +563,7 @@ func TestResolveMetricValueStructuredLowerBoundNonNumericIsUnparsed(t *testing.T
 func TestResolveMetricValueLegacyFallsBackToParser(t *testing.T) {
 	r := metricRowFixture()
 	r.ThresholdOrTarget = ns("不低于250 cd/m²")
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "single" || p.Comparator != ">=" || p.AssertionKind != "lower_bound_requirement" {
 		t.Fatalf("expected legacy row to fall back to the free-text parser, got %+v", p)
 	}
@@ -487,7 +579,7 @@ func TestResolveMetricValueRangeMissingBoundsFallsBackHonestly(t *testing.T) {
 	r.MetricValue = ns("see table 3")
 	// value_min/value_max NULL and no parseable range expression: this must
 	// remain honest unparsed -- never a fabricated interval.
-	p := resolveMetricValue(r)
+	p := resolveMetricValueLegacy(r)
 	if p.ValueForm != "unparsed" {
 		t.Fatalf("expected range row without value_min/value_max to be unparsed, got %+v", p)
 	}

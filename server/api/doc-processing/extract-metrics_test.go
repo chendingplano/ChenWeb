@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/names"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -1976,6 +1978,84 @@ func TestMetricsProcessor_ProcessChunk_NoOpWhenSkipping(t *testing.T) {
 	if extractor.structuredCalledCount != 0 || extractor.calledCount != 0 {
 		t.Fatalf("expected zero LLM calls when skipping, got structured=%d plain=%d",
 			extractor.structuredCalledCount, extractor.calledCount)
+	}
+}
+
+// ── DR6: extraction-time value_range_type governance (ADR 2026081401) ────────
+
+// TestMetricsProcessorCheckValueRangeTypeMappingsFlagsUnmappedRow locks in
+// DR6: an unmapped value_range_type flags the specific kb.metrics row,
+// upserts a governed-table proposal, logs one assertion_mapping_miss entry,
+// and returns a non-nil error -- without touching the row's other fields.
+func TestMetricsProcessorCheckValueRangeTypeMappingsFlagsUnmappedRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	// ValueRangeTypeMapper.Lookup: cache miss, auto-inserts a 'proposed' row.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT raw_value, canonical_bucket, status FROM kb.metric_value_range_type_map")).
+		WillReturnRows(sqlmock.NewRows([]string{"raw_value", "canonical_bucket", "status"}))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.metric_value_range_type_map")).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// checkValueRangeTypeMappings flags the specific row.
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.metrics SET value_range_type_error = $2 WHERE id = $1")).
+		WithArgs(int64(501), `unmapped value_range_type: "some_brand_new_vocabulary"`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// One assertion_mapping_miss summary log row for the run.
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.doc_proc_logs")).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	store := &fakeMetricsStore{existingMetrics: []map[string]any{
+		{"id": int64(501), "metric_id": "416_mtc_1", "value_range_type": "some_brand_new_vocabulary"},
+	}}
+	p := &MetricsProcessor{Store: store, ProcLogger: DocProcLogger{DB: db}}
+
+	err = p.checkValueRangeTypeMappings(context.Background(), 416)
+	if err == nil {
+		t.Fatal("expected a non-nil error when a metric's value_range_type is unmapped")
+	}
+	if !strings.Contains(err.Error(), "1 metric(s) blocked") {
+		t.Fatalf("error = %q, want it to report exactly 1 blocked metric", err.Error())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestMetricsProcessorCheckValueRangeTypeMappingsNoMissesReturnsNil locks in
+// DR6: when every metric's value_range_type is already 'approved', no
+// UPDATE, no log row, and no error -- unchanged from before this ADR.
+func TestMetricsProcessorCheckValueRangeTypeMappingsNoMissesReturnsNil(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT raw_value, canonical_bucket, status FROM kb.metric_value_range_type_map")).
+		WillReturnRows(sqlmock.NewRows([]string{"raw_value", "canonical_bucket", "status"}).
+			AddRow("min", "lower_bound", "approved"))
+
+	store := &fakeMetricsStore{existingMetrics: []map[string]any{
+		{"id": int64(501), "metric_id": "416_mtc_1", "value_range_type": "min"},
+	}}
+	p := &MetricsProcessor{Store: store, ProcLogger: DocProcLogger{DB: db}}
+
+	if err := p.checkValueRangeTypeMappings(context.Background(), 416); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

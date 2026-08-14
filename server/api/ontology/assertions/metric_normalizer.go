@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // MetricNormalizer is the seam-5 instantiation for the metric artifact
@@ -81,6 +83,7 @@ WHERE m.input_record_id = $1`
 	defer rows.Close()
 
 	dcStore := DecisionCandidateStore{DB: db}
+	mapper := NewValueRangeTypeMapper(db)
 	for rows.Next() {
 		var r metricRow
 		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition, &r.MetricDefinitionTermID,
@@ -95,7 +98,11 @@ WHERE m.input_record_id = $1`
 			report.Skipped++
 			continue
 		}
-		payload := metricCandidatePayloadForRow(r)
+		canonicalBucket, lookupStatus, err := mapper.Lookup(ctx, r.ValueRangeType.String, inputRecordID)
+		if err != nil {
+			return report, fmt.Errorf("value_range_type lookup for metric %s: %w", metricID, err)
+		}
+		payload := metricCandidatePayloadForRow(r, canonicalBucket, lookupStatus)
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
 			return report, err
@@ -130,20 +137,21 @@ WHERE m.input_record_id = $1`
 	return report, rows.Err()
 }
 
-func metricCandidatePayloadForRow(r metricRow) map[string]any {
+func metricCandidatePayloadForRow(r metricRow, canonicalBucket, lookupStatus string) map[string]any {
 	unit := r.MetricUnit.String
 	if unit == "" {
 		unit = r.MetricUnitEn.String
 	}
-	parsed := resolveMetricValue(r)
+	parsed := resolveMetricValue(r, canonicalBucket)
 	payload := map[string]any{
-		"metric_id":      strings.TrimSpace(r.MetricID),
-		"metric_name":    r.MetricName.String,
-		"unit":           unit,
-		"raw_text":       r.ThresholdOrTarget.String,
-		"value_form":     parsed.ValueForm,
-		"comparator":     parsed.Comparator,
-		"assertion_kind": parsed.AssertionKind,
+		"metric_id":               strings.TrimSpace(r.MetricID),
+		"metric_name":             r.MetricName.String,
+		"unit":                    unit,
+		"raw_text":                r.ThresholdOrTarget.String,
+		"value_form":              parsed.ValueForm,
+		"comparator":              parsed.Comparator,
+		"assertion_kind":          parsed.AssertionKind,
+		"value_range_type_lookup": lookupStatus,
 	}
 	if r.MetricDefinitionTermID.Valid && strings.TrimSpace(r.MetricDefinitionTermID.String) != "" {
 		payload["metric_definition_term_id"] = strings.TrimSpace(r.MetricDefinitionTermID.String)
@@ -212,13 +220,15 @@ var structuredValueAssertionKind = map[string]string{
 	"range":       "interval_requirement",
 }
 
-// canonicalMetricValueRangeType is the compatibility boundary between the
-// extraction vocabulary and normalization's small structured vocabulary. The
-// extractor has emitted these synonymous values in production; accepting them
-// here lets both independently versioned stages retain a stable contract.
-// CanonicalMetricValueRangeType is the extractor/normalizer range contract.
-// Extraction persists this canonical form and normalization retains the same
-// boundary defensively for historical rows.
+// CanonicalMetricValueRangeType was the extractor/normalizer range contract
+// through commit 56b6. As of ADR 2026081401 DR1, production classification no
+// longer calls this function -- it goes through the governed, DB-backed
+// ValueRangeTypeMapper (kb.metric_value_range_type_map) below, which an
+// operator can extend without a code change. This function is retained only
+// as (a) the source-of-truth this ADR's DR5 migration seeded the governed
+// table from, and (b) a canonicalization oracle for tests that don't need to
+// exercise the DB-backed lookup directly (see resolveMetricValueLegacy in
+// metric_normalizer_test.go).
 func CanonicalMetricValueRangeType(raw string) string {
 	vrt := strings.ToLower(strings.TrimSpace(raw))
 	vrt = strings.ReplaceAll(vrt, "-", "_")
@@ -252,6 +262,185 @@ func CanonicalMetricValueRangeType(raw string) string {
 	}
 }
 
+// valueRangeTypeMapCacheTTL bounds how stale the in-process
+// kb.metric_value_range_type_map cache can be. The table is read on every
+// metric row normalized (design D1: a per-call DB round trip is not
+// acceptable), so the whole table is cached; a short TTL plus
+// invalidate-on-write (see ValueRangeTypeMapper.Lookup) keeps a just-approved
+// mapping visible within one TTL window even without an explicit signal.
+const valueRangeTypeMapCacheTTL = 30 * time.Second
+
+// valueRangeTypeMapEntry is one kb.metric_value_range_type_map row as held in
+// the in-process cache.
+type valueRangeTypeMapEntry struct {
+	CanonicalBucket string
+	Status          string
+}
+
+// valueRangeTypeMapCache holds the full kb.metric_value_range_type_map table
+// in memory, keyed by raw_value. Not exported: production code shares
+// defaultValueRangeTypeMapCache via NewValueRangeTypeMapper; tests construct
+// their own so cached state never leaks between test functions.
+type valueRangeTypeMapCache struct {
+	mu       sync.RWMutex
+	entries  map[string]valueRangeTypeMapEntry
+	loadedAt time.Time
+}
+
+var defaultValueRangeTypeMapCache = &valueRangeTypeMapCache{}
+
+func (c *valueRangeTypeMapCache) fresh(ctx context.Context, db *sql.DB) (map[string]valueRangeTypeMapEntry, error) {
+	c.mu.RLock()
+	if c.entries != nil && time.Since(c.loadedAt) < valueRangeTypeMapCacheTTL {
+		entries := c.entries
+		c.mu.RUnlock()
+		return entries, nil
+	}
+	c.mu.RUnlock()
+	return c.reload(ctx, db)
+}
+
+func (c *valueRangeTypeMapCache) reload(ctx context.Context, db *sql.DB) (map[string]valueRangeTypeMapEntry, error) {
+	rows, err := db.QueryContext(ctx, `SELECT raw_value, canonical_bucket, status FROM kb.metric_value_range_type_map`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	entries := make(map[string]valueRangeTypeMapEntry)
+	for rows.Next() {
+		var rawValue, status string
+		var bucket sql.NullString
+		if err := rows.Scan(&rawValue, &bucket, &status); err != nil {
+			return nil, err
+		}
+		entries[rawValue] = valueRangeTypeMapEntry{CanonicalBucket: bucket.String, Status: status}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.entries = entries
+	c.loadedAt = time.Now()
+	c.mu.Unlock()
+	return entries, nil
+}
+
+// invalidate drops the cached table so the next Lookup reloads it -- called
+// after any write so a row this process just inserted is visible to this
+// process immediately, without waiting for the TTL.
+func (c *valueRangeTypeMapCache) invalidate() {
+	c.mu.Lock()
+	c.entries = nil
+	c.mu.Unlock()
+}
+
+// ValueRangeTypeMapper is the DB-backed replacement for
+// CanonicalMetricValueRangeType (ADR 2026081401 DR1). Construct via
+// NewValueRangeTypeMapper in production; the zero-value (nil cache) is only
+// valid in tests that supply their own cache field.
+type ValueRangeTypeMapper struct {
+	DB    *sql.DB
+	cache *valueRangeTypeMapCache
+}
+
+// NewValueRangeTypeMapper returns a mapper backed by the shared,
+// process-wide table cache.
+func NewValueRangeTypeMapper(db *sql.DB) ValueRangeTypeMapper {
+	return ValueRangeTypeMapper{DB: db, cache: defaultValueRangeTypeMapCache}
+}
+
+// Lookup classifies a raw kb.metrics.value_range_type string against
+// kb.metric_value_range_type_map. canonicalBucket is non-empty and
+// authoritative ONLY when status == "approved" -- a 'proposed' row's
+// best-effort bucket guess is persisted for human review (see
+// guessCanonicalBucketFromCues) but is never returned as usable here, since
+// only human approval makes a bucket authoritative for classification (DR1).
+//
+// status is one of:
+//   - "absent"   -- raw was empty/NULL to begin with; not a mapping problem.
+//   - "approved" -- a human-confirmed mapping; canonicalBucket is usable.
+//   - "ambiguous" -- a human decided no bound direction can be inferred.
+//   - "proposed" -- never seen before (auto-inserted by this call) or seen
+//     but not yet triaged; recordID is recorded as first/last-seen.
+func (m ValueRangeTypeMapper) Lookup(ctx context.Context, raw string, recordID int64) (canonicalBucket string, status string, err error) {
+	normalized := normalizeValueRangeTypeRaw(raw)
+	if normalized == "" {
+		return "", "absent", nil
+	}
+	if m.DB == nil {
+		return "", "", fmt.Errorf("db is nil")
+	}
+	entries, err := m.cache.fresh(ctx, m.DB)
+	if err != nil {
+		return "", "", err
+	}
+	if entry, ok := entries[normalized]; ok {
+		if entry.Status == "proposed" || entry.Status == "ambiguous" {
+			if err := m.touchOccurrence(ctx, normalized, recordID); err != nil {
+				return "", "", err
+			}
+		}
+		if entry.Status != "approved" {
+			return "", entry.Status, nil
+		}
+		return entry.CanonicalBucket, entry.Status, nil
+	}
+	guess := guessCanonicalBucketFromCues(normalized)
+	if err := m.insertProposed(ctx, normalized, guess, recordID); err != nil {
+		return "", "", err
+	}
+	m.cache.invalidate()
+	return "", "proposed", nil
+}
+
+func (m ValueRangeTypeMapper) touchOccurrence(ctx context.Context, rawValue string, recordID int64) error {
+	_, err := m.DB.ExecContext(ctx, `
+UPDATE kb.metric_value_range_type_map
+   SET occurrence_count = occurrence_count + 1, last_seen_record_id = $2, modify_time = NOW()
+ WHERE raw_value = $1`, rawValue, recordID)
+	return err
+}
+
+func (m ValueRangeTypeMapper) insertProposed(ctx context.Context, rawValue, bucketGuess string, recordID int64) error {
+	var bucket sql.NullString
+	if bucketGuess != "" {
+		bucket = sql.NullString{String: bucketGuess, Valid: true}
+	}
+	_, err := m.DB.ExecContext(ctx, `
+INSERT INTO kb.metric_value_range_type_map (raw_value, canonical_bucket, status, occurrence_count, first_seen_record_id, last_seen_record_id)
+VALUES ($1, $2, 'proposed', 1, $3, $3)
+ON CONFLICT (raw_value) DO NOTHING`, rawValue, bucket, recordID)
+	return err
+}
+
+// normalizeValueRangeTypeRaw matches CanonicalMetricValueRangeType's existing
+// normalization exactly, so kb.metric_value_range_type_map.raw_value and the
+// runtime lookup key always agree.
+func normalizeValueRangeTypeRaw(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	v = strings.ReplaceAll(v, "-", "_")
+	v = strings.ReplaceAll(v, " ", "_")
+	return v
+}
+
+// guessCanonicalBucketFromCues is DR6's deliberately lightweight best-effort
+// suggestion for a newly-proposed raw_value, reusing the same direction-cue
+// regexes parseThresholdOrTarget already recognizes. It only ever seeds a
+// 'proposed' row's suggestion for a human to confirm or correct -- never an
+// authoritative classification -- so a wrong guess has no consequence (ADR
+// 2026081401 §7).
+func guessCanonicalBucketFromCues(normalized string) string {
+	text := strings.ReplaceAll(normalized, "_", " ")
+	switch {
+	case reLowerBound.MatchString(text):
+		return "lower_bound"
+	case reUpperBound.MatchString(text):
+		return "upper_bound"
+	default:
+		return ""
+	}
+}
+
 // valueClassAssertionKind refines the assertion kind by value_class, mirroring
 // the parser's requirement-vs-observation distinction: an observed test result
 // is an observed_value even when the source phrasing is a bound.
@@ -264,21 +453,26 @@ var valueClassAssertionKind = map[string]string{
 	"definition":        "reference",
 }
 
-// resolveMetricValue is the structured-first path (design D1). When the row
-// carries a populated value_range_type it maps the enum + value_class +
-// metric_value/value_min/value_max deterministically into value form,
-// comparator, assertion kind, and numeric fields -- no free-text parsing. When
-// the enum is empty (pre-structured-schema rows, or extraction that left it
-// unset) it falls back to parseThresholdOrTarget on threshold_or_target. It
-// never fabricates: a structured row with no parseable number produces an
-// honest unparsed, never a value invented from unrelated text.
-func resolveMetricValue(r metricRow) parsedThreshold {
-	vrt := CanonicalMetricValueRangeType(r.ValueRangeType.String)
-	if vrt == "" {
+// resolveMetricValue is the structured-first path (design D1). canonicalBucket
+// is the already-resolved governed bucket for r.ValueRangeType (ADR 2026081401
+// DR1 -- callers get it from ValueRangeTypeMapper.Lookup, not by canonicalizing
+// here) and is only ever non-empty when the lookup was 'approved'. When
+// r.ValueRangeType itself is empty (pre-structured-schema rows, or extraction
+// that left it unset) this falls back to parseThresholdOrTarget on
+// threshold_or_target -- distinct from a populated-but-ungoverned
+// value_range_type (canonicalBucket == "" but r.ValueRangeType != ""), which
+// must NOT fall back to free-text parsing: the row explicitly claims a
+// structured value, so an unrecognized/unapproved one honestly falls through
+// to unparsed below instead. It never fabricates: a structured row with no
+// parseable number produces an honest unparsed, never a value invented from
+// unrelated text.
+func resolveMetricValue(r metricRow, canonicalBucket string) parsedThreshold {
+	if strings.TrimSpace(r.ValueRangeType.String) == "" {
 		// Legacy row (pre-structured-schema, or extraction left the enum
 		// unset): fall back to the free-text parser unchanged.
 		return parseThresholdOrTarget(r.ThresholdOrTarget.String)
 	}
+	vrt := canonicalBucket
 	// kind starts from the enum's base assertion kind (empty for
 	// qualitative/limit_absent, which have no numeric-kind term) and is
 	// refined by value_class.

@@ -18,6 +18,11 @@ type AssociateReport struct {
 	Accepted int
 	Deferred int
 	Rejected int
+	// MappingMisses counts candidates deferred specifically because their
+	// value_range_type_lookup tag was "proposed" (ADR 2026081401 DR3) --
+	// ungoverned vocabulary nobody has triaged yet, as opposed to any other
+	// deferral reason. Included in Deferred, not separate from it.
+	MappingMisses int
 }
 
 // AssociateSemantics implements spec §10.3-§10.7 (generate candidates is
@@ -92,9 +97,15 @@ WHERE status IN ('candidate', 'in_review') AND source_artifact_type = ANY($1)
 			report.Accepted++
 		case "deferred":
 			report.Deferred++
+		case "deferredMappingMiss":
+			report.Deferred++
+			report.MappingMisses++
 		case "rejected":
 			report.Rejected++
 		}
+	}
+	if report.MappingMisses > 0 {
+		return report, fmt.Errorf("associate_semantics: %d candidate(s) blocked on ungoverned vocabulary awaiting review", report.MappingMisses)
 	}
 	return report, nil
 }
@@ -269,6 +280,10 @@ type metricCandidatePayload struct {
 	NumericValue           *float64 `json:"numeric_value"`
 	LowerValue             *float64 `json:"lower_value"`
 	UpperValue             *float64 `json:"upper_value"`
+	// ValueRangeTypeLookup is the governed-mapping outcome
+	// normalize_assertions tagged this candidate with (ADR 2026081401 DR1/
+	// DR3): "approved" | "ambiguous" | "proposed" | "absent".
+	ValueRangeTypeLookup string `json:"value_range_type_lookup"`
 }
 
 // metricAssertionKindTermID rejects only missing and unparsed values. Every
@@ -315,7 +330,14 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 	}
 	assertionKindTermID, supported := metricAssertionKindTermID(p.AssertionKind)
 	if !supported {
-		return a.deferCandidate(ctx, dcStore, dc, "no_governed_assertion_kind_term:"+p.AssertionKind)
+		reason := "no_governed_assertion_kind_term:" + p.AssertionKind
+		if p.ValueRangeTypeLookup == "proposed" {
+			// Ungoverned vocabulary nobody has triaged yet (ADR 2026081401
+			// DR3) -- distinguished from every other deferral reason so Run
+			// can fail the record instead of silently deferring forever.
+			return a.deferCandidateAsMappingMiss(ctx, dcStore, dc, reason)
+		}
+		return a.deferCandidate(ctx, dcStore, dc, reason)
 	}
 	predicateTermID := "mea:measured_by"
 	predicateOK, err := a.termExists(ctx, predicateTermID)
@@ -536,4 +558,15 @@ func (a AssociateSemantics) deferCandidateWithDependency(ctx context.Context, dc
 		return "", err
 	}
 	return "deferred", nil
+}
+
+// deferCandidateAsMappingMiss defers exactly like deferCandidate but returns
+// a distinguishable outcome so Run's loop can also increment
+// AssociateReport.MappingMisses (ADR 2026081401 DR3) -- the candidate's
+// persisted status/fingerprint are identical to an ordinary deferral.
+func (a AssociateSemantics) deferCandidateAsMappingMiss(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate, reason string) (string, error) {
+	if _, err := dcStore.DeferCandidate(ctx, dc.ID, reason, reason, "associate_semantics"); err != nil {
+		return "", err
+	}
+	return "deferredMappingMiss", nil
 }

@@ -786,7 +786,77 @@ func (p *MetricsProcessor) PostProcessIndex(ctx context.Context, recordID int64)
 	if refreshErr := refreshMetricArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ChunkDir, recordID, rec); refreshErr != nil {
 		p.Logger.Warn("refresh metric artifact failed", "record_id", recordID, "error", refreshErr)
 	}
+
+	// ADR 2026081401 DR6: detect an ungoverned value_range_type at the
+	// earliest point the information exists, instead of waiting up to three
+	// stages later for associate_semantics (which is independently gated by
+	// SEMANTIC_ASSOCIATION_ENABLED and may not even run). Runs strictly after
+	// the writes above -- extraction/persistence of kb.metrics rows is
+	// unchanged regardless of mapping outcome; this only flags what was
+	// already written.
+	if mappingErr := p.checkValueRangeTypeMappings(ctx, recordID); mappingErr != nil {
+		return mappingErr
+	}
 	return nil
+}
+
+// checkValueRangeTypeMappings runs every kb.metrics row just indexed for
+// this record through the governed ValueRangeTypeMapper (ADR 2026081401 DR6).
+// A miss flags that specific row's value_range_type_error column (the row
+// itself is left exactly as extracted -- never dropped) and is accumulated;
+// if any misses occurred, one kb.doc_proc_logs assertion_mapping_miss entry
+// is written and a non-nil aggregate error is returned, which the Phase C
+// harness (control.go runPostProcessIndexing, DR4) turns into a "failed"
+// extract_metrics status for this record.
+func (p *MetricsProcessor) checkValueRangeTypeMappings(ctx context.Context, recordID int64) error {
+	if ApiTypes.ProjectDBHandle == nil {
+		return nil
+	}
+	metrics, err := p.Store.GetMetricsByInputRecordID(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26081401) load kb.metrics rows for record %d: %w", recordID, err)
+	}
+	mapper := assertions.NewValueRangeTypeMapper(ApiTypes.ProjectDBHandle)
+	var misses []string
+	for _, m := range metrics {
+		rowID, ok := m["id"].(int64)
+		if !ok {
+			continue
+		}
+		rawValueRangeType := strings.TrimSpace(asString(m["value_range_type"]))
+		_, status, err := mapper.Lookup(ctx, rawValueRangeType, recordID)
+		if err != nil {
+			return fmt.Errorf("(MID_26081402) value_range_type lookup for kb.metrics row %d: %w", rowID, err)
+		}
+		if status != "proposed" {
+			continue
+		}
+		msg := fmt.Sprintf("unmapped value_range_type: %q", rawValueRangeType)
+		if _, err := ApiTypes.ProjectDBHandle.ExecContext(ctx,
+			`UPDATE kb.metrics SET value_range_type_error = $2 WHERE id = $1`, rowID, msg); err != nil {
+			return fmt.Errorf("(MID_26081403) set value_range_type_error for kb.metrics row %d: %w", rowID, err)
+		}
+		misses = append(misses, rawValueRangeType)
+	}
+	if len(misses) == 0 {
+		return nil
+	}
+	errMsg := fmt.Sprintf("extract_metrics: %d metric(s) blocked on ungoverned value_range_type vocabulary awaiting review", len(misses))
+	extraInfo, _ := json.Marshal(map[string]any{
+		"family":     "metric.value_range_type",
+		"raw_values": misses,
+		"count":      len(misses),
+	})
+	extraInfoStr := string(extraInfo)
+	if logErr := p.ProcLogger.LogAssertionMappingMiss(ctx, DocProcLogRecord{
+		DocProcName:   p.Name(),
+		RecordID:      &recordID,
+		Errors:        &errMsg,
+		ExtraInfoJSON: &extraInfoStr,
+	}, "extract-metrics.go_MetricsProcessor.checkValueRangeTypeMappings"); logErr != nil && p.Logger != nil {
+		p.Logger.Error("failed to write assertion_mapping_miss log", "record_id", recordID, "error", logErr)
+	}
+	return errors.New(errMsg)
 }
 
 func (p *MetricsProcessor) persistMetricObjects(ctx context.Context, recordID int64, metrics []map[string]any) error {

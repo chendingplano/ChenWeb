@@ -1116,6 +1116,12 @@ func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors 
 				if s.Logger != nil {
 					s.Logger.Error("post-process indexing failed", "record_id", recordID, "processor", name, "error", err)
 				}
+				// ADR 2026081401 DR4: mirrors runSingleProcessorCollect's Phase
+				// A/B pattern -- without this, no PostProcessIndexer's failure
+				// ever reached kb.inputs.status/pipeline_state/has_failed_proc,
+				// for any processor, making the retry mechanism and the admin
+				// dashboard's status column structurally blind to Phase C.
+				s.persistProcessorRuntimeStatus(ctx, recordID, name, "failed", err.Error())
 				return
 			}
 			indexSpan.SetAttributes(attribute.String("index.status", "success"))
