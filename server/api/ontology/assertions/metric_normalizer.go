@@ -185,7 +185,11 @@ var (
 	// reRangeKeyword already covers "10-20"-style ranges via its keyword
 	// forms once a space or Chinese range marker is present.
 	reRangeHyphen = regexp.MustCompile(`(-?\d+(?:\.\d+)?)\s+-\s+(-?\d+(?:\.\d+)?)`)
-	reNumber      = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
+	// reWholeRange accepts only a complete, two-endpoint range. Structured
+	// range rows may contain schedules or tiered classifications; extracting a
+	// substring from those compound values would fabricate an interval.
+	reWholeRange = regexp.MustCompile(`^\s*(-?\d+(?:\.\d+)?)\s*(?:to|~|～|至|―|–|—|\s-\s)\s*(-?\d+(?:\.\d+)?)\s*$`)
+	reNumber     = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
 	// reRatioDenominatorOne matches the "N:1" contrast/ratio notation.
 	reRatioDenominatorOne = regexp.MustCompile(`(\d+(?:\.\d+)?):1\b`)
 )
@@ -281,10 +285,12 @@ func resolveMetricValue(r metricRow) parsedThreshold {
 		// has not populated value_min/value_max. Parsing only the known range
 		// shape retains a structured interval without inventing endpoints.
 		rawRange := strings.NewReplacer("℃", "", "°C", "", "°", "").Replace(r.MetricValue.String)
-		parsed := parseThresholdOrTarget(rawRange)
-		if parsed.ValueForm == "range" {
-			parsed.AssertionKind = kind
-			return parsed
+		if match := reWholeRange.FindStringSubmatch(rawRange); match != nil {
+			lo, errLo := strconv.ParseFloat(match[1], 64)
+			hi, errHi := strconv.ParseFloat(match[2], 64)
+			if errLo == nil && errHi == nil {
+				return parsedThreshold{ValueForm: "range", Comparator: "between", AssertionKind: kind, LowerValue: &lo, UpperValue: &hi}
+			}
 		}
 	case "lower_bound", "upper_bound":
 		if v, ok := firstParseableNumber(r.MetricValue.String); ok {

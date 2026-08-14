@@ -284,6 +284,23 @@ func TestResolveMetricValueProductionRangeParsesMetricValue(t *testing.T) {
 	}
 }
 
+func TestResolveMetricValueProductionCompoundRangesRemainUnparsed(t *testing.T) {
+	for _, raw := range []string{
+		"白天6:00～22:00; 夜间22:00～次日6:00",
+		"I级: <30; II级: 30~40",
+		"I级: <10; II级: 10~20",
+		"I级: <15; II级: 15~20",
+	} {
+		r := metricRowFixture()
+		r.ValueRangeType = ns("range")
+		r.MetricValue = ns(raw)
+		p := resolveMetricValue(r)
+		if p.ValueForm != "unparsed" || p.LowerValue != nil || p.UpperValue != nil {
+			t.Fatalf("compound range %q must remain unparsed, got %+v", raw, p)
+		}
+	}
+}
+
 // TestResolveMetricValueRangeUsesValueMinMax locks in design D1: a range row's
 // endpoints come from value_min/value_max, never from re-parsing
 // threshold_or_target (spec: "range values use value_min and value_max without
