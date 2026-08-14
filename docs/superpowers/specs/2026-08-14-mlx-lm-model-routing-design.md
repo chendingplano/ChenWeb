@@ -9,14 +9,16 @@ by default.
 
 ## Scope
 
-Add one MLX model definition and extend the shared OpenAI-compatible client
-with a host-scoped mapping:
+Add one MLX model definition and extend both shared OpenAI-compatible client
+paths with a host-scoped mapping:
 
 - `host = "mlx-lm"` identifies an MLX LM server.
 - For that host, `thinking_type = "enabled"` sends
   `chat_template_kwargs: {"enable_thinking": true}`.
 - `thinking_type = "disabled"` or an empty value sends
   `chat_template_kwargs: {"enable_thinking": false}`.
+- MLX payloads contain `chat_template_kwargs` and never the existing provider
+  extension `thinking`.
 - Other hosts preserve their existing request payloads and behavior.
 
 The model definition uses `http://127.0.0.1:8080`, which ChenWeb's existing
@@ -45,23 +47,46 @@ used by this large local model.
 
 ## Implementation
 
-Add the model host to the shared client's configuration and retained client
-state. At request construction, add MLX-specific `chat_template_kwargs` only
-when the host is `mlx-lm`; this avoids sending an unsupported extension to
-other OpenAI-compatible services. The existing normalized values `enabled` and
-`disabled` are used; an empty value maps to disabled for MLX.
+Carry `Host` and `ThinkingType` from `ApiTypes.LLMModelDef` through
+ChenWeb's direct model-resolution paths into both shared client types:
+
+- JSON-only `OpenAIJSONClient` / `OpenAIJSONClientConfig`, used by document
+  processors and one-shot reviewers.
+- Tool-capable `openaiClient` / `ProviderConfig`, used by
+  `BuildReviewerToolClient` for `Complete` and streaming/tool requests.
+
+At request construction, both client types add MLX-specific
+`chat_template_kwargs` only when `Host` is `mlx-lm`; this avoids sending an
+unsupported extension to other OpenAI-compatible services. The normalized
+values `enabled` and `disabled` are used; an empty value maps to disabled for
+MLX. On the MLX path, do not send the existing `thinking` provider extension;
+on non-MLX paths retain the current behavior of adding it only for enabled
+thinking.
+
+The admin/import database path is intentionally out of scope: this request
+uses the `.models.toml` file directly through environment variables, and the
+current imported account/profile schema does not persist a model host. The
+importer must continue parsing the new entry without error, but importing it
+does not promise MLX-specific thinking behavior.
 
 ## Verification
 
 - Add shared-client tests covering enabled, disabled, and empty MLX thinking
-  settings, plus a non-MLX regression case with no MLX extension.
-- Run the focused shared Go tests.
-- Parse ChenWeb's `.models.toml` through its existing model-import test path.
-- Start the configured MLX server and make a local chat-completions request if
-  it is available, confirming the model endpoint remains reachable.
+  settings, asserting the exact `chat_template_kwargs` value and the absence
+  of the legacy `thinking` field.
+- Test non-MLX JSON extraction, generic `Complete`, and streaming/tool calls
+  to confirm no MLX-specific field is added and existing enabled-thinking
+  behavior remains unchanged.
+- Test host propagation from `.models.toml` through the direct ChenWeb client
+  construction paths. Parse the new entry through the existing importer as a
+  compatibility check only.
+- Run focused shared and ChenWeb Go tests.
+- Start MLX LM bound to `127.0.0.1` and make a local chat-completions request
+  if the service is available, confirming the model endpoint remains
+  reachable.
 
 ## Documentation impact
 
-Update the MLX LM user manual with the server command that leaves thinking
-selection to ChenWeb request configuration. No prompt or database schema
-changes are needed.
+Update `ThirdParty/mlx-lm/USER_MANUAL.md` with a server command bound to
+`127.0.0.1` that leaves thinking selection to ChenWeb request configuration.
+No prompt or database schema changes are needed.
