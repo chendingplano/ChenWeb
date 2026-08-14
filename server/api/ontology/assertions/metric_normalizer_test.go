@@ -247,6 +247,90 @@ func TestResolveMetricValueCanonicalizesExtractorRangeVariants(t *testing.T) {
 	}
 }
 
+// TestResolveMetricValueCanonicalizesProductionVocabularySurvey locks in the
+// 2026-08-14 synonym-table expansion, driven by a full survey of production
+// kb.metrics.value_range_type values (309 distinct strings across 7,036
+// rows). Only unambiguous-direction synonyms were added; this covers a
+// representative sample from each bucket, including symbol and Chinese
+// forms, not every surveyed string.
+func TestResolveMetricValueCanonicalizesProductionVocabularySurvey(t *testing.T) {
+	tests := []struct {
+		name       string
+		rangeType  string
+		value      string
+		comparator string
+		kind       string
+		want       float64
+	}{
+		{name: "greater_than_or_equal", rangeType: "greater_than_or_equal", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "greater than or equal to", rangeType: "greater than or equal to", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "at least", rangeType: "at least", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "symbol >=", rangeType: ">=", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "symbol ≥", rangeType: "≥", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "Chinese 大于等于", rangeType: "大于等于", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "Chinese 下限", rangeType: "下限", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+		{name: "threshold_min", rangeType: "threshold_min", value: "30", comparator: ">=", kind: "lower_bound_requirement", want: 30},
+
+		{name: "less_than_or_equal", rangeType: "less_than_or_equal", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "less than or equal to", rangeType: "less than or equal to", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "symbol <=", rangeType: "<=", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "symbol ≤", rangeType: "≤", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "Chinese 不大于", rangeType: "不大于", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+		{name: "Chinese 上限", rangeType: "上限", value: "30", comparator: "<=", kind: "upper_bound_requirement", want: 30},
+
+		{name: "single", rangeType: "single", value: "500", comparator: "=", kind: "exact_value", want: 500},
+		{name: "single_value", rangeType: "single_value", value: "3", comparator: "=", kind: "exact_value", want: 3},
+		{name: "integer", rangeType: "integer", value: "24", comparator: "=", kind: "exact_value", want: 24},
+		{name: "fixed", rangeType: "fixed", value: "100", comparator: "=", kind: "exact_value", want: 100},
+		{name: "Chinese 固定值", rangeType: "固定值", value: "100", comparator: "=", kind: "exact_value", want: 100},
+		{name: "Chinese 单值", rangeType: "单值", value: "3", comparator: "=", kind: "exact_value", want: 3},
+		{name: "Chinese 点值", rangeType: "点值", value: "3", comparator: "=", kind: "exact_value", want: 3},
+
+		{name: "min_max", rangeType: "min-max", value: "5.5~8.5", comparator: "between", kind: "interval_requirement"},
+		{name: "Chinese 区间", rangeType: "区间", value: "5.5~8.5", comparator: "between", kind: "interval_requirement"},
+		{name: "Chinese 范围", rangeType: "范围", value: "5.5~8.5", comparator: "between", kind: "interval_requirement"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := metricRowFixture()
+			r.ValueRangeType = ns(tt.rangeType)
+			r.ValueClass = ns("requirement")
+			r.MetricValue = ns(tt.value)
+
+			p := resolveMetricValue(r)
+			if p.Comparator != tt.comparator || p.AssertionKind != tt.kind {
+				t.Fatalf("resolveMetricValue(%q) = %+v, want comparator=%q kind=%q", tt.rangeType, p, tt.comparator, tt.kind)
+			}
+			if tt.kind == "interval_requirement" {
+				if p.LowerValue == nil || *p.LowerValue != 5.5 || p.UpperValue == nil || *p.UpperValue != 8.5 {
+					t.Fatalf("unexpected bounds: lower=%v upper=%v", p.LowerValue, p.UpperValue)
+				}
+				return
+			}
+			if p.NumericValue == nil || *p.NumericValue != tt.want {
+				t.Fatalf("numeric value = %v, want %v", p.NumericValue, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveMetricValueLeavesAmbiguousVocabularyUnparsed locks in the
+// conservative half of the 2026-08-14 synonym-table expansion: strings whose
+// direction can't be inferred (threshold, target, tolerance, categorical)
+// must keep deferring rather than guess.
+func TestResolveMetricValueLeavesAmbiguousVocabularyUnparsed(t *testing.T) {
+	for _, vrt := range []string{"threshold", "target", "tolerance", "categorical", "ordinal", "continuous", "binary", "ratio"} {
+		r := metricRowFixture()
+		r.ValueRangeType = ns(vrt)
+		r.ValueClass = ns("requirement")
+		r.MetricValue = ns("100")
+		p := resolveMetricValue(r)
+		if p.ValueForm != "unparsed" || p.AssertionKind != "unparsed" {
+			t.Fatalf("expected %q to remain unparsed (direction-ambiguous), got %+v", vrt, p)
+		}
+	}
+}
+
 func TestMetricCandidatePayloadCarriesMetricDefinitionTermID(t *testing.T) {
 	r := metricRowFixture()
 	r.MetricName = ns("Organic matter")

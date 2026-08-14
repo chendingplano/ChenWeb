@@ -3476,14 +3476,6 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 	}
 	raw, _ := payload["candidates"].([]any)
 	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
-	p.Logger.Info("extract metrics end  (batch)",
-		"record_id", p.batchRecordID,
-		"extracted metrics", len(raw),
-		"chunk", chunkIdx,
-		"cache_hit", cacheHit,
-		"cache_miss", cacheMiss,
-		"ms_used", time.Since(callStart).Milliseconds(),
-	)
 	p.batchMu.Lock()
 	if lang != "" && p.batchLang == "unknown" {
 		p.batchLang = lang
@@ -3493,6 +3485,17 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 	}
 	p.batchMentions = append(p.batchMentions, normalizeMetricCandidateMentions(raw, block)...)
 	p.batchMu.Unlock()
+
+	p.Logger.Info("extract metrics end  (batch)",
+		"record_id", p.batchRecordID,
+		"extracted metrics", len(raw),
+		"chunk", chunkIdx,
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+		"total_extracted", len(p.batchMentions),
+		"ms_used", time.Since(callStart).Milliseconds(),
+	)
+
 	return nil
 }
 

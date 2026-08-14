@@ -224,13 +224,28 @@ func CanonicalMetricValueRangeType(raw string) string {
 	vrt = strings.ReplaceAll(vrt, "-", "_")
 	vrt = strings.ReplaceAll(vrt, " ", "_")
 	switch vrt {
-	case "min", "minimum", "min_threshold", "lower_limit", "lower_threshold":
+	// Additions below were found by surveying production kb.metrics.value_range_type
+	// (2026-08-14): 309 distinct strings across 7,036 rows, confirming extract_metrics
+	// treats this as free text rather than a fixed enum. Each group here covers only
+	// synonyms whose direction is unambiguous from the string itself; genuinely
+	// direction-ambiguous strings (e.g. "threshold", "target", "tolerance",
+	// "categorical") are intentionally left unmapped -- they fall through to
+	// value_form='unparsed' as before, which is the honest, conservative outcome for a
+	// bound that can't be inferred rather than guessed.
+	case "min", "minimum", "min_threshold", "lower_limit", "lower_threshold",
+		"greater_than_or_equal", "greater_than_or_equal_to", "greater_or_equal", "greater_than",
+		"at_least", ">=", ">", "≥", "大于等于", "下限", "minimumormore", "threshold_min":
 		return "lower_bound"
-	case "max", "maximum", "max_threshold", "upper_limit", "upper_threshold":
+	case "max", "maximum", "max_threshold", "upper_limit", "upper_threshold",
+		"less_than_or_equal", "less_than_or_equal_to", "less_than",
+		"<=", "<", "≤", "不大于", "上限":
 		return "upper_bound"
-	case "exact", "exact_count", "exact_duration", "exact_ratio", "exact_specification":
+	case "exact", "exact_count", "exact_duration", "exact_ratio", "exact_specification",
+		"single", "single_value", "integer", "numeric", "exact_value", "fixed",
+		"固定值", "单值", "单一值", "点值", "精确值":
 		return "exact"
-	case "range", "interval", "between", "value_range":
+	case "range", "interval", "between", "value_range", "min_max", "closed_interval",
+		"区间", "范围":
 		return "range"
 	default:
 		return vrt

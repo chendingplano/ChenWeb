@@ -4773,14 +4773,14 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 * Start PostgreSQL: cd ~/bin; sh pg_start
 * Kratos: cd kratos; sh start.sh
 * JetStream: cd shared/go/cmd/nets-server; sh start.sh 
-* Start doc parser service: cd ChenWeb/server/cmd/doc-parser; sh start.sh
-* PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh; source .venv/bin/activate
-* Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
 * Start Docker: cd ChenWeb; mise run docker-start
 * Start Clickhouse: cd ChenWeb; mise obs-up
+* Start doc parser service: cd ChenWeb/server/cmd/doc-parser; sh start.sh
+* PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh; source .venv/bin/activate
 * Start cc-switch: cd ThirdParty/cc-switch; 
-* Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
 * Start Caddy: ch ChenWeb; sh start_caddy.sh
+* Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
+* Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
 
 # Operations
 
