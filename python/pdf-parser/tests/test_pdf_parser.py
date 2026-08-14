@@ -1,7 +1,10 @@
+import asyncio
 import time
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 import os
+
+from nats.js.errors import NotFoundError
 
 import pdf_parser as pdf_parser_module
 from pdf_parser import (
@@ -45,6 +48,65 @@ class TestConfig:
     def test_repo_dirs_use_data_home_dir_directly(self, monkeypatch):
         monkeypatch.setenv("DATA_HOME_DIR", "/Users/cding/Apps/SemOS")
         assert _repo_dirs() == ["/Users/cding/Apps/SemOS"]
+
+
+class TestJetStreamStreamRecovery:
+    def test_reuses_stream_already_owning_subject(self):
+        class FakeJS:
+            async def stream_info(self, name):
+                raise NotFoundError()
+
+            async def find_stream_name_by_subject(self, subject):
+                assert subject == "kb.pdf.staged"
+                return "pdf-stage-events"
+
+            async def add_stream(self, **kwargs):
+                raise AssertionError("must not create a duplicate stream")
+
+        bus = pdf_parser_module.JetStreamBus()
+        bus._js = FakeJS()
+
+        asyncio.run(bus._ensure_stream("kb-pdf-staged-events", "kb.pdf.staged"))
+
+    def test_creates_stream_when_subject_is_not_owned(self):
+        calls = []
+
+        class FakeJS:
+            async def stream_info(self, name):
+                raise NotFoundError()
+
+            async def find_stream_name_by_subject(self, subject):
+                raise NotFoundError()
+
+            async def add_stream(self, **kwargs):
+                calls.append(kwargs)
+
+        bus = pdf_parser_module.JetStreamBus()
+        bus._js = FakeJS()
+
+        asyncio.run(bus._ensure_stream("new-stream", "kb.pdf.new"))
+
+        assert calls == [{"name": "new-stream", "subjects": ["kb.pdf.new"]}]
+
+    def test_propagates_non_not_found_stream_error(self):
+        class FakeJS:
+            async def stream_info(self, name):
+                raise RuntimeError("authorization failed")
+
+            async def find_stream_name_by_subject(self, subject):
+                raise AssertionError("must not search after an unrelated error")
+
+            async def add_stream(self, **kwargs):
+                raise AssertionError("must not create after an unrelated error")
+
+        bus = pdf_parser_module.JetStreamBus()
+        bus._js = FakeJS()
+
+        try:
+            asyncio.run(bus._ensure_stream("stream", "subject"))
+            assert False, "expected the NATS error to propagate"
+        except RuntimeError as exc:
+            assert str(exc) == "authorization failed"
 
 
 class TestThrottledProgress:

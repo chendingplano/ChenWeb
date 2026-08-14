@@ -104,9 +104,17 @@ PYTHONPATH=. .venv/bin/python pdf_parser.py
 | `NATS_TOKEN` | | Token auth alternative (optional) |
 | `PDF_STAGE_EVENT_SUBJECT` | `kb.pdf.staged` | Subject consumed from Step 1 |
 | `PDF_STAGE_EVENT_DURABLE` | `pdf-parser` | Durable consumer name |
-| `PDF_STAGE_EVENT_STREAM` | | Optional: auto-create stream for stage subject |
+| `PDF_STAGE_EVENT_STREAM` | | Preferred stream name for the stage subject; an existing stream owning the subject is reused |
 | `PDF_PARSED_EVENT_SUBJECT` | `kb.pdf.parsed` | Subject published to Step 3 |
-| `PDF_PARSED_EVENT_STREAM` | | Optional: auto-create stream for parsed subject |
+| `PDF_PARSED_EVENT_STREAM` | | Preferred stream name for the parsed subject; an existing stream owning the subject is reused |
+
+On startup, the service first checks each configured stream name. If that name
+does not exist, it looks up the JetStream stream that already owns the required
+subject before creating anything. This allows restarts after a machine crash
+and preserves streams whose names were created by an older configuration.
+Only a JetStream `not found` response triggers this fallback; authentication,
+authorization, timeout, and other NATS errors stop startup with their original
+error.
 
 ### OpenDataLoader-specific
 

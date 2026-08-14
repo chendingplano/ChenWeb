@@ -62,8 +62,10 @@ import psycopg2
 
 try:
     from nats.aio.client import Client as NATS
+    from nats.js.errors import NotFoundError
 except Exception:  # pragma: no cover - optional runtime dependency
     NATS = None
+    NotFoundError = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -680,14 +682,28 @@ class JetStreamBus:
         stream_name = stream_name.strip()
         if not stream_name:
             return
-        info = None
         try:
-            info = await self._js.stream_info(stream_name)
-        except Exception:
-            info = None
-        if info is None:
-            await self._js.add_stream(name=stream_name, subjects=[subject])
-            log.info("created jetstream stream name=%s subject=%s", stream_name, subject)
+            await self._js.stream_info(stream_name)
+            return
+        except NotFoundError:
+            pass
+
+        try:
+            existing_name = await self._js.find_stream_name_by_subject(subject)
+        except NotFoundError:
+            existing_name = ""
+
+        if existing_name:
+            log.info(
+                "reusing jetstream stream name=%s for subject=%s (configured name=%s)",
+                existing_name,
+                subject,
+                stream_name,
+            )
+            return
+
+        await self._js.add_stream(name=stream_name, subjects=[subject])
+        log.info("created jetstream stream name=%s subject=%s", stream_name, subject)
 
     async def close(self) -> None:
         if self._nc is not None:

@@ -4,7 +4,7 @@ import tempfile
 from shared import decode_status, has_operation, has_parse_success_or_active, upsert_status
 from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir, relativize_to_data_home, relativize_to_backup_root, resolve_repo_path, resolve_backup_path
 from shared import claim_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
-from shared import record_parsed_failure, record_parsed_success
+from shared import record_parse_active, record_parsed_failure, record_parsed_success
 
 
 class TestDecodeStatus:
