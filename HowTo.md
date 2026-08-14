@@ -4952,9 +4952,12 @@ The commands below switch Codex to use deepseek-v4-flash
 ## DeepSeek Prices
 | Type | Flash | Pro|
 |----------|-------|--------|
-| Input (Cache Hit) | $0.0028	| $0.003625 |
-| Input (Cache Miss) | $0.14	| $0.435 |
-| Output | $0.28	| $0.87 |
+| Input (Cache Hit, off-peak) | $0.007/0.0028	| $0.022/0.003625 |
+| Input (Cache Miss, off-peak) | $0.22/0.14	| $0.435 |
+| Output (off-peak) | $0.66/0.28	| $1.32/0.87 |
+| Input (Cache Hit, peak) | $0.014	| $0.044 |
+| Input (Cache Miss, peak) | $0.44	| $1.98 |
+| Output (peak) | $0.132	| $3.96 |
 | Concurrency Limit |	2500	| 500 |
 
 Note: max output length: 384KB
