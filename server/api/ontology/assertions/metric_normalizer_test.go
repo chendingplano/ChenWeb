@@ -587,3 +587,41 @@ func TestResolveMetricValueRangeMissingBoundsFallsBackHonestly(t *testing.T) {
 		t.Fatalf("expected no fabricated bounds, got %+v", p)
 	}
 }
+
+// TestNormalizeValueRangeTypeRawMatchesUnexported locks in that the exported
+// wrapper (for callers outside this package, e.g. an admin correction
+// handler keying kb.metric_value_range_type_map.raw_value) never drifts from
+// the unexported function the runtime lookup actually uses.
+func TestNormalizeValueRangeTypeRawMatchesUnexported(t *testing.T) {
+	cases := []string{
+		"", "  ", "Min", "MIN THRESHOLD", "at-least", "at least",
+		"greater-than_or-equal to", "下限", "  Upper  Limit  ",
+	}
+	for _, raw := range cases {
+		want := normalizeValueRangeTypeRaw(raw)
+		got := NormalizeValueRangeTypeRaw(raw)
+		if got != want {
+			t.Fatalf("NormalizeValueRangeTypeRaw(%q) = %q, want %q (from normalizeValueRangeTypeRaw)", raw, got, want)
+		}
+	}
+}
+
+// TestInvalidateValueRangeTypeMapCacheClearsDefaultCache locks in that the
+// exported wrapper actually reaches the same package-wide cache
+// NewValueRangeTypeMapper hands to production code, not a copy.
+func TestInvalidateValueRangeTypeMapCacheClearsDefaultCache(t *testing.T) {
+	defaultValueRangeTypeMapCache.mu.Lock()
+	defaultValueRangeTypeMapCache.entries = map[string]valueRangeTypeMapEntry{
+		"min": {CanonicalBucket: "lower_bound", Status: "approved"},
+	}
+	defaultValueRangeTypeMapCache.mu.Unlock()
+
+	InvalidateValueRangeTypeMapCache()
+
+	defaultValueRangeTypeMapCache.mu.RLock()
+	entries := defaultValueRangeTypeMapCache.entries
+	defaultValueRangeTypeMapCache.mu.RUnlock()
+	if entries != nil {
+		t.Fatalf("expected defaultValueRangeTypeMapCache.entries to be nil after invalidate, got %+v", entries)
+	}
+}

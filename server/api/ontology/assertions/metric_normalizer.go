@@ -334,6 +334,22 @@ func (c *valueRangeTypeMapCache) invalidate() {
 	c.mu.Unlock()
 }
 
+// InvalidateValueRangeTypeMapCache clears the in-process
+// kb.metric_value_range_type_map cache so the next Lookup re-reads the table
+// instead of serving a stale entry for up to the 30s TTL. Callers outside this
+// package that write to the table directly (e.g. an admin correction handler)
+// must call this after committing.
+func InvalidateValueRangeTypeMapCache() {
+	defaultValueRangeTypeMapCache.invalidate()
+}
+
+// NormalizeValueRangeTypeRaw exposes normalizeValueRangeTypeRaw so callers
+// outside this package can key kb.metric_value_range_type_map.raw_value
+// identically to the runtime lookup (see ValueRangeTypeMapper.Lookup).
+func NormalizeValueRangeTypeRaw(raw string) string {
+	return normalizeValueRangeTypeRaw(raw)
+}
+
 // ValueRangeTypeMapper is the DB-backed replacement for
 // CanonicalMetricValueRangeType (ADR 2026081401 DR1). Construct via
 // NewValueRangeTypeMapper in production; the zero-value (nil cache) is only

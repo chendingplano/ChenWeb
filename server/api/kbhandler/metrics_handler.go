@@ -61,6 +61,10 @@ type metricRecord struct {
 	// this metric is linked to via kb.artifact_objects, when reconciled.
 	// Distinct from ObjectName (the raw extraction-time name).
 	ObjectNodeCanonicalName *string `json:"object_node_canonical_name,omitempty"`
+	// ValueRangeTypeError is set by extract_metrics (ADR 2026081401 DR6) when
+	// ValueRangeType has no approved kb.metric_value_range_type_map mapping.
+	// Only populated by ListMetricRangeTypeErrors today.
+	ValueRangeTypeError *string `json:"value_range_type_error,omitempty"`
 }
 
 type listMetricsResponse struct {
