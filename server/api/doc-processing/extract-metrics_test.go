@@ -37,7 +37,7 @@ func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailabl
 	p := NewMetricsProcessor(nil, nil, extractor, nil)
 	p.PromptRef = "prompt-extract-metrics-v1.md"
 
-	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, "extract_metric_candidates", "MID-26052908")
+	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, "extract_metric_candidates", "MID-26052908", true)
 	if err != nil {
 		t.Fatalf("extractMetricPayload: %v", err)
 	}

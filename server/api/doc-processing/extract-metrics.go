@@ -1549,9 +1549,15 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 		return merged[i].LineNumber < merged[j].LineNumber
 	})
 	sourceLines := blockLinesToJSON(merged)
+	// Source lines before candidates: every candidate's SupportLines is that candidate's
+	// whole originating chunk (see mentionsAsCandidates), so when a chunk's candidate count
+	// exceeds METRIC_ENRICH_GROUP_SIZE and groupCandidatesByChunk splits it into multiple
+	// batches, every split batch's merged source lines are byte-identical. Putting them
+	// right after the (also constant) schema, ahead of the batch-only-unique candidates,
+	// lets those split batches share a longer cacheable prefix instead of only the schema.
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nCandidates:\n" + string(candidatesJSON) +
-		"\n\nSource lines (JSON array):\n" + sourceLines
+		"\n\nSource lines (JSON array):\n" + sourceLines +
+		"\n\nCandidates:\n" + string(candidatesJSON)
 }
 
 func normalizeMetricList(items []any) []map[string]any {
@@ -2542,13 +2548,21 @@ func (p *MetricsProcessor) extractMetricPayload(
 	modelName string,
 	cfg structureModelConfig,
 	callReason string,
-	loc string) (map[string]any, error) {
+	loc string,
+	documentFirst bool) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	callLoc := strings.TrimSpace(loc)
 	if callLoc == "" {
 		callLoc = "MID-CWB-EXTRACT-METRICS"
 	}
 	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef), promptText, modelName, inputText, callReason, callLoc)
+	// Pass 1 candidate extraction: inputText is the chunk text, shared across the six
+	// chunk-consuming processors, so document-first (default from newLLMJSONInput) is
+	// correct. Pass 2 enrichment builds inputText per-batch (schema + candidates +
+	// source lines, unique every call) while promptText (the enrichment instructions)
+	// is byte-identical across all batches — so it must go task-first, same exception
+	// as create_artifact_category (see ADR 2026062701, artifact_category_wiring.go).
+	in.DocumentFirst = documentFirst
 	var (
 		payload map[string]any
 		err     error
@@ -2606,7 +2620,7 @@ func firstPromptLine(promptText string) string {
 */
 
 func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText, taskPrompt string) (map[string]any, string, error) {
-	payload, err := p.extractMetricPayload(ctx, inputText, taskPrompt, p.MentionModelName, p.MentionModelCfg, "extract_metric_candidates", "MID-26052901")
+	payload, err := p.extractMetricPayload(ctx, inputText, taskPrompt, p.MentionModelName, p.MentionModelCfg, "extract_metric_candidates", "MID-26052901", true)
 	if err == nil {
 		return payload, strings.TrimSpace(p.MentionModelName), nil
 	}
@@ -2635,7 +2649,7 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 		)
 	}
 
-	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, taskPrompt, fallbackModelName, p.FallbackMentionModelCfg, "extract_metric_candidates", "MID-26052902")
+	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, taskPrompt, fallbackModelName, p.FallbackMentionModelCfg, "extract_metric_candidates", "MID-26052902", true)
 	if fallbackErr != nil {
 		if isEmptyMetricExtractionError(fallbackErr) {
 			p.Logger.Info("fallback metric candidate extraction returned empty JSON; treating as empty result",
@@ -3392,7 +3406,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		enrichStart := p.Now()
 		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), i+1)
 		payload, err := p.extractMetricPayload(concCtx, buildMetricRelationBatchPrompt(batch.candidates),
-			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903")
+			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903", false)
 		p.logEnrichMetricsChunk(ctx, recordID, enrichCallID, batch.chunkIdx, len(batches),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now(), "")
