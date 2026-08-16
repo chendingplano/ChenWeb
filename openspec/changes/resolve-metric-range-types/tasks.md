@@ -141,3 +141,6 @@
       `go test ./server/api/kbhandler/ -run 'ValueRangeTypeMap|RangeTypeError'`,
       `bun test src/lib/components/home3/resolve-metric-range-types-client.test.ts`,
       `bun run check` (no new errors).
+- [x] 9.8 Keep the approve confirmation readable after the tab split: a
+      tab-independent notice in the Map Block, since approving moves the entry (and
+      its per-entry message) out of the tab the operator is looking at.

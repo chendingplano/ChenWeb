@@ -84,6 +84,11 @@
 	// entries needing a decision under the already-approved majority.
 	let mapTab = $state<'pending' | 'approved'>('pending');
 
+	// Approving an entry moves it out of the Needs Triage tab, taking its
+	// per-entry confirmation with it -- this tab-independent notice is what the
+	// operator actually reads after a successful approve.
+	let mapNotice = $state('');
+
 	let newEntryRawValue = $state('');
 	let newEntryBucket   = $state('');
 	let addingEntry      = $state(false);
@@ -116,12 +121,12 @@
 		mapApplying = { ...mapApplying, [rawValue]: true };
 		mapApplyError = { ...mapApplyError, [rawValue]: '' };
 		mapApplyResult = { ...mapApplyResult, [rawValue]: '' };
+		mapNotice = '';
 		try {
 			const res = await applyRangeTypeMapEntry(rawValue, bucket);
-			mapApplyResult = {
-				...mapApplyResult,
-				[rawValue]: `Approved. ${res.corrected_count} row${res.corrected_count === 1 ? '' : 's'} corrected.`
-			};
+			const summary = `Approved. ${res.corrected_count} row${res.corrected_count === 1 ? '' : 's'} corrected.`;
+			mapApplyResult = { ...mapApplyResult, [rawValue]: summary };
+			mapNotice = `${rawValue} → ${bucket}. ${summary}`;
 		} catch (e) {
 			mapApplyError = { ...mapApplyError, [rawValue]: e instanceof Error ? e.message : String(e) };
 		} finally {
@@ -279,6 +284,12 @@
 
 			{#if rangeTypeMapShelf.error}
 				<div class="text-xs" style="color:#F87171;">{rangeTypeMapShelf.error}</div>
+			{/if}
+
+			{#if mapNotice}
+				<div class="text-[11px] rounded-md px-2 py-1.5" style="background:rgba(52,211,153,0.10); color:#34D399;">
+					{mapNotice}
+				</div>
 			{/if}
 
 			<datalist id="rmrt-shelf-canonical-bucket-options">

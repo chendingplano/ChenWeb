@@ -136,6 +136,12 @@ user.
 - **THEN** `kb.metrics` rows with a different (normalized) `value_range_type`, or with
   `value_range_type_error` already `NULL`, are left unchanged
 
+#### Scenario: Confirmation survives the entry changing tabs
+- **WHEN** an entry is approved from the non-`approved` tab, which moves it into the
+  `approved` tab
+- **THEN** the corrected-row confirmation stays visible in the Map Block rather than
+  disappearing along with the entry
+
 ### Requirement: Apply Approved Mapping to Metrics
 Each `approved` Map Block entry SHALL offer an "Apply" action that rewrites the
 metric rows themselves: every `kb.metrics` row whose normalized `value_range_type`
