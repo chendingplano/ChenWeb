@@ -91,6 +91,13 @@ type DecisionCandidateStore struct {
 	DB DBX
 }
 
+type DecisionCandidateListFilter struct {
+	Status, CandidateKind, Method                         string
+	LogicalIdentity, SourceArtifactType, SourceArtifactID string
+	InputRecordID                                         *int64
+	Page, PageSize                                        int
+}
+
 const decisionCandidateColumns = `
 	id, logical_identity_key, revision, payload_fingerprint, candidate_kind,
 	proposed_payload, method, resolution_outcome, resolution_reason,
@@ -99,6 +106,42 @@ const decisionCandidateColumns = `
 	resulting_assertion_id, last_seen, create_time, create_by, modify_time, modify_by`
 
 const decisionCandidateFrom = "FROM kb.semantic_decision_candidates"
+
+func (s DecisionCandidateStore) List(ctx context.Context, f DecisionCandidateListFilter) ([]DecisionCandidate, int64, error) {
+	if s.DB == nil {
+		return nil, 0, errors.New("db is nil")
+	}
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 50
+	}
+	if f.PageSize > 200 {
+		f.PageSize = 200
+	}
+	where := []string{"($1 = '' OR status = $1)", "($2 = '' OR candidate_kind = $2)", "($3 = '' OR method = $3)", "($4 = '' OR logical_identity_key ILIKE '%' || $4 || '%')", "($5 = '' OR source_artifact_type = $5)", "($6 = '' OR source_artifact_id = $6)", "($7::bigint IS NULL OR input_record_id = $7)"}
+	args := []any{strings.TrimSpace(f.Status), strings.TrimSpace(f.CandidateKind), strings.TrimSpace(f.Method), strings.TrimSpace(f.LogicalIdentity), strings.TrimSpace(f.SourceArtifactType), strings.TrimSpace(f.SourceArtifactID), f.InputRecordID}
+	whereSQL := strings.Join(where, " AND ")
+	var total int64
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) "+decisionCandidateFrom+" WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.DB.QueryContext(ctx, "SELECT "+decisionCandidateColumns+" "+decisionCandidateFrom+" WHERE "+whereSQL+" ORDER BY id DESC LIMIT $8 OFFSET $9", append(args, f.PageSize, (f.Page-1)*f.PageSize)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]DecisionCandidate, 0)
+	for rows.Next() {
+		c, err := scanDecisionCandidate(rows.Scan)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, c)
+	}
+	return out, total, rows.Err()
+}
 
 // PayloadFingerprint returns the deterministic identity of a candidate's
 // proposed payload. Two identical reprocessings of the same logical

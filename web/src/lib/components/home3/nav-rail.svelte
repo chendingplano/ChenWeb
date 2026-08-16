@@ -295,7 +295,8 @@
 					label: 'Doc Process Pipeline',
 					children: [
 						{ id: 'sysadmin-doc-process-dag', label: 'Doc Process DAG' },
-						{ id: 'sysadmin-doc-process-processors', label: 'Doc Processors' }
+						{ id: 'sysadmin-doc-process-processors', label: 'Doc Processors' },
+						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: 'Semantic Decision Candidates' }
 					]
 				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }
