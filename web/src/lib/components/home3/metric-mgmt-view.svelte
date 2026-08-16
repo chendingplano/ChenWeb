@@ -92,6 +92,7 @@
 	let searchError = $state('');
 	let searchHasRun = $state(false);
 	let searchTotal = $state(0);
+	let searchPage = $state<number>(KB_METRIC_SEARCH_DEFAULTS.page);
 	let metricNameDropdownValue = $state<number | ''>('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
@@ -238,7 +239,7 @@
 		if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(clamped));
 	}
 
-	function startGipResize(event: PointerEvent, edge: 'left' | 'right') {
+	function startGipResize(event: PointerEvent) {
 		event.preventDefault();
 		const startX = event.clientX;
 		const startWidth = gipWidth ?? GIP_WIDTH_DEFAULT;
@@ -247,7 +248,7 @@
 		document.body.style.userSelect = 'none';
 		const move = (e: PointerEvent) => {
 			const delta = e.clientX - startX;
-			persistGipWidth(edge === 'left' ? startWidth - delta : startWidth + delta);
+			persistGipWidth(startWidth + delta);
 		};
 		const up = () => {
 			gipResizing = false;
@@ -269,6 +270,82 @@
 		} else if (event.key === 'ArrowRight') {
 			event.preventDefault();
 			persistGipWidth((gipWidth ?? GIP_WIDTH_DEFAULT) + 16);
+		}
+	}
+
+	// ---------- Metrics list (sidebar) width (draggable) ----------
+	// This is the panel to the LEFT of the metric info panel; it has its own
+	// resize handle and must not be confused with gipWidth above, which sizes
+	// the metric info panel itself.
+	const METRICS_SIDEBAR_WIDTH_KEY = 'metrics:sidebar-width';
+	const METRICS_SIDEBAR_WIDTH_MIN = 280;
+	const METRICS_SIDEBAR_WIDTH_MAX = 640;
+	const METRICS_SIDEBAR_WIDTH_DEFAULT = 360;
+	let metricsSidebarWidth = $state<number | null>(null);
+	let sidebarResizing = $state(false);
+
+	$effect(() => {
+		if (!browser) return;
+		const saved = Number(localStorage.getItem(METRICS_SIDEBAR_WIDTH_KEY));
+		if (
+			Number.isFinite(saved) &&
+			saved >= METRICS_SIDEBAR_WIDTH_MIN &&
+			saved <= METRICS_SIDEBAR_WIDTH_MAX
+		) {
+			metricsSidebarWidth = saved;
+		}
+	});
+
+	let bodyGridStyle = $derived.by(() => {
+		if (recordBrowserFolded) {
+			return `grid-template-columns: 42px ${metricsSidebarWidth ?? METRICS_SIDEBAR_WIDTH_DEFAULT}px minmax(0, 1fr)`;
+		}
+		if (metricsSidebarWidth != null) {
+			return `grid-template-columns: auto ${metricsSidebarWidth}px minmax(0, 1fr)`;
+		}
+		return '';
+	});
+
+	function persistSidebarWidth(next: number) {
+		const clamped = Math.max(
+			METRICS_SIDEBAR_WIDTH_MIN,
+			Math.min(METRICS_SIDEBAR_WIDTH_MAX, Math.round(next))
+		);
+		metricsSidebarWidth = clamped;
+		if (browser) localStorage.setItem(METRICS_SIDEBAR_WIDTH_KEY, String(clamped));
+	}
+
+	function startSidebarResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = metricsSidebarWidth ?? METRICS_SIDEBAR_WIDTH_DEFAULT;
+		sidebarResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => {
+			const delta = e.clientX - startX;
+			persistSidebarWidth(startWidth + delta);
+		};
+		const up = () => {
+			sidebarResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onSidebarResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			persistSidebarWidth((metricsSidebarWidth ?? METRICS_SIDEBAR_WIDTH_DEFAULT) - 16);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			persistSidebarWidth((metricsSidebarWidth ?? METRICS_SIDEBAR_WIDTH_DEFAULT) + 16);
 		}
 	}
 	type NormalizedSpan = { page_number: number; line_number: number };
@@ -812,6 +889,9 @@
 	let metricSearchActive = $derived(
 		searchQuery.trim().length > 0 || hasKbMetricSearchFilters(searchFilters)
 	);
+	let searchTotalPages = $derived(
+		Math.max(1, Math.ceil(searchTotal / KB_METRIC_SEARCH_DEFAULTS.pageSize))
+	);
 
 	let selectedMetricInFilteredIndex = $derived(
 		filteredMetrics.findIndex((m) => m.id === selectedMetricId)
@@ -1036,7 +1116,13 @@
 	}
 
 	async function loadMetricsForRecord(id: number) {
+		// A record selection must reset every panel-level filter and the global
+		// metric-search state, otherwise stale searchResults (or a stale
+		// confidence filter) keep hijacking the card list instead of showing
+		// this record's metrics.
 		keywordFilter = '';
+		confidenceFilter = '';
+		clearMetricSearch();
 		errorMsg = '';
 		loading = true;
 		metrics = [];
@@ -1075,19 +1161,22 @@
 		}
 	}
 
-	async function runMetricSearch() {
+	async function runMetricSearch(page: number = KB_METRIC_SEARCH_DEFAULTS.page) {
 		searchError = '';
 		searchHasRun = true;
 		const params = buildKbMetricSearchParams({
 			query: searchQuery,
-			page: KB_METRIC_SEARCH_DEFAULTS.page,
+			page,
 			pageSize: KB_METRIC_SEARCH_DEFAULTS.pageSize,
 			filters: searchFilters
 		});
-		if (!params.q) {
+		// A blank query is fine as long as a filter narrows the corpus — that is
+		// how "list every metric of record N" is expressed.
+		if (!params.q && !hasKbMetricSearchFilters(searchFilters)) {
 			searchResults = [];
 			searchTotal = 0;
-			searchError = 'Enter a query before searching metrics.';
+			searchPage = KB_METRIC_SEARCH_DEFAULTS.page;
+			searchError = 'Enter a query or set at least one filter before searching metrics.';
 			return;
 		}
 		searchLoading = true;
@@ -1095,6 +1184,7 @@
 			const response = await searchKbMetrics(params);
 			searchResults = response.results ?? [];
 			searchTotal = response.total ?? 0;
+			searchPage = response.page ?? page;
 		} catch (err) {
 			searchResults = [];
 			searchTotal = 0;
@@ -1112,6 +1202,7 @@
 		searchError = '';
 		searchHasRun = false;
 		searchTotal = 0;
+		searchPage = KB_METRIC_SEARCH_DEFAULTS.page;
 	}
 
 	async function handleMetricSearchResultClick(result: KbMetricSearchResult) {
@@ -1135,7 +1226,6 @@
 		if (!first) return;
 
 		// Move display to the selected page without forcing iframe remount/reload.
-		console.log('metric selected, id:' + m.id + ', page_num:' + first.page_number);
 		docPage = first.page_number > 0 ? first.page_number : 1;
 
 		// If user is on the lines panel, scroll the highlighted line into view.
@@ -1438,10 +1528,7 @@
 		</div>
 	</header>
 
-	<div
-		class="body"
-		style={recordBrowserFolded ? 'grid-template-columns: 42px 360px minmax(0, 1fr)' : ''}
-	>
+	<div class="body" style={bodyGridStyle}>
 		{#if !recordBrowserFolded}
 			<div class="record-browser-slot">
 				<button
@@ -1615,7 +1702,7 @@
 						type="button"
 						class="search-btn primary"
 						disabled={searchLoading}
-						onclick={runMetricSearch}
+						onclick={() => void runMetricSearch()}
 					>
 						{searchLoading ? 'Searching…' : 'Search'}
 					</button>
@@ -1636,7 +1723,23 @@
 					<div class="search-status">{searchError}</div>
 				{:else if metricSearchActive && searchHasRun}
 					<div class="search-status">
-						{searchTotal} result{searchTotal === 1 ? '' : 's'} for "{searchQuery.trim()}"
+						{searchTotal} result{searchTotal === 1 ? '' : 's'}
+						{#if searchQuery.trim()}for "{searchQuery.trim()}"{/if}
+						{#if searchTotalPages > 1}
+							· page {searchPage} / {searchTotalPages}
+							<button
+								type="button"
+								class="search-page-btn"
+								disabled={searchLoading || searchPage <= 1}
+								onclick={() => void runMetricSearch(searchPage - 1)}>Prev</button
+							>
+							<button
+								type="button"
+								class="search-page-btn"
+								disabled={searchLoading || searchPage >= searchTotalPages}
+								onclick={() => void runMetricSearch(searchPage + 1)}>Next</button
+							>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1689,7 +1792,11 @@
 							<div class="card-rule" aria-hidden="true"></div>
 							<div class="card-body">
 								<div class="card-row-top">
-									<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-index">
+										⌕ {String(
+											(searchPage - 1) * KB_METRIC_SEARCH_DEFAULTS.pageSize + idx + 1
+										).padStart(3, '0')}
+									</div>
 									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
 								</div>
 								<div class="card-name">{result.primary_label}</div>
@@ -1745,10 +1852,10 @@
 				<button
 					type="button"
 					class="gip-resize-handle gip-resize-left"
-					class:active={gipResizing}
-					aria-label="Resize the metric info panel from the left edge"
-					onpointerdown={(event) => startGipResize(event, 'left')}
-					onkeydown={onGipResizerKeydown}
+					class:active={sidebarResizing}
+					aria-label="Resize the metrics list panel"
+					onpointerdown={startSidebarResize}
+					onkeydown={onSidebarResizerKeydown}
 				>
 					<span class="gip-resize-grip" aria-hidden="true"></span>
 				</button>
@@ -1858,7 +1965,7 @@
 					class="gip-resize-handle gip-resize-right"
 					class:active={gipResizing}
 					aria-label="Resize the metric info panel from the right edge"
-					onpointerdown={(event) => startGipResize(event, 'right')}
+					onpointerdown={startGipResize}
 					onkeydown={onGipResizerKeydown}
 				>
 					<span class="gip-resize-grip" aria-hidden="true"></span>
@@ -2745,6 +2852,22 @@
 	.search-status {
 		font: 500 0.76rem/1.35 var(--font-sans);
 		color: var(--text-muted);
+	}
+
+	.search-page-btn {
+		border-radius: 999px;
+		border: 1px solid var(--ink-line);
+		background: transparent;
+		color: var(--text-secondary);
+		padding: 2px 9px;
+		margin-left: 6px;
+		font: 600 0.72rem/1.35 var(--font-sans);
+		cursor: pointer;
+	}
+
+	.search-page-btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
 	}
 
 	.empty {

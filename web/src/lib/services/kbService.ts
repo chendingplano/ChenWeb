@@ -218,7 +218,7 @@ export type GetKbMetricResponse = {
 };
 
 async function fetchOrThrow<T>(url: string, fallback: string): Promise<T> {
-	const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
+	const response = await fetch(url, { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
 	if (!response.ok) {
 		const payload = await response.json().catch(() => null);
 		const msg =
@@ -759,16 +759,6 @@ export async function listKbChunks(inputRecordId: number): Promise<ListKbTopicCh
 		`${BASE}/chunks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
 		'Failed to retrieve chunks'
 	);
-	console.log('[kbService] listKbChunks fetched', {
-		inputRecordId,
-		total: result.total,
-		chunks: (result.results ?? []).map((chunk) => ({
-			seqno: chunk.seqno,
-			line_tokens: chunk.line_tokens,
-			source_line_spans: chunk.source_line_spans,
-			content_line_count: chunk.content_lines?.length ?? 0
-		}))
-	});
 	return result;
 }
 
@@ -844,17 +834,6 @@ export async function listKbSceneBlocks(inputRecordId: number): Promise<ListKbSc
 		`${BASE}/scene-blocks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
 		'Failed to retrieve scene blocks'
 	);
-	console.log('[kbService] listKbSceneBlocks fetched', {
-		inputRecordId,
-		total: result.total,
-		scene_blocks: (result.results ?? []).map((block) => ({
-			id: block.id,
-			scene_id: block.scene_id,
-			scene_type: block.scene_type,
-			title: block.title,
-			confidence: block.confidence
-		}))
-	});
 	return result;
 }
 
@@ -902,17 +881,6 @@ export async function listKbProducts(inputRecordId: number): Promise<ListKbProdu
 		`${BASE}/products?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
 		'Failed to retrieve products'
 	);
-	console.log('[kbService] listKbProducts fetched', {
-		inputRecordId,
-		total: result.total,
-		products: (result.results ?? []).map((p) => ({
-			id: p.id,
-			product_rel_id: p.product_rel_id,
-			product_name: p.product_name,
-			product_type: p.product_type,
-			confidence: p.confidence
-		}))
-	});
 	return result;
 }
 
@@ -1390,17 +1358,6 @@ export async function listProvisionGraph(
 		'Failed to list provision graph'
 	);
 	const provisionIds = new Set((result.results ?? []).flatMap((node) => node.topicIds ?? []));
-	/*
-	console.log('[Compliance Provisions] provision graph received', {
-		ksStoreId,
-		nodes: result.results?.length ?? 0,
-		uniqueProvisions: provisionIds.size,
-		provisionRefs: (result.results ?? []).reduce(
-			(count, node) => count + (node.topicIds?.length ?? 0),
-			0
-		)
-	});
-	*/
 	return result;
 }
 
@@ -1415,14 +1372,6 @@ export async function getProvisionCategory(
 		`${BASE}/provision-category?${query.toString()}`,
 		'Failed to load provision category'
 	);
-	/*
-	console.log('[Compliance Provisions] provision category received', {
-		categoryPath,
-		ksStoreId,
-		provisions: result.topics?.length ?? 0,
-		provisionIds: (result.topics ?? []).map((topic) => topic.id)
-	});
-	*/
 	return result;
 }
 
@@ -1431,13 +1380,6 @@ export async function getRecordProvisions(recordId: number): Promise<GetRecordPr
 		`${BASE}/record-provisions?record_id=${encodeURIComponent(String(recordId))}`,
 		'Failed to load record provisions'
 	);
-	/*
-	console.log('[Compliance Provisions] record provisions received', {
-		recordId,
-		provisions: result.topics?.length ?? 0,
-		provisionIds: (result.topics ?? []).map((topic) => topic.id)
-	});
-	*/
 	return result;
 }
 

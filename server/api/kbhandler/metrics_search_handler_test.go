@@ -138,6 +138,74 @@ func TestBuildMetricSearchWhereClauseAddsCJKSubstringFallback(t *testing.T) {
 	}
 }
 
+func TestSearchMetricsRejectsBlankQueryWithoutFilters(t *testing.T) {
+	c, rec := newMetricSearchContext(t, "q=")
+	if err := SearchMetrics(c); err != nil {
+		t.Fatalf("SearchMetrics returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBuildMetricSearchWhereClauseFiltersOnlyWhenQueryBlank(t *testing.T) {
+	cfg := metricSearchConfig{
+		dictionary:     "simple",
+		phraseFriendly: true,
+	}
+	recordID := int64(416)
+
+	whereSQL, args := buildMetricSearchWhereClause("", metricSearchFilters{InputRecordID: &recordID}, cfg)
+
+	if strings.Contains(whereSQL, "tsquery") {
+		t.Fatalf("blank q must not add a full-text predicate: whereSQL=%q", whereSQL)
+	}
+	if whereSQL != "m.input_record_id = $1" {
+		t.Fatalf("whereSQL=%q", whereSQL)
+	}
+	if len(args) != 1 || args[0] != recordID {
+		t.Fatalf("args=%v", args)
+	}
+}
+
+func TestQueryMetricSearchResultsListsFilterOnlyMatches(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	cfg := metricSearchConfig{
+		dictionary:      "simple",
+		defaultPageSize: 20,
+		maxPageSize:     100,
+		previewMaxWords: 18,
+		phraseFriendly:  true,
+		weights:         appconfig.GetMetricSearchWeightsConfig(),
+	}
+	recordID := int64(416)
+
+	// No $1 for query text: the tsquery is an inlined empty literal, so the
+	// record filter takes $1 and LIMIT/OFFSET follow it.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT websearch_to_tsquery('simple', '') AS query")).
+		WithArgs(recordID, 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "metric_id", "input_record_id", "input_filename", "metric_name", "metric_name_en",
+			"metric_subject", "metric_subject_en", "metric_value", "metric_unit", "metric_unit_en",
+			"value_class", "value_class_en", "value_data_type", "is_explicit_metric", "table_name_or_section",
+			"metric_keywords", "metric_keywords_en", "source_line_spans", "score", "snippet",
+		}))
+
+	_, err = queryMetricSearchResults(db, "", metricSearchFilters{InputRecordID: &recordID}, 1, 20, cfg)
+	if err != nil {
+		t.Fatalf("queryMetricSearchResults returned error: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestQueryMetricSearchResultsEscapesHeadlineOptions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

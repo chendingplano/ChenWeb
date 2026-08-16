@@ -243,6 +243,7 @@ func backfillRecord(rec inputRecord, dryRun bool) (int, error) {
 	consumed := map[int]bool{}
 
 	fixed := 0
+	fuzzyMatched := 0
 	for _, page := range doc.Pages {
 		candidates := linesByPage[page.PageNumber]
 		for _, item := range page.Items {
@@ -250,6 +251,17 @@ func backfillRecord(rec inputRecord, dryRun bool) (int, error) {
 				continue
 			}
 			matchAt := findContentRun(parsed, candidates, consumed, item.ListItems)
+			if matchAt == nil {
+				// The .txt text can drift from content_list.json through hand
+				// correction after parse; fall back to a similarity match
+				// before giving up (see findContentRunFuzzy).
+				matchAt = findContentRunFuzzy(parsed, candidates, consumed, item.ListItems)
+				if matchAt != nil {
+					fuzzyMatched += len(matchAt)
+					log.Printf("  page %d: list starting %q matched by similarity (text edited after parse)",
+						page.PageNumber, truncate(item.ListItems[0], 30))
+				}
+			}
 			if matchAt == nil {
 				log.Printf("  page %d: no .txt run matches list starting %q — skipped",
 					page.PageNumber, truncate(item.ListItems[0], 30))
@@ -266,6 +278,9 @@ func backfillRecord(rec inputRecord, dryRun bool) (int, error) {
 		}
 	}
 
+	if fuzzyMatched > 0 {
+		log.Printf("  %d line(s) located by similarity fallback", fuzzyMatched)
+	}
 	if fixed == 0 || dryRun {
 		return fixed, nil
 	}
@@ -306,6 +321,107 @@ func findContentRun(parsed []lineRec, candidates []int, consumed map[int]bool, w
 		}
 	}
 	return nil
+}
+
+// minRunSimilarity is the per-item floor for the fuzzy fallback. Post-parse
+// human corrections are typically a character or two in a sentence of tens to
+// hundreds (record 416 page 11: 2 chars in 247, similarity 0.992), while two
+// genuinely different list items in the same document score far below this.
+const minRunSimilarity = 0.9
+
+// findContentRunFuzzy is the fallback for findContentRun. The .txt content is
+// not, in fact, immutable after parse: it gets hand-corrected (record 416 page
+// 11 had 震荡機 -> 振荡機 fixed by hand), and because findContentRun requires
+// every item in the run to match exactly, one edited character silently skips
+// the whole list -- leaving every line in it with a stale, wrong-coordinate-
+// space bbox that then mis-paints highlights.
+//
+// This keeps findContentRun's structural guarantees (same page, contiguous
+// unconsumed run, exact item count) and relaxes only the text comparison to a
+// per-item similarity floor. It additionally requires every matched line to be
+// a list-item, which findContentRun does not: exact text match is its own proof
+// of identity, but a fuzzy match is not, and writing a list bbox over a
+// paragraph that structure analysis merged would be a silent corruption.
+// Among qualifying runs it returns the highest-scoring one, so a near-duplicate
+// list elsewhere on the page cannot win over the real match.
+func findContentRunFuzzy(parsed []lineRec, candidates []int, consumed map[int]bool, wantContent []string) []int {
+	n := len(wantContent)
+	if n == 0 {
+		return nil
+	}
+	want := make([]string, n)
+	for i, c := range wantContent {
+		want[i] = normalizeText(c)
+	}
+
+	var best []int
+	bestScore := 0.0
+	for start := 0; start+n <= len(candidates); start++ {
+		total := 0.0
+		ok := true
+		for k := range n {
+			idx := candidates[start+k]
+			if consumed[idx] || !isListItemType(parsed[idx].lineTyp) {
+				ok = false
+				break
+			}
+			sim := runeSimilarity(normalizeText(parsed[idx].content), want[k])
+			if sim < minRunSimilarity {
+				ok = false
+				break
+			}
+			total += sim
+		}
+		if ok && total > bestScore {
+			bestScore = total
+			best = append(best[:0:0], candidates[start:start+n]...)
+		}
+	}
+	return best
+}
+
+// isListItemType reports whether a .txt line type is one of the list-item
+// variants the converter emits (list-item, list-item-num, list-item_m-sym,
+// list-item-s-sym). Matching the bare "list-item" string would silently
+// exclude the ~2.3k numbered and symbol-bulleted list lines in the corpus.
+func isListItemType(t string) bool {
+	return strings.HasPrefix(t, "list-item")
+}
+
+// runeSimilarity returns 1 - normalizedLevenshtein(a, b), over runes so CJK
+// text is compared by character rather than by UTF-8 byte.
+func runeSimilarity(a, b string) float64 {
+	if a == b {
+		return 1
+	}
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) == 0 || len(rb) == 0 {
+		return 0
+	}
+	longest := max(len(ra), len(rb))
+	// Cheap length prefilter: the edit distance is at least the length
+	// difference, so an over-long candidate cannot clear the floor.
+	if float64(longest-min(len(ra), len(rb)))/float64(longest) > 1-minRunSimilarity {
+		return 0
+	}
+
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(min(cur[j-1]+1, prev[j]+1), prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return 1 - float64(prev[len(rb)])/float64(longest)
 }
 
 func rawLinePathFor(resultFilename string) string {

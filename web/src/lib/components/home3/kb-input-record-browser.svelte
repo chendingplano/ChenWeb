@@ -415,8 +415,16 @@
 			recordIdInput = '';
 			applyFilters(nextFilters);
 			if (records.length === 1) {
+				// Pin the picked record and emit it directly. Re-querying page 1
+				// here (loadRecords) silently drops the selection whenever the
+				// picked record is not on the first page.
 				pinnedMode = false;
-				await loadRecords(1, records[0].id);
+				results = records;
+				listTotal = 1;
+				listPage = 1;
+				listJumpInput = '1';
+				onResultsChange({ results, total: 1, page: 1 });
+				emitSelectedRecord(records[0], true);
 			} else {
 				pinnedMode = true;
 				results = records;

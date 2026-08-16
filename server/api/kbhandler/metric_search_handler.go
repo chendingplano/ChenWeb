@@ -23,6 +23,14 @@ type metricSearchFilters struct {
 	MetricUnit       string `json:"metric_unit,omitempty"`
 }
 
+func (f metricSearchFilters) hasAny() bool {
+	return f.InputRecordID != nil ||
+		f.IsExplicitMetric != nil ||
+		f.ValueClass != "" ||
+		f.ValueDataType != "" ||
+		f.MetricUnit != ""
+}
+
 type metricSearchResult struct {
 	ArtifactID         string          `json:"artifact_id"`
 	ID                 int64           `json:"id"`
@@ -118,12 +126,6 @@ func SearchMetrics(c echo.Context) error {
 	logger := rc.GetLogger()
 
 	queryText := strings.TrimSpace(c.QueryParam("q"))
-	if queryText == "" {
-		return c.JSON(http.StatusBadRequest, errorResponse{
-			Status:   false,
-			ErrorMsg: "q is required (CWB_KB_MS_010)",
-		})
-	}
 
 	cfg := loadMetricSearchConfig()
 	page := parsePositiveInt(c.QueryParam("page"), 1)
@@ -153,6 +155,16 @@ func SearchMetrics(c echo.Context) error {
 		ValueClass:       strings.TrimSpace(c.QueryParam("value_class")),
 		ValueDataType:    strings.TrimSpace(c.QueryParam("value_data_type")),
 		MetricUnit:       strings.TrimSpace(c.QueryParam("metric_unit")),
+	}
+
+	// A blank q is allowed as long as at least one structured filter narrows the
+	// corpus — that is how "show every metric of record N" is expressed. Without
+	// either we would scan all of kb.metrics, so keep rejecting that.
+	if queryText == "" && !filters.hasAny() {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "q is required unless at least one filter is set (CWB_KB_MS_010)",
+		})
 	}
 
 	total, err := countMetricSearchResults(ApiTypes.ProjectDBHandle, queryText, filters, cfg)
@@ -202,6 +214,14 @@ func queryMetricSearchResults(db *sql.DB, queryText string, filters metricSearch
 	if !cfg.phraseFriendly {
 		tsQueryExpr = "plainto_tsquery"
 	}
+	// With a blank q there is no $1 to parse — the where clause omits it too, so
+	// the placeholder numbering below stays consistent. An empty tsquery makes
+	// every ts_rank_cd term 0 and turns ts_headline into a plain leading excerpt,
+	// which is exactly what a filter-only listing wants.
+	queryInputSQL := fmt.Sprintf(`SELECT %s('%s', $1) AS query`, tsQueryExpr, cfg.dictionary)
+	if queryText == "" {
+		queryInputSQL = fmt.Sprintf(`SELECT %s('%s', '') AS query`, tsQueryExpr, cfg.dictionary)
+	}
 	snippetOptions := fmt.Sprintf("MaxWords=%d, MinWords=%d, ShortWord=2, HighlightAll=false, MaxFragments=1, FragmentDelimiter=' ... '", cfg.previewMaxWords, maxInt(6, cfg.previewMaxWords/2))
 	escapedSnippetOptions := escapeSQLLiteral(snippetOptions)
 
@@ -243,7 +263,7 @@ func queryMetricSearchResults(db *sql.DB, queryText string, filters metricSearch
 
 	sqlText := fmt.Sprintf(`
 WITH query_input AS (
-    SELECT %s('%s', $1) AS query
+    %s
 ),
 ranked AS (
     SELECT
@@ -290,7 +310,7 @@ SELECT
 FROM scored
 ORDER BY score DESC, id ASC
 LIMIT $%d OFFSET $%d
-	`, tsQueryExpr, cfg.dictionary, scoreExpr, cfg.dictionary, escapedSnippetOptions, whereSQL, minRankClause, len(args)-1, len(args))
+	`, queryInputSQL, scoreExpr, cfg.dictionary, escapedSnippetOptions, whereSQL, minRankClause, len(args)-1, len(args))
 
 	rows, err := db.Query(sqlText, args...)
 	if err != nil {
@@ -362,9 +382,14 @@ func buildMetricSearchWhereClause(queryText string, filters metricSearchFilters,
 			OR coalesce(m.search_document, '') ILIKE '%%' || $1 || '%%')`, ftsClause)
 	}
 
-	conditions := []string{ftsClause}
-	args := []any{queryText}
-	nextArg := 2
+	conditions := []string{}
+	args := []any{}
+	nextArg := 1
+	if queryText != "" {
+		conditions = append(conditions, ftsClause)
+		args = append(args, queryText)
+		nextArg = 2
+	}
 
 	if filters.InputRecordID != nil {
 		conditions = append(conditions, fmt.Sprintf("m.input_record_id = $%d", nextArg))
@@ -390,6 +415,13 @@ func buildMetricSearchWhereClause(queryText string, filters metricSearchFilters,
 		conditions = append(conditions, fmt.Sprintf("(coalesce(m.metric_unit, '') = $%d OR coalesce(m.metric_unit_en, '') = $%d)", nextArg, nextArg))
 		args = append(args, filters.MetricUnit)
 		nextArg++
+	}
+
+	if len(conditions) == 0 {
+		// Filter-only search with every filter blank never reaches here (the
+		// handler rejects it), but keep the clause valid rather than emitting
+		// a bare `WHERE`.
+		conditions = append(conditions, "TRUE")
 	}
 
 	return strings.Join(conditions, " AND "), args

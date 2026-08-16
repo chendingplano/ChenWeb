@@ -395,7 +395,6 @@ type metricCandidateMention struct {
 	Confidence        float64
 	ConfidenceReason  string
 	ChunkIndex        int
-	ChunkLines        []BlockLine
 	HasNormalEvidence bool
 }
 
@@ -410,7 +409,6 @@ type metricCandidate struct {
 	UnitHint           string
 	ValueHint          string
 	SupportingMentions []map[string]any
-	SupportLines       []BlockLine
 }
 
 type candidateBatch struct {
@@ -1230,7 +1228,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	)
 
 	// ── Pass 2: concurrent enrichment batches (delegated to enrichMetricCandidates) ──
-	metrics, uncertainMetrics, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, docCtx)
+	metrics, uncertainMetrics, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, chunks, docCtx)
 	if enrichErr != nil {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
@@ -1529,34 +1527,11 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 		"uncertain_metrics": []any{},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	// Merge support lines from all candidates (same chunk); deduplicate by page+line number.
-	seen := make(map[[2]int]struct{})
-	merged := make([]BlockLine, 0)
-	for _, c := range candidates {
-		for _, l := range c.SupportLines {
-			key := [2]int{l.PageNumber, l.LineNumber}
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			merged = append(merged, l)
-		}
-	}
-	sort.Slice(merged, func(i, j int) bool {
-		if merged[i].PageNumber != merged[j].PageNumber {
-			return merged[i].PageNumber < merged[j].PageNumber
-		}
-		return merged[i].LineNumber < merged[j].LineNumber
-	})
-	sourceLines := blockLinesToJSON(merged)
-	// Source lines before candidates: every candidate's SupportLines is that candidate's
-	// whole originating chunk (see mentionsAsCandidates), so when a chunk's candidate count
-	// exceeds METRIC_ENRICH_GROUP_SIZE and groupCandidatesByChunk splits it into multiple
-	// batches, every split batch's merged source lines are byte-identical. Putting them
-	// right after the (also constant) schema, ahead of the batch-only-unique candidates,
-	// lets those split batches share a longer cacheable prefix instead of only the schema.
+	// No source-lines section here: the caller sends the full chunk (all of a candidate's
+	// SupportLines is that candidate's whole originating chunk, see mentionsAsCandidates)
+	// as the canonicalChunkInputText document, so the LLM already sees every line with its
+	// page/line number. Duplicating a merged subset here would just add uncached tokens.
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nSource lines (JSON array):\n" + sourceLines +
 		"\n\nCandidates:\n" + string(candidatesJSON)
 }
 
@@ -1631,7 +1606,6 @@ func normalizeMetricCandidateMentions(items []any, block Block) []metricCandidat
 			Confidence:        toFloat(raw["confidence"]),
 			ConfidenceReason:  strings.TrimSpace(asString(raw["confidence_reason"])),
 			ChunkIndex:        block.Index,
-			ChunkLines:        append([]BlockLine(nil), block.Lines...),
 			HasNormalEvidence: metricCandidateHasNormalEvidence(block, spans, quote),
 		})
 	}
@@ -1741,7 +1715,6 @@ func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
 				"confidence":        mention.Confidence,
 				"confidence_reason": mention.ConfidenceReason,
 			}},
-			SupportLines: append([]BlockLine(nil), mention.ChunkLines...),
 		})
 	}
 	return out
@@ -2556,12 +2529,22 @@ func (p *MetricsProcessor) extractMetricPayload(
 		callLoc = "MID-CWB-EXTRACT-METRICS"
 	}
 	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef), promptText, modelName, inputText, callReason, callLoc)
-	// Pass 1 candidate extraction: inputText is the chunk text, shared across the six
-	// chunk-consuming processors, so document-first (default from newLLMJSONInput) is
-	// correct. Pass 2 enrichment builds inputText per-batch (schema + candidates +
-	// source lines, unique every call) while promptText (the enrichment instructions)
-	// is byte-identical across all batches — so it must go task-first, same exception
-	// as create_artifact_category (see ADR 2026062701, artifact_category_wiring.go).
+	// Both passes use document-first (default from newLLMJSONInput): inputText goes first
+	// as the stable/cacheable prefix, promptText (task instructions) goes last. For both
+	// passes inputText is now canonicalChunkInputText(chunk, docCtx) — the same bytes
+	// every chunk-based processor sends for that chunk — so pass 2's calls ride the cache
+	// pass 1 (and the coordinator's seed processor) already warmed for that chunk earlier
+	// in the run, instead of only caching pass 2's own small constant schema block.
+	//
+	// Pass 2 was briefly switched to task-first (the byte-identical enrichment
+	// instructions in the system message, hoping a bigger constant prefix would cache
+	// better — same reasoning as create_artifact_category's task-first layout, ADR
+	// 2026062701). Measured on kb.doc_proc_logs (record 416): document-first got a steady
+	// 384 prompt_cache_hit_tokens/call (just the schema, since pass 2's document was its
+	// own bespoke schema+source-lines+candidates blob, not the shared chunk text);
+	// task-first got 0 on every call in the next run. Fixed properly by making pass 2's
+	// document the same canonicalChunkInputText pass 1 already sends, per that function's
+	// doc comment in input_lines.go, instead of just reverting to task-first=false.
 	in.DocumentFirst = documentFirst
 	var (
 		payload map[string]any
@@ -3371,7 +3354,7 @@ func refreshMetricArtifactFile(ctx context.Context, db *sql.DB, artifactDir stri
 // candidates and returns the deduplicated enriched metric rows plus any
 // uncertain metrics identified by the LLM. It is called from both
 // extractMetricsFromChunksWithLLM (DRY) and FinalizeChunkBatch.
-func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, _ string) ([]map[string]any, []map[string]any, error) {
+func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, chunks []Chunk, docCtx string) ([]map[string]any, []map[string]any, error) {
 	type pass2Result struct {
 		metrics   []map[string]any
 		uncertain []map[string]any
@@ -3392,10 +3375,23 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		"candidates", len(candidates),
 	)
 
+	// batch.chunkIdx is a metricCandidate.ChunkIndex value, which is stamped from
+	// chunksToBlocks' Block.Index = Chunk.SeqNo — not necessarily chunks' array position
+	// (SeqNo can start above 0 or have gaps, e.g. in tests). Look chunks up by SeqNo
+	// rather than indexing the slice directly.
+	chunksBySeq := make(map[int]Chunk, len(chunks))
+	for _, c := range chunks {
+		chunksBySeq[c.SeqNo] = c
+	}
+
 	pass2Results, pass2Err := runConcurrent(ctx, maxTasks, len(batches), func(concCtx context.Context, i int) (pass2Result, error) {
 		batch := batches[i]
 		if isCtxStopped(concCtx) {
 			return pass2Result{}, ErrPipelineStopped
+		}
+		chunk, ok := chunksBySeq[batch.chunkIdx]
+		if !ok {
+			return pass2Result{}, fmt.Errorf("(MID_26081601) %s enrich batch: no chunk with seq %d (chunks=%d)", p.Name(), batch.chunkIdx, len(chunks))
 		}
 		batchStart := time.Now()
 		p.Logger.Info("enrich metric start",
@@ -3405,8 +3401,17 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		)
 		enrichStart := p.Now()
 		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), i+1)
-		payload, err := p.extractMetricPayload(concCtx, buildMetricRelationBatchPrompt(batch.candidates),
-			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903", false)
+		// Document is the same canonicalChunkInputText(chunk, docCtx) every chunk-based
+		// processor sends for this chunk — byte-identical to what pass 1 (and the
+		// coordinator's seed processor) already sent moments earlier in this run, so this
+		// call rides their already-warm DeepSeek cache entry instead of paying for the
+		// chunk again. The enrichment instructions + schema + this batch's candidates are
+		// task-specific, so they go in the <TASK> suffix. See input_lines.go's
+		// canonicalChunkInputText doc comment and ADR 2026062701 §Phase 2.3.
+		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+		taskText := p.RelationPromptText + "\n\n" + buildMetricRelationBatchPrompt(batch.candidates)
+		payload, err := p.extractMetricPayload(concCtx, inputText,
+			taskText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903", true)
 		p.logEnrichMetricsChunk(ctx, recordID, enrichCallID, batch.chunkIdx, len(batches),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now(), "")
@@ -3600,7 +3605,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if isCtxStopped(ctx) {
 		return ErrPipelineStopped
 	}
-	metrics, _, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchDocCtx)
+	metrics, _, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchChunks, p.batchDocCtx)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			return ErrPipelineStopped

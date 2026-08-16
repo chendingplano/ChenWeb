@@ -78,6 +78,45 @@ export function splitMapEntriesByStatus(entries: ValueRangeTypeMapEntry[]): {
 	};
 }
 
+export type MapEntrySortKey = 'raw_value' | 'canonical_bucket';
+
+/**
+ * Sorts entries by raw_value or by canonical_bucket ("mapped value"), both
+ * case-insensitive with raw_value as a tiebreaker. `key === null` returns a
+ * copy in the incoming order, so callers can fall back to
+ * splitMapEntriesByStatus's prevalence order.
+ */
+export function sortMapEntriesBy(
+	entries: ValueRangeTypeMapEntry[],
+	key: MapEntrySortKey | null
+): ValueRangeTypeMapEntry[] {
+	if (!key) return [...entries];
+	return [...entries].sort((a, b) => {
+		const av = (key === 'raw_value' ? a.raw_value : (a.canonical_bucket ?? '')).toLowerCase();
+		const bv = (key === 'raw_value' ? b.raw_value : (b.canonical_bucket ?? '')).toLowerCase();
+		return av.localeCompare(bv) || a.raw_value.localeCompare(b.raw_value);
+	});
+}
+
+/**
+ * Filters entries to those whose raw_value contains rawQuery and whose
+ * canonical_bucket contains mappedQuery (both case-insensitive substring
+ * matches; a blank query matches everything).
+ */
+export function filterMapEntries(
+	entries: ValueRangeTypeMapEntry[],
+	rawQuery: string,
+	mappedQuery: string
+): ValueRangeTypeMapEntry[] {
+	const raw = rawQuery.trim().toLowerCase();
+	const mapped = mappedQuery.trim().toLowerCase();
+	return entries.filter(
+		(e) =>
+			(!raw || e.raw_value.toLowerCase().includes(raw)) &&
+			(!mapped || (e.canonical_bucket ?? '').toLowerCase().includes(mapped))
+	);
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, { credentials: 'same-origin', ...init });
 	const text = await res.text();

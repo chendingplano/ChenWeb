@@ -581,7 +581,6 @@ func TestMentionsAsCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 			UnitHint:          "ms",
 			ValueHint:         "200",
 			ChunkIndex:        1,
-			ChunkLines:        []BlockLine{{Flag: "o", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
 			HasNormalEvidence: false,
 		},
 	}
@@ -598,7 +597,6 @@ func TestMentionsAsCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 		UnitHint:          "ms",
 		ValueHint:         "200",
 		ChunkIndex:        2,
-		ChunkLines:        []BlockLine{{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
 		HasNormalEvidence: true,
 	})
 	merged := mentionsAsCandidates(withNormal)
@@ -779,6 +777,7 @@ func TestFinalizeChunkBatch_WipeModeDeletesThenSaves(t *testing.T) {
 	p.batchRecordID = 173
 	p.batchForceClear = true
 	p.ObjectStore = objectStore
+	p.batchChunks = metricsBlocksToChunks([]Block{makeMetricsBlock(0, 2)})
 	p.batchMentions = []metricCandidateMention{{
 		MetricNameHint:    "Latency",
 		SourceLineSpans:   []string{"2"},
@@ -816,8 +815,9 @@ func TestEnrichMetricCandidatesKeepsSuccessfulBatchesWhenOneFails(t *testing.T) 
 		{CandidateID: "c1", ChunkIndex: 0, MetricNameHint: "Throughput"},
 		{CandidateID: "c2", ChunkIndex: 1, MetricNameHint: "Latency"},
 	}
+	chunks := metricsBlocksToChunks([]Block{makeMetricsBlock(0, 1), makeMetricsBlock(1, 2)})
 
-	metrics, _, err := p.enrichMetricCandidates(context.Background(), 416, candidates, "")
+	metrics, _, err := p.enrichMetricCandidates(context.Background(), 416, candidates, chunks, "")
 	if err == nil || !strings.Contains(err.Error(), "second enrichment timed out") {
 		t.Fatalf("enrichMetricCandidates error=%v, want the batch failure alongside partial results", err)
 	}
@@ -861,6 +861,7 @@ func TestFinalizeChunkBatch_MergeMode_UnchangedExistingNotWritten(t *testing.T) 
 	p.batchRecordID = 173
 	p.batchForceClear = false
 	p.batchExistingMetrics = metricsStore.existingMetrics
+	p.batchChunks = metricsBlocksToChunks([]Block{makeMetricsBlock(0, 2)})
 	p.batchMentions = []metricCandidateMention{{
 		MetricNameHint:    "Latency",
 		SourceLineSpans:   []string{"2"},
@@ -895,6 +896,7 @@ func TestFinalizeChunkBatch_MergeMode_NewMetricUpserted(t *testing.T) {
 	p.batchRecordID = 173
 	p.batchForceClear = false
 	p.batchExistingMetrics = metricsStore.existingMetrics
+	p.batchChunks = metricsBlocksToChunks([]Block{makeMetricsBlock(0, 50)})
 	p.batchMentions = []metricCandidateMention{{
 		MetricNameHint:    "Throughput",
 		SourceLineSpans:   []string{"50"},
@@ -1302,9 +1304,6 @@ func TestBuildMetricRelationBatchPromptIncludesMetricCategorySchema(t *testing.T
 		{
 			CandidateID:    "metric_cand_1",
 			MetricNameHint: "Latency",
-			SupportLines: []BlockLine{
-				{Flag: "n", LineNumber: 2, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
-			},
 		},
 	})
 	if !strings.Contains(prompt, `"metric_categories"`) {

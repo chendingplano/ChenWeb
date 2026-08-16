@@ -4,9 +4,11 @@ import assert from 'node:assert/strict';
 import {
 	applyValueRangeTypeMapEntryToMetrics,
 	buildRangeTypeErrorsQuery,
+	filterMapEntries,
 	isInvalidMapEntry,
 	listMetricRangeTypeErrors,
 	listValueRangeTypeMapEntries,
+	sortMapEntriesBy,
 	splitMapEntriesByStatus,
 	upsertValueRangeTypeMapEntry,
 	type ValueRangeTypeMapEntry
@@ -162,6 +164,79 @@ test('splitMapEntriesByStatus breaks occurrence-count ties alphabetically', () =
 		splitMapEntriesByStatus(entries).approved.map((e) => e.raw_value),
 		['alpha', 'zulu']
 	);
+});
+
+test('sortMapEntriesBy sorts case-insensitively by raw_value', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'Zulu', canonical_bucket: 'exact', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'alpha', canonical_bucket: 'range', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'Mike', canonical_bucket: 'lower_bound', status: 'approved', occurrence_count: 1 }
+	];
+	assert.deepEqual(
+		sortMapEntriesBy(entries, 'raw_value').map((e) => e.raw_value),
+		['alpha', 'Mike', 'Zulu']
+	);
+});
+
+test('sortMapEntriesBy sorts case-insensitively by canonical_bucket, treating missing buckets as empty', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'a', canonical_bucket: 'Upper_bound', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'b', status: 'proposed', occurrence_count: 1 },
+		{ raw_value: 'c', canonical_bucket: 'exact', status: 'approved', occurrence_count: 1 }
+	];
+	assert.deepEqual(
+		sortMapEntriesBy(entries, 'canonical_bucket').map((e) => e.raw_value),
+		['b', 'c', 'a']
+	);
+});
+
+test('sortMapEntriesBy breaks ties alphabetically by raw_value', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'zulu', canonical_bucket: 'exact', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'alpha', canonical_bucket: 'exact', status: 'approved', occurrence_count: 1 }
+	];
+	assert.deepEqual(
+		sortMapEntriesBy(entries, 'canonical_bucket').map((e) => e.raw_value),
+		['alpha', 'zulu']
+	);
+});
+
+test('sortMapEntriesBy with a null key returns a copy in the incoming order', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'zulu', canonical_bucket: 'exact', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'alpha', canonical_bucket: 'exact', status: 'approved', occurrence_count: 1 }
+	];
+	const sorted = sortMapEntriesBy(entries, null);
+	assert.deepEqual(sorted.map((e) => e.raw_value), ['zulu', 'alpha']);
+	assert.notEqual(sorted, entries);
+});
+
+test('filterMapEntries matches raw_value and canonical_bucket independently, case-insensitively', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'threshold_min', canonical_bucket: 'lower_bound', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'threshold_max', canonical_bucket: 'upper_bound', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'exact_value', status: 'proposed', occurrence_count: 1 }
+	];
+	assert.deepEqual(
+		filterMapEntries(entries, 'THRESHOLD', '').map((e) => e.raw_value),
+		['threshold_min', 'threshold_max']
+	);
+	assert.deepEqual(
+		filterMapEntries(entries, '', 'lower').map((e) => e.raw_value),
+		['threshold_min']
+	);
+	assert.deepEqual(
+		filterMapEntries(entries, 'threshold', 'upper').map((e) => e.raw_value),
+		['threshold_max']
+	);
+});
+
+test('filterMapEntries returns everything when both queries are blank', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'a', status: 'approved', occurrence_count: 1 },
+		{ raw_value: 'b', status: 'approved', occurrence_count: 1 }
+	];
+	assert.deepEqual(filterMapEntries(entries, '  ', '  ').map((e) => e.raw_value), ['a', 'b']);
 });
 
 test('applyValueRangeTypeMapEntryToMetrics POSTs the raw_value and returns the applied count', async () => {

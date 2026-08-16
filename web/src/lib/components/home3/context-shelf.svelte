@@ -25,7 +25,10 @@
 	import {
 		isInvalidMapEntry,
 		splitMapEntriesByStatus,
-		CANONICAL_BUCKET_OPTIONS
+		sortMapEntriesBy,
+		filterMapEntries,
+		CANONICAL_BUCKET_OPTIONS,
+		type MapEntrySortKey
 	} from '$lib/components/home3/resolve-metric-range-types-client.js';
 
 	type ActiveSelection = {
@@ -95,9 +98,22 @@
 	let addEntryError    = $state('');
 	let addEntryResult   = $state('');
 
+	// Sort/search apply on top of the pending/approved split, shared across both
+	// tabs so switching tabs doesn't reset what the operator was looking for.
+	let mapSortKey     = $state<MapEntrySortKey | null>(null);
+	let mapSearchRaw   = $state('');
+	let mapSearchMapped = $state('');
+
 	let splitMapEntries  = $derived(splitMapEntriesByStatus(rangeTypeMapShelf.entries));
 	let visibleMapEntries = $derived(
-		mapTab === 'pending' ? splitMapEntries.pending : splitMapEntries.approved
+		sortMapEntriesBy(
+			filterMapEntries(
+				mapTab === 'pending' ? splitMapEntries.pending : splitMapEntries.approved,
+				mapSearchRaw,
+				mapSearchMapped
+			),
+			mapSortKey
+		)
 	);
 
 	// Seed drafts for newly-seen entries only; never clobber an in-progress edit.
@@ -298,6 +314,78 @@
 				{/each}
 			</datalist>
 
+			<div class="rounded-lg p-2.5" style="background:{surface2}; border:1px solid {borderColor};">
+				<div class="text-[11px] font-semibold mb-1.5" style="color:{textMuted};">Add New Entry</div>
+				<div class="flex flex-col gap-1.5">
+					<input
+						type="text"
+						placeholder="raw_value"
+						bind:value={newEntryRawValue}
+						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+							border-radius:5px; padding:5px 8px; font-size:12px;"
+					/>
+					<input
+						type="text"
+						list="rmrt-shelf-canonical-bucket-options"
+						placeholder="canonical_bucket"
+						bind:value={newEntryBucket}
+						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+							border-radius:5px; padding:5px 8px; font-size:12px;"
+					/>
+					<button
+						onclick={addNewMapEntry}
+						disabled={addingEntry}
+						class="flex items-center justify-center gap-1.5 cursor-pointer"
+						style="padding:6px 10px; border-radius:6px; border:none; background:{accent}; color:white;
+							font-size:12px; font-weight:500; opacity:{addingEntry ? 0.6 : 1};"
+					>
+						<PlusIcon class="w-3.5 h-3.5" />
+						{addingEntry ? 'Adding…' : 'Add'}
+					</button>
+					{#if addEntryError}
+						<span class="text-[11px]" style="color:#F87171;">{addEntryError}</span>
+					{:else if addEntryResult}
+						<span class="text-[11px]" style="color:#34D399;">{addEntryResult}</span>
+					{/if}
+				</div>
+			</div>
+
+			<div class="flex items-center gap-1.5">
+				<span class="text-[10px] font-semibold uppercase flex-shrink-0" style="color:{textMuted};">Sort:</span>
+				{#each [
+					{ id: 'raw_value' as const, label: 'Sort by Raw Values' },
+					{ id: 'canonical_bucket' as const, label: 'Sort by Mapped Values' }
+				] as opt (opt.id)}
+					<button
+						onclick={() => (mapSortKey = mapSortKey === opt.id ? null : opt.id)}
+						class="cursor-pointer whitespace-nowrap"
+						style="padding:3px 8px; border-radius:5px; font-size:10.5px; font-weight:500;
+							border:1px solid {mapSortKey === opt.id ? accent : borderColor};
+							background:{mapSortKey === opt.id ? accent + '20' : 'transparent'};
+							color:{mapSortKey === opt.id ? accent : textMuted};"
+					>
+						{opt.label}
+					</button>
+				{/each}
+			</div>
+
+			<div class="flex flex-col gap-1.5">
+				<input
+					type="text"
+					placeholder="Search Raw Values"
+					bind:value={mapSearchRaw}
+					style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+						border-radius:5px; padding:5px 8px; font-size:12px;"
+				/>
+				<input
+					type="text"
+					placeholder="Search Mapped Values"
+					bind:value={mapSearchMapped}
+					style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+						border-radius:5px; padding:5px 8px; font-size:12px;"
+				/>
+			</div>
+
 			<div class="space-y-2">
 				{#if visibleMapEntries.length === 0 && !rangeTypeMapShelf.loading}
 					<div class="text-xs" style="color:{textMuted};">
@@ -363,42 +451,6 @@
 						{/if}
 					</div>
 				{/each}
-			</div>
-
-			<div class="rounded-lg p-2.5" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="text-[11px] font-semibold mb-1.5" style="color:{textMuted};">Add New Entry</div>
-				<div class="flex flex-col gap-1.5">
-					<input
-						type="text"
-						placeholder="raw_value"
-						bind:value={newEntryRawValue}
-						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
-							border-radius:5px; padding:5px 8px; font-size:12px;"
-					/>
-					<input
-						type="text"
-						list="rmrt-shelf-canonical-bucket-options"
-						placeholder="canonical_bucket"
-						bind:value={newEntryBucket}
-						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
-							border-radius:5px; padding:5px 8px; font-size:12px;"
-					/>
-					<button
-						onclick={addNewMapEntry}
-						disabled={addingEntry}
-						class="flex items-center justify-center gap-1.5 cursor-pointer"
-						style="padding:6px 10px; border-radius:6px; border:none; background:{accent}; color:white;
-							font-size:12px; font-weight:500; opacity:{addingEntry ? 0.6 : 1};"
-					>
-						<PlusIcon class="w-3.5 h-3.5" />
-						{addingEntry ? 'Adding…' : 'Add'}
-					</button>
-					{#if addEntryError}
-						<span class="text-[11px]" style="color:#F87171;">{addEntryError}</span>
-					{:else if addEntryResult}
-						<span class="text-[11px]" style="color:#34D399;">{addEntryResult}</span>
-					{/if}
-				</div>
 			</div>
 
 		{:else if sectionId === 'dashboard' || !activeMenu}

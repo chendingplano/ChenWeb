@@ -144,3 +144,31 @@
 - [x] 9.8 Keep the approve confirmation readable after the tab split: a
       tab-independent notice in the Map Block, since approving moves the entry (and
       its per-entry message) out of the tab the operator is looking at.
+
+## 10. Map Block UI polish (follow-up): reorder, sort, and search
+
+- [x] 10.1 In `resolve-metric-range-types-client.ts`, add a `MapEntrySortKey` type
+      (`'raw_value' | 'canonical_bucket'`) and two pure helpers:
+      `sortMapEntriesBy(entries, key: MapEntrySortKey | null)` (case-insensitive sort
+      on `raw_value` or `canonical_bucket`, `raw_value` as tiebreak; `key === null`
+      returns a copy in the incoming order, so callers can fall back to
+      `splitMapEntriesByStatus`'s prevalence order) and
+      `filterMapEntries(entries, rawQuery, mappedQuery)` (case-insensitive substring
+      match against `raw_value` and `canonical_bucket` respectively; a blank query
+      matches everything).
+- [x] 10.2 Unit tests for both helpers in `resolve-metric-range-types-client.test.ts`,
+      matching the existing pure-helper test style.
+- [x] 10.3 In `context-shelf.svelte`: add `mapSortKey`, `mapSearchRaw`,
+      `mapSearchMapped` state; update the `visibleMapEntries` derived to filter then
+      sort on top of the existing per-tab (`pending`/`approved`) split.
+- [x] 10.4 In `context-shelf.svelte`: move the "Add New Entry" form from below the
+      entries list to above it (still one shared form regardless of which tab is
+      active, per current behavior).
+- [x] 10.5 In `context-shelf.svelte`: add "Sort by Raw Values" / "Sort by Mapped
+      Values" buttons and "Search Raw Values" / "Search Mapped Values" text inputs
+      above the entries list, visible for both tabs; highlight whichever sort button
+      is active.
+- [x] 10.6 Verification:
+      `bun test src/lib/components/home3/resolve-metric-range-types-client.test.ts`,
+      `bun run check`, manual walkthrough with `mise dev` (switch tabs, sort each way,
+      search each field, add a new entry from the relocated form).
