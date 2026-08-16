@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+	applyValueRangeTypeMapEntryToMetrics,
 	buildRangeTypeErrorsQuery,
 	isInvalidMapEntry,
 	listMetricRangeTypeErrors,
 	listValueRangeTypeMapEntries,
+	splitMapEntriesByStatus,
 	upsertValueRangeTypeMapEntry,
 	type ValueRangeTypeMapEntry
 } from './resolve-metric-range-types-client.js';
@@ -131,4 +133,70 @@ test('isInvalidMapEntry flags anything that is not approved', () => {
 	assert.equal(isInvalidMapEntry({ raw_value: 'x', status: 'proposed', occurrence_count: 0 }), true);
 	assert.equal(isInvalidMapEntry({ raw_value: 'x', status: 'ambiguous', occurrence_count: 0 }), true);
 	assert.equal(isInvalidMapEntry({ raw_value: 'x', status: 'approved', occurrence_count: 0 }), false);
+});
+
+test('splitMapEntriesByStatus separates the two tabs and sorts each by occurrence count', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'min', canonical_bucket: 'lower_bound', status: 'approved', occurrence_count: 17 },
+		{ raw_value: 'threshold', status: 'ambiguous', occurrence_count: 2 },
+		{ raw_value: 'exact', canonical_bucket: 'exact', status: 'approved', occurrence_count: 40 },
+		{ raw_value: 'threshold_min', status: 'proposed', occurrence_count: 9 }
+	];
+	const { pending, approved } = splitMapEntriesByStatus(entries);
+	assert.deepEqual(
+		pending.map((e) => e.raw_value),
+		['threshold_min', 'threshold']
+	);
+	assert.deepEqual(
+		approved.map((e) => e.raw_value),
+		['exact', 'min']
+	);
+});
+
+test('splitMapEntriesByStatus breaks occurrence-count ties alphabetically', () => {
+	const entries: ValueRangeTypeMapEntry[] = [
+		{ raw_value: 'zulu', canonical_bucket: 'exact', status: 'approved', occurrence_count: 5 },
+		{ raw_value: 'alpha', canonical_bucket: 'exact', status: 'approved', occurrence_count: 5 }
+	];
+	assert.deepEqual(
+		splitMapEntriesByStatus(entries).approved.map((e) => e.raw_value),
+		['alpha', 'zulu']
+	);
+});
+
+test('applyValueRangeTypeMapEntryToMetrics POSTs the raw_value and returns the applied count', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			status: true,
+			entry: { raw_value: 'min', canonical_bucket: 'lower_bound', status: 'approved', occurrence_count: 17 },
+			applied_count: 12
+		})
+	);
+	try {
+		const res = await applyValueRangeTypeMapEntryToMetrics('min');
+		assert.equal(mock.calls.length, 1);
+		assert.equal(mock.calls[0].input, '/api/v1/kb/metric-value-range-type-map/apply');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.deepEqual(JSON.parse(String(mock.calls[0].init?.body)), { raw_value: 'min' });
+		assert.equal(res.applied_count, 12);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('applyValueRangeTypeMapEntryToMetrics surfaces the refusal for a non-approved entry', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json(
+			{ status: false, error_msg: 'only approved entries can be applied (CWB_KB_RTE_314)' },
+			{ status: 409 }
+		)
+	);
+	try {
+		await assert.rejects(
+			() => applyValueRangeTypeMapEntryToMetrics('threshold_min'),
+			/only approved entries can be applied/
+		);
+	} finally {
+		mock.restore();
+	}
 });

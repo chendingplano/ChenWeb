@@ -60,6 +60,24 @@ export function isInvalidMapEntry(entry: ValueRangeTypeMapEntry): boolean {
 	return entry.status !== 'approved';
 }
 
+/**
+ * Splits the map into the two tabs the Map Block renders: `pending` (status
+ * != 'approved' -- still needs triage) and `approved`. Both lists get the same
+ * order, most-seen raw values first then alphabetical, so a tab switch doesn't
+ * reshuffle what the operator was reading.
+ */
+export function splitMapEntriesByStatus(entries: ValueRangeTypeMapEntry[]): {
+	pending: ValueRangeTypeMapEntry[];
+	approved: ValueRangeTypeMapEntry[];
+} {
+	const byPrevalence = (a: ValueRangeTypeMapEntry, b: ValueRangeTypeMapEntry) =>
+		b.occurrence_count - a.occurrence_count || a.raw_value.localeCompare(b.raw_value);
+	return {
+		pending: entries.filter(isInvalidMapEntry).sort(byPrevalence),
+		approved: entries.filter((e) => !isInvalidMapEntry(e)).sort(byPrevalence)
+	};
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, { credentials: 'same-origin', ...init });
 	const text = await res.text();
@@ -120,5 +138,25 @@ export function upsertValueRangeTypeMapEntry(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(payload)
+	});
+}
+
+/**
+ * Applies an already-approved entry to the metric rows themselves: every
+ * kb.metrics row whose value_range_type matches raw_value gets that column
+ * rewritten to the entry's canonical_bucket and its value_range_type_error
+ * cleared. Distinct from upsertValueRangeTypeMapEntry, which governs the
+ * mapping and only clears the error flag -- this one edits the classification.
+ * Rejected server-side (409) unless the entry is 'approved' with a
+ * canonical_bucket. applied_count reports how many rows actually changed, so a
+ * repeat click on an already-applied entry reports 0.
+ */
+export function applyValueRangeTypeMapEntryToMetrics(
+	rawValue: string
+): Promise<{ status: boolean; entry: ValueRangeTypeMapEntry; applied_count: number }> {
+	return req('/api/v1/kb/metric-value-range-type-map/apply', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ raw_value: rawValue })
 	});
 }

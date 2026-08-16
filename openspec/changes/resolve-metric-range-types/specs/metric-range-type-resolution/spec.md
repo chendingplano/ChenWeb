@@ -69,12 +69,26 @@ existing Metrics page uses (`GET /kb/raw-lines`).
 ### Requirement: Value Range Type Map Listing
 The page SHALL provide a Map Block listing every `kb.metric_value_range_type_map`
 entry (`raw_value`, `canonical_bucket`, `status`), visually distinguishing entries
-whose `status` is not `approved` as invalid, sorted with invalid entries first.
+whose `status` is not `approved` as invalid. The Map Block SHALL separate the two
+populations into two tab-switched lists — one holding only the non-`approved`
+entries, one holding only the `approved` entries — each labelled with its entry
+count and each ordered by `occurrence_count` descending, then `raw_value`
+ascending. The non-`approved` tab SHALL be the one shown first.
 
 #### Scenario: Invalid entries are distinguishable
 - **WHEN** the Map Block loads
-- **THEN** every entry with `status != 'approved'` is visually flagged as invalid and
-  listed before entries with `status = 'approved'`
+- **THEN** the non-`approved` tab is selected, shows only entries with
+  `status != 'approved'` visually flagged as invalid, and no `approved` entry
+  appears in it
+
+#### Scenario: Switching to the approved tab
+- **WHEN** a user selects the approved tab
+- **THEN** only entries with `status = 'approved'` are listed, and no non-`approved`
+  entry appears in it
+
+#### Scenario: Empty tab
+- **WHEN** a tab has no entries (e.g. every raw value has been triaged)
+- **THEN** that tab reports it is empty rather than showing the other tab's entries
 
 ### Requirement: Canonical Bucket Editor
 Each Map Block entry SHALL expose its `canonical_bucket` as an editable combobox
@@ -91,7 +105,7 @@ carries no database-level enum constraint.
 The Map Block SHALL let a user add a new `kb.metric_value_range_type_map` entry by
 supplying a `raw_value` and a `canonical_bucket`. Submitting SHALL create the entry
 with `status = 'approved'` if it does not already exist, or update it in place
-(same behavior as applying a correction, per the Apply requirement below) if it does.
+(same behavior as saving a correction, per the approve requirement below) if it does.
 
 #### Scenario: Adding a brand-new raw value
 - **WHEN** a user enters a `raw_value` that has no existing
@@ -99,8 +113,8 @@ with `status = 'approved'` if it does not already exist, or update it in place
 - **THEN** a new row is created with that `raw_value`, `canonical_bucket`, and
   `status = 'approved'`
 
-### Requirement: Apply Correction with Cascade
-Setting a `canonical_bucket` on a Map Block entry and applying it SHALL persist the
+### Requirement: Approve Mapping with Error Cascade
+Setting a `canonical_bucket` on a Map Block entry and saving it SHALL persist the
 entry with `status = 'approved'`, SHALL invalidate the in-process governed-mapping
 cache so subsequent lookups see the correction immediately, and SHALL clear
 `value_range_type_error` on every `kb.metrics` row whose normalized `value_range_type`
@@ -110,7 +124,7 @@ user.
 
 #### Scenario: Applying a correction to an invalid entry
 - **WHEN** a user sets `canonical_bucket = 'lower_bound'` on an entry with
-  `raw_value = 'threshold_min'` and `status = 'proposed'`, and clicks Apply
+  `raw_value = 'threshold_min'` and `status = 'proposed'`, and saves it
 - **THEN** the entry is saved with `canonical_bucket = 'lower_bound'` and
   `status = 'approved'`, every `kb.metrics` row with `value_range_type_error` set and
   `value_range_type` normalizing to `threshold_min` has its
@@ -121,3 +135,32 @@ user.
 - **WHEN** an entry with `raw_value = 'threshold_min'` is corrected
 - **THEN** `kb.metrics` rows with a different (normalized) `value_range_type`, or with
   `value_range_type_error` already `NULL`, are left unchanged
+
+### Requirement: Apply Approved Mapping to Metrics
+Each `approved` Map Block entry SHALL offer an "Apply" action that rewrites the
+metric rows themselves: every `kb.metrics` row whose normalized `value_range_type`
+equals the entry's `raw_value` SHALL have `value_range_type` set to that entry's
+`canonical_bucket` and `value_range_type_error` set to `NULL`. The number of rows
+actually changed SHALL be reported back to the user. The action SHALL be rejected
+for an entry that is not `approved` or that has no `canonical_bucket`, since a
+non-approved bucket is a machine guess rather than a human decision and must never
+be written into `kb.metrics`.
+
+#### Scenario: Applying an approved entry
+- **WHEN** a user clicks Apply on an entry with `raw_value = 'threshold_min'`,
+  `canonical_bucket = 'lower_bound'`, and `status = 'approved'`
+- **THEN** every `kb.metrics` row whose `value_range_type` normalizes to
+  `threshold_min` has `value_range_type` set to `lower_bound` and
+  `value_range_type_error` set to `NULL`, and the user is shown how many rows were
+  updated
+
+#### Scenario: Re-applying an already-applied entry
+- **WHEN** a user clicks Apply a second time on the same entry, with no metric row
+  left to change
+- **THEN** no row is modified and the reported count is 0
+
+#### Scenario: Apply refused for a non-approved entry
+- **WHEN** an Apply is requested for an entry whose `status` is not `approved`, or
+  whose `canonical_bucket` is empty
+- **THEN** the request is rejected, no `kb.metrics` row is modified, and the reason
+  is shown to the user

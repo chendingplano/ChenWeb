@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -341,5 +342,103 @@ UPDATE kb.metrics
 
 	return c.JSON(http.StatusOK, upsertValueRangeTypeMapEntryResponse{
 		Status: true, Entry: entry, CorrectedCount: corrected,
+	})
+}
+
+type applyValueRangeTypeMapEntryRequest struct {
+	RawValue string `json:"raw_value"`
+}
+
+type applyValueRangeTypeMapEntryResponse struct {
+	Status       bool                      `json:"status"`
+	Entry        valueRangeTypeMapEntryDTO `json:"entry"`
+	AppliedCount int64                     `json:"applied_count"`
+}
+
+// ApplyValueRangeTypeMapEntry handles POST /api/v1/kb/metric-value-range-type-map/apply.
+// Where UpsertValueRangeTypeMapEntry only clears the error flag, this rewrites
+// the data: every kb.metrics row whose normalized value_range_type equals the
+// entry's raw_value gets value_range_type replaced by the entry's approved
+// canonical_bucket and value_range_type_error set to NULL. Only 'approved'
+// entries may be applied -- a 'proposed' row's bucket is a machine guess and is
+// never authoritative (see assertions.ValueRangeTypeMapper.Lookup), so applying
+// it would write an unreviewed classification into kb.metrics.
+func ApplyValueRangeTypeMapEntry(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_RTE_300")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	var req applyValueRangeTypeMapEntryRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid request body (CWB_KB_RTE_310)",
+		})
+	}
+
+	rawValue := assertions.NormalizeValueRangeTypeRaw(req.RawValue)
+	if rawValue == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "raw_value is required (CWB_KB_RTE_311)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+
+	entry, err := fetchValueRangeTypeMapEntry(db, rawValue)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "no mapping entry for that raw_value (CWB_KB_RTE_312)",
+		})
+	}
+	if err != nil {
+		logger.Error("load kb.metric_value_range_type_map entry failed", "raw_value", rawValue, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to load mapping entry (CWB_KB_RTE_313)",
+		})
+	}
+	if entry.Status != "approved" {
+		return c.JSON(http.StatusConflict, errorResponse{
+			Status: false, ErrorMsg: "only approved entries can be applied (CWB_KB_RTE_314)",
+		})
+	}
+	bucket := ""
+	if entry.CanonicalBucket != nil {
+		bucket = strings.TrimSpace(*entry.CanonicalBucket)
+	}
+	if bucket == "" {
+		return c.JSON(http.StatusConflict, errorResponse{
+			Status: false, ErrorMsg: "entry has no canonical_bucket to apply (CWB_KB_RTE_315)",
+		})
+	}
+
+	// Same hand-ported normalization predicate as the cascade in
+	// UpsertValueRangeTypeMapEntry (design D2) -- keep all three copies in sync
+	// with assertions.normalizeValueRangeTypeRaw. The trailing IS DISTINCT
+	// FROM / IS NOT NULL guard keeps applied_count honest: a second Apply on an
+	// already-applied entry reports 0 rather than re-counting untouched rows.
+	const applyQuery = `
+UPDATE kb.metrics
+   SET value_range_type = $2,
+       value_range_type_error = NULL
+ WHERE lower(regexp_replace(trim(value_range_type), '[- ]', '_', 'g')) = $1
+   AND (value_range_type IS DISTINCT FROM $2 OR value_range_type_error IS NOT NULL)`
+	result, err := db.Exec(applyQuery, rawValue, bucket)
+	if err != nil {
+		logger.Error("apply canonical bucket to kb.metrics failed",
+			"raw_value", rawValue, "canonical_bucket", bucket, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to apply mapping to metrics (CWB_KB_RTE_320)",
+		})
+	}
+	applied, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("rows affected on apply failed", "err", err)
+		applied = 0
+	}
+	logger.Info("applied value range type mapping to kb.metrics",
+		"raw_value", rawValue, "canonical_bucket", bucket, "applied_count", applied)
+
+	return c.JSON(http.StatusOK, applyValueRangeTypeMapEntryResponse{
+		Status: true, Entry: entry, AppliedCount: applied,
 	})
 }

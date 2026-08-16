@@ -112,3 +112,32 @@
 - [x] 8.1 Append a short "Resolved" note to ADR `2026081401` §7 in
       `KnowledgeStore/doc-repo/adrs/202608/2026081401-adr-governed-metric-vocabulary-and-phase-d-failure-reporting.md`
       pointing to this page as closing the deferred admin-UI open question.
+
+## 9. Map Block tabs + Apply-to-metrics (follow-up)
+
+- [x] 9.1 In `metric_range_type_errors_handler.go`, add `ApplyValueRangeTypeMapEntry`
+      (`POST /kb/metric-value-range-type-map/apply`): body `{raw_value}`; normalize via
+      `assertions.NormalizeValueRangeTypeRaw` (400 if empty); load the entry (404 if
+      absent); refuse with 409 unless `status = 'approved'` with a non-empty
+      `canonical_bucket`; then `UPDATE kb.metrics SET value_range_type = $2,
+      value_range_type_error = NULL WHERE lower(regexp_replace(trim(value_range_type),
+      '[- ]', '_', 'g')) = $1 AND (value_range_type IS DISTINCT FROM $2 OR
+      value_range_type_error IS NOT NULL)`; respond `{entry, applied_count}`.
+- [x] 9.2 Register the route in `server/api/routes.go` next to the other two.
+- [x] 9.3 sqlmock tests: success (applied_count reported), 409 for a `proposed`
+      entry, 409 for an approved entry with a NULL `canonical_bucket`, 404 for an
+      unknown `raw_value`, 400 for a blank `raw_value`.
+- [x] 9.4 Client: `applyValueRangeTypeMapEntryToMetrics(rawValue)` plus the pure
+      `splitMapEntriesByStatus(entries)` helper that produces the two tab lists;
+      shelf-store wrapper `applyRangeTypeMapEntryToMetrics` that reloads the map and
+      refreshes the errored-metrics list.
+- [x] 9.5 Client tests: the split helper's partitioning/ordering, the apply call's
+      request shape and `applied_count`, and the 409 refusal surfacing.
+- [x] 9.6 `context-shelf.svelte`: replace the single sorted list with a
+      "Needs Triage (n)" / "Approved (n)" tab pair, and give each approved entry an
+      "Apply" button (separate from the existing approve/save check button) that shows
+      the updated-row count or the refusal.
+- [x] 9.7 Verification: `go build ./server/... && go vet ./server/api/kbhandler/`,
+      `go test ./server/api/kbhandler/ -run 'ValueRangeTypeMap|RangeTypeError'`,
+      `bun test src/lib/components/home3/resolve-metric-range-types-client.test.ts`,
+      `bun run check` (no new errors).

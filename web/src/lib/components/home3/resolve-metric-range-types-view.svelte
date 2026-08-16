@@ -1,21 +1,15 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import {
 		listMetricRangeTypeErrors,
-		listValueRangeTypeMapEntries,
-		upsertValueRangeTypeMapEntry,
 		isInvalidMapEntry,
-		CANONICAL_BUCKET_OPTIONS,
-		type MetricRangeTypeError,
-		type ValueRangeTypeMapEntry
+		type MetricRangeTypeError
 	} from './resolve-metric-range-types-client.js';
+	import { rangeTypeMapShelf, loadRangeTypeMapEntries } from './resolve-metric-range-types-shelf-store.svelte';
 	import { getKbInput, getRawLines, type KbInputRecord, type RawLine } from '$lib/services/kbService';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import CheckIcon from '@lucide/svelte/icons/check';
-	import PlusIcon from '@lucide/svelte/icons/plus';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
@@ -23,7 +17,6 @@
 	// --- Design tokens (matches db-consistency-view.svelte / resolve-ambiguous-objects-view.svelte) ---
 	let pageBg        = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let cardBg        = $derived(darkMode ? '#1F2333' : '#FFFFFF');
-	let surface2      = $derived(darkMode ? '#252A3A' : '#ECEEF2');
 	let borderColor   = $derived(darkMode ? '#2D3348' : '#E4E6EB');
 	let accent        = $derived(darkMode ? '#818CF8' : '#6366F1');
 	let accentTint    = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
@@ -31,9 +24,7 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted     = $derived(darkMode ? '#64748B' : '#9CA3AF');
 	let inputBg       = $derived(darkMode ? '#141824' : '#FFFFFF');
-	let colorWarn     = $derived(darkMode ? '#FBBF24' : '#D97706');
 	let colorError    = $derived(darkMode ? '#F87171' : '#DC2626');
-	let colorOk       = $derived(darkMode ? '#34D399' : '#059669');
 
 	// --- Left panel: search + results list ---
 	let rows        = $state<MetricRangeTypeError[]>([]);
@@ -126,6 +117,21 @@
 		return out;
 	}
 
+	// The row's source_line_spans verbatim (line-number spans like "90" /
+	// "98:99"), for the Information Block -- normalizeSpans above resolves the
+	// same field to pages for highlighting, but an operator triaging a bad
+	// value_range_type also wants the stored grounding as kb.metrics holds it.
+	let spansDisplay = $derived.by(() => {
+		const raw = selected?.source_line_spans;
+		if (!Array.isArray(raw)) return '';
+		return raw
+			.map((item) =>
+				typeof item === 'string' ? item.trim() : typeof item === 'number' ? String(item) : ''
+			)
+			.filter((s) => s !== '')
+			.join(', ');
+	});
+
 	let rawLineByKey = $derived.by(() => {
 		const map = new Map<string, RawLine>();
 		for (const ln of rawLines) map.set(`${ln.page_number}:${ln.line_number}`, ln);
@@ -190,6 +196,18 @@
 		selectedId = id;
 		const row = rows.find((r) => r.id === id);
 		if (!row) return;
+
+		if (currentInput?.id === row.input_record_id) {
+			// Source document already loaded -- just move the PDF display to the
+			// target page and repaint the highlight, without refetching or
+			// remounting PdfViewWindow (matches metric-mgmt-view.svelte's
+			// selectMetric, which avoids the same remount/reload trap).
+			const spans = normalizeSpans(row);
+			if (spans.length > 0) docPage = spans[0].page_number;
+			highlightSelectionVersion += 1;
+			return;
+		}
+
 		pdfLoading = true;
 		pdfError = '';
 		try {
@@ -200,7 +218,7 @@
 			currentInput = inputRes.record;
 			rawLines = linesRes.lines;
 			const spans = normalizeSpans(row);
-			if (spans.length > 0) docPage = spans[0].page_number;
+			docPage = spans.length > 0 ? spans[0].page_number : 1;
 			highlightSelectionVersion += 1;
 		} catch (e) {
 			pdfError = e instanceof Error ? e.message : String(e);
@@ -211,122 +229,47 @@
 		}
 	}
 
-	// --- Map Block: kb.metric_value_range_type_map governance ---
-	let mapEntries  = $state<ValueRangeTypeMapEntry[]>([]);
-	let mapLoading  = $state(false);
-	let mapError    = $state('');
-
-	let mapBucketDraft = $state<Record<string, string>>({});
-	let mapApplying     = $state<Record<string, boolean>>({});
-	let mapApplyResult  = $state<Record<string, string>>({});
-	let mapApplyError   = $state<Record<string, string>>({});
-
-	let newEntryRawValue = $state('');
-	let newEntryBucket   = $state('');
-	let addingEntry      = $state(false);
-	let addEntryError    = $state('');
-	let addEntryResult   = $state('');
-
+	// --- Map Block: kb.metric_value_range_type_map governance, rendered in the
+	// page-level context shelf (see resolve-metric-range-types-shelf-store) ---
 	let errorTypeOptions = $derived.by(() =>
-		[...new Set(mapEntries.filter(isInvalidMapEntry).map((e) => e.raw_value))].sort()
+		[...new Set(rangeTypeMapShelf.entries.filter(isInvalidMapEntry).map((e) => e.raw_value))].sort()
 	);
-
-	let sortedMapEntries = $derived.by(() =>
-		[...mapEntries].sort((a, b) => {
-			const aInvalid = isInvalidMapEntry(a) ? 0 : 1;
-			const bInvalid = isInvalidMapEntry(b) ? 0 : 1;
-			if (aInvalid !== bInvalid) return aInvalid - bInvalid;
-			return b.occurrence_count - a.occurrence_count;
-		})
-	);
-
-	async function loadMapEntries() {
-		mapLoading = true;
-		mapError = '';
-		try {
-			const res = await listValueRangeTypeMapEntries();
-			mapEntries = res.results;
-			const draft: Record<string, string> = {};
-			for (const e of mapEntries) draft[e.raw_value] = e.canonical_bucket ?? mapBucketDraft[e.raw_value] ?? '';
-			mapBucketDraft = draft;
-		} catch (e) {
-			mapError = e instanceof Error ? e.message : String(e);
-		} finally {
-			mapLoading = false;
-		}
-	}
-
-	async function applyMapEntry(rawValue: string) {
-		const bucket = (mapBucketDraft[rawValue] ?? '').trim();
-		if (!bucket) {
-			mapApplyError = { ...mapApplyError, [rawValue]: 'Select or enter a canonical bucket first.' };
-			return;
-		}
-		mapApplying = { ...mapApplying, [rawValue]: true };
-		mapApplyError = { ...mapApplyError, [rawValue]: '' };
-		mapApplyResult = { ...mapApplyResult, [rawValue]: '' };
-		try {
-			const res = await upsertValueRangeTypeMapEntry({ raw_value: rawValue, canonical_bucket: bucket });
-			mapApplyResult = {
-				...mapApplyResult,
-				[rawValue]: `Saved as approved. ${res.corrected_count} metric row${res.corrected_count === 1 ? '' : 's'} corrected.`
-			};
-			await loadMapEntries();
-			await loadList();
-		} catch (e) {
-			mapApplyError = { ...mapApplyError, [rawValue]: e instanceof Error ? e.message : String(e) };
-		} finally {
-			mapApplying = { ...mapApplying, [rawValue]: false };
-		}
-	}
-
-	async function addNewEntry() {
-		const rawValue = newEntryRawValue.trim();
-		const bucket = newEntryBucket.trim();
-		if (!rawValue || !bucket) {
-			addEntryError = 'raw_value and canonical_bucket are both required.';
-			return;
-		}
-		addingEntry = true;
-		addEntryError = '';
-		addEntryResult = '';
-		try {
-			const res = await upsertValueRangeTypeMapEntry({ raw_value: rawValue, canonical_bucket: bucket });
-			addEntryResult = `Added "${res.entry.raw_value}" as approved.`;
-			newEntryRawValue = '';
-			newEntryBucket = '';
-			await loadMapEntries();
-			await loadList();
-		} catch (e) {
-			addEntryError = e instanceof Error ? e.message : String(e);
-		} finally {
-			addingEntry = false;
-		}
-	}
 
 	onMount(() => {
 		loadList();
-		loadMapEntries();
+		rangeTypeMapShelf.active = true;
+		loadRangeTypeMapEntries();
+	});
+
+	onDestroy(() => {
+		rangeTypeMapShelf.active = false;
+		rangeTypeMapShelf.onCorrected = null;
+	});
+
+	$effect(() => {
+		rangeTypeMapShelf.onCorrected = () => loadList();
 	});
 </script>
 
-<div class="p-6" style="background:{pageBg}; min-height:100%;">
-	<div class="mb-5">
+<div class="p-6 flex flex-col" style="background:{pageBg}; height:100%; overflow:hidden;">
+	<div class="mb-5 flex-shrink-0">
 		<h1 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
 			Database Maintenance — Resolve Metric Range Types
 		</h1>
 		<p style="font-size:13px; color:{textSecondary};">
 			Triage kb.metrics rows whose value_range_type has no approved governed mapping, and correct
-			kb.metric_value_range_type_map entries. Applying a correction clears the error on every metric
-			row that shares the same raw value.
+			kb.metric_value_range_type_map entries (see the Value Range Type Map in the context panel on
+			the right). Approving a mapping clears the error on every metric row that shares the same raw
+			value; "Apply" on an approved entry additionally rewrites those rows' value_range_type to the
+			canonical bucket.
 		</p>
 	</div>
 
 	<!-- Left / Right split -->
-	<div class="flex gap-5 items-start" style="min-height:520px;">
+	<div class="flex-1 flex gap-5" style="min-height:0;">
 		<!-- Left panel: search + results -->
-		<div class="flex flex-col gap-4" style="width:380px; flex-shrink:0;">
-			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
+		<div class="flex flex-col gap-4" style="width:380px; flex-shrink:0; min-height:0;">
+			<div class="rounded-xl p-4 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 				<div class="flex flex-col gap-3">
 					<div class="flex flex-col gap-1">
 						<label for="rmrt-record-id" style="font-size:12px; font-weight:500; color:{textMuted};">
@@ -395,12 +338,12 @@
 			</div>
 
 			{#if listError}
-				<div class="rounded-xl p-3" style="background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.25); color:{colorError}; font-size:13px;">
+				<div class="rounded-xl p-3 flex-shrink-0" style="background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.25); color:{colorError}; font-size:13px;">
 					{listError}
 				</div>
 			{/if}
 
-			<div class="rounded-xl overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor}; max-height:640px; overflow-y:auto;">
+			<div class="rounded-xl flex-1" style="background:{cardBg}; border:1px solid {borderColor}; min-height:0; overflow-y:auto;">
 				{#if rows.length === 0 && !listLoading}
 					<div class="p-4" style="font-size:13px; color:{textMuted};">No errored metrics found.</div>
 				{/if}
@@ -423,12 +366,16 @@
 		</div>
 
 		<!-- Right panel: Information Block + PDF Display -->
-		<div class="flex-1 flex gap-4" style="min-width:0;">
-			<div class="rounded-xl p-4" style="width:360px; flex-shrink:0; background:{cardBg}; border:1px solid {borderColor};">
+		<div class="flex-1 flex gap-4" style="min-width:0; min-height:0;">
+			<div class="rounded-xl p-4 overflow-y-auto" style="width:360px; flex-shrink:0; min-height:0; background:{cardBg}; border:1px solid {borderColor};">
 				{#if !selected}
 					<div style="font-size:13px; color:{textMuted};">Select a metric on the left to see its details.</div>
 				{:else}
 					<div class="flex flex-col gap-3">
+						<div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Metric ID</div>
+							<div style="font-size:13px; color:{textPrimary}; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all;">{selected.metric_id || '—'}</div>
+						</div>
 						<div>
 							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Metric Name</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.metric_name || '—'}</div>
@@ -453,6 +400,10 @@
 							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Value Range Type</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.value_range_type || '—'}</div>
 						</div>
+						<div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Source Line Spans</div>
+							<div style="font-size:13px; color:{textPrimary}; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-word;">{spansDisplay || '—'}</div>
+						</div>
 						<div class="rounded-lg p-3" style="background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.25);">
 							<div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
 								<AlertTriangleIcon style="width:13px; height:13px; color:{colorError};" />
@@ -464,7 +415,14 @@
 				{/if}
 			</div>
 
-			<div class="flex-1 rounded-xl overflow-hidden" style="min-width:0; min-height:600px; background:{cardBg}; border:1px solid {borderColor};">
+			<!-- Must be a flex COLUMN: PdfViewWindow's .pvw-container relies on `flex:1`
+			     to inherit a definite height, which then flows down to
+			     .pdf-stage -> .pdf-layout(height:100%) -> .pdf-canvas-host(height:100%;
+			     overflow:auto). In a plain block parent that `flex:1` is inert, the host
+			     grows to fit every page, and scrollToPage()/scrollToFirstHighlight()
+			     become no-ops (host.scrollHeight === host.clientHeight). Matches
+			     metric-mgmt-view.svelte's .doc-frame-wrap. -->
+			<div class="flex-1 flex flex-col rounded-xl overflow-hidden" style="min-width:0; min-height:0; background:{cardBg}; border:1px solid {borderColor};">
 				{#if !selected}
 					<div class="p-4" style="font-size:13px; color:{textMuted};">PDF source will appear here once a metric is selected.</div>
 				{:else if pdfLoading}
@@ -492,126 +450,6 @@
 			</div>
 		</div>
 	</div>
-
-	<!-- Map Block: kb.metric_value_range_type_map governance -->
-	<div class="rounded-xl mt-5" style="background:{cardBg}; border:1px solid {borderColor}; overflow:hidden;">
-		<div class="flex items-center justify-between p-4" style="border-bottom:1px solid {borderColor};">
-			<div>
-				<div style="font-size:14px; font-weight:600; color:{textPrimary};">Value Range Type Map</div>
-				<div style="font-size:12px; color:{textSecondary};">
-					Entries with status other than "approved" are invalid and shown first.
-				</div>
-			</div>
-			<button
-				onclick={loadMapEntries}
-				disabled={mapLoading}
-				title="Refresh"
-				style="display:flex; align-items:center; justify-content:center; width:32px; height:32px;
-					border-radius:7px; border:none; cursor:pointer; background:{surface2}; color:{textSecondary};
-					opacity:{mapLoading ? 0.6 : 1};"
-			>
-				<RefreshCwIcon style="width:14px; height:14px;{mapLoading ? ' animation:spin 1s linear infinite;' : ''}" />
-			</button>
-		</div>
-
-		{#if mapError}
-			<div class="p-3" style="color:{colorError}; font-size:13px;">{mapError}</div>
-		{/if}
-
-		<datalist id="rmrt-canonical-bucket-options">
-			{#each CANONICAL_BUCKET_OPTIONS as opt}
-				<option value={opt}></option>
-			{/each}
-		</datalist>
-
-		<div
-			class="grid"
-			style="grid-template-columns: 1fr 220px 110px 1fr 90px; padding:8px 16px;
-				background:{surface2}; border-bottom:1px solid {borderColor};
-				font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;"
-		>
-			<span>raw_value</span>
-			<span>canonical_bucket</span>
-			<span>status</span>
-			<span>result</span>
-			<span></span>
-		</div>
-
-		{#each sortedMapEntries as entry (entry.raw_value)}
-			{@const invalid = isInvalidMapEntry(entry)}
-			<div
-				class="grid items-center"
-				style="grid-template-columns: 1fr 220px 110px 1fr 90px; padding:8px 16px; gap:8px;
-					border-bottom:1px solid {borderColor};
-					background:{invalid ? (darkMode ? 'rgba(251,191,36,0.05)' : 'rgba(217,119,6,0.04)') : 'transparent'};"
-			>
-				<span style="font-size:13px; color:{textPrimary}; word-break:break-word;">{entry.raw_value}</span>
-				<input
-					type="text"
-					list="rmrt-canonical-bucket-options"
-					bind:value={mapBucketDraft[entry.raw_value]}
-					placeholder="lower_bound, upper_bound, exact, range…"
-					style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary};
-						border-radius:6px; padding:5px 8px; font-size:12px;"
-				/>
-				<span style="font-size:12px; font-weight:600; color:{invalid ? colorWarn : colorOk};">
-					{entry.status}
-				</span>
-				<span style="font-size:12px; color:{mapApplyError[entry.raw_value] ? colorError : colorOk};">
-					{mapApplyError[entry.raw_value] || mapApplyResult[entry.raw_value] || ''}
-				</span>
-				<button
-					onclick={() => applyMapEntry(entry.raw_value)}
-					disabled={mapApplying[entry.raw_value]}
-					style="display:flex; align-items:center; justify-content:center; gap:4px;
-						padding:5px 10px; border-radius:6px; border:none; cursor:pointer;
-						font-size:12px; font-weight:500; background:{accent}; color:white;
-						opacity:{mapApplying[entry.raw_value] ? 0.6 : 1};"
-				>
-					<CheckIcon style="width:12px; height:12px;" />
-					{mapApplying[entry.raw_value] ? '…' : 'Apply'}
-				</button>
-			</div>
-		{/each}
-
-		<!-- Add Entry -->
-		<div class="p-4" style="border-top:1px solid {borderColor};">
-			<div style="font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:8px;">Add New Entry</div>
-			<div class="flex gap-2 items-center flex-wrap">
-				<input
-					type="text"
-					placeholder="raw_value"
-					bind:value={newEntryRawValue}
-					style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary};
-						border-radius:6px; padding:6px 10px; font-size:13px; width:220px;"
-				/>
-				<input
-					type="text"
-					list="rmrt-canonical-bucket-options"
-					placeholder="canonical_bucket"
-					bind:value={newEntryBucket}
-					style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary};
-						border-radius:6px; padding:6px 10px; font-size:13px; width:220px;"
-				/>
-				<button
-					onclick={addNewEntry}
-					disabled={addingEntry}
-					style="display:flex; align-items:center; gap:6px;
-						padding:6px 14px; border-radius:7px; border:none; cursor:pointer;
-						font-size:13px; font-weight:500; background:{accent}; color:white;
-						opacity:{addingEntry ? 0.6 : 1};"
-				>
-					<PlusIcon style="width:13px; height:13px;" />
-					{addingEntry ? 'Adding…' : 'Add'}
-				</button>
-				{#if addEntryError}
-					<span style="font-size:12px; color:{colorError};">{addEntryError}</span>
-				{:else if addEntryResult}
-					<span style="font-size:12px; color:{colorOk};">{addEntryResult}</span>
-				{/if}
-			</div>
-		</div>
-	</div>
 </div>
 
 <style>
@@ -620,9 +458,5 @@
 		background: rgba(200, 85, 61, 0.18);
 		border: 1px solid rgba(200, 85, 61, 0.9);
 		box-shadow: inset 0 0 0 1px rgba(255, 210, 179, 0.22);
-	}
-	@keyframes spin {
-		from { transform: rotate(0deg); }
-		to   { transform: rotate(360deg); }
 	}
 </style>

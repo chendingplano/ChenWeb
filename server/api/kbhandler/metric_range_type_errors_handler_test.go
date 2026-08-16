@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -317,5 +318,171 @@ func TestSQLNormalizePredicateAgreesWithGoNormalize(t *testing.T) {
 		if got != want {
 			t.Fatalf("sqlNormalizeEquivalent(%q) = %q, want %q (assertions.NormalizeValueRangeTypeRaw)", raw, got, want)
 		}
+	}
+}
+
+func newApplyValueRangeTypeMapContext(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/kb/metric-value-range-type-map/apply", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	return c, rec
+}
+
+// valueRangeTypeMapEntryFetchQuery is the single-entry lookup both
+// UpsertValueRangeTypeMapEntry (reload) and ApplyValueRangeTypeMapEntry
+// (pre-flight) issue via fetchValueRangeTypeMapEntry.
+var valueRangeTypeMapEntryFetchQuery = regexp.QuoteMeta(`SELECT
+    raw_value, canonical_bucket, status, occurrence_count, first_seen_record_id, last_seen_record_id, note,
+    COALESCE(to_char(create_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS create_time, create_by,
+    COALESCE(to_char(modify_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS modify_time, modify_by FROM kb.metric_value_range_type_map WHERE raw_value = $1`)
+
+func valueRangeTypeMapEntryRow(rawValue string, bucket any, status string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"raw_value", "canonical_bucket", "status", "occurrence_count", "first_seen_record_id", "last_seen_record_id",
+		"note", "create_time", "create_by", "modify_time", "modify_by",
+	}).AddRow(rawValue, bucket, status, int64(9), int64(101), int64(244), nil,
+		"2026-08-01T00:00:00+00:00", nil, "2026-08-15T00:00:00+00:00", nil)
+}
+
+// TestApplyValueRangeTypeMapEntrySuccess locks in the Apply action: an
+// approved entry rewrites value_range_type to its canonical_bucket on every
+// matching kb.metrics row and clears the error, reporting the row count.
+func TestApplyValueRangeTypeMapEntrySuccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(valueRangeTypeMapEntryFetchQuery).
+		WithArgs("threshold_min").
+		WillReturnRows(valueRangeTypeMapEntryRow("threshold_min", "lower_bound", "approved"))
+
+	applyQuery := regexp.QuoteMeta(`
+UPDATE kb.metrics
+   SET value_range_type = $2,
+       value_range_type_error = NULL
+ WHERE lower(regexp_replace(trim(value_range_type), '[- ]', '_', 'g')) = $1
+   AND (value_range_type IS DISTINCT FROM $2 OR value_range_type_error IS NOT NULL)`)
+	mock.ExpectExec(applyQuery).
+		WithArgs("threshold_min", "lower_bound").
+		WillReturnResult(sqlmock.NewResult(0, 7))
+
+	c, rec := newApplyValueRangeTypeMapContext(t, `{"raw_value":"Threshold-Min"}`)
+	if err := ApplyValueRangeTypeMapEntry(c); err != nil {
+		t.Fatalf("ApplyValueRangeTypeMapEntry returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"applied_count":7`) {
+		t.Fatalf("expected applied_count=7 in body, got %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+// TestApplyValueRangeTypeMapEntryNotApproved guards the core rule: a
+// 'proposed' entry's bucket is a machine guess, so Apply must refuse to write
+// it into kb.metrics.
+func TestApplyValueRangeTypeMapEntryNotApproved(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(valueRangeTypeMapEntryFetchQuery).
+		WithArgs("threshold_min").
+		WillReturnRows(valueRangeTypeMapEntryRow("threshold_min", "lower_bound", "proposed"))
+
+	c, rec := newApplyValueRangeTypeMapContext(t, `{"raw_value":"threshold_min"}`)
+	if err := ApplyValueRangeTypeMapEntry(c); err != nil {
+		t.Fatalf("ApplyValueRangeTypeMapEntry returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+// TestApplyValueRangeTypeMapEntryApprovedWithoutBucket covers the approved-but-
+// NULL-canonical_bucket row: there is nothing to write, so Apply must refuse
+// rather than blank out value_range_type.
+func TestApplyValueRangeTypeMapEntryApprovedWithoutBucket(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(valueRangeTypeMapEntryFetchQuery).
+		WithArgs("threshold_min").
+		WillReturnRows(valueRangeTypeMapEntryRow("threshold_min", nil, "approved"))
+
+	c, rec := newApplyValueRangeTypeMapContext(t, `{"raw_value":"threshold_min"}`)
+	if err := ApplyValueRangeTypeMapEntry(c); err != nil {
+		t.Fatalf("ApplyValueRangeTypeMapEntry returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestApplyValueRangeTypeMapEntryUnknownRawValue(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(valueRangeTypeMapEntryFetchQuery).
+		WithArgs("never_seen").
+		WillReturnError(sql.ErrNoRows)
+
+	c, rec := newApplyValueRangeTypeMapContext(t, `{"raw_value":"never_seen"}`)
+	if err := ApplyValueRangeTypeMapEntry(c); err != nil {
+		t.Fatalf("ApplyValueRangeTypeMapEntry returned error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestApplyValueRangeTypeMapEntryMissingRawValue(t *testing.T) {
+	c, rec := newApplyValueRangeTypeMapContext(t, `{"raw_value":"  "}`)
+	if err := ApplyValueRangeTypeMapEntry(c); err != nil {
+		t.Fatalf("ApplyValueRangeTypeMapEntry returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }

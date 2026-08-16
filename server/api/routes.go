@@ -533,6 +533,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/metrics/range-type-errors", kbhandler.ListMetricRangeTypeErrors)
 	apiGroup.GET("/kb/metric-value-range-type-map", kbhandler.ListValueRangeTypeMapEntries)
 	apiGroup.POST("/kb/metric-value-range-type-map", kbhandler.UpsertValueRangeTypeMapEntry)
+	apiGroup.POST("/kb/metric-value-range-type-map/apply", kbhandler.ApplyValueRangeTypeMapEntry)
 	apiGroup.GET("/kb/artifacts/wiki", kbhandler.GetArtifactWiki)
 	apiGroup.GET("/kb/search", kbhandler.SearchAllArtifacts)
 	apiGroup.POST("/kb/search/backfill-embeddings", kbhandler.BackfillSearchEmbeddings)
