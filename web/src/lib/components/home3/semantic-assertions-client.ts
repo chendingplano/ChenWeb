@@ -7,7 +7,7 @@ export type Assertion = {
 	status: string; decision_reason?: string; dependency_fingerprint?: string;
 	superseded_by?: number; create_time: string; modify_time: string;
 };
-export type AssertionSortKey = 'id'|'identity'|'subject'|'predicate'|'status'|'revision'|'confidence'|'modified';
+export type AssertionSortKey = 'identity'|'subject'|'predicate'|'status'|'modified';
 export type AssertionFilters = { status: string; logical_identity: string; subject_ref_kind: string; subject_ref_id: string; predicate_term_id: string; object_ref_id: string; subject_object_id: string; latest_only: boolean };
 async function req<T>(path: string, init?: RequestInit): Promise<T> { const res = await fetch(path, { credentials:'same-origin', ...init }); const text = await res.text(); let body:any=null; try { body=text?JSON.parse(text):null } catch {} if(!res.ok) throw new Error(body?.error_msg||`HTTP ${res.status}`); return body as T; }
 export async function listAssertions(filters: AssertionFilters, page=1, pageSize=50, sortBy?: AssertionSortKey, sortDir?: 'asc'|'desc') { const q=new URLSearchParams({page:String(page),page_size:String(pageSize),latest_only:String(filters.latest_only)}); for(const [k,v] of Object.entries(filters)) if(k!=='latest_only' && typeof v === 'string' && v.trim()) q.set(k,v.trim()); if(sortBy) q.set('sort_by',sortBy); if(sortDir) q.set('sort_dir',sortDir); return req<{results:Assertion[];total:number;page:number;page_size:number}>(`/api/v1/kb/semantic-assertions?${q}`); }

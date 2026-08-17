@@ -131,7 +131,7 @@ func (s AssertionStore) ListAdmin(ctx context.Context, f AssertionListFilter) ([
 	if f.LatestOnly {
 		where = append(where, "revision = (SELECT MAX(a2.revision) FROM kb.semantic_assertions a2 WHERE a2.logical_identity_key = kb.semantic_assertions.logical_identity_key)")
 	}
-	sortColumns := map[string]string{"id": "id", "identity": "logical_identity_key", "subject": "subject_ref_id", "predicate": "predicate_term_id", "status": "status", "revision": "revision", "confidence": "confidence", "modified": "modify_time"}
+	sortColumns := map[string]string{"identity": "logical_identity_key", "subject": "subject_ref_id", "predicate": "predicate_term_id", "status": "status", "modified": "modify_time"}
 	order := sortColumns[f.SortBy]
 	if order == "" {
 		order = "modify_time"
