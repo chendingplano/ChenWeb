@@ -63,8 +63,11 @@ type metricRecord struct {
 	ObjectNodeCanonicalName *string `json:"object_node_canonical_name,omitempty"`
 	// ValueRangeTypeError is set by extract_metrics (ADR 2026081401 DR6) when
 	// ValueRangeType has no approved kb.metric_value_range_type_map mapping.
-	// Only populated by ListMetricRangeTypeErrors today.
 	ValueRangeTypeError *string `json:"value_range_type_error,omitempty"`
+	// KeywordConceptID and MetricDefinitionTermID are governed identifiers from
+	// spec 2026080403 §19 step 12.
+	KeywordConceptID       *string `json:"keyword_concept_id,omitempty"`
+	MetricDefinitionTermID *string `json:"metric_definition_term_id,omitempty"`
 }
 
 type listMetricsResponse struct {
@@ -160,7 +163,8 @@ SELECT
     NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
     ao.object_name,
     m.table_name_or_section, m.reasoning_tags,
-    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
+    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -207,6 +211,7 @@ ORDER BY m.id ASC
 			&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 			&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
 			&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
+			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -273,7 +278,8 @@ SELECT
     NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
     ao.object_name,
     m.table_name_or_section, m.reasoning_tags,
-    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
+    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -307,6 +313,7 @@ WHERE m.id = $1
 		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 		&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
 		&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
+		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 	)
 	if err != nil {
 		return metricRecord{}, err

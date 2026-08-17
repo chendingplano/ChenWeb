@@ -2,6 +2,7 @@ package assertions
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"testing"
 	"time"
@@ -162,6 +163,127 @@ func TestRunSucceedsWhenCandidateDeferredForAmbiguousValueRangeType(t *testing.T
 	}
 	if report.Deferred != 1 {
 		t.Fatalf("Deferred = %d, want 1", report.Deferred)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// evidenceRow builds one full-column kb.assertion_evidence RETURNING row,
+// column order matching evidenceColumns exactly.
+func evidenceRow(id, assertionID int64) *sqlmock.Rows {
+	now := time.Now()
+	return sqlmock.NewRows([]string{
+		"id", "assertion_id", "input_record_id", "artifact_type", "artifact_id",
+		"artifact_object_id", "evidence_quote", "source_line_spans", "extraction_run",
+		"model", "prompt_version", "confidence", "evidence_role", "actor_kind", "deleted",
+		"deleted_reason", "deleted_time", "create_time", "create_by",
+	}).AddRow(
+		id, assertionID, int64(416), "metric", "m1",
+		"obj_1", "250", []byte(`[{"start":10,"end":12}]`), "evt-abc123",
+		"deepseek-chat", "prompt-extract-metrics-v3", 0.87, "supports", "processor", false,
+		nil, nil, now, "associate_semantics",
+	)
+}
+
+// TestProcessMetricAcceptedPathPopulatesEvidenceProvenanceFields locks in the
+// associate_semantics fix for kb.assertion_evidence's previously-blank
+// provenance columns (spec 2026072702 §8.3): artifact_object_id,
+// source_line_spans, extraction_run, model, prompt_version, and the evidence
+// row's own confidence must all carry through from the decision candidate/
+// payload into the evidence INSERT, not just onto the assertion.
+func TestProcessMetricAcceptedPathPopulatesEvidenceProvenanceFields(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	confidence := 0.87
+	payload := `{"metric_id":"m1","subject_object_id":"obj_1","assertion_kind":"exact_value","raw_text":"250","extraction_run":"evt-abc123","model":"deepseek-chat","prompt_version":"prompt-extract-metrics-v3"}`
+	dc := DecisionCandidate{
+		ID:                 42,
+		LogicalIdentityKey: "metric:416:m1",
+		SourceArtifactType: "metric",
+		SourceArtifactID:   "m1",
+		ProposedPayload:    []byte(payload),
+		SourceLineSpans:    []byte(`[{"start":10,"end":12}]`),
+		Confidence:         &confidence,
+	}
+
+	// termExists(mea:measured_by), termExists(mea:exact_value)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (\n\tSELECT 1 FROM kb.ontology_terms")).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (\n\tSELECT 1 FROM kb.ontology_terms")).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	// dcStore.SetResolution: UPDATE + refetch.
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_decision_candidates\nSET resolution_outcome")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + decisionCandidateColumns + "\n" + decisionCandidateFrom + "\nWHERE id = $1")).
+		WillReturnRows(decisionCandidateRow(42, StatusInReview, "approved"))
+
+	// persistAssertion: GetLatest finds nothing -> CreateAssertion.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE logical_identity_key = $1")).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusCandidate))
+
+	// evStore.AddEvidence: INSERT ... RETURNING, args pinned to prove every
+	// provenance field reaches the statement.
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.assertion_evidence")).
+		WithArgs(
+			int64(1), int64(416), "metric", "m1",
+			"obj_1", "250", `[{"start":10,"end":12}]`,
+			"evt-abc123", "deepseek-chat", "prompt-extract-metrics-v3",
+			0.87, "supports", "processor", "associate_semantics",
+		).
+		WillReturnRows(evidenceRow(1, 1))
+	// AddEvidence's restoreIfUnsupported check.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE id = $1")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusCandidate))
+
+	// asStore.TransitionStatus(1, InReview): fetch, update, refetch.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE id = $1")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusCandidate))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE id = $1")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusInReview))
+
+	// asStore.TransitionStatus(1, Accepted): fetch, update, refetch.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE id = $1")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusInReview))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_assertions")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.semantic_assertions\nWHERE id = $1")).
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusAccepted))
+
+	// dcStore.SetResultingAssertion: UPDATE + refetch.
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_decision_candidates\nSET resulting_assertion_id")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + decisionCandidateColumns + "\n" + decisionCandidateFrom + "\nWHERE id = $1")).
+		WillReturnRows(decisionCandidateRow(42, StatusInReview, "approved"))
+
+	// dcStore.TransitionStatus(42, Accepted): fetch, update, refetch.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + decisionCandidateColumns + "\n" + decisionCandidateFrom + "\nWHERE id = $1")).
+		WillReturnRows(decisionCandidateRow(42, StatusInReview, "approved"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_decision_candidates\nSET status")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + decisionCandidateColumns + "\n" + decisionCandidateFrom + "\nWHERE id = $1")).
+		WillReturnRows(decisionCandidateRow(42, StatusAccepted, "approved"))
+
+	a := AssociateSemantics{DB: db}
+	dcStore := DecisionCandidateStore{DB: db}
+	asStore := AssertionStore{DB: db}
+	evStore := EvidenceStore{DB: db, Assertions: asStore}
+
+	outcome, err := a.processMetric(context.Background(), dcStore, asStore, evStore, dc, 416)
+	if err != nil {
+		t.Fatalf("processMetric: %v", err)
+	}
+	if outcome != "accepted" {
+		t.Fatalf("outcome = %q, want accepted", outcome)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -2,8 +2,27 @@ package assertions
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestDecisionCandidateOrder(t *testing.T) {
+	for _, key := range []string{"identity", "kind", "method", "source", "confidence", "status", "resolution", "modified"} {
+		order := decisionCandidateOrder(key, "asc")
+		if !strings.Contains(order, " ASC NULLS LAST, id ASC") {
+			t.Errorf("decisionCandidateOrder(%q, asc) = %q, want ascending nulls-last order with id tie-breaker", key, order)
+		}
+	}
+	if got := decisionCandidateOrder("confidence", "desc"); !strings.Contains(got, "confidence DESC NULLS LAST, id DESC") {
+		t.Fatalf("descending confidence order = %q", got)
+	}
+	if got := decisionCandidateOrder("not-allowed", "desc"); got != "ORDER BY id DESC" {
+		t.Fatalf("unsupported sort order = %q, want default order", got)
+	}
+	if got := decisionCandidateOrder("status", "sideways"); !strings.Contains(got, "status ASC NULLS LAST, id ASC") {
+		t.Fatalf("invalid direction order = %q, want ascending order", got)
+	}
+}
 
 func TestDecisionCandidateTransitionAllowed(t *testing.T) {
 	cases := []struct {

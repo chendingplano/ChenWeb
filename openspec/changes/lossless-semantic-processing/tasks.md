@@ -1,0 +1,95 @@
+## 1. Phase 0 — Reconcile dependencies and characterize the full corpus
+
+- [x] 1.1 Write reconciliation notes mapping this ADR's normative assertion fields, state identifiers, lifecycle, identity/revision boundary, and evidence behavior onto ADR `2026081701`'s claim registry, canonical payload, class contracts, and redirects; record every seam and every unresolved disagreement
+- [x] 1.2 Build `server/cmd/semantic-baseline` reporting, per input record and corpus-wide: metric occurrences, current decision candidates/assertions/evidence, deferred and failure reasons by reason string, required stage counts, and Review Document visibility
+- [x] 1.3 Run the baseline across all 58 metric-bearing input records and commit the report to `KnowledgeStore` as the pre-cutover comparison basis
+- [x] 1.4 Model storage and throughput for one evidence link, one class-resolution decision, one outcome envelope per required stage, zero-or-more findings, retry records, and up to one assertion per occurrence before canonical convergence
+- [x] 1.5 Load-test outcome/finding persistence, dependency-driven retry throughput, and the deferred constraint trigger at 7,074-occurrence scale, plus the policy-versioned candidate/comparison/Review Document caps required by ADR `2026081701`
+- [x] 1.6 Record documented coverage, capacity, latency, and rollback gates and obtain sign-off; Phase 1 does not begin until 1.1–1.5 pass
+
+## 2. Phase 1 — Governed vocabulary and additive schema
+
+- [x] 2.1 Seed governed execution, assertion-lifecycle, disposition, dimension, finding, mapping, value, class, conformance, and evidence-support terms using the exact DR9 underscore identifiers; add a validator that rejects hyphenated aliases in persisted/API machine fields
+- [x] 2.2 Migration: create `kb.semantic_processing_outcomes` with the DR4 columns, base uniqueness on `(outcome_key, input_fingerprint, dependency_fingerprint)`, `uq_semantic_processing_outcomes_active` on `(outcome_key) WHERE active = true`, and the non-null `artifact_id` rule for completed semantic-stage outcomes
+- [x] 2.3 Migration: create `kb.semantic_processing_findings` with the DR4 columns, base uniqueness on `(outcome_id, finding_key, dependency_fingerprint)`, `uq_semantic_processing_findings_active` on `(outcome_id, finding_key) WHERE active = true`, and the deferred constraint trigger rejecting an active finding under an inactive outcome
+- [x] 2.4 Migration: create `kb.unresolved_semantic_occurrences` with the DR13 columns including required `artifact_id`, base uniqueness, `uq_unresolved_semantic_occurrences_active` on `(occurrence_key) WHERE active = true`, and lease columns
+- [x] 2.5 Migration: create `kb.semantic_retry_queue` unique on `(outcome_id, finding_id, target_dependency_fingerprint)` with nullable `finding_id`, lease/attempt token columns, and a `stale` terminal state
+- [x] 2.6 Migration: create `kb.semantic_adapter_compliance` recording adapter name/version, writer mode, conformance-suite version, and last verified result
+- [x] 2.7 Migration: add `represented` to the `kb.semantic_assertions` status CHECK and add `unsupported_prior_status` constrained to `represented|candidate|in_review|deferred|accepted` and permitted only when `status = 'unsupported'`
+- [x] 2.8 Migration: add the governed state columns (`class_identity_state_term_id`, `mapping_resolution_state_term_id`, `value_state_term_id`, `conformance_state_term_id`, `normalized_against_contract_revision_id`, raw payload/fingerprint) to `kb.semantic_assertions`
+- [x] 2.9 Migration: backfill `value_state_term_id = 'present'` for existing rows satisfying the old object-or-literal check, report any row that does not, then replace `chk_semantic_assertions_object_ref_or_literal` with the value-state-aware constraint using `NOT VALID` followed by `VALIDATE CONSTRAINT`
+- [x] 2.10 Verify every new migration applies and rolls back cleanly against a scratch database, and that no existing raw artifact row is rewritten or deleted
+
+## 3. Phase 1 — Shared framework code (no production behavior change)
+
+- [x] 3.1 Implement `ExecutionStatus` as binary `completed`/`failed` with a mandatory finding summary type, and a single `LegacyProcStatus` projection used by every `proc_status` write site
+- [x] 3.2 Classify processor outcomes into `system_failure`, `source_or_output_unrecoverable`, `semantic_finding`, `semantic_success`, with the narrow "cannot continue" definition and the required-versus-optional service distinction
+- [x] 3.3 Implement the canonical dependency-fingerprint serializer: `v1:<sha256 of sorted-key canonical JSON>` over the declared dependency axes, with explicit nulls, plus the outcome-level aggregate over stage and child fingerprints
+- [x] 3.4 Implement `OutcomeStore` — deterministic `outcome_key`, idempotent `last_seen` replay, transactional supersession with child deactivation, and transactionally derived `finding_count`/`highest_severity_term_id`
+- [x] 3.5 Implement `FindingStore` — deterministic `finding_key` within the family-declared decision scope, append-only writes, active-row maintenance, and stable `error_code` independent of human details
+- [x] 3.6 Implement `UnresolvedOccurrenceStore` — deterministic `occurrence_key`, lease claim with row locking, transactional materialization, and saga completion markers with idempotency keys
+- [x] 3.7 Implement `SemanticRetryQueue` — idempotent enqueue, transactional claim with skip-locked, lease expiry reclaim, stale detection that writes no semantic rows, and targeted scheduling on dependency change
+- [x] 3.8 Define the `SemanticFamilyAdapter` interface (raw identity, atomic occurrence recognition, minimum raw-preserved shape, provisional class behavior, value/conformance states, canonical identity, capability-aware operations, dependency axes, required stages, per-stage decision scopes) and the adapter registry
+- [x] 3.9 Implement the shared adapter conformance suite and wire `kb.semantic_adapter_compliance` so writer activation is refused when the registered adapter has not passed the current suite version
+- [x] 3.10 Implement `SemanticCompletenessReport` joining current occurrences against adapter-declared required stages, reporting missing outcomes, missing supporting links, artifacts with neither path, and `finding_count` drift
+- [x] 3.11 Add `represented` and the evidence-loss/restoration transitions to the assertion state machine, including writing and clearing `unsupported_prior_status` and refusing governance escalation on restoration
+- [x] 3.12 Implement DR11 run reporting: artifacts examined, instances by disposition, findings by term/severity/retry state, new versus reused, downstream skip reasons, and system failures as a separate section
+- [x] 3.13 Add the `LOSSLESS_SEMANTIC_WRITES_METRIC` and `LOSSLESS_SEMANTIC_FALLBACK_WRITES` gates, defaulting off, with a per-family deny switch
+- [x] 3.14 Implement the metric adapter in shadow mode: compute intended assertions, outcomes, and cardinality and compare against the existing path without any consumer-visible write
+
+## 4. Phase 1 — Tests
+
+- [x] 4.1 Outcome/finding tests: deterministic keys, idempotent replay advancing only `last_seen`, supersession with child deactivation, active-row uniqueness under concurrency, orphan-active-finding rejection at commit, and derived summary correctness
+- [x] 4.2 Constraint tests: completed outcome with null `artifact_id` rejected; unidentified failed invocation creates no unresolved occurrence; illegal `unsupported_prior_status` combinations rejected; each value-state payload rule accepted or rejected as specified
+- [x] 4.3 Fingerprint tests: stability across map iteration order, aggregate change when a child changes, version prefix present, and identical inputs producing byte-equal output
+- [x] 4.4 Retry tests: idempotent concurrent enqueue, transactional claim, lease expiry reclaim, crash/restart resumption, stale job writing nothing, and unchanged-dependency sweeps producing no work
+- [x] 4.5 Lifecycle tests: `represented → candidate → in_review`, evidence loss from each of represented/candidate/in_review/deferred/accepted recording the exact prior status, restoration as a claim-preserving revision without governance escalation, and rejected/superseded unaffected by evidence changes
+- [x] 4.6 Vocabulary tests: exact governed identifiers accepted, hyphenated aliases rejected, and a new finding term added without a schema change
+- [x] 4.7 Execution-status tests: binary persistence, mandatory finding summary, legacy `success`/`failed` projection, error-severity finding still completing, and required-versus-optional service failure classification
+- [x] 4.8 Completeness tests: missing required stage outcome reported and blocking activation; adapter that omits a contract axis failing conformance; activation refused without a passing suite result
+- [x] 4.9 Shadow-mode test proving the metric adapter writes nothing consumer-visible while reporting intended cardinality
+- [x] 4.10 Migration rollback test proving Phase 1 migrations are additive and safe to leave in place
+
+## 5. Phase 2 — Deploy compatible readers before enabling new writers
+
+- [ ] 5.1 Audit and enumerate every consumer filtering on `status = 'accepted'`; assign and document one explicit lifecycle policy each
+- [ ] 5.2 Make APIs, semantic projection, search, comparison, Review Document, reports, and retry tooling tolerate legacy assertions and every new raw-preserved/ambiguous/missing/represented/unsupported state
+- [ ] 5.3 Add state fields to consumer APIs before changing any default filtering behavior
+- [ ] 5.4 Make comparison record `no_verdict`/`incomparable_with` with a reason instead of dropping unsupported instances
+- [ ] 5.5 Expose raw value, normalized value, independent states, errors, class confidence, and evidence in Review Document, and stop presenting "completed with findings" as a document failure
+- [ ] 5.6 Index both raw and normalized text in search; make observed class profiles include outliers without promoting them; make completeness checks distinguish absent artifact from missing value
+- [ ] 5.7 Build the reader compatibility suite covering legacy rows, every new state, represented/unsupported restoration, and assertion redirects; certify each required consumer against it
+- [ ] 5.8 Retrain dashboards and alerts to stop reading semantic findings as failures
+- [ ] 5.9 Keep default behavior on legacy writers until every required metric consumer is certified
+
+## 6. Phase 3 — Enable the metric lossless writer (BLOCKED on ADR 2026081701)
+
+- [ ] 6.1 Confirm ADR `2026081701` foundations are active in shadow mode: stable/provisional class assignment, `claim_id`-backed `logical_identity_key`, redirect resolution, and the claim/canonical-key registries
+- [ ] 6.2 Resolve existing duplicate current metric supporting links through an auditable backfill, retaining non-current duplicates as history
+- [ ] 6.3 Create `uq_assertion_evidence_current_metric_support` on `(artifact_type, artifact_id, input_record_id)` where `artifact_type = 'metric' AND evidence_role = 'supports' AND deleted = false`
+- [ ] 6.4 Extend metric assertion and value-state storage for raw-preserved and missing-value payloads
+- [ ] 6.5 Implement the DR5 atomic metric semantic transaction covering mapping observation, class decision, claim find-or-create, evidence supersession, outcome envelope and complete child findings, and projection/retry invalidation
+- [ ] 6.6 Remove the aggregate mapping-miss error from `associate_semantics.Run` and stop writing `accepted` on ingestion; write `represented` instead
+- [ ] 6.7 Implement the DR12 disposition table for approved, proposed, ambiguous, absent, malformed, and recognized-special range types
+- [ ] 6.8 Preserve the admin mapping workflow and trigger targeted semantic retry after mapping decision changes
+- [ ] 6.9 Enable `LOSSLESS_SEMANTIC_WRITES_METRIC` only after Phase 2 certification and a passing completeness projection
+- [ ] 6.10 Produce corpus reports proving every current metric has exactly one current supporting assertion link and the required stage outcome set; enumerate, convert, or explicitly retire every temporary migration exception
+- [ ] 6.11 Regression tests for the DR5 rollback boundary proving no partial mapping count, class decision, assertion, evidence link, outcome, validation, or invalidation survives while the raw metric remains
+- [ ] 6.12 Regression tests for all identity-value branches, including parsed-but-unmapped `raw_preserved` outcomes converging by normalized value, normalized convergence across differing raw wording, and distinct unparsed raw fingerprints not converging
+
+## 7. Phase 4 — Generic fallback and additional families
+
+- [ ] 7.1 Deploy and certify generic-discovery readers for unresolved occurrences
+- [ ] 7.2 Wire every registered extractor to generic fallback persistence and run the shared fallback conformance suite without changing production behavior
+- [ ] 7.3 Backfill or explicitly report historical artifacts skipped before lossless processing
+- [ ] 7.4 Enable `LOSSLESS_SEMANTIC_FALLBACK_WRITES` with the per-family deny switch available for emergency isolation
+- [ ] 7.5 Confirm completeness reports show every new identifiable artifact has either a compliant instance or exactly one current unresolved occurrence
+- [ ] 7.6 Certify at least one non-metric adapter plus the generic fallback against the shared conformance suite
+- [ ] 7.7 Factor proven metric behavior into the shared adapter framework, then migrate provisions, entities, inventory items, products, and relations one vertical slice at a time
+
+## 8. Pre-cutover reports and documentation
+
+- [ ] 8.1 Produce the required pre-cutover reports: full-corpus coverage, row/storage projections, write/retry throughput, assertion counts before and after canonical convergence, raw artifacts with no instance or occurrence, instances by value/class/conformance state, current proposed mappings with occurrence counts, old processor failures that become findings, lifecycle counts including represented/accepted/unsupported, constraint and active-row violations, downstream `no_verdict`/skip reasons, retry queue size by dependency type, and Review Document result changes
+- [ ] 8.2 Resolve ADR §10 open questions 1–4 plus the retry-worker-pool question from design.md, and record the decisions
+- [ ] 8.3 Update `ChenWeb/docs` and the user manual `metric-assertion-semantic-processing` for the new state model, and record which docs are now stale
+- [ ] 8.4 Update ADR `2026081801` status from Proposed once Phase 3 cutover completes

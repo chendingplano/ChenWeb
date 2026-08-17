@@ -62,7 +62,7 @@ func ListSemanticDecisionCandidates(c echo.Context) error {
 		}
 		inputID = &v
 	}
-	rows, total, err := candidateStore().List(c.Request().Context(), assertions.DecisionCandidateListFilter{Status: c.QueryParam("status"), CandidateKind: c.QueryParam("candidate_kind"), Method: c.QueryParam("method"), LogicalIdentity: c.QueryParam("logical_identity"), SourceArtifactType: c.QueryParam("source_artifact_type"), SourceArtifactID: c.QueryParam("source_artifact_id"), InputRecordID: inputID, Page: page, PageSize: pageSize})
+	rows, total, err := candidateStore().List(c.Request().Context(), assertions.DecisionCandidateListFilter{Status: c.QueryParam("status"), CandidateKind: c.QueryParam("candidate_kind"), Method: c.QueryParam("method"), LogicalIdentity: c.QueryParam("logical_identity"), SourceArtifactType: c.QueryParam("source_artifact_type"), SourceArtifactID: c.QueryParam("source_artifact_id"), InputRecordID: inputID, Page: page, PageSize: pageSize, SortBy: c.QueryParam("sort_by"), SortDir: c.QueryParam("sort_dir")})
 	if err != nil {
 		logger.Error("list semantic decision candidates failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to list semantic decision candidates"})

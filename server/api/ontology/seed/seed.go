@@ -24,9 +24,10 @@ type moduleContent struct {
 }
 
 var curatedModules = map[string]moduleContent{
-	"core":               coreModule,
-	"document-authority": documentAuthorityModule,
-	"measurement":        measurementModule,
+	"core":                coreModule,
+	"document-authority":  documentAuthorityModule,
+	"measurement":         measurementModule,
+	"semantic-processing": semanticProcessingModule,
 }
 
 // BootstrapWarning reports a nonfatal bootstrap condition. Curated content is
@@ -61,7 +62,7 @@ func ensureCuratedModules(ctx context.Context, db *sql.DB, seedModules func(cont
 	if db == nil {
 		return nil, errors.New("db is nil")
 	}
-	warnings, err := seedModules(ctx, db, []string{"core", "document-authority"}, false)
+	warnings, err := seedModules(ctx, db, []string{"core", "document-authority", "semantic-processing"}, false)
 	if err != nil {
 		return nil, err
 	}

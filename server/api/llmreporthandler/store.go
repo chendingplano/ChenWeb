@@ -293,6 +293,7 @@ type UsageEventAdmin struct {
 	AccountName           *string         `json:"account_name"`
 	ProfileID             *string         `json:"profile_id"`
 	RecordID              *int64          `json:"record_id"`
+	RunID                 *int64          `json:"run_id"`
 	Provider              string          `json:"provider"`
 	ModelName             string          `json:"model_name"`
 	PromptName            string          `json:"prompt_name"`
@@ -318,6 +319,7 @@ type UsageEventAdminFilters struct {
 	Prompt      string
 	CallReason  string
 	CallLoc     string
+	RunID       *int64
 	StartedFrom *time.Time
 	StartedTo   *time.Time
 	InTokMin    *int64
@@ -350,6 +352,9 @@ func buildUsageEventAdminWhere(f UsageEventAdminFilters) (string, []any) {
 	}
 	if f.CallLoc != "" {
 		add("evt.call_loc ILIKE '%%' || $%d || '%%'", f.CallLoc)
+	}
+	if f.RunID != nil {
+		add("evt.run_id = $%d", *f.RunID)
 	}
 	if f.StartedFrom != nil {
 		add("evt.request_started_at >= $%d", *f.StartedFrom)
@@ -395,7 +400,7 @@ func (s *Store) ListUsageEventsAdmin(ctx context.Context, page, pageSize int, fi
 	offset := (page - 1) * pageSize
 	limitArg := len(whereArgs) + 1
 	offsetArg := len(whereArgs) + 2
-	query := fmt.Sprintf(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
+	query := fmt.Sprintf(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id, evt.run_id,
 evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
 evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
@@ -415,10 +420,10 @@ LIMIT $%d OFFSET $%d`, where, limitArg, offsetArg)
 	for rows.Next() {
 		var row UsageEventAdmin
 		var accountID, accountName, profileID sql.NullString
-		var recordID sql.NullInt64
+		var recordID, runID sql.NullInt64
 		var metadataJSON []byte
 		if err := rows.Scan(
-			&row.ID, &accountID, &accountName, &profileID, &recordID,
+			&row.ID, &accountID, &accountName, &profileID, &recordID, &runID,
 			&row.Provider, &row.ModelName, &row.PromptName, &row.CallReason, &row.CallLoc,
 			&row.RequestStartedAt, &row.InputTokens, &row.OutputTokens, &row.TotalTokens,
 			&row.PromptCacheHitTokens, &row.PromptCacheMissTokens, &row.LatencyMS, &row.ErrorMessage,
@@ -437,6 +442,9 @@ LIMIT $%d OFFSET $%d`, where, limitArg, offsetArg)
 		}
 		if recordID.Valid {
 			row.RecordID = &recordID.Int64
+		}
+		if runID.Valid {
+			row.RunID = &runID.Int64
 		}
 		row.MetadataJSON = json.RawMessage(metadataJSON)
 		out = append(out, row)

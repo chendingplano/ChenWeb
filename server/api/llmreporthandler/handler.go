@@ -199,6 +199,9 @@ func ListUsageEventsAdmin(c echo.Context) error {
 		MetaKey:    c.QueryParam("meta_key"),
 		MetaValue:  c.QueryParam("meta_value"),
 	}
+	if v, ok := int64Param(c.QueryParam("run_id")); ok {
+		filters.RunID = &v
+	}
 	if v, ok := timeParam(c.QueryParam("started_from")); ok {
 		filters.StartedFrom = &v
 	}

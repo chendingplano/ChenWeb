@@ -171,6 +171,7 @@ export type SourceLineSpan = { page_number: number; line_number: number } | stri
 export type KbMetricRecord = {
 	id: number;
 	input_record_id: number;
+	metric_id?: string | null;
 	event_id?: string | null;
 	input_filename?: string;
 	metric_name?: string;
@@ -204,6 +205,9 @@ export type KbMetricRecord = {
 	table_name_or_section?: string;
 	reasoning_tags?: string[];
 	created_at?: string;
+	keyword_concept_id?: string | null;
+	metric_definition_term_id?: string | null;
+	value_range_type_error?: string | null;
 };
 
 export type ListKbMetricsResponse = {

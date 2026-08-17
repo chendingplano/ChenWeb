@@ -311,7 +311,8 @@ SELECT
     NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
     ao.object_name,
     m.table_name_or_section, m.reasoning_tags,
-    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
+    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -336,6 +337,7 @@ WHERE m.id = $1
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"document_title", "document_doc_no", "object_name",
 		"table_name_or_section", "reasoning_tags", "created_at",
+		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error",
 	}).AddRow(
 		int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
@@ -344,6 +346,7 @@ WHERE m.id = $1
 		"Definition", "Threshold", "monthly", 0.82, true, "Dynamic BP Spec", "T/JXAS 010—2021", "Adult patient",
 		"Table 2", `["named_metric"]`,
 		"2026-05-07T13:00:00+00:00",
+		nil, nil, nil,
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(11)).WillReturnRows(rows)
 
@@ -436,7 +439,8 @@ SELECT
     NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
     ao.object_name,
     m.table_name_or_section, m.reasoning_tags,
-    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
+    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -462,6 +466,7 @@ ORDER BY m.id ASC
 		"value_range_type", "value_class", "value_class_en", "formula_or_definition",
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"document_title", "document_doc_no", "object_name", "table_name_or_section", "reasoning_tags", "created_at",
+		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error",
 	}
 	addRow := func(rows *sqlmock.Rows, id int64, name string, spans string) *sqlmock.Rows {
 		return rows.AddRow(
@@ -469,6 +474,7 @@ ORDER BY m.id ASC
 			name, name, spans, "subject", "subject", "desc", "desc", "context", "context",
 			`[]`, `[]`, "model", "paragraph", "mmHg", "mmHg", "", "number", "exact", "class", "class",
 			"", "", "", 0.95, true, "title", "doc-no", "object", "section", `[]`, "2026-07-12T10:00:00+00:00",
+			nil, nil, nil,
 		)
 	}
 	rows := sqlmock.NewRows(cols)

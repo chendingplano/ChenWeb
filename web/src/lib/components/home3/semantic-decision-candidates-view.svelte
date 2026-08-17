@@ -2,50 +2,654 @@
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import { listCandidates, createCandidate, transitionCandidate, resolveCandidate, deferCandidate, retryCandidate, type DecisionCandidate } from './semantic-decision-candidates-client';
+	import {
+		listCandidates,
+		createCandidate,
+		transitionCandidate,
+		resolveCandidate,
+		deferCandidate,
+		retryCandidate,
+		type CandidateSortDir,
+		type CandidateSortKey,
+		type DecisionCandidate
+	} from './semantic-decision-candidates-client';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
-	let bg = $derived(darkMode ? '#171B26' : '#F2F4F7'), card = $derived(darkMode ? '#1F2333' : '#FFFFFF'), surface = $derived(darkMode ? '#252A3A' : '#ECEEF2'), border = $derived(darkMode ? '#2D3348' : '#E4E6EB'), accent = $derived(darkMode ? '#818CF8' : '#6366F1'), text = $derived(darkMode ? '#E2E8F0' : '#111827'), muted = $derived(darkMode ? '#94A3B8' : '#6B7280'), danger = $derived(darkMode ? '#F87171' : '#DC2626');
-	let rows = $state<DecisionCandidate[]>([]), total = $state(0), page = $state(1), loading = $state(false), error = $state(''), info = $state('');
-	let filters = $state({ status: '', candidate_kind: '', method: '', logical_identity: '', source_artifact_type: '', source_artifact_id: '', input_record_id: '' });
-	let selected = $state<DecisionCandidate | null>(null), showCreate = $state(false), saving = $state(false);
+	let bg = $derived(darkMode ? '#171B26' : '#F2F4F7'),
+		card = $derived(darkMode ? '#1F2333' : '#FFFFFF'),
+		surface = $derived(darkMode ? '#252A3A' : '#ECEEF2'),
+		border = $derived(darkMode ? '#2D3348' : '#E4E6EB'),
+		accent = $derived(darkMode ? '#818CF8' : '#6366F1'),
+		text = $derived(darkMode ? '#E2E8F0' : '#111827'),
+		muted = $derived(darkMode ? '#94A3B8' : '#6B7280'),
+		danger = $derived(darkMode ? '#F87171' : '#DC2626');
+	let rows = $state<DecisionCandidate[]>([]),
+		total = $state(0),
+		page = $state(1),
+		loading = $state(false),
+		error = $state(''),
+		info = $state('');
+	let filters = $state({
+		status: '',
+		candidate_kind: '',
+		method: '',
+		logical_identity: '',
+		source_artifact_type: '',
+		source_artifact_id: '',
+		input_record_id: ''
+	});
+	let selected = $state<DecisionCandidate | null>(null),
+		showCreate = $state(false),
+		saving = $state(false);
 	let detailsRecord = $state<DecisionCandidate | null>(null);
-	let newIdentity = $state(''), newKind = $state('referent'), newMethod = $state('semantic_candidate'), newPayload = $state('{}'), newSourceType = $state(''), newSourceID = $state(''), newConfidence = $state('');
-	let actionReason = $state(''), dependency = $state(''), outcome = $state('');
-	const pageSize = 50;
+	let newIdentity = $state(''),
+		newKind = $state('referent'),
+		newMethod = $state('semantic_candidate'),
+		newPayload = $state('{}'),
+		newSourceType = $state(''),
+		newSourceID = $state(''),
+		newConfidence = $state('');
+	let actionReason = $state(''),
+		dependency = $state(''),
+		outcome = $state('');
+	let sortBy = $state<CandidateSortKey | ''>(''),
+		sortDir = $state<CandidateSortDir>('asc');
+	let pageSize = $state(50);
+	const pageSizeOptions = [25, 50, 100, 200];
+	const sortableHeaders: { key: CandidateSortKey; label: string }[] = [
+		{ key: 'identity', label: 'Identity' },
+		{ key: 'kind', label: 'Kind' },
+		{ key: 'method', label: 'Method' },
+		{ key: 'source', label: 'Source' },
+		{ key: 'confidence', label: 'Confidence' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'resolution', label: 'Resolution' },
+		{ key: 'modified', label: 'Modified' }
+	];
 	const kinds = ['referent', 'term_association', 'assertion', 'occurrence', 'profile_selection'];
-	const methods = ['explicit_structured', 'deterministic_source_span', 'released_mapping', 'lexical_candidate', 'semantic_candidate', 'structural_candidate', 'human'];
+	const methods = [
+		'explicit_structured',
+		'deterministic_source_span',
+		'released_mapping',
+		'lexical_candidate',
+		'semantic_candidate',
+		'structural_candidate',
+		'human'
+	];
 	const statuses = ['candidate', 'in_review', 'accepted', 'rejected', 'deferred', 'superseded'];
-	async function load() { loading = true; error = ''; try { const result = await listCandidates(filters, page, pageSize); rows = result.results; total = result.total; } catch (e) { error = e instanceof Error ? e.message : String(e); } finally { loading = false; } }
-	function apply() { page = 1; load(); }
-	function clear() { for (const key of Object.keys(filters) as (keyof typeof filters)[]) filters[key] = ''; apply(); }
-	function json(value: unknown) { try { return JSON.stringify(value, null, 2); } catch { return String(value); } }
-	function time(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString(); }
+	async function load() {
+		loading = true;
+		error = '';
+		try {
+			const result = await listCandidates(
+				filters,
+				page,
+				pageSize,
+				sortBy || undefined,
+				sortBy ? sortDir : undefined
+			);
+			rows = result.results;
+			total = result.total;
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			loading = false;
+		}
+	}
+	function apply() {
+		page = 1;
+		load();
+	}
+	function changePageSize(value: string) {
+		pageSize = Number(value);
+		page = 1;
+		load();
+	}
+	function toggleSort(key: CandidateSortKey) {
+		if (sortBy === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		else {
+			sortBy = key;
+			sortDir = 'asc';
+		}
+		page = 1;
+		load();
+	}
+	function clear() {
+		for (const key of Object.keys(filters) as (keyof typeof filters)[]) filters[key] = '';
+		apply();
+	}
+	function json(value: unknown) {
+		try {
+			return JSON.stringify(value, null, 2);
+		} catch {
+			return String(value);
+		}
+	}
+	function time(value: string) {
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+	}
 	type DetailRow = { key: string; value: string | null; depth: number };
-	function detailRows(value: unknown, key = 'record', depth = 0, out: DetailRow[] = []): DetailRow[] {
-		if (value === null || value === undefined) { out.push({ key, value: 'null', depth }); return out; }
-		if (typeof value !== 'object') { out.push({ key, value: String(value), depth }); return out; }
+	function detailRows(
+		value: unknown,
+		key = 'record',
+		depth = 0,
+		out: DetailRow[] = []
+	): DetailRow[] {
+		if (value === null || value === undefined) {
+			out.push({ key, value: 'null', depth });
+			return out;
+		}
+		if (typeof value !== 'object') {
+			out.push({ key, value: String(value), depth });
+			return out;
+		}
 		out.push({ key, value: null, depth });
-		if (Array.isArray(value)) value.forEach((item, index) => detailRows(item, `[${index}]`, depth + 1, out));
-		else Object.entries(value as Record<string, unknown>).forEach(([childKey, childValue]) => detailRows(childValue, childKey, depth + 1, out));
+		if (Array.isArray(value))
+			value.forEach((item, index) => detailRows(item, `[${index}]`, depth + 1, out));
+		else
+			Object.entries(value as Record<string, unknown>).forEach(([childKey, childValue]) =>
+				detailRows(childValue, childKey, depth + 1, out)
+			);
 		return out;
 	}
-	function can(row: DecisionCandidate, to: string) { return (row.status === 'candidate' && ['in_review', 'rejected', 'deferred'].includes(to)) || (row.status === 'in_review' && ['accepted', 'rejected', 'deferred'].includes(to)); }
-	async function transition(to: string) { if (!selected) return; saving = true; try { selected = await transitionCandidate(selected.id, { to, reason: actionReason }); info = `Candidate #${selected.id} moved to ${to}.`; await load(); } catch (e) { error = e instanceof Error ? e.message : String(e); } finally { saving = false; } }
-	async function saveResolution() { if (!selected || !outcome) return; saving = true; try { selected = await resolveCandidate(selected.id, { outcome, reason: actionReason }); info = 'Resolution updated.'; await load(); } catch (e) { error = e instanceof Error ? e.message : String(e); } finally { saving = false; } }
-	async function defer() { if (!selected || !dependency.trim()) return; saving = true; try { selected = await deferCandidate(selected.id, { dependency_fingerprint: dependency, reason: actionReason }); info = 'Candidate deferred.'; await load(); } catch (e) { error = e instanceof Error ? e.message : String(e); } finally { saving = false; } }
-	async function retry() { if (!selected || !dependency.trim()) return; saving = true; try { selected = await retryCandidate(selected.id, { dependency_fingerprint: dependency }); info = 'Deferred candidate retried.'; await load(); } catch (e) { error = e instanceof Error ? e.message : String(e); } finally { saving = false; } }
-	async function create() { saving = true; error = ''; try { const payload = JSON.parse(newPayload); const confidence = newConfidence.trim() ? Number(newConfidence) : undefined; await createCandidate({ logical_identity_key: newIdentity, candidate_kind: newKind as any, method: newMethod as any, proposed_payload: payload, source_artifact_type: newSourceType, source_artifact_id: newSourceID, confidence }); showCreate = false; info = 'Candidate created or reused.'; await load(); } catch (e) { error = e instanceof Error ? e.message : String(e); } finally { saving = false; } }
+	function can(row: DecisionCandidate, to: string) {
+		return (
+			(row.status === 'candidate' && ['in_review', 'rejected', 'deferred'].includes(to)) ||
+			(row.status === 'in_review' && ['accepted', 'rejected', 'deferred'].includes(to))
+		);
+	}
+	async function transition(to: string) {
+		if (!selected) return;
+		saving = true;
+		try {
+			selected = await transitionCandidate(selected.id, { to, reason: actionReason });
+			info = `Candidate #${selected.id} moved to ${to}.`;
+			await load();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
+	async function saveResolution() {
+		if (!selected || !outcome) return;
+		saving = true;
+		try {
+			selected = await resolveCandidate(selected.id, { outcome, reason: actionReason });
+			info = 'Resolution updated.';
+			await load();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
+	async function defer() {
+		if (!selected || !dependency.trim()) return;
+		saving = true;
+		try {
+			selected = await deferCandidate(selected.id, {
+				dependency_fingerprint: dependency,
+				reason: actionReason
+			});
+			info = 'Candidate deferred.';
+			await load();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
+	async function retry() {
+		if (!selected || !dependency.trim()) return;
+		saving = true;
+		try {
+			selected = await retryCandidate(selected.id, { dependency_fingerprint: dependency });
+			info = 'Deferred candidate retried.';
+			await load();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
+	async function create() {
+		saving = true;
+		error = '';
+		try {
+			const payload = JSON.parse(newPayload);
+			const confidence = newConfidence.trim() ? Number(newConfidence) : undefined;
+			await createCandidate({
+				logical_identity_key: newIdentity,
+				candidate_kind: newKind as any,
+				method: newMethod as any,
+				proposed_payload: payload,
+				source_artifact_type: newSourceType,
+				source_artifact_id: newSourceID,
+				confidence
+			});
+			showCreate = false;
+			info = 'Candidate created or reused.';
+			await load();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
 	onMount(load);
 </script>
 
-<div class="h-full overflow-auto p-6 space-y-4" style="background:{bg}">
-	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}"><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 style="font-size:18px;font-weight:600;color:{text}">Semantic Decision Candidates</h2><p style="font-size:13px;color:{muted};margin-top:2px">Lifecycle-safe administration of <code style="color:{accent}">kb.semantic_decision_candidates</code>.</p></div><div class="flex gap-2"><button onclick={() => { showCreate = true; }} class="rounded-lg px-3 py-2 text-sm cursor-pointer" style="background:{accent};color:white"><PlusIcon class="inline h-4 w-4" /> New Candidate</button><button onclick={load} disabled={loading} class="rounded-lg px-3 py-2 text-sm cursor-pointer" style="background:{surface};color:{text};border:1px solid {border}"><RefreshCwIcon class="inline h-4 w-4 {loading ? 'animate-spin' : ''}" /> Refresh</button></div></div></div>
-	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}"><div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">{#each [['status','Status'],['candidate_kind','Kind'],['method','Method'],['logical_identity','Logical Identity'],['source_artifact_type','Source Type'],['source_artifact_id','Source ID'],['input_record_id','Input Record ID']] as item}<label class="flex flex-col gap-1"><span style="font-size:11px;color:{muted}">{item[1]}</span>{#if ['status','candidate_kind','method'].includes(item[0])}<select bind:value={filters[item[0] as keyof typeof filters]} class="rounded px-2 py-1.5 text-sm" style="background:{surface};color:{text};border:1px solid {border}"><option value="">Any</option>{#each item[0] === 'status' ? statuses : item[0] === 'candidate_kind' ? kinds : methods as option}<option value={option}>{option}</option>{/each}</select>{:else}<input bind:value={filters[item[0] as keyof typeof filters]} class="rounded px-2 py-1.5 text-sm" style="background:{surface};color:{text};border:1px solid {border}" />{/if}</label>{/each}</div><div class="mt-4 flex gap-2"><button onclick={apply} class="rounded-lg px-3 py-2 text-sm cursor-pointer" style="background:{accent};color:white">Apply Filters</button><button onclick={clear} class="rounded-lg px-3 py-2 text-sm cursor-pointer" style="background:{surface};color:{text};border:1px solid {border}">Clear</button></div></div>
-	{#if error}<div class="rounded-xl p-4" style="background:{danger}20;border:1px solid {danger}60;color:{danger}">{error}</div>{/if}{#if info}<div class="rounded-xl p-4" style="background:{accent}20;border:1px solid {accent}60;color:{accent}">{info}</div>{/if}
-	<div class="rounded-xl overflow-hidden" style="background:{card};border:1px solid {border}"><div class="flex justify-between px-5 py-3" style="border-bottom:1px solid {border};color:{muted};font-size:13px">Total: {total}<div class="flex gap-2"><button onclick={() => { if (page > 1) { page--; load(); } }} disabled={page <= 1 || loading} class="rounded px-2 py-1 disabled:opacity-40" style="background:{surface};color:{text};border:1px solid {border}">‹</button><span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span><button onclick={() => { if (page < Math.ceil(total / pageSize)) { page++; load(); } }} disabled={page >= Math.ceil(total / pageSize) || loading} class="rounded px-2 py-1 disabled:opacity-40" style="background:{surface};color:{text};border:1px solid {border}">›</button></div></div>{#if loading}<div class="p-8 text-center" style="color:{muted}">Loading…</div>{:else if !rows.length}<div class="p-8 text-center" style="color:{muted}">No candidates found.</div>{:else}<div class="overflow-auto"><table class="w-full text-sm"><thead><tr style="background:{surface}">{#each ['ID / Revision','Input Record ID','Identity','Kind','Method','Source','Confidence','Status','Resolution','Modified','Details'] as h}<th class="px-4 py-3 text-left whitespace-nowrap" style="color:{muted};font-size:12px;border-bottom:1px solid {border}">{h}</th>{/each}</tr></thead><tbody>{#each rows as row (row.id)}<tr class="hover:bg-white/5"><td class="px-4 py-3 whitespace-nowrap" style="border-bottom:1px solid {border};color:{text}"><button onclick={() => { selected = row; actionReason = ''; outcome = row.resolution_outcome ?? ''; dependency = row.dependency_fingerprint ?? ''; }} style="color:{accent};background:none;border:0;cursor:pointer">#{row.id} / r{row.revision}</button></td><td class="px-4 py-3 whitespace-nowrap" style="border-bottom:1px solid {border};color:{muted}">{row.input_record_id ?? '—'}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted};font-family:monospace;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{row.logical_identity_key}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}">{row.candidate_kind}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}">{row.method}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}">{row.source_artifact_type ?? '—'} {row.source_artifact_id ?? ''}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}">{row.confidence == null ? '—' : row.confidence.toFixed(3)}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{text}">{row.status}</td><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}">{row.resolution_outcome ?? '—'}</td><td class="px-4 py-3 whitespace-nowrap" style="border-bottom:1px solid {border};color:{muted}">{time(row.modify_time)}</td><td class="px-4 py-3" style="border-bottom:1px solid {border}"><button onclick={() => { detailsRecord = row; }} class="rounded px-2.5 py-1 text-xs" style="background:{surface};color:{accent};border:1px solid {border}">Details</button></td></tr>{/each}</tbody></table></div>{/if}</div>
+<div class="h-full space-y-4 overflow-auto p-6" style="background:{bg}">
+	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div>
+				<h2 style="font-size:18px;font-weight:600;color:{text}">Semantic Decision Candidates</h2>
+				<p style="font-size:13px;color:{muted};margin-top:2px">
+					Lifecycle-safe administration of <code style="color:{accent}"
+						>kb.semantic_decision_candidates</code
+					>.
+				</p>
+			</div>
+			<div class="flex gap-2">
+				<button
+					onclick={() => {
+						showCreate = true;
+					}}
+					class="cursor-pointer rounded-lg px-3 py-2 text-sm"
+					style="background:{accent};color:white"
+					><PlusIcon class="inline h-4 w-4" /> New Candidate</button
+				><button
+					onclick={load}
+					disabled={loading}
+					class="cursor-pointer rounded-lg px-3 py-2 text-sm"
+					style="background:{surface};color:{text};border:1px solid {border}"
+					><RefreshCwIcon class="inline h-4 w-4 {loading ? 'animate-spin' : ''}" /> Refresh</button
+				>
+			</div>
+		</div>
+	</div>
+	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
+		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
+			{#each [['status', 'Status'], ['candidate_kind', 'Kind'], ['method', 'Method'], ['logical_identity', 'Logical Identity'], ['source_artifact_type', 'Source Type'], ['source_artifact_id', 'Source ID'], ['input_record_id', 'Input Record ID']] as item}<label
+					class="flex flex-col gap-1"
+					><span style="font-size:11px;color:{muted}">{item[1]}</span
+					>{#if ['status', 'candidate_kind', 'method'].includes(item[0])}<select
+							bind:value={filters[item[0] as keyof typeof filters]}
+							class="rounded px-2 py-1.5 text-sm"
+							style="background:{surface};color:{text};border:1px solid {border}"
+							><option value="">Any</option
+							>{#each item[0] === 'status' ? statuses : item[0] === 'candidate_kind' ? kinds : methods as option}<option
+									value={option}>{option}</option
+								>{/each}</select
+						>{:else}<input
+							bind:value={filters[item[0] as keyof typeof filters]}
+							class="rounded px-2 py-1.5 text-sm"
+							style="background:{surface};color:{text};border:1px solid {border}"
+						/>{/if}</label
+				>{/each}
+		</div>
+		<div class="mt-4 flex gap-2">
+			<button
+				onclick={apply}
+				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
+				style="background:{accent};color:white">Apply Filters</button
+			><button
+				onclick={clear}
+				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
+				style="background:{surface};color:{text};border:1px solid {border}">Clear</button
+			>
+		</div>
+	</div>
+	{#if error}<div
+			class="rounded-xl p-4"
+			style="background:{danger}20;border:1px solid {danger}60;color:{danger}"
+		>
+			{error}
+		</div>{/if}{#if info}<div
+			class="rounded-xl p-4"
+			style="background:{accent}20;border:1px solid {accent}60;color:{accent}"
+		>
+			{info}
+		</div>{/if}
+	<div class="overflow-hidden rounded-xl" style="background:{card};border:1px solid {border}">
+		<div
+			class="flex justify-between px-5 py-3"
+			style="border-bottom:1px solid {border};color:{muted};font-size:13px"
+		>
+			Total: {total}
+			<div class="flex gap-2">
+				<button
+					onclick={() => {
+						if (page > 1) {
+							page--;
+							load();
+						}
+					}}
+					disabled={page <= 1 || loading}
+					class="rounded px-2 py-1 disabled:opacity-40"
+					style="background:{surface};color:{text};border:1px solid {border}">‹</button
+				><label class="flex items-center gap-2" style="color:{muted}">
+					<span>Page Size</span>
+					<select
+						value={pageSize}
+						onchange={(event) => changePageSize((event.currentTarget as HTMLSelectElement).value)}
+						disabled={loading}
+						class="rounded px-2 py-1"
+						style="background:{surface};color:{text};border:1px solid {border}"
+					>
+						{#each pageSizeOptions as option}<option value={option}>{option}</option>{/each}
+					</select>
+				</label><span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span><button
+					onclick={() => {
+						if (page < Math.ceil(total / pageSize)) {
+							page++;
+							load();
+						}
+					}}
+					disabled={page >= Math.ceil(total / pageSize) || loading}
+					class="rounded px-2 py-1 disabled:opacity-40"
+					style="background:{surface};color:{text};border:1px solid {border}">›</button
+				>
+			</div>
+		</div>
+		{#if loading}<div class="p-8 text-center" style="color:{muted}">
+				Loading…
+			</div>{:else if !rows.length}<div class="p-8 text-center" style="color:{muted}">
+				No candidates found.
+			</div>{:else}<div class="overflow-auto">
+				<table class="w-full text-sm">
+					<thead class="sticky top-0 z-10" style="background:{surface}"
+						><tr style="background:{surface}">
+							{#each ['ID / Revision', 'Input Record ID'] as h}<th
+									class="px-4 py-3 text-left whitespace-nowrap"
+									style="color:{muted};font-size:12px;border-bottom:1px solid {border}">{h}</th
+								>{/each}
+							{#each sortableHeaders as header}
+								<th
+									class="px-4 py-3 text-left whitespace-nowrap"
+									style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
+								>
+									<button
+										type="button"
+										onclick={() => toggleSort(header.key)}
+										aria-label={`Sort by ${header.label}`}
+										class="cursor-pointer"
+										style="color:{muted};background:none;border:0;padding:0"
+									>
+										{header.label}{#if sortBy === header.key}<span aria-hidden="true">
+												{sortDir === 'asc' ? '↑' : '↓'}</span
+											>{:else}<span aria-hidden="true"> ↕</span>{/if}
+									</button>
+								</th>
+							{/each}
+							<th
+								class="px-4 py-3 text-left whitespace-nowrap"
+								style="color:{muted};font-size:12px;border-bottom:1px solid {border}">Details</th
+							>
+						</tr></thead
+					><tbody
+						>{#each rows as row (row.id)}<tr class="hover:bg-white/5"
+								><td
+									class="px-4 py-3 whitespace-nowrap"
+									style="border-bottom:1px solid {border};color:{text}"
+									><button
+										onclick={() => {
+											selected = row;
+											actionReason = '';
+											outcome = row.resolution_outcome ?? '';
+											dependency = row.dependency_fingerprint ?? '';
+										}}
+										style="color:{accent};background:none;border:0;cursor:pointer"
+										>#{row.id} / r{row.revision}</button
+									></td
+								><td
+									class="px-4 py-3 whitespace-nowrap"
+									style="border-bottom:1px solid {border};color:{muted}"
+									>{row.input_record_id ?? '—'}</td
+								><td
+									class="px-4 py-3"
+									style="border-bottom:1px solid {border};color:{muted};font-family:monospace;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+									>{row.logical_identity_key}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}"
+									>{row.candidate_kind}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}"
+									>{row.method}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}"
+									>{row.source_artifact_type ?? '—'} {row.source_artifact_id ?? ''}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}"
+									>{row.confidence == null ? '—' : row.confidence.toFixed(3)}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{text}"
+									>{row.status}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border};color:{muted}"
+									>{row.resolution_outcome ?? '—'}</td
+								><td
+									class="px-4 py-3 whitespace-nowrap"
+									style="border-bottom:1px solid {border};color:{muted}">{time(row.modify_time)}</td
+								><td class="px-4 py-3" style="border-bottom:1px solid {border}"
+									><button
+										onclick={() => {
+											detailsRecord = row;
+										}}
+										class="rounded px-2.5 py-1 text-xs"
+										style="background:{surface};color:{accent};border:1px solid {border}"
+										>Details</button
+									></td
+								></tr
+							>{/each}</tbody
+					>
+				</table>
+			</div>{/if}
+	</div>
 </div>
 
-{#if showCreate || selected}<div class="fixed inset-0 z-50 flex items-center justify-center p-6" style="background:#0008" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) { showCreate = false; selected = null; } }}><div class="w-full max-w-4xl max-h-[90vh] overflow-auto rounded-xl p-5 space-y-4" style="background:{card};border:1px solid {border}">{#if showCreate}<h3 style="color:{text};font-weight:600">New Semantic Decision Candidate</h3><div class="grid gap-3 md:grid-cols-2"><label style="color:{muted}">Logical identity<input bind:value={newIdentity} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}" /></label><label style="color:{muted}">Kind<select bind:value={newKind} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}">{#each kinds as option}<option>{option}</option>{/each}</select></label><label style="color:{muted}">Method<select bind:value={newMethod} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}">{#each methods as option}<option>{option}</option>{/each}</select></label><label style="color:{muted}">Confidence<input bind:value={newConfidence} type="number" min="0" max="1" step="0.01" class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}" /></label><label style="color:{muted}">Source type<input bind:value={newSourceType} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}" /></label><label style="color:{muted}">Source ID<input bind:value={newSourceID} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}" /></label></div><label style="color:{muted}">Proposed payload<textarea bind:value={newPayload} rows="10" class="w-full rounded px-2 py-1.5 font-mono text-xs" style="background:{surface};color:{text};border:1px solid {border}" /></label><div class="flex justify-end gap-2"><button onclick={() => { showCreate = false; }} class="rounded px-3 py-2" style="background:{surface};color:{text};border:1px solid {border}">Cancel</button><button onclick={create} disabled={saving} class="rounded px-3 py-2" style="background:{accent};color:white">Create</button></div>{:else if selected}<div class="flex justify-between"><h3 style="color:{text};font-weight:600">Candidate #{selected.id} · Revision {selected.revision}</h3><button onclick={() => { selected = null; }} class="rounded px-3 py-1" style="background:{surface};color:{text};border:1px solid {border}">Close</button></div><pre class="max-h-64 overflow-auto rounded p-3 text-xs" style="background:{surface};color:{muted}">{json(selected)}</pre><label style="color:{muted}">Reason<textarea bind:value={actionReason} rows="2" class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}" /></label><div class="flex flex-wrap gap-2">{#each ['in_review','accepted','rejected','deferred'] as next}{#if can(selected, next)}<button onclick={() => transition(next)} disabled={saving} class="rounded px-3 py-2 text-sm" style="background:{accent};color:white">Move to {next}</button>{/if}{/each}</div><div class="grid gap-3 md:grid-cols-3"><label style="color:{muted}">Resolution<select bind:value={outcome} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}"><option value="">—</option>{#each ['matched','new_target_candidate','rejected','deferred'] as option}<option>{option}</option>{/each}</select></label><button onclick={saveResolution} disabled={saving || !outcome} class="self-end rounded px-3 py-2" style="background:{surface};color:{text};border:1px solid {border}">Save Resolution</button><label style="color:{muted}">Dependency fingerprint<input bind:value={dependency} class="w-full rounded px-2 py-1.5" style="background:{surface};color:{text};border:1px solid {border}" /></label></div>{#if selected.status === 'deferred'}<button onclick={retry} disabled={saving || !dependency.trim()} class="rounded px-3 py-2" style="background:{surface};color:{text};border:1px solid {border}">Retry Deferred</button>{/if}{/if}</div></div>{/if}
+{#if showCreate || selected}<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:#0008"
+		role="presentation"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) {
+				showCreate = false;
+				selected = null;
+			}
+		}}
+	>
+		<div
+			class="max-h-[90vh] w-full max-w-4xl space-y-4 overflow-auto rounded-xl p-5"
+			style="background:{card};border:1px solid {border}"
+		>
+			{#if showCreate}<h3 style="color:{text};font-weight:600">New Semantic Decision Candidate</h3>
+				<div class="grid gap-3 md:grid-cols-2">
+					<label style="color:{muted}"
+						>Logical identity<input
+							bind:value={newIdentity}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+						/></label
+					><label style="color:{muted}"
+						>Kind<select
+							bind:value={newKind}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+							>{#each kinds as option}<option>{option}</option>{/each}</select
+						></label
+					><label style="color:{muted}"
+						>Method<select
+							bind:value={newMethod}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+							>{#each methods as option}<option>{option}</option>{/each}</select
+						></label
+					><label style="color:{muted}"
+						>Confidence<input
+							bind:value={newConfidence}
+							type="number"
+							min="0"
+							max="1"
+							step="0.01"
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+						/></label
+					><label style="color:{muted}"
+						>Source type<input
+							bind:value={newSourceType}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+						/></label
+					><label style="color:{muted}"
+						>Source ID<input
+							bind:value={newSourceID}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+						/></label
+					>
+				</div>
+				<label style="color:{muted}"
+					>Proposed payload<textarea
+						bind:value={newPayload}
+						rows="10"
+						class="w-full rounded px-2 py-1.5 font-mono text-xs"
+						style="background:{surface};color:{text};border:1px solid {border}"
+					/></label
+				>
+				<div class="flex justify-end gap-2">
+					<button
+						onclick={() => {
+							showCreate = false;
+						}}
+						class="rounded px-3 py-2"
+						style="background:{surface};color:{text};border:1px solid {border}">Cancel</button
+					><button
+						onclick={create}
+						disabled={saving}
+						class="rounded px-3 py-2"
+						style="background:{accent};color:white">Create</button
+					>
+				</div>{:else if selected}<div class="flex justify-between">
+					<h3 style="color:{text};font-weight:600">
+						Candidate #{selected.id} · Revision {selected.revision}
+					</h3>
+					<button
+						onclick={() => {
+							selected = null;
+						}}
+						class="rounded px-3 py-1"
+						style="background:{surface};color:{text};border:1px solid {border}">Close</button
+					>
+				</div>
+				<pre
+					class="max-h-64 overflow-auto rounded p-3 text-xs"
+					style="background:{surface};color:{muted}">{json(selected)}</pre>
+				<label style="color:{muted}"
+					>Reason<textarea
+						bind:value={actionReason}
+						rows="2"
+						class="w-full rounded px-2 py-1.5"
+						style="background:{surface};color:{text};border:1px solid {border}"
+					/></label
+				>
+				<div class="flex flex-wrap gap-2">
+					{#each ['in_review', 'accepted', 'rejected', 'deferred'] as next}{#if can(selected, next)}<button
+								onclick={() => transition(next)}
+								disabled={saving}
+								class="rounded px-3 py-2 text-sm"
+								style="background:{accent};color:white">Move to {next}</button
+							>{/if}{/each}
+				</div>
+				<div class="grid gap-3 md:grid-cols-3">
+					<label style="color:{muted}"
+						>Resolution<select
+							bind:value={outcome}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+							><option value="">—</option
+							>{#each ['matched', 'new_target_candidate', 'rejected', 'deferred'] as option}<option
+									>{option}</option
+								>{/each}</select
+						></label
+					><button
+						onclick={saveResolution}
+						disabled={saving || !outcome}
+						class="self-end rounded px-3 py-2"
+						style="background:{surface};color:{text};border:1px solid {border}"
+						>Save Resolution</button
+					><label style="color:{muted}"
+						>Dependency fingerprint<input
+							bind:value={dependency}
+							class="w-full rounded px-2 py-1.5"
+							style="background:{surface};color:{text};border:1px solid {border}"
+						/></label
+					>
+				</div>
+				{#if selected.status === 'deferred'}<button
+						onclick={retry}
+						disabled={saving || !dependency.trim()}
+						class="rounded px-3 py-2"
+						style="background:{surface};color:{text};border:1px solid {border}"
+						>Retry Deferred</button
+					>{/if}{/if}
+		</div>
+	</div>{/if}
 
-{#if detailsRecord}<div class="fixed inset-0 z-50 flex items-center justify-center p-6" style="background:rgba(15,23,42,0.62)" role="button" tabindex="0" aria-label="Close candidate details" onclick={(e) => { if (e.target === e.currentTarget) detailsRecord = null; }} onkeydown={(e) => { if (e.key === 'Escape') detailsRecord = null; }}><div class="rounded-xl flex flex-col" style="background:{card};border:1px solid {border};width:min(1046px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:hidden;resize:both;min-width:480px;min-height:200px" role="dialog" aria-modal="true" aria-label="Semantic decision candidate details" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}><div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {border}"><h3 style="font-size:15px;font-weight:600;color:{text}">Candidate #{detailsRecord.id} Details</h3><button onclick={() => { detailsRecord = null; }} class="rounded px-3 py-1.5 text-xs" style="background:{surface};color:{muted};border:1px solid {border}">Close</button></div><div class="p-4 overflow-y-auto"><div style="font-size:12px;font-weight:600;color:{muted};margin-bottom:6px">Record Fields</div><div class="rounded-lg p-2" style="border:1px solid {border};background:{surface}">{#each detailRows(detailsRecord) as row}<div style="display:flex;align-items:baseline;padding-left:{row.depth * 16}px;min-height:20px;gap:8px;padding-top:2px;padding-bottom:2px"><span style="font-size:12px;width:180px;flex-shrink:0;word-break:break-all;color:{muted};font-weight:{row.value === null ? '600' : '400'}">{row.key}</span>{#if row.value !== null}<span style="font-size:12px;color:{text};word-break:break-word;white-space:pre-wrap;flex:1;min-width:0">{row.value}</span>{/if}</div>{/each}</div></div></div></div>{/if}
+{#if detailsRecord}<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.62)"
+		role="button"
+		tabindex="0"
+		aria-label="Close candidate details"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) detailsRecord = null;
+		}}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') detailsRecord = null;
+		}}
+	>
+		<div
+			class="flex flex-col rounded-xl"
+			style="background:{card};border:1px solid {border};width:min(1046px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:hidden;resize:both;min-width:480px;min-height:200px"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Semantic decision candidate details"
+			tabindex="0"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+		>
+			<div
+				class="flex items-center justify-between px-4 py-3"
+				style="border-bottom:1px solid {border}"
+			>
+				<h3 style="font-size:15px;font-weight:600;color:{text}">
+					Candidate #{detailsRecord.id} Details
+				</h3>
+				<button
+					onclick={() => {
+						detailsRecord = null;
+					}}
+					class="rounded px-3 py-1.5 text-xs"
+					style="background:{surface};color:{muted};border:1px solid {border}">Close</button
+				>
+			</div>
+			<div class="overflow-y-auto p-4">
+				<div style="font-size:12px;font-weight:600;color:{muted};margin-bottom:6px">
+					Record Fields
+				</div>
+				<div class="rounded-lg p-2" style="border:1px solid {border};background:{surface}">
+					{#each detailRows(detailsRecord) as row}<div
+							style="display:flex;align-items:baseline;padding-left:{row.depth *
+								16}px;min-height:20px;gap:8px;padding-top:2px;padding-bottom:2px"
+						>
+							<span
+								style="font-size:12px;width:180px;flex-shrink:0;word-break:break-all;color:{muted};font-weight:{row.value ===
+								null
+									? '600'
+									: '400'}">{row.key}</span
+							>{#if row.value !== null}<span
+									style="font-size:12px;color:{text};word-break:break-word;white-space:pre-wrap;flex:1;min-width:0"
+									>{row.value}</span
+								>{/if}
+						</div>{/each}
+				</div>
+			</div>
+		</div>
+	</div>{/if}

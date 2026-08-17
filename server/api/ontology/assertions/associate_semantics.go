@@ -277,6 +277,9 @@ type metricCandidatePayload struct {
 	AssertionKind          string   `json:"assertion_kind"`
 	SubjectObjectID        string   `json:"subject_object_id"`
 	Condition              string   `json:"condition"`
+	ExtractionRun          string   `json:"extraction_run"`
+	Model                  string   `json:"model"`
+	PromptVersion          string   `json:"prompt_version"`
 	NumericValue           *float64 `json:"numeric_value"`
 	LowerValue             *float64 `json:"lower_value"`
 	UpperValue             *float64 `json:"upper_value"`
@@ -409,14 +412,20 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 
 	recordID := inputRecordID
 	if _, err := evStore.AddEvidence(ctx, Evidence{
-		AssertionID:   created.ID,
-		InputRecordID: &recordID,
-		ArtifactType:  dc.SourceArtifactType,
-		ArtifactID:    dc.SourceArtifactID,
-		EvidenceQuote: p.RawText,
-		EvidenceRole:  "supports",
-		ActorKind:     "processor",
-		CreateBy:      "associate_semantics",
+		AssertionID:      created.ID,
+		InputRecordID:    &recordID,
+		ArtifactType:     dc.SourceArtifactType,
+		ArtifactID:       dc.SourceArtifactID,
+		ArtifactObjectID: p.SubjectObjectID,
+		EvidenceQuote:    p.RawText,
+		SourceLineSpans:  dc.SourceLineSpans,
+		ExtractionRun:    p.ExtractionRun,
+		Model:            p.Model,
+		PromptVersion:    p.PromptVersion,
+		Confidence:       dc.Confidence,
+		EvidenceRole:     "supports",
+		ActorKind:        "processor",
+		CreateBy:         "associate_semantics",
 	}); err != nil {
 		return "", err
 	}

@@ -96,6 +96,30 @@ type DecisionCandidateListFilter struct {
 	LogicalIdentity, SourceArtifactType, SourceArtifactID string
 	InputRecordID                                         *int64
 	Page, PageSize                                        int
+	SortBy, SortDir                                       string
+}
+
+var decisionCandidateSortColumns = map[string]string{
+	"identity":   "logical_identity_key",
+	"kind":       "candidate_kind",
+	"method":     "method",
+	"source":     "NULLIF(COALESCE(source_artifact_type, '') || ' ' || COALESCE(source_artifact_id, ''), ' ')",
+	"confidence": "confidence",
+	"status":     "status",
+	"resolution": "resolution_outcome",
+	"modified":   "modify_time",
+}
+
+func decisionCandidateOrder(sortBy, sortDir string) string {
+	column, ok := decisionCandidateSortColumns[strings.TrimSpace(sortBy)]
+	if !ok {
+		return "ORDER BY id DESC"
+	}
+	direction := "ASC"
+	if strings.EqualFold(strings.TrimSpace(sortDir), "desc") {
+		direction = "DESC"
+	}
+	return fmt.Sprintf("ORDER BY %s %s NULLS LAST, id %s", column, direction, direction)
 }
 
 const decisionCandidateColumns = `
@@ -127,7 +151,7 @@ func (s DecisionCandidateStore) List(ctx context.Context, f DecisionCandidateLis
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) "+decisionCandidateFrom+" WHERE "+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT "+decisionCandidateColumns+" "+decisionCandidateFrom+" WHERE "+whereSQL+" ORDER BY id DESC LIMIT $8 OFFSET $9", append(args, f.PageSize, (f.Page-1)*f.PageSize)...)
+	rows, err := s.DB.QueryContext(ctx, "SELECT "+decisionCandidateColumns+" "+decisionCandidateFrom+" WHERE "+whereSQL+" "+decisionCandidateOrder(f.SortBy, f.SortDir)+" LIMIT $8 OFFSET $9", append(args, f.PageSize, (f.Page-1)*f.PageSize)...)
 	if err != nil {
 		return nil, 0, err
 	}

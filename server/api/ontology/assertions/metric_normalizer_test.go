@@ -437,6 +437,48 @@ func TestMetricCandidatePayloadCarriesMetricDefinitionTermID(t *testing.T) {
 	}
 }
 
+// TestMetricCandidatePayloadCarriesEvidenceProvenanceFields locks in that
+// kb.metrics' own event_id/model_name/prompt_name reach the candidate
+// payload as extraction_run/model/prompt_version, so associate_semantics can
+// later copy them onto kb.assertion_evidence (spec 2026072702 §8.3).
+func TestMetricCandidatePayloadCarriesEvidenceProvenanceFields(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("min")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("≥30")
+	r.EventID = ns("evt-abc123")
+	r.ModelName = ns("deepseek-chat")
+	r.PromptName = ns("prompt-extract-metrics-v3")
+
+	payload := metricCandidatePayloadForRowLegacy(r)
+	if got := payload["extraction_run"]; got != "evt-abc123" {
+		t.Fatalf("extraction_run = %#v, want evt-abc123", got)
+	}
+	if got := payload["model"]; got != "deepseek-chat" {
+		t.Fatalf("model = %#v, want deepseek-chat", got)
+	}
+	if got := payload["prompt_version"]; got != "prompt-extract-metrics-v3" {
+		t.Fatalf("prompt_version = %#v, want prompt-extract-metrics-v3", got)
+	}
+}
+
+// TestMetricCandidatePayloadOmitsEmptyEvidenceProvenanceFields matches the
+// existing condition/subject_object_id convention: an absent source value
+// must not appear in the payload as an empty string.
+func TestMetricCandidatePayloadOmitsEmptyEvidenceProvenanceFields(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueRangeType = ns("min")
+	r.ValueClass = ns("requirement")
+	r.MetricValue = ns("≥30")
+
+	payload := metricCandidatePayloadForRowLegacy(r)
+	for _, key := range []string{"extraction_run", "model", "prompt_version"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload[%q] = %#v, want key absent when source column is empty", key, payload[key])
+		}
+	}
+}
+
 func TestResolveMetricValueProductionRatioDoesNotFabricateScalar(t *testing.T) {
 	r := metricRowFixture()
 	r.ValueRangeType = ns("exact_ratio")

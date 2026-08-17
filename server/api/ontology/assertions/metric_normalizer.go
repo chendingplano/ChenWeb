@@ -58,6 +58,9 @@ type metricRow struct {
 	ValueMin               sql.NullFloat64
 	ValueMax               sql.NullFloat64
 	Condition              sql.NullString
+	EventID                sql.NullString
+	ModelName              sql.NullString
+	PromptName             sql.NullString
 }
 
 // Normalize implements Normalizer.
@@ -71,7 +74,8 @@ func (n MetricNormalizer) Normalize(ctx context.Context, db *sql.DB, inputRecord
 SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.formula_or_definition,
        m.metric_definition_term_id, m.threshold_or_target, m.measurement_frequency, m.confidence, m.source_line_spans,
        ao.object_id,
-       m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition
+       m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition,
+       m.event_id, m.model_name, m.prompt_name
 FROM kb.metrics m
 LEFT JOIN kb.artifact_objects ao
   ON ao.artifact_type = 'metric' AND ao.artifact_id = m.metric_id AND ao.input_record_id = m.input_record_id
@@ -88,7 +92,8 @@ WHERE m.input_record_id = $1`
 		var r metricRow
 		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition, &r.MetricDefinitionTermID,
 			&r.ThresholdOrTarget, &r.MeasurementFrequency, &r.Confidence, &r.SourceLineSpans, &r.SubjectObjectID,
-			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition); err != nil {
+			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition,
+			&r.EventID, &r.ModelName, &r.PromptName); err != nil {
 			return report, err
 		}
 		report.Examined++
@@ -161,6 +166,15 @@ func metricCandidatePayloadForRow(r metricRow, canonicalBucket, lookupStatus str
 	}
 	if r.SubjectObjectID.Valid && r.SubjectObjectID.String != "" {
 		payload["subject_object_id"] = r.SubjectObjectID.String
+	}
+	if r.EventID.Valid && r.EventID.String != "" {
+		payload["extraction_run"] = r.EventID.String
+	}
+	if r.ModelName.Valid && r.ModelName.String != "" {
+		payload["model"] = r.ModelName.String
+	}
+	if r.PromptName.Valid && r.PromptName.String != "" {
+		payload["prompt_version"] = r.PromptName.String
 	}
 	if parsed.NumericValue != nil {
 		payload["numeric_value"] = *parsed.NumericValue

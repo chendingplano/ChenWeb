@@ -56,3 +56,4 @@ config.local.toml
 .superpowers/
 ontology-compiler
 doc-benchmark
+semantic-baseline

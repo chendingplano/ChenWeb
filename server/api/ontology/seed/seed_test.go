@@ -49,8 +49,12 @@ func TestEnsureCuratedModulesDefersMeasurementWithoutQuantityRelease(t *testing.
 	if err != nil {
 		t.Fatalf("EnsureCuratedModules: %v", err)
 	}
-	if len(seeded) != 1 || len(seeded[0]) != 2 || seeded[0][0] != "core" || seeded[0][1] != "document-authority" {
-		t.Fatalf("strict modules seeded = %#v, want core and document-authority", seeded)
+	// semantic-processing joins the strict batch (ADR 2026081801 Phase 1 task
+	// 2.1): it depends only on core, so unlike measurement it has no deferred
+	// dependency on the separately imported quantity module.
+	wantStrict := []string{"core", "document-authority", "semantic-processing"}
+	if len(seeded) != 1 || !sameStringSlice(seeded[0], wantStrict) {
+		t.Fatalf("strict modules seeded = %#v, want %#v", seeded, wantStrict)
 	}
 	if len(warnings) != 1 || warnings[0].Kind != WarningDeferredDependency || warnings[0].ModuleID != "measurement" || warnings[0].DependencyModuleID != "quantity" {
 		t.Fatalf("warnings = %#v, want deferred measurement warning", warnings)

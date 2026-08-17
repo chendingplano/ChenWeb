@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	ontology-seed --module core|document-authority|measurement|all [--author-only]
+//	ontology-seed --module core|document-authority|semantic-processing|measurement|all [--author-only]
 //
 // Re-running is safe and idempotent: module metadata is reconciled from the
 // compiled-in content, curated terms and labels that changed since their last
@@ -33,13 +33,13 @@ import (
 
 func main() {
 	log.SetFlags(0)
-	moduleFlag := flag.String("module", "", "module to seed: core|document-authority|measurement|all")
+	moduleFlag := flag.String("module", "", "module to seed: core|document-authority|semantic-processing|measurement|all")
 	authorOnly := flag.Bool("author-only", false, "author content only; do not release or activate")
 	flag.Parse()
 
 	targets := []string{*moduleFlag}
 	if *moduleFlag == "all" || *moduleFlag == "" {
-		targets = []string{"core", "document-authority", "measurement"}
+		targets = []string{"core", "document-authority", "semantic-processing", "measurement"}
 	}
 
 	db := connect()

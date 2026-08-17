@@ -1752,8 +1752,15 @@ type runIDCtxKey struct{}
 // insertDocProcLog (doc_proc_log_store.go) reads it at its single choke
 // point so every Log* call site stamps run_id without a signature change.
 // See ADR 2026071201.
+//
+// Also tags ctx via withLLMRunID (llm_capture_input.go) with the same id,
+// so every processor's LLM calls made through newLLMJSONInput stamp
+// llm_usage_event.run_id too -- otherwise doc-processing runs (unlike
+// doc-review runs, which tag it separately in review-document.go) would
+// always capture LLM usage with run_id left NULL.
 func withRunID(ctx context.Context, id int64) context.Context {
-	return context.WithValue(ctx, runIDCtxKey{}, id)
+	ctx = context.WithValue(ctx, runIDCtxKey{}, id)
+	return withLLMRunID(ctx, id)
 }
 
 func runIDFromContext(ctx context.Context) (int64, bool) {

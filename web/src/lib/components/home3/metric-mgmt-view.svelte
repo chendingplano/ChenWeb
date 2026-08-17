@@ -585,7 +585,6 @@
 		const metadata: AttrDef[] = [
 			textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
 			textAttr('input_record_id', 'Document ID', HashIcon, String(m.input_record_id), true),
-			textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
 			textAttr(
 				'confidence',
 				'Confidence',
@@ -607,6 +606,27 @@
 				CalendarIcon,
 				m.is_explicit_metric == null ? '' : m.is_explicit_metric ? 'true' : 'false',
 				m.is_explicit_metric != null
+			),
+			textAttr(
+				'keyword_concept_id',
+				'Keyword Concept ID',
+				HashIcon,
+				fmt(m.keyword_concept_id),
+				has(m.keyword_concept_id)
+			),
+			textAttr(
+				'metric_definition_term_id',
+				'Definition Term ID',
+				HashIcon,
+				fmt(m.metric_definition_term_id),
+				has(m.metric_definition_term_id)
+			),
+			textAttr(
+				'value_range_type_error',
+				'Range Type Error',
+				HashIcon,
+				fmt(m.value_range_type_error),
+				has(m.value_range_type_error)
 			)
 		];
 
@@ -637,6 +657,8 @@
 		];
 
 		const metric: AttrDef[] = [
+			textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
+			textAttr('metric_artifact_id', 'Metric ID', HashIcon, fmt(m.metric_id), has(m.metric_id)),
 			textAttr('subject', 'Subject', TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
 			textAttr('object_name', 'Object', FileIcon, fmt(m.object_name), has(m.object_name)),
 			textAttr(
@@ -741,25 +763,25 @@
 		// at the top so the layout reads like the Scene Blocks chart.
 		const groupSpecs: GroupSpec[] = [
 			{
+				key: 'g_metric',
+				label: 'Metric',
+				icon: TrendingUpIcon,
+				angleDeg: -90,
+				attrs: attrsByGroup.metric
+			},
+			{
 				key: 'g_metadata',
 				label: 'Metadata',
 				icon: BookOpenIcon,
-				angleDeg: -90,
+				angleDeg: -18,
 				attrs: attrsByGroup.metadata
 			},
 			{
 				key: 'g_context',
 				label: 'Context',
 				icon: TagIcon,
-				angleDeg: -18,
-				attrs: attrsByGroup.context
-			},
-			{
-				key: 'g_metric',
-				label: 'Metric',
-				icon: TrendingUpIcon,
 				angleDeg: 54,
-				attrs: attrsByGroup.metric
+				attrs: attrsByGroup.context
 			},
 			{
 				key: 'g_grounding',

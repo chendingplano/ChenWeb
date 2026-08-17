@@ -26,6 +26,7 @@
 		account_name: string | null;
 		profile_id: string | null;
 		record_id: number | null;
+		run_id: number | null;
 		provider: string;
 		model_name: string;
 		prompt_name: string;
@@ -49,6 +50,7 @@
 	let filterPrompt     = $state('');
 	let filterCallReason = $state('');
 	let filterCallLoc    = $state('');
+	let filterRunID      = $state('');
 	let filterStartedFrom = $state('');
 	let filterStartedTo   = $state('');
 	let filterInTokMin   = $state('');
@@ -68,6 +70,7 @@
 		filterPrompt = '';
 		filterCallReason = '';
 		filterCallLoc = '';
+		filterRunID = '';
 		filterStartedFrom = '';
 		filterStartedTo = '';
 		filterInTokMin = '';
@@ -111,6 +114,7 @@
 			if (filterPrompt) params.set('prompt', filterPrompt);
 			if (filterCallReason) params.set('call_reason', filterCallReason);
 			if (filterCallLoc) params.set('call_loc', filterCallLoc);
+			if (filterRunID) params.set('run_id', filterRunID);
 			if (filterStartedFrom) params.set('started_from', toRFC3339(filterStartedFrom));
 			if (filterStartedTo) params.set('started_to', toRFC3339(filterStartedTo));
 			if (filterInTokMin) params.set('in_tok_min', filterInTokMin);
@@ -357,6 +361,11 @@
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Run ID</span>
+				<input type="number" bind:value={filterRunID} placeholder="Exact…"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
 				<span style="font-size:11px; color:{textMuted};">Started From</span>
 				<input type="datetime-local" bind:value={filterStartedFrom}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
@@ -462,6 +471,7 @@
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Metadata</th>
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call Reason</th>
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call LOC</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Run ID</th>
 							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">In Tok</th>
 							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Out Tok</th>
 							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Cache Hit</th>
@@ -493,6 +503,7 @@
 
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_reason || '—'}</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_loc || '—'}</td>
+								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.run_id ?? '—'}</td>
 
 								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>
 								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>

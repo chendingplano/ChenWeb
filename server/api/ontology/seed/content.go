@@ -146,3 +146,111 @@ var measurementModule = moduleContent{
 		{ID: "mea:measured_by", Kind: "property", Def: "Binds a metric to the procedure that measures it.", Labels: enPref("measured by")},
 	},
 }
+
+// semanticProcessingModule owns the cross-family state vocabulary decided by
+// ADR 2026081801 DR4 and DR9: outcome dispositions, finding terms, finding
+// dimensions, severities, retry states, required processing stages, and the
+// independent state axes (class identity, mapping resolution, value,
+// conformance, evidence role).
+//
+// These are governed ontology terms rather than database enums on purpose
+// (DR4): a new finding term must be installable without a schema migration.
+// The local names are the exact normative machine identifiers from DR9 --
+// persisted state, API payloads, dependency fingerprints, and canonical
+// serialization use them verbatim, and hyphenated or natural-language variants
+// are rejected. User interfaces may render friendlier labels.
+//
+// term_kind is "concept" throughout: these are controlled-vocabulary values,
+// not classes of real-world referents (core:*) and not properties.
+var semanticProcessingModule = moduleContent{
+	ModuleID:  "semantic-processing",
+	Version:   "1.0.0",
+	Title:     "Semantic processing state module",
+	Owner:     "platform",
+	DependsOn: []string{"core"},
+	Terms: []seedTerm{
+		// Outcome dispositions (DR4). Disposition describes what the stage
+		// managed to produce; it never selects the canonical identity branch.
+		{ID: "semantic:normalized", Kind: "concept", Def: "The stage produced an authoritative normalized representation.", Labels: enPref("normalized")},
+		{ID: "semantic:raw_preserved", Kind: "concept", Def: "The stage preserved the source claim without a complete authoritative normalization.", Labels: enPref("raw preserved")},
+		{ID: "semantic:not_applicable", Kind: "concept", Def: "The stage does not apply to this artifact.", Labels: enPref("not applicable")},
+		{ID: "semantic:no_result", Kind: "concept", Def: "The stage ran but could produce no result, and recorded why.", Labels: enPref("no result")},
+
+		// Finding terms (DR4). Each names one content-level problem; several
+		// may coexist under one outcome envelope.
+		{ID: "semantic:mapping_unresolved", Kind: "concept", Def: "A governed mapping for the observed raw value is missing or only proposed.", Labels: enPref("mapping unresolved")},
+		{ID: "semantic:mapping_ambiguous", Kind: "concept", Def: "A governed mapping exists but no single canonical target can be selected.", Labels: enPref("mapping ambiguous")},
+		{ID: "semantic:unparsed", Kind: "concept", Def: "The source literal itself could not be parsed into a semantic value.", Labels: enPref("unparsed")},
+		{ID: "semantic:value_missing", Kind: "concept", Def: "The source mentions the artifact but supplies no expected value.", Labels: enPref("value missing")},
+		{ID: "semantic:value_unknown", Kind: "concept", Def: "Raw evidence exists but no other value state can yet be determined.", Labels: enPref("value unknown")},
+		{ID: "semantic:datatype_mismatch", Kind: "concept", Def: "The observed datatype conflicts with the selected class contract.", Labels: enPref("datatype mismatch")},
+		{ID: "semantic:contract_violation", Kind: "concept", Def: "The claim violates a rule in its class contract.", Labels: enPref("contract violation")},
+		{ID: "semantic:class_provisional", Kind: "concept", Def: "No existing class resolved, so a provisional class was created.", Labels: enPref("class provisional")},
+		{ID: "semantic:class_ambiguous", Kind: "concept", Def: "Several classes remain plausible for this occurrence.", Labels: enPref("class ambiguous")},
+		{ID: "semantic:identity_evidence_conflict", Kind: "concept", Def: "Candidate identity evidence conflicts; recorded as a finding, never stored in the class-identity state field.", Labels: enPref("identity evidence conflict")},
+		{ID: "semantic:source_conflict", Kind: "concept", Def: "This source claim conflicts with another source claim.", Labels: enPref("source conflict")},
+		{ID: "semantic:no_verdict", Kind: "concept", Def: "A comparison or evaluation could produce no verdict because a required capability is absent.", Labels: enPref("no verdict")},
+
+		// Finding dimensions (DR4): which axis a finding belongs to. Findings
+		// are keyed within a stage's declared decision scopes, and the
+		// dimension is what makes several simultaneous findings legible.
+		{ID: "semantic:dimension_mapping", Kind: "concept", Def: "Findings about governed vocabulary mapping.", Labels: enPref("mapping dimension")},
+		{ID: "semantic:dimension_value", Kind: "concept", Def: "Findings about the value literal and its datatype.", Labels: enPref("value dimension")},
+		{ID: "semantic:dimension_class", Kind: "concept", Def: "Findings about class identity and resolution.", Labels: enPref("class dimension")},
+		{ID: "semantic:dimension_conformance", Kind: "concept", Def: "Findings about conformance with a class contract.", Labels: enPref("conformance dimension")},
+		{ID: "semantic:dimension_identity", Kind: "concept", Def: "Findings about canonical claim identity.", Labels: enPref("identity dimension")},
+		{ID: "semantic:dimension_conflict", Kind: "concept", Def: "Findings about conflicts between sources or instances.", Labels: enPref("conflict dimension")},
+
+		// Finding severities. Severity is a user-facing signal only: DR3 is
+		// explicit that an error-severity finding does not become an
+		// execution failure.
+		{ID: "semantic:severity_info", Kind: "concept", Def: "Informational finding.", Labels: enPref("info")},
+		{ID: "semantic:severity_warning", Kind: "concept", Def: "Finding a consumer should be warned about.", Labels: enPref("warning")},
+		{ID: "semantic:severity_error", Kind: "concept", Def: "Finding presented to users as an error; it does not fail processor execution.", Labels: enPref("error")},
+
+		// Retry states (DR10).
+		{ID: "semantic:retry_pending", Kind: "concept", Def: "The finding is retryable and awaiting a dependency change.", Labels: enPref("retry pending")},
+		{ID: "semantic:retry_scheduled", Kind: "concept", Def: "A targeted retry has been scheduled for this finding.", Labels: enPref("retry scheduled")},
+		{ID: "semantic:retry_not_retryable", Kind: "concept", Def: "No dependency change can resolve this finding.", Labels: enPref("not retryable")},
+		{ID: "semantic:retry_stale", Kind: "concept", Def: "The retry target no longer matches the current source or dependency.", Labels: enPref("retry stale")},
+
+		// Required semantic stages for the metric adapter (DR5, DR13). The
+		// adapter declares which of these it requires; the completeness
+		// projection reports against that declaration.
+		{ID: "semantic:stage_normalize", Kind: "concept", Def: "Normalization of a raw artifact occurrence into semantic values.", Labels: enPref("normalize stage")},
+		{ID: "semantic:stage_class_resolution", Kind: "concept", Def: "Resolution of the ontology class an occurrence instantiates.", Labels: enPref("class resolution stage")},
+		{ID: "semantic:stage_associate", Kind: "concept", Def: "Association of a normalized or raw-preserved occurrence with a semantic instance and evidence.", Labels: enPref("associate stage")},
+
+		// Class identity states (DR9). candidate_evidence_conflict is the
+		// state; semantic:identity_evidence_conflict above is the finding.
+		{ID: "semantic:resolved_existing", Kind: "concept", Def: "The occurrence resolved to an existing class.", Labels: enPref("resolved existing")},
+		{ID: "semantic:provisional_new", Kind: "concept", Def: "No existing class resolved, so a provisional class was created.", Labels: enPref("provisional new")},
+		{ID: "semantic:ambiguous_candidates", Kind: "concept", Def: "Several classes remain plausible; the instance points at a deterministic provisional class.", Labels: enPref("ambiguous candidates")},
+		{ID: "semantic:candidate_evidence_conflict", Kind: "concept", Def: "Candidate class evidence conflicts.", Labels: enPref("candidate evidence conflict")},
+
+		// Mapping resolution states (DR9).
+		{ID: "semantic:mapping_resolved", Kind: "concept", Def: "A governed mapping selected one authoritative canonical target.", Labels: enPref("mapping resolved")},
+		{ID: "semantic:mapping_state_unresolved", Kind: "concept", Def: "No approved governed mapping is available.", Labels: enPref("mapping state unresolved")},
+		{ID: "semantic:mapping_state_ambiguous", Kind: "concept", Def: "The governed mapping is recorded as ambiguous.", Labels: enPref("mapping state ambiguous")},
+		{ID: "semantic:mapping_not_required", Kind: "concept", Def: "Mapping does not apply to this occurrence.", Labels: enPref("mapping not required")},
+
+		// Value states (DR9, and ADR 2026081701 DR8's table).
+		{ID: "semantic:value_present", Kind: "concept", Def: "A usable normalized value or interval exists.", Labels: enPref("value present")},
+		{ID: "semantic:value_state_missing", Kind: "concept", Def: "The document mentions the artifact but supplies no expected value.", Labels: enPref("value state missing")},
+		{ID: "semantic:value_state_unparsed", Kind: "concept", Def: "A source value exists but normalization cannot parse it.", Labels: enPref("value state unparsed")},
+		{ID: "semantic:value_state_datatype_mismatch", Kind: "concept", Def: "The observed datatype conflicts with the selected class contract.", Labels: enPref("value state datatype mismatch")},
+		{ID: "semantic:value_state_unknown", Kind: "concept", Def: "The occurrence and raw evidence exist, but no other value state can yet be determined.", Labels: enPref("value state unknown")},
+		{ID: "semantic:value_state_not_applicable", Kind: "concept", Def: "The source explicitly says the artifact does not apply.", Labels: enPref("value state not applicable")},
+
+		// Conformance states (DR9).
+		{ID: "semantic:conforms", Kind: "concept", Def: "The claim conforms with its class contract.", Labels: enPref("conforms")},
+		{ID: "semantic:conformance_contract_violation", Kind: "concept", Def: "The claim violates its class contract.", Labels: enPref("conformance contract violation")},
+		{ID: "semantic:not_evaluated", Kind: "concept", Def: "Conformance has not been evaluated.", Labels: enPref("not evaluated")},
+
+		// Evidence roles (DR9). The persisted/API identifiers remain the bare
+		// strings "supports" and "contradicts"; these are their governed term
+		// IDs.
+		{ID: "semantic:evidence_supports", Kind: "concept", Def: "Evidence supporting an assertion; persisted and returned as the identifier \"supports\".", Labels: enPref("evidence supports")},
+		{ID: "semantic:evidence_contradicts", Kind: "concept", Def: "Evidence contradicting an assertion; persisted and returned as the identifier \"contradicts\".", Labels: enPref("evidence contradicts")},
+	},
+}
