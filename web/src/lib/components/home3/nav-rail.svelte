@@ -296,8 +296,9 @@
 					children: [
 						{ id: 'sysadmin-doc-process-dag', label: 'Doc Process DAG' },
 						{ id: 'sysadmin-doc-process-processors', label: 'Doc Processors' },
+						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: 'Semantic Decision Candidates' },
 						{ id: 'sysadmin-doc-process-semantic-assertions', label: 'Semantic Assertions' },
-						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: 'Semantic Decision Candidates' }
+						{ id: 'sysadmin-doc-process-assertion-evidence', label: 'Assertion Evidence' }
 					]
 				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }

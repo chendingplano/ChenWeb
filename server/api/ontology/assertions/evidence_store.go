@@ -44,6 +44,15 @@ type EvidenceStore struct {
 	Assertions AssertionStore
 }
 
+type EvidenceListFilter struct {
+	AssertionID                                       int64
+	ArtifactType, ArtifactID, EvidenceRole, ActorKind string
+	InputRecordID                                     *int64
+	IncludeDeleted                                    bool
+	Page, PageSize                                    int
+	SortBy, SortDir                                   string
+}
+
 const evidenceColumns = `
 	id, assertion_id, input_record_id, artifact_type, artifact_id,
 	artifact_object_id, evidence_quote, source_line_spans, extraction_run,
@@ -51,6 +60,85 @@ const evidenceColumns = `
 	deleted_reason, deleted_time, create_time, create_by`
 
 const evidenceFrom = "FROM kb.assertion_evidence"
+
+func (s EvidenceStore) ListAdmin(ctx context.Context, f EvidenceListFilter) ([]Evidence, int64, error) {
+	if s.DB == nil {
+		return nil, 0, errors.New("db is nil")
+	}
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 50
+	}
+	if f.PageSize > 200 {
+		f.PageSize = 200
+	}
+	where := []string{"1=1"}
+	args := []any{}
+	add := func(column string, value any) {
+		args = append(args, value)
+		where = append(where, column+" = $"+strconv.Itoa(len(args)))
+	}
+	if f.AssertionID > 0 {
+		add("assertion_id", f.AssertionID)
+	}
+	if f.ArtifactType != "" {
+		add("artifact_type", f.ArtifactType)
+	}
+	if f.ArtifactID != "" {
+		add("artifact_id", f.ArtifactID)
+	}
+	if f.EvidenceRole != "" {
+		add("evidence_role", f.EvidenceRole)
+	}
+	if f.ActorKind != "" {
+		add("actor_kind", f.ActorKind)
+	}
+	if f.InputRecordID != nil {
+		add("input_record_id", *f.InputRecordID)
+	}
+	if !f.IncludeDeleted {
+		where = append(where, "NOT deleted")
+	}
+	sortColumns := map[string]string{"assertion": "assertion_id", "input_record": "input_record_id", "artifact": "artifact_id", "role": "evidence_role", "confidence": "confidence", "deleted": "deleted", "created": "create_time"}
+	order := sortColumns[f.SortBy]
+	if order == "" {
+		order = "create_time"
+	}
+	direction := "DESC"
+	if strings.EqualFold(f.SortDir, "asc") {
+		direction = "ASC"
+	}
+	base := "SELECT " + evidenceColumns + " " + evidenceFrom + " WHERE " + strings.Join(where, " AND ")
+	var total int64
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) "+evidenceFrom+" WHERE "+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
+	rows, err := s.DB.QueryContext(ctx, base+" ORDER BY "+order+" "+direction+", id "+direction+" LIMIT $"+strconv.Itoa(len(args)-1)+" OFFSET $"+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]Evidence, 0)
+	for rows.Next() {
+		e, err := scanEvidence(rows.Scan)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	return out, total, rows.Err()
+}
+
+func (s EvidenceStore) GetByID(ctx context.Context, id int64) (Evidence, error) {
+	if s.DB == nil {
+		return Evidence{}, errors.New("db is nil")
+	}
+	row := s.DB.QueryRowContext(ctx, "SELECT "+evidenceColumns+" "+evidenceFrom+" WHERE id = $1", id)
+	return scanEvidence(row.Scan)
+}
 
 func scanEvidence(scan func(dest ...any) error) (Evidence, error) {
 	var (
@@ -252,6 +340,26 @@ WHERE id = $1`
 	}
 	_, err = s.Assertions.TransitionStatus(ctx, assertionID, StatusUnsupported, transitionReason, actor)
 	return err
+}
+
+func (s EvidenceStore) RestoreEvidence(ctx context.Context, id int64) (Evidence, error) {
+	if s.DB == nil {
+		return Evidence{}, errors.New("db is nil")
+	}
+	var assertionID int64
+	var role string
+	if err := s.DB.QueryRowContext(ctx, "SELECT assertion_id, evidence_role "+evidenceFrom+" WHERE id = $1 AND deleted", id).Scan(&assertionID, &role); err != nil {
+		return Evidence{}, err
+	}
+	if _, err := s.DB.ExecContext(ctx, "UPDATE kb.assertion_evidence SET deleted = FALSE, deleted_reason = NULL, deleted_time = NULL WHERE id = $1", id); err != nil {
+		return Evidence{}, err
+	}
+	if role == "supports" {
+		if _, err := s.restoreIfUnsupported(ctx, assertionID); err != nil {
+			return Evidence{}, err
+		}
+	}
+	return s.GetByID(ctx, id)
 }
 
 // restoreIfUnsupported returns an unsupported assertion to accepted once it
