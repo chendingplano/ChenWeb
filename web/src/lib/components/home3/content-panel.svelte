@@ -31,6 +31,7 @@
 	import DocProcessDagView from '$lib/components/home3/doc-process-dag-view.svelte';
 	import DocProcessorsView from '$lib/components/home3/doc-processors-view.svelte';
 	import SemanticDecisionCandidatesView from '$lib/components/home3/semantic-decision-candidates-view.svelte';
+	import SemanticAssertionsView from '$lib/components/home3/semantic-assertions-view.svelte';
 	import UserManagementView from '$lib/components/home3/user-management-view.svelte';
 	import RoleManagementView from '$lib/components/home3/role-management-view.svelte';
 	import AccessControlsView from '$lib/components/home3/access-controls-view.svelte';
@@ -161,6 +162,7 @@
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-decision-candidates' &&
+			activeMenu?.childId !== 'sysadmin-doc-process-semantic-assertions' &&
 			activeMenu?.childId !== 'cdm-editor'
 	);
 </script>
@@ -266,6 +268,8 @@
 			<DocProcessorsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-semantic-decision-candidates'}
 			<SemanticDecisionCandidatesView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-process-semantic-assertions'}
+			<SemanticAssertionsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-user-management'}
 			<UserManagementView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-role-management'}

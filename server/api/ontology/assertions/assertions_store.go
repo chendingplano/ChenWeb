@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -73,6 +74,92 @@ type DBX interface {
 // operational state machine.
 type AssertionStore struct {
 	DB DBX
+}
+
+type AssertionListFilter struct {
+	Status, LogicalIdentity, SubjectRefKind, SubjectRefID, PredicateTermID string
+	ObjectRefKind, ObjectRefID, SubjectObjectID                            string
+	LatestOnly                                                             bool
+	Page, PageSize                                                         int
+	SortBy, SortDir                                                        string
+}
+
+func (s AssertionStore) ListAdmin(ctx context.Context, f AssertionListFilter) ([]Assertion, int64, error) {
+	if s.DB == nil {
+		return nil, 0, errors.New("db is nil")
+	}
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 50
+	}
+	if f.PageSize > 200 {
+		f.PageSize = 200
+	}
+	where := []string{"1=1"}
+	args := []any{}
+	add := func(sql string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf("%s = $%d", sql, len(args)))
+	}
+	if f.Status != "" {
+		add("status", f.Status)
+	}
+	if f.LogicalIdentity != "" {
+		where = append(where, fmt.Sprintf("logical_identity_key ILIKE $%d", len(args)+1))
+		args = append(args, "%"+f.LogicalIdentity+"%")
+	}
+	if f.SubjectRefKind != "" {
+		add("subject_ref_kind", f.SubjectRefKind)
+	}
+	if f.SubjectRefID != "" {
+		add("subject_ref_id", f.SubjectRefID)
+	}
+	if f.PredicateTermID != "" {
+		add("predicate_term_id", f.PredicateTermID)
+	}
+	if f.ObjectRefKind != "" {
+		add("object_ref_kind", f.ObjectRefKind)
+	}
+	if f.ObjectRefID != "" {
+		add("object_ref_id", f.ObjectRefID)
+	}
+	if f.SubjectObjectID != "" {
+		add("subject_object_id", f.SubjectObjectID)
+	}
+	if f.LatestOnly {
+		where = append(where, "revision = (SELECT MAX(a2.revision) FROM kb.semantic_assertions a2 WHERE a2.logical_identity_key = kb.semantic_assertions.logical_identity_key)")
+	}
+	sortColumns := map[string]string{"id": "id", "identity": "logical_identity_key", "subject": "subject_ref_id", "predicate": "predicate_term_id", "status": "status", "revision": "revision", "confidence": "confidence", "modified": "modify_time"}
+	order := sortColumns[f.SortBy]
+	if order == "" {
+		order = "modify_time"
+	}
+	direction := "DESC"
+	if strings.EqualFold(f.SortDir, "asc") {
+		direction = "ASC"
+	}
+	base := "SELECT " + assertionColumns + " " + assertionFrom + " WHERE " + strings.Join(where, " AND ")
+	var total int64
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) "+assertionFrom+" WHERE "+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
+	rows, err := s.DB.QueryContext(ctx, base+" ORDER BY "+order+" "+direction+" LIMIT $"+strconv.Itoa(len(args)-1)+" OFFSET $"+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]Assertion, 0)
+	for rows.Next() {
+		a, err := scanAssertion(rows.Scan)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, a)
+	}
+	return out, total, rows.Err()
 }
 
 const assertionColumns = `

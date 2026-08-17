@@ -469,6 +469,12 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/semantic-decision-candidates/:id/defer", kbhandler.DeferSemanticDecisionCandidate)
 	apiGroup.POST("/kb/semantic-decision-candidates/:id/retry", kbhandler.RetrySemanticDecisionCandidate)
 	apiGroup.POST("/kb/semantic-decision-candidates/:id/assertion", kbhandler.LinkSemanticDecisionCandidateAssertion)
+	apiGroup.GET("/kb/semantic-assertions", kbhandler.ListSemanticAssertions)
+	apiGroup.POST("/kb/semantic-assertions", kbhandler.CreateSemanticAssertion)
+	apiGroup.GET("/kb/semantic-assertions/:id", kbhandler.GetSemanticAssertion)
+	apiGroup.POST("/kb/semantic-assertions/:id/transition", kbhandler.TransitionSemanticAssertion)
+	apiGroup.POST("/kb/semantic-assertions/:id/defer", kbhandler.DeferSemanticAssertion)
+	apiGroup.POST("/kb/semantic-assertions/:id/retry", kbhandler.RetrySemanticAssertion)
 	// No /kb/pipeline-policies routes: ADR 2026081001 DR3 retires kb.pipeline_policies entirely.
 	apiGroup.POST("/kb/pipeline-routing-clearances/approve", kbhandler.ApprovePipelineRoutingClearance)
 	apiGroup.POST("/kb/pipeline-routing-clearances/replace", kbhandler.ReplacePipelineRoutingClearance)
