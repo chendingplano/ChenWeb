@@ -8,7 +8,7 @@
 
 - [x] 2.1 Add additive migrations for stable term identity headers, append-only term revisions, `kb.ontology_terms_current`, and required indexes
 - [x] 2.2 Implement term current/history stores and migrate one representative current-state reader behind the compatibility view
-- [ ] 2.3 Add a read-audit test/command that blocks base-term reshaping while an application current-state reader remains unmigrated
+- [x] 2.3 Add a read-audit test/command that blocks base-term reshaping while an application current-state reader remains unmigrated
 - [ ] 2.4 Add migration tests proving historical term state remains queryable and existing term references remain valid
 
 ## 3. Class contracts and capability validation

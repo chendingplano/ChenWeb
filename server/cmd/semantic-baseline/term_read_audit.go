@@ -1,15 +1,23 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// ErrBaseTermReshapeBlocked prevents a migration from changing the legacy
+// table while any current-state application reader still targets it directly.
+var ErrBaseTermReshapeBlocked = errors.New("base ontology term reshape blocked by unmigrated current-state readers")
+
+var baseTermReshapeRE = regexp.MustCompile(`(?i)\b(?:alter|drop|truncate)\s+(?:table\s+)?kb\.ontology_terms\b|\brename\s+table\s+kb\.ontology_terms\b`)
 
 // TermReaderAudit is a source-level inventory used before replacing current
 // term reads with kb.ontology_terms_current. It deliberately reports every
@@ -89,6 +97,45 @@ func AuditTermReaders(root string) (TermReaderAudit, error) {
 		return nil
 	})
 	return audit, err
+}
+
+// AssertBaseTermReshapeSafe enforces the Phase 1 migration guard. Additive
+// migrations are always permitted; a future migration that reshapes the base
+// table is rejected until every production current-state reader has moved to
+// kb.ontology_terms_current.
+func AssertBaseTermReshapeSafe(sourceRoot, migrationRoot string) error {
+	audit, err := AuditTermReaders(sourceRoot)
+	if err != nil {
+		return err
+	}
+	reshape, err := migrationReshapesBaseTerms(migrationRoot)
+	if err != nil {
+		return err
+	}
+	if !reshape || audit.CurrentState == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %d current-state reader(s) remain", ErrBaseTermReshapeBlocked, audit.CurrentState)
+}
+
+func migrationReshapesBaseTerms(root string) (bool, error) {
+	entries, err := os.ReadDir(strings.TrimSpace(root))
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, entry.Name()))
+		if err != nil {
+			return false, err
+		}
+		if baseTermReshapeRE.Match(body) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func classifyTermSQL(raw string) (string, bool) {

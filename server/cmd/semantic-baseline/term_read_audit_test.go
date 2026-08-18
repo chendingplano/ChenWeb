@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,6 +43,37 @@ func TestAuditTermReadersClassifiesApplicationSQLAndSkipsTests(t *testing.T) {
 	}
 	if byClass["write_path"].MigrationTarget != "stable term header and revision stores" {
 		t.Fatalf("write-path target = %+v", byClass["write_path"])
+	}
+}
+
+func TestAssertBaseTermReshapeSafeBlocksUnmigratedCurrentReaders(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "reader.go"), []byte("package fixture\nconst current = `SELECT term_id FROM kb.ontology_terms`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	migrations := t.TempDir()
+	if err := os.WriteFile(filepath.Join(migrations, "20260818000010_reshape_terms.sql"), []byte("-- +goose Up\nALTER TABLE kb.ontology_terms RENAME TO ontology_terms_legacy;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := AssertBaseTermReshapeSafe(root, migrations)
+	if !errors.Is(err, ErrBaseTermReshapeBlocked) {
+		t.Fatalf("AssertBaseTermReshapeSafe error = %v, want ErrBaseTermReshapeBlocked", err)
+	}
+}
+
+func TestAssertBaseTermReshapeSafeAllowsAdditiveMigrations(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "reader.go"), []byte("package fixture\nconst current = `SELECT term_id FROM kb.ontology_terms`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	migrations := t.TempDir()
+	if err := os.WriteFile(filepath.Join(migrations, "20260818000010_additive.sql"), []byte("-- +goose Up\nCREATE TABLE kb.other_table (id BIGINT);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AssertBaseTermReshapeSafe(root, migrations); err != nil {
+		t.Fatalf("AssertBaseTermReshapeSafe: %v", err)
 	}
 }
 
