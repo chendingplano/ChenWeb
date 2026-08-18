@@ -2,12 +2,65 @@ package assertions
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestAssertionColumnsIncludeLosslessStateFields(t *testing.T) {
+	for _, column := range []string{
+		"unsupported_prior_status",
+		"class_identity_state_term_id",
+		"mapping_resolution_state_term_id",
+		"value_state_term_id",
+		"conformance_state_term_id",
+		"raw_payload",
+		"raw_snapshot_fingerprint",
+		"processing_error_details",
+		"normalized_against_contract_revision_id",
+	} {
+		if !strings.Contains(assertionColumns, column) {
+			t.Errorf("assertion read projection omits %q", column)
+		}
+	}
+}
+
+func TestAssertionJSONExposesLosslessStateFields(t *testing.T) {
+	contractRevision := int64(42)
+	payload, err := json.Marshal(Assertion{
+		UnsupportedPriorStatus:              StatusRepresented,
+		ClassIdentityStateTermID:            "semantic:class_identity_resolved_existing",
+		MappingResolutionStateTermID:        "semantic:mapping_resolution_unresolved",
+		ValueStateTermID:                    "semantic:value_state_unparsed",
+		ConformanceStateTermID:              "semantic:conformance_not_evaluated",
+		RawPayload:                          json.RawMessage(`{"raw":"n/a"}`),
+		RawSnapshotFingerprint:              "v1:raw",
+		ProcessingErrorDetails:              json.RawMessage(`{"finding":"mapping_unresolved"}`),
+		NormalizedAgainstContractRevisionID: &contractRevision,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	for _, field := range []string{
+		"unsupported_prior_status",
+		"class_identity_state_term_id",
+		"mapping_resolution_state_term_id",
+		"value_state_term_id",
+		"conformance_state_term_id",
+		"raw_payload",
+		"raw_snapshot_fingerprint",
+		"processing_error_details",
+		"normalized_against_contract_revision_id",
+	} {
+		if !strings.Contains(string(payload), `"`+field+`"`) {
+			t.Errorf("assertion JSON omits %q: %s", field, payload)
+		}
+	}
+}
 
 func assertionRow(cols []string) *sqlmock.Rows {
 	return assertionRowWithStatus(cols, StatusCandidate)
@@ -21,7 +74,9 @@ func assertionRowWithStatus(cols []string, status string) *sqlmock.Rows {
 		nil, []byte(`{"value":250}`), nil, "positive",
 		nil, []byte("null"), nil, "", nil, nil,
 		nil, nil, nil, nil, nil,
-		nil, "", status, nil,
+		nil, "", status,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil,
 		nil, nil, nil, nil,
 		now, now, "tester", now, "tester",
 	)
@@ -34,7 +89,11 @@ func assertionColumnNames() []string {
 		"object_object_id", "object_literal", "assertion_kind_term_id", "polarity",
 		"modality", "qualifiers", "confidence", "value_form", "numeric_value", "lower_value",
 		"upper_value", "lower_inclusive", "upper_inclusive", "comparator", "unit_term_id",
-		"quantity_kind_term_id", "raw_text", "status", "decision_reason",
+		"quantity_kind_term_id", "raw_text", "status", "unsupported_prior_status",
+		"class_identity_state_term_id", "mapping_resolution_state_term_id",
+		"value_state_term_id", "conformance_state_term_id", "raw_payload",
+		"raw_snapshot_fingerprint", "processing_error_details",
+		"normalized_against_contract_revision_id", "decision_reason",
 		"dependency_fingerprint", "superseded_by", "valid_time_start", "valid_time_end",
 		"transaction_time", "create_time", "create_by", "modify_time", "modify_by",
 	}
@@ -183,7 +242,9 @@ func TestAssertionStoreRetryDeferredRejectsUnchangedFingerprint(t *testing.T) {
 		nil, []byte(`{}`), nil, "positive",
 		nil, []byte("null"), nil, "", nil, nil,
 		nil, nil, nil, nil, nil,
-		nil, "", StatusDeferred, nil,
+		nil, "", StatusDeferred,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil,
 		"fp-v1", nil, nil, nil,
 		now, now, "tester", now, "tester",
 	)

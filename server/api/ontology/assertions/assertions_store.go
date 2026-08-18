@@ -22,43 +22,52 @@ var AllowedRefKinds = map[string]bool{
 // LogicalIdentityKey groups revisions of the same claim (spec §10.7); the
 // latest revision for a given key is the current state.
 type Assertion struct {
-	ID                    int64           `json:"id"`
-	LogicalIdentityKey    string          `json:"logical_identity_key"`
-	Revision              int             `json:"revision"`
-	SubjectRefKind        string          `json:"subject_ref_kind"`
-	SubjectRefID          string          `json:"subject_ref_id"`
-	SubjectObjectID       string          `json:"subject_object_id,omitempty"`
-	PredicateTermID       string          `json:"predicate_term_id"`
-	ObjectRefKind         string          `json:"object_ref_kind,omitempty"`
-	ObjectRefID           string          `json:"object_ref_id,omitempty"`
-	ObjectObjectID        string          `json:"object_object_id,omitempty"`
-	ObjectLiteral         json.RawMessage `json:"object_literal,omitempty"`
-	AssertionKindTermID   string          `json:"assertion_kind_term_id,omitempty"`
-	Polarity              string          `json:"polarity"`
-	Modality              string          `json:"modality,omitempty"`
-	Qualifiers            json.RawMessage `json:"qualifiers,omitempty"`
-	Confidence            *float64        `json:"confidence,omitempty"`
-	ValueForm             string          `json:"value_form,omitempty"`
-	NumericValue          *float64        `json:"numeric_value,omitempty"`
-	LowerValue            *float64        `json:"lower_value,omitempty"`
-	UpperValue            *float64        `json:"upper_value,omitempty"`
-	LowerInclusive        *bool           `json:"lower_inclusive,omitempty"`
-	UpperInclusive        *bool           `json:"upper_inclusive,omitempty"`
-	Comparator            string          `json:"comparator,omitempty"`
-	UnitTermID            string          `json:"unit_term_id,omitempty"`
-	QuantityKindTermID    string          `json:"quantity_kind_term_id,omitempty"`
-	RawText               string          `json:"raw_text,omitempty"`
-	Status                string          `json:"status"`
-	DecisionReason        string          `json:"decision_reason,omitempty"`
-	DependencyFingerprint string          `json:"dependency_fingerprint,omitempty"`
-	SupersededBy          *int64          `json:"superseded_by,omitempty"`
-	ValidTimeStart        *time.Time      `json:"valid_time_start,omitempty"`
-	ValidTimeEnd          *time.Time      `json:"valid_time_end,omitempty"`
-	TransactionTime       time.Time       `json:"transaction_time"`
-	CreateTime            time.Time       `json:"create_time"`
-	CreateBy              string          `json:"create_by,omitempty"`
-	ModifyTime            time.Time       `json:"modify_time"`
-	ModifyBy              string          `json:"modify_by,omitempty"`
+	ID                                  int64           `json:"id"`
+	LogicalIdentityKey                  string          `json:"logical_identity_key"`
+	Revision                            int             `json:"revision"`
+	SubjectRefKind                      string          `json:"subject_ref_kind"`
+	SubjectRefID                        string          `json:"subject_ref_id"`
+	SubjectObjectID                     string          `json:"subject_object_id,omitempty"`
+	PredicateTermID                     string          `json:"predicate_term_id"`
+	ObjectRefKind                       string          `json:"object_ref_kind,omitempty"`
+	ObjectRefID                         string          `json:"object_ref_id,omitempty"`
+	ObjectObjectID                      string          `json:"object_object_id,omitempty"`
+	ObjectLiteral                       json.RawMessage `json:"object_literal,omitempty"`
+	AssertionKindTermID                 string          `json:"assertion_kind_term_id,omitempty"`
+	Polarity                            string          `json:"polarity"`
+	Modality                            string          `json:"modality,omitempty"`
+	Qualifiers                          json.RawMessage `json:"qualifiers,omitempty"`
+	Confidence                          *float64        `json:"confidence,omitempty"`
+	ValueForm                           string          `json:"value_form,omitempty"`
+	NumericValue                        *float64        `json:"numeric_value,omitempty"`
+	LowerValue                          *float64        `json:"lower_value,omitempty"`
+	UpperValue                          *float64        `json:"upper_value,omitempty"`
+	LowerInclusive                      *bool           `json:"lower_inclusive,omitempty"`
+	UpperInclusive                      *bool           `json:"upper_inclusive,omitempty"`
+	Comparator                          string          `json:"comparator,omitempty"`
+	UnitTermID                          string          `json:"unit_term_id,omitempty"`
+	QuantityKindTermID                  string          `json:"quantity_kind_term_id,omitempty"`
+	RawText                             string          `json:"raw_text,omitempty"`
+	Status                              string          `json:"status"`
+	UnsupportedPriorStatus              string          `json:"unsupported_prior_status,omitempty"`
+	ClassIdentityStateTermID            string          `json:"class_identity_state_term_id,omitempty"`
+	MappingResolutionStateTermID        string          `json:"mapping_resolution_state_term_id,omitempty"`
+	ValueStateTermID                    string          `json:"value_state_term_id,omitempty"`
+	ConformanceStateTermID              string          `json:"conformance_state_term_id,omitempty"`
+	RawPayload                          json.RawMessage `json:"raw_payload,omitempty"`
+	RawSnapshotFingerprint              string          `json:"raw_snapshot_fingerprint,omitempty"`
+	ProcessingErrorDetails              json.RawMessage `json:"processing_error_details,omitempty"`
+	NormalizedAgainstContractRevisionID *int64          `json:"normalized_against_contract_revision_id,omitempty"`
+	DecisionReason                      string          `json:"decision_reason,omitempty"`
+	DependencyFingerprint               string          `json:"dependency_fingerprint,omitempty"`
+	SupersededBy                        *int64          `json:"superseded_by,omitempty"`
+	ValidTimeStart                      *time.Time      `json:"valid_time_start,omitempty"`
+	ValidTimeEnd                        *time.Time      `json:"valid_time_end,omitempty"`
+	TransactionTime                     time.Time       `json:"transaction_time"`
+	CreateTime                          time.Time       `json:"create_time"`
+	CreateBy                            string          `json:"create_by,omitempty"`
+	ModifyTime                          time.Time       `json:"modify_time"`
+	ModifyBy                            string          `json:"modify_by,omitempty"`
 }
 
 // DBX is the subset of database/sql the store needs; both *sql.DB and *sql.Tx
@@ -168,7 +177,11 @@ const assertionColumns = `
 	object_object_id, object_literal, assertion_kind_term_id, polarity,
 	modality, qualifiers, confidence, value_form, numeric_value, lower_value,
 	upper_value, lower_inclusive, upper_inclusive, comparator, unit_term_id,
-	quantity_kind_term_id, raw_text, status, decision_reason,
+	quantity_kind_term_id, raw_text, status, unsupported_prior_status,
+	class_identity_state_term_id, mapping_resolution_state_term_id,
+	value_state_term_id, conformance_state_term_id, raw_payload,
+	raw_snapshot_fingerprint, processing_error_details,
+	normalized_against_contract_revision_id, decision_reason,
 	dependency_fingerprint, superseded_by, valid_time_start, valid_time_end,
 	transaction_time, create_time, create_by, modify_time, modify_by`
 
@@ -176,33 +189,42 @@ const assertionFrom = "FROM kb.semantic_assertions"
 
 func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 	var (
-		a               Assertion
-		subjectObjectID sql.NullString
-		objectRefKind   sql.NullString
-		objectRefID     sql.NullString
-		objectObjectID  sql.NullString
-		objectLiteral   json.RawMessage
-		assertionKind   sql.NullString
-		modality        sql.NullString
-		qualifiers      json.RawMessage
-		confidence      sql.NullFloat64
-		valueForm       sql.NullString
-		numericValue    sql.NullFloat64
-		lowerValue      sql.NullFloat64
-		upperValue      sql.NullFloat64
-		lowerInclusive  sql.NullBool
-		upperInclusive  sql.NullBool
-		comparator      sql.NullString
-		unitTermID      sql.NullString
-		quantityKindID  sql.NullString
-		rawText         sql.NullString
-		decisionReason  sql.NullString
-		depFingerprint  sql.NullString
-		supersededBy    sql.NullInt64
-		validTimeStart  sql.NullTime
-		validTimeEnd    sql.NullTime
-		createBy        sql.NullString
-		modifyBy        sql.NullString
+		a                                   Assertion
+		subjectObjectID                     sql.NullString
+		objectRefKind                       sql.NullString
+		objectRefID                         sql.NullString
+		objectObjectID                      sql.NullString
+		objectLiteral                       json.RawMessage
+		assertionKind                       sql.NullString
+		modality                            sql.NullString
+		qualifiers                          json.RawMessage
+		confidence                          sql.NullFloat64
+		valueForm                           sql.NullString
+		numericValue                        sql.NullFloat64
+		lowerValue                          sql.NullFloat64
+		upperValue                          sql.NullFloat64
+		lowerInclusive                      sql.NullBool
+		upperInclusive                      sql.NullBool
+		comparator                          sql.NullString
+		unitTermID                          sql.NullString
+		quantityKindID                      sql.NullString
+		rawText                             sql.NullString
+		unsupportedPriorStatus              sql.NullString
+		classIdentityStateTermID            sql.NullString
+		mappingResolutionStateTermID        sql.NullString
+		valueStateTermID                    sql.NullString
+		conformanceStateTermID              sql.NullString
+		rawPayload                          []byte
+		rawSnapshotFingerprint              sql.NullString
+		processingErrorDetails              []byte
+		normalizedAgainstContractRevisionID sql.NullInt64
+		decisionReason                      sql.NullString
+		depFingerprint                      sql.NullString
+		supersededBy                        sql.NullInt64
+		validTimeStart                      sql.NullTime
+		validTimeEnd                        sql.NullTime
+		createBy                            sql.NullString
+		modifyBy                            sql.NullString
 	)
 	if err := scan(
 		&a.ID, &a.LogicalIdentityKey, &a.Revision, &a.SubjectRefKind, &a.SubjectRefID,
@@ -210,7 +232,11 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 		&objectObjectID, &objectLiteral, &assertionKind, &a.Polarity,
 		&modality, &qualifiers, &confidence, &valueForm, &numericValue, &lowerValue,
 		&upperValue, &lowerInclusive, &upperInclusive, &comparator, &unitTermID,
-		&quantityKindID, &rawText, &a.Status, &decisionReason,
+		&quantityKindID, &rawText, &a.Status, &unsupportedPriorStatus,
+		&classIdentityStateTermID, &mappingResolutionStateTermID,
+		&valueStateTermID, &conformanceStateTermID, &rawPayload,
+		&rawSnapshotFingerprint, &processingErrorDetails,
+		&normalizedAgainstContractRevisionID, &decisionReason,
 		&depFingerprint, &supersededBy, &validTimeStart, &validTimeEnd,
 		&a.TransactionTime, &a.CreateTime, &createBy, &a.ModifyTime, &modifyBy,
 	); err != nil {
@@ -278,6 +304,34 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 	}
 	if rawText.Valid {
 		a.RawText = rawText.String
+	}
+	if unsupportedPriorStatus.Valid {
+		a.UnsupportedPriorStatus = unsupportedPriorStatus.String
+	}
+	if classIdentityStateTermID.Valid {
+		a.ClassIdentityStateTermID = classIdentityStateTermID.String
+	}
+	if mappingResolutionStateTermID.Valid {
+		a.MappingResolutionStateTermID = mappingResolutionStateTermID.String
+	}
+	if valueStateTermID.Valid {
+		a.ValueStateTermID = valueStateTermID.String
+	}
+	if conformanceStateTermID.Valid {
+		a.ConformanceStateTermID = conformanceStateTermID.String
+	}
+	if rawPayload != nil {
+		a.RawPayload = rawPayload
+	}
+	if rawSnapshotFingerprint.Valid {
+		a.RawSnapshotFingerprint = rawSnapshotFingerprint.String
+	}
+	if processingErrorDetails != nil {
+		a.ProcessingErrorDetails = processingErrorDetails
+	}
+	if normalizedAgainstContractRevisionID.Valid {
+		v := normalizedAgainstContractRevisionID.Int64
+		a.NormalizedAgainstContractRevisionID = &v
 	}
 	if decisionReason.Valid {
 		a.DecisionReason = decisionReason.String

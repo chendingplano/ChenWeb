@@ -132,7 +132,9 @@ func TestP3ExitItem8DeterministicAcceptRecordsSourceClaim(t *testing.T) {
 			nil, []byte(`{"value":250}`), "mea:lower_bound_requirement", "positive",
 			nil, []byte("null"), nil, "single", 250.0, nil,
 			nil, nil, nil, ">=", nil,
-			nil, "raw", StatusInReview, nil,
+			nil, "raw", StatusInReview,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil,
+			nil,
 			nil, nil, nil, nil,
 			now, now, "tester", now, "tester",
 		)
