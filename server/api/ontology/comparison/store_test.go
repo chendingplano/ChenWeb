@@ -138,6 +138,24 @@ func TestEvaluateDirectionalCellUsesFamilyEvidence(t *testing.T) {
 	}
 }
 
+func TestEvaluateDirectionalCellRecordsNoVerdictForUnnormalizableInput(t *testing.T) {
+	subject := upperBound("Time", "fortnight", "1")
+	authority := upperBound("Time", "ms", "120")
+	cell, err := EvaluateDirectionalCell(DirectionalCellInput{
+		RunID: 7, TargetObjectID: "display-1", MetricKey: "time_to_alarm",
+		SubjectFamily: "enterprise", SubjectConstraint: subject,
+		SubjectAssertions: json.RawMessage(`[{"assertion_id":101}]`),
+		AuthorityFamily:   "GB", AuthorityEvidence: FamilyEvidence{Representative: &authority, Applicable: true},
+		AuthorityAssertions: json.RawMessage(`[{"assertion_id":202}]`),
+	})
+	if err != nil {
+		t.Fatalf("EvaluateDirectionalCell: %v", err)
+	}
+	if cell.Verdict != NoVerdict || cell.Rationale == "" {
+		t.Fatalf("cell = %#v, want persisted no_verdict with rationale", cell)
+	}
+}
+
 func TestComparisonStoreGetScopeLoadsFrozenReleaseSnapshot(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

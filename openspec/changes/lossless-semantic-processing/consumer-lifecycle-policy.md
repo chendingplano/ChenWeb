@@ -15,13 +15,14 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 | Authoritative classification projection | `api/ontology/assertions/classification_projection.go` | **accepted-only**. This is the authoritative object classification projection, not an observed-profile projection. | Retain filter; a future observed profile must be a distinct, inclusive projection. |
 | Keyword-concept alignment | `api/ontology/keywords/alignment.go` | **accepted-only**. An `aligns_to_term` relation changes governed term identity and remains a curator/automatic-governance decision. | Retain filter; represented metric assertions are out of this family and must not be treated as an alignment. |
 | Assertion-store accepted watermark | `api/ontology/assertions/assertions_store.go` (`LastAcceptedForSubject`) | **accepted-only**. The API's name and its callers make it an explicit endorsed-truth query. | Retain filter; do not reuse it for discovery or diagnostics. |
-| Assertion lifecycle on evidence loss/restoration | `api/ontology/assertions/evidence_store.go` | **all evidence-supported lifecycle states**: `represented`, `candidate`, `in_review`, `deferred`, and `accepted` transition to `unsupported` on loss of final qualifying evidence; restoration returns the recorded prior status. | Update in task 5.2. Current code only handles `accepted`, and restores directly to `accepted`, so it is not yet compatible. |
+| Assertion lifecycle on evidence loss/restoration | `api/ontology/assertions/evidence_store.go` | **all evidence-supported lifecycle states**: `represented`, `candidate`, `in_review`, `deferred`, and `accepted` transition to `unsupported` on loss of final qualifying evidence; restoration returns the recorded prior status. | Implemented as part of task 5.2; remaining reader work is tracked separately. |
+| Directional comparison | `api/ontology/comparison/compare.go`, `evaluate_cell.go` | **capability-aware**. Every selected comparison pair produces a cell. Missing normalization or incompatible quantity/component capabilities returns `no_verdict` with a persisted rationale; comparable pairs retain their existing verdicts. | Implemented in task 5.4; later assertion readers must pass raw-preserved states into this path rather than dropping them. |
 | Semantic completeness projection | `api/ontology/semantic/completeness.go` | **diagnostic / capability-aware**. It reports supporting-link coverage rather than endorsing an assertion. | Retain its state-neutral coverage behavior; add represented/raw-preserved cases to the reader compatibility suite. |
 | Semantic processing association | `api/ontology/assertions/associate_semantics.go` | **legacy writer, not a consumer**. It still promotes successful ingestion to `accepted`. | Keep unchanged until Phase 3 task 6.6; it is deliberately outside the Phase 2 reader cutover. |
 
 ## Consumers not currently implemented
 
-The Phase 2 scope also requires search, comparison, Review Document rendering,
+The Phase 2 scope also requires search, Review Document rendering,
 generic semantic discovery, diagnostic projections, reports, and retry tooling
 to be dual-read.  The production tree has no implementation that reads
 `kb.semantic_assertions` for search or comparison; the only comparison matches

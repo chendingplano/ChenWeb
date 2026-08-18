@@ -55,7 +55,7 @@
 - [x] 5.1 Audit and enumerate every consumer filtering on `status = 'accepted'`; assign and document one explicit lifecycle policy each
 - [ ] 5.2 Make APIs, semantic projection, search, comparison, Review Document, reports, and retry tooling tolerate legacy assertions and every new raw-preserved/ambiguous/missing/represented/unsupported state
 - [x] 5.3 Add state fields to consumer APIs before changing any default filtering behavior
-- [ ] 5.4 Make comparison record `no_verdict`/`incomparable_with` with a reason instead of dropping unsupported instances
+- [x] 5.4 Make comparison record `no_verdict`/`incomparable_with` with a reason instead of dropping unsupported instances
 - [ ] 5.5 Expose raw value, normalized value, independent states, errors, class confidence, and evidence in Review Document, and stop presenting "completed with findings" as a document failure
 - [ ] 5.6 Index both raw and normalized text in search; make observed class profiles include outliers without promoting them; make completeness checks distinguish absent artifact from missing value
 - [ ] 5.7 Build the reader compatibility suite covering legacy rows, every new state, represented/unsupported restoration, and assertion redirects; certify each required consumer against it

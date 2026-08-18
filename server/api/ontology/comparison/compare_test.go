@@ -105,29 +105,20 @@ func TestCompareBoundaryInclusiveExactValueEqualsUpperBound(t *testing.T) {
 	assertVerdict(t, upperBound("Time", "ms", "120"), exactValue("Time", "ms", "120"), Weaker)
 }
 
-func TestCompareQuantityKindMismatchErrors(t *testing.T) {
-	_, _, err := Compare(upperBound("Time", "ms", "120"), upperBound("Luminance", "cd/m2", "250"))
-	if err == nil {
-		t.Fatal("expected an error for mismatched quantity kinds, got nil")
-	}
+func TestCompareQuantityKindMismatchRecordsNoVerdict(t *testing.T) {
+	assertVerdict(t, upperBound("Time", "ms", "120"), upperBound("Luminance", "cd/m2", "250"), NoVerdict)
 }
 
-func TestCompareComponentMismatchErrors(t *testing.T) {
+func TestCompareComponentMismatchRecordsNoVerdict(t *testing.T) {
 	subject := lowerBound("Angle", "degree", "160")
 	subject.Component = "horizontal"
 	reference := lowerBound("Angle", "degree", "140")
 	reference.Component = "vertical"
-	_, _, err := Compare(subject, reference)
-	if err == nil {
-		t.Fatal("expected an error for mismatched components, got nil")
-	}
+	assertVerdict(t, subject, reference, NoVerdict)
 }
 
-func TestCompareUnknownUnitErrors(t *testing.T) {
-	_, _, err := Compare(upperBound("Time", "fortnight", "1"), upperBound("Time", "ms", "120"))
-	if err == nil {
-		t.Fatal("expected an error for an unknown unit, got nil")
-	}
+func TestCompareUnknownUnitRecordsNoVerdict(t *testing.T) {
+	assertVerdict(t, upperBound("Time", "fortnight", "1"), upperBound("Time", "ms", "120"), NoVerdict)
 }
 
 func TestEvaluateFamilyNotApplicableTakesPrecedence(t *testing.T) {

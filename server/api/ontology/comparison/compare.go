@@ -23,6 +23,7 @@ const (
 	StandardAbsent  Verdict = "standard_absent"
 	NotApplicable   Verdict = "not_applicable"
 	Indeterminate   Verdict = "indeterminate"
+	NoVerdict       Verdict = "no_verdict"
 )
 
 // Compare implements the DR21 strictness relation between a subject
@@ -43,24 +44,24 @@ func Compare(subject, reference Constraint) (Verdict, string, error) {
 		return LimitAbsent, "the property is referenced but no bound value is given", nil
 	}
 	if subject.QuantityKind != reference.QuantityKind {
-		return "", "", fmt.Errorf(
-			"comparison: quantity kind mismatch: subject %q vs reference %q", subject.QuantityKind, reference.QuantityKind)
+		return NoVerdict, fmt.Sprintf(
+			"cannot compare different quantity kinds: subject %q vs reference %q", subject.QuantityKind, reference.QuantityKind), nil
 	}
 	if subject.Component != reference.Component {
-		return "", "", fmt.Errorf(
-			"comparison: cannot compare different components: subject %q vs reference %q", subject.Component, reference.Component)
+		return NoVerdict, fmt.Sprintf(
+			"cannot compare different components: subject %q vs reference %q", subject.Component, reference.Component), nil
 	}
 
 	sIv, ok, err := buildInterval(subject)
 	if err != nil {
-		return "", "", err
+		return NoVerdict, "subject normalization unavailable: " + err.Error(), nil
 	}
 	if !ok {
 		return "", "", fmt.Errorf("comparison: subject form %q has no satisfying set", subject.Form)
 	}
 	rIv, ok, err := buildInterval(reference)
 	if err != nil {
-		return "", "", err
+		return NoVerdict, "reference normalization unavailable: " + err.Error(), nil
 	}
 	if !ok {
 		return "", "", fmt.Errorf("comparison: reference form %q has no satisfying set", reference.Form)
