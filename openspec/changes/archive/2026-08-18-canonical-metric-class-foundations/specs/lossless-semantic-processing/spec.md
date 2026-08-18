@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Metric writer activation depends on class and claim foundations
 The lossless metric writer SHALL remain disabled until stable/provisional class resolution, canonical claim identities, redirects, current-support cardinality, and their shadow-mode certification are active.

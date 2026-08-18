@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Assertions preserve independent lifecycle and class identity
 Semantic assertions SHALL preserve their lifecycle status and independent class identity, mapping-resolution, value, and conformance states. A `represented` assertion is source-admitted but not accepted, and an instance-to-class reference SHALL not imply governance endorsement.
