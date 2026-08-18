@@ -33,7 +33,7 @@
 
 ## 6. Canonical claims and instance references
 
-- [ ] 6.1 Add canonical-key-version registry and concurrency-safe `kb.semantic_claim_identities` with stable `claim_id` uniqueness
+- [x] 6.1 Add canonical-key-version registry and concurrency-safe `kb.semantic_claim_identities` with stable `claim_id` uniqueness
 - [ ] 6.2 Add `instance_of_term_id` and normalization-contract revision references to assertions additively, including state-aware constraints and indexes
 - [ ] 6.3 Implement canonical key serialization and shadow find-or-create without enabling the new metric writer
 - [ ] 6.4 Implement claim-identity store and tests for concurrent convergence, collision reporting, evidence-only changes, and identity-bearing divergence
