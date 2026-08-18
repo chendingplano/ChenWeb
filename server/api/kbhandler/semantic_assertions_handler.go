@@ -13,10 +13,11 @@ import (
 )
 
 type semanticAssertionListResponse struct {
-	Status         bool                   `json:"status"`
-	Results        []assertions.Assertion `json:"results"`
-	Page, PageSize int                    `json:"page"`
-	Total          int64                  `json:"total"`
+	Status   bool                   `json:"status"`
+	Results  []assertions.Assertion `json:"results"`
+	Page     int                    `json:"page"`
+	PageSize int                    `json:"page_size"`
+	Total    int64                  `json:"total"`
 }
 type semanticAssertionResponse struct {
 	Status bool                 `json:"status"`

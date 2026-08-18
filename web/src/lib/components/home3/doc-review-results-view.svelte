@@ -25,6 +25,7 @@
 	import JsonTreeViewer from './json-tree-viewer.svelte';
 	import DocReviewFindingsView from './doc-review-findings-view.svelte';
 	import DocReviewReportView from './doc-review-report-view.svelte';
+	import DocReviewSemanticView from './doc-review-semantic-view.svelte';
 	import { marked } from 'marked';
 
 	let {
@@ -106,7 +107,7 @@
 	let filterPass = $state('');
 	let filterSeverity = $state('');
 	let expandedFindings = $state<Set<number>>(new Set());
-	let activeTab = $state<'results' | 'findings' | 'report'>('results');
+	let activeTab = $state<'results' | 'findings' | 'report' | 'semantic'>('results');
 	let isStopping = $state(false);
 	let packages = $state<ReviewPackageInfo[]>([]);
 	// Localized display labels for the current UI locale (falling back to name_en),
@@ -229,6 +230,9 @@
 	}
 	function showResultsPage() {
 		activeTab = 'results';
+	}
+	function showSemanticPage() {
+		activeTab = 'semantic';
 	}
 
 	// Derived counts
@@ -646,7 +650,7 @@
 	<div style="padding: 1.5rem;">
 		<!-- Back / status header -->
 		<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem;">
-			{#if (activeTab === 'findings' || activeTab === 'report') && isCompletedView}
+			{#if (activeTab === 'findings' || activeTab === 'report' || activeTab === 'semantic') && isCompletedView}
 				<button
 					onclick={showResultsPage}
 					style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 1rem; background: {accentTint}; color: {accent}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
@@ -780,6 +784,14 @@
 				{:else if activeTab === 'report'}
 					<div style="height: calc(100vh - 220px); min-height: 640px;">
 						<DocReviewReportView reportId={linkReportId} {darkMode} embedded={true} />
+					</div>
+				{:else if activeTab === 'semantic'}
+					<div style="height: calc(100vh - 220px); min-height: 640px;">
+						<DocReviewSemanticView
+							{darkMode}
+							inputRecordId={request.input_record_id}
+							embedded={true}
+						/>
 					</div>
 			{:else}
 				<!-- Header -->
@@ -1184,6 +1196,11 @@
 						onclick={showFindingsPage}
 						style="padding: 0.4rem 1rem; background: {accentTint}; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
 						>Findings</button
+					>
+					<button
+						onclick={showSemanticPage}
+						style="padding: 0.4rem 1rem; background: {accentTint}; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
+						>Semantic Diagnostics</button
 					>
 					<!-- 2. View Full Report PDF (dropdown listing all PDFs for this document) -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->

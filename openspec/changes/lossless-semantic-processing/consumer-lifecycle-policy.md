@@ -20,17 +20,21 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 | Directional comparison | `api/ontology/comparison/compare.go`, `evaluate_cell.go` | **capability-aware**. Every selected comparison pair produces a cell. Missing normalization or incompatible quantity/component capabilities returns `no_verdict` with a persisted rationale; comparable pairs retain their existing verdicts. | Implemented in task 5.4; later assertion readers must pass raw-preserved states into this path rather than dropping them. |
 | Metric search registry | `api/doc-processing/search_indexing.go` (`buildMetricRegistryRows`) | **dual-read discovery**. Every legacy metric remains indexed; when a current supporting assertion exists, both its raw representation and its normalized representation are appended to the metric search document and recorded in semantic payload. | Implemented as the search slice of task 5.6. The optional lateral assertion read preserves legacy-only rows and does not change any writer gate. |
 | Semantic completeness projection | `api/ontology/semantic/completeness.go` | **diagnostic / capability-aware**. It reports supporting-link coverage rather than endorsing an assertion. | Retain its state-neutral coverage behavior; add represented/raw-preserved cases to the reader compatibility suite. |
+| Review Document — Semantic Diagnostics tab | `web/src/lib/components/home3/doc-review-semantic-view.svelte`, calling the semantic assertion diagnostic API above | **dual-read discovery**. A read-only tab on the doc-review results view; displays raw value, normalized value, all four independent states, processing errors, class confidence, and active evidence for every lifecycle status, including represented/unsupported/raw-preserved. Does not route through the accepted-only profile-rule loader and never labels a non-empty finding list as a processing failure. | Implemented as task 5.5. |
 | Semantic processing association | `api/ontology/assertions/associate_semantics.go` | **legacy writer, not a consumer**. It still promotes successful ingestion to `accepted`. | Keep unchanged until Phase 3 task 6.6; it is deliberately outside the Phase 2 reader cutover. |
 
 ## Consumers not currently implemented
 
-The Phase 2 scope also requires Review Document rendering, generic semantic
-discovery, diagnostic projections, reports, and retry tooling to be dual-read.
-Metric search now reads supporting assertions when available while preserving
-legacy-only rows. The semantic assertion diagnostic API can now scope all
-lifecycle states to the document through active evidence links. Review Document
-still receives assertion-derived facts through the accepted-only profile path;
-its flagged-instance display model has not yet been implemented.
+The Phase 2 scope also requires generic semantic discovery, diagnostic
+projections, reports, and retry tooling to be dual-read. Metric search now
+reads supporting assertions when available while preserving legacy-only rows.
+The semantic assertion diagnostic API can now scope all lifecycle states to
+the document through active evidence links. Review Document's governance
+rendering still goes through the accepted-only profile path unchanged; its
+new "Semantic Diagnostics" tab (task 5.5) is a separate, additive, read-only
+projection over the same document-scoped diagnostic API, displaying raw and
+normalized value, independent states, processing errors, class confidence,
+and active evidence without widening or replacing the accepted-only path.
 
 ## Certification rule
 
