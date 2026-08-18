@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS kb.ontology_class_resolution_alternatives (
 CREATE INDEX IF NOT EXISTS idx_kb_class_resolution_alternatives_candidate
     ON kb.ontology_class_resolution_alternatives (candidate_class_term_id) WHERE candidate_class_term_id IS NOT NULL;
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kb.reject_class_resolution_mutation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -52,6 +53,7 @@ BEGIN
     RAISE EXCEPTION 'class resolution history is append-only';
 END;
 $$;
+-- +goose StatementEnd
 
 CREATE TRIGGER kb_class_resolution_decisions_immutable
 BEFORE UPDATE OR DELETE ON kb.ontology_class_resolution_decisions

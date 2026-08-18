@@ -37,6 +37,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_semantic_assertion_redirects_active_sour
     ON kb.semantic_assertion_redirects (source_assertion_id)
     WHERE active;
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kb.guard_term_redirect_cycle()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -63,7 +64,9 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kb.guard_assertion_redirect_cycle()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -90,6 +93,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
 CREATE TRIGGER kb_term_redirect_cycle_guard
 BEFORE INSERT OR UPDATE OF source_term_id, target_term_id, active ON kb.ontology_term_redirects

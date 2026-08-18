@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/classfoundation"
 )
 
 // MetricAdapterName and MetricAdapterVersion identify the metric family
@@ -139,6 +142,30 @@ type ShadowComparison struct {
 	// Phase 3 uq_assertion_evidence_current_metric_support invariant and must
 	// be resolved by auditable backfill before that index can be created.
 	DuplicateCurrentSupport int
+	// FoundationClassResolved counts source-backed class candidates after
+	// read-only redirect resolution. Unavailable candidates remain explicit;
+	// shadow mode never creates provisional classes.
+	FoundationClassResolved     int
+	FoundationClassUnavailable  int
+	FoundationClaimCandidates   int
+	FoundationProfileCandidates int
+}
+
+type termRedirectLookup struct{ db *sql.DB }
+
+func (l termRedirectLookup) ActiveRedirect(ctx context.Context, source string) (string, bool, error) {
+	var target string
+	err := l.db.QueryRowContext(ctx, `
+SELECT target_term_id
+FROM kb.ontology_term_redirects
+WHERE source_term_id = $1 AND active`, source).Scan(&target)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return target, true, nil
 }
 
 // RunShadow computes the shadow comparison for one input record.
@@ -159,7 +186,11 @@ func (a MetricAdapter) RunShadow(ctx context.Context, db *sql.DB, inputRecordID 
 WITH norm AS (
   SELECT m.metric_id,
          m.input_record_id,
-         CASE WHEN m.value_range_type IS NULL OR btrim(m.value_range_type) = '' THEN NULL
+	         coalesce(m.metric_definition_term_id, '') AS metric_definition_term_id,
+	         coalesce(m.metric_name, '') AS metric_name,
+	         coalesce(m.metric_value, '') AS metric_value,
+	         coalesce(m.metric_unit, '') AS metric_unit,
+	         CASE WHEN m.value_range_type IS NULL OR btrim(m.value_range_type) = '' THEN NULL
               ELSE replace(replace(lower(btrim(m.value_range_type)), '-', '_'), ' ', '_')
          END AS raw_key,
          nullif(btrim(coalesce(m.threshold_or_target, '')), '') AS literal
@@ -167,6 +198,11 @@ WITH norm AS (
   WHERE m.input_record_id = $1 AND m.metric_id IS NOT NULL AND btrim(m.metric_id) <> ''
 )
 SELECT n.metric_id,
+	   n.metric_definition_term_id,
+	   n.metric_name,
+	   n.metric_value,
+	   n.metric_unit,
+	   coalesce(n.raw_key, ''),
        CASE WHEN n.raw_key IS NULL THEN 'absent'
             WHEN vm.raw_value IS NULL THEN 'unmapped'
             ELSE vm.status END AS mapping_state,
@@ -185,11 +221,35 @@ LEFT JOIN kb.metric_value_range_type_map vm ON vm.raw_value = n.raw_key`
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var metricID, mappingState string
+		var metricID, metricDefinitionTerm, metricName, metricValue, metricUnit, rawRangeType, mappingState string
 		var hasLiteral bool
 		var supportLinks int
-		if err := rows.Scan(&metricID, &mappingState, &hasLiteral, &supportLinks); err != nil {
+		if err := rows.Scan(&metricID, &metricDefinitionTerm, &metricName, &metricValue, &metricUnit, &rawRangeType, &mappingState, &hasLiteral, &supportLinks); err != nil {
 			return cmp, err
+		}
+		foundation, err := a.FoundationShadow(ctx, MetricFoundationShadowInput{
+			MetricID:             metricID,
+			MetricDefinitionTerm: metricDefinitionTerm,
+			MetricName:           metricName,
+			MetricValue:          metricValue,
+			MetricUnit:           metricUnit,
+			RangeType:            rawRangeType,
+			Redirects:            termRedirectLookup{db: db},
+		})
+		if err != nil {
+			return cmp, fmt.Errorf("compute metric foundation shadow for %s: %w", metricID, err)
+		}
+		if foundation.ClassState == classfoundation.ResolutionResolvedExisting {
+			cmp.FoundationClassResolved++
+		}
+		if foundation.ClassState == MetricFoundationClassUnavailable {
+			cmp.FoundationClassUnavailable++
+		}
+		if strings.TrimSpace(foundation.CanonicalClaimKey) != "" {
+			cmp.FoundationClaimCandidates++
+		}
+		if foundation.ProfileObservation != nil {
+			cmp.FoundationProfileCandidates++
 		}
 		cmp.MetricsExamined++
 		switch {

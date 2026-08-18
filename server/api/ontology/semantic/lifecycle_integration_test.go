@@ -336,6 +336,9 @@ func TestIntegrationShadowModeWritesNothing(t *testing.T) {
 	if cmp.IntendedOutcomeEnvelopes != 9 {
 		t.Errorf("intended envelopes = %d, want 9 (3 metrics x 3 required stages)", cmp.IntendedOutcomeEnvelopes)
 	}
+	if cmp.FoundationClassUnavailable != 3 || cmp.FoundationClaimCandidates != 0 || cmp.FoundationProfileCandidates != 0 {
+		t.Errorf("foundation shadow = %#v, want all three source-class gaps reported without claim/profile candidates", cmp)
+	}
 }
 
 func tableCounts(t *testing.T, db *sql.DB) map[string]int {

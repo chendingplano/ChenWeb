@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS kb.semantic_claim_identities (
 CREATE INDEX IF NOT EXISTS idx_kb_semantic_claim_identities_class
     ON kb.semantic_claim_identities (class_term_id) WHERE class_term_id IS NOT NULL;
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kb.reject_semantic_claim_identity_mutation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -39,6 +40,7 @@ BEGIN
     RAISE EXCEPTION 'semantic claim identity is immutable';
 END;
 $$;
+-- +goose StatementEnd
 
 CREATE TRIGGER kb_semantic_claim_identities_immutable
 BEFORE UPDATE OR DELETE ON kb.semantic_claim_identities

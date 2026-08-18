@@ -108,6 +108,7 @@ ON CONFLICT (source_term_row_id) DO NOTHING;
 -- The legacy writer remains available during the compatibility period. Mirror
 -- every new legacy version into the append-only representation so readers of
 -- the current view never silently miss newly authored terms.
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kb.sync_ontology_term_revision_after_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -172,6 +173,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
 DROP TRIGGER IF EXISTS kb_sync_ontology_term_revision_after_insert ON kb.ontology_terms;
 CREATE TRIGGER kb_sync_ontology_term_revision_after_insert
