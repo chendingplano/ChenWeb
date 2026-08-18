@@ -191,6 +191,44 @@ func TestBuildSemanticProjectionRegistryRowsIncludesLineSpans(t *testing.T) {
 	}
 }
 
+func TestBuildMetricRegistryRowsIndexesRawAndNormalizedRepresentations(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("FROM kb\\.metrics").
+		WithArgs(int64(177)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "metric_id", "metric_name", "metric_unit", "metric_desc", "metric_keywords", "category_paths", "source_line_spans", "search_document",
+			"metric_value", "assertion_raw_text", "assertion_raw_payload", "assertion_object_literal", "numeric_value", "lower_value", "upper_value", "comparator", "unit_term_id",
+		}).AddRow(
+			int64(7), "177_1", "clearance", "m", "required clearance", []byte(`["clearance"]`), []byte(`[]`), []byte(`["12"]`), "",
+			"no less than 2.5 m", "clearance >= two and a half metres", []byte(`{"source_phrase":"no less than 2.5 m"}`), []byte(`{"value":2.5,"unit":"unit:metre"}`), 2.5, nil, nil, ">=", "unit:metre",
+		))
+
+	got, err := buildMetricRegistryRows(context.Background(), db, 177)
+	if err != nil {
+		t.Fatalf("buildMetricRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d, want 1", len(got))
+	}
+	for _, want := range []string{
+		"no less than 2.5 m",
+		"clearance >= two and a half metres",
+		"unit:metre",
+	} {
+		if !strings.Contains(got[0].SearchDocument, want) {
+			t.Fatalf("search document %q omits %q", got[0].SearchDocument, want)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestBuildSemanticProjectionRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
 	oldConfig := appconfig.AppConfig
 	t.Cleanup(func() {

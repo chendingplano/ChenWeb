@@ -443,10 +443,27 @@ ORDER BY id`
 
 func buildMetricRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
 	const q = `
-SELECT id, metric_id, metric_name, metric_unit, metric_desc, metric_keywords, category_paths, source_line_spans, search_document
-FROM kb.metrics
-WHERE input_record_id = $1
-ORDER BY id`
+SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_desc, m.metric_keywords,
+       m.category_paths, m.source_line_spans, m.search_document, COALESCE(m.metric_value, ''),
+       COALESCE(sa.raw_text, ''), COALESCE(sa.raw_payload, '{}'::jsonb),
+       COALESCE(sa.object_literal, '{}'::jsonb), sa.numeric_value, sa.lower_value,
+       sa.upper_value, COALESCE(sa.comparator, ''), COALESCE(sa.unit_term_id, '')
+FROM kb.metrics m
+LEFT JOIN LATERAL (
+    SELECT a.raw_text, a.raw_payload, a.object_literal, a.numeric_value, a.lower_value,
+           a.upper_value, a.comparator, a.unit_term_id
+    FROM kb.assertion_evidence e
+    JOIN kb.semantic_assertions a ON a.id = e.assertion_id
+    WHERE e.artifact_type = 'metric'
+      AND e.artifact_id = m.metric_id
+      AND e.input_record_id = m.input_record_id
+      AND e.evidence_role = 'supports'
+      AND e.deleted = false
+    ORDER BY a.modify_time DESC, a.id DESC
+    LIMIT 1
+) sa ON true
+WHERE m.input_record_id = $1
+ORDER BY m.id`
 	rows, err := db.QueryContext(ctx, q, recordID)
 	if err != nil {
 		return nil, err
@@ -465,14 +482,39 @@ ORDER BY id`
 			categoryPaths   []byte
 			sourceLineSpans []byte
 			searchDoc       string
+			metricValue     string
+			rawText         string
+			rawPayload      []byte
+			objectLiteral   []byte
+			numericValue    sql.NullFloat64
+			lowerValue      sql.NullFloat64
+			upperValue      sql.NullFloat64
+			comparator      string
+			unitTermID      string
 		)
-		if err := rows.Scan(&id, &metricID, &metricName, &metricUnit, &metricDesc, &metricKeywords, &categoryPaths, &sourceLineSpans, &searchDoc); err != nil {
+		if err := rows.Scan(
+			&id, &metricID, &metricName, &metricUnit, &metricDesc, &metricKeywords,
+			&categoryPaths, &sourceLineSpans, &searchDoc, &metricValue, &rawText,
+			&rawPayload, &objectLiteral, &numericValue, &lowerValue, &upperValue,
+			&comparator, &unitTermID,
+		); err != nil {
 			return nil, err
 		}
+		rawRepresentation := joinUniqueSearchParts(metricValue, rawText, searchDocumentJSONBytesText(rawPayload))
+		normalizedRepresentation := joinUniqueSearchParts(
+			searchDocumentJSONBytesText(objectLiteral),
+			formatMetricSearchNumber(numericValue),
+			formatMetricSearchNumber(lowerValue),
+			formatMetricSearchNumber(upperValue),
+			comparator,
+			unitTermID,
+		)
 		payload, _ := json.Marshal(map[string]any{
-			"metric_unit":     metricUnit,
-			"metric_desc":     metricDesc,
-			"metric_keywords": rawJSONArrayStrings(metricKeywords),
+			"metric_unit":               metricUnit,
+			"metric_desc":               metricDesc,
+			"metric_keywords":           rawJSONArrayStrings(metricKeywords),
+			"raw_representation":        rawRepresentation,
+			"normalized_representation": normalizedRepresentation,
 		})
 		seq := lastDelimitedToken(metricID)
 		if seq == "" {
@@ -485,7 +527,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(metricName, metricID),
 			SecondaryLabel:  metricUnit,
-			SearchDocument:  firstNonEmpty(searchDoc, strings.Join([]string{metricName, metricDesc, metricUnit}, " ")),
+			SearchDocument:  joinUniqueSearchParts(firstNonEmpty(searchDoc, strings.Join([]string{metricName, metricDesc, metricUnit}, " ")), rawRepresentation, normalizedRepresentation),
 			SnippetBasis:    firstNonEmpty(metricDesc, metricName),
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(sourceLineSpans),
@@ -493,6 +535,13 @@ ORDER BY id`
 		})
 	}
 	return out, rows.Err()
+}
+
+func formatMetricSearchNumber(v sql.NullFloat64) string {
+	if !v.Valid {
+		return ""
+	}
+	return strconv.FormatFloat(v.Float64, 'g', -1, 64)
 }
 
 func buildProvisionRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {

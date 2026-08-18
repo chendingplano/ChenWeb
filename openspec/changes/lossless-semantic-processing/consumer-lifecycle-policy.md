@@ -17,19 +17,18 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 | Assertion-store accepted watermark | `api/ontology/assertions/assertions_store.go` (`LastAcceptedForSubject`) | **accepted-only**. The API's name and its callers make it an explicit endorsed-truth query. | Retain filter; do not reuse it for discovery or diagnostics. |
 | Assertion lifecycle on evidence loss/restoration | `api/ontology/assertions/evidence_store.go` | **all evidence-supported lifecycle states**: `represented`, `candidate`, `in_review`, `deferred`, and `accepted` transition to `unsupported` on loss of final qualifying evidence; restoration returns the recorded prior status. | Implemented as part of task 5.2; remaining reader work is tracked separately. |
 | Directional comparison | `api/ontology/comparison/compare.go`, `evaluate_cell.go` | **capability-aware**. Every selected comparison pair produces a cell. Missing normalization or incompatible quantity/component capabilities returns `no_verdict` with a persisted rationale; comparable pairs retain their existing verdicts. | Implemented in task 5.4; later assertion readers must pass raw-preserved states into this path rather than dropping them. |
+| Metric search registry | `api/doc-processing/search_indexing.go` (`buildMetricRegistryRows`) | **dual-read discovery**. Every legacy metric remains indexed; when a current supporting assertion exists, both its raw representation and its normalized representation are appended to the metric search document and recorded in semantic payload. | Implemented as the search slice of task 5.6. The optional lateral assertion read preserves legacy-only rows and does not change any writer gate. |
 | Semantic completeness projection | `api/ontology/semantic/completeness.go` | **diagnostic / capability-aware**. It reports supporting-link coverage rather than endorsing an assertion. | Retain its state-neutral coverage behavior; add represented/raw-preserved cases to the reader compatibility suite. |
 | Semantic processing association | `api/ontology/assertions/associate_semantics.go` | **legacy writer, not a consumer**. It still promotes successful ingestion to `accepted`. | Keep unchanged until Phase 3 task 6.6; it is deliberately outside the Phase 2 reader cutover. |
 
 ## Consumers not currently implemented
 
-The Phase 2 scope also requires search, Review Document rendering,
-generic semantic discovery, diagnostic projections, reports, and retry tooling
-to be dual-read.  The production tree has no implementation that reads
-`kb.semantic_assertions` for search or comparison; the only comparison matches
-are handler tests.  Those consumers therefore require new reader paths and
-compatibility certification rather than a filter change.  Review Document
-currently receives assertion-derived facts through the accepted-only profile
-path; its flagged-instance display model has not yet been implemented.
+The Phase 2 scope also requires Review Document rendering, generic semantic
+discovery, diagnostic projections, reports, and retry tooling to be dual-read.
+Metric search now reads supporting assertions when available while preserving
+legacy-only rows. Review Document currently receives assertion-derived facts
+through the accepted-only profile path; its flagged-instance display model has
+not yet been implemented.
 
 ## Certification rule
 
