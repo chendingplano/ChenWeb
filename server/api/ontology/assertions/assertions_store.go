@@ -22,34 +22,39 @@ var AllowedRefKinds = map[string]bool{
 // LogicalIdentityKey groups revisions of the same claim (spec §10.7); the
 // latest revision for a given key is the current state.
 type Assertion struct {
-	ID                                  int64           `json:"id"`
-	LogicalIdentityKey                  string          `json:"logical_identity_key"`
-	Revision                            int             `json:"revision"`
-	SubjectRefKind                      string          `json:"subject_ref_kind"`
-	SubjectRefID                        string          `json:"subject_ref_id"`
-	SubjectObjectID                     string          `json:"subject_object_id,omitempty"`
-	PredicateTermID                     string          `json:"predicate_term_id"`
-	ObjectRefKind                       string          `json:"object_ref_kind,omitempty"`
-	ObjectRefID                         string          `json:"object_ref_id,omitempty"`
-	ObjectObjectID                      string          `json:"object_object_id,omitempty"`
-	ObjectLiteral                       json.RawMessage `json:"object_literal,omitempty"`
-	AssertionKindTermID                 string          `json:"assertion_kind_term_id,omitempty"`
-	Polarity                            string          `json:"polarity"`
-	Modality                            string          `json:"modality,omitempty"`
-	Qualifiers                          json.RawMessage `json:"qualifiers,omitempty"`
-	Confidence                          *float64        `json:"confidence,omitempty"`
-	ValueForm                           string          `json:"value_form,omitempty"`
-	NumericValue                        *float64        `json:"numeric_value,omitempty"`
-	LowerValue                          *float64        `json:"lower_value,omitempty"`
-	UpperValue                          *float64        `json:"upper_value,omitempty"`
-	LowerInclusive                      *bool           `json:"lower_inclusive,omitempty"`
-	UpperInclusive                      *bool           `json:"upper_inclusive,omitempty"`
-	Comparator                          string          `json:"comparator,omitempty"`
-	UnitTermID                          string          `json:"unit_term_id,omitempty"`
-	QuantityKindTermID                  string          `json:"quantity_kind_term_id,omitempty"`
-	RawText                             string          `json:"raw_text,omitempty"`
-	Status                              string          `json:"status"`
-	UnsupportedPriorStatus              string          `json:"unsupported_prior_status,omitempty"`
+	ID                     int64           `json:"id"`
+	LogicalIdentityKey     string          `json:"logical_identity_key"`
+	Revision               int             `json:"revision"`
+	SubjectRefKind         string          `json:"subject_ref_kind"`
+	SubjectRefID           string          `json:"subject_ref_id"`
+	SubjectObjectID        string          `json:"subject_object_id,omitempty"`
+	PredicateTermID        string          `json:"predicate_term_id"`
+	ObjectRefKind          string          `json:"object_ref_kind,omitempty"`
+	ObjectRefID            string          `json:"object_ref_id,omitempty"`
+	ObjectObjectID         string          `json:"object_object_id,omitempty"`
+	ObjectLiteral          json.RawMessage `json:"object_literal,omitempty"`
+	AssertionKindTermID    string          `json:"assertion_kind_term_id,omitempty"`
+	Polarity               string          `json:"polarity"`
+	Modality               string          `json:"modality,omitempty"`
+	Qualifiers             json.RawMessage `json:"qualifiers,omitempty"`
+	Confidence             *float64        `json:"confidence,omitempty"`
+	ValueForm              string          `json:"value_form,omitempty"`
+	NumericValue           *float64        `json:"numeric_value,omitempty"`
+	LowerValue             *float64        `json:"lower_value,omitempty"`
+	UpperValue             *float64        `json:"upper_value,omitempty"`
+	LowerInclusive         *bool           `json:"lower_inclusive,omitempty"`
+	UpperInclusive         *bool           `json:"upper_inclusive,omitempty"`
+	Comparator             string          `json:"comparator,omitempty"`
+	UnitTermID             string          `json:"unit_term_id,omitempty"`
+	QuantityKindTermID     string          `json:"quantity_kind_term_id,omitempty"`
+	RawText                string          `json:"raw_text,omitempty"`
+	Status                 string          `json:"status"`
+	UnsupportedPriorStatus string          `json:"unsupported_prior_status,omitempty"`
+	// InstanceOfTermID is the stable class identity this assertion resolved to
+	// (ADR 2026081701 DR1/DR2, migration 20260818000014). Required whenever
+	// ClassIdentityStateTermID is resolved_existing, provisional_new, or
+	// ambiguous_candidates (ck_kb_semantic_assertions_resolved_class_reference).
+	InstanceOfTermID                    string          `json:"instance_of_term_id,omitempty"`
 	ClassIdentityStateTermID            string          `json:"class_identity_state_term_id,omitempty"`
 	MappingResolutionStateTermID        string          `json:"mapping_resolution_state_term_id,omitempty"`
 	ValueStateTermID                    string          `json:"value_state_term_id,omitempty"`
@@ -183,6 +188,7 @@ const assertionColumns = `
 	modality, qualifiers, confidence, value_form, numeric_value, lower_value,
 	upper_value, lower_inclusive, upper_inclusive, comparator, unit_term_id,
 	quantity_kind_term_id, raw_text, status, unsupported_prior_status,
+	instance_of_term_id,
 	class_identity_state_term_id, mapping_resolution_state_term_id,
 	value_state_term_id, conformance_state_term_id, raw_payload,
 	raw_snapshot_fingerprint, processing_error_details,
@@ -215,6 +221,7 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 		quantityKindID                      sql.NullString
 		rawText                             sql.NullString
 		unsupportedPriorStatus              sql.NullString
+		instanceOfTermID                    sql.NullString
 		classIdentityStateTermID            sql.NullString
 		mappingResolutionStateTermID        sql.NullString
 		valueStateTermID                    sql.NullString
@@ -238,6 +245,7 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 		&modality, &qualifiers, &confidence, &valueForm, &numericValue, &lowerValue,
 		&upperValue, &lowerInclusive, &upperInclusive, &comparator, &unitTermID,
 		&quantityKindID, &rawText, &a.Status, &unsupportedPriorStatus,
+		&instanceOfTermID,
 		&classIdentityStateTermID, &mappingResolutionStateTermID,
 		&valueStateTermID, &conformanceStateTermID, &rawPayload,
 		&rawSnapshotFingerprint, &processingErrorDetails,
@@ -312,6 +320,9 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 	}
 	if unsupportedPriorStatus.Valid {
 		a.UnsupportedPriorStatus = unsupportedPriorStatus.String
+	}
+	if instanceOfTermID.Valid {
+		a.InstanceOfTermID = instanceOfTermID.String
 	}
 	if classIdentityStateTermID.Valid {
 		a.ClassIdentityStateTermID = classIdentityStateTermID.String
@@ -418,10 +429,16 @@ INSERT INTO kb.semantic_assertions
 	 object_object_id, object_literal, assertion_kind_term_id, polarity,
 	 modality, qualifiers, confidence, value_form, numeric_value, lower_value,
 	 upper_value, lower_inclusive, upper_inclusive, comparator, unit_term_id,
-	 quantity_kind_term_id, raw_text, status, valid_time_start, valid_time_end,
+	 quantity_kind_term_id, raw_text, status, unsupported_prior_status,
+	 instance_of_term_id,
+	 class_identity_state_term_id, mapping_resolution_state_term_id,
+	 value_state_term_id, conformance_state_term_id, raw_payload,
+	 raw_snapshot_fingerprint, processing_error_details,
+	 normalized_against_contract_revision_id, valid_time_start, valid_time_end,
 	 create_by, modify_by)
 VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb,
-	$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+	$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+	$27, $28, $29, $30, $31, $32::jsonb, $33, $34::jsonb, $35, $36, $37, $38, $39)
 RETURNING ` + assertionColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(a.LogicalIdentityKey), a.SubjectRefKind, strings.TrimSpace(a.SubjectRefID),
@@ -433,7 +450,11 @@ RETURNING ` + assertionColumns
 		nullableFloat(a.NumericValue), nullableFloat(a.LowerValue), nullableFloat(a.UpperValue),
 		nullableBool(a.LowerInclusive), nullableBool(a.UpperInclusive), nullableString(a.Comparator),
 		nullableString(a.UnitTermID), nullableString(a.QuantityKindTermID), nullableString(a.RawText),
-		a.Status, nullableTime(a.ValidTimeStart), nullableTime(a.ValidTimeEnd),
+		a.Status, nullableString(a.UnsupportedPriorStatus), nullableString(a.InstanceOfTermID),
+		nullableString(a.ClassIdentityStateTermID), nullableString(a.MappingResolutionStateTermID),
+		nullableString(a.ValueStateTermID), nullableString(a.ConformanceStateTermID), nullableJSON(a.RawPayload),
+		nullableString(a.RawSnapshotFingerprint), nullableJSON(a.ProcessingErrorDetails),
+		a.NormalizedAgainstContractRevisionID, nullableTime(a.ValidTimeStart), nullableTime(a.ValidTimeEnd),
 		nullableString(a.CreateBy), nullableString(a.ModifyBy),
 	)
 	return scanAssertion(row.Scan)
@@ -476,10 +497,16 @@ INSERT INTO kb.semantic_assertions
 	 object_object_id, object_literal, assertion_kind_term_id, polarity,
 	 modality, qualifiers, confidence, value_form, numeric_value, lower_value,
 	 upper_value, lower_inclusive, upper_inclusive, comparator, unit_term_id,
-	 quantity_kind_term_id, raw_text, status, valid_time_start, valid_time_end,
+	 quantity_kind_term_id, raw_text, status, unsupported_prior_status,
+	 instance_of_term_id,
+	 class_identity_state_term_id, mapping_resolution_state_term_id,
+	 value_state_term_id, conformance_state_term_id, raw_payload,
+	 raw_snapshot_fingerprint, processing_error_details,
+	 normalized_against_contract_revision_id, valid_time_start, valid_time_end,
 	 create_by, modify_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14::jsonb,
-	$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+	$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
+	$28, $29, $30, $31, $32, $33::jsonb, $34, $35::jsonb, $36, $37, $38, $39, $40)
 RETURNING ` + assertionColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(a.LogicalIdentityKey), prior.Revision+1, a.SubjectRefKind, strings.TrimSpace(a.SubjectRefID),
@@ -491,7 +518,11 @@ RETURNING ` + assertionColumns
 		nullableFloat(a.NumericValue), nullableFloat(a.LowerValue), nullableFloat(a.UpperValue),
 		nullableBool(a.LowerInclusive), nullableBool(a.UpperInclusive), nullableString(a.Comparator),
 		nullableString(a.UnitTermID), nullableString(a.QuantityKindTermID), nullableString(a.RawText),
-		a.Status, nullableTime(a.ValidTimeStart), nullableTime(a.ValidTimeEnd),
+		a.Status, nullableString(a.UnsupportedPriorStatus), nullableString(a.InstanceOfTermID),
+		nullableString(a.ClassIdentityStateTermID), nullableString(a.MappingResolutionStateTermID),
+		nullableString(a.ValueStateTermID), nullableString(a.ConformanceStateTermID), nullableJSON(a.RawPayload),
+		nullableString(a.RawSnapshotFingerprint), nullableJSON(a.ProcessingErrorDetails),
+		a.NormalizedAgainstContractRevisionID, nullableTime(a.ValidTimeStart), nullableTime(a.ValidTimeEnd),
 		nullableString(a.CreateBy), nullableString(a.ModifyBy),
 	)
 	next, err := scanAssertion(row.Scan)
