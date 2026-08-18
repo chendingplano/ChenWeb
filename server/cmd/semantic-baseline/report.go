@@ -23,6 +23,8 @@ type Baseline struct {
 	AssertionStates []ReasonCount
 	StageCoverage   StageCoverage
 	Capacity        CapacityModel
+	ClassFoundation ClassFoundationCapacity
+	TermReaders     TermReaderAudit
 }
 
 // CorpusCounts is the corpus-wide summary (Phase 0 item 3).
@@ -92,6 +94,19 @@ type CapacityModel struct {
 	EstimatedBytes       int64
 }
 
+// ClassFoundationCapacity projects the additive ADR 2026081701 rows from the
+// current corpus without assuming that the foundation tables already exist.
+// Until canonical convergence is proven, every metric may require its own
+// provisional class, claim identity, observed profile, and observation row.
+type ClassFoundationCapacity struct {
+	LegacyAssertions            int64
+	ProvisionalClassCandidates  int64
+	ClaimIdentitiesUpperBound   int64
+	ObservedProfilesUpperBound  int64
+	ObservedProfileObservations int64
+	EstimatedBytes              int64
+}
+
 // Row-size figures used by the capacity model, INCLUDING index overhead.
 //
 // bytesPerOutcome is measured, not guessed: the Phase 0 load test
@@ -104,11 +119,15 @@ type CapacityModel struct {
 // The others remain conservative estimates of the same shape; they are
 // annotated so a reader can tell measurement from projection.
 const (
-	bytesPerOutcome   = 806  // measured, load test 2026-08-18
-	bytesPerFinding   = 384  // estimated
-	bytesPerEvidence  = 448  // estimated
-	bytesPerDecision  = 384  // estimated
-	bytesPerAssertion = 1024 // estimated
+	bytesPerOutcome            = 806  // measured, load test 2026-08-18
+	bytesPerFinding            = 384  // estimated
+	bytesPerEvidence           = 448  // estimated
+	bytesPerDecision           = 384  // estimated
+	bytesPerAssertion          = 1024 // estimated
+	bytesPerClassHeader        = 640  // estimated
+	bytesPerClaimIdentity      = 512  // estimated
+	bytesPerObservedProfile    = 768  // estimated
+	bytesPerProfileObservation = 640  // estimated
 )
 
 // requiredMetricStages is the metric adapter's declared required stage set as
@@ -147,6 +166,7 @@ func Collect(ctx context.Context, db *sql.DB) (Baseline, error) {
 		OutcomeEnvelopes:  b.Corpus.MetricOccurrences * int64(len(requiredMetricStages)),
 	}
 	b.Capacity = modelCapacity(b.Corpus, b.StageCoverage)
+	b.ClassFoundation = modelClassFoundationCapacity(b.Corpus)
 	return b, nil
 }
 
@@ -336,6 +356,25 @@ func modelCapacity(c CorpusCounts, s StageCoverage) CapacityModel {
 		m.ClassDecisions*bytesPerDecision +
 		m.AssertionsUpperBound*bytesPerAssertion +
 		m.FindingsHighEstimate*bytesPerFinding
+	return m
+}
+
+func modelClassFoundationCapacity(c CorpusCounts) ClassFoundationCapacity {
+	// Before canonical convergence, a metric occurrence is the conservative
+	// upper bound for every new class/claim/profile cardinality. Later corpus
+	// evidence can only reduce classes and claims through safe convergence.
+	m := ClassFoundationCapacity{
+		LegacyAssertions:            c.Assertions,
+		ProvisionalClassCandidates:  c.MetricOccurrences,
+		ClaimIdentitiesUpperBound:   c.MetricOccurrences,
+		ObservedProfilesUpperBound:  c.MetricOccurrences,
+		ObservedProfileObservations: c.MetricOccurrences,
+	}
+	m.EstimatedBytes =
+		m.ProvisionalClassCandidates*bytesPerClassHeader +
+			m.ClaimIdentitiesUpperBound*bytesPerClaimIdentity +
+			m.ObservedProfilesUpperBound*bytesPerObservedProfile +
+			m.ObservedProfileObservations*bytesPerProfileObservation
 	return m
 }
 

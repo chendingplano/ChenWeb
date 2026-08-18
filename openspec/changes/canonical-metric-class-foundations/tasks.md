@@ -1,7 +1,7 @@
 ## 1. Baseline and reader audit
 
-- [ ] 1.1 Produce a corpus baseline for term readers, metric support-link duplicates, class/claim cardinality, and profile storage projections across all metric-bearing records
-- [ ] 1.2 Inventory every application read of `kb.ontology_terms`; classify it as current-state, historical, or write-path and assign a migration target
+- [x] 1.1 Produce a corpus baseline for term readers, metric support-link duplicates, class/claim cardinality, and profile storage projections across all metric-bearing records
+- [x] 1.2 Inventory every application read of `kb.ontology_terms`; classify it as current-state, historical, or write-path and assign a migration target
 - [ ] 1.3 Define and load-test the initial caps for profile examples, redirect depth, canonical-key shadow reports, and same-class Review Document retrieval
 
 ## 2. Stable ontology class storage

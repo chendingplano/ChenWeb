@@ -71,7 +71,26 @@ func RenderMarkdown(b Baseline, now time.Time) string {
 	fmt.Fprintf(&sb, "| Assertions before canonical convergence | %d |\n", m.AssertionsUpperBound)
 	fmt.Fprintf(&sb, "| **Estimated bytes (worst case)** | **%s** |\n", humanBytes(m.EstimatedBytes))
 
-	fmt.Fprintf(&sb, "\n## 7. Per-record detail\n\n| Record | File | Metrics | Candidates | Supported | Unreachable | Review-visible |\n|---:|---|---:|---:|---:|---:|---:|\n")
+	f := b.ClassFoundation
+	fmt.Fprintf(&sb, "\n## 7. ADR 2026081701 class-foundation projection\n\n| Projected row set | Rows |\n|---|---:|\n")
+	fmt.Fprintf(&sb, "| Existing semantic assertions | %d |\n", f.LegacyAssertions)
+	fmt.Fprintf(&sb, "| Provisional class candidates before convergence | %d |\n", f.ProvisionalClassCandidates)
+	fmt.Fprintf(&sb, "| Canonical claim identities before convergence | %d |\n", f.ClaimIdentitiesUpperBound)
+	fmt.Fprintf(&sb, "| Observed class profiles before convergence | %d |\n", f.ObservedProfilesUpperBound)
+	fmt.Fprintf(&sb, "| Observed profile observations | %d |\n", f.ObservedProfileObservations)
+	fmt.Fprintf(&sb, "| **Estimated class-foundation bytes** | **%s** |\n", humanBytes(f.EstimatedBytes))
+
+	t := b.TermReaders
+	fmt.Fprintf(&sb, "\n## 8. Current-term reader audit\n\n| Classification | Application files |\n|---|---:|\n")
+	fmt.Fprintf(&sb, "| Current-state readers to migrate | %d |\n", t.CurrentState)
+	fmt.Fprintf(&sb, "| Historical readers | %d |\n", t.Historical)
+	fmt.Fprintf(&sb, "| Write paths | %d |\n", t.WritePath)
+	fmt.Fprintf(&sb, "\n| Application source | Classification | Migration target |\n|---|---|---|\n")
+	for _, ref := range t.References {
+		fmt.Fprintf(&sb, "| `%s` | `%s` | %s |\n", ref.Path, ref.Classification, ref.MigrationTarget)
+	}
+
+	fmt.Fprintf(&sb, "\n## 9. Per-record detail\n\n| Record | File | Metrics | Candidates | Supported | Unreachable | Review-visible |\n|---:|---|---:|---:|---:|---:|---:|\n")
 	for _, r := range b.PerRecord {
 		fmt.Fprintf(&sb, "| %d | %s | %d | %d | %d | %d | %d |\n",
 			r.InputRecordID, shortFile(r.Filename), r.Metrics, r.DecisionCandidates,

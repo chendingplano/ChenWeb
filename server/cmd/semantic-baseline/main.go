@@ -29,6 +29,7 @@ func main() {
 	log.SetFlags(0)
 	format := flag.String("format", "markdown", "output format: markdown|json")
 	out := flag.String("out", "", "write to FILE instead of stdout")
+	sourceRoot := flag.String("source-root", ".", "Go source root for kb.ontology_terms reader audit")
 	flag.Parse()
 
 	db := connect()
@@ -39,6 +40,10 @@ func main() {
 		log.Fatalf("collect baseline: %v", err)
 	}
 	baseline.SetFindingsLowEstimate()
+	baseline.TermReaders, err = AuditTermReaders(*sourceRoot)
+	if err != nil {
+		log.Fatalf("audit term readers: %v", err)
+	}
 
 	var rendered string
 	switch *format {
