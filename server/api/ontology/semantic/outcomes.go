@@ -99,6 +99,28 @@ func (s OutcomeStore) Record(ctx context.Context, out Outcome, findings []Findin
 	if s.DB == nil {
 		return RecordResult{}, fmt.Errorf("db is nil")
 	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := RecordTx(ctx, tx, out, findings)
+	if err != nil {
+		return RecordResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RecordResult{}, err
+	}
+	return result, nil
+}
+
+// RecordTx is Record's transactional body, exposed so a caller with a wider
+// atomic boundary (DR5's metric semantic transaction composes outcome/finding
+// writes with assertion, evidence, and class-resolution writes in one
+// transaction) can include an outcome envelope without nesting transactions.
+// The caller owns tx's lifetime: it commits or rolls back, never RecordTx.
+func RecordTx(ctx context.Context, tx *sql.Tx, out Outcome, findings []Finding) (RecordResult, error) {
 	if err := validateOutcome(out, findings); err != nil {
 		return RecordResult{}, err
 	}
@@ -120,12 +142,6 @@ func (s OutcomeStore) Record(ctx context.Context, out Outcome, findings []Findin
 		childFingerprints = append(childFingerprints, f.DependencyFingerprint)
 	}
 	out.DependencyFingerprint = AggregateFingerprint(out.DependencyFingerprint, childFingerprints)
-
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return RecordResult{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	// Lock the scope before reading it. Without this, two workers racing on
 	// the same occurrence could both read "no active row" and both insert; the
@@ -153,9 +169,6 @@ func (s OutcomeStore) Record(ctx context.Context, out Outcome, findings []Findin
 		}
 		current, err := loadFindings(ctx, tx, existing.ID)
 		if err != nil {
-			return RecordResult{}, err
-		}
-		if err := tx.Commit(); err != nil {
 			return RecordResult{}, err
 		}
 		return RecordResult{Outcome: *existing, Findings: current, Reused: true}, nil
@@ -194,9 +207,6 @@ func (s OutcomeStore) Record(ctx context.Context, out Outcome, findings []Findin
 			return RecordResult{}, err
 		}
 		written = append(written, w)
-	}
-	if err := tx.Commit(); err != nil {
-		return RecordResult{}, err
 	}
 	return RecordResult{Outcome: inserted, Findings: written, Superseded: supersededID}, nil
 }

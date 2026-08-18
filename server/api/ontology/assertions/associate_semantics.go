@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/lib/pq"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semantic"
 )
 
 // AssociateReport summarizes one associate_semantics run over one input
@@ -21,8 +23,16 @@ type AssociateReport struct {
 	// MappingMisses counts candidates deferred specifically because their
 	// value_range_type_lookup tag was "proposed" (ADR 2026081401 DR3) --
 	// ungoverned vocabulary nobody has triaged yet, as opposed to any other
-	// deferral reason. Included in Deferred, not separate from it.
+	// deferral reason. Included in Deferred, not separate from it. Never
+	// incremented while LOSSLESS_SEMANTIC_WRITES_METRIC is enabled, since
+	// DR12 supersedes this deferral for metrics under that gate.
 	MappingMisses int
+	// Represented counts metric candidates persisted via the DR5/DR6 lossless
+	// path with assertion status 'represented' -- distinct from Accepted,
+	// which is reserved for the legacy straight-to-accepted path. Conflating
+	// the two would be exactly the "represented silently treated as accepted"
+	// mistake DR6 forbids.
+	Represented int
 }
 
 // AssociateSemantics implements spec §10.3-§10.7 (generate candidates is
@@ -95,6 +105,8 @@ WHERE status IN ('candidate', 'in_review') AND source_artifact_type = ANY($1)
 		switch outcome {
 		case "accepted":
 			report.Accepted++
+		case "represented":
+			report.Represented++
 		case "deferred":
 			report.Deferred++
 		case "deferredMappingMiss":
@@ -287,6 +299,13 @@ type metricCandidatePayload struct {
 	// normalize_assertions tagged this candidate with (ADR 2026081401 DR1/
 	// DR3): "approved" | "ambiguous" | "proposed" | "absent".
 	ValueRangeTypeLookup string `json:"value_range_type_lookup"`
+	// ValueRangeTypeRaw is the normalized raw_value key this candidate looked
+	// up in kb.metric_value_range_type_map (normalizeValueRangeTypeRaw's
+	// output). It is what makes a mapping-finding dependency fingerprint
+	// specific to the one raw value that changed, rather than to every
+	// unresolved/ambiguous mapping in the corpus -- see
+	// resolveMetricMappingDependency in metric_lossless_writer.go.
+	ValueRangeTypeRaw string `json:"value_range_type_raw"`
 }
 
 // metricAssertionKindTermID rejects only missing and unparsed values. Every
@@ -331,6 +350,30 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 		}
 		return a.deferCandidate(ctx, dcStore, dc, "unresolved_referent")
 	}
+
+	// DR12 supersedes the governed-assertion-kind gate below it: an empty or
+	// ungoverned kind (today's mapping-miss deferral) instead materializes a
+	// raw-preserved, represented assertion. This branch is a self-contained
+	// early return specifically so the legacy path beneath it -- including
+	// its exact query order -- is untouched when the gate is off (the
+	// default), which is what every existing gate-off test depends on.
+	if semantic.NewGates().MetricLosslessWritesEnabled() {
+		predicateTermID := "mea:measured_by"
+		predicateOK, err := a.termExists(ctx, predicateTermID)
+		if err != nil {
+			return "", err
+		}
+		if !predicateOK {
+			return a.deferCandidateWithDependency(ctx, dcStore, dc,
+				"governed_term_not_released:"+predicateTermID,
+				fmt.Sprintf("governed_terms:%s=%t", predicateTermID, predicateOK))
+		}
+		if _, err := dcStore.SetResolution(ctx, dc.ID, "matched", "subject reconciled; predicate released"); err != nil {
+			return "", err
+		}
+		return a.writeMetricLossless(ctx, dc, p, inputRecordID, predicateTermID)
+	}
+
 	assertionKindTermID, supported := metricAssertionKindTermID(p.AssertionKind)
 	if !supported {
 		reason := "no_governed_assertion_kind_term:" + p.AssertionKind
