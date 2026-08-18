@@ -22,6 +22,7 @@ type MetricFoundationShadowInput struct {
 	MetricDefinitionTerm string
 	MetricName           string
 	MetricValue          string
+	ThresholdOrTarget    string
 	MetricUnit           string
 	RangeType            string
 	Redirects            classfoundation.RedirectLookup
@@ -66,13 +67,21 @@ func (MetricAdapter) FoundationShadow(ctx context.Context, input MetricFoundatio
 		}, nil
 	}
 	classTermID = redirect.TerminalTarget
+	rawValue := strings.TrimSpace(input.MetricValue)
+	if rawValue == "" {
+		rawValue = strings.TrimSpace(input.ThresholdOrTarget)
+	}
+	observationState := "represented"
+	if rawValue == "" {
+		observationState = "missing"
+	}
 	claimKey, err := classfoundation.SerializeCanonicalClaimKey(classfoundation.CanonicalClaimInput{
 		KeyVersion:  "identity/v1",
 		ClassTermID: classTermID,
 		Fields: map[string]string{
 			"metric_name":  strings.TrimSpace(input.MetricName),
 			"metric_unit":  strings.TrimSpace(input.MetricUnit),
-			"metric_value": strings.TrimSpace(input.MetricValue),
+			"metric_value": rawValue,
 			"range_type":   strings.TrimSpace(input.RangeType),
 		},
 	})
@@ -90,10 +99,10 @@ func (MetricAdapter) FoundationShadow(ctx context.Context, input MetricFoundatio
 			LogicalDatatype:   "raw_metric_value",
 			ValueForm:         "raw",
 			UnitTermID:        strings.TrimSpace(input.MetricUnit),
-			ObservationState:  "represented",
+			ObservationState:  observationState,
 			AggregationMethod: "metric_foundation_shadow",
 			MethodVersion:     MetricAdapterVersion,
-			RawValue:          strings.TrimSpace(input.MetricValue),
+			RawValue:          rawValue,
 		},
 		Redirect: redirect,
 	}, nil

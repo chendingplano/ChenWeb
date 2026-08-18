@@ -149,6 +149,9 @@ type ShadowComparison struct {
 	FoundationClassUnavailable  int
 	FoundationClaimCandidates   int
 	FoundationProfileCandidates int
+	// FoundationReport retains bounded, per-occurrence diagnostics behind the
+	// aggregate counters. It is shadow-only and never persists evidence.
+	FoundationReport *FoundationShadowReport
 }
 
 type termRedirectLookup struct{ db *sql.DB }
@@ -177,7 +180,11 @@ func (a MetricAdapter) RunShadow(ctx context.Context, db *sql.DB, inputRecordID 
 	if db == nil {
 		return ShadowComparison{}, fmt.Errorf("db is nil")
 	}
-	cmp := ShadowComparison{InputRecordID: inputRecordID, IntendedFindingsByTerm: map[string]int{}}
+	cmp := ShadowComparison{
+		InputRecordID:          inputRecordID,
+		IntendedFindingsByTerm: map[string]int{},
+		FoundationReport:       NewFoundationShadowReport(0),
+	}
 
 	// The mapping-state join reproduces normalizeValueRangeTypeRaw's key
 	// (lowercase, trim, '-'/' ' -> '_') so the shadow projection and the
@@ -189,6 +196,7 @@ WITH norm AS (
 	         coalesce(m.metric_definition_term_id, '') AS metric_definition_term_id,
 	         coalesce(m.metric_name, '') AS metric_name,
 	         coalesce(m.metric_value, '') AS metric_value,
+	         coalesce(m.threshold_or_target, '') AS threshold_or_target,
 	         coalesce(m.metric_unit, '') AS metric_unit,
 	         CASE WHEN m.value_range_type IS NULL OR btrim(m.value_range_type) = '' THEN NULL
               ELSE replace(replace(lower(btrim(m.value_range_type)), '-', '_'), ' ', '_')
@@ -201,6 +209,7 @@ SELECT n.metric_id,
 	   n.metric_definition_term_id,
 	   n.metric_name,
 	   n.metric_value,
+	   n.threshold_or_target,
 	   n.metric_unit,
 	   coalesce(n.raw_key, ''),
        CASE WHEN n.raw_key IS NULL THEN 'absent'
@@ -221,10 +230,10 @@ LEFT JOIN kb.metric_value_range_type_map vm ON vm.raw_value = n.raw_key`
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var metricID, metricDefinitionTerm, metricName, metricValue, metricUnit, rawRangeType, mappingState string
+		var metricID, metricDefinitionTerm, metricName, metricValue, thresholdOrTarget, metricUnit, rawRangeType, mappingState string
 		var hasLiteral bool
 		var supportLinks int
-		if err := rows.Scan(&metricID, &metricDefinitionTerm, &metricName, &metricValue, &metricUnit, &rawRangeType, &mappingState, &hasLiteral, &supportLinks); err != nil {
+		if err := rows.Scan(&metricID, &metricDefinitionTerm, &metricName, &metricValue, &thresholdOrTarget, &metricUnit, &rawRangeType, &mappingState, &hasLiteral, &supportLinks); err != nil {
 			return cmp, err
 		}
 		foundation, err := a.FoundationShadow(ctx, MetricFoundationShadowInput{
@@ -232,6 +241,7 @@ LEFT JOIN kb.metric_value_range_type_map vm ON vm.raw_value = n.raw_key`
 			MetricDefinitionTerm: metricDefinitionTerm,
 			MetricName:           metricName,
 			MetricValue:          metricValue,
+			ThresholdOrTarget:    thresholdOrTarget,
 			MetricUnit:           metricUnit,
 			RangeType:            rawRangeType,
 			Redirects:            termRedirectLookup{db: db},
@@ -251,6 +261,7 @@ LEFT JOIN kb.metric_value_range_type_map vm ON vm.raw_value = n.raw_key`
 		if foundation.ProfileObservation != nil {
 			cmp.FoundationProfileCandidates++
 		}
+		cmp.FoundationReport.Observe(metricID, inputRecordID, foundation, supportLinks)
 		cmp.MetricsExamined++
 		switch {
 		case supportLinks == 0:
@@ -290,6 +301,7 @@ LEFT JOIN kb.metric_value_range_type_map vm ON vm.raw_value = n.raw_key`
 	if err := rows.Err(); err != nil {
 		return cmp, err
 	}
+	cmp.FoundationReport.Finalize()
 	cmp.IntendedOutcomeEnvelopes = cmp.MetricsExamined * len(a.RequiredStages())
 	return cmp, nil
 }
