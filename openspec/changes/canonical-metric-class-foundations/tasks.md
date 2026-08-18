@@ -21,7 +21,7 @@
 ## 4. Inclusive observed class profiles
 
 - [x] 4.1 Add observed-profile, attribute-observation, distribution, example, contradiction, and outlier storage keyed by stable class and source evidence
-- [ ] 4.2 Implement profile aggregation that includes represented, malformed, unparsed, missing, nonconforming, and conflicting observations with independent states
+- [x] 4.2 Implement profile aggregation that includes represented, malformed, unparsed, missing, nonconforming, and conflicting observations with independent states
 - [ ] 4.3 Implement a read model/API for observed profiles that labels them non-authoritative and applies configured example/result caps
 - [ ] 4.4 Add tests proving profile aggregation includes a malformed/outlier observation without writing or changing a class-contract revision
 
