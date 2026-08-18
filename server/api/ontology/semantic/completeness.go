@@ -41,6 +41,10 @@ type CompletenessReport struct {
 	// state, which the value-state-aware constraint permits for legacy rows
 	// but the lossless writer must never produce.
 	AssertionsMissingValueState int64
+	// ArtifactsWithMissingValue counts source-backed artifacts that were
+	// represented and supported, but whose governed value state is explicitly
+	// missing. These are present artifacts, not absent-artifact gaps.
+	ArtifactsWithMissingValue int64
 }
 
 // Complete reports whether the projection found nothing that blocks cutover.
@@ -172,6 +176,17 @@ WHERE f.active = true AND o.active = false`).Scan(&rep.OrphanActiveFindings); er
 SELECT count(*) FROM kb.semantic_assertions WHERE value_state_term_id IS NULL`).
 		Scan(&rep.AssertionsMissingValueState); err != nil {
 		return rep, fmt.Errorf("count assertions missing value state: %w", err)
+	}
+
+	if err := c.DB.QueryRowContext(ctx, `
+SELECT count(DISTINCT (e.artifact_type, e.artifact_id, e.input_record_id))
+FROM kb.assertion_evidence e
+JOIN kb.semantic_assertions a ON a.id = e.assertion_id
+WHERE e.deleted = false
+  AND e.evidence_role = 'supports'
+  AND a.value_state_term_id = 'semantic:value_state_missing'`).
+		Scan(&rep.ArtifactsWithMissingValue); err != nil {
+		return rep, fmt.Errorf("count artifacts with missing value: %w", err)
 	}
 	return rep, nil
 }
