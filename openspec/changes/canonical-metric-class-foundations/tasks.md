@@ -57,5 +57,5 @@
 
 ## 9. Documentation and handoff
 
-- [ ] 9.1 Update ChenWeb architecture documentation and the metric semantic-processing manual with stable class, observed profile, contract, claim, and redirect semantics
+- [x] 9.1 Update ChenWeb architecture documentation and the metric semantic-processing manual with stable class, observed profile, contract, claim, and redirect semantics
 - [ ] 9.2 Record stale documents, unresolved policy choices, and the precise handoff point for Phase 3 lossless metric writer activation
