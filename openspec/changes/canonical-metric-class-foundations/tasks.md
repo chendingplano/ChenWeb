@@ -14,7 +14,7 @@
 ## 3. Class contracts and capability validation
 
 - [x] 3.1 Add append-only class-contract revision, capability declaration, and capability-validation-result storage with governed vocabulary references
-- [ ] 3.2 Implement stores that create identity-only classes and append validated contract revisions without changing stable term IDs
+- [x] 3.2 Implement stores that create identity-only classes and append validated contract revisions without changing stable term IDs
 - [ ] 3.3 Implement capability validation dispatch and persist validator name, version, result, evidence, and failure details per capability
 - [ ] 3.4 Add tests proving an identity-only class cannot advertise unsupported comparison or validation capability
 
