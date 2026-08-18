@@ -52,7 +52,7 @@
 - [x] 8.1 Wire class, profile, claim, and redirect computations into metric shadow mode with no consumer-visible writer change
 - [x] 8.2 Expose shadow reports for provisional/ambiguous classes, claim convergence/collisions, profile outliers, redirects, and duplicate evidence exceptions
 - [x] 8.3 Build the reader and migration compatibility suite covering legacy terms/assertions, represented states, redirects, and current-term reads
-- [ ] 8.4 Run corpus and load tests at active caps; publish capacity, latency, storage, rollback, and exception reports
+- [x] 8.4 Run corpus and load tests at active caps; publish capacity, latency, storage, rollback, and exception reports
 - [ ] 8.5 Certify the ADR 2026081701 foundations for the dependent `lossless-semantic-processing` change; retain both lossless writer gates disabled
 
 ## 9. Documentation and handoff
