@@ -45,7 +45,7 @@
 - [x] 7.2 Implement bounded redirect resolution with traversal provenance and explicit unresolved/depth-limit outcomes
 - [x] 7.3 Report and resolve duplicate current metric support links through an auditable history-preserving backfill
 - [x] 7.4 Add `uq_assertion_evidence_current_metric_support` scoped to active supporting metric evidence only
-- [ ] 7.5 Add tests for redirect cycles, reversal/supersession, single-target enforcement, metric duplicate rejection, and non-metric evidence fan-out
+- [x] 7.5 Add tests for redirect cycles, reversal/supersession, single-target enforcement, metric duplicate rejection, and non-metric evidence fan-out
 
 ## 8. Shadow integration and certification
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestMetricSupportCardinalityMigrationScopesUniqueIndexToCurrentMetricSupports(t *testing.T) {
+func TestMetricSupportCardinalityMigrationRejectsOnlyCurrentMetricSupports(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate metric support cardinality migration test")
@@ -30,6 +30,14 @@ func TestMetricSupportCardinalityMigrationScopesUniqueIndexToCurrentMetricSuppor
 	} {
 		if !strings.Contains(compactSQL, required) {
 			t.Errorf("migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"where evidence_role = 'supports' and not deleted",
+		"on kb.assertion_evidence (artifact_id, input_record_id)",
+	} {
+		if strings.Contains(compactSQL, forbidden) {
+			t.Errorf("metric-only cardinality index is too broad: found %q", forbidden)
 		}
 	}
 }

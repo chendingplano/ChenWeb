@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestRedirectMigrationEnforcesSingleActiveTargetsAndCycleGuards(t *testing.T) {
+func TestRedirectMigrationSupportsAuditableSupersessionAndRejectsCycles(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate redirect migration test")
@@ -26,10 +26,15 @@ func TestRedirectMigrationEnforcesSingleActiveTargetsAndCycleGuards(t *testing.T
 		"target_term_id",
 		"source_assertion_id",
 		"target_assertion_id",
+		"active boolean not null default true",
 		"superseded_by_redirect_id",
+		"uq_kb_ontology_term_redirects_active_source",
+		"uq_kb_semantic_assertion_redirects_active_source",
 		"where active",
 		"create trigger kb_term_redirect_cycle_guard",
 		"create trigger kb_assertion_redirect_cycle_guard",
+		"before insert or update of source_term_id, target_term_id, active",
+		"before insert or update of source_assertion_id, target_assertion_id, active",
 		"recursive",
 		"-- +goose down",
 	} {
