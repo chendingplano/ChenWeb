@@ -67,6 +67,10 @@ func assertionRow(cols []string) *sqlmock.Rows {
 }
 
 func assertionRowWithStatus(cols []string, status string) *sqlmock.Rows {
+	return assertionRowWithStatusAndPrior(cols, status, nil)
+}
+
+func assertionRowWithStatusAndPrior(cols []string, status string, prior any) *sqlmock.Rows {
 	now := time.Now()
 	return sqlmock.NewRows(cols).AddRow(
 		int64(1), "p3test:metric:001", 1, "object_node", "obj_1",
@@ -75,7 +79,7 @@ func assertionRowWithStatus(cols []string, status string) *sqlmock.Rows {
 		nil, []byte("null"), nil, "", nil, nil,
 		nil, nil, nil, nil, nil,
 		nil, "", status,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		prior, nil, nil, nil, nil, nil, nil, nil, nil,
 		nil,
 		nil, nil, nil, nil,
 		now, now, "tester", now, "tester",

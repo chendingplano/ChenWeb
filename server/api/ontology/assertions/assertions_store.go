@@ -606,6 +606,57 @@ WHERE id = $1`
 	return s.GetByID(ctx, id)
 }
 
+// TransitionToUnsupportedForEvidenceLoss records the precise lifecycle state
+// that preceded loss of the assertion's final qualifying evidence. That stored
+// value is the only valid restoration target (ADR 2026081801 DR6).
+func (s AssertionStore) TransitionToUnsupportedForEvidenceLoss(ctx context.Context, id int64, reason, by string) (Assertion, error) {
+	if s.DB == nil {
+		return Assertion{}, errors.New("db is nil")
+	}
+	cur, err := s.GetByID(ctx, id)
+	if err != nil {
+		return Assertion{}, err
+	}
+	if !EvidenceLossTransitionAllowed(cur.Status) {
+		return cur, nil
+	}
+	const stmt = `
+UPDATE kb.semantic_assertions
+SET status = $2, unsupported_prior_status = $3, decision_reason = $4, modify_time = NOW(), modify_by = $5
+WHERE id = $1`
+	if _, err := s.DB.ExecContext(ctx, stmt, id, StatusUnsupported, cur.Status, nullableString(reason), nullableString(by)); err != nil {
+		return Assertion{}, err
+	}
+	return s.GetByID(ctx, id)
+}
+
+// RestoreFromUnsupported restores an assertion only to the lifecycle status
+// recorded when its final qualifying evidence was removed. It intentionally
+// cannot choose a status, so restoration cannot escalate governance.
+func (s AssertionStore) RestoreFromUnsupported(ctx context.Context, id int64, reason, by string) (Assertion, error) {
+	if s.DB == nil {
+		return Assertion{}, errors.New("db is nil")
+	}
+	cur, err := s.GetByID(ctx, id)
+	if err != nil {
+		return Assertion{}, err
+	}
+	if cur.Status != StatusUnsupported {
+		return cur, nil
+	}
+	if !ValidUnsupportedPriorStatus(cur.UnsupportedPriorStatus) {
+		return Assertion{}, fmt.Errorf("unsupported assertion %d has invalid prior status %q", id, cur.UnsupportedPriorStatus)
+	}
+	const stmt = `
+UPDATE kb.semantic_assertions
+SET status = $2, unsupported_prior_status = NULL, decision_reason = $3, modify_time = NOW(), modify_by = $4
+WHERE id = $1`
+	if _, err := s.DB.ExecContext(ctx, stmt, id, cur.UnsupportedPriorStatus, nullableString(reason), nullableString(by)); err != nil {
+		return Assertion{}, err
+	}
+	return s.GetByID(ctx, id)
+}
+
 // DeferAssertion moves a candidate/in-review assertion to deferred and
 // records the dependency fingerprint it is blocked on (spec §9.3, mirroring
 // the P2 candidate defer/retry gate for the operational machine).

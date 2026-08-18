@@ -295,9 +295,8 @@ WHERE assertion_id = $1 AND evidence_role = 'supports' AND NOT deleted`
 // DeleteEvidence soft-deletes an evidence row (application-level deletion,
 // e.g. cascading from an input-record deletion per existing retention
 // policy -- never a DB-level ON DELETE CASCADE, spec §10.12). If this was the
-// assertion's last active supporting evidence, the assertion transitions
-// accepted -> unsupported and the deleted evidence id is recorded in the
-// transition reason.
+// assertion's last active supporting evidence, the assertion transitions to
+// unsupported while recording its exact prior lifecycle status.
 func (s EvidenceStore) DeleteEvidence(ctx context.Context, id int64, actor, reason string) error {
 	if s.DB == nil {
 		return errors.New("db is nil")
@@ -331,14 +330,14 @@ WHERE id = $1`
 	if err != nil {
 		return err
 	}
-	if cur.Status != StatusAccepted {
+	if !EvidenceLossTransitionAllowed(cur.Status) {
 		return nil
 	}
 	transitionReason := "last qualifying evidence removed (evidence id " + strconv.FormatInt(id, 10) + ")"
 	if reason != "" {
 		transitionReason += ": " + reason
 	}
-	_, err = s.Assertions.TransitionStatus(ctx, assertionID, StatusUnsupported, transitionReason, actor)
+	_, err = s.Assertions.TransitionToUnsupportedForEvidenceLoss(ctx, assertionID, transitionReason, actor)
 	return err
 }
 
@@ -362,8 +361,8 @@ func (s EvidenceStore) RestoreEvidence(ctx context.Context, id int64) (Evidence,
 	return s.GetByID(ctx, id)
 }
 
-// restoreIfUnsupported returns an unsupported assertion to accepted once it
-// has at least one active supporting evidence row again (spec §16.3 item 16).
+// restoreIfUnsupported returns an unsupported assertion to its recorded prior
+// lifecycle state once it has active supporting evidence again.
 func (s EvidenceStore) restoreIfUnsupported(ctx context.Context, assertionID int64) (Assertion, error) {
 	cur, err := s.Assertions.GetByID(ctx, assertionID)
 	if err != nil {
@@ -372,7 +371,7 @@ func (s EvidenceStore) restoreIfUnsupported(ctx context.Context, assertionID int
 	if cur.Status != StatusUnsupported {
 		return cur, nil
 	}
-	return s.Assertions.TransitionStatus(ctx, assertionID, StatusAccepted, "qualifying evidence restored", "")
+	return s.Assertions.RestoreFromUnsupported(ctx, assertionID, "qualifying evidence restored", "")
 }
 
 func nullableInt64(v *int64) any {
