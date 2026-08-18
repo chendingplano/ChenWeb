@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semantic"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -331,6 +333,32 @@ UPDATE kb.metrics
 	}
 
 	assertions.InvalidateValueRangeTypeMapCache()
+
+	// Task 6.8 (ADR 2026081801 Phase 3): approving a mapping is a dependency
+	// change for every metric semantic outcome whose active finding recorded
+	// THIS raw value as unresolved or ambiguous (DR10). Scoped by exact
+	// current fingerprint (ScheduleForKeyedDependencyChange), not by "not yet
+	// at the new target" (ScheduleForDependencyChange) -- the latter would
+	// also match every other raw value's still-unresolved findings, since
+	// none of them equal this target either, sweeping the whole corpus into
+	// the retry queue on every single approval. Best-effort: the mapping
+	// decision itself already committed above, and a scheduling failure here
+	// is not a reason to fail the request -- the dependency-driven retry
+	// worker's own sweep still reconciles the mismatch eventually.
+	resolvedFingerprint := assertions.MetricMappingFindingFingerprint(rawValue, semantic.MappingResolved)
+	retryQueue := semantic.RetryQueue{DB: db}
+	priorMappingStatesByFindingTerm := []struct{ findingTerm, priorState string }{
+		{semantic.FindingMappingUnresolved, semantic.MappingUnresolved},
+		{semantic.FindingMappingAmbiguous, semantic.MappingAmbiguous},
+	}
+	for _, entry := range priorMappingStatesByFindingTerm {
+		findingTerm, priorState := entry.findingTerm, entry.priorState
+		currentFingerprint := assertions.MetricMappingFindingFingerprint(rawValue, priorState)
+		if _, err := retryQueue.ScheduleForKeyedDependencyChange(context.Background(), findingTerm, currentFingerprint, resolvedFingerprint); err != nil {
+			logger.Error("schedule targeted semantic retry after mapping approval failed",
+				"raw_value", rawValue, "finding_term", findingTerm, "err", err)
+		}
+	}
 
 	entry, err := fetchValueRangeTypeMapEntry(db, rawValue)
 	if err != nil {

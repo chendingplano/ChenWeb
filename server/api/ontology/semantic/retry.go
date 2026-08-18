@@ -219,6 +219,35 @@ ON CONFLICT (outcome_id, finding_id, target_dependency_fingerprint) DO NOTHING`,
 	return int(n), err
 }
 
+// ScheduleForKeyedDependencyChange is ScheduleForDependencyChange's
+// precisely-scoped sibling: it matches findings currently AT a specific
+// fingerprint rather than every finding not yet at the target. Use it when
+// the changed dependency is itself keyed (e.g. one governed mapping table
+// row among thousands), where matching "anything different from the new
+// target" would sweep in every other unrelated key's still-unresolved
+// findings too -- exactly the corpus-wide retry storm DR10 exists to avoid.
+func (q RetryQueue) ScheduleForKeyedDependencyChange(ctx context.Context, findingTermID, currentFingerprint, targetFingerprint string) (int, error) {
+	if err := ValidateGovernedIdentifier(findingTermID); err != nil {
+		return 0, fmt.Errorf("finding term: %w", err)
+	}
+	res, err := q.DB.ExecContext(ctx, `
+INSERT INTO kb.semantic_retry_queue (
+  outcome_id, finding_id, target_dependency_fingerprint, source_input_fingerprint, state, create_by)
+SELECT o.id, f.id, $3, o.input_fingerprint, 'pending', 'dependency_change'
+FROM kb.semantic_processing_outcomes o
+JOIN kb.semantic_processing_findings f ON f.outcome_id = o.id AND f.active = true
+WHERE o.active = true
+  AND f.finding_term_id = $1
+  AND f.dependency_fingerprint = $2
+ON CONFLICT (outcome_id, finding_id, target_dependency_fingerprint) DO NOTHING`,
+		findingTermID, currentFingerprint, targetFingerprint)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
 // PendingByDependency reports queue size grouped by target dependency, one of
 // the required pre-cutover reports (ADR section 6).
 func (q RetryQueue) PendingByDependency(ctx context.Context) (map[string]int, error) {

@@ -157,6 +157,7 @@ func metricCandidatePayloadForRow(r metricRow, canonicalBucket, lookupStatus str
 		"comparator":              parsed.Comparator,
 		"assertion_kind":          parsed.AssertionKind,
 		"value_range_type_lookup": lookupStatus,
+		"value_range_type_raw":    normalizeValueRangeTypeRaw(r.ValueRangeType.String),
 	}
 	if r.MetricDefinitionTermID.Valid && strings.TrimSpace(r.MetricDefinitionTermID.String) != "" {
 		payload["metric_definition_term_id"] = strings.TrimSpace(r.MetricDefinitionTermID.String)

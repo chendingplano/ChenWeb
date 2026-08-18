@@ -246,6 +246,23 @@ UPDATE kb.metrics
 		WithArgs("threshold_min").
 		WillReturnResult(sqlmock.NewResult(0, 3))
 
+	retryScheduleQuery := regexp.QuoteMeta(`
+INSERT INTO kb.semantic_retry_queue (
+  outcome_id, finding_id, target_dependency_fingerprint, source_input_fingerprint, state, create_by)
+SELECT o.id, f.id, $3, o.input_fingerprint, 'pending', 'dependency_change'
+FROM kb.semantic_processing_outcomes o
+JOIN kb.semantic_processing_findings f ON f.outcome_id = o.id AND f.active = true
+WHERE o.active = true
+  AND f.finding_term_id = $1
+  AND f.dependency_fingerprint = $2
+ON CONFLICT (outcome_id, finding_id, target_dependency_fingerprint) DO NOTHING`)
+	mock.ExpectExec(retryScheduleQuery).
+		WithArgs("semantic:mapping_unresolved", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(retryScheduleQuery).
+		WithArgs("semantic:mapping_ambiguous", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
 	reloadQuery := regexp.QuoteMeta(`SELECT
     raw_value, canonical_bucket, status, occurrence_count, first_seen_record_id, last_seen_record_id, note,
     COALESCE(to_char(create_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS create_time, create_by,
