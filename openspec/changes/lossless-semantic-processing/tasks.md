@@ -57,7 +57,7 @@
 - [x] 5.3 Add state fields to consumer APIs before changing any default filtering behavior
 - [x] 5.4 Make comparison record `no_verdict`/`incomparable_with` with a reason instead of dropping unsupported instances
 - [x] 5.5 Expose raw value, normalized value, independent states, errors, class confidence, and evidence in Review Document, and stop presenting "completed with findings" as a document failure
-- [ ] 5.6 Index both raw and normalized text in search; make observed class profiles include outliers without promoting them; make completeness checks distinguish absent artifact from missing value
+- [x] 5.6 Index both raw and normalized text in search; make observed class profiles include outliers without promoting them; make completeness checks distinguish absent artifact from missing value
 - [ ] 5.7 Build the reader compatibility suite covering legacy rows, every new state, represented/unsupported restoration, and assertion redirects; certify each required consumer against it
 - [ ] 5.8 Retrain dashboards and alerts to stop reading semantic findings as failures
 - [ ] 5.9 Keep default behavior on legacy writers until every required metric consumer is certified
