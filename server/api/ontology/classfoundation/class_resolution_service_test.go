@@ -42,7 +42,7 @@ func TestClassResolutionServiceCreatesProvisionalClassWhenNoSafeCompatibleClass(
 		ProvisionalClass:   ClassIdentity{TermID: "metric:provisional-temperature", ModuleID: "metrics", By: "resolver"},
 		QuantityKindTermID: "quantity:temperature",
 		Candidates: []ClassResolutionCandidate{
-			{TermID: "metric:temperature-label-only", QuantityKindTermID: "quantity:pressure", Safe: true},
+			{TermID: "metric:temperature-label-only", Label: "Operating temperature", QuantityKindTermID: "quantity:pressure", Safe: true},
 		},
 	})
 	if err != nil {
@@ -53,5 +53,32 @@ func TestClassResolutionServiceCreatesProvisionalClassWhenNoSafeCompatibleClass(
 	}
 	if len(creator.created) != 1 || creator.created[0].TermID != "metric:provisional-temperature" {
 		t.Fatalf("provisional creation = %#v", creator.created)
+	}
+}
+
+func TestClassResolutionServiceMarksMultipleSafeCandidatesAmbiguousAndKeepsProvisionalClass(t *testing.T) {
+	creator := &fakeProvisionalClassCreator{}
+	result, err := (ClassResolutionService{ProvisionalClasses: creator}).Resolve(context.Background(), ClassResolutionRequest{
+		ProvisionalClass:   ClassIdentity{TermID: "metric:provisional-speed", ModuleID: "metrics"},
+		QuantityKindTermID: "quantity:speed",
+		Candidates: []ClassResolutionCandidate{
+			{TermID: "metric:normal-speed", QuantityKindTermID: "quantity:speed", Safe: true},
+			{TermID: "metric:red-zone-speed", QuantityKindTermID: "quantity:speed", Safe: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.IdentityState != ResolutionAmbiguousCandidates || result.SelectedClassTermID != "metric:provisional-speed" {
+		t.Fatalf("unexpected ambiguous resolution: %#v", result)
+	}
+}
+
+func TestClassResolutionServiceRejectsClasslessOutcome(t *testing.T) {
+	_, err := (ClassResolutionService{}).Resolve(context.Background(), ClassResolutionRequest{
+		QuantityKindTermID: "quantity:temperature",
+	})
+	if err == nil {
+		t.Fatal("expected unresolved source to be rejected instead of returned classless")
 	}
 }

@@ -23,6 +23,7 @@ type IdentityClassCreator interface {
 
 type ClassResolutionCandidate struct {
 	TermID             string
+	Label              string
 	QuantityKindTermID string
 	Safe               bool
 }
