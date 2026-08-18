@@ -298,7 +298,8 @@
 						{ id: 'sysadmin-doc-process-processors', label: 'Doc Processors' },
 						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: 'Semantic Decision Candidates' },
 						{ id: 'sysadmin-doc-process-semantic-assertions', label: 'Semantic Assertions' },
-						{ id: 'sysadmin-doc-process-assertion-evidence', label: 'Assertion Evidence' }
+						{ id: 'sysadmin-doc-process-assertion-evidence', label: 'Assertion Evidence' },
+						{ id: 'sysadmin-doc-process-semantic-retry-queue', label: 'Semantic Retry Queue' }
 					]
 				},
 				{ id: 'sysadmin-page-config', label: 'Page Content' }

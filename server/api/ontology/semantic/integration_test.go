@@ -454,6 +454,90 @@ func TestIntegrationRetryQueueIdempotencyAndLeases(t *testing.T) {
 	}
 }
 
+// Task 5.2 "retry tooling": List is the diagnostic reader over
+// kb.semantic_retry_queue. It must filter by state, and it must join in
+// enough outcome context (artifact identity) that an operator can tell what
+// a queued job is waiting to resolve without a second query.
+func TestIntegrationRetryQueueListFiltersAndJoinsOutcomeContext(t *testing.T) {
+	db := freshSemanticTestDB(t)
+	ctx := context.Background()
+	store := OutcomeStore{DB: db}
+	queue := RetryQueue{DB: db}
+
+	fp := Dependencies{MappingRevision: "map-1"}.Fingerprint()
+	out := baseOutcome("m-list-1")
+	out.OutcomeCategory = CategorySemanticFinding
+	out.DispositionTermID = DispositionRawPreserved
+	res, err := store.Record(ctx, out, []Finding{mappingFinding(fp)})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	target := Dependencies{MappingRevision: "map-2"}.Fingerprint()
+	job := RetryJob{
+		OutcomeID:                   res.Outcome.ID,
+		FindingID:                   &res.Findings[0].ID,
+		TargetDependencyFingerprint: target,
+		SourceInputFingerprint:      res.Outcome.InputFingerprint,
+	}
+	created, _, err := queue.Enqueue(ctx, job)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	all, total, err := queue.List(ctx, RetryJobFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 1 || len(all) != 1 {
+		t.Fatalf("total=%d len=%d, want 1 job", total, len(all))
+	}
+	got := all[0]
+	if got.ID != created.ID {
+		t.Fatalf("listed job id = %d, want %d", got.ID, created.ID)
+	}
+	if got.OutcomeArtifactType != "metric" || got.OutcomeArtifactID != "m-list-1" {
+		t.Fatalf("List did not join outcome context: artifact_type=%q artifact_id=%q", got.OutcomeArtifactType, got.OutcomeArtifactID)
+	}
+	if got.OutcomeStageTermID != StageNormalize {
+		t.Fatalf("List did not join outcome stage: %q", got.OutcomeStageTermID)
+	}
+	if got.CreateTime.IsZero() {
+		t.Fatal("List must populate create_time")
+	}
+
+	// state filter
+	if _, err := queue.Claim(ctx, "worker-1", time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	pending, total, err := queue.List(ctx, RetryJobFilter{State: RetryJobPending})
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if total != 0 || len(pending) != 0 {
+		t.Fatalf("pending total=%d len=%d, want 0 after the only job was claimed", total, len(pending))
+	}
+	claimed, total, err := queue.List(ctx, RetryJobFilter{State: RetryJobClaimed})
+	if err != nil {
+		t.Fatalf("list claimed: %v", err)
+	}
+	if total != 1 || len(claimed) != 1 {
+		t.Fatalf("claimed total=%d len=%d, want 1", total, len(claimed))
+	}
+
+	// outcome_id filter
+	byOutcome, total, err := queue.List(ctx, RetryJobFilter{OutcomeID: res.Outcome.ID})
+	if err != nil {
+		t.Fatalf("list by outcome: %v", err)
+	}
+	if total != 1 || len(byOutcome) != 1 {
+		t.Fatalf("by-outcome total=%d len=%d, want 1", total, len(byOutcome))
+	}
+	if _, total, err := queue.List(ctx, RetryJobFilter{OutcomeID: res.Outcome.ID + 999}); err != nil || total != 0 {
+		t.Fatalf("by-outcome mismatch: total=%d err=%v, want 0", total, err)
+	}
+}
+
 // Task 4.4 / DR10: an unchanged dependency sweep must enqueue nothing.
 func TestIntegrationScheduleForDependencyChangeTargetsOnlyAffected(t *testing.T) {
 	db := freshSemanticTestDB(t)

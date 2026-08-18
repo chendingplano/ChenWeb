@@ -475,6 +475,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/semantic-assertions/:id/transition", kbhandler.TransitionSemanticAssertion)
 	apiGroup.POST("/kb/semantic-assertions/:id/defer", kbhandler.DeferSemanticAssertion)
 	apiGroup.POST("/kb/semantic-assertions/:id/retry", kbhandler.RetrySemanticAssertion)
+	apiGroup.GET("/kb/semantic-retry-queue", kbhandler.ListSemanticRetryQueue)
 	apiGroup.GET("/kb/assertion-evidence", kbhandler.ListAssertionEvidence)
 	apiGroup.POST("/kb/assertion-evidence", kbhandler.CreateAssertionEvidence)
 	apiGroup.GET("/kb/assertion-evidence/:id", kbhandler.GetAssertionEvidence)

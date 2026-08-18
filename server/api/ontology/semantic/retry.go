@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,7 +19,9 @@ const (
 	RetryJobFailed  = "failed"
 )
 
-// RetryJob is one row of kb.semantic_retry_queue.
+// RetryJob is one row of kb.semantic_retry_queue. The Outcome* fields are
+// read-only context joined in by List for a diagnostic reader; Enqueue,
+// Claim, and find leave them zero-valued.
 type RetryJob struct {
 	ID                          int64
 	OutcomeID                   int64
@@ -29,6 +33,13 @@ type RetryJob struct {
 	LeaseToken                  string
 	LeaseExpiresAt              *time.Time
 	LastError                   string
+	CreateTime                  time.Time
+	ModifyTime                  time.Time
+
+	OutcomeInputRecordID *int64
+	OutcomeArtifactType  string
+	OutcomeArtifactID    string
+	OutcomeStageTermID   string
 }
 
 // RetryQueue implements DR10's dependency-driven semantic retry.
@@ -228,6 +239,78 @@ FROM kb.semantic_retry_queue WHERE state = 'pending' GROUP BY 1`)
 		out[k] = n
 	}
 	return out, rows.Err()
+}
+
+// RetryJobFilter selects rows for List, the diagnostic reader over
+// kb.semantic_retry_queue (task 5.2's "retry tooling" consumer). This queue
+// has no accepted/represented distinction of its own -- every job is
+// diagnostic by nature, so List has no accepted-only mode.
+type RetryJobFilter struct {
+	State     string
+	OutcomeID int64
+	Page      int
+	PageSize  int
+}
+
+// List returns retry jobs joined with their outcome's artifact identity, so
+// an operator can see what a queued retry is waiting to resolve without a
+// second lookup.
+func (q RetryQueue) List(ctx context.Context, f RetryJobFilter) ([]RetryJob, int64, error) {
+	if q.DB == nil {
+		return nil, 0, fmt.Errorf("db is nil")
+	}
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 50
+	}
+	if f.PageSize > 200 {
+		f.PageSize = 200
+	}
+	where := []string{"1=1"}
+	args := []any{}
+	if f.State != "" {
+		args = append(args, f.State)
+		where = append(where, fmt.Sprintf("q.state = $%d", len(args)))
+	}
+	if f.OutcomeID > 0 {
+		args = append(args, f.OutcomeID)
+		where = append(where, fmt.Sprintf("q.outcome_id = $%d", len(args)))
+	}
+	from := `FROM kb.semantic_retry_queue q LEFT JOIN kb.semantic_processing_outcomes o ON o.id = q.outcome_id WHERE ` + strings.Join(where, " AND ")
+
+	var total int64
+	if err := q.DB.QueryRowContext(ctx, "SELECT COUNT(*) "+from, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
+	rows, err := q.DB.QueryContext(ctx, `
+SELECT q.id, q.outcome_id, q.finding_id, q.target_dependency_fingerprint,
+  coalesce(q.source_input_fingerprint,''), q.state, q.attempts,
+  coalesce(q.lease_token,''), q.lease_expires_at, coalesce(q.last_error,''),
+  q.create_time, q.modify_time,
+  o.input_record_id, coalesce(o.artifact_type,''), coalesce(o.artifact_id,''), coalesce(o.stage_term_id,'')
+`+from+`
+ORDER BY q.id DESC
+LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]RetryJob, 0)
+	for rows.Next() {
+		var j RetryJob
+		if err := rows.Scan(&j.ID, &j.OutcomeID, &j.FindingID, &j.TargetDependencyFingerprint,
+			&j.SourceInputFingerprint, &j.State, &j.Attempts,
+			&j.LeaseToken, &j.LeaseExpiresAt, &j.LastError, &j.CreateTime, &j.ModifyTime,
+			&j.OutcomeInputRecordID, &j.OutcomeArtifactType, &j.OutcomeArtifactID, &j.OutcomeStageTermID); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, j)
+	}
+	return out, total, rows.Err()
 }
 
 const retryColumns = `id, outcome_id, finding_id, target_dependency_fingerprint,

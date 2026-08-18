@@ -12,7 +12,7 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 | Profile-rule evaluation | `api/kbhandler/ontology_review_assertion_loader.go`, `api/ontology/profiles/review_service.go`, `rule_required_assertion_pattern.go` | **accepted-only**. Profile rules evaluate endorsed truth and must not treat represented source claims as conforming. | Retain filter; make the policy explicit in API/type documentation and certify legacy plus non-accepted inputs remain excluded. |
 | Review-scope API | `api/kbhandler/ontology_review_scopes_handler.go` | **accepted-only** indirectly, through the profile-rule assertion loader. | Retain; expose no represented assertion as a rule fact. |
 | Applicability classifications | `api/doc-processing/applicability_classifications.go` | **accepted-only**. Classifications select governance/review applicability and therefore require an endorsed `core:instance_of` assertion. | Retain filter; certify represented classifications do not alter applicability. |
-| Authoritative classification projection | `api/ontology/assertions/classification_projection.go` | **accepted-only**. This is the authoritative object classification projection, not an observed-profile projection. | Retain filter; a future observed profile must be a distinct, inclusive projection. |
+| Authoritative classification projection ("semantic projection") | `api/ontology/assertions/classification_projection.go`, `api/ontology/assertions/project_semantics.go` | **accepted-only**. `ProjectSemantics.Run` explicitly rebuilds derived projections "from accepted assertions" (DR8 Phase D); this is the "semantic projection" consumer named in task 5.2. | Already covered by this audit's accepted-only classification; no widening required. Note: `web/src/lib/components/home3/semantic-projections-view.svelte` is an unrelated feature over `kb.semantic_projections` (document topic/keyword summaries) and does not read `kb.semantic_assertions` at all — a naming collision, not a consumer of this system. |
 | Keyword-concept alignment | `api/ontology/keywords/alignment.go` | **accepted-only**. An `aligns_to_term` relation changes governed term identity and remains a curator/automatic-governance decision. | Retain filter; represented metric assertions are out of this family and must not be treated as an alignment. |
 | Assertion-store accepted watermark | `api/ontology/assertions/assertions_store.go` (`LastAcceptedForSubject`) | **accepted-only**. The API's name and its callers make it an explicit endorsed-truth query. | Retain filter; do not reuse it for discovery or diagnostics. |
 | Semantic assertion diagnostic API | `api/kbhandler/semantic_assertions_handler.go`, `api/ontology/assertions/assertions_store.go` (`GET /kb/semantic-assertions?input_record_id=`) | **dual-read diagnostic discovery**. The document-scoped query returns every lifecycle status having a current evidence link for that input record; an explicit status filter remains available. | Implemented as the first Review Document/discovery reader slice. It exposes raw and independent-state fields already present in the assertion response without widening any governance query. |
@@ -22,19 +22,21 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 | Semantic completeness projection | `api/ontology/semantic/completeness.go` | **diagnostic / capability-aware**. It reports supporting-link coverage rather than endorsing an assertion. | Retain its state-neutral coverage behavior; add represented/raw-preserved cases to the reader compatibility suite. |
 | Review Document — Semantic Diagnostics tab | `web/src/lib/components/home3/doc-review-semantic-view.svelte`, calling the semantic assertion diagnostic API above | **dual-read discovery**. A read-only tab on the doc-review results view; displays raw value, normalized value, all four independent states, processing errors, class confidence, and active evidence for every lifecycle status, including represented/unsupported/raw-preserved. Does not route through the accepted-only profile-rule loader and never labels a non-empty finding list as a processing failure. | Implemented as task 5.5. |
 | Semantic processing association | `api/ontology/assertions/associate_semantics.go` | **legacy writer, not a consumer**. It still promotes successful ingestion to `accepted`. | Keep unchanged until Phase 3 task 6.6; it is deliberately outside the Phase 2 reader cutover. |
+| Semantic run reports ("reports") | `api/ontology/semantic/report.go` (DR11 per-run outcome/finding report), `cmd/semantic-baseline` (Phase 0 corpus report) | **diagnostic**. Both report by outcome/finding disposition and severity, not by assertion status; neither filters to `accepted`. This is the "reports" consumer named in task 5.2 — no separate assertion-status-filtered report exists elsewhere in the codebase. | Already dual-read by construction (Phase 0/1); no widening required. |
+| Semantic retry queue reader ("retry tooling") | `api/ontology/semantic/retry.go` (`RetryQueue.List`), `api/kbhandler/semantic_retry_queue_handler.go` (`GET /kb/semantic-retry-queue`), `web/src/lib/components/home3/semantic-retry-queue-view.svelte` | **diagnostic**. `kb.semantic_retry_queue` has no accepted/represented distinction of its own — every job is diagnostic by nature. Before task 5.2, this queue (implemented in Phase 1 task 3.7) had no reader at all: `RetryQueue` exposed only `Enqueue`/`Claim`/`MarkDone`/`MarkStale`/`MarkFailed`/`ScheduleForDependencyChange`, none of which list rows. | Implemented as part of task 5.2: added `RetryQueue.List` (filters by state/outcome_id, joins outcome artifact identity), its handler/route, and a read-only admin page under Sysadmin → Doc Process → Semantic Retry Queue. |
 
 ## Consumers not currently implemented
 
-The Phase 2 scope also requires generic semantic discovery, diagnostic
-projections, reports, and retry tooling to be dual-read. Metric search now
-reads supporting assertions when available while preserving legacy-only rows.
-The semantic assertion diagnostic API can now scope all lifecycle states to
-the document through active evidence links. Review Document's governance
-rendering still goes through the accepted-only profile path unchanged; its
-new "Semantic Diagnostics" tab (task 5.5) is a separate, additive, read-only
-projection over the same document-scoped diagnostic API, displaying raw and
-normalized value, independent states, processing errors, class confidence,
-and active evidence without widening or replacing the accepted-only path.
+Generic semantic discovery and diagnostic projections beyond what is listed
+above remain to be built as Phase 2 continues (task 5.6 onward). Metric
+search now reads supporting assertions when available while preserving
+legacy-only rows. The semantic assertion diagnostic API can now scope all
+lifecycle states to the document through active evidence links. Review
+Document's governance rendering still goes through the accepted-only profile
+path unchanged; its "Semantic Diagnostics" tab (task 5.5) is a separate,
+additive, read-only projection over the same document-scoped diagnostic API.
+Semantic projection, reports, and retry tooling — the three remaining items
+literally named in task 5.2 — are now all accounted for (rows above).
 
 ## Certification rule
 
