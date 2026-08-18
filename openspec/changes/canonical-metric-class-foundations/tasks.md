@@ -41,7 +41,7 @@
 
 ## 7. Redirects and evidence cardinality
 
-- [ ] 7.1 Add append-only term and assertion redirect stores with one-active-target constraints, supersession, and cycle rejection
+- [x] 7.1 Add append-only term and assertion redirect stores with one-active-target constraints, supersession, and cycle rejection
 - [ ] 7.2 Implement bounded redirect resolution with traversal provenance and explicit unresolved/depth-limit outcomes
 - [ ] 7.3 Report and resolve duplicate current metric support links through an auditable history-preserving backfill
 - [ ] 7.4 Add `uq_assertion_evidence_current_metric_support` scoped to active supporting metric evidence only
