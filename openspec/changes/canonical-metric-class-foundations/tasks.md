@@ -27,7 +27,7 @@
 
 ## 5. Class resolution decisions
 
-- [ ] 5.1 Add append-only class-resolution decisions, alternatives, evidence, method, confidence, and supersession storage
+- [x] 5.1 Add append-only class-resolution decisions, alternatives, evidence, method, confidence, and supersession storage
 - [ ] 5.2 Implement deterministic class-resolution service that selects an existing safe class or creates a provisional class, never a classless/dropped metric
 - [ ] 5.3 Add tests for resolved, provisional, ambiguous, and rejected decisions, including same-label/different-quantity negative identity
 
