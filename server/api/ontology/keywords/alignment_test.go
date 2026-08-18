@@ -587,3 +587,18 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 		t.Fatalf("ExpectationsWereMet: %v", err)
 	}
 }
+
+// Task 5.7 reader compatibility certification: TestAlignmentsStoreAcceptedForConcept
+// mocks against the acceptedForConceptSQL constant itself, so it would still
+// pass even if the accepted-only clause were accidentally removed from that
+// constant. This test independently types the WHERE clause so a regression
+// to the accepted-only guarantee (a represented or unsupported aligns_to_term
+// row must never be treated as this concept's alignment) breaks a test.
+func TestAcceptedForConceptSQLFiltersToAcceptedStatusOnly(t *testing.T) {
+	if !regexp.MustCompile(`(?s)status = 'accepted'`).MatchString(acceptedForConceptSQL) {
+		t.Fatalf("acceptedForConceptSQL no longer filters to accepted status:\n%s", acceptedForConceptSQL)
+	}
+	if !regexp.MustCompile(`(?s)subject_ref_kind = 'keyword_concept'`).MatchString(acceptedForConceptSQL) {
+		t.Fatalf("acceptedForConceptSQL no longer scopes to keyword_concept:\n%s", acceptedForConceptSQL)
+	}
+}

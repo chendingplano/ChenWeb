@@ -322,3 +322,54 @@ func TestHighestAcceptedAssertionIDReturnsZeroWhenNone(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Task 5.7 reader compatibility certification: the two tests above match only
+// the SELECT prefix, so a regression that dropped "AND status = 'accepted'"
+// from the WHERE clause would not be caught. This test independently types
+// the full WHERE clause (not copied from the source constant) so it fails if
+// the accepted-only guarantee is ever weakened -- this is the accepted-only
+// watermark named in consumer-lifecycle-policy.md.
+func TestHighestAcceptedAssertionIDQueryFiltersToAcceptedStatusOnly(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(id), 0) FROM kb.semantic_assertions
+WHERE subject_object_id = $1 AND status = 'accepted'`)).
+		WithArgs("obj-1").
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(int64(1)))
+	if _, err := (AssertionStore{DB: db}).HighestAcceptedAssertionID(context.Background(), "obj-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("query text no longer contains the accepted-only literal: %v", err)
+	}
+}
+
+// Task 5.7: ListBySubjectObject backs the profile-rule assertion loader
+// (api/kbhandler/ontology_review_assertion_loader.go), which always passes
+// status="accepted" -- it must never see a represented or unsupported row.
+// This has no prior direct test: the loader's own test only exercises a fake
+// implementation of the lister interface, never this store method's SQL.
+func TestListBySubjectObjectFiltersByRequestedStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta(`WHERE subject_object_id = $1
+  AND ($2 = '' OR status = $2)`)).
+		WithArgs("obj-1", "accepted").
+		WillReturnRows(assertionRowWithStatus(assertionColumnNames(), StatusAccepted))
+	got, err := (AssertionStore{DB: db}).ListBySubjectObject(context.Background(), "obj-1", "accepted")
+	if err != nil {
+		t.Fatalf("ListBySubjectObject: %v", err)
+	}
+	if len(got) != 1 || got[0].Status != StatusAccepted {
+		t.Fatalf("ListBySubjectObject = %+v, want one accepted row", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("query no longer filters by the requested status: %v", err)
+	}
+}
