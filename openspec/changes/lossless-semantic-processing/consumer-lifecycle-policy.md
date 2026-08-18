@@ -15,6 +15,7 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 | Authoritative classification projection | `api/ontology/assertions/classification_projection.go` | **accepted-only**. This is the authoritative object classification projection, not an observed-profile projection. | Retain filter; a future observed profile must be a distinct, inclusive projection. |
 | Keyword-concept alignment | `api/ontology/keywords/alignment.go` | **accepted-only**. An `aligns_to_term` relation changes governed term identity and remains a curator/automatic-governance decision. | Retain filter; represented metric assertions are out of this family and must not be treated as an alignment. |
 | Assertion-store accepted watermark | `api/ontology/assertions/assertions_store.go` (`LastAcceptedForSubject`) | **accepted-only**. The API's name and its callers make it an explicit endorsed-truth query. | Retain filter; do not reuse it for discovery or diagnostics. |
+| Semantic assertion diagnostic API | `api/kbhandler/semantic_assertions_handler.go`, `api/ontology/assertions/assertions_store.go` (`GET /kb/semantic-assertions?input_record_id=`) | **dual-read diagnostic discovery**. The document-scoped query returns every lifecycle status having a current evidence link for that input record; an explicit status filter remains available. | Implemented as the first Review Document/discovery reader slice. It exposes raw and independent-state fields already present in the assertion response without widening any governance query. |
 | Assertion lifecycle on evidence loss/restoration | `api/ontology/assertions/evidence_store.go` | **all evidence-supported lifecycle states**: `represented`, `candidate`, `in_review`, `deferred`, and `accepted` transition to `unsupported` on loss of final qualifying evidence; restoration returns the recorded prior status. | Implemented as part of task 5.2; remaining reader work is tracked separately. |
 | Directional comparison | `api/ontology/comparison/compare.go`, `evaluate_cell.go` | **capability-aware**. Every selected comparison pair produces a cell. Missing normalization or incompatible quantity/component capabilities returns `no_verdict` with a persisted rationale; comparable pairs retain their existing verdicts. | Implemented in task 5.4; later assertion readers must pass raw-preserved states into this path rather than dropping them. |
 | Metric search registry | `api/doc-processing/search_indexing.go` (`buildMetricRegistryRows`) | **dual-read discovery**. Every legacy metric remains indexed; when a current supporting assertion exists, both its raw representation and its normalized representation are appended to the metric search document and recorded in semantic payload. | Implemented as the search slice of task 5.6. The optional lateral assertion read preserves legacy-only rows and does not change any writer gate. |
@@ -26,9 +27,10 @@ before a lossless metric writer can be enabled.  Test-only SQL is excluded.
 The Phase 2 scope also requires Review Document rendering, generic semantic
 discovery, diagnostic projections, reports, and retry tooling to be dual-read.
 Metric search now reads supporting assertions when available while preserving
-legacy-only rows. Review Document currently receives assertion-derived facts
-through the accepted-only profile path; its flagged-instance display model has
-not yet been implemented.
+legacy-only rows. The semantic assertion diagnostic API can now scope all
+lifecycle states to the document through active evidence links. Review Document
+still receives assertion-derived facts through the accepted-only profile path;
+its flagged-instance display model has not yet been implemented.
 
 ## Certification rule
 

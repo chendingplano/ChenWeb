@@ -88,6 +88,7 @@ type AssertionStore struct {
 type AssertionListFilter struct {
 	Status, LogicalIdentity, SubjectRefKind, SubjectRefID, PredicateTermID string
 	ObjectRefKind, ObjectRefID, SubjectObjectID                            string
+	InputRecordID                                                          *int64
 	LatestOnly                                                             bool
 	Page, PageSize                                                         int
 	SortBy, SortDir                                                        string
@@ -136,6 +137,10 @@ func (s AssertionStore) ListAdmin(ctx context.Context, f AssertionListFilter) ([
 	}
 	if f.SubjectObjectID != "" {
 		add("subject_object_id", f.SubjectObjectID)
+	}
+	if f.InputRecordID != nil {
+		args = append(args, *f.InputRecordID)
+		where = append(where, fmt.Sprintf(`EXISTS (SELECT 1 FROM kb.assertion_evidence e WHERE e.assertion_id = kb.semantic_assertions.id AND e.input_record_id = $%d AND NOT e.deleted)`, len(args)))
 	}
 	if f.LatestOnly {
 		where = append(where, "revision = (SELECT MAX(a2.revision) FROM kb.semantic_assertions a2 WHERE a2.logical_identity_key = kb.semantic_assertions.logical_identity_key)")

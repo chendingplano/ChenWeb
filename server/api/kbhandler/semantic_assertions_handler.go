@@ -38,9 +38,13 @@ func ListSemanticAssertions(c echo.Context) error {
 	defer rc.Close()
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	size, _ := strconv.Atoi(c.QueryParam("page_size"))
+	var inputRecordID *int64
+	if value, err := strconv.ParseInt(c.QueryParam("input_record_id"), 10, 64); err == nil && value > 0 {
+		inputRecordID = &value
+	}
 	latest := c.QueryParam("latest_only") != "false"
 	rows, total, err := assertionStore().ListAdmin(c.Request().Context(), assertions.AssertionListFilter{
-		Status: c.QueryParam("status"), LogicalIdentity: c.QueryParam("logical_identity"), SubjectRefKind: c.QueryParam("subject_ref_kind"), SubjectRefID: c.QueryParam("subject_ref_id"), PredicateTermID: c.QueryParam("predicate_term_id"), ObjectRefKind: c.QueryParam("object_ref_kind"), ObjectRefID: c.QueryParam("object_ref_id"), SubjectObjectID: c.QueryParam("subject_object_id"), LatestOnly: latest, Page: page, PageSize: size, SortBy: c.QueryParam("sort_by"), SortDir: c.QueryParam("sort_dir"),
+		Status: c.QueryParam("status"), LogicalIdentity: c.QueryParam("logical_identity"), SubjectRefKind: c.QueryParam("subject_ref_kind"), SubjectRefID: c.QueryParam("subject_ref_id"), PredicateTermID: c.QueryParam("predicate_term_id"), ObjectRefKind: c.QueryParam("object_ref_kind"), ObjectRefID: c.QueryParam("object_ref_id"), SubjectObjectID: c.QueryParam("subject_object_id"), InputRecordID: inputRecordID, LatestOnly: latest, Page: page, PageSize: size, SortBy: c.QueryParam("sort_by"), SortDir: c.QueryParam("sort_dir"),
 	})
 	if err != nil {
 		rc.GetLogger().Error("list semantic assertions failed", "err", err)

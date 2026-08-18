@@ -29,6 +29,24 @@ func TestAssertionColumnsIncludeLosslessStateFields(t *testing.T) {
 	}
 }
 
+func TestListAdminFiltersDocumentScopedDiagnosticsThroughActiveEvidence(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	recordID := int64(7)
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.semantic_assertions WHERE 1=1 AND EXISTS").WithArgs(recordID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT ").WillReturnRows(sqlmock.NewRows(assertionColumnNames()))
+	_, _, err = (AssertionStore{DB: db}).ListAdmin(context.Background(), AssertionListFilter{InputRecordID: &recordID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAssertionJSONExposesLosslessStateFields(t *testing.T) {
 	contractRevision := int64(42)
 	payload, err := json.Marshal(Assertion{
