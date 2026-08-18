@@ -104,6 +104,20 @@ const termColumns = `
 
 const termFrom = "FROM kb.ontology_terms"
 
+// termCurrentFrom is the stable compatibility surface added by ADR
+// 2026081701. It exposes exactly one latest revision per immutable term_id.
+const termCurrentFrom = "FROM kb.ontology_terms_current"
+
+// termRevisionColumns retains the public Term shape while reading append-only
+// revisions. source_term_row_id deliberately remains the exposed ID so legacy
+// callers and existing foreign-key references keep their identity.
+const termRevisionColumns = `
+	source_term_row_id AS id, term_id, revision AS version, term_kind, module_id, status, definition, scope,
+	source_candidate_id, value_type, range_type, permitted_unit_term_ids,
+	create_time, create_by, modify_time, modify_by`
+
+const termRevisionFrom = "FROM kb.ontology_term_revisions"
+
 func scanTerm(scan func(dest ...any) error) (Term, error) {
 	var (
 		t               Term
@@ -302,20 +316,19 @@ VALUES `)
 	return out, rows.Err()
 }
 
-// GetTermLatest returns the current (highest-version) row for a term_id.
+// GetTermLatest returns the compatibility current row for a term_id. The
+// backing view is one latest append-only revision per stable term identity.
 func (s TermStore) GetTermLatest(ctx context.Context, termID string) (Term, error) {
 	if s.DB == nil {
 		return Term{}, errors.New("db is nil")
 	}
-	const stmt = `SELECT ` + termColumns + "\n" + termFrom + `
-WHERE term_id = $1
-ORDER BY version DESC
-LIMIT 1`
+	const stmt = `SELECT ` + termColumns + "\n" + termCurrentFrom + `
+WHERE term_id = $1`
 	row := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(termID))
 	return scanTerm(row.Scan)
 }
 
-// GetTerm returns the specific version of a term.
+// GetTerm returns one immutable historical revision of a term.
 func (s TermStore) GetTerm(ctx context.Context, termID string, version int) (Term, error) {
 	if s.DB == nil {
 		return Term{}, errors.New("db is nil")
@@ -323,8 +336,8 @@ func (s TermStore) GetTerm(ctx context.Context, termID string, version int) (Ter
 	if version < 1 {
 		return Term{}, errors.New("version must be >= 1")
 	}
-	const stmt = `SELECT ` + termColumns + "\n" + termFrom + `
-WHERE term_id = $1 AND version = $2`
+	const stmt = `SELECT ` + termRevisionColumns + "\n" + termRevisionFrom + `
+WHERE term_id = $1 AND revision = $2`
 	row := s.DB.QueryRowContext(ctx, stmt, strings.TrimSpace(termID), version)
 	return scanTerm(row.Scan)
 }
@@ -359,10 +372,10 @@ ORDER BY term_id, version DESC`
 	return terms, nil
 }
 
-// TransitionStatus moves a term version between allowed content-lifecycle
-// states. Included_in_release is only reachable from the chunk B release
-// path; this method enforces the same transition table so no call site can
-// shortcut the lifecycle.
+// TransitionStatus appends a new term version with the requested lifecycle
+// state. Included_in_release is only reachable from the chunk B release path;
+// this method enforces the same transition table so no call site can shortcut
+// the lifecycle or mutate historical state in place.
 func (s TermStore) TransitionStatus(ctx context.Context, termID string, version int, to, by string) (Term, error) {
 	if s.DB == nil {
 		return Term{}, errors.New("db is nil")
@@ -375,12 +388,7 @@ func (s TermStore) TransitionStatus(ctx context.Context, termID string, version 
 	if !allowed[to] {
 		return Term{}, fmt.Errorf("%w: %s -> %s", errIllegalTermTransition, cur.Status, to)
 	}
-	const stmt = `
-UPDATE kb.ontology_terms
-SET status = $3, modify_time = NOW(), modify_by = $4
-WHERE term_id = $1 AND version = $2`
-	if _, err := s.DB.ExecContext(ctx, stmt, strings.TrimSpace(termID), version, to, nullableString(by)); err != nil {
-		return Term{}, err
-	}
-	return s.GetTerm(ctx, termID, version)
+	cur.Status = to
+	cur.ModifyBy = by
+	return s.CreateTermVersion(ctx, cur)
 }

@@ -25,6 +25,7 @@ func TestTermIdentityFoundationMigrationIsAdditiveAndBackfillsHistory(t *testing
 		"INSERT INTO kb.ontology_term_headers",
 		"INSERT INTO kb.ontology_term_revisions",
 		"CREATE OR REPLACE VIEW kb.ontology_terms_current",
+		"CREATE TRIGGER kb_sync_ontology_term_revision_after_insert",
 		"UNIQUE (term_id, revision)",
 		"source_term_row_id",
 	} {

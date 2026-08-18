@@ -105,6 +105,80 @@ SELECT
 FROM kb.ontology_terms
 ON CONFLICT (source_term_row_id) DO NOTHING;
 
+-- The legacy writer remains available during the compatibility period. Mirror
+-- every new legacy version into the append-only representation so readers of
+-- the current view never silently miss newly authored terms.
+CREATE OR REPLACE FUNCTION kb.sync_ontology_term_revision_after_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO kb.ontology_term_headers (
+        term_id,
+        term_kind,
+        module_id,
+        create_time,
+        create_by
+    )
+    VALUES (
+        NEW.term_id,
+        NEW.term_kind,
+        NEW.module_id,
+        NEW.create_time,
+        NEW.create_by
+    )
+    ON CONFLICT (term_id) DO NOTHING;
+
+    INSERT INTO kb.ontology_term_revisions (
+        term_id,
+        revision,
+        source_term_row_id,
+        term_kind,
+        module_id,
+        status,
+        definition,
+        scope,
+        value_type,
+        range_type,
+        permitted_unit_term_ids,
+        source_candidate_id,
+        released_in_release_id,
+        create_time,
+        create_by,
+        modify_time,
+        modify_by
+    )
+    VALUES (
+        NEW.term_id,
+        NEW.version,
+        NEW.id,
+        NEW.term_kind,
+        NEW.module_id,
+        NEW.status,
+        NEW.definition,
+        NEW.scope,
+        NEW.value_type,
+        NEW.range_type,
+        NEW.permitted_unit_term_ids,
+        NEW.source_candidate_id,
+        NEW.released_in_release_id,
+        NEW.create_time,
+        NEW.create_by,
+        NEW.modify_time,
+        NEW.modify_by
+    )
+    ON CONFLICT (source_term_row_id) DO NOTHING;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS kb_sync_ontology_term_revision_after_insert ON kb.ontology_terms;
+CREATE TRIGGER kb_sync_ontology_term_revision_after_insert
+AFTER INSERT ON kb.ontology_terms
+FOR EACH ROW
+EXECUTE FUNCTION kb.sync_ontology_term_revision_after_insert();
+
 -- Current-state readers can migrate to this view without changing selected
 -- columns or invalidating the legacy row id they expose to callers.
 CREATE OR REPLACE VIEW kb.ontology_terms_current AS
@@ -131,5 +205,7 @@ ORDER BY revision.term_id, revision.revision DESC, revision.id DESC;
 
 -- +goose Down
 DROP VIEW IF EXISTS kb.ontology_terms_current;
+DROP TRIGGER IF EXISTS kb_sync_ontology_term_revision_after_insert ON kb.ontology_terms;
+DROP FUNCTION IF EXISTS kb.sync_ontology_term_revision_after_insert();
 DROP TABLE IF EXISTS kb.ontology_term_revisions;
 DROP TABLE IF EXISTS kb.ontology_term_headers;
