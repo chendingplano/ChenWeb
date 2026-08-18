@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
 )
+
+var ErrClaimIdentityCollision = errors.New("canonical claim key collides with different identity payload")
 
 // CanonicalClaimInput carries only identity-bearing data. Evidence is accepted
 // as caller context but deliberately excluded from serialization and registry
@@ -65,7 +68,11 @@ func (s ClaimIdentityStore) FindOrCreateShadow(ctx context.Context, input Canoni
 	if err != nil {
 		return "", false, err
 	}
-	payload, err := json.Marshal(input.Fields)
+	fields := input.Fields
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return "", false, fmt.Errorf("serialize claim identity payload: %w", err)
 	}
@@ -90,10 +97,22 @@ RETURNING claim_id`, claimID, strings.TrimSpace(input.KeyVersion), key, strings.
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", false, fmt.Errorf("create shadow claim identity: %w", err)
 	}
+	var existingPayload []byte
 	if err := s.DB.QueryRowContext(ctx, `
-SELECT claim_id FROM kb.semantic_claim_identities
-WHERE key_version = $1 AND canonical_key = $2`, strings.TrimSpace(input.KeyVersion), key).Scan(&claimID); err != nil {
+SELECT claim_id, identity_payload FROM kb.semantic_claim_identities
+WHERE key_version = $1 AND canonical_key = $2`, strings.TrimSpace(input.KeyVersion), key).Scan(&claimID, &existingPayload); err != nil {
 		return "", false, fmt.Errorf("load converged shadow claim identity: %w", err)
 	}
+	if !sameJSONPayload(payload, existingPayload) {
+		return "", false, fmt.Errorf("%w: key version %s", ErrClaimIdentityCollision, strings.TrimSpace(input.KeyVersion))
+	}
 	return claimID, false, nil
+}
+
+func sameJSONPayload(left, right []byte) bool {
+	var leftValue, rightValue any
+	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
