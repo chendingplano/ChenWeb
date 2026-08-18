@@ -35,7 +35,7 @@
 
 - [x] 6.1 Add canonical-key-version registry and concurrency-safe `kb.semantic_claim_identities` with stable `claim_id` uniqueness
 - [x] 6.2 Add `instance_of_term_id` and normalization-contract revision references to assertions additively, including state-aware constraints and indexes
-- [ ] 6.3 Implement canonical key serialization and shadow find-or-create without enabling the new metric writer
+- [x] 6.3 Implement canonical key serialization and shadow find-or-create without enabling the new metric writer
 - [ ] 6.4 Implement claim-identity store and tests for concurrent convergence, collision reporting, evidence-only changes, and identity-bearing divergence
 - [ ] 6.5 Add a compatibility projection proving registry-managed assertion `logical_identity_key` equals its `claim_id`
 
