@@ -110,6 +110,30 @@ Three existing tests provided weaker protection than they appeared to:
 All three now have an independently-typed assertion that would fail if the
 accepted-only guarantee regressed.
 
+## Task 5.9 — default writer behavior, now that certification exists
+
+`Gates.enabled` (`gates.go`) treats an unset or unparseable environment
+variable as OFF — `LOSSLESS_SEMANTIC_WRITES_METRIC` and
+`LOSSLESS_SEMANTIC_FALLBACK_WRITES` are off by default, structurally, not by
+convention. `TestWriterGatesDefaultOff` and `TestUnparseableGateValueIsOff`
+(Phase 1 task 3.13) already certify this. `AuthorizeWriterActivation`
+(`conformance.go`) independently refuses activation whenever `gateEnabled` is
+false, regardless of adapter state — certified by the
+`lifecycle_integration_test.go` cases at lines 245/250/263/273/279 (gate-off
+refusal, no-adapter refusal, missing/stale compliance-record refusal).
+
+**Honest caveat**: `AuthorizeWriterActivation` checks the gate and DR13
+adapter conformance (`kb.semantic_adapter_compliance`); it does **not**
+machine-check this document's certification status — there is no
+`reader-compatibility-certification.md` version field it consults. Today,
+"every required consumer is certified" is a **process gate**: a human
+operator reads this document before setting the environment variable, the
+same way a human read the Phase 0 baseline before Phase 1 sign-off. This
+matches the current state of the code, not an aspiration — flagged here so
+whoever implements Phase 3 task 6.9 (writer activation) can decide whether to
+make this document's PASS status a machine-checked precondition (analogous to
+`ConformanceSuiteVersion`) or keep it a documented human gate.
+
 ## Known pre-existing gaps (not blocking, tracked for later)
 
 - `search_indexing_test.go`'s tests currently fail in this dev environment

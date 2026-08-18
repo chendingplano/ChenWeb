@@ -41,6 +41,33 @@ additive, read-only projection over the same document-scoped diagnostic API.
 Semantic projection, reports, and retry tooling — the three remaining items
 literally named in task 5.2 — are now all accounted for (rows above).
 
+## Task 5.8 — blocked on Phase 3 task 6.6, not actionable in Phase 2
+
+Task 5.8 ("retrain dashboards and alerts to stop reading semantic findings as
+failures") has no live signal to retrain against today. Every dashboard/alert
+read of processing status (`web/src/lib/components/home3/doc-processor-dashboard-view.svelte`,
+`DocMetadataSQLStore.ListRecordsWithFailedDocProcessors` in
+`extract-doc-metadata-store.go`, backed by the `has_failed_proc` DB-trigger
+rollup) reads only the legacy `proc_status` column, which is still written
+exclusively by the unchanged legacy writer (`associate_semantics.go`). That
+writer still marks a run `failed` on any mapping-miss (design.md's documented
+current-state finding), and removing that is Phase 3 task 6.6 — deliberately
+deferred past Phase 2 because doing it earlier "would expose represented rows
+to consumers that have not been certified to read them" (handoff §5). Task
+5.7, just completed, is that certification, so 6.6 is now unblocked in terms
+of prerequisites, but 6.6 is explicitly Phase 3 scope, not 5.8's.
+
+The reader-side infrastructure this retraining will eventually consume is
+already built and ready: `semantic.ExecutionStatus`, `LegacyProcStatus`,
+`FindingSummary.DisplayStatus`, and `SetsHasFailedProc` (Phase 1 task 3.12,
+D6) already compute "failed" from `ExecutionStatus` alone, never from
+`finding_count`. There is nothing for a Phase 2 dashboard to retrain against
+until a writer populates outcome/finding data that a dashboard could read
+instead of legacy `proc_status` — and no writer is enabled until Phase 3.
+5.8 is left unchecked rather than marked done on documentation alone, since
+unlike 5.2/5.6's already-satisfied items, this one has no code or doc gap to
+close today — it is genuinely blocked, not merely undocumented.
+
 ## Certification rule
 
 The reader compatibility suite in task 5.7 must name each row above.  It must

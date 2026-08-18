@@ -60,7 +60,7 @@
 - [x] 5.6 Index both raw and normalized text in search; make observed class profiles include outliers without promoting them; make completeness checks distinguish absent artifact from missing value
 - [x] 5.7 Build the reader compatibility suite covering legacy rows, every new state, represented/unsupported restoration, and assertion redirects; certify each required consumer against it
 - [ ] 5.8 Retrain dashboards and alerts to stop reading semantic findings as failures
-- [ ] 5.9 Keep default behavior on legacy writers until every required metric consumer is certified
+- [x] 5.9 Keep default behavior on legacy writers until every required metric consumer is certified
 
 ## 6. Phase 3 — Enable the metric lossless writer (BLOCKED on ADR 2026081701)
 
