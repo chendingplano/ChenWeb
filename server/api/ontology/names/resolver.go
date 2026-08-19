@@ -372,7 +372,10 @@ func (r *Resolver) termPrefName(ctx context.Context, termID string) string {
 	var label string
 	err := r.Family.DB.QueryRowContext(ctx, `
 SELECT l.label FROM kb.ontology_term_labels l
-WHERE l.term_id = $1 AND l.status = 'included_in_release'
+JOIN kb.ontology_terms t ON t.term_id = l.term_id
+WHERE l.term_id = $1
+  AND t.status IN ('included_in_release', 'auto-promoted')
+  AND l.status IN ('included_in_release', 'auto-promoted')
 ORDER BY (l.label_role = 'prefLabel') DESC, (l.lang = 'en') DESC
 LIMIT 1`, termID).Scan(&label)
 	if err != nil {
@@ -398,8 +401,8 @@ const releasedTermSQL = `
 SELECT t.term_id, t.term_kind, t.module_id, l.label, l.lang, l.label_role
 FROM kb.ontology_terms t
 JOIN kb.ontology_term_labels l ON l.term_id = t.term_id
-WHERE t.status = 'included_in_release'
-  AND l.status = 'included_in_release'
+WHERE t.status IN ('included_in_release', 'auto-promoted')
+  AND l.status IN ('included_in_release', 'auto-promoted')
   AND ($1::text[] IS NULL OR t.term_kind = ANY($1))
   AND ($2::text[] IS NULL OR t.module_id = ANY($2))
   AND ($3 = '' OR l.lang = $3)`

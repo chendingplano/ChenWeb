@@ -38,6 +38,11 @@ const (
 	termPrefNameQ       = "WHERE l.term_id = $1"
 )
 
+const (
+	usableTermQueryQ    = `(?s)FROM kb\.ontology_terms t.*t\.status IN \('included_in_release', 'auto-promoted'\).*l\.status IN \('included_in_release', 'auto-promoted'\)`
+	usableTermPrefNameQ = `(?s)FROM kb\.ontology_term_labels l.*JOIN kb\.ontology_terms t ON t\.term_id = l\.term_id.*t\.status IN \('included_in_release', 'auto-promoted'\).*l\.status IN \('included_in_release', 'auto-promoted'\)`
+)
+
 func newFamily(db *sql.DB) *keywords.KeywordFamily {
 	return &keywords.KeywordFamily{DB: db, ResolverMode: "observe"}
 }
@@ -233,6 +238,90 @@ func TestResolveNameTermResolved(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestResolveNameMatchesAutoPromotedTermLabelsByRequestedLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		label    string
+		language string
+	}{
+		{name: "Chinese", label: "显示亮度", language: "zh"},
+		{name: "English", label: "Display luminance", language: "en"},
+		{name: "Undetermined", label: "250", language: "und"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			r := NewResolver(newFamily(db))
+			mock.ExpectQuery(usableTermQueryQ).
+				WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), tt.language).
+				WillReturnRows(termRows(
+					[]any{"measurement:auto", "metric_definition", "measurement", tt.label, tt.language, "prefLabel"},
+				))
+			queueTotalMiss(mock, tt.label, "_")
+
+			res, err := r.ResolveName(context.Background(), ResolveNameRequest{
+				Name: tt.label, Scope: "_", Language: tt.language,
+			})
+			if err != nil {
+				t.Fatalf("ResolveName: %v", err)
+			}
+			if res.Status != StatusTermResolved || res.TermID != "measurement:auto" || res.TermPrefName != tt.label {
+				t.Fatalf("resolution = %#v, want auto-promoted term %q", res, tt.label)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTermPrefNameUsesOnlyUsableJoinedTerms(t *testing.T) {
+	tests := []struct {
+		name string
+		rows *sqlmock.Rows
+		want string
+	}{
+		{
+			name: "auto-promoted term and label",
+			rows: sqlmock.NewRows([]string{"label"}).AddRow("显示亮度"),
+			want: "显示亮度",
+		},
+		{
+			name: "unusable joined term",
+			rows: sqlmock.NewRows([]string{"label"}),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			r := NewResolver(newFamily(db))
+			mock.ExpectQuery(usableTermPrefNameQ).
+				WithArgs("measurement:auto").
+				WillReturnRows(tt.rows)
+
+			if got := r.termPrefName(context.Background(), "measurement:auto"); got != tt.want {
+				t.Fatalf("termPrefName() = %q, want %q", got, tt.want)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
