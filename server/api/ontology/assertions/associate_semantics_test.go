@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semantic"
 )
 
 // TestMetricAssertionKindTermIDUsesReleasedCatalogVocabulary locks in the
@@ -115,11 +117,17 @@ func expectRunOverOneMetricCandidate(mock sqlmock.Sqlmock, id int64, lookupTag s
 }
 
 // TestRunFailsWhenCandidateBlockedOnProposedValueRangeType locks in ADR
-// 2026081401 DR3: a candidate deferred specifically because its
-// value_range_type_lookup tag is "proposed" makes Run report a MappingMiss
-// and return a non-nil aggregate error -- the candidate itself still ends up
-// deferred exactly as an ordinary deferral would.
+// 2026081401 DR3's legacy behavior, still reachable via ADR 2026081801 §6's
+// rollback lever (LOSSLESS_SEMANTIC_WRITES_METRIC explicitly off): a
+// candidate deferred specifically because its value_range_type_lookup tag is
+// "proposed" makes Run report a MappingMiss and return a non-nil aggregate
+// error -- the candidate itself still ends up deferred exactly as an
+// ordinary deferral would. Under the default (gate on), ADR 2026081801 DR12
+// supersedes this failure behavior -- see
+// TestIntegrationWriteMetricLosslessMaterializesRawPreservedRepresentedAssertion
+// in metric_lossless_writer_integration_test.go for that path's coverage.
 func TestRunFailsWhenCandidateBlockedOnProposedValueRangeType(t *testing.T) {
+	t.Setenv(semantic.GateMetricLosslessWrites, "false")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -142,11 +150,15 @@ func TestRunFailsWhenCandidateBlockedOnProposedValueRangeType(t *testing.T) {
 	}
 }
 
-// TestRunSucceedsWhenCandidateDeferredForAmbiguousValueRangeType locks in DR3:
-// a candidate deferred for a reason OTHER than "proposed" -- here the lookup
+// TestRunSucceedsWhenCandidateDeferredForAmbiguousValueRangeType locks in
+// DR3's legacy behavior (see the rollback note on
+// TestRunFailsWhenCandidateBlockedOnProposedValueRangeType above): a
+// candidate deferred for a reason OTHER than "proposed" -- here the lookup
 // tag is "ambiguous" -- must not count as a MappingMiss and must not fail
-// the run, matching today's behavior for ordinary deferrals.
+// the run, matching legacy behavior for ordinary deferrals when the gate is
+// explicitly off.
 func TestRunSucceedsWhenCandidateDeferredForAmbiguousValueRangeType(t *testing.T) {
+	t.Setenv(semantic.GateMetricLosslessWrites, "false")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -191,8 +203,12 @@ func evidenceRow(id, assertionID int64) *sqlmock.Rows {
 // provenance columns (spec 2026072702 §8.3): artifact_object_id,
 // source_line_spans, extraction_run, model, prompt_version, and the evidence
 // row's own confidence must all carry through from the decision candidate/
-// payload into the evidence INSERT, not just onto the assertion.
+// payload into the evidence INSERT, not just onto the assertion. The
+// "accepted" outcome only exists on the legacy straight-to-accepted path
+// (writeMetricLossless returns "represented" instead), so this test pins the
+// gate off per ADR 2026081801 §6's rollback lever to keep exercising it.
 func TestProcessMetricAcceptedPathPopulatesEvidenceProvenanceFields(t *testing.T) {
+	t.Setenv(semantic.GateMetricLosslessWrites, "false")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)

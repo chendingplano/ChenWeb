@@ -355,8 +355,10 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 	// ungoverned kind (today's mapping-miss deferral) instead materializes a
 	// raw-preserved, represented assertion. This branch is a self-contained
 	// early return specifically so the legacy path beneath it -- including
-	// its exact query order -- is untouched when the gate is off (the
-	// default), which is what every existing gate-off test depends on.
+	// its exact query order -- is untouched when the gate is explicitly
+	// turned off (ADR 2026081801 §6's rollback lever; the gate defaults ON as
+	// of Phase 3 cutover), which is what every existing gate-off test depends
+	// on.
 	if semantic.NewGates().MetricLosslessWritesEnabled() {
 		predicateTermID := "mea:measured_by"
 		predicateOK, err := a.termExists(ctx, predicateTermID)
