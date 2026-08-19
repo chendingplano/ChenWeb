@@ -1,14 +1,26 @@
-// Command fallback-conformance is the ADR 2026081801 Phase 4 task 7.2 check.
-// It registers a generic DR13 fallback adapter (semantic.FallbackAdapter) for
-// every family with a registered normalizer (assertions seam 5) that has no
-// compliant semantic-instance adapter of its own yet, then runs the shared
-// adapter conformance suite for each and records the result in
-// kb.semantic_adapter_compliance with writer mode "fallback".
+// Command fallback-conformance is the ADR 2026081801 Phase 4 task 7.2 and
+// task 7.3 check. It:
+//
+//  1. registers a generic DR13 fallback adapter (semantic.FallbackAdapter)
+//     for every family with a registered normalizer (assertions seam 5) that
+//     has no compliant semantic-instance adapter of its own yet, then runs
+//     the shared adapter conformance suite for each and records the result
+//     in kb.semantic_adapter_compliance with writer mode "fallback" (task
+//     7.2); and
+//  2. for every family this command knows an artifact-source query for (see
+//     artifactSourceSQL below), runs the same completeness projection
+//     metric-writer-readiness runs, explicitly reporting how many of that
+//     family's current artifacts have neither a compliant assertion path nor
+//     an active unresolved occurrence -- i.e. are silently skipped today,
+//     the same way metrics were before this ADR (task 7.3's "explicitly
+//     report" half; its backfill half is deliberately deprioritized, see
+//     "Note on backfills" in foundation-shadow-confirmation.md).
 //
 // This never enables LOSSLESS_SEMANTIC_FALLBACK_WRITES or any other writer
 // gate, and it never calls semantic.OccurrenceStore -- no
-// kb.unresolved_semantic_occurrences row is written. Recording a compliance
-// result is a safe, additive write: it never activates a writer by itself
+// kb.unresolved_semantic_occurrences row is written and no kb.provisions (or
+// other family) row is mutated. Recording a compliance result is a safe,
+// additive write: it never activates a writer by itself
 // (AuthorizeWriterActivation still requires the gate to be on).
 //
 // Usage:
@@ -59,9 +71,38 @@ func main() {
 	}
 
 	fmt.Println("\nLOSSLESS_SEMANTIC_FALLBACK_WRITES was not read or modified by this command.")
+
+	fmt.Println("\n--- task 7.3: historical-skip coverage (report only, no data mutation) ---")
+	for _, family := range wired {
+		src, ok := artifactSourceSQL[family]
+		if !ok {
+			fmt.Printf("%s: no artifact-source query registered for this command yet; skipping coverage report\n", family)
+			continue
+		}
+		adapter, _ := semantic.LookupAdapter(family)
+		rep, err := semantic.CompletenessChecker{DB: db, ArtifactSourceSQL: src}.Run(ctx, adapter)
+		if err != nil {
+			log.Fatalf("run completeness projection for %q: %v", family, err)
+		}
+		fmt.Printf("%s: current artifacts=%d, with neither an assertion path nor an active unresolved occurrence=%d\n",
+			family, rep.CurrentArtifacts, rep.ArtifactsWithNeitherPath)
+	}
+
 	if !allPassed {
 		os.Exit(1)
 	}
+}
+
+// artifactSourceSQL is, per family, the same kind of current-occurrence query
+// semantic.MetricArtifactSourceSQL is for metrics: one row per current
+// artifact, selecting (artifact_id, input_record_id). Only families this
+// command knows how to query are listed; a newly-wired family with no entry
+// here is reported as skipped rather than guessed at.
+var artifactSourceSQL = map[string]string{
+	"provision": `
+SELECT p.prov_id AS artifact_id, p.input_record_id AS input_record_id
+FROM kb.provisions p
+WHERE p.prov_id IS NOT NULL AND btrim(p.prov_id) <> ''`,
 }
 
 func connect() *sql.DB {
