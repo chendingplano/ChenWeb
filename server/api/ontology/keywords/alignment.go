@@ -355,7 +355,7 @@ func (s AlignmentsStore) EnsureAcceptedOrCreate(ctx context.Context, conceptID s
 		if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
 			TermID:    termID,
 			Label:     synth.CanonicalName,
-			Lang:      "und",
+			Lang:      autoPromotedLabelLanguage(synth.CanonicalName),
 			LabelRole: "prefLabel",
 			Status:    "auto-promoted",
 		}); err != nil {
@@ -369,7 +369,7 @@ func (s AlignmentsStore) EnsureAcceptedOrCreate(ctx context.Context, conceptID s
 			if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
 				TermID:    termID,
 				Label:     alias,
-				Lang:      "und",
+				Lang:      autoPromotedLabelLanguage(alias),
 				LabelRole: "altLabel",
 				Status:    "auto-promoted",
 			}); err != nil {

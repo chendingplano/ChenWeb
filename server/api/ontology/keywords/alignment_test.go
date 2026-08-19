@@ -522,23 +522,23 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 
 	// prefLabel: existence check, then insert.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS")).
-		WithArgs(newTermID, "und").
+		WithArgs(newTermID, "en").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_term_labels")).
-		WithArgs(newTermID, "Test Metric", "und", "prefLabel", "auto-promoted", nil, nil, nil).
+		WithArgs(newTermID, "Test Metric", "en", "prefLabel", "auto-promoted", nil, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "label", "lang", "label_role", "status",
 			"source_candidate_id", "create_time", "create_by", "modify_time", "modify_by",
-		}).AddRow(200, newTermID, 1, "Test Metric", "und", "prefLabel", "auto-promoted", nil, now, nil, now, nil))
+		}).AddRow(200, newTermID, 1, "Test Metric", "en", "prefLabel", "auto-promoted", nil, now, nil, now, nil))
 
 	// altLabel: "TM" only -- the "Test Metric" alias equals the canonical
 	// name and must be skipped, and altLabel never checks prefLabelExists.
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_term_labels")).
-		WithArgs(newTermID, "TM", "und", "altLabel", "auto-promoted", nil, nil, nil).
+		WithArgs(newTermID, "TM", "en", "altLabel", "auto-promoted", nil, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "label", "lang", "label_role", "status",
 			"source_candidate_id", "create_time", "create_by", "modify_time", "modify_by",
-		}).AddRow(201, newTermID, 1, "TM", "und", "altLabel", "auto-promoted", nil, now, nil, now, nil))
+		}).AddRow(201, newTermID, 1, "TM", "en", "altLabel", "auto-promoted", nil, now, nil, now, nil))
 
 	// ensureAccepted's own sequence: conflict gate, released guard x2,
 	// idempotency check, the assertion write, the audit row.
@@ -585,6 +585,109 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
+func TestAlignmentsStoreEnsureAcceptedOrCreateAssignsLabelLanguages(t *testing.T) {
+	tests := []struct {
+		name          string
+		canonicalName string
+		alias         string
+		canonicalLang string
+		aliasLang     string
+	}{
+		{
+			name:          "Chinese preferred and alias",
+			canonicalName: "显示亮度",
+			alias:         "屏幕亮度",
+			canonicalLang: "zh",
+			aliasLang:     "zh",
+		},
+		{
+			name:          "English preferred and alternate",
+			canonicalName: "Display luminance",
+			alias:         "Screen brightness",
+			canonicalLang: "en",
+			aliasLang:     "en",
+		},
+		{
+			name:          "Chinese preferred and Latin alternate",
+			canonicalName: "显示亮度",
+			alias:         "Display luminance",
+			canonicalLang: "zh",
+			aliasLang:     "en",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			const conceptID = "concept_language"
+			termID := autoPromotedTermID(conceptID)
+			stop := errors.New("stop after label writes")
+			store := AlignmentsStore{
+				Assertions:  assertions.AssertionStore{DB: db},
+				DecisionLog: semid.DecisionLogStore{DB: db},
+				Scope:       "_",
+			}
+
+			mock.ExpectBegin()
+			expectKeywordIdentityLock(mock)
+			mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+				WithArgs(conceptID).
+				WillReturnRows(noAlignmentRow())
+			mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
+				WithArgs(
+					termID, "metric_definition", "measurement", "auto-promoted",
+					"definition", "document-derived, auto-promoted (ADR 2026081201)", nil,
+					"number", "exact", nil, nil, nil,
+				).
+				WillReturnRows(sqlmock.NewRows([]string{
+					"id", "term_id", "version", "term_kind", "module_id", "status",
+					"definition", "scope", "source_candidate_id", "value_type", "range_type",
+					"permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by",
+				}).AddRow(100, termID, 1, "metric_definition", "measurement", "auto-promoted",
+					"definition", "document-derived, auto-promoted (ADR 2026081201)", nil,
+					"number", "exact", nil, time.Now(), nil, time.Now(), nil))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS")).
+				WithArgs(termID, tt.canonicalLang).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+			mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_term_labels")).
+				WithArgs(termID, tt.canonicalName, tt.canonicalLang, "prefLabel", "auto-promoted", nil, nil, nil).
+				WillReturnRows(sqlmock.NewRows([]string{
+					"id", "term_id", "version", "label", "lang", "label_role", "status",
+					"source_candidate_id", "create_time", "create_by", "modify_time", "modify_by",
+				}).AddRow(200, termID, 1, tt.canonicalName, tt.canonicalLang, "prefLabel", "auto-promoted", nil, time.Now(), nil, time.Now(), nil))
+			mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_term_labels")).
+				WithArgs(termID, tt.alias, tt.aliasLang, "altLabel", "auto-promoted", nil, nil, nil).
+				WillReturnRows(sqlmock.NewRows([]string{
+					"id", "term_id", "version", "label", "lang", "label_role", "status",
+					"source_candidate_id", "create_time", "create_by", "modify_time", "modify_by",
+				}).AddRow(201, termID, 1, tt.alias, tt.aliasLang, "altLabel", "auto-promoted", nil, time.Now(), nil, time.Now(), nil))
+			mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
+				WithArgs(conceptID).
+				WillReturnError(stop)
+			mock.ExpectRollback()
+
+			_, err = store.EnsureAcceptedOrCreate(context.Background(), conceptID, TermSynthesisInput{
+				CanonicalName: tt.canonicalName,
+				Aliases:       []string{tt.alias},
+				Definition:    "definition",
+				ValueType:     "number",
+				RangeType:     "exact",
+			}, testMethod, testScore, testEvidence)
+			if !errors.Is(err, stop) {
+				t.Fatalf("EnsureAcceptedOrCreate error = %v, want %v", err, stop)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
