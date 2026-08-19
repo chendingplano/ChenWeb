@@ -9,7 +9,21 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/ontology/semantic"
 )
+
+func TestValidateAssertionAllowsMissingValueWithoutObjectPayload(t *testing.T) {
+	err := validateAssertion(Assertion{
+		LogicalIdentityKey: "claim:missing-value",
+		SubjectRefKind:     "object_node",
+		SubjectRefID:       "obj-1",
+		PredicateTermID:    "mea:measured_by",
+		ValueStateTermID:   semantic.ValueMissing,
+	})
+	if err != nil {
+		t.Fatalf("validateAssertion: %v", err)
+	}
+}
 
 func TestAssertionColumnsIncludeLosslessStateFields(t *testing.T) {
 	for _, column := range []string{

@@ -12,16 +12,35 @@ func alwaysTrueDocumentForValidateTest() semrules.Document {
 }
 
 func TestValidatePipelineVersionRejectsMissingProducer(t *testing.T) {
-	// normalize_assertions requires metrics+provisions; neither extract_metrics
-	// nor extract_provisions is selected, so no producer exists.
+	// A synthetic processor requiring an artifact kind nothing produces is
+	// used here because every built-in processor's Requires is now either
+	// satisfied by a baseline processor (static_analyzer/chunking) or, for
+	// the DR8 Phase D stages, no longer declared at all -- see
+	// TestValidatePipelineVersionAcceptsDataDrivenPhaseDStagesStandalone.
+	RegisterProcessor(ProcessorSpec{Name: "test_only_missing_producer", Requires: []string{"nonexistent_artifact_kind"}})
 	err := ValidatePipelineVersion(PipelineVersionDraft{
-		Processors: []string{"normalize_assertions"},
+		Processors: []string{"test_only_missing_producer"},
 	})
 	if err == nil {
 		t.Fatal("expected processor closure rejection")
 	}
-	if !strings.Contains(err.Error(), "normalize_assertions") || !strings.Contains(err.Error(), "metrics") {
+	if !strings.Contains(err.Error(), "test_only_missing_producer") || !strings.Contains(err.Error(), "nonexistent_artifact_kind") {
 		t.Fatalf("error should name the processor and missing artifact kind: %v", err)
+	}
+}
+
+// TestValidatePipelineVersionAcceptsDataDrivenPhaseDStagesStandalone is the
+// regression test for the bug fixed 2026-08-19: normalize_assertions,
+// associate_semantics, and project_semantics each read/write purely by
+// input_record_id against already-persisted DB state (see phase_d.go), so
+// none of them requires its logical predecessor to be selected in the same
+// pipeline version -- only to have run at some point, possibly under an
+// earlier version, for the records this version will process.
+func TestValidatePipelineVersionAcceptsDataDrivenPhaseDStagesStandalone(t *testing.T) {
+	for _, name := range []string{"normalize_assertions", "associate_semantics", "project_semantics"} {
+		if err := ValidatePipelineVersion(PipelineVersionDraft{Processors: []string{name}}); err != nil {
+			t.Fatalf("expected %q to be selectable standalone (data-driven, no same-run producer required), got: %v", name, err)
+		}
 	}
 }
 

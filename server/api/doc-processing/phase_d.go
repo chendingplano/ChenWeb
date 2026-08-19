@@ -20,6 +20,8 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -90,6 +92,14 @@ func (p *AssociateSemanticsProcessor) PostProcessIndex(ctx context.Context, reco
 		return nil
 	}
 	report, err := (assertions.AssociateSemantics{DB: ApiTypes.ProjectDBHandle}).Run(ctx, recordID)
+	if err != nil && report.MappingMisses == 0 {
+		// Candidate/persistence failures use the established generic summary
+		// entry type. Keep this at the doc-processing boundary because the
+		// assertions package cannot import docprocessing without a cycle.
+		if logErr := logAssociateSemanticsFailure(ctx, ApiTypes.ProjectDBHandle, recordID, err); logErr != nil {
+			return fmt.Errorf("%w (also failed to write associate_semantics error to kb.doc_proc_logs: %v)", err, logErr)
+		}
+	}
 	// ADR 2026081401 DR3/DR2: the log write lives here, not inside
 	// AssociateSemantics.Run itself -- assertions cannot import
 	// docprocessing (docprocessing already imports assertions; a reverse
@@ -100,14 +110,42 @@ func (p *AssociateSemanticsProcessor) PostProcessIndex(ctx context.Context, reco
 		if err != nil {
 			errMsg = err.Error()
 		}
-		// Best-effort: a logging failure must not mask Run's real error.
-		_ = DocProcLogger{DB: ApiTypes.ProjectDBHandle}.LogAssertionMappingMiss(ctx, DocProcLogRecord{
+		logErr := DocProcLogger{DB: ApiTypes.ProjectDBHandle}.LogAssertionMappingMiss(ctx, DocProcLogRecord{
 			DocProcName: p.Name(),
 			RecordID:    &recordID,
 			Errors:      &errMsg,
 		}, "phase_d.go_AssociateSemanticsProcessor.PostProcessIndex")
+		if logErr != nil {
+			return fmt.Errorf("%w (also failed to write associate_semantics mapping error to kb.doc_proc_logs: %v)", err, logErr)
+		}
 	}
 	return err
+}
+
+func logAssociateSemanticsFailure(ctx context.Context, db *sql.DB, recordID int64, processingErr error) error {
+	return logPhaseDError(ctx, db, recordID, "associate_semantics", processingErr)
+}
+
+func logPhaseDError(ctx context.Context, db *sql.DB, recordID int64, stage string, processingErr error) error {
+	errText := ""
+	if processingErr != nil {
+		errText = processingErr.Error()
+	}
+	extraInfo, marshalErr := json.Marshal(map[string]any{
+		"stage":     stage,
+		"record_id": recordID,
+		"error":     errText,
+	})
+	if marshalErr != nil {
+		return fmt.Errorf("marshal %s failure details: %w", stage, marshalErr)
+	}
+	extraInfoText := string(extraInfo)
+	return (DocProcLogger{DB: db}).LogSummary(ctx, EntryTypeError, DocProcLogRecord{
+		DocProcName:   stage,
+		RecordID:      &recordID,
+		Errors:        &errText,
+		ExtraInfoJSON: &extraInfoText,
+	}, "MID-yyyymmdd-01")
 }
 
 // ProjectSemanticsProcessor is DR8's project_semantics stage: build derived
@@ -133,6 +171,9 @@ func (p *ProjectSemanticsProcessor) PostProcessIndex(ctx context.Context, record
 	}
 	db := ApiTypes.ProjectDBHandle
 	if _, err := (assertions.ProjectSemantics{DB: db}).Run(ctx, recordID); err != nil {
+		if logErr := logPhaseDError(ctx, db, recordID, p.Name(), err); logErr != nil && p.Logger != nil {
+			p.Logger.Error("phase_d project semantics error log failed", "record_id", recordID, "error", logErr)
+		}
 		return err
 	}
 	p.logAssociationRunReport(ctx, db, recordID)
@@ -145,12 +186,17 @@ func (p *ProjectSemanticsProcessor) PostProcessIndex(ctx context.Context, record
 // themselves already succeeded, so a telemetry-query error must not be
 // reported as a post-process indexing failure.
 func (p *ProjectSemanticsProcessor) logAssociationRunReport(ctx context.Context, db *sql.DB, recordID int64) {
-	if p.Logger == nil {
-		return
-	}
 	report, err := assertions.BuildAssociationRunReport(ctx, db, recordID)
 	if err != nil {
-		p.Logger.Error("phase_d association-run report failed", "record_id", recordID, "error", err)
+		if logErr := logPhaseDError(ctx, db, recordID, p.Name(), err); logErr != nil && p.Logger != nil {
+			p.Logger.Error("phase_d association-run error log failed", "record_id", recordID, "error", logErr)
+		}
+		if p.Logger != nil {
+			p.Logger.Error("phase_d association-run report failed", "record_id", recordID, "error", err)
+		}
+		return
+	}
+	if p.Logger == nil {
 		return
 	}
 	if report.ArtifactsExamined == 0 {
@@ -175,5 +221,33 @@ func (p *ProjectSemanticsProcessor) logAssociationRunReport(ctx context.Context,
 			"artifacts_examined", report.ArtifactsExamined,
 			"deferred_by_reason", report.DeferredByReason,
 		)
+		if err := logHighDeferredCandidateRate(ctx, db, recordID,
+			report.LifecycleCounts[assertions.StatusDeferred],
+			report.ArtifactsExamined,
+			report.DeferredByReason,
+		); err != nil {
+			p.Logger.Error("phase_d high deferred candidate rate log failed", "record_id", recordID, "error", err)
+		}
 	}
+}
+
+func logHighDeferredCandidateRate(ctx context.Context, db *sql.DB, recordID int64, deferred, examined int, deferredByReason map[string]int) error {
+	extraInfo, err := json.Marshal(map[string]any{
+		"stage":              "associate_semantics",
+		"record_id":          recordID,
+		"deferred":           deferred,
+		"artifacts_examined": examined,
+		"deferred_by_reason": deferredByReason,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal high deferred candidate rate details: %w", err)
+	}
+	errText := fmt.Sprintf("deferred candidate rate exceeded 50%%: %d of %d candidates", deferred, examined)
+	extraInfoText := string(extraInfo)
+	return (DocProcLogger{DB: db}).LogSummary(ctx, EntryTypeError, DocProcLogRecord{
+		DocProcName:   "associate_semantics",
+		RecordID:      &recordID,
+		Errors:        &errText,
+		ExtraInfoJSON: &extraInfoText,
+	}, "MID-yyyymmdd-01")
 }

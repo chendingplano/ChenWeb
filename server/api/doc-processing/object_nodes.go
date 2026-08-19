@@ -349,7 +349,8 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 				}
 				logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 					Status: reconcileOutcomeLLMFailed, Object: obj, Candidates: it.candidates,
-					Err: rr.err, MSUsed: rr.ms,
+					CandidateDisplay: objectReconcileCandidateDisplay(it.candidates),
+					Err:              rr.err, MSUsed: rr.ms,
 				})
 			} else {
 				var applyStore AmbiguousObjectLLMApplyStore
@@ -363,12 +364,14 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 					}
 					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 						Status: reconcileOutcomeApplyFailed, Object: obj, Candidates: it.candidates,
-						Decision: rr.decision, Err: applyErr, MSUsed: rr.ms,
+						CandidateDisplay: objectReconcileCandidateDisplay(it.candidates),
+						Decision:         rr.decision, Err: applyErr, MSUsed: rr.ms,
 					})
 				} else if applied {
 					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 						Status: reconcileOutcomeResolved, Object: resolvedObj, Candidates: it.candidates,
-						Decision: rr.decision, ResolvedID: resolvedObj.ObjectID, MSUsed: rr.ms,
+						CandidateDisplay: objectReconcileCandidateDisplay(it.candidates),
+						Decision:         rr.decision, ResolvedID: resolvedObj.ObjectID, MSUsed: rr.ms,
 					})
 					out[i] = resolvedObj
 					continue
@@ -376,25 +379,31 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 					// LLM answered but confidence below threshold → left ambiguous.
 					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 						Status: reconcileOutcomeUnresolved, Object: obj, Candidates: it.candidates,
-						Decision: rr.decision, MSUsed: rr.ms,
+						CandidateDisplay: objectReconcileCandidateDisplay(it.candidates),
+						Decision:         rr.decision, MSUsed: rr.ms,
 					})
 				}
 			}
 		}
 
-		if it.result.Status == ObjectReconcileAmbiguous && logger != nil {
-			var names []string
-			for _, c := range it.candidates {
-				names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
+		if it.result.Status == ObjectReconcileAmbiguous {
+			names := objectReconcileCandidateDisplay(it.candidates)
+			if logger != nil {
+				logger.Warn("object reconciliation ambiguous",
+					"input_record_id", obj.InputRecordID,
+					"artifact_type", obj.ArtifactType,
+					"artifact_id", obj.ArtifactID,
+					"object_name", obj.ObjectName,
+					"top_score", it.result.Confidence,
+					"candidates", names,
+				)
 			}
-			logger.Warn("object reconciliation ambiguous",
-				"input_record_id", obj.InputRecordID,
-				"artifact_type", obj.ArtifactType,
-				"artifact_id", obj.ArtifactID,
-				"object_name", obj.ObjectName,
-				"top_score", it.result.Confidence,
-				"candidates", names,
-			)
+			if !it.ambiguous {
+				logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
+					Status: reconcileOutcomeUnresolved, Object: obj, Candidates: it.candidates,
+					CandidateDisplay: names,
+				})
+			}
 		}
 		obj.ObjectID = it.result.ObjectID
 		obj.ReconcileStatus = it.result.Status
@@ -406,6 +415,14 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 		out[i] = obj
 	}
 	return out, nil
+}
+
+func objectReconcileCandidateDisplay(candidates []ObjectNodeCandidate) []string {
+	names := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
+	}
+	return names
 }
 
 func buildObjectNodeSearchDocument(obj ArtifactObject) string {

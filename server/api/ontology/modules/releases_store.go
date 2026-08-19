@@ -239,6 +239,9 @@ func tagContentRows(ctx context.Context, tx *sql.Tx, releaseID int64, snap snaps
 	if err := tag("kb.ontology_terms", idsOfTerms(snap.Terms)); err != nil {
 		return err
 	}
+	if err := syncTaggedTermRevisions(ctx, tx, releaseID, idsOfTerms(snap.Terms)); err != nil {
+		return err
+	}
 	if err := tag("kb.ontology_term_labels", idsOfLabels(snap.Labels)); err != nil {
 		return err
 	}
@@ -252,6 +255,22 @@ func tagContentRows(ctx context.Context, tx *sql.Tx, releaseID int64, snap snaps
 		return err
 	}
 	return tag("kb.ontology_profile_rules", idsOfProfileRules(snap.ProfileRules))
+}
+
+// syncTaggedTermRevisions keeps the append-only current-state view aligned
+// with the legacy term rows that release tagging updates. The identity
+// foundation mirrors inserts, but release tagging is an UPDATE; without this
+// second update, ontology_terms_current continues to report approved rows
+// after the release has marked their legacy rows included_in_release.
+func syncTaggedTermRevisions(ctx context.Context, tx *sql.Tx, releaseID int64, termIDs []int64) error {
+	if len(termIDs) == 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+UPDATE kb.ontology_term_revisions
+SET status = 'included_in_release', released_in_release_id = $1, modify_time = NOW()
+WHERE source_term_row_id = ANY($2::bigint[])`, releaseID, pq.Array(termIDs))
+	return err
 }
 
 func idsOfTerms(ts []terms.Term) []int64 {

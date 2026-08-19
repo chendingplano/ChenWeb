@@ -82,7 +82,10 @@
 	onMount(loadRows);
 </script>
 
-<div class="flex h-full flex-col overflow-hidden p-6" style="background:{pageBg};">
+<div
+	class="flex h-full flex-col overflow-hidden p-6"
+	style="background:{pageBg}; user-select:text; -webkit-user-select:text;"
+>
 	<div class="mb-5 flex-shrink-0">
 		<div class="mb-1 flex items-center gap-2">
 			<AlertTriangleIcon style="width:18px; height:18px; color:{warning};" />

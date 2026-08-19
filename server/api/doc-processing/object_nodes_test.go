@@ -2,6 +2,9 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql/driver"
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"testing"
 
@@ -122,6 +125,79 @@ func TestReconcileArtifactObjectsLogsWarnOnAmbiguousTie(t *testing.T) {
 	} else if names, ok := v.([]string); !ok || len(names) != 2 {
 		t.Fatalf("candidates arg = %v, want 2 candidate names", names)
 	}
+}
+
+func TestReconcileArtifactObjectsLogsAmbiguousCandidateList(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := &tiedCandidateStore{
+		nodes: []ObjectNode{
+			{ObjectID: "obj_a", CanonicalName: "Pressure Regulator A"},
+			{ObjectID: "obj_b", CanonicalName: "Pressure Regulator B"},
+		},
+	}
+	objects := []ArtifactObject{{
+		InputRecordID: 9,
+		ArtifactType:  searchArtifactProvision,
+		ArtifactID:    "9_prv_1",
+		ObjectName:    "pressure regulator",
+	}}
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.doc_proc_logs")).
+		WithArgs(
+			nil, "resolve_objects", "{}", nil, int64(9), nil, EntryTypeReconcileObject,
+			nil, nil, sqlmock.AnyArg(), nil, nil,
+			jsonWithFieldsMatcher{fields: map[string]any{
+				"outcome": "unresolved",
+				"candidates": []any{
+					"obj_a:Pressure Regulator A",
+					"obj_b:Pressure Regulator B",
+				},
+			}},
+			sqlmock.AnyArg(), sqlmock.AnyArg(), nil, nil, nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	_, err = reconcileArtifactObjectsWithLLM(
+		context.Background(), objects, ObjectReconciler{Store: store}, &fakeLogger{}, nil,
+		defaultResolveAmbiguousMinConf,
+		objectReconcileLogSink{ProcLogger: DocProcLogger{DB: db}, DocProcName: "resolve_objects"},
+	)
+	if err != nil {
+		t.Fatalf("reconcileArtifactObjectsWithLLM: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type jsonWithFieldsMatcher struct {
+	fields map[string]any
+}
+
+func (m jsonWithFieldsMatcher) Match(v driver.Value) bool {
+	var raw string
+	switch value := v.(type) {
+	case string:
+		raw = value
+	case []byte:
+		raw = string(value)
+	default:
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	for field, want := range m.fields {
+		if !reflect.DeepEqual(payload[field], want) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {

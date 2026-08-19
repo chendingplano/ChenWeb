@@ -90,7 +90,7 @@ var P5AcceptanceCriteria = map[int][]string{
 	// atomic version authoring is the replacement mechanism).
 	13: {
 		"kbhandler: TestCreatePipelineMidTransactionFailureRollsBackSupersede",
-		"kbhandler: TestCreatePipelineRejectsFailedClosureValidationBeforeTouchingDB",
+		"kbhandler: TestCreatePipelineRejectsCyclicDependencyBeforeTouchingDB",
 	},
 	// 14. execution/review snapshots reproducible after activation changes
 	14: {

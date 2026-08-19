@@ -41,6 +41,32 @@ LIMIT 1`)).
 	}
 }
 
+func TestTagContentRowsSynchronizesCurrentTermRevisions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_term_revisions
+SET status = 'included_in_release', released_in_release_id = $1, modify_time = NOW()
+WHERE source_term_row_id = ANY($2::bigint[])`)).
+		WithArgs(int64(42), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := syncTaggedTermRevisions(context.Background(), tx, 42, []int64{7}); err != nil {
+		t.Fatalf("syncTaggedTermRevisions: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestActivateCallsPromoteHookInsideTransaction proves the approved-proposal
 // promotion runs inside Activate's own transaction: the Promote hook receives
 // the release id and its content checksum (resolved on the same tx), and the
@@ -141,6 +167,11 @@ func TestCreateReleasePreserveActiveExcludesCurrentActiveReleaseFromSupersession
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_terms SET status = 'included_in_release'`)).
 		WithArgs(int64(101), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_term_revisions
+SET status = 'included_in_release', released_in_release_id = $1, modify_time = NOW()
+WHERE source_term_row_id = ANY($2::bigint[])`)).
+		WithArgs(int64(101), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_candidates`)).
 		WithArgs(int64(101)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -185,6 +216,11 @@ func TestCreateReleaseNormallySupersedesAllPriorReleases(t *testing.T) {
 		WithArgs("core", "1.0.1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "compiler").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(102)))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_terms SET status = 'included_in_release'`)).
+		WithArgs(int64(102), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_term_revisions
+SET status = 'included_in_release', released_in_release_id = $1, modify_time = NOW()
+WHERE source_term_row_id = ANY($2::bigint[])`)).
 		WithArgs(int64(102), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.ontology_candidates`)).

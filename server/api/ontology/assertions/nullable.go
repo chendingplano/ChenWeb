@@ -41,3 +41,14 @@ func nullableJSON(raw []byte) any {
 	}
 	return string(raw)
 }
+
+// nullableObjectLiteral preserves the database distinction between a missing
+// metric value and a JSON document whose value is the literal null. The
+// value-state payload constraint requires SQL NULL for a genuinely missing
+// object payload.
+func nullableObjectLiteral(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return string(raw)
+}

@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// Named writer gates from ADR 2026081801 Phase 3 and Phase 4. Both default OFF:
-// Phase 1 is additive and must not change production writer behavior, and a
-// rollback is defined as disabling the gate and restoring the legacy writer.
+// Named writer gates from ADR 2026081801 Phase 3 and Phase 4. The metric
+// lossless-writes gate defaults ON; the fallback-writes gate remains OFF.
 const (
 	GateMetricLosslessWrites = "LOSSLESS_SEMANTIC_WRITES_METRIC"
 	GateFallbackWrites       = "LOSSLESS_SEMANTIC_FALLBACK_WRITES"
@@ -20,7 +19,7 @@ const (
 
 // Gates reads the named writer gates. The indirection exists so tests can
 // supply values without mutating process environment, and so every gate read
-// goes through one place that documents the default-off rule.
+// goes through one place that documents each gate's default.
 type Gates struct {
 	lookup func(string) (string, bool)
 }
@@ -39,7 +38,7 @@ func (g Gates) enabled(name string) bool {
 	}
 	raw, ok := g.lookup(name)
 	if !ok {
-		return false
+		return name == GateMetricLosslessWrites
 	}
 	// Anything unparseable is treated as OFF. A typo in a gate value must not
 	// switch a writer on.

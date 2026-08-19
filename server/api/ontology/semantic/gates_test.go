@@ -2,13 +2,10 @@ package semantic
 
 import "testing"
 
-// Phase 1 is additive: both writer gates must be OFF unless explicitly enabled.
-// A gate that defaulted on would make "rollback disables the writer gate"
-// meaningless.
-func TestWriterGatesDefaultOff(t *testing.T) {
+func TestMetricWriterGateDefaultsOn(t *testing.T) {
 	g := NewGatesFromMap(nil)
-	if g.MetricLosslessWritesEnabled() {
-		t.Error("LOSSLESS_SEMANTIC_WRITES_METRIC must default off")
+	if !g.MetricLosslessWritesEnabled() {
+		t.Error("LOSSLESS_SEMANTIC_WRITES_METRIC must default on")
 	}
 	if g.FallbackWritesEnabled() {
 		t.Error("LOSSLESS_SEMANTIC_FALLBACK_WRITES must default off")

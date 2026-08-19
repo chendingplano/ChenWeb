@@ -79,7 +79,7 @@ func ListOrphanedLabels(c echo.Context) error {
 	}
 
 	dataQ := `SELECT l.id, l.term_id, l.label, l.lang, l.label_role, l.status,
- l.create_time, l.create_by, l.modify_time, l.modify_by
+ l.create_time, COALESCE(l.create_by, ''), l.modify_time, COALESCE(l.modify_by, '')
  FROM kb.ontology_term_labels l WHERE ` + where + `
  ORDER BY l.term_id, l.lang, l.label_role, l.id`
 	rows, err := db.QueryContext(c.Request().Context(), dataQ, args...)

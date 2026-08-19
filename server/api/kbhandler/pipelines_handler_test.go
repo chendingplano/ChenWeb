@@ -191,7 +191,7 @@ func TestCreatePipelineRequiresName(t *testing.T) {
 	}
 }
 
-func TestCreatePipelineRejectsFailedClosureValidationBeforeTouchingDB(t *testing.T) {
+func TestCreatePipelineRejectsCyclicDependencyBeforeTouchingDB(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -202,12 +202,16 @@ func TestCreatePipelineRejectsFailedClosureValidationBeforeTouchingDB(t *testing
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	// normalize_assertions requires metrics+provisions; neither producer is
-	// selected, so ADR 2026081001 DR8 check 1 must reject this before any
-	// DB statement runs (mock has zero expectations set).
+	// depends_on_processors edges forming a cycle must be rejected by ADR
+	// 2026081001 DR8 check 2 before any DB statement runs (mock has zero
+	// expectations set).
 	c, rec := newPipelineContext(t, http.MethodPost, "/api/v1/kb/pipelines", `{
 		"name":"broken",
-		"processors":["normalize_assertions"]
+		"processors":["extract_metrics","extract_provisions"],
+		"rules":[
+			{"name":"gate-a","target_processor":"extract_metrics","effect":"require","depends_on_processors":["extract_provisions"]},
+			{"name":"gate-b","target_processor":"extract_provisions","effect":"require","depends_on_processors":["extract_metrics"]}
+		]
 	}`)
 	if err := CreatePipeline(c); err != nil {
 		t.Fatalf("CreatePipeline returned error: %v", err)

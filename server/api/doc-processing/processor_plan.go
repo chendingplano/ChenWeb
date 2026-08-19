@@ -433,9 +433,26 @@ var productionProcessorSpecs = []ProcessorSpec{
 	// PostProcessDependsOn (see phase_d.go). Gated by
 	// SEMANTIC_ASSOCIATION_ENABLED, which defaults to true as of 2026-08-13
 	// (see phase_d.go), so these run by default.
-	{Name: "normalize_assertions", Phase: "C", DependsOn: []string{"extract_metrics", "extract_provisions"}, Requires: []string{"metrics", "provisions"}, Produces: []string{"assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
-	{Name: "associate_semantics", Phase: "C", DependsOn: []string{"normalize_assertions"}, Requires: []string{"assertions"}, Produces: []string{"semantic_associations"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
-	{Name: "project_semantics", Phase: "C", DependsOn: []string{"associate_semantics"}, Requires: []string{"semantic_associations"}, Produces: []string{"assertion_projections"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	//
+	// No DependsOn/Requires: each stage's PostProcessIndex takes only
+	// (ctx, inputRecordID) and reads its input straight from already-
+	// persisted tables (kb.metrics/kb.provisions, kb.semantic_decision_candidates,
+	// kb.semantic_assertions -- see NormalizeAllFamilies, AssociateSemantics.Run,
+	// ProjectSemantics.Run), silently processing zero rows for a family with no
+	// data yet. Unlike the Phase B extractors above, they do not need their
+	// logical predecessor to be selected in *this* pipeline version -- only to
+	// have produced rows for this record at some point, possibly under an
+	// earlier version. Declaring them here as Requires used to make
+	// validateProcessorClosure (DR8 check 1) reject a pipeline version that
+	// re-runs only these stages, which is a real, intended use (e.g.
+	// normalizing whichever of metrics/provisions already exist for a record
+	// without re-running extraction). PostProcessDependsOn (phase_d.go) still
+	// orders normalize -> associate -> project correctly when more than one
+	// runs together in the same request; runPostProcessIndexing already treats
+	// an absent dependency as nothing to wait for.
+	{Name: "normalize_assertions", Phase: "C", Produces: []string{"assertions"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	{Name: "associate_semantics", Phase: "C", Produces: []string{"semantic_associations"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
+	{Name: "project_semantics", Phase: "C", Produces: []string{"assertion_projections"}, Class: "routed", Cost: "free", OnUndetermined: "skip", Idempotent: true},
 	// Tier-1/tier-2 facet producers (ADR §3.5 DR4). Like classify_document
 	// below, neither is dispatched by the ordinary Phase A/B/C wave: tier-1
 	// runs inline inside control.go's line-file-generated handling (right

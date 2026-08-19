@@ -463,8 +463,8 @@ const (
 	reconcileOutcomeApplyFailed = "apply_failed" // decision could not be applied
 )
 
-// objectReconcileLogSink persists per-object LLM object-reconciliation outcomes
-// to kb.doc_proc_logs. A zero value (nil ProcLogger.DB) disables persistence so
+// objectReconcileLogSink persists per-object object-reconciliation outcomes to
+// kb.doc_proc_logs. A zero value (nil ProcLogger.DB) disables persistence so
 // callers/tests without a database run unchanged.
 type objectReconcileLogSink struct {
 	ProcLogger  DocProcLogger
@@ -474,16 +474,17 @@ type objectReconcileLogSink struct {
 
 func (s objectReconcileLogSink) enabled() bool { return s.ProcLogger.DB != nil }
 
-// objectReconcileOutcome captures the result of adjudicating one ambiguous
-// artifact object so success and failure alike can be logged uniformly.
+// objectReconcileOutcome captures one ambiguous artifact object's reconciliation
+// outcome so success and failure alike can be logged uniformly.
 type objectReconcileOutcome struct {
-	Status     string
-	Object     ArtifactObject
-	Candidates []ObjectNodeCandidate
-	Decision   AmbiguousObjectLLMDecision
-	ResolvedID string
-	Err        error
-	MSUsed     int64
+	Status           string
+	Object           ArtifactObject
+	Candidates       []ObjectNodeCandidate
+	CandidateDisplay []string
+	Decision         AmbiguousObjectLLMDecision
+	ResolvedID       string
+	Err              error
+	MSUsed           int64
 }
 
 // logReconcileOutcome writes one reconcile_object row. It is best-effort: a
@@ -502,6 +503,7 @@ func (s objectReconcileLogSink) logReconcileOutcome(ctx context.Context, logger 
 		"artifact_type":         o.Object.ArtifactType,
 		"object_name":           o.Object.ObjectName,
 		"candidate_object_ids":  candidateIDs,
+		"candidates":            o.CandidateDisplay,
 		"resolved_object_id":    o.ResolvedID,
 		"resolution_confidence": o.Decision.ResolutionConfidence,
 	}

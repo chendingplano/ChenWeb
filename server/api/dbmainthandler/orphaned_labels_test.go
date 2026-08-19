@@ -65,6 +65,32 @@ func TestListOrphanedLabelsReturnsOnlyLabelsWithoutTerms(t *testing.T) {
 	}
 }
 
+func TestListOrphanedLabelsAcceptsNullableAuditFields(t *testing.T) {
+	mock, cleanup := setupOrphanedLabelsDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT count(*) FROM kb.ontology_term_labels l WHERE NOT EXISTS")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.id, l.term_id, l.label, l.lang, l.label_role, l.status,\n l.create_time, COALESCE(l.create_by, ''), l.modify_time, COALESCE(l.modify_by, '')")).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "term_id", "label", "lang", "label_role", "status", "create_time", "create_by", "modify_time", "modify_by",
+		}).AddRow(42, "measurement:orphan", "orphan", "en", "altLabel", "draft", now, "", now, ""))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/db/ontology-term-labels/orphans", nil)
+	rec := httptest.NewRecorder()
+	if err := ListOrphanedLabels(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListOrphanedLabels: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListOrphanedLabelsAppliesSearchFilters(t *testing.T) {
 	mock, cleanup := setupOrphanedLabelsDB(t)
 	defer cleanup()

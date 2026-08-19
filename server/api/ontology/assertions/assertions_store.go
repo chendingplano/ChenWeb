@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/ontology/semantic"
 )
 
 // AllowedRefKinds mirrors the kb.semantic_assertions CHECK on
@@ -205,7 +207,7 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 		objectRefKind                       sql.NullString
 		objectRefID                         sql.NullString
 		objectObjectID                      sql.NullString
-		objectLiteral                       json.RawMessage
+		objectLiteral                       []byte
 		assertionKind                       sql.NullString
 		modality                            sql.NullString
 		qualifiers                          json.RawMessage
@@ -268,7 +270,7 @@ func scanAssertion(scan func(dest ...any) error) (Assertion, error) {
 		a.ObjectObjectID = objectObjectID.String
 	}
 	if objectLiteral != nil {
-		a.ObjectLiteral = objectLiteral
+		a.ObjectLiteral = json.RawMessage(objectLiteral)
 	}
 	if assertionKind.Valid {
 		a.AssertionKindTermID = assertionKind.String
@@ -386,7 +388,7 @@ func validateAssertion(a Assertion) error {
 	if strings.TrimSpace(a.PredicateTermID) == "" {
 		return errors.New("predicate_term_id is required")
 	}
-	if a.ObjectRefID == "" && len(a.ObjectLiteral) == 0 {
+	if a.ObjectRefID == "" && len(a.ObjectLiteral) == 0 && a.ValueStateTermID != semantic.ValueMissing {
 		return errors.New("one of object_ref_id or object_literal is required")
 	}
 	if a.ObjectRefID != "" && !AllowedRefKinds[a.ObjectRefKind] {
@@ -444,7 +446,7 @@ RETURNING ` + assertionColumns
 		strings.TrimSpace(a.LogicalIdentityKey), a.SubjectRefKind, strings.TrimSpace(a.SubjectRefID),
 		nullableString(a.SubjectObjectID), strings.TrimSpace(a.PredicateTermID),
 		nullableString(a.ObjectRefKind), nullableString(a.ObjectRefID),
-		nullableString(a.ObjectObjectID), nullableJSON(a.ObjectLiteral),
+		nullableString(a.ObjectObjectID), nullableObjectLiteral(a.ObjectLiteral),
 		nullableString(a.AssertionKindTermID), a.Polarity, nullableString(a.Modality),
 		nullableJSON(a.Qualifiers), nullableFloat(a.Confidence), nullableString(a.ValueForm),
 		nullableFloat(a.NumericValue), nullableFloat(a.LowerValue), nullableFloat(a.UpperValue),
@@ -512,7 +514,7 @@ RETURNING ` + assertionColumns
 		strings.TrimSpace(a.LogicalIdentityKey), prior.Revision+1, a.SubjectRefKind, strings.TrimSpace(a.SubjectRefID),
 		nullableString(a.SubjectObjectID), strings.TrimSpace(a.PredicateTermID),
 		nullableString(a.ObjectRefKind), nullableString(a.ObjectRefID),
-		nullableString(a.ObjectObjectID), nullableJSON(a.ObjectLiteral),
+		nullableString(a.ObjectObjectID), nullableObjectLiteral(a.ObjectLiteral),
 		nullableString(a.AssertionKindTermID), a.Polarity, nullableString(a.Modality),
 		nullableJSON(a.Qualifiers), nullableFloat(a.Confidence), nullableString(a.ValueForm),
 		nullableFloat(a.NumericValue), nullableFloat(a.LowerValue), nullableFloat(a.UpperValue),
