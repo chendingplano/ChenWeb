@@ -16,6 +16,9 @@ import (
 )
 
 const EntryTypePipelineFinish = "pipeline finish"
+const EntryTypeError = "error"
+const EntryTypeWarning = "warning"
+const EntryTypeDocProcSummary = "doc_proc_summary"
 const EntryTypeLLMCall = "llm_call"
 const EntryTypeGenerateSummary = "generate_summary"
 const EntryTypeGenerateSummaryFinish = "generate_summary_finish"
@@ -333,6 +336,9 @@ func (l DocProcLogger) LogReconcileObject(ctx context.Context, rec DocProcLogRec
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
 	case EntryTypePipelineFinish,
+		EntryTypeError,
+		EntryTypeWarning,
+		EntryTypeDocProcSummary,
 		EntryTypeLLMCall,
 		EntryTypeGenerateSummary,
 		EntryTypeGenerateSummaryFinish,
