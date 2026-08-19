@@ -1,1 +1,0 @@
-vi api/ontology/assertions/metric_lossless_writer.go api/ontology/assertions/associate_semantics.go api/ontology/semantic/gates_test.go api/ontology/semantic/gates.go cmd/metric-writer-readiness/main.go

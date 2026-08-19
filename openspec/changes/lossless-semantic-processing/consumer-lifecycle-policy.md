@@ -68,6 +68,24 @@ instead of legacy `proc_status` — and no writer is enabled until Phase 3.
 unlike 5.2/5.6's already-satisfied items, this one has no code or doc gap to
 close today — it is genuinely blocked, not merely undocumented.
 
+**Re-verified 2026-08-19** (task 6.9 now genuinely closed, and — per ADR §1.2 —
+the `LOSSLESS_SEMANTIC_WRITES_METRIC` gate now defaults ON in code, not just
+locally): 6.6 is done, and the mapping-miss-fails-the-run behavior this
+section describes no longer runs by default for the **metric** family — a
+proposed/ambiguous mapping now completes with a finding instead of marking
+`proc_status`/`has_failed_proc` failed. There is now live signal to retrain
+against for metrics (doc 416's outcome/finding rows). But 5.8's own scope is
+the dashboard/alert code itself
+(`doc-processor-dashboard-view.svelte`, `ListRecordsWithFailedDocProcessors`)
+switching to read `ExecutionStatus`/`FindingSummary.DisplayStatus` instead of
+legacy `proc_status` — that code change has not been made. It also remains
+blocked for every non-metric family (provisions, entities, ...): those still
+run the pre-DR12 legacy path unconditionally (Phase 4, not started — see
+`tasks.md` §7), so retraining today would only be correct for metrics and
+would still misread other families' semantic findings as failures. 5.8 stays
+unchecked; the blocker has narrowed from "no live signal at all" to "the
+retraining code itself, plus Phase 4 family coverage."
+
 ## Certification rule
 
 The reader compatibility suite in task 5.7 must name each row above.  It must
