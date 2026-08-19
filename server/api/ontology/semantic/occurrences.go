@@ -232,6 +232,33 @@ func (s OccurrenceStore) ActiveOccurrence(ctx context.Context, occurrenceKey str
 	return scanOccurrence(row)
 }
 
+// ActiveOccurrencesForInputRecord returns every currently-active unresolved
+// occurrence for one input record -- task 7.1's generic-discovery reader.
+// DR13 requires the current row to be "queryable through the same generic
+// semantic-discovery API as assertions"; input_record_id is the scope
+// AssertionListFilter already uses for that same per-document discovery, so
+// this mirrors it rather than introducing a second convention.
+func (s OccurrenceStore) ActiveOccurrencesForInputRecord(ctx context.Context, inputRecordID int64) ([]UnresolvedOccurrence, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT `+occurrenceColumns+`
+FROM kb.unresolved_semantic_occurrences
+WHERE input_record_id = $1 AND active = true
+ORDER BY id`, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UnresolvedOccurrence
+	for rows.Next() {
+		occ, err := scanOccurrence(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, occ)
+	}
+	return out, rows.Err()
+}
+
 const occurrenceColumns = `id, occurrence_key, input_record_id, artifact_type, artifact_id,
 	source_revision, raw_payload, provenance, materialization_state, resulting_assertion_id,
 	current_outcome_id, supersedes_occurrence_id, input_fingerprint, dependency_fingerprint,

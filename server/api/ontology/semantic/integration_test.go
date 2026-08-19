@@ -698,6 +698,58 @@ func TestIntegrationOccurrenceLifecycle(t *testing.T) {
 	}
 }
 
+// Task 7.1: certifies the generic-discovery reader against real Postgres --
+// scoped to one input record and excluding both a different record's
+// occurrence and a superseded (inactive) row for the same record.
+func TestIntegrationActiveOccurrencesForInputRecordScopesToRecordAndActiveRows(t *testing.T) {
+	db := freshSemanticTestDB(t)
+	ctx := context.Background()
+	store := OccurrenceStore{DB: db}
+
+	recordOne := int64(1)
+	recordTwo := int64(2)
+
+	original := UnresolvedOccurrence{
+		OccurrenceKey:         OccurrenceKey("widget:v1", recordOne, "widget", "w-1"),
+		InputRecordID:         &recordOne,
+		ArtifactType:          "widget",
+		ArtifactID:            "w-1",
+		InputFingerprint:      "v1:in-1",
+		DependencyFingerprint: "v1:dep-1",
+	}
+	if _, _, err := store.Upsert(ctx, original); err != nil {
+		t.Fatalf("upsert original: %v", err)
+	}
+	superseding := original
+	superseding.InputFingerprint = "v1:in-2"
+	if _, _, err := store.Upsert(ctx, superseding); err != nil {
+		t.Fatalf("upsert superseding: %v", err)
+	}
+
+	otherRecord := UnresolvedOccurrence{
+		OccurrenceKey:         OccurrenceKey("widget:v1", recordTwo, "widget", "w-2"),
+		InputRecordID:         &recordTwo,
+		ArtifactType:          "widget",
+		ArtifactID:            "w-2",
+		InputFingerprint:      "v1:in-1",
+		DependencyFingerprint: "v1:dep-1",
+	}
+	if _, _, err := store.Upsert(ctx, otherRecord); err != nil {
+		t.Fatalf("upsert other record: %v", err)
+	}
+
+	occs, err := store.ActiveOccurrencesForInputRecord(ctx, recordOne)
+	if err != nil {
+		t.Fatalf("ActiveOccurrencesForInputRecord: %v", err)
+	}
+	if len(occs) != 1 {
+		t.Fatalf("occs = %+v, want exactly 1 (superseded row and other record's row excluded)", occs)
+	}
+	if occs[0].ArtifactID != "w-1" || occs[0].InputFingerprint != "v1:in-2" {
+		t.Fatalf("occs[0] = %+v, want the current (superseding) row for w-1", occs[0])
+	}
+}
+
 // A rollback inside the materialization body must leave nothing behind: the
 // occurrence stays active and claimable, and no partial writes survive.
 func TestIntegrationMaterializationRollbackLeavesOccurrenceActive(t *testing.T) {

@@ -79,7 +79,7 @@
 
 ## 7. Phase 4 — Generic fallback and additional families
 
-- [ ] 7.1 Deploy and certify generic-discovery readers for unresolved occurrences
+- [x] 7.1 Deploy and certify generic-discovery readers for unresolved occurrences (scoped down after checking with the user: no REST route or consumer exists yet, and task 7.2's writer wiring is still unchecked, so there is nothing in production to discover through an API yet. Added `OccurrenceStore.ActiveOccurrencesForInputRecord` -- the store-level reader, scoped by `input_record_id` the same way `AssertionListFilter` scopes assertion discovery (DR13: "queryable through the same generic semantic-discovery API as assertions") -- built TDD (`occurrences_test.go`, sqlmock) and certified against real Postgres (`TestIntegrationActiveOccurrencesForInputRecordScopesToRecordAndActiveRows` in `integration_test.go`, proving a superseded row and a different record's row are both excluded). A REST route and consumer wiring are deferred to whenever 7.2 lands a real writer and a specific consumer is scoped to use it.)
 - [ ] 7.2 Wire every registered extractor to generic fallback persistence and run the shared fallback conformance suite without changing production behavior
 - [ ] 7.3 Backfill or explicitly report historical artifacts skipped before lossless processing (**backfill against current `miner` data deprioritized — see "Note on backfills" in `foundation-shadow-confirmation.md`; the "explicitly report" half is unaffected**)
 - [ ] 7.4 Enable `LOSSLESS_SEMANTIC_FALLBACK_WRITES` with the per-family deny switch available for emergency isolation
