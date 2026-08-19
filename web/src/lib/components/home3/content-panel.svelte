@@ -27,6 +27,7 @@
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import ResolveAmbiguousObjectsView from '$lib/components/home3/resolve-ambiguous-objects-view.svelte';
 	import ResolveMetricRangeTypesView from '$lib/components/home3/resolve-metric-range-types-view.svelte';
+	import ResolveOrphanedLabelsView from '$lib/components/home3/resolve-orphaned-labels-view.svelte';
 	import SchedulesView from '$lib/components/home3/schedules-view.svelte';
 	import DocProcessDagView from '$lib/components/home3/doc-process-dag-view.svelte';
 	import DocProcessorsView from '$lib/components/home3/doc-processors-view.svelte';
@@ -160,6 +161,7 @@
 		sectionId !== 'chat' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-metric-range-types' &&
+			activeMenu?.childId !== 'sysadmin-db-resolve-orphaned-labels' &&
 			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
@@ -262,6 +264,8 @@
 			<ResolveAmbiguousObjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-metric-range-types'}
 			<ResolveMetricRangeTypesView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-db-resolve-orphaned-labels'}
+			<ResolveOrphanedLabelsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-schedules'}
 			<SchedulesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-dag'}

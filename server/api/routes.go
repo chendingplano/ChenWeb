@@ -743,6 +743,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/admin/db/kb-inputs-status/fix", dbmainthandler.FixKbInputsStatus)
 	apiGroup.POST("/admin/db/kb-input-artifacts/clean", kbhandler.CleanInputArtifacts)
 	apiGroup.GET("/admin/db/maintenance-logs", dbmainthandler.ListMaintenanceLogs)
+	apiGroup.GET("/admin/db/ontology-term-labels/orphans", dbmainthandler.ListOrphanedLabels)
+	apiGroup.POST("/admin/db/ontology-term-labels/orphans/resolve", dbmainthandler.ResolveOrphanedLabels)
 	apiGroup.GET("/admin/benchmark/config", docbenchmarkadminhandler.GetConfig)
 	apiGroup.PUT("/admin/benchmark/config", docbenchmarkadminhandler.PutConfig)
 	apiGroup.GET("/admin/benchmark/setup-state", docbenchmarkadminhandler.GetSetupState)

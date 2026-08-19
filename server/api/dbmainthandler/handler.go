@@ -15,6 +15,173 @@ import (
 
 var logger = loggerutil.CreateDefaultLogger("CWB_DBMH_001")
 
+const orphanedLabelOperation = "resolve-orphaned-ontology-term-labels"
+
+// OrphanedLabelRow is a label row whose term_id no longer exists in the
+// governed ontology term catalog.
+type OrphanedLabelRow struct {
+	ID         int64     `json:"id"`
+	TermID     string    `json:"term_id"`
+	Label      string    `json:"label"`
+	Lang       string    `json:"lang"`
+	LabelRole  string    `json:"label_role"`
+	Status     string    `json:"status"`
+	CreateTime time.Time `json:"create_time"`
+	CreateBy   string    `json:"create_by"`
+	ModifyTime time.Time `json:"modify_time"`
+	ModifyBy   string    `json:"modify_by"`
+}
+
+type resolveOrphanedLabelsRequest struct {
+	IDs       []int64 `json:"ids"`
+	Query     string  `json:"q"`
+	Lang      string  `json:"lang"`
+	LabelRole string  `json:"label_role"`
+}
+
+func orphanedLabelsWhere(startArg int, query, lang, labelRole string) (string, []any) {
+	conditions := []string{`NOT EXISTS (SELECT 1 FROM kb.ontology_terms t WHERE t.term_id = l.term_id)`}
+	args := make([]any, 0, 3)
+	n := startArg
+	if query != "" {
+		conditions = append(conditions, fmt.Sprintf(`(l.term_id ILIKE $%d OR l.label ILIKE $%d OR l.lang ILIKE $%d)`, n, n, n))
+		args = append(args, "%"+query+"%")
+		n++
+	}
+	if lang != "" {
+		conditions = append(conditions, fmt.Sprintf("l.lang = $%d", n))
+		args = append(args, lang)
+		n++
+	}
+	if labelRole != "" {
+		conditions = append(conditions, fmt.Sprintf("l.label_role = $%d", n))
+		args = append(args, labelRole)
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+// ListOrphanedLabels handles GET /api/v1/admin/db/ontology-term-labels/orphans.
+func ListOrphanedLabels(c echo.Context) error {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "database unavailable"})
+	}
+
+	query := strings.TrimSpace(c.QueryParam("q"))
+	lang := strings.TrimSpace(c.QueryParam("lang"))
+	labelRole := strings.TrimSpace(c.QueryParam("label_role"))
+	where, args := orphanedLabelsWhere(1, query, lang, labelRole)
+
+	var total int64
+	countQ := "SELECT count(*) FROM kb.ontology_term_labels l WHERE " + where
+	if err := db.QueryRowContext(c.Request().Context(), countQ, args...).Scan(&total); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	dataQ := `SELECT l.id, l.term_id, l.label, l.lang, l.label_role, l.status,
+ l.create_time, l.create_by, l.modify_time, l.modify_by
+ FROM kb.ontology_term_labels l WHERE ` + where + `
+ ORDER BY l.term_id, l.lang, l.label_role, l.id`
+	rows, err := db.QueryContext(c.Request().Context(), dataQ, args...)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	defer rows.Close()
+
+	results := make([]OrphanedLabelRow, 0)
+	for rows.Next() {
+		var row OrphanedLabelRow
+		if err := rows.Scan(&row.ID, &row.TermID, &row.Label, &row.Lang, &row.LabelRole, &row.Status,
+			&row.CreateTime, &row.CreateBy, &row.ModifyTime, &row.ModifyBy); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "results": results, "total": total})
+}
+
+// ResolveOrphanedLabels handles POST /api/v1/admin/db/ontology-term-labels/orphans/resolve.
+func ResolveOrphanedLabels(c echo.Context) error {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "database unavailable"})
+	}
+	var req resolveOrphanedLabelsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	ids := uniquePositiveIDs(req.IDs)
+	if len(ids) == 0 {
+		return c.JSON(http.StatusOK, map[string]any{"status": true, "deleted_count": 0})
+	}
+
+	tx, err := db.BeginTx(c.Request().Context(), nil)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	deleteQ := `DELETE FROM kb.ontology_term_labels l
+WHERE l.id IN (` + strings.Join(placeholders, ", ") + `)
+  AND NOT EXISTS (SELECT 1 FROM kb.ontology_terms t WHERE t.term_id = l.term_id)`
+	result, err := tx.ExecContext(c.Request().Context(), deleteQ, args...)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	resultData, err := json.Marshal(map[string]any{
+		"deleted_count": deleted,
+		"ids":           ids,
+		"q":             req.Query,
+		"lang":          req.Lang,
+		"label_role":    req.LabelRole,
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if _, err := tx.ExecContext(c.Request().Context(),
+		`INSERT INTO kb.db_maintenance_logs (operation, result_data) VALUES ($1, $2)`,
+		orphanedLabelOperation, string(resultData)); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if err := tx.Commit(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	committed = true
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "deleted_count": deleted})
+}
+
+func uniquePositiveIDs(ids []int64) []int64 {
+	seen := make(map[int64]struct{}, len(ids))
+	result := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				result = append(result, id)
+			}
+		}
+	}
+	return result
+}
+
 // CheckKbInputsStatus counts kb.inputs rows where the status JSONB array
 // contains duplicate entries for the same operation name. These duplicates
 // are produced by the appendEntityRelationStatus bug (fixed in the server)
