@@ -198,16 +198,34 @@ migrations are additive and safe to leave in place on rollback.
 
 ## Open Questions
 
-Carried from ADR §10, to be resolved before production cutover:
+Carried from ADR §10. Items 1–4 resolved 2026-08-20 (task 8.2); see ADR `2026081801` Appendix C for
+the full decision record:
 
-1. Physical split between assertion columns, validation-result tables, and
-   `kb.semantic_processing_outcomes`, including where `unsupported_prior_status` lives.
-2. Retention/compaction for large `raw_fragment` values when the source artifact and immutable
-   invocation record already preserve identical content.
-3. Default Review Document filters and warning presentation by outcome severity.
-4. First non-metric family to migrate after the metric slice.
+1. **Resolved.** Physical split between assertion columns, validation-result tables, and
+   `kb.semantic_processing_outcomes`, including where `unsupported_prior_status` lives. Already
+   shipped: `unsupported_prior_status` is a column on `kb.semantic_assertions`;
+   `kb.semantic_processing_outcomes`/`kb.semantic_processing_findings` are the entire
+   validation-result layer. See Appendix C.1.
+2. **Resolved — moot in practice.** Retention/compaction for large `raw_fragment` values when the
+   source artifact and immutable invocation record already preserve identical content. No adapter
+   built so far ever populates `raw_fragment` (both metric and provision own a family raw table
+   instead, per DR2). No policy adopted; revisit only if a future family lacks its own raw table.
+   See Appendix C.2.
+3. **Resolved.** Default Review Document filters and warning presentation by outcome severity.
+   Already shipped (task 5.5): no default filter, everything shown, severity as color-coded badges.
+   Known gap: assertion-scoped, not outcome/finding-scoped — not treated as a blocker. See
+   Appendix C.3.
+4. **Resolved.** First non-metric family to migrate after the metric slice: **provision** (task
+   7.6), which deliberately bypasses the ADR `2026081701` four-table class/instance apparatus. That
+   apparatus itself stays metrics-only until the metric vertical slice's full cutover completes;
+   task 7.7 scopes each further family's apparatus need independently. Appendix A.3's concern about
+   the apparatus stays open and deferred. See Appendix C.4.
 
 Added by this design:
 
-5. Whether `kb.semantic_retry_queue` should share the existing failed-processor worker pool or run its
-   own; resolved by the Phase 0 throughput test.
+5. **Left open — known gap, not resolved.** Whether `kb.semantic_retry_queue` should share the
+   existing failed-processor worker pool or run its own. In practice neither exists: the queue
+   receives real enqueues (task 6.8, mapping approval) but `RetryQueue.Claim` has no production
+   caller anywhere, so nothing drains it. Whether it needs a real drain, or should be retired in
+   favor of the existing reprocess-the-document admin pattern, is deferred to task 7.7. See ADR
+   Appendix C.5.
