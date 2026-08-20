@@ -126,6 +126,25 @@ export function buildManualLaunchOperations(
 	return enforceEntityBeforeRelation(chosen, entityAlreadySucceeded);
 }
 
+// ADR 2026081801 task 5.8: extract_metrics still legitimately fails a record
+// when a value_range_type string is unreviewed (DR12 keeps this failure --
+// it is not a semantic finding, it is a real "vocabulary needs triage"
+// signal). But it is routine, self-resolving backlog, not breakage, and
+// restarting the pipeline will not fix it -- only approving/correcting the
+// mapping does. The Failed Pipelines panel must not show this identically to
+// a genuine crash. The substring below is copied from the one place that
+// error text is generated (extract-metrics.go's checkValueRangeTypeMappings,
+// MID_26081403 area): "extract_metrics: %d metric(s) blocked on ungoverned
+// value_range_type vocabulary awaiting review".
+const MAPPING_TRIAGE_ERROR_SUBSTRING = 'blocked on ungoverned value_range_type vocabulary awaiting review';
+
+// isMappingTriageFailure reports whether a failed status entry is this known,
+// self-explanatory extract_metrics case rather than a genuine failure.
+export function isMappingTriageFailure(entry: StatusEntry): boolean {
+	if (normalizeOperationName(entry.operation) !== 'extract_metrics') return false;
+	return (entry.error ?? '').includes(MAPPING_TRIAGE_ERROR_SUBSTRING);
+}
+
 const FINAL_STATUSES = new Set(['success', 'fail', 'failed', 'stopped']);
 
 function normalizeOperationName(value?: string): string {

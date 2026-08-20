@@ -5,6 +5,7 @@ import {
 	buildStageDefs,
 	computeStages,
 	isActiveRecord,
+	isMappingTriageFailure,
 	MANDATORY_PROCESSOR_IDS,
 	MANDATORY_DISPLAY_STAGES,
 	buildManualLaunchOperations,
@@ -252,4 +253,41 @@ test('entityExtractionSucceeded reads the record status', () => {
 		false
 	);
 	assert.equal(entityExtractionSucceeded(makeRecord([])), false);
+});
+
+test('isMappingTriageFailure recognizes the known extract_metrics mapping-backlog error', () => {
+	assert.equal(
+		isMappingTriageFailure({
+			operation: 'extract_metrics',
+			proc_status: 'failed',
+			error: 'extract_metrics: 3 metric(s) blocked on ungoverned value_range_type vocabulary awaiting review'
+		}),
+		true
+	);
+});
+
+test('isMappingTriageFailure is false for a different extract_metrics failure', () => {
+	assert.equal(
+		isMappingTriageFailure({
+			operation: 'extract_metrics',
+			proc_status: 'failed',
+			error: 'LLM service unavailable'
+		}),
+		false
+	);
+});
+
+test('isMappingTriageFailure is false for a different processor with the same-shaped error', () => {
+	assert.equal(
+		isMappingTriageFailure({
+			operation: 'associate_semantics',
+			proc_status: 'failed',
+			error: 'blocked on ungoverned value_range_type vocabulary awaiting review'
+		}),
+		false
+	);
+});
+
+test('isMappingTriageFailure is false when there is no error text', () => {
+	assert.equal(isMappingTriageFailure({ operation: 'extract_metrics', proc_status: 'failed' }), false);
 });

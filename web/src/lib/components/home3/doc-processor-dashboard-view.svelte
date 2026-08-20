@@ -24,6 +24,7 @@
 		computeStages,
 		entityExtractionSucceeded,
 		isActiveRecord,
+		isMappingTriageFailure,
 		visibleStages,
 		type StageInfo,
 		type StageStatus,
@@ -46,6 +47,10 @@
 	let colorSuccessTint = $derived(darkMode ? 'rgba(52,211,153,0.12)' : 'rgba(16,185,129,0.10)');
 	let colorError = $derived(darkMode ? '#F87171' : '#EF4444');
 	let colorErrorTint = $derived(darkMode ? 'rgba(248,113,113,0.12)' : 'rgba(239,68,68,0.10)');
+	// Same amber convention as semantic-diagnostics-labels.ts's 'warn' severity
+	// (task 5.5) -- routine vocabulary-triage backlog, not a genuine failure.
+	let colorWarning = $derived(darkMode ? '#FBBF24' : '#F59E0B');
+	let colorWarningTint = $derived(darkMode ? 'rgba(251,191,36,0.12)' : 'rgba(245,158,11,0.10)');
 
 	// ── Config ────────────────────────────────────────────────────────────
 
@@ -624,7 +629,9 @@
 		return Object.fromEntries(selectableProcessorIds.map((p) => [p, unfinishedStageIds.has(p)]));
 	}
 
-	function getFailedSteps(record: KbInputRecord): string[] {
+	type FailedStep = { operation: string; isMappingTriage: boolean };
+
+	function getFailedSteps(record: KbInputRecord): FailedStep[] {
 		return (record.status ?? [])
 			.filter((e) => {
 				const ps = (
@@ -635,7 +642,17 @@
 				).toLowerCase();
 				return ps === 'failed' || ps === 'fail';
 			})
-			.map((e) => e.operation ?? '?');
+			.map((e) => ({
+				operation: e.operation ?? '?',
+				isMappingTriage: isMappingTriageFailure(e as StatusEntry)
+			}));
+	}
+
+	// A record whose only failed steps are routine mapping-triage backlog
+	// (ADR 2026081801 task 5.8) isn't "broken" -- Restart won't fix it, only
+	// approving/correcting the value_range_type mapping will.
+	function isMappingTriageOnly(steps: FailedStep[]): boolean {
+		return steps.length > 0 && steps.every((s) => s.isMappingTriage);
 	}
 
 	async function loadFailedPipelines() {
@@ -1670,6 +1687,7 @@
 							<tbody>
 								{#each failedRecords as rec (rec.id)}
 									{@const failedSteps = getFailedSteps(rec)}
+									{@const triageOnly = isMappingTriageOnly(failedSteps)}
 									<tr style="border-bottom:1px solid {borderColor}; background:transparent;">
 										<td class="px-3 py-2.5" style="font-family:monospace; color:{accent}; font-size:12px; white-space:nowrap;">{rec.id}</td>
 										<td class="px-3 py-2.5 max-w-xs" style="color:{textPrimary};">
@@ -1679,24 +1697,36 @@
 											<div class="flex flex-wrap gap-1">
 												{#each failedSteps as step}
 													<span
-														style="font-family:monospace; font-size:10px; padding:1px 6px; border-radius:999px;
-														       background:{colorErrorTint}; color:{colorError}; border:1px solid {colorError}30; white-space:nowrap;"
-													>{step}</span>
+														title={step.isMappingTriage
+															? 'Routine vocabulary-triage backlog, not a processing failure. Restart will not resolve this -- go to System Admin → Database Maintenance → Resolve Metric Range Types.'
+															: undefined}
+														style="font-family:monospace; font-size:10px; padding:1px 6px; border-radius:999px; white-space:nowrap;
+														       {step.isMappingTriage
+															? `background:${colorWarningTint}; color:${colorWarning}; border:1px solid ${colorWarning}30;`
+															: `background:${colorErrorTint}; color:${colorError}; border:1px solid ${colorError}30;`}"
+													>{step.operation}{step.isMappingTriage ? ' (mapping triage)' : ''}</span>
 												{/each}
 											</div>
 										</td>
 										<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px; white-space:nowrap;">{formatTime(rec.create_time)}</td>
 										<td class="px-3 py-2.5 text-right">
-											<button
-												onclick={() => openRestart(rec)}
-												class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
-												style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:11px; font-weight:500; cursor:pointer; white-space:nowrap;"
-												onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
-												onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
-											>
-												<PlayIcon class="h-3 w-3" />
-												Restart
-											</button>
+											{#if triageOnly}
+												<span
+													style="font-size:11px; color:{textMuted}; white-space:nowrap;"
+													title="Restart will reproduce this identically. Resolve the mapping via System Admin → Database Maintenance → Resolve Metric Range Types, then this record will pick it up on its next ordinary reprocess."
+												>Needs mapping triage, not restart</span>
+											{:else}
+												<button
+													onclick={() => openRestart(rec)}
+													class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+													style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:11px; font-weight:500; cursor:pointer; white-space:nowrap;"
+													onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
+													onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
+												>
+													<PlayIcon class="h-3 w-3" />
+													Restart
+												</button>
+											{/if}
 										</td>
 									</tr>
 								{/each}
