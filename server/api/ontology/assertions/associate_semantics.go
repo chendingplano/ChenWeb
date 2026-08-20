@@ -590,11 +590,12 @@ type provisionCandidatePayload struct {
 // content gap -- see the P3 implementation log), so every provision
 // candidate deferred here unconditionally. Task 7.6 added the governed
 // prov: module and a real writer (writeProvisionLossless), gated behind
-// LOSSLESS_SEMANTIC_WRITES_PROVISION so its activation stays a deliberate
-// later decision (mirroring processMetric's own MetricLosslessWritesEnabled
-// branch). With that gate off (the default), behavior is unchanged from
-// before task 7.6: defer, optionally persisting task 7.4's generic-fallback
-// record when LOSSLESS_SEMANTIC_FALLBACK_WRITES authorizes "provision".
+// LOSSLESS_SEMANTIC_WRITES_PROVISION (mirroring processMetric's own
+// MetricLosslessWritesEnabled branch). As of task 7.7 that gate defaults on,
+// consistent with its certified conformance/completeness state. With the
+// gate explicitly disabled, behavior falls back to pre-task-7.6 defer,
+// optionally persisting task 7.4's generic-fallback record when
+// LOSSLESS_SEMANTIC_FALLBACK_WRITES authorizes "provision".
 func (a AssociateSemantics) processProvision(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate) (string, error) {
 	var p provisionCandidatePayload
 	if err := json.Unmarshal(dc.ProposedPayload, &p); err != nil {

@@ -27,12 +27,11 @@ func (ProvisionAdapter) AdapterVersion() string  { return ProvisionAdapterVersio
 func (ProvisionAdapter) OccurrenceScope() string { return ProvisionOccurrenceScope }
 
 // SupportsInstances is true: task 7.6 gives provisions a real writer
-// (writeProvisionLossless), gated behind LOSSLESS_SEMANTIC_WRITES_PROVISION.
-// As with MetricAdapter, the declaration lands ahead of the writer's own
-// gate being turned on -- DR1's "must produce an instance" obligation is
-// enforced by the gate and completeness projection at activation time, not
-// by this declaration alone (the same sequencing metrics used from task 3.8
-// through task 6.9).
+// (writeProvisionLossless), gated behind LOSSLESS_SEMANTIC_WRITES_PROVISION
+// (on by default as of task 7.7). DR1's "must produce an instance"
+// obligation is enforced by the gate and completeness projection at
+// activation time, not by this declaration alone (the same sequencing
+// metrics used from task 3.8 through task 6.9).
 func (ProvisionAdapter) SupportsInstances() bool { return true }
 
 // RawIdentityFields are the kb.provisions columns that constitute the raw
@@ -83,7 +82,7 @@ WHERE p.prov_id IS NOT NULL AND btrim(p.prov_id) <> ''`
 
 // The provision adapter registers itself so LookupAdapter, the completeness
 // projection, and AuthorizeWriterActivation can find it. Registration is not
-// activation: the writer gate defaults off, so a registered adapter still
-// writes nothing until LOSSLESS_SEMANTIC_WRITES_PROVISION is explicitly
-// enabled.
+// activation on its own -- LOSSLESS_SEMANTIC_WRITES_PROVISION is what gates
+// the writer (it defaults on as of task 7.7, but can still be explicitly
+// disabled per-environment).
 func init() { RegisterAdapter(ProvisionAdapter{}) }

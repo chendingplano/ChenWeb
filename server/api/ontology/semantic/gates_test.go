@@ -2,10 +2,12 @@ package semantic
 
 import "testing"
 
-// Task 7.4: both gates default on. The fallback path only ever adds a
-// durable unresolved-occurrence record for an artifact that otherwise gets
-// no durable record at all, so defaulting it on carries the same "safe to
-// leave on" reasoning task 6.9 established for the metric gate.
+// Task 7.4/7.7: all three writer gates default on. The fallback path only
+// ever adds a durable unresolved-occurrence record for an artifact that
+// otherwise gets no durable record at all, and task 7.6 already certified
+// the provision writer's conformance and completeness against real corpus
+// data -- the same "safe to leave on" reasoning task 6.9 established for the
+// metric gate applies to provision once certified.
 func TestWriterGatesDefaultOn(t *testing.T) {
 	g := NewGatesFromMap(nil)
 	if !g.MetricLosslessWritesEnabled() {
@@ -13,6 +15,9 @@ func TestWriterGatesDefaultOn(t *testing.T) {
 	}
 	if !g.FallbackWritesEnabled() {
 		t.Error("LOSSLESS_SEMANTIC_FALLBACK_WRITES must default on")
+	}
+	if !g.ProvisionLosslessWritesEnabled() {
+		t.Error("LOSSLESS_SEMANTIC_WRITES_PROVISION must default on")
 	}
 	if !g.FallbackAllowedFor("metric") {
 		t.Error("fallback should be allowed by default when no deny switch is set")

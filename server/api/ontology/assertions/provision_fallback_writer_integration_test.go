@@ -42,10 +42,15 @@ func proposeAndReviewProvisionCandidate(t *testing.T, dbForCandidates DecisionCa
 // Task 7.4, gate explicitly off (ADR §6's rollback lever; the gate defaults
 // ON as of this task): processProvision must remain byte-identical to its
 // pre-gate behavior -- defer only, nothing written to the generic-fallback
-// store.
+// store. Pins the lossless-writer gate explicitly off too (it defaults ON as
+// of task 7.7) so this exercises the pre-task-7.6 legacy defer path, not
+// processProvisionLossless's own defer path -- the two coincidentally
+// produce the same zero counts for this payload, which would otherwise let
+// this test pass without actually exercising what it claims to.
 func TestIntegrationProcessProvisionGateOffWritesNoFallbackRecord(t *testing.T) {
 	db := freshAssertionsTestDB(t)
 	t.Setenv(semantic.GateFallbackWrites, "false")
+	t.Setenv(semantic.GateProvisionLosslessWrites, "false")
 	ctx := context.Background()
 	dcStore := DecisionCandidateStore{DB: db}
 
@@ -85,10 +90,15 @@ WHERE artifact_type='provision' AND artifact_id='prov-gate-off'`).Scan(&outcomeC
 
 // Task 7.4, gate on: processProvision persists DR13's generic-fallback pair
 // (one active unresolved occurrence, one outcome envelope with one finding)
-// in addition to its unchanged defer behavior.
+// in addition to its unchanged defer behavior. Pins the lossless-writer gate
+// explicitly off (it defaults ON as of task 7.7) to isolate the fallback
+// path under test -- with both gates on, this candidate would instead take
+// processProvisionLossless's own defer path, which is covered separately by
+// provision_lossless_writer_integration_test.go.
 func TestIntegrationProcessProvisionGateOnWritesFallbackOccurrenceAndOutcome(t *testing.T) {
 	db := freshAssertionsTestDB(t)
 	t.Setenv(semantic.GateFallbackWrites, "true")
+	t.Setenv(semantic.GateProvisionLosslessWrites, "false")
 	ctx := context.Background()
 	dcStore := DecisionCandidateStore{DB: db}
 

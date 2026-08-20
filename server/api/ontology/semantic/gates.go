@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// Named writer gates from ADR 2026081801 Phase 3 and Phase 4. Both the
-// metric lossless-writes gate and the fallback-writes gate default ON (task
-// 7.4): the fallback path only ever adds a durable unresolved-occurrence
-// record for an artifact that today gets no durable record at all, and the
-// per-family deny switch below stays available to isolate one family in an
-// emergency without touching this default.
+// Named writer gates from ADR 2026081801 Phase 3 and Phase 4. All three
+// writer gates default ON (tasks 7.4/6.9/7.7): the fallback path only ever
+// adds a durable unresolved-occurrence record for an artifact that today
+// gets no durable record at all, and the per-family deny switch below stays
+// available to isolate one family in an emergency without touching this
+// default.
 const (
 	GateMetricLosslessWrites = "LOSSLESS_SEMANTIC_WRITES_METRIC"
 	GateFallbackWrites       = "LOSSLESS_SEMANTIC_FALLBACK_WRITES"
@@ -20,11 +20,11 @@ const (
 	// LOSSLESS_SEMANTIC_FALLBACK_DENY_PROVISION=1.
 	GateFallbackDenyPrefix = "LOSSLESS_SEMANTIC_FALLBACK_DENY_"
 	// GateProvisionLosslessWrites gates task 7.6's provision instance writer.
-	// It defaults OFF, mirroring GateMetricLosslessWrites' own Phase 1-2
-	// staging: the adapter and writer are certified and ready, but a live
-	// completeness/readiness check (metric's task 6.9 equivalent) has not
-	// been run for provisions yet, so activation stays a deliberate later
-	// decision, not a side effect of this task.
+	// It defaults ON as of task 7.7: task 7.6 already certified the
+	// adapter's conformance and completeness against real corpus data
+	// (kb.semantic_adapter_compliance, provision-writer-readiness), so
+	// activation no longer needs to stay behind a separate deliberate step
+	// the way it did before certification existed.
 	GateProvisionLosslessWrites = "LOSSLESS_SEMANTIC_WRITES_PROVISION"
 )
 
@@ -49,7 +49,7 @@ func (g Gates) enabled(name string) bool {
 	}
 	raw, ok := g.lookup(name)
 	if !ok {
-		return name == GateMetricLosslessWrites || name == GateFallbackWrites
+		return name == GateMetricLosslessWrites || name == GateFallbackWrites || name == GateProvisionLosslessWrites
 	}
 	// Anything unparseable is treated as OFF. A typo in a gate value must not
 	// switch a writer on.
