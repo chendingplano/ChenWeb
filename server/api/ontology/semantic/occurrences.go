@@ -259,6 +259,42 @@ ORDER BY id`, inputRecordID)
 	return out, rows.Err()
 }
 
+// SupersedeActiveForArtifactTx marks any active unresolved occurrence for
+// one artifact as materialized, inside the caller's own transaction. It is
+// the direct-write counterpart to Claim/Materialize's lease-based worker
+// flow, for a family whose writer runs synchronously in the same
+// transaction as its own assertion write and therefore never claims a
+// separate lease. DR13: "successful materialization supersedes the
+// occurrence" -- a family's writer must call this whenever it creates a
+// real instance for an artifact that may already carry an active
+// unresolved occurrence (e.g. task 7.4's generic-fallback record, written
+// before this family had a real writer).
+//
+// No-op (returns false, nil) when no active occurrence exists for this
+// artifact, so a family's writer can call it unconditionally rather than
+// checking first.
+func (s OccurrenceStore) SupersedeActiveForArtifactTx(ctx context.Context, tx *sql.Tx, artifactType, artifactID string, inputRecordID, resultingAssertionID, currentOutcomeID int64) (bool, error) {
+	var occID int64
+	err := tx.QueryRowContext(ctx, `
+SELECT id FROM kb.unresolved_semantic_occurrences
+WHERE active = true AND artifact_type = $1 AND artifact_id = $2 AND input_record_id = $3
+FOR UPDATE`, artifactType, artifactID, inputRecordID).Scan(&occID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE kb.unresolved_semantic_occurrences
+SET materialization_state = 'materialized', resulting_assertion_id = $2, current_outcome_id = $3,
+    active = false, saga_completed_at = NOW(), lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1`, occID, resultingAssertionID, currentOutcomeID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 const occurrenceColumns = `id, occurrence_key, input_record_id, artifact_type, artifact_id,
 	source_revision, raw_payload, provenance, materialization_state, resulting_assertion_id,
 	current_outcome_id, supersedes_occurrence_id, input_fingerprint, dependency_fingerprint,

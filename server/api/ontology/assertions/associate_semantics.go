@@ -583,20 +583,18 @@ type provisionCandidatePayload struct {
 	SubjectObjectID string `json:"subject_object_id"`
 }
 
-// processProvision resolves and validates a provision candidate. No core
-// module term yet represents a deontic (required/prohibited/permitted)
-// predicate (a real, documented content gap -- see the P3 implementation
-// log), so every provision candidate defers here rather than inventing a
-// term reference (spec §10.5: missing context produces deferred, not an
-// invented target).
+// processProvision resolves and validates a provision candidate.
 //
-// When LOSSLESS_SEMANTIC_FALLBACK_WRITES authorizes the "provision" family
-// (task 7.4), this also persists DR13's generic-fallback record -- one
-// active unresolved occurrence plus one outcome envelope -- before deferring,
-// so the provision becomes discoverable through task 7.1's reader instead of
-// leaving no durable trace beyond the decision candidate itself. With the
-// gate off (the default), behavior is byte-identical to before this gate
-// existed: defer only, nothing written to the fallback store.
+// Until task 7.6, no core module term represented a deontic
+// (required/prohibited/permitted) predicate at all (a real, documented
+// content gap -- see the P3 implementation log), so every provision
+// candidate deferred here unconditionally. Task 7.6 added the governed
+// prov: module and a real writer (writeProvisionLossless), gated behind
+// LOSSLESS_SEMANTIC_WRITES_PROVISION so its activation stays a deliberate
+// later decision (mirroring processMetric's own MetricLosslessWritesEnabled
+// branch). With that gate off (the default), behavior is unchanged from
+// before task 7.6: defer, optionally persisting task 7.4's generic-fallback
+// record when LOSSLESS_SEMANTIC_FALLBACK_WRITES authorizes "provision".
 func (a AssociateSemantics) processProvision(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate) (string, error) {
 	var p provisionCandidatePayload
 	if err := json.Unmarshal(dc.ProposedPayload, &p); err != nil {
@@ -604,6 +602,10 @@ func (a AssociateSemantics) processProvision(ctx context.Context, dcStore Decisi
 			return "", err
 		}
 		return "rejected", nil
+	}
+
+	if semantic.NewGates().ProvisionLosslessWritesEnabled() {
+		return a.processProvisionLossless(ctx, dcStore, dc, p)
 	}
 
 	const deferReason = "no_governed_deontic_predicate"
@@ -617,6 +619,60 @@ func (a AssociateSemantics) processProvision(ctx context.Context, dcStore Decisi
 		return "", err
 	}
 	return a.deferCandidate(ctx, dcStore, dc, deferReason)
+}
+
+// processProvisionLossless is task 7.6's gated entry point once the
+// governed deontic terms and a real writer exist. It defers on the same two
+// preconditions writeMetricLossless's caller (processMetric) checks before
+// its own writer runs: an unresolved subject (mirroring metric's
+// "unresolved_referent") and an unclassifiable assertion kind -- the latter
+// distinguished from the pre-7.6 "no term at all" gap by a different,
+// accurate reason ("unparsed_modality"), since the governed terms now exist
+// and the problem is genuinely that this one clause's modality could not be
+// classified from its text.
+func (a AssociateSemantics) processProvisionLossless(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate, p provisionCandidatePayload) (string, error) {
+	if p.SubjectObjectID == "" {
+		if _, err := dcStore.SetResolution(ctx, dc.ID, "deferred", "ambiguous_targets"); err != nil {
+			return "", err
+		}
+		return a.deferCandidate(ctx, dcStore, dc, "unresolved_referent")
+	}
+
+	assertionKindTermID, supported := provisionAssertionKindTermID(p.AssertionKind)
+	if !supported {
+		const deferReason = "unparsed_modality"
+		if semantic.NewGates().FallbackAllowedFor("provision") {
+			if err := a.writeProvisionFallbackOccurrence(ctx, dc, deferReason); err != nil {
+				return "", fmt.Errorf("write provision fallback occurrence: %w", err)
+			}
+		}
+		if _, err := dcStore.SetResolution(ctx, dc.ID, "deferred", "modality could not be classified from source text"); err != nil {
+			return "", err
+		}
+		return a.deferCandidate(ctx, dcStore, dc, deferReason)
+	}
+
+	// Defensive, mirroring processMetric's own predicate/kind release check:
+	// the prov: module is released as of task 7.6, but a writer must never
+	// assume a governed term exists rather than verify it.
+	predicateOK, err := a.termExists(ctx, ProvisionPredicateTermID)
+	if err != nil {
+		return "", err
+	}
+	kindOK, err := a.termExists(ctx, assertionKindTermID)
+	if err != nil {
+		return "", err
+	}
+	if !predicateOK || !kindOK {
+		return a.deferCandidateWithDependency(ctx, dcStore, dc,
+			"governed_term_not_released:"+ProvisionPredicateTermID+","+assertionKindTermID,
+			governedTermDependencyFingerprint(ProvisionPredicateTermID, predicateOK, assertionKindTermID, kindOK))
+	}
+
+	if _, err := dcStore.SetResolution(ctx, dc.ID, "matched", "subject reconciled; deontic predicate released"); err != nil {
+		return "", err
+	}
+	return a.writeProvisionLossless(ctx, dc, p, assertionKindTermID)
 }
 
 func (a AssociateSemantics) deferCandidate(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate, reason string) (string, error) {

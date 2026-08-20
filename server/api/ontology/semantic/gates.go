@@ -19,6 +19,13 @@ const (
 	// required by Phase 4 item 4, e.g.
 	// LOSSLESS_SEMANTIC_FALLBACK_DENY_PROVISION=1.
 	GateFallbackDenyPrefix = "LOSSLESS_SEMANTIC_FALLBACK_DENY_"
+	// GateProvisionLosslessWrites gates task 7.6's provision instance writer.
+	// It defaults OFF, mirroring GateMetricLosslessWrites' own Phase 1-2
+	// staging: the adapter and writer are certified and ready, but a live
+	// completeness/readiness check (metric's task 6.9 equivalent) has not
+	// been run for provisions yet, so activation stays a deliberate later
+	// decision, not a side effect of this task.
+	GateProvisionLosslessWrites = "LOSSLESS_SEMANTIC_WRITES_PROVISION"
 )
 
 // Gates reads the named writer gates. The indirection exists so tests can
@@ -57,6 +64,13 @@ func (g Gates) MetricLosslessWritesEnabled() bool { return g.enabled(GateMetricL
 
 // FallbackWritesEnabled reports whether the global generic-fallback gate is on.
 func (g Gates) FallbackWritesEnabled() bool { return g.enabled(GateFallbackWrites) }
+
+// ProvisionLosslessWritesEnabled reports whether
+// LOSSLESS_SEMANTIC_WRITES_PROVISION is on. Like
+// MetricLosslessWritesEnabled, this is only one of the activation
+// preconditions; AuthorizeWriterActivation checks conformance and compliance
+// registry state.
+func (g Gates) ProvisionLosslessWritesEnabled() bool { return g.enabled(GateProvisionLosslessWrites) }
 
 // FallbackAllowedFor applies the global gate and the per-family deny switch.
 // The deny switch is an emergency isolation control: it can only subtract, so

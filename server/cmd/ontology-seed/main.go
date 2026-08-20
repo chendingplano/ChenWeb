@@ -1,12 +1,13 @@
 // Command ontology-seed authors the curated core 4a ontology modules as data
-// (core, document-authority, measurement) and, unless --author-only, releases
-// and activates them through the module compiler. It is the DB-native
-// authoring surface for platform-owned vocabulary -- content lives in the
-// database (2026-07-31 storage decision), not in a data repository.
+// (core, document-authority, measurement, provision) and, unless
+// --author-only, releases and activates them through the module compiler. It
+// is the DB-native authoring surface for platform-owned vocabulary -- content
+// lives in the database (2026-07-31 storage decision), not in a data
+// repository.
 //
 // Usage:
 //
-//	ontology-seed --module core|document-authority|semantic-processing|measurement|all [--author-only]
+//	ontology-seed --module core|document-authority|semantic-processing|measurement|provision|all [--author-only]
 //
 // Re-running is safe and idempotent: module metadata is reconciled from the
 // compiled-in content, curated terms and labels that changed since their last
@@ -39,7 +40,7 @@ func main() {
 
 	targets := []string{*moduleFlag}
 	if *moduleFlag == "all" || *moduleFlag == "" {
-		targets = []string{"core", "document-authority", "semantic-processing", "measurement"}
+		targets = []string{"core", "document-authority", "semantic-processing", "measurement", "provision"}
 	}
 
 	db := connect()

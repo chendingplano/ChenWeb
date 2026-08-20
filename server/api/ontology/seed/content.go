@@ -147,6 +147,33 @@ var measurementModule = moduleContent{
 	},
 }
 
+// provisionModule owns the provision-family assertion contract: the deontic
+// predicate binding a subject to a governing provision, and the deontic
+// assertion kinds (required/prohibited/permitted) a provision's modality
+// resolves to (ADR 2026081801 task 7.6). Mirrors measurementModule's shape --
+// a family-owned module for family-specific assertion kinds, distinct from
+// coreModule's cross-family predicates -- but has no external dependency
+// like measurement's on quantity/QUDT, so it joins the strict startup batch
+// directly.
+var provisionModule = moduleContent{
+	ModuleID:  "provision",
+	Version:   "1.0.0",
+	Title:     "Provision module",
+	Owner:     "platform",
+	DependsOn: []string{"core"},
+	Terms: []seedTerm{
+		{ID: "prov:has_provision", Kind: "property", Def: "Binds a subject to a normative provision governing it.", Labels: enPref("has provision")},
+		// Deontic assertion kinds -- what a provision's modality means
+		// (mirrors mea:*'s assertion-kind terms; provisionAssertionKind maps
+		// modality "recommended" onto kind "permitted" rather than a fourth
+		// term, since a recommendation is a weaker permission, not a distinct
+		// deontic category).
+		{ID: "prov:required", Kind: "property", Def: "Assertion kind: the subject is required to satisfy the stated provision.", Labels: enPref("required")},
+		{ID: "prov:prohibited", Kind: "property", Def: "Assertion kind: the subject is prohibited from the stated provision.", Labels: enPref("prohibited")},
+		{ID: "prov:permitted", Kind: "property", Def: "Assertion kind: the subject is permitted the stated provision.", Labels: enPref("permitted")},
+	},
+}
+
 // semanticProcessingModule owns the cross-family state vocabulary decided by
 // ADR 2026081801 DR4 and DR9: outcome dispositions, finding terms, finding
 // dimensions, severities, retry states, required processing stages, and the
