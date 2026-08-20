@@ -589,6 +589,14 @@ type provisionCandidatePayload struct {
 // log), so every provision candidate defers here rather than inventing a
 // term reference (spec §10.5: missing context produces deferred, not an
 // invented target).
+//
+// When LOSSLESS_SEMANTIC_FALLBACK_WRITES authorizes the "provision" family
+// (task 7.4), this also persists DR13's generic-fallback record -- one
+// active unresolved occurrence plus one outcome envelope -- before deferring,
+// so the provision becomes discoverable through task 7.1's reader instead of
+// leaving no durable trace beyond the decision candidate itself. With the
+// gate off (the default), behavior is byte-identical to before this gate
+// existed: defer only, nothing written to the fallback store.
 func (a AssociateSemantics) processProvision(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate) (string, error) {
 	var p provisionCandidatePayload
 	if err := json.Unmarshal(dc.ProposedPayload, &p); err != nil {
@@ -597,10 +605,18 @@ func (a AssociateSemantics) processProvision(ctx context.Context, dcStore Decisi
 		}
 		return "rejected", nil
 	}
+
+	const deferReason = "no_governed_deontic_predicate"
+	if semantic.NewGates().FallbackAllowedFor("provision") {
+		if err := a.writeProvisionFallbackOccurrence(ctx, dc, deferReason); err != nil {
+			return "", fmt.Errorf("write provision fallback occurrence: %w", err)
+		}
+	}
+
 	if _, err := dcStore.SetResolution(ctx, dc.ID, "deferred", "no governed deontic predicate term"); err != nil {
 		return "", err
 	}
-	return a.deferCandidate(ctx, dcStore, dc, "no_governed_deontic_predicate")
+	return a.deferCandidate(ctx, dcStore, dc, deferReason)
 }
 
 func (a AssociateSemantics) deferCandidate(ctx context.Context, dcStore DecisionCandidateStore, dc DecisionCandidate, reason string) (string, error) {

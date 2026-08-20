@@ -6,8 +6,12 @@ import (
 	"strings"
 )
 
-// Named writer gates from ADR 2026081801 Phase 3 and Phase 4. The metric
-// lossless-writes gate defaults ON; the fallback-writes gate remains OFF.
+// Named writer gates from ADR 2026081801 Phase 3 and Phase 4. Both the
+// metric lossless-writes gate and the fallback-writes gate default ON (task
+// 7.4): the fallback path only ever adds a durable unresolved-occurrence
+// record for an artifact that today gets no durable record at all, and the
+// per-family deny switch below stays available to isolate one family in an
+// emergency without touching this default.
 const (
 	GateMetricLosslessWrites = "LOSSLESS_SEMANTIC_WRITES_METRIC"
 	GateFallbackWrites       = "LOSSLESS_SEMANTIC_FALLBACK_WRITES"
@@ -38,7 +42,7 @@ func (g Gates) enabled(name string) bool {
 	}
 	raw, ok := g.lookup(name)
 	if !ok {
-		return name == GateMetricLosslessWrites
+		return name == GateMetricLosslessWrites || name == GateFallbackWrites
 	}
 	// Anything unparseable is treated as OFF. A typo in a gate value must not
 	// switch a writer on.
