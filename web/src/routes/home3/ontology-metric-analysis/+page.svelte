@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { page } from '$app/state';
+	import { onMount } from 'svelte';
+	import DocumentMetricsAnalysis from '$lib/components/home3/document-metrics-analysis.svelte';
+	import { getMetricOntologyAnalysis } from '$lib/services/metricOntologyAnalysisService';
+	import { theme } from '$lib/stores/theme.svelte';
 	import {
 		ArrowDownRight,
 		ArrowUpRight,
@@ -19,26 +24,32 @@
 		TriangleAlert
 	} from '@lucide/svelte';
 
-	type Variant = 'atlas' | 'signal' | 'field';
 	type Status = 'complete' | 'findings' | 'historical' | 'blocked' | 'incomplete' | 'failed';
 
-	let variant = $state<Variant>('atlas');
-	let darkMode = $state(false);
+	let {
+		embedded = false,
+		hostDarkMode = undefined,
+		knowledgeStoreId = null
+	}: { embedded?: boolean; hostDarkMode?: boolean; knowledgeStoreId?: number | null } = $props();
+	let darkMode = $derived(hostDarkMode ?? theme.isDark);
+	let loading = $state(false);
+	let loadError = $state('');
+	let errorFreePercent = $state('93.5%');
 	let activeScope = $state('All authorized documents');
 	let filterOpen = $state(false);
 	let selectedMetric = $state<string | null>(null);
 	let query = $state('');
 
-	const kpis = [
+	let kpis = $state([
 		{ label: 'Occurrences', sub: 'record-born rows', value: '1,284', delta: '+8.4%', direction: 'up', tone: 'bronze', href: 'Document Metrics' },
 		{ label: 'Current instances', sub: 'distinct assertions', value: '982', delta: '+3.1%', direction: 'up', tone: 'ink', href: 'Document Metrics' },
 		{ label: 'Ontology metrics', sub: 'governed definitions', value: '146', delta: '+12', direction: 'up', tone: 'olive', href: 'Ontology Metrics' },
 		{ label: 'Metric classes', sub: 'instantiated classes', value: '38', delta: '0', direction: 'flat', tone: 'slate', href: 'Ontology Metrics' },
 		{ label: 'With errors', sub: 'detected error facts', value: '84', delta: '-5.2%', direction: 'down', tone: 'red', href: 'Document Metrics' },
 		{ label: 'No detected errors', sub: 'not complete or warning-free', value: '1,200', delta: '+9.6%', direction: 'up', tone: 'blue', href: 'Document Metrics' }
-	];
+	]);
 
-	const coverage = [
+	let coverage = $state([
 		{ label: 'Complete', value: 684, percent: 53, color: 'var(--green)' },
 		{ label: 'Completed with findings', value: 216, percent: 17, color: 'var(--bronze)' },
 		{ label: 'Historical / not processed', value: 168, percent: 13, color: 'var(--slate)' },
@@ -46,22 +57,22 @@
 		{ label: 'Incomplete graph', value: 74, percent: 6, color: 'var(--violet)' },
 		{ label: 'Execution failed', value: 42, percent: 3, color: 'var(--orange)' },
 		{ label: 'Unknown coverage', value: 17, percent: 2, color: 'var(--muted)' }
-	];
+	]);
 
-	const errors = [
+	let errors = $state([
 		{ label: 'Unresolved unit', value: 31, percent: 88, severity: 'Warning' },
 		{ label: 'Missing assertion edge', value: 22, percent: 63, severity: 'Error' },
 		{ label: 'Range type fallback', value: 16, percent: 46, severity: 'Warning' },
 		{ label: 'Processor timeout', value: 9, percent: 26, severity: 'Failed' },
 		{ label: 'Unknown governed term', value: 6, percent: 17, severity: 'Warning' }
-	];
+	]);
 
-	const mappings = [
+	let mappings = $state([
 		{ term: 'temperature', module: 'physical-quantity', occurrences: 208, instances: 146, state: 'Current' },
 		{ term: 'pressure', module: 'physical-quantity', occurrences: 167, instances: 121, state: 'Current' },
 		{ term: 'flow rate', module: 'process-measure', occurrences: 126, instances: 98, state: 'Current' },
 		{ term: 'service life', module: 'reliability', occurrences: 82, instances: 61, state: 'Warning' }
-	];
+	]);
 
 	const statusMeta: Record<Status, { label: string; className: string }> = {
 		complete: { label: 'Complete', className: 'positive' },
@@ -72,12 +83,49 @@
 		failed: { label: 'Execution failed', className: 'error' }
 	};
 
-	const recentRows: { id: string; document: string; metric: string; value: string; definition: string; status: Status; updated: string }[] = [
+	let recentRows: { id: string; document: string; metric: string; value: string; definition: string; status: Status; updated: string }[] = $state([
 		{ id: 'occ-00841', document: '泵站维护规程 · §4.2', metric: '入口压力', value: '0.42 MPa', definition: 'pressure', status: 'findings', updated: '12 min ago' },
 		{ id: 'occ-00840', document: '冷却系统验收 · §2.1', metric: '出口温度', value: '72 °C', definition: 'temperature', status: 'complete', updated: '18 min ago' },
 		{ id: 'occ-00839', document: '流量计校准记录 · §7', metric: '额定流量', value: '1,200 L/min', definition: 'flow rate', status: 'historical', updated: '31 min ago' },
 		{ id: 'occ-00838', document: '风机技术条件 · §5.3', metric: '设计寿命', value: '20,000 h', definition: 'service life', status: 'blocked', updated: '44 min ago' }
-	];
+	]);
+
+	function number(value: number) {
+		return new Intl.NumberFormat('en-US').format(value);
+	}
+
+	function normalizeStatus(value: string): Status {
+		if (value === 'findings' || value === 'historical' || value === 'blocked' || value === 'incomplete' || value === 'failed') return value;
+		return 'complete';
+	}
+
+	async function loadAnalysis() {
+		loading = true;
+		loadError = '';
+		try {
+			const response = await getMetricOntologyAnalysis(knowledgeStoreId);
+			errorFreePercent = `${response.error_presence.find((item) => item.label === 'Without detected errors')?.percent ?? 0}%`;
+			kpis = [
+				{ label: 'Occurrences', sub: 'record-born rows', value: number(response.kpi.occurrences), delta: '', direction: 'flat', tone: 'bronze', href: 'Document Metrics' },
+				{ label: 'Current instances', sub: 'distinct assertions', value: number(response.kpi.current_instances), delta: '', direction: 'flat', tone: 'ink', href: 'Document Metrics' },
+				{ label: 'Ontology metrics', sub: 'governed definitions', value: number(response.kpi.ontology_metrics), delta: '', direction: 'flat', tone: 'olive', href: 'Ontology Metrics' },
+				{ label: 'Metric classes', sub: 'instantiated classes', value: number(response.kpi.metric_classes), delta: '', direction: 'flat', tone: 'slate', href: 'Ontology Metrics' },
+				{ label: 'With errors', sub: 'detected error facts', value: number(response.kpi.with_errors), delta: '', direction: 'flat', tone: 'red', href: 'Document Metrics' },
+				{ label: 'No detected errors', sub: 'not complete or warning-free', value: number(response.kpi.without_errors), delta: '', direction: 'flat', tone: 'blue', href: 'Document Metrics' }
+			];
+			const colors = ['var(--green)', 'var(--bronze)', 'var(--slate)', 'var(--red)', 'var(--violet)', 'var(--orange)', 'var(--muted)'];
+			coverage = response.coverage_states.map((item, index) => ({ ...item, color: colors[index % colors.length] }));
+			errors = response.errors_by_type;
+			mappings = response.mappings;
+			recentRows = response.recent_occurrences.map((row) => ({ ...row, status: normalizeStatus(row.status) }));
+		} catch (error) {
+			loadError = error instanceof Error ? error.message : String(error);
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(loadAnalysis);
 
 	let filteredRows = $derived(
 		recentRows.filter((row) => `${row.document} ${row.metric} ${row.definition}`.toLowerCase().includes(query.toLowerCase()))
@@ -96,10 +144,15 @@
 
 <svelte:head>
 	<title>Metric Ontology Analysis · ChenWeb</title>
-	<meta name="description" content="Read-only diagnostic dashboard for metric ontology coverage and processing outcomes." />
+	<meta name="description" content="Read-only diagnostic view for metric ontology coverage and processing outcomes." />
 </svelte:head>
 
-<div class:dark={darkMode} class="page-shell variant-{variant}">
+{#if page.url.searchParams.get('view') === 'document'}
+	<DocumentMetricsAnalysis />
+{:else}
+
+	<div class:dark={darkMode} class="page-shell" class:embedded>
+	{#if !embedded}
 	<header class="topbar">
 		<div class="brand-lockup">
 			<div class="brand-mark">CH</div>
@@ -110,12 +163,13 @@
 		</div>
 		<div class="top-actions">
 			<button class="icon-button" aria-label="Refresh read model" title="Refresh read model"><RefreshCw size={16} /></button>
-			<button class="icon-button" aria-label="Toggle theme" title="Toggle theme" onclick={() => (darkMode = !darkMode)}>
+			<button class="icon-button" aria-label="Toggle theme" title="Toggle theme" onclick={() => theme.toggle()}>
 				{#if darkMode}<Sun size={16} />{:else}<Moon size={16} />{/if}
 			</button>
 			<div class="avatar" aria-label="Signed in as C. Ding">CD</div>
 		</div>
 	</header>
+	{/if}
 
 	<main class="content">
 		<div class="breadcrumb"><span>Ontology</span><span class="slash">/</span><strong>Metrics</strong><span class="route-badge">Read-only analysis</span></div>
@@ -144,12 +198,8 @@
 			{#if filterOpen}<div class="notice-expanded"><span>Conformance <b>Passed</b></span><span>Projection <b>Current</b></span><span>Resolution <b>Mixed</b></span><span>Denominator <b>1,284 occurrences</b></span></div>{/if}
 		</section>
 
-		<div class="variant-picker" aria-label="Visual implementation variants">
-			<span>Implementation variants</span>
-			<button class:chosen={variant === 'atlas'} onclick={() => (variant = 'atlas')}>01 Atlas <small>editorial ledger</small></button>
-			<button class:chosen={variant === 'signal'} onclick={() => (variant = 'signal')}>02 Signal <small>dense operations</small></button>
-			<button class:chosen={variant === 'field'} onclick={() => (variant = 'field')}>03 Field Notes <small>quiet review</small></button>
-		</div>
+		{#if loading}<div class="data-note">Refreshing the composed read model…</div>{/if}
+		{#if loadError}<div class="data-note error-note">Live data unavailable: {loadError}. Showing the last safe fixture.</div>{/if}
 
 		<section class="scope-bar">
 			<div class="scope-label"><Filter size={15} /><span>Scope</span></div>
@@ -172,8 +222,8 @@
 		<section class="dashboard-grid">
 			<div class="panel error-panel">
 				<div class="panel-head"><div><p class="panel-kicker">01 / error presence</p><h2>Most metrics are clean, not necessarily complete.</h2></div><button class="more-button" aria-label="More error presence options"><MoreHorizontal size={18} /></button></div>
-				<div class="error-visual"><div class="donut"><div><strong>93.5%</strong><span>no detected errors</span></div></div><div class="error-legend"><div><span class="dot blue"></span><strong>1,200</strong><span>without detected errors</span></div><div><span class="dot red"></span><strong>84</strong><span>with error facts</span></div><p><TriangleAlert size={13} /> A clean processing result can still carry warnings or silent gaps.</p></div></div>
-				<table class="exact-table"><caption>Exact error presence values</caption><tbody><tr><td>Without detected errors</td><td>1,200</td><td>93.5%</td></tr><tr><td>With error facts</td><td>84</td><td>6.5%</td></tr></tbody></table>
+				<div class="error-visual"><div class="donut"><div><strong>{errorFreePercent}</strong><span>no detected errors</span></div></div><div class="error-legend"><div><span class="dot blue"></span><strong>{kpis[5].value}</strong><span>without detected errors</span></div><div><span class="dot red"></span><strong>{kpis[4].value}</strong><span>with error facts</span></div><p><TriangleAlert size={13} /> A clean processing result can still carry warnings or silent gaps.</p></div></div>
+				<table class="exact-table"><caption>Exact error presence values</caption><tbody><tr><td>Without detected errors</td><td>{kpis[5].value}</td><td>—</td></tr><tr><td>With error facts</td><td>{kpis[4].value}</td><td>—</td></tr></tbody></table>
 			</div>
 
 			<div class="panel coverage-panel">
@@ -201,7 +251,8 @@
 
 		<footer class="page-footer"><span><Layers3 size={14} /> Metric ontology analysis · Page 1 of 3</span><span>Last updated 20 Aug 2026, 14:32 UTC <button class="footer-link">View API shape</button></span></footer>
 	</main>
-</div>
+	</div>
+{/if}
 
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
@@ -212,7 +263,10 @@
 	:global(button:focus-visible), :global(a:focus-visible), :global(input:focus-visible) { outline: 3px solid oklch(0.72 0.12 65); outline-offset: 3px; }
 	:root { --paper: oklch(0.965 0.014 78); --panel: oklch(0.985 0.009 78); --ink: oklch(0.23 0.025 63); --muted: oklch(0.55 0.025 72); --line: oklch(0.88 0.028 75); --bronze: oklch(0.61 0.09 69); --green: oklch(0.58 0.09 145); --red: oklch(0.58 0.13 26); --blue: oklch(0.56 0.11 245); --violet: oklch(0.59 0.1 302); --orange: oklch(0.68 0.12 52); --slate: oklch(0.57 0.035 245); --muted-bar: oklch(0.78 0.02 72); }
 	.page-shell { --bg: var(--paper); --surface: var(--panel); --text: var(--ink); --subtle: var(--muted); --border: var(--line); --shadow: 0 12px 30px oklch(0.3 0.02 70 / 0.06); min-height: 100vh; background: var(--bg); color: var(--text); transition: background 180ms ease, color 180ms ease; }
-	.page-shell.dark { --bg: oklch(0.19 0.018 70); --surface: oklch(0.235 0.018 70); --text: oklch(0.91 0.018 78); --subtle: oklch(0.7 0.025 78); --border: oklch(0.37 0.025 72); --shadow: 0 12px 30px oklch(0.05 0.02 70 / 0.3); --muted-bar: oklch(0.42 0.02 72); }
+	.page-shell.dark { --bg: #111827; --surface: #182334; --text: #f7f5f1; --subtle: #c4cfdf; --border: #304663; --bronze: #ff9b54; --green: #47b699; --red: #ff7d6b; --blue: #78a5e5; --violet: #9c8de2; --orange: #ffb072; --slate: #8ea2bb; --ink: #f7f5f1; --shadow: 0 12px 30px rgba(7, 10, 18, 0.32); --muted-bar: #405773; }
+	.page-shell.embedded .content { padding-top: 25px; }
+	.data-note { margin: 13px 0; padding: 10px 12px; border: 1px solid var(--border); background: color-mix(in oklch, var(--bronze) 8%, transparent); color: var(--subtle); font: 500 11px 'DM Mono', monospace; }
+	.error-note { color: var(--red); border-color: color-mix(in oklch, var(--red) 45%, var(--border)); }
 	.topbar { height: 70px; padding: 0 4.5vw; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: color-mix(in oklch, var(--surface) 80%, transparent); }
 	.brand-lockup, .top-actions, .scope-bar, .breadcrumb, .title-actions, .notice-copy, .source-footer, .page-footer, .table-tools { display: flex; align-items: center; }
 	.brand-lockup { gap: 11px; }.brand-mark { width: 30px; height: 30px; border: 1px solid var(--bronze); color: var(--bronze); display: grid; place-items: center; font: 500 11px 'DM Mono', monospace; letter-spacing: -0.08em; }.eyebrow, .section-kicker, .panel-kicker { margin: 0; text-transform: uppercase; letter-spacing: 0.13em; font: 500 10px 'DM Mono', monospace; color: var(--bronze); }.brand-name { margin: 2px 0 0; font-size: 13px; font-weight: 700; }.top-actions { gap: 11px; }.icon-button, .more-button { border: 0; color: var(--subtle); background: transparent; cursor: pointer; padding: 7px; }.icon-button:hover, .more-button:hover { color: var(--text); }.avatar { width: 30px; height: 30px; background: var(--ink); color: var(--paper); display: grid; place-items: center; border-radius: 50%; font: 500 10px 'DM Mono', monospace; }

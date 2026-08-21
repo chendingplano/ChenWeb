@@ -549,6 +549,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/inputs/:id/stop", kbhandler.StopPipeline)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)
+	apiGroup.GET("/kb/metrics/ontology-analysis", kbhandler.GetMetricOntologyAnalysis)
 	apiGroup.GET("/kb/metrics/:metric_id/wiki", kbhandler.GetMetricWiki)
 	apiGroup.GET("/kb/metrics/range-type-errors", kbhandler.ListMetricRangeTypeErrors)
 	apiGroup.GET("/kb/metric-value-range-type-map", kbhandler.ListValueRangeTypeMapEntries)

@@ -52,6 +52,7 @@
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import LayersIcon from '@lucide/svelte/icons/layers';
+	import MetricOntologyAnalysisView from '$lib/components/home3/metric-ontology-analysis-view.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -59,6 +60,7 @@
 		| 'kb-input-details'
 		| 'kb-metrics'
 		| 'kb-metric-wiki'
+		| 'kb-metric-ontology'
 		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
@@ -211,6 +213,19 @@
 					id: 'kb-category-review',
 					label: 'Category Review',
 					description: 'Curate the inventory category ontology'
+				}
+			]
+		},
+		{
+			id: 'kb-metric-ontology',
+			label: 'Ontology',
+			description: 'Governed vocabulary and metric diagnostics',
+			icon: NetworkIcon,
+			children: [
+				{
+					id: 'kb-metric-ontology',
+					label: 'Metric Ontology',
+					description: 'Inspect metric coverage, mappings, and findings'
 				}
 			]
 		}
@@ -386,6 +401,7 @@
 		activeSection !== 'kb-search' &&
 			activeSection !== 'kb-llm-wiki-v3' &&
 			activeSection !== 'kb-metric-wiki' &&
+			activeSection !== 'kb-metric-ontology' &&
 			activeSection !== 'kb-artifact-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
@@ -770,6 +786,11 @@
 				{:else}
 					<KnowledgeStoreView {darkMode} />
 				{/if}
+			{:else if activeSection === 'kb-metric-ontology'}
+				<MetricOntologyAnalysisView
+					{darkMode}
+					knowledgeStoreId={knowledgeStoreState.activeStore?.id ?? null}
+				/>
 			{:else if activeSection === 'kb-artifact-wiki'}
 				{#if artifactWikiType && artifactWikiId}
 					<ArtifactWikiPage
