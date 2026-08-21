@@ -378,6 +378,7 @@
 	let injestionOpen = $state(false);
 	let documentWikiOpen = $state(false);
 	let documentProcessingOpen = $state(false);
+	let ontologyOpen = $state(false);
 	let activeItem = $derived(
 		menuItems.find(
 			(item) =>
@@ -430,6 +431,10 @@
 		if (docWikiItem?.children?.some((child) => child.id === id)) {
 			documentWikiOpen = true;
 		}
+		const ontologyItem = menuItems.find((item) => item.id === 'kb-metric-ontology');
+		if (ontologyItem?.children?.some((child) => child.id === id)) {
+			ontologyOpen = true;
+		}
 	}
 
 	function isCollapsibleParent(item: KbMenuItem) {
@@ -440,6 +445,7 @@
 		if (item.id === 'kb-import') return injestionOpen;
 		if (item.id === 'kb-doc-wiki') return documentWikiOpen;
 		if (item.id === 'kb-chunks') return documentProcessingOpen;
+		if (item.id === 'kb-metric-ontology') return ontologyOpen;
 		return false;
 	}
 
@@ -447,6 +453,7 @@
 		if (item.id === 'kb-import') injestionOpen = !injestionOpen;
 		else if (item.id === 'kb-doc-wiki') documentWikiOpen = !documentWikiOpen;
 		else if (item.id === 'kb-chunks') documentProcessingOpen = !documentProcessingOpen;
+		else if (item.id === 'kb-metric-ontology') ontologyOpen = !ontologyOpen;
 	}
 
 	function isChildActive(childId: KbSectionId) {
