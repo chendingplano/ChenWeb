@@ -268,7 +268,11 @@
 
 		<section class="recent-section">
 			<div class="section-heading"><div><p class="panel-kicker">Latest occurrences</p><h2>Recent activity worth inspecting</h2></div><div class="table-tools"><label class="search-field"><Search size={15} /><input bind:value={query} placeholder="Search metric or document" aria-label="Search metric or document" /></label><button class="quiet-button">Columns <ChevronDown size={14} /></button></div></div>
-			<div class="table-wrap"><table class="recent-table"><caption>Recent metric occurrences</caption><thead><tr><th>Occurrence</th><th>Metric / document</th><th>Value</th><th>Governed definition</th><th>State</th><th>Updated</th></tr></thead><tbody>{#if filteredRows.length === 0}<tr><td colspan="6" class="empty-row">(no data)</td></tr>{:else}{#each filteredRows as row}<tr><td><span class="mono">{row.id}</span></td><td><strong>{row.metric}</strong><small>{row.document}</small></td><td>{row.value}</td><td><span class="definition-chip">{row.definition}</span></td><td><span class="status-badge {statusMeta[row.status].className}">{statusMeta[row.status].label}</span></td><td>{row.updated}</td></tr>{/each}{/if}</tbody></table></div>
+			{#if filteredRows.length === 0}
+				<div class="recent-empty empty-state-panel">(no data)</div>
+			{:else}
+				<div class="table-wrap"><table class="recent-table"><caption>Recent metric occurrences</caption><thead><tr><th>Occurrence</th><th>Metric / document</th><th>Value</th><th>Governed definition</th><th>State</th><th>Updated</th></tr></thead><tbody>{#each filteredRows as row}<tr><td><span class="mono">{row.id}</span></td><td><strong>{row.metric}</strong><small>{row.document}</small></td><td>{row.value}</td><td><span class="definition-chip">{row.definition}</span></td><td><span class="status-badge {statusMeta[row.status].className}">{statusMeta[row.status].label}</span></td><td>{row.updated}</td></tr>{/each}</tbody></table></div>
+			{/if}
 		</section>
 
 		<footer class="page-footer"><span><Layers3 size={14} /> Metric ontology analysis · Page 1 of 3</span><span>Last updated 20 Aug 2026, 14:32 UTC <button class="footer-link">View API shape</button></span></footer>
