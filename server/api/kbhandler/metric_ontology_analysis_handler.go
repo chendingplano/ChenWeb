@@ -99,6 +99,14 @@ func GetMetricOntologyAnalysis(c echo.Context) error {
 	var out metricOntologyAnalysisResponse
 	out.Status = true
 	out.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	// Keep collection fields as JSON arrays even when the selected corpus has
+	// no rows. The dashboard can then render an explicit empty state instead of
+	// failing while mapping a null response field.
+	out.ErrorFacts = make([]metricOntologyCount, 0)
+	out.CoverageStates = make([]metricOntologyCount, 0)
+	out.Mappings = make([]metricOntologyMapping, 0)
+	out.Errors = make([]metricOntologyError, 0)
+	out.Recent = make([]metricOntologyRecentOccurrence, 0)
 	out.Coverage = metricOntologyCoverage{
 		Writer: "semantic writer / current", Scope: "authorized corpus", ReadModel: "metric ontology analysis v1",
 		Rules: "diagnostic rules v1.4", Conformance: "passed", Projection: "current", Resolution: "mixed",

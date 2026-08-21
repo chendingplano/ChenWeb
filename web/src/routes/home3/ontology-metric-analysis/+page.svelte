@@ -35,6 +35,16 @@
 	let loading = $state(false);
 	let loadError = $state('');
 	let errorFreePercent = $state('93.5%');
+	let coverageMeta = $state({
+		writer: 'semantic writer / current',
+		scope: 'authorized corpus',
+		read_model: 'metric ontology analysis v1',
+		rules: 'diagnostic rules v1.4',
+		conformance: 'passed',
+		projection: 'current',
+		resolution: 'mixed',
+		denominator: 1284
+	});
 	let activeScope = $state('All authorized documents');
 	let filterOpen = $state(false);
 	let selectedMetric = $state<string | null>(null);
@@ -104,7 +114,13 @@
 		loadError = '';
 		try {
 			const response = await getMetricOntologyAnalysis(knowledgeStoreId);
-			errorFreePercent = `${response.error_presence.find((item) => item.label === 'Without detected errors')?.percent ?? 0}%`;
+			const errorPresence = response.error_presence ?? [];
+			const coverageStates = response.coverage_states ?? [];
+			const errorTypes = response.errors_by_type ?? [];
+			const mappingRows = response.mappings ?? [];
+			const occurrenceRows = response.recent_occurrences ?? [];
+			coverageMeta = response.coverage;
+			errorFreePercent = `${errorPresence.find((item) => item.label === 'Without detected errors')?.percent ?? 0}%`;
 			kpis = [
 				{ label: 'Occurrences', sub: 'record-born rows', value: number(response.kpi.occurrences), delta: '', direction: 'flat', tone: 'bronze', href: 'Document Metrics' },
 				{ label: 'Current instances', sub: 'distinct assertions', value: number(response.kpi.current_instances), delta: '', direction: 'flat', tone: 'ink', href: 'Document Metrics' },
@@ -114,10 +130,10 @@
 				{ label: 'No detected errors', sub: 'not complete or warning-free', value: number(response.kpi.without_errors), delta: '', direction: 'flat', tone: 'blue', href: 'Document Metrics' }
 			];
 			const colors = ['var(--green)', 'var(--bronze)', 'var(--slate)', 'var(--red)', 'var(--violet)', 'var(--orange)', 'var(--muted)'];
-			coverage = response.coverage_states.map((item, index) => ({ ...item, color: colors[index % colors.length] }));
-			errors = response.errors_by_type;
-			mappings = response.mappings;
-			recentRows = response.recent_occurrences.map((row) => ({ ...row, status: normalizeStatus(row.status) }));
+			coverage = coverageStates.map((item, index) => ({ ...item, color: colors[index % colors.length] }));
+			errors = errorTypes;
+			mappings = mappingRows;
+			recentRows = occurrenceRows.map((row) => ({ ...row, status: normalizeStatus(row.status) }));
 		} catch (error) {
 			loadError = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -193,9 +209,9 @@
 
 		<section class="coverage-notice" class:expanded={filterOpen}>
 			<div class="notice-icon"><Check size={15} /></div>
-			<div class="notice-copy"><strong>Coverage is current</strong><span>writer v3.8.2 · scope: authorized corpus · read-model 2026.08.20 · rules v1.4</span></div>
+			<div class="notice-copy"><strong>Coverage is {coverageMeta.conformance}</strong><span>{coverageMeta.writer} · scope: {coverageMeta.scope} · {coverageMeta.read_model} · {coverageMeta.rules}</span></div>
 			<button class="notice-detail" onclick={() => (filterOpen = !filterOpen)}>{filterOpen ? 'Hide details' : 'View definition'} <ChevronDown size={14} /></button>
-			{#if filterOpen}<div class="notice-expanded"><span>Conformance <b>Passed</b></span><span>Projection <b>Current</b></span><span>Resolution <b>Mixed</b></span><span>Denominator <b>1,284 occurrences</b></span></div>{/if}
+			{#if filterOpen}<div class="notice-expanded"><span>Conformance <b>{coverageMeta.conformance}</b></span><span>Projection <b>{coverageMeta.projection}</b></span><span>Resolution <b>{coverageMeta.resolution}</b></span><span>Denominator <b>{number(coverageMeta.denominator)} occurrences</b></span></div>{/if}
 		</section>
 
 		{#if loading}<div class="data-note">Refreshing the composed read model…</div>{/if}
