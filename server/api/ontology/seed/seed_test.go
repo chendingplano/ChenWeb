@@ -178,8 +178,8 @@ func TestAuthorModuleUpdatesExistingModuleMetadata(t *testing.T) {
 		WithArgs("core:x").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:x", "class", "core", "approved", "x", nil, nil, nil, nil, nil, "ontology-seed", "ontology-seed").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "approved", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WithArgs("core:x", "class", "core", "approved", "x", nil, nil, nil, "ontology-seed", "ontology-seed").
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "approved", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()))
@@ -212,7 +212,7 @@ func TestAuthorModuleSupersedesChangedPreferredLabelBeforeReplacingIt(t *testing
 		WillReturnRows(sqlmock.NewRows(moduleColumns()).AddRow(int64(1), "core", "Core", "platform", "", pq.Array([]string{}), "active", now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "approved", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "approved", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(3), "core:x", 1, "old label", "en", "prefLabel", "approved", nil, now, "ontology-seed", now, "ontology-seed"))
@@ -245,10 +245,10 @@ func TestAuthorModuleVersionsReleasedTermWhenCuratedDefinitionChanges(t *testing
 		WillReturnRows(sqlmock.NewRows(moduleColumns()).AddRow(int64(1), "core", "Core", "platform", "", pq.Array([]string{}), "active", now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "old definition", "", nil, "", "", nil, now, "prior-release", now, "prior-release"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "old definition", "", nil, nil, now, "prior-release", now, "prior-release"))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:x", "class", "core", "approved", "curated definition", nil, nil, nil, nil, nil, "ontology-seed", "ontology-seed").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(3), "core:x", 2, "class", "core", "approved", "curated definition", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WithArgs("core:x", "class", "core", "approved", "curated definition", nil, nil, nil, "ontology-seed", "ontology-seed").
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(3), "core:x", 2, "class", "core", "approved", "curated definition", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(4), "core:x", 1, "x", "en", "prefLabel", "included_in_release", nil, now, "prior-release", now, "prior-release"))
@@ -275,7 +275,7 @@ func TestAuthorModuleDoesNotVersionMatchingCuratedTerm(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(moduleColumns()).AddRow(int64(1), "core", "Core", "platform", "", pq.Array([]string{}), "active", now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "curated definition", "", nil, "", "", nil, now, "prior-release", now, "prior-release"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "curated definition", "", nil, nil, now, "prior-release", now, "prior-release"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(4), "core:x", 1, "x", "en", "prefLabel", "included_in_release", nil, now, "prior-release", now, "prior-release"))
@@ -302,10 +302,10 @@ func TestStageContentForNewCuratedReleaseStagesIncludedTermAfterLabelOnlyEdit(t 
 	// the new content-derived release is constructed.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:x", "class", "core", "approved", "x", nil, nil, nil, nil, nil, "ontology-seed", "ontology-seed").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(4), "core:x", 2, "class", "core", "approved", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WithArgs("core:x", "class", "core", "approved", "x", nil, nil, nil, "ontology-seed", "ontology-seed").
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(4), "core:x", 2, "class", "core", "approved", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).
@@ -331,7 +331,7 @@ func TestStageContentForNewCuratedReleaseStagesIncludedDesiredLabel(t *testing.T
 	mc := moduleContent{ModuleID: "core", Title: "Core", Owner: "platform", Terms: []seedTerm{{ID: "core:x", Kind: "class", Def: "x", Labels: enPref("label")}}}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 2, "class", "core", "approved", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 2, "class", "core", "approved", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(3), "core:x", 1, "label", "en", "prefLabel", "included_in_release", nil, now, "ontology-seed", now, "ontology-seed"))
@@ -361,10 +361,10 @@ func TestAuthorModuleReauthorsSupersededCuratedTerm(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(moduleColumns()).AddRow(int64(1), "core", "Core", "platform", "", pq.Array([]string{}), "active", now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "superseded", "x", "", nil, "", "", nil, now, "operator", now, "operator"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "superseded", "x", "", nil, nil, now, "operator", now, "operator"))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:x", "class", "core", "approved", "x", nil, nil, nil, nil, nil, "ontology-seed", "ontology-seed").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(3), "core:x", 2, "class", "core", "approved", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WithArgs("core:x", "class", "core", "approved", "x", nil, nil, nil, "ontology-seed", "ontology-seed").
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(3), "core:x", 2, "class", "core", "approved", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(4), "core:x", 1, "x", "en", "prefLabel", "superseded", nil, now, "operator", now, "operator"))
@@ -435,7 +435,7 @@ func TestCuratedContentReleasedRejectsStaleNewestReleasePins(t *testing.T) {
 	mc := moduleContent{ModuleID: "core", Title: "Core", Owner: "platform", Terms: []seedTerm{{ID: "core:x", Kind: "class", Def: "x", Labels: enPref("x")}}}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(3), "core:x", 1, "x", "en", "prefLabel", "included_in_release", nil, now, "ontology-seed", now, "ontology-seed"))
@@ -466,7 +466,7 @@ func TestCuratedContentReleasedAcceptsMatchingNewestReleasePins(t *testing.T) {
 	mc := moduleContent{ModuleID: "core", Title: "Core", Owner: "platform", DependsOn: []string{"quantity"}, Terms: []seedTerm{{ID: "core:x", Kind: "class", Def: "x", Labels: enPref("x")}}}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms\nWHERE term_id = $1\nORDER BY version DESC\nLIMIT 1")).
 		WithArgs("core:x").
-		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "x", "", nil, "", "", nil, now, "ontology-seed", now, "ontology-seed"))
+		WillReturnRows(sqlmock.NewRows(termColumns()).AddRow(int64(2), "core:x", 1, "class", "core", "included_in_release", "x", "", nil, nil, now, "ontology-seed", now, "ontology-seed"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_term_labels\nWHERE term_id = $1\nORDER BY version DESC")).
 		WithArgs("core:x").
 		WillReturnRows(sqlmock.NewRows(labelColumns()).AddRow(int64(3), "core:x", 1, "x", "en", "prefLabel", "included_in_release", nil, now, "ontology-seed", now, "ontology-seed"))
@@ -491,7 +491,7 @@ func moduleColumns() []string {
 }
 
 func termColumns() []string {
-	return []string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"}
+	return []string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "properties", "create_time", "create_by", "modify_time", "modify_by"}
 }
 
 func labelColumns() []string {

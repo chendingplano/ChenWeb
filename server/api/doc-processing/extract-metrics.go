@@ -252,13 +252,18 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 		}
 		if s.Alignments != nil && res.ConceptID != "" && res.Status != names.StatusTermResolved {
 			rep := firstByName[name]
+			definition := strings.TrimSpace(asString(rep["metric_desc"]))
+			if definition == "" {
+				definition = strings.TrimSpace(asString(rep["formula_or_definition"]))
+			}
 			synth := keywords.TermSynthesisInput{
 				CanonicalName: name,
-				Definition:    strings.TrimSpace(asString(rep["formula_or_definition"])),
+				Definition:    definition,
 				ValueType:     strings.TrimSpace(asString(rep["value_data_type"])),
 				RangeType:     strings.TrimSpace(asString(rep["value_range_type"])),
 			}
 			if unit := strings.TrimSpace(asString(rep["metric_unit"])); unit != "" {
+				synth.RawUnit = unit
 				if unitTermID, uerr := s.Resolver.MatchUnitLabel(ctx, unit); uerr == nil && unitTermID != "" {
 					synth.PermittedUnitTermIDs = []string{unitTermID}
 				}

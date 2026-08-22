@@ -282,11 +282,13 @@ func (s AlignmentsStore) ensureAccepted(ctx context.Context, db DBX, conceptID, 
 // TermSynthesisInput is the structural, already-extracted data a caller
 // supplies to auto-create a metric_definition term (ADR 2026081201 DR3). No
 // field is authored by an LLM here -- CanonicalName/Definition/ValueType/
-// RangeType/PermittedUnitTermIDs are transcribed from the triggering
+// RangeType/PermittedUnitTermIDs/RawUnit are transcribed from the triggering
 // metric's own extracted fields (or left empty, never guessed). Unit
 // resolution (a raw unit string -> a released `unit` term id) is the
 // caller's job -- keywords must not depend on the names package (names
-// already depends on keywords; a reverse import would cycle).
+// already depends on keywords; a reverse import would cycle). RawUnit is
+// carried separately from PermittedUnitTermIDs so a resolution miss never
+// loses the source unit string (bug 2026082101).
 type TermSynthesisInput struct {
 	CanonicalName        string
 	Aliases              []string
@@ -294,6 +296,31 @@ type TermSynthesisInput struct {
 	ValueType            string
 	RangeType            string
 	PermittedUnitTermIDs []string
+	RawUnit              string
+}
+
+// termProperties builds the kb.ontology_terms.properties payload (bug
+// 2026082101 finding 2) from the metric-only synthesis fields, keyed by
+// convention for term_kind='metric_definition'. Empty fields are omitted
+// rather than written as empty strings/arrays.
+func (in TermSynthesisInput) termProperties() map[string]any {
+	props := map[string]any{}
+	if in.ValueType != "" {
+		props["value_type"] = in.ValueType
+	}
+	if in.RangeType != "" {
+		props["range_type"] = in.RangeType
+	}
+	if len(in.PermittedUnitTermIDs) > 0 {
+		props["permitted_unit_term_ids"] = in.PermittedUnitTermIDs
+	}
+	if in.RawUnit != "" {
+		props["raw_unit"] = in.RawUnit
+	}
+	if len(props) == 0 {
+		return nil
+	}
+	return props
 }
 
 // EnsureAcceptedOrCreate is EnsureAccepted extended with ADR 2026081201 DR1:
@@ -338,15 +365,13 @@ func (s AlignmentsStore) EnsureAcceptedOrCreate(ctx context.Context, conceptID s
 
 		termID := autoPromotedTermID(conceptID)
 		created, err := terms.TermStore{DB: db}.CreateTerm(ctx, terms.Term{
-			TermID:               termID,
-			TermKind:             "metric_definition",
-			ModuleID:             "measurement",
-			Status:               "auto-promoted",
-			Definition:           strings.TrimSpace(synth.Definition),
-			Scope:                "document-derived, auto-promoted (ADR 2026081201)",
-			ValueType:            strings.TrimSpace(synth.ValueType),
-			RangeType:            strings.TrimSpace(synth.RangeType),
-			PermittedUnitTermIDs: synth.PermittedUnitTermIDs,
+			TermID:     termID,
+			TermKind:   "metric_definition",
+			ModuleID:   "measurement",
+			Status:     "auto-promoted",
+			Definition: strings.TrimSpace(synth.Definition),
+			Scope:      "document-derived, auto-promoted (ADR 2026081201)",
+			Properties: synth.termProperties(),
 		})
 		if err != nil {
 			return fmt.Errorf("auto-create metric_definition term: %w", err)

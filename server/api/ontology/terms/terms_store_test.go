@@ -19,14 +19,14 @@ func TestTermStoreCreateTermInsertsVersionOne(t *testing.T) {
 
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:assertion", "class", "core", "draft", "An assertion is a qualified claim.", nil, nil, nil, nil, nil, "tester", "tester").
+		WithArgs("core:assertion", "class", "core", "draft", "An assertion is a qualified claim.", nil, nil, nil, "tester", "tester").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(1), "core:assertion", 1, "class", "core", "draft",
-			"An assertion is a qualified claim.", nil, nil, nil, nil, nil, now, "tester", now, "tester"))
+			"An assertion is a qualified claim.", nil, nil, nil, now, "tester", now, "tester"))
 
 	store := TermStore{DB: db}
 	got, err := store.CreateTerm(context.Background(), Term{
@@ -77,11 +77,11 @@ func TestTermStoreGetTermLatestReadsCompatibilityCurrentView(t *testing.T) {
 		WithArgs("core:assertion").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(3), "core:assertion", 2, "class", "core", "approved",
-			"An assertion is a qualified claim.", nil, nil, nil, nil, nil, now, "tester", now, "tester"))
+			"An assertion is a qualified claim.", nil, nil, nil, now, "tester", now, "tester"))
 
 	store := TermStore{DB: db}
 	got, err := store.GetTermLatest(context.Background(), "core:assertion")
@@ -108,11 +108,11 @@ func TestTermStoreGetTermReadsAppendOnlyRevision(t *testing.T) {
 		WithArgs("core:assertion", 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(1), "core:assertion", 1, "class", "core", "draft",
-			"An assertion is a qualified claim.", nil, nil, nil, nil, nil, now, "tester", now, "tester"))
+			"An assertion is a qualified claim.", nil, nil, nil, now, "tester", now, "tester"))
 
 	store := TermStore{DB: db}
 	got, err := store.GetTerm(context.Background(), "core:assertion", 1)
@@ -140,20 +140,20 @@ func TestTermStoreTransitionStatusEnforcesStateMachine(t *testing.T) {
 		WithArgs("core:assertion", 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(1), "core:assertion", 1, "class", "core", "draft",
-			"", nil, nil, nil, nil, nil, now, "", now, ""))
+			"", nil, nil, nil, now, "", now, ""))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
-		WithArgs("core:assertion", "class", "core", "rejected", nil, nil, nil, nil, nil, nil, nil, nil).
+		WithArgs("core:assertion", "class", "core", "rejected", nil, nil, nil, nil, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(2), "core:assertion", 2, "class", "core", "rejected",
-			"", nil, nil, nil, nil, nil, now, "", now, ""))
+			"", nil, nil, nil, now, "", now, ""))
 
 	store := TermStore{DB: db}
 	got, err := store.TransitionStatus(context.Background(), "core:assertion", 1, "rejected", "")
@@ -180,11 +180,11 @@ func TestTermStoreTransitionStatusRejectsIllegalArc(t *testing.T) {
 		WithArgs("core:assertion", 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by",
 			"modify_time", "modify_by",
 		}).AddRow(int64(1), "core:assertion", 1, "class", "core", "approved",
-			"", nil, nil, nil, nil, nil, now, "", now, ""))
+			"", nil, nil, nil, now, "", now, ""))
 
 	store := TermStore{DB: db}
 	_, err = store.TransitionStatus(context.Background(), "core:assertion", 1, "draft", "")

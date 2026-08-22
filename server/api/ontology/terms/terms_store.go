@@ -27,17 +27,17 @@ type Term struct {
 	Definition        string `json:"definition"`
 	Scope             string `json:"scope"`
 	SourceCandidateID *int64 `json:"source_candidate_id"`
-	// ValueType, RangeType, PermittedUnitTermIDs (ADR 2026081201 DR3) are
-	// only ever set by the auto-promotion path today; every other caller
-	// (QUDT import, candidate promotion) leaves them empty, which persists
-	// as SQL NULL and changes nothing about their existing behavior.
-	ValueType            string    `json:"value_type"`
-	RangeType            string    `json:"range_type"`
-	PermittedUnitTermIDs []string  `json:"permitted_unit_term_ids"`
-	CreateTime           time.Time `json:"create_time"`
-	CreateBy             string    `json:"create_by"`
-	ModifyTime           time.Time `json:"modify_time"`
-	ModifyBy             string    `json:"modify_by"`
+	// Properties holds kind-specific structured data, keyed by convention
+	// per term_kind. Only ever set by the auto-promotion path today (keys
+	// value_type, range_type, permitted_unit_term_ids, raw_unit for
+	// metric_definition, ADR 2026081201 DR3); every other caller (QUDT
+	// import, candidate promotion) leaves it empty, which persists as SQL
+	// NULL.
+	Properties map[string]any `json:"properties"`
+	CreateTime time.Time      `json:"create_time"`
+	CreateBy   string         `json:"create_by"`
+	ModifyTime time.Time      `json:"modify_time"`
+	ModifyBy   string         `json:"modify_by"`
 }
 
 // DBX is the subset of database/sql that the content stores need. Both
@@ -99,7 +99,7 @@ type TermStore struct {
 
 const termColumns = `
 	id, term_id, version, term_kind, module_id, status, definition, scope,
-	source_candidate_id, value_type, range_type, permitted_unit_term_ids,
+	source_candidate_id, properties,
 	create_time, create_by, modify_time, modify_by`
 
 const termFrom = "FROM kb.ontology_terms"
@@ -113,7 +113,7 @@ const termCurrentFrom = "FROM kb.ontology_terms_current"
 // callers and existing foreign-key references keep their identity.
 const termRevisionColumns = `
 	source_term_row_id AS id, term_id, revision AS version, term_kind, module_id, status, definition, scope,
-	source_candidate_id, value_type, range_type, permitted_unit_term_ids,
+	source_candidate_id, properties,
 	create_time, create_by, modify_time, modify_by`
 
 const termRevisionFrom = "FROM kb.ontology_term_revisions"
@@ -124,15 +124,13 @@ func scanTerm(scan func(dest ...any) error) (Term, error) {
 		definition      sql.NullString
 		scope           sql.NullString
 		sourceCandidate sql.NullInt64
-		valueType       sql.NullString
-		rangeType       sql.NullString
-		permittedUnits  []byte
+		properties      []byte
 		createBy        sql.NullString
 		modifyBy        sql.NullString
 	)
 	if err := scan(
 		&t.ID, &t.TermID, &t.Version, &t.TermKind, &t.ModuleID, &t.Status,
-		&definition, &scope, &sourceCandidate, &valueType, &rangeType, &permittedUnits,
+		&definition, &scope, &sourceCandidate, &properties,
 		&t.CreateTime, &createBy, &t.ModifyTime, &modifyBy,
 	); err != nil {
 		return Term{}, err
@@ -147,13 +145,7 @@ func scanTerm(scan func(dest ...any) error) (Term, error) {
 		v := sourceCandidate.Int64
 		t.SourceCandidateID = &v
 	}
-	if valueType.Valid {
-		t.ValueType = valueType.String
-	}
-	if rangeType.Valid {
-		t.RangeType = rangeType.String
-	}
-	t.PermittedUnitTermIDs = scanStringArray(permittedUnits)
+	t.Properties = scanJSONMap(properties)
 	if createBy.Valid {
 		t.CreateBy = createBy.String
 	}
@@ -196,15 +188,15 @@ func (s TermStore) CreateTerm(ctx context.Context, t Term) (Term, error) {
 	const stmt = `
 INSERT INTO kb.ontology_terms
 	(term_id, version, term_kind, module_id, status, definition, scope,
-	 source_candidate_id, value_type, range_type, permitted_unit_term_ids,
+	 source_candidate_id, properties,
 	 create_by, modify_by)
-VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING ` + termColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(t.TermID), t.TermKind, strings.TrimSpace(t.ModuleID),
 		t.Status, nullableString(t.Definition), nullableString(t.Scope),
-		nullableInt64(t.SourceCandidateID), nullableString(t.ValueType), nullableString(t.RangeType),
-		nullableStringArray(t.PermittedUnitTermIDs), nullableString(t.CreateBy), nullableString(t.ModifyBy),
+		nullableInt64(t.SourceCandidateID), nullableJSON(t.Properties),
+		nullableString(t.CreateBy), nullableString(t.ModifyBy),
 	)
 	return scanTerm(row.Scan)
 }
@@ -224,16 +216,16 @@ func (s TermStore) CreateTermVersion(ctx context.Context, t Term) (Term, error) 
 	const stmt = `
 INSERT INTO kb.ontology_terms
 	(term_id, version, term_kind, module_id, status, definition, scope,
-	 source_candidate_id, value_type, range_type, permitted_unit_term_ids,
+	 source_candidate_id, properties,
 	 create_by, modify_by)
 VALUES ($1, (SELECT COALESCE(MAX(version), 0) + 1 FROM kb.ontology_terms WHERE term_id = $1),
-        $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING ` + termColumns
 	row := s.DB.QueryRowContext(ctx, stmt,
 		strings.TrimSpace(t.TermID), t.TermKind, strings.TrimSpace(t.ModuleID),
 		t.Status, nullableString(t.Definition), nullableString(t.Scope),
-		nullableInt64(t.SourceCandidateID), nullableString(t.ValueType), nullableString(t.RangeType),
-		nullableStringArray(t.PermittedUnitTermIDs), nullableString(t.CreateBy), nullableString(t.ModifyBy),
+		nullableInt64(t.SourceCandidateID), nullableJSON(t.Properties),
+		nullableString(t.CreateBy), nullableString(t.ModifyBy),
 	)
 	return scanTerm(row.Scan)
 }
@@ -275,9 +267,9 @@ func (s TermStore) insertTermChunk(ctx context.Context, chunk []Term) ([]Term, e
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO kb.ontology_terms
 	(term_id, version, term_kind, module_id, status, definition, scope, source_candidate_id,
-	 value_type, range_type, permitted_unit_term_ids, create_by, modify_by)
+	 properties, create_by, modify_by)
 VALUES `)
-	args := make([]any, 0, len(chunk)*12)
+	args := make([]any, 0, len(chunk)*10)
 	for i, t := range chunk {
 		if err := validateTerm(t); err != nil {
 			return nil, fmt.Errorf("term %q: %w", t.TermID, err)
@@ -289,14 +281,14 @@ VALUES `)
 		if i > 0 {
 			sb.WriteString(",")
 		}
-		base := i * 12
-		fmt.Fprintf(&sb, "($%d,1,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12)
+		base := i * 10
+		fmt.Fprintf(&sb, "($%d,1,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10)
 		args = append(args,
 			strings.TrimSpace(t.TermID), t.TermKind, strings.TrimSpace(t.ModuleID),
 			status, nullableString(t.Definition), nullableString(t.Scope),
-			nullableInt64(t.SourceCandidateID), nullableString(t.ValueType), nullableString(t.RangeType),
-			nullableStringArray(t.PermittedUnitTermIDs), nullableString(t.CreateBy), nullableString(t.ModifyBy),
+			nullableInt64(t.SourceCandidateID), nullableJSON(t.Properties),
+			nullableString(t.CreateBy), nullableString(t.ModifyBy),
 		)
 	}
 	sb.WriteString(" ON CONFLICT (term_id, version) DO NOTHING RETURNING " + termColumns)

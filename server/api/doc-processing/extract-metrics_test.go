@@ -2305,6 +2305,72 @@ func TestResolvingMetricsStoreAutoPromotesTermWhenConceptHasNone(t *testing.T) {
 	}
 }
 
+// TestResolvingMetricsStoreAutoPromotePrefersMetricDescOverFormula locks in
+// bug 2026082101 finding 1: metric_desc is the descriptive sentence every
+// other definition writer uses, while formula_or_definition is legitimately
+// empty for bare-threshold sources -- so metric_desc must win when both are
+// present, not be shadowed by formula_or_definition.
+func TestResolvingMetricsStoreAutoPromotePrefersMetricDescOverFormula(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"有机质的质量分数": {RawName: "有机质的质量分数", Status: names.StatusLexicalResolved, ConceptID: "kwc_organic", Method: "auto_created", Confidence: 0.8},
+		},
+	}
+	aligner := &scriptedTermAligner{termID: "measurement:kwc_organic"}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver, Alignments: aligner}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_name":           "有机质的质量分数",
+			"formula_or_definition": "",
+			"metric_desc":           "肥料技术指标：有机质的质量分数（以烘干基计）应不低于30%。",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if len(aligner.calls) != 1 {
+		t.Fatalf("EnsureAcceptedOrCreate calls=%d, want 1", len(aligner.calls))
+	}
+	if got := aligner.calls[0].Definition; got != "肥料技术指标：有机质的质量分数（以烘干基计）应不低于30%。" {
+		t.Fatalf("Definition=%q, want metric_desc to win over empty formula_or_definition", got)
+	}
+}
+
+// TestResolvingMetricsStoreAutoPromoteRetainsRawUnitOnResolverMiss locks in
+// bug 2026082101 finding 3: the source metric_unit string must survive even
+// when unit resolution doesn't populate PermittedUnitTermIDs (scriptedNameResolver's
+// MatchUnitLabel always misses), so a resolver miss never destroys it.
+func TestResolvingMetricsStoreAutoPromoteRetainsRawUnitOnResolverMiss(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"有机质的质量分数": {RawName: "有机质的质量分数", Status: names.StatusLexicalResolved, ConceptID: "kwc_organic", Method: "auto_created", Confidence: 0.8},
+		},
+	}
+	aligner := &scriptedTermAligner{termID: "measurement:kwc_organic"}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver, Alignments: aligner}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_name": "有机质的质量分数",
+			"metric_unit": "%",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if len(aligner.calls) != 1 {
+		t.Fatalf("EnsureAcceptedOrCreate calls=%d, want 1", len(aligner.calls))
+	}
+	got := aligner.calls[0]
+	if got.RawUnit != "%" {
+		t.Fatalf("RawUnit=%q, want %%q preserved despite the resolver miss", got.RawUnit)
+	}
+	if len(got.PermittedUnitTermIDs) != 0 {
+		t.Fatalf("PermittedUnitTermIDs=%#v, want empty on a resolver miss", got.PermittedUnitTermIDs)
+	}
+}
+
 // TestResolvingMetricsStoreSkipsAutoPromoteWhenAlreadyTermResolved confirms
 // EnsureAcceptedOrCreate is not called when the resolver already returned a
 // governed term (e.g. an existing aligns_to_term) -- auto-promotion only

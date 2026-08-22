@@ -273,7 +273,7 @@
 							<text class="grp" x="760" y="136">MEASUREMENT SCIENCE</text>
 							<text class="grp" x="1053" y="136">CLAIM FRAME</text>
 							<g class="chip"><rect x="329" y="146" width="276" height="44" rx="7" /><text class="ct" x="467" y="166">metric_definition</text><text class="cs" x="467" y="181">what the metric is, independent of any document</text></g>
-							<g class="chip"><rect x="329" y="200" width="276" height="44" rx="7" /><text class="ct" x="467" y="220">class · metric class</text><text class="cs" x="467" y="235">what a stored claim is an instance of</text></g>
+							<g class="chip"><rect x="329" y="200" width="276" height="44" rx="7" /><text class="ct" x="467" y="220">class · metric class</text><text class="cs" x="467" y="235">kb.ontology_terms - what a stored claim is an instance of</text></g>
 							<g class="chip"><rect x="622" y="146" width="276" height="44" rx="7" /><text class="ct" x="760" y="166">quantity_kind → dimension → unit</text><text class="cs" x="760" y="181">what · which units agree · how it is written</text></g>
 							<g class="chip chip-edge"><rect x="622" y="200" width="276" height="44" rx="7" /><text class="ct" x="760" y="220">kb.metric_value_range_type_map</text><text class="cs" x="760" y="235">governed mapping, not an ontology term</text></g>
 							<g class="chip"><rect x="915" y="146" width="276" height="44" rx="7" /><text class="ct" x="1053" y="166">assertion kind</text><text class="cs" x="1053" y="181">observed · exact · bounds · target · capability</text></g>

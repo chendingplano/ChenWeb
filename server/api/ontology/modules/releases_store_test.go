@@ -260,7 +260,7 @@ WHERE module_id = $1`)).
 WHERE ($1 = '' OR module_id = $1)
   AND ($2 = '' OR status = $2)`)).
 		WithArgs("core", "approved").
-		WillReturnRows(termRows().AddRow(int64(10), "core:term", 2, "class", "core", "approved", "term", "", nil, "", "", nil, now, "tester", now, "tester"))
+		WillReturnRows(termRows().AddRow(int64(10), "core:term", 2, "class", "core", "approved", "term", "", nil, nil, now, "tester", now, "tester"))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM kb.ontology_term_labels
 WHERE term_id = $1`)).
 		WithArgs("core:term").
@@ -290,7 +290,7 @@ func moduleRows() *sqlmock.Rows {
 }
 
 func termRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "value_type", "range_type", "permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by"})
+	return sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "properties", "create_time", "create_by", "modify_time", "modify_by"})
 }
 
 func releaseRows() *sqlmock.Rows {

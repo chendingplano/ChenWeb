@@ -495,7 +495,10 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 		newLK     = "kwc:concept_new:core:aligns_to_term:measurement:concept_new"
 	)
 	now := time.Now()
-	permittedUnitsJSON := []byte(`["quantity:unit_x"]`)
+	// termProperties() marshals a map[string]any; encoding/json sorts map
+	// keys alphabetically, so the byte-for-byte expected payload's key
+	// order is fixed regardless of struct field order.
+	propertiesJSON := []byte(`{"permitted_unit_term_ids":["quantity:unit_x"],"range_type":"exact","value_type":"number"}`)
 
 	mock.ExpectBegin()
 	expectKeywordIdentityLock(mock)
@@ -510,15 +513,15 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 		WithArgs(
 			newTermID, "metric_definition", "measurement", "auto-promoted",
 			"def text", "document-derived, auto-promoted (ADR 2026081201)", nil,
-			"number", "exact", permittedUnitsJSON, nil, nil,
+			propertiesJSON, nil, nil,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "term_id", "version", "term_kind", "module_id", "status",
-			"definition", "scope", "source_candidate_id", "value_type", "range_type",
-			"permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by",
+			"definition", "scope", "source_candidate_id", "properties",
+			"create_time", "create_by", "modify_time", "modify_by",
 		}).AddRow(100, newTermID, 1, "metric_definition", "measurement", "auto-promoted",
 			"def text", "document-derived, auto-promoted (ADR 2026081201)", nil,
-			"number", "exact", permittedUnitsJSON, now, nil, now, nil))
+			propertiesJSON, now, nil, now, nil))
 
 	// prefLabel: existence check, then insert.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS")).
@@ -641,19 +644,20 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAssignsLabelLanguages(t *testing.T
 			mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
 				WithArgs(conceptID).
 				WillReturnRows(noAlignmentRow())
+			propertiesJSON := []byte(`{"range_type":"exact","value_type":"number"}`)
 			mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
 				WithArgs(
 					termID, "metric_definition", "measurement", "auto-promoted",
 					"definition", "document-derived, auto-promoted (ADR 2026081201)", nil,
-					"number", "exact", nil, nil, nil,
+					propertiesJSON, nil, nil,
 				).
 				WillReturnRows(sqlmock.NewRows([]string{
 					"id", "term_id", "version", "term_kind", "module_id", "status",
-					"definition", "scope", "source_candidate_id", "value_type", "range_type",
-					"permitted_unit_term_ids", "create_time", "create_by", "modify_time", "modify_by",
+					"definition", "scope", "source_candidate_id", "properties",
+					"create_time", "create_by", "modify_time", "modify_by",
 				}).AddRow(100, termID, 1, "metric_definition", "measurement", "auto-promoted",
 					"definition", "document-derived, auto-promoted (ADR 2026081201)", nil,
-					"number", "exact", nil, time.Now(), nil, time.Now(), nil))
+					propertiesJSON, time.Now(), nil, time.Now(), nil))
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS")).
 				WithArgs(termID, tt.canonicalLang).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))

@@ -21,8 +21,8 @@ func TestCreateOntologyComparisonCellPersistsDirectionalEvidence(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = old }()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("metric").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
-			AddRow(1, "metric", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, time.Now(), nil, time.Now(), nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "properties", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(1, "metric", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, nil, time.Now(), nil, time.Now(), nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.ontology_comparison_cells")).WithArgs(int64(7), "obj", "metric", "enterprise", int64(1), `[]`, int64(0), "authority", int64(2), `[]`, int64(0), "stronger", "subject_to_authority", "tighter").WillReturnResult(sqlmock.NewResult(1, 1))
 	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/comparison-runs/7/cells", `{"target_object_id":"obj","metric_key":"metric","subject_family":"enterprise","subject_representative_assertion_id":1,"authority_family":"authority","authority_representative_assertion_id":2,"verdict":"stronger","direction":"subject_to_authority","rationale":"tighter"}`, map[string]string{"run_id": "7"})
 	if err := CreateOntologyComparisonCell(c); err != nil {

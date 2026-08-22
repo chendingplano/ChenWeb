@@ -21,8 +21,8 @@ func TestCreateOntologyComparisonScopePersistsFrozenReleases(t *testing.T) {
 	defer func() { ApiTypes.ProjectDBHandle = old }()
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.ontology_terms")).WithArgs("time_to_alarm").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "create_time", "create_by", "modify_time", "modify_by"}).
-			AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, now, nil, now, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "term_id", "version", "term_kind", "module_id", "status", "definition", "scope", "source_candidate_id", "properties", "create_time", "create_by", "modify_time", "modify_by"}).
+			AddRow(1, "time_to_alarm", 1, "metric_definition", "measurement", "included_in_release", nil, nil, nil, nil, now, nil, now, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_comparison_scopes")).
 		WithArgs("comparison-1", `["obj-1"]`, `["time_to_alarm"]`, "2026-08-01", `[{"module_id":"core","release_id":42}]`, `[{"profile_id":"profile","release_id":42}]`, `{}`, `{}`, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"comparison_scope_id", "target_object_ids", "metric_keys", "as_of_date", "module_releases", "profile_releases", "precedence_policy", "closed_dimensions", "selected_by", "selection_reason", "create_time"}).
