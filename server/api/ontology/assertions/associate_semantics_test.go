@@ -25,16 +25,6 @@ func TestMetricAssertionKindTermIDUsesReleasedCatalogVocabulary(t *testing.T) {
 	}
 }
 
-func TestMetricQualifiersCarryMetricDefinitionTermID(t *testing.T) {
-	p := metricCandidatePayload{
-		MetricName:             "Organic matter",
-		MetricDefinitionTermID: "mea:organic_matter_mass_fraction",
-	}
-	if got := metricQualifiers(p)["metric_definition_term_id"]; got != p.MetricDefinitionTermID {
-		t.Fatalf("metric_definition_term_id qualifier = %#v, want %q", got, p.MetricDefinitionTermID)
-	}
-}
-
 func TestGovernedTermDependencyFingerprintChangesOnlyWhenAvailabilityChanges(t *testing.T) {
 	missing := governedTermDependencyFingerprint("mea:measured_by", false, "mea:exact_value", false)
 	stillMissing := governedTermDependencyFingerprint("mea:measured_by", false, "mea:exact_value", false)

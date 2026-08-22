@@ -3,10 +3,14 @@ package assertions
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
 func TestParseThresholdOrTargetLowerBound(t *testing.T) {
@@ -179,8 +183,200 @@ func resolveMetricValueLegacy(r metricRow) parsedThreshold {
 	return resolveMetricValue(r, CanonicalMetricValueRangeType(r.ValueRangeType.String))
 }
 
-func metricCandidatePayloadForRowLegacy(r metricRow) map[string]any {
-	return metricCandidatePayloadForRow(r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved")
+func metricCandidatePayloadForRowLegacy(t *testing.T, r metricRow) map[string]any {
+	t.Helper()
+	payload, err := metricCandidatePayloadForRow(context.Background(), GovernedPropertyResolver{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", nil, nil, 0)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	return payload
+}
+
+// TestMetricCandidatePayloadForRowPrefersMetricDescOverFormula locks in bug
+// 2026082101 finding 1's definition-sourcing rule at its new home: class
+// creation moved from extract_metrics to associate_semantics (finding 5),
+// so the payload built here -- not extract_metrics' own auto-promotion --
+// is now what carries the class-level definition forward.
+func TestMetricCandidatePayloadForRowPrefersMetricDescOverFormula(t *testing.T) {
+	r := metricRowFixture()
+	r.MetricDesc = ns("肥料技术指标：有机质的质量分数（以烘干基计）应不低于30%。")
+	r.FormulaOrDefinition = ns("should not be used")
+	got := metricCandidatePayloadForRowLegacy(t, r)
+	if got["definition"] != "肥料技术指标：有机质的质量分数（以烘干基计）应不低于30%。" {
+		t.Fatalf("definition = %#v, want metric_desc to win over a non-empty formula_or_definition", got["definition"])
+	}
+}
+
+func TestMetricCandidatePayloadForRowFallsBackToFormulaWhenDescEmpty(t *testing.T) {
+	r := metricRowFixture()
+	r.MetricDesc = ns("")
+	r.FormulaOrDefinition = ns("发芽指数(%) = ...")
+	got := metricCandidatePayloadForRowLegacy(t, r)
+	if got["definition"] != "发芽指数(%) = ..." {
+		t.Fatalf("definition = %#v, want formula_or_definition fallback", got["definition"])
+	}
+}
+
+func TestMetricCandidatePayloadForRowOmitsDefinitionWhenBothEmpty(t *testing.T) {
+	r := metricRowFixture()
+	got := metricCandidatePayloadForRowLegacy(t, r)
+	if _, ok := got["definition"]; ok {
+		t.Fatalf("definition = %#v, want omitted rather than fabricated", got["definition"])
+	}
+}
+
+func TestMetricCandidatePayloadForRowForwardsKeywordConceptID(t *testing.T) {
+	r := metricRowFixture()
+	r.KeywordConceptID = ns("kwc_organic")
+	got := metricCandidatePayloadForRowLegacy(t, r)
+	if got["keyword_concept_id"] != "kwc_organic" {
+		t.Fatalf("keyword_concept_id = %#v, want kwc_organic", got["keyword_concept_id"])
+	}
+}
+
+// TestMetricCandidatePayloadForRowAppliesClassPropertyMap covers finding 6's
+// fix: [ontology_term_property_map] entries land under "class_properties",
+// resolved via the same dotted-path field map (ext_info.object_name)
+// extract_metrics' auto-promotion used to build directly.
+func TestMetricCandidatePayloadForRowAppliesClassPropertyMap(t *testing.T) {
+	r := metricRowFixture()
+	r.MetricName = ns("有机质的质量分数")
+	r.ExtInfo = json.RawMessage(`{"object_name":"肥料"}`)
+	classEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "metric_name", Property: "term_name"},
+		{Field: "ext_info.object_name", Property: "object_name"},
+	}
+
+	payload, err := metricCandidatePayloadForRow(context.Background(), GovernedPropertyResolver{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 0)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["class_properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
+	}
+	want := map[string]any{"term_name": "有机质的质量分数", "object_name": "肥料"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("class_properties = %#v, want %#v", got, want)
+	}
+	if _, leaked := payload["qualifiers"]; leaked {
+		t.Fatalf("qualifiers = %#v, want unset (no qualifier map configured)", payload["qualifiers"])
+	}
+}
+
+// TestMetricCandidatePayloadForRowAppliesQualifierMap covers finding 8's
+// fix: [semantic_assertion_property_map] entries land under "qualifiers",
+// the instance-level counterpart to class_properties above.
+func TestMetricCandidatePayloadForRowAppliesQualifierMap(t *testing.T) {
+	r := metricRowFixture()
+	r.MetricSubject = ns("有机质")
+	r.Condition = ns("烘干基计")
+	qualifierMappings := ParsePropertyMap([]string{
+		"metric:metric_subject:subject",
+		"metric:condition:condition",
+	})["metric"]
+
+	payload, err := metricCandidatePayloadForRow(context.Background(), GovernedPropertyResolver{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", nil, qualifierMappings, 0)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["qualifiers"].(map[string]any)
+	if !ok {
+		t.Fatalf("qualifiers = %#v, want a map", payload["qualifiers"])
+	}
+	want := map[string]any{"subject": "有机质", "condition": "烘干基计"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("qualifiers = %#v, want %#v", got, want)
+	}
+	if _, leaked := payload["class_properties"]; leaked {
+		t.Fatalf("class_properties = %#v, want unset (no class property map configured)", payload["class_properties"])
+	}
+}
+
+// TestMetricCandidatePayloadForRowIdentityFieldResolvesApprovedTerm locks in
+// ADR 2026082203 DR2: an identity=true configured field resolves through
+// GovernedPropertyResolver and lands in class_properties as
+// {"raw":..., "term_id":...}, not a plain value.
+func TestMetricCandidatePayloadForRowIdentityFieldResolvesApprovedTerm(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(governedPropertyValueMapSelectSQL)).
+		WillReturnRows(sqlmock.NewRows([]string{"dimension", "raw_value", "term_id", "status"}).
+			AddRow("metric_subject", "youjizhi", "measurement:subj_organic_matter", "approved"))
+
+	r := metricRowFixture()
+	r.MetricSubject = ns("youjizhi")
+	classEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "metric_subject", Property: "subject", Identity: true, Dimension: "metric_subject"},
+	}
+
+	resolver := GovernedPropertyResolver{DB: db, cache: &governedPropertyValueMapCache{}}
+	payload, err := metricCandidatePayloadForRow(context.Background(), resolver, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 900)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["class_properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
+	}
+	want := map[string]any{"subject": map[string]any{"raw": "youjizhi", "term_id": "measurement:subj_organic_matter"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("class_properties = %#v, want %#v", got, want)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestMetricCandidatePayloadForRowIdentityFieldUnresolvedIsNullTermID locks
+// in DR2's "unresolved, not absent" distinction: a proposed (not yet
+// approved) mapping still writes the raw value with an explicit nil
+// term_id, distinguishable from a field that isn't configured at all.
+func TestMetricCandidatePayloadForRowIdentityFieldUnresolvedIsNullTermID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(governedPropertyValueMapSelectSQL)).
+		WillReturnRows(sqlmock.NewRows([]string{"dimension", "raw_value", "term_id", "status"}))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.governed_property_value_map")).
+		WithArgs("metric_value_class", "yaoqiu", int64(901)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	r := metricRowFixture()
+	r.ValueClass = ns("yaoqiu")
+	classEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "value_class", Property: "value_class", Identity: true, Dimension: "metric_value_class"},
+	}
+
+	resolver := GovernedPropertyResolver{DB: db, cache: &governedPropertyValueMapCache{}}
+	payload, err := metricCandidatePayloadForRow(context.Background(), resolver, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 901)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["class_properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
+	}
+	entry, ok := got["value_class"].(map[string]any)
+	if !ok {
+		t.Fatalf("class_properties[value_class] = %#v, want a map", got["value_class"])
+	}
+	if entry["raw"] != "yaoqiu" {
+		t.Fatalf("raw = %#v, want yaoqiu", entry["raw"])
+	}
+	if termID, present := entry["term_id"]; !present || termID != nil {
+		t.Fatalf("term_id = %#v (present=%v), want nil but present", termID, present)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestResolveMetricValueLowerBound(t *testing.T) {
@@ -431,7 +627,7 @@ func TestMetricCandidatePayloadCarriesMetricDefinitionTermID(t *testing.T) {
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("≥30")
 
-	payload := metricCandidatePayloadForRowLegacy(r)
+	payload := metricCandidatePayloadForRowLegacy(t, r)
 	if got := payload["metric_definition_term_id"]; got != "mea:organic_matter_mass_fraction" {
 		t.Fatalf("metric_definition_term_id = %#v, want resolved term id", got)
 	}
@@ -450,7 +646,7 @@ func TestMetricCandidatePayloadCarriesEvidenceProvenanceFields(t *testing.T) {
 	r.ModelName = ns("deepseek-chat")
 	r.PromptName = ns("prompt-extract-metrics-v3")
 
-	payload := metricCandidatePayloadForRowLegacy(r)
+	payload := metricCandidatePayloadForRowLegacy(t, r)
 	if got := payload["extraction_run"]; got != "evt-abc123" {
 		t.Fatalf("extraction_run = %#v, want evt-abc123", got)
 	}
@@ -471,7 +667,7 @@ func TestMetricCandidatePayloadOmitsEmptyEvidenceProvenanceFields(t *testing.T) 
 	r.ValueClass = ns("requirement")
 	r.MetricValue = ns("≥30")
 
-	payload := metricCandidatePayloadForRowLegacy(r)
+	payload := metricCandidatePayloadForRowLegacy(t, r)
 	for _, key := range []string{"extraction_run", "model", "prompt_version"} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("payload[%q] = %#v, want key absent when source column is empty", key, payload[key])

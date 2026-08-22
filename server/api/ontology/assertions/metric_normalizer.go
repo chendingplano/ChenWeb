@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
 // MetricNormalizer is the seam-5 instantiation for the metric artifact
@@ -61,6 +63,20 @@ type metricRow struct {
 	EventID                sql.NullString
 	ModelName              sql.NullString
 	PromptName             sql.NullString
+	// MetricDesc, KeywordConceptID, MetricSubject, ReasoningTags, ExtInfo,
+	// MetricCategories, ValueDataType are forwarded into the candidate
+	// payload for class synthesis (Definition, ConceptID) and the
+	// [ontology_term_property_map]/[semantic_assertion_property_map] field
+	// maps (bug 2026082101 findings 5, 6, 8) -- previously read only by
+	// extract_metrics' own auto-promotion path, now needed here since class/
+	// qualifier synthesis moved to associate_semantics.
+	MetricDesc       sql.NullString
+	KeywordConceptID sql.NullString
+	MetricSubject    sql.NullString
+	ReasoningTags    json.RawMessage
+	ExtInfo          json.RawMessage
+	MetricCategories sql.NullString
+	ValueDataType    sql.NullString
 }
 
 // Normalize implements Normalizer.
@@ -75,7 +91,9 @@ SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.form
        m.metric_definition_term_id, m.threshold_or_target, m.measurement_frequency, m.confidence, m.source_line_spans,
        ao.object_id,
        m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition,
-       m.event_id, m.model_name, m.prompt_name
+       m.event_id, m.model_name, m.prompt_name,
+       m.metric_desc, m.keyword_concept_id, m.metric_subject, m.reasoning_tags, m.ext_info,
+       m.metric_categories, m.value_data_type
 FROM kb.metrics m
 LEFT JOIN kb.artifact_objects ao
   ON ao.artifact_type = 'metric' AND ao.artifact_id = m.metric_id AND ao.input_record_id = m.input_record_id
@@ -88,12 +106,17 @@ WHERE m.input_record_id = $1`
 
 	dcStore := DecisionCandidateStore{DB: db}
 	mapper := NewValueRangeTypeMapper(db)
+	propResolver := NewGovernedPropertyResolver(db)
+	classPropertyEntries := appconfig.GetOntologyTermPropertyMap()["metric"]
+	qualifierMappings := ParsePropertyMap(appconfig.GetSemanticAssertionPropertyMap())["metric"]
 	for rows.Next() {
 		var r metricRow
 		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition, &r.MetricDefinitionTermID,
 			&r.ThresholdOrTarget, &r.MeasurementFrequency, &r.Confidence, &r.SourceLineSpans, &r.SubjectObjectID,
 			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition,
-			&r.EventID, &r.ModelName, &r.PromptName); err != nil {
+			&r.EventID, &r.ModelName, &r.PromptName,
+			&r.MetricDesc, &r.KeywordConceptID, &r.MetricSubject, &r.ReasoningTags, &r.ExtInfo,
+			&r.MetricCategories, &r.ValueDataType); err != nil {
 			return report, err
 		}
 		report.Examined++
@@ -107,7 +130,10 @@ WHERE m.input_record_id = $1`
 		if err != nil {
 			return report, fmt.Errorf("value_range_type lookup for metric %s: %w", metricID, err)
 		}
-		payload := metricCandidatePayloadForRow(r, canonicalBucket, lookupStatus)
+		payload, err := metricCandidatePayloadForRow(ctx, propResolver, r, canonicalBucket, lookupStatus, classPropertyEntries, qualifierMappings, inputRecordID)
+		if err != nil {
+			return report, fmt.Errorf("build class properties for metric %s: %w", metricID, err)
+		}
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
 			return report, err
@@ -142,7 +168,7 @@ WHERE m.input_record_id = $1`
 	return report, rows.Err()
 }
 
-func metricCandidatePayloadForRow(r metricRow, canonicalBucket, lookupStatus string) map[string]any {
+func metricCandidatePayloadForRow(ctx context.Context, propResolver GovernedPropertyResolver, r metricRow, canonicalBucket, lookupStatus string, classPropertyEntries []appconfig.OntologyTermPropertyMapEntry, qualifierMappings []PropertyMapping, inputRecordID int64) (map[string]any, error) {
 	unit := r.MetricUnit.String
 	if unit == "" {
 		unit = r.MetricUnitEn.String
@@ -186,7 +212,81 @@ func metricCandidatePayloadForRow(r metricRow, canonicalBucket, lookupStatus str
 	if parsed.UpperValue != nil {
 		payload["upper_value"] = *parsed.UpperValue
 	}
-	return payload
+	if r.KeywordConceptID.Valid && r.KeywordConceptID.String != "" {
+		payload["keyword_concept_id"] = r.KeywordConceptID.String
+	}
+	// Definition sourcing mirrors extract_metrics' pre-finding-5 auto-promotion
+	// logic exactly (bug 2026082101 finding 1): metric_desc is the descriptive
+	// sentence every other definition writer uses; formula_or_definition is
+	// legitimately empty for bare-threshold sources, so it's only a fallback.
+	definition := strings.TrimSpace(r.MetricDesc.String)
+	if definition == "" {
+		definition = strings.TrimSpace(r.FormulaOrDefinition.String)
+	}
+	if definition != "" {
+		payload["definition"] = definition
+	}
+	if r.ValueDataType.Valid && r.ValueDataType.String != "" {
+		payload["value_data_type"] = r.ValueDataType.String
+	}
+	if r.ValueRangeType.Valid && r.ValueRangeType.String != "" {
+		payload["value_range_type_text"] = r.ValueRangeType.String
+	}
+
+	fieldMap := metricFieldMap(r, unit)
+	classProperties, err := BuildSignatureProperties(ctx, propResolver, classPropertyEntries, fieldMap, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	if classProperties != nil {
+		payload["class_properties"] = classProperties
+	}
+	if qualifiers := BuildMappedProperties(qualifierMappings, fieldMap); qualifiers != nil {
+		payload["qualifiers"] = qualifiers
+	}
+	return payload, nil
+}
+
+// metricFieldMap builds the dotted-path-capable field map both
+// [ontology_term_property_map] (class-level) and
+// [semantic_assertion_property_map] (instance-level) resolve their
+// configured field names against (bug 2026082101 findings 6/8). Keys match
+// kb.metrics' canonical column names, the same convention
+// extract_metrics' own property-map application used.
+func metricFieldMap(r metricRow, unit string) map[string]any {
+	m := map[string]any{
+		"metric_name":           r.MetricName.String,
+		"metric_subject":        r.MetricSubject.String,
+		"metric_unit":           unit,
+		"formula_or_definition": r.FormulaOrDefinition.String,
+		"threshold_or_target":   r.ThresholdOrTarget.String,
+		"measurement_frequency": r.MeasurementFrequency.String,
+		"metric_value":          r.MetricValue.String,
+		"value_data_type":       r.ValueDataType.String,
+		"value_range_type":      r.ValueRangeType.String,
+		"value_class":           r.ValueClass.String,
+		"metric_categories":     r.MetricCategories.String,
+		"condition":             r.Condition.String,
+	}
+	if r.ValueMin.Valid {
+		m["value_min"] = r.ValueMin.Float64
+	}
+	if r.ValueMax.Valid {
+		m["value_max"] = r.ValueMax.Float64
+	}
+	if len(r.ReasoningTags) > 0 {
+		var tags any
+		if err := json.Unmarshal(r.ReasoningTags, &tags); err == nil {
+			m["reasoning_tags"] = tags
+		}
+	}
+	if len(r.ExtInfo) > 0 {
+		var extInfo any
+		if err := json.Unmarshal(r.ExtInfo, &extInfo); err == nil {
+			m["ext_info"] = extInfo
+		}
+	}
+	return m
 }
 
 // The pilot corpus (ADR OD1: 呼吸机/医疗器械) is predominantly Chinese-language

@@ -361,65 +361,75 @@ func (s AlignmentsStore) EnsureAcceptedOrCreate(ctx context.Context, conceptID s
 		txStore := s
 		txStore.Assertions.DB = db
 		txStore.DecisionLog.DB = db
-
-		// Existing-alignment path: identical to EnsureAccepted, run inside
-		// this same transaction so a concurrent creator's write is visible.
-		existing, err := txStore.AcceptedForConcept(ctx, db, conceptID)
-		if err != nil {
-			return err
-		}
-		if existing != nil {
-			result = *existing
-			return nil
-		}
-
-		termID := autoPromotedTermID(conceptID)
-		created, err := terms.TermStore{DB: db}.CreateTerm(ctx, terms.Term{
-			TermID:     termID,
-			TermKind:   "metric_definition",
-			ModuleID:   "measurement",
-			Status:     "auto-promoted",
-			Definition: strings.TrimSpace(synth.Definition),
-			Scope:      "document-derived, auto-promoted (ADR 2026081201)",
-			Properties: synth.termProperties(),
-		})
-		if err != nil {
-			return fmt.Errorf("auto-create metric_definition term: %w", err)
-		}
-		labelStore := terms.LabelStore{DB: db}
-		if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
-			TermID:    termID,
-			Label:     synth.CanonicalName,
-			Lang:      autoPromotedLabelLanguage(synth.CanonicalName),
-			LabelRole: "prefLabel",
-			Status:    "auto-promoted",
-		}); err != nil {
-			return fmt.Errorf("auto-create term prefLabel: %w", err)
-		}
-		for _, alias := range synth.Aliases {
-			alias = strings.TrimSpace(alias)
-			if alias == "" || alias == synth.CanonicalName {
-				continue
-			}
-			if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
-				TermID:    termID,
-				Label:     alias,
-				Lang:      autoPromotedLabelLanguage(alias),
-				LabelRole: "altLabel",
-				Status:    "auto-promoted",
-			}); err != nil {
-				return fmt.Errorf("auto-create term altLabel %q: %w", alias, err)
-			}
-		}
-
-		aligned, err := txStore.ensureAccepted(ctx, db, conceptID, created.TermID, method, score, evidence)
-		if err != nil {
-			return err
-		}
-		result = aligned
-		return nil
+		var err error
+		result, _, err = txStore.ensureAcceptedOrCreate(ctx, db, conceptID, synth, method, score, evidence)
+		return err
 	})
 	return result, err
+}
+
+// ensureAcceptedOrCreate is EnsureAcceptedOrCreate's transaction-scoped core
+// (mirrors ensureAccepted), extracted so a caller already inside its own
+// transaction -- the metric-class-synthesis-seam's registered
+// ClassSynthesizer -- can run it without EnsureAcceptedOrCreate opening a
+// second, independent transaction (bug 2026082101 finding 5 follow-up). The
+// returned bool reports whether a new term was minted, as opposed to an
+// already-aligned concept's existing term being reused.
+func (s AlignmentsStore) ensureAcceptedOrCreate(ctx context.Context, db DBX, conceptID string, synth TermSynthesisInput, method string, score float64, evidence string) (Alignment, bool, error) {
+	// Existing-alignment path: identical to EnsureAccepted, run inside
+	// this same transaction so a concurrent creator's write is visible.
+	existing, err := s.AcceptedForConcept(ctx, db, conceptID)
+	if err != nil {
+		return Alignment{}, false, err
+	}
+	if existing != nil {
+		return *existing, false, nil
+	}
+
+	termID := autoPromotedTermID(conceptID)
+	created, err := terms.TermStore{DB: db}.CreateTerm(ctx, terms.Term{
+		TermID:     termID,
+		TermKind:   "metric_definition",
+		ModuleID:   "measurement",
+		Status:     "auto-promoted",
+		Definition: strings.TrimSpace(synth.Definition),
+		Scope:      "document-derived, auto-promoted (ADR 2026081201)",
+		Properties: synth.termProperties(),
+	})
+	if err != nil {
+		return Alignment{}, false, fmt.Errorf("auto-create metric_definition term: %w", err)
+	}
+	labelStore := terms.LabelStore{DB: db}
+	if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
+		TermID:    termID,
+		Label:     synth.CanonicalName,
+		Lang:      autoPromotedLabelLanguage(synth.CanonicalName),
+		LabelRole: "prefLabel",
+		Status:    "auto-promoted",
+	}); err != nil {
+		return Alignment{}, false, fmt.Errorf("auto-create term prefLabel: %w", err)
+	}
+	for _, alias := range synth.Aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" || alias == synth.CanonicalName {
+			continue
+		}
+		if _, err := labelStore.CreateLabel(ctx, terms.TermLabel{
+			TermID:    termID,
+			Label:     alias,
+			Lang:      autoPromotedLabelLanguage(alias),
+			LabelRole: "altLabel",
+			Status:    "auto-promoted",
+		}); err != nil {
+			return Alignment{}, false, fmt.Errorf("auto-create term altLabel %q: %w", alias, err)
+		}
+	}
+
+	aligned, err := s.ensureAccepted(ctx, db, conceptID, created.TermID, method, score, evidence)
+	if err != nil {
+		return Alignment{}, false, err
+	}
+	return aligned, true, nil
 }
 
 // autoPromotedTermID derives a deterministic, collision-free term id from

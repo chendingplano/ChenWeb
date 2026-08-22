@@ -231,6 +231,61 @@ WHERE artifact_type='metric' AND artifact_id='m-1' AND input_record_id=100
 	}
 }
 
+// TestIntegrationWriteMetricLosslessProvisionalClassIsCatalogVisible locks in
+// metric-class-synthesis-seam's visibility fix (bug 2026082101 finding 5
+// follow-up): before this change, a brand-new concept's provisional class
+// was created only via classfoundation.CreateIdentityOnlyClass, which never
+// inserted into kb.ontology_terms -- so it never appeared in
+// kb.ontology_terms_current (the view every other governed-term reader
+// uses), because kb.ontology_term_revisions.source_term_row_id is NOT NULL
+// REFERENCES kb.ontology_terms(id) and nothing had populated that FK target.
+// synthesizeClass now always creates the class through terms.TermStore,
+// so the resulting term is a real, catalog-visible row.
+func TestIntegrationWriteMetricLosslessProvisionalClassIsCatalogVisible(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	// This test's payload carries a ConceptID, which routes class synthesis
+	// through AlignmentsStore.ensureAccepted's released-guard check
+	// (alignment.go) -- it requires core:aligns_to_term itself to already be
+	// a released property term, independent of the metric_definition term
+	// being created.
+	seedGovernedTerm(t, db, "core:aligns_to_term", "property", "core")
+	seedObjectNode(t, db, "obj-3")
+
+	numeric := 99.0
+	p := metricCandidatePayload{
+		MetricID:             "m-3",
+		MetricName:           "Concept-Linked Metric",
+		ConceptID:            "kwc_concept_linked_metric",
+		Definition:           "A metric occurrence whose concept has never been promoted before.",
+		SubjectObjectID:      "obj-3",
+		RawText:              "99",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-3", "m-3", 300, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 300, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	const wantTermID = "measurement:kwc_concept_linked_metric"
+	var definition string
+	if err := db.QueryRowContext(ctx,
+		`SELECT definition FROM kb.ontology_terms_current WHERE term_id = $1`, wantTermID,
+	).Scan(&definition); err != nil {
+		t.Fatalf("provisional class not visible via kb.ontology_terms_current: %v", err)
+	}
+	if definition != p.Definition {
+		t.Fatalf("kb.ontology_terms_current.definition = %q, want %q", definition, p.Definition)
+	}
+}
+
 func mustReopenCandidateForReplay(t *testing.T, db *sql.DB, id int64) DecisionCandidate {
 	t.Helper()
 	if _, err := db.Exec(`UPDATE kb.semantic_decision_candidates SET status='in_review' WHERE id=$1`, id); err != nil {
@@ -442,5 +497,262 @@ FROM kb.semantic_assertions WHERE subject_ref_id = 'obj-4'`).Scan(&distinctKeys)
 	}
 	if claimCount != 2 {
 		t.Fatalf("claim identities registered = %d, want 2 (no false convergence)", claimCount)
+	}
+}
+
+// seedGovernedTermWithProperties is seedGovernedTerm plus a properties JSONB
+// payload -- used to seed an existing metric_definition class carrying a
+// class-identity signature (ADR 2026082203 DR2) for matchClassBySignature to
+// find.
+func seedGovernedTermWithProperties(t *testing.T, db *sql.DB, termID, termKind, moduleID, status string, properties map[string]any) {
+	t.Helper()
+	propsJSON, err := json.Marshal(properties)
+	if err != nil {
+		t.Fatalf("marshal properties for %s: %v", termID, err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO kb.ontology_terms (term_id, version, term_kind, module_id, status, properties)
+VALUES ($1, 1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING`, termID, termKind, moduleID, status, propsJSON); err != nil {
+		t.Fatalf("seed governed term with properties %s: %v", termID, err)
+	}
+}
+
+// signatureEntry builds one BuildSignatureProperties-shaped
+// {"raw":..., "term_id":...} ExtraProperties value (ADR 2026082203 DR2).
+func signatureEntry(raw, termID string) map[string]any {
+	return map[string]any{"raw": raw, "term_id": termID}
+}
+
+func mustFindAssertionByObject(t *testing.T, db *sql.DB, objectID string) Assertion {
+	t.Helper()
+	var logicalKey string
+	if err := db.QueryRow(`SELECT logical_identity_key FROM kb.semantic_assertions WHERE subject_ref_id = $1 LIMIT 1`, objectID).Scan(&logicalKey); err != nil {
+		t.Fatalf("find assertion logical identity key for %s: %v", objectID, err)
+	}
+	assertion, err := (AssertionStore{DB: db}).GetLatest(context.Background(), logicalKey)
+	if err != nil {
+		t.Fatalf("load assertion by logical identity key %s: %v", logicalKey, err)
+	}
+	return assertion
+}
+
+// TestIntegrationWriteMetricLosslessSignatureMatchesExistingClassBySubject
+// locks in ADR 2026082203 DR5's primary case: an occurrence whose resolved
+// "subject" dimension agrees with an existing class's stored signature
+// reuses that class (ClassResolvedExisting) instead of hashing metric_name
+// into a brand-new provisional class -- even though this occurrence's name
+// has never been seen before and would hash to a different candidate term.
+func TestIntegrationWriteMetricLosslessSignatureMatchesExistingClassBySubject(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-sig-1")
+	seedGovernedTermWithProperties(t, db, "measurement:seeded_ambient_temp", "metric_definition", "measurement", "included_in_release",
+		map[string]any{"subject": signatureEntry("ambient", "measurement:subj_ambient")})
+
+	numeric := 21.0
+	p := metricCandidatePayload{
+		MetricID:             "m-sig-1",
+		MetricName:           "Never-Before-Seen Metric Name",
+		SubjectObjectID:      "obj-sig-1",
+		RawText:              "21",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+		ExtraProperties: map[string]any{
+			"subject": signatureEntry("ambient", "measurement:subj_ambient"),
+		},
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-sig-1", "m-sig-1", 500, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 500, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-sig-1")
+	if assertion.InstanceOfTermID != "measurement:seeded_ambient_temp" {
+		t.Fatalf("instance_of_term_id = %q, want the seeded class reused via signature match", assertion.InstanceOfTermID)
+	}
+	if assertion.ClassIdentityStateTermID != semantic.ClassResolvedExisting {
+		t.Fatalf("class_identity_state = %q, want resolved_existing", assertion.ClassIdentityStateTermID)
+	}
+
+	var newClassCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM kb.ontology_term_headers WHERE term_id LIKE 'measurement:auto:defname_%'`).Scan(&newClassCount); err != nil {
+		t.Fatalf("count name-hash provisional classes: %v", err)
+	}
+	if newClassCount != 0 {
+		t.Fatalf("name-hash provisional classes created = %d, want 0 (signature match should have short-circuited the fallback entirely)", newClassCount)
+	}
+}
+
+// TestIntegrationWriteMetricLosslessSignatureDisagreementExcludesCandidate
+// locks in design.md D3's "no contradiction" rule: a class that disagrees
+// with the occurrence on one shared resolved dimension is excluded
+// entirely, even though it also carries an unrelated dimension the
+// occurrence didn't resolve -- and even though a *different* class with
+// weaker (single-dimension) agreement is available and correctly wins
+// instead.
+func TestIntegrationWriteMetricLosslessSignatureDisagreementExcludesCandidate(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-sig-2")
+
+	// Disagreeing candidate: agrees on subject, but its value_class
+	// contradicts the occurrence's resolved value_class.
+	seedGovernedTermWithProperties(t, db, "measurement:seeded_disagreeing_class", "metric_definition", "measurement", "included_in_release",
+		map[string]any{
+			"subject":     signatureEntry("soil", "measurement:subj_soil"),
+			"value_class": signatureEntry("threshold", "measurement:vc_threshold"),
+		})
+	// Weaker but non-contradicting candidate: agrees on subject only
+	// (value_class is absent from its signature, a don't-care, not a
+	// mismatch).
+	seedGovernedTermWithProperties(t, db, "measurement:seeded_agreeing_class", "metric_definition", "measurement", "included_in_release",
+		map[string]any{"subject": signatureEntry("soil", "measurement:subj_soil")})
+
+	numeric := 5.0
+	p := metricCandidatePayload{
+		MetricID:             "m-sig-2",
+		MetricName:           "Disagreement Probe",
+		SubjectObjectID:      "obj-sig-2",
+		RawText:              "5",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+		ExtraProperties: map[string]any{
+			"subject":     signatureEntry("soil", "measurement:subj_soil"),
+			"value_class": signatureEntry("requirement", "measurement:vc_requirement"),
+		},
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-sig-2", "m-sig-2", 501, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 501, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-sig-2")
+	if assertion.InstanceOfTermID != "measurement:seeded_agreeing_class" {
+		t.Fatalf("instance_of_term_id = %q, want the non-contradicting class, not the disagreeing one", assertion.InstanceOfTermID)
+	}
+	if assertion.ClassIdentityStateTermID != semantic.ClassResolvedExisting {
+		t.Fatalf("class_identity_state = %q, want resolved_existing", assertion.ClassIdentityStateTermID)
+	}
+}
+
+// TestIntegrationWriteMetricLosslessSignatureTieCreatesAmbiguousProvisional
+// locks in design.md D3's second gap-fix: two existing classes tied at the
+// same non-zero shared-agreeing-dimension count are never guessed between.
+// The occurrence gets a brand-new provisional class instead, flagged
+// ClassAmbiguousCandidates, with both tied candidates recorded as
+// alternatives on the class-resolution decision (class-resolution-decisions
+// spec's "signature ties never silently pick a winner" requirement).
+func TestIntegrationWriteMetricLosslessSignatureTieCreatesAmbiguousProvisional(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-sig-3")
+
+	seedGovernedTermWithProperties(t, db, "measurement:seeded_tie_a", "metric_definition", "measurement", "included_in_release",
+		map[string]any{"subject": signatureEntry("water", "measurement:subj_water")})
+	seedGovernedTermWithProperties(t, db, "measurement:seeded_tie_b", "metric_definition", "measurement", "included_in_release",
+		map[string]any{"value_class": signatureEntry("requirement", "measurement:vc_requirement")})
+
+	numeric := 3.0
+	p := metricCandidatePayload{
+		MetricID:             "m-sig-3",
+		MetricName:           "Tie Probe",
+		SubjectObjectID:      "obj-sig-3",
+		RawText:              "3",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+		ExtraProperties: map[string]any{
+			"subject":     signatureEntry("water", "measurement:subj_water"),
+			"value_class": signatureEntry("requirement", "measurement:vc_requirement"),
+		},
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-sig-3", "m-sig-3", 502, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 502, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-sig-3")
+	if assertion.InstanceOfTermID == "measurement:seeded_tie_a" || assertion.InstanceOfTermID == "measurement:seeded_tie_b" {
+		t.Fatalf("instance_of_term_id = %q, want a brand-new provisional class, not either tied candidate", assertion.InstanceOfTermID)
+	}
+	if assertion.ClassIdentityStateTermID != semantic.ClassAmbiguousCandidates {
+		t.Fatalf("class_identity_state = %q, want ambiguous_candidates", assertion.ClassIdentityStateTermID)
+	}
+
+	var altCount int
+	if err := db.QueryRowContext(ctx, `
+SELECT count(*) FROM kb.ontology_class_resolution_alternatives alt
+JOIN kb.ontology_class_resolution_decisions d ON d.id = alt.decision_id
+WHERE d.source_artifact_id = 'm-sig-3'`).Scan(&altCount); err != nil {
+		t.Fatalf("count recorded alternatives: %v", err)
+	}
+	if altCount != 2 {
+		t.Fatalf("recorded alternatives = %d, want 2 (both tied candidates)", altCount)
+	}
+}
+
+// TestIntegrationWriteMetricLosslessZeroResolvedDimensionsSignatureIsNoop
+// locks in design.md D3 gap-fix 1 explicitly for this ADR: an occurrence
+// with no identity-shaped ExtraProperties entries (only plain, non-identity
+// values, as a misconfigured or non-identity field would produce) never
+// attempts a signature match and falls straight through to today's
+// unchanged name-hash fallback -- proving matchClassBySignature is a true
+// no-op addition, not a behavior change, when nothing resolved.
+func TestIntegrationWriteMetricLosslessZeroResolvedDimensionsSignatureIsNoop(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-sig-4")
+	// A class exists in the catalog, but nothing on the occurrence resolved
+	// to a non-null term_id, so it must never be considered a candidate.
+	seedGovernedTermWithProperties(t, db, "measurement:seeded_unrelated", "metric_definition", "measurement", "included_in_release",
+		map[string]any{"subject": signatureEntry("ambient", "measurement:subj_ambient")})
+
+	numeric := 1.0
+	p := metricCandidatePayload{
+		MetricID:             "m-sig-4",
+		MetricName:           "No Signal Probe",
+		SubjectObjectID:      "obj-sig-4",
+		RawText:              "1",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+		ExtraProperties: map[string]any{
+			"non_identity_field": "plain value, not a {raw,term_id} map",
+		},
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-sig-4", "m-sig-4", 503, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 503, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-sig-4")
+	if assertion.InstanceOfTermID == "measurement:seeded_unrelated" {
+		t.Fatalf("instance_of_term_id = %q, want a fresh name-hash class, not the unrelated seeded one", assertion.InstanceOfTermID)
+	}
+	if assertion.ClassIdentityStateTermID != semantic.ClassProvisionalNew {
+		t.Fatalf("class_identity_state = %q, want provisional_new (unchanged fallback behavior)", assertion.ClassIdentityStateTermID)
 	}
 }

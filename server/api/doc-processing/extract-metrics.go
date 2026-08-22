@@ -20,7 +20,6 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/names"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
-	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -149,23 +148,19 @@ type nameResolver interface {
 	MatchUnitLabel(ctx context.Context, unit string) (string, error)
 }
 
-// termAligner is the subset of keywords.AlignmentsStore the decorator needs
-// — declared here for the same unit-testability reason as nameResolver.
-type termAligner interface {
-	EnsureAcceptedOrCreate(ctx context.Context, conceptID string, synth keywords.TermSynthesisInput, method string, score float64, evidence string) (keywords.Alignment, error)
-}
-
 // ResolvingMetricsStore wraps a MetricsStore so every metric row is resolved
 // through names.Resolver before it is persisted (spec §16.3, REQ-3): the one
 // seam where the resolver is called, whatever write path reached the store.
-// keyword_concept_id is populated from resolution.ConceptID (fast, ungoverned);
-// metric_definition_term_id only from resolution.TermID on term_resolved
-// (governed). Values already written by the extraction are never overwritten.
-// extract_metrics itself is untouched — no prompt change.
+// keyword_concept_id is populated from resolution.ConceptID (fast, ungoverned).
+// metric_definition_term_id is no longer set here (bug 2026082101 finding 5):
+// class/term creation now happens only in associate_semantics, once a metric
+// occurrence actually becomes a represented/accepted assertion, not
+// speculatively during extraction. Values already written by the extraction
+// are never overwritten. extract_metrics itself is untouched — no prompt
+// change.
 type ResolvingMetricsStore struct {
-	Inner      MetricsStore
-	Resolver   nameResolver
-	Alignments termAligner
+	Inner    MetricsStore
+	Resolver nameResolver
 }
 
 // SaveMetrics resolves every metric's name, then persists via Inner (spec
@@ -217,27 +212,24 @@ func (s *ResolvingMetricsStore) GetMetricsByInputRecordID(ctx context.Context, i
 // call, required so D11 concept auto-creation actually fires for a name
 // seen for the first time (see the nameResolver doc comment) — and
 // annotates the metric maps in place. Empty or non-string metric names are
-// skipped (not resolved). When a resolved concept has no governed term yet
-// (ADR 2026081201 DR1), auto-creates one from the representative metric
-// row's own extracted fields (DR3) rather than leaving the term id empty.
-// A resolution or auto-promotion error propagates and aborts the batch,
-// which is acceptable for a persistence seam (spec §16.3, REQ-3).
+// skipped (not resolved). It no longer auto-creates a governed term for an
+// unresolved concept (bug 2026082101 finding 5): term/class creation is
+// associate_semantics' job now, triggered once a metric occurrence actually
+// becomes a represented/accepted assertion, not speculatively here. A
+// resolution error propagates and aborts the batch, which is acceptable for
+// a persistence seam (spec §16.3, REQ-3).
 func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[string]any) ([]map[string]any, error) {
 	if len(metrics) == 0 {
 		return metrics, nil
 	}
-	metricPropertyMappings := parseOntologyTermPropertyMap(appconfig.GetOntologyTermPropertyMap())["metric"]
-	firstByName := make(map[string]map[string]any, len(metrics))
+	seen := make(map[string]bool, len(metrics))
 	var order []string
 	for _, m := range metrics {
 		name := strings.TrimSpace(asString(m["metric_name"]))
-		if name == "" {
+		if name == "" || seen[name] {
 			continue
 		}
-		if _, dup := firstByName[name]; dup {
-			continue
-		}
-		firstByName[name] = m
+		seen[name] = true
 		order = append(order, name)
 	}
 	if len(order) == 0 {
@@ -251,43 +243,6 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 		)
 		if err != nil {
 			return nil, err
-		}
-		if s.Alignments != nil && res.ConceptID != "" && res.Status != names.StatusTermResolved {
-			// canon guarantees canonical DB-column field names (metric_desc,
-			// metric_unit, ...) are populated regardless of which shape rep
-			// arrived in: a fresh/force-clear batch only carries the "raw"
-			// LLM-output names (desc, unit, ...; see canonicalizeMetricFieldAliases
-			// doc comment), while a merge-path batch already carries both. Reading
-			// straight from rep here previously always missed on a fresh batch
-			// (bug 2026082101 erratum: metric_desc/metric_unit are never the raw
-			// shape's key, so definition/raw_unit stayed empty even after the
-			// metric_desc/metric_unit sourcing fix landed).
-			rep := firstByName[name]
-			canon := canonicalizeMetricFieldAliases(rep)
-			definition := strings.TrimSpace(asString(canon["metric_desc"]))
-			if definition == "" {
-				definition = strings.TrimSpace(asString(canon["formula_or_definition"]))
-			}
-			synth := keywords.TermSynthesisInput{
-				CanonicalName:   name,
-				Definition:      definition,
-				ValueType:       strings.TrimSpace(asString(canon["value_data_type"])),
-				RangeType:       strings.TrimSpace(asString(canon["value_range_type"])),
-				ExtraProperties: buildOntologyTermProperties(metricPropertyMappings, canon),
-			}
-			if unit := strings.TrimSpace(asString(canon["metric_unit"])); unit != "" {
-				synth.RawUnit = unit
-				if unitTermID, uerr := s.Resolver.MatchUnitLabel(ctx, unit); uerr == nil && unitTermID != "" {
-					synth.PermittedUnitTermIDs = []string{unitTermID}
-				}
-			}
-			al, aerr := s.Alignments.EnsureAcceptedOrCreate(ctx, res.ConceptID, synth, res.Method, res.Confidence,
-				"auto-promoted via metric resolution (ADR 2026081201)")
-			if aerr != nil {
-				return nil, fmt.Errorf("auto-promote metric_definition term for metric %q: %w", name, aerr)
-			}
-			res.TermID = al.ObjectTermID
-			res.Status = names.StatusTermResolved
 		}
 		byName[name] = res
 	}
@@ -326,7 +281,6 @@ func newResolvingMetricsStore(db *sql.DB) MetricsStore {
 			&keywords.KeywordFamily{DB: db, ResolverMode: keywords.ResolverMode()},
 			alignments,
 		),
-		Alignments: alignments,
 	}
 }
 

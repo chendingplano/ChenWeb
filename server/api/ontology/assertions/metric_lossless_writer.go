@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -55,7 +56,20 @@ func (a AssociateSemantics) writeMetricLossless(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	selectedClassTermID, classIdentityState, err := resolveOrCreateMetricClass(ctx, tx, classTermID)
+	synthUnitTermIDs := []string(nil)
+	if unitTermID != "" {
+		synthUnitTermIDs = []string{unitTermID}
+	}
+	selectedClassTermID, classIdentityState, signatureAlternatives, err := resolveOrCreateMetricClass(ctx, tx, classTermID, ClassSynthesisInput{
+		ConceptID:            p.ConceptID,
+		CanonicalName:        p.MetricName,
+		Definition:           p.Definition,
+		ValueType:            p.ValueDataType,
+		RangeType:            p.ValueRangeTypeText,
+		PermittedUnitTermIDs: synthUnitTermIDs,
+		RawUnit:              p.Unit,
+		ExtraProperties:      p.ExtraProperties,
+	})
 	if err != nil {
 		return "", fmt.Errorf("resolve metric class: %w", err)
 	}
@@ -73,7 +87,7 @@ func (a AssociateSemantics) writeMetricLossless(
 		IdentityState: strings.TrimPrefix(classIdentityState, "semantic:"),
 		Method:        "deterministic_definition_term",
 		CreateBy:      "metric_lossless_writer",
-	}, nil); err != nil {
+	}, signatureAlternatives); err != nil {
 		return "", fmt.Errorf("record class resolution decision: %w", err)
 	}
 
@@ -100,7 +114,7 @@ func (a AssociateSemantics) writeMetricLossless(
 		ObjectRefKind:                "literal",
 		ObjectLiteral:                metricObjectLiteral(valueStateTermID, p),
 		AssertionKindTermID:          assertionKindTermID,
-		Qualifiers:                   mustMarshal(metricQualifiers(p)),
+		Qualifiers:                   mustMarshal(p.Qualifiers),
 		UnitTermID:                   unitTermID,
 		QuantityKindTermID:           quantityKindTermID,
 		ValueForm:                    p.ValueForm,
@@ -214,29 +228,194 @@ func provisionalMetricClassTermID(p metricCandidatePayload) string {
 	return "measurement:auto:defname_" + hex.EncodeToString(sum[:])[:12]
 }
 
-// resolveOrCreateMetricClass checks for an existing term header before
-// creating a provisional one, so a retried attempt reuses the class created
-// by a prior attempt instead of appending a redundant identity-only contract
-// revision (ContractStore.CreateIdentityOnlyClass is not itself idempotent
-// across repeated calls -- see its doc comment).
-func resolveOrCreateMetricClass(ctx context.Context, tx *sql.Tx, candidateTermID string) (termID, identityState string, err error) {
-	var exists bool
-	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM kb.ontology_term_headers WHERE term_id = $1)`, candidateTermID).Scan(&exists); err != nil {
-		return "", "", err
-	}
-	if exists {
-		return candidateTermID, semantic.ClassResolvedExisting, nil
-	}
-	revision, err := (classfoundation.ContractStore{DB: tx}).CreateIdentityOnlyClass(ctx, classfoundation.ClassIdentity{
-		TermID:   candidateTermID,
-		ModuleID: "measurement",
-		By:       "metric_lossless_writer",
-	})
+// metricDefinitionTermKind is the only term_kind this pass wires
+// signature-based resolution for (ADR 2026082203 design.md non-goals: a
+// future term_kind gets its own signature composition via DR4's config,
+// not a code change to matchClassBySignature).
+const metricDefinitionTermKind = "metric_definition"
+
+// resolveOrCreateMetricClass implements ADR 2026082203 DR5: it first
+// attempts signature-based resolution (matchClassBySignature) before
+// falling back to today's unchanged order -- delegating to the registered
+// ClassSynthesizer (metric-class-synthesis-seam, bug 2026082101 finding 5)
+// to create or select the metric's class, running inside the caller's
+// transaction so the class write commits or rolls back with the rest of the
+// metric semantic transaction. When input.ConceptID is set, the
+// synthesizer's own concept-based existence check makes it idempotent on
+// retry, and the resulting term_id may differ from candidateTermID (an
+// existing concept-linked term wins over the hash-derived candidate). When
+// no concept is available, the synthesizer's create path is not itself
+// idempotent (mirroring the prior CreateIdentityOnlyClass's doc comment), so
+// a header-existence pre-check on candidateTermID keeps a retried attempt
+// from appending a redundant term.
+func resolveOrCreateMetricClass(ctx context.Context, tx *sql.Tx, candidateTermID string, input ClassSynthesisInput) (termID, identityState string, alternatives []classfoundation.ClassResolutionAlternative, err error) {
+	signatureTermID, tiedAlternatives, err := matchClassBySignature(ctx, tx, input)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, fmt.Errorf("match class by signature: %w", err)
 	}
-	return revision.TermID, semantic.ClassProvisionalNew, nil
+	if signatureTermID != "" {
+		return signatureTermID, semantic.ClassResolvedExisting, nil, nil
+	}
+
+	if input.ConceptID == "" {
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM kb.ontology_term_headers WHERE term_id = $1)`, candidateTermID).Scan(&exists); err != nil {
+			return "", "", nil, err
+		}
+		if exists {
+			return candidateTermID, semantic.ClassResolvedExisting, nil, nil
+		}
+	}
+	synthTermID, created, err := SynthesizeClass(ctx, tx, candidateTermID, input)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if !created {
+		return synthTermID, semantic.ClassResolvedExisting, nil, nil
+	}
+	// A signature tie (design.md D3 gap-fix 2) never guesses between the
+	// tied existing candidates: it still provisions a new class through the
+	// unchanged create path above, but flags the decision ambiguous and
+	// carries the tied candidates as alternatives for
+	// ClassResolutionDecisionStore.RecordIfChanged to persist.
+	if len(tiedAlternatives) > 0 {
+		return synthTermID, semantic.ClassAmbiguousCandidates, tiedAlternatives, nil
+	}
+	return synthTermID, semantic.ClassProvisionalNew, nil, nil
+}
+
+// resolvedSignatureDimensions extracts the occurrence's resolved
+// identity-bearing signature dimensions from ExtraProperties -- only
+// entries in BuildSignatureProperties' {"raw":..., "term_id":...} shape
+// (ADR 2026082203 DR2) with a non-empty term_id count as "resolved" for
+// signature matching. A plain (non-identity) property value is silently
+// skipped, not an error -- it simply carries no identity signal.
+func resolvedSignatureDimensions(extraProperties map[string]any) map[string]string {
+	resolved := map[string]string{}
+	for property, v := range extraProperties {
+		entry, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		termID, _ := entry["term_id"].(string)
+		if termID == "" {
+			continue
+		}
+		resolved[property] = termID
+	}
+	return resolved
+}
+
+// matchClassBySignature implements ADR 2026082203 DR5 / design.md D3: find
+// an existing class whose stored properties signature agrees with the
+// occurrence's resolved identity-bearing dimensions.
+//
+// A candidate class must share at least one dimension resolved to the same
+// non-null term_id on both sides to count as a match at all -- "matches on
+// every dimension resolved on both sides" is otherwise vacuously true for
+// zero shared dimensions, which would match every class in the catalog to a
+// wholly-unresolved occurrence (design.md D3 gap-fix 1). Among qualifying
+// candidates, the one(s) agreeing on the most shared dimensions win; a tie
+// is never guessed between (gap-fix 2) -- termID is empty and alternatives
+// lists every tied candidate for the caller to record and resolve by
+// provisioning a new class instead.
+func matchClassBySignature(ctx context.Context, tx *sql.Tx, input ClassSynthesisInput) (termID string, alternatives []classfoundation.ClassResolutionAlternative, err error) {
+	resolved := resolvedSignatureDimensions(input.ExtraProperties)
+	if len(resolved) == 0 {
+		return "", nil, nil
+	}
+
+	properties := make([]string, 0, len(resolved))
+	for property := range resolved {
+		properties = append(properties, property)
+	}
+	sort.Strings(properties) // deterministic query arg order
+
+	query := `SELECT term_id, properties FROM kb.ontology_terms_current
+WHERE term_kind = $1 AND status IN ('included_in_release', 'auto-promoted') AND properties IS NOT NULL`
+	args := []any{metricDefinitionTermKind}
+	for _, property := range properties {
+		args = append(args, property, resolved[property])
+		dimArg, valueArg := len(args)-1, len(args)
+		query += fmt.Sprintf(" AND (properties->$%d->>'term_id' IS NULL OR properties->$%d->>'term_id' = $%d)", dimArg, dimArg, valueArg)
+	}
+
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return "", nil, fmt.Errorf("query signature candidates: %w", err)
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		termID    string
+		agreement int
+	}
+	var best []candidate
+	bestCount := 0
+	for rows.Next() {
+		var candTermID string
+		var propsRaw json.RawMessage
+		if err := rows.Scan(&candTermID, &propsRaw); err != nil {
+			return "", nil, err
+		}
+		var candProps map[string]any
+		if err := json.Unmarshal(propsRaw, &candProps); err != nil {
+			return "", nil, fmt.Errorf("unmarshal candidate properties for %s: %w", candTermID, err)
+		}
+		agreement := 0
+		for _, property := range properties {
+			entry, ok := candProps[property].(map[string]any)
+			if !ok {
+				continue
+			}
+			if t, _ := entry["term_id"].(string); t != "" && t == resolved[property] {
+				agreement++
+			}
+		}
+		if agreement == 0 {
+			continue
+		}
+		switch {
+		case agreement > bestCount:
+			bestCount = agreement
+			best = []candidate{{termID: candTermID, agreement: agreement}}
+		case agreement == bestCount:
+			best = append(best, candidate{termID: candTermID, agreement: agreement})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, err
+	}
+
+	switch len(best) {
+	case 0:
+		return "", nil, nil
+	case 1:
+		return best[0].termID, nil, nil
+	default:
+		alts := make([]classfoundation.ClassResolutionAlternative, len(best))
+		for i, c := range best {
+			// Evidence is inserted as ::jsonb (class_resolution_decisions_store.go's
+			// normalizedJSON only defaults an empty string to "{}"; it does not
+			// escape arbitrary text into JSON), so this must already be valid JSON.
+			evidence, err := json.Marshal(map[string]any{"reason": "signature_tie", "agreement_count": c.agreement})
+			if err != nil {
+				return "", nil, err
+			}
+			alts[i] = classfoundation.ClassResolutionAlternative{
+				CandidateClassTermID: c.termID,
+				// Rank is left zero: kb.ontology_class_resolution_alternatives
+				// enforces uniqueness on (decision_id, rank), and
+				// ClassResolutionDecisionStore.record auto-numbers an unset
+				// Rank by slice position -- every tied candidate is equally
+				// ranked in truth, but the table still needs a distinct
+				// ordinal per row.
+				Evidence: string(evidence),
+			}
+		}
+		return "", alts, nil
+	}
 }
 
 // canonicalClaimFields implements DR2's identity-value branch selection.

@@ -306,6 +306,33 @@ type metricCandidatePayload struct {
 	// unresolved/ambiguous mapping in the corpus -- see
 	// resolveMetricMappingDependency in metric_lossless_writer.go.
 	ValueRangeTypeRaw string `json:"value_range_type_raw"`
+	// ConceptID is kb.metrics.keyword_concept_id, forwarded so class
+	// synthesis (metric-class-synthesis-seam) can preserve the
+	// keyword-concept-to-term alignment link auto-promotion used to provide
+	// (bug 2026082101 finding 5).
+	ConceptID string `json:"keyword_concept_id"`
+	// Definition is metric_desc falling back to formula_or_definition --
+	// the same class-level definition sourcing extract_metrics used to do
+	// before class creation moved here (bug 2026082101 findings 1/5).
+	Definition string `json:"definition"`
+	// ValueDataType is kb.metrics.value_data_type (e.g. "number", "text"),
+	// a class-level fact about the metric_definition term (bug 2026082101
+	// finding 6).
+	ValueDataType string `json:"value_data_type"`
+	// ValueRangeTypeText is kb.metrics.value_range_type's raw classification
+	// text (e.g. "exact", "range", "lower_bound") -- a class-level fact,
+	// distinct from ValueRangeTypeLookup/ValueRangeTypeRaw above, which are
+	// the governed-mapping bookkeeping for the *value* on this occurrence,
+	// not the class.
+	ValueRangeTypeText string `json:"value_range_type_text"`
+	// ExtraProperties holds class-level fields configured via
+	// [ontology_term_property_map] (bug 2026082101 finding 6: class-level
+	// only -- instance-level fields go in Qualifiers instead).
+	ExtraProperties map[string]any `json:"class_properties,omitempty"`
+	// Qualifiers holds instance-level fields configured via
+	// [semantic_assertion_property_map] (bug 2026082101 finding 8),
+	// replacing the old hardcoded metricQualifiers().
+	Qualifiers map[string]any `json:"qualifiers,omitempty"`
 }
 
 // metricAssertionKindTermID rejects only missing and unparsed values. Every
@@ -318,17 +345,6 @@ func metricAssertionKindTermID(assertionKind string) (string, bool) {
 		return "", false
 	}
 	return "mea:" + assertionKind, true
-}
-
-func metricQualifiers(p metricCandidatePayload) map[string]any {
-	qualifierMap := map[string]any{"metric_name": p.MetricName}
-	if p.MetricDefinitionTermID != "" {
-		qualifierMap["metric_definition_term_id"] = p.MetricDefinitionTermID
-	}
-	if p.Condition != "" {
-		qualifierMap["condition"] = p.Condition
-	}
-	return qualifierMap
 }
 
 func governedTermDependencyFingerprint(predicateTermID string, predicateReleased bool, assertionKindTermID string, assertionKindReleased bool) string {
@@ -420,7 +436,7 @@ func (a AssociateSemantics) processMetric(ctx context.Context, dcStore DecisionC
 	if err != nil {
 		return "", err
 	}
-	qualifiers, err := json.Marshal(metricQualifiers(p))
+	qualifiers, err := json.Marshal(p.Qualifiers)
 	if err != nil {
 		return "", err
 	}

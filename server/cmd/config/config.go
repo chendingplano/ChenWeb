@@ -151,13 +151,38 @@ type FrontendConfigSection struct {
 	AnnouncementsMax *int `mapstructure:"announcements_max"`
 }
 
-// OntologyTermPropertyMapConfig holds the operator-configured
+// OntologyTermPropertyMapEntry is one configured field->property mapping for
+// an artifact type's class-identity signature (ADR 2026082203 DR4). Identity
+// and Dimension replace the flat "artifact_type:field:property" string
+// format (bug 2026082101 finding 2 follow-up), which could not carry these
+// two extra attributes cleanly.
+type OntologyTermPropertyMapEntry struct {
+	// Field is the dotted path into the artifact's field map, e.g.
+	// "ext_info.object_name".
+	Field string `mapstructure:"field"`
+	// Property is the key written into kb.ontology_terms.properties.
+	Property string `mapstructure:"property"`
+	// Identity marks this field as participating in class-identity
+	// signature matching (ADR 2026082203 DR2/DR5). When true, Dimension
+	// must name a kb.governed_property_value_map dimension to resolve
+	// against; the written property takes the {"raw":..., "term_id":...}
+	// shape instead of a plain value.
+	Identity bool `mapstructure:"identity"`
+	// Dimension is the kb.governed_property_value_map dimension this field
+	// resolves against. Only meaningful when Identity is true.
+	Dimension string `mapstructure:"dimension"`
+}
+
+// SemanticAssertionPropertyMapConfig holds the operator-configured
 // "artifact_type:table_field_name:property_name" entries that expose
-// additional already-extracted artifact fields onto the governed
-// kb.ontology_terms.properties JSONB bag for auto-promoted terms (bug
-// 2026082101 finding 2 follow-up). Configured via
-// [ontology_term_property_map] in config.toml / config.local.toml.
-type OntologyTermPropertyMapConfig struct {
+// instance-level already-extracted artifact fields onto
+// kb.semantic_assertions.qualifiers (bug 2026082101 findings 6/8: this is
+// the instance-scoped counterpart to [ontology_term_property_map], which is
+// class-scoped). Unlike the class-scoped map (ADR 2026082203 DR4), this
+// section keeps its flat string format -- instance-level fields never
+// participate in class-identity signature matching. Configured via
+// [semantic_assertion_property_map] in config.toml / config.local.toml.
+type SemanticAssertionPropertyMapConfig struct {
 	PropertyMap []string `mapstructure:"property_map"`
 }
 
@@ -205,9 +230,17 @@ type AppConfigDef struct {
 	System SystemConfigSection `mapstructure:"system"`
 	// OntologyTermPropertyMap configures which already-extracted artifact
 	// fields are exposed onto kb.ontology_terms.properties for auto-promoted
-	// governed terms, per artifact type. Configured via
+	// governed terms, per artifact type, and which of those fields
+	// participate in class-identity signature matching (ADR 2026082203 DR4).
+	// Keyed by artifact type directly -- TOML's [[ontology_term_property_map.
+	// metric]] table array nests under this key. Configured via
 	// [ontology_term_property_map] in config.toml / config.local.toml.
-	OntologyTermPropertyMap OntologyTermPropertyMapConfig `mapstructure:"ontology_term_property_map"`
+	OntologyTermPropertyMap map[string][]OntologyTermPropertyMapEntry `mapstructure:"ontology_term_property_map"`
+	// SemanticAssertionPropertyMap configures which already-extracted
+	// artifact fields are exposed onto kb.semantic_assertions.qualifiers,
+	// per artifact type. Configured via [semantic_assertion_property_map]
+	// in config.toml / config.local.toml.
+	SemanticAssertionPropertyMap SemanticAssertionPropertyMapConfig `mapstructure:"semantic_assertion_property_map"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review
@@ -284,6 +317,8 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 		return fmt.Errorf("(MID_26031003) unable to decode app config, error:%w", err)
 	}
 	appConfigViper = appVp
+
+	warnOnMissingIdentityPropertyMap(logger)
 
 	err := ApiUtils.LoadConfig(ctx, logger, configPath)
 	if err != nil {
@@ -373,13 +408,51 @@ func GetKnowledgeContentConfig() map[string]bool {
 	return AppConfig.KnowledgeContent
 }
 
-// GetOntologyTermPropertyMap returns the configured
-// "artifact_type:table_field_name:property_name" entries from
-// [ontology_term_property_map].property_map. Returns nil when unset, in
+// artifactTypesRequiringIdentitySignature names the artifact types whose
+// class resolution attempts signature-based matching (ADR 2026082203 DR5).
+// A misconfiguration warning (below) only applies to these -- an artifact
+// type with no signature-resolution consumer legitimately has no identity
+// entries.
+var artifactTypesRequiringIdentitySignature = []string{"metric"}
+
+// warnOnMissingIdentityPropertyMap implements ADR 2026082203 DR4's
+// validation ask: a WARNING (not a hard error) when an artifact type known
+// to require signature-based resolution has zero `identity = true` entries
+// in [ontology_term_property_map] -- almost certainly a misconfiguration,
+// but not fatal, since signature resolution simply falls back to today's
+// existing behavior with zero identity dimensions configured.
+func warnOnMissingIdentityPropertyMap(logger ApiTypes.JimoLogger) {
+	for _, artifactType := range artifactTypesRequiringIdentitySignature {
+		hasIdentity := false
+		for _, entry := range AppConfig.OntologyTermPropertyMap[artifactType] {
+			if entry.Identity {
+				hasIdentity = true
+				break
+			}
+		}
+		if !hasIdentity {
+			logger.Warn("ontology_term_property_map has no identity=true entries for an artifact type that requires signature-based class resolution",
+				"artifact_type", artifactType)
+		}
+	}
+}
+
+// GetOntologyTermPropertyMap returns the configured entries from
+// [ontology_term_property_map], keyed by artifact type
+// (e.g. [[ontology_term_property_map.metric]]). Returns nil when unset, in
 // which case no additional properties are exposed beyond each artifact
 // type's fixed synthesis fields.
-func GetOntologyTermPropertyMap() []string {
-	return AppConfig.OntologyTermPropertyMap.PropertyMap
+func GetOntologyTermPropertyMap() map[string][]OntologyTermPropertyMapEntry {
+	return AppConfig.OntologyTermPropertyMap
+}
+
+// GetSemanticAssertionPropertyMap returns the configured
+// "artifact_type:field:property" entries for
+// [semantic_assertion_property_map]. Returns nil/empty when no such section
+// is present, in which case kb.semantic_assertions.qualifiers gets no
+// configured instance-level fields.
+func GetSemanticAssertionPropertyMap() []string {
+	return AppConfig.SemanticAssertionPropertyMap.PropertyMap
 }
 
 // GetWorkspaceContentConfig returns the configured /semos/workspace content
