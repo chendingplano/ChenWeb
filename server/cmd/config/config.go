@@ -151,6 +151,16 @@ type FrontendConfigSection struct {
 	AnnouncementsMax *int `mapstructure:"announcements_max"`
 }
 
+// OntologyTermPropertyMapConfig holds the operator-configured
+// "artifact_type:table_field_name:property_name" entries that expose
+// additional already-extracted artifact fields onto the governed
+// kb.ontology_terms.properties JSONB bag for auto-promoted terms (bug
+// 2026082101 finding 2 follow-up). Configured via
+// [ontology_term_property_map] in config.toml / config.local.toml.
+type OntologyTermPropertyMapConfig struct {
+	PropertyMap []string `mapstructure:"property_map"`
+}
+
 type SystemConfigSection struct {
 	// AccessRoles defines the canonical role keys for this project, sourced
 	// from [system].access_roles in config.toml / config.local.toml. When the
@@ -193,6 +203,11 @@ type AppConfigDef struct {
 	// System holds operator-tunable system settings such as the canonical
 	// access-role list for the current project.
 	System SystemConfigSection `mapstructure:"system"`
+	// OntologyTermPropertyMap configures which already-extracted artifact
+	// fields are exposed onto kb.ontology_terms.properties for auto-promoted
+	// governed terms, per artifact type. Configured via
+	// [ontology_term_property_map] in config.toml / config.local.toml.
+	OntologyTermPropertyMap OntologyTermPropertyMapConfig `mapstructure:"ontology_term_property_map"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review
@@ -356,6 +371,15 @@ func GetDocReviewsConfig() map[string][]string {
 // is present, in which case every content item defaults to enabled.
 func GetKnowledgeContentConfig() map[string]bool {
 	return AppConfig.KnowledgeContent
+}
+
+// GetOntologyTermPropertyMap returns the configured
+// "artifact_type:table_field_name:property_name" entries from
+// [ontology_term_property_map].property_map. Returns nil when unset, in
+// which case no additional properties are exposed beyond each artifact
+// type's fixed synthesis fields.
+func GetOntologyTermPropertyMap() []string {
+	return AppConfig.OntologyTermPropertyMap.PropertyMap
 }
 
 // GetWorkspaceContentConfig returns the configured /semos/workspace content

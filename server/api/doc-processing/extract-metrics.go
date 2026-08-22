@@ -20,6 +20,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/names"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -225,6 +226,7 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 	if len(metrics) == 0 {
 		return metrics, nil
 	}
+	metricPropertyMappings := parseOntologyTermPropertyMap(appconfig.GetOntologyTermPropertyMap())["metric"]
 	firstByName := make(map[string]map[string]any, len(metrics))
 	var order []string
 	for _, m := range metrics {
@@ -251,18 +253,29 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 			return nil, err
 		}
 		if s.Alignments != nil && res.ConceptID != "" && res.Status != names.StatusTermResolved {
+			// canon guarantees canonical DB-column field names (metric_desc,
+			// metric_unit, ...) are populated regardless of which shape rep
+			// arrived in: a fresh/force-clear batch only carries the "raw"
+			// LLM-output names (desc, unit, ...; see canonicalizeMetricFieldAliases
+			// doc comment), while a merge-path batch already carries both. Reading
+			// straight from rep here previously always missed on a fresh batch
+			// (bug 2026082101 erratum: metric_desc/metric_unit are never the raw
+			// shape's key, so definition/raw_unit stayed empty even after the
+			// metric_desc/metric_unit sourcing fix landed).
 			rep := firstByName[name]
-			definition := strings.TrimSpace(asString(rep["metric_desc"]))
+			canon := canonicalizeMetricFieldAliases(rep)
+			definition := strings.TrimSpace(asString(canon["metric_desc"]))
 			if definition == "" {
-				definition = strings.TrimSpace(asString(rep["formula_or_definition"]))
+				definition = strings.TrimSpace(asString(canon["formula_or_definition"]))
 			}
 			synth := keywords.TermSynthesisInput{
-				CanonicalName: name,
-				Definition:    definition,
-				ValueType:     strings.TrimSpace(asString(rep["value_data_type"])),
-				RangeType:     strings.TrimSpace(asString(rep["value_range_type"])),
+				CanonicalName:   name,
+				Definition:      definition,
+				ValueType:       strings.TrimSpace(asString(canon["value_data_type"])),
+				RangeType:       strings.TrimSpace(asString(canon["value_range_type"])),
+				ExtraProperties: buildOntologyTermProperties(metricPropertyMappings, canon),
 			}
-			if unit := strings.TrimSpace(asString(rep["metric_unit"])); unit != "" {
+			if unit := strings.TrimSpace(asString(canon["metric_unit"])); unit != "" {
 				synth.RawUnit = unit
 				if unitTermID, uerr := s.Resolver.MatchUnitLabel(ctx, unit); uerr == nil && unitTermID != "" {
 					synth.PermittedUnitTermIDs = []string{unitTermID}

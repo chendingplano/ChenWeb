@@ -17,6 +17,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
 	"github.com/chendingplano/deepdoc/server/api/ontology/names"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -2368,6 +2369,93 @@ func TestResolvingMetricsStoreAutoPromoteRetainsRawUnitOnResolverMiss(t *testing
 	}
 	if len(got.PermittedUnitTermIDs) != 0 {
 		t.Fatalf("PermittedUnitTermIDs=%#v, want empty on a resolver miss", got.PermittedUnitTermIDs)
+	}
+}
+
+// TestResolvingMetricsStoreAutoPromoteReadsRawShapeDescAndUnit locks in the
+// bug 2026082101 erratum: a freshly-enriched metric batch (the force_clear
+// path, e.g. SaveMetrics called directly from enrichMetricCandidates output)
+// only carries the "raw" LLM-output field names (desc/unit), never the
+// canonical DB-column names (metric_desc/metric_unit) the two tests above
+// use directly. Reading rep["metric_desc"]/rep["metric_unit"] without first
+// canonicalizing left definition/raw_unit empty on every real extraction run
+// even after the metric_desc/metric_unit sourcing fix landed, because the
+// map never had those keys to begin with.
+func TestResolvingMetricsStoreAutoPromoteReadsRawShapeDescAndUnit(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"有机质的质量分数": {RawName: "有机质的质量分数", Status: names.StatusLexicalResolved, ConceptID: "kwc_organic", Method: "auto_created", Confidence: 0.8},
+		},
+	}
+	aligner := &scriptedTermAligner{termID: "measurement:kwc_organic"}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver, Alignments: aligner}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_name": "有机质的质量分数",
+			"desc":        "肥料技术指标：有机质的质量分数（以烘干基计）应不低于30%。",
+			"unit":        "%",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if len(aligner.calls) != 1 {
+		t.Fatalf("EnsureAcceptedOrCreate calls=%d, want 1", len(aligner.calls))
+	}
+	got := aligner.calls[0]
+	if got.Definition != "肥料技术指标：有机质的质量分数（以烘干基计）应不低于30%。" {
+		t.Fatalf("Definition=%q, want the raw-shape 'desc' field to be read", got.Definition)
+	}
+	if got.RawUnit != "%" {
+		t.Fatalf("RawUnit=%q, want the raw-shape 'unit' field to be read", got.RawUnit)
+	}
+}
+
+// TestResolvingMetricsStoreAutoPromoteAppliesConfiguredPropertyMap covers the
+// [ontology_term_property_map] feature: operator-configured
+// "metric:<field>:<property>" entries expose additional already-extracted
+// metric fields onto kb.ontology_terms.properties, and a dotted field path
+// resolves into a nested map (ext_info.object_name).
+func TestResolvingMetricsStoreAutoPromoteAppliesConfiguredPropertyMap(t *testing.T) {
+	prevMap := appconfig.AppConfig.OntologyTermPropertyMap.PropertyMap
+	appconfig.AppConfig.OntologyTermPropertyMap.PropertyMap = []string{
+		"metric:metric_name:term_name",
+		"metric:value_class:value_class",
+		"metric:ext_info.object_name:object_name",
+		"provisions:provision_type:provision_type", // a different artifact_type must not leak in
+	}
+	t.Cleanup(func() { appconfig.AppConfig.OntologyTermPropertyMap.PropertyMap = prevMap })
+
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"有机质的质量分数": {RawName: "有机质的质量分数", Status: names.StatusLexicalResolved, ConceptID: "kwc_organic", Method: "auto_created", Confidence: 0.8},
+		},
+	}
+	aligner := &scriptedTermAligner{termID: "measurement:kwc_organic"}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver, Alignments: aligner}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_name": "有机质的质量分数",
+			"value_class": "threshold",
+			"ext_info":    map[string]any{"object_name": "肥料"},
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if len(aligner.calls) != 1 {
+		t.Fatalf("EnsureAcceptedOrCreate calls=%d, want 1", len(aligner.calls))
+	}
+	got := aligner.calls[0].ExtraProperties
+	want := map[string]any{
+		"term_name":   "有机质的质量分数",
+		"value_class": "threshold",
+		"object_name": "肥料",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExtraProperties=%#v, want %#v", got, want)
 	}
 }
 

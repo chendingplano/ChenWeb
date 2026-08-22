@@ -297,6 +297,13 @@ type TermSynthesisInput struct {
 	RangeType            string
 	PermittedUnitTermIDs []string
 	RawUnit              string
+	// ExtraProperties holds additional artifact fields the operator has
+	// exposed onto kb.ontology_terms.properties via
+	// [ontology_term_property_map] in config.toml/config.local.toml (bug
+	// 2026082101 finding 2 follow-up). Keys are operator-configured and may
+	// vary per deployment; termProperties applies them first so the fixed
+	// synthesis fields below always win on a key collision.
+	ExtraProperties map[string]any
 }
 
 // termProperties builds the kb.ontology_terms.properties payload (bug
@@ -305,6 +312,9 @@ type TermSynthesisInput struct {
 // rather than written as empty strings/arrays.
 func (in TermSynthesisInput) termProperties() map[string]any {
 	props := map[string]any{}
+	for k, v := range in.ExtraProperties {
+		props[k] = v
+	}
 	if in.ValueType != "" {
 		props["value_type"] = in.ValueType
 	}
