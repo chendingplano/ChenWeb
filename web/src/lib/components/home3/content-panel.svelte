@@ -51,6 +51,7 @@
 	import ReviewExternalResourcesView from '$lib/components/home3/review-external-resources-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
 	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
+	import KeywordRewriteRulesView from '$lib/components/home3/keyword-rewrite-rules-view.svelte';
 	import Canvas01 from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01 from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -310,6 +311,8 @@
 			<ProjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-videos'}
 			<VideoManagementView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-keyword-rewrite-rules'}
+			<KeywordRewriteRulesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-external-terminology'}
 			<ExternalTerminologyResourcesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-review-external-terminology'}

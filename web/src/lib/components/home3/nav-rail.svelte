@@ -290,6 +290,11 @@
 						}
 					]
 				},
+				{
+					id: 'sysadmin-keyword-normalization',
+					label: 'Keyword Normalization',
+					children: [{ id: 'sysadmin-keyword-rewrite-rules', label: 'Rewrite Rules' }]
+				},
 				{ id: 'sysadmin-schedules', label: 'Schedules' },
 				{
 					id: 'sysadmin-doc-process-pipeline',

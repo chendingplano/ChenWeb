@@ -151,39 +151,41 @@ type FrontendConfigSection struct {
 	AnnouncementsMax *int `mapstructure:"announcements_max"`
 }
 
-// OntologyTermPropertyMapEntry is one configured field->property mapping for
-// an artifact type's class-identity signature (ADR 2026082203 DR4). Identity
-// and Dimension replace the flat "artifact_type:field:property" string
-// format (bug 2026082101 finding 2 follow-up), which could not carry these
-// two extra attributes cleanly.
+// OntologyTermPropertyMapEntry is one configured field->property mapping,
+// shared by both [ontology_term_property_map] (class-level,
+// kb.ontology_terms.properties) and [semantic_assertion_property_map]
+// (instance-level, kb.semantic_assertions.qualifiers) (openspec change
+// governed-property-normalization). Identity and Normalize replace the
+// original flat "artifact_type:field:property" string format (bug
+// 2026082101 finding 2 follow-up; ADR 2026082203 DR4), which could not carry
+// these extra attributes cleanly.
 type OntologyTermPropertyMapEntry struct {
 	// Field is the dotted path into the artifact's field map, e.g.
 	// "ext_info.object_name".
 	Field string `mapstructure:"field"`
-	// Property is the key written into kb.ontology_terms.properties.
+	// Property is the key written into the target properties/qualifiers bag.
 	Property string `mapstructure:"property"`
 	// Identity marks this field as participating in class-identity
-	// signature matching (ADR 2026082203 DR2/DR5). When true, Dimension
-	// must name a kb.governed_property_value_map dimension to resolve
-	// against; the written property takes the {"raw":..., "term_id":...}
-	// shape instead of a plain value.
+	// signature matching (ADR 2026082203 DR2/DR5). Meaningless on the
+	// instance side ([semantic_assertion_property_map]) -- instance fields
+	// never gate class matching. Independent of Normalize: a field may be
+	// identity-bearing without being resolved (stays a plain value,
+	// contributes nothing to signature matching), resolved without being
+	// identity-bearing, both, or neither.
 	Identity bool `mapstructure:"identity"`
-	// Dimension is the kb.governed_property_value_map dimension this field
-	// resolves against. Only meaningful when Identity is true.
-	Dimension string `mapstructure:"dimension"`
-}
-
-// SemanticAssertionPropertyMapConfig holds the operator-configured
-// "artifact_type:table_field_name:property_name" entries that expose
-// instance-level already-extracted artifact fields onto
-// kb.semantic_assertions.qualifiers (bug 2026082101 findings 6/8: this is
-// the instance-scoped counterpart to [ontology_term_property_map], which is
-// class-scoped). Unlike the class-scoped map (ADR 2026082203 DR4), this
-// section keeps its flat string format -- instance-level fields never
-// participate in class-identity signature matching. Configured via
-// [semantic_assertion_property_map] in config.toml / config.local.toml.
-type SemanticAssertionPropertyMapConfig struct {
-	PropertyMap []string `mapstructure:"property_map"`
+	// Normalize names which resolution method produces this field's
+	// {"raw":..,"resolved":..} shape, or is empty for a plain value with no
+	// resolution at all. One of "" (unset), "system" (a field-specific,
+	// hand-built mechanism -- e.g. a curated bucket map), "simple"
+	// (deterministic string normalization only, no DB -- semid.Normalizer),
+	// "moderate" (tiers 0-3 of names.Resolver/KeywordFamily -- table-backed,
+	// no fuzzy matching; recognized but not yet implemented, see openspec
+	// change governed-property-normalization design.md), "strong" (the full
+	// tiers 0-5 ladder, names.Resolver). Any other value fails config load.
+	// The property-building function itself never branches on which of
+	// these is set -- it only checks whether Normalize is non-empty and
+	// looks up an already-computed resolved value supplied by the caller.
+	Normalize string `mapstructure:"normalize"`
 }
 
 type SystemConfigSection struct {
@@ -238,9 +240,11 @@ type AppConfigDef struct {
 	OntologyTermPropertyMap map[string][]OntologyTermPropertyMapEntry `mapstructure:"ontology_term_property_map"`
 	// SemanticAssertionPropertyMap configures which already-extracted
 	// artifact fields are exposed onto kb.semantic_assertions.qualifiers,
-	// per artifact type. Configured via [semantic_assertion_property_map]
-	// in config.toml / config.local.toml.
-	SemanticAssertionPropertyMap SemanticAssertionPropertyMapConfig `mapstructure:"semantic_assertion_property_map"`
+	// per artifact type, in the same table-array shape as
+	// OntologyTermPropertyMap (Identity is unread on this path -- instance
+	// fields never gate class matching). Configured via
+	// [semantic_assertion_property_map] in config.toml / config.local.toml.
+	SemanticAssertionPropertyMap map[string][]OntologyTermPropertyMapEntry `mapstructure:"semantic_assertion_property_map"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review
@@ -319,6 +323,9 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 	appConfigViper = appVp
 
 	warnOnMissingIdentityPropertyMap(logger)
+	if err := validateNormalizePropertyMaps(); err != nil {
+		return err
+	}
 
 	err := ApiUtils.LoadConfig(ctx, logger, configPath)
 	if err != nil {
@@ -437,6 +444,50 @@ func warnOnMissingIdentityPropertyMap(logger ApiTypes.JimoLogger) {
 	}
 }
 
+// validNormalizeMethods are the only recognized [ontology_term_property_map]/
+// [semantic_assertion_property_map] `normalize` values (openspec change
+// governed-property-normalization). "moderate" is a real, named method
+// (tiers 0-3 of names.Resolver/KeywordFamily) but has no implementation yet
+// -- KeywordFamily's tier ladder has no stopping-point parameter today, and
+// building one with no real caller would be speculative -- so it is
+// recognized-but-rejected, distinct from a genuinely unrecognized string.
+var validNormalizeMethods = map[string]bool{
+	"":       true,
+	"system": true,
+	"simple": true,
+	"strong": true,
+}
+
+// validateNormalizePropertyMaps fails config load (not a warning -- this is
+// a real misconfiguration, not a benign edge case) when any
+// [ontology_term_property_map]/[semantic_assertion_property_map] entry's
+// `normalize` value is not empty, "system", "simple", or "strong".
+// "moderate" gets its own distinct error message naming it as unimplemented
+// rather than unrecognized.
+func validateNormalizePropertyMaps() error {
+	for _, section := range []struct {
+		name    string
+		entries map[string][]OntologyTermPropertyMapEntry
+	}{
+		{"ontology_term_property_map", AppConfig.OntologyTermPropertyMap},
+		{"semantic_assertion_property_map", AppConfig.SemanticAssertionPropertyMap},
+	} {
+		for artifactType, list := range section.entries {
+			for _, entry := range list {
+				if entry.Normalize == "moderate" {
+					return fmt.Errorf("(MID_26031007) [%s.%s] field %q: normalize = \"moderate\" is a recognized method with no implementation yet",
+						section.name, artifactType, entry.Field)
+				}
+				if !validNormalizeMethods[entry.Normalize] {
+					return fmt.Errorf("(MID_26031007) [%s.%s] field %q: unrecognized normalize value %q",
+						section.name, artifactType, entry.Field, entry.Normalize)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // GetOntologyTermPropertyMap returns the configured entries from
 // [ontology_term_property_map], keyed by artifact type
 // (e.g. [[ontology_term_property_map.metric]]). Returns nil when unset, in
@@ -446,13 +497,12 @@ func GetOntologyTermPropertyMap() map[string][]OntologyTermPropertyMapEntry {
 	return AppConfig.OntologyTermPropertyMap
 }
 
-// GetSemanticAssertionPropertyMap returns the configured
-// "artifact_type:field:property" entries for
-// [semantic_assertion_property_map]. Returns nil/empty when no such section
-// is present, in which case kb.semantic_assertions.qualifiers gets no
+// GetSemanticAssertionPropertyMap returns the configured entries from
+// [semantic_assertion_property_map], keyed by artifact type. Returns nil
+// when unset, in which case kb.semantic_assertions.qualifiers gets no
 // configured instance-level fields.
-func GetSemanticAssertionPropertyMap() []string {
-	return AppConfig.SemanticAssertionPropertyMap.PropertyMap
+func GetSemanticAssertionPropertyMap() map[string][]OntologyTermPropertyMapEntry {
+	return AppConfig.SemanticAssertionPropertyMap
 }
 
 // GetWorkspaceContentConfig returns the configured /semos/workspace content

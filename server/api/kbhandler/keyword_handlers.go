@@ -15,6 +15,42 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+func requireKeywordRewriteAdmin(c echo.Context, loc string) (ApiTypes.RequestContext, error) {
+	rc := EchoFactory.NewFromEcho(c, loc)
+	user := rc.IsAuthenticated()
+	if user == nil {
+		return rc, c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authentication required (" + loc + ")"})
+	}
+	admin := user.IsOwner || user.Admin
+	if !admin {
+		for _, role := range user.Roles {
+			role = strings.ToLower(strings.TrimSpace(role))
+			if role == "admin" || role == "root" {
+				admin = true
+				break
+			}
+		}
+	}
+	if !admin {
+		return rc, c.JSON(http.StatusForbidden, errorResponse{Status: false, ErrorMsg: "admin access required (" + loc + ")"})
+	}
+	return rc, nil
+}
+
+func rewriteRuleError(c echo.Context, logger interface{ Error(string, ...any) }, op, loc string, err error) error {
+	logger.Error(op, "err", err)
+	switch {
+	case errors.Is(err, keywords.ErrRewriteRuleInvalid):
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid rewrite rule (" + loc + ")"})
+	case errors.Is(err, keywords.ErrRewriteRuleNotFound), errors.Is(err, sql.ErrNoRows):
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "rewrite rule not found (" + loc + ")"})
+	case strings.Contains(err.Error(), "23505"):
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "rewrite rule already exists (" + loc + ")"})
+	default:
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "rewrite rule operation failed (" + loc + ")"})
+	}
+}
+
 // -- Concept handlers ---------------------------------------------------------
 
 // ListKeywordConcepts handles GET /api/v1/kb/keyword-concepts
@@ -330,7 +366,11 @@ func LockKeywordSurface(c echo.Context) error {
 
 // CreateKeywordRewriteRule handles POST /api/v1/kb/keyword-rewrite-rules
 func CreateKeywordRewriteRule(c echo.Context) error {
-	rc := EchoFactory.NewFromEcho(c, "CWB_KB_KW_200")
+	rc, authErr := requireKeywordRewriteAdmin(c, "CWB_KB_KW_200")
+	if authErr != nil {
+		rc.Close()
+		return authErr
+	}
 	defer rc.Close()
 	logger := rc.GetLogger()
 
@@ -340,24 +380,29 @@ func CreateKeywordRewriteRule(c echo.Context) error {
 		Replacement string `json:"replacement"`
 		Scope       string `json:"scope"`
 		Provenance  string `json:"provenance"`
+		Enabled     *bool  `json:"enabled"`
 	}
-	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+	if err := decodeStrictJSON(c, &payload); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_KW_201)"})
 	}
 
 	store := keywords.RewriteRuleStore{DB: ApiTypes.ProjectDBHandle}
+	enabled := false
+	if payload.Enabled != nil {
+		enabled = *payload.Enabled
+	}
 	created, err := store.CreateRule(c.Request().Context(), keywords.RewriteRule{
 		RuleID:      payload.RuleID,
 		Pattern:     payload.Pattern,
 		Replacement: payload.Replacement,
 		Scope:       payload.Scope,
 		Provenance:  payload.Provenance,
+		Enabled:     enabled,
 	})
 	if err != nil {
-		logger.Error("create keyword rewrite rule failed", "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create keyword rewrite rule (CWB_KB_KW_202)"})
+		return rewriteRuleError(c, logger, "create keyword rewrite rule failed", "CWB_KB_KW_202", err)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "record": created})
+	return c.JSON(http.StatusCreated, map[string]any{"status": true, "record": created})
 }
 
 // ListKeywordRewriteRules handles GET /api/v1/kb/keyword-rewrite-rules
@@ -377,7 +422,11 @@ func ListKeywordRewriteRules(c echo.Context) error {
 
 // ToggleKeywordRewriteRule handles PUT /api/v1/kb/keyword-rewrite-rules/:rule_id/enabled
 func ToggleKeywordRewriteRule(c echo.Context) error {
-	rc := EchoFactory.NewFromEcho(c, "CWB_KB_KW_220")
+	rc, authErr := requireKeywordRewriteAdmin(c, "CWB_KB_KW_220")
+	if authErr != nil {
+		rc.Close()
+		return authErr
+	}
 	defer rc.Close()
 	logger := rc.GetLogger()
 
@@ -386,16 +435,77 @@ func ToggleKeywordRewriteRule(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid rule_id (CWB_KB_KW_221)"})
 	}
 	var payload struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool `json:"enabled"`
 	}
-	_ = json.NewDecoder(c.Request().Body).Decode(&payload)
+	if err := decodeStrictJSON(c, &payload); err != nil || payload.Enabled == nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "enabled is required (CWB_KB_KW_223)"})
+	}
 
 	store := keywords.RewriteRuleStore{DB: ApiTypes.ProjectDBHandle}
-	if err := store.UpdateRuleEnabled(c.Request().Context(), ruleID, payload.Enabled); err != nil {
-		logger.Error("toggle keyword rewrite rule failed", "rule_id", ruleID, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to toggle keyword rewrite rule (CWB_KB_KW_222)"})
+	if err := store.UpdateRuleEnabled(c.Request().Context(), ruleID, *payload.Enabled); err != nil {
+		return rewriteRuleError(c, logger, "toggle keyword rewrite rule failed", "CWB_KB_KW_222", err)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "message": "updated"})
+	got, err := store.GetRule(c.Request().Context(), ruleID)
+	if err != nil {
+		return rewriteRuleError(c, logger, "read toggled keyword rewrite rule failed", "CWB_KB_KW_224", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "record": got})
+}
+
+func AdminListKeywordRewriteRules(c echo.Context) error {
+	rc, err := requireKeywordRewriteAdmin(c, "CWB_KB_KW_230")
+	if err != nil {
+		rc.Close()
+		return err
+	}
+	defer rc.Close()
+	list, err := (keywords.RewriteRuleStore{DB: ApiTypes.ProjectDBHandle}).ListRules(c.Request().Context(), c.QueryParam("scope"))
+	if err != nil {
+		return rewriteRuleError(c, rc.GetLogger(), "list keyword rewrite rules failed", "CWB_KB_KW_231", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "results": list, "total": len(list)})
+}
+
+func ListKeywordRewriteScopes(c echo.Context) error {
+	rc, err := requireKeywordRewriteAdmin(c, "CWB_KB_KW_240")
+	if err != nil {
+		rc.Close()
+		return err
+	}
+	defer rc.Close()
+	scopes, err := (keywords.RewriteRuleStore{DB: ApiTypes.ProjectDBHandle}).ListScopes(c.Request().Context())
+	if err != nil {
+		return rewriteRuleError(c, rc.GetLogger(), "list keyword rewrite scopes failed", "CWB_KB_KW_241", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "results": scopes, "total": len(scopes)})
+}
+
+func UpdateKeywordRewriteRule(c echo.Context) error {
+	rc, authErr := requireKeywordRewriteAdmin(c, "CWB_KB_KW_250")
+	if authErr != nil {
+		rc.Close()
+		return authErr
+	}
+	defer rc.Close()
+	var payload struct {
+		Pattern     string `json:"pattern"`
+		Replacement string `json:"replacement"`
+		Scope       string `json:"scope"`
+		Enabled     *bool  `json:"enabled"`
+		Provenance  string `json:"provenance"`
+	}
+	if err := decodeStrictJSON(c, &payload); err != nil || payload.Enabled == nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid complete rewrite rule (CWB_KB_KW_251)"})
+	}
+	ruleID := strings.TrimSpace(c.Param("rule_id"))
+	if ruleID == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid rule_id (CWB_KB_KW_252)"})
+	}
+	updated, err := (keywords.RewriteRuleStore{DB: ApiTypes.ProjectDBHandle}).UpdateRule(c.Request().Context(), ruleID, keywords.RewriteRule{Pattern: payload.Pattern, Replacement: payload.Replacement, Scope: payload.Scope, Enabled: *payload.Enabled, Provenance: payload.Provenance})
+	if err != nil {
+		return rewriteRuleError(c, rc.GetLogger(), "update keyword rewrite rule failed", "CWB_KB_KW_253", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "record": updated})
 }
 
 // -- Resolution handler -------------------------------------------------------

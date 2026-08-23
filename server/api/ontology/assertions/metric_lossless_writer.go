@@ -287,10 +287,14 @@ func resolveOrCreateMetricClass(ctx context.Context, tx *sql.Tx, candidateTermID
 
 // resolvedSignatureDimensions extracts the occurrence's resolved
 // identity-bearing signature dimensions from ExtraProperties -- only
-// entries in BuildSignatureProperties' {"raw":..., "term_id":...} shape
-// (ADR 2026082203 DR2) with a non-empty term_id count as "resolved" for
-// signature matching. A plain (non-identity) property value is silently
-// skipped, not an error -- it simply carries no identity signal.
+// entries in BuildConfiguredProperties' {"raw":..., "resolved":...} shape
+// (openspec change governed-property-normalization) with a non-empty
+// resolved value count as "resolved" for signature matching. A plain
+// (non-normalized) property value is silently skipped, not an error -- it
+// simply carries no identity signal. This is mechanism-agnostic: a
+// "resolved" value may have come from keyword-concept identity resolution
+// (metric_name/subject), a curated bucket map (value_class/value_type/
+// range_type), or any future method -- the shape is uniform regardless.
 func resolvedSignatureDimensions(extraProperties map[string]any) map[string]string {
 	resolved := map[string]string{}
 	for property, v := range extraProperties {
@@ -298,11 +302,11 @@ func resolvedSignatureDimensions(extraProperties map[string]any) map[string]stri
 		if !ok {
 			continue
 		}
-		termID, _ := entry["term_id"].(string)
-		if termID == "" {
+		value, _ := entry["resolved"].(string)
+		if value == "" {
 			continue
 		}
-		resolved[property] = termID
+		resolved[property] = value
 	}
 	return resolved
 }
@@ -312,7 +316,7 @@ func resolvedSignatureDimensions(extraProperties map[string]any) map[string]stri
 // occurrence's resolved identity-bearing dimensions.
 //
 // A candidate class must share at least one dimension resolved to the same
-// non-null term_id on both sides to count as a match at all -- "matches on
+// non-empty value on both sides to count as a match at all -- "matches on
 // every dimension resolved on both sides" is otherwise vacuously true for
 // zero shared dimensions, which would match every class in the catalog to a
 // wholly-unresolved occurrence (design.md D3 gap-fix 1). Among qualifying
@@ -338,7 +342,7 @@ WHERE term_kind = $1 AND status IN ('included_in_release', 'auto-promoted') AND 
 	for _, property := range properties {
 		args = append(args, property, resolved[property])
 		dimArg, valueArg := len(args)-1, len(args)
-		query += fmt.Sprintf(" AND (properties->$%d->>'term_id' IS NULL OR properties->$%d->>'term_id' = $%d)", dimArg, dimArg, valueArg)
+		query += fmt.Sprintf(" AND (properties->$%d->>'resolved' IS NULL OR properties->$%d->>'resolved' = $%d)", dimArg, dimArg, valueArg)
 	}
 
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -369,7 +373,7 @@ WHERE term_kind = $1 AND status IN ('included_in_release', 'auto-promoted') AND 
 			if !ok {
 				continue
 			}
-			if t, _ := entry["term_id"].(string); t != "" && t == resolved[property] {
+			if v, _ := entry["resolved"].(string); v != "" && v == resolved[property] {
 				agreement++
 			}
 		}

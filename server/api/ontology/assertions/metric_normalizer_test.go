@@ -185,7 +185,7 @@ func resolveMetricValueLegacy(r metricRow) parsedThreshold {
 
 func metricCandidatePayloadForRowLegacy(t *testing.T, r metricRow) map[string]any {
 	t.Helper()
-	payload, err := metricCandidatePayloadForRow(context.Background(), GovernedPropertyResolver{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", nil, nil, 0)
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", nil, nil, 0)
 	if err != nil {
 		t.Fatalf("metricCandidatePayloadForRow: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestMetricCandidatePayloadForRowAppliesClassPropertyMap(t *testing.T) {
 		{Field: "ext_info.object_name", Property: "object_name"},
 	}
 
-	payload, err := metricCandidatePayloadForRow(context.Background(), GovernedPropertyResolver{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 0)
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 0)
 	if err != nil {
 		t.Fatalf("metricCandidatePayloadForRow: %v", err)
 	}
@@ -271,12 +271,12 @@ func TestMetricCandidatePayloadForRowAppliesQualifierMap(t *testing.T) {
 	r := metricRowFixture()
 	r.MetricSubject = ns("有机质")
 	r.Condition = ns("烘干基计")
-	qualifierMappings := ParsePropertyMap([]string{
-		"metric:metric_subject:subject",
-		"metric:condition:condition",
-	})["metric"]
+	qualifierEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "metric_subject", Property: "subject"},
+		{Field: "condition", Property: "condition"},
+	}
 
-	payload, err := metricCandidatePayloadForRow(context.Background(), GovernedPropertyResolver{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", nil, qualifierMappings, 0)
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", nil, qualifierEntries, 0)
 	if err != nil {
 		t.Fatalf("metricCandidatePayloadForRow: %v", err)
 	}
@@ -293,29 +293,20 @@ func TestMetricCandidatePayloadForRowAppliesQualifierMap(t *testing.T) {
 	}
 }
 
-// TestMetricCandidatePayloadForRowIdentityFieldResolvesApprovedTerm locks in
-// ADR 2026082203 DR2: an identity=true configured field resolves through
-// GovernedPropertyResolver and lands in class_properties as
-// {"raw":..., "term_id":...}, not a plain value.
-func TestMetricCandidatePayloadForRowIdentityFieldResolvesApprovedTerm(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery(regexp.QuoteMeta(governedPropertyValueMapSelectSQL)).
-		WillReturnRows(sqlmock.NewRows([]string{"dimension", "raw_value", "term_id", "status"}).
-			AddRow("metric_subject", "youjizhi", "measurement:subj_organic_matter", "approved"))
-
+// TestMetricCandidatePayloadForRowSubjectResolvesFromPrecomputedConceptID
+// locks in the "strong" method's shape (openspec change
+// governed-property-normalization): subject's keyword-concept id is resolved
+// upstream (extract-metrics.go, names.Resolver) and merely read here, not
+// resolved via a DB call inside metricCandidatePayloadForRow itself.
+func TestMetricCandidatePayloadForRowSubjectResolvesFromPrecomputedConceptID(t *testing.T) {
 	r := metricRowFixture()
 	r.MetricSubject = ns("youjizhi")
+	r.SubjectConceptID = ns("kwc_subj_organic_matter")
 	classEntries := []appconfig.OntologyTermPropertyMapEntry{
-		{Field: "metric_subject", Property: "subject", Identity: true, Dimension: "metric_subject"},
+		{Field: "metric_subject", Property: "subject", Identity: true, Normalize: "strong"},
 	}
 
-	resolver := GovernedPropertyResolver{DB: db, cache: &governedPropertyValueMapCache{}}
-	payload, err := metricCandidatePayloadForRow(context.Background(), resolver, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 900)
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 900)
 	if err != nil {
 		t.Fatalf("metricCandidatePayloadForRow: %v", err)
 	}
@@ -323,7 +314,71 @@ func TestMetricCandidatePayloadForRowIdentityFieldResolvesApprovedTerm(t *testin
 	if !ok {
 		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
 	}
-	want := map[string]any{"subject": map[string]any{"raw": "youjizhi", "term_id": "measurement:subj_organic_matter"}}
+	want := map[string]any{"subject": map[string]any{"raw": "youjizhi", "resolved": "kwc_subj_organic_matter"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("class_properties = %#v, want %#v", got, want)
+	}
+}
+
+// TestMetricCandidatePayloadForRowValueClassResolvesViaSimpleNormalizer
+// locks in the "simple" method: value_class normalizes case/whitespace
+// deterministically, with no DB interaction at all (ValueBucketMapper{} has
+// a nil DB -- a call would panic/error if this test reached one).
+func TestMetricCandidatePayloadForRowValueClassResolvesViaSimpleNormalizer(t *testing.T) {
+	r := metricRowFixture()
+	r.ValueClass = ns("  Requirement  ")
+	classEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "value_class", Property: "value_class", Identity: true, Normalize: "simple"},
+	}
+
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 901)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["class_properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
+	}
+	want := map[string]any{"value_class": map[string]any{"raw": "  Requirement  ", "resolved": "requirement"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("class_properties = %#v, want %#v", got, want)
+	}
+}
+
+// TestMetricCandidatePayloadForRowValueTypeResolvesViaBucketMapperProposed
+// locks in the "system" method for value_type: a first-seen raw value
+// resolves via kb.metric_value_bucket_map and, being freshly proposed
+// (never approved), carries an empty resolved value -- distinct from
+// value_class/subject/metric_name, which cannot be in this state.
+func TestMetricCandidatePayloadForRowValueTypeResolvesViaBucketMapperProposed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(valueBucketMapSelectSQL)).
+		WillReturnRows(sqlmock.NewRows([]string{"dimension", "raw_value", "canonical_bucket", "status"}))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.metric_value_bucket_map")).
+		WithArgs("value_type", "ratio", int64(902)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	r := metricRowFixture()
+	r.ValueDataType = ns("ratio")
+	classEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "value_data_type", Property: "value_type", Normalize: "system"},
+	}
+
+	bucketMapper := ValueBucketMapper{DB: db, cache: &valueBucketMapCache{}}
+	payload, err := metricCandidatePayloadForRow(context.Background(), bucketMapper, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 902)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["class_properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
+	}
+	want := map[string]any{"value_type": map[string]any{"raw": "ratio", "resolved": ""}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("class_properties = %#v, want %#v", got, want)
 	}
@@ -332,31 +387,21 @@ func TestMetricCandidatePayloadForRowIdentityFieldResolvesApprovedTerm(t *testin
 	}
 }
 
-// TestMetricCandidatePayloadForRowIdentityFieldUnresolvedIsNullTermID locks
-// in DR2's "unresolved, not absent" distinction: a proposed (not yet
-// approved) mapping still writes the raw value with an explicit nil
-// term_id, distinguishable from a field that isn't configured at all.
-func TestMetricCandidatePayloadForRowIdentityFieldUnresolvedIsNullTermID(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery(regexp.QuoteMeta(governedPropertyValueMapSelectSQL)).
-		WillReturnRows(sqlmock.NewRows([]string{"dimension", "raw_value", "term_id", "status"}))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO kb.governed_property_value_map")).
-		WithArgs("metric_value_class", "yaoqiu", int64(901)).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
+// TestMetricCandidatePayloadForRowRangeTypeReusesCanonicalBucketNoNewCall
+// locks in the "system" method for range_type: it reuses the canonicalBucket
+// already computed by ValueRangeTypeMapper.Lookup (metric_normalizer.go's
+// Normalize loop) rather than issuing a second lookup here.
+func TestMetricCandidatePayloadForRowRangeTypeReusesCanonicalBucketNoNewCall(t *testing.T) {
 	r := metricRowFixture()
-	r.ValueClass = ns("yaoqiu")
+	r.ValueRangeType = ns("interval")
 	classEntries := []appconfig.OntologyTermPropertyMapEntry{
-		{Field: "value_class", Property: "value_class", Identity: true, Dimension: "metric_value_class"},
+		{Field: "value_range_type", Property: "range_type", Normalize: "system"},
 	}
 
-	resolver := GovernedPropertyResolver{DB: db, cache: &governedPropertyValueMapCache{}}
-	payload, err := metricCandidatePayloadForRow(context.Background(), resolver, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 901)
+	// canonicalBucket ("range") is passed in directly, as if
+	// ValueRangeTypeMapper.Lookup already resolved it -- ValueBucketMapper{}
+	// (nil DB) proves no second lookup happens for this field.
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, "range", "approved", classEntries, nil, 903)
 	if err != nil {
 		t.Fatalf("metricCandidatePayloadForRow: %v", err)
 	}
@@ -364,18 +409,33 @@ func TestMetricCandidatePayloadForRowIdentityFieldUnresolvedIsNullTermID(t *test
 	if !ok {
 		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
 	}
-	entry, ok := got["value_class"].(map[string]any)
+	want := map[string]any{"range_type": map[string]any{"raw": "interval", "resolved": "range"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("class_properties = %#v, want %#v", got, want)
+	}
+}
+
+// TestMetricCandidatePayloadForRowObjectNameStaysPlainEvenWhenIdentity locks
+// in that object_name is excluded from resolution entirely (openspec change
+// governed-property-normalization): identity=true with no Normalize stays a
+// plain value, never {"raw":..,"resolved":..}.
+func TestMetricCandidatePayloadForRowObjectNameStaysPlainEvenWhenIdentity(t *testing.T) {
+	r := metricRowFixture()
+	r.ExtInfo = json.RawMessage(`{"object_name":"肥料"}`)
+	classEntries := []appconfig.OntologyTermPropertyMapEntry{
+		{Field: "ext_info.object_name", Property: "object_name", Identity: true},
+	}
+
+	payload, err := metricCandidatePayloadForRow(context.Background(), ValueBucketMapper{}, r, CanonicalMetricValueRangeType(r.ValueRangeType.String), "approved", classEntries, nil, 904)
+	if err != nil {
+		t.Fatalf("metricCandidatePayloadForRow: %v", err)
+	}
+	got, ok := payload["class_properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("class_properties[value_class] = %#v, want a map", got["value_class"])
+		t.Fatalf("class_properties = %#v, want a map", payload["class_properties"])
 	}
-	if entry["raw"] != "yaoqiu" {
-		t.Fatalf("raw = %#v, want yaoqiu", entry["raw"])
-	}
-	if termID, present := entry["term_id"]; !present || termID != nil {
-		t.Fatalf("term_id = %#v (present=%v), want nil but present", termID, present)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+	if got["object_name"] != "肥料" {
+		t.Fatalf("object_name = %#v, want plain string 肥料", got["object_name"])
 	}
 }
 

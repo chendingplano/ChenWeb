@@ -316,14 +316,19 @@ type metricCandidatePayload struct {
 	// before class creation moved here (bug 2026082101 findings 1/5).
 	Definition string `json:"definition"`
 	// ValueDataType is kb.metrics.value_data_type (e.g. "number", "text"),
-	// a class-level fact about the metric_definition term (bug 2026082101
-	// finding 6).
+	// forwarded into ClassSynthesisInput.ValueType. The class-identity-
+	// signature and instance-qualifier copies of this same source field
+	// (property "value_type") flow through the separate, config-driven
+	// [ontology_term_property_map]/[semantic_assertion_property_map] path
+	// instead (openspec change governed-property-normalization) -- via
+	// metricFieldMap's own "value_data_type" key, not this struct field.
 	ValueDataType string `json:"value_data_type"`
 	// ValueRangeTypeText is kb.metrics.value_range_type's raw classification
-	// text (e.g. "exact", "range", "lower_bound") -- a class-level fact,
-	// distinct from ValueRangeTypeLookup/ValueRangeTypeRaw above, which are
-	// the governed-mapping bookkeeping for the *value* on this occurrence,
-	// not the class.
+	// text (e.g. "exact", "range", "lower_bound"), forwarded into
+	// ClassSynthesisInput.RangeType -- distinct from ValueRangeTypeLookup/
+	// ValueRangeTypeRaw above, which are the governed-mapping bookkeeping for
+	// the *value* on this occurrence, not the class. Same config-driven
+	// "range_type" property path note as ValueDataType above applies here.
 	ValueRangeTypeText string `json:"value_range_type_text"`
 	// ExtraProperties holds class-level fields configured via
 	// [ontology_term_property_map] (bug 2026082101 finding 6: class-level

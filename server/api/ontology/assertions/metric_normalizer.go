@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/semid"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
@@ -77,6 +78,12 @@ type metricRow struct {
 	ExtInfo          json.RawMessage
 	MetricCategories sql.NullString
 	ValueDataType    sql.NullString
+	// SubjectConceptID is kb.metrics.subject_concept_id, the metric_subject
+	// dimension's keyword-concept identity (openspec change
+	// governed-property-normalization) -- resolved upstream in
+	// extract-metrics.go via names.Resolver, scope "metric_subject", the
+	// same way KeywordConceptID already is for metric_name.
+	SubjectConceptID sql.NullString
 }
 
 // Normalize implements Normalizer.
@@ -93,7 +100,7 @@ SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.form
        m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition,
        m.event_id, m.model_name, m.prompt_name,
        m.metric_desc, m.keyword_concept_id, m.metric_subject, m.reasoning_tags, m.ext_info,
-       m.metric_categories, m.value_data_type
+       m.metric_categories, m.value_data_type, m.subject_concept_id
 FROM kb.metrics m
 LEFT JOIN kb.artifact_objects ao
   ON ao.artifact_type = 'metric' AND ao.artifact_id = m.metric_id AND ao.input_record_id = m.input_record_id
@@ -106,9 +113,9 @@ WHERE m.input_record_id = $1`
 
 	dcStore := DecisionCandidateStore{DB: db}
 	mapper := NewValueRangeTypeMapper(db)
-	propResolver := NewGovernedPropertyResolver(db)
+	bucketMapper := NewValueBucketMapper(db)
 	classPropertyEntries := appconfig.GetOntologyTermPropertyMap()["metric"]
-	qualifierMappings := ParsePropertyMap(appconfig.GetSemanticAssertionPropertyMap())["metric"]
+	qualifierEntries := appconfig.GetSemanticAssertionPropertyMap()["metric"]
 	for rows.Next() {
 		var r metricRow
 		if err := rows.Scan(&r.ID, &r.MetricID, &r.MetricName, &r.MetricUnit, &r.MetricUnitEn, &r.FormulaOrDefinition, &r.MetricDefinitionTermID,
@@ -116,7 +123,7 @@ WHERE m.input_record_id = $1`
 			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition,
 			&r.EventID, &r.ModelName, &r.PromptName,
 			&r.MetricDesc, &r.KeywordConceptID, &r.MetricSubject, &r.ReasoningTags, &r.ExtInfo,
-			&r.MetricCategories, &r.ValueDataType); err != nil {
+			&r.MetricCategories, &r.ValueDataType, &r.SubjectConceptID); err != nil {
 			return report, err
 		}
 		report.Examined++
@@ -130,7 +137,7 @@ WHERE m.input_record_id = $1`
 		if err != nil {
 			return report, fmt.Errorf("value_range_type lookup for metric %s: %w", metricID, err)
 		}
-		payload, err := metricCandidatePayloadForRow(ctx, propResolver, r, canonicalBucket, lookupStatus, classPropertyEntries, qualifierMappings, inputRecordID)
+		payload, err := metricCandidatePayloadForRow(ctx, bucketMapper, r, canonicalBucket, lookupStatus, classPropertyEntries, qualifierEntries, inputRecordID)
 		if err != nil {
 			return report, fmt.Errorf("build class properties for metric %s: %w", metricID, err)
 		}
@@ -168,7 +175,7 @@ WHERE m.input_record_id = $1`
 	return report, rows.Err()
 }
 
-func metricCandidatePayloadForRow(ctx context.Context, propResolver GovernedPropertyResolver, r metricRow, canonicalBucket, lookupStatus string, classPropertyEntries []appconfig.OntologyTermPropertyMapEntry, qualifierMappings []PropertyMapping, inputRecordID int64) (map[string]any, error) {
+func metricCandidatePayloadForRow(ctx context.Context, bucketMapper ValueBucketMapper, r metricRow, canonicalBucket, lookupStatus string, classPropertyEntries []appconfig.OntologyTermPropertyMapEntry, qualifierEntries []appconfig.OntologyTermPropertyMapEntry, inputRecordID int64) (map[string]any, error) {
 	unit := r.MetricUnit.String
 	if unit == "" {
 		unit = r.MetricUnitEn.String
@@ -234,14 +241,33 @@ func metricCandidatePayloadForRow(ctx context.Context, propResolver GovernedProp
 	}
 
 	fieldMap := metricFieldMap(r, unit)
-	classProperties, err := BuildSignatureProperties(ctx, propResolver, classPropertyEntries, fieldMap, inputRecordID)
+
+	// resolved holds the already-computed resolved value for every
+	// normalize-configured field, keyed by field name -- BuildConfiguredProperties
+	// itself never computes a resolved value, only wraps whichever one is
+	// here (openspec change governed-property-normalization). metric_name/
+	// metric_subject reuse concept ids already resolved upstream (strong
+	// method, names.Resolver); value_range_type reuses the canonicalBucket
+	// already computed above (system method, kb.metric_value_range_type_map,
+	// unmodified); value_class is normalized inline (simple method, no DB);
+	// value_data_type resolves via the new bucket map (system method,
+	// kb.metric_value_bucket_map).
+	valueTypeBucket, _, err := bucketMapper.Lookup(ctx, "value_type", r.ValueDataType.String, inputRecordID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("value_type bucket lookup: %w", err)
 	}
-	if classProperties != nil {
+	resolved := map[string]string{
+		"metric_name":      r.KeywordConceptID.String,
+		"metric_subject":   r.SubjectConceptID.String,
+		"value_range_type": canonicalBucket,
+		"value_class":      semid.Normalizer{Version: semid.CurrentNormalizerVersion}.Normalize(r.ValueClass.String).Norm,
+		"value_data_type":  valueTypeBucket,
+	}
+
+	if classProperties := BuildConfiguredProperties(classPropertyEntries, fieldMap, resolved); classProperties != nil {
 		payload["class_properties"] = classProperties
 	}
-	if qualifiers := BuildMappedProperties(qualifierMappings, fieldMap); qualifiers != nil {
+	if qualifiers := BuildConfiguredProperties(qualifierEntries, fieldMap, resolved); qualifiers != nil {
 		payload["qualifiers"] = qualifiers
 	}
 	return payload, nil

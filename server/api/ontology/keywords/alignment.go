@@ -300,26 +300,28 @@ type TermSynthesisInput struct {
 	// ExtraProperties holds additional artifact fields the operator has
 	// exposed onto kb.ontology_terms.properties via
 	// [ontology_term_property_map] in config.toml/config.local.toml (bug
-	// 2026082101 finding 2 follow-up). Keys are operator-configured and may
-	// vary per deployment; termProperties applies them first so the fixed
-	// synthesis fields below always win on a key collision.
+	// 2026082101 finding 2 follow-up; value_type/range_type moved here as
+	// configured, normalized fields under openspec change
+	// governed-property-normalization -- no longer unconditional fixed
+	// fields, see ValueType/RangeType below). Keys are operator-configured
+	// and may vary per deployment; termProperties applies them first so the
+	// remaining fixed synthesis fields (PermittedUnitTermIDs/RawUnit) always
+	// win on a key collision.
 	ExtraProperties map[string]any
 }
 
 // termProperties builds the kb.ontology_terms.properties payload (bug
 // 2026082101 finding 2) from the metric-only synthesis fields, keyed by
 // convention for term_kind='metric_definition'. Empty fields are omitted
-// rather than written as empty strings/arrays.
+// rather than written as empty strings/arrays. ValueType/RangeType are no
+// longer written unconditionally here (openspec change
+// governed-property-normalization) -- they're configured, normalized
+// ("system" method) fields now, sourced via ExtraProperties like any other
+// [ontology_term_property_map] entry.
 func (in TermSynthesisInput) termProperties() map[string]any {
 	props := map[string]any{}
 	for k, v := range in.ExtraProperties {
 		props[k] = v
-	}
-	if in.ValueType != "" {
-		props["value_type"] = in.ValueType
-	}
-	if in.RangeType != "" {
-		props["range_type"] = in.RangeType
 	}
 	if len(in.PermittedUnitTermIDs) > 0 {
 		props["permitted_unit_term_ids"] = in.PermittedUnitTermIDs

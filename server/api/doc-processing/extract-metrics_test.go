@@ -1489,6 +1489,7 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -1561,7 +1562,7 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
@@ -1620,7 +1621,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"value_data_type", "value_range_type", "value_class", "value_class_en",
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
 		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en",
-		"keyword_concept_id", "metric_definition_term_id", "ext_info",
+		"keyword_concept_id", "metric_definition_term_id", "subject_concept_id", "ext_info",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1629,7 +1630,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"number", "maximum", "performance", "performance",
 		"", "<=200", "daily",
 		`["performance"]`, `["performance"]`, `[{"category_path":[{"name":"System Safety"},{"name":"Alarm Thresholds"}]}]`, `[{"category_path":[{"name":"System Safety"}]}]`,
-		"kwc:latency", "mdt:latency", `{"language":"zh","schema_version":"2"}`,
+		"kwc:latency", "mdt:latency", "kwc:api", `{"language":"zh","schema_version":"2"}`,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).
@@ -2241,6 +2242,115 @@ func TestResolvingMetricsStoreRoutesBothWritePaths(t *testing.T) {
 	}
 	if _, err := s.GetMetricsByInputRecordID(ctx, 1); err != nil {
 		t.Fatalf("GetMetricsByInputRecordID: %v", err)
+	}
+}
+
+// TestResolvingMetricsStoreResolvesSubject locks in openspec change
+// governed-property-normalization: metric_subject resolves the same way
+// metric_name does, under its own dedicated scope, writing
+// subject_concept_id (never keyword_concept_id/metric_definition_term_id).
+func TestResolvingMetricsStoreResolvesSubject(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"ambient temperature": {RawName: "ambient temperature", Status: names.StatusLexicalResolved, ConceptID: "kwc_subj_ambient"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_subject": "ambient temperature"}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	m := inner.lastSave.Metrics[0]
+	if m["subject_concept_id"] != "kwc_subj_ambient" {
+		t.Fatalf("subject_concept_id=%#v, want kwc_subj_ambient", m["subject_concept_id"])
+	}
+
+	var subjectReq *names.ResolveNameRequest
+	for i := range resolver.requests {
+		if resolver.requests[i].Scope == "metric_subject" {
+			subjectReq = &resolver.requests[i]
+		}
+	}
+	if subjectReq == nil {
+		t.Fatal("no ResolveAndObserve call used scope \"metric_subject\"")
+	}
+	if subjectReq.Name != "ambient temperature" {
+		t.Fatalf("subject resolve request name=%q, want ambient temperature", subjectReq.Name)
+	}
+}
+
+// TestResolvingMetricsStoreResolvesSubjectFromRawAlias locks in that subject
+// resolution reads whichever of "metric_subject" (canonical) / "subject"
+// (raw extraction shape) is populated -- see metricFieldAliasPairs.
+func TestResolvingMetricsStoreResolvesSubjectFromRawAlias(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"rural area": {RawName: "rural area", Status: names.StatusLexicalResolved, ConceptID: "kwc_subj_rural"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"subject": "rural area"}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if got := inner.lastSave.Metrics[0]["subject_concept_id"]; got != "kwc_subj_rural" {
+		t.Fatalf("subject_concept_id=%#v, want kwc_subj_rural", got)
+	}
+}
+
+// TestResolvingMetricsStoreSubjectNeverOverwrites mirrors
+// TestResolvingMetricsStoreNeverOverwrites for subject_concept_id.
+func TestResolvingMetricsStoreSubjectNeverOverwrites(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"ambient temperature": {RawName: "ambient temperature", Status: names.StatusLexicalResolved, ConceptID: "kwc_other"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{
+			"metric_subject":     "ambient temperature",
+			"subject_concept_id": "kwc_prior",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if got := inner.lastSave.Metrics[0]["subject_concept_id"]; got != "kwc_prior" {
+		t.Fatalf("subject_concept_id=%#v, want kwc_prior preserved (never overwrite)", got)
+	}
+}
+
+// TestResolvingMetricsStoreEmptySubjectSkipped confirms an empty
+// metric_subject never triggers a resolve call or writes a key.
+func TestResolvingMetricsStoreEmptySubjectSkipped(t *testing.T) {
+	inner := &fakeMetricsStore{}
+	resolver := &scriptedNameResolver{
+		resolutions: map[string]names.NameResolution{
+			"Luminance": {RawName: "Luminance", Status: names.StatusTermResolved, ConceptID: "kwc_l", TermID: "mea:Luminance"},
+		},
+	}
+	s := &ResolvingMetricsStore{Inner: inner, Resolver: resolver}
+
+	if _, err := s.SaveMetrics(context.Background(), SaveMetricsRequest{
+		Metrics: []map[string]any{{"metric_name": "Luminance"}},
+	}); err != nil {
+		t.Fatalf("SaveMetrics: %v", err)
+	}
+	if _, ok := inner.lastSave.Metrics[0]["subject_concept_id"]; ok {
+		t.Fatalf("subject_concept_id must be absent for an empty metric_subject, got %#v", inner.lastSave.Metrics[0]["subject_concept_id"])
+	}
+	for _, req := range resolver.requests {
+		if req.Scope == "metric_subject" {
+			t.Fatalf("ResolveAndObserve must not be called for an empty metric_subject, got request %+v", req)
+		}
 	}
 }
 

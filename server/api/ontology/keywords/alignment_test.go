@@ -497,8 +497,11 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 	now := time.Now()
 	// termProperties() marshals a map[string]any; encoding/json sorts map
 	// keys alphabetically, so the byte-for-byte expected payload's key
-	// order is fixed regardless of struct field order.
-	propertiesJSON := []byte(`{"permitted_unit_term_ids":["quantity:unit_x"],"range_type":"exact","value_type":"number"}`)
+	// order is fixed regardless of struct field order. ValueType/RangeType
+	// (still set on the input below) no longer appear here -- they're
+	// configured, normalized fields now (openspec change
+	// governed-property-normalization), not unconditional fixed fields.
+	propertiesJSON := []byte(`{"permitted_unit_term_ids":["quantity:unit_x"]}`)
 
 	mock.ExpectBegin()
 	expectKeywordIdentityLock(mock)
@@ -644,12 +647,16 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAssignsLabelLanguages(t *testing.T
 			mock.ExpectQuery(regexp.QuoteMeta(acceptedForConceptSQL)).
 				WithArgs(conceptID).
 				WillReturnRows(noAlignmentRow())
-			propertiesJSON := []byte(`{"range_type":"exact","value_type":"number"}`)
+			// ValueType/RangeType are still set on the input below, but no
+			// longer land in properties (openspec change
+			// governed-property-normalization) -- with no
+			// PermittedUnitTermIDs/RawUnit/ExtraProperties set either,
+			// termProperties() now returns nil (SQL NULL), not a JSON blob.
 			mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_terms")).
 				WithArgs(
 					termID, "metric_definition", "measurement", "auto-promoted",
 					"definition", "document-derived, auto-promoted (ADR 2026081201)", nil,
-					propertiesJSON, nil, nil,
+					nil, nil, nil,
 				).
 				WillReturnRows(sqlmock.NewRows([]string{
 					"id", "term_id", "version", "term_kind", "module_id", "status",
@@ -657,7 +664,7 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAssignsLabelLanguages(t *testing.T
 					"create_time", "create_by", "modify_time", "modify_by",
 				}).AddRow(100, termID, 1, "metric_definition", "measurement", "auto-promoted",
 					"definition", "document-derived, auto-promoted (ADR 2026081201)", nil,
-					propertiesJSON, time.Now(), nil, time.Now(), nil))
+					nil, time.Now(), nil, time.Now(), nil))
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS")).
 				WithArgs(termID, tt.canonicalLang).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))

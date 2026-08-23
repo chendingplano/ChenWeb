@@ -222,6 +222,20 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 	if len(metrics) == 0 {
 		return metrics, nil
 	}
+	if err := s.resolveMetricNames(ctx, metrics); err != nil {
+		return nil, err
+	}
+	if err := s.resolveMetricSubjects(ctx, metrics); err != nil {
+		return nil, err
+	}
+	return metrics, nil
+}
+
+// resolveMetricNames is resolveAll's metric_name pass, unchanged from before
+// this file also resolved metric_subject -- split out so a batch with no
+// metric_name values (but real metric_subject values) doesn't short-circuit
+// before the subject pass ever runs.
+func (s *ResolvingMetricsStore) resolveMetricNames(ctx context.Context, metrics []map[string]any) error {
 	seen := make(map[string]bool, len(metrics))
 	var order []string
 	for _, m := range metrics {
@@ -233,7 +247,7 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 		order = append(order, name)
 	}
 	if len(order) == 0 {
-		return metrics, nil
+		return nil
 	}
 	byName := make(map[string]names.NameResolution, len(order))
 	for _, name := range order {
@@ -242,7 +256,7 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 			names.NameOccurrence{ArtifactType: "metric", ArtifactID: name, FieldPath: "metric_name", RawName: name, Scope: "_"},
 		)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		byName[name] = res
 	}
@@ -263,7 +277,55 @@ func (s *ResolvingMetricsStore) resolveAll(ctx context.Context, metrics []map[st
 			}
 		}
 	}
-	return metrics, nil
+	return nil
+}
+
+// resolveMetricSubjects gives metric_subject's class-identity signature
+// (openspec change governed-property-normalization) the same real
+// keyword-concept resolution metric_name already gets above, just under its
+// own dedicated scope ("metric_subject") so a subject string and a
+// metric_name string sharing the same characters never collide (concept ids
+// are content-hashed as sha256(norm_key|scope) -- different scope, different
+// concept space). subject can arrive under either the raw extraction key
+// ("subject") or the canonical DB-column key ("metric_subject") depending on
+// which stage of the pipeline this metric map came from (see
+// metricFieldAliasPairs) -- read whichever is populated.
+func (s *ResolvingMetricsStore) resolveMetricSubjects(ctx context.Context, metrics []map[string]any) error {
+	seen := make(map[string]bool, len(metrics))
+	var order []string
+	for _, m := range metrics {
+		subject := firstNonEmptyTrimmed(asString(m["metric_subject"]), asString(m["subject"]))
+		if subject == "" || seen[subject] {
+			continue
+		}
+		seen[subject] = true
+		order = append(order, subject)
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	bySubject := make(map[string]names.NameResolution, len(order))
+	for _, subject := range order {
+		res, err := s.Resolver.ResolveAndObserve(ctx,
+			names.ResolveNameRequest{Name: subject, Scope: "metric_subject"},
+			names.NameOccurrence{ArtifactType: "metric", ArtifactID: subject, FieldPath: "metric_subject", RawName: subject, Scope: "metric_subject"},
+		)
+		if err != nil {
+			return err
+		}
+		bySubject[subject] = res
+	}
+	for _, m := range metrics {
+		subject := firstNonEmptyTrimmed(asString(m["metric_subject"]), asString(m["subject"]))
+		res, ok := bySubject[subject]
+		if !ok || res.ConceptID == "" {
+			continue
+		}
+		if _, exists := m["subject_concept_id"]; !exists {
+			m["subject_concept_id"] = res.ConceptID
+		}
+	}
+	return nil
 }
 
 // newResolvingMetricsStore builds the §16.3 consumer: the concrete store
@@ -2807,7 +2869,7 @@ SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_sub
        value_data_type, value_range_type, value_class, value_class_en,
        formula_or_definition, threshold_or_target, measurement_frequency,
 	       metric_categories, metric_categories_en, category_paths, category_paths_en,
-	       keyword_concept_id, metric_definition_term_id, ext_info
+	       keyword_concept_id, metric_definition_term_id, subject_concept_id, ext_info
 FROM kb.metrics
 WHERE input_record_id = $1`
 	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
@@ -2823,14 +2885,14 @@ WHERE input_record_id = $1`
 			metricID, name, nameEn, subject, subjectEn, desc, descEn, ctx1, ctxEn        sql.NullString
 			unit, unitEn, value, valueDataType, valueRangeType, valueClass, valueClassEn sql.NullString
 			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn     sql.NullString
-			keywordConceptID, metricDefinitionTermID                                     sql.NullString
+			keywordConceptID, metricDefinitionTermID, subjectConceptID                   sql.NullString
 			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
 		)
 		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,
 			&desc, &descEn, &ctx1, &ctxEn, &keywordsJSON, &keywordsEnJSON, &unit, &unitEn, &value,
 			&valueDataType, &valueRangeType, &valueClass, &valueClassEn, &formula, &threshold, &freq,
 			&categories, &categoriesEn, &catPaths, &catPathsEn, &keywordConceptID,
-			&metricDefinitionTermID, &extInfoJSON); err != nil {
+			&metricDefinitionTermID, &subjectConceptID, &extInfoJSON); err != nil {
 			return nil, err
 		}
 		m := map[string]any{
@@ -2846,6 +2908,7 @@ WHERE input_record_id = $1`
 			"measurement_frequency":     freq.String,
 			"keyword_concept_id":        keywordConceptID.String,
 			"metric_definition_term_id": metricDefinitionTermID.String,
+			"subject_concept_id":        subjectConceptID.String,
 		}
 		if spansJSON.Valid {
 			var spans any
@@ -2944,10 +3007,11 @@ INSERT INTO kb.metrics (
 	search_document,
 	ext_info,
 	keyword_concept_id,
-	metric_definition_term_id
+	metric_definition_term_id,
+	subject_concept_id
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -3007,6 +3071,13 @@ VALUES (
 		if id := strings.TrimSpace(asString(metric["metric_definition_term_id"])); id != "" {
 			metricDefTermIDVal = id
 		}
+		// subject_concept_id is populated by the ResolvingMetricsStore
+		// decorator, same as keyword_concept_id (openspec change
+		// governed-property-normalization).
+		var subjectConceptIDVal any
+		if id := strings.TrimSpace(asString(metric["subject_concept_id"])); id != "" {
+			subjectConceptIDVal = id
+		}
 
 		_, err = s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
@@ -3048,6 +3119,7 @@ VALUES (
 			string(extInfo),
 			keywordConceptIDVal,
 			metricDefTermIDVal,
+			subjectConceptIDVal,
 		)
 		if err != nil {
 			return inserted, err
@@ -3082,10 +3154,10 @@ INSERT INTO kb.metrics (
 	metric_value, value_data_type, value_range_type, value_class, value_class_en, formula_or_definition,
 	threshold_or_target, measurement_frequency, confidence, is_explicit_metric, table_name_or_section,
 	reasoning_tags, metric_categories, metric_categories_en, category_paths, category_paths_en,
-	search_document, ext_info, keyword_concept_id, metric_definition_term_id
+	search_document, ext_info, keyword_concept_id, metric_definition_term_id, subject_concept_id
 ) VALUES (
 	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,
-	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39
+	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40
 )
 ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE SET
 	metric_name = EXCLUDED.metric_name, metric_name_en = EXCLUDED.metric_name_en,
@@ -3102,7 +3174,8 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 	metric_categories_en = EXCLUDED.metric_categories_en, category_paths = EXCLUDED.category_paths,
 	category_paths_en = EXCLUDED.category_paths_en, search_document = EXCLUDED.search_document,
 	ext_info = EXCLUDED.ext_info, keyword_concept_id = EXCLUDED.keyword_concept_id,
-	metric_definition_term_id = EXCLUDED.metric_definition_term_id`
+	metric_definition_term_id = EXCLUDED.metric_definition_term_id,
+	subject_concept_id = EXCLUDED.subject_concept_id`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
 		strings.EqualFold(strings.TrimSpace(req.Language), "english")
@@ -3148,6 +3221,10 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 		if id := strings.TrimSpace(asString(metric["metric_definition_term_id"])); id != "" {
 			metricDefTermIDVal = id
 		}
+		var subjectConceptIDVal any
+		if id := strings.TrimSpace(asString(metric["subject_concept_id"])); id != "" {
+			subjectConceptIDVal = id
+		}
 
 		res, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal, req.InputRecordID, strings.TrimSpace(asString(metric["metric_id"])),
@@ -3169,7 +3246,7 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 			strings.TrimSpace(asString(metric["table_name_or_section"])), string(reasoningTagsJSON),
 			string(metricCategoriesJSON), string(metricCategoriesEnJSON), string(categoryPathsJSON),
 			string(categoryPathsEnJSON), searchDocument, string(extInfo),
-			keywordConceptIDVal, metricDefTermIDVal,
+			keywordConceptIDVal, metricDefTermIDVal, subjectConceptIDVal,
 		)
 		if err != nil {
 			return affected, err

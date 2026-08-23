@@ -518,10 +518,14 @@ ON CONFLICT DO NOTHING`, termID, termKind, moduleID, status, propsJSON); err != 
 	}
 }
 
-// signatureEntry builds one BuildSignatureProperties-shaped
-// {"raw":..., "term_id":...} ExtraProperties value (ADR 2026082203 DR2).
-func signatureEntry(raw, termID string) map[string]any {
-	return map[string]any{"raw": raw, "term_id": termID}
+// signatureEntry builds one BuildConfiguredProperties-shaped
+// {"raw":..., "resolved":...} ExtraProperties value (openspec change
+// governed-property-normalization; was {"raw":..,"term_id":..} under ADR
+// 2026082203 DR2). The second parameter name stays "resolved" in spirit --
+// callers pass whatever value the field's method (strong/simple/system)
+// produced, a keyword concept id or a canonical bucket string alike.
+func signatureEntry(raw, resolved string) map[string]any {
+	return map[string]any{"raw": raw, "resolved": resolved}
 }
 
 func mustFindAssertionByObject(t *testing.T, db *sql.DB, objectID string) Assertion {
@@ -723,7 +727,7 @@ func TestIntegrationWriteMetricLosslessZeroResolvedDimensionsSignatureIsNoop(t *
 	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
 	seedObjectNode(t, db, "obj-sig-4")
 	// A class exists in the catalog, but nothing on the occurrence resolved
-	// to a non-null term_id, so it must never be considered a candidate.
+	// to a non-empty value, so it must never be considered a candidate.
 	seedGovernedTermWithProperties(t, db, "measurement:seeded_unrelated", "metric_definition", "measurement", "included_in_release",
 		map[string]any{"subject": signatureEntry("ambient", "measurement:subj_ambient")})
 
@@ -738,7 +742,7 @@ func TestIntegrationWriteMetricLosslessZeroResolvedDimensionsSignatureIsNoop(t *
 		AssertionKind:        "observed_value",
 		ValueRangeTypeLookup: "absent",
 		ExtraProperties: map[string]any{
-			"non_identity_field": "plain value, not a {raw,term_id} map",
+			"non_identity_field": "plain value, not a {raw,resolved} map",
 		},
 	}
 	dc := proposeMetricCandidate(t, db, "metric:m-sig-4", "m-sig-4", 503, p)
