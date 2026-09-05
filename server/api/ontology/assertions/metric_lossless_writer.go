@@ -91,6 +91,12 @@ func (a AssociateSemantics) writeMetricLossless(
 		return "", fmt.Errorf("record class resolution decision: %w", err)
 	}
 
+	currentContract, _, err := (classfoundation.ContractStore{DB: tx}).Current(ctx, selectedClassTermID)
+	if err != nil {
+		return "", fmt.Errorf("load current class contract: %w", err)
+	}
+	conformanceStateTermID := metricConformanceState(currentContract, valueStateTermID, unitTermID, p.ValueDataType)
+
 	claimID, _, err := (classfoundation.ClaimIdentityStore{DB: tx}).FindOrCreateShadow(ctx, classfoundation.CanonicalClaimInput{
 		KeyVersion:  "identity/v1",
 		ClassTermID: selectedClassTermID,
@@ -129,15 +135,26 @@ func (a AssociateSemantics) writeMetricLossless(
 		ClassIdentityStateTermID:     classIdentityState,
 		MappingResolutionStateTermID: mappingStateTermID,
 		ValueStateTermID:             valueStateTermID,
-		ConformanceStateTermID:       semantic.ConformanceNotEvaluated,
-		RawPayload:                   mustMarshal(map[string]string{"raw_text": p.RawText, "value_form": p.ValueForm}),
-		RawSnapshotFingerprint:       dc.PayloadFingerprint,
-		CreateBy:                     "metric_lossless_writer",
-		ModifyBy:                     "metric_lossless_writer",
+		ConformanceStateTermID:       conformanceStateTermID,
+		// Records which contract revision this conformance determination was
+		// made against, so a later contract promotion is detectable as
+		// "this assertion's recorded revision no longer matches its class's
+		// current one" (metric-contract-backfill, task 8) without needing a
+		// separate staleness ledger -- the column already existed, unused,
+		// since ADR 2026081701's original migration.
+		NormalizedAgainstContractRevisionID: &currentContract.ID,
+		RawPayload:                          mustMarshal(map[string]string{"raw_text": p.RawText, "value_form": p.ValueForm}),
+		RawSnapshotFingerprint:              dc.PayloadFingerprint,
+		CreateBy:                            "metric_lossless_writer",
+		ModifyBy:                            "metric_lossless_writer",
 	}
 	created, err := a.persistAssertionTx(ctx, asStore, assertion)
 	if err != nil {
 		return "", fmt.Errorf("persist represented assertion: %w", err)
+	}
+
+	if err := recordMetricContractEvidence(ctx, tx, selectedClassTermID, p, inputRecordID, created.ID, unitTermID, valueStateTermID); err != nil {
+		return "", err
 	}
 
 	if err := supersedeMetricSupportEvidence(ctx, evStore, dc, p, inputRecordID, created.ID); err != nil {
@@ -249,6 +266,27 @@ const metricDefinitionTermKind = "metric_definition"
 // a header-existence pre-check on candidateTermID keeps a retried attempt
 // from appending a redundant term.
 func resolveOrCreateMetricClass(ctx context.Context, tx *sql.Tx, candidateTermID string, input ClassSynthesisInput) (termID, identityState string, alternatives []classfoundation.ClassResolutionAlternative, err error) {
+	resolvedTermID, resolvedState, resolvedAlternatives, err := resolveOrSynthesizeMetricClassTerm(ctx, tx, candidateTermID, input)
+	if err != nil {
+		return "", "", nil, err
+	}
+	// Every class this pass resolves or creates gets a contract header
+	// (metric-class-contracts change, DR: "reconcile via idempotent
+	// EnsureHeader"), whether it was just synthesized, matched by signature,
+	// or reused from a term created before this mechanism existed.
+	revision, err := (classfoundation.ContractStore{DB: tx}).EnsureHeader(ctx, classfoundation.ClassIdentity{
+		TermID: resolvedTermID, ModuleID: "measurement", By: "metric_lossless_writer",
+	})
+	if err != nil {
+		return "", "", nil, fmt.Errorf("ensure class contract header: %w", err)
+	}
+	if err := classfoundation.DeclareCanInstantiate(ctx, tx, revision); err != nil {
+		return "", "", nil, fmt.Errorf("declare can_instantiate capability: %w", err)
+	}
+	return resolvedTermID, resolvedState, resolvedAlternatives, nil
+}
+
+func resolveOrSynthesizeMetricClassTerm(ctx context.Context, tx *sql.Tx, candidateTermID string, input ClassSynthesisInput) (termID, identityState string, alternatives []classfoundation.ClassResolutionAlternative, err error) {
 	signatureTermID, tiedAlternatives, err := matchClassBySignature(ctx, tx, input)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("match class by signature: %w", err)

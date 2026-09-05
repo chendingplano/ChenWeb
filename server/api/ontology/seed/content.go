@@ -274,6 +274,14 @@ var semanticProcessingModule = moduleContent{
 		{ID: "semantic:conformance_contract_violation", Kind: "concept", Def: "The claim violates its class contract.", Labels: enPref("conformance contract violation")},
 		{ID: "semantic:not_evaluated", Kind: "concept", Def: "Conformance has not been evaluated.", Labels: enPref("not evaluated")},
 
+		// Class-contract capabilities (ADR 2026081701 DR11 seam, activated by
+		// the metric-class-contracts change). A capability term must also
+		// have a kb.ontology_term_headers row before it can be declared on a
+		// contract (the FK classfoundation's capabilities table carries) --
+		// classfoundation.ContractStore.EnsureHeader backfills that lazily.
+		{ID: "semantic:can_instantiate", Kind: "concept", Def: "The class can receive source-backed instances even with an identity-only contract.", Labels: enPref("can instantiate")},
+		{ID: "semantic:can_validate_value", Kind: "concept", Def: "The class's contract declares enough (a value type and at least one permitted unit) to validate an instance's value.", Labels: enPref("can validate value")},
+
 		// Evidence roles (DR9). The persisted/API identifiers remain the bare
 		// strings "supports" and "contradicts"; these are their governed term
 		// IDs.

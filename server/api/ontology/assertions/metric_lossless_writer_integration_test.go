@@ -16,6 +16,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 
+	"github.com/chendingplano/deepdoc/server/api/ontology/classfoundation"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semantic"
 )
 
@@ -758,5 +759,328 @@ func TestIntegrationWriteMetricLosslessZeroResolvedDimensionsSignatureIsNoop(t *
 	}
 	if assertion.ClassIdentityStateTermID != semantic.ClassProvisionalNew {
 		t.Fatalf("class_identity_state = %q, want provisional_new (unchanged fallback behavior)", assertion.ClassIdentityStateTermID)
+	}
+}
+
+// TestIntegrationWriteMetricLosslessCreatesContractHeaderForNewClass locks in
+// metric-class-contracts' EnsureHeader wiring: a class resolved by this write
+// path gets exactly one identity_only contract revision, not just a
+// kb.ontology_term_headers row (which the pre-existing
+// kb_sync_ontology_term_revision_after_insert trigger already provides for
+// free on the kb.ontology_terms insert -- the contract revision is the actual
+// gap this change closes).
+func TestIntegrationWriteMetricLosslessCreatesContractHeaderForNewClass(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-contract-1")
+
+	numeric := 500.0
+	p := metricCandidatePayload{
+		MetricID:             "m-contract-1",
+		MetricName:           "Contract Header Probe",
+		SubjectObjectID:      "obj-contract-1",
+		RawText:              "500",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-contract-1", "m-contract-1", 601, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 601, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-contract-1")
+	var revisionCount int
+	var definitionState string
+	if err := db.QueryRowContext(ctx, `
+SELECT count(*), max(r.definition_state)
+FROM kb.ontology_class_contract_revisions r
+WHERE r.term_id = $1`, assertion.InstanceOfTermID).Scan(&revisionCount, &definitionState); err != nil {
+		t.Fatalf("count contract revisions: %v", err)
+	}
+	if revisionCount != 1 {
+		t.Fatalf("contract revisions for %s = %d, want 1", assertion.InstanceOfTermID, revisionCount)
+	}
+	if definitionState != classfoundation.DefinitionIdentityOnly {
+		t.Fatalf("definition_state = %q, want identity_only", definitionState)
+	}
+	var currentRevisionSet bool
+	if err := db.QueryRowContext(ctx, `
+SELECT current_contract_revision_id IS NOT NULL FROM kb.ontology_term_headers WHERE term_id = $1`,
+		assertion.InstanceOfTermID).Scan(&currentRevisionSet); err != nil {
+		t.Fatalf("check current_contract_revision_id: %v", err)
+	}
+	if !currentRevisionSet {
+		t.Fatal("kb.ontology_term_headers.current_contract_revision_id was not set")
+	}
+}
+
+// TestIntegrationWriteMetricLosslessReusedClassGetsOneContractRevision proves
+// EnsureHeader's idempotency at the actual call site: two metrics resolving
+// to the same class (same ConceptID, so the same synthesized/aligned term)
+// must not accumulate a second identity_only revision on the second write.
+// This payload's two writes also happen to agree on datatype/unit from two
+// distinct documents, which legitimately promotes the contract to
+// partially_defined on the second write (metric_capability_validators_test.go
+// and contract_synthesis_integration_test.go cover that mechanism directly)
+// -- so this test checks the identity_only-revision count specifically,
+// not the total revision count, to isolate the property it's actually about.
+func TestIntegrationWriteMetricLosslessReusedClassGetsOneContractRevision(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedGovernedTerm(t, db, "core:aligns_to_term", "property", "core")
+	seedObjectNode(t, db, "obj-contract-2a")
+	seedObjectNode(t, db, "obj-contract-2b")
+
+	basePayload := metricCandidatePayload{
+		MetricName:           "Reused Class Probe",
+		ConceptID:            "kwc_reused_class_probe",
+		Definition:           "A metric occurrence written twice under the same concept.",
+		ValueForm:            "single",
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+	}
+	a := AssociateSemantics{DB: db}
+
+	first := basePayload
+	first.MetricID = "m-contract-2a"
+	first.SubjectObjectID = "obj-contract-2a"
+	first.RawText = "10"
+	v1 := 10.0
+	first.NumericValue = &v1
+	dc1 := proposeMetricCandidate(t, db, "metric:m-contract-2a", "m-contract-2a", 602, first)
+	if _, err := a.writeMetricLossless(ctx, dc1, first, 602, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless (first): %v", err)
+	}
+
+	second := basePayload
+	second.MetricID = "m-contract-2b"
+	second.SubjectObjectID = "obj-contract-2b"
+	second.RawText = "20"
+	v2 := 20.0
+	second.NumericValue = &v2
+	dc2 := proposeMetricCandidate(t, db, "metric:m-contract-2b", "m-contract-2b", 603, second)
+	if _, err := a.writeMetricLossless(ctx, dc2, second, 603, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless (second): %v", err)
+	}
+
+	assertionA := mustFindAssertionByObject(t, db, "obj-contract-2a")
+	assertionB := mustFindAssertionByObject(t, db, "obj-contract-2b")
+	if assertionA.InstanceOfTermID != assertionB.InstanceOfTermID {
+		t.Fatalf("expected both occurrences to resolve to the same class, got %q and %q", assertionA.InstanceOfTermID, assertionB.InstanceOfTermID)
+	}
+
+	var identityOnlyCount int
+	if err := db.QueryRowContext(ctx, `
+SELECT count(*) FROM kb.ontology_class_contract_revisions WHERE term_id = $1 AND definition_state = 'identity_only'`,
+		assertionA.InstanceOfTermID).Scan(&identityOnlyCount); err != nil {
+		t.Fatalf("count identity_only contract revisions: %v", err)
+	}
+	if identityOnlyCount != 1 {
+		t.Fatalf("identity_only contract revisions after two writes to the same class = %d, want still 1 (no duplicate)", identityOnlyCount)
+	}
+}
+
+// TestIntegrationWriteMetricLosslessBackfillsContractForPreExistingClass
+// proves EnsureHeader also repairs a class term that predates this change --
+// created directly via terms.TermStore (so the insert trigger already gave
+// it a kb.ontology_term_headers row) but with no contract revision behind
+// it, matching the live shape found in `miner` (4,639 headers, 0 with a
+// contract) before this change.
+func TestIntegrationWriteMetricLosslessBackfillsContractForPreExistingClass(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-contract-3")
+
+	// Seed the class term the old way: a plain kb.ontology_terms insert (the
+	// trigger mirrors it into kb.ontology_term_headers with no contract),
+	// with no ConceptID and no signature-matchable properties, so
+	// resolveOrCreateMetricClass's existing-term-reuse branch selects it by
+	// its own deterministic hash-derived candidate term ID.
+	preExistingPayload := metricCandidatePayload{MetricName: "Pre-Existing Class Probe"}
+	preExistingTermID := provisionalMetricClassTermID(preExistingPayload)
+	seedGovernedTerm(t, db, preExistingTermID, "metric_definition", "measurement")
+	var headerExists, hasContract bool
+	if err := db.QueryRowContext(ctx, `
+SELECT true, current_contract_revision_id IS NOT NULL FROM kb.ontology_term_headers WHERE term_id = $1`,
+		preExistingTermID).Scan(&headerExists, &hasContract); err != nil {
+		t.Fatalf("precondition: header row must exist via the insert trigger: %v", err)
+	}
+	if !headerExists || hasContract {
+		t.Fatalf("precondition failed: headerExists=%v hasContract=%v, want true/false", headerExists, hasContract)
+	}
+
+	numeric := 7.0
+	p := metricCandidatePayload{
+		MetricID:             "m-contract-3",
+		MetricName:           "Pre-Existing Class Probe",
+		SubjectObjectID:      "obj-contract-3",
+		RawText:              "7",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+	}
+	dc := proposeMetricCandidate(t, db, "metric:m-contract-3", "m-contract-3", 604, p)
+
+	a := AssociateSemantics{DB: db}
+	if _, err := a.writeMetricLossless(ctx, dc, p, 604, "mea:measured_by"); err != nil {
+		t.Fatalf("writeMetricLossless: %v", err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-contract-3")
+	if assertion.InstanceOfTermID != preExistingTermID {
+		t.Fatalf("instance_of_term_id = %q, want the pre-existing class %q reused", assertion.InstanceOfTermID, preExistingTermID)
+	}
+	var revisionCount int
+	if err := db.QueryRowContext(ctx, `
+SELECT count(*) FROM kb.ontology_class_contract_revisions WHERE term_id = $1`, preExistingTermID).Scan(&revisionCount); err != nil {
+		t.Fatalf("count contract revisions: %v", err)
+	}
+	if revisionCount != 1 {
+		t.Fatalf("contract revisions backfilled for pre-existing class = %d, want 1", revisionCount)
+	}
+}
+
+// TestIntegrationWriteMetricLosslessObservedProfileEvidenceAndConformance is
+// the end-to-end proof for tasks 3.2/3.3/6.2/7.1-7.3 of the metric-class-
+// contracts change: it drives four writes to the same class through the real
+// writeMetricLossless path and checks the observed-profile counts, the
+// synthesis promotion, and each write's own conformance state against the
+// contract as it stood at that write -- not retroactively.
+func TestIntegrationWriteMetricLosslessObservedProfileEvidenceAndConformance(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedGovernedTerm(t, db, "core:aligns_to_term", "property", "core")
+	seedGovernedTerm(t, db, "quantity:unit_SEC", "unit", "quantity")
+	seedGovernedTerm(t, db, "quantity:unit_COUNT", "unit", "quantity")
+	for _, obj := range []string{"obj-evid-1", "obj-evid-2", "obj-evid-3", "obj-evid-4"} {
+		seedObjectNode(t, db, obj)
+	}
+
+	a := AssociateSemantics{DB: db}
+	write := func(metricID, objectID string, inputRecordID int64, unit string, value float64) Assertion {
+		t.Helper()
+		p := metricCandidatePayload{
+			MetricID:             metricID,
+			MetricName:           "Evidence Probe",
+			ConceptID:            "kwc_evidence_probe",
+			Definition:           "A metric written multiple times to exercise contract synthesis.",
+			SubjectObjectID:      objectID,
+			RawText:              fmt.Sprintf("%v %s", value, unit),
+			ValueForm:            "single",
+			ValueDataType:        "number",
+			Unit:                 unit,
+			NumericValue:         &value,
+			AssertionKind:        "observed_value",
+			ValueRangeTypeLookup: "absent",
+		}
+		dc := proposeMetricCandidate(t, db, "metric:"+metricID, metricID, inputRecordID, p)
+		if _, err := a.writeMetricLossless(ctx, dc, p, inputRecordID, "mea:measured_by"); err != nil {
+			t.Fatalf("writeMetricLossless(%s): %v", metricID, err)
+		}
+		return mustFindAssertionByObject(t, db, objectID)
+	}
+
+	// First write: only one document's evidence exists yet, so the class
+	// stays identity_only and this instance is honestly not_evaluated.
+	first := write("m-evid-1", "obj-evid-1", 701, "s", 10)
+	if first.ConformanceStateTermID != semantic.ConformanceNotEvaluated {
+		t.Fatalf("first write conformance = %q, want not_evaluated", first.ConformanceStateTermID)
+	}
+	var profileCount, observedCount, documentCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM kb.ontology_observed_class_profiles WHERE class_term_id = $1`, first.InstanceOfTermID).Scan(&profileCount); err != nil {
+		t.Fatalf("count observed profiles: %v", err)
+	}
+	if profileCount != 1 {
+		t.Fatalf("observed profiles for class = %d, want 1", profileCount)
+	}
+	if err := db.QueryRowContext(ctx, `
+SELECT a.observed_count, a.document_count FROM kb.ontology_observed_class_attribute_observations a
+JOIN kb.ontology_observed_class_profiles p ON p.id = a.profile_id
+WHERE p.class_term_id = $1 AND a.attribute_key = 'value'`, first.InstanceOfTermID).Scan(&observedCount, &documentCount); err != nil {
+		t.Fatalf("load attribute observation: %v", err)
+	}
+	if observedCount != 1 || documentCount != 1 {
+		t.Fatalf("attribute observation counts = (%d, %d), want (1, 1)", observedCount, documentCount)
+	}
+
+	// Second write: a second document agrees on datatype and unit. This
+	// write's own conformance is still evaluated against the pre-promotion
+	// (identity_only) contract, so it too is not_evaluated -- the promotion
+	// this write causes applies going forward, not retroactively to itself.
+	second := write("m-evid-2", "obj-evid-2", 702, "s", 20)
+	if second.ConformanceStateTermID != semantic.ConformanceNotEvaluated {
+		t.Fatalf("second write conformance = %q, want not_evaluated (promotion is not retroactive to the write that causes it)", second.ConformanceStateTermID)
+	}
+	if err := db.QueryRowContext(ctx, `
+SELECT a.observed_count, a.document_count FROM kb.ontology_observed_class_attribute_observations a
+JOIN kb.ontology_observed_class_profiles p ON p.id = a.profile_id
+WHERE p.class_term_id = $1 AND a.attribute_key = 'value'`, first.InstanceOfTermID).Scan(&observedCount, &documentCount); err != nil {
+		t.Fatalf("load attribute observation after second write: %v", err)
+	}
+	if observedCount != 2 || documentCount != 2 {
+		t.Fatalf("attribute observation counts after second write = (%d, %d), want (2, 2) (incremented, not duplicated)", observedCount, documentCount)
+	}
+	var definitionState string
+	if err := db.QueryRowContext(ctx, `
+SELECT r.definition_state FROM kb.ontology_term_headers h
+JOIN kb.ontology_class_contract_revisions r ON r.id = h.current_contract_revision_id
+WHERE h.term_id = $1`, first.InstanceOfTermID).Scan(&definitionState); err != nil {
+		t.Fatalf("load current definition_state: %v", err)
+	}
+	if definitionState != classfoundation.DefinitionPartiallyDefined {
+		t.Fatalf("definition_state after two agreeing documents = %q, want partially_defined", definitionState)
+	}
+	var canValidateResult string
+	if err := db.QueryRowContext(ctx, `
+SELECT validation_result FROM kb.ontology_class_capability_validation_results r
+JOIN kb.ontology_term_headers h ON h.current_contract_revision_id = r.contract_revision_id
+WHERE h.term_id = $1 AND r.capability_term_id = $2`,
+		first.InstanceOfTermID, classfoundation.CapabilityCanValidateValue).Scan(&canValidateResult); err != nil {
+		t.Fatalf("load can_validate_value result: %v", err)
+	}
+	if canValidateResult != classfoundation.ValidationPass {
+		t.Fatalf("can_validate_value result = %q, want pass", canValidateResult)
+	}
+
+	// Third write: the contract is now partially_defined declaring unit_SEC;
+	// this instance's matching unit conforms.
+	third := write("m-evid-3", "obj-evid-3", 703, "s", 30)
+	if third.ConformanceStateTermID != semantic.Conforms {
+		t.Fatalf("third write conformance = %q, want conforms", third.ConformanceStateTermID)
+	}
+	if third.Status != StatusRepresented {
+		t.Fatalf("third write status = %q, want represented even though it conforms", third.Status)
+	}
+
+	// Fourth write: a different unit against the same partially_defined
+	// contract violates it, and the contract itself is not reverted.
+	fourth := write("m-evid-4", "obj-evid-4", 704, "count", 5)
+	if fourth.ConformanceStateTermID != semantic.ConformanceContractViolation {
+		t.Fatalf("fourth write conformance = %q, want conformance_contract_violation", fourth.ConformanceStateTermID)
+	}
+	if fourth.Status != StatusRepresented {
+		t.Fatalf("fourth write status = %q, want represented even though it violates the contract", fourth.Status)
+	}
+	if err := db.QueryRowContext(ctx, `
+SELECT r.definition_state FROM kb.ontology_term_headers h
+JOIN kb.ontology_class_contract_revisions r ON r.id = h.current_contract_revision_id
+WHERE h.term_id = $1`, first.InstanceOfTermID).Scan(&definitionState); err != nil {
+		t.Fatalf("load definition_state after violation: %v", err)
+	}
+	if definitionState != classfoundation.DefinitionPartiallyDefined {
+		t.Fatalf("definition_state after a contradicting write = %q, want unchanged partially_defined", definitionState)
 	}
 }

@@ -125,6 +125,74 @@ WHERE term_id = $2`, revision.ID, termID); err != nil {
 	return revision, nil
 }
 
+// EnsureHeader makes class-header/contract resolution idempotent, closing
+// the gap CreateIdentityOnlyClass's own doc comment names ("callers that
+// need idempotent resolution must resolve first"). It upserts the header row
+// and returns the existing current revision when one is already recorded,
+// or creates the first identity-only revision when none is. Safe to call on
+// every metric write for the same class term without accumulating duplicate
+// identity-only revisions, and safe to call for a term that predates this
+// mechanism (its header/first revision are backfilled on that call).
+func (s ContractStore) EnsureHeader(ctx context.Context, identity ClassIdentity) (ContractRevision, error) {
+	if s.DB == nil {
+		return ContractRevision{}, errors.New("db is nil")
+	}
+	termID := strings.TrimSpace(identity.TermID)
+	moduleID := strings.TrimSpace(identity.ModuleID)
+	if termID == "" || moduleID == "" {
+		return ContractRevision{}, errors.New("term_id and module_id are required")
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+INSERT INTO kb.ontology_term_headers (term_id, term_kind, module_id, create_time, create_by)
+VALUES ($1, 'class', $2, NOW(), $3)
+ON CONFLICT (term_id) DO NOTHING`, termID, moduleID, nullable(identity.By)); err != nil {
+		return ContractRevision{}, fmt.Errorf("ensure class header: %w", err)
+	}
+	current, ok, err := s.current(ctx, termID)
+	if err != nil {
+		return ContractRevision{}, err
+	}
+	if ok {
+		return current, nil
+	}
+	return s.AppendContractRevision(ctx, ContractRevision{
+		TermID:                termID,
+		ContractSchemaVersion: "contract/v1",
+		IdentitySchemaVersion: "identity/v1",
+		DefinitionState:       DefinitionIdentityOnly,
+		ContractPayload:       "{}",
+		SynthesisMethod:       "deterministic_resolution",
+		Provenance:            "{}",
+		CreateBy:              identity.By,
+	})
+}
+
+// Current returns the term's current contract revision, or ok=false when the
+// term has no header yet (not an error -- an expected state for a class term
+// created before this mechanism existed and not yet re-resolved).
+func (s ContractStore) Current(ctx context.Context, termID string) (revision ContractRevision, ok bool, err error) {
+	if s.DB == nil {
+		return ContractRevision{}, false, errors.New("db is nil")
+	}
+	return s.current(ctx, strings.TrimSpace(termID))
+}
+
+func (s ContractStore) current(ctx context.Context, termID string) (ContractRevision, bool, error) {
+	row := s.DB.QueryRowContext(ctx, `
+SELECT r.id, r.term_id, r.revision, r.definition_state, r.contract_payload, r.create_time
+FROM kb.ontology_term_headers h
+JOIN kb.ontology_class_contract_revisions r ON r.id = h.current_contract_revision_id
+WHERE h.term_id = $1`, termID)
+	var revision ContractRevision
+	if err := row.Scan(&revision.ID, &revision.TermID, &revision.Revision, &revision.DefinitionState, &revision.ContractPayload, &revision.CreateTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ContractRevision{}, false, nil
+		}
+		return ContractRevision{}, false, fmt.Errorf("load current class contract: %w", err)
+	}
+	return revision, true, nil
+}
+
 func validateContractRevision(revision ContractRevision) error {
 	if strings.TrimSpace(revision.TermID) == "" {
 		return errors.New("term_id is required")
