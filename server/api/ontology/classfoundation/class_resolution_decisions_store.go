@@ -8,6 +8,17 @@ import (
 	"strings"
 )
 
+// Identity-state values for ClassResolutionDecision.IdentityState, matching
+// kb.ontology_class_resolution_decisions' identity_state CHECK constraint
+// (project_migrations/20260818000012_create_class_resolution_decisions.sql).
+const (
+	ResolutionResolvedExisting          = "resolved_existing"
+	ResolutionProvisionalNew            = "provisional_new"
+	ResolutionAmbiguousCandidates       = "ambiguous_candidates"
+	ResolutionCandidateEvidenceConflict = "candidate_evidence_conflict"
+	ResolutionRejected                  = "rejected"
+)
+
 // ClassResolutionAlternative is one ranked candidate behind a decision (DR6:
 // "records every candidate term, score, method, and evidence"). At least one
 // of CandidateClassTermID or CandidateKey is required, matching the table's
