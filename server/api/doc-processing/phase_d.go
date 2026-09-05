@@ -70,7 +70,8 @@ func (p *NormalizeAssertionsProcessor) PostProcessIndex(ctx context.Context, rec
 	if !SemanticAssociationEnabledFromEnv() || ApiTypes.ProjectDBHandle == nil {
 		return nil
 	}
-	return assertions.NormalizeAllFamilies(ctx, ApiTypes.ProjectDBHandle, recordID)
+	force, _ := docProcessorFlagsFromContext(ctx)
+	return assertions.NormalizeAllFamilies(assertions.WithForceReprocess(ctx, force), ApiTypes.ProjectDBHandle, recordID)
 }
 
 // AssociateSemanticsProcessor is DR8's associate_semantics stage: resolve,
@@ -91,7 +92,8 @@ func (p *AssociateSemanticsProcessor) PostProcessIndex(ctx context.Context, reco
 	if !SemanticAssociationEnabledFromEnv() || ApiTypes.ProjectDBHandle == nil {
 		return nil
 	}
-	report, err := (assertions.AssociateSemantics{DB: ApiTypes.ProjectDBHandle}).Run(ctx, recordID)
+	force, _ := docProcessorFlagsFromContext(ctx)
+	report, err := (assertions.AssociateSemantics{DB: ApiTypes.ProjectDBHandle}).Run(assertions.WithForceReprocess(ctx, force), recordID)
 	if err != nil && report.MappingMisses == 0 {
 		// Candidate/persistence failures use the established generic summary
 		// entry type. Keep this at the doc-processing boundary because the
@@ -170,6 +172,10 @@ func (p *ProjectSemanticsProcessor) PostProcessIndex(ctx context.Context, record
 		return nil
 	}
 	db := ApiTypes.ProjectDBHandle
+	// No force-flag plumbing here: ProjectSemantics.Run already rebuilds every
+	// projection target touched by the record's accepted assertions on every
+	// call, so a Force Run is its default behavior. It also naturally picks up
+	// whatever associate_semantics re-accepted this run.
 	if _, err := (assertions.ProjectSemantics{DB: db}).Run(ctx, recordID); err != nil {
 		if logErr := logPhaseDError(ctx, db, recordID, p.Name(), err); logErr != nil && p.Logger != nil {
 			p.Logger.Error("phase_d project semantics error log failed", "record_id", recordID, "error", logErr)

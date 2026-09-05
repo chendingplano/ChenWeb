@@ -281,6 +281,13 @@ func validateDecisionCandidate(c DecisionCandidate) error {
 // Reused=true instead of creating duplicate review work (spec §16.3 item 2).
 // A changed payload creates a new revision and supersedes the prior one if
 // it had reached a completed (accepted/rejected) status.
+//
+// Under WithForceReprocess (doc-processor "Force Run"), an identical-payload
+// prior that has already been decided (accepted/rejected/deferred) is NOT
+// reused: a fresh revision is created so the downstream stages re-adjudicate
+// it. An identical-payload prior still open (candidate/in_review) is reused
+// as normal -- it will be (re)processed regardless, so forcing a second
+// revision would only churn.
 func (s DecisionCandidateStore) Propose(ctx context.Context, c DecisionCandidate) (DecisionCandidate, error) {
 	if s.DB == nil {
 		return DecisionCandidate{}, errors.New("db is nil")
@@ -299,7 +306,8 @@ func (s DecisionCandidateStore) Propose(ctx context.Context, c DecisionCandidate
 	}
 	hasPrior := err == nil
 
-	if hasPrior && prior.PayloadFingerprint == fp {
+	priorStillOpen := hasPrior && (prior.Status == StatusCandidate || prior.Status == StatusInReview)
+	if hasPrior && prior.PayloadFingerprint == fp && (!forceReprocess(ctx) || priorStillOpen) {
 		if _, err := s.DB.ExecContext(ctx, `
 UPDATE kb.semantic_decision_candidates SET last_seen = NOW() WHERE id = $1`, prior.ID); err != nil {
 			return DecisionCandidate{}, err

@@ -53,6 +53,7 @@
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import MetricOntologyAnalysisView from '$lib/components/home3/metric-ontology-analysis-view.svelte';
+	import MetricOntologyExplorerView from '$lib/components/home3/metric-ontology-explorer-view.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -61,6 +62,7 @@
 		| 'kb-metrics'
 		| 'kb-metric-wiki'
 		| 'kb-metric-ontology'
+		| 'kb-metric-ontology-explorer'
 		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
@@ -226,6 +228,11 @@
 					id: 'kb-metric-ontology',
 					label: 'Metric Ontology',
 					description: 'Inspect metric coverage, mappings, and findings'
+				},
+				{
+					id: 'kb-metric-ontology-explorer',
+					label: 'Metric Ontology Explorer',
+					description: "Explore a metric's ontology and pipeline on a canvas"
 				}
 			]
 		}
@@ -351,6 +358,7 @@
 		parseKbSearchArtifactType(page.url.searchParams.get('scope'))
 	);
 	let metricWikiId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
+	let metricOntologyExplorerId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
 	let artifactWikiType = $derived(page.url.searchParams.get('artifact_type')?.trim() ?? '');
 	let artifactWikiId = $derived(page.url.searchParams.get('artifact_id')?.trim() ?? '');
 	let artifactWikiLang = $derived(page.url.searchParams.get('lang')?.trim() ?? 'en');
@@ -403,6 +411,7 @@
 			activeSection !== 'kb-llm-wiki-v3' &&
 			activeSection !== 'kb-metric-wiki' &&
 			activeSection !== 'kb-metric-ontology' &&
+			activeSection !== 'kb-metric-ontology-explorer' &&
 			activeSection !== 'kb-artifact-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
@@ -798,6 +807,8 @@
 					{darkMode}
 					knowledgeStoreId={knowledgeStoreState.activeStore?.id ?? null}
 				/>
+			{:else if activeSection === 'kb-metric-ontology-explorer'}
+				<MetricOntologyExplorerView {darkMode} metricId={metricOntologyExplorerId} />
 			{:else if activeSection === 'kb-artifact-wiki'}
 				{#if artifactWikiType && artifactWikiId}
 					<ArtifactWikiPage
@@ -892,11 +903,20 @@
 
 <style>
 	.kb-page {
-		height: calc(100vh - 4.25rem);
+		height: 100%;
+		min-height: 0;
 	}
 
 	.kb-menu {
 		flex-shrink: 0;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+
+	.kb-menu button,
+	.kb-menu span {
+		user-select: text;
+		-webkit-user-select: text;
 	}
 
 	.menu-resize-handle {

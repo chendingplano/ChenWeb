@@ -976,7 +976,10 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// ordered after the rest via PostProcessDependsOn -- see phase_d.go.
 	// Inert unless SEMANTIC_ASSOCIATION_ENABLED (default: true), and only invoked at all if
 	// present in this run's processors (routed, per ADR §8.2).
-	s.runPostProcessIndexing(ctx, processors, evt.RecordID)
+	// The event's force/force_clear ride along on the context the same way the
+	// chunk-batch coordinator threads them, so phase_d.go can honor "Force Run"
+	// (a Phase A/B processor instead re-parses the payload it is handed).
+	s.runPostProcessIndexing(withDocProcessorFlags(ctx, evt.Force, evt.ForceClear), processors, evt.RecordID)
 
 	pipelineMSUsed := time.Since(requestStart).Milliseconds()
 	status := "success"

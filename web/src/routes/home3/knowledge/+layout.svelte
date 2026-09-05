@@ -4,5 +4,9 @@
 	let { data, children } = $props();
 </script>
 
-<SiteHeader config={data.siteConfig} />
-{@render children?.()}
+<div class="flex h-dvh min-h-0 flex-col overflow-hidden">
+	<SiteHeader config={data.siteConfig} />
+	<main class="min-h-0 flex-1 overflow-hidden">
+		{@render children?.()}
+	</main>
+</div>

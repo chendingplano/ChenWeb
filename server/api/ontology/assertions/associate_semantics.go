@@ -65,6 +65,20 @@ func (a AssociateSemantics) Run(ctx context.Context, inputRecordID int64) (Assoc
 		return report, err
 	}
 
+	// Force Run: re-normalize first so every artifact's latest candidate is
+	// re-proposed. Propose (under the same WithForceReprocess ctx) turns an
+	// already-decided identical-payload candidate into a fresh 'candidate'
+	// revision, which the select below then picks up -- this is what lets a
+	// standalone associate_semantics force run reprocess a record whose
+	// candidates are all 'accepted' (e.g. re-running the class-contract write
+	// path on a record processed before that path existed). A normal run
+	// leaves the idempotent skip-if-current behavior untouched.
+	if forceReprocess(ctx) {
+		if err := NormalizeAllFamilies(ctx, a.DB, inputRecordID); err != nil {
+			return report, fmt.Errorf("force re-normalize before associate: %w", err)
+		}
+	}
+
 	// Also picks up rows stuck at 'in_review': that status is this stage's own
 	// momentary bookkeeping (transition-in immediately followed by
 	// resolve/adjudicate), not a human-review pause, so a row still sitting

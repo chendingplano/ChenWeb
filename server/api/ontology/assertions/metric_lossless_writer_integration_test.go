@@ -888,6 +888,112 @@ SELECT count(*) FROM kb.ontology_class_contract_revisions WHERE term_id = $1 AND
 	}
 }
 
+// TestIntegrationAssociateSemanticsForceReprocessesDecidedCandidate locks in
+// the doc-processor "Force Run" behavior for Phase D (bug 2026090501): a
+// metric candidate already accepted on a prior run is re-adjudicated when
+// the run carries WithForceReprocess -- Propose reopens it as a fresh
+// revision and Run re-writes it -- while a normal run leaves the accepted
+// candidate untouched. EnsureHeader stays idempotent across the reprocess.
+func TestIntegrationAssociateSemanticsForceReprocessesDecidedCandidate(t *testing.T) {
+	db := freshAssertionsTestDB(t)
+	ctx := context.Background()
+	seedGovernedTerm(t, db, "mea:measured_by", "property", "measurement")
+	seedGovernedTerm(t, db, "mea:observed_value", "property", "measurement")
+	seedObjectNode(t, db, "obj-force-1")
+
+	numeric := 500.0
+	p := metricCandidatePayload{
+		MetricID:             "m-force-1",
+		MetricName:           "Force Reprocess Probe",
+		SubjectObjectID:      "obj-force-1",
+		RawText:              "500",
+		ValueForm:            "single",
+		NumericValue:         &numeric,
+		AssertionKind:        "observed_value",
+		ValueRangeTypeLookup: "absent",
+	}
+	dcStore := DecisionCandidateStore{DB: db}
+	proposeMetricCandidate(t, db, "metric:m-force-1", "m-force-1", 610, p)
+
+	a := AssociateSemantics{DB: db}
+	if r, err := a.Run(ctx, 610); err != nil || r.Represented != 1 {
+		t.Fatalf("first Run: report=%+v err=%v (want Represented=1)", r, err)
+	}
+
+	assertion := mustFindAssertionByObject(t, db, "obj-force-1")
+	assertionRevisions := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRowContext(ctx,
+			`SELECT count(*) FROM kb.semantic_assertions WHERE logical_identity_key = $1`,
+			assertion.LogicalIdentityKey).Scan(&n); err != nil {
+			t.Fatalf("count assertion revisions: %v", err)
+		}
+		return n
+	}
+	contractRevisions := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRowContext(ctx,
+			`SELECT count(*) FROM kb.ontology_class_contract_revisions WHERE term_id = $1`,
+			assertion.InstanceOfTermID).Scan(&n); err != nil {
+			t.Fatalf("count contract revisions: %v", err)
+		}
+		return n
+	}
+	if assertionRevisions() != 1 || contractRevisions() != 1 {
+		t.Fatalf("after first Run: assertion revisions=%d contract revisions=%d, want 1 and 1", assertionRevisions(), contractRevisions())
+	}
+
+	// A normal replay must not re-select the accepted candidate.
+	if r, err := a.Run(ctx, 610); err != nil || r.Examined != 0 {
+		t.Fatalf("non-force replay: report=%+v err=%v (want Examined=0)", r, err)
+	}
+	if assertionRevisions() != 1 {
+		t.Fatalf("non-force replay created an assertion revision: got %d, want 1", assertionRevisions())
+	}
+
+	// Re-propose the same payload under a force context (what Run's internal
+	// NormalizeAllFamilies does on a Force Run); the decided candidate must
+	// reopen as a fresh 'candidate' revision rather than be reused.
+	payload, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	recordID := int64(610)
+	reproposed, err := dcStore.Propose(WithForceReprocess(ctx, true), DecisionCandidate{
+		LogicalIdentityKey: "metric:m-force-1",
+		CandidateKind:      "assertion",
+		ProposedPayload:    payload,
+		Method:             "explicit_structured",
+		SourceArtifactType: "metric",
+		SourceArtifactID:   "m-force-1",
+		InputRecordID:      &recordID,
+		CreateBy:           "test",
+		ModifyBy:           "test",
+	})
+	if err != nil {
+		t.Fatalf("force re-propose: %v", err)
+	}
+	if reproposed.Reused {
+		t.Fatal("force re-propose of a decided candidate must create a fresh revision, not reuse it")
+	}
+	if reproposed.Status != StatusCandidate {
+		t.Fatalf("reopened candidate status = %q, want candidate", reproposed.Status)
+	}
+
+	// A plain Run now picks the reopened candidate up and re-writes it.
+	if r, err := a.Run(ctx, 610); err != nil || r.Represented != 1 {
+		t.Fatalf("force reprocess Run: report=%+v err=%v (want Represented=1)", r, err)
+	}
+	if assertionRevisions() != 2 {
+		t.Fatalf("force reprocess did not create a new assertion revision: got %d, want 2", assertionRevisions())
+	}
+	if contractRevisions() != 1 {
+		t.Fatalf("EnsureHeader was not idempotent across reprocess: contract revisions=%d, want 1", contractRevisions())
+	}
+}
+
 // TestIntegrationWriteMetricLosslessBackfillsContractForPreExistingClass
 // proves EnsureHeader also repairs a class term that predates this change --
 // created directly via terms.TermStore (so the insert trigger already gave

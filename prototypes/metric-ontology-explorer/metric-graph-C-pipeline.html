@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Metric Ontology Explorer — Pipeline (Prototype C)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #f7f9fb;
+    --line: #d7dee6;
+    --line-strong: #b9c4cf;
+    --ink: #17222e;
+    --ink-2: #47586a;
+    --ink-3: #7c8b9c;
+    --blue: #2f6feb;
+    --blue-ink: #1b4fb8;
+    --green: #1f9d63;
+    --amber: #c9821a;
+    --red: #d64550;
+    --violet: #6b57d2;
+    --ui: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--ui); font-size: 13px; -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  ::selection { background: rgba(47, 111, 235, 0.2); }
+
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 18px;
+    height: 50px; padding: 0 18px;
+    background: var(--surface); border-bottom: 1px solid var(--line);
+    flex: 0 0 auto; position: relative; z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .mark {
+    width: 24px; height: 24px; border-radius: 5px; background: var(--blue);
+    display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 13px;
+    box-shadow: 0 2px 6px rgba(47,111,235,0.3);
+  }
+  .brand .title { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
+  .crumb {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  }
+  .crumb b { color: var(--ink-2); }
+  .topbar .spacer { flex: 1; }
+
+  .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 7px; overflow: hidden; background: var(--surface-2); }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font-family: var(--ui); font-weight: 600; font-size: 11px; letter-spacing: 0.03em;
+    color: var(--ink-2); padding: 6px 12px; display: flex; align-items: center; gap: 6px;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button svg { width: 13px; height: 13px; }
+  .seg button.active { background: var(--blue); color: #fff; }
+  .seg button:hover:not(.active) { background: #e7ecf2; }
+  .seg.small button { padding: 5px 10px; font-size: 10.5px; }
+
+  .btn-ghost {
+    appearance: none; background: transparent; border: 1px solid var(--line-strong);
+    border-radius: 6px; color: var(--ink-2); cursor: pointer;
+    font-family: var(--ui); font-weight: 600; font-size: 11px; padding: 6px 10px;
+  }
+  .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+
+  #workspace { flex: 1 1 auto; display: flex; min-height: 0; min-width: 0; padding: 10px; gap: 0; }
+  .group { display: flex; min-width: 0; min-height: 0; }
+  .group.vert { flex-direction: column; }
+  .group.horz { flex-direction: row; }
+
+  .pane {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    min-width: 0; min-height: 0; display: flex; flex-direction: column;
+    position: relative; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(20, 34, 46, 0.04);
+  }
+  .pane-head {
+    display: flex; align-items: center; gap: 10px;
+    height: 38px; padding: 0 14px; border-bottom: 1px solid var(--line);
+    background: var(--surface-2); flex: 0 0 auto;
+  }
+  .pane-head .lbl { font-weight: 700; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+  .pane-head .grow { flex: 1; }
+  .pane-head .meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+
+  .splitter { flex: 0 0 10px; position: relative; z-index: 5; }
+  .splitter::after { content: ""; position: absolute; border-radius: 3px; background: transparent; transition: background 0.14s; }
+  .splitter[data-axis="x"] { cursor: col-resize; }
+  .splitter[data-axis="x"]::after { top: 20px; bottom: 20px; left: 3px; width: 4px; }
+  .splitter[data-axis="y"] { cursor: row-resize; }
+  .splitter[data-axis="y"]::after { left: 20px; right: 20px; top: 3px; height: 4px; }
+  .splitter:hover::after, .splitter.drag::after { background: var(--blue); }
+  body.resizing { user-select: none; }
+
+  /* ---------- Canvas ---------- */
+  #canvasHost { position: absolute; inset: 0; overflow: hidden; }
+  #graph { width: 100%; height: 100%; display: block; cursor: grab; background:
+      linear-gradient(var(--bg) 0 0) padding-box; }
+  #graph.grabbing { cursor: grabbing; }
+  .grid-line { stroke: #e2e7ee; stroke-width: 1px; }
+
+  .flow-edge { fill: none; stroke: var(--line-strong); stroke-width: 1.4px; }
+  .flow-edge.faded { stroke: #e4e9ef; }
+  .flow-edge.hot { stroke: var(--blue); stroke-width: 2px; }
+
+  .gnode { cursor: pointer; }
+  .gnode .card {
+    fill: var(--surface); stroke: var(--line-strong); stroke-width: 1px;
+  }
+  .gnode.hub .card { stroke: var(--blue); stroke-width: 1.6px; }
+  .gnode.selected .card { stroke: var(--blue); stroke-width: 2px; }
+  .gnode.faded { opacity: 0.42; }
+  .gnode .statusbar { }
+  .gnode .nlabel { font-weight: 700; font-size: 12px; fill: var(--ink); }
+  .gnode.hub .nlabel { font-size: 13px; }
+  .gnode .ncount { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-2); }
+  .gnode .nkind { font-family: var(--mono); font-size: 8px; fill: var(--ink-3); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  .canvas-topbar {
+    position: absolute; top: 10px; left: 10px; right: 10px; z-index: 6;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .canvas-topbar .stagelane {
+    display: flex; gap: 4px; font-family: var(--mono); font-size: 9px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .canvas-topbar .grow { flex: 1; }
+  .zoombar { display: inline-flex; gap: 4px; }
+  .zoombar button {
+    width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink-2); cursor: pointer; font-size: 13px;
+  }
+  .zoombar button:hover { border-color: var(--blue); color: var(--blue); }
+
+  .popover {
+    position: absolute; z-index: 30; pointer-events: none;
+    background: var(--ink); color: #fff; border-radius: 8px; padding: 10px 12px;
+    min-width: 180px; box-shadow: 0 12px 30px rgba(15, 25, 35, 0.28);
+    opacity: 0; transform: translateY(4px); transition: opacity 0.12s, transform 0.12s;
+  }
+  .popover.show { opacity: 1; transform: translateY(0); }
+  .popover .pv-title { font-weight: 700; font-size: 12px; margin-bottom: 2px; }
+  .popover .pv-sub { font-family: var(--mono); font-size: 10px; color: #9fb0c2; margin-bottom: 8px; }
+  .popover .pv-row { display: flex; justify-content: space-between; gap: 14px; font-family: var(--mono); font-size: 10.5px; margin-top: 3px; }
+  .popover .pv-row span:last-child { color: #7fd6a8; }
+  .popover svg { display: block; margin-top: 8px; }
+
+  /* ---------- Content viewer ---------- */
+  .tabs-strip { display: flex; border-bottom: 1px solid var(--line); background: var(--surface-2); flex: 0 0 auto; }
+  .tabs-strip button {
+    appearance: none; background: transparent; border: 0; border-bottom: 2px solid transparent;
+    font-family: var(--ui); font-weight: 600; font-size: 11px; letter-spacing: 0.03em;
+    color: var(--ink-3); padding: 9px 14px; cursor: pointer;
+  }
+  .tabs-strip button:hover { color: var(--ink); }
+  .tabs-strip button.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .tab-body { flex: 1 1 auto; overflow: auto; padding: 16px; }
+  .tab-body::-webkit-scrollbar, .pdf-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+  .tab-body::-webkit-scrollbar-thumb, .pdf-scroll::-webkit-scrollbar-thumb {
+    background: var(--line-strong); border-radius: 12px; border: 3px solid var(--surface);
+  }
+
+  .cv-title { font-weight: 800; font-size: 18px; letter-spacing: -0.01em; margin: 0 0 2px; }
+  .cv-sub { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-bottom: 14px; }
+  .cv-sub .rel { color: var(--blue-ink); }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
+  .stat {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  }
+  .stat .s-label { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-3); }
+  .stat .s-value { font-weight: 800; font-size: 20px; margin-top: 3px; letter-spacing: -0.02em; }
+  .stat .s-value.small { font-size: 13px; font-weight: 600; font-family: var(--mono); }
+  .stat.accent { background: #eef3fe; border-color: #cfdffb; }
+  .stat.accent .s-value { color: var(--blue-ink); }
+
+  .prose { line-height: 1.62; color: var(--ink-2); font-size: 12.5px; max-width: 60ch; }
+  .prose p { margin: 0 0 10px; }
+  .prose strong { color: var(--ink); }
+
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  table.tbl th {
+    text-align: left; font-family: var(--mono); font-size: 9px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-3); padding: 8px; border-bottom: 1px solid var(--line-strong);
+  }
+  table.tbl td { padding: 8px; border-bottom: 1px solid var(--line); }
+  table.tbl td.mono { font-family: var(--mono); }
+  table.tbl tr:hover td { background: var(--surface-2); }
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: 9px; font-weight: 500;
+    padding: 2px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .tag.ok { background: #e4f4ec; color: var(--green); }
+  .tag.warn { background: #fbf0dd; color: var(--amber); }
+  .tag.err { background: #fbe4e6; color: var(--red); }
+
+  .finding { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .finding .sev {
+    flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px;
+  }
+  .finding .sev.high { background: var(--red); }
+  .finding .sev.med { background: var(--amber); }
+  .finding .sev.low { background: var(--ink-3); }
+  .finding .f-body { font-size: 12px; line-height: 1.5; }
+  .finding .f-body b { display: block; font-family: var(--mono); font-size: 10px; color: var(--ink-3); font-weight: 500; }
+
+  .jump-ev {
+    margin-top: 12px; display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 10.5px; color: var(--blue); cursor: pointer;
+    border: 1px solid #cfdffb; background: #eef3fe; padding: 5px 9px; border-radius: 6px;
+  }
+  .jump-ev:hover { background: #e0eafd; }
+
+  .empty { height: 100%; display: grid; place-items: center; color: var(--ink-3); font-family: var(--mono); font-size: 11px; }
+
+  /* ---------- PDF ---------- */
+  .pdf-toolbar {
+    display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 14px;
+    background: var(--surface-2); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+  }
+  .pdf-toolbar .lbl { font-weight: 700; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+  .pdf-toolbar .grow { flex: 1; }
+  .pdf-toolbar .hint { font-family: var(--mono); font-size: 10px; color: var(--blue-ink); }
+  .pdf-toolbar button {
+    width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink-2); cursor: pointer; font-size: 12px;
+  }
+  .pdf-toolbar button:hover { border-color: var(--blue); color: var(--blue); }
+  .pdf-toolbar .zoom { font-family: var(--mono); font-size: 10px; color: var(--ink-3); min-width: 34px; text-align: center; }
+
+  .pdf-scroll { flex: 1 1 auto; overflow: auto; padding: 16px; background: #e4e8ee; }
+  .pdf-doc { width: 520px; margin: 0 auto; transform-origin: top center; }
+  .pdf-page {
+    background: var(--surface); border: 1px solid var(--line-strong);
+    box-shadow: 0 10px 26px -12px rgba(20, 34, 46, 0.25);
+    padding: 40px 44px; margin-bottom: 16px;
+    font-family: "Public Sans", serif; color: #2b3a49; line-height: 1.7; font-size: 12px;
+  }
+  .pdf-page h2 { font-weight: 800; font-size: 13px; margin: 0 0 2px; color: var(--ink); }
+  .pdf-page .doc-sub { font-family: var(--mono); font-size: 10px; color: var(--ink-3); margin-bottom: 18px; }
+  .pdf-page .clause-no { font-family: var(--mono); font-size: 10px; color: var(--blue-ink); }
+  .pdf-page p { margin: 0 0 12px; position: relative; }
+  .pdf-page strong { color: var(--ink); }
+  .pdf-page mark {
+    background: transparent; color: inherit; padding: 1px 2px; border-radius: 2px;
+    outline: 1px dashed var(--line-strong); cursor: pointer;
+  }
+  .pdf-page mark.is-active {
+    background: #eef3fe; outline: 1px solid var(--blue);
+    box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+  }
+  .pdf-page mark.is-active::after {
+    content: attr(data-callout);
+    position: absolute; right: -30px; margin-top: -2px;
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    background: var(--blue); color: #fff; border-radius: 4px; padding: 1px 5px;
+  }
+  .pdf-page mark.flash { background: #dcfce9; outline-color: var(--green); }
+  .pg-foot {
+    margin-top: 20px; padding-top: 10px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 9px; color: var(--ink-3); text-align: center; letter-spacing: 0.08em;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="mark">M</span><span class="title">Metric Ontology Explorer</span></div>
+    <span class="crumb">home3 / <b>knowledge</b> / ontology</span>
+    <span class="spacer"></span>
+    <div class="seg" id="layoutSeg">
+      <button data-layout="lr" class="active" title="Left / Right">
+        <svg viewBox="0 0 16 16"><rect x="1" y="1" width="6.5" height="14" rx="1" fill="none" stroke="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1" fill="none" stroke="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor"/></svg>
+        L·R
+      </button>
+      <button data-layout="tb" title="Top / Bottom">
+        <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="6.5" rx="1" fill="none" stroke="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor"/></svg>
+        T·B
+      </button>
+    </div>
+    <button class="btn-ghost" id="resetLayout">Reset panes</button>
+  </header>
+  <div id="workspace"></div>
+</div>
+
+<template id="paneTemplates">
+  <section class="pane" id="paneCanvas">
+    <div class="pane-head">
+      <span class="lbl">Ontology Canvas</span>
+      <div class="seg small" id="modeSeg">
+        <button data-mode="flow" class="active">Flow</button>
+        <button data-mode="radial">Radial</button>
+      </div>
+      <span class="grow"></span>
+      <span class="meta" id="canvasMeta"></span>
+    </div>
+    <div class="pane-body" style="flex:1 1 auto; min-height:0; position:relative;">
+      <div id="canvasHost">
+        <svg id="graph"></svg>
+        <div class="canvas-topbar">
+          <span class="stagelane" id="stagelane"></span>
+          <span class="grow"></span>
+          <span class="zoombar">
+            <button data-z="out">−</button><button data-z="fit">⤢</button><button data-z="in">+</button>
+          </span>
+        </div>
+        <div class="popover" id="popover"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" id="paneTabs">
+    <div class="pane-head"><span class="lbl">Content</span><span class="grow"></span><span class="meta" id="tabsMeta"></span></div>
+    <div class="tabs-strip" id="tabsStrip"></div>
+    <div class="tab-body" id="tabBody"></div>
+  </section>
+
+  <section class="pane" id="panePdf">
+    <div class="pdf-toolbar">
+      <span class="lbl">Source PDF</span>
+      <span class="hint" id="pdfHint"></span>
+      <span class="grow"></span>
+      <button data-pz="out">−</button><span class="zoom" id="pdfZoom">100%</span><button data-pz="in">+</button><button data-pz="fit">⤢</button>
+    </div>
+    <div class="pdf-scroll" id="pdfScroll"><div class="pdf-doc" id="pdfDoc"></div></div>
+  </section>
+</template>
+
+<script>
+/* =====================================================================
+   Metric Ontology Explorer — Prototype C "Pipeline"
+   Analytical canvas: left→right processing flow OR radial ego view.
+   Stat-forward content viewer + callout-numbered source PDF.
+   ===================================================================== */
+const LS_KEY = "moe-proto-C-v1";
+
+const NODES = [
+  { id: "document", label: "Document", kind: "source", stage: "Ingest",
+    count: "1,336", coverage: "100%", lastRun: "2026-09-01 09:12", status: "ok",
+    trend: [4, 6, 5, 8, 9, 11, 13],
+    blurb: "Source PDFs and their line-based extracts. Chunked on ingest; each chunk is an input record a metric points back to.",
+    facts: { table: "kb.inputs", grain: "chunk / clause", reader: "layout-aware" },
+    records: [["doc_TPS118", "Thermal Performance Standard TPS-118", "42 pp · 214 chunks", "ok"], ["doc_TPS118_x", "TPS-118 line extract", "1,904 lines", "ok"]],
+    findings: [["low", "3 documents re-ingested", "chunk ids stable, no downstream impact"]],
+    evidence: [{ span: "e1", page: 1 }, { span: "e2", page: 1 }] },
+  { id: "processor", label: "Processor", kind: "pipeline", stage: "Extract",
+    count: "3 stages", coverage: "—", lastRun: "2026-09-04 18:41", status: "warn",
+    trend: [10, 9, 11, 8, 7, 9, 6],
+    blurb: "extract_metrics → enrich (pass-2) → Phase D semantic write. DeepSeek prefix cache, per-chunk batch coordinator.",
+    facts: { stages: "extract · enrich · Phase D", cache: "DeepSeek prefix", input: "canonicalChunkInputText" },
+    records: [["proc_extract", "extract_metrics", "214 chunks · 18:41", "ok"], ["proc_enrich", "metrics.enrich pass-2", "cache_hit 0.31", "warn"], ["proc_phased", "Phase D write", "LOSSLESS default ON", "ok"]],
+    findings: [["med", "enrich cache_hit below target", "0.31 vs 0.70 — provider timing + burst fan-out"]],
+    evidence: [] },
+  { id: "mdef", label: "Metric Definition", kind: "governed", stage: "Govern",
+    count: "416", coverage: "61%", lastRun: "2026-09-05 08:20", status: "warn",
+    trend: [2, 3, 3, 4, 5, 6, 6],
+    blurb: "Governed template each metric conforms to: unit, value-range type, comparison direction, class contract.",
+    facts: { table: "kb.metric_definitions", contract: "class-contract synthesis (live)", can_compare: "planned" },
+    records: [["md_ufactor", "Thermal transmittance (U-factor)", "W/m²·K · lower-better", "ok"], ["md_airleak", "Air leakage rate", "L/s·m² @Pa · lower-better", "ok"]],
+    findings: [["med", "163 definitions unmapped", "no class contract synthesised yet"], ["low", "record 416 backfilled", "stale server binary, not a code defect"]],
+    evidence: [{ span: "e6", page: 2 }] },
+  { id: "metric", label: "Metric", kind: "core", stage: "Metric",
+    count: "18,204", coverage: "82%", lastRun: "2026-09-04 18:41", status: "ok",
+    trend: [6, 8, 9, 12, 14, 16, 18],
+    blurb: "A measurable indicator mined from a document — value, threshold, target, rate, score or KPI — normalized into kb.metrics.",
+    facts: { table: "kb.metrics", identity: "metric_key", value_range_type: "309-string vocabulary" },
+    records: [["mtr_0912", "U-factor, opaque wall assembly", "TPS-118 §4.2", "ok"], ["mtr_0913", "Air leakage @75Pa", "TPS-118 §6.1", "warn"], ["mtr_0915", "Thermal bridging penalty", "TPS-118 §5.3", "err"]],
+    findings: [["high", "Phase D not invoked when extract_metrics run alone", "metric-value semantic_assertions stay empty"]],
+    evidence: [] },
+  { id: "keyword", label: "Keyword", kind: "lexicon", stage: "Tag",
+    count: "4,213", coverage: "100%", lastRun: "2026-08-30 14:00", status: "ok",
+    trend: [40, 41, 41, 42, 42, 42, 42],
+    blurb: "Verified lexicon terms (4,213, all QUDT-linked) that surface a metric and produce aligns_to_term stubs.",
+    facts: { lexicon: "keyword lexicon v2", verified_terms: "4,213", match: "surface + morphology" },
+    records: [["kw_ufactor", "u-factor", "syn: thermal transmittance", "ok"], ["kw_airleak", "air leakage", "syn: infiltration", "ok"]],
+    findings: [["low", "synonym gap closed 2026-08-14", "partial value_range_type synonyms added"]],
+    evidence: [{ span: "e4", page: 1 }] },
+  { id: "object", label: "Object", kind: "entity", stage: "Resolve",
+    count: "2,741", coverage: "69%", lastRun: "2026-09-03 22:05", status: "warn",
+    trend: [20, 22, 24, 25, 26, 27, 27],
+    blurb: "The real thing a metric measures. Resolved via normalize_assertions; anchors object-anchored missing-metric detection.",
+    facts: { route: "normalize_assertions", store: "kb.semantic_decision_candidates" },
+    records: [["obj_wall_op", "Opaque wall assembly", "12 metrics", "ok"], ["obj_fenestr", "Fenestration unit", "5 metrics", "warn"]],
+    findings: [["med", "object reconciliation ambiguous", "23 rows — never self-resolves via drain"]],
+    evidence: [{ span: "e3", page: 2 }] },
+  { id: "evidence", label: "Evidence", kind: "provenance", stage: "Prove",
+    count: "9,180", coverage: "74%", lastRun: "2026-09-04 18:41", status: "warn",
+    trend: [50, 55, 60, 66, 72, 82, 92],
+    blurb: "Verbatim spans that justify a metric's value. assertion_evidence links assertion → chunk offset; shown as PDF highlights.",
+    facts: { table: "assertion_evidence", shape: "char span + bbox" },
+    records: [["ev_4471", "“U-factor ≤ 0.28 W/m²·K”", "p.1 §4.2", "ok"], ["ev_4472", "“≤ 1.5 L/s·m² at 75 Pa”", "p.1 §6.1", "ok"], ["ev_4473", "“minimum R-10 continuous”", "p.2 §4.4", "warn"]],
+    findings: [["med", "26% of spans unresolved", "assertion present, offset not yet matched"]],
+    evidence: [{ span: "e1", page: 1 }, { span: "e2", page: 1 }, { span: "e5", page: 2 }] },
+  { id: "misc", label: "Misc", kind: "deferred", stage: "Park",
+    count: "111", coverage: "—", lastRun: "2026-09-04 18:41", status: "warn",
+    trend: [8, 9, 9, 10, 10, 11, 11],
+    blurb: "Unclassified / deferred artifacts: unparsed assertion kinds, ambiguous reconciliations. Manual drain only.",
+    facts: { markers: "unparsed · ambiguous", drain: "manual only" },
+    records: [["msc_unparsed", "Unparsed assertion kind", "88 rows", "warn"], ["msc_ambig", "Ambiguous reconciliation", "23 rows", "warn"]],
+    findings: [["med", "no_governed_assertion_kind_term:unparsed", "88 rows, does not self-resolve"]],
+    evidence: [] },
+  { id: "analysis", label: "Analysis", kind: "diagnostic", stage: "Diagnose",
+    count: "512", coverage: "—", lastRun: "2026-09-05 06:30", status: "err",
+    trend: [30, 28, 26, 24, 20, 18, 16],
+    blurb: "Coverage, mappings, findings and self-harvested ontology candidates. Metric Ontology Analysis view; findings P1–P8.",
+    facts: { view: "Metric Ontology Analysis", harvest: "kb.ontology_candidates (fingerprint, additive)" },
+    records: [["an_cov", "Coverage by object class", "82% opaque · 41% fenestration", "warn"], ["an_map", "Definition mapping gaps", "163 unmapped", "err"], ["an_cand", "Ontology candidates", "512 pending", "warn"]],
+    findings: [["high", "163 unmapped definitions (P3)", "blocks comparison for affected classes"], ["med", "512 ontology candidates pending (P6)", "additive-only, no delete on re-run"]],
+    evidence: [{ span: "e7", page: 2 }] },
+  { id: "product", label: "Product", kind: "downstream", stage: "Deliver",
+    count: "6", coverage: "—", lastRun: "2026-09-05 07:55", status: "err",
+    trend: [3, 3, 4, 4, 5, 5, 6],
+    blurb: "Downstream deliverables reading curated metrics + contracts: comparison report, coverage dashboard, wiki entry.",
+    facts: { surfaces: "Metric Wiki · Ontology Analysis", gate: "can_compare (planned)" },
+    records: [["prd_compare", "Metric comparison report", "blocked on can_compare", "err"], ["prd_wiki", "Metric Wiki entry", "live", "ok"], ["prd_dash", "Coverage dashboard", "live", "ok"]],
+    findings: [["high", "comparison report blocked", "can_compare capability not built"]],
+    evidence: [] },
+];
+const BY_ID = {};
+NODES.forEach(n => (BY_ID[n.id] = n));
+
+/* flow edges (directional) */
+const FLOW_EDGES = [
+  ["document", "processor"], ["processor", "mdef"], ["processor", "metric"], ["mdef", "metric"],
+  ["metric", "keyword"], ["metric", "object"], ["metric", "evidence"], ["metric", "misc"],
+  ["object", "analysis"], ["evidence", "analysis"], ["metric", "analysis"],
+  ["analysis", "product"], ["metric", "product"],
+];
+/* radial edges: metric ↔ each of the other 9 */
+const RADIAL_EDGES = NODES.filter(n => n.id !== "metric").map(n => ["metric", n.id]);
+
+const REL = {
+  document: "mined from", object: "measures", keyword: "tagged by", evidence: "justified by",
+  mdef: "conforms to", processor: "produced by", product: "consumed by", analysis: "evaluated by", misc: "parked in",
+};
+
+const PDF_PAGES = [
+  { n: 1, title: "Thermal Performance Standard TPS-118", sub: "Insulated Opaque Wall Assemblies — Part 1: Requirements",
+    clauses: [
+      { no: "§4.2", h: "Opaque assembly thermal transmittance",
+        html: `The area-weighted assembly <mark data-span="e4">U-factor</mark> of opaque above-grade walls shall not exceed <mark data-span="e1">0.28 W/m²·K</mark> when evaluated by the two-dimensional method of Annex C. In climate zones 6 and above the limiting value is 0.21 W/m²·K.` },
+      { no: "§6.1", h: "Air leakage of the assembly",
+        html: `Each tested wall specimen shall demonstrate an air leakage rate not greater than <mark data-span="e2">1.5 L/s·m² at a pressure differential of 75 Pa</mark>, measured per the referenced infiltration protocol.` },
+      { no: "§4.1", h: "Scope",
+        html: `This clause applies to field-assembled and prefabricated opaque wall assemblies. Fenestration is addressed in Part 2 and is excluded from the <mark data-span="e4">U-factor</mark> averaging boundary.` },
+    ] },
+  { n: 2, title: "Thermal Performance Standard TPS-118", sub: "Insulated Opaque Wall Assemblies — Part 1: Requirements (cont.)",
+    clauses: [
+      { no: "§4.4", h: "Continuous insulation",
+        html: `A layer of <mark data-span="e5">continuous insulation with a minimum thermal resistance of R-10 (RSI 1.76)</mark> shall be installed outboard of the structural sheathing where prescriptive compliance is elected. The <mark data-span="e3">opaque wall assembly</mark> is the unit of evaluation.` },
+      { no: "§5.3", h: "Thermal bridging",
+        html: `Point and linear transmittance from cladding attachments shall be included. Where <mark data-span="e6">the assembly U-factor is derived by calculation</mark>, the class contract for thermal transmittance governs the reported range and the lower-is-better comparison direction.` },
+      { no: "§7.2", h: "Reporting",
+        html: `The compliance report shall list each governed metric, its evaluated value and its clause of origin. <mark data-span="e7">Unmapped or ambiguous metrics shall be placed in an appendix</mark> and are not eligible for comparison.` },
+    ] },
+];
+
+/* ---------- Layout engine ---------- */
+const workspace = document.getElementById("workspace");
+const tpl = document.getElementById("paneTemplates").content;
+const paneCanvas = tpl.getElementById("paneCanvas");
+const paneTabs = tpl.getElementById("paneTabs");
+const panePdf = tpl.getElementById("panePdf");
+
+const DEFAULTS = { layout: "lr", leftW: 560, canvasH: 344, tabsW: 400 };
+let state = loadState();
+function loadState() {
+  try { const s = JSON.parse(localStorage.getItem(LS_KEY)); if (s && s.layout) return Object.assign({}, DEFAULTS, s); } catch (e) {}
+  return Object.assign({}, DEFAULTS);
+}
+function saveState() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+function gap(px) { const d = document.createElement("div"); d.style.flex = `0 0 ${px}px`; return d; }
+function buildLayout() {
+  workspace.textContent = "";
+  workspace.style.flexDirection = state.layout === "lr" ? "row" : "column";
+  if (state.layout === "lr") {
+    const left = groupEl("vert");
+    left.style.cssText = `width:${state.leftW}px;flex:0 0 ${state.leftW}px`;
+    paneCanvas.style.cssText = `flex:0 0 ${state.canvasH}px;height:${state.canvasH}px`;
+    paneTabs.style.cssText = "flex:1 1 auto";
+    left.append(paneCanvas, splitterEl("y", "canvasH"), paneTabs);
+    panePdf.style.cssText = "flex:1 1 auto";
+    workspace.append(left, splitterEl("x", "leftW"), panePdf);
+  } else {
+    paneCanvas.style.cssText = `flex:0 0 ${state.canvasH}px;height:${state.canvasH}px`;
+    const bottom = groupEl("horz");
+    bottom.style.cssText = "flex:1 1 auto";
+    paneTabs.style.cssText = `flex:0 0 ${state.tabsW}px;width:${state.tabsW}px`;
+    panePdf.style.cssText = "flex:1 1 auto";
+    bottom.append(paneTabs, splitterEl("x", "tabsW"), panePdf);
+    workspace.append(paneCanvas, splitterEl("y", "canvasH"), bottom);
+  }
+  requestAnimationFrame(() => { resizeGraph(); layoutGraph(false); });
+}
+function groupEl(k) { const d = document.createElement("div"); d.className = "group " + k; return d; }
+function splitterEl(axis, key) {
+  const s = document.createElement("div");
+  s.className = "splitter"; s.dataset.axis = axis; s.dataset.key = key;
+  s.addEventListener("pointerdown", startResize);
+  return s;
+}
+let resize = null;
+function startResize(e) {
+  const s = e.currentTarget;
+  resize = { key: s.dataset.key, startX: e.clientX, startY: e.clientY, startVal: state[s.dataset.key] };
+  s.classList.add("drag"); s.setPointerCapture(e.pointerId); document.body.classList.add("resizing");
+  s.addEventListener("pointermove", moveResize); s.addEventListener("pointerup", endResize);
+}
+function moveResize(e) {
+  if (!resize) return;
+  const dx = e.clientX - resize.startX, dy = e.clientY - resize.startY;
+  let v = resize.startVal;
+  if (resize.key === "leftW") v = clamp(resize.startVal + dx, 340, workspace.clientWidth - 360);
+  else if (resize.key === "tabsW") v = clamp(resize.startVal + dx, 300, workspace.clientWidth - 360);
+  else if (resize.key === "canvasH") {
+    const host = state.layout === "lr" ? document.querySelector(".group.vert") : workspace;
+    v = clamp(resize.startVal + dy, 200, host.clientHeight - 180);
+  }
+  state[resize.key] = Math.round(v); applySizes();
+}
+function endResize(e) {
+  const s = e.currentTarget; s.classList.remove("drag");
+  s.removeEventListener("pointermove", moveResize); s.removeEventListener("pointerup", endResize);
+  document.body.classList.remove("resizing"); resize = null; saveState();
+  resizeGraph(); layoutGraph(false);
+}
+function applySizes() {
+  if (state.layout === "lr") {
+    const left = document.querySelector(".group.vert");
+    if (left) left.style.cssText = `width:${state.leftW}px;flex:0 0 ${state.leftW}px`;
+  } else {
+    paneTabs.style.cssText = `flex:0 0 ${state.tabsW}px;width:${state.tabsW}px`;
+  }
+  paneCanvas.style.cssText = `flex:0 0 ${state.canvasH}px;height:${state.canvasH}px`;
+  resizeGraph(); layoutGraph(false);
+}
+document.getElementById("layoutSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.layout = b.dataset.layout;
+  [...document.querySelectorAll("#layoutSeg button")].forEach(x => x.classList.toggle("active", x === b));
+  saveState(); buildLayout();
+});
+document.getElementById("resetLayout").addEventListener("click", () => {
+  const layout = state.layout; state = Object.assign({}, DEFAULTS, { layout }); saveState(); buildLayout();
+});
+
+/* =====================================================================
+   Canvas
+   ===================================================================== */
+const svg = d3.select(paneCanvas.querySelector("#graph"));
+const gZoom = svg.append("g");
+const gGrid = gZoom.append("g");
+const gEdges = gZoom.append("g");
+const gNodes = gZoom.append("g");
+svg.append("defs").html(`
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 z" fill="#8ea2b5"></path>
+  </marker>
+  <marker id="ah-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 z" fill="#2f6feb"></path>
+  </marker>`);
+
+let zoomT = d3.zoomIdentity;
+const zoom = d3.zoom().scaleExtent([0.3, 2.4]).on("zoom", (e) => { zoomT = e.transform; gZoom.attr("transform", e.transform); });
+svg.call(zoom).on("dblclick.zoom", null)
+  .on("mousedown.c", () => svg.classed("grabbing", true))
+  .on("mouseup.c mouseleave.c", () => svg.classed("grabbing", false));
+
+let mode = "flow";
+let selectedId = "metric";
+const CARD_W = 132, CARD_H = 52;
+
+const FLOW_COLS = {
+  document: 0, processor: 1, mdef: 2, metric: 3,
+  keyword: 4, object: 4, evidence: 4, misc: 4,
+  analysis: 5, product: 6,
+};
+const STACK4 = { keyword: -1.5, object: -0.5, evidence: 0.5, misc: 1.5 };
+const STAGE_LANES = ["Ingest", "Extract", "Govern", "Metric", "Fan-out", "Diagnose", "Deliver"];
+
+function positions() {
+  const pos = {};
+  if (mode === "flow") {
+    const colGapX = 176, rowGapY = 108, midCol = 3;
+    NODES.forEach(n => {
+      const c = FLOW_COLS[n.id];
+      const x = (c - midCol) * colGapX;
+      let y = 0;
+      if (c === 4) y = STACK4[n.id] * rowGapY;
+      else if (n.id === "mdef") y = -rowGapY * 0.62;
+      else if (n.id === "processor") y = rowGapY * 0.22;
+      pos[n.id] = { x, y };
+    });
+  } else {
+    const host = document.getElementById("canvasHost");
+    const R = host ? clamp(Math.min(host.clientWidth, host.clientHeight) * 0.55, 250, 330) : 260;
+    pos["metric"] = { x: 0, y: 0 };
+    const others = NODES.filter(n => n.id !== "metric");
+    others.forEach((n, i) => {
+      const a = (i / others.length) * Math.PI * 2 - Math.PI / 2;
+      pos[n.id] = { x: Math.cos(a) * R, y: Math.sin(a) * R };
+    });
+  }
+  return pos;
+}
+function activeEdges() { return mode === "flow" ? FLOW_EDGES : RADIAL_EDGES; }
+
+function edgePath(a, b, pos) {
+  const s = pos[a], t = pos[b];
+  if (mode === "flow") {
+    const sx = s.x + CARD_W / 2, sy = s.y, tx = t.x - CARD_W / 2, ty = t.y;
+    const mx = (sx + tx) / 2;
+    return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+  }
+  return `M${s.x},${s.y} L${t.x},${t.y}`;
+}
+
+function neighborsOf(id) {
+  const set = new Set([id]);
+  activeEdges().forEach(([a, b]) => { if (a === id) set.add(b); if (b === id) set.add(a); });
+  return set;
+}
+
+function layoutGraph(animate) {
+  const pos = positions();
+  const edges = activeEdges();
+  const nb = neighborsOf(selectedId);
+  const dur = animate ? 640 : 0;
+
+  const eSel = gEdges.selectAll("path").data(edges, d => d[0] + ">" + d[1]);
+  eSel.exit().remove();
+  eSel.enter().append("path")
+    .attr("class", "flow-edge").attr("marker-end", "url(#ah)")
+    .attr("d", d => edgePath(d[0], d[1], pos))
+    .merge(eSel)
+    .classed("hot", d => selectedId && (d[0] === selectedId || d[1] === selectedId))
+    .classed("faded", d => selectedId && !(d[0] === selectedId || d[1] === selectedId))
+    .attr("marker-end", d => (selectedId && (d[0] === selectedId || d[1] === selectedId)) ? "url(#ah-hot)" : "url(#ah)")
+    .transition().duration(dur).ease(d3.easeCubicInOut)
+    .attr("d", d => edgePath(d[0], d[1], pos));
+
+  const nSel = gNodes.selectAll("g.gnode").data(NODES, d => d.id);
+  const nEnter = nSel.enter().append("g")
+    .attr("class", d => "gnode" + (d.id === "metric" ? " hub" : ""))
+    .attr("transform", d => `translate(${pos[d.id].x},${pos[d.id].y})`)
+    .on("click", (e, d) => { e.stopPropagation(); selectNode(d.id); })
+    .on("mousemove", (e, d) => showPopover(e, d))
+    .on("mouseleave", hidePopover);
+  nEnter.each(function (d) {
+    const g = d3.select(this);
+    g.append("rect").attr("class", "card").attr("x", -CARD_W / 2).attr("y", -CARD_H / 2)
+      .attr("width", CARD_W).attr("height", CARD_H).attr("rx", 8);
+    g.append("rect").attr("class", "statusbar").attr("x", -CARD_W / 2).attr("y", -CARD_H / 2)
+      .attr("width", 4).attr("height", CARD_H).attr("rx", 2)
+      .attr("fill", statusColor(d.status));
+    g.append("text").attr("class", "nkind").attr("x", -CARD_W / 2 + 14).attr("y", -CARD_H / 2 + 15).text(d.stage.toUpperCase());
+    g.append("text").attr("class", "nlabel").attr("x", -CARD_W / 2 + 14).attr("y", 2).text(d.label);
+    g.append("text").attr("class", "ncount").attr("x", -CARD_W / 2 + 14).attr("y", CARD_H / 2 - 10).text(d.count);
+  });
+  nEnter.merge(nSel)
+    .classed("selected", d => d.id === selectedId)
+    .classed("faded", d => selectedId && !nb.has(d.id))
+    .transition().duration(dur).ease(d3.easeCubicInOut)
+    .attr("transform", d => `translate(${pos[d.id].x},${pos[d.id].y})`);
+
+  const meta = document.getElementById("canvasMeta");
+  if (meta) meta.textContent = mode === "flow" ? `flow · ${edges.length} edges` : `radial · ${edges.length} edges`;
+  const lane = document.getElementById("stagelane");
+  if (lane) lane.innerHTML = mode === "flow" ? STAGE_LANES.map(s => `<span>${s}</span>`).join("<span>·</span>") : "<span>ego view — Metric &amp; its 9 neighbours</span>";
+  if (animate || !gZoom.attr("transform")) fitGraph(animate ? 640 : 0);
+}
+function statusColor(s) { return s === "ok" ? "#1f9d63" : s === "warn" ? "#c9821a" : s === "err" ? "#d64550" : "#7c8b9c"; }
+
+function selectNode(id) {
+  selectedId = id;
+  layoutGraph(false);
+  renderContent(id);
+  renderEvidence(id);
+}
+svg.on("click", () => {});
+
+/* mode toggle */
+paneCanvas.querySelector("#modeSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  mode = b.dataset.mode;
+  [...paneCanvas.querySelectorAll("#modeSeg button")].forEach(x => x.classList.toggle("active", x === b));
+  layoutGraph(true);
+});
+
+/* popover with sparkline */
+const popover = () => document.getElementById("popover");
+function sparkline(vals, w, h) {
+  const max = Math.max(...vals), min = Math.min(...vals);
+  const nx = i => (i / (vals.length - 1)) * w;
+  const ny = v => h - ((v - min) / (max - min || 1)) * h;
+  const d = vals.map((v, i) => `${i ? "L" : "M"}${nx(i).toFixed(1)},${ny(v).toFixed(1)}`).join(" ");
+  return `<svg width="${w}" height="${h}"><path d="${d}" fill="none" stroke="#7fd6a8" stroke-width="1.6"/><path d="${d} L${w},${h} L0,${h} Z" fill="rgba(127,214,168,0.15)" stroke="none"/></svg>`;
+}
+function showPopover(e, d) {
+  const host = document.getElementById("canvasHost");
+  const r = host.getBoundingClientRect();
+  const p = popover();
+  p.innerHTML = `<div class="pv-title">${d.label}</div>
+    <div class="pv-sub">${d.stage} · ${d.status.toUpperCase()}</div>
+    <div class="pv-row"><span>instances</span><span>${d.count}</span></div>
+    <div class="pv-row"><span>coverage</span><span>${d.coverage}</span></div>
+    <div class="pv-row"><span>last run</span><span>${d.lastRun}</span></div>
+    ${sparkline(d.trend, 156, 34)}`;
+  let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
+  if (x + 200 > r.width) x = e.clientX - r.left - 200;
+  if (y + 150 > r.height) y = e.clientY - r.top - 150;
+  p.style.left = x + "px"; p.style.top = y + "px";
+  p.classList.add("show");
+}
+function hidePopover() { popover().classList.remove("show"); }
+
+/* zoom / fit */
+paneCanvas.querySelector(".zoombar").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.z === "in") svg.transition().duration(180).call(zoom.scaleBy, 1.3);
+  else if (b.dataset.z === "out") svg.transition().duration(180).call(zoom.scaleBy, 1 / 1.3);
+  else fitGraph(300);
+});
+function resizeGraph() {
+  const host = document.getElementById("canvasHost"); if (!host) return;
+  const w = host.clientWidth, h = host.clientHeight;
+  svg.attr("width", w).attr("height", h).attr("viewBox", `0 0 ${w} ${h}`);
+}
+function fitGraph(dur) {
+  const host = document.getElementById("canvasHost"); if (!host) return;
+  const w = host.clientWidth, h = host.clientHeight;
+  const pos = positions();
+  const xs = [], ys = [];
+  NODES.forEach(n => { xs.push(pos[n.id].x - CARD_W / 2, pos[n.id].x + CARD_W / 2); ys.push(pos[n.id].y - CARD_H / 2, pos[n.id].y + CARD_H / 2); });
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 44;
+  const k = clamp(Math.min(w / (maxX - minX + pad * 2), h / (maxY - minY + pad * 2)), 0.3, 1.7);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const t = d3.zoomIdentity.translate(w / 2 - cx * k, h / 2 - cy * k).scale(k);
+  svg.transition().duration(dur == null ? 300 : dur).call(zoom.transform, t);
+}
+
+/* =====================================================================
+   Content viewer
+   ===================================================================== */
+const TABS = ["Overview", "Records", "Findings"];
+let activeTab = "Overview";
+const tabsStrip = paneTabs.querySelector("#tabsStrip");
+const tabBody = paneTabs.querySelector("#tabBody");
+TABS.forEach(t => {
+  const b = document.createElement("button");
+  b.textContent = t; b.classList.toggle("active", t === activeTab);
+  b.addEventListener("click", () => { activeTab = t; [...tabsStrip.children].forEach(c => c.classList.toggle("active", c === b)); renderContent(selectedId); });
+  tabsStrip.append(b);
+});
+function renderContent(id) {
+  const d = BY_ID[id];
+  const meta = paneTabs.querySelector("#tabsMeta");
+  if (!d) { tabBody.innerHTML = `<div class="empty">select a node</div>`; if (meta) meta.textContent = ""; return; }
+  if (meta) meta.textContent = d.id;
+  const rel = d.id === "metric" ? "the centre of the ontology" : `Metric <span class="rel">${REL[d.id]}</span> ${d.label}`;
+  let inner = `<h1 class="cv-title">${d.label}</h1><div class="cv-sub">${d.stage.toUpperCase()} · ${rel}</div>`;
+
+  if (activeTab === "Overview") {
+    inner += `<div class="stat-grid">
+      <div class="stat accent"><div class="s-label">Instances</div><div class="s-value">${d.count}</div></div>
+      <div class="stat"><div class="s-label">Coverage</div><div class="s-value">${d.coverage}</div></div>
+      <div class="stat"><div class="s-label">Status</div><div class="s-value small"><span class="tag ${d.status}">${d.status}</span></div></div>
+      <div class="stat"><div class="s-label">Last run</div><div class="s-value small">${d.lastRun}</div></div>
+    </div>
+    <div class="prose"><p>${d.blurb}</p></div>
+    <table class="tbl" style="margin-top:12px"><tbody>` +
+      Object.entries(d.facts).map(([k, v]) => `<tr><td class="mono" style="color:var(--ink-3);width:34%">${k}</td><td class="mono">${v}</td></tr>`).join("") +
+      `</tbody></table>`;
+    if (d.evidence && d.evidence.length) inner += `<div class="jump-ev" data-jump="${d.id}">▸ highlight ${d.evidence.length} evidence span(s) in source</div>`;
+  } else if (activeTab === "Records") {
+    inner += `<table class="tbl"><thead><tr><th>ID</th><th>Name</th><th>Detail</th><th>State</th></tr></thead><tbody>` +
+      d.records.map(r => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td style="color:var(--ink-3)">${r[2]}</td><td><span class="tag ${r[3]}">${r[3]}</span></td></tr>`).join("") +
+      `</tbody></table>`;
+  } else if (activeTab === "Findings") {
+    inner += d.findings && d.findings.length
+      ? d.findings.map(f => `<div class="finding"><span class="sev ${f[0]}"></span><div class="f-body"><b>${f[0].toUpperCase()}</b>${f[1]}<div style="color:var(--ink-3);margin-top:3px">${f[2]}</div></div></div>`).join("")
+      : `<div class="prose"><p style="color:var(--ink-3)">No findings recorded for this stage.</p></div>`;
+  }
+  tabBody.innerHTML = inner;
+  const j = tabBody.querySelector("[data-jump]");
+  if (j) j.addEventListener("click", () => renderEvidence(j.dataset.jump, true));
+}
+
+/* =====================================================================
+   Source PDF (faux) with numbered callouts
+   ===================================================================== */
+const pdfDoc = panePdf.querySelector("#pdfDoc");
+const pdfScroll = panePdf.querySelector("#pdfScroll");
+const pdfHint = panePdf.querySelector("#pdfHint");
+let pdfZoom = 1;
+function buildPdf() {
+  pdfDoc.innerHTML = PDF_PAGES.map(p => `
+    <div class="pdf-page" data-page="${p.n}">
+      <h2>${p.title}</h2><div class="doc-sub">${p.sub}</div>
+      ${p.clauses.map(c => `<p><span class="clause-no">${c.no}</span> &nbsp;<strong>${c.h}.</strong> ${c.html}</p>`).join("")}
+      <div class="pg-foot">TPS-118 · PAGE ${p.n} / ${PDF_PAGES.length}</div>
+    </div>`).join("");
+  pdfDoc.querySelectorAll("mark").forEach(m => m.addEventListener("click", () => {
+    const owner = NODES.find(n => (n.evidence || []).some(e => e.span === m.dataset.span));
+    if (owner) {
+      selectNode(owner.id);
+      const g = gNodes.selectAll("g.gnode").filter(d => d.id === owner.id);
+      g.select(".card").transition().duration(140).attr("stroke", "#1f9d63").transition().delay(700).duration(300).attr("stroke", null);
+    }
+    m.classList.add("flash"); setTimeout(() => m.classList.remove("flash"), 900);
+  }));
+}
+function renderEvidence(id, scroll) {
+  pdfDoc.querySelectorAll("mark.is-active").forEach(m => { m.classList.remove("is-active"); m.removeAttribute("data-callout"); });
+  const d = BY_ID[id];
+  const spans = d && d.evidence ? d.evidence.map(e => e.span) : [];
+  if (!spans.length) { pdfHint.textContent = d ? "no evidence spans" : ""; return; }
+  let first = null, k = 0;
+  spans.forEach(s => pdfDoc.querySelectorAll(`mark[data-span="${s}"]`).forEach(m => {
+    k++; m.classList.add("is-active"); m.setAttribute("data-callout", k); if (!first) first = m;
+  }));
+  pdfHint.textContent = `${spans.length} callout(s) · ${d.label}`;
+  if (scroll && first) first.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function applyPdfZoom() {
+  pdfDoc.style.transform = `scale(${pdfZoom})`;
+  panePdf.querySelector("#pdfZoom").textContent = Math.round(pdfZoom * 100) + "%";
+}
+panePdf.querySelector(".pdf-toolbar").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.pz === "in") pdfZoom = clamp(pdfZoom + 0.1, 0.6, 1.8);
+  else if (b.dataset.pz === "out") pdfZoom = clamp(pdfZoom - 0.1, 0.6, 1.8);
+  else pdfZoom = 1;
+  applyPdfZoom();
+});
+
+/* ---------- boot ---------- */
+[...document.querySelectorAll("#layoutSeg button")].forEach(x => x.classList.toggle("active", x.dataset.layout === state.layout));
+buildLayout();
+buildPdf();
+layoutGraph(false);
+selectNode("metric");
+setTimeout(() => { resizeGraph(); fitGraph(0); }, 250);
+
+const ro = new ResizeObserver(() => { resizeGraph(); });
+ro.observe(document.getElementById("canvasHost"));
+window.addEventListener("resize", () => { resizeGraph(); });
+</script>
+</body>
+</html>

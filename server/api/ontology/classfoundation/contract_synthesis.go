@@ -96,10 +96,20 @@ func SynthesizeContractFromObservations(ctx context.Context, db DBX, classTermID
 }
 
 func observedValueGroups(ctx context.Context, db DBX, classTermID string) ([]observedValueGroup, error) {
+	// document_count is the number of DISTINCT source documents that observed
+	// this (datatype, unit) pair -- counted from the per-document distribution
+	// rows, not summed from attribute_observations.document_count, which is a
+	// naive per-observation counter that inflates when the same document is
+	// re-observed (a metric reprocessed under Force Run, or after a payload
+	// change). SynthesizeContractFromObservations' minSynthesisDocuments bar is
+	// a cross-document-agreement check, so it must not be satisfiable by one
+	// document counted twice.
 	rows, err := db.QueryContext(ctx, `
-SELECT a.logical_datatype, a.unit_term_id, SUM(a.document_count) AS document_count
+SELECT a.logical_datatype, a.unit_term_id, COUNT(DISTINCT d.distribution_value) AS document_count
 FROM kb.ontology_observed_class_attribute_observations a
 JOIN kb.ontology_observed_class_profiles p ON p.id = a.profile_id
+LEFT JOIN kb.ontology_observed_class_attribute_distributions d
+       ON d.attribute_observation_id = a.id AND d.distribution_kind = 'document'
 WHERE p.class_term_id = $1 AND a.attribute_key = 'value' AND a.observation_state = 'present'
 GROUP BY a.logical_datatype, a.unit_term_id`, classTermID)
 	if err != nil {
