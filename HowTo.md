@@ -4971,3 +4971,12 @@ Note: max output length: 384KB
 |-------|-------|--------|
 | Qwen 3.8 Max | 
 
+# Tmux Commands
+Prefix is the default Ctrl-b:
+
+Ctrl-b c — new window (adds a tab)
+Ctrl-b n / Ctrl-b p — next / previous
+Ctrl-b 0..9 — jump to window N
+Ctrl-b , — rename window
+Ctrl-b w — pick from a list
+Or just click a tab / drag pane borders (mouse is back on)
