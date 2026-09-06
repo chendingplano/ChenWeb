@@ -3,6 +3,8 @@
 	// A graph-first workspace: an orrery canvas, a tabbed content viewer, and a
 	// source-document pane, in a resizable three-pane shell.
 
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import PanelShell from './metric-ontology-explorer/panel-shell.svelte';
 	import OntologyCanvas from './metric-ontology-explorer/ontology-canvas.svelte';
 	import ContentViewer from './metric-ontology-explorer/content-viewer.svelte';
@@ -43,6 +45,15 @@
 		openTabs = openTabs.filter((x) => x !== id);
 		if (activeTab === id) activeTab = 'entry';
 	}
+	function onpickmetric(id: string) {
+		// Deep-link the picked metric so +page.svelte's `metric_id`-derived prop
+		// flows back down and the source pane re-resolves; `section` keeps the
+		// explorer selected across a refresh.
+		const url = new URL(page.url);
+		url.searchParams.set('section', 'kb-metric-ontology-explorer');
+		url.searchParams.set('metric_id', id);
+		void goto(url, { keepFocus: true, noScroll: true });
+	}
 
 	const evidenceSpans = $derived(
 		activeTab !== 'entry' ? (CHAIN_NODE_BY_ID[activeTab]?.evidenceSpans ?? []) : []
@@ -58,7 +69,17 @@
 			<OntologyCanvas {tokens} {focusId} {openChain} {onfocus} {ontogglechain} {onopenrecord} />
 		{/snippet}
 		{#snippet content()}
-			<ContentViewer {tokens} {focusId} {openTabs} {activeTab} {onselecttab} {onclosetab} />
+			<ContentViewer
+				{tokens}
+				{darkMode}
+				{focusId}
+				{metricId}
+				{openTabs}
+				{activeTab}
+				{onselecttab}
+				{onclosetab}
+				{onpickmetric}
+			/>
 		{/snippet}
 		{#snippet source()}
 			<SourcePane {tokens} {metricId} {evidenceSpans} {evidenceLabel} />

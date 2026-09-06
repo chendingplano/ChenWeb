@@ -2,21 +2,28 @@
 	import { BY_ID, CHAIN_NODE_BY_ID } from './model';
 	import type { ExplorerTokens } from './theme';
 	import { LOADERS, type Cell } from '$lib/services/metricOntologyExplorerService';
+	import MetricSearchPane from './metric-search-pane.svelte';
 
 	let {
 		tokens,
+		darkMode = true,
 		focusId,
+		metricId = '',
 		openTabs,
 		activeTab,
 		onselecttab,
-		onclosetab
+		onclosetab,
+		onpickmetric
 	}: {
 		tokens: ExplorerTokens;
+		darkMode?: boolean;
 		focusId: string;
+		metricId?: string;
 		openTabs: string[];
-		activeTab: string; // 'entry' | chain node id
+		activeTab: string; // 'entry' | 'search' | chain node id
 		onselecttab: (id: string) => void;
 		onclosetab: (id: string) => void;
+		onpickmetric: (metricId: string) => void;
 	} = $props();
 
 	const SECTIONS = ['Definition', 'Connection', 'Processing', 'Sources'] as const;
@@ -56,6 +63,15 @@
 		>
 			{focusNode.label}
 		</button>
+		<button
+			class="tab"
+			class:active={activeTab === 'search'}
+			role="tab"
+			aria-selected={activeTab === 'search'}
+			onclick={() => onselecttab('search')}
+		>
+			Search
+		</button>
 		{#each openTabs as id (id)}
 			{@const node = CHAIN_NODE_BY_ID[id]}
 			<span class="tab-wrap" class:active={activeTab === id}>
@@ -67,6 +83,11 @@
 		{/each}
 	</div>
 
+	{#if activeTab === 'search'}
+	<div class="search-slot">
+		<MetricSearchPane {tokens} {darkMode} activeMetricId={metricId} onpick={onpickmetric} />
+	</div>
+	{:else}
 	<div class="body">
 		{#if activeTab === 'entry'}
 			<div class="kicker">
@@ -138,6 +159,7 @@
 			{/if}
 		{/if}
 	</div>
+	{/if}
 </div>
 
 <style>
@@ -148,6 +170,12 @@
 		min-height: 0;
 		background: var(--panel);
 		color: var(--text);
+	}
+	.search-slot {
+		flex: 1 1 auto;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
 	}
 	.tabs {
 		display: flex;
