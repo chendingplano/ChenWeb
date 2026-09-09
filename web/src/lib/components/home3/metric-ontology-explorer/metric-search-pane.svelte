@@ -535,6 +535,14 @@
 		flex-direction: column;
 		gap: 8px;
 		padding: 4px 14px 16px;
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+	.cards::-webkit-scrollbar {
+		width: 8px;
+	}
+	.cards::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
 	}
 	.note {
 		margin: 4px 0 0;

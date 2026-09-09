@@ -1,7 +1,14 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { BY_ID, CHAIN_NODE_BY_ID } from './model';
 	import type { ExplorerTokens } from './theme';
-	import { LOADERS, type Cell } from '$lib/services/metricOntologyExplorerService';
+	import {
+		PROJECT,
+		getRelatedMetrics,
+		type Cell,
+		type MetricGraphRow,
+		type RelatedMetrics
+	} from '$lib/services/metricOntologyExplorerService';
 	import MetricSearchPane from './metric-search-pane.svelte';
 
 	let {
@@ -9,6 +16,8 @@
 		darkMode = true,
 		focusId,
 		metricId = '',
+		nodeRows = null,
+		graphError = '',
 		openTabs,
 		activeTab,
 		onselecttab,
@@ -19,6 +28,8 @@
 		darkMode?: boolean;
 		focusId: string;
 		metricId?: string;
+		nodeRows?: Record<string, { rows: MetricGraphRow[] }> | null;
+		graphError?: string;
 		openTabs: string[];
 		activeTab: string; // 'entry' | 'search' | chain node id
 		onselecttab: (id: string) => void;
@@ -31,22 +42,70 @@
 
 	const focusNode = $derived(BY_ID[focusId] ?? BY_ID.metric);
 
-	type Loaded = { state: 'loading' | 'ok' | 'err'; rows?: Cell[][]; error?: string };
-	let cache = $state<Record<string, Loaded>>({});
-
-	$effect(() => {
-		const id = activeTab;
-		if (id === 'entry') return;
-		const node = CHAIN_NODE_BY_ID[id];
-		if (!node?.loaderKey) return;
-		if (cache[id]) return;
-		cache[id] = { state: 'loading' };
-		LOADERS[node.loaderKey]()
-			.then((r) => (cache[id] = { state: 'ok', rows: r.rows }))
-			.catch((e) => (cache[id] = { state: 'err', error: e instanceof Error ? e.message : String(e) }));
+	const activeNode = $derived(activeTab === 'entry' ? null : CHAIN_NODE_BY_ID[activeTab]);
+	// Rows for the active record tab, projected to its display columns.
+	const activeRows = $derived.by<Cell[][]>(() => {
+		if (!activeNode || !nodeRows) return [];
+		const raw = nodeRows[activeNode.id]?.rows ?? [];
+		const project = PROJECT[activeNode.id];
+		return project ? raw.map((r) => project(r)) : [];
 	});
 
-	const activeNode = $derived(activeTab === 'entry' ? null : CHAIN_NODE_BY_ID[activeTab]);
+	// --- Analysis satellite: the two `related` chain nodes are lazily fetched
+	// (not part of the metric_graph payload) and cached per (metricId, scope)
+	// (openspec analysis-node-related-metrics).
+	type RelatedState = { loading: boolean; error: string; data: RelatedMetrics | null };
+	let relatedCache = $state<Record<string, RelatedState>>({});
+
+	const relatedKey = $derived(
+		activeNode?.related && metricId ? `${metricId}::${activeNode.related}` : ''
+	);
+	const relatedState = $derived<RelatedState>(
+		relatedKey
+			? (relatedCache[relatedKey] ?? { loading: true, error: '', data: null })
+			: { loading: false, error: '', data: null }
+	);
+	const relatedRows = $derived.by<{ metricId: string; cells: Cell[] }[]>(() => {
+		const data = relatedState.data;
+		if (!activeNode?.related || !data) return [];
+		const project = PROJECT[activeNode.id];
+		return data.results.map((r) => ({
+			metricId: r.metric_id,
+			cells: project ? project(r as unknown as MetricGraphRow) : []
+		}));
+	});
+	const relatedNoClass = $derived(
+		!!activeNode?.related && !!relatedState.data && relatedState.data.class_term_id === null
+	);
+
+	$effect(() => {
+		const node = activeNode;
+		const id = metricId;
+		if (!node?.related || !id) return;
+		const key = `${id}::${node.related}`;
+		// untrack: this effect must depend only on (metricId, scope), not on
+		// relatedCache[key]. Reading it tracked would subscribe the effect to its
+		// own write below, forcing a re-run whose teardown flips `cancelled` and
+		// discards the in-flight fetch — leaving the tab stuck on "Loading…".
+		if (untrack(() => relatedCache[key])) return; // cached: loading, error, or data — never refetch
+		relatedCache[key] = { loading: true, error: '', data: null };
+		let cancelled = false;
+		getRelatedMetrics(id, node.related)
+			.then((data) => {
+				if (!cancelled) relatedCache[key] = { loading: false, error: '', data };
+			})
+			.catch((e) => {
+				if (!cancelled)
+					relatedCache[key] = {
+						loading: false,
+						error: e instanceof Error ? e.message : String(e),
+						data: null
+					};
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
 
 <div
@@ -118,16 +177,27 @@
 			<div class="kicker">{BY_ID[activeNode.parentId]?.label ?? activeNode.parentId} ▸ {activeNode.label}</div>
 			<h1 class="title">{activeNode.label}</h1>
 			<div class="rec-meta">
-				<span class="pill" class:stage={!activeNode.loaderKey && activeNode.table.startsWith('pipeline')}>{activeNode.table}</span>
+				<span class="pill" class:stage={activeNode.glyph === 'stage'}>{activeNode.table}</span>
 			</div>
 			<p class="prose">{activeNode.description}</p>
 
-			{#if activeNode.loaderKey}
-				{@const loaded = cache[activeTab]}
-				{#if !loaded || loaded.state === 'loading'}
-					<p class="note">Loading rows…</p>
-				{:else if loaded.state === 'err'}
-					<p class="note err">Could not load {activeNode.table}: {loaded.error}</p>
+			{#if !metricId}
+				<p class="note">
+					Pick a metric from the
+					<button class="linklike" onclick={() => onselecttab('search')}>Search</button>
+					tab to see its records.
+				</p>
+			{:else if activeNode.related}
+				{#if relatedState.loading}
+					<p class="note">Loading related metrics…</p>
+				{:else if relatedState.error}
+					<p class="note err">Could not load related metrics: {relatedState.error}</p>
+				{:else if relatedNoClass}
+					<p class="note">
+						This metric has no resolved governed class yet — no peers to show.
+					</p>
+				{:else if relatedRows.length === 0}
+					<p class="note">No related metrics for this metric.</p>
 				{:else}
 					<div class="rec-wrap">
 						<table class="rec">
@@ -135,26 +205,45 @@
 								<tr>{#each activeNode.columns as c}<th>{c}</th>{/each}</tr>
 							</thead>
 							<tbody>
-								{#each loaded.rows ?? [] as row}
-									<tr>{#each row as cell}<td>{cell}</td>{/each}</tr>
+								{#each relatedRows as row}
+									<tr
+										class="row-link"
+										role="button"
+										tabindex="0"
+										title="Open {row.metricId} in the explorer"
+										onclick={() => onpickmetric(row.metricId)}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												onpickmetric(row.metricId);
+											}
+										}}
+									>
+										{#each row.cells as cell}<td>{cell}</td>{/each}
+									</tr>
 								{/each}
-								{#if !(loaded.rows ?? []).length}
-									<tr><td class="empty" colspan={activeNode.columns.length}>No rows.</td></tr>
-								{/if}
 							</tbody>
 						</table>
 					</div>
 				{/if}
+			{:else if graphError}
+				<p class="note err">Could not load this metric’s graph: {graphError}</p>
+			{:else if !nodeRows}
+				<p class="note">Loading rows…</p>
+			{:else if activeRows.length === 0}
+				<p class="note">No {activeNode.table} rows for this metric.</p>
 			{:else}
-				<div class="schema">
-					<div class="schema-head">Schema · read endpoint pending</div>
+				<div class="rec-wrap">
 					<table class="rec">
-						<thead><tr><th>column</th></tr></thead>
+						<thead>
+							<tr>{#each activeNode.columns as c}<th>{c}</th>{/each}</tr>
+						</thead>
 						<tbody>
-							{#each activeNode.columns as c}<tr><td>{c}</td></tr>{/each}
+							{#each activeRows as row}
+								<tr>{#each row as cell}<td>{cell}</td>{/each}</tr>
+							{/each}
 						</tbody>
 					</table>
-					<p class="note">A follow-up change wires <code>{activeNode.table}</code> to live data.</p>
 				</div>
 			{/if}
 		{/if}
@@ -328,10 +417,16 @@
 	table.rec tbody tr:last-child td {
 		border-bottom: 0;
 	}
-	td.empty {
-		text-align: center;
-		color: var(--text-3);
-		font-style: italic;
+	table.rec tr.row-link {
+		cursor: pointer;
+	}
+	table.rec tr.row-link:hover td {
+		background: var(--hover);
+		color: var(--text);
+	}
+	table.rec tr.row-link:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: -2px;
 	}
 	.note {
 		margin: 12px 0 0;
@@ -341,15 +436,14 @@
 	.note.err {
 		color: #dc2626;
 	}
-	.schema-head {
-		font: 600 10px/1 ui-sans-serif, system-ui, sans-serif;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--text-3);
-		margin-bottom: 8px;
-	}
-	code {
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 0.92em;
+	.linklike {
+		appearance: none;
+		border: 0;
+		background: transparent;
+		padding: 0;
+		font: inherit;
+		color: var(--accent);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 </style>

@@ -40,6 +40,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
+	"github.com/chendingplano/deepdoc/server/api/productdrawings"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
@@ -315,6 +316,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/images", imagehandler.UploadImage)
 	apiGroup.GET("/images", imagehandler.ListImages)
 	apiGroup.POST("/images/generate", imagehandler.GenerateImage)
+	apiGroup.POST("/product-drawings", productdrawings.Generate)
+	apiGroup.POST("/product-drawings/generate", productdrawings.GeneratePending)
+	apiGroup.GET("/product-drawings", productdrawings.List)
+	apiGroup.GET("/product-drawings/pending/:token/content", productdrawings.ServePendingContent)
+	apiGroup.POST("/product-drawings/pending/:token/keep", productdrawings.KeepPending)
+	apiGroup.DELETE("/product-drawings/pending/:token", productdrawings.IgnorePending)
+	apiGroup.GET("/product-drawings/:id/content", productdrawings.Content)
+	apiGroup.PUT("/product-drawings/:id", productdrawings.Update)
+	apiGroup.DELETE("/product-drawings/:id", productdrawings.Delete)
 	apiGroup.GET("/images/:id/content", imagehandler.ServeImageContent)
 	apiGroup.DELETE("/images/:id", imagehandler.DeleteImage)
 
@@ -554,6 +564,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)
 	apiGroup.GET("/kb/metrics/ontology-analysis", kbhandler.GetMetricOntologyAnalysis)
 	apiGroup.GET("/kb/metrics/:metric_id/wiki", kbhandler.GetMetricWiki)
+	apiGroup.GET("/kb/metrics/:metric_id/graph", kbhandler.GetMetricGraph)
+	apiGroup.GET("/kb/metrics/:metric_id/related-metrics", kbhandler.GetRelatedMetrics)
 	apiGroup.GET("/kb/metrics/range-type-errors", kbhandler.ListMetricRangeTypeErrors)
 	apiGroup.GET("/kb/metric-value-range-type-map", kbhandler.ListValueRangeTypeMapEntries)
 	apiGroup.POST("/kb/metric-value-range-type-map", kbhandler.UpsertValueRangeTypeMapEntry)
@@ -561,6 +573,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/artifacts/wiki", kbhandler.GetArtifactWiki)
 	apiGroup.GET("/kb/search", kbhandler.SearchAllArtifacts)
 	apiGroup.POST("/kb/search/backfill-embeddings", kbhandler.BackfillSearchEmbeddings)
+	apiGroup.POST("/kb/ontology/class-contracts/backfill-search", kbhandler.BackfillClassContractSearch)
 	apiGroup.POST("/kb/objects/resolve-ambiguous", kbhandler.ResolveAmbiguousObjects)
 	apiGroup.POST("/kb/entities/resolve-objects", kbhandler.ResolveEntityObjects)
 	apiGroup.GET("/kb/schedule-job-types", kbhandler.ListScheduleJobTypes)

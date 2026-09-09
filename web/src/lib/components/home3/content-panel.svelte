@@ -49,6 +49,7 @@
 	import VideoManagementView from '$lib/components/home3/video-management-view.svelte';
 	import ExternalTerminologyResourcesView from '$lib/components/home3/external-terminology-resources-view.svelte';
 	import ReviewExternalResourcesView from '$lib/components/home3/review-external-resources-view.svelte';
+	import ProductDrawingsView from '$lib/components/home3/product-drawings-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
 	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
 	import KeywordRewriteRulesView from '$lib/components/home3/keyword-rewrite-rules-view.svelte';
@@ -311,6 +312,8 @@
 			<ProjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-videos'}
 			<VideoManagementView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-resources-product-drawings'}
+			<ProductDrawingsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-keyword-rewrite-rules'}
 			<KeywordRewriteRulesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-external-terminology'}

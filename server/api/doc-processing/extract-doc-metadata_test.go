@@ -290,6 +290,7 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	}}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
+	svc.PromptErr = nil
 	svc.InitialPages = 1
 	svc.PromptText = "extract metadata"
 	svc.ModelName = "gpt-test"
@@ -361,6 +362,7 @@ func TestExtractDocMetadata_NormalizesNestedMetadataLanguage(t *testing.T) {
 	}}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
+	svc.PromptErr = nil
 	svc.InitialPages = 1
 	svc.PromptText = "extract metadata"
 
@@ -429,6 +431,7 @@ func TestExtractDocMetadata_FallbackAuthorsFromMainDraftingPersons(t *testing.T)
 	}}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
+	svc.PromptErr = nil
 	svc.PromptText = "extract metadata"
 
 	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":9}`)); err != nil {
@@ -463,6 +466,7 @@ func TestExtractDocMetadata_PartialPublishDateFallsBackToMetadata(t *testing.T) 
 	}}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
+	svc.PromptErr = nil
 	svc.PromptText = "extract metadata"
 
 	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":12}`)); err != nil {
@@ -578,6 +582,7 @@ func TestExtractDocMetadata_PrimaryFailureRetriesFallbackModel(t *testing.T) {
 	}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
+	svc.PromptErr = nil
 	svc.ModelName = "gemma4:26b"
 	svc.FallbackModelName = "deepseek-v4-flash"
 	svc.PromptText = "extract metadata"
@@ -631,6 +636,7 @@ func TestExtractDocMetadata_FallbackEmptyJSONIsWarning(t *testing.T) {
 	}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
+	svc.PromptErr = nil
 	svc.ModelName = "gemma4:26b"
 	svc.FallbackModelName = "deepseek-v4-pro"
 	svc.PromptText = "extract metadata"

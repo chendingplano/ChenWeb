@@ -9,8 +9,13 @@
 	import OntologyCanvas from './metric-ontology-explorer/ontology-canvas.svelte';
 	import ContentViewer from './metric-ontology-explorer/content-viewer.svelte';
 	import SourcePane from './metric-ontology-explorer/source-pane.svelte';
-	import { CHAIN_NODE_BY_ID } from './metric-ontology-explorer/model';
+	import { CHAIN_NODE_BY_ID, CHAINS } from './metric-ontology-explorer/model';
 	import { explorerTokens } from './metric-ontology-explorer/theme';
+	import {
+		getMetricGraph,
+		type MetricGraph,
+		type MetricGraphMetric
+	} from '$lib/services/metricOntologyExplorerService';
 
 	let { darkMode = true, metricId = '' }: { darkMode?: boolean; metricId?: string } = $props();
 
@@ -20,6 +25,41 @@
 	let openChain = $state<string | null>(null);
 	let openTabs = $state<string[]>([]);
 	let activeTab = $state('entry');
+
+	// One fetch per selected metric; every record tab reads its slice.
+	let graph = $state<MetricGraph | null>(null);
+	let graphError = $state('');
+
+	$effect(() => {
+		const id = metricId.trim();
+		graph = null;
+		graphError = '';
+		if (!id) return;
+		let cancelled = false;
+		getMetricGraph(id)
+			.then((g) => {
+				if (!cancelled) graph = g;
+			})
+			.catch((e) => {
+				if (!cancelled) graphError = e instanceof Error ? e.message : String(e);
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const metric = $derived<MetricGraphMetric | null>(graph?.metric ?? null);
+	const nodeRows = $derived(graph?.nodes ?? null);
+	// Per-satellite badge = row count of the satellite's first chain node.
+	const counts = $derived.by<Record<string, number>>(() => {
+		const out: Record<string, number> = {};
+		if (!nodeRows) return out;
+		for (const [sat, chain] of Object.entries(CHAINS)) {
+			const first = chain[0]?.id;
+			if (first && nodeRows[first]) out[sat] = nodeRows[first].rows.length;
+		}
+		return out;
+	});
 
 	function onfocus(id: string) {
 		focusId = id;
@@ -66,7 +106,16 @@
 <div class="moe-root" style="background:{tokens.pageBg};">
 	<PanelShell {tokens}>
 		{#snippet canvas()}
-			<OntologyCanvas {tokens} {focusId} {openChain} {onfocus} {ontogglechain} {onopenrecord} />
+			<OntologyCanvas
+				{tokens}
+				{focusId}
+				{openChain}
+				{metric}
+				{counts}
+				{onfocus}
+				{ontogglechain}
+				{onopenrecord}
+			/>
 		{/snippet}
 		{#snippet content()}
 			<ContentViewer
@@ -74,6 +123,8 @@
 				{darkMode}
 				{focusId}
 				{metricId}
+				{nodeRows}
+				{graphError}
 				{openTabs}
 				{activeTab}
 				{onselecttab}

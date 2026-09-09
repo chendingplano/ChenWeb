@@ -501,7 +501,7 @@ func (p *ExtractDocMetadataProcessor) failAndPersist(ctx context.Context, rec Do
 func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
 	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT"))
 	if promptRef == "" {
-		return defaultDocMetaPrompt, "", "", nil
+		promptRef = defaultDocMetaPromptRef
 	}
 
 	paths := make([]string, 0, 8)
@@ -790,18 +790,8 @@ func normalizeDocMetadataLanguage(metadata map[string]any) {
 	}
 }
 
-const defaultDocMetaPrompt = `You extract document metadata from line-based document text.
-Return strict JSON with fields:
-- title: string
-- doc_no: string
-- publish_date: string
-- authors: string[]
-- main_drafting_persons: string[]
-- drafting_persons: string[]
-- metadata: object (other metadata only)
-- need_more_pages: boolean
-
-Rules:
-- If current pages are insufficient, set need_more_pages=true.
-- Never output markdown.
-- Prefer empty strings/arrays instead of null.`
+// defaultDocMetaPromptRef is the prompt file loaded when EXTRACT_DOCMETA_PROMPT
+// is unset. It is resolved through the same candidate-path search as an explicit
+// ref (PROMPT_DIR, server/cmd/doc-processor/prompts, ./prompts). Kept out of code
+// per ChenWeb CLAUDE.md §2 ("NEVER hard-code prompts in code").
+const defaultDocMetaPromptRef = "prompt_extract_doc_metadata_v1.txt"

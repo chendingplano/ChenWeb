@@ -1,14 +1,25 @@
-// Read wrappers for the Metric Ontology Explorer record tabs.
+// Read wrapper for the Metric Ontology Explorer.
 //
-// Only the five chain nodes whose kb.* table already has a read endpoint are
-// wired here. The rest render a schema panel (see model.ts — no `loaderKey`)
-// until a follow-up change adds their endpoints.
+// One call — GET /api/v1/kb/metrics/:metric_id/graph — returns the related rows
+// for every chain node of the selected metric, keyed by the model.ts chain-node
+// id. The record tabs read their slice of that payload; `PROJECT` shapes a raw
+// row into the node's display columns (openspec metric-scoped-explorer D2).
 
-import { searchObjects, type ArtifactObjectSummary, type ObjectNodeSummary } from './objectManagerService';
-import type { LoaderKey } from '$lib/components/home3/metric-ontology-explorer/model';
+export type Cell = string | number | boolean | null;
 
-export type Cell = string | number | null;
-export type RecordRows = { rows: Cell[][] };
+export type MetricGraphMetric = {
+	metric_id: string;
+	metric_name: string;
+	metric_name_en: string;
+	input_record_id: number;
+};
+
+export type MetricGraphRow = Record<string, unknown>;
+
+export type MetricGraph = {
+	metric: MetricGraphMetric;
+	nodes: Record<string, { rows: MetricGraphRow[] }>;
+};
 
 async function getJson<T>(url: string, fallback: string): Promise<T> {
 	const res = await fetch(url, { method: 'GET', credentials: 'same-origin' });
@@ -23,116 +34,174 @@ async function getJson<T>(url: string, fallback: string): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
-const PAGE = 25;
-const dash = (v: unknown): Cell => (v === null || v === undefined || v === '' ? '—' : (v as Cell));
+export async function getMetricGraph(metricId: string): Promise<MetricGraph> {
+	return getJson<MetricGraph>(
+		`/api/v1/kb/metrics/${encodeURIComponent(metricId)}/graph`,
+		'failed to load metric graph'
+	);
+}
+
+// --- Analysis satellite: related-metrics cohorts (openspec analysis-node-related-metrics) ---
+
+export type RelatedMetricsScope = 'same_class' | 'similar_class';
+
+export type RelatedMetricRow = {
+	metric_id: string;
+	metric_name: string;
+	metric_name_en: string;
+	input_record_id: number;
+	class_term_id: string;
+	class_label: string;
+	metric_value?: string;
+	metric_unit?: string;
+	source_filename?: string;
+	score?: number; // similar_class only
+	matched_class_term_id?: string; // similar_class only
+};
+
+export type RelatedMetrics = {
+	status: boolean;
+	metric_id: string;
+	scope: RelatedMetricsScope;
+	class_term_id: string | null; // null => selected metric has no resolved governed class
+	results: RelatedMetricRow[];
+};
+
+/**
+ * GET /api/v1/kb/metrics/:metric_id/related-metrics — the Analysis satellite's
+ * two chain nodes. Lazily fetched on tab open; the caller caches per
+ * (metricId, scope). `limit` defaults server-side (20 similar / 200 same).
+ */
+export async function getRelatedMetrics(
+	metricId: string,
+	scope: RelatedMetricsScope,
+	limit?: number
+): Promise<RelatedMetrics> {
+	const q = new URLSearchParams({ scope });
+	if (limit != null) q.set('limit', String(limit));
+	return getJson<RelatedMetrics>(
+		`/api/v1/kb/metrics/${encodeURIComponent(metricId)}/related-metrics?${q.toString()}`,
+		'failed to load related metrics'
+	);
+}
+
+const dash = (v: unknown): Cell =>
+	v === null || v === undefined || v === '' ? '—' : (v as Cell);
+const score4 = (v: unknown): Cell =>
+	typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(4)) : dash(v);
 const clip = (v: unknown, n = 90): Cell => {
 	const s = v == null ? '' : String(v);
 	return s.length > n ? s.slice(0, n - 1) + '…' : dash(s);
 };
-
-async function loadArtifactObjects(): Promise<RecordRows> {
-	const { rows } = await searchObjects({ table: 'artifact_objects', page_size: PAGE });
-	return {
-		rows: (rows as ArtifactObjectSummary[]).map((r) => [
-			r.id,
-			dash(r.object_name_en || r.object_name),
-			`${r.artifact_type} · ${r.artifact_id}`,
-			dash(r.object_id),
-			dash(r.reconcile_status)
-		])
-	};
-}
-
-async function loadObjectNodes(): Promise<RecordRows> {
-	const { rows } = await searchObjects({ table: 'object_nodes', page_size: PAGE });
-	return {
-		rows: (rows as ObjectNodeSummary[]).map((r) => [
-			r.id,
-			dash(r.canonical_name_en || r.canonical_name),
-			dash(r.object_type),
-			dash(r.object_id),
-			dash(r.reconcile_status)
-		])
-	};
-}
-
-type KeywordConcept = {
-	concept_id: string;
-	pref_label: string;
-	status: string;
-	scope: string;
-	gloss: string | null;
+const s = (r: MetricGraphRow, k: string): unknown => r[k];
+const firstOf = (r: MetricGraphRow, ...keys: string[]): unknown => {
+	for (const k of keys) {
+		const v = r[k];
+		if (v !== null && v !== undefined && v !== '') return v;
+	}
+	return null;
 };
-async function loadKeywordConcepts(): Promise<RecordRows> {
-	const data = await getJson<{ results: KeywordConcept[] }>(
-		'/api/v1/kb/keyword-concepts',
-		'failed to list keyword concepts'
-	);
-	return {
-		rows: (data.results ?? []).slice(0, PAGE).map((c) => [
-			c.concept_id,
-			dash(c.pref_label),
-			dash(c.status),
-			dash(c.scope),
-			clip(c.gloss)
-		])
-	};
-}
 
-type OntologyTerm = {
-	term_id: string;
-	term_kind: string;
-	module_id: string;
-	status: string;
-	definition: string;
-};
-async function loadOntologyTerms(): Promise<RecordRows> {
-	const data = await getJson<{ results: OntologyTerm[] }>(
-		'/api/v1/kb/ontology/terms',
-		'failed to list ontology terms'
-	);
-	return {
-		rows: (data.results ?? []).slice(0, PAGE).map((t) => [
-			t.term_id,
-			dash(t.term_kind),
-			dash(t.module_id),
-			dash(t.status),
-			clip(t.definition)
-		])
-	};
-}
-
-type SemanticAssertion = {
-	id: number;
-	subject_ref_id?: string;
-	subject_object_id?: string;
-	predicate_term_id?: string;
-	object_ref_id?: string;
-	object_object_id?: string;
-	assertion_kind_term_id?: string;
-	confidence?: number | null;
-};
-async function loadSemanticAssertions(): Promise<RecordRows> {
-	const data = await getJson<{ results: SemanticAssertion[] }>(
-		`/api/v1/kb/semantic-assertions?page_size=${PAGE}&latest_only=true`,
-		'failed to list semantic assertions'
-	);
-	return {
-		rows: (data.results ?? []).map((a) => [
-			a.id,
-			dash(a.subject_ref_id || a.subject_object_id),
-			dash(a.predicate_term_id),
-			dash(a.object_ref_id || a.object_object_id),
-			dash(a.assertion_kind_term_id),
-			a.confidence == null ? '—' : a.confidence.toFixed(2)
-		])
-	};
-}
-
-export const LOADERS: Record<LoaderKey, () => Promise<RecordRows>> = {
-	artifact_objects: loadArtifactObjects,
-	object_nodes: loadObjectNodes,
-	keyword_concepts: loadKeywordConcepts,
-	ontology_terms: loadOntologyTerms,
-	semantic_assertions: loadSemanticAssertions
+/** Shapes one graph row into the chain node's `columns` order (model.ts). */
+export const PROJECT: Record<string, (r: MetricGraphRow) => Cell[]> = {
+	object__mention: (r) => [
+		dash(s(r, 'id')),
+		dash(firstOf(r, 'object_name_en', 'object_name')),
+		dash(s(r, 'object_id')),
+		dash(s(r, 'reconcile_status'))
+	],
+	object__node: (r) => [
+		dash(s(r, 'id')),
+		dash(firstOf(r, 'canonical_name_en', 'canonical_name')),
+		dash(s(r, 'object_type')),
+		dash(s(r, 'object_id')),
+		dash(s(r, 'reconcile_status'))
+	],
+	keyword__concept: (r) => [
+		dash(s(r, 'concept_id')),
+		dash(s(r, 'pref_label')),
+		dash(s(r, 'status')),
+		dash(s(r, 'scope')),
+		clip(s(r, 'gloss'))
+	],
+	mdef__term: (r) => [
+		dash(s(r, 'term_id')),
+		dash(s(r, 'term_kind')),
+		dash(s(r, 'module_id')),
+		dash(s(r, 'status')),
+		clip(s(r, 'definition'))
+	],
+	mdef__contract: (r) => [
+		dash(s(r, 'id')),
+		dash(s(r, 'term_id')),
+		dash(s(r, 'revision')),
+		dash(s(r, 'definition_state')),
+		dash(s(r, 'effective_from'))
+	],
+	proc__extract: (r) => [
+		dash(s(r, 'model_name')),
+		s(r, 'is_explicit_metric') ? 'yes' : 'no',
+		dash(s(r, 'confidence')),
+		dash(s(r, 'location_type')),
+		dash(s(r, 'created_at'))
+	],
+	proc__normalize: (r) => [
+		dash(s(r, 'stage')),
+		dash(s(r, 'disposition')),
+		dash(s(r, 'execution_status')),
+		dash(s(r, 'outcome_category')),
+		dash(s(r, 'finding_count'))
+	],
+	proc__associate: (r) => [
+		dash(s(r, 'stage')),
+		dash(s(r, 'disposition')),
+		dash(s(r, 'execution_status')),
+		dash(s(r, 'outcome_category')),
+		dash(s(r, 'finding_count'))
+	],
+	proc__project: (r) => [
+		dash(s(r, 'assertion_id')),
+		dash(s(r, 'status')),
+		dash(s(r, 'value_state_term_id')),
+		dash(s(r, 'conformance_state_term_id')),
+		dash(s(r, 'normalized_against_contract_revision_id'))
+	],
+	ev__ae: (r) => [
+		dash(s(r, 'id')),
+		dash(s(r, 'assertion_id')),
+		dash(s(r, 'input_record_id')),
+		dash(s(r, 'artifact_object_id')),
+		clip(s(r, 'evidence_quote'))
+	],
+	ev__dc: (r) => [
+		dash(s(r, 'id')),
+		dash(s(r, 'candidate_kind')),
+		clip(s(r, 'logical_identity_key')),
+		dash(s(r, 'status')),
+		dash(s(r, 'resulting_assertion_id'))
+	],
+	ev__sa: (r) => [
+		dash(s(r, 'id')),
+		dash(s(r, 'subject')),
+		dash(s(r, 'predicate_term_id')),
+		dash(s(r, 'object')),
+		dash(s(r, 'assertion_kind_term_id')),
+		dash(s(r, 'confidence'))
+	],
+	// Analysis satellite — rows are RelatedMetricRow from getRelatedMetrics, not
+	// the metric_graph payload (openspec analysis-node-related-metrics).
+	analysis__same_class: (r) => [
+		dash(s(r, 'metric_id')),
+		dash(firstOf(r, 'metric_name_en', 'metric_name')),
+		dash(s(r, 'metric_value')),
+		dash(s(r, 'metric_unit')),
+		dash(firstOf(r, 'source_filename', 'input_record_id'))
+	],
+	analysis__similar_class: (r) => [
+		dash(s(r, 'metric_id')),
+		dash(firstOf(r, 'metric_name_en', 'metric_name')),
+		dash(firstOf(r, 'class_label', 'class_term_id')),
+		dash(s(r, 'matched_class_term_id')),
+		score4(s(r, 'score'))
+	]
 };

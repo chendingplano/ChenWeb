@@ -1,0 +1,7 @@
+Create a polished 3D exploded-view drawing of a modern ICU mechanical ventilator, showing its major external and internal parts separated slightly in a logical assembly sequence. Show the ventilator on a compact wheeled stand in a three-quarter view, with the outer housing moved aside so the pneumatic and electronic components are visible.
+
+Show clearly: outer housing, touchscreen display, control knobs, air intake filter, blower/turbine, inspiratory valve, expiratory valve, oxygen inlet, air inlet, mixing chamber, bacterial filter, pressure sensor, flow sensor, main control board, battery, breathing circuit tubing, humidifier connection, and caster wheels.
+
+Use a high-quality 3D CAD-style product visualization mixed with a clean medical textbook technical illustration. Use thin leader lines, numbered callouts, and a neat legend with these exact labels: 1 Outer housing; 2 Touchscreen display; 3 Air intake filter; 4 Blower; 5 Inspiratory valve; 6 Expiratory valve; 7 Oxygen inlet; 8 Air inlet; 9 Pressure sensor; 10 Flow sensor; 11 Main control board; 12 Battery; 13 Breathing circuit; 14 Humidifier connection.
+
+Use a clean white-to-light-gray studio background, soft neutral lighting, clinically clean presentation, white and light-gray housing, dark charcoal controls, blue and green tubing, metallic fittings, orange oxygen-path accents, and blue-gray electronics. Keep the construction mechanically plausible, all parts distinct, labels legible and non-overlapping, and omit patients, logos, watermarks, and unrelated objects.

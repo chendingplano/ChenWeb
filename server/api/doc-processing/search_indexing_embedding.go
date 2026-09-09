@@ -165,6 +165,14 @@ func embedQueryText(ctx context.Context, text string) ([]float64, bool) {
 	return vec, true
 }
 
+// EmbedSearchQuery is the exported form of embedQueryText, for out-of-package
+// callers that need the configured search embedder as a plain
+// func(ctx, text) ([]float64, bool) — e.g. server/cmd/class-contract-search-backfill.
+// Best-effort: (nil,false) means "no embedding available, proceed lexical-only".
+func EmbedSearchQuery(ctx context.Context, text string) ([]float64, bool) {
+	return embedQueryText(ctx, text)
+}
+
 func truncateRunes(s string, max int) string {
 	if max <= 0 {
 		return s

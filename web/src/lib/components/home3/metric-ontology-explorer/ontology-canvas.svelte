@@ -19,6 +19,8 @@
 		tokens,
 		focusId,
 		openChain,
+		metric = null,
+		counts = {},
 		onfocus,
 		ontogglechain,
 		onopenrecord
@@ -26,10 +28,45 @@
 		tokens: ExplorerTokens;
 		focusId: string;
 		openChain: string | null;
+		metric?: { metric_id: string; metric_name: string; metric_name_en: string } | null;
+		counts?: Record<string, number>;
 		onfocus: (id: string) => void;
 		ontogglechain: (satelliteId: string) => void;
 		onopenrecord: (chainNodeId: string) => void;
 	} = $props();
+
+	// Centre-node identity. With a metric selected the core shows its name +
+	// metric_id; otherwise the static "Metric / ONTOLOGY CORE". A long or CJK
+	// name is truncated to a width bound, full text kept in an SVG <title>.
+	const CORE_LABEL_UNITS = 20;
+	const cjk = (ch: string) => /[⺀-鿿가-힣＀-￯]/.test(ch);
+	function truncateCore(name: string): string {
+		let used = 0;
+		let out = '';
+		for (const ch of name) {
+			const w = cjk(ch) ? 1.7 : 1;
+			if (used + w > CORE_LABEL_UNITS) return out + '…';
+			used += w;
+			out += ch;
+		}
+		return out;
+	}
+	function coreWidthUnits(name: string): number {
+		let used = 0;
+		for (const ch of name) used += cjk(ch) ? 1.7 : 1;
+		return Math.min(used, CORE_LABEL_UNITS);
+	}
+	const coreName = $derived((metric?.metric_name || '').trim());
+	const coreLabel = $derived(coreName ? truncateCore(coreName) : 'Metric');
+	const coreSub = $derived(coreName ? metric!.metric_id : 'ONTOLOGY CORE');
+	const coreTitle = $derived(
+		coreName && metric!.metric_name_en && metric!.metric_name_en !== coreName
+			? `${coreName} · ${metric!.metric_name_en}`
+			: coreName || ''
+	);
+	const coreW = $derived(
+		coreName ? Math.max(178, Math.min(320, 120 + coreWidthUnits(coreName) * 8.5)) : 178
+	);
 
 	const GLYPH: Record<Glyph, string> = {
 		metric: 'M8 2.2a5.8 5.8 0 100 11.6 5.8 5.8 0 000-11.6ZM8 5v6M5 8h6',
@@ -78,6 +115,8 @@
 		kind: 'core' | 'sat' | 'chain';
 		label: string;
 		sub?: string;
+		title?: string; // hover text (full metric name on the core)
+		badge?: number; // related-row count on a satellite
 		glyph: Glyph;
 		x: number;
 		y: number;
@@ -94,7 +133,18 @@
 
 	const nodes = $derived.by<LNode[]>(() => {
 		const out: LNode[] = [
-			{ id: CENTER.id, kind: 'core', label: 'Metric', sub: 'ONTOLOGY CORE', glyph: 'metric', x: 0, y: 0, w: 178, h: 66 }
+			{
+				id: CENTER.id,
+				kind: 'core',
+				label: coreLabel,
+				sub: coreSub,
+				title: coreTitle || undefined,
+				glyph: 'metric',
+				x: 0,
+				y: 0,
+				w: coreW,
+				h: 66
+			}
 		];
 		SATELLITES.forEach((s, i) => {
 			const a = base(i) + rotTarget;
@@ -103,6 +153,7 @@
 				kind: 'sat',
 				label: s.label,
 				sub: s.kind.toUpperCase(),
+				badge: counts[s.id] > 0 ? counts[s.id] : undefined,
 				glyph: s.glyph,
 				x: RX * Math.cos(a),
 				y: RY * Math.sin(a),
@@ -305,6 +356,7 @@
 					in:scale={n.kind === 'chain' ? { duration: 240, start: 0.85 } : { duration: 0 }}
 					out:scale={n.kind === 'chain' ? { duration: 180, start: 0.85 } : { duration: 0 }}
 				>
+					{#if n.title}<title>{n.title}</title>{/if}
 					<rect class="box" x={-n.w / 2} y={-n.h / 2} width={n.w} height={n.h} rx={n.kind === 'chain' ? 6 : 9} />
 					<path class="icon" d={GLYPH[n.glyph]} transform="translate({-n.w / 2 + 12},{n.kind === 'core' ? -10 : -7}) scale({n.kind === 'core' ? 20 / 16 : 14 / 16})" />
 					{#if n.kind === 'core'}
@@ -314,6 +366,12 @@
 						<text class="label" x={-n.w / 2 + (n.kind === 'chain' ? 32 : 34)} y={1}>{n.label}</text>
 						{#if n.kind === 'sat'}
 							<text class="kind" x={0} y={-n.h / 2 - 7}>{n.sub}</text>
+							{#if n.badge != null}
+								<g class="badge" transform="translate({n.w / 2 - 6},{-n.h / 2 + 6})">
+									<circle r="9" />
+									<text y="0.5">{n.badge}</text>
+								</g>
+							{/if}
 						{/if}
 					{/if}
 				</g>
@@ -407,6 +465,17 @@
 		letter-spacing: 0.16em;
 		fill: var(--text-2);
 		text-anchor: middle;
+	}
+	.node .badge circle {
+		fill: var(--accent);
+		stroke: var(--card);
+		stroke-width: 1.5px;
+	}
+	.node .badge text {
+		font: 600 9px/1 ui-sans-serif, system-ui, sans-serif;
+		fill: #fff;
+		text-anchor: middle;
+		dominant-baseline: middle;
 	}
 	.node.core .box {
 		fill: var(--accent);

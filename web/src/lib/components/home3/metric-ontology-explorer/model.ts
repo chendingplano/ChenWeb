@@ -1,16 +1,18 @@
 // Static ontology model for the Metric Ontology Explorer canvas.
 //
 // The diagram is fixed: a `Metric` centre, nine satellites, and seven
-// unfoldable downstream chains. Nothing here is fetched — only the record
-// tabs (see `loaderKey`) and the source-document pane touch the network.
+// unfoldable downstream chains. Nothing here is fetched — the record tabs read
+// their slice of GET /api/v1/kb/metrics/:metric_id/graph (keyed by chain-node
+// `id`) and the source-document pane loads the metric's input.
 //
-// Chains (exact, per spec metric-ontology-explorer):
+// Chains (exact, per spec metric-ontology-explorer + analysis-node-related-metrics):
 //   object  -> Object Mention -> Object Node
 //   keyword -> Keyword Concept
 //   mdef    -> Ontology Term -> Class Contract Revision
 //   processor -> Extract Metrics -> Normalize Assertion -> Associate Semantics -> Project Semantics
 //   evidence  -> Assertion Evidence -> Decision Candidate -> Semantic Assertion
-//   document / product / analysis / misc: no chain
+//   analysis  -> Metrics of Same Class -> Metrics of Similar Classes  (lazy: GET /kb/metrics/:id/related-metrics)
+//   document / product / misc: no chain
 
 export type Glyph =
 	| 'metric'
@@ -42,25 +44,22 @@ export type SatelliteNode = {
 	entry: EntryCopy;
 };
 
-/** A read-endpoint key resolved by metricOntologyExplorerService.LOADERS. */
-export type LoaderKey =
-	| 'artifact_objects'
-	| 'object_nodes'
-	| 'keyword_concepts'
-	| 'ontology_terms'
-	| 'semantic_assertions';
-
 export type ChainNode = {
 	id: string;
 	label: string;
 	glyph: 'entity' | 'stage';
-	table: string; // kb.* table name, or a short "pipeline stage" note
-	columns: string[];
+	table: string; // kb.* table name, or a short pipeline-stage note
+	columns: string[]; // display columns; order matches PROJECT[id] output
 	description: string;
-	/** Present => live record tab. Absent => schema panel (endpoint pending). */
-	loaderKey?: LoaderKey;
 	/** Evidence span ids to highlight in the source pane when this tab is active. */
 	evidenceSpans?: string[];
+	/**
+	 * Marks a lazily-fetched node: its rows come from
+	 * GET /api/v1/kb/metrics/:metric_id/related-metrics?scope=<related>, not the
+	 * one-shot metric_graph payload. content-viewer fetches these on tab open
+	 * and caches per (metric_id, scope).
+	 */
+	related?: 'same_class' | 'similar_class';
 };
 
 export const CENTER: SatelliteNode = {
@@ -233,10 +232,9 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			label: 'Object Mention',
 			glyph: 'entity',
 			table: 'kb.artifact_objects',
-			columns: ['id', 'object name', 'artifact', 'object id', 'reconcile'],
+			columns: ['id', 'object', 'object id', 'reconcile'],
 			description:
-				'A single textual mention of an object inside a document chunk, before canonicalisation.',
-			loaderKey: 'artifact_objects'
+				'The metric’s own object mention(s) — the text this metric was read as being about, before canonicalisation.'
 		},
 		{
 			id: 'object__node',
@@ -245,8 +243,7 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			table: 'kb.object_nodes',
 			columns: ['id', 'canonical name', 'type', 'object id', 'reconcile'],
 			description:
-				'The canonical object that many mentions resolve to; carries the class and the alias set.',
-			loaderKey: 'object_nodes'
+				'The canonical object the metric’s mention resolves to; carries the class and the alias set.'
 		}
 	],
 	keyword: [
@@ -257,8 +254,7 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			table: 'kb.keyword_concepts',
 			columns: ['concept id', 'label', 'status', 'scope', 'gloss'],
 			description:
-				'The governed concept a surface keyword resolves to; one concept groups many synonyms and links to QUDT.',
-			loaderKey: 'keyword_concepts'
+				'The governed concept this metric aligns to; one concept groups many synonyms and links to QUDT.'
 		}
 	],
 	mdef: [
@@ -269,17 +265,16 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			table: 'kb.ontology_terms',
 			columns: ['term id', 'kind', 'module', 'status', 'definition'],
 			description:
-				'A governed vocabulary term the definition binds to — an assertion kind, a unit dimension, or a comparison rule.',
-			loaderKey: 'ontology_terms'
+				'The governed term(s) this metric binds to — its definition term plus the unit / quantity-kind / assertion-kind on its assertion.'
 		},
 		{
 			id: 'mdef__contract',
 			label: 'Class Contract Revision',
 			glyph: 'entity',
-			table: 'kb.class_contract_revisions',
-			columns: ['id', 'class', 'rev', 'unit', 'range type', 'cmp', 'effective from'],
+			table: 'kb.ontology_class_contract_revisions',
+			columns: ['id', 'class', 'rev', 'state', 'effective from'],
 			description:
-				'An immutable revision of a metric class contract: unit, value-range type, comparison direction, effective window.'
+				'The current immutable contract revision of the class this metric’s claim resolved to.'
 		}
 	],
 	processor: [
@@ -287,35 +282,58 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			id: 'proc__extract',
 			label: 'Extract Metrics',
 			glyph: 'stage',
-			table: 'pipeline stage · run log',
-			columns: ['run', 'chunks', 'metrics out', 'cache hit', 'status'],
-			description: 'Reads document chunks and emits raw metric candidates into kb.metrics.'
+			table: 'kb.metrics · extraction',
+			columns: ['model', 'explicit?', 'confidence', 'location', 'extracted'],
+			description: 'What extraction produced for this metric row.'
 		},
 		{
 			id: 'proc__normalize',
 			label: 'Normalize Assertion',
 			glyph: 'stage',
-			table: 'pipeline stage · run log',
-			columns: ['run', 'in', 'normalized', 'unparsed', 'status'],
+			table: 'semantic:stage_normalize',
+			columns: ['stage', 'disposition', 'status', 'category', 'findings'],
 			description:
-				'Maps raw candidates onto governed assertion kinds; routes unmatched to Misc.'
+				'The normalize-stage processing outcome recorded for this metric, with its finding count.'
 		},
 		{
 			id: 'proc__associate',
 			label: 'Associate Semantics',
 			glyph: 'stage',
-			table: 'pipeline stage · run log',
-			columns: ['run', 'assertions', 'linked', 'orphan', 'status'],
-			description: 'Links normalized assertions to objects, keywords and evidence spans.'
+			table: 'semantic:stage_class_resolution + associate',
+			columns: ['stage', 'disposition', 'status', 'category', 'findings'],
+			description:
+				'The class-resolution and associate stage outcomes recorded for this metric.'
 		},
 		{
 			id: 'proc__project',
 			label: 'Project Semantics',
 			glyph: 'stage',
-			table: 'pipeline stage · run log',
-			columns: ['run', 'in', 'projected', 'skipped', 'status'],
+			table: 'kb.semantic_assertions · projection',
+			columns: ['assertion', 'status', 'value state', 'conformance', 'contract rev'],
 			description:
-				'Projects associated semantics into kb.semantic_assertions and the downstream products.'
+				'The projection result for this metric: the resulting assertion’s status and conformance.'
+		}
+	],
+	analysis: [
+		{
+			id: 'analysis__same_class',
+			label: 'Metrics of Same Class',
+			glyph: 'stage',
+			table: 'kb.metrics · same governed class',
+			columns: ['metric id', 'name', 'value', 'unit', 'document'],
+			description:
+				'Every other metric whose resulting assertion resolved to the same governed class as this one — its direct peer group under one contract. Click a row to recentre the explorer on that metric.',
+			related: 'same_class'
+		},
+		{
+			id: 'analysis__similar_class',
+			label: 'Metrics of Similar Classes',
+			glyph: 'stage',
+			table: 'class-contract hybrid search',
+			columns: ['metric id', 'name', 'class', 'matched via', 'score'],
+			description:
+				'Metrics drawn from class contracts hybrid-matched as similar to this metric’s class contract — the wider comparison frontier, ranked by contract similarity. Click a row to recentre the explorer on that metric.',
+			related: 'similar_class'
 		}
 	],
 	evidence: [
@@ -324,9 +342,9 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			label: 'Assertion Evidence',
 			glyph: 'entity',
 			table: 'kb.assertion_evidence',
-			columns: ['id', 'assertion', 'chunk', 'span', 'quote'],
+			columns: ['id', 'assertion', 'record', 'object', 'quote'],
 			description:
-				'Links one semantic assertion to a verbatim character span (and bbox) inside a chunk.',
+				'The evidence rows behind this metric’s assertion — each a verbatim span inside a chunk.',
 			evidenceSpans: ['e1', 'e2', 'e5']
 		},
 		{
@@ -334,9 +352,9 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			label: 'Decision Candidate',
 			glyph: 'entity',
 			table: 'kb.semantic_decision_candidates',
-			columns: ['id', 'kind', 'subject', 'status', 'fingerprint'],
+			columns: ['id', 'kind', 'identity', 'status', 'assertion'],
 			description:
-				'A proposed semantic decision awaiting curation — a new object link, a kind mapping, or a reconciliation.'
+				'The semantic decision candidate(s) proposed for this metric and their status.'
 		},
 		{
 			id: 'ev__sa',
@@ -345,8 +363,7 @@ export const CHAINS: Record<string, ChainNode[]> = {
 			table: 'kb.semantic_assertions',
 			columns: ['id', 'subject', 'predicate', 'object', 'kind', 'conf'],
 			description:
-				'A projected subject–predicate–object statement with its kind and confidence.',
-			loaderKey: 'semantic_assertions'
+				'The projected subject–predicate–object statement(s) this metric produced.'
 		}
 	]
 };

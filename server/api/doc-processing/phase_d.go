@@ -183,6 +183,14 @@ func (p *ProjectSemanticsProcessor) PostProcessIndex(ctx context.Context, record
 		return err
 	}
 	p.logAssociationRunReport(ctx, db, recordID)
+
+	// openspec analysis-node-related-metrics (design D8): associate_semantics
+	// (which runs before this stage) resolved this record's metric classes and
+	// committed their contract revisions. Refresh the class-contract
+	// hybrid-search index for those classes now -- post-commit, because Reindex
+	// embeds text. Best-effort; never fails Phase D.
+	refreshClassContractSearchForRecord(ctx, recordID, p.Logger)
+
 	return nil
 }
 

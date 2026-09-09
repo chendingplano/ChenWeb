@@ -280,6 +280,7 @@
 					label: 'Resources',
 					children: [
 						{ id: 'sysadmin-resources-videos', label: 'Videos' },
+						{ id: 'sysadmin-resources-product-drawings', label: 'Generate 3D Product Drawings' },
 						{
 							id: 'sysadmin-resources-external-terminology',
 							label: 'External Terminology Resources'
