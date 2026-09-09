@@ -40,6 +40,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
+	productreviews "github.com/chendingplano/deepdoc/server/api/product-reviews"
 	"github.com/chendingplano/deepdoc/server/api/productdrawings"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
@@ -609,6 +610,26 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
 	apiGroup.GET("/kb/scene-blocks", kbhandler.ListSceneBlocks)
 	apiGroup.GET("/kb/products", kbhandler.ListProducts)
+
+	// Product Metric Reviewer (openspec change product-metric-reviewer).
+	apiGroup.POST("/kb/product-profiles", productreviews.CreateProductProfile)
+	apiGroup.GET("/kb/product-profiles/:id", productreviews.GetProductProfile)
+	apiGroup.POST("/kb/product-profiles/:id/build", productreviews.BuildProductProfile)
+	apiGroup.POST("/kb/product-profiles/:id/ready", productreviews.SetProductProfileReady)
+	apiGroup.POST("/kb/product-profiles/:id/nodes", productreviews.AddProductProfileNode)
+	apiGroup.PATCH("/kb/product-profiles/:id/nodes/:node_id", productreviews.UpdateProductProfileNode)
+	apiGroup.DELETE("/kb/product-profiles/:id/nodes/:node_id", productreviews.DeleteProductProfileNode)
+	apiGroup.GET("/kb/product-reviews/aspects", productreviews.ListProductReviewAspects)
+	apiGroup.POST("/kb/product-reviews", productreviews.CreateProductReview)
+	apiGroup.GET("/kb/product-reviews", productreviews.ListProductReviews)
+	apiGroup.GET("/kb/product-reviews/:id", productreviews.GetProductReview)
+	apiGroup.POST("/kb/product-reviews/:id/rerun", productreviews.RerunProductReview)
+	apiGroup.GET("/kb/product-reviews/runs/:run_id", productreviews.GetProductReviewRun)
+	apiGroup.GET("/kb/product-reviews/runs/:run_id/results", productreviews.GetProductReviewRunResults)
+	apiGroup.GET("/kb/product-reviews/runs/:run_id/documents", productreviews.GetProductReviewRunDocuments)
+	apiGroup.GET("/kb/product-reviews/runs/:run_id/diff", productreviews.GetProductReviewRunDiff)
+	apiGroup.GET("/kb/product-reviews/runs/:run_id/export", productreviews.ExportProductReviewRunResults)
+
 	apiGroup.GET("/kb/inventory-items", kbhandler.ListInventoryItems)
 	apiGroup.GET("/kb/semantic-projections", kbhandler.ListSemanticProjections)
 	apiGroup.GET("/kb/inventory-categories", kbhandler.ListInventoryCategories)

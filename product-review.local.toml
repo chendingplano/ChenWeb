@@ -1,0 +1,134 @@
+# Product Metric Reviewer configuration (global, loaded once at startup).
+#
+# openspec change product-metric-reviewer. Same shape and locale resolution as
+# doc-review.local.toml: aspect labels are internationalized via
+# `name_<locale>` / `desc_<locale>`; `name_en` / `desc_en` are the fallback.
+# The server resolves these per the `?lang=` locale on the aspect-vocabulary
+# endpoint, falling back to the *_en value.
+#
+# This is a GLOBAL config, not per-review-run.
+
+# ── Models ───────────────────────────────────────────────────────────────────
+# The only LLM calls in the app: one decomposition call per profile build, plus
+# at most one optional aspect-mapping call for ungrounded aspect labels.
+# Retrieval, scoring, tiering and reporting never call an LLM.
+
+[models]
+structure       = "deepseek-flash-chen"   # prompt-product-structure-v1.md
+aspect_mapping  = "deepseek-flash-chen"    # prompt-product-aspect-mapping-v1.md
+
+# ── Construction budgets ─────────────────────────────────────────────────────
+# Propose + ground + expand iterate to `max_depth` and stop at `max_nodes`;
+# proposed nodes beyond the budget are discarded breadth-first and the discard
+# is recorded on the profile.
+
+[budgets]
+max_depth        = 3
+max_nodes        = 200
+max_documents    = 400    # cap on the scored document scope set per run
+max_results      = 2000   # cap on total results per run
+per_document_cap = 60     # cap on artifacts contributed by a single document
+
+# ── Grounding thresholds ─────────────────────────────────────────────────────
+# A node grounds through the first source that clears its threshold:
+# kb.object_nodes (exact/alias, then embedding), kb.keyword_concepts scope
+# metric_subject, kb.ontology_terms labels. Below threshold -> ungrounded.
+
+[grounding]
+object_embedding_min   = 0.82
+concept_label_min      = 0.90
+ontology_label_min     = 0.90
+
+# ── Document scoring ─────────────────────────────────────────────────────────
+# relation_type weights for a Path A kb.products identity match; standards get a
+# score boost (never a filter) so they rank first.
+
+[scoring]
+standards_boost = 0.25
+
+[scoring.relation_type_weights]
+scope                     = 1.0
+regulated_object          = 1.0
+requirement_target        = 1.0
+performance_requirement   = 0.7
+design_requirement        = 0.7
+material_requirement      = 0.7
+testing_requirement       = 0.6
+certification_requirement = 0.6
+usage_condition           = 0.6
+installation_requirement  = 0.6
+maintenance_requirement   = 0.6
+storage_requirement       = 0.6
+component_of              = 0.5
+contains_product          = 0.5
+risk_source               = 0.5
+other                     = 0.3
+
+# ── Aspect vocabulary ───────────────────────────────────────────────────────
+# Each aspect is a node attached to the profile root. An aspect either declares
+# the kb.products.relation_type values it maps to (matching is an indexed join)
+# or sets match_mode = "lexical" (matching falls back to lexical/vector search
+# on the aspect's own labels).
+
+[aspects.storage]
+name_en    = "Storage"
+name_zh_cn = "贮存"
+desc_en    = "Storage conditions and limits the product must satisfy."
+desc_zh_cn = "产品必须满足的贮存条件与限值。"
+relation_types = ["storage_requirement"]
+
+[aspects.transport]
+name_en    = "Transport"
+name_zh_cn = "运输"
+desc_en    = "Transportation and handling conditions."
+desc_zh_cn = "运输与搬运条件。"
+match_mode = "lexical"
+
+[aspects.maintenance]
+name_en    = "Maintenance"
+name_zh_cn = "维护"
+desc_en    = "Servicing, inspection and maintenance requirements."
+desc_zh_cn = "保养、检查与维护要求。"
+relation_types = ["maintenance_requirement"]
+
+[aspects.usage_environment]
+name_en    = "Usage environment"
+name_zh_cn = "使用环境"
+desc_en    = "Operating and installation environment the product runs in."
+desc_zh_cn = "产品运行的使用与安装环境。"
+relation_types = ["usage_condition", "installation_requirement"]
+
+[aspects.safety]
+name_en    = "Safety"
+name_zh_cn = "安全"
+desc_en    = "Safety hazards and certification requirements."
+desc_zh_cn = "安全危害与认证要求。"
+relation_types = ["risk_source", "certification_requirement"]
+
+[aspects.testing]
+name_en    = "Testing"
+name_zh_cn = "测试"
+desc_en    = "Type-test and verification requirements."
+desc_zh_cn = "型式试验与验证要求。"
+relation_types = ["testing_requirement"]
+
+[aspects.packaging]
+name_en    = "Packaging"
+name_zh_cn = "包装"
+desc_en    = "Packaging and marking requirements."
+desc_zh_cn = "包装与标识要求。"
+match_mode = "lexical"
+
+[aspects.disposal]
+name_en    = "Disposal"
+name_zh_cn = "废弃处置"
+desc_en    = "End-of-life, disposal and decommissioning requirements."
+desc_zh_cn = "报废、处置与退役要求。"
+match_mode = "lexical"
+
+[aspects.emc]
+name_en    = "EMC"
+name_zh_cn = "电磁兼容"
+desc_en    = "Electromagnetic compatibility requirements."
+desc_zh_cn = "电磁兼容要求。"
+match_mode = "lexical"

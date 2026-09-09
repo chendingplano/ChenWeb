@@ -1,0 +1,121 @@
+package productreviews
+
+import "time"
+
+// Node kinds. A profile has exactly one `product` root; `module`/`part` nest
+// under it recursively; `aspect` nodes attach to the root (parent_node_id null).
+const (
+	KindProduct = "product"
+	KindModule  = "module"
+	KindPart    = "part"
+	KindAspect  = "aspect"
+)
+
+// Node origin — how the node entered the tree.
+const (
+	OriginLLMProposed   = "llm_proposed"
+	OriginGraphExpanded = "graph_expanded"
+	OriginUserAdded     = "user_added"
+)
+
+// Node curation status.
+const (
+	StatusProposed = "proposed"
+	StatusAccepted = "accepted"
+	StatusRejected = "rejected"
+)
+
+// Node grounding state — which governed space, if any, the label resolved to.
+const (
+	GroundingObjectNode     = "object_node"
+	GroundingKeywordConcept = "keyword_concept"
+	GroundingOntologyTerm   = "ontology_term"
+	GroundingUngrounded     = "ungrounded"
+)
+
+// Aspect match mode: "join" resolves via kb.products.relation_type; "lexical"
+// falls back to text/vector matching on the aspect's own labels.
+const (
+	MatchModeJoin    = "join"
+	MatchModeLexical = "lexical"
+)
+
+// Profile status.
+const (
+	ProfileDraft = "draft"
+	ProfileReady = "ready"
+)
+
+// reconcileNeedsReview is the set of kb.object_nodes.reconcile_status values that
+// mean the app must not pick a sense on the user's behalf (spec: grounding pass).
+var reconcileNeedsReview = map[string]bool{"ambiguous": true, "pending_review": true}
+
+// Profile is a versioned product scope profile (kb.product_profiles).
+type Profile struct {
+	ID                 int64     `json:"id"`
+	TenantID           string    `json:"tenant_id"`
+	Name               string    `json:"name"`
+	ProductDescription string    `json:"product_description"`
+	Version            int       `json:"version"`
+	Status             string    `json:"status"`
+	Truncated          bool      `json:"truncated"`
+	TruncatedCount     int       `json:"truncated_count"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// SourceRef records why an expanded node is in the tree: the kb.semantic_assertions
+// row or kb.products row that supplied the edge.
+type SourceRef struct {
+	Kind   string `json:"kind"`   // "assertion" | "product"
+	ID     int64  `json:"id"`     // kb row id
+	Detail string `json:"detail"` // predicate_term_id or relation_type
+}
+
+// ProfileNode is one scope node (kb.product_profile_nodes).
+type ProfileNode struct {
+	ID              int64       `json:"id"`
+	ProfileID       int64       `json:"profile_id"`
+	ParentNodeID    *int64      `json:"parent_node_id"`
+	NodeKind        string      `json:"node_kind"`
+	Label           string      `json:"label"`
+	LabelEN         string      `json:"label_en"`
+	Aliases         []string    `json:"aliases"`
+	Depth           int         `json:"depth"`
+	Origin          string      `json:"origin"`
+	Status          string      `json:"status"`
+	Confidence      float64     `json:"confidence"`
+	Rationale       string      `json:"rationale"`
+	ObjectID        string      `json:"object_id"`
+	ConceptID       string      `json:"concept_id"`
+	TermID          string      `json:"term_id"`
+	Grounding       string      `json:"grounding"`
+	ReconcileStatus string      `json:"reconcile_status"`
+	AspectKey       string      `json:"aspect_key"`
+	RelationTypes   []string    `json:"relation_types"`
+	MatchMode       string      `json:"match_mode"`
+	SourceRefs      []SourceRef `json:"source_refs"`
+}
+
+// NeedsReconcileReview reports whether this node's grounded object is in an
+// ambiguous / pending-review reconcile state and must be flagged to a reviewer.
+func (n ProfileNode) NeedsReconcileReview() bool {
+	return reconcileNeedsReview[n.ReconcileStatus]
+}
+
+// NewProfileInput is the payload for creating a profile.
+type NewProfileInput struct {
+	TenantID           string `json:"tenant_id"`
+	Name               string `json:"name"`
+	ProductDescription string `json:"product_description"`
+}
+
+// NodeEdit carries a mutable subset of a node's fields for an edit.
+type NodeEdit struct {
+	Label        *string
+	LabelEN      *string
+	Aliases      *[]string
+	NodeKind     *string
+	Status       *string
+	ParentNodeID *int64 // set to change the parent; nil leaves it unchanged
+}
