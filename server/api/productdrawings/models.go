@@ -45,7 +45,7 @@ type KeepResponse struct {
 
 const (
 	promptFileName = "prompt-ventilator-exploded-view-v1.md"
-	defaultModel   = "openai-image-2.5"
+	defaultModel   = "gpt-image-2.5-sunburst"
 )
 
 type Request struct {

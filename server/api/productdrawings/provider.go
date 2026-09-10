@@ -35,7 +35,7 @@ const openAISelectionModel = "OpenAI"
 func qwenModelName() string {
 	return envOr("QWEN_IMAGE_GEN_MODEL", envOr("IMAGE_GEN_MODEL", "wan2.2-t2i-flash"))
 }
-func openAIModelName() string { return envOr("OPENAI_IMAGE_GEN_MODEL", "openai-image-2.5") }
+func openAIModelName() string { return envOr("OPENAI_IMAGE_GEN_MODEL", "gpt-image-2.5-sunburst") }
 
 type openAIRequest struct {
 	Model  string `json:"model"`

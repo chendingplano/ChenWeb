@@ -118,7 +118,7 @@ func GeneratePending(c echo.Context) error {
 	}
 	req.Prompt = prompt
 	modelName := modelNameForSelection(selection)
-	img, err := cfg.Provider.Generate(c.Request().Context(), selection, prompt)
+	img, err := cfg.Provider.Generate(c.Request().Context(), selection, buildDrawingPrompt(prompt))
 	if err != nil {
 		logger.Error("pending product drawing generation failed", "err", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "image generation failed"})
