@@ -19,6 +19,9 @@ type ConfigResponse struct {
 	EnableLoginWithGithub bool                    `json:"enable_login_with_github"`
 	EnableLoginWithGoogle bool                    `json:"enable_login_with_google"`
 	EnablePhoneLogin      bool                    `json:"enable_phone_login"`
+	// LoginPage selects which login screen the frontend renders. See
+	// config.GetLoginPage for the valid values and fallback behavior.
+	LoginPage string `json:"login_page"`
 }
 
 type ServerConfig struct {
@@ -78,6 +81,7 @@ func GetConfig(c echo.Context) error {
 		EnableLoginWithGithub: config.GetEnableLoginWithGithub(),
 		EnableLoginWithGoogle: config.GetEnableLoginWithGoogle(),
 		EnablePhoneLogin:      config.GetEnablePhoneLogin(),
+		LoginPage:             config.GetLoginPage(),
 	}
 
 	return c.JSON(http.StatusOK, response)

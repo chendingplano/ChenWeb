@@ -194,6 +194,11 @@ type SystemConfigSection struct {
 	// setting is missing or empty, the application falls back to its built-in
 	// role set.
 	AccessRoles []string `mapstructure:"access_roles"`
+	// LoginPage selects which login screen the frontend renders, sourced from
+	// [system].login_page. Valid values are "login-email-google" (default) and
+	// "login-cell-phone-only"; an unset or unrecognized value falls back to the
+	// default. Read it through GetLoginPage(), not directly.
+	LoginPage string `mapstructure:"login_page"`
 }
 
 type AppConfigDef struct {
@@ -526,6 +531,26 @@ func GetAccessRoles(fallback []string) []string {
 		return normalizeStringList(fallback)
 	}
 	return out
+}
+
+// DefaultLoginPage is the login screen used when [system].login_page is unset
+// or set to an unrecognized value.
+const DefaultLoginPage = "login-email-google"
+
+// validLoginPages is the set of login screens the frontend knows how to render.
+var validLoginPages = map[string]bool{
+	"login-email-google":    true,
+	"login-cell-phone-only": true,
+}
+
+// GetLoginPage returns [system].login_page normalized to trimmed lower-case,
+// or DefaultLoginPage when it is unset or not one of the known login screens.
+func GetLoginPage() string {
+	v := strings.ToLower(strings.TrimSpace(AppConfig.System.LoginPage))
+	if validLoginPages[v] {
+		return v
+	}
+	return DefaultLoginPage
 }
 
 func GetLanguages() []string {
