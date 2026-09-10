@@ -11,7 +11,7 @@
 	} from '@lucide/svelte';
 	import { appAuthStore } from '@chendingplano/shared';
 	import Ornament from './components/Ornament.svelte';
-	import LoginPanel from '$lib/components/login-01.svelte';
+	import LoginPanel from '$lib/components/auth/LoginPanel.svelte';
 	import { loginPrompt } from './loginPrompt.svelte';
 
 	let { data } = $props();

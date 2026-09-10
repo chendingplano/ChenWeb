@@ -1,12 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Snippet } from 'svelte';
 	import { appAuthStore } from '@chendingplano/shared';
 
-	let { children }: { children?: Snippet } = $props();
+	// The one reusable login panel. Render it directly for a full-page login
+	// (`variant="page"`, the default) or inside a modal wrapper
+	// (`variant="modal"`), in which case it shows its own "Cancel" button wired
+	// to `onClose`. Do not fork this component — add props here instead.
+	let {
+		variant = 'page',
+		onClose
+	}: { variant?: 'page' | 'modal'; onClose?: () => void } = $props();
 
-	// This page implements three modes: login, signup, forgot password
-	// (or three pages). This is controlled by the "mode" variable.
+	// This panel implements several modes: login, signup, forgot password,
+	// phone login. This is controlled by the "mode" variable.
 
 	// Populated on mount from GET /api/config; the OAuth flags default to
 	// true so the buttons stay visible if the fetch fails. Phone login
@@ -137,7 +143,7 @@
 	}
 
 	async function handleForgotPassword() {
-		console.log('[login-01] handleForgotPassword', { email });
+		console.log('[LoginPanel] handleForgotPassword', { email });
 		if (!email) {
 			alert('Please enter your email address.');
 			return;
@@ -162,7 +168,7 @@
 	}
 
 	async function handleRecoveryCode() {
-		console.log('[login-01] handleRecoveryCode', {
+		console.log('[LoginPanel] handleRecoveryCode', {
 			email,
 			hasFlowId: Boolean(recoveryFlowId),
 			hasCode: Boolean(recoveryCode)
@@ -185,7 +191,7 @@
 	}
 
 	async function handleSetNewPassword() {
-		console.log('[login-01] handleSetNewPassword', {
+		console.log('[LoginPanel] handleSetNewPassword', {
 			hasFlowId: Boolean(recoveryFlowId)
 		});
 		if (newPassword !== newPasswordConfirm) {
@@ -351,10 +357,6 @@
 			<p class="sign-up-label">
 				<button class="sign-up-link" onclick={switchToPhone}>Log in with Phone</button>
 			</p>
-		{/if}
-
-		{#if children}
-			{@render children()}
 		{/if}
 
 		<p class="sign-up-label">
@@ -641,14 +643,14 @@
 		</div>
 	{/if}
 
-	{#if children && mode !== 'login'}
-		{@render children()}
+	{#if variant === 'modal' && onClose}
+		<button type="button" class="cancel-btn" onclick={onClose}>Cancel</button>
 	{/if}
 </div>
 
 <style>
 	.form-container {
-		width: 350px;
+		width: min(350px, calc(100vw - 2rem));
 		background-color: #fff;
 		color: #1a1a1a;
 		box-shadow: rgba(0, 0, 0, 0.35) 0px 5px 15px;
@@ -797,5 +799,32 @@
 		background-color: #000;
 		color: #fff;
 		border: 2px solid #000;
+	}
+
+	/* Modal-only dismiss control. Mirrors .form-btn geometry so it lines up
+	   with the rest of the panel; neutral colours so it reads as secondary. */
+	.cancel-btn {
+		width: 100%;
+		margin-top: 15px;
+		padding: 10px 15px;
+		font-family:
+			'Lucida Sans', 'Lucida Sans Regular', 'Lucida Grande', 'Lucida Sans Unicode', Geneva, Verdana,
+			sans-serif;
+		border-radius: 20px;
+		border: 0 !important;
+		outline: 0 !important;
+		background: #e2e2e2;
+		color: #4a4a4a;
+		cursor: pointer;
+		box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
+	}
+
+	.cancel-btn:hover {
+		background: #d5d5d5;
+		color: #1a1a1a;
+	}
+
+	.cancel-btn:active {
+		box-shadow: none;
 	}
 </style>

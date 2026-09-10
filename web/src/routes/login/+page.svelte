@@ -1,5 +1,5 @@
 <script lang="ts">
-    import LoginPage from "$lib/components/login-01.svelte";
+    import LoginPage from "$lib/components/auth/LoginPanel.svelte";
 </script>
 
 <div class="app">

@@ -26,7 +26,7 @@
 	import MenuContent from '$lib/components/MenuContent.svelte';
 	import TableWithFilters from '$lib/components/table-with-filters.svelte';
 	import Table03 from '$lib/components/table-03.svelte';
-	import LoginPage from '$lib/components/login-01.svelte';
+	import LoginPage from '$lib/components/auth/LoginPanel.svelte';
 	import ProcessDetails from '$lib/components/process-details.svelte';
 	import Dashboard01 from '$lib/components/dashboard01.svelte';
 	import type { IProcessTableRow } from '$lib/components/common-types.js';

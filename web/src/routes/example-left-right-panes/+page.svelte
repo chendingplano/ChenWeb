@@ -2,7 +2,7 @@
   import MenuContent from "$lib/components/MenuContent.svelte";
   import TableWithFilters from "$lib/components/table-with-filters.svelte";
   import Table03 from "$lib/components/table-03.svelte";
-  import LoginPage from "$lib/components/login-01.svelte";
+  import LoginPage from "$lib/components/auth/LoginPanel.svelte";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
 
   let activeView : string | null = null

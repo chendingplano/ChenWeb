@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { loginPrompt } from '../loginPrompt.svelte';
-	import LoginPanel from '$lib/components/login-01.svelte';
+	import LoginPanel from '$lib/components/auth/LoginPanel.svelte';
 </script>
 
 {#if loginPrompt.open}
@@ -22,15 +22,7 @@
 			aria-label="Login"
 			tabindex="0"
 		>
-			<LoginPanel>
-				<button
-					type="button"
-					onclick={() => loginPrompt.hide()}
-					class="mb-3 w-full rounded-[20px] bg-gray-200 py-2.5 text-center text-sm font-semibold text-[#747474] transition-colors hover:bg-gray-300 hover:text-black"
-				>
-					Cancel
-				</button>
-			</LoginPanel>
+			<LoginPanel variant="modal" onClose={() => loginPrompt.hide()} />
 		</div>
 	</div>
 {/if}
