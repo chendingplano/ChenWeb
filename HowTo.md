@@ -278,7 +278,7 @@ The login page should have a few options, such as:
   - Login through Email
   - Login through Google
   - Login through GitHub
-An example can be found in ChenWeb/web/src/lib/components/login-01.svelt.
+An example can be found in ChenWeb/web/src/lib/components/auth/LoginPanel.svelte.
 For "Login through Google", there should be a button, whose onclick will
 look like:
   onclick={() => { window.location.href = 'http://localhost:8080/auth/google/login'; }}
