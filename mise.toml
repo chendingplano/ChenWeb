@@ -74,6 +74,77 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 [tasks.build-both]
 run = "mise build-web && mise build-server"
 
+[tasks.build-server-linux]
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all four."
+run = '''
+set -euo pipefail
+
+OUT=/tmp/chenweb-deploy
+REPO="$(git rev-parse --show-toplevel)"
+cd "$REPO"
+
+# binary name -> cmd package
+ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter create-admin:./server/cmd/create-admin"
+SELECT="${BINS:-}"   # e.g. BINS="server,doc-processor"
+
+SELECTED=""
+for pair in $ALL; do
+  name="${pair%%:*}"
+  if [ -z "$SELECT" ] || printf '%s' ",$SELECT," | grep -q ",$name,"; then
+    SELECTED="$SELECTED $pair"
+  fi
+done
+[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,create-admin" >&2; exit 1; }
+
+rm -rf "$OUT"
+mkdir -p "$OUT"
+
+# Only the 'server' (deepdoc) binary embeds the frontend (server/api/routes.go
+# //go:embed all:webbuild). Rebuild it so login-01.svelte's phone UI is current
+# -- the committed server/api/webbuild is stale.
+case " $SELECTED " in
+  *" server:"*)
+    echo "==> rebuilding embedded frontend"
+    ( cd web && bun run build )
+    rsync -a --delete ./web/build/ ./server/api/webbuild/
+    ;;
+esac
+
+built=""
+for pair in $SELECTED; do
+  name="${pair%%:*}"; pkg="${pair##*:}"
+  echo "==> building $name-linux  ($pkg)"
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -buildvcs=false -ldflags "-s -w" \
+    -o "$OUT/$name-linux" "$pkg"
+  ( cd "$OUT" && shasum -a 256 "$name-linux" > "$name-linux.sha256" )
+  built="$built $name-linux"
+done
+
+# self-contained: ship the on-box deploy script alongside the binaries
+cp "$REPO/scripts/deploy-server-china.sh" "$OUT/"
+chmod +x "$OUT/deploy-server-china.sh"
+
+{
+  echo "git_rev:   $(git rev-parse HEAD)"
+  echo "git_short: $(git rev-parse --short HEAD)"
+  echo "git_dirty: $([ -n "$(git status --porcelain)" ] && echo yes || echo no)"
+  echo "built_at:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "built_on:  $(hostname)"
+  echo "binaries: $built"
+} > "$OUT/MANIFEST"
+
+echo
+echo "=== $OUT ==="
+ls -lh "$OUT"
+echo
+cat "$OUT"/*.sha256
+echo
+echo "next:"
+echo "  scp -P 8822 -r $OUT gui@210.5.158.91:~/"
+echo "  ssh -p 8822 gui@210.5.158.91   # then:  su -  ;  bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy"
+'''
+
 [tasks.serve]
 run = '''USE_EMBED_FRONTEND=true ./.cache/server.exe serve --dir '''
 
