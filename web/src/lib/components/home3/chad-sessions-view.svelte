@@ -214,6 +214,14 @@
 										<span class="message-index">#{index + 1}</span>
 									</span>
 								</div>
+								{#if message.toolCallCommand}
+									<div class="tool-call">
+										<span>TOOL CALL: {message.toolCallCommand}</span>
+										{#if message.toolCallParameters !== undefined}
+											<pre>{formatContent(message.toolCallParameters)}</pre>
+										{/if}
+									</div>
+								{/if}
 								<pre>{formatContent(message.content)}</pre>
 							</article>
 						{/each}
@@ -377,6 +385,8 @@
 		color: var(--text);
 		text-align: left;
 		cursor: pointer;
+		user-select: text;
+		-webkit-user-select: text;
 	}
 	.session-row:hover,
 	.session-row.selected {
@@ -439,6 +449,8 @@
 		padding: 24px;
 		overflow-x: hidden;
 		overflow-y: auto;
+		user-select: text;
+		-webkit-user-select: text;
 	}
 	.detail-head code {
 		display: inline-block;
@@ -511,6 +523,21 @@
 	.message-tokens {
 		color: var(--accent);
 		font-weight: 600;
+		letter-spacing: 0;
+	}
+	.tool-call {
+		border-top: 1px solid var(--border);
+		padding: 10px 13px 0;
+		color: var(--accent);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+	}
+	.tool-call pre {
+		margin: 8px -13px 0;
+		border-top: 1px solid var(--border);
+		color: var(--secondary);
+		font-weight: 400;
 		letter-spacing: 0;
 	}
 	pre {

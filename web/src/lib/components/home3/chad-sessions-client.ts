@@ -9,7 +9,10 @@ export type ChadSessionSummary = {
 
 export type ChadSessionMessage = {
 	role?: string;
+	name?: string;
 	content?: unknown;
+	toolCallCommand?: string;
+	toolCallParameters?: unknown;
 };
 
 export type ChadSessionDetail = {

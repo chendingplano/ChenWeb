@@ -37,7 +37,7 @@ func TestListSessionsReturnsNewestFirstSummaries(t *testing.T) {
 	if len(response.Sessions) != 2 {
 		t.Fatalf("session count = %d, want 2", len(response.Sessions))
 	}
-	if response.Sessions[0].ID != "newer" || response.Sessions[1].ID != "older" {
+	if response.Sessions[0].ID != "20260911-000000-newer" || response.Sessions[1].ID != "20260911-000000-older" {
 		t.Fatalf("ids = %#v, want newer then older", response.Sessions)
 	}
 	if response.Sessions[0].MessageCount != 2 {
@@ -52,11 +52,11 @@ func TestGetSessionReturnsMessagesAndNotFoundForUnknownID(t *testing.T) {
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/chad/sessions/session-a", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chad/sessions/20260911-000000-session-a", nil)
 	c := e.NewContext(req, rec)
 	c.SetPath("/api/v1/chad/sessions/:id")
 	c.SetParamNames("id")
-	c.SetParamValues("session-a")
+	c.SetParamValues("20260911-000000-session-a")
 
 	if err := h.GetSession(c); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestGetSessionReturnsMessagesAndNotFoundForUnknownID(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.ID != "session-a" || len(response.Messages) != 2 {
+	if response.ID != "20260911-000000-session-a" || len(response.Messages) != 2 {
 		t.Fatalf("detail = %#v, want session-a with 2 messages", response)
 	}
 
@@ -127,7 +127,7 @@ func TestListSessionsSkipsMalformedEntries(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Sessions) != 1 || response.Sessions[0].ID != "valid" {
+	if len(response.Sessions) != 1 || response.Sessions[0].ID != "20260911-000000-valid" {
 		t.Fatalf("sessions = %#v, want only valid", response.Sessions)
 	}
 }
@@ -145,7 +145,7 @@ func TestGetSessionRejectsOversizedSessionFile(t *testing.T) {
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
 	c.SetPath("/api/v1/chad/sessions/:id")
 	c.SetParamNames("id")
-	c.SetParamValues("large")
+	c.SetParamValues("20260911-000000-large")
 	if err := New(root).GetSession(c); err != nil {
 		t.Fatal(err)
 	}
