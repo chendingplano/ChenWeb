@@ -103,7 +103,10 @@ func (h *Handler) ListSessions(c echo.Context) error {
 	logger := loggerutil.CreateDefaultLogger("CWB_CHAD_010")
 	logger.Info("List Chad sessions")
 	if db := h.projectDB(); db != nil {
-		return h.listDatabaseSessions(c, db)
+		var count int
+		if err := db.QueryRowContext(c.Request().Context(), `SELECT COUNT(*) FROM kb.chad_sessions`).Scan(&count); err == nil && count > 0 {
+			return h.listDatabaseSessions(c, db)
+		}
 	}
 
 	sessions, err := h.listFilesystemSessions()
@@ -220,6 +223,9 @@ func (h *Handler) getDatabaseSession(c echo.Context, db *sql.DB, id string) erro
 		&detail.ChadVersion, &detail.ModelName, &detail.Mode, &createTime,
 		&detail.Meta); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if legacy, legacyErr := h.readDetail(id); legacyErr == nil {
+				return c.JSON(http.StatusOK, legacy)
+			}
 			return c.JSON(http.StatusNotFound, map[string]string{"error_msg": "Session not found"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error_msg": "Unable to read session from database"})
