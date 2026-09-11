@@ -98,6 +98,11 @@
 		}
 	}
 
+	function tokenCount(content: unknown): number {
+		const bytes = new TextEncoder().encode(formatContent(content)).length;
+		return Math.max(1, Math.ceil(bytes / 4));
+	}
+
 	function roleLabel(role: string | undefined): string {
 		return role ? role.toUpperCase() : 'MESSAGE';
 	}
@@ -203,9 +208,11 @@
 						{#each detail.messages as message, index}
 							<article class="message-card role-{message.role || 'unknown'}">
 								<div class="message-label">
-									<span>{roleLabel(message.role)}</span><span class="message-index"
-										>#{index + 1}</span
-									>
+									<span>{roleLabel(message.role)}</span>
+									<span class="message-stats">
+										<span class="message-tokens">tokens={tokenCount(message.content)}</span>
+										<span class="message-index">#{index + 1}</span>
+									</span>
 								</div>
 								<pre>{formatContent(message.content)}</pre>
 							</article>
@@ -494,6 +501,16 @@
 	.message-index {
 		color: var(--muted);
 		font-weight: 400;
+		letter-spacing: 0;
+	}
+	.message-stats {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.message-tokens {
+		color: var(--accent);
+		font-weight: 600;
 		letter-spacing: 0;
 	}
 	pre {
