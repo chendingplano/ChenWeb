@@ -197,7 +197,7 @@ func (h *Handler) GetSession(c echo.Context) error {
 func (h *Handler) listDatabaseSessions(c echo.Context, db *sql.DB) error {
 	rows, err := db.QueryContext(c.Request().Context(), `
 		SELECT s.session_id, s.title, EXTRACT(EPOCH FROM s.updated), s.turns, s.directory,
-		       s.chad_version, s.model_name, s.mode, s.create_time,
+		       s.harness_version, s.model_name, s.mode, s.create_time,
 		       COUNT(m.id)
 		FROM kb.harness_sessions s
 		LEFT JOIN kb.harness_messages m ON m.harness_name = s.harness_name AND m.session_id = s.session_id
