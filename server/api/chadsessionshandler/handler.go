@@ -23,6 +23,7 @@ const maxSessionFileBytes = 8 * 1024 * 1024
 type Handler struct {
 	root           string
 	databaseBacked bool
+	harnessName    string
 }
 
 type SessionSummary struct {
@@ -79,7 +80,11 @@ type sessionFile struct {
 }
 
 func New(root string) *Handler {
-	return &Handler{root: root}
+	return &Handler{root: root, harnessName: "chad"}
+}
+
+func NewHarness(root, harnessName string) *Handler {
+	return &Handler{root: root, harnessName: harnessName, databaseBacked: true}
 }
 
 func NewDefault() (*Handler, error) {
@@ -90,6 +95,14 @@ func NewDefault() (*Handler, error) {
 	handler := New(filepath.Join(home, ".chad", "sessions"))
 	handler.databaseBacked = true
 	return handler, nil
+}
+
+func NewPiDefault() (*Handler, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Pi session home: %w", err)
+	}
+	return NewHarness(filepath.Join(home, ".pi", "agent", "sessions"), "pi"), nil
 }
 
 func (h *Handler) projectDB() *sql.DB {
@@ -104,7 +117,7 @@ func (h *Handler) ListSessions(c echo.Context) error {
 	logger.Info("List Chad sessions")
 	if db := h.projectDB(); db != nil {
 		var count int
-		if err := db.QueryRowContext(c.Request().Context(), `SELECT COUNT(*) FROM kb.chad_sessions`).Scan(&count); err == nil && count > 0 {
+		if err := db.QueryRowContext(c.Request().Context(), `SELECT COUNT(*) FROM kb.harness_sessions WHERE harness_name = $1`, h.harnessName).Scan(&count); err == nil && count > 0 {
 			return h.listDatabaseSessions(c, db)
 		}
 	}
@@ -183,13 +196,14 @@ func (h *Handler) GetSession(c echo.Context) error {
 
 func (h *Handler) listDatabaseSessions(c echo.Context, db *sql.DB) error {
 	rows, err := db.QueryContext(c.Request().Context(), `
-		SELECT s.session_id, s.title, s.updated, s.turns, s.directory,
+		SELECT s.session_id, s.title, EXTRACT(EPOCH FROM s.updated), s.turns, s.directory,
 		       s.chad_version, s.model_name, s.mode, s.create_time,
 		       COUNT(m.id)
-		FROM kb.chad_sessions s
-		LEFT JOIN kb.chad_messages m ON m.session_id = s.session_id
+		FROM kb.harness_sessions s
+		LEFT JOIN kb.harness_messages m ON m.harness_name = s.harness_name AND m.session_id = s.session_id
+		WHERE s.harness_name = $1
 		GROUP BY s.id
-		ORDER BY s.updated DESC, s.session_id DESC`)
+		ORDER BY s.updated DESC, s.session_id DESC`, h.harnessName)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error_msg": "Unable to read Chad sessions from database"})
 	}
@@ -216,9 +230,9 @@ func (h *Handler) getDatabaseSession(c echo.Context, db *sql.DB, id string) erro
 	var detail SessionDetail
 	var createTime time.Time
 	if err := db.QueryRowContext(c.Request().Context(), `
-		SELECT session_id, title, updated, turns, directory, chad_version,
+		SELECT session_id, title, EXTRACT(EPOCH FROM updated), turns, directory, harness_version,
 		       model_name, mode, create_time, meta
-		FROM kb.chad_sessions WHERE session_id = $1`, id).Scan(
+		FROM kb.harness_sessions WHERE harness_name = $1 AND session_id = $2`, h.harnessName, id).Scan(
 		&detail.ID, &detail.Title, &detail.Updated, &detail.Turns, &detail.CWD,
 		&detail.ChadVersion, &detail.ModelName, &detail.Mode, &createTime,
 		&detail.Meta); err != nil {
@@ -233,7 +247,7 @@ func (h *Handler) getDatabaseSession(c echo.Context, db *sql.DB, id string) erro
 	detail.CreateTime = createTime.UTC().Format(time.RFC3339)
 	rows, err := db.QueryContext(c.Request().Context(), `
 		SELECT message_json, tool_call_command, tool_call_parameters
-		FROM kb.chad_messages WHERE session_id = $1 ORDER BY message_index`, id)
+		FROM kb.harness_messages WHERE harness_name = $1 AND session_id = $2 ORDER BY message_index`, h.harnessName, id)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error_msg": "Unable to read Chad messages"})
 	}

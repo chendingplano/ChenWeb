@@ -46,10 +46,10 @@ async function request<T>(path: string): Promise<T> {
 	return body as T;
 }
 
-export function listChadSessions(): Promise<{ sessions: ChadSessionSummary[] }> {
-	return request<{ sessions: ChadSessionSummary[] }>('/api/v1/chad/sessions');
+export function listHarnessSessions(harness: string): Promise<{ sessions: ChadSessionSummary[] }> {
+	return request<{ sessions: ChadSessionSummary[] }>(`/api/v1/${harness}/sessions`);
 }
 
-export function getChadSession(id: string): Promise<ChadSessionDetail> {
-	return request<ChadSessionDetail>(`/api/v1/chad/sessions/${encodeURIComponent(id)}`);
+export function getHarnessSession(harness: string, id: string): Promise<ChadSessionDetail> {
+	return request<ChadSessionDetail>(`/api/v1/${harness}/sessions/${encodeURIComponent(id)}`);
 }

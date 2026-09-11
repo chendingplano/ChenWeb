@@ -5,13 +5,14 @@
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import {
-		getChadSession,
-		listChadSessions,
+		getHarnessSession,
+		listHarnessSessions,
 		type ChadSessionDetail,
 		type ChadSessionSummary
 	} from './chad-sessions-client';
 
-	let { darkMode = true }: { darkMode?: boolean } = $props();
+	let { darkMode = true, harness = 'chad' }: { darkMode?: boolean; harness?: 'chad' | 'pi' } = $props();
+	let harnessLabel = $derived(harness === 'pi' ? 'Pi' : 'Chad');
 	let sessions = $state<ChadSessionSummary[]>([]);
 	let selectedID = $state<string | null>(null);
 	let detail = $state<ChadSessionDetail | null>(null);
@@ -42,7 +43,7 @@
 		loading = true;
 		error = null;
 		try {
-			const response = await listChadSessions();
+			const response = await listHarnessSessions(harness);
 			sessions = response.sessions ?? [];
 			const selectedIndex = selectedID
 				? sessions.findIndex((session) => session.id === selectedID)
@@ -67,7 +68,7 @@
 		detailLoading = true;
 		detailError = null;
 		try {
-			detail = await getChadSession(id);
+			detail = await getHarnessSession(harness, id);
 		} catch (err) {
 			detail = null;
 			detailError = errorMessage(err);
@@ -118,9 +119,9 @@
 >
 	<header class="page-header">
 		<div>
-			<p class="eyebrow">SYSTEM ADMIN / LLM / CHAD SESSIONS</p>
-			<h1>Chad Sessions</h1>
-			<p class="intro">Read-only request and response logs from the local Chad session store.</p>
+			<p class="eyebrow">SYSTEM ADMIN / LLM / {harnessLabel.toUpperCase()} SESSIONS</p>
+			<h1>{harnessLabel} Sessions</h1>
+			<p class="intro">Read-only request and response logs from the local {harnessLabel} session store.</p>
 		</div>
 		<div class="header-actions">
 			<span class="count">{sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}</span>
@@ -141,12 +142,12 @@
 	{/if}
 
 	<div class="workspace">
-		<aside class="session-list" aria-label="Chad sessions">
+		<aside class="session-list" aria-label="{harnessLabel} sessions">
 			<div class="list-heading"><span>SESSION DIRECTORY</span><span>{sessions.length}</span></div>
 			{#if loading && !sessions.length}
 				<div class="state">Loading sessions…</div>
 			{:else if !sessions.length}
-				<div class="state">No Chad sessions found.</div>
+				<div class="state">No {harnessLabel} sessions found.</div>
 			{:else}
 				<div class="rows">
 					{#each pageSessions as session (session.id)}

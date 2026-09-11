@@ -261,6 +261,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	if err != nil {
 		return fmt.Errorf("initialize Chad sessions handler: %w", err)
 	}
+	piSessionsHandler, err := chadsessionshandler.NewPiDefault()
+	if err != nil {
+		return fmt.Errorf("initialize Pi sessions handler: %w", err)
+	}
 
 	// Add the endpoint '/api/v1/health'
 	apiGroup.GET("/health", func(c echo.Context) error {
@@ -427,6 +431,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Local Chad session viewer (read-only)
 	apiGroup.GET("/chad/sessions", chadSessionsHandler.ListSessions)
 	apiGroup.GET("/chad/sessions/:id", chadSessionsHandler.GetSession)
+	apiGroup.GET("/pi/sessions", piSessionsHandler.ListSessions)
+	apiGroup.GET("/pi/sessions/:id", piSessionsHandler.GetSession)
 
 	// Customer request log endpoint
 	apiGroup.POST("/cust_request_logs", custreqloghandler.CreateCustRequestLog)

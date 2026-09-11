@@ -262,6 +262,8 @@
 			<LLMModelsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-chat-sessions'}
 			<ChadSessionsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-pi-sessions'}
+			<ChadSessionsView {darkMode} harness="pi" />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}
 			<DbConsistencyView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-clean-artifact-data'}
