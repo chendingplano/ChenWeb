@@ -19,6 +19,10 @@
 	let detailLoading = $state(false);
 	let error = $state<string | null>(null);
 	let detailError = $state<string | null>(null);
+	const pageSize = 20;
+	let page = $state(0);
+	let pageCount = $derived(Math.max(1, Math.ceil(sessions.length / pageSize)));
+	let pageSessions = $derived(sessions.slice(page * pageSize, (page + 1) * pageSize));
 
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -40,6 +44,10 @@
 		try {
 			const response = await listChadSessions();
 			sessions = response.sessions ?? [];
+			const selectedIndex = selectedID
+				? sessions.findIndex((session) => session.id === selectedID)
+				: -1;
+			page = selectedIndex >= 0 ? Math.floor(selectedIndex / pageSize) : 0;
 			const nextID =
 				selectedID && sessions.some((session) => session.id === selectedID)
 					? selectedID
@@ -93,6 +101,10 @@
 	function roleLabel(role: string | undefined): string {
 		return role ? role.toUpperCase() : 'MESSAGE';
 	}
+
+	function setPage(nextPage: number): void {
+		page = Math.max(0, Math.min(nextPage, pageCount - 1));
+	}
 </script>
 
 <div
@@ -124,7 +136,7 @@
 	{/if}
 
 	<div class="workspace">
-		<aside class="session-list" aria-label="Chat sessions">
+		<aside class="session-list" aria-label="Chad sessions">
 			<div class="list-heading"><span>SESSION DIRECTORY</span><span>{sessions.length}</span></div>
 			{#if loading && !sessions.length}
 				<div class="state">Loading sessions…</div>
@@ -132,7 +144,7 @@
 				<div class="state">No Chad sessions found.</div>
 			{:else}
 				<div class="rows">
-					{#each sessions as session (session.id)}
+					{#each pageSessions as session (session.id)}
 						<button
 							class:selected={selectedID === session.id}
 							class="session-row"
@@ -150,6 +162,13 @@
 								</div>{/if}
 						</button>
 					{/each}
+				</div>
+			{/if}
+			{#if sessions.length > pageSize}
+				<div class="pagination">
+					<button onclick={() => setPage(page - 1)} disabled={page === 0}>Previous</button>
+					<span>Page {page + 1} of {pageCount}</span>
+					<button onclick={() => setPage(page + 1)} disabled={page >= pageCount - 1}>Next</button>
 				</div>
 			{/if}
 		</aside>
@@ -200,7 +219,12 @@
 
 <style>
 	.session-page {
-		min-height: calc(100vh - 58px);
+		height: 100%;
+		min-height: 0;
+		box-sizing: border-box;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
 		background: var(--page-bg);
 		color: var(--text);
 		padding: 28px;
@@ -212,6 +236,9 @@
 		align-items: flex-start;
 		justify-content: space-between;
 		gap: 20px;
+	}
+	.page-header {
+		flex-shrink: 0;
 	}
 	.eyebrow {
 		margin: 0 0 8px;
@@ -267,6 +294,7 @@
 		animation: spin 0.8s linear infinite;
 	}
 	.notice {
+		flex-shrink: 0;
 		margin-top: 18px;
 		border: 1px solid #b45353;
 		border-radius: 8px;
@@ -274,9 +302,10 @@
 		font-size: 12px;
 	}
 	.workspace {
+		flex: 1;
 		display: grid;
 		grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-		min-height: 620px;
+		min-height: 0;
 		margin-top: 24px;
 		overflow: hidden;
 		border: 1px solid var(--border);
@@ -284,7 +313,10 @@
 		background: var(--card-bg);
 	}
 	.session-list {
+		display: flex;
+		flex-direction: column;
 		min-width: 0;
+		min-height: 0;
 		border-right: 1px solid var(--border);
 		background: color-mix(in srgb, var(--surface) 42%, var(--card-bg));
 	}
@@ -299,8 +331,34 @@
 		letter-spacing: 0.13em;
 	}
 	.rows {
-		max-height: 700px;
-		overflow: auto;
+		flex: 1;
+		min-height: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+	}
+	.pagination {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-shrink: 0;
+		gap: 8px;
+		border-top: 1px solid var(--border);
+		padding: 10px 12px;
+		color: var(--muted);
+		font-size: 11px;
+	}
+	.pagination button {
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 5px 8px;
+		background: var(--card-bg);
+		color: var(--text);
+		font: inherit;
+		cursor: pointer;
+	}
+	.pagination button:disabled {
+		cursor: default;
+		opacity: 0.45;
 	}
 	.session-row {
 		display: block;
@@ -370,8 +428,10 @@
 	}
 	.detail {
 		min-width: 0;
+		min-height: 0;
 		padding: 24px;
-		overflow: auto;
+		overflow-x: hidden;
+		overflow-y: auto;
 	}
 	.detail-head code {
 		display: inline-block;
@@ -471,16 +531,17 @@
 		}
 		.workspace {
 			grid-template-columns: 1fr;
+			grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
 		}
 		.session-list {
 			border-right: 0;
 			border-bottom: 1px solid var(--border);
 		}
 		.rows {
-			max-height: 280px;
+			max-height: none;
 		}
 		.detail {
-			min-height: 420px;
+			min-height: 0;
 			padding: 18px;
 		}
 		.detail-facts {

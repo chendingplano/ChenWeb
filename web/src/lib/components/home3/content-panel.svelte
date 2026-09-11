@@ -176,7 +176,9 @@
 </script>
 
 <main
-	class="relative flex min-w-0 flex-1 flex-col overflow-y-auto"
+	class="relative flex min-w-0 flex-1 flex-col {activeMenu?.childId === 'sysadmin-llm-chat-sessions'
+		? 'overflow-hidden'
+		: 'overflow-y-auto'}"
 	style="background:{pageBg}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
 	<!-- Topbar: breadcrumb + shelf toggle -->
@@ -209,7 +211,7 @@
 	{/if}
 
 	<!-- Main content area -->
-	<div class="flex-1 {showFooter ? '' : 'min-h-0'}">
+	<div class="min-w-0 flex-1 {showFooter ? '' : 'min-h-0'}">
 		{#if activeMenu?.childId === 'doc-processor-dashboard'}
 			<DocProcessorDashboardView {darkMode} />
 		{:else if activeMenu?.childId === 'llm-activities'}
