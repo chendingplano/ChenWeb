@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an authenticated, read-only ChenWeb admin page that lists every local Chad session and renders its request/response log.
+**Goal:** Add an authenticated, read-only ChenWeb admin page named Chad Sessions that lists every local Chad session and renders its request/response log.
 
 **Architecture:** Add a focused Go `chadsessionshandler` that safely reads the server user's `~/.chad/sessions` store through two authenticated JSON endpoints. Add a typed browser client and a full-height Svelte two-pane view, then connect the view to the existing `/development` nav rail and content panel under System Admin → LLM.
 
@@ -149,7 +149,7 @@
 
 - [ ] **Step 1: Add the `sysadmin-llm-chat-sessions` leaf.**
 
-  Place `Chat Sessions` beneath the existing `sysadmin-llm` group after the model entries, so the rendered hierarchy is Development → System Admin → LLM → Chat Sessions.
+  Place `Chad Sessions` beneath the existing `sysadmin-llm` group after the model entries, so the rendered hierarchy is Development → System Admin → LLM → Chad Sessions.
 
 - [ ] **Step 2: Import and render the new viewer.**
 
@@ -167,7 +167,7 @@
 
 - [ ] **Step 5: Commit the UI/navigation slice with jj.**
 
-  Run: `jj commit web/src/lib/components/home3/chad-sessions-view.svelte web/src/lib/components/home3/nav-rail.svelte web/src/lib/components/home3/content-panel.svelte -m 'feat: add Chad chat sessions admin page'`
+  Run: `jj commit web/src/lib/components/home3/chad-sessions-view.svelte web/src/lib/components/home3/nav-rail.svelte web/src/lib/components/home3/content-panel.svelte -m 'feat: add Chad sessions admin page'`
 
 ## Chunk 3: Integration verification and handoff
 
@@ -199,7 +199,7 @@
 
 - [ ] **Step 4: Manually verify with a running authenticated app.**
 
-  Open `/development`, expand `System Admin → LLM`, confirm `Chat Sessions` appears, select a real session, confirm request/response content renders, refresh, and verify a session with structured content does not execute markup.
+  Open `/development`, expand `System Admin → LLM`, confirm `Chad Sessions` appears, select a real session, confirm request/response content renders, refresh, and verify a session with structured content does not execute markup.
 
 - [ ] **Step 5: Answer the workspace documentation checklist.**
 

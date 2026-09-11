@@ -101,8 +101,8 @@
 >
 	<header class="page-header">
 		<div>
-			<p class="eyebrow">SYSTEM ADMIN / LLM / CHAT SESSIONS</p>
-			<h1>Chat Sessions</h1>
+			<p class="eyebrow">SYSTEM ADMIN / LLM / CHAD SESSIONS</p>
+			<h1>Chad Sessions</h1>
 			<p class="intro">Read-only request and response logs from the local Chad session store.</p>
 		</div>
 		<div class="header-actions">

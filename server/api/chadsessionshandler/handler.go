@@ -131,27 +131,15 @@ func (h *Handler) GetSession(c echo.Context) error {
 }
 
 func (h *Handler) readSummary(id string) (SessionSummary, error) {
-	var index indexFile
-	if err := readJSON(filepath.Join(h.root, id, "index.json"), &index); err != nil {
-		return SessionSummary{}, err
-	}
-	entry, ok := index.Sessions[id]
-	if !ok {
-		return SessionSummary{}, fmt.Errorf("session missing from index")
-	}
 	detail, err := h.readDetail(id)
 	if err != nil {
 		return SessionSummary{}, err
 	}
-	updated := entry.Updated
-	if updated == 0 {
-		updated = detail.Updated
-	}
 	return SessionSummary{
 		ID:           id,
-		Title:        entry.Title,
-		Updated:      updated,
-		Turns:        entry.Turns,
+		Title:        detail.Title,
+		Updated:      detail.Updated,
+		Turns:        detail.Turns,
 		CWD:          detail.CWD,
 		MessageCount: len(detail.Messages),
 	}, nil
@@ -169,10 +157,6 @@ func (h *Handler) readDetail(id string) (SessionDetail, error) {
 	if err := readJSON(filepath.Join(dir, "index.json"), &index); err != nil {
 		return SessionDetail{}, err
 	}
-	entry, ok := index.Sessions[id]
-	if !ok {
-		return SessionDetail{}, os.ErrNotExist
-	}
 	contentPath, err := newestSessionFile(dir)
 	if err != nil {
 		return SessionDetail{}, err
@@ -180,6 +164,16 @@ func (h *Handler) readDetail(id string) (SessionDetail, error) {
 	var content sessionFile
 	if err := readJSON(contentPath, &content); err != nil {
 		return SessionDetail{}, err
+	}
+	entry, ok := index.Sessions[content.SessionID]
+	if !ok && len(index.Sessions) == 1 {
+		for _, candidate := range index.Sessions {
+			entry = candidate
+			ok = true
+		}
+	}
+	if !ok {
+		return SessionDetail{}, os.ErrNotExist
 	}
 	updated := entry.Updated
 	if updated == 0 {

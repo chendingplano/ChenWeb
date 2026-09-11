@@ -160,20 +160,21 @@ func writeSessionFixture(t *testing.T, root, id string, updated float64, turns i
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	index := map[string]any{"sessions": map[string]any{id: map[string]any{
+	contentID := "20260911-000000-" + id
+	index := map[string]any{"sessions": map[string]any{contentID: map[string]any{
 		"title": title, "updated": updated, "turns": turns,
 	}}}
 	writeJSON(t, filepath.Join(dir, "index.json"), index)
 	session := map[string]any{
 		"cwd":        "/tmp/example",
-		"session_id": id,
+		"session_id": contentID,
 		"updated":    updated,
 		"messages": []any{
 			map[string]any{"role": "user", "content": request},
 			map[string]any{"role": "assistant", "content": map[string]any{"answer": "response"}},
 		},
 	}
-	writeJSON(t, filepath.Join(dir, "20260911-000000-"+id+".json"), session)
+	writeJSON(t, filepath.Join(dir, contentID+".json"), session)
 }
 
 func writeJSON(t *testing.T, path string, value any) {

@@ -5,7 +5,7 @@ Status: Approved for implementation
 
 ## Goal
 
-Add a read-only page to the `/development` dashboard at `System Admin → LLM → Chat Sessions`. The page lists every session stored in the ChenWeb server user's `~/.chad/sessions` directory. Selecting a session displays its request and model-response log.
+Add a read-only page to the `/development` dashboard at `System Admin → LLM → Chad Sessions`. The page lists every session stored in the ChenWeb server user's `~/.chad/sessions` directory. Selecting a session displays its request and model-response log.
 
 ## Scope and assumptions
 
@@ -16,7 +16,7 @@ Add a read-only page to the `/development` dashboard at `System Admin → LLM �
 
 ## Navigation and UI
 
-Add a `Chat Sessions` leaf under the existing `sysadmin-llm` group in `web/src/lib/components/home3/nav-rail.svelte`, with id `sysadmin-llm-chat-sessions`. Add a matching branch in `content-panel.svelte`.
+Add a `Chad Sessions` leaf under the existing `sysadmin-llm` group in `web/src/lib/components/home3/nav-rail.svelte`, with id `sysadmin-llm-chat-sessions`. Add a matching branch in `content-panel.svelte`.
 
 The view is a full-height two-pane operational screen consistent with other System Admin pages:
 
