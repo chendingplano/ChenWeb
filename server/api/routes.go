@@ -22,6 +22,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
+	"github.com/chendingplano/deepdoc/server/api/chadsessionshandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
@@ -256,6 +257,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
+	chadSessionsHandler, err := chadsessionshandler.NewDefault()
+	if err != nil {
+		return fmt.Errorf("initialize Chad sessions handler: %w", err)
+	}
 
 	// Add the endpoint '/api/v1/health'
 	apiGroup.GET("/health", func(c echo.Context) error {
@@ -418,6 +423,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/chatter/sessions", chatterhandler.CreateSession)
 	apiGroup.GET("/chatter/sessions/:id/dialogs", chatterhandler.GetDialogs)
 	apiGroup.POST("/chatter/sessions/:id/messages", chatterhandler.SendMessage)
+
+	// Local Chad session viewer (read-only)
+	apiGroup.GET("/chad/sessions", chadSessionsHandler.ListSessions)
+	apiGroup.GET("/chad/sessions/:id", chadSessionsHandler.GetSession)
 
 	// Customer request log endpoint
 	apiGroup.POST("/cust_request_logs", custreqloghandler.CreateCustRequestLog)
