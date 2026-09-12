@@ -160,13 +160,29 @@ func (s DocumentScoper) pathA(ctx context.Context, nodes []ScopeNode, get func(i
 
 // pathB — RRF hybrid over the product / summary / topic partitions using each
 // node's labels. Join-mode aspect nodes are skipped (they scope via Path A).
+// module/part query text is anchored with the product root's label (bug
+// 2026091301: a bare short generic part label like "主机"/"存储器" has no
+// product context of its own, so an unanchored hybrid search matches equally
+// well against the same term in an unrelated document domain).
 func (s DocumentScoper) pathB(ctx context.Context, nodes []ScopeNode, get func(int64) *ScopedDoc) error {
 	partitions := []string{"product", "summary", "topic"}
+	var rootText string
+	for _, n := range nodes {
+		if n.isProduct() {
+			rootText = n.labelText()
+			break
+		}
+	}
+	minSim := s.Config.Scoring.HybridSimilarityMin
 	for _, n := range nodes {
 		if n.isAspect() && len(n.RelationTypes) > 0 {
 			continue
 		}
-		hits, err := rrfSearch(ctx, s.DB, partitions, n.labelText(), n.Embedding, hybridCandidateLimit)
+		queryText := n.labelText()
+		if (n.Kind == KindModule || n.Kind == KindPart) && rootText != "" && rootText != queryText {
+			queryText = rootText + " " + queryText
+		}
+		hits, err := rrfSearch(ctx, s.DB, partitions, queryText, n.Embedding, hybridCandidateLimit, minSim)
 		if err != nil {
 			return err
 		}
@@ -191,7 +207,7 @@ func (s DocumentScoper) pathC(ctx context.Context, recIDs []int64, acc map[int64
 	classified := map[int64]bool{}
 
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT record_id, COALESCE(value, '')
+		SELECT record_id, COALESCE(value #>> '{}', '')
 		FROM kb.doc_facet_values
 		WHERE path = 'document.doc_kind' AND record_id = ANY($1)`, pq.Array(recIDs))
 	if err != nil {

@@ -24,6 +24,16 @@ const (
 	defaultPerDocumentCap = 60
 )
 
+// defaultHybridSimilarityMin is ScoringConfig.HybridSimilarityMin's fallback
+// when unset. This only cuts the extreme long tail — it does NOT reliably
+// separate true from false matches for short, generic node labels (bug
+// 2026091301: measured against the live corpus, a genuine wrong-domain match
+// and several genuine right-domain matches sit interleaved in the 0.23–0.32
+// similarity band for a 2-character label like "主机"; no single floor
+// separates them without also dropping true positives). Treat this as noise
+// reduction, not a precision guarantee.
+const defaultHybridSimilarityMin = 0.20
+
 // ModelsConfig names the two model refs the app may call (see design D8).
 type ModelsConfig struct {
 	Structure     string `toml:"structure"`
@@ -69,6 +79,12 @@ type GroundingConfig struct {
 type ScoringConfig struct {
 	StandardsBoost      float64            `toml:"standards_boost"`
 	RelationTypeWeights map[string]float64 `toml:"relation_type_weights"`
+	// HybridSimilarityMin is the minimum cosine similarity (1 - embedding
+	// distance) a Path B hybrid-search hit's vector half must clear to count.
+	// Unset (<= 0) falls back to defaultHybridSimilarityMin (bug 2026091301:
+	// the vector half previously had no floor, so a node with no genuinely
+	// close neighbor still matched its 200 least-bad options).
+	HybridSimilarityMin float64 `toml:"hybrid_similarity_min"`
 }
 
 // AspectConfig is one [aspects.<key>] block. An aspect either declares the

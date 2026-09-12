@@ -157,3 +157,43 @@ against a real corpus) and 6.2 (full-tree `go test ./...`) are deferred — see 
 - The frontend page is **not registered in `nav-rail.svelte`** — reachable directly at
   `/home3/product-metric-review?run=<id>`. Add a nav entry (page-config system) when the
   app is ready for discovery.
+
+## Update — 2026-09-13: 6.1 completed, two bugs fixed, one still open
+
+Since this note was written, a self-service intake page shipped on top of this change
+(`IntakeProductReview` / `intake.go`, `/home3` "Product Review" nav entry — not covered
+above since it postdates this note) and the corpus stopped being near-empty. Task 6.1 was
+finally run for real; full root-cause and fix detail is in
+`KnowledgeStore/doc-repo/bugs/202609/2026091301-bug-product-metric-reviewer-e2e-crash-curation-gap-and-retrieval-precision.md`.
+Summary:
+
+- **`docscope.go` pathC crashed every review run outright** (`COALESCE(value, '')` against
+  a `jsonb` column — `''::jsonb` is invalid JSON, fails at parse time regardless of data).
+  Fixed: `COALESCE(value #>> '{}', '')`. This is why the one real run on record before today
+  (`kb.product_review_runs.id=1`) failed in 0.5s having done nothing.
+- **The self-service intake flow never curates its proposed nodes**, so part-tier
+  attribution was structurally impossible through that page (retrieval only loads
+  `status='accepted'` nodes, by design — this is *not* a relaxation of that design). Fixed:
+  new `Store.AcceptAllProposed`, called only from `IntakeProductReview` between `Build` and
+  `SetProfileStatus(ready)`; the manual curation page's accept/reject gate is untouched.
+- **6.1 is done against `血压计` (blood pressure monitor), not `Ventilator`.** The dev
+  corpus loaded today is BP-monitor documents; testing against a `Ventilator` profile (which
+  a prior intake attempt had created when the DB was empty) produces domain-mismatched
+  results — not a fair verification. All three of 6.1's literal conditions are met: 36
+  part-tier + 1 aspect-tier attributed results, 20-entry gap list.
+- **Still open: retrieval precision — deeper than a tuning knob.** Spot-checking the part-tier
+  results shows real hits mixed with wrong-domain ones (a `主机`/"host unit" node attributed a
+  composting-facility metric). Added a similarity floor (`ScoringConfig.HybridSimilarityMin`,
+  `hybrid.go`'s `sem` CTE) and product-root-anchored query text for module/part nodes
+  (`docscope.go` pathB, `retrieve.go` Path E) — both shipped and verified live. But re-running
+  the `血压计` review proved these don't fix precision: for a short generic label like `主机`,
+  real and wrong-domain matches sit interleaved in the same 0.23–0.32 cosine-similarity band
+  (measured against the live corpus), so no threshold separates them, and the wrong-domain
+  documents don't lexically co-occur with the product name at the chunk level either. A real
+  fix needs product-identity propagated into the chunk-level index — out of scope here; full
+  evidence and the remediation options are in the bug doc.
+- Corrections to two of this note's original "what the app assumes" claims, now that
+  `kb.products` and `kb.metrics` are populated: Path A (`kb.products` identity match) and
+  Path C (`document.doc_kind` boost) both exercised against real data during the `血压计`
+  run — Path C's underlying bug (above) is why it was never actually exercised until today,
+  not because the facet rows didn't exist by the time of the run.

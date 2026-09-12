@@ -402,6 +402,33 @@ func (s Store) DeleteNode(ctx context.Context, profileID, nodeID int64) error {
 	return tx.Commit()
 }
 
+// AcceptAllProposed accepts every `proposed` node on a profile in one step and
+// bumps the version once. Used by the self-service intake flow (spec:
+// product-review-intake), which has no manual curation step of its own — the
+// full curation page still gates on individual accept/reject.
+func (s Store) AcceptAllProposed(ctx context.Context, profileID int64) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE kb.product_profile_nodes
+		SET status = 'accepted', updated_at = NOW()
+		WHERE profile_id = $1 AND status = 'proposed'`, profileID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return tx.Commit()
+	}
+	if err := bumpVersion(ctx, tx, profileID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // insertNode inserts one node and returns its id. JSONB columns are marshalled
 // from the Go slices.
 func insertNode(ctx context.Context, q queryer, n ProfileNode) (int64, error) {

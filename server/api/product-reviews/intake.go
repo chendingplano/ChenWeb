@@ -73,6 +73,12 @@ func IntakeProductReview(c echo.Context) error {
 		if err := builder.Build(ctx, profile.ID, ProposeInput{}); err != nil {
 			return fail(c, err)
 		}
+		// Self-service intake has no manual curation step, so accept the
+		// LLM-proposed tree wholesale rather than leaving every module/part
+		// node stuck at status=proposed (and so invisible to retrieval).
+		if err := store.AcceptAllProposed(ctx, profile.ID); err != nil {
+			return fail(c, err)
+		}
 		if err := store.SetProfileStatus(ctx, profile.ID, ProfileReady); err != nil {
 			return fail(c, err)
 		}

@@ -27,13 +27,21 @@ type rrfHit struct {
 // rrfSearch fuses a lexical ranking and — when vec is non-nil — a pgvector
 // cosine ranking over the given kb.search_artifacts partitions, via RRF. It
 // never calls an LLM: the vector is a pre-computed node embedding.
-func rrfSearch(ctx context.Context, db *sql.DB, partitions []string, queryText string, vec []float64, limit int) ([]rrfHit, error) {
+// minSimilarity floors the vector half (1 - embedding distance); <= 0 falls
+// back to defaultHybridSimilarityMin. The lexical half is unaffected — it
+// already requires a real text match (bug 2026091301: the vector half had no
+// floor at all, so it always returned its nearest 200 neighbors by raw
+// distance, however unrelated, once a node's label had any embedding).
+func rrfSearch(ctx context.Context, db *sql.DB, partitions []string, queryText string, vec []float64, limit int, minSimilarity float64) ([]rrfHit, error) {
 	queryText = strings.TrimSpace(queryText)
 	if queryText == "" || len(partitions) == 0 {
 		return nil, nil
 	}
 	if limit <= 0 {
 		limit = hybridCandidateLimit
+	}
+	if minSimilarity <= 0 {
+		minSimilarity = defaultHybridSimilarityMin
 	}
 
 	const lexCTE = `
@@ -72,6 +80,7 @@ sem AS (
 	       ROW_NUMBER() OVER (ORDER BY sa.embedding <=> $4::vector, sa.artifact_id) AS rnk
 	FROM kb.search_artifacts sa
 	WHERE sa.artifact_type = ANY($2) AND sa.embedding IS NOT NULL
+	  AND (1 - (sa.embedding <=> $4::vector)) >= $6
 	ORDER BY rnk
 	LIMIT $3
 )
@@ -84,7 +93,7 @@ FROM lex
 FULL OUTER JOIN sem
   ON lex.artifact_type = sem.artifact_type AND lex.artifact_id = sem.artifact_id
 ORDER BY score DESC, 2 ASC`
-		args = []any{queryText, pq.Array(partitions), limit, formatVector(vec), rrfK}
+		args = []any{queryText, pq.Array(partitions), limit, formatVector(vec), rrfK, minSimilarity}
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)

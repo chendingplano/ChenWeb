@@ -49,7 +49,7 @@
 
 ## 6. Verification and documentation
 
-- [ ] 6.1 End-to-end check against the dev corpus with a real product (`Ventilator`): profile builds, a part-attributed metric such as a display or battery metric is returned, an aspect-attributed metric is returned, and the gap list is populated
-- [ ] 6.2 `go test ./...` in `ChenWeb/server` and `mise build-server` clean; frontend build clean
+- [x] 6.1 End-to-end check against the dev corpus with a real product: profile builds, a part-attributed metric is returned, an aspect-attributed metric is returned, and the gap list is populated — done against `血压计` (not `Ventilator`, per the corpus actually loaded); required fixing two bugs first, see `KnowledgeStore/doc-repo/bugs/202609/2026091301-bug-product-metric-reviewer-e2e-crash-curation-gap-and-retrieval-precision.md`. That doc's Finding 3 (retrieval-precision defect) is still open.
+- [x] 6.2 `go test ./...` in `ChenWeb/server` and `mise build-server` clean; frontend build clean — `go build ./...`, `go vet ./...`, `mise build-server`, and `bun run build` (web/) all clean; `go test ./api/product-reviews/...` green. Full-tree `go test ./...` surfaces 5 pre-existing failures unrelated to this change (`ontology/seed` sqlmock query drift, `ontology/semantic` `TEST_DATABASE_URL` format mismatch, `openmetadatahandler` external-service/config mismatch, `terminologyresourcehandler` FK constraint from stale test data, `qudt-import` fixture parse error) — none touch code this change added or modified.
 - [x] 6.3 Record the knowledge change: what the app assumes about `kb.products.relation_type` and `kb.metrics.subject_concept_id`, which docs are now stale, and what was intentionally left undocumented (per workspace `CLAUDE.md` "Coding Best Practice")
 - [x] 6.4 Commit through `jj` — migrations and backend as one commit, frontend as another; confirm `jj log` shows only the expected linear commits

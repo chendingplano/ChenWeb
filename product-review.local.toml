@@ -45,6 +45,12 @@ ontology_label_min     = 0.90
 
 [scoring]
 standards_boost = 0.25
+# Minimum cosine similarity (1 - embedding distance) a Path B/Path E hybrid
+# hit's vector half must clear to count. Cuts the extreme long tail only —
+# bug 2026091301 found true/false matches interleaved in the 0.23-0.32 band
+# for short generic node labels, so this does not by itself fix precision for
+# those; see the bug doc before raising this further.
+hybrid_similarity_min = 0.20
 
 [scoring.relation_type_weights]
 scope                     = 1.0

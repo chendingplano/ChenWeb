@@ -90,6 +90,14 @@ func (r Retriever) Retrieve(ctx context.Context, in RetrieveInput) (*RetrieveRes
 		scopedRecs = append(scopedRecs, d.InputRecordID)
 	}
 	conceptIDs := dedupeStrings(conceptIDsOf(in.Nodes))
+	var rootText string
+	for _, n := range in.Nodes {
+		if n.isProduct() {
+			rootText = n.labelText()
+			break
+		}
+	}
+	minSim := r.Config.Scoring.HybridSimilarityMin
 
 	var hits []pathHit
 	for _, at := range in.ArtifactTypes {
@@ -117,11 +125,18 @@ func (r Retriever) Retrieve(ctx context.Context, in RetrieveInput) (*RetrieveRes
 		}
 
 		// Path E — hybrid over this type's partition, anchored per node.
+		// module/part query text is anchored with the product root's label
+		// (bug 2026091301: an unanchored short generic part label matches
+		// artifacts from unrelated document domains equally well).
 		for _, n := range in.Nodes {
 			if n.isAspect() && len(n.RelationTypes) > 0 {
 				continue
 			}
-			rrf, err := rrfSearch(ctx, r.DB, []string{adapter.Partition()}, n.labelText(), n.Embedding, hybridCandidateLimit)
+			queryText := n.labelText()
+			if (n.Kind == KindModule || n.Kind == KindPart) && rootText != "" && rootText != queryText {
+				queryText = rootText + " " + queryText
+			}
+			rrf, err := rrfSearch(ctx, r.DB, []string{adapter.Partition()}, queryText, n.Embedding, hybridCandidateLimit, minSim)
 			if err != nil {
 				return nil, err
 			}
