@@ -98,15 +98,18 @@ func CreateProductProfile(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H01")
 	defer rc.Close()
 	var body struct {
-		Name               string `json:"name"`
-		ProductDescription string `json:"product_description"`
-		TenantID           string `json:"tenant_id"`
+		Name               string   `json:"name"`
+		ProductDescription string   `json:"product_description"`
+		Keywords           []string `json:"keywords"`
+		Notes              string   `json:"notes"`
+		TenantID           string   `json:"tenant_id"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	p, err := newStore().CreateProfile(c.Request().Context(), NewProfileInput{
-		Name: body.Name, ProductDescription: body.ProductDescription, TenantID: body.TenantID,
+		Name: body.Name, ProductDescription: body.ProductDescription,
+		Keywords: body.Keywords, Notes: body.Notes, TenantID: body.TenantID,
 	})
 	if err != nil {
 		return fail(c, err)

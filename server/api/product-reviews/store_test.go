@@ -2,8 +2,10 @@ package productreviews
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -17,7 +19,7 @@ func TestCreateProfile(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(rx("INSERT INTO kb.product_profiles")).
-		WithArgs("-", "Ventilator", "").
+		WithArgs("-", "Ventilator", "", []byte("[]"), "").
 		WillReturnRows(profileRows(1, "Ventilator", 1, "draft", false, 0))
 	mock.ExpectExec(rx("INSERT INTO kb.product_profile_nodes")).
 		WithArgs(int64(1), KindProduct, "Ventilator", OriginUserAdded, StatusAccepted).
@@ -117,6 +119,162 @@ func TestDeleteNodeBumpsVersion(t *testing.T) {
 
 	if err := store.DeleteNode(context.Background(), 1, 5); err != nil {
 		t.Fatalf("DeleteNode: %v", err)
+	}
+}
+
+// Scenario: keywords/notes captured on the intake form round-trip through
+// create (spec: product-review-intake — keywords are stored on the profile).
+func TestCreateProfileWithKeywordsAndNotes(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(rx("INSERT INTO kb.product_profiles")).
+		WithArgs("-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"truncated", "truncated_count", "created_at", "updated_at",
+		}).AddRow(1, "-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck", 1, "draft", false, 0, time.Now(), time.Now()))
+	mock.ExpectExec(rx("INSERT INTO kb.product_profile_nodes")).
+		WithArgs(int64(1), KindProduct, "Ventilator", OriginUserAdded, StatusAccepted).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	p, err := store.CreateProfile(context.Background(), NewProfileInput{
+		Name: "Ventilator", Keywords: []string{"icu", "respiratory"}, Notes: "urgent, needs recheck",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if len(p.Keywords) != 2 || p.Keywords[0] != "icu" || p.Notes != "urgent, needs recheck" {
+		t.Fatalf("profile = %+v, want keywords [icu respiratory] / notes preserved", p)
+	}
+}
+
+// Scenario: submitting a new product name finds no existing profile (spec:
+// product-review-intake — first-time product name).
+func TestFindProfileByNameNoMatch(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
+		WithArgs("-", "Ventilator").
+		WillReturnError(sql.ErrNoRows)
+
+	p, err := store.FindProfileByName(context.Background(), "", "Ventilator")
+	if err != nil {
+		t.Fatalf("FindProfileByName: %v", err)
+	}
+	if p != nil {
+		t.Fatalf("p = %+v, want nil (no match)", p)
+	}
+}
+
+// Scenario: submitting a previously reviewed product name matches, even with
+// different case/whitespace (spec: product-review-intake — duplicate
+// detection is normalized exact match).
+func TestFindProfileByNameMatch(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
+		WithArgs("acme", "  ventilator  ").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"truncated", "truncated_count", "created_at", "updated_at",
+		}).AddRow(9, "acme", "Ventilator", "", []byte("[]"), "", 2, "ready", false, 0, time.Now(), time.Now()))
+
+	p, err := store.FindProfileByName(context.Background(), "acme", "  ventilator  ")
+	if err != nil {
+		t.Fatalf("FindProfileByName: %v", err)
+	}
+	if p == nil || p.ID != 9 || p.Status != ProfileReady {
+		t.Fatalf("p = %+v, want id 9 / ready", p)
+	}
+}
+
+// Scenario: duplicate with a completed prior run (spec: product-review-intake)
+// — offers both "view results" and "re-run" via latest_request_id/latest_run.
+func TestDuplicateProfileResponseWithCompletedRun(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+	runs := RunStore{DB: store.DB}
+
+	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
+		WithArgs("-", "Ventilator").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"truncated", "truncated_count", "created_at", "updated_at",
+		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "ready", false, 0, time.Now(), time.Now()))
+	mock.ExpectQuery(rx("FROM kb.product_review_requests")).WithArgs(int64(9)).
+		WillReturnRows(requestReturnRow(200, 9, 1))
+	mock.ExpectQuery(rx("FROM kb.product_review_runs")).WithArgs(int64(200)).
+		WillReturnRows(runGetRow(300, 200, 1, RunCompleted, ""))
+
+	resp, err := duplicateProfileResponse(context.Background(), store, runs, "", "Ventilator")
+	if err != nil {
+		t.Fatalf("duplicateProfileResponse: %v", err)
+	}
+	if resp["duplicate"] != true || resp["latest_request_id"] != int64(200) {
+		t.Fatalf("resp = %+v, want duplicate=true, latest_request_id=200", resp)
+	}
+	run, ok := resp["latest_run"].(*Run)
+	if !ok || run.ID != 300 {
+		t.Fatalf("resp[latest_run] = %+v, want run id 300", resp["latest_run"])
+	}
+}
+
+// Scenario: duplicate with no completed run yet (spec: product-review-intake)
+// — no latest_run key, so the caller can only offer "re-run".
+func TestDuplicateProfileResponseNoRunYet(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+	runs := RunStore{DB: store.DB}
+
+	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
+		WithArgs("-", "Ventilator").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"truncated", "truncated_count", "created_at", "updated_at",
+		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "draft", false, 0, time.Now(), time.Now()))
+	mock.ExpectQuery(rx("FROM kb.product_review_requests")).WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "profile_id", "profile_version", "artifact_types",
+			"filters", "notes", "requester", "created_at", "updated_at",
+		}))
+
+	resp, err := duplicateProfileResponse(context.Background(), store, runs, "", "Ventilator")
+	if err != nil {
+		t.Fatalf("duplicateProfileResponse: %v", err)
+	}
+	if resp["duplicate"] != true {
+		t.Fatalf("resp = %+v, want duplicate=true", resp)
+	}
+	if _, has := resp["latest_run"]; has {
+		t.Fatalf("resp = %+v, want no latest_run key", resp)
+	}
+	if _, has := resp["latest_request_id"]; has {
+		t.Fatalf("resp = %+v, want no latest_request_id key (no request exists)", resp)
+	}
+}
+
+// Scenario: first-time product name (spec: product-review-intake) — no
+// existing profile, so the caller proceeds to create one.
+func TestDuplicateProfileResponseNoMatch(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+	runs := RunStore{DB: store.DB}
+
+	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
+		WithArgs("-", "Ventilator").
+		WillReturnError(sql.ErrNoRows)
+
+	resp, err := duplicateProfileResponse(context.Background(), store, runs, "", "Ventilator")
+	if err != nil {
+		t.Fatalf("duplicateProfileResponse: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil (no existing profile)", resp)
 	}
 }
 

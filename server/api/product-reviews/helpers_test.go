@@ -30,9 +30,9 @@ func newMockStore(t *testing.T) (Store, sqlmock.Sqlmock, func()) {
 // profileRows builds the RETURNING / SELECT row set for a kb.product_profiles row.
 func profileRows(id int64, name string, version int, status string, truncated bool, truncatedCount int) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
-		"id", "tenant_id", "name", "product_description", "version", "status",
+		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
 		"truncated", "truncated_count", "created_at", "updated_at",
-	}).AddRow(id, "-", name, "", version, status, truncated, truncatedCount, time.Now(), time.Now())
+	}).AddRow(id, "-", name, "", []byte("[]"), "", version, status, truncated, truncatedCount, time.Now(), time.Now())
 }
 
 // nodeCols is the column order of the nodeColumns SELECT list.

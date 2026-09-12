@@ -636,6 +636,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.DELETE("/kb/product-profiles/:id/nodes/:node_id", productreviews.DeleteProductProfileNode)
 	apiGroup.GET("/kb/product-reviews/aspects", productreviews.ListProductReviewAspects)
 	apiGroup.POST("/kb/product-reviews", productreviews.CreateProductReview)
+	apiGroup.POST("/kb/product-reviews/intake", productreviews.IntakeProductReview)
 	apiGroup.GET("/kb/product-reviews", productreviews.ListProductReviews)
 	apiGroup.GET("/kb/product-reviews/:id", productreviews.GetProductReview)
 	apiGroup.POST("/kb/product-reviews/:id/rerun", productreviews.RerunProductReview)

@@ -56,6 +56,8 @@ type Profile struct {
 	TenantID           string    `json:"tenant_id"`
 	Name               string    `json:"name"`
 	ProductDescription string    `json:"product_description"`
+	Keywords           []string  `json:"keywords"`
+	Notes              string    `json:"notes"`
 	Version            int       `json:"version"`
 	Status             string    `json:"status"`
 	Truncated          bool      `json:"truncated"`
@@ -105,9 +107,11 @@ func (n ProfileNode) NeedsReconcileReview() bool {
 
 // NewProfileInput is the payload for creating a profile.
 type NewProfileInput struct {
-	TenantID           string `json:"tenant_id"`
-	Name               string `json:"name"`
-	ProductDescription string `json:"product_description"`
+	TenantID           string   `json:"tenant_id"`
+	Name               string   `json:"name"`
+	ProductDescription string   `json:"product_description"`
+	Keywords           []string `json:"keywords"`
+	Notes              string   `json:"notes"`
 }
 
 // NodeEdit carries a mutable subset of a node's fields for an edit.

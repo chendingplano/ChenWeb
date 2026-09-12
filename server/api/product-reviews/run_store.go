@@ -179,6 +179,29 @@ func (s RunStore) ListRequests(ctx context.Context, profileID int64) ([]Request,
 	return out, rows.Err()
 }
 
+// LatestRequestAndRun returns a profile's most recently created request and,
+// if any run has executed against it, that request's most recent run. Both
+// are nil when the profile has never had a review started (spec:
+// product-review-intake — duplicate detection surfaces this to the caller).
+func (s RunStore) LatestRequestAndRun(ctx context.Context, profileID int64) (*Request, *Run, error) {
+	reqs, err := s.ListRequests(ctx, profileID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(reqs) == 0 {
+		return nil, nil, nil
+	}
+	latestReq := reqs[0] // ListRequests orders by created_at DESC
+	runs, err := s.ListRuns(ctx, latestReq.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(runs) == 0 {
+		return &latestReq, nil, nil
+	}
+	return &latestReq, &runs[0], nil // ListRuns orders by run_number DESC
+}
+
 func (s RunStore) CreateRun(ctx context.Context, requestID int64) (*Run, error) {
 	r := Run{}
 	err := s.DB.QueryRowContext(ctx, `

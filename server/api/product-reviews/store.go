@@ -89,18 +89,21 @@ func (s Store) CreateProfile(ctx context.Context, in NewProfileInput) (*Profile,
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	keywords, _ := json.Marshal(orEmpty(in.Keywords))
 	p := Profile{}
+	var keywordsRaw []byte
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO kb.product_profiles (tenant_id, name, product_description)
-		VALUES ($1, $2, $3)
-		RETURNING id, tenant_id, name, product_description, version, status,
+		INSERT INTO kb.product_profiles (tenant_id, name, product_description, keywords, notes)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, tenant_id, name, product_description, keywords, notes, version, status,
 		          truncated, truncated_count, created_at, updated_at`,
-		tenant, name, strings.TrimSpace(in.ProductDescription),
-	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &p.Version, &p.Status,
+		tenant, name, strings.TrimSpace(in.ProductDescription), keywords, strings.TrimSpace(in.Notes),
+	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
 		&p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal(keywordsRaw, &p.Keywords)
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO kb.product_profile_nodes
@@ -119,11 +122,12 @@ func (s Store) CreateProfile(ctx context.Context, in NewProfileInput) (*Profile,
 // GetProfile loads one profile row.
 func (s Store) GetProfile(ctx context.Context, id int64) (*Profile, error) {
 	p := Profile{}
+	var keywordsRaw []byte
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT id, tenant_id, name, product_description, version, status,
+		SELECT id, tenant_id, name, product_description, keywords, notes, version, status,
 		       truncated, truncated_count, created_at, updated_at
 		FROM kb.product_profiles WHERE id = $1`, id,
-	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &p.Version, &p.Status,
+	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
 		&p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -131,6 +135,36 @@ func (s Store) GetProfile(ctx context.Context, id int64) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal(keywordsRaw, &p.Keywords)
+	return &p, nil
+}
+
+// FindProfileByName looks up a tenant's profile by product name, matching on a
+// trimmed, case-insensitive comparison. Returns nil, nil when no profile
+// matches (spec: product-review-intake — duplicate detection is exact
+// normalized-name match, not fuzzy).
+func (s Store) FindProfileByName(ctx context.Context, tenantID, name string) (*Profile, error) {
+	tenant := strings.TrimSpace(tenantID)
+	if tenant == "" {
+		tenant = "-"
+	}
+	p := Profile{}
+	var keywordsRaw []byte
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT id, tenant_id, name, product_description, keywords, notes, version, status,
+		       truncated, truncated_count, created_at, updated_at
+		FROM kb.product_profiles
+		WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))
+		ORDER BY updated_at DESC LIMIT 1`, tenant, name,
+	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
+		&p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal(keywordsRaw, &p.Keywords)
 	return &p, nil
 }
 
