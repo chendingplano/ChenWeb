@@ -158,7 +158,12 @@ func embedQueryText(ctx context.Context, text string) ([]float64, bool) {
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 		defer cancel()
 	}
-	vec, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: modelName, InputText: text})
+	vec, err := embedder.Embed(ctx, llmclients.EmbedInput{
+		ModelName: modelName, 
+		InputText: text,
+		CallReason: "embed query text",
+		CallLoc: "MID_2026091201",
+		})
 	if err != nil || len(vec) != kbsearch.ConfiguredEmbeddingDim() {
 		return nil, false
 	}
