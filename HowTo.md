@@ -4966,6 +4966,20 @@ Peak
 
 Note: max output length: 384KB
 
+## DeepSeek Flash 4.1
+- V4-Flash & V4-Flash-Vision-Exp are retired. For compatibility, deepseek-v4-flash and 
+  deepseek-v4-flash-vision-exp temporarily route to V4.1-Flash.
+- Starting at 04:00 UTC on Sept 14, 2026, all deepseek-v4-pro requests will route to V4.1-Flash at V4.1-Flash rates. 
+  This will continue until V4.1-Pro launches.
+
+Pricing
+|    | Input (cache hit) | Input (cache miss) | Output |
+|----|-------------------|--------------------|--------|
+| Off-Peak | $0.003 | $0.15 | $0.6 |
+| Peak | $0.006 | $0.3 | $1.20 |
+
+Peak hours: 1:00-4:00 and 6:00-10:00 UTC on weekdays, 
+
 ## Qwen Prices
 | Model | Input | Output |
 |-------|-------|--------|

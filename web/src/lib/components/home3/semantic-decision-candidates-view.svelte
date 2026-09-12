@@ -511,7 +511,7 @@
 						rows="10"
 						class="w-full rounded px-2 py-1.5 font-mono text-xs"
 						style="background:{surface};color:{text};border:1px solid {border}"
-					/></label
+					></textarea></label
 				>
 				<div class="flex justify-end gap-2">
 					<button
@@ -547,7 +547,7 @@
 						rows="2"
 						class="w-full rounded px-2 py-1.5"
 						style="background:{surface};color:{text};border:1px solid {border}"
-					/></label
+					></textarea></label
 				>
 				<div class="flex flex-wrap gap-2">
 					{#each ['in_review', 'accepted', 'rejected', 'deferred'] as next}{#if can(selected, next)}<button
