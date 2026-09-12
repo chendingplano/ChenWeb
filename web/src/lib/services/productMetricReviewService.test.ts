@@ -8,6 +8,7 @@ import {
 	rerunReview,
 	runExportUrl,
 	needsReconcileReview,
+	startProductReviewIntake,
 	type ProfileNode
 } from './productMetricReviewService';
 
@@ -97,6 +98,81 @@ test('runExportUrl builds a plain URL with the same filters (for an <a href>)', 
 		'/api/v1/kb/product-reviews/runs/91/export?tier=part'
 	);
 	assert.equal(runExportUrl(91), '/api/v1/kb/product-reviews/runs/91/export');
+});
+
+test('startProductReviewIntake POSTs the form fields to the intake endpoint', async () => {
+	const f = stubFetch({
+		status: true,
+		duplicate: false,
+		profile: { id: 1, name: 'Ventilator' },
+		run: { id: 9, run_number: 1, status: 'completed' }
+	});
+	try {
+		const out = await startProductReviewIntake({
+			name: 'Ventilator',
+			product_description: 'ICU ventilator',
+			keywords: ['icu', 'respiratory'],
+			notes: 'urgent'
+		});
+		assert.equal(f.last().url, '/api/v1/kb/product-reviews/intake');
+		assert.equal(f.last().method, 'POST');
+		assert.deepEqual(JSON.parse(f.last().body), {
+			name: 'Ventilator',
+			product_description: 'ICU ventilator',
+			keywords: ['icu', 'respiratory'],
+			notes: 'urgent'
+		});
+		assert.equal(out.duplicate, false);
+		assert.equal(out.run?.id, 9);
+	} finally {
+		f.restore();
+	}
+});
+
+test('startProductReviewIntake surfaces a duplicate response without a run', async () => {
+	const f = stubFetch({
+		status: true,
+		duplicate: true,
+		profile: { id: 1, name: 'Ventilator' },
+		latest_request_id: 40,
+		latest_run: { id: 6, run_number: 2, status: 'completed' }
+	});
+	try {
+		const out = await startProductReviewIntake({ name: 'Ventilator' });
+		assert.equal(out.duplicate, true);
+		assert.equal(out.run, undefined);
+		assert.equal(out.latest_request_id, 40);
+		assert.equal(out.latest_run?.id, 6);
+	} finally {
+		f.restore();
+	}
+});
+
+test('startProductReviewIntake passes resume_profile_id through for the draft re-run path', async () => {
+	const f = stubFetch({
+		status: true,
+		duplicate: false,
+		profile: { id: 1, name: 'Ventilator' },
+		run: { id: 10, run_number: 1, status: 'completed' }
+	});
+	try {
+		await startProductReviewIntake({ name: 'Ventilator', resume_profile_id: 1 });
+		assert.deepEqual(JSON.parse(f.last().body), { name: 'Ventilator', resume_profile_id: 1 });
+	} finally {
+		f.restore();
+	}
+});
+
+test('startProductReviewIntake surfaces a failed build as a rejected promise', async () => {
+	const f = stubFetch({ status: false, error_msg: 'LLM proposer failed' }, 422);
+	try {
+		await assert.rejects(
+			() => startProductReviewIntake({ name: 'Ventilator' }),
+			/LLM proposer failed/
+		);
+	} finally {
+		f.restore();
+	}
 });
 
 test('needsReconcileReview flags ambiguous / pending_review nodes only', () => {

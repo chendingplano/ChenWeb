@@ -146,7 +146,8 @@
 				{ id: 'apps-browse', label: 'Browse' },
 				{ id: 'apps-configure', label: 'Configure' },
 				{ id: 'apps-generate-doc', label: 'Generate Doc' },
-				{ id: 'apps-document-review', label: 'Document Review' }
+				{ id: 'apps-document-review', label: 'Document Review' },
+				{ id: 'apps-product-review', label: 'Product Review' }
 			]
 		},
 		{
@@ -480,6 +481,10 @@
 		}
 		if (child?.id === 'kb-doc-structure') {
 			window.open(`/home3/doc-structure?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
+			return;
+		}
+		if (child?.id === 'apps-product-review') {
+			window.open(`/home3/product-review?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
 			return;
 		}
 		onSelect({

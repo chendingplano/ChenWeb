@@ -54,6 +54,8 @@ export type Profile = {
 	tenant_id: string;
 	name: string;
 	product_description: string;
+	keywords: string[];
+	notes: string;
 	version: number;
 	status: ProfileStatus;
 	truncated: boolean;
@@ -192,6 +194,8 @@ function jsonBody(body: unknown): RequestInit {
 export function createProfile(input: {
 	name: string;
 	product_description?: string;
+	keywords?: string[];
+	notes?: string;
 	tenant_id?: string;
 }): Promise<{ status: true; profile: Profile }> {
 	return call('/product-profiles', jsonBody(input));
@@ -258,6 +262,32 @@ export function acceptNode(profileId: number, nodeId: number) {
 }
 export function rejectNode(profileId: number, nodeId: number) {
 	return updateNode(profileId, nodeId, { status: 'rejected' });
+}
+
+// ── self-service intake ─────────────────────────────────────────────────────
+// POST /product-reviews/intake (openspec change product-review-intake): one
+// call that either surfaces an existing profile for the same product name
+// (duplicate: true — offer "view results" or "re-run") or creates, builds,
+// and runs a fresh review in one step (duplicate: false — a run is returned).
+
+export type IntakeResponse = {
+	status: true;
+	duplicate: boolean;
+	profile: Profile;
+	run?: ReviewRun;
+	latest_request_id?: number;
+	latest_run?: ReviewRun;
+};
+
+export function startProductReviewIntake(input: {
+	name: string;
+	product_description?: string;
+	keywords?: string[];
+	notes?: string;
+	tenant_id?: string;
+	resume_profile_id?: number;
+}): Promise<IntakeResponse> {
+	return call('/product-reviews/intake', jsonBody(input));
 }
 
 // ── aspect vocabulary ───────────────────────────────────────────────────────
