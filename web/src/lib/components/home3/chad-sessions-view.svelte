@@ -554,41 +554,41 @@
 		font-weight: 400;
 		letter-spacing: 0;
 	}
-	.session-json-group {
+	:global(.session-json-group) {
 		display: grid;
 		gap: 3px;
 	}
-	.session-json-row {
+	:global(.session-json-row) {
 		display: grid;
 		grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
 		align-items: start;
 		gap: 16px;
 		padding-left: calc(var(--session-json-depth) * 16px);
 	}
-	.session-json-nested {
+	:global(.session-json-nested) {
 		padding-left: calc(var(--session-json-depth) * 16px);
 	}
-	.session-json-key {
+	:global(.session-json-key) {
 		color: var(--secondary);
 		overflow-wrap: anywhere;
 	}
-	.session-json-group-key {
+	:global(.session-json-group-key) {
 		margin-top: 5px;
 		margin-bottom: 2px;
 		color: var(--accent);
 		font-weight: 600;
 	}
-	.session-json-value {
+	:global(.session-json-value) {
 		min-width: 0;
 		overflow-wrap: anywhere;
 	}
-	.session-json-string {
+	:global(.session-json-string) {
 		white-space: pre-wrap;
 	}
-	.session-json-null {
+	:global(.session-json-null) {
 		color: var(--muted);
 	}
-	.session-json-primitive {
+	:global(.session-json-primitive) {
 		color: var(--accent);
 	}
 	.error-text {
