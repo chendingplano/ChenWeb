@@ -4,6 +4,7 @@
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import { formatSessionJson } from './session-json-formatter';
 	import {
 		getHarnessSession,
 		listHarnessSessions,
@@ -219,11 +220,13 @@
 									<div class="tool-call">
 										<span>TOOL CALL: {message.toolCallCommand}</span>
 										{#if message.toolCallParameters !== undefined}
-											<pre>{formatContent(message.toolCallParameters)}</pre>
+											<div class="formatted-json">
+												{@html formatSessionJson(message.toolCallParameters)}
+											</div>
 										{/if}
 									</div>
 								{/if}
-								<pre>{formatContent(message.content)}</pre>
+								<div class="formatted-json">{@html formatSessionJson(message.content)}</div>
 							</article>
 						{/each}
 					</div>
@@ -534,16 +537,7 @@
 		font-weight: 700;
 		letter-spacing: 0.1em;
 	}
-	.tool-call pre {
-		margin: 8px -13px 0;
-		border-top: 1px solid var(--border);
-		color: var(--secondary);
-		font-weight: 400;
-		letter-spacing: 0;
-	}
-	pre {
-		margin: 0;
-		overflow: auto;
+	.formatted-json {
 		border-top: 1px solid var(--border);
 		padding: 13px;
 		color: var(--text);
@@ -553,6 +547,49 @@
 			monospace;
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
+	}
+	.tool-call .formatted-json {
+		margin: 8px -13px 0;
+		color: var(--secondary);
+		font-weight: 400;
+		letter-spacing: 0;
+	}
+	.session-json-group {
+		display: grid;
+		gap: 3px;
+	}
+	.session-json-row {
+		display: grid;
+		grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+		align-items: start;
+		gap: 16px;
+		padding-left: calc(var(--session-json-depth) * 16px);
+	}
+	.session-json-nested {
+		padding-left: calc(var(--session-json-depth) * 16px);
+	}
+	.session-json-key {
+		color: var(--secondary);
+		overflow-wrap: anywhere;
+	}
+	.session-json-group-key {
+		margin-top: 5px;
+		margin-bottom: 2px;
+		color: var(--accent);
+		font-weight: 600;
+	}
+	.session-json-value {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.session-json-string {
+		white-space: pre-wrap;
+	}
+	.session-json-null {
+		color: var(--muted);
+	}
+	.session-json-primitive {
+		color: var(--accent);
 	}
 	.error-text {
 		color: #fca5a5;
