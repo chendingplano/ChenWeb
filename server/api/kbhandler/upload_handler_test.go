@@ -102,6 +102,7 @@ func TestUploadInputsSuccess(t *testing.T) {
     $12,
     $13,
     $14,
+    $15,
     '[]'::jsonb
 )
 RETURNING id`)
@@ -121,7 +122,7 @@ RETURNING id`)
 			"docling",
 			"sample.pdf",
 			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
+			"5eb63bbbe01eeed093cb22bb8f5acdc3",
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(81)))
 	mock.ExpectCommit()

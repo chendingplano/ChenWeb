@@ -3,7 +3,9 @@ package productreviews
 import (
 	"context"
 	"net/http"
+	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/productdrawings"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -29,6 +31,7 @@ func IntakeProductReview(c echo.Context) error {
 		Notes              string   `json:"notes"`
 		TenantID           string   `json:"tenant_id"`
 		ResumeProfileID    int64    `json:"resume_profile_id"`
+		Model              string   `json:"model"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
@@ -84,6 +87,8 @@ func IntakeProductReview(c echo.Context) error {
 		}
 	}
 
+	ensureProfileDrawing(ctx, rc.GetLogger(), store, profile, body.Model)
+
 	ctrl, err := newRunController()
 	if err != nil {
 		return fail(c, err)
@@ -128,4 +133,62 @@ func duplicateProfileResponse(ctx context.Context, store Store, runs RunStore, t
 		resp["latest_run"] = run
 	}
 	return resp, nil
+}
+
+// ensureProfileDrawing binds an existing kb.product_drawings row to the
+// profile by name if one exists, otherwise generates one from the profile's
+// accepted part-tier nodes and binds the result (spec:
+// product-review-auto-drawing). A no-op if the profile already has a
+// drawing_id. A lookup/generation failure is logged and otherwise ignored —
+// the review still proceeds with no drawing, exactly as it did before this
+// automatic path existed (design.md Decision 6).
+func ensureProfileDrawing(ctx context.Context, logger ApiTypes.JimoLogger, store Store, profile *Profile, model string) {
+	if profile.DrawingID != nil {
+		return
+	}
+	if existing, err := productdrawings.FindByName(ctx, profile.Name); err != nil {
+		logger.Error("product review auto-drawing lookup failed", "profile_id", profile.ID, "err", err)
+		return
+	} else if existing != nil {
+		if err := store.SetProfileDrawing(ctx, profile.ID, existing.ID); err != nil {
+			logger.Error("product review auto-drawing bind failed", "profile_id", profile.ID, "err", err)
+		}
+		return
+	}
+
+	nodes, err := store.LoadNodes(ctx, profile.ID)
+	if err != nil {
+		logger.Error("product review auto-drawing node load failed", "profile_id", profile.ID, "err", err)
+		return
+	}
+	components := make([]string, 0, 15)
+	for _, n := range nodes {
+		if n.NodeKind != KindPart || n.Status == StatusRejected || n.Label == "" {
+			continue
+		}
+		components = append(components, n.Label)
+		if len(components) == 15 {
+			break
+		}
+	}
+	prompt, err := productdrawings.ComposeExplodedViewPrompt(productdrawings.DefaultPromptDir(), profile.Name, components)
+	if err != nil {
+		logger.Error("product review auto-drawing prompt compose failed", "profile_id", profile.ID, "err", err)
+		return
+	}
+	saved, err := productdrawings.GenerateAndSave(ctx, productdrawings.GenerateAndSaveInput{
+		Name:        profile.Name,
+		Description: profile.ProductDescription,
+		Keywords:    strings.Join(profile.Keywords, ", "),
+		Notes:       profile.Notes,
+		Prompt:      prompt,
+		Model:       model,
+	})
+	if err != nil {
+		logger.Error("product review auto-drawing generation failed", "profile_id", profile.ID, "err", err)
+		return
+	}
+	if err := store.SetProfileDrawing(ctx, profile.ID, saved.ID); err != nil {
+		logger.Error("product review auto-drawing bind failed", "profile_id", profile.ID, "err", err)
+	}
 }

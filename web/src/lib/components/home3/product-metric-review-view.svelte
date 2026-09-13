@@ -133,9 +133,9 @@
 		SCOPE_MAX = 480;
 	const DETAIL_MIN = 320,
 		DETAIL_MAX = 900;
-	const MAIN_MIN = 360;
+	const MAIN_MIN = -40;
 	const DRAWING_MIN = 140,
-		DRAWING_MAX = 640;
+		DRAWING_MAX = 940;
 
 	function loadLayout(): ReviewLayout {
 		if (!browser) return { ...LAYOUT_DEFAULTS };
@@ -1085,7 +1085,12 @@
 				{/if}
 
 				<!-- main -->
-				<section class="main-pane">
+				<section
+					class="main-pane"
+					style={tab === 'results'
+						? `width:calc(100% - ${layout.scopeW + layout.detailW + 412}px)`
+						: ''}
+				>
 					{#if tab === 'results'}
 						<div class="filters">
 							<select bind:value={tierFilter}>
@@ -1940,13 +1945,15 @@
 		align-items: flex-start;
 		gap: 0;
 	}
-	.layout.resizable .scope-pane,
-	.layout.resizable .detail-pane {
+	.layout.resizable .scope-pane {
 		flex: 0 0 auto;
 	}
 	.layout.resizable .main-pane {
-		flex: 1 1 auto;
+		flex: 0 0 auto;
 		min-width: 0;
+	}
+	.layout.resizable .detail-pane {
+		flex: 1 1 auto;
 	}
 	.v-splitter {
 		flex: 0 0 auto;

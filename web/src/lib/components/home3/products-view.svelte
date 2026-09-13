@@ -7,7 +7,6 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import UsersIcon from '@lucide/svelte/icons/users';
-	import PackageIcon from '@lucide/svelte/icons/package';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import Share2Icon from '@lucide/svelte/icons/share-2';
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
@@ -19,9 +18,9 @@
 		darkMode = true,
 		browserInstanceKey = 'products',
 		scopeToActiveStore = false,
-		heroEyebrow = 'Subject Wiki',
-		heroTitle = 'Products',
-		heroDescription = 'Inspect the product and part relations an LLM extracted from each document: what is referenced, how it is used, and what requirements apply.',
+		heroEyebrow = 'Knowledge System · Vol. III',
+		heroTitle = 'Products & Provenance',
+		heroDescription = 'Browse product records extracted from source documents, then return to the evidence that grounded each record.',
 		onFocusModeChange
 	}: {
 		darkMode?: boolean;
@@ -84,8 +83,7 @@
 			label: 'Relations',
 			icon: Share2Icon,
 			attrs: [
-				{ key: 'relation_type', label: 'Relation Type', icon: GitBranchIcon, kind: 'text', field: 'relation_type' },
-				{ key: 'related_products', label: 'Related Products', icon: PackageIcon, kind: 'kw', field: 'related_products' }
+				{ key: 'relation_type', label: 'Relation Type', icon: GitBranchIcon, kind: 'text', field: 'relation_type' }
 			]
 		}
 	];
@@ -142,6 +140,6 @@
 	itemTypeFilterLabel="Product Type"
 	emptyTableName="kb.products"
 	emptySubtitle="Products are produced by the extract-products processor once the document is processed."
-	browserSubtitle="Search, filter, and select a record to inspect its extracted product relations."
+	browserSubtitle="Search, filter, and select a source document to inspect its extracted product records."
 	canvasMapLabel="Product Map"
 />

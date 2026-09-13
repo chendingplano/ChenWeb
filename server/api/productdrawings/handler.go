@@ -211,11 +211,12 @@ func KeepPending(c echo.Context) error {
 	}
 	var id int64
 	if ApiTypes.ProjectDBHandle != nil {
-		row := ApiTypes.ProjectDBHandle.QueryRowContext(c.Request().Context(), `INSERT INTO kb.product_drawings (name,description,prompt,keywords,notes,filename,stored_path,model,model_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, strings.TrimSpace(req.Name), strings.TrimSpace(req.Description), strings.TrimSpace(req.Prompt), strings.TrimSpace(req.Keywords), strings.TrimSpace(req.Notes), filename, dst, normalizeSelection(req.Model), modelNameForSelection(req.Model))
-		if err := row.Scan(&id); err != nil {
+		savedID, err := insertDrawingRow(c.Request().Context(), req.Name, req.Description, req.Prompt, req.Keywords, req.Notes, filename, dst, req.Model)
+		if err != nil {
 			_ = os.Rename(dst, src)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save drawing metadata"})
 		}
+		id = savedID
 	}
 	_ = os.Remove(metaPath)
 	return c.JSON(http.StatusOK, KeepResponse{Status: true, Filename: filename, Path: "resources/product-drawings/" + filename, ID: id})

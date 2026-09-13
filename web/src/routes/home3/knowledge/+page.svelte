@@ -112,7 +112,7 @@
 			children: [
 				{
 					id: 'kb-import',
-					label: 'Upload Files',
+					label: 'File Management',
 					description: 'Upload and import document files'
 				}
 			]
@@ -169,14 +169,14 @@
 					description: 'Manage extracted metrics'
 				},
 				{
+					id: 'kb-products',
+					label: 'Products',
+					description: 'Browse extracted product records'
+				},
+				{
 					id: 'kb-scene-blocks',
 					label: 'Scene Blocks',
 					description: 'Event-driven scene extraction'
-				},
-				{
-					id: 'kb-products',
-					label: 'Products',
-					description: 'Product and part relation extraction'
 				},
 				{
 					id: 'kb-provision-tree',

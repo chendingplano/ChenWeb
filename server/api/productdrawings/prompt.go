@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const explodedViewPromptFileName = "prompt-product-drawing-exploded-view-v1.md"
+const explodedViewPromptFileName = "prompt-product-drawing-exploded-view-v2.md"
 
 // ComposeExplodedViewPrompt renders the exploded-view drawing prompt template
 // for productName, listing components (product-specific part names, e.g. from

@@ -333,6 +333,7 @@ export function startProductReviewIntake(input: {
 	notes?: string;
 	tenant_id?: string;
 	resume_profile_id?: number;
+	model?: 'Qwen' | 'OpenAI';
 }): Promise<IntakeResponse> {
 	return call('/product-reviews/intake', jsonBody(input));
 }

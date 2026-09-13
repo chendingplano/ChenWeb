@@ -28,6 +28,7 @@
 	let description = $state('');
 	let keywordsInput = $state('');
 	let notes = $state('');
+	let model = $state<'Qwen' | 'OpenAI'>('Qwen');
 	let submitting = $state(false);
 	let rerunning = $state(false);
 	let error = $state('');
@@ -171,7 +172,8 @@
 				name: name.trim(),
 				product_description: description.trim(),
 				keywords: parsedKeywords(),
-				notes: notes.trim()
+				notes: notes.trim(),
+				model
 			});
 			if (out.duplicate) {
 				duplicateProfile = out.profile;
@@ -240,82 +242,93 @@
 			<div class="note error">{error}</div>
 		{/if}
 
-		{#if duplicateProfile}
-			<div class="empty-hero">
-				<AlertTriangle size={22} />
-				<h1>{m.pmr_intake_duplicate_heading()}</h1>
-				<p>{m.pmr_intake_duplicate_hint({ name: duplicateProfile.name })}</p>
-				{#if duplicateLatestRunId == null}
-					<p class="muted">{m.pmr_intake_no_run_hint()}</p>
-				{/if}
-				<div class="run-open">
-					{#if duplicateLatestRunId != null}
-						<button class="ghost" onclick={viewResults}>{m.pmr_intake_view_results()}</button>
+		<div class="pmr-card">
+			{#if duplicateProfile}
+				<div class="empty-hero">
+					<AlertTriangle size={22} />
+					<h1>{m.pmr_intake_duplicate_heading()}</h1>
+					<p>{m.pmr_intake_duplicate_hint({ name: duplicateProfile.name })}</p>
+					{#if duplicateLatestRunId == null}
+						<p class="muted">{m.pmr_intake_no_run_hint()}</p>
 					{/if}
-					<button class="primary" onclick={handleRerun} disabled={rerunning}>
-						{rerunning ? m.pmr_intake_rerunning() : m.pmr_intake_rerun()}
-					</button>
-				</div>
-				<button class="linky start-over" onclick={startOver}>{m.pmr_intake_start_over()}</button>
-			</div>
-		{:else}
-			<div class="empty-hero">
-				<Layers size={22} />
-				<h1>{m.pmr_intake_heading()}</h1>
-				<p>{m.pmr_intake_hint()}</p>
-				<form
-					class="intake-form"
-					onsubmit={(e) => {
-						e.preventDefault();
-						start();
-					}}
-				>
-					<ProductNameField
-						bind:value={name}
-						label={m.pmr_intake_name_label()}
-						placeholder={m.pmr_intake_name_placeholder()}
-						disabled={submitting}
-						style="--pnf-border: var(--border); --pnf-bg: var(--surface); --pnf-text: var(--text); --pnf-subtle: var(--subtle); --pnf-hover: color-mix(in oklch, var(--surface) 60%, var(--accent) 12%);"
-					/>
-					<label>
-						<span>{m.pmr_intake_description_label()}</span>
-						<textarea
-							rows="2"
-							bind:value={description}
-							placeholder={m.pmr_intake_description_placeholder()}
-							disabled={submitting}
-						></textarea>
-					</label>
-					<label>
-						<span>{m.pmr_intake_keywords_label()}</span>
-						<input
-							type="text"
-							bind:value={keywordsInput}
-							placeholder={m.pmr_intake_keywords_hint()}
-							disabled={submitting}
-						/>
-					</label>
-					<label>
-						<span>{m.pmr_intake_notes_label()}</span>
-						<textarea
-							rows="2"
-							bind:value={notes}
-							placeholder={m.pmr_intake_notes_placeholder()}
-							disabled={submitting}
-						></textarea>
-					</label>
-					<button class="primary wide" type="submit" disabled={!canStart}>
-						{#if selectedProfile}
-							{submitting ? m.pmr_intake_rerunning() : m.pmr_intake_rerun()}
-						{:else}
-							{submitting ? m.pmr_intake_starting() : m.pmr_intake_start()}
+					<div class="run-open">
+						{#if duplicateLatestRunId != null}
+							<button class="ghost" onclick={viewResults}>{m.pmr_intake_view_results()}</button>
 						{/if}
-					</button>
-				</form>
-			</div>
-		{/if}
+						<button class="primary" onclick={handleRerun} disabled={rerunning}>
+							{rerunning ? m.pmr_intake_rerunning() : m.pmr_intake_rerun()}
+						</button>
+					</div>
+					<button class="linky start-over" onclick={startOver}>{m.pmr_intake_start_over()}</button>
+				</div>
+			{:else}
+				<div class="intake-hero">
+					<div class="intake-intro">
+						<Layers size={22} />
+						<h1>{m.pmr_intake_heading()}</h1>
+						<p>{m.pmr_intake_hint()}</p>
+					</div>
+					<form
+						class="intake-form"
+						onsubmit={(e) => {
+							e.preventDefault();
+							start();
+						}}
+					>
+						<ProductNameField
+							bind:value={name}
+							label={m.pmr_intake_name_label()}
+							placeholder={m.pmr_intake_name_placeholder()}
+							disabled={submitting}
+							style="--pnf-border: var(--border); --pnf-bg: var(--surface); --pnf-text: var(--text); --pnf-subtle: var(--subtle); --pnf-hover: color-mix(in oklch, var(--surface) 60%, var(--accent) 12%);"
+						/>
+						<label>
+							<span>{m.pmr_intake_keywords_label()}</span>
+							<input
+								type="text"
+								bind:value={keywordsInput}
+								placeholder={m.pmr_intake_keywords_hint()}
+								disabled={submitting}
+							/>
+						</label>
+						<label>
+							<span>{m.pmr_intake_model_label()}</span>
+							<select bind:value={model} disabled={submitting}>
+								<option value="Qwen">Qwen · Aliyun</option>
+								<option value="OpenAI">OpenAI · ChatGPT Image 2.5</option>
+							</select>
+						</label>
+						<label class="wide">
+							<span>{m.pmr_intake_description_label()}</span>
+							<textarea
+								rows="2"
+								bind:value={description}
+								placeholder={m.pmr_intake_description_placeholder()}
+								disabled={submitting}
+							></textarea>
+						</label>
+						<label class="wide">
+							<span>{m.pmr_intake_notes_label()}</span>
+							<textarea
+								rows="2"
+								bind:value={notes}
+								placeholder={m.pmr_intake_notes_placeholder()}
+								disabled={submitting}
+							></textarea>
+						</label>
+						<button class="primary wide" type="submit" disabled={!canStart}>
+							{#if selectedProfile}
+								{submitting ? m.pmr_intake_rerunning() : m.pmr_intake_rerun()}
+							{:else}
+								{submitting ? m.pmr_intake_starting() : m.pmr_intake_start()}
+							{/if}
+						</button>
+					</form>
+				</div>
+			{/if}
+		</div>
 
-		<section class="history">
+		<section class="history pmr-card">
 			<h2 class="history-heading">{m.pmr_intake_history_heading()}</h2>
 			{#if loadingProfiles}
 				<p class="muted">{m.pmr_intake_history_loading()}</p>
@@ -488,9 +501,17 @@
 	}
 
 	.content {
-		max-width: 720px;
-		margin: 0 auto;
+		display: flex;
+		flex-direction: column;
+		gap: 24px;
 		padding: 26px clamp(16px, 2.4vw, 40px) 40px;
+	}
+
+	.pmr-card {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 24px clamp(16px, 2.4vw, 32px);
 	}
 
 	.note {
@@ -509,7 +530,7 @@
 	}
 
 	.empty-hero {
-		margin: 60px auto;
+		margin: 20px auto;
 		max-width: 460px;
 		text-align: center;
 		color: var(--subtle);
@@ -526,11 +547,32 @@
 		line-height: 1.6;
 	}
 
+	.intake-intro {
+		max-width: 460px;
+		margin: 0 auto 22px;
+		text-align: center;
+		color: var(--subtle);
+	}
+	.intake-intro h1 {
+		margin: 14px 0 6px;
+		font-size: 22px;
+		letter-spacing: -0.03em;
+		color: var(--text);
+	}
+	.intake-intro p {
+		margin: 0;
+		font-size: 13px;
+		line-height: 1.6;
+	}
+
 	.intake-form {
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 14px 16px;
 		text-align: left;
+	}
+	.intake-form .wide {
+		grid-column: 1 / -1;
 	}
 	.intake-form label {
 		display: flex;
@@ -540,7 +582,8 @@
 		color: var(--subtle);
 	}
 	.intake-form input,
-	.intake-form textarea {
+	.intake-form textarea,
+	.intake-form select {
 		padding: 9px 11px;
 		border: 1px solid var(--border);
 		background: var(--surface);
@@ -599,7 +642,6 @@
 	}
 
 	.history {
-		margin-top: 32px;
 		text-align: left;
 	}
 	.history-heading {

@@ -277,6 +277,7 @@ INSERT INTO %s (
     $12,
     $13,
     $14,
+    $15,
     '[]'::jsonb
 )
 RETURNING id`, inputTable)

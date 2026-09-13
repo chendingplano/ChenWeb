@@ -148,6 +148,7 @@
 	"pmr_intake_keywords_hint": "Comma-separated",
 	"pmr_intake_notes_label": "Notes (optional)",
 	"pmr_intake_notes_placeholder": "Any context for this review",
+	"pmr_intake_model_label": "Image Generation Model",
 	"pmr_intake_start": "Start",
 	"pmr_intake_starting": "Starting…",
 	"pmr_intake_start_over": "Start over",
