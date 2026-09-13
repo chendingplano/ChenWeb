@@ -7,6 +7,7 @@
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import DocGenView from '$lib/components/home3/doc-gen-view.svelte';
 	import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
+	import ProductReviewIntakeView from '$lib/components/home3/product-review-intake-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import CdmEditorShell from '$lib/components/cdm/CdmEditorShell.svelte';
@@ -236,6 +237,8 @@
 			{#key docReviewKey}
 				<DocumentReviewView {darkMode} />
 			{/key}
+		{:else if activeMenu?.childId === 'apps-product-review'}
+			<ProductReviewIntakeView {darkMode} embedded />
 		{:else if activeMenu?.childId === 'prompt-optimizer'}
 			<PromptOptimizerView {darkMode} />
 		{:else if activeMenu?.childId === 'openmetadata'}

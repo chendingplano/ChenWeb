@@ -168,27 +168,58 @@ func (s Store) FindProfileByName(ctx context.Context, tenantID, name string) (*P
 	return &p, nil
 }
 
-// ListProfiles returns a tenant's profiles, most-recently-updated first.
-func (s Store) ListProfiles(ctx context.Context, tenantID string) ([]Profile, error) {
+// ListProfiles returns a tenant's profiles, most-recently-updated first, each
+// carrying its latest review request/run (if any) — spec:
+// product-review-history-list. limit is clamped to at least 1 by the caller.
+func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]ProfileSummary, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		tenantID = "-"
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id, tenant_id, name, product_description, version, status,
-		       truncated, truncated_count, created_at, updated_at
-		FROM kb.product_profiles WHERE tenant_id = $1
-		ORDER BY updated_at DESC`, tenantID)
+		SELECT p.id, p.tenant_id, p.name, p.product_description, p.keywords, p.notes, p.version,
+		       p.status, p.truncated, p.truncated_count, p.created_at, p.updated_at,
+		       r.id, ru.id, ru.status, ru.finished_at
+		FROM kb.product_profiles p
+		LEFT JOIN LATERAL (
+			SELECT id FROM kb.product_review_requests
+			WHERE profile_id = p.id ORDER BY created_at DESC LIMIT 1
+		) r ON true
+		LEFT JOIN LATERAL (
+			SELECT id, status, finished_at FROM kb.product_review_runs
+			WHERE request_id = r.id ORDER BY run_number DESC LIMIT 1
+		) ru ON true
+		WHERE p.tenant_id = $1
+		ORDER BY p.updated_at DESC
+		LIMIT $2`, tenantID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []Profile
+	var out []ProfileSummary
 	for rows.Next() {
-		var p Profile
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &p.Version,
-			&p.Status, &p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var (
+			p                ProfileSummary
+			keywordsRaw      []byte
+			requestID, runID sql.NullInt64
+			runStatus        sql.NullString
+			runFinishedAt    sql.NullTime
+		)
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes,
+			&p.Version, &p.Status, &p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt,
+			&requestID, &runID, &runStatus, &runFinishedAt); err != nil {
 			return nil, err
+		}
+		_ = json.Unmarshal(keywordsRaw, &p.Keywords)
+		if requestID.Valid {
+			p.LatestRequestID = &requestID.Int64
+		}
+		if runID.Valid {
+			p.LatestRunID = &runID.Int64
+		}
+		p.LatestRunStatus = runStatus.String
+		if runFinishedAt.Valid {
+			p.LatestRunFinishedAt = &runFinishedAt.Time
 		}
 		out = append(out, p)
 	}

@@ -5,6 +5,7 @@ import {
 	createReview,
 	getRunResults,
 	listAspects,
+	listProfiles,
 	rerunReview,
 	runExportUrl,
 	needsReconcileReview,
@@ -98,6 +99,38 @@ test('runExportUrl builds a plain URL with the same filters (for an <a href>)', 
 		'/api/v1/kb/product-reviews/runs/91/export?tier=part'
 	);
 	assert.equal(runExportUrl(91), '/api/v1/kb/product-reviews/runs/91/export');
+});
+
+test('listProfiles GETs the profile list endpoint with no query by default', async () => {
+	const f = stubFetch({ status: true, profiles: [{ id: 1, name: 'Ventilator' }] });
+	try {
+		const out = await listProfiles();
+		assert.equal(f.last().url, '/api/v1/kb/product-profiles');
+		assert.equal(f.last().method, 'GET');
+		assert.equal(out.profiles.length, 1);
+		assert.equal(out.profiles[0].name, 'Ventilator');
+	} finally {
+		f.restore();
+	}
+});
+
+test('listProfiles passes a limit through as a query param', async () => {
+	const f = stubFetch({ status: true, profiles: [] });
+	try {
+		await listProfiles(10);
+		assert.equal(f.last().url, '/api/v1/kb/product-profiles?limit=10');
+	} finally {
+		f.restore();
+	}
+});
+
+test('listProfiles surfaces a { status: false } envelope as a rejected promise', async () => {
+	const f = stubFetch({ status: false, error_msg: 'db unavailable' }, 500);
+	try {
+		await assert.rejects(() => listProfiles(), /db unavailable/);
+	} finally {
+		f.restore();
+	}
 });
 
 test('startProductReviewIntake POSTs the form fields to the intake endpoint', async () => {

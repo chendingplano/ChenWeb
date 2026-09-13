@@ -207,6 +207,21 @@ export function getProfile(
 	return call(`/product-profiles/${id}`);
 }
 
+/** A profile plus its latest review request/run, for the intake page's
+ *  past-reviews list (spec: product-review-history-list). Both are absent
+ *  when the profile has never had a review started. */
+export type ProfileSummary = Profile & {
+	latest_request_id?: number;
+	latest_run_id?: number;
+	latest_run_status?: string;
+	latest_run_finished_at?: string;
+};
+
+export function listProfiles(limit?: number): Promise<{ status: true; profiles: ProfileSummary[] }> {
+	const q = limit ? `?limit=${limit}` : '';
+	return call(`/product-profiles${q}`);
+}
+
 export function buildProfile(
 	id: number,
 	seedExcerpts: string[] = []

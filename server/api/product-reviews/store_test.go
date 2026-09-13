@@ -278,6 +278,47 @@ func TestDuplicateProfileResponseNoMatch(t *testing.T) {
 	}
 }
 
+// Scenario: listing profiles with mixed run history (spec:
+// product-review-history-list) — a profile with a completed run and a
+// profile with no request yet both come back, most-recently-updated first,
+// each reflecting its own latest run (or lack of one).
+func TestListProfilesMixedRunHistory(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	now := time.Now()
+	cols := []string{
+		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+		"truncated", "truncated_count", "created_at", "updated_at",
+		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at",
+	}
+	mock.ExpectQuery(rx("FROM kb.product_profiles p")).
+		WithArgs("acme", 50).
+		WillReturnRows(sqlmock.NewRows(cols).
+			AddRow(9, "acme", "Ventilator", "", []byte(`["icu"]`), "", 2, "ready", false, 0, now, now,
+				int64(200), int64(300), RunCompleted, now).
+			AddRow(8, "acme", "Drone", "", []byte("[]"), "", 1, "draft", false, 0, now, now,
+				nil, nil, nil, nil))
+
+	out, err := store.ListProfiles(context.Background(), "acme", 50)
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want 2", len(out))
+	}
+	if out[0].ID != 9 || out[0].LatestRequestID == nil || *out[0].LatestRequestID != 200 ||
+		out[0].LatestRunID == nil || *out[0].LatestRunID != 300 || out[0].LatestRunStatus != RunCompleted {
+		t.Fatalf("out[0] = %+v, want id 9 with latest request 200 / run 300 completed", out[0])
+	}
+	if len(out[0].Keywords) != 1 || out[0].Keywords[0] != "icu" {
+		t.Fatalf("out[0].Keywords = %+v, want [icu]", out[0].Keywords)
+	}
+	if out[1].ID != 8 || out[1].LatestRequestID != nil || out[1].LatestRunID != nil {
+		t.Fatalf("out[1] = %+v, want id 8 with no request/run", out[1])
+	}
+}
+
 func TestWouldCreateCycle(t *testing.T) {
 	one, two := int64(1), int64(2)
 	nodes := []scannedNode{

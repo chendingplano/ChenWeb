@@ -122,5 +122,13 @@
 	"pmr_intake_view_results": "查看结果",
 	"pmr_intake_rerun": "重新运行",
 	"pmr_intake_rerunning": "正在重新运行…",
-	"pmr_intake_no_run_hint": "此前的尝试没有完成任何一次运行。"
+	"pmr_intake_no_run_hint": "此前的尝试没有完成任何一次运行。",
+	"pmr_intake_history_heading": "历史审阅",
+	"pmr_intake_history_loading": "正在加载历史审阅…",
+	"pmr_intake_history_empty": "暂无历史审阅。",
+	"pmr_intake_history_status_never_run": "从未运行",
+	"pmr_intake_history_status_completed": "已完成",
+	"pmr_intake_history_status_running": "运行中…",
+	"pmr_intake_history_status_failed": "失败",
+	"pmr_intake_history_status_pending": "等待中"
 }

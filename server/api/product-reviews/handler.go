@@ -141,6 +141,44 @@ func GetProductProfile(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "profile": p, "nodes": nodes})
 }
 
+// ListProductProfiles — GET /kb/product-profiles?limit= (spec:
+// product-review-history-list): most-recently-updated profiles, each
+// carrying its latest review request/run so the intake page can render past
+// reviews as cards without further round trips.
+func ListProductProfiles(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H19")
+	defer rc.Close()
+	limit := parseListLimit(c.QueryParam("limit"), defaultProfileListLimit, maxProfileListLimit)
+	tenantID := c.QueryParam("tenant_id")
+	profiles, err := newStore().ListProfiles(c.Request().Context(), tenantID, limit)
+	if err != nil {
+		return fail(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "profiles": profiles})
+}
+
+const (
+	defaultProfileListLimit = 50
+	maxProfileListLimit     = 200
+)
+
+// parseListLimit parses a "limit" query param, falling back to def on an
+// absent/invalid/non-positive value and clamping to max — extracted from the
+// handler so it's unit-testable without the global DB/config wiring the rest
+// of this package's handlers depend on.
+func parseListLimit(raw string, def, max int) int {
+	limit := def
+	if v := strings.TrimSpace(raw); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > max {
+		limit = max
+	}
+	return limit
+}
+
 // BuildProductProfile — POST /kb/product-profiles/:id/build
 func BuildProductProfile(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H03")

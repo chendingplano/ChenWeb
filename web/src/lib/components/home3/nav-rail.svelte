@@ -483,10 +483,6 @@
 			window.open(`/home3/doc-structure?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
 			return;
 		}
-		if (child?.id === 'apps-product-review') {
-			window.open(`/home3/product-review?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
-			return;
-		}
 		onSelect({
 			itemId: item.id,
 			childId: child?.id,

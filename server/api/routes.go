@@ -628,6 +628,7 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Product Metric Reviewer (openspec change product-metric-reviewer).
 	apiGroup.POST("/kb/product-profiles", productreviews.CreateProductProfile)
+	apiGroup.GET("/kb/product-profiles", productreviews.ListProductProfiles)
 	apiGroup.GET("/kb/product-profiles/:id", productreviews.GetProductProfile)
 	apiGroup.POST("/kb/product-profiles/:id/build", productreviews.BuildProductProfile)
 	apiGroup.POST("/kb/product-profiles/:id/ready", productreviews.SetProductProfileReady)

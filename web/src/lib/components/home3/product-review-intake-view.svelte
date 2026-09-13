@@ -1,9 +1,19 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { AlertTriangle, Layers } from '@lucide/svelte';
-	import { rerunReview, startProductReviewIntake, type Profile } from '$lib/services/productMetricReviewService';
+	import {
+		listProfiles,
+		rerunReview,
+		startProductReviewIntake,
+		type Profile,
+		type ProfileSummary
+	} from '$lib/services/productMetricReviewService';
 
-	let { darkMode = false }: { darkMode?: boolean } = $props();
+	// `embedded`: rendered inside content-panel.svelte's app shell, which already
+	// supplies the breadcrumb/topbar — hide our own so it isn't shown twice.
+	let { darkMode = false, embedded = false }: { darkMode?: boolean; embedded?: boolean } =
+		$props();
 
 	// ── form state ────────────────────────────────────────────────────────────
 	let name = $state('');
@@ -19,6 +29,75 @@
 	let duplicateProfile = $state<Profile | null>(null);
 	let duplicateLatestRequestId = $state<number | undefined>(undefined);
 	let duplicateLatestRunId = $state<number | undefined>(undefined);
+
+	// ── past-reviews list (spec: product-review-history-list) — selecting a
+	// card prefills the form above and relabels the submit action "Re-Run",
+	// independent of the duplicate-name hero above ─────────────────────────────
+	let profiles = $state<ProfileSummary[]>([]);
+	let loadingProfiles = $state(true);
+	let selectedProfile = $state<ProfileSummary | null>(null);
+
+	onMount(() => {
+		loadProfiles();
+	});
+
+	async function loadProfiles() {
+		loadingProfiles = true;
+		try {
+			const out = await listProfiles();
+			profiles = out.profiles;
+		} catch {
+			// Past-reviews list is a convenience, not required to use the form —
+			// leave it empty rather than surfacing a load error here.
+		} finally {
+			loadingProfiles = false;
+		}
+	}
+
+	function selectProfile(p: ProfileSummary) {
+		selectedProfile = p;
+		name = p.name;
+		description = p.product_description ?? '';
+		keywordsInput = (p.keywords ?? []).join(', ');
+		notes = p.notes ?? '';
+		error = '';
+		duplicateProfile = null;
+	}
+
+	// Editing the name away from the selected card drops the selection, so
+	// "Re-Run" can never fire against a profile the visible name no longer
+	// matches (design.md Decision 4).
+	$effect(() => {
+		if (selectedProfile && name.trim() !== selectedProfile.name.trim()) {
+			selectedProfile = null;
+		}
+	});
+
+	function statusWord(p: ProfileSummary): string {
+		if (!p.latest_request_id) return m.pmr_intake_history_status_never_run();
+		switch (p.latest_run_status) {
+			case 'completed':
+				return m.pmr_intake_history_status_completed();
+			case 'running':
+				return m.pmr_intake_history_status_running();
+			case 'failed':
+				return m.pmr_intake_history_status_failed();
+			default:
+				return m.pmr_intake_history_status_pending();
+		}
+	}
+
+	function relativeTime(iso: string): string {
+		const diffMs = Date.now() - new Date(iso).getTime();
+		const mins = Math.round(diffMs / 60000);
+		if (mins < 1) return 'just now';
+		if (mins < 60) return `${mins}m ago`;
+		const hours = Math.round(mins / 60);
+		if (hours < 24) return `${hours}h ago`;
+		const days = Math.round(hours / 24);
+		if (days < 30) return `${days}d ago`;
+		return `${Math.round(days / 30)}mo ago`;
+	}
 
 	const canStart = $derived(name.trim().length > 0 && !submitting);
 
@@ -37,12 +116,45 @@
 		window.location.href = u.toString();
 	}
 
+	// Resumes an existing profile's review — re-running its latest request if
+	// one exists, otherwise resume-building a profile that was created but
+	// never run (design.md Decision 3; shared by the duplicate-name hero's
+	// Re-run button and the past-reviews list's Re-Run button).
+	async function resumeReview(
+		profileId: number,
+		profileName: string,
+		requestId?: number,
+		runId?: number
+	): Promise<number> {
+		if (requestId != null && runId != null) {
+			const out = await rerunReview(requestId);
+			return out.run.id;
+		}
+		const out = await startProductReviewIntake({
+			name: profileName,
+			resume_profile_id: profileId,
+			notes: notes.trim()
+		});
+		if (!out.run) throw new Error('review did not start');
+		return out.run.id;
+	}
+
 	async function start() {
 		if (!canStart) return;
 		submitting = true;
 		error = '';
 		duplicateProfile = null;
 		try {
+			if (selectedProfile) {
+				const runId = await resumeReview(
+					selectedProfile.id,
+					selectedProfile.name,
+					selectedProfile.latest_request_id,
+					selectedProfile.latest_run_id
+				);
+				goToRun(runId);
+				return;
+			}
 			const out = await startProductReviewIntake({
 				name: name.trim(),
 				product_description: description.trim(),
@@ -73,19 +185,12 @@
 		rerunning = true;
 		error = '';
 		try {
-			let runId: number;
-			if (duplicateLatestRunId != null && duplicateLatestRequestId != null) {
-				const out = await rerunReview(duplicateLatestRequestId);
-				runId = out.run.id;
-			} else {
-				const out = await startProductReviewIntake({
-					name: duplicateProfile.name,
-					resume_profile_id: duplicateProfile.id,
-					notes: notes.trim()
-				});
-				if (!out.run) throw new Error('review did not start');
-				runId = out.run.id;
-			}
+			const runId = await resumeReview(
+				duplicateProfile.id,
+				duplicateProfile.name,
+				duplicateLatestRequestId,
+				duplicateLatestRunId
+			);
 			goToRun(runId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -102,19 +207,21 @@
 	}
 </script>
 
-<div class="pmr-shell" class:dark={darkMode}>
-	<header class="topbar">
-		<div class="brand">
-			<span class="brand-mark">PR</span>
-			<div>
-				<p class="kicker">{m.pmr_intake_kicker()}</p>
-				<p class="brand-name">{m.pmr_intake_title()}</p>
+<div class="pmr-shell" class:dark={darkMode} class:embedded>
+	{#if !embedded}
+		<header class="topbar">
+			<div class="brand">
+				<span class="brand-mark">PR</span>
+				<div>
+					<p class="kicker">{m.pmr_intake_kicker()}</p>
+					<p class="brand-name">{m.pmr_intake_title()}</p>
+				</div>
 			</div>
-		</div>
-		<div class="crumbs">
-			<span class="route-badge">/home3/product-review</span>
-		</div>
-	</header>
+			<div class="crumbs">
+				<span class="route-badge">/home3/product-review</span>
+			</div>
+		</header>
+	{/if}
 
 	<div class="content">
 		{#if error}
@@ -188,11 +295,53 @@
 						></textarea>
 					</label>
 					<button class="primary wide" type="submit" disabled={!canStart}>
-						{submitting ? m.pmr_intake_starting() : m.pmr_intake_start()}
+						{#if selectedProfile}
+							{submitting ? m.pmr_intake_rerunning() : m.pmr_intake_rerun()}
+						{:else}
+							{submitting ? m.pmr_intake_starting() : m.pmr_intake_start()}
+						{/if}
 					</button>
 				</form>
 			</div>
 		{/if}
+
+		<section class="history">
+			<h2 class="history-heading">{m.pmr_intake_history_heading()}</h2>
+			{#if loadingProfiles}
+				<p class="muted">{m.pmr_intake_history_loading()}</p>
+			{:else if profiles.length === 0}
+				<p class="muted">{m.pmr_intake_history_empty()}</p>
+			{:else}
+				<div class="history-grid">
+					{#each profiles as p (p.id)}
+						<button
+							type="button"
+							class="history-card"
+							class:selected={selectedProfile?.id === p.id}
+							onclick={() => selectProfile(p)}
+						>
+							<div class="history-card-name">{p.name}</div>
+							{#if p.product_description}
+								<p class="history-card-desc">{p.product_description}</p>
+							{/if}
+							{#if p.keywords?.length}
+								<div class="history-card-keywords">
+									{#each p.keywords as kw (kw)}
+										<span class="chip">{kw}</span>
+									{/each}
+								</div>
+							{/if}
+							<div class="history-card-status">
+								{statusWord(p)}
+								{#if p.latest_run_status === 'completed' && p.latest_run_finished_at}
+									<span class="muted"> · {relativeTime(p.latest_run_finished_at)}</span>
+								{/if}
+							</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</section>
 	</div>
 </div>
 
@@ -207,6 +356,7 @@
 		--border: oklch(0.88 0.028 75);
 		--bronze: oklch(0.61 0.09 69);
 		--red: oklch(0.57 0.14 27);
+		--accent: #6366f1;
 		min-height: 100vh;
 		background: var(--bg);
 		color: var(--text);
@@ -220,6 +370,9 @@
 			background 180ms ease,
 			color 180ms ease;
 	}
+	.pmr-shell.embedded {
+		min-height: 0;
+	}
 	.pmr-shell.dark {
 		--bg: #111827;
 		--surface: #182334;
@@ -228,6 +381,7 @@
 		--border: #304663;
 		--bronze: #ff9b54;
 		--red: #ff7d6b;
+		--accent: #818cf8;
 	}
 	.pmr-shell :global(*) {
 		box-sizing: border-box;
@@ -390,9 +544,9 @@
 	}
 	.primary {
 		padding: 9px 14px;
-		border: 1px solid var(--bronze);
-		background: var(--bronze);
-		color: var(--bg);
+		border: 1px solid var(--accent);
+		background: var(--accent);
+		color: #fff;
 		cursor: pointer;
 		font-size: 12px;
 	}
@@ -416,5 +570,73 @@
 	.start-over {
 		display: block;
 		margin: 14px auto 0;
+	}
+
+	.history {
+		margin-top: 32px;
+		text-align: left;
+	}
+	.history-heading {
+		margin: 0 0 12px;
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: -0.01em;
+		color: var(--text);
+	}
+	.history-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 12px;
+	}
+	.history-card {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding: 12px 14px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: inherit;
+		text-align: left;
+		font: inherit;
+		cursor: pointer;
+	}
+	.history-card:hover {
+		border-color: var(--accent);
+	}
+	.history-card.selected {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 1px var(--accent);
+	}
+	.history-card-name {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.history-card-desc {
+		margin: 0;
+		font-size: 12px;
+		line-height: 1.4;
+		color: var(--subtle);
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.history-card-keywords {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+	.chip {
+		padding: 2px 7px;
+		border: 1px solid var(--border);
+		border-radius: 99px;
+		font-size: 10px;
+		color: var(--subtle);
+	}
+	.history-card-status {
+		margin-top: 2px;
+		font-size: 11px;
+		color: var(--subtle);
 	}
 </style>

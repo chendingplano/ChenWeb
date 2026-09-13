@@ -66,6 +66,18 @@ type Profile struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// ProfileSummary is a profile plus its latest review request/run, if any
+// (spec: product-review-history-list). LatestRequestID/LatestRunID are nil
+// when the profile has never had a review started; LatestRunStatus/
+// LatestRunFinishedAt are zero when the profile has a request but no run yet.
+type ProfileSummary struct {
+	Profile
+	LatestRequestID     *int64     `json:"latest_request_id,omitempty"`
+	LatestRunID         *int64     `json:"latest_run_id,omitempty"`
+	LatestRunStatus     string     `json:"latest_run_status,omitempty"`
+	LatestRunFinishedAt *time.Time `json:"latest_run_finished_at,omitempty"`
+}
+
 // SourceRef records why an expanded node is in the tree: the kb.semantic_assertions
 // row or kb.products row that supplied the edge.
 type SourceRef struct {
