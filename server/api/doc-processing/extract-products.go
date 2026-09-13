@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -62,25 +63,33 @@ type ProductsProcessor struct {
 	TranslateModelName   string
 	TranslateModelCfg    structureModelConfig
 	TranslateEnabled     bool
-	CategorizePromptText string
-	CategorizePromptRef  string
-	CategorizePromptPath string
-	CategorizePromptErr  error
-	CategorizeModelRef   string
-	CategorizeModelName  string
-	CategorizeModelCfg   structureModelConfig
-	CategorizeEnabled    bool
+	TranslateBatchSize   int
 	FallbackModelRef     string
 	FallbackModelCfgPath string
 	FallbackModelErr     error
 	FallbackModelName    string
 	FallbackModelCfg     structureModelConfig
-	BlockSize            int
-	PrevOverlap          int
-	NextOverlap          int
-	RemoveTOC            bool
 	ArtifactDir          string
 	ArtifactWebDir       string
+	ProductNames         ProductNameStore
+	MaxTasks             int
+
+	// batch* fields hold per-run state for the ChunkBatchProcessor path
+	// (InitChunkBatch/ProcessChunk/FinalizeChunkBatch), set up by
+	// InitChunkBatch and read/written by ProcessChunk (under batchMu, since
+	// the coordinator calls it concurrently across chunks) and
+	// FinalizeChunkBatch. Unused by the HandleEvent path.
+	batchMu            sync.Mutex
+	batchRecordID      int64
+	batchDocCtx        string
+	batchChunks        []Chunk
+	batchBlocks        []Block
+	batchStart         time.Time
+	batchSkip          bool
+	batchForce         bool
+	batchMentions      []productMention
+	batchFallbackCount int
+	batchMentionModel  string
 }
 
 type ProductsStore interface {
@@ -127,6 +136,11 @@ type productCandidate struct {
 	ProductTypeHint    string
 	SupportingMentions []map[string]any
 	SupportLines       []BlockLine
+	// BlockIndex is the shared Block.Index of every mention merged into this
+	// candidate, or -1 when the candidate's mentions span more than one
+	// block. Only a single-block candidate can reuse that block's chunk as
+	// its enrichment document (see extractProductsFromBlocksWithLLM).
+	BlockIndex int
 }
 
 func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *ProductsProcessor {
@@ -138,8 +152,8 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		"prompt-extract-product-mentions-v1.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
-		[]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"},
-		"prompt-enrich-product-relations-v1.md",
+		[]string{"ENRICH_PRODUCT_MENTION_PROMPT"},
+		"prompt-enrich-product-mention-v2.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
@@ -151,25 +165,15 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	)
 	translatePromptText, translatePromptRef, translatePromptPath, translatePromptErr := loadProductPromptFromEnvKeys(
 		[]string{"TRANSLATE_PRODUCTS_PROMPT"},
-		"prompt-translate-products-v1.md",
-	)
-	categorizePromptText, categorizePromptRef, categorizePromptPath, categorizePromptErr := loadProductPromptFromEnvKeys(
-		[]string{"CATEGORIZE_PRODUCTS_PROMPT"},
-		"prompt-categorize-products-v1.md",
+		"prompt-translate-products-v2.md",
 	)
 	translateModelRef, _, translateModelCfg, translateModelErr := loadOptionalModelConfigFromEnvKeys(
 		[]string{"TRANSLATION_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
-	categorizeModelRef, _, categorizeModelCfg, categorizeModelErr := loadOptionalModelConfigFromEnvKeys(
-		[]string{"CATEGORIZE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_DEF_FILE",
-	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
-	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
-	categorizeEnabled := categorizePromptErr == nil && strings.TrimSpace(categorizePromptText) != "" && categorizeModelErr == nil && strings.TrimSpace(categorizeModelCfg.ModelName) != ""
 	return &ProductsProcessor{
 		InputStore:           inputStore,
 		Store:                store,
@@ -212,25 +216,16 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		TranslateModelName:   translateModelCfg.ModelName,
 		TranslateModelCfg:    translateModelCfg,
 		TranslateEnabled:     translateEnabled,
-		CategorizePromptText: categorizePromptText,
-		CategorizePromptRef:  categorizePromptRef,
-		CategorizePromptPath: categorizePromptPath,
-		CategorizePromptErr:  categorizePromptErr,
-		CategorizeModelRef:   categorizeModelRef,
-		CategorizeModelName:  categorizeModelCfg.ModelName,
-		CategorizeModelCfg:   categorizeModelCfg,
-		CategorizeEnabled:    categorizeEnabled,
+		TranslateBatchSize:   envInt("TRANSLATE_PRODUCTS_BATCH_SIZE", defaultTranslateBatchSize, 1),
 		FallbackModelRef:     fallbackModelRef,
 		FallbackModelCfgPath: fallbackModelCfgPath,
 		FallbackModelErr:     fallbackModelErr,
 		FallbackModelName:    fallbackModelCfg.ModelName,
 		FallbackModelCfg:     fallbackModelCfg,
-		BlockSize:            envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
-		PrevOverlap:          prevOverlap,
-		NextOverlap:          nextOverlap,
-		RemoveTOC:            removeTOC,
 		ArtifactDir:          strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ArtifactWebDir:       strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		ProductNames:         ProductNameSQLStore{DB: ApiTypes.ProjectDBHandle},
+		MaxTasks:             envInt("EXTRACT_PRODUCTS_MAX_TASKS", 1, 1),
 	}
 }
 
@@ -302,14 +297,14 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		}
 	}
 
-	blocks, err := p.resolveProductBlocks(ctx, evt, rec)
+	blocks, chunks, err := p.resolveProductChunkBlocks(evt, rec)
 	if err != nil {
 		p.persistProductsStatus(ctx, rec, start, err)
-		p.Logger.Error("resolveBlocks error", "error", err, "record_id", evt.RecordID)
+		p.Logger.Error("resolveProductChunkBlocks error", "error", err, "record_id", evt.RecordID)
 		return nil
 	}
 	if len(blocks) == 0 {
-		err := fmt.Errorf("(MID_26052007) no blocks found for record_id=%d", evt.RecordID)
+		err := fmt.Errorf("(MID_26052007) no chunks found for record_id=%d", evt.RecordID)
 		p.persistProductsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -319,7 +314,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		"record_id", evt.RecordID,
 		"filename", inputFilename)
 
-	result, err := p.extractProductsFromBlocksWithLLM(ctx, blocks)
+	result, err := p.extractProductsFromBlocksWithLLM(ctx, blocks, chunks, buildDocContextLine(rec))
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistProducts(context.Background(), rec, start)
@@ -329,6 +324,10 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		return nil
 	}
 
+	// product_name_id / category_paths are already resolved on result.Products
+	// by resolveProductNamesAndCategories (called from
+	// extractProductsFromBlocksWithLLM, after Pass 3a translation so a newly
+	// proposed row can be enriched with its English name too).
 	outputRows := p.buildProductOutputRows(result.Products, start, len(blocks), result.ModelName)
 	for i := range outputRows {
 		outputRows[i]["product_rel_id"] = fmt.Sprintf("%d_prd_%d", evt.RecordID, i+1)
@@ -371,74 +370,337 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	return nil
 }
 
-func (p *ProductsProcessor) resolveProductBlocks(ctx context.Context, evt LineFileGeneratedEvent, rec DocMetadataInputRecord) ([]Block, error) {
-	if buf := BlockBufferFromContext(ctx); buf != nil {
-		return buf.Blocks, nil
-	}
-
+// resolveProductChunkBlocks loads the persisted .chunks artifact (chunking
+// must have run first) and adapts it to the []Block shape the rest of this
+// file's mention/candidate pipeline and WriteLineOverlapConnectionsFromRegistry
+// already expect, via the same chunksToBlocks adapter extract_metrics uses.
+// extract_products previously re-blocked the raw line file directly (reading
+// Blocks, not Chunks); switched to chunks so it shares the one chunk set
+// every other Phase B extractor reads, instead of maintaining its own
+// independent re-blocking of the document.
+func (p *ProductsProcessor) resolveProductChunkBlocks(evt LineFileGeneratedEvent, rec DocMetadataInputRecord) ([]Block, []Chunk, error) {
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26052010) resolve input file for record_id=%d: %w", evt.RecordID, err)
+		return nil, nil, fmt.Errorf("(MID_26052010) resolve input file for record_id=%d: %w", evt.RecordID, err)
 	}
 	body, err := os.ReadFile(inputPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("(MID_26052011) input file not exist: %s", inputPath)
+			return nil, nil, fmt.Errorf("(MID_26052011) input file not exist: %s", inputPath)
 		}
-		return nil, fmt.Errorf("(MID_26052012) read input file: %w", err)
+		return nil, nil, fmt.Errorf("(MID_26052012) read input file: %w", err)
 	}
-	buf, err := buildBlocks(body, p.productBlockSize(), p.PrevOverlap, p.NextOverlap, p.RemoveTOC)
+	lines, err := ParseInputLines(body)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26052013) build blocks: %w", err)
+		return nil, nil, fmt.Errorf("(MID_26052014) parse line file for record_id=%d: %w", evt.RecordID, err)
 	}
-	return buf.Blocks, nil
+	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
+	chunks, err := loadChunksFromArtifactFile(p.ArtifactDir, evt.RecordID, artifactBase+".chunks", lines)
+	if err != nil {
+		return nil, nil, fmt.Errorf("(MID_26052013) load chunks for record_id=%d: %w", evt.RecordID, err)
+	}
+	return chunksToBlocks(chunks), chunks, nil
 }
 
-func (p *ProductsProcessor) productBlockSize() int {
-	if p.BlockSize >= 1 {
-		return p.BlockSize
+// InitChunkBatch implements ChunkBatchProcessor: it validates config and the
+// force=false "already extracted" skip (mirroring HandleEvent), then resets
+// per-run batch state. It must not make LLM calls.
+func (p *ProductsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.MentionPromptErr != nil {
+		return fmt.Errorf("(MID_26091210) %s mention prompt error: %w", p.Name(), p.MentionPromptErr)
 	}
-	return DefaultBlockingBlockSize
-}
+	if p.RelationPromptErr != nil {
+		return fmt.Errorf("(MID_26091211) %s relation prompt error: %w", p.Name(), p.RelationPromptErr)
+	}
+	p.batchSkip = false
+	if p.MentionModelErr != nil {
+		p.Logger.Warn("products extraction skipped: mention model config error",
+			"record_id", recordID, "model_ref", p.MentionModelRef, "error", p.MentionModelErr)
+		p.batchSkip = true
+		return nil
+	}
+	if p.RelationModelErr != nil {
+		p.Logger.Warn("products extraction skipped: relation model config error",
+			"record_id", recordID, "model_ref", p.RelationModelRef, "error", p.RelationModelErr)
+		p.batchSkip = true
+		return nil
+	}
 
-func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context, blocks []Block) (productExtractionResult, error) {
-	eventID := eventIDFromContext(ctx)
-	mentions := make([]productMention, 0, len(blocks))
-	usedMentionModel := strings.TrimSpace(p.MentionModelName)
-	llmCallCount := 0
-	fallbackCount := 0
-	for idx, block := range blocks {
-		if isCtxStopped(ctx) {
-			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+	force, _ := docProcessorFlagsFromContext(ctx)
+	p.batchForce = force
+	if !force {
+		exists, err := p.Store.ProductsExist(ctx, recordID)
+		if err != nil {
+			return fmt.Errorf("(MID_26091212) %s check products exist: %w", p.Name(), err)
 		}
-		callStart := p.Now()
-		p.Logger.Info("extract product mentions - begin",
-			"idx", idx,
-			"total", len(blocks),
-			"model_name", p.MentionModelName,
-			"prompt_name", p.MentionPromptRef,
-		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
-			"extract products", buildProductMentionsUserPrompt(block),
-			p.MentionPromptText, p.MentionPromptRef,
-			p.MentionModelName, p.MentionModelCfg)
+		if exists {
+			p.Logger.Info("products extraction skipped", "record_id", recordID, "reason", "products already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactProduct, recordID, p.Logger, ReindexProductSearchForRecord)
+			p.batchSkip = true
+			return nil
+		}
+	}
+
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchBlocks = chunksToBlocks(chunks)
+	p.batchDocCtx = docCtx
+	p.batchMentions = nil
+	p.batchFallbackCount = 0
+	p.batchMentionModel = strings.TrimSpace(p.MentionModelName)
+	return nil
+}
+
+// ProcessChunk implements ChunkBatchProcessor: pass 1 (mention extraction)
+// for exactly one chunk, called by the coordinator with LLM_CALL_STAGGER
+// between calls across processors so this chunk's canonicalChunkInputText
+// document lands back-to-back with other processors' calls for it.
+func (p *ProductsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if p.batchSkip {
+		return nil
+	}
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26091213) %s chunk index %d out of range (len=%d)", p.Name(), chunkIdx, len(p.batchChunks))
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	chunk := p.batchChunks[chunkIdx]
+	block := chunksToBlocks([]Chunk{chunk})[0]
+	mentions, modelName, didFallback, err := p.extractProductMentionsForChunk(ctx, eventIDFromContext(ctx), chunkIdx, len(p.batchChunks), block, chunk, p.batchDocCtx)
+	if err != nil {
+		if isCtxStopped(ctx) {
+			return ErrPipelineStopped
+		}
+		p.Logger.Warn("extract_products chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		return nil
+	}
+	p.batchMu.Lock()
+	p.batchMentions = append(p.batchMentions, mentions...)
+	if didFallback {
+		p.batchFallbackCount++
+	}
+	if m := strings.TrimSpace(modelName); m != "" {
+		p.batchMentionModel = m
+	}
+	p.batchMu.Unlock()
+	return nil
+}
+
+// FinalizeChunkBatch implements ChunkBatchProcessor: pass 2 (relation
+// enrichment, reusing the single-block fast path so candidates ride the
+// cache ProcessChunk already warmed), translation, name/category resolution,
+// and the same save/index/artifact/reindex steps HandleEvent runs.
+func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if p.batchSkip {
+		return nil
+	}
+	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26091214) %s load kb.inputs record %d: %w", p.Name(), p.batchRecordID, err)
+	}
+	eventID := eventIDFromContext(ctx)
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+	llmCallCount := len(p.batchChunks)
+	fallbackCount := p.batchFallbackCount
+	mentionsCount := len(p.batchMentions)
+
+	candidates := mergeProductMentionCandidates(p.batchMentions)
+	p.Logger.Info("Merged product mention candidates",
+		"mentions_count", mentionsCount,
+		"candidate_count", len(candidates),
+		"record_stage", "post_merge",
+	)
+
+	chunksBySeq := make(map[int]Chunk, len(p.batchChunks))
+	for _, c := range p.batchChunks {
+		chunksBySeq[c.SeqNo] = c
+	}
+
+	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+	pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, p.batchDocCtx, maxTasks)
+	if pass2Err != nil {
+		if isCtxStopped(ctx) || errors.Is(pass2Err, ErrPipelineStopped) {
+			p.stopAndPersistProducts(context.Background(), rec, p.batchStart)
+			return ErrPipelineStopped
+		}
+		p.persistProductsStatus(ctx, rec, p.batchStart, pass2Err)
+		return fmt.Errorf("(MID_26091215) %s enrich product relations: %w", p.Name(), pass2Err)
+	}
+
+	products := make([]map[string]any, 0, len(candidates))
+	for _, r := range pass2Results {
+		products = append(products, r.rows...)
 		llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != "" {
+		if r.didFallback {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_b%d", eventID, idx), "extract_product_mentions", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now())
-		if err != nil {
-			p.Logger.Error("failed extracting product mentions", "error", err)
-			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
+		if r.modelName != "" {
+			usedRelationModel = r.modelName
 		}
-		usedMentionModel = strings.TrimSpace(modelName)
-		raw, _ := payload["mentions"].([]any)
-		mentions = append(mentions, normalizeProductMentions(raw, block)...)
-		p.Logger.Info("extract product mentions - end",
-			"mentions_so_far", len(mentions),
-			"model_name", p.MentionModelName,
-			"prompt_name", p.MentionPromptRef,
-			"ms_used", time.Since(callStart).Milliseconds())
+	}
+
+	preDedupeCount := len(products)
+	products = dedupeFinalProductRows(products)
+	p.Logger.Info("Deduped final product relation rows",
+		"rows_before_dedup", preDedupeCount,
+		"rows_after_dedup", len(products),
+		"record_stage", "post_relation_dedup",
+	)
+	if p.TranslateEnabled {
+		p.Logger.Info("Starting product translation pass",
+			"row_count", len(products),
+			"model_name", p.TranslateModelName,
+			"prompt_name", p.TranslatePromptRef,
+		)
+		var translateErr error
+		products, translateErr = p.translateProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
+		if translateErr != nil {
+			p.persistProductsStatus(ctx, rec, p.batchStart, translateErr)
+			return fmt.Errorf("(MID_26091216) %s translate products: %w", p.Name(), translateErr)
+		}
+	}
+	p.Logger.Info("Starting product name resolution + catalog categorization",
+		"row_count", len(products),
+	)
+	var resolveErr error
+	products, resolveErr = p.resolveProductNamesAndCategories(ctx, products)
+	if resolveErr != nil {
+		p.persistProductsStatus(ctx, rec, p.batchStart, resolveErr)
+		return fmt.Errorf("(MID_26091217) %s resolve product names: %w", p.Name(), resolveErr)
+	}
+
+	result := productExtractionResult{
+		Products:      products,
+		ModelName:     firstNonEmptyTrimmed(usedRelationModel, p.batchMentionModel, p.RelationModelName, p.ModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+		MentionsCount: mentionsCount,
+	}
+
+	if p.batchForce {
+		_, _ = p.Store.DeleteProductsByInputRecordID(ctx, p.batchRecordID)
+	}
+	outputRows := p.buildProductOutputRows(result.Products, p.batchStart, len(p.batchBlocks), result.ModelName)
+	for i := range outputRows {
+		outputRows[i]["product_rel_id"] = fmt.Sprintf("%d_prd_%d", p.batchRecordID, i+1)
+	}
+	inserted, err := p.Store.SaveProducts(ctx, SaveProductsRequest{
+		InputRecordID: p.batchRecordID,
+		Products:      outputRows,
+	})
+	if err != nil {
+		p.persistProductsStatus(ctx, rec, p.batchStart, err)
+		return fmt.Errorf("(MID_26091218) %s save products: %w", p.Name(), err)
+	}
+	if err := p.indexProductsInTree(p.batchRecordID, outputRows); err != nil {
+		p.persistProductsStatus(ctx, rec, p.batchStart, err)
+		return fmt.Errorf("(MID_26091219) %s index products tree: %w", p.Name(), err)
+	}
+	if err := p.writeProductsArtifact(p.batchRecordID, rec, outputRows); err != nil {
+		p.persistProductsStatus(ctx, rec, p.batchStart, err)
+		return fmt.Errorf("(MID_26091220) %s write products artifact: %w", p.Name(), err)
+	}
+	if reindexErr := ReindexProductSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex product search registry failed", "record_id", p.batchRecordID, "error", reindexErr)
+	}
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, p.batchRecordID, searchArtifactProduct, RelationHasPartComponent, p.batchBlocks); connErr != nil {
+		p.Logger.Warn("write has-part-component connections failed", "record_id", p.batchRecordID, "error", connErr)
+	}
+	p.Logger.Info("products extracted",
+		"record_id", p.batchRecordID,
+		"inserted_rows", inserted,
+		"products_count", len(outputRows),
+		"blocks", len(p.batchBlocks),
+	)
+	p.persistProductsStatus(ctx, rec, p.batchStart, nil)
+	p.logProductsSummary(ctx, p.batchStart, p.Now(), result, len(p.batchBlocks))
+	return nil
+}
+
+// productPass1Result is one Pass 1 (mention extraction) task's outcome,
+// collected by runConcurrent and merged in block-index order afterward.
+type productPass1Result struct {
+	mentions    []productMention
+	modelName   string
+	didFallback bool
+}
+
+// productPass2Result is one Pass 2 (relation enrichment) task's outcome.
+type productPass2Result struct {
+	rows        []map[string]any
+	modelName   string
+	didFallback bool
+}
+
+func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context, blocks []Block, chunks []Chunk, docCtx string) (productExtractionResult, error) {
+	eventID := eventIDFromContext(ctx)
+	usedMentionModel := strings.TrimSpace(p.MentionModelName)
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+	// chunksBySeq looks a block/candidate up by Block.Index (== Chunk.SeqNo,
+	// per chunksToBlocks) so both passes below can send that chunk's
+	// canonicalChunkInputText as their document -- the same bytes every other
+	// chunk-based processor sends for it, forming the stable, cacheable
+	// prefix DeepSeek's prompt cache needs. See input_lines.go's
+	// canonicalChunkInputText doc comment.
+	chunksBySeq := make(map[int]Chunk, len(chunks))
+	for _, c := range chunks {
+		chunksBySeq[c.SeqNo] = c
+	}
+
+	// Pass 1: concurrent per-block mention extraction (mirrors
+	// extract_metrics' extractMetricsFromChunksWithLLM). Each block is
+	// independent -- no cross-block state -- so this is the same fan-out
+	// extract_metrics already uses; MaxTasks defaults to 1 (sequential,
+	// today's behavior) until EXTRACT_PRODUCTS_MAX_TASKS raises it.
+	pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(blocks), func(concCtx context.Context, idx int) (productPass1Result, error) {
+		block := blocks[idx]
+		if isCtxStopped(concCtx) {
+			return productPass1Result{}, ErrPipelineStopped
+		}
+		chunk, ok := chunksBySeq[block.Index]
+		if !ok {
+			return productPass1Result{}, fmt.Errorf("(MID_26052040) extract product mentions: no chunk with seq %d (chunks=%d)", block.Index, len(chunks))
+		}
+		mentions, modelName, didFallback, err := p.extractProductMentionsForChunk(concCtx, eventID, idx, len(blocks), block, chunk, docCtx)
+		if err != nil {
+			if isCtxStopped(concCtx) {
+				return productPass1Result{}, ErrPipelineStopped
+			}
+			p.Logger.Error("failed extracting product mentions", "error", err)
+			return productPass1Result{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
+		}
+		return productPass1Result{
+			mentions:    mentions,
+			modelName:   strings.TrimSpace(modelName),
+			didFallback: didFallback,
+		}, nil
+	})
+	if pass1Err != nil {
+		if isCtxStopped(ctx) || errors.Is(pass1Err, ErrPipelineStopped) {
+			return productExtractionResult{}, ErrPipelineStopped
+		}
+		return productExtractionResult{}, pass1Err
+	}
+
+	mentions := make([]productMention, 0, len(blocks))
+	llmCallCount := len(blocks)
+	fallbackCount := 0
+	for _, r := range pass1Results {
+		mentions = append(mentions, r.mentions...)
+		if r.didFallback {
+			fallbackCount++
+		}
+		if r.modelName != "" {
+			usedMentionModel = r.modelName
+		}
 	}
 
 	candidates := mergeProductMentionCandidates(mentions)
@@ -447,42 +709,27 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		"candidate_count", len(candidates),
 		"record_stage", "post_merge",
 	)
-	products := make([]map[string]any, 0, len(candidates))
+
+	// Pass 2: concurrent per-candidate relation enrichment, same fan-out.
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	for idx, candidate := range candidates {
-		if isCtxStopped(ctx) {
+	pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, docCtx, maxTasks)
+	if pass2Err != nil {
+		if isCtxStopped(ctx) || errors.Is(pass2Err, ErrPipelineStopped) {
 			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
 		}
-		callStart := p.Now()
-		p.Logger.Info("Start enriching product candidate",
-			"idx", idx,
-			"total", len(candidates),
-			"candidate_id", candidate.CandidateID,
-			"model_name", p.RelationModelName,
-			"prompt_name", p.RelationPromptRef,
-		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
-			"product relations", buildProductRelationUserPrompt(candidate),
-			p.RelationPromptText, p.RelationPromptRef,
-			p.RelationModelName, p.RelationModelCfg)
+		return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, pass2Err
+	}
+
+	products := make([]map[string]any, 0, len(candidates))
+	for _, r := range pass2Results {
+		products = append(products, r.rows...)
 		llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
+		if r.didFallback {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_product_relations", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now())
-		if err != nil {
-			p.Logger.Error("failed enriching product relations", "error", err, "candidate_id", candidate.CandidateID)
-			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
+		if r.modelName != "" {
+			usedRelationModel = r.modelName
 		}
-		usedRelationModel = strings.TrimSpace(modelName)
-		raw, _ := payload["products"].([]any)
-		normalized := normalizeProductList(raw)
-		products = append(products, normalized...)
-		p.Logger.Info("extract products - end",
-			"candidate_id", candidate.CandidateID,
-			"rows", len(normalized),
-			"products_so_far", len(products),
-			"ms_used", time.Since(callStart).Milliseconds())
 	}
 
 	preDedupeCount := len(products)
@@ -504,17 +751,13 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, translateErr
 		}
 	}
-	if p.CategorizeEnabled {
-		p.Logger.Info("Starting product categorization pass",
-			"row_count", len(products),
-			"model_name", p.CategorizeModelName,
-			"prompt_name", p.CategorizePromptRef,
-		)
-		var categorizeErr error
-		products, categorizeErr = p.categorizeProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
-		if categorizeErr != nil {
-			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, categorizeErr
-		}
+	p.Logger.Info("Starting product name resolution + catalog categorization",
+		"row_count", len(products),
+	)
+	var resolveErr error
+	products, resolveErr = p.resolveProductNamesAndCategories(ctx, products)
+	if resolveErr != nil {
+		return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, resolveErr
 	}
 	return productExtractionResult{
 		Products:      products,
@@ -523,6 +766,135 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		FallbackCount: fallbackCount,
 		MentionsCount: len(mentions),
 	}, nil
+}
+
+// extractProductMentionsForChunk runs pass 1 for exactly one chunk/block.
+// Shared by the direct HandleEvent path (extractProductsFromBlocksWithLLM's
+// pass 1 loop) and the per-chunk batching coordinator path (ProcessChunk), so
+// both send the identical canonicalChunkInputText document for a given
+// chunk -- required for the coordinator's cross-processor cache sharing.
+func (p *ProductsProcessor) extractProductMentionsForChunk(
+	ctx context.Context,
+	eventID string,
+	idx int,
+	total int,
+	block Block,
+	chunk Chunk,
+	docCtx string,
+) ([]productMention, string, bool, error) {
+	callStart := p.Now()
+	p.Logger.Info("extract product mentions - begin",
+		"idx", idx,
+		"total", total,
+		"model_name", p.MentionModelName,
+		"prompt_name", p.MentionPromptRef,
+	)
+	// Document is canonicalChunkInputText(chunk, docCtx) so this call rides
+	// the coordinator's cross-processor cache for this chunk; the schema
+	// and block index are task-specific, so they go in the <TASK> suffix.
+	inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+	taskText := p.MentionPromptText + "\n\n" + buildProductMentionsTaskPrompt(block.Index)
+	payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+		"extract products", inputText,
+		taskText, p.MentionPromptRef,
+		p.MentionModelName, p.MentionModelCfg)
+	p.logLLMCall(ctx, fmt.Sprintf("%s_p1_b%d", eventID, idx), "extract_product_mentions", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now())
+	if err != nil {
+		return nil, modelName, false, err
+	}
+	raw, _ := payload["mentions"].([]any)
+	mentions := normalizeProductMentions(raw, block)
+	didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != ""
+	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	p.Logger.Info("extract product mentions - end",
+		"mention count", len(mentions),
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+		"ms_used", time.Since(callStart).Milliseconds())
+	return mentions, modelName, didFallback, nil
+}
+
+// enrichProductCandidatesWithLLM runs pass 2 (concurrent per-candidate
+// relation enrichment) for a set of merged candidates. Shared by the direct
+// HandleEvent path and FinalizeChunkBatch, so both single-block candidates
+// reuse pass 1's canonicalChunkInputText document (see productCandidate.
+// BlockIndex) the same way.
+func (p *ProductsProcessor) enrichProductCandidatesWithLLM(
+	ctx context.Context,
+	eventID string,
+	candidates []productCandidate,
+	chunksBySeq map[int]Chunk,
+	docCtx string,
+	maxTasks int,
+) ([]productPass2Result, error) {
+	var mu sync.Mutex
+	productsSoFar := 0
+
+	p.Logger.Info("enrich product",
+		"total candidates", len(candidates),
+		"model_name", p.RelationModelName,
+		"prompt_name", p.RelationPromptRef,
+	)
+
+	return runConcurrent(ctx, maxTasks, len(candidates), func(concCtx context.Context, idx int) (productPass2Result, error) {
+		candidate := candidates[idx]
+		if isCtxStopped(concCtx) {
+			return productPass2Result{}, ErrPipelineStopped
+		}
+		callStart := p.Now()
+		p.Logger.Info("enrich product - begin",
+			"idx", idx,
+			"total", len(candidates),
+			"candidate_id", candidate.CandidateID,
+		)
+		var inputText, taskText string
+		if chunk, ok := chunksBySeq[candidate.BlockIndex]; ok {
+			// Candidate's evidence lives entirely in one block: send that
+			// chunk's canonical text as the document, byte-identical to what
+			// pass 1 already sent for it, so this call rides pass 1's
+			// already-warm cache instead of paying for a bespoke,
+			// never-repeating candidate blob.
+			inputText = canonicalChunkInputText(chunk.Lines, docCtx)
+			taskText = p.RelationPromptText + "\n\n" + buildProductRelationTaskPrompt(candidate)
+		} else {
+			// Candidate's mentions span multiple blocks -- no single chunk to
+			// send as the document, so fall back to the merged source-lines
+			// blob (uncacheable, same as before).
+			inputText = buildProductRelationUserPrompt(candidate)
+			taskText = p.RelationPromptText
+		}
+		payload, modelName, err := p.extractProductPayloadWithFallback(concCtx,
+			"product relations", inputText,
+			taskText, p.RelationPromptRef,
+			p.RelationModelName, p.RelationModelCfg)
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_product_relations", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now())
+		if err != nil {
+			if isCtxStopped(concCtx) {
+				return productPass2Result{}, ErrPipelineStopped
+			}
+			p.Logger.Error("failed enriching product relations", "error", err, "candidate_id", candidate.CandidateID)
+			return productPass2Result{}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
+		}
+		raw, _ := payload["products"].([]any)
+		normalized := normalizeProductList(raw)
+		mu.Lock()
+		productsSoFar += len(normalized)
+		soFar := productsSoFar
+		mu.Unlock()
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+		p.Logger.Info("enrich product - end",
+			"candidate_id", candidate.CandidateID,
+			"rows", len(normalized),
+			"products_so_far", soFar,
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
+			"ms_used", time.Since(callStart).Milliseconds())
+		return productPass2Result{
+			rows:        normalized,
+			modelName:   strings.TrimSpace(modelName),
+			didFallback: strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "",
+		}, nil
+	})
 }
 
 func (p *ProductsProcessor) extractProductPayloadWithFallback(
@@ -612,11 +984,11 @@ func (p *ProductsProcessor) extractProductPayload(
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 
 	startTime := time.Now()
-	p.Logger.Info("extract products - begin",
-		"action", opr,
-		"model", modelName,
-		"prompt_name", promptRef,
-	)
+	// p.Logger.Info("extract products - begin",
+	// 	"action", opr,
+	// 	"model", modelName,
+	// 	"prompt_name", promptRef,
+	// )
 
 	callReason := strings.TrimSpace(opr)
 	if callReason == "" {
@@ -665,9 +1037,12 @@ func (p *ProductsProcessor) extractProductPayload(
 	}
 	payload["products"] = items
 
+	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 	p.Logger.Info("extract products - end",
 		"action", opr,
-		"ms_used", time.Since(startTime).Milliseconds())
+		"ms_used", time.Since(startTime).Milliseconds(),
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss)
 	return payload, nil
 }
 
@@ -707,7 +1082,11 @@ func looksLikeProductRecord(payload map[string]any) bool {
 	return false
 }
 
-func buildProductMentionsUserPrompt(block Block) string {
+// buildProductMentionsTaskPrompt returns the mentions-pass schema and block
+// index only -- the block's lines are no longer duplicated here, since the
+// canonicalChunkInputText document (sent separately, see
+// extractProductsFromBlocksWithLLM) already carries every line.
+func buildProductMentionsTaskPrompt(blockIndex int) string {
 	schema := map[string]any{
 		"mentions": []map[string]any{{
 			"mention_text":      "string",
@@ -722,10 +1101,13 @@ func buildProductMentionsUserPrompt(block Block) string {
 	}
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nBlock index: " + strconv.Itoa(block.Index) +
-		"\n\nInput block lines (JSON array):\n" + blockLinesToJSON(block.Lines)
+		"\n\nBlock index: " + strconv.Itoa(blockIndex)
 }
 
+// buildProductRelationUserPrompt is the multi-block fallback document: used
+// only when a candidate's mentions span more than one block, so there's no
+// single chunk to send as the canonical document and the merged source lines
+// must be included here instead.
 func buildProductRelationUserPrompt(candidate productCandidate) string {
 	candidateJSON, _ := json.Marshal(map[string]any{
 		"candidate_id":        candidate.CandidateID,
@@ -736,6 +1118,20 @@ func buildProductRelationUserPrompt(candidate productCandidate) string {
 	})
 	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
 		"\n\nSource lines (JSON array):\n" + blockLinesToJSON(candidate.SupportLines)
+}
+
+// buildProductRelationTaskPrompt is the single-block task suffix: the
+// candidate JSON only, no source lines, since the canonicalChunkInputText
+// document already carries every line of that candidate's one block.
+func buildProductRelationTaskPrompt(candidate productCandidate) string {
+	candidateJSON, _ := json.Marshal(map[string]any{
+		"candidate_id":        candidate.CandidateID,
+		"product_name":        candidate.ProductName,
+		"canonical_name":      candidate.CanonicalName,
+		"product_type_hint":   candidate.ProductTypeHint,
+		"supporting_mentions": candidate.SupportingMentions,
+	})
+	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON)
 }
 
 func normalizeProductMentions(items []any, block Block) []productMention {
@@ -852,7 +1248,12 @@ func mergeProductMentionCandidates(mentions []productMention) []productCandidate
 		canonicalName := ""
 		productType := "unknown"
 		typeCounts := map[string]int{}
+		blockIndex := b.mentions[0].BlockIndex
+		sameBlock := true
 		for _, mention := range b.mentions {
+			if mention.BlockIndex != blockIndex {
+				sameBlock = false
+			}
 			if productName == "" || (mention.HasNormalEvidence && productName == b.mentions[0].MentionText) {
 				productName = firstNonEmptyTrimmed(mention.MentionText, productName)
 			}
@@ -899,6 +1300,10 @@ func mergeProductMentionCandidates(mentions []productMention) []productCandidate
 			}
 			return supportLines[i].Flag < supportLines[j].Flag
 		})
+		candidateBlockIndex := -1
+		if sameBlock {
+			candidateBlockIndex = blockIndex
+		}
 		out = append(out, productCandidate{
 			CandidateID:        fmt.Sprintf("cand_%d", len(out)+1),
 			ProductName:        productName,
@@ -906,6 +1311,7 @@ func mergeProductMentionCandidates(mentions []productMention) []productCandidate
 			ProductTypeHint:    productType,
 			SupportingMentions: supportMentions,
 			SupportLines:       supportLines,
+			BlockIndex:         candidateBlockIndex,
 		})
 	}
 	return out
@@ -1132,11 +1538,6 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 			modelNames = append(modelNames, strings.TrimSpace(p.TranslateModelName))
 		}
 	}
-	if p.CategorizeEnabled && strings.TrimSpace(p.CategorizeModelName) != "" {
-		if !slices.Contains(modelNames, strings.TrimSpace(p.CategorizeModelName)) {
-			modelNames = append(modelNames, strings.TrimSpace(p.CategorizeModelName))
-		}
-	}
 	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
 	extraInfo, _ := json.Marshal(map[string]interface{}{
 		"total_products": len(result.Products),
@@ -1146,7 +1547,7 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 		"num_blocks":     numBlocks,
 	})
 	extraStr := string(extraInfo)
-	if err := p.ProcLogger.LogSummary(ctx, "extract_products", DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, EntryTypeExtractProducts, DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
@@ -1157,95 +1558,209 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 	}
 }
 
+const defaultTranslateBatchSize = 10
+
+// translateProductRows batch-translates products' name/summary/requirement
+// fields, N rows per LLM call (default 10, TRANSLATE_PRODUCTS_BATCH_SIZE),
+// with batches run concurrently (p.MaxTasks) -- previously one row per call,
+// sequential. Each request row carries an "idx" (its position within the
+// batch) that the LLM must echo back; returned rows are matched to the row
+// they translate by that idx rather than by position, so if the model drops
+// or reorders a row, the rows it did return still land on the right product
+// instead of the whole batch being discarded. A batch that fails outright,
+// or a row within a batch whose idx is missing/invalid, is logged and left
+// untranslated (same graceful-degrade contract as before, now scoped to a
+// batch instead of a single row).
 func (p *ProductsProcessor) translateProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) ([]map[string]any, error) {
-	for i := range products {
-		if isCtxStopped(ctx) {
-			return products, ErrPipelineStopped
+	if len(products) == 0 {
+		return products, nil
+	}
+	batchSize := p.TranslateBatchSize
+	if batchSize <= 0 {
+		batchSize = defaultTranslateBatchSize
+	}
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+	numBatches := (len(products) + batchSize - 1) / batchSize
+
+	type translateBatchOutcome struct {
+		calls     int
+		fallbacks int
+	}
+	outcomes, err := runConcurrent(ctx, maxTasks, numBatches, func(concCtx context.Context, b int) (translateBatchOutcome, error) {
+		start := b * batchSize
+		end := min(start+batchSize, len(products))
+		if isCtxStopped(concCtx) {
+			return translateBatchOutcome{}, ErrPipelineStopped
 		}
 		callStart := p.Now()
-		rowInput, _ := json.Marshal(map[string]any{
-			"products": []map[string]any{{
+		items := make([]map[string]any, 0, end-start)
+		for i := start; i < end; i++ {
+			items = append(items, map[string]any{
+				"idx":               i - start,
 				"product_name":      products[i]["product_name"],
 				"canonical_name":    products[i]["canonical_name"],
 				"product_summary":   products[i]["relation_summary"],
 				"requirement_text":  products[i]["requirement_text"],
 				"confidence_reason": products[i]["confidence_reason"],
-			}},
-		})
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+			})
+		}
+		rowInput, _ := json.Marshal(map[string]any{"products": items})
+		payload, modelName, err := p.extractProductPayloadWithFallback(concCtx,
 			"product translation", string(rowInput),
 			p.TranslatePromptText, p.TranslatePromptRef,
 			p.TranslateModelName, p.TranslateModelCfg)
-		*llmCallCount++
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p3_t%d", eventID, b), "translate_products", 3, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.TranslatePromptRef), nil, err, callStart, p.Now())
+		outcome := translateBatchOutcome{calls: 1}
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.TranslateModelName) && strings.TrimSpace(modelName) != "" {
-			*fallbackCount++
+			outcome.fallbacks = 1
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p3_t%d", eventID, i), "translate_products", 3, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.TranslatePromptRef), nil, err, callStart, p.Now())
 		if err != nil {
-			p.Logger.Warn("translate product row failed; keeping untranslated row", "error", err, "product_name", products[i]["product_name"])
-			continue
+			if isCtxStopped(concCtx) {
+				return outcome, ErrPipelineStopped
+			}
+			p.Logger.Warn("translate product batch failed; keeping batch untranslated", "error", err, "batch", b, "batch_size", end-start)
+			return outcome, nil
 		}
 		raw, _ := payload["products"].([]any)
-		if len(raw) == 0 {
-			continue
+		if len(raw) != end-start {
+			p.Logger.Warn("translate product batch returned mismatched row count; applying rows that can be matched by idx",
+				"batch", b, "want", end-start, "got", len(raw), "raw", raw)
 		}
-		first, _ := raw[0].(map[string]any)
-		if first == nil {
-			continue
-		}
-		for _, key := range []string{"product_name_en", "canonical_name_en", "product_summary_en", "requirement_text_en", "confidence_reason_en"} {
-			switch key {
-			case "product_summary_en":
-				products[i]["relation_summary_en"] = strings.TrimSpace(asString(first[key]))
-			default:
-				products[i][key] = strings.TrimSpace(asString(first[key]))
+		for _, item := range raw {
+			first, _ := item.(map[string]any)
+			if first == nil {
+				continue
 			}
+			idxNum, ok := first["idx"].(float64)
+			if !ok {
+				p.Logger.Warn("translate product batch item missing valid idx; skipping", "batch", b, "item", first)
+				continue
+			}
+			idx := int(idxNum)
+			if idx < 0 || idx >= end-start {
+				p.Logger.Warn("translate product batch item idx out of range; skipping", "batch", b, "idx", idx, "batch_size", end-start)
+				continue
+			}
+			row := products[start+idx]
+			for _, key := range []string{"product_name_en", "canonical_name_en", "product_summary_en", "requirement_text_en", "confidence_reason_en"} {
+				switch key {
+				case "product_summary_en":
+					row["relation_summary_en"] = strings.TrimSpace(asString(first[key]))
+				default:
+					row[key] = strings.TrimSpace(asString(first[key]))
+				}
+			}
+		}
+		return outcome, nil
+	})
+	for _, o := range outcomes {
+		*llmCallCount += o.calls
+		*fallbackCount += o.fallbacks
+	}
+	if err != nil && (isCtxStopped(ctx) || errors.Is(err, ErrPipelineStopped)) {
+		return products, ErrPipelineStopped
+	}
+	return products, nil
+}
+
+// resolveProductNamesAndCategories resolves each row's product_name against
+// kb.product_names (see product_names_resolve.go) and, on a match, copies
+// that row's catalog category (sub_catalog/category_l1/category_l2) into
+// category_paths -- replacing the old free-form LLM categorization pass.
+// A 'proposed' (unmatched) name has no catalog category, so category_paths
+// stays empty for it; that is the intended signal that it awaits curation,
+// not a failure. Resolution is a handful of plain SQL lookups per distinct
+// name (no LLM), run concurrently (p.MaxTasks) across distinct names.
+func (p *ProductsProcessor) resolveProductNamesAndCategories(ctx context.Context, products []map[string]any) ([]map[string]any, error) {
+	if len(products) == 0 {
+		return products, nil
+	}
+	uniqueNames := make([]string, 0, len(products))
+	rowsByName := make(map[string][]int, len(products))
+	for i, row := range products {
+		name := strings.TrimSpace(asString(row["product_name"]))
+		if name == "" {
+			continue
+		}
+		if _, ok := rowsByName[name]; !ok {
+			uniqueNames = append(uniqueNames, name)
+		}
+		rowsByName[name] = append(rowsByName[name], i)
+	}
+	if len(uniqueNames) == 0 {
+		return products, nil
+	}
+
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+	resolutions, err := runConcurrent(ctx, maxTasks, len(uniqueNames), func(concCtx context.Context, i int) (productNameResolution, error) {
+		if isCtxStopped(concCtx) {
+			return productNameResolution{}, ErrPipelineStopped
+		}
+		name := uniqueNames[i]
+		var nameEN string
+		if rows := rowsByName[name]; len(rows) > 0 {
+			nameEN = strings.TrimSpace(asString(products[rows[0]]["product_name_en"]))
+		}
+		return p.resolveProductName(concCtx, name, nameEN), nil
+	})
+	if err != nil {
+		if isCtxStopped(ctx) || errors.Is(err, ErrPipelineStopped) {
+			return products, ErrPipelineStopped
+		}
+		return products, nil
+	}
+
+	for i, name := range uniqueNames {
+		res := resolutions[i]
+		paths := categoryPathsFromCatalog(res)
+		for _, rowIdx := range rowsByName[name] {
+			row := products[rowIdx]
+			if res.ID > 0 {
+				row["product_name_id"] = res.ID
+			}
+			// Authoritative, not additive: Pass 2's own prompt asks the LLM
+			// for its own free-form category_paths/category_paths_en (see
+			// prompt-enrich-product-mention-v2.md's "Extract Category Paths"
+			// section) -- this pass replaces that with the catalog lookup
+			// regardless, including clearing it to nil/empty when there is no
+			// catalog match, rather than only overwriting on a hit and
+			// silently leaving the LLM's guess in place on a miss.
+			if len(paths) > 0 {
+				row["category_paths"] = paths
+			} else {
+				delete(row, "category_paths")
+			}
+			delete(row, "category_paths_en")
 		}
 	}
 	return products, nil
 }
 
-func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) ([]map[string]any, error) {
-	for i := range products {
-		if isCtxStopped(ctx) {
-			return products, ErrPipelineStopped
-		}
-		callStart := p.Now()
-		rowInput, _ := json.Marshal(map[string]any{
-			"products": []map[string]any{{
-				"product_name":    products[i]["product_name"],
-				"canonical_name":  products[i]["canonical_name"],
-				"product_type":    products[i]["product_type"],
-				"relation_type":   products[i]["relation_type"],
-				"product_summary": products[i]["relation_summary"],
-				"evidence_quote":  products[i]["evidence_quote"],
-			}},
-		})
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
-			"product categorize", string(rowInput),
-			p.CategorizePromptText, p.CategorizePromptRef,
-			p.CategorizeModelName, p.CategorizeModelCfg)
-		*llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CategorizeModelName) && strings.TrimSpace(modelName) != "" {
-			*fallbackCount++
-		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p4_c%d", eventID, i), "categorize_products", 4, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.CategorizePromptRef), nil, err, callStart, p.Now())
-		if err != nil {
-			p.Logger.Warn("categorize product row failed; keeping uncategorized row", "error", err, "product_name", products[i]["product_name"])
+// categoryPathsFromCatalog builds the existing category_paths shape
+// (semantic-chunking.go's CategoryPathEntry/CategoryPathNode) from a
+// kb.product_names catalog match, so downstream consumers (indexProductsInTree)
+// need no changes. Confidence is 1.0 throughout: this is a deterministic
+// catalog lookup, not a model guess. Returns nil when the matched row (or a
+// newly proposed one) carries no catalog category.
+func categoryPathsFromCatalog(res productNameResolution) []CategoryPathEntry {
+	var nodes []CategoryPathNode
+	for _, name := range []string{res.SubCatalog, res.CategoryL1, res.CategoryL2} {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
-		raw, _ := payload["products"].([]any)
-		if len(raw) == 0 {
-			continue
-		}
-		first, _ := raw[0].(map[string]any)
-		if first == nil {
-			continue
-		}
-		products[i]["category_paths"] = first["category_paths"]
-		products[i]["category_paths_en"] = first["category_paths_en"]
+		nodes = append(nodes, CategoryPathNode{Name: name, Confidence: 1.0})
 	}
-	return products, nil
+	if len(nodes) == 0 {
+		return nil
+	}
+	return []CategoryPathEntry{{Nodes: nodes, PathConfidence: 1.0}}
 }
 
 func (p *ProductsProcessor) buildProductOutputRows(products []map[string]any, now time.Time, numBlocks int, modelName string) []map[string]any {
@@ -1276,6 +1791,7 @@ func (p *ProductsProcessor) buildProductOutputRows(products []map[string]any, no
 			"confidence_reason_en": strings.TrimSpace(asString(product["confidence_reason_en"])),
 			"category_paths":       product["category_paths"],
 			"category_paths_en":    product["category_paths_en"],
+			"product_name_id":      product["product_name_id"],
 			"status":               "active",
 			"model_name":           strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
 			"prompt_name":          strings.TrimSpace(p.PromptRef),
@@ -1789,9 +2305,10 @@ INSERT INTO kb.products (
 	public_info,
 	private_info,
 	notes,
-	error_msg
+	error_msg,
+	product_name_id
 ) VALUES (
-	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25::jsonb,$26,$27,$28,$29::jsonb,$30::jsonb,$31,$32
+	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25::jsonb,$26,$27,$28,$29::jsonb,$30::jsonb,$31,$32,$33
 )
 ON CONFLICT (input_record_id, product_rel_id) DO UPDATE SET
 	product_name = EXCLUDED.product_name,
@@ -1824,6 +2341,7 @@ ON CONFLICT (input_record_id, product_rel_id) DO UPDATE SET
 	private_info = EXCLUDED.private_info,
 	notes = EXCLUDED.notes,
 	error_msg = EXCLUDED.error_msg,
+	product_name_id = EXCLUDED.product_name_id,
 	modify_time = NOW()`
 
 	var inserted int64
@@ -1871,6 +2389,7 @@ ON CONFLICT (input_record_id, product_rel_id) DO UPDATE SET
 			string(privateInfoJSON),                                                        // $30
 			strings.TrimSpace(asString(product["notes"])),                                  // $31
 			strings.TrimSpace(asString(product["error_msg"])),                              // $32
+			nullableProductNameID(product["product_name_id"]),                              // $33
 		)
 		if err != nil {
 			return inserted, err

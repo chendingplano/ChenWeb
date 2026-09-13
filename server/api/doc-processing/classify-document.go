@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -449,12 +451,43 @@ func tier3PathSet() map[string]bool {
 	return out
 }
 
+// ClassifyDocumentEnabledFromEnv resolves the CLASSIFY_DOCUMENT_ENABLED
+// (default: true) setting, same convention as SemanticAssociationEnabledFromEnv
+// (phase_d.go): unset or unparseable resolves to enabled. When enabled (the
+// default), ResolveExtractionFacts makes classify_document run against every
+// still-unanswered governed tier-3 path for every document, instead of only
+// when an authored kb.pipeline_bindings/kb.pipeline_rules predicate happens
+// to reference one of those paths -- a policy with no such predicate
+// authored otherwise leaves the classifier permanently unreachable (ADR
+// review 2026091301). Set to "false" to disable tier-3 classification during
+// extraction routing entirely -- a full kill switch, including any
+// predicate that would otherwise have triggered it.
+func ClassifyDocumentEnabledFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("CLASSIFY_DOCUMENT_ENABLED"))
+	if raw == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return true
+	}
+	return enabled
+}
+
+// defaultClassifyDocumentPromptRef is used when CLASSIFY_DOCUMENT_PROMPT is unset.
+const defaultClassifyDocumentPromptRef = "prompt-classify-document-v1.md"
+
 // LoadClassifyDocumentPrompt loads the versioned classify_document prompt
-// from the standard prompt search paths. The prompt is never embedded in
-// Go (spec section 7: "The prompt is a versioned file under ChenWeb/prompts;
+// from the standard prompt search paths. The ref is overridable via
+// CLASSIFY_DOCUMENT_PROMPT so the prompt is never hard-coded in the binary
+// (spec section 7: "The prompt is a versioned file under ChenWeb/prompts;
 // it is never embedded in Go").
 func LoadClassifyDocumentPrompt() (promptText, promptRef, promptPath string, err error) {
-	return loadPromptByRef("prompt-classify-document-v1.md")
+	ref := strings.TrimSpace(os.Getenv("CLASSIFY_DOCUMENT_PROMPT"))
+	if ref == "" {
+		ref = defaultClassifyDocumentPromptRef
+	}
+	return loadPromptByRef(ref)
 }
 
 // NewDocumentClassifier builds a classifier with the versioned prompt and

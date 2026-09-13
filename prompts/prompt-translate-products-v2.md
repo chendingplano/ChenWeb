@@ -10,10 +10,12 @@ Return strict JSON only.
 2. If the source text is already English, set all `_en` fields to `null`.
 3. Do not change non-translation fields.
 4. Translate concisely and accurately.
-5. The input `products` array may contain multiple records in one call. The
-   output array MUST have exactly one entry per input entry, in the same
-   order. Never merge, drop, reorder, or add entries — the caller matches
-   output entries to input entries by position.
+5. The input `products` array may contain multiple records in one call. Each
+   input record carries an `idx` field. Every output record MUST echo back
+   the same `idx` value as the input record it translates, so the caller can
+   match output entries to input entries even if entries are ever dropped or
+   reordered. Never invent an `idx` that was not present in the input, and
+   never output two records with the same `idx`.
 
 ## Output Schema
 
@@ -21,6 +23,7 @@ Return strict JSON only.
 {
   "products": [
     {
+      "idx": 0,
       "product_name_en": "string or null",
       "canonical_name_en": "string or null",
       "product_summary_en": "string or null",

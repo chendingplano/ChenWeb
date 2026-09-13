@@ -68,7 +68,7 @@ type ProductionPlanFacts struct {
 	// or DocPipelineModeEnforced). Zero value ("") behaves as plan-only, so
 	// callers that don't set it (tests, the constructor-time BuildProductionProcessorPlan
 	// seam) get legacy-equivalent behavior by default.
-	Mode string
+	Mode                      string
 	ExplicitProcessorOverride bool               `json:",omitempty"`
 	ProcessorGateOverrides    map[string]string  `json:",omitempty"`
 	RoutingSnapshot           *P5RoutingSnapshot `json:",omitempty"`
@@ -421,6 +421,11 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "extract_inventory_items", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"inventory_items"}},
 	{Name: "extract_metrics", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metrics"}},
 	{Name: "extract_provisions", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"provisions"}},
+	// extract_products reads Chunks (resolveProductChunkBlocks, adapted to
+	// []Block via chunksToBlocks) as of 2026-09-12 -- previously re-blocked
+	// the raw line file directly (Blocks, not Chunks), which is why this
+	// entry had no DependsOn/Requires before.
+	{Name: "extract_products", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"products"}},
 	// ADR §8.2 P4 harvesters. They are routed so a governed pipeline chooses
 	// the corpus types for which their candidate output is meaningful.
 	{Name: "extract_metric_definitions", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metric_definition_candidates"}, Class: "routed", Cost: "cheap_llm", OnUndetermined: "skip", Idempotent: true},

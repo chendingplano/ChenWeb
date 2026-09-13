@@ -64,6 +64,7 @@ required_processors = [
 	"extract_semantic_projections",
 	"extract_entity",
 	"extract_relation",
+	"extract_products",
 	"generate_topics",
 	"generate_scene_blocks",
 	"extract_inventory_items",

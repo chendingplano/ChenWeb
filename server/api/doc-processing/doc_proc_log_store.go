@@ -43,6 +43,7 @@ const EntryTypeExtractRelations = "extract_relations"
 const EntryTypeExtractEntityRelationFinish = "extract_entity_relation_finish"
 const EntryTypeExtractInventoryItems = "extract_inventory_items"
 const EntryTypeExtractInventoryItemsFinish = "extract_inventory_items_finish"
+const EntryTypeExtractProducts = "extract_products"
 const EntryTypeExtractDocMetadata = "extract_doc_metadata"
 const EntryTypeChunking = "chunking"
 const EntryTypeGenerateTopics = "generate_topics"
@@ -355,6 +356,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractRelations,
 		EntryTypeExtractEntityRelationFinish,
 		EntryTypeExtractInventoryItems, EntryTypeExtractInventoryItemsFinish,
+		EntryTypeExtractProducts,
 		EntryTypeExtractSceneBlocksFinish,
 		EntryTypeChunking,
 		EntryTypeGenerateTopics,

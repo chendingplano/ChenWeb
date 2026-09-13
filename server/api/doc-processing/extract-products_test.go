@@ -4,10 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 type fakeProductsStore struct {
@@ -110,11 +117,20 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	t.Setenv("ARTIFACT_DIR", tmp)
 	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 
+	stagingFilename := filepath.Join(tmp, "ocr_rslt_5101.pdf")
+	writeTestArtifacts(t, tmp, 5101, stagingFilename, "opendata",
+		strings.Join([]string{
+			"10\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tThe infusion pump shall be inspected monthly.",
+			"11\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOverlap context.",
+			"12\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tEach infusion pump must have a maintenance log.",
+		}, "\n"),
+		"overlap: [11]\nlines: [10]\n\noverlap: []\nlines: [12]\n",
+	)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              5101,
 		ParserName:      "opendata",
 		ResultFilename:  filepath.Join(tmp, "ocr_rslt_5101.json"),
-		StagingFilename: filepath.Join(tmp, "ocr_rslt_5101.pdf"),
+		StagingFilename: stagingFilename,
 		StatusRaw:       "[]",
 	}}
 	productStore := &fakeProductsStore{}
@@ -175,7 +191,7 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 			{
 				"products": []any{
 					map[string]any{
-						"product_name_en":      nil,
+						"product_name_en":      "infusion pump",
 						"canonical_name_en":    nil,
 						"product_summary_en":   nil,
 						"requirement_text_en":  nil,
@@ -183,49 +199,10 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 					},
 				},
 			},
-			{
-				"products": []any{
-					map[string]any{
-						"category_paths": []any{
-							map[string]any{
-								"category_path": []any{
-									map[string]any{
-										"name":       "medical",
-										"keywords":   []any{"infusion"},
-										"confidence": 0.88,
-									},
-								},
-								"path_keywords":   []any{"infusion pump"},
-								"path_confidence": 0.88,
-							},
-						},
-						"category_paths_en": []any{},
-					},
-				},
-			},
 		},
 	}
 
-	ctx, holder := withBlockBufferHolder(context.Background())
-	holder.mu.Lock()
-	holder.buffer = &BlockBuffer{
-		Blocks: []Block{
-			{
-				Index: 1,
-				Lines: []BlockLine{
-					{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."},
-					{Flag: "o", LineNumber: 11, PageNumber: 1, LineType: "paragraph", Content: "Overlap context."},
-				},
-			},
-			{
-				Index: 2,
-				Lines: []BlockLine{
-					{Flag: "n", LineNumber: 12, PageNumber: 1, LineType: "paragraph", Content: "Each infusion pump must have a maintenance log."},
-				},
-			},
-		},
-	}
-	holder.mu.Unlock()
+	ctx := context.Background()
 
 	p := NewProductsProcessor(inputStore, productStore, extractor, nil)
 	p.MentionPromptText = "extract mentions"
@@ -245,17 +222,16 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	p.TranslatePromptRef = "prompt-translate-products-v1.md"
 	p.TranslateModelName = "gpt-test"
 	p.TranslatePromptErr = nil
-	p.CategorizeEnabled = true
-	p.CategorizePromptText = "categorize"
-	p.CategorizePromptRef = "prompt-categorize-products-v1.md"
-	p.CategorizeModelName = "gpt-test"
-	p.CategorizePromptErr = nil
+	p.ProductNames = &fakeProductNameStore{lookupResult: &productNameMatch{
+		ID: 6279, ProductName: "infusion pump", Exact: true,
+		SubCatalog: "01 有源手术器械", CategoryL1: "01 超声手术设备及附件", CategoryL2: "01.1 超声手术设备",
+	}}
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"5101","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.structuredCalledCount != 5 {
-		t.Fatalf("structuredCalledCount=%d, want 5", extractor.structuredCalledCount)
+	if extractor.structuredCalledCount != 4 {
+		t.Fatalf("structuredCalledCount=%d, want 4", extractor.structuredCalledCount)
 	}
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
@@ -276,8 +252,12 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	if got := strings.TrimSpace(asString(row["prompt_name"])); got != "prompt-enrich-product-relations-v1.md" {
 		t.Fatalf("prompt_name=%q", got)
 	}
-	if _, ok := row["category_paths"]; !ok {
-		t.Fatalf("category_paths missing")
+	if got, _ := row["product_name_id"].(int64); got != 6279 {
+		t.Fatalf("product_name_id=%v, want 6279 (from the resolved kb.product_names match)", row["product_name_id"])
+	}
+	paths, ok := row["category_paths"].([]CategoryPathEntry)
+	if !ok || len(paths) != 1 || len(paths[0].Nodes) != 3 || paths[0].Nodes[0].Name != "01 有源手术器械" {
+		t.Fatalf("category_paths not built from the kb.product_names catalog match: %#v", row["category_paths"])
 	}
 
 	artifactPath := filepath.Join(tmp, "5", "5101", "ocr_rslt_5101_opendata.products")
@@ -291,6 +271,105 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	}
 	if len(artifactRecords) != 1 {
 		t.Fatalf("artifact product count=%d, want 1", len(artifactRecords))
+	}
+}
+
+// TestExtractProductsFromBlocksWithLLM_MentionsPassUsesCanonicalChunkDocument
+// guards against the cache_hit=0 regression (2026-09-12 log investigation):
+// the mentions pass's document must be canonicalChunkInputText(chunk, docCtx)
+// -- the same bytes every other chunk-based processor sends for this chunk --
+// not a bespoke schema+block blob, so it forms the stable prefix DeepSeek's
+// prompt cache can actually match. See input_lines.go's canonicalChunkInputText
+// doc comment and the metrics enrich-cache fix (2026-08-16) this mirrors.
+func TestExtractProductsFromBlocksWithLLM_MentionsPassUsesCanonicalChunkDocument(t *testing.T) {
+	block := Block{Index: 7, Lines: []BlockLine{
+		{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."},
+	}}
+	chunk := Chunk{SeqNo: 7, Lines: []MarkedLine{
+		{Mark: "r", Line: Line{LineNo: 10, PageNo: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."}},
+	}}
+	docCtx := "Test Doc | DOC-001"
+	extractor := &fakeJSONExtractor{outs: []map[string]any{{"mentions": []any{}}}}
+	p := &ProductsProcessor{
+		Logger:             loggerutil.CreateDefaultLogger("MID_TEST_PDM1"),
+		Extractor:          extractor,
+		Now:                time.Now,
+		MentionPromptText:  "extract mentions",
+		MentionPromptRef:   "prompt-extract-product-mentions-v1.md",
+		MentionModelName:   "gpt-test",
+		RelationPromptText: "enrich relations",
+		RelationPromptRef:  "prompt-enrich-product-relations-v1.md",
+		RelationModelName:  "gpt-test",
+		MaxTasks:           1,
+	}
+
+	if _, err := p.extractProductsFromBlocksWithLLM(context.Background(), []Block{block}, []Chunk{chunk}, docCtx); err != nil {
+		t.Fatalf("extractProductsFromBlocksWithLLM: %v", err)
+	}
+	if len(extractor.inputTexts) != 1 {
+		t.Fatalf("inputTexts=%v, want 1 mentions call", extractor.inputTexts)
+	}
+	want := canonicalChunkInputText(chunk.Lines, docCtx)
+	if extractor.inputTexts[0] != want {
+		t.Fatalf("mentions pass document = %q, want canonical chunk text %q", extractor.inputTexts[0], want)
+	}
+}
+
+// TestExtractProductsFromBlocksWithLLM_SingleBlockCandidateRelationsPassReusesMentionsDocument
+// asserts the actual cache-hit condition: for a candidate whose evidence all
+// comes from one block, pass 2's document must be byte-identical to pass 1's
+// document for that same chunk, so pass 2 rides the cache pass 1 already
+// warmed instead of paying for a bespoke, never-repeating candidate blob.
+func TestExtractProductsFromBlocksWithLLM_SingleBlockCandidateRelationsPassReusesMentionsDocument(t *testing.T) {
+	block := Block{Index: 3, Lines: []BlockLine{
+		{Flag: "n", LineNumber: 5, PageNumber: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."},
+	}}
+	chunk := Chunk{SeqNo: 3, Lines: []MarkedLine{
+		{Mark: "r", Line: Line{LineNo: 5, PageNo: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."}},
+	}}
+	docCtx := "Test Doc | DOC-002"
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{"mentions": []any{
+			map[string]any{
+				"mention_text":      "infusion pump",
+				"canonical_hint":    "infusion pump",
+				"product_type_hint": "equipment",
+				"evidence_quote":    "infusion pump",
+				"evidence_lines":    []any{"5"},
+				"is_explicit":       true,
+				"confidence":        0.9,
+				"confidence_reason": "explicit mention",
+			},
+		}},
+		{"products": []any{
+			map[string]any{"product_name": "infusion pump", "relation_type": "maintenance_requirement"},
+		}},
+	}}
+	p := &ProductsProcessor{
+		Logger:             loggerutil.CreateDefaultLogger("MID_TEST_PDM2"),
+		Extractor:          extractor,
+		Now:                time.Now,
+		MentionPromptText:  "extract mentions",
+		MentionPromptRef:   "prompt-extract-product-mentions-v1.md",
+		MentionModelName:   "gpt-test",
+		RelationPromptText: "enrich relations",
+		RelationPromptRef:  "prompt-enrich-product-relations-v1.md",
+		RelationModelName:  "gpt-test",
+		MaxTasks:           1,
+	}
+
+	if _, err := p.extractProductsFromBlocksWithLLM(context.Background(), []Block{block}, []Chunk{chunk}, docCtx); err != nil {
+		t.Fatalf("extractProductsFromBlocksWithLLM: %v", err)
+	}
+	if len(extractor.inputTexts) != 2 {
+		t.Fatalf("inputTexts=%v, want 2 calls (mentions + relations)", extractor.inputTexts)
+	}
+	wantDoc := canonicalChunkInputText(chunk.Lines, docCtx)
+	if extractor.inputTexts[0] != wantDoc {
+		t.Fatalf("mentions pass document = %q, want canonical chunk text %q", extractor.inputTexts[0], wantDoc)
+	}
+	if extractor.inputTexts[1] != wantDoc {
+		t.Fatalf("relations pass document = %q, want byte-identical to mentions pass document %q (required to hit the warm cache)", extractor.inputTexts[1], wantDoc)
 	}
 }
 
@@ -347,7 +426,7 @@ func TestProductsProcessor_ExtractProductPayloadUsesStructuredContractWhenAvaila
 	p.PromptRef = "prompt-test"
 	p.ModelName = "gpt-test"
 
-	payload, err := p.extractProductPayload(context.Background(), 
+	payload, err := p.extractProductPayload(context.Background(),
 		"action", "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{})
 	if err != nil {
 		t.Fatalf("extractProductPayload: %v", err)
@@ -441,5 +520,162 @@ timeout_sec = 100
 	}
 	if cfg.TimeoutSec != 90 {
 		t.Fatalf("timeout=%d, want 90", cfg.TimeoutSec)
+	}
+}
+
+// concurrentTranslateExtractor is a thread-safe LLMStructuredJSONExtractor
+// fake for exercising translateProductRows' real concurrent multi-batch path
+// -- unlike fakeJSONExtractor (a shared, unsynchronized outs queue, fine for
+// the package's other sequential-call tests but not safe to share across
+// goroutines), this generates each batch's translation from its own input,
+// keyed by product_name, so concurrent batches never contend on shared state.
+type concurrentTranslateExtractor struct {
+	mu         sync.Mutex
+	batchSizes []int
+	calls      int32
+	failBatch  int // 1-indexed call number to fail with a mismatched-length response; 0 = never
+	dropIdx    int // local idx (within failBatch) to drop when failBatch matches
+}
+
+func (f *concurrentTranslateExtractor) ExtractJSON(context.Context, llmclients.JSONExtractionInput) (map[string]any, error) {
+	return nil, fmt.Errorf("concurrentTranslateExtractor only implements ExtractStructuredJSON")
+}
+
+func (f *concurrentTranslateExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, _ llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	callNum := int(atomic.AddInt32(&f.calls, 1))
+	var req struct {
+		Products []map[string]any `json:"products"`
+	}
+	if err := json.Unmarshal([]byte(in.InputText), &req); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	f.batchSizes = append(f.batchSizes, len(req.Products))
+	f.mu.Unlock()
+
+	out := make([]map[string]any, 0, len(req.Products))
+	for i, item := range req.Products {
+		if callNum == f.failBatch && i == f.dropIdx {
+			continue // drop one row so this batch's returned length mismatches
+		}
+		out = append(out, map[string]any{
+			"idx":             item["idx"],
+			"product_name_en": strings.TrimSpace(asString(item["product_name"])) + "_EN",
+		})
+	}
+	return &llmclients.StructuredOutputResult{Parsed: map[string]any{"products": toAnySlice(out)}}, nil
+}
+
+func toAnySlice(rows []map[string]any) []any {
+	out := make([]any, len(rows))
+	for i, r := range rows {
+		out[i] = r
+	}
+	return out
+}
+
+func TestTranslateProductRows_ConcurrentBatching(t *testing.T) {
+	products := make([]map[string]any, 25)
+	for i := range products {
+		products[i] = map[string]any{"product_name": fmt.Sprintf("product-%02d", i)}
+	}
+	extractor := &concurrentTranslateExtractor{}
+	p := &ProductsProcessor{
+		Logger:             loggerutil.CreateDefaultLogger("MID_TEST_TPR"),
+		Extractor:          extractor,
+		Now:                time.Now,
+		TranslateBatchSize: 10,
+		MaxTasks:           4,
+		TranslateModelName: "gpt-test",
+	}
+	var llmCallCount, fallbackCount int
+	out, err := p.translateProductRows(context.Background(), products, "evt1", &llmCallCount, &fallbackCount)
+	if err != nil {
+		t.Fatalf("translateProductRows: %v", err)
+	}
+	if llmCallCount != 3 {
+		t.Fatalf("llmCallCount=%d, want 3 batches of size <=10 for 25 rows", llmCallCount)
+	}
+	extractor.mu.Lock()
+	sizes := append([]int(nil), extractor.batchSizes...)
+	extractor.mu.Unlock()
+	total := 0
+	for _, s := range sizes {
+		total += s
+	}
+	if total != 25 {
+		t.Fatalf("batch sizes %v sum to %d, want 25", sizes, total)
+	}
+	for i, row := range out {
+		want := fmt.Sprintf("product-%02d_EN", i)
+		if got := row["product_name_en"]; got != want {
+			t.Fatalf("row %d: product_name_en=%v, want %q (batching must not cross-assign rows)", i, got, want)
+		}
+	}
+}
+
+func TestTranslateProductRows_MismatchedBatchLengthAppliesRowsMatchedByIdx(t *testing.T) {
+	products := make([]map[string]any, 12)
+	for i := range products {
+		products[i] = map[string]any{"product_name": fmt.Sprintf("product-%02d", i)}
+	}
+	// Drop local idx 0 (row 0, the first row of the first batch) so that
+	// batch's returned length mismatches; the other 5 rows in that batch
+	// must still be applied via idx, not discarded.
+	extractor := &concurrentTranslateExtractor{failBatch: 1, dropIdx: 0}
+	p := &ProductsProcessor{
+		Logger:             loggerutil.CreateDefaultLogger("MID_TEST_TPR"),
+		Extractor:          extractor,
+		Now:                time.Now,
+		TranslateBatchSize: 6,
+		MaxTasks:           1, // deterministic call order for this assertion
+		TranslateModelName: "gpt-test",
+	}
+	var llmCallCount, fallbackCount int
+	out, err := p.translateProductRows(context.Background(), products, "evt1", &llmCallCount, &fallbackCount)
+	if err != nil {
+		t.Fatalf("translateProductRows: %v", err)
+	}
+	if got := out[0]["product_name_en"]; got != nil {
+		t.Fatalf("row 0 (the dropped idx) should stay untranslated, got %v", got)
+	}
+	for i := 1; i < 12; i++ {
+		want := fmt.Sprintf("product-%02d_EN", i)
+		if got := out[i]["product_name_en"]; got != want {
+			t.Fatalf("row %d: product_name_en=%v, want %q", i, got, want)
+		}
+	}
+}
+
+func TestTranslateProductRows_MidBatchDropDoesNotMisassignLaterRows(t *testing.T) {
+	products := make([]map[string]any, 6)
+	for i := range products {
+		products[i] = map[string]any{"product_name": fmt.Sprintf("product-%02d", i)}
+	}
+	// Drop local idx 2 (the middle of the only batch). Naive positional
+	// matching would shift rows 3-5's translations onto rows 2-4; idx-based
+	// matching must keep every surviving row attached to its own product.
+	extractor := &concurrentTranslateExtractor{failBatch: 1, dropIdx: 2}
+	p := &ProductsProcessor{
+		Logger:             loggerutil.CreateDefaultLogger("MID_TEST_TPR"),
+		Extractor:          extractor,
+		Now:                time.Now,
+		TranslateBatchSize: 6,
+		MaxTasks:           1,
+		TranslateModelName: "gpt-test",
+	}
+	var llmCallCount, fallbackCount int
+	out, err := p.translateProductRows(context.Background(), products, "evt1", &llmCallCount, &fallbackCount)
+	if err != nil {
+		t.Fatalf("translateProductRows: %v", err)
+	}
+	if got := out[2]["product_name_en"]; got != nil {
+		t.Fatalf("row 2 (the dropped idx) should stay untranslated, got %v", got)
+	}
+	for _, i := range []int{0, 1, 3, 4, 5} {
+		want := fmt.Sprintf("product-%02d_EN", i)
+		if got := out[i]["product_name_en"]; got != want {
+			t.Fatalf("row %d: product_name_en=%v, want %q (must not be shifted onto a neighboring row)", i, got, want)
+		}
 	}
 }

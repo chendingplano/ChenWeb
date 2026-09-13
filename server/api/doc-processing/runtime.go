@@ -71,6 +71,7 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 		NewRelationProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewInventoryItemsProcessor(inputStore, InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewMetricsProcessor(inputStore, newResolvingMetricsStore(ApiTypes.ProjectDBHandle), newClient(), logger),
+		NewProductsProcessor(inputStore, ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewMetricDefinitionsProcessor(newClient(), logger),
 		NewProductStructureProcessor(),
 		NewTestMethodsProcessor(newClient()),
@@ -96,16 +97,21 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 // review 2026080302 finding P5-11).
 // buildProductionResolver constructs the tier-3 applicability resolver from
 // production dependencies (spec 2026080102 section 7). It is nil-safe: a
-// configuration failure (missing model config, missing prompt) logs a warning
+// configuration failure (missing model config, missing prompt) logs an error
 // and returns nil, so routing degrades to today's behaviour instead of failing
 // the whole runtime -- the same graceful-degrade convention newMetricCategoryResolver
-// uses for the LLM category creator. The governing document-authority release
-// id is resolved lazily per record via VocabularyReleases, not at construction.
+// uses for the LLM category creator. This is now logged at Error (not Warn):
+// since tier-3 runs by default (ClassifyDocumentEnabledFromEnv,
+// classify-document.go), a nil resolver here silently disables the whole
+// facet_tier3 feature server-wide, which is worth surfacing loudly rather
+// than only in a warning an operator may filter out. The governing
+// document-authority release id is resolved lazily per record via
+// VocabularyReleases, not at construction.
 func buildProductionResolver(db *sql.DB, logger ApiTypes.JimoLogger) *ApplicabilityResolver {
 	classifier, err := newProductionDocumentClassifier(SQLStore{DB: db}, policyaudit.SQLStore{DB: db})
 	if err != nil {
 		if logger != nil {
-			logger.Warn("classify_document: tier-3 classifier unavailable; routing proceeds without classification",
+			logger.Error("classify_document: tier-3 classifier unavailable; routing proceeds without classification",
 				"env", "CLASSIFY_DOCUMENT_MODEL_NAME/MODEL_DEF_FILE",
 				"error", err.Error())
 		}

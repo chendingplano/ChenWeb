@@ -98,6 +98,17 @@ type ResolverRequest struct {
 	Predicates          []semrules.Document
 	VocabularyReleaseID int64
 	DocumentSample      string
+	// AlwaysClassifyPaths are tier-3 paths to classify regardless of whether
+	// any Predicate finds them decision-relevant. Used by
+	// ResolveExtractionFacts to make classify_document run by default (see
+	// ClassifyDocumentEnabledFromEnv) instead of only when an authored
+	// routing/gate predicate happens to need one of these facts -- ADR review
+	// 2026091301: a policy with no such predicate authored yet left tier-3
+	// permanently unreachable, which defeats the point of building it.
+	// ResolveReviewFacts leaves this nil; it keeps the original
+	// predicate-only behavior spec 2026080102 section 7 describes for
+	// review-scope selection.
+	AlwaysClassifyPaths []string
 }
 
 // ResolverResult is the frozen two-pass output.
@@ -136,7 +147,7 @@ func (r *ApplicabilityResolver) Resolve(ctx context.Context, req ResolverRequest
 	}
 
 	// --- identify decision-relevant missing tier-3 paths ---
-	missing := decisionRelevantTier3Paths(pass1)
+	missing := unionTier3Paths(decisionRelevantTier3Paths(pass1), req.AlwaysClassifyPaths)
 	if len(missing) == 0 {
 		return ResolverResult{
 			Facts:  req.BaseFacts,
@@ -262,6 +273,44 @@ func decisionRelevantTier3Paths(results []semrules.Result) []string {
 			seen[path] = true
 			out = append(out, path)
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// unresolvedTier3Paths returns every Tier3Paths() path that facts does not
+// already hold as FactKnown. Used to build ResolverRequest.AlwaysClassifyPaths
+// so classify_document runs by default (ClassifyDocumentEnabledFromEnv)
+// against whatever it hasn't already answered for this record/attempt,
+// independent of whether any routing predicate references those paths.
+func unresolvedTier3Paths(facts semrules.FactSet) []string {
+	var out []string
+	for _, path := range Tier3Paths() {
+		if fact, ok := facts[path]; ok && fact.State == semrules.FactKnown {
+			continue
+		}
+		out = append(out, path)
+	}
+	return out
+}
+
+// unionTier3Paths merges two path lists into a deduplicated, sorted result.
+func unionTier3Paths(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	var out []string
+	for _, path := range a {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	for _, path := range b {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
 	}
 	sort.Strings(out)
 	return out
@@ -398,6 +447,15 @@ func (r *ApplicabilityResolver) enrichWithPersistedFacets(ctx context.Context, r
 
 func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, planFacts ProductionPlanFacts, recordID int64, attemptKey string, documentSample string) (semrules.FactSet, *ResolverResult, error) {
 	baseFacts := r.enrichWithPersistedFacets(ctx, recordID, BuildPipelineBindingFactSet(planFacts))
+	// CLASSIFY_DOCUMENT_ENABLED (default true): a full kill switch for
+	// tier-3 during extraction routing. When false, no predicate -- authored
+	// or not -- can trigger the classifier from this entry point; when true
+	// (the default), it also classifies every still-unknown governed tier-3
+	// path unconditionally, not only when an authored routing/gate predicate
+	// happens to reference one. See ClassifyDocumentEnabledFromEnv.
+	if !ClassifyDocumentEnabledFromEnv() {
+		return baseFacts, nil, nil
+	}
 	var vocabularyReleaseID int64
 	if r.VocabularyReleases != nil {
 		if id, err := r.VocabularyReleases.ActiveDocumentAuthorityReleaseID(ctx); err == nil {
@@ -410,6 +468,7 @@ func (r *ApplicabilityResolver) ResolveExtractionFacts(ctx context.Context, plan
 		InvocationID:        fmt.Sprintf("extraction-%d-%s", recordID, attemptKey),
 		BaseFacts:           baseFacts,
 		Predicates:          activeRoutingPredicates(),
+		AlwaysClassifyPaths: unresolvedTier3Paths(baseFacts),
 		VocabularyReleaseID: vocabularyReleaseID,
 		DocumentSample:      documentSample,
 	}

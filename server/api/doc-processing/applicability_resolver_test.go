@@ -381,8 +381,16 @@ func TestResolveExtractionFactsCollectsActiveRoutingPredicates(t *testing.T) {
 
 // TestResolveExtractionFactsNoClassifierCallForResolvedTierOneTwoPredicate
 // proves a predicate referencing only already-resolved tier-1/2 paths never
-// triggers a classifier call.
+// triggers a classifier call -- exercised under CLASSIFY_DOCUMENT_ENABLED=false
+// (the legacy, predicate-only-gated mode) since by default
+// (ClassifyDocumentEnabledFromEnv) ResolveExtractionFacts now also classifies
+// every still-unresolved governed tier-3 path regardless of predicates, so
+// this record's four governed paths (none resolved by tier-1/2 here) would
+// otherwise legitimately trigger a call. See
+// TestResolveExtractionFactsClassifiesByDefaultWithoutADecisionRelevantPredicate
+// for that default-enabled behavior.
 func TestResolveExtractionFactsNoClassifierCallForResolvedTierOneTwoPredicate(t *testing.T) {
+	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "false")
 	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
 	SetProductionPipelineBindings([]PipelineBinding{
 		{
@@ -404,6 +412,69 @@ func TestResolveExtractionFactsNoClassifierCallForResolvedTierOneTwoPredicate(t 
 	}
 	if result != nil && result.Classified {
 		t.Fatalf("expected no classifier invocation for an already-resolved tier-1/2 predicate, result=%#v", result)
+	}
+	if callCount != 0 {
+		t.Fatalf("callCount=%d, want 0", callCount)
+	}
+}
+
+// TestResolveExtractionFactsClassifiesByDefaultWithoutADecisionRelevantPredicate
+// proves the fix for ADR review 2026091301: with no binding/gate predicate
+// authored anywhere that references a governed tier-3 path (the exact
+// production state that left classify_document permanently unreachable),
+// ResolveExtractionFacts must still invoke the classifier by default
+// (CLASSIFY_DOCUMENT_ENABLED unset => true) so the four governed facets get
+// populated for every document, not only when a routing predicate happens to
+// ask for one of them.
+func TestResolveExtractionFactsClassifiesByDefaultWithoutADecisionRelevantPredicate(t *testing.T) {
+	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
+	SetProductionPipelineBindings(nil) // no conditional bindings authored, mirrors production
+
+	callCount := 0
+	ext := &countingExtractor{count: &callCount, result: map[string]any{}}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: &stubFacetStore{}}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: &stubFacetStore{}}
+
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, "attempt-1", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts: %v", err)
+	}
+	if result == nil || !result.Classified {
+		t.Fatalf("expected the classifier to run by default with no decision-relevant predicate, result=%#v", result)
+	}
+	if callCount != 1 {
+		t.Fatalf("callCount=%d, want 1", callCount)
+	}
+}
+
+// TestResolveExtractionFactsClassifyDocumentDisabledSkipsClassifierEntirely
+// proves CLASSIFY_DOCUMENT_ENABLED=false is a full kill switch for extraction
+// routing: even with an active binding predicate that references a governed
+// tier-3 path (the same setup TestResolveExtractionFactsInvokesClassifier...
+// above proves triggers a call when enabled), no LLM call happens.
+func TestResolveExtractionFactsClassifyDocumentDisabledSkipsClassifierEntirely(t *testing.T) {
+	t.Setenv("CLASSIFY_DOCUMENT_ENABLED", "false")
+	t.Cleanup(func() { SetProductionPipelineBindings(nil) })
+	SetProductionPipelineBindings([]PipelineBinding{
+		{
+			BindingKind: PipelineBindingKindConditional, PipelineName: "pdf_pipeline", Active: true,
+			Predicate: semrules.Document{Version: 1, Expression: semrules.Predicate{
+				Kind: "fact", Path: "document.doc_kind", Op: "eq", Value: "product_specification",
+			}},
+		},
+	})
+
+	callCount := 0
+	ext := &countingExtractor{count: &callCount, result: map[string]any{}}
+	classifier := &DocumentClassifier{Extractor: ext, PromptText: "test", ModelName: "test", Vocabulary: testVocabulary(), Facets: &stubFacetStore{}}
+	resolver := &ApplicabilityResolver{Classifier: classifier, Facets: &stubFacetStore{}}
+
+	_, result, err := resolver.ResolveExtractionFacts(context.Background(), ProductionPlanFacts{InputDocType: "pdf"}, 1, "attempt-1", "sample")
+	if err != nil {
+		t.Fatalf("ResolveExtractionFacts: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected a nil result (short-circuited before Resolve) when disabled, got %#v", result)
 	}
 	if callCount != 0 {
 		t.Fatalf("callCount=%d, want 0", callCount)

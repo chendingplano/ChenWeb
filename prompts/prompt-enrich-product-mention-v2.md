@@ -97,62 +97,6 @@ Allowed relation_type values:
 11. If the relation is uncertain, include it with low confidence and explain why.
 12. If no product relation exists, return an empty products array.
 
-## Extract Category Paths
-
-For each product, extract its category paths.
-
-### Category structure
-
-A category path is made of one or more categories, forming a category path:
-```text
-  <domain>/<subdomain>/..., similar to file path.
-```
-
-* `<domain>` is the domain of the product. MUST be generic, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
-* `<subdomain>` MUST also be generic within its domain.
-* Last level = most specific
-* Each level MUST be semantically narrower than its parent
-* `<domain>`, `<subdomain>` and subsequent categories MUST be in its input language.
-* Limit the max depth of category paths to 10
-
-### Category Paths Extraction Rules
-
-* Extract multiple category paths per product
-* Provide both category-level keywords and path-level keywords
-* Keywords MUST:
-
-  * Be directly grounded in the input
-  * Be specific and meaningful (not generic words)
-  * Help distinguish this topic from others
-  * Keywords are in its input language
-
-### Confidence
-
-* Provide a confidence score between 0 and 1 for each category path
-* Confidence reflects:
-
-  * Clarity of the topic in the input
-  * Completeness of the category path
-  * Strength of supporting evidence
-* Use:
-
-  * ≥0.85 → strong, explicit topic
-  * 0.6–0.85 → reasonably clear topic
-  * <0.6 → weak or inferred topic (avoid if possible)
-
-### Category Quality
-
-* Use canonical noun phrases
-* Avoid verbs, sentences, or vague terms
-* Avoid generic categories such as:
-
-  * "general", "other", "miscellaneous"
-
-### Consistency
-
-* Reuse common top-level categories when appropriate
-* Keep naming style consistent across all paths
-
 ## Languages
 
 * All text (i.e., the fields that have the corresponding "_en" name) fields are in its input language
@@ -217,25 +161,6 @@ A category path is made of one or more categories, forming a category path:
         },
       ],
       "discriminators_en": [...]
-
-      "category_paths": [
-        {
-          "category_path": [
-            {
-              "name": "category-name",
-              "keywords": ["keyword", "keyword"...],
-              "confidence": ddd
-            },
-            {
-              <the next category>
-            },
-            ...
-          ],
-          "path_keywords": ["keyword", "keyword"...],
-          "path_confidence": ddd
-        }
-      ]
-      "category_paths_en": [...]
     }
   ]
 }
