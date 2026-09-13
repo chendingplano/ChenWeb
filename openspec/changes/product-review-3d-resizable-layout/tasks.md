@@ -125,5 +125,7 @@
   `kb.product_drawings` rows are never deleted on regenerate (intentionally out of scope), and that the
   `product-metric-reviewer-page` capability spec was never merged into `openspec/specs/` (pre-existing gap,
   not fixed by this change). (`KnowledgeStore/doc-repo/devdocs/202609/2026091302-devdoc-product-review-3d-resizable-layout.md`.)
-- [ ] 6.6 Commit via `jj` (workspace `CLAUDE.md` git workflow): migration + backend as one commit, frontend
-  as another.
+- [x] 6.6 Commit via `jj` (workspace `CLAUDE.md` git workflow): migration + backend as one commit, frontend
+  as another. (Committed as a single `jj` commit instead, per explicit user direction after the working
+  tree turned out to also hold unrelated pre-existing uncommitted work — a product-name typeahead feature
+  — which the user asked to include in the same commit; see commit `a9b6`.)

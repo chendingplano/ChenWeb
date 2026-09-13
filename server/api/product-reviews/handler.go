@@ -489,6 +489,41 @@ func GetProductReviewRunResults(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "results": results, "count": len(results)})
 }
 
+// GetProductReviewMetricDetail — GET /kb/product-reviews/artifacts/:artifact_id/metric
+func GetProductReviewMetricDetail(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H23")
+	defer rc.Close()
+	artifactID := strings.TrimSpace(c.Param("artifact_id"))
+	if artifactID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "missing artifact id"})
+	}
+	detail, err := FetchMetricDetail(c.Request().Context(), ApiTypes.ProjectDBHandle, artifactID)
+	if err != nil {
+		return fail(c, err)
+	}
+	if detail == nil {
+		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": "metric not found"})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "metric": detail})
+}
+
+// GetProductReviewObjectNames — GET /kb/product-reviews/objects?ids=obj_1,obj_2
+func GetProductReviewObjectNames(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H24")
+	defer rc.Close()
+	var ids []string
+	for _, id := range strings.Split(c.QueryParam("ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	names, err := FetchObjectNames(c.Request().Context(), ApiTypes.ProjectDBHandle, ids)
+	if err != nil {
+		return fail(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "objects": names})
+}
+
 // GetProductReviewRunDocuments — GET /kb/product-reviews/runs/:run_id/documents
 func GetProductReviewRunDocuments(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H16")

@@ -147,6 +147,25 @@ export type ResultRow = {
 	primary_label: string;
 };
 
+export type ObjectName = {
+	object_id: string;
+	name: string;
+	name_en: string;
+};
+
+export type MetricDetail = {
+	artifact_id: string;
+	metric_name: string;
+	subject: string;
+	value: string;
+	threshold: string;
+	unit: string;
+	frequency: string;
+	class: string;
+	data_type: string;
+	range_type: string;
+};
+
 export type ScopedDocument = {
 	input_record_id: number;
 	fused_score: number;
@@ -393,6 +412,18 @@ export function getRunDocuments(
 
 export function getRunDiff(runId: number): Promise<{ status: true; diff: RunDiff }> {
 	return call(`/product-reviews/runs/${runId}/diff`);
+}
+
+export function getMetricDetail(
+	artifactId: string
+): Promise<{ status: true; metric: MetricDetail }> {
+	return call(`/product-reviews/artifacts/${encodeURIComponent(artifactId)}/metric`);
+}
+
+export function getObjectNames(
+	objectIds: string[]
+): Promise<{ status: true; objects: ObjectName[] }> {
+	return call(`/product-reviews/objects?ids=${objectIds.map(encodeURIComponent).join(',')}`);
 }
 
 /** URL for the CSV export — the sandbox blocks script-driven downloads, so hand

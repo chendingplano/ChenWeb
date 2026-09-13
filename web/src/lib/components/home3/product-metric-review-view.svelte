@@ -4,7 +4,6 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import {
 		AlertTriangle,
-		ArrowUpRight,
 		ChevronDown,
 		ChevronRight,
 		CircleDot,
@@ -24,6 +23,8 @@
 		getProfile,
 		getReview,
 		getRun,
+		getMetricDetail,
+		getObjectNames,
 		getRunDiff,
 		getRunDocuments,
 		getRunResults,
@@ -33,6 +34,7 @@
 		runExportUrl,
 		setProfileDrawing,
 		updateNode,
+		type MetricDetail,
 		type Profile,
 		type ProfileNode,
 		type ResultRow,
@@ -49,7 +51,20 @@
 		productDrawingContentUrl,
 		type PendingProductDrawing
 	} from '$lib/services/productDrawingService';
-	import { getKbInput, getRawLines, type KbInputRecord, type RawLine } from '$lib/services/kbService';
+	import {
+		getKbInput,
+		getRawLines,
+		listKbMetrics,
+		type KbInputRecord,
+		type KbMetricRecord,
+		type RawLine
+	} from '$lib/services/kbService';
+	import {
+		buildLineNumToPage,
+		buildMetricGroupAttrs,
+		normalizeMetricSpans,
+		type AttrDef
+	} from './metric-detail-groups';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
@@ -297,6 +312,73 @@
 		showDrawingGenerator = true;
 	}
 
+	// Full-details dialog — shows the same curated Metric/Metadata/Context/
+	// Grounding/Reasoning fields as the Metrics workspace (metric-mgmt-view.svelte)
+	// for the selected result's metric, in-place, without leaving this page.
+	let showFullDetailsDialog = $state(false);
+	let fullDetailsLoading = $state(false);
+	let fullDetailsError = $state('');
+	let fullDetailsMetric = $state<KbMetricRecord | null>(null);
+	let fullDetailsRequestId = 0;
+
+	function openFullDetails(r: ResultRow | null) {
+		if (!r) return;
+		showFullDetailsDialog = true;
+		fullDetailsError = '';
+		fullDetailsMetric = null;
+		fullDetailsLoading = true;
+		const requestId = ++fullDetailsRequestId;
+		listKbMetrics(r.input_record_id)
+			.then((res) => {
+				if (requestId !== fullDetailsRequestId) return; // superseded
+				const target = (res.results ?? []).find((metric) => metric.metric_id === r.artifact_id);
+				if (!target) {
+					fullDetailsError = m.pmr_full_details_not_found();
+					return;
+				}
+				fullDetailsMetric = target;
+			})
+			.catch((e) => {
+				if (requestId !== fullDetailsRequestId) return;
+				fullDetailsError = e instanceof Error ? e.message : String(e);
+			})
+			.finally(() => {
+				if (requestId === fullDetailsRequestId) fullDetailsLoading = false;
+			});
+	}
+
+	// The source document's raw lines are already loaded for the selected
+	// result (to jump/highlight the PDF); reuse them for the Grounding section
+	// instead of fetching again.
+	let fullDetailsRawLines = $derived.by(() =>
+		fullDetailsMetric && detailInputId === fullDetailsMetric.input_record_id ? detailRawLines : []
+	);
+	let fullDetailsGroups = $derived.by(() => {
+		const metric = fullDetailsMetric;
+		if (!metric) return null;
+		const lineNumToPage = buildLineNumToPage(fullDetailsRawLines);
+		const lineByKey = new Map<string, RawLine>();
+		for (const ln of fullDetailsRawLines) lineByKey.set(`${ln.page_number}:${ln.line_number}`, ln);
+		const spans = normalizeMetricSpans(metric, lineNumToPage);
+		return buildMetricGroupAttrs(metric, spans, lineByKey);
+	});
+
+	function attrRows(attrs: AttrDef[]): FlatRow[] {
+		const rows: FlatRow[] = [];
+		for (const a of attrs) {
+			if (a.kind === 'lines' && a.hasValue) {
+				rows.push({ key: a.label, value: null, depth: 0 });
+				for (const entry of a.entries) {
+					const key = entry.lineType ? `${entry.head} (${entry.lineType})` : entry.head;
+					rows.push({ key, value: entry.content || '—', depth: 1 });
+				}
+			} else {
+				rows.push({ key: a.label, value: a.hasValue ? a.value : '—', depth: 0 });
+			}
+		}
+		return rows;
+	}
+
 	// ── metric-details panel (results tab, right column) — selecting a result
 	// row loads its source document's raw lines once (cached per document, so
 	// clicking between rows of the same document doesn't refetch), jumps the
@@ -307,6 +389,8 @@
 	let detailRawLines = $state<RawLine[]>([]);
 	let detailLoading = $state(false);
 	let detailError = $state('');
+	let metricDetailId = $state<string | null>(null);
+	let metricDetail = $state<MetricDetail | null>(null);
 	let detailDocPage = $state(1);
 	let detailPdfZoom = $state(0.5);
 	let detailPdfNumPages = $state(0);
@@ -388,6 +472,17 @@
 		selectedResult = r;
 		detailHighlightVersion += 1;
 		detailError = '';
+		if (metricDetailId !== r.artifact_id) {
+			metricDetailId = r.artifact_id;
+			metricDetail = null;
+			getMetricDetail(r.artifact_id)
+				.then((res) => {
+					if (metricDetailId === r.artifact_id) metricDetail = res.metric;
+				})
+				.catch(() => {
+					if (metricDetailId === r.artifact_id) metricDetail = null;
+				});
+		}
 		if (detailInputId !== r.input_record_id) {
 			detailInputId = r.input_record_id;
 			detailInput = null;
@@ -567,6 +662,32 @@
 		return map;
 	});
 
+	const nodeObjectId = $derived.by(() => {
+		const map = new Map<number, string>();
+		for (const n of nodes) map.set(n.id, n.object_id);
+		return map;
+	});
+
+	// object_id is a kb.object_nodes foreign key, not a display value — resolve
+	// it to the object's canonical name whenever the node set changes.
+	let objectName = $state<Map<string, string>>(new Map());
+	$effect(() => {
+		const ids = Array.from(new Set(nodes.map((n) => n.object_id).filter((id) => id)));
+		if (ids.length === 0) {
+			objectName = new Map();
+			return;
+		}
+		getObjectNames(ids)
+			.then((res) => {
+				const map = new Map<string, string>();
+				for (const o of res.objects) map.set(o.object_id, o.name || o.name_en || o.object_id);
+				objectName = map;
+			})
+			.catch(() => {
+				objectName = new Map();
+			});
+	});
+
 	// ── results view ──────────────────────────────────────────────────────────
 	const filtered = $derived.by(() => {
 		const t = textFilter.trim().toLowerCase();
@@ -681,9 +802,78 @@
 		}
 	}
 
-	function recordHref(recordId: number): string {
-		return `/home3/knowledge?section=kb-input-details&record_id=${recordId}&dark=${darkMode ? '1' : '0'}`;
+	// ── document dialog — shows the selected result's kb.inputs record (the
+	// same "Record Fields" / "Doc Metadata" layout as the Upload Files view's
+	// record viewer) instead of navigating to a page ─────────────────────────
+	let showDocumentDialog = $state(false);
+
+	type FlatRow = { key: string; value: string | null; depth: number };
+
+	function tryParseJsonLike(v: unknown): unknown {
+		if (typeof v !== 'string') return v;
+		const t = v.trim();
+		if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+			try {
+				return JSON.parse(t);
+			} catch {
+				/* not JSON */
+			}
+		}
+		return v;
 	}
+
+	function flattenForDisplay(obj: unknown, depth = 0): FlatRow[] {
+		const rows: FlatRow[] = [];
+		if (obj === null || obj === undefined || typeof obj !== 'object') return rows;
+		const entries: Array<[string, unknown]> = Array.isArray(obj)
+			? (obj as unknown[]).map((v, i) => [`[${i}]`, v] as [string, unknown])
+			: Object.entries(obj as Record<string, unknown>);
+		for (const [k, v] of entries) {
+			const parsed = tryParseJsonLike(v);
+			if (parsed !== null && parsed !== undefined && typeof parsed === 'object') {
+				const isArr = Array.isArray(parsed);
+				const len = isArr ? (parsed as unknown[]).length : Object.keys(parsed as object).length;
+				if (len === 0) {
+					rows.push({ key: k, value: isArr ? '[]' : '{}', depth });
+				} else if (isArr && (parsed as unknown[]).every((item) => item === null || typeof item !== 'object')) {
+					rows.push({
+						key: k,
+						value: (parsed as unknown[]).map((item) => (item === null ? 'null' : String(item))).join(', '),
+						depth
+					});
+				} else {
+					rows.push({ key: k, value: null, depth });
+					rows.push(...flattenForDisplay(parsed, depth + 1));
+				}
+			} else {
+				rows.push({ key: k, value: v === null || v === undefined ? '—' : String(v).trim() || '—', depth });
+			}
+		}
+		return rows;
+	}
+
+	let documentDialogRecordRows = $derived.by((): FlatRow[] => {
+		if (!detailInput) return [];
+		const filtered: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(detailInput as unknown as Record<string, unknown>)) {
+			if (k !== 'status' && k !== 'doc_metadata') filtered[k] = v;
+		}
+		return flattenForDisplay(filtered);
+	});
+
+	let documentDialogDocMeta = $derived.by((): FlatRow[] => {
+		if (!detailInput) return [];
+		let meta: unknown = detailInput.doc_metadata;
+		if (typeof meta === 'string') {
+			try {
+				meta = JSON.parse(meta);
+			} catch {
+				return [];
+			}
+		}
+		if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return [];
+		return flattenForDisplay(meta);
+	});
 
 	function fmtScore(s: number): string {
 		return s.toFixed(3);
@@ -1001,20 +1191,27 @@
 								<dl class="drawer-fields">
 									<dt>{m.pmr_field_artifact()}</dt>
 									<dd class="mono">{selectedResult.artifact_id}</dd>
+									<dt>{m.pmr_field_metric_name()}</dt>
+									<dd>{metricDetail?.metric_name || '—'}</dd>
+									<dt>{m.pmr_field_subject()}</dt>
+									<dd>{metricDetail?.subject || '—'}</dd>
+									<dt>{m.pmr_field_object()}</dt>
+									<dd>
+										{selectedResult.node_id == null
+											? m.pmr_none()
+											: objectName.get(nodeObjectId.get(selectedResult.node_id) ?? '') || '—'}
+									</dd>
 									<dt>{m.pmr_field_document()}</dt>
 									<dd>
-										<a
-											href={recordHref(selectedResult.input_record_id)}
-											target="_blank"
-											rel="noopener"
+										<button
+											type="button"
+											class="field-link"
+											onclick={() => (showDocumentDialog = true)}
 										>
 											#{selectedResult.input_record_id}
-											<ArrowUpRight size={12} />
-										</a>
+										</button>
 									</dd>
-									<dt>{m.pmr_field_line_spans()}</dt>
-									<dd class="mono">{spansText(selectedResult.source_line_spans) || '—'}</dd>
-									<dt>{m.pmr_field_matched_node()}</dt>
+									<dt>{m.pmr_field_matched_name()}</dt>
 									<dd>
 										{selectedResult.node_id != null
 											? (nodeLabel.get(selectedResult.node_id) ?? `#${selectedResult.node_id}`)
@@ -1022,20 +1219,34 @@
 									</dd>
 									<dt>{m.pmr_field_paths()}</dt>
 									<dd class="mono">{selectedResult.paths.join(' · ') || '—'}</dd>
+									<dt>{m.pmr_field_value()}</dt>
+									<dd>{metricDetail?.value || '—'}</dd>
+									<dt>{m.pmr_field_threshold()}</dt>
+									<dd>{metricDetail?.threshold || '—'}</dd>
+									<dt>{m.pmr_field_unit()}</dt>
+									<dd>{metricDetail?.unit || '—'}</dd>
+									<dt>{m.pmr_field_frequency()}</dt>
+									<dd>{metricDetail?.frequency || '—'}</dd>
+									<dt>{m.pmr_field_class()}</dt>
+									<dd>{metricDetail?.class || '—'}</dd>
+									<dt>{m.pmr_field_data_type()}</dt>
+									<dd>{metricDetail?.data_type || '—'}</dd>
+									<dt>{m.pmr_field_range_type()}</dt>
+									<dd>{metricDetail?.range_type || '—'}</dd>
 									<dt>{m.pmr_field_score()}</dt>
 									<dd class="mono">{fmtScore(selectedResult.score)}</dd>
+									<dt>{m.pmr_field_line_spans()}</dt>
+									<dd class="mono">{spansText(selectedResult.source_line_spans) || '—'}</dd>
 									<dt>{m.pmr_field_reason()}</dt>
 									<dd>{selectedResult.inclusion_reason}</dd>
 								</dl>
-								<a
-									class="ghost wide"
-									href={recordHref(selectedResult.input_record_id)}
-									target="_blank"
-									rel="noopener"
+								<button
+									type="button"
+									class="ghost full-details-btn"
+									onclick={() => openFullDetails(selectedResult)}
 								>
-									{m.pmr_open_source()}
-									<ArrowUpRight size={13} />
-								</a>
+									{m.pmr_full_details_button()}
+								</button>
 							{/if}
 						</div>
 						<div class="detail-pdf">
@@ -1068,6 +1279,128 @@
 		{/if}
 	</div>
 
+	{#if showDocumentDialog && detailInput}
+	<div
+		class="doc-dialog-overlay"
+		onmousedown={(e) => {
+			if (e.target === e.currentTarget) showDocumentDialog = false;
+		}}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') showDocumentDialog = false;
+		}}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="doc-dialog"
+			onmousedown={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label={m.pmr_field_document()}
+			tabindex="0"
+		>
+			<div class="doc-dialog-head">
+				<h3>Record ID: {detailInput.id}</h3>
+				<button type="button" class="ghost" onclick={() => (showDocumentDialog = false)}>
+					{m.pmr_close()}
+				</button>
+			</div>
+			<div class="doc-dialog-body">
+				<div>
+					<div class="doc-dialog-section-title">{m.pmr_record_fields()}</div>
+					<div class="doc-dialog-rows">
+						{#each documentDialogRecordRows as row}
+							<div class="doc-dialog-row" style="padding-left:{row.depth * 16}px">
+								<span class="doc-dialog-key">{row.key}</span>
+								{#if row.value !== null}
+									<span class="doc-dialog-value">{row.value}</span>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				</div>
+				<div>
+					<div class="doc-dialog-section-title">
+						{m.pmr_doc_metadata({ n: documentDialogDocMeta.filter((r) => r.depth === 0).length })}
+					</div>
+					{#if documentDialogDocMeta.length === 0}
+						<div class="muted">{m.pmr_doc_metadata_empty()}</div>
+					{:else}
+						<div class="doc-dialog-rows">
+							{#each documentDialogDocMeta as row}
+								<div class="doc-dialog-row" style="padding-left:{row.depth * 16}px">
+									<span class="doc-dialog-key">{row.key}</span>
+									{#if row.value !== null}
+										<span class="doc-dialog-value">{row.value}</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	</div>
+	{/if}
+
+	{#if showFullDetailsDialog}
+		<div
+			class="doc-dialog-overlay"
+			onmousedown={(e) => {
+				if (e.target === e.currentTarget) showFullDetailsDialog = false;
+			}}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') showFullDetailsDialog = false;
+			}}
+			role="button"
+			tabindex="0"
+		>
+			<div
+				class="doc-dialog"
+				onmousedown={(e) => e.stopPropagation()}
+				onkeydown={(e) => e.stopPropagation()}
+				role="dialog"
+				aria-modal="true"
+				aria-label={m.pmr_full_details_button()}
+				tabindex="0"
+			>
+				<div class="doc-dialog-head">
+					<h3>{fullDetailsMetric?.metric_name || selectedResult?.artifact_id || ''}</h3>
+					<button type="button" class="ghost" onclick={() => (showFullDetailsDialog = false)}>
+						{m.pmr_close()}
+					</button>
+				</div>
+				<div class="doc-dialog-body">
+					{#if fullDetailsLoading}
+						<div class="note">{m.pmr_full_details_loading()}</div>
+					{:else if fullDetailsError}
+						<div class="note">{fullDetailsError}</div>
+					{:else if fullDetailsGroups}
+						{@const groups = fullDetailsGroups}
+						{#each [{ label: m.pmr_group_metric(), attrs: groups.metric }, { label: m.pmr_group_metadata(), attrs: groups.metadata }, { label: m.pmr_group_context(), attrs: groups.context }, { label: m.pmr_group_grounding(), attrs: groups.grounding }, { label: m.pmr_group_reasoning(), attrs: groups.reasoning }] as group (group.label)}
+							{@const filled = group.attrs.filter((a) => a.hasValue).length}
+							<div>
+								<div class="doc-dialog-section-title">
+									{group.label} ({filled}/{group.attrs.length})
+								</div>
+								<div class="doc-dialog-rows">
+									{#each attrRows(group.attrs) as row}
+										<div class="doc-dialog-row" style="padding-left:{row.depth * 16}px">
+											<span class="doc-dialog-key">{row.key}</span>
+											{#if row.value !== null}
+												<span class="doc-dialog-value">{row.value}</span>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/each}
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 {#snippet treeNode(node: TreeNode, depth: number)}
@@ -1551,11 +1884,6 @@
 	.ghost:disabled {
 		opacity: 0.5;
 		cursor: wait;
-	}
-	.ghost.wide {
-		justify-content: center;
-		width: 100%;
-		margin-top: 14px;
 	}
 	.primary {
 		padding: 9px 14px;
@@ -2234,12 +2562,95 @@
 		margin: 0;
 		word-break: break-word;
 	}
-	.drawer-fields a {
+	.drawer-fields .field-link {
 		color: var(--bronze);
-		text-decoration: none;
-		display: inline-flex;
+		font-family: 'DM Mono', monospace;
+		border: 0;
+		background: none;
+		padding: 0;
+		font-size: inherit;
+		cursor: pointer;
+	}
+	.full-details-btn {
+		width: 100%;
+		justify-content: center;
+		margin-top: 14px;
+	}
+
+	/* document record dialog */
+	.doc-dialog-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: flex;
 		align-items: center;
-		gap: 3px;
+		justify-content: center;
+		padding: 24px;
+		background: rgba(15, 23, 42, 0.62);
+	}
+	.doc-dialog {
+		display: flex;
+		flex-direction: column;
+		width: min(760px, calc(100vw - 48px));
+		max-height: calc(100vh - 48px);
+		overflow: hidden;
+		border-radius: 12px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		box-shadow: var(--shadow);
+	}
+	.doc-dialog-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12px 16px;
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+	.doc-dialog-head h3 {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.doc-dialog-body {
+		padding: 16px;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	.doc-dialog-section-title {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--subtle);
+		margin-bottom: 6px;
+	}
+	.doc-dialog-rows {
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 6px 8px;
+	}
+	.doc-dialog-row {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		min-height: 20px;
+		padding: 2px 0;
+	}
+	.doc-dialog-key {
+		width: 160px;
+		flex-shrink: 0;
+		font-size: 12px;
+		color: var(--subtle);
+		word-break: break-all;
+	}
+	.doc-dialog-value {
+		font-size: 12px;
+		color: var(--text);
+		word-break: break-word;
+		flex: 1;
+		min-width: 0;
 	}
 
 	@media (max-width: 1000px) {
