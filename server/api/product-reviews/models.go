@@ -62,6 +62,7 @@ type Profile struct {
 	Status             string    `json:"status"`
 	Truncated          bool      `json:"truncated"`
 	TruncatedCount     int       `json:"truncated_count"`
+	DrawingID          *int64    `json:"drawing_id,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -115,6 +116,21 @@ type ProfileNode struct {
 // ambiguous / pending-review reconcile state and must be flagged to a reviewer.
 func (n ProfileNode) NeedsReconcileReview() bool {
 	return reconcileNeedsReview[n.ReconcileStatus]
+}
+
+// ProductNameEntry is one row of the kb.product_names catalog, trimmed to
+// the fields the intake page's client-side name typeahead needs (design:
+// product-name-typeahead — the catalog is a few thousand rows and changes
+// rarely, so the browser loads it once and searches in memory rather than
+// querying per keystroke).
+type ProductNameEntry struct {
+	ID            int64    `json:"id"`
+	ProductName   string   `json:"product_name"`
+	ProductNameEN string   `json:"product_name_en"`
+	Aliases       []string `json:"aliases"`
+	CategoryL1    string   `json:"category_l1"`
+	CategoryL2    string   `json:"category_l2"`
+	Status        string   `json:"status"`
 }
 
 // NewProfileInput is the payload for creating a profile.

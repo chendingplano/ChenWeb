@@ -92,18 +92,22 @@ func (s Store) CreateProfile(ctx context.Context, in NewProfileInput) (*Profile,
 	keywords, _ := json.Marshal(orEmpty(in.Keywords))
 	p := Profile{}
 	var keywordsRaw []byte
+	var drawingID sql.NullInt64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO kb.product_profiles (tenant_id, name, product_description, keywords, notes)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, tenant_id, name, product_description, keywords, notes, version, status,
-		          truncated, truncated_count, created_at, updated_at`,
+		          truncated, truncated_count, drawing_id, created_at, updated_at`,
 		tenant, name, strings.TrimSpace(in.ProductDescription), keywords, strings.TrimSpace(in.Notes),
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
-		&p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal(keywordsRaw, &p.Keywords)
+	if drawingID.Valid {
+		p.DrawingID = &drawingID.Int64
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO kb.product_profile_nodes
@@ -123,12 +127,13 @@ func (s Store) CreateProfile(ctx context.Context, in NewProfileInput) (*Profile,
 func (s Store) GetProfile(ctx context.Context, id int64) (*Profile, error) {
 	p := Profile{}
 	var keywordsRaw []byte
+	var drawingID sql.NullInt64
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT id, tenant_id, name, product_description, keywords, notes, version, status,
-		       truncated, truncated_count, created_at, updated_at
+		       truncated, truncated_count, drawing_id, created_at, updated_at
 		FROM kb.product_profiles WHERE id = $1`, id,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
-		&p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -136,6 +141,9 @@ func (s Store) GetProfile(ctx context.Context, id int64) (*Profile, error) {
 		return nil, err
 	}
 	_ = json.Unmarshal(keywordsRaw, &p.Keywords)
+	if drawingID.Valid {
+		p.DrawingID = &drawingID.Int64
+	}
 	return &p, nil
 }
 
@@ -150,14 +158,15 @@ func (s Store) FindProfileByName(ctx context.Context, tenantID, name string) (*P
 	}
 	p := Profile{}
 	var keywordsRaw []byte
+	var drawingID sql.NullInt64
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT id, tenant_id, name, product_description, keywords, notes, version, status,
-		       truncated, truncated_count, created_at, updated_at
+		       truncated, truncated_count, drawing_id, created_at, updated_at
 		FROM kb.product_profiles
 		WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))
 		ORDER BY updated_at DESC LIMIT 1`, tenant, name,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
-		&p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -165,6 +174,9 @@ func (s Store) FindProfileByName(ctx context.Context, tenantID, name string) (*P
 		return nil, err
 	}
 	_ = json.Unmarshal(keywordsRaw, &p.Keywords)
+	if drawingID.Valid {
+		p.DrawingID = &drawingID.Int64
+	}
 	return &p, nil
 }
 
@@ -178,7 +190,7 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT p.id, p.tenant_id, p.name, p.product_description, p.keywords, p.notes, p.version,
-		       p.status, p.truncated, p.truncated_count, p.created_at, p.updated_at,
+		       p.status, p.truncated, p.truncated_count, p.drawing_id, p.created_at, p.updated_at,
 		       r.id, ru.id, ru.status, ru.finished_at
 		FROM kb.product_profiles p
 		LEFT JOIN LATERAL (
@@ -201,16 +213,20 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 		var (
 			p                ProfileSummary
 			keywordsRaw      []byte
+			drawingID        sql.NullInt64
 			requestID, runID sql.NullInt64
 			runStatus        sql.NullString
 			runFinishedAt    sql.NullTime
 		)
 		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes,
-			&p.Version, &p.Status, &p.Truncated, &p.TruncatedCount, &p.CreatedAt, &p.UpdatedAt,
+			&p.Version, &p.Status, &p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt,
 			&requestID, &runID, &runStatus, &runFinishedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(keywordsRaw, &p.Keywords)
+		if drawingID.Valid {
+			p.DrawingID = &drawingID.Int64
+		}
 		if requestID.Valid {
 			p.LatestRequestID = &requestID.Int64
 		}
@@ -221,6 +237,36 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 		if runFinishedAt.Valid {
 			p.LatestRunFinishedAt = &runFinishedAt.Time
 		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListProductNames returns the approved+proposed kb.product_names catalog
+// (rejected rows excluded) for the intake page's client-side name typeahead
+// — see ProductNameEntry.
+func (s Store) ListProductNames(ctx context.Context) ([]ProductNameEntry, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT id, product_name, product_name_en, COALESCE(aliases, '[]'::jsonb),
+		       category_l1, category_l2, status
+		FROM kb.product_names
+		WHERE status IN ('approved', 'proposed')
+		ORDER BY product_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ProductNameEntry
+	for rows.Next() {
+		var (
+			p          ProductNameEntry
+			aliasesRaw []byte
+		)
+		if err := rows.Scan(&p.ID, &p.ProductName, &p.ProductNameEN, &aliasesRaw,
+			&p.CategoryL1, &p.CategoryL2, &p.Status); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(aliasesRaw, &p.Aliases)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -266,6 +312,20 @@ func (s Store) SetProfileStatus(ctx context.Context, id int64, status string) er
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE kb.product_profiles SET status = $2, updated_at = NOW() WHERE id = $1`,
 		id, status)
+	return err
+}
+
+// SetProfileDrawing associates a kept kb.product_drawings row with a profile
+// (spec: product-review-results-layout). Not a node-set mutation, so it does
+// not bump the version. drawingID of 0 clears the association.
+func (s Store) SetProfileDrawing(ctx context.Context, id int64, drawingID int64) error {
+	var arg any
+	if drawingID > 0 {
+		arg = drawingID
+	}
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE kb.product_profiles SET drawing_id = $2, updated_at = NOW() WHERE id = $1`,
+		id, arg)
 	return err
 }
 

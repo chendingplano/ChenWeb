@@ -60,6 +60,9 @@ export type Profile = {
 	status: ProfileStatus;
 	truncated: boolean;
 	truncated_count: number;
+	/** Kept `kb.product_drawings` row associated with this profile, if any
+	 *  (spec: product-review-results-layout). */
+	drawing_id?: number | null;
 	created_at: string;
 	updated_at: string;
 };
@@ -234,6 +237,16 @@ export function setProfileReady(
 	ready = true
 ): Promise<{ status: true; profile_status: ProfileStatus }> {
 	return call(`/product-profiles/${id}/ready`, jsonBody({ ready }));
+}
+
+/** Associates a kept product-drawings row with a profile (spec:
+ *  product-review-results-layout); pass 0 to clear the association. */
+export function setProfileDrawing(id: number, drawingId: number): Promise<{ status: true }> {
+	return call(`/product-profiles/${id}/drawing`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ drawing_id: drawingId })
+	});
 }
 
 export function addNode(

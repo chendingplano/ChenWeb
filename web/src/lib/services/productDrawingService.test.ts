@@ -22,9 +22,11 @@ describe('productDrawingService', () => {
 
 	test('keeps and ignores a pending drawing', async () => {
 		const fetchFn = mock()
-			.mockResolvedValueOnce(response({ status: true, filename: 'drawing.png', path: 'resources/product-drawings/drawing.png' }))
+			.mockResolvedValueOnce(
+				response({ status: true, filename: 'drawing.png', path: 'resources/product-drawings/drawing.png', id: 42 })
+			)
 			.mockResolvedValueOnce(response({ status: true, ignored: true }));
-		await expect(keepProductDrawing('abc', fetchFn)).resolves.toMatchObject({ filename: 'drawing.png' });
+		await expect(keepProductDrawing('abc', fetchFn)).resolves.toMatchObject({ filename: 'drawing.png', id: 42 });
 		await expect(ignoreProductDrawing('abc', fetchFn)).resolves.toBeUndefined();
 		expect(pendingProductDrawingContentUrl('abc')).toBe('/api/v1/product-drawings/pending/abc/content');
 	});

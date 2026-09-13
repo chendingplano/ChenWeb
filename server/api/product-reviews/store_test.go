@@ -133,8 +133,8 @@ func TestCreateProfileWithKeywordsAndNotes(t *testing.T) {
 		WithArgs("-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
-			"truncated", "truncated_count", "created_at", "updated_at",
-		}).AddRow(1, "-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck", 1, "draft", false, 0, time.Now(), time.Now()))
+			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
+		}).AddRow(1, "-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck", 1, "draft", false, 0, nil, time.Now(), time.Now()))
 	mock.ExpectExec(rx("INSERT INTO kb.product_profile_nodes")).
 		WithArgs(int64(1), KindProduct, "Ventilator", OriginUserAdded, StatusAccepted).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -181,8 +181,8 @@ func TestFindProfileByNameMatch(t *testing.T) {
 		WithArgs("acme", "  ventilator  ").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
-			"truncated", "truncated_count", "created_at", "updated_at",
-		}).AddRow(9, "acme", "Ventilator", "", []byte("[]"), "", 2, "ready", false, 0, time.Now(), time.Now()))
+			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
+		}).AddRow(9, "acme", "Ventilator", "", []byte("[]"), "", 2, "ready", false, 0, nil, time.Now(), time.Now()))
 
 	p, err := store.FindProfileByName(context.Background(), "acme", "  ventilator  ")
 	if err != nil {
@@ -204,8 +204,8 @@ func TestDuplicateProfileResponseWithCompletedRun(t *testing.T) {
 		WithArgs("-", "Ventilator").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
-			"truncated", "truncated_count", "created_at", "updated_at",
-		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "ready", false, 0, time.Now(), time.Now()))
+			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
+		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "ready", false, 0, nil, time.Now(), time.Now()))
 	mock.ExpectQuery(rx("FROM kb.product_review_requests")).WithArgs(int64(9)).
 		WillReturnRows(requestReturnRow(200, 9, 1))
 	mock.ExpectQuery(rx("FROM kb.product_review_runs")).WithArgs(int64(200)).
@@ -235,8 +235,8 @@ func TestDuplicateProfileResponseNoRunYet(t *testing.T) {
 		WithArgs("-", "Ventilator").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
-			"truncated", "truncated_count", "created_at", "updated_at",
-		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "draft", false, 0, time.Now(), time.Now()))
+			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
+		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "draft", false, 0, nil, time.Now(), time.Now()))
 	mock.ExpectQuery(rx("FROM kb.product_review_requests")).WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "profile_id", "profile_version", "artifact_types",
@@ -289,15 +289,15 @@ func TestListProfilesMixedRunHistory(t *testing.T) {
 	now := time.Now()
 	cols := []string{
 		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
-		"truncated", "truncated_count", "created_at", "updated_at",
+		"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
 		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at",
 	}
 	mock.ExpectQuery(rx("FROM kb.product_profiles p")).
 		WithArgs("acme", 50).
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow(9, "acme", "Ventilator", "", []byte(`["icu"]`), "", 2, "ready", false, 0, now, now,
+			AddRow(9, "acme", "Ventilator", "", []byte(`["icu"]`), "", 2, "ready", false, 0, int64(77), now, now,
 				int64(200), int64(300), RunCompleted, now).
-			AddRow(8, "acme", "Drone", "", []byte("[]"), "", 1, "draft", false, 0, now, now,
+			AddRow(8, "acme", "Drone", "", []byte("[]"), "", 1, "draft", false, 0, nil, now, now,
 				nil, nil, nil, nil))
 
 	out, err := store.ListProfiles(context.Background(), "acme", 50)
@@ -314,8 +314,81 @@ func TestListProfilesMixedRunHistory(t *testing.T) {
 	if len(out[0].Keywords) != 1 || out[0].Keywords[0] != "icu" {
 		t.Fatalf("out[0].Keywords = %+v, want [icu]", out[0].Keywords)
 	}
+	if out[0].DrawingID == nil || *out[0].DrawingID != 77 {
+		t.Fatalf("out[0].DrawingID = %v, want 77", out[0].DrawingID)
+	}
 	if out[1].ID != 8 || out[1].LatestRequestID != nil || out[1].LatestRunID != nil {
 		t.Fatalf("out[1] = %+v, want id 8 with no request/run", out[1])
+	}
+	if out[1].DrawingID != nil {
+		t.Fatalf("out[1].DrawingID = %v, want nil", out[1].DrawingID)
+	}
+}
+
+// Scenario: a profile with a kept drawing reports its drawing id (spec:
+// product-review-results-layout) — the Results page uses this to decide
+// whether to show the kept image or the inline generator.
+func TestGetProfileWithDrawing(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	drawingID := int64(42)
+	mock.ExpectQuery(rx("FROM kb.product_profiles WHERE id = $1")).
+		WithArgs(int64(9)).
+		WillReturnRows(profileRowsWithDrawing(9, "Ventilator", 2, "ready", false, 0, &drawingID))
+
+	p, err := store.GetProfile(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("GetProfile: %v", err)
+	}
+	if p == nil || p.DrawingID == nil || *p.DrawingID != 42 {
+		t.Fatalf("p.DrawingID = %v, want 42", p)
+	}
+}
+
+// Scenario: a profile with no drawing yet reports a nil drawing id.
+func TestGetProfileNoDrawing(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	mock.ExpectQuery(rx("FROM kb.product_profiles WHERE id = $1")).
+		WithArgs(int64(9)).
+		WillReturnRows(profileRows(9, "Ventilator", 1, "draft", false, 0))
+
+	p, err := store.GetProfile(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("GetProfile: %v", err)
+	}
+	if p == nil || p.DrawingID != nil {
+		t.Fatalf("p.DrawingID = %v, want nil", p)
+	}
+}
+
+// Scenario: keeping a generated drawing associates it with the profile.
+func TestSetProfileDrawingAssociates(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	mock.ExpectExec(rx("UPDATE kb.product_profiles SET drawing_id = $2")).
+		WithArgs(int64(9), int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := store.SetProfileDrawing(context.Background(), 9, 42); err != nil {
+		t.Fatalf("SetProfileDrawing: %v", err)
+	}
+}
+
+// Scenario: passing 0 clears a profile's drawing association.
+func TestSetProfileDrawingClears(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	mock.ExpectExec(rx("UPDATE kb.product_profiles SET drawing_id = $2")).
+		WithArgs(int64(9), nil).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := store.SetProfileDrawing(context.Background(), 9, 0); err != nil {
+		t.Fatalf("SetProfileDrawing: %v", err)
 	}
 }
 

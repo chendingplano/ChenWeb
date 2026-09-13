@@ -9,6 +9,7 @@ import {
 	rerunReview,
 	runExportUrl,
 	needsReconcileReview,
+	setProfileDrawing,
 	startProductReviewIntake,
 	type ProfileNode
 } from './productMetricReviewService';
@@ -40,6 +41,19 @@ test('createReview POSTs the review body to the reviews endpoint', async () => {
 		assert.equal(f.last().method, 'POST');
 		assert.deepEqual(JSON.parse(f.last().body), { profile_id: 7, artifact_types: ['metric'] });
 		assert.equal(out.run.status, 'completed');
+	} finally {
+		f.restore();
+	}
+});
+
+test('setProfileDrawing PATCHes the drawing id to the profile', async () => {
+	const f = stubFetch({ status: true });
+	try {
+		const out = await setProfileDrawing(7, 42);
+		assert.equal(f.last().url, '/api/v1/kb/product-profiles/7/drawing');
+		assert.equal(f.last().method, 'PATCH');
+		assert.deepEqual(JSON.parse(f.last().body), { drawing_id: 42 });
+		assert.equal(out.status, true);
 	} finally {
 		f.restore();
 	}

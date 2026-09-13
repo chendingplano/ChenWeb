@@ -9,10 +9,18 @@
 		type Profile,
 		type ProfileSummary
 	} from '$lib/services/productMetricReviewService';
+	import ProductNameField from './product-name-field.svelte';
 
 	// `embedded`: rendered inside content-panel.svelte's app shell, which already
 	// supplies the breadcrumb/topbar — hide our own so it isn't shown twice.
-	let { darkMode = false, embedded = false }: { darkMode?: boolean; embedded?: boolean } =
+	// `onStartedRun`, when given, is called instead of navigating to the
+	// standalone /home3/product-metric-review route — content-panel.svelte
+	// uses it to swap to the embedded results view without leaving the shell.
+	let {
+		darkMode = false,
+		embedded = false,
+		onStartedRun
+	}: { darkMode?: boolean; embedded?: boolean; onStartedRun?: (runId: number) => void } =
 		$props();
 
 	// ── form state ────────────────────────────────────────────────────────────
@@ -109,6 +117,10 @@
 	}
 
 	function goToRun(runId: number) {
+		if (onStartedRun) {
+			onStartedRun(runId);
+			return;
+		}
 		if (typeof window === 'undefined') return;
 		const u = new URL('/home3/product-metric-review', window.location.origin);
 		u.searchParams.set('run', String(runId));
@@ -258,15 +270,13 @@
 						start();
 					}}
 				>
-					<label>
-						<span>{m.pmr_intake_name_label()}</span>
-						<input
-							type="text"
-							bind:value={name}
-							placeholder={m.pmr_intake_name_placeholder()}
-							disabled={submitting}
-						/>
-					</label>
+					<ProductNameField
+						bind:value={name}
+						label={m.pmr_intake_name_label()}
+						placeholder={m.pmr_intake_name_placeholder()}
+						disabled={submitting}
+						style="--pnf-border: var(--border); --pnf-bg: var(--surface); --pnf-text: var(--text); --pnf-subtle: var(--subtle); --pnf-hover: color-mix(in oklch, var(--surface) 60%, var(--accent) 12%);"
+					/>
 					<label>
 						<span>{m.pmr_intake_description_label()}</span>
 						<textarea
@@ -314,11 +324,15 @@
 			{:else}
 				<div class="history-grid">
 					{#each profiles as p (p.id)}
-						<button
-							type="button"
+						<div
 							class="history-card"
 							class:selected={selectedProfile?.id === p.id}
+							role="button"
+							tabindex="0"
 							onclick={() => selectProfile(p)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') selectProfile(p);
+							}}
 						>
 							<div class="history-card-name">{p.name}</div>
 							{#if p.product_description}
@@ -337,7 +351,20 @@
 									<span class="muted"> · {relativeTime(p.latest_run_finished_at)}</span>
 								{/if}
 							</div>
-						</button>
+							{#if p.latest_run_id != null}
+								{@const runId = p.latest_run_id}
+								<button
+									type="button"
+									class="history-card-view"
+									onclick={(e) => {
+										e.stopPropagation();
+										goToRun(runId);
+									}}
+								>
+									{m.pmr_intake_view_results()}
+								</button>
+							{/if}
+						</div>
 					{/each}
 				</div>
 			{/if}
@@ -521,7 +548,6 @@
 		font-size: 13px;
 		resize: vertical;
 	}
-
 	.run-open {
 		display: flex;
 		gap: 8px;
@@ -606,6 +632,21 @@
 	.history-card.selected {
 		border-color: var(--accent);
 		box-shadow: 0 0 0 1px var(--accent);
+	}
+	.history-card-view {
+		align-self: flex-start;
+		margin-top: 2px;
+		padding: 5px 10px;
+		border: 1px solid var(--border);
+		background: transparent;
+		color: var(--accent);
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.history-card-view:hover {
+		border-color: var(--accent);
+		background: color-mix(in oklch, var(--surface) 60%, var(--accent) 12%);
 	}
 	.history-card-name {
 		font-size: 13px;

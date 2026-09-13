@@ -2,7 +2,7 @@ export type DrawingMetadata = { name: string; description?: string; prompt: stri
 export type PendingProductDrawing = DrawingMetadata & { token: string; image_url: string; expires_at: string };
 export type ProductDrawing = DrawingMetadata & { id: number; filename: string; model_name: string; image_url: string; created_at: string; updated_at: string };
 export type ProductDrawingPage = { drawings: ProductDrawing[]; total: number; page: number; page_size: number };
-export type KeptProductDrawing = { status: boolean; filename: string; path: string };
+export type KeptProductDrawing = { status: boolean; filename: string; path: string; id?: number };
 
 async function jsonRequest<T>(url: string, init: RequestInit, fetchFn: typeof fetch): Promise<T> {
 	const res = await fetchFn(url, { ...init, credentials: 'same-origin' });

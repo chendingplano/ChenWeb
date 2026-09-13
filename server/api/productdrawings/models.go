@@ -41,6 +41,7 @@ type KeepResponse struct {
 	Status   bool   `json:"status"`
 	Filename string `json:"filename"`
 	Path     string `json:"path"`
+	ID       int64  `json:"id,omitempty"`
 }
 
 const (

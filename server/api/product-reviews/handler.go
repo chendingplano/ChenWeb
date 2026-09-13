@@ -305,6 +305,28 @@ func SetProductProfileReady(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "profile_status": status})
 }
 
+// SetProductProfileDrawing — PATCH /kb/product-profiles/:id/drawing (spec:
+// product-review-results-layout). Associates a kept product-drawings row with
+// the profile so the Results page shows it without regenerating.
+func SetProductProfileDrawing(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H22")
+	defer rc.Close()
+	id, err := idParam(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "bad profile id"})
+	}
+	var body struct {
+		DrawingID int64 `json:"drawing_id"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	if err := newStore().SetProfileDrawing(c.Request().Context(), id, body.DrawingID); err != nil {
+		return fail(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true})
+}
+
 // ListProductReviewAspects — GET /kb/product-reviews/aspects?lang=
 func ListProductReviewAspects(c echo.Context) error {
 	cfg, err := GetConfig()
@@ -531,4 +553,21 @@ func ExportProductReviewRunResults(c echo.Context) error {
 	}
 	w.Flush()
 	return w.Error()
+}
+
+// ── product name catalog ────────────────────────────────────────────────────
+
+// ListProductNames — GET /kb/product-names: the full approved+proposed
+// kb.product_names catalog, for the intake page's Product Name typeahead
+// (design: product-name-typeahead). The catalog is small and changes
+// rarely, so the browser caches this response and searches it in memory
+// rather than querying per keystroke.
+func ListProductNames(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_H21")
+	defer rc.Close()
+	names, err := newStore().ListProductNames(c.Request().Context())
+	if err != nil {
+		return fail(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "product_names": names})
 }

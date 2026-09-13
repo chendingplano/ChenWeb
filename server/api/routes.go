@@ -627,11 +627,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/products", kbhandler.ListProducts)
 
 	// Product Metric Reviewer (openspec change product-metric-reviewer).
+	apiGroup.GET("/kb/product-names", productreviews.ListProductNames)
 	apiGroup.POST("/kb/product-profiles", productreviews.CreateProductProfile)
 	apiGroup.GET("/kb/product-profiles", productreviews.ListProductProfiles)
 	apiGroup.GET("/kb/product-profiles/:id", productreviews.GetProductProfile)
 	apiGroup.POST("/kb/product-profiles/:id/build", productreviews.BuildProductProfile)
 	apiGroup.POST("/kb/product-profiles/:id/ready", productreviews.SetProductProfileReady)
+	apiGroup.PATCH("/kb/product-profiles/:id/drawing", productreviews.SetProductProfileDrawing)
 	apiGroup.POST("/kb/product-profiles/:id/nodes", productreviews.AddProductProfileNode)
 	apiGroup.PATCH("/kb/product-profiles/:id/nodes/:node_id", productreviews.UpdateProductProfileNode)
 	apiGroup.DELETE("/kb/product-profiles/:id/nodes/:node_id", productreviews.DeleteProductProfileNode)

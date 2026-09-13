@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 	import { m } from '$lib/paraglide/messages.js';
 	import {
 		AlertTriangle,
@@ -14,8 +15,7 @@
 		Pencil,
 		Plus,
 		RefreshCw,
-		Trash2,
-		X
+		Trash2
 	} from '@lucide/svelte';
 	import {
 		acceptNode,
@@ -31,23 +31,50 @@
 		rejectNode,
 		rerunReview,
 		runExportUrl,
+		setProfileDrawing,
 		updateNode,
+		type Profile,
 		type ProfileNode,
 		type ResultRow,
 		type ReviewRun,
 		type RunDiff,
 		type ScopedDocument
 	} from '$lib/services/productMetricReviewService';
+	import {
+		generateProductDrawing,
+		ignoreProductDrawing,
+		keepProductDrawing,
+		pendingProductDrawingContentUrl,
+		productDrawingContentUrl,
+		type PendingProductDrawing
+	} from '$lib/services/productDrawingService';
+	import { getKbInput, getRawLines, type KbInputRecord, type RawLine } from '$lib/services/kbService';
+	import PdfViewWindow from './pdf-view-window.svelte';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
-	let { darkMode = false }: { darkMode?: boolean } = $props();
+	// `embedded`/`onBack`: rendered inside content-panel.svelte's app shell —
+	// hide our own header (the shell already supplies breadcrumb/topbar) and
+	// offer a way back to the intake view instead of relying on the browser's
+	// Back button, which would leave the shell entirely.
+	let {
+		darkMode = false,
+		embedded = false,
+		initialRunId = null,
+		onBack
+	}: {
+		darkMode?: boolean;
+		embedded?: boolean;
+		initialRunId?: number | null;
+		onBack?: () => void;
+	} = $props();
 
 	// ── url params ────────────────────────────────────────────────────────────
 	function param(name: string): string {
 		if (typeof window === 'undefined') return '';
 		return new URLSearchParams(window.location.search).get(name) ?? '';
 	}
-	let runIdInput = $state(param('run'));
-	let runId = $state<number | null>(param('run') ? Number(param('run')) : null);
+	let runIdInput = $state(initialRunId ? String(initialRunId) : param('run'));
+	let runId = $state<number | null>(initialRunId ?? (param('run') ? Number(param('run')) : null));
 
 	// ── loaded state ──────────────────────────────────────────────────────────
 	let loading = $state(false);
@@ -57,6 +84,7 @@
 	let profileVersion = $state<number | null>(null);
 	let currentProfileVersion = $state<number | null>(null);
 	let profileName = $state('');
+	let profile = $state<Profile | null>(null);
 	let nodes = $state<ProfileNode[]>([]);
 	let results = $state<ResultRow[]>([]);
 	let scopedDocs = $state<ScopedDocument[]>([]);
@@ -70,7 +98,6 @@
 	let docFilter = $state<number | null>(null);
 	let textFilter = $state('');
 	let showDocumentScope = $state(false);
-	let drawer = $state<ResultRow | null>(null);
 	let collapsed = $state<Record<number, boolean>>({});
 	let addingUnder = $state<number | null>(null);
 	let newLabel = $state('');
@@ -78,6 +105,330 @@
 	let editingNode = $state<number | null>(null);
 	let editLabel = $state('');
 	let busyNode = $state<number | null>(null);
+
+	// ── resizable layout (results tab) — drag handles between the drawing area
+	// and the scope-tree / results / metric-details panes, sizes persisted per
+	// browser (spec: product-review-results-layout; pattern mirrors
+	// metric-ontology-explorer/panel-shell.svelte's splitter) ─────────────────
+	type ReviewLayout = { drawingH: number; scopeW: number; detailW: number };
+	const LAYOUT_KEY = 'pmr-review-layout';
+	const LAYOUT_DEFAULTS: ReviewLayout = { drawingH: 320, scopeW: 320, detailW: 420 };
+	const SCOPE_MIN = 240,
+		SCOPE_MAX = 480;
+	const DETAIL_MIN = 320,
+		DETAIL_MAX = 900;
+	const MAIN_MIN = 360;
+	const DRAWING_MIN = 140,
+		DRAWING_MAX = 640;
+
+	function loadLayout(): ReviewLayout {
+		if (!browser) return { ...LAYOUT_DEFAULTS };
+		try {
+			const raw = localStorage.getItem(LAYOUT_KEY);
+			if (raw) {
+				const p = JSON.parse(raw) as Partial<ReviewLayout>;
+				return {
+					drawingH: typeof p.drawingH === 'number' ? p.drawingH : LAYOUT_DEFAULTS.drawingH,
+					scopeW: typeof p.scopeW === 'number' ? p.scopeW : LAYOUT_DEFAULTS.scopeW,
+					detailW: typeof p.detailW === 'number' ? p.detailW : LAYOUT_DEFAULTS.detailW
+				};
+			}
+		} catch {
+			/* private mode / blocked / malformed — fall through to defaults */
+		}
+		return { ...LAYOUT_DEFAULTS };
+	}
+
+	let layout = $state<ReviewLayout>(loadLayout());
+	let layoutEl: HTMLDivElement | null = $state(null);
+
+	function persistLayout() {
+		if (!browser) return;
+		try {
+			localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+		} catch {
+			/* ignore */
+		}
+	}
+
+	const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+	type ResizeKey = 'drawingH' | 'scopeW' | 'detailW';
+	let drag: { key: ResizeKey; startX: number; startY: number; startVal: number } | null = null;
+
+	function startResize(e: PointerEvent, key: ResizeKey) {
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		drag = { key, startX: e.clientX, startY: e.clientY, startVal: layout[key] };
+		document.body.style.userSelect = 'none';
+	}
+	function moveResize(e: PointerEvent) {
+		if (!drag || !layoutEl) return;
+		const W = layoutEl.clientWidth;
+		if (drag.key === 'scopeW') {
+			const maxScope = Math.max(SCOPE_MIN, W - layout.detailW - MAIN_MIN - 12);
+			layout.scopeW = clamp(drag.startVal + (e.clientX - drag.startX), SCOPE_MIN, Math.min(SCOPE_MAX, maxScope));
+		} else if (drag.key === 'detailW') {
+			const maxDetail = Math.max(DETAIL_MIN, W - layout.scopeW - MAIN_MIN - 12);
+			layout.detailW = clamp(
+				drag.startVal - (e.clientX - drag.startX),
+				DETAIL_MIN,
+				Math.min(DETAIL_MAX, maxDetail)
+			);
+		} else {
+			layout.drawingH = clamp(drag.startVal + (e.clientY - drag.startY), DRAWING_MIN, DRAWING_MAX);
+		}
+	}
+	function endResize(e: PointerEvent) {
+		if (!drag) return;
+		try {
+			(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+		} catch {
+			/* ignore */
+		}
+		drag = null;
+		document.body.style.userSelect = '';
+		persistLayout();
+	}
+
+	// ── product drawing (results tab) — generate/keep/ignore reuses the
+	// existing System Admin "Generate 3D Product Drawings" flow; a kept
+	// drawing is cached on the profile via drawing_id so it isn't regenerated
+	// on every visit (spec: product-review-results-layout) ────────────────────
+	let drawingId = $state<number | null>(null);
+	$effect(() => {
+		drawingId = profile?.drawing_id ?? null;
+	});
+	let drawingPrompt = $state('');
+	let drawingPromptTouched = $state(false);
+	let pendingDrawing = $state<PendingProductDrawing | null>(null);
+	let drawingGenerating = $state(false);
+	let drawingBusy = $state(false);
+	let drawingError = $state('');
+	let showDrawingGenerator = $state(false);
+
+	function buildDrawingPrompt(): string {
+		const parts = [profileName || 'product'];
+		const desc = profile?.product_description?.trim();
+		if (desc) parts.push(desc);
+		const kw = (profile?.keywords ?? []).join(', ');
+		if (kw) parts.push(`keywords: ${kw}`);
+		const notes = profile?.notes?.trim();
+		if (notes) parts.push(notes);
+		return `3D exploded technical illustration of ${parts.join(' — ')}`;
+	}
+
+	$effect(() => {
+		if (profile && !drawingPromptTouched) {
+			drawingPrompt = buildDrawingPrompt();
+		}
+	});
+
+	async function generateDrawing() {
+		if (!drawingPrompt.trim()) return;
+		drawingGenerating = true;
+		drawingError = '';
+		try {
+			pendingDrawing = await generateProductDrawing({
+				name: profileName || 'Product',
+				description: profile?.product_description ?? '',
+				prompt: drawingPrompt.trim(),
+				keywords: (profile?.keywords ?? []).join(', '),
+				notes: profile?.notes ?? ''
+			});
+		} catch (e) {
+			drawingError = e instanceof Error ? e.message : String(e);
+		} finally {
+			drawingGenerating = false;
+		}
+	}
+
+	async function keepDrawing() {
+		if (!pendingDrawing || !profileId) return;
+		drawingBusy = true;
+		drawingError = '';
+		try {
+			const kept = await keepProductDrawing(pendingDrawing.token);
+			if (kept.id) {
+				await setProfileDrawing(profileId, kept.id);
+				drawingId = kept.id;
+				if (profile) profile.drawing_id = kept.id;
+			}
+			pendingDrawing = null;
+			showDrawingGenerator = false;
+		} catch (e) {
+			drawingError = e instanceof Error ? e.message : String(e);
+		} finally {
+			drawingBusy = false;
+		}
+	}
+
+	async function discardDrawing() {
+		if (!pendingDrawing) return;
+		drawingBusy = true;
+		try {
+			await ignoreProductDrawing(pendingDrawing.token);
+		} catch {
+			/* best-effort — the pending file also expires on its own */
+		} finally {
+			pendingDrawing = null;
+			drawingBusy = false;
+		}
+	}
+
+	function openRegenerate() {
+		pendingDrawing = null;
+		drawingError = '';
+		drawingPromptTouched = false;
+		drawingPrompt = buildDrawingPrompt();
+		showDrawingGenerator = true;
+	}
+
+	// ── metric-details panel (results tab, right column) — selecting a result
+	// row loads its source document's raw lines once (cached per document, so
+	// clicking between rows of the same document doesn't refetch), jumps the
+	// PDF to the page containing the matched lines, and highlights them ───────
+	let selectedResult = $state<ResultRow | null>(null);
+	let detailInputId = $state<number | null>(null);
+	let detailInput = $state<KbInputRecord | null>(null);
+	let detailRawLines = $state<RawLine[]>([]);
+	let detailLoading = $state(false);
+	let detailError = $state('');
+	let detailDocPage = $state(1);
+	let detailPdfZoom = $state(0.5);
+	let detailPdfNumPages = $state(0);
+	let detailHighlightVersion = $state(0);
+
+	let detailFileUrl = $derived(
+		detailInput ? `/api/v1/kb/inputs/${detailInput.id}/file#page=${detailDocPage}&zoom=page-width` : ''
+	);
+	let detailIsPdf = $derived((detailInput?.type ?? '').toLowerCase() === 'pdf');
+
+	// source_line_spans is line-number spans only (e.g. "129", "117:119") —
+	// same convention as kb.metrics.source_line_spans (metric-mgmt-view.svelte).
+	function normalizeSpanLineNumbers(spans: unknown): number[] {
+		if (!Array.isArray(spans)) return [];
+		const out: number[] = [];
+		for (const item of spans) {
+			if (typeof item === 'number' && item > 0) {
+				out.push(Math.trunc(item));
+			} else if (typeof item === 'string') {
+				const s = item.trim();
+				const range = s.match(/^(\d+)\s*[:,-]\s*(\d+)$/);
+				if (range) {
+					const start = parseInt(range[1], 10);
+					const end = parseInt(range[2], 10);
+					for (let n = start; n <= end && n <= start + 200; n++) out.push(n);
+				} else {
+					const n = parseInt(s, 10);
+					if (n > 0) out.push(n);
+				}
+			} else if (item && typeof item === 'object') {
+				const obj = item as Record<string, unknown>;
+				const l = obj.line_number ?? obj.line ?? obj.line_no ?? obj.lineNo;
+				const n = typeof l === 'number' ? l : parseInt(String(l ?? ''), 10);
+				if (Number.isFinite(n) && n > 0) out.push(n);
+			}
+		}
+		return out;
+	}
+
+	function firstSpanPage(spans: unknown, lines: RawLine[]): number | null {
+		const lineNums = normalizeSpanLineNumbers(spans);
+		if (lineNums.length === 0) return null;
+		const byLine = new Map<number, number>();
+		for (const ln of lines) if (!byLine.has(ln.line_number)) byLine.set(ln.line_number, ln.page_number);
+		for (const n of lineNums) {
+			const p = byLine.get(n);
+			if (p) return p;
+		}
+		return null;
+	}
+
+	let detailLineNumToPage = $derived.by(() => {
+		const map = new Map<number, number>();
+		for (const ln of detailRawLines) if (!map.has(ln.line_number)) map.set(ln.line_number, ln.page_number);
+		return map;
+	});
+	let detailRawLineByKey = $derived.by(() => {
+		const map = new Map<string, RawLine>();
+		for (const ln of detailRawLines) map.set(`${ln.page_number}:${ln.line_number}`, ln);
+		return map;
+	});
+	let detailSelectedLinesByPage = $derived.by(() => {
+		const map = new Map<number, RawLine[]>();
+		if (!selectedResult) return map;
+		for (const lineNo of normalizeSpanLineNumbers(selectedResult.source_line_spans)) {
+			const pageNo = detailLineNumToPage.get(lineNo);
+			if (!pageNo) continue;
+			const ln = detailRawLineByKey.get(`${pageNo}:${lineNo}`);
+			if (ln && Array.isArray(ln.coords) && ln.coords.length >= 4) {
+				const arr = map.get(pageNo) ?? [];
+				arr.push(ln);
+				map.set(pageNo, arr);
+			}
+		}
+		return map;
+	});
+
+	async function selectResult(r: ResultRow) {
+		selectedResult = r;
+		detailHighlightVersion += 1;
+		detailError = '';
+		if (detailInputId !== r.input_record_id) {
+			detailInputId = r.input_record_id;
+			detailInput = null;
+			detailRawLines = [];
+			detailLoading = true;
+			const [inputRes, rawRes] = await Promise.all([
+				getKbInput(r.input_record_id).catch(() => null),
+				getRawLines(r.input_record_id).catch(() => null)
+			]);
+			if (detailInputId !== r.input_record_id) return; // superseded by a newer selection
+			detailInput = inputRes?.record ?? null;
+			detailRawLines = rawRes?.lines ?? [];
+			if (!detailInput) detailError = m.pmr_detail_load_failed();
+			detailLoading = false;
+		}
+		detailDocPage = firstSpanPage(r.source_line_spans, detailRawLines) ?? 1;
+	}
+
+	function renderResultHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		const HIGHLIGHT_EXPAND_TOP_PX = 2;
+		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
+		const lines = detailSelectedLinesByPage.get(pageNo) ?? [];
+		const rects = lines.flatMap((ln) => {
+			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
+			const vx1 = (ln.coords[0] * viewport.width) / 1000,
+				vy1 = (ln.coords[1] * viewport.height) / 1000,
+				vx2 = (ln.coords[2] * viewport.width) / 1000,
+				vy2 = (ln.coords[3] * viewport.height) / 1000;
+			return [
+				{
+					lineNumber: ln.line_number,
+					left: Math.min(vx1, vx2),
+					top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+					rawBottom: Math.max(vy1, vy2),
+					width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX
+				}
+			];
+		});
+		for (let i = 0; i < rects.length; i += 1) {
+			const rect = rects[i];
+			const nextRect = rects[i + 1];
+			const isContiguous = nextRect && nextRect.lineNumber === rect.lineNumber + 1;
+			const bottom = isContiguous ? nextRect.top : rect.rawBottom;
+			const height = Math.max(0, bottom - rect.top);
+			if (rect.width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${rect.left}px`;
+			mark.style.top = `${rect.top}px`;
+			mark.style.width = `${rect.width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = `line ${rect.lineNumber}`;
+			overlay.appendChild(mark);
+		}
+	}
 
 	const staleVersion = $derived(
 		profileVersion != null &&
@@ -98,6 +449,7 @@
 			const prof = await getProfile(profileId);
 			profileName = prof.profile.name;
 			currentProfileVersion = prof.profile.version;
+			profile = prof.profile;
 			nodes = prof.nodes;
 			const [res, docs, d] = await Promise.all([
 				getRunResults(runId),
@@ -120,6 +472,7 @@
 			const [prof, res] = await Promise.all([getProfile(profileId), getRunResults(runId)]);
 			nodes = prof.nodes;
 			currentProfileVersion = prof.profile.version;
+			profile = prof.profile;
 			results = res.results;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -328,25 +681,30 @@
 	}
 </script>
 
-<div class="pmr-shell" class:dark={darkMode}>
-	<header class="topbar">
-		<div class="brand">
-			<span class="brand-mark">PMR</span>
-			<div>
-				<p class="kicker">{m.pmr_kicker()}</p>
-				<p class="brand-name">{m.pmr_title()}</p>
+<div class="pmr-shell" class:dark={darkMode} class:embedded>
+	{#if !embedded}
+		<header class="topbar">
+			<div class="brand">
+				<span class="brand-mark">PMR</span>
+				<div>
+					<p class="kicker">{m.pmr_kicker()}</p>
+					<p class="brand-name">{m.pmr_title()}</p>
+				</div>
 			</div>
-		</div>
-		<div class="crumbs">
-			{#if profileName}
-				<span>{profileName}</span><span class="slash">/</span>
-			{/if}
-			{#if run}<strong>{m.pmr_run_n({ n: run.run_number })}</strong>{/if}
-			<span class="route-badge">/home3/product-metric-review</span>
-		</div>
-	</header>
+			<div class="crumbs">
+				{#if profileName}
+					<span>{profileName}</span><span class="slash">/</span>
+				{/if}
+				{#if run}<strong>{m.pmr_run_n({ n: run.run_number })}</strong>{/if}
+				<span class="route-badge">/home3/product-metric-review</span>
+			</div>
+		</header>
+	{/if}
 
-	<div class="content">
+	<div class="content" class:wide={tab === 'results' && !!run}>
+		{#if onBack}
+			<button class="linky back" onclick={onBack}>← {m.pmr_back()}</button>
+		{/if}
 		{#if error}
 			<div class="note error">{error}</div>
 		{/if}
@@ -418,9 +776,78 @@
 				</button>
 			</div>
 
-			<div class="layout" class:report-mode={tab === 'report'}>
+			{#if tab === 'results' && profile}
+				<div class="drawing-area" style="height:{layout.drawingH}px">
+					{#if drawingId != null && !showDrawingGenerator}
+						<div class="drawing-kept">
+							<img src={productDrawingContentUrl(drawingId)} alt={profileName} />
+							<button class="ghost drawing-regenerate" onclick={openRegenerate} disabled={drawingBusy}>
+								<RefreshCw size={13} />{m.pmr_drawing_regenerate()}
+							</button>
+						</div>
+					{:else if pendingDrawing}
+						<div class="drawing-pending">
+							<img src={pendingProductDrawingContentUrl(pendingDrawing.token)} alt={profileName} />
+							<div class="drawing-pending-actions">
+								<button class="primary" onclick={keepDrawing} disabled={drawingBusy}
+									>{m.pmr_drawing_keep()}</button
+								>
+								<button class="ghost" onclick={discardDrawing} disabled={drawingBusy}
+									>{m.pmr_drawing_discard()}</button
+								>
+							</div>
+						</div>
+					{:else}
+						<div class="drawing-generator">
+							<div class="pane-head"><span>{m.pmr_drawing_heading()}</span></div>
+							<label class="drawing-prompt-label" for="pmr-drawing-prompt"
+								>{m.pmr_drawing_prompt_label()}</label
+							>
+							<textarea
+								id="pmr-drawing-prompt"
+								rows="2"
+								bind:value={drawingPrompt}
+								oninput={() => (drawingPromptTouched = true)}
+							></textarea>
+							<div class="drawing-generator-actions">
+								<button
+									class="primary"
+									onclick={generateDrawing}
+									disabled={drawingGenerating || !drawingPrompt.trim()}
+								>
+									{drawingGenerating ? m.pmr_drawing_generating() : m.pmr_drawing_generate()}
+								</button>
+								{#if drawingId != null}
+									<button class="linky" onclick={() => (showDrawingGenerator = false)}
+										>{m.pmr_cancel()}</button
+									>
+								{/if}
+							</div>
+							{#if drawingError}
+								<p class="drawing-error">{drawingError}</p>
+							{/if}
+						</div>
+					{/if}
+				</div>
+				<div
+					class="h-splitter"
+					role="separator"
+					aria-orientation="horizontal"
+					onpointerdown={(e) => startResize(e, 'drawingH')}
+					onpointermove={moveResize}
+					onpointerup={endResize}
+					onpointercancel={endResize}
+				></div>
+			{/if}
+
+			<div
+				class="layout"
+				class:report-mode={tab === 'report'}
+				class:resizable={tab === 'results'}
+				bind:this={layoutEl}
+			>
 				<!-- scope tree -->
-				<aside class="scope-pane">
+				<aside class="scope-pane" style={tab === 'results' ? `width:${layout.scopeW}px` : ''}>
 					<div class="pane-head">
 						<FolderTree size={13} /><span>{m.pmr_scope_tree()}</span>
 						{#if selectedNodeId != null}
@@ -433,6 +860,18 @@
 						{/each}
 					</div>
 				</aside>
+
+				{#if tab === 'results'}
+					<div
+						class="v-splitter"
+						role="separator"
+						aria-orientation="vertical"
+						onpointerdown={(e) => startResize(e, 'scopeW')}
+						onpointermove={moveResize}
+						onpointerup={endResize}
+						onpointercancel={endResize}
+					></div>
+				{/if}
 
 				<!-- main -->
 				<section class="main-pane">
@@ -511,57 +950,103 @@
 						{@render reportView()}
 					{/if}
 				</section>
+
+				{#if tab === 'results'}
+					<div
+						class="v-splitter"
+						role="separator"
+						aria-orientation="vertical"
+						onpointerdown={(e) => startResize(e, 'detailW')}
+						onpointermove={moveResize}
+						onpointerup={endResize}
+						onpointercancel={endResize}
+					></div>
+
+					<!-- metric details -->
+					<aside class="detail-pane" style="width:{layout.detailW}px">
+						<div class="detail-attrs">
+							<div class="pane-head">
+								<FileText size={13} /><span>{m.pmr_detail_heading()}</span>
+							</div>
+							{#if !selectedResult}
+								<div class="detail-empty">
+									<p>{m.pmr_detail_empty()}</p>
+								</div>
+							{:else}
+								<p class="kicker">{selectedResult.tier} · {selectedResult.artifact_type}</p>
+								<h3 class="detail-title">
+									{selectedResult.primary_label || selectedResult.artifact_id}
+								</h3>
+								<dl class="drawer-fields">
+									<dt>{m.pmr_field_artifact()}</dt>
+									<dd class="mono">{selectedResult.artifact_id}</dd>
+									<dt>{m.pmr_field_document()}</dt>
+									<dd>
+										<a
+											href={recordHref(selectedResult.input_record_id)}
+											target="_blank"
+											rel="noopener"
+										>
+											#{selectedResult.input_record_id}
+											<ArrowUpRight size={12} />
+										</a>
+									</dd>
+									<dt>{m.pmr_field_line_spans()}</dt>
+									<dd class="mono">{spansText(selectedResult.source_line_spans) || '—'}</dd>
+									<dt>{m.pmr_field_matched_node()}</dt>
+									<dd>
+										{selectedResult.node_id != null
+											? (nodeLabel.get(selectedResult.node_id) ?? `#${selectedResult.node_id}`)
+											: m.pmr_none()}
+									</dd>
+									<dt>{m.pmr_field_paths()}</dt>
+									<dd class="mono">{selectedResult.paths.join(' · ') || '—'}</dd>
+									<dt>{m.pmr_field_score()}</dt>
+									<dd class="mono">{fmtScore(selectedResult.score)}</dd>
+									<dt>{m.pmr_field_reason()}</dt>
+									<dd>{selectedResult.inclusion_reason}</dd>
+								</dl>
+								<a
+									class="ghost wide"
+									href={recordHref(selectedResult.input_record_id)}
+									target="_blank"
+									rel="noopener"
+								>
+									{m.pmr_open_source()}
+									<ArrowUpRight size={13} />
+								</a>
+							{/if}
+						</div>
+						<div class="detail-pdf">
+							{#if !selectedResult}
+								<!-- nothing to show until a result is selected -->
+							{:else if detailLoading}
+								<div class="note">{m.pmr_loading()}</div>
+							{:else if detailError}
+								<div class="note error">{detailError}</div>
+							{:else if detailIsPdf && detailInput}
+								<PdfViewWindow
+									inputId={detailInput.id}
+									fileUrl={detailFileUrl}
+									bind:page={detailDocPage}
+									bind:zoom={detailPdfZoom}
+									bind:numPages={detailPdfNumPages}
+									highlightVersion={`${selectedResult.artifact_id}:${detailHighlightVersion}`}
+									renderHighlights={renderResultHighlights}
+									enableSelectionDialog={false}
+									showSidebar={false}
+									{darkMode}
+								/>
+							{:else}
+								<div class="note">{m.pmr_detail_pdf_unavailable()}</div>
+							{/if}
+						</div>
+					</aside>
+				{/if}
 			</div>
 		{/if}
 	</div>
 
-	<!-- evidence drawer -->
-	{#if drawer}
-		<div class="drawer-scrim" onclick={() => (drawer = null)} role="presentation"></div>
-		<aside class="drawer">
-			<div class="drawer-head">
-				<div>
-					<p class="kicker">{drawer.tier} · {drawer.artifact_type}</p>
-					<h2>{drawer.primary_label || drawer.artifact_id}</h2>
-				</div>
-				<button class="icon" onclick={() => (drawer = null)}><X size={16} /></button>
-			</div>
-			<dl class="drawer-fields">
-				<dt>{m.pmr_field_artifact()}</dt>
-				<dd class="mono">{drawer.artifact_id}</dd>
-				<dt>{m.pmr_field_document()}</dt>
-				<dd>
-					<a href={recordHref(drawer.input_record_id)} target="_blank" rel="noopener">
-						#{drawer.input_record_id}
-						<ArrowUpRight size={12} />
-					</a>
-				</dd>
-				<dt>{m.pmr_field_line_spans()}</dt>
-				<dd class="mono">{spansText(drawer.source_line_spans) || '—'}</dd>
-				<dt>{m.pmr_field_matched_node()}</dt>
-				<dd>
-					{drawer.node_id != null
-						? (nodeLabel.get(drawer.node_id) ?? `#${drawer.node_id}`)
-						: m.pmr_none()}
-				</dd>
-				<dt>{m.pmr_field_paths()}</dt>
-				<dd class="mono">{drawer.paths.join(' · ') || '—'}</dd>
-				<dt>{m.pmr_field_score()}</dt>
-				<dd class="mono">{fmtScore(drawer.score)}</dd>
-				<dt>{m.pmr_field_reason()}</dt>
-				<dd>{drawer.inclusion_reason}</dd>
-			</dl>
-			<a
-				class="ghost wide"
-				href={recordHref(drawer.input_record_id)}
-				target="_blank"
-				rel="noopener"
-			>
-				{m.pmr_open_source()}
-				<ArrowUpRight size={13} />
-			</a>
-		</aside>
-	{/if}
 </div>
 
 {#snippet treeNode(node: TreeNode, depth: number)}
@@ -665,7 +1150,11 @@
 {/snippet}
 
 {#snippet resultRow(r: ResultRow)}
-	<button class="rrow" onclick={() => (drawer = r)}>
+	<button
+		class="rrow"
+		class:sel={selectedResult?.artifact_id === r.artifact_id}
+		onclick={() => selectResult(r)}
+	>
 		<span class="r-tier t-{r.tier}">{r.tier}</span>
 		<span class="r-label">{r.primary_label || r.artifact_id}</span>
 		<span class="r-doc">#{r.input_record_id}</span>
@@ -814,6 +1303,9 @@
 			background 180ms ease,
 			color 180ms ease;
 	}
+	.pmr-shell.embedded {
+		min-height: 0;
+	}
 	.pmr-shell.dark {
 		--bg: #111827;
 		--surface: #182334;
@@ -923,6 +1415,9 @@
 		margin: 0 auto;
 		padding: 26px clamp(16px, 2.4vw, 40px) 40px;
 	}
+	.content.wide {
+		max-width: none;
+	}
 
 	.note {
 		display: flex;
@@ -956,6 +1451,11 @@
 	.linky:disabled {
 		opacity: 0.5;
 		cursor: wait;
+	}
+	.linky.back {
+		padding: 0;
+		margin-bottom: 14px;
+		font-size: 12px;
 	}
 
 	.empty-hero {
@@ -1077,12 +1577,135 @@
 
 	.layout {
 		display: grid;
-		grid-template-columns: minmax(280px, 340px) 1fr;
+		grid-template-columns: minmax(280px, 340px) minmax(320px, 640px) minmax(360px, 1fr);
 		gap: 16px;
 		align-items: start;
 	}
 	.layout.report-mode {
 		grid-template-columns: minmax(260px, 300px) 1fr;
+	}
+	/* Results tab: independently resizable panes (drag handles between them)
+	   instead of the fixed grid tracks above — spec: product-review-results-layout. */
+	.layout.resizable {
+		display: flex;
+		align-items: flex-start;
+		gap: 0;
+	}
+	.layout.resizable .scope-pane,
+	.layout.resizable .detail-pane {
+		flex: 0 0 auto;
+	}
+	.layout.resizable .main-pane {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.v-splitter {
+		flex: 0 0 auto;
+		align-self: stretch;
+		width: 9px;
+		margin: 0 -1px;
+		cursor: col-resize;
+		background: transparent;
+		position: relative;
+	}
+	.v-splitter::after {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 4px;
+		width: 1px;
+		background: var(--border);
+	}
+	.v-splitter:hover::after {
+		background: var(--bronze);
+	}
+	.drawing-area {
+		border: 1px solid var(--border);
+		background: var(--surface);
+		box-shadow: var(--shadow);
+		margin-bottom: 0;
+		overflow: hidden;
+	}
+	.drawing-kept,
+	.drawing-pending {
+		position: relative;
+		height: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--bg);
+	}
+	.drawing-kept img,
+	.drawing-pending img {
+		max-width: 100%;
+		max-height: 100%;
+		object-fit: contain;
+	}
+	.drawing-regenerate {
+		position: absolute;
+		top: 10px;
+		right: 10px;
+	}
+	.drawing-pending-actions {
+		position: absolute;
+		bottom: 10px;
+		right: 10px;
+		display: flex;
+		gap: 8px;
+	}
+	.drawing-generator {
+		height: 100%;
+		padding: 14px;
+		display: flex;
+		flex-direction: column;
+		overflow: auto;
+	}
+	.drawing-prompt-label {
+		font-size: 11px;
+		color: var(--subtle);
+		margin-bottom: 6px;
+	}
+	.drawing-generator textarea {
+		flex: 1;
+		min-height: 48px;
+		padding: 9px 11px;
+		border: 1px solid var(--border);
+		background: var(--bg);
+		color: inherit;
+		font: inherit;
+		font-size: 12px;
+		resize: vertical;
+	}
+	.drawing-generator-actions {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: 10px;
+	}
+	.drawing-error {
+		margin: 8px 0 0;
+		font-size: 11px;
+		color: var(--red, #c0392b);
+	}
+	.h-splitter {
+		height: 9px;
+		margin: -1px 0;
+		cursor: row-resize;
+		background: transparent;
+		position: relative;
+	}
+	.h-splitter::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 4px;
+		height: 1px;
+		background: var(--border);
+	}
+	.h-splitter:hover::after {
+		background: var(--bronze);
 	}
 	.pane-head {
 		display: flex;
@@ -1113,6 +1736,54 @@
 		top: 14px;
 		max-height: calc(100vh - 40px);
 		overflow: auto;
+	}
+
+	/* metric-details pane */
+	.detail-pane {
+		position: sticky;
+		top: 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		max-height: calc(100vh - 40px);
+	}
+	.detail-attrs {
+		border: 1px solid var(--border);
+		background: var(--surface);
+		box-shadow: var(--shadow);
+		padding: 14px;
+		flex-shrink: 0;
+		max-height: 46vh;
+		overflow: auto;
+	}
+	.detail-title {
+		margin: 5px 0 0;
+		font-size: 15px;
+		letter-spacing: -0.02em;
+	}
+	.detail-empty {
+		padding: 18px 0;
+		color: var(--subtle);
+		font-size: 12px;
+		text-align: center;
+	}
+	.detail-pdf {
+		flex: 1 1 auto;
+		min-height: 320px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		box-shadow: var(--shadow);
+		overflow: hidden;
+		display: flex;
+	}
+	.detail-pdf .note {
+		margin: auto;
+	}
+	:global(.pdf-highlight) {
+		position: absolute;
+		background: color-mix(in oklch, var(--bronze) 22%, transparent);
+		border: 1px solid var(--bronze);
+		pointer-events: none;
 	}
 
 	/* tree */
@@ -1348,6 +2019,9 @@
 	.rrow:hover {
 		background: color-mix(in oklch, var(--bronze) 5%, transparent);
 	}
+	.rrow.sel {
+		background: color-mix(in oklch, var(--bronze) 12%, transparent);
+	}
 	.r-tier {
 		padding: 2px 5px;
 		border: 1px solid currentColor;
@@ -1504,53 +2178,7 @@
 		font-style: normal;
 	}
 
-	/* drawer */
-	.drawer-scrim {
-		position: fixed;
-		inset: 0;
-		background: oklch(0.2 0.02 60 / 0.28);
-		z-index: 40;
-	}
-	.drawer {
-		position: fixed;
-		top: 0;
-		right: 0;
-		width: min(420px, 92vw);
-		height: 100vh;
-		z-index: 41;
-		background: var(--surface);
-		border-left: 1px solid var(--border);
-		box-shadow: -18px 0 40px oklch(0.2 0.02 60 / 0.18);
-		padding: 18px;
-		overflow: auto;
-		animation: slidein 160ms ease;
-	}
-	@keyframes slidein {
-		from {
-			transform: translateX(24px);
-			opacity: 0;
-		}
-	}
-	.drawer-head {
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-		align-items: start;
-		border-bottom: 1px solid var(--border);
-		padding-bottom: 12px;
-	}
-	.drawer-head h2 {
-		margin: 5px 0 0;
-		font-size: 16px;
-		letter-spacing: -0.02em;
-	}
-	.icon {
-		width: 28px;
-		height: 28px;
-	}
-	.icon:hover {
-		color: var(--text);
-	}
+	/* metric-details attrs (formerly the evidence drawer) */
 	.drawer-fields {
 		display: grid;
 		grid-template-columns: 108px 1fr;
@@ -1584,9 +2212,29 @@
 		.layout.report-mode {
 			grid-template-columns: 1fr;
 		}
-		.scope-pane {
+		.layout.resizable {
+			flex-direction: column;
+		}
+		.layout.resizable .scope-pane,
+		.layout.resizable .detail-pane {
+			width: auto !important;
+			flex: 1 1 auto;
+		}
+		.scope-pane,
+		.detail-pane {
 			position: static;
 			max-height: 340px;
+		}
+		.detail-attrs {
+			max-height: none;
+		}
+		.v-splitter,
+		.h-splitter {
+			display: none;
+		}
+		.drawing-area {
+			height: auto !important;
+			max-height: 260px;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

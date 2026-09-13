@@ -8,6 +8,7 @@
 	import DocGenView from '$lib/components/home3/doc-gen-view.svelte';
 	import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
 	import ProductReviewIntakeView from '$lib/components/home3/product-review-intake-view.svelte';
+	import ProductMetricReviewView from '$lib/components/home3/product-metric-review-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import CdmEditorShell from '$lib/components/cdm/CdmEditorShell.svelte';
@@ -158,6 +159,16 @@
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 	let isDashboard = $derived(sectionId === 'dashboard' || !activeMenu);
 
+	// Product Review: starting a review swaps the embedded intake view for the
+	// embedded results view (same nav item, no navigation away from the
+	// shell); leaving the nav item resets back to the intake view.
+	let productReviewRunId = $state<number | null>(null);
+	$effect(() => {
+		if (activeMenu?.childId !== 'apps-product-review') {
+			productReviewRunId = null;
+		}
+	});
+
 	// Flow pages scroll naturally and show the footer at the bottom.
 	// App-shell pages (chat, resolve-ambiguous, llm-usage-logs) fill the viewport, manage their
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
@@ -198,16 +209,19 @@
 					<span style="color:{textPrimary}; font-weight:500;">{activeMenu.childTitle}</span>
 				{/if}
 			</nav>
-			<!-- Shelf toggle -->
-			<button
-				onclick={onToggleShelf}
-				class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
-				style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
-				aria-label={shelfOpen ? 'Close context panel' : 'Open context panel'}
-			>
-				<PanelRightIcon class="h-3.5 w-3.5" />
-				{shelfOpen ? 'Close panel' : 'Open panel'}
-			</button>
+			<!-- Shelf toggle — hidden for Product Review, whose results page uses the
+			     space for its own resizable panes instead (spec: product-review-results-layout) -->
+			{#if activeMenu?.childId !== 'apps-product-review'}
+				<button
+					onclick={onToggleShelf}
+					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
+					style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
+					aria-label={shelfOpen ? 'Close context panel' : 'Open context panel'}
+				>
+					<PanelRightIcon class="h-3.5 w-3.5" />
+					{shelfOpen ? 'Close panel' : 'Open panel'}
+				</button>
+			{/if}
 		</div>
 	{/if}
 
@@ -238,7 +252,20 @@
 				<DocumentReviewView {darkMode} />
 			{/key}
 		{:else if activeMenu?.childId === 'apps-product-review'}
-			<ProductReviewIntakeView {darkMode} embedded />
+			{#if productReviewRunId}
+				<ProductMetricReviewView
+					{darkMode}
+					embedded
+					initialRunId={productReviewRunId}
+					onBack={() => (productReviewRunId = null)}
+				/>
+			{:else}
+				<ProductReviewIntakeView
+					{darkMode}
+					embedded
+					onStartedRun={(runId) => (productReviewRunId = runId)}
+				/>
+			{/if}
 		{:else if activeMenu?.childId === 'prompt-optimizer'}
 			<PromptOptimizerView {darkMode} />
 		{:else if activeMenu?.childId === 'openmetadata'}

@@ -29,10 +29,20 @@ func newMockStore(t *testing.T) (Store, sqlmock.Sqlmock, func()) {
 
 // profileRows builds the RETURNING / SELECT row set for a kb.product_profiles row.
 func profileRows(id int64, name string, version int, status string, truncated bool, truncatedCount int) *sqlmock.Rows {
+	return profileRowsWithDrawing(id, name, version, status, truncated, truncatedCount, nil)
+}
+
+// profileRowsWithDrawing is profileRows plus an explicit drawing_id (nil = no
+// drawing associated yet — spec: product-review-results-layout).
+func profileRowsWithDrawing(id int64, name string, version int, status string, truncated bool, truncatedCount int, drawingID *int64) *sqlmock.Rows {
+	var drawing any
+	if drawingID != nil {
+		drawing = *drawingID
+	}
 	return sqlmock.NewRows([]string{
 		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
-		"truncated", "truncated_count", "created_at", "updated_at",
-	}).AddRow(id, "-", name, "", []byte("[]"), "", version, status, truncated, truncatedCount, time.Now(), time.Now())
+		"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
+	}).AddRow(id, "-", name, "", []byte("[]"), "", version, status, truncated, truncatedCount, drawing, time.Now(), time.Now())
 }
 
 // nodeCols is the column order of the nodeColumns SELECT list.
