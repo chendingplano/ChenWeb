@@ -61,6 +61,7 @@
 	"pmr_tab_report": "报告",
 	"pmr_drawing_heading": "产品图纸",
 	"pmr_drawing_prompt_label": "生图提示词",
+	"pmr_drawing_model_label": "模型",
 	"pmr_drawing_generate": "生成 3D 图纸",
 	"pmr_drawing_generating": "生成中…",
 	"pmr_drawing_keep": "保留",

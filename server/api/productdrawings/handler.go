@@ -86,6 +86,26 @@ func Generate(c echo.Context) error {
 	return NewHandler(defaultConfig())(c)
 }
 
+// ComposePrompt renders the exploded-view prompt template for a product name
+// and component list — a preview step with no DB access and no image call,
+// so callers can show/edit the default prompt before generating.
+func ComposePrompt(c echo.Context) error {
+	var req ComposePromptRequest
+	if c.Request().Body != nil && c.Request().ContentLength != 0 {
+		if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		}
+	}
+	if strings.TrimSpace(req.ProductName) == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "product_name is required"})
+	}
+	prompt, err := ComposeExplodedViewPrompt(defaultConfig().PromptDir, req.ProductName, req.Components)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to compose prompt"})
+	}
+	return c.JSON(http.StatusOK, ComposePromptResponse{Prompt: prompt})
+}
+
 func GeneratePending(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_DRAW_002")
 	defer rc.Close()
@@ -118,7 +138,7 @@ func GeneratePending(c echo.Context) error {
 	}
 	req.Prompt = prompt
 	modelName := modelNameForSelection(selection)
-	img, err := cfg.Provider.Generate(c.Request().Context(), selection, buildDrawingPrompt(prompt))
+	img, err := cfg.Provider.Generate(c.Request().Context(), selection, prompt)
 	if err != nil {
 		logger.Error("pending product drawing generation failed", "err", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "image generation failed"})

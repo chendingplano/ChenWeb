@@ -328,6 +328,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/images/generate", imagehandler.GenerateImage)
 	apiGroup.POST("/product-drawings", productdrawings.Generate)
 	apiGroup.POST("/product-drawings/generate", productdrawings.GeneratePending)
+	apiGroup.POST("/product-drawings/compose-prompt", productdrawings.ComposePrompt)
 	apiGroup.GET("/product-drawings", productdrawings.List)
 	apiGroup.GET("/product-drawings/pending/:token/content", productdrawings.ServePendingContent)
 	apiGroup.POST("/product-drawings/pending/:token/keep", productdrawings.KeepPending)

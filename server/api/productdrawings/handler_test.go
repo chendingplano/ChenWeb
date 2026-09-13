@@ -158,6 +158,80 @@ func TestGenerateRejectsUnsupportedSubject(t *testing.T) {
 	}
 }
 
+func TestGeneratePendingSendsPromptVerbatim(t *testing.T) {
+	promptDir := t.TempDir()
+	outputDir := t.TempDir()
+	pendingDir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"data":[{"b64_json":"iVBORw0KGgo="}]}`)
+	}))
+	defer server.Close()
+	t.Setenv("PROMPTS_DIR", promptDir)
+	t.Setenv("PRODUCT_DRAWINGS_DIR", outputDir)
+	t.Setenv("PRODUCT_DRAWINGS_PENDING_DIR", pendingDir)
+	t.Setenv("IMAGE_GEN_BASE_URL", server.URL)
+	t.Setenv("IMAGE_GEN_API_KEY", "test-key")
+	t.Setenv("IMAGE_GEN_MODEL", "test-model")
+
+	const customPrompt = "Draw a 3D exploded technical illustration of 血压计. custom template text"
+	body, _ := json.Marshal(map[string]string{"name": "血压计", "prompt": customPrompt})
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/product-drawings/generate", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := GeneratePending(e.NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("generate status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var pending PendingResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending.Prompt != customPrompt {
+		t.Fatalf("prompt = %q, want it unchanged from the request: %q", pending.Prompt, customPrompt)
+	}
+}
+
+func TestComposePromptEndpoint(t *testing.T) {
+	promptDir := t.TempDir()
+	writeExplodedViewTemplate(t, promptDir)
+	t.Setenv("PROMPTS_DIR", promptDir)
+
+	body, _ := json.Marshal(ComposePromptRequest{ProductName: "血压计", Components: []string{"控制按钮", "电路板"}})
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/product-drawings/compose-prompt", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := ComposePrompt(e.NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp ComposePromptResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Prompt, "控制按钮, 电路板") {
+		t.Fatalf("composed prompt missing components: %q", resp.Prompt)
+	}
+}
+
+func TestComposePromptRequiresProductName(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/product-drawings/compose-prompt", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := ComposePrompt(e.NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestGenerateMapsProviderFailure(t *testing.T) {
 	t.Parallel()
 

@@ -1,0 +1,3 @@
+Draw a 3D exploded technical illustration of {{PRODUCT_NAME}}.
+
+IMPORTANT EXPLODED-VIEW REQUIREMENT: Do not show only the exterior product. Create a true cutaway/exploded technical assembly. Move or make the outer shell transparent and separate the housing panels so the internal components are visibly exposed. Show each major part as a distinct object with clear spacing between parts.{{COMPONENTS_SENTENCE}} Use numbered callouts with thin leader lines pointing to the actual parts, description of the parts, and include a clean parts legend. Make the internal construction mechanically plausible, legible, and easy to inspect.

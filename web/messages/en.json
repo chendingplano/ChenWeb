@@ -61,6 +61,7 @@
 	"pmr_tab_report": "Report",
 	"pmr_drawing_heading": "Product drawing",
 	"pmr_drawing_prompt_label": "Drawing prompt",
+	"pmr_drawing_model_label": "Model",
 	"pmr_drawing_generate": "Generate 3D Drawing",
 	"pmr_drawing_generating": "Generating…",
 	"pmr_drawing_keep": "Keep",

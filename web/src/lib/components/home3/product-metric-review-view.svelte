@@ -41,6 +41,7 @@
 		type ScopedDocument
 	} from '$lib/services/productMetricReviewService';
 	import {
+		composeDrawingPrompt,
 		generateProductDrawing,
 		ignoreProductDrawing,
 		keepProductDrawing,
@@ -200,26 +201,38 @@
 	});
 	let drawingPrompt = $state('');
 	let drawingPromptTouched = $state(false);
+	let drawingModel = $state<'Qwen' | 'OpenAI'>('Qwen');
 	let pendingDrawing = $state<PendingProductDrawing | null>(null);
 	let drawingGenerating = $state(false);
 	let drawingBusy = $state(false);
 	let drawingError = $state('');
 	let showDrawingGenerator = $state(false);
 
-	function buildDrawingPrompt(): string {
-		const parts = [profileName || 'product'];
-		const desc = profile?.product_description?.trim();
-		if (desc) parts.push(desc);
-		const kw = (profile?.keywords ?? []).join(', ');
-		if (kw) parts.push(`keywords: ${kw}`);
-		const notes = profile?.notes?.trim();
-		if (notes) parts.push(notes);
-		return `3D exploded technical illustration of ${parts.join(' — ')}`;
+	// part-tier scope-tree labels for this product, excluding anything the
+	// reviewer has rejected — fed into the backend's exploded-view template
+	// so the drawing prompt names this product's actual components instead
+	// of a generic/mismatched part list.
+	function drawingComponents(): string[] {
+		return nodes
+			.filter((n) => n.node_kind === 'part' && n.status !== 'rejected')
+			.map((n) => n.label)
+			.filter(Boolean)
+			.slice(0, 15);
+	}
+
+	async function refreshDrawingPrompt() {
+		if (!profile) return;
+		try {
+			const { prompt } = await composeDrawingPrompt(profileName || 'product', drawingComponents());
+			drawingPrompt = prompt;
+		} catch (e) {
+			drawingError = e instanceof Error ? e.message : String(e);
+		}
 	}
 
 	$effect(() => {
 		if (profile && !drawingPromptTouched) {
-			drawingPrompt = buildDrawingPrompt();
+			void refreshDrawingPrompt();
 		}
 	});
 
@@ -233,7 +246,8 @@
 				description: profile?.product_description ?? '',
 				prompt: drawingPrompt.trim(),
 				keywords: (profile?.keywords ?? []).join(', '),
-				notes: profile?.notes ?? ''
+				notes: profile?.notes ?? '',
+				model: drawingModel
 			});
 		} catch (e) {
 			drawingError = e instanceof Error ? e.message : String(e);
@@ -279,7 +293,7 @@
 		pendingDrawing = null;
 		drawingError = '';
 		drawingPromptTouched = false;
-		drawingPrompt = buildDrawingPrompt();
+		void refreshDrawingPrompt();
 		showDrawingGenerator = true;
 	}
 
@@ -810,6 +824,13 @@
 								oninput={() => (drawingPromptTouched = true)}
 							></textarea>
 							<div class="drawing-generator-actions">
+								<label class="drawing-model-label" for="pmr-drawing-model"
+									>{m.pmr_drawing_model_label()}</label
+								>
+								<select id="pmr-drawing-model" class="drawing-model-select" bind:value={drawingModel}>
+									<option value="Qwen">Qwen · Aliyun</option>
+									<option value="OpenAI">OpenAI · ChatGPT Image 2.5</option>
+								</select>
 								<button
 									class="primary"
 									onclick={generateDrawing}
@@ -1682,6 +1703,20 @@
 		align-items: center;
 		gap: 4px;
 		margin-top: 10px;
+	}
+	.drawing-model-label {
+		font-size: 11px;
+		color: var(--subtle);
+		margin-right: 2px;
+	}
+	.drawing-model-select {
+		border: 1px solid var(--border);
+		background: var(--bg);
+		color: inherit;
+		font: inherit;
+		font-size: 12px;
+		padding: 6px 8px;
+		margin-right: 8px;
 	}
 	.drawing-error {
 		margin: 8px 0 0;

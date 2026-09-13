@@ -12,6 +12,7 @@ async function jsonRequest<T>(url: string, init: RequestInit, fetchFn: typeof fe
 	return body;
 }
 export function generateProductDrawing(metadata: DrawingMetadata | typeof fetch = { name: 'Ventilator exploded view', prompt: '' }, fetchFn: typeof fetch = fetch) { if (typeof metadata === 'function') { fetchFn = metadata; metadata = { name: 'Ventilator exploded view', prompt: '' }; } return jsonRequest<PendingProductDrawing>('/api/v1/product-drawings/generate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(metadata)}, fetchFn); }
+export function composeDrawingPrompt(productName: string, components: string[], fetchFn: typeof fetch = fetch) { return jsonRequest<{prompt:string}>('/api/v1/product-drawings/compose-prompt', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_name:productName,components})}, fetchFn); }
 export function listProductDrawings(page=1, pageSize=12, fetchFn: typeof fetch = fetch) { return jsonRequest<ProductDrawingPage>(`/api/v1/product-drawings?page=${page}&page_size=${pageSize}`, {method:'GET'}, fetchFn); }
 export function updateProductDrawing(id:number, metadata:DrawingMetadata, fetchFn:typeof fetch=fetch) { return jsonRequest<{status:boolean}>(`/api/v1/product-drawings/${id}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(metadata)}, fetchFn); }
 export function deleteProductDrawing(id:number, fetchFn:typeof fetch=fetch) { return jsonRequest<{status:boolean}>(`/api/v1/product-drawings/${id}`, {method:'DELETE'}, fetchFn); }

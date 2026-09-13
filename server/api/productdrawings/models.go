@@ -59,6 +59,17 @@ type Request struct {
 	Notes       string `json:"notes"`
 }
 
+// ComposePromptRequest is the payload for the prompt-composition preview
+// endpoint (no image generation, no DB writes).
+type ComposePromptRequest struct {
+	ProductName string   `json:"product_name"`
+	Components  []string `json:"components"`
+}
+
+type ComposePromptResponse struct {
+	Prompt string `json:"prompt"`
+}
+
 type ImageProvider interface {
 	Generate(ctx context.Context, model, prompt string) ([]byte, error)
 }
