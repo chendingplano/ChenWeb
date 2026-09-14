@@ -18,7 +18,7 @@
 #   <dir>   directory holding <name>-linux + <name>-linux.sha256
 #           (default: the directory this script lives in)
 #   name    one or more of:
-#             server  doc-processor  parser-result-converter  create-admin
+#             server  doc-processor  parser-result-converter  doc-service  create-admin
 #           (default: every *-linux found in <dir>)
 #
 # Env overrides:
@@ -40,12 +40,13 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 run() { if [ "$DRY_RUN" = 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
 
 # --- valid binary -> systemd service (empty = CLI tool, install only) ---------
-valid_names="server doc-processor parser-result-converter create-admin"
+valid_names="server doc-processor parser-result-converter doc-service create-admin"
 svc_for() {
   case "$1" in
     server)                   printf 'chenweb' ;;
     doc-processor)            printf 'doc-processor' ;;
     parser-result-converter)  printf 'parser-result-converter' ;;
+    doc-service)              printf 'doc-service' ;;
     create-admin)             printf '' ;;
     *)                        printf '__invalid__' ;;
   esac

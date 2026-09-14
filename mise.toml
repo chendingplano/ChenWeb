@@ -75,7 +75,7 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all four."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all five."
 run = '''
 set -euo pipefail
 
@@ -84,7 +84,7 @@ REPO="$(git rev-parse --show-toplevel)"
 cd "$REPO"
 
 # binary name -> cmd package
-ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter create-admin:./server/cmd/create-admin"
+ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin"
 SELECT="${BINS:-}"   # e.g. BINS="server,doc-processor"
 
 SELECTED=""
@@ -94,7 +94,7 @@ for pair in $ALL; do
     SELECTED="$SELECTED $pair"
   fi
 done
-[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,create-admin" >&2; exit 1; }
+[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,doc-service,create-admin" >&2; exit 1; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
