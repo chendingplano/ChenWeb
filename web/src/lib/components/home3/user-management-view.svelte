@@ -14,6 +14,7 @@
 		id: string;
 		name: string;
 		email: string;
+		phone: string;
 		firstName: string;
 		lastName: string;
 		status: 'active' | 'inactive' | 'trial';
@@ -24,6 +25,7 @@
 	type EditDraft = {
 		id: string;
 		email: string;
+		phone: string;
 		firstName: string;
 		lastName: string;
 		status: UserRow['status'];
@@ -56,6 +58,7 @@
 	let editDraft = $state<EditDraft>({
 		id: '',
 		email: '',
+		phone: '',
 		firstName: '',
 		lastName: '',
 		status: 'active',
@@ -94,6 +97,7 @@
 			id: user.id,
 			name: displayName(user),
 			email: user.email,
+			phone: user.user_mobile ?? '',
 			firstName: user.first_name ?? '',
 			lastName: user.last_name ?? '',
 			status: mapStatus(user),
@@ -158,6 +162,7 @@
 		editDraft = {
 			id: user.id,
 			email: user.email,
+			phone: user.phone,
 			firstName: user.firstName,
 			lastName: user.lastName,
 			status: user.status,
@@ -318,7 +323,10 @@
 		<table>
 			<thead>
 				<tr>
-					<th>User</th>
+					<th>First Name</th>
+					<th>Last Name</th>
+					<th>Email</th>
+					<th>Phone</th>
 					<th>Status</th>
 					<th>Roles</th>
 					<th>Actions</th>
@@ -327,21 +335,19 @@
 			<tbody>
 				{#if loading}
 					<tr>
-						<td colspan="4" class="empty-state">Loading users from Kratos...</td>
+						<td colspan="7" class="empty-state">Loading users from Kratos...</td>
 					</tr>
 				{:else if users.length === 0}
 					<tr>
-						<td colspan="4" class="empty-state">No Kratos users were returned.</td>
+						<td colspan="7" class="empty-state">No Kratos users were returned.</td>
 					</tr>
 				{:else}
 				{#each users as user (user.id)}
 					<tr>
-						<td>
-							<div class="user-cell">
-								<strong>{user.name}</strong>
-								<span>{user.email}</span>
-							</div>
-						</td>
+						<td>{user.firstName || '—'}</td>
+						<td>{user.lastName || '—'}</td>
+						<td>{user.email || '—'}</td>
+						<td>{user.phone || '—'}</td>
 						<td><span class="status">{user.status}</span></td>
 						<td>
 							<div class="chips">
@@ -391,7 +397,7 @@
 			<div class="dialog-head">
 				<div>
 					<div class="dialog-title">Edit Account</div>
-					<div class="dialog-subtitle">Use the email address below to confirm the exact account.</div>
+					<div class="dialog-subtitle">Use the email or phone below to confirm the exact account.</div>
 				</div>
 				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>Close</button>
 			</div>
@@ -399,9 +405,13 @@
 				<div class="dialog-error" role="alert">{error}</div>
 			{/if}
 			<div class="dialog-body">
-				<label class="wide">
+				<label>
 					<span>Email Address</span>
-					<input value={editDraft.email} readonly />
+					<input value={editDraft.email || 'No email on file'} readonly />
+				</label>
+				<label>
+					<span>Phone</span>
+					<input value={editDraft.phone || 'No phone on file'} readonly />
 				</label>
 				<label>
 					<span>First Name</span>
@@ -491,7 +501,7 @@
 		min-height: 100%;
 		padding: 16px 20px 32px;
 	}
-	.toolbar, .summary-grid, .row-actions, .chips, .user-cell {
+	.toolbar, .summary-grid, .row-actions, .chips {
 		display: flex;
 	}
 	.toolbar {
@@ -579,18 +589,6 @@
 		font-size: 11px;
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
-	}
-	.user-cell {
-		flex-direction: column;
-		gap: 4px;
-	}
-	.user-cell strong {
-		color: var(--heading);
-		font-size: 14px;
-	}
-	.user-cell span {
-		color: var(--sub);
-		font-size: 12px;
 	}
 	.status, .chip {
 		display: inline-flex;
@@ -685,7 +683,6 @@
 		color: var(--sub);
 		font-size: 12px;
 	}
-	.dialog-body label.wide,
 	.dialog-body .wide {
 		grid-column: 1 / -1;
 	}

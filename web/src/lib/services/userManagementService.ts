@@ -4,6 +4,7 @@ export type ManagedUser = {
 	first_name: string;
 	last_name: string;
 	email: string;
+	user_mobile?: string;
 	verified: boolean;
 	admin: boolean;
 	is_owner: boolean;
