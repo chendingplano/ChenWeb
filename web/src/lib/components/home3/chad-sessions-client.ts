@@ -25,6 +25,12 @@ export type ChadSessionDetail = {
 	messages: ChadSessionMessage[];
 };
 
+export function getSystemPrompt(meta: unknown): string | null {
+	if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;
+	const systemPrompt = (meta as { system_prompt?: unknown }).system_prompt;
+	return typeof systemPrompt === 'string' && systemPrompt.length > 0 ? systemPrompt : null;
+}
+
 async function request<T>(path: string): Promise<T> {
 	const response = await fetch(path, { credentials: 'same-origin' });
 	const text = await response.text();

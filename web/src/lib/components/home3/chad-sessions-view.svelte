@@ -6,6 +6,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { formatSessionJson } from './session-json-formatter';
 	import {
+		getSystemPrompt,
 		getHarnessSession,
 		listHarnessSessions,
 		type ChadSessionDetail,
@@ -25,6 +26,7 @@
 	let page = $state(0);
 	let pageCount = $derived(Math.max(1, Math.ceil(sessions.length / pageSize)));
 	let pageSessions = $derived(sessions.slice(page * pageSize, (page + 1) * pageSize));
+	let systemPrompt = $derived(detail ? getSystemPrompt(detail.meta) : null);
 
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -198,22 +200,34 @@
 					</div>
 					<div class="detail-facts">
 						<span><Clock3Icon size={13} />{formatDate(detail.updated)}</span><span
-							><MessageSquareIcon size={13} />{detail.messages.length} messages</span
+							><MessageSquareIcon size={13} />{detail.messages.length + (systemPrompt ? 1 : 0)} messages</span
 						>
 					</div>
 				</div>
 				{#if detail.cwd}<div class="cwd-banner"><FolderOpenIcon size={14} />{detail.cwd}</div>{/if}
-				{#if !detail.messages.length}
+				{#if !detail.messages.length && !systemPrompt}
 					<div class="detail-state">This session has no messages.</div>
 				{:else}
 					<div class="messages">
+						{#if systemPrompt}
+							<article class="message-card role-system">
+								<div class="message-label">
+									<span>SYSTEM</span>
+									<span class="message-stats">
+										<span class="message-tokens">tokens={tokenCount(systemPrompt)}</span>
+										<span class="message-index">#1</span>
+									</span>
+								</div>
+								<div class="formatted-json">{@html formatSessionJson(systemPrompt)}</div>
+							</article>
+						{/if}
 						{#each detail.messages as message, index}
 							<article class="message-card role-{message.role || 'unknown'}">
 								<div class="message-label">
 									<span>{roleLabel(message.role)}</span>
 									<span class="message-stats">
 										<span class="message-tokens">tokens={tokenCount(message.content)}</span>
-										<span class="message-index">#{index + 1}</span>
+										<span class="message-index">#{index + (systemPrompt ? 2 : 1)}</span>
 									</span>
 								</div>
 								{#if message.toolCallCommand}
