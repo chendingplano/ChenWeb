@@ -599,120 +599,135 @@
 	});
 </script>
 
-<div class="doc-page-bar">
-	<div class="page-bar-sidebar-spacer" style={`width:${pdfSidebarWidth}px;`}></div>
-	<div class="page-controls-wrap">
-		<div class="page-controls">
-			<button
-				class="page-btn"
-				onclick={() => goToPage(page - 1)}
-				disabled={page <= 1}
-				aria-label="Previous page">‹</button
-			>
-			<div class="page-bar-label">
-				<span class="page-bar-folio">page</span>
-				<input
-					type="number"
-					min="1"
-					max={Math.max(1, numPages)}
-					class="page-input"
-					bind:value={page}
-					onchange={() => goToPage(page)}
-				/>
-				<span class="page-total">/ {Math.max(1, numPages)}</span>
-			</div>
-			<button
-				class="page-btn"
-				onclick={() => goToPage(page + 1)}
-				disabled={page >= Math.max(1, numPages)}
-				aria-label="Next page">›</button
-			>
-			<button class="page-btn small" onclick={zoomOut} title="Zoom out" aria-label="Zoom out"
-				>−</button
-			>
-			<span class="zoom-label">{zoomLabel()}</span>
-			<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button
-			>
-			<button
-				class="page-btn small"
-				type="button"
-				onclick={openPdfInNewTab}
-				title="Open in new tab"
-				aria-label="Open in new tab">↗</button
-			>
-		</div>
-	</div>
-	{@render pageBarTool?.()}
-</div>
-
-<div class="pdf-stage" bind:this={pdfStageEl}>
-	<div class="pdf-layout">
-		<div class="pdf-sidebar-cluster" bind:this={pdfSidebarClusterEl}>
-			{@render sidebarContent?.()}
-			{@render sidebarResizer?.()}
-		</div>
-		<div
-			class="pdf-canvas-host"
-			bind:this={pdfCanvasHostEl}
-			onpointerdown={onDragPointerDown}
-			onpointermove={onDragPointerMove}
-			onpointerup={onDragPointerUp}
-			onselectstart={(e) => e.preventDefault()}
-		>
-			<div class="pdf-pages">
-				{#each pdfRenderedPages as pageNo (pageNo)}
-					<div class="pdf-page" id={`${viewerId}-page-${pageNo}`} data-page={pageNo}>
-						<div class="pdf-page-head">
-							<span class="pdf-page-label">page</span>
-							<span class="pdf-page-num">{String(pageNo).padStart(3, '0')}</span>
-						</div>
-						<div class="pdf-canvas-shell">
-							<canvas class="pdf-canvas" id={`${viewerId}-canvas-${pageNo}`}></canvas>
-							<div class="pdf-overlay" id={`${viewerId}-overlay-${pageNo}`}></div>
-							{#if floatingOverlay && floatingOverlayPage === pageNo}
-								<div
-									class="pdf-floating-overlay-anchor"
-									style={`left:${floatingOverlayLeft}px; top:${floatingOverlayTop}px;`}
-								>
-									<div class="pdf-floating-overlay-card" bind:this={floatingOverlayEl}>
-										{@render floatingOverlay()}
-									</div>
-								</div>
-							{/if}
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
-	</div>
-	{#if dragSelecting}
-		<div
-			class="pdf-drag-indicator"
-			style="top:{indViewportTop}px;left:{indViewportLeft}px;width:{indWidth}px;height:{indHeight}px;"
-		></div>
-	{/if}
-	{#if pdfLoading}
-		<div class="pdf-status"><span class="dot-loop"></span>{loadingLabel}</div>
-	{/if}
-	{#if pdfError}
-		<div class="doc-error" style="padding-top:20px;">
-			<div class="doc-error-title">⚠ Cannot render this PDF</div>
-			<div class="doc-error-msg">
-				{pdfError}<br />
-				<button class="doc-error-link" type="button" onclick={openPdfInNewTab}
-					>Open in a new tab</button
+<div class="pdf-viewer">
+	<div class="doc-page-bar">
+		<div class="page-bar-sidebar-spacer" style={`width:${pdfSidebarWidth}px;`}></div>
+		<div class="page-controls-wrap">
+			<div class="page-controls">
+				<button
+					class="page-btn"
+					onclick={() => goToPage(page - 1)}
+					disabled={page <= 1}
+					aria-label="Previous page">‹</button
+				>
+				<div class="page-bar-label">
+					<span class="page-bar-folio">page</span>
+					<input
+						type="number"
+						min="1"
+						max={Math.max(1, numPages)}
+						class="page-input"
+						bind:value={page}
+						onchange={() => goToPage(page)}
+					/>
+					<span class="page-total">/ {Math.max(1, numPages)}</span>
+				</div>
+				<button
+					class="page-btn"
+					onclick={() => goToPage(page + 1)}
+					disabled={page >= Math.max(1, numPages)}
+					aria-label="Next page">›</button
+				>
+				<button class="page-btn small" onclick={zoomOut} title="Zoom out" aria-label="Zoom out"
+					>−</button
+				>
+				<span class="zoom-label">{zoomLabel()}</span>
+				<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in"
+					>+</button
+				>
+				<button
+					class="page-btn small"
+					type="button"
+					onclick={openPdfInNewTab}
+					title="Open in new tab"
+					aria-label="Open in new tab">↗</button
 				>
 			</div>
 		</div>
-	{/if}
+		{@render pageBarTool?.()}
+	</div>
+
+	<div class="pdf-stage" bind:this={pdfStageEl}>
+		<div class="pdf-layout">
+			<div class="pdf-sidebar-cluster" bind:this={pdfSidebarClusterEl}>
+				{@render sidebarContent?.()}
+				{@render sidebarResizer?.()}
+			</div>
+			<div
+				class="pdf-canvas-host"
+				bind:this={pdfCanvasHostEl}
+				onpointerdown={onDragPointerDown}
+				onpointermove={onDragPointerMove}
+				onpointerup={onDragPointerUp}
+				onselectstart={(e) => e.preventDefault()}
+			>
+				<div class="pdf-pages">
+					{#each pdfRenderedPages as pageNo (pageNo)}
+						<div class="pdf-page" id={`${viewerId}-page-${pageNo}`} data-page={pageNo}>
+							<div class="pdf-page-head">
+								<span class="pdf-page-label">page</span>
+								<span class="pdf-page-num">{String(pageNo).padStart(3, '0')}</span>
+							</div>
+							<div class="pdf-canvas-shell">
+								<canvas class="pdf-canvas" id={`${viewerId}-canvas-${pageNo}`}></canvas>
+								<div class="pdf-overlay" id={`${viewerId}-overlay-${pageNo}`}></div>
+								{#if floatingOverlay && floatingOverlayPage === pageNo}
+									<div
+										class="pdf-floating-overlay-anchor"
+										style={`left:${floatingOverlayLeft}px; top:${floatingOverlayTop}px;`}
+									>
+										<div class="pdf-floating-overlay-card" bind:this={floatingOverlayEl}>
+											{@render floatingOverlay()}
+										</div>
+									</div>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		</div>
+		{#if dragSelecting}
+			<div
+				class="pdf-drag-indicator"
+				style="top:{indViewportTop}px;left:{indViewportLeft}px;width:{indWidth}px;height:{indHeight}px;"
+			></div>
+		{/if}
+		{#if pdfLoading}
+			<div class="pdf-status"><span class="dot-loop"></span>{loadingLabel}</div>
+		{/if}
+		{#if pdfError}
+			<div class="doc-error" style="padding-top:20px;">
+				<div class="doc-error-title">⚠ Cannot render this PDF</div>
+				<div class="doc-error-msg">
+					{pdfError}<br />
+					<button class="doc-error-link" type="button" onclick={openPdfInNewTab}
+						>Open in a new tab</button
+					>
+				</div>
+			</div>
+		{/if}
+	</div>
 </div>
 
 <style>
+	.pdf-viewer {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+		min-width: 0;
+		flex: 1 1 auto;
+	}
 	.doc-page-bar {
+		position: sticky;
+		top: 0;
+		z-index: 4;
 		display: flex;
 		align-items: center;
 		gap: 10px;
 		padding: 10px 14px;
+		flex: 0 0 auto;
 		border-bottom: 1px solid var(--ink-line-soft);
 		background: var(--panel-bg);
 	}

@@ -203,6 +203,7 @@
 		min-height: 0;
 		position: relative;
 		display: flex;
+		flex-direction: column;
 	}
 	.empty {
 		margin: auto;

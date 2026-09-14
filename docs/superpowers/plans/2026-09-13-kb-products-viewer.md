@@ -14,4 +14,5 @@
 
 - [x] Move the `kb-products` menu item directly after `kb-metrics` in `web/src/routes/home3/knowledge/+page.svelte`.
 - [x] Update `ProductsView` copy and remove the related-products detail group so the viewer presents product records and source documents only.
+- [x] Add `project_migrations/20260913000002_enable_kb_products_menu.sql` to restore the menu entry's enabled/accessibility flags.
 - [x] Run the focused frontend checks and inspect the diff.

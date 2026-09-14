@@ -10,6 +10,10 @@ The existing `ProductsView` and `KbExtractionView` provide the required three-pa
 
 Products will appear immediately after Metrics in the Knowledge System menu. Its detail groups will cover product metadata, grounding, inputs, actors, and requirements. Related-product navigation/details are excluded; the selected source document remains available for context and evidence.
 
+The `kb-products` page-config entries must remain enabled and accessible in both
+supported language rows; an idempotent project migration restores those flags so
+the DB-backed menu overlay does not hide the page-owned menu entry.
+
 ## Verification
 
 - Verify menu order is Metrics, Products.
