@@ -119,6 +119,7 @@
 **Files:**
 - Create: `server/api/agentservicehandler/testdata/evaluation-cases.json`
 - Create: `docs/pi-agentic-services-operations.md`
+- Create: `docs/pi-agentic-services-handoff.md`
 - Modify: `mise.toml`
 
 - [x] Add representative normal, ambiguous, missing-evidence, conflicting-source, hostile-document, access-denial, and access-revoked-after-save cases for both profiles.
@@ -126,4 +127,4 @@
 - [x] Add a development task that starts the gateway beside ChenWeb without exposing it publicly.
 - [x] Run migration up/down/up against a dedicated empty development probe database; validate the migration contract in tests as well.
 - [x] Run `bun test` and `bun run check` in `ThirdParty/pi`; run frontend tests/check/build; copy the generated build into the embed directory; run `go test ./...` and `mise build-server` in ChenWeb.
-- [ ] Commit Pi and ChenWeb changes separately with `jj`, inspect both logs, and confirm no unrelated workspace changes were included.
+- [x] Commit Pi and ChenWeb changes separately with `jj`, inspect both logs, and confirm no unrelated workspace changes were included.
