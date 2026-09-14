@@ -1,0 +1,33 @@
+package agentservicehandler
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func TestAgenticServiceMigrationEnforcesAttemptSourceIntegrity(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not resolve test path")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(file), "../../../project_migrations/20260914000001_create_agentic_service_tables.sql"))
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(body)
+	for _, required := range []string{
+		"FOREIGN KEY (tool_call_id, attempt_id)",
+		"REFERENCES kb.agentic_tool_calls(id, attempt_id)",
+		"FOREIGN KEY (message_id, attempt_id)",
+		"REFERENCES kb.agentic_messages(id, attempt_id)",
+		"CHECK (BTRIM(source_fingerprint) <> '')",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration missing integrity clause %q", required)
+		}
+	}
+}
