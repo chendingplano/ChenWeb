@@ -341,8 +341,8 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)
-	apiGroup.PUT("/system-admin/users/by-email/:email", useradminhandler.UpdateUser)
-	apiGroup.DELETE("/system-admin/users/by-email/:email", useradminhandler.DeleteUser)
+	apiGroup.PUT("/system-admin/users/:id", useradminhandler.UpdateUser)
+	apiGroup.DELETE("/system-admin/users/:id", useradminhandler.DeleteUser)
 
 	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 

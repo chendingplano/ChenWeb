@@ -3,7 +3,6 @@ package useradminhandler
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 
@@ -239,14 +238,6 @@ func findIdentityByEmail(logger ApiTypes.JimoLogger, email string) (*ApiTypes.Us
 	return nil, err
 }
 
-func normalizeEmailParam(raw string) (string, error) {
-	decoded, err := url.PathUnescape(strings.TrimSpace(raw))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(strings.ToLower(decoded)), nil
-}
-
 func UpdateUser(c echo.Context) error {
 	currentUser, rc, err := requireAuthenticatedUser(c, "CWB_USR_030")
 	if err != nil {
@@ -257,16 +248,10 @@ func UpdateUser(c echo.Context) error {
 	logger := rc.GetLogger()
 	canManageAll := canManageAllUsers(currentUser)
 
-	targetEmail, err := normalizeEmailParam(c.Param("email"))
-	if err != nil {
+	targetID := strings.TrimSpace(c.Param("id"))
+	if targetID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid email path parameter",
-			"loc":   "CWB_USR_039A",
-		})
-	}
-	if targetEmail == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Email is required",
+			"error": "User id is required",
 			"loc":   "CWB_USR_039",
 		})
 	}
@@ -290,7 +275,7 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	existingUser, err := findIdentityByEmail(logger, targetEmail)
+	existingUser, err := auth.KratosGetIdentityByID(logger, targetID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "User not found",
@@ -298,7 +283,7 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	if !canManageAll && !strings.EqualFold(currentUser.Email, targetEmail) {
+	if !canManageAll && currentUser.UserId != targetID {
 		return c.JSON(http.StatusForbidden, map[string]string{
 			"error": "You may only manage your own account",
 			"loc":   "CWB_USR_077",
@@ -333,7 +318,7 @@ func UpdateUser(c echo.Context) error {
 		})
 	}
 
-	if currentUser.Email == targetEmail && !req.Admin {
+	if currentUser.UserId == targetID && !req.Admin {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "You cannot remove your own admin access",
 			"loc":   "CWB_USR_099",
@@ -353,16 +338,16 @@ func UpdateUser(c echo.Context) error {
 		},
 		State: &identityState,
 	}); err != nil {
-		logger.Error("failed to update kratos user", "error", err, "user_email", targetEmail)
+		logger.Error("failed to update kratos user", "error", err, "user_id", targetID)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to update user",
 			"loc":   "CWB_USR_117",
 		})
 	}
 
-	updatedUser, err := findIdentityByEmail(logger, targetEmail)
+	updatedUser, err := auth.KratosGetIdentityByID(logger, targetID)
 	if err != nil {
-		logger.Error("failed to load updated kratos user", "error", err, "user_email", targetEmail)
+		logger.Error("failed to load updated kratos user", "error", err, "user_id", targetID)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "User updated but could not be reloaded",
 			"loc":   "CWB_USR_126",
@@ -390,27 +375,21 @@ func DeleteUser(c echo.Context) error {
 		})
 	}
 
-	targetEmail, err := normalizeEmailParam(c.Param("email"))
-	if err != nil {
+	targetID := strings.TrimSpace(c.Param("id"))
+	if targetID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid email path parameter",
-			"loc":   "CWB_USR_149A",
-		})
-	}
-	if targetEmail == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Email is required",
+			"error": "User id is required",
 			"loc":   "CWB_USR_149",
 		})
 	}
-	if currentUser.Email == targetEmail {
+	if currentUser.UserId == targetID {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "You cannot delete your own account",
 			"loc":   "CWB_USR_156",
 		})
 	}
 
-	existingUser, err := findIdentityByEmail(logger, targetEmail)
+	existingUser, err := auth.KratosGetIdentityByID(logger, targetID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "User not found",
@@ -425,7 +404,7 @@ func DeleteUser(c echo.Context) error {
 	}
 
 	if err := auth.KratosDeleteIdentity(logger, existingUser.UserId); err != nil {
-		logger.Error("failed to delete kratos user", "error", err, "user_email", targetEmail)
+		logger.Error("failed to delete kratos user", "error", err, "user_id", targetID)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to delete user",
 			"loc":   "CWB_USR_179",
@@ -435,7 +414,7 @@ func DeleteUser(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "ok",
 		"deleted": true,
-		"email":   targetEmail,
+		"id":      targetID,
 	})
 }
 

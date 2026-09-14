@@ -210,7 +210,7 @@
 		success = null;
 		error = null;
 		try {
-			const updated = await updateManagedUser(editDraft.email, {
+			const updated = await updateManagedUser(editDraft.id, {
 				first_name: editDraft.firstName.trim(),
 				last_name: editDraft.lastName.trim(),
 				status: editDraft.status,
@@ -234,7 +234,7 @@
 		success = null;
 		error = null;
 		try {
-			await deleteManagedUser(user.email);
+			await deleteManagedUser(user.id);
 			managedUsers = managedUsers.filter((entry) => entry.id !== user.id);
 			syncUsers();
 			success = `Deleted account ${user.email}.`;
@@ -395,6 +395,9 @@
 				</div>
 				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>Close</button>
 			</div>
+			{#if error}
+				<div class="dialog-error" role="alert">{error}</div>
+			{/if}
 			<div class="dialog-body">
 				<label class="wide">
 					<span>Email Address</span>
@@ -548,6 +551,14 @@
 		border-radius: 12px;
 		color: #22c55e;
 		padding: 12px 14px;
+	}
+	.dialog-error {
+		background: color-mix(in srgb, var(--danger) 14%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+		border-radius: 12px;
+		color: var(--danger);
+		padding: 12px 14px;
+		margin: 16px 20px 0;
 	}
 	.table-card {
 		overflow: hidden;
