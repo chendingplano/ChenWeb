@@ -609,7 +609,17 @@ const alignEvidence = "pref_label exact match to a released metric_definition la
 
 const alignQualifiersJSON = `{"evidence":"pref_label exact match to a released metric_definition label (auto-assign, §16.1)","method":"term_exact"}`
 
-// alignAssertionRow is a full 37-column kb.semantic_assertions row as returned
+func alignAssertionInsertArgs(lk, conceptID, termID string) []driver.Value {
+	return []driver.Value{
+		lk, "keyword_concept", conceptID, nil,
+		"core:aligns_to_term", "ontology_term", termID, nil, nil, nil,
+		"positive", nil, alignQualifiersJSON, 1.0, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil,
+		nil, nil, nil, nil, nil, "null", nil, "null", nil, nil, nil, nil, nil,
+	}
+}
+
+// alignAssertionRow is a full kb.semantic_assertions row as returned
 // by CreateAssertion, carrying an accepted keyword_concept -> ontology_term
 // alignment (mirrors keywords/alignment_test.go's row).
 func alignAssertionRow(id int64, conceptID, termID string) *sqlmock.Rows {
@@ -620,7 +630,11 @@ func alignAssertionRow(id int64, conceptID, termID string) *sqlmock.Rows {
 		"object_object_id", "object_literal", "assertion_kind_term_id", "polarity",
 		"modality", "qualifiers", "confidence", "value_form", "numeric_value", "lower_value",
 		"upper_value", "lower_inclusive", "upper_inclusive", "comparator", "unit_term_id",
-		"quantity_kind_term_id", "raw_text", "status", "decision_reason",
+		"quantity_kind_term_id", "raw_text", "status", "unsupported_prior_status",
+		"instance_of_term_id", "class_identity_state_term_id",
+		"mapping_resolution_state_term_id", "value_state_term_id", "conformance_state_term_id",
+		"raw_payload", "raw_snapshot_fingerprint", "processing_error_details",
+		"normalized_against_contract_revision_id", "decision_reason",
 		"dependency_fingerprint", "superseded_by", "valid_time_start", "valid_time_end",
 		"transaction_time", "create_time", "create_by", "modify_time", "modify_by",
 	}).AddRow(
@@ -629,7 +643,8 @@ func alignAssertionRow(id int64, conceptID, termID string) *sqlmock.Rows {
 		nil, []byte("null"), nil, "positive",
 		nil, []byte(alignQualifiersJSON), 1.0, nil, nil, nil,
 		nil, nil, nil, nil, nil,
-		nil, "", "accepted", alignEvidence,
+		nil, "", "accepted", nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, alignEvidence,
 		nil, nil, nil, nil,
 		testNow, testNow, nil, testNow, nil,
 	)
@@ -765,12 +780,7 @@ func TestResolveAndObserveAutoAlignsOnExactLabel(t *testing.T) {
 		WithArgs("kwc:kwc_l:core:aligns_to_term:mea:Luminance").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(assertionInsertQ)).
-		WithArgs(
-			"kwc:kwc_l:core:aligns_to_term:mea:Luminance", "keyword_concept", "kwc_l", nil,
-			"core:aligns_to_term", "ontology_term", "mea:Luminance", nil, "null", nil,
-			"positive", nil, alignQualifiersJSON, 1.0, nil,
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil, nil, nil, nil,
-		).
+		WithArgs(alignAssertionInsertArgs("kwc:kwc_l:core:aligns_to_term:mea:Luminance", "kwc_l", "mea:Luminance")...).
 		WillReturnRows(alignAssertionRow(1, "kwc_l", "mea:Luminance"))
 	mock.ExpectQuery(regexp.QuoteMeta(decisionSQL)).
 		WithArgs("keyword_align", "_", `{"concept_id":"kwc_l","term_id":"mea:Luminance"}`, sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).

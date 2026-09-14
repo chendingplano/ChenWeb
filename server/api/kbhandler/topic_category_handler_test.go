@@ -102,7 +102,7 @@ lines: [338-342]
 topic_keywords: [clinic, health]
 topic: "Requirements text"
 `)
-	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.topics"), `topic_id: 1
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.topics"), `topic_id: 99_tpc_1
 topic_type: "procedure"
 lines: ["338-342"]
 topic_keywords: ["clinic", "health"]
@@ -118,7 +118,7 @@ category_paths: []
 	if len(results) != 1 {
 		t.Fatalf("expected 1 topic, got %d", len(results))
 	}
-	if results[0].ID != "99_1" {
+	if results[0].ID != "99_tpc_1" {
 		t.Fatalf("unexpected topic id: %+v", results[0])
 	}
 	if results[0].TopicText != "Requirements text" {
@@ -175,14 +175,14 @@ lines: [493-501]
 topic_keywords: [传染病筛查, 免疫]
 topic: "应定期对消防员进行传染病筛查和免疫。"
 `)
-	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.topics"), `topic_id: 1
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.topics"), `topic_id: 99_tpc_1
 topic_type: "general"
 lines: ["1-3"]
 topic_keywords: ["overview"]
 topic: "消防员职业健康标准 (Standard on occupational health for fire fighter) - 发布信息"
 category_paths: []
 
-topic_id: 149
+topic_id: 99_tpc_149
 topic_type: "list"
 lines: ["493-501"]
 topic_keywords: ["传染病筛查", "免疫"]
@@ -198,7 +198,7 @@ category_paths: []
 	if len(results) != 1 {
 		t.Fatalf("expected 1 topic, got %d", len(results))
 	}
-	if results[0].ID != "99_149" {
+	if results[0].ID != "99_tpc_149" {
 		t.Fatalf("expected resolved artifact topic id, got %+v", results[0])
 	}
 	if results[0].TopicText != "应定期对消防员进行传染病筛查和免疫。" {

@@ -71,7 +71,7 @@ func TestParseTermsFromFileClassifiesEachClassFromItsOwnRDFType(t *testing.T) {
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix qudt: <http://qudt.org/schema/qudt/> .
 
-<http://qudt.org/vocab/dimensionvector/L> a qudt:DimensionVector ;
+<http://qudt.org/vocab/dimensionvector/L> a qudt:QuantityKindDimensionVector ;
     rdfs:label "Length"@en .
 `)
 	combined := writeTTL("qudt-all.ttl", `@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -85,7 +85,7 @@ func TestParseTermsFromFileClassifiesEachClassFromItsOwnRDFType(t *testing.T) {
 <http://qudt.org/vocab/quantitykind/LuminousIntensity> a qudt:QuantityKind ;
     rdfs:label "luminous intensity"@en .
 
-<http://qudt.org/vocab/dimensionvector/L> a qudt:DimensionVector ;
+<http://qudt.org/vocab/dimensionvector/L> a qudt:QuantityKindDimensionVector ;
     rdfs:label "Length"@en .
 `)
 

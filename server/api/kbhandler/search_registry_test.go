@@ -13,6 +13,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 )
 
 func TestDeleteSearchRegistryRowsForRecord(t *testing.T) {
@@ -57,6 +58,7 @@ func TestInsertSearchRegistryRowsUpsertsNormalizedRows(t *testing.T) {
 			`["performance"]`,
 			`["10:11"]`,
 			`{"kind":"summary"}`,
+			pq.Array([]string{}),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -106,6 +108,7 @@ func TestInsertSearchRegistryRowsSemanticModeWritesEmbedding(t *testing.T) {
 			`["performance"]`,
 			`["10:11"]`,
 			`{"kind":"summary"}`,
+			pq.Array([]string{}),
 			"Energy summary category performance",
 			kbsearch.FormatVectorLiteral([]float64{0.125, -0.5, 1}),
 		).
@@ -166,9 +169,9 @@ func TestSearchSummariesReturnsRegistryResults(t *testing.T) {
 	mock.ExpectQuery("WITH query_input AS").
 		WithArgs("energy", "summary", int64(7), 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
-			"summary", "7_sum_1", int64(7), "Energy summary", "Level 1", "doc.pdf", "doc.pdf", `["10:11"]`, `{"kind":"summary"}`, 0.84, "Energy summary highlights the target",
+			"summary", "7_sum_1", int64(7), "Energy summary", "Level 1", "doc.pdf", "doc.pdf", `["10:11"]`, `{"kind":"summary"}`, "{energy}", 0.84, "Energy summary highlights the target",
 		))
 
 	c, rec := newRegistrySearchContext(t, "q=energy&input_record_id=7")
@@ -215,9 +218,9 @@ func TestSearchTopicsReturnsRegistryResults(t *testing.T) {
 	mock.ExpectQuery("WITH query_input AS").
 		WithArgs("battery", "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
-			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, 0.73, "Battery safety appears in the charging requirements",
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, "{battery,safety}", 0.73, "Battery safety appears in the charging requirements",
 		))
 
 	e := echo.New()
@@ -253,9 +256,9 @@ func TestSearchProductsReturnsRegistryResults(t *testing.T) {
 	mock.ExpectQuery("WITH query_input AS").
 		WithArgs("pump", "product", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
-			"product", "12_prd_1", int64(12), "Infusion pump", "equipment", "products.pdf", "products.pdf", `["1:20"]`, `{"kind":"product"}`, 0.91, "Infusion pump requires monthly inspection",
+			"product", "12_prd_1", int64(12), "Infusion pump", "equipment", "products.pdf", "products.pdf", `["1:20"]`, `{"kind":"product"}`, "{pump}", 0.91, "Infusion pump requires monthly inspection",
 		))
 
 	e := echo.New()
@@ -291,10 +294,10 @@ func TestSearchAllArtifactsReturnsMixedRegistryResults(t *testing.T) {
 	mock.ExpectQuery("WITH query_input AS").
 		WithArgs("safety", int64(88), 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).
-			AddRow("summary", "88_sum_1", int64(88), "Safety overview", "Level 1", "doc.pdf", "doc.pdf", `["1:10"]`, `{"kind":"summary"}`, 0.88, "Safety overview text").
-			AddRow("provision", "88_prv_3", int64(88), "Protective enclosure", "mandatory", "doc.pdf", "doc.pdf", `["2:12"]`, `{"kind":"provision"}`, 0.81, "Protective enclosure shall remain closed"))
+			AddRow("summary", "88_sum_1", int64(88), "Safety overview", "Level 1", "doc.pdf", "doc.pdf", `["1:10"]`, `{"kind":"summary"}`, "{safety}", 0.88, "Safety overview text").
+			AddRow("provision", "88_prv_3", int64(88), "Protective enclosure", "mandatory", "doc.pdf", "doc.pdf", `["2:12"]`, `{"kind":"provision"}`, "{enclosure}", 0.81, "Protective enclosure shall remain closed"))
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/search?q=safety&input_record_id=88", nil)
@@ -385,11 +388,11 @@ func TestBuildRegistrySearchWhereClauseAddsCJKSubstringFallback(t *testing.T) {
 	}
 }
 
-func TestRegistryLexicalBackendDefaultsToPostgres(t *testing.T) {
+func TestRegistryLexicalBackendDefaultsToParadeDB(t *testing.T) {
 	t.Setenv("SEARCH_LEXICAL_BACKEND", "")
 
-	if got := registryLexicalBackend(); got != lexicalBackendPostgres {
-		t.Fatalf("backend=%q, want %q", got, lexicalBackendPostgres)
+	if got := registryLexicalBackend(); got != lexicalBackendParadeDB {
+		t.Fatalf("backend=%q, want %q", got, lexicalBackendParadeDB)
 	}
 }
 
@@ -413,9 +416,9 @@ func TestQueryRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
 	mock.ExpectQuery("pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1").
 		WithArgs("battery", "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
-			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, 2.7, "Battery safety",
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, "{battery}", 2.7, "Battery safety",
 		))
 
 	results, err := queryRegistrySearchResults(db, "topic", "battery", artifactSearchFilters{}, 1, 20, registrySearchConfig{
@@ -471,9 +474,9 @@ func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
 	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*sa\\.embedding <=> \\$2::vector").
 		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
-			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, 0.031, "Battery safety",
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, "{battery}", 0.031, "Battery safety",
 		))
 
 	results, err := queryHybridSearchResultsParadeDB(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20)

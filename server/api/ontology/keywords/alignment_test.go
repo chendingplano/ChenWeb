@@ -3,6 +3,7 @@ package keywords
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"regexp"
 	"testing"
@@ -30,7 +31,17 @@ var testScore = 1.0
 // RETURNING/read row returns.
 const testQualifiers = `{"evidence":"pref_label exact match","method":"term_exact"}`
 
-// alignmentAssertionRow is a full 37-column kb.semantic_assertions row as
+func alignmentInsertArgs(lk, conceptID, termID, qualifiers string, confidence float64) []driver.Value {
+	return []driver.Value{
+		lk, "keyword_concept", conceptID, nil,
+		alignPredicateTermID, "ontology_term", termID, nil, nil, nil,
+		"positive", nil, qualifiers, confidence, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil,
+		nil, nil, nil, nil, nil, "null", nil, "null", nil, nil, nil, nil, nil,
+	}
+}
+
+// alignmentAssertionRow is a full kb.semantic_assertions row as
 // returned by CreateAssertion/CreateRevision/GetLatest, carrying an accepted
 // keyword_concept -> ontology_term alignment.
 func alignmentAssertionRow(id int64, lk, conceptID, termID, evidence string, qualifiers []byte, confidence float64) *sqlmock.Rows {
@@ -41,7 +52,11 @@ func alignmentAssertionRow(id int64, lk, conceptID, termID, evidence string, qua
 		"object_object_id", "object_literal", "assertion_kind_term_id", "polarity",
 		"modality", "qualifiers", "confidence", "value_form", "numeric_value", "lower_value",
 		"upper_value", "lower_inclusive", "upper_inclusive", "comparator", "unit_term_id",
-		"quantity_kind_term_id", "raw_text", "status", "decision_reason",
+		"quantity_kind_term_id", "raw_text", "status", "unsupported_prior_status",
+		"instance_of_term_id", "class_identity_state_term_id",
+		"mapping_resolution_state_term_id", "value_state_term_id", "conformance_state_term_id",
+		"raw_payload", "raw_snapshot_fingerprint", "processing_error_details",
+		"normalized_against_contract_revision_id", "decision_reason",
 		"dependency_fingerprint", "superseded_by", "valid_time_start", "valid_time_end",
 		"transaction_time", "create_time", "create_by", "modify_time", "modify_by",
 	}).AddRow(
@@ -50,7 +65,8 @@ func alignmentAssertionRow(id int64, lk, conceptID, termID, evidence string, qua
 		nil, []byte("null"), nil, "positive",
 		nil, qualifiers, confidence, nil, nil, nil,
 		nil, nil, nil, nil, nil,
-		nil, "", "accepted", evidence,
+		nil, "", "accepted", nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, evidence,
 		nil, nil, nil, nil,
 		now, now, nil, now, nil,
 	)
@@ -112,12 +128,7 @@ func TestAlignmentsStoreEnsureAccepted(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 	// 4. CreateAssertion INSERT...RETURNING: pin the whole written row.
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
-		WithArgs(
-			testLK, "keyword_concept", testConceptID, nil,
-			alignPredicateTermID, "ontology_term", testTermID, nil, "null", nil,
-			"positive", nil, testQualifiers, testScore, nil,
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil, nil, nil, nil,
-		).
+		WithArgs(alignmentInsertArgs(testLK, testConceptID, testTermID, testQualifiers, testScore)...).
 		WillReturnRows(alignmentAssertionRow(1, testLK, testConceptID, testTermID, testEvidence, []byte(testQualifiers), testScore))
 	// 5. DR15 audit row (observe path only).
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
@@ -207,12 +218,7 @@ func TestAlignmentsStoreConflict(t *testing.T) {
 		WithArgs(testLK).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
-		WithArgs(
-			testLK, "keyword_concept", testConceptID, nil,
-			alignPredicateTermID, "ontology_term", testTermID, nil, "null", nil,
-			"positive", nil, testQualifiers, testScore, nil,
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil, nil, nil, nil,
-		).
+		WithArgs(alignmentInsertArgs(testLK, testConceptID, testTermID, testQualifiers, testScore)...).
 		WillReturnRows(alignmentAssertionRow(1, testLK, testConceptID, testTermID, testEvidence, []byte(testQualifiers), testScore))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
 		WithArgs("keyword_align", "_", `{"concept_id":"concept_a","term_id":"mea:Luminance"}`, sqlmock.AnyArg(), "accepted", nil, nil, "auto-align", 0).
@@ -352,6 +358,7 @@ func TestAlignmentsStoreEnsureAcceptedRollsBackAssertionWhenAuditFails(t *testin
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(getLatestByLK)).WithArgs(testLK).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
+		WithArgs(alignmentInsertArgs(testLK, testConceptID, testTermID, testQualifiers, testScore)...).
 		WillReturnRows(alignmentAssertionRow(1, testLK, testConceptID, testTermID, testEvidence, []byte(testQualifiers), testScore))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
 		WillReturnError(errors.New("audit unavailable"))
@@ -561,12 +568,7 @@ func TestAlignmentsStoreEnsureAcceptedOrCreateAutoCreatesTerm(t *testing.T) {
 		WithArgs(newLK).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semantic_assertions")).
-		WithArgs(
-			newLK, "keyword_concept", conceptID, nil,
-			alignPredicateTermID, "ontology_term", newTermID, nil, "null", nil,
-			"positive", nil, testQualifiers, testScore, nil,
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, "accepted", nil, nil, nil, nil,
-		).
+		WithArgs(alignmentInsertArgs(newLK, conceptID, newTermID, testQualifiers, testScore)...).
 		WillReturnRows(alignmentAssertionRow(2, newLK, conceptID, newTermID, testEvidence, []byte(testQualifiers), testScore))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.semid_decision_log")).
 		WithArgs("keyword_align", "_", `{"concept_id":"concept_new","term_id":"measurement:concept_new"}`,

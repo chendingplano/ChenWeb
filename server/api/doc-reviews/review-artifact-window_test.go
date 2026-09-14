@@ -109,12 +109,14 @@ func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
 	t.Setenv("LLM_CALL_STAGGER", "0")
 
 	seedsRelease := make(chan struct{})
+	seedStarted := make(chan struct{}, 2)
 	var seedStarts int32
 	remainderStarted := make(chan int, 3)
 
 	mkSeedRun := func() func(context.Context) []ReviewFinding {
 		return func(context.Context) []ReviewFinding {
 			atomic.AddInt32(&seedStarts, 1)
+			seedStarted <- struct{}{}
 			<-seedsRelease
 			return []ReviewFinding{{Title: "seed"}}
 		}
@@ -150,6 +152,16 @@ func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
 		)
 		close(done)
 	}()
+
+	// Wait for both seed callbacks to enter. Goroutine launch order is not a
+	// scheduling guarantee when the configured stagger is zero.
+	for i := range 2 {
+		select {
+		case <-seedStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("seed unit %d did not start", i+1)
+		}
+	}
 
 	// All three remainder units must start while both seeds are still blocked.
 	for i := range 3 {

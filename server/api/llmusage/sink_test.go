@@ -204,19 +204,41 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 	}
 }
 
-func TestSinkCaptureSkipsDatabaseInsertWhenAccountProfileMissing(t *testing.T) {
+func TestSinkCapturePersistsWithoutAccountProfileLinkage(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	startedAt := time.Date(2026, 6, 19, 9, 59, 0, 0, time.UTC)
+	finishedAt := time.Date(2026, 6, 19, 10, 0, 0, 0, time.UTC)
+	archiveRoot := t.TempDir()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (`)).
+		WithArgs(
+			"evt-test-2", nil, nil, "openai", "gpt-4o-mini", "no-account-yet",
+			startedAt, finishedAt, time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC),
+			int64(0), int64(0), int64(0), int64(0), int64(0), int64(60000), 0,
+			"",
+			filepath.Join("2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-input.json.gz"),
+			filepath.Join("2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-output.json.gz"),
+			"", `{"capture_source":"shared_llm"}`, nil, "", "", nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
 	sink := &Sink{
-		ArchiveRoot: t.TempDir(),
+		DB:          db,
+		ArchiveRoot: archiveRoot,
 		WorkspaceTZ: time.UTC,
 		NewID:       func() string { return "evt-test-2" },
-		Now:         func() time.Time { return time.Date(2026, 6, 19, 10, 0, 0, 0, time.UTC) },
+		Now:         func() time.Time { return finishedAt },
 	}
 
 	record := sharedllm.UsageCaptureRecord{
 		Provider:         sharedllm.ProviderOpenAI,
 		ModelName:        "gpt-4o-mini",
 		PromptName:       "no-account-yet",
-		RequestStartedAt: time.Date(2026, 6, 19, 9, 59, 0, 0, time.UTC),
+		RequestStartedAt: startedAt,
 		InputBody:        []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
 		OutputBody:       []byte(`{"content":"hello"}`),
 	}
@@ -228,6 +250,9 @@ func TestSinkCaptureSkipsDatabaseInsertWhenAccountProfileMissing(t *testing.T) {
 	inputPath := filepath.Join(sink.ArchiveRoot, "2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-input.json.gz")
 	if _, err := sharedllm.ReadGzipFile(inputPath); err != nil {
 		t.Fatalf("expected archive for unknown account, got error %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
 

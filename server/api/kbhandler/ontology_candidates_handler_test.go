@@ -56,14 +56,14 @@ func TestCreateOntologyCandidateReturnsFingerprintAndReused(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO kb.ontology_candidates")).
 		WithArgs("term", string(payload), "core", "llm", "rec:1", "null", nil, nil, fp, "null",
-			"discovered", nil, "tester", "tester").
+			"discovered", nil, "tester", "tester", nil).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "candidate_kind", "proposed_payload", "proposed_module_id", "source_type",
 			"source_ref", "source_line_spans", "discovery_method", "confidence", "fingerprint",
 			"candidate_matches", "status", "decision_reason", "dependency_fingerprint",
-			"proposed_by", "create_time", "create_by", "modify_time", "modify_by",
+			"proposed_by", "create_time", "create_by", "modify_time", "modify_by", "identity_key",
 		}).AddRow(int64(1), "term", payload, "core", "llm", "rec:1", []byte("null"), nil, nil, fp,
-			[]byte("null"), "discovered", nil, nil, nil, now, "tester", now, "tester"))
+			[]byte("null"), "discovered", nil, nil, nil, now, "tester", now, "tester", nil))
 
 	body := `{"candidate_kind":"term","proposed_payload":{"term_id":"core:assertion","term_kind":"class","module_id":"core"},"proposed_module_id":"core","source_type":"llm","source_ref":"rec:1","create_by":"tester"}`
 	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/candidates", body, nil)
@@ -106,9 +106,9 @@ func TestPromoteOntologyCandidateRequiresApproved(t *testing.T) {
 			"id", "candidate_kind", "proposed_payload", "proposed_module_id", "source_type",
 			"source_ref", "source_line_spans", "discovery_method", "confidence", "fingerprint",
 			"candidate_matches", "status", "decision_reason", "dependency_fingerprint",
-			"proposed_by", "create_time", "create_by", "modify_time", "modify_by",
+			"proposed_by", "create_time", "create_by", "modify_time", "modify_by", "identity_key",
 		}).AddRow(int64(1), "term", []byte(`{}`), "core", "llm", nil, []byte("null"), nil, nil, "fp",
-			[]byte("null"), "draft", nil, nil, nil, now, nil, now, nil))
+			[]byte("null"), "draft", nil, nil, nil, now, nil, now, nil, nil))
 
 	c, rec := newOntologyCandidateContext(t, http.MethodPost, "/api/v1/kb/ontology/candidates/1/promote", `{}`, map[string]string{"id": "1"})
 	if err := PromoteOntologyCandidate(c); err != nil {
