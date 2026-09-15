@@ -224,6 +224,29 @@ ORDER BY m.sequence_no ASC`
 	return ResumeState{Conversation: conversation, Messages: messages}, nil
 }
 
+func (s *Store) LoadSourceDependencies(ctx context.Context, ownerUserID, conversationID string) (map[string][]SourceRecord, error) {
+	const query = `SELECT src.message_id, src.document_id, src.source_fingerprint, src.source_version
+FROM kb.agentic_sources src
+JOIN kb.agentic_messages m ON m.id=src.message_id
+JOIN kb.agentic_conversations c ON c.id=m.conversation_id
+WHERE c.id=$1 AND c.owner_user_id=$2
+ORDER BY src.message_id, src.id`
+	rows, err := s.db.QueryContext(ctx, query, conversationID, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]SourceRecord)
+	for rows.Next() {
+		var item SourceRecord
+		if err := rows.Scan(&item.MessageID, &item.DocumentID, &item.Fingerprint, &item.SourceVersion); err != nil {
+			return nil, err
+		}
+		out[item.MessageID] = append(out[item.MessageID], item)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) CreateMessage(ctx context.Context, ownerUserID string, in CreateMessageInput) (Message, error) {
 	if in.Role == "assistant" && in.Status == "complete" {
 		return Message{}, ErrAssistantCompletionRequiresFinalize
@@ -401,6 +424,20 @@ SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, updated_at = NOW()
 RETURNING id`
 	var id string
 	err := s.db.QueryRowContext(ctx, query, in.MessageID, ownerUserID, in.Rating, in.Comment).Scan(&id)
+	return id, err
+}
+
+func (s *Store) UpsertConversationFeedback(ctx context.Context, ownerUserID, conversationID string, in FeedbackInput) (string, error) {
+	const query = `INSERT INTO kb.agentic_feedback (message_id, owner_user_id, rating, comment)
+SELECT m.id, $2, $4, $5
+FROM kb.agentic_messages m
+JOIN kb.agentic_conversations c ON c.id=m.conversation_id
+WHERE m.id=$3 AND c.id=$1 AND c.owner_user_id=$2 AND m.role='assistant' AND m.status='complete'
+ON CONFLICT (message_id, owner_user_id) DO UPDATE
+SET rating=EXCLUDED.rating, comment=EXCLUDED.comment, updated_at=NOW()
+RETURNING id`
+	var id string
+	err := s.db.QueryRowContext(ctx, query, conversationID, ownerUserID, in.MessageID, in.Rating, in.Comment).Scan(&id)
 	return id, err
 }
 

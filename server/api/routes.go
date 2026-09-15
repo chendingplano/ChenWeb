@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -254,6 +256,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	// (public: pre-login pages need it). ADR 2026071102.
 	e.GET("/api/site-config", sitehandler.GetSiteConfig)
 	e.POST("/api/internal/mitmproxy/ingest", proxytracehandler.IngestMitmExchange)
+	promptDir := os.Getenv("PROMPT_DIR")
+	if promptDir == "" {
+		_, currentFile, _, _ := runtime.Caller(0)
+		promptDir = filepath.Join(filepath.Dir(currentFile), "../../prompts")
+	}
+	profileRegistry, profileErr := agentservicehandler.LoadProfileRegistry(promptDir)
+	if profileErr != nil {
+		return fmt.Errorf("initialize Pi profiles: %w", profileErr)
+	}
 	var capabilitySigner *agentservicehandler.CapabilitySigner
 	if secret := os.Getenv("PI_RUN_CAPABILITY_SECRET"); secret != "" {
 		var signerErr error
@@ -264,14 +275,6 @@ func RegisterRoutes(e *echo.Echo) error {
 	}
 	var toolAccess agentservicehandler.KnowledgeAccessChecker = agentservicehandler.ActiveKnowledgeAccessChecker{DB: ApiTypes.ProjectDBHandle}
 	if capabilitySigner != nil && os.Getenv("PI_GATEWAY_SECRET") != "" {
-		promptDir := os.Getenv("PROMPT_DIR")
-		if promptDir == "" {
-			promptDir = "prompts"
-		}
-		profileRegistry, profileErr := agentservicehandler.LoadProfileRegistry(promptDir)
-		if profileErr != nil {
-			return fmt.Errorf("initialize Pi profile access checker: %w", profileErr)
-		}
 		toolAccess = agentservicehandler.ProfileAccessChecker{Registry: profileRegistry, Next: toolAccess}
 	}
 	toolService := agentservicehandler.NewKnowledgeToolService(
@@ -282,6 +285,9 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
+	agentservicehandler.RegisterConversationRoutes(apiGroup.Group("/agent-services"),
+		agentservicehandler.NewConversationHandler(agentservicehandler.NewStore(ApiTypes.ProjectDBHandle), profileRegistry,
+			&agentservicehandler.CurrentSourceAccessChecker{DB: ApiTypes.ProjectDBHandle}))
 	chadSessionsHandler, err := chadsessionshandler.NewDefault()
 	if err != nil {
 		return fmt.Errorf("initialize Chad sessions handler: %w", err)

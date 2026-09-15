@@ -79,10 +79,10 @@
 - Create: `server/api/agentservicehandler/handler_test.go`
 - Modify: `server/api/routes.go`
 
-- [ ] Start with handler tests proving authentication-derived ownership, service/profile listing, slug routing, pilot availability, version/model pinning, deletion, and feedback.
-- [ ] Add profile listing/health plus conversation list/create/get/delete endpoints.
-- [ ] On every conversation read/resume, recheck every referenced source. Hide complete source-derived assistant messages whose dependencies are no longer accessible, explain the omission, and exclude hidden messages/tool data from history sent to Pi.
-- [ ] Test access revoked after save as well as deleted/moved source behavior.
+- [x] Start with handler tests proving authentication-derived ownership, service/profile listing, slug routing, pilot availability, version/model pinning, deletion, and feedback.
+- [x] Add profile listing/health plus conversation list/create/get/delete endpoints.
+- [x] On every conversation read/resume, recheck every referenced source. Hide complete source-derived assistant messages whose dependencies are no longer accessible, explain the omission, and exclude hidden messages/tool data from history sent to Pi.
+- [x] Test access revoked after save as well as deleted/moved source behavior.
 
 ### Task 6: Add the ChenWeb run, SSE, cancellation, and permission lifecycle
 
