@@ -54,6 +54,10 @@
 	const cnPhonePattern = /^1[3-9]\d{9}$/;
 	let phone = $state('');
 	let phoneCode = $state('');
+	// Collected only when phoneFlowType === 'registration' (new account) -
+	// shown on the code-entry step, submitted together with the code.
+	let phoneFirstName = $state('');
+	let phoneLastName = $state('');
 	let phoneStep = $state<'enter-phone' | 'enter-code'>('enter-phone');
 	let phoneFlowId = $state('');
 	let phoneFlowType = $state('');
@@ -237,6 +241,8 @@
 	function switchToPhone() {
 		phone = '';
 		phoneCode = '';
+		phoneFirstName = '';
+		phoneLastName = '';
 		phoneStep = 'enter-phone';
 		phoneFlowId = '';
 		phoneFlowType = '';
@@ -288,6 +294,10 @@
 			alert('Please enter the code you received.');
 			return;
 		}
+		if (phoneFlowType === 'registration' && (!phoneFirstName || !phoneLastName)) {
+			alert('Please enter your first and last name.');
+			return;
+		}
 		try {
 			const res = await fetch('/auth/phone/verify', {
 				method: 'POST',
@@ -296,7 +306,10 @@
 					phone,
 					code: phoneCode,
 					flow_id: phoneFlowId,
-					flow_type: phoneFlowType
+					flow_type: phoneFlowType,
+					...(phoneFlowType === 'registration'
+						? { first_name: phoneFirstName, last_name: phoneLastName }
+						: {})
 				})
 			});
 			const data = await res.json();
@@ -380,6 +393,7 @@
 				class="input"
 				placeholder="First name"
 				autocomplete="given-name"
+				required
 			/>
 			<input
 				bind:value={last_name}
@@ -387,6 +401,7 @@
 				class="input"
 				placeholder="Last name"
 				autocomplete="family-name"
+				required
 			/>
 			<input
 				bind:value={email}
@@ -548,6 +563,24 @@
 					autocomplete="one-time-code"
 					required
 				/>
+				{#if phoneFlowType === 'registration'}
+					<input
+						bind:value={phoneFirstName}
+						type="text"
+						class="input"
+						placeholder="First name"
+						autocomplete="given-name"
+						required
+					/>
+					<input
+						bind:value={phoneLastName}
+						type="text"
+						class="input"
+						placeholder="Last name"
+						autocomplete="family-name"
+						required
+					/>
+				{/if}
 				<button type="submit" class="form-btn">Verify code</button>
 				<button
 					type="button"

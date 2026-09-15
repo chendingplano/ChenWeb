@@ -20,6 +20,10 @@
 	const cnPhonePattern = /^1[3-9]\d{9}$/;
 	let phone = $state('');
 	let phoneCode = $state('');
+	// Collected only when phoneFlowType === 'registration' (new account) -
+	// shown on the code-entry step, submitted together with the code.
+	let firstName = $state('');
+	let lastName = $state('');
 	let phoneStep = $state<'enter-phone' | 'enter-code'>('enter-phone');
 	let phoneFlowId = $state('');
 	let phoneFlowType = $state('');
@@ -72,6 +76,10 @@
 			alert('Please enter the code you received.');
 			return;
 		}
+		if (phoneFlowType === 'registration' && (!firstName || !lastName)) {
+			alert('Please enter your first and last name.');
+			return;
+		}
 		try {
 			const res = await fetch('/auth/phone/verify', {
 				method: 'POST',
@@ -80,7 +88,10 @@
 					phone,
 					code: phoneCode,
 					flow_id: phoneFlowId,
-					flow_type: phoneFlowType
+					flow_type: phoneFlowType,
+					...(phoneFlowType === 'registration'
+						? { first_name: firstName, last_name: lastName }
+						: {})
 				})
 			});
 			const data = await res.json();
@@ -98,6 +109,8 @@
 		phoneCode = '';
 		phoneFlowId = '';
 		phoneFlowType = '';
+		firstName = '';
+		lastName = '';
 		phoneStep = 'enter-phone';
 	}
 </script>
@@ -146,6 +159,24 @@
 				inputmode="numeric"
 				required
 			/>
+			{#if phoneFlowType === 'registration'}
+				<input
+					bind:value={firstName}
+					type="text"
+					class="input"
+					placeholder="First name"
+					autocomplete="given-name"
+					required
+				/>
+				<input
+					bind:value={lastName}
+					type="text"
+					class="input"
+					placeholder="Last name"
+					autocomplete="family-name"
+					required
+				/>
+			{/if}
 			<button type="submit" class="form-btn">Verify code</button>
 			<button
 				type="button"

@@ -91,10 +91,14 @@
 
 	type KbMenuItem = {
 		id: KbSectionId;
+		// Overrides `id` as the kb.page_config lookup key (label overrides +
+		// hidden checks) when a child routes to the same section as its parent
+		// (or another item) but needs its own independently overridable label.
+		entryKey?: string;
 		label: string;
 		description: string;
 		icon: any;
-		children?: Array<{ id: KbSectionId; label: string; description: string }>;
+		children?: Array<{ id: KbSectionId; entryKey?: string; label: string; description: string }>;
 	};
 
 	const menuItems: KbMenuItem[] = [
@@ -112,7 +116,8 @@
 			children: [
 				{
 					id: 'kb-import',
-					label: 'File Management',
+					entryKey: 'kb-import-upload',
+					label: 'Upload Files',
 					description: 'Upload and import document files'
 				}
 			]
@@ -238,12 +243,20 @@
 		}
 	];
 
-	// Every valid Wiki sidebar menu item id (top-level + children), the
+	// kb.page_config lookup key for a menu item: `entryKey` when set (a child
+	// routing to the same section id as its parent, or another item, but
+	// needing its own independently overridable label), else `id`.
+	const configKeyOf = (item: { id: string; entryKey?: string }) => item.entryKey ?? item.id;
+
+	// Every valid Wiki sidebar menu config key (top-level + children), the
 	// source of truth for [knowledge-content]/labels-<lang>.toml menu ids. Used
 	// to detect config entries that don't match anything, which config loading
 	// otherwise treats as a silent no-op (see unknownMenuConfigIds below).
 	const knownMenuIds = new Set<string>(
-		menuItems.flatMap((item) => [item.id, ...(item.children?.map((child) => child.id) ?? [])])
+		menuItems.flatMap((item) => [
+			configKeyOf(item),
+			...(item.children?.map((child) => configKeyOf(child)) ?? [])
+		])
 	);
 
 	// DB-backed page config for the Wiki sidebar (GET /api/v1/page-config/
@@ -298,13 +311,13 @@
 		const isVisible = (id: string) => cfg === null || !cfg.hidden.has(id);
 		const labelFor = (id: string, fallback: string) => cfg?.overrides[id]?.label ?? fallback;
 		return menuItems
-			.filter((item) => isVisible(item.id))
+			.filter((item) => isVisible(configKeyOf(item)))
 			.map((item) => {
-				const label = labelFor(item.id, item.label);
+				const label = labelFor(configKeyOf(item), item.label);
 				if (!item.children) return { ...item, label };
 				const children = item.children
-					.filter((child) => isVisible(child.id))
-					.map((child) => ({ ...child, label: labelFor(child.id, child.label) }));
+					.filter((child) => isVisible(configKeyOf(child)))
+					.map((child) => ({ ...child, label: labelFor(configKeyOf(child), child.label) }));
 				return { ...item, label, children };
 			})
 			.filter((item) => !item.children || item.children.length > 0);
