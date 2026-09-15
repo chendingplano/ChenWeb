@@ -285,9 +285,18 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
-	agentservicehandler.RegisterConversationRoutes(apiGroup.Group("/agent-services"),
-		agentservicehandler.NewConversationHandler(agentservicehandler.NewStore(ApiTypes.ProjectDBHandle), profileRegistry,
-			&agentservicehandler.CurrentSourceAccessChecker{DB: ApiTypes.ProjectDBHandle}))
+	agentServiceGroup := apiGroup.Group("/agent-services")
+	agentStore := agentservicehandler.NewStore(ApiTypes.ProjectDBHandle)
+	agentSources := &agentservicehandler.CurrentSourceAccessChecker{DB: ApiTypes.ProjectDBHandle}
+	agentservicehandler.RegisterConversationRoutes(agentServiceGroup,
+		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources))
+	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
+	if piGatewayURL == "" {
+		piGatewayURL = "http://127.0.0.1:8765"
+	}
+	agentservicehandler.RegisterRunRoutes(agentServiceGroup,
+		agentservicehandler.NewRunHandler(agentStore, profileRegistry, agentSources,
+			agentservicehandler.NewPiGatewayClient(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner))
 	chadSessionsHandler, err := chadsessionshandler.NewDefault()
 	if err != nil {
 		return fmt.Errorf("initialize Chad sessions handler: %w", err)

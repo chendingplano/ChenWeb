@@ -49,3 +49,18 @@ func TestAgenticKnowledgeGrantMigrationIsUserAndStoreScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestAgenticRunGuardMigrationPreventsConcurrentAttempts(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not resolve test path")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(file), "../../../project_migrations/20260915000001_guard_agentic_active_attempts.sql"))
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	if !strings.Contains(string(body), "WHERE status = 'running'") || !strings.Contains(string(body), "UNIQUE INDEX") {
+		t.Fatal("migration does not prevent two running attempts")
+	}
+}

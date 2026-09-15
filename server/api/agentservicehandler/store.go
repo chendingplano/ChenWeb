@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type Store struct {
@@ -17,6 +19,7 @@ var (
 	ErrAssistantCompletionRequiresFinalize = errors.New("assistant completion requires FinalizeAssistantMessage")
 	ErrKnowledgeSourcesRequired            = errors.New("knowledge-backed assistant message requires sources")
 	ErrSourceIdentityRequired              = errors.New("source tool call and fingerprint are required")
+	ErrRunAlreadyActive                    = errors.New("conversation already has an active run")
 )
 
 func NewStore(db *sql.DB) *Store {
@@ -292,6 +295,77 @@ RETURNING id, conversation_id, idempotency_key, status, error_code, error_messag
 	return scanAttempt(s.db.QueryRowContext(ctx, query, conversationID, ownerUserID, idempotencyKey))
 }
 
+func (s *Store) ListGrantedStoreIDs(ctx context.Context, userID string, allowedStoreNames []string) ([]string, error) {
+	const query = `SELECT DISTINCT ks.id::text
+FROM kb.agentic_knowledge_grants g
+JOIN kb.knowledge_store ks ON ks.id=g.knowledge_store_id
+WHERE g.user_id=$1 AND ks.ks_name=ANY($2) AND ks.status='active'
+  AND g.active AND (g.expires_at IS NULL OR g.expires_at>now())
+ORDER BY ks.id::text`
+	rows, err := s.db.QueryContext(ctx, query, userID, pq.Array(allowedStoreNames))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *Store) CreateRunAttempt(ctx context.Context, ownerUserID, conversationID, idempotencyKey string) (ResponseAttempt, bool, error) {
+	const insert = `INSERT INTO kb.agentic_response_attempts (conversation_id, idempotency_key)
+SELECT c.id, $3 FROM kb.agentic_conversations c
+WHERE c.id=$1 AND c.owner_user_id=$2
+ON CONFLICT DO NOTHING
+RETURNING id, conversation_id, idempotency_key, status, error_code, error_message,
+          input_tokens, output_tokens, created_at, updated_at`
+	created, err := scanAttempt(s.db.QueryRowContext(ctx, insert, conversationID, ownerUserID, idempotencyKey))
+	if err == nil {
+		return created, true, nil
+	}
+	if err != sql.ErrNoRows {
+		return ResponseAttempt{}, false, err
+	}
+	const existing = `SELECT a.id, a.conversation_id, a.idempotency_key, a.status, a.error_code,
+       a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at
+FROM kb.agentic_response_attempts a
+JOIN kb.agentic_conversations c ON c.id=a.conversation_id
+WHERE c.id=$1 AND c.owner_user_id=$2 AND a.idempotency_key=$3`
+	attempt, err := scanAttempt(s.db.QueryRowContext(ctx, existing, conversationID, ownerUserID, idempotencyKey))
+	if err == nil {
+		return attempt, false, nil
+	}
+	if err != sql.ErrNoRows {
+		return ResponseAttempt{}, false, err
+	}
+	var running bool
+	const active = `SELECT EXISTS(SELECT 1 FROM kb.agentic_response_attempts a
+JOIN kb.agentic_conversations c ON c.id=a.conversation_id
+WHERE c.id=$1 AND c.owner_user_id=$2 AND a.status='running')`
+	if err := s.db.QueryRowContext(ctx, active, conversationID, ownerUserID).Scan(&running); err != nil {
+		return ResponseAttempt{}, false, err
+	}
+	if running {
+		return ResponseAttempt{}, false, ErrRunAlreadyActive
+	}
+	return ResponseAttempt{}, false, sql.ErrNoRows
+}
+
+func (s *Store) GetRunAttempt(ctx context.Context, ownerUserID, conversationID, attemptID string) (ResponseAttempt, error) {
+	const query = `SELECT a.id, a.conversation_id, a.idempotency_key, a.status, a.error_code,
+       a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at
+FROM kb.agentic_response_attempts a
+JOIN kb.agentic_conversations c ON c.id=a.conversation_id
+WHERE a.id=$1 AND c.id=$2 AND c.owner_user_id=$3`
+	return scanAttempt(s.db.QueryRowContext(ctx, query, attemptID, conversationID, ownerUserID))
+}
+
 func (s *Store) SetAttemptOutcome(ctx context.Context, ownerUserID, attemptID string, in AttemptOutcome) (ResponseAttempt, error) {
 	const query = `UPDATE kb.agentic_response_attempts a
 SET status = $3, error_code = $4, error_message = $5,
@@ -299,6 +373,7 @@ SET status = $3, error_code = $4, error_message = $5,
     completed_at = CASE WHEN $3 = 'running' THEN NULL ELSE NOW() END
 FROM kb.agentic_conversations c
 WHERE a.id = $1 AND a.conversation_id = c.id AND c.owner_user_id = $2
+  AND a.status = 'running'
 RETURNING a.id, a.conversation_id, a.idempotency_key, a.status, a.error_code,
           a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at`
 	return scanAttempt(s.db.QueryRowContext(ctx, query,

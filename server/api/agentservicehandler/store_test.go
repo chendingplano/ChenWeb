@@ -187,7 +187,7 @@ func TestSetAttemptOutcomeHandlesStoppedAndFailedStates(t *testing.T) {
 	for _, status := range []string{"stopped", "failed"} {
 		t.Run(status, func(t *testing.T) {
 			store, mock := newMockStore(t)
-			mock.ExpectQuery(`(?s)UPDATE kb\.agentic_response_attempts a.*FROM kb\.agentic_conversations c.*c\.owner_user_id = \$2.*RETURNING`).
+			mock.ExpectQuery(`(?s)UPDATE kb\.agentic_response_attempts a.*FROM kb\.agentic_conversations c.*c\.owner_user_id = \$2.*a\.status = 'running'.*RETURNING`).
 				WithArgs("attempt-1", "user-1", status, "gateway_error", "details", int64(11), int64(7)).
 				WillReturnRows(attemptRows().AddRow(
 					"attempt-1", "conv-1", "turn-key-1", status, "gateway_error", "details", 11, 7, testNow, testNow,
