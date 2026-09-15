@@ -1,1 +1,1 @@
-sudo caddy run --config Caddyfile    
+caddy run --config Caddyfile    

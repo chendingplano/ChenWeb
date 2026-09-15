@@ -1,4 +1,4 @@
-dingbo.bzton.cn {
+macmini.deepdocs.me {
 	# Route Kratos identity/auth requests to the Kratos server.
 	# Strip the /kratos prefix before forwarding because Kratos listens
 	# on its own root (e.g. /self-service/...), not under /kratos/.

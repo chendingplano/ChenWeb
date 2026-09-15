@@ -292,7 +292,8 @@
 						{
 							id: 'sysadmin-resources-review-external-terminology',
 							label: 'Review External Resources'
-						}
+						},
+						{ id: 'sysadmin-resources-sync-data', label: 'Sync Data' }
 					]
 				},
 				{

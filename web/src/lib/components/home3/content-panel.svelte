@@ -52,6 +52,7 @@
 	import VideoManagementView from '$lib/components/home3/video-management-view.svelte';
 	import ExternalTerminologyResourcesView from '$lib/components/home3/external-terminology-resources-view.svelte';
 	import ReviewExternalResourcesView from '$lib/components/home3/review-external-resources-view.svelte';
+	import SyncDataView from '$lib/components/home3/sync-data-view.svelte';
 	import ProductDrawingsView from '$lib/components/home3/product-drawings-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
 	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
@@ -358,6 +359,8 @@
 			<ExternalTerminologyResourcesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-review-external-terminology'}
 			<ReviewExternalResourcesView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-resources-sync-data'}
+			<SyncDataView {darkMode} />
 		{:else if activeMenu?.childId === 'videos-training'}
 			<TrainingVideoViewer {darkMode} />
 		{:else if activeMenu?.childId === 'docs-users-manual'}

@@ -9,7 +9,10 @@
 #                      bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy
 #
 # Run ON THE BOX, as root (systemctl needs it; `gui` is not a sudoer).
-# Per binary: verify sha256, verify ELF/arch, back up the current binary,
+# First, syncs migration files (project_migrations/, shared_migrations/) if the
+# payload carries them -- this must happen before any unit starts, because every
+# binary runs goose at startup and reads those dirs from disk.
+# Then per binary: verify sha256, verify ELF/arch, back up the current binary,
 # stop -> swap -> start the matching service, health-check, and auto-roll-back
 # to the previous binary if the health-check fails.
 #
@@ -26,6 +29,7 @@
 #   RUN_USER      (default gui)          owner of the installed binaries
 #   PORT          (default 8090)         chenweb health-check port
 #   KEEP_BAKS     (default 3)            how many .bak-<ts> copies to retain
+#   SKIP_MIGRATIONS=1  leave migration files untouched (binaries only)
 #   DRY_RUN=1     print privileged actions instead of running them
 
 set -euo pipefail
@@ -34,10 +38,13 @@ CHENWEB_DIR=${CHENWEB_DIR:-/home/gui/Workspace/ChenWeb}
 RUN_USER=${RUN_USER:-gui}
 PORT=${PORT:-8090}
 KEEP_BAKS=${KEEP_BAKS:-3}
+SKIP_MIGRATIONS=${SKIP_MIGRATIONS:-0}
 DRY_RUN=${DRY_RUN:-0}
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 run() { if [ "$DRY_RUN" = 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
+# sorted basenames of the *.sql in $1 (empty, not an error, if $1 has none/missing)
+list_sql() { (cd "$1" 2>/dev/null && ls -1 ./*.sql 2>/dev/null) | sed 's|^\./||' | sort; }
 
 # --- valid binary -> systemd service (empty = CLI tool, install only) ---------
 valid_names="server doc-processor parser-result-converter doc-service create-admin"
@@ -78,6 +85,64 @@ echo "  source : $SRC_DIR"
 echo "  target : $CHENWEB_DIR"
 for n in "${NAMES[@]}"; do
   s=$(svc_for "$n"); printf '  %-26s -> %s\n' "$n-linux" "${s:-<install only>}"
+done
+echo
+
+# --- migrations -------------------------------------------------------------
+# Must land BEFORE any unit starts: config.RunMigrations runs at every binary's
+# startup and reads these dirs from disk (os.DirFS), so shipping a binary without
+# them leaves the schema behind and tables go missing at runtime.
+# Additive on purpose -- never --delete, so a migration the box has already
+# applied is never yanked out from under goose's tracking table.
+# NOTE: the per-binary auto-rollback below does NOT roll migrations back; goose
+# down-migrations are not run here. Review the "new file(s)" list before deploying.
+echo "== migrations =="
+if [ "$SKIP_MIGRATIONS" = 1 ]; then
+  echo "  SKIP_MIGRATIONS=1 -- migration files left untouched"
+else
+  for d in project_migrations shared_migrations; do
+    src="$SRC_DIR/$d"; dst="$CHENWEB_DIR/$d"
+    if [ ! -d "$src" ]; then
+      echo "  $d: not in payload -- skipped (build predates migration shipping?)"
+      continue
+    fi
+    pending=$(comm -23 <(list_sql "$src") <(list_sql "$dst") || true)
+    n=$(printf '%s\n' "$pending" | grep -c . || true)
+    if [ "$n" -eq 0 ]; then
+      echo "  $d: already current ($(list_sql "$dst" | grep -c . || true) files)"
+    else
+      echo "  $d: $n new file(s), will be applied at next service start:"
+      printf '%s\n' "$pending" | sed 's/^/      /'
+    fi
+    run mkdir -p "$dst"
+    run rsync -a "$src"/ "$dst"/
+    run chown -R "$RUN_USER:$RUN_USER" "$dst"
+  done
+fi
+echo
+
+# --- reviewer configs ---------------------------------------------------------
+# doc-review.local.toml / product-review.local.toml are git-tracked repo-root
+# files read from disk (not compiled into the binary), so a binaries-only
+# payload leaves the box's copy stale or missing entirely -- see the runbook's
+# Gotcha section (prompts/ hit the same class of bug 2026-09-16;
+# product-review.local.toml was never deployed here at all until 2026-09-16).
+# Verbatim copy, no per-box translation needed (only symbolic model/prompt refs
+# inside). Always synced regardless of which binaries are named on the command
+# line, same as migrations above.
+echo "== reviewer configs =="
+for f in doc-review.local.toml product-review.local.toml; do
+  src="$SRC_DIR/$f"; dst="$CHENWEB_DIR/$f"
+  if [ ! -f "$src" ]; then
+    echo "  $f: not in payload -- skipped (build predates config shipping?)"
+    continue
+  fi
+  if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+    echo "  $f: already current"
+  else
+    echo "  $f: installing"
+    run install -m 0644 -o "$RUN_USER" -g "$RUN_USER" "$src" "$dst"
+  fi
 done
 echo
 

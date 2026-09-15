@@ -90,7 +90,7 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all five."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + *.local.toml reviewer configs into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all five."
 run = '''
 set -euo pipefail
 
@@ -140,6 +140,44 @@ done
 cp "$REPO/scripts/deploy-server-china.sh" "$OUT/"
 chmod +x "$OUT/deploy-server-china.sh"
 
+# Ship the migration files too. config.RunMigrations reads these from DISK at
+# service startup (sharedgoose -> os.DirFS on PROJECT_MIGRATION_DIR), not from a
+# go:embed FS, so a binaries-only payload leaves the box's schema frozen wherever
+# the last copy left it -- goose then applies nothing and tables silently go
+# missing. Always shipped regardless of BINS: migrations are not per-binary.
+mig_counts=""
+for d in project_migrations shared_migrations; do
+  if [ -d "$REPO/$d" ]; then
+    mkdir -p "$OUT/$d"
+    cp -a "$REPO/$d"/. "$OUT/$d"/
+    c=$(ls -1 "$OUT/$d"/*.sql 2>/dev/null | wc -l | tr -d " ")
+    echo "==> staged $d ($c files)"
+    mig_counts="$mig_counts $d=$c"
+  else
+    echo "==> WARNING: $REPO/$d not found -- no migrations staged for it" >&2
+  fi
+done
+
+# Ship the *.local.toml reviewer configs too. Despite the ".local." name these
+# are git-tracked repo-root files (not gitignored machine overrides, unlike
+# mise.local.toml/config.local.toml) that GetDocReviewConfig()/
+# productreviews.GetConfig() read from disk on demand -- not go:embed'd, so
+# they're invisible to a binaries-only payload just like prompts/ (see the
+# deploy runbook's Gotcha section). Missing doc-review.local.toml silently
+# disables 6 reviewer aspects; missing product-review.local.toml fails every
+# Product Review build request outright. Both have already been hit for real
+# on onto.bzton.cn (2026-09-16). Always shipped regardless of BINS.
+cfg_files=""
+for f in doc-review.local.toml product-review.local.toml; do
+  if [ -f "$REPO/$f" ]; then
+    cp "$REPO/$f" "$OUT/$f"
+    cfg_files="$cfg_files $f"
+  else
+    echo "==> WARNING: $REPO/$f not found -- not staged" >&2
+  fi
+done
+[ -n "$cfg_files" ] && echo "==> staged reviewer configs:$cfg_files"
+
 {
   echo "git_rev:   $(git rev-parse HEAD)"
   echo "git_short: $(git rev-parse --short HEAD)"
@@ -147,6 +185,8 @@ chmod +x "$OUT/deploy-server-china.sh"
   echo "built_at:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "built_on:  $(hostname)"
   echo "binaries: $built"
+  echo "migrations:$mig_counts"
+  echo "reviewer_configs:${cfg_files:- <none staged>}"
 } > "$OUT/MANIFEST"
 
 echo

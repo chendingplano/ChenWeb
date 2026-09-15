@@ -29,6 +29,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
+	"github.com/chendingplano/deepdoc/server/api/datasync"
 	"github.com/chendingplano/deepdoc/server/api/dbmainthandler"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
@@ -256,6 +257,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	// (public: pre-login pages need it). ADR 2026071102.
 	e.GET("/api/site-config", sitehandler.GetSiteConfig)
 	e.POST("/api/internal/mitmproxy/ingest", proxytracehandler.IngestMitmExchange)
+	// Sync-source side of production-data-sync: a deployed target reaches
+	// out to this instance to pull registered data items. No Kratos session
+	// exists for that caller, so access is a shared-secret header instead
+	// (checked inside the handler, mirrors sms_relay.go).
+	e.GET("/api/internal/data-sync/items/:itemId/changes", datasync.HandlePullChanges)
 	promptDir := os.Getenv("PROMPT_DIR")
 	if promptDir == "" {
 		_, currentFile, _, _ := runtime.Caller(0)
@@ -439,6 +445,12 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/llm/accounts/:id", llmadminhandler.UpdateAccount)
 	apiGroup.POST("/llm/accounts/import-models-toml", llmadminhandler.ImportModelsTOMLPreview)
 	apiGroup.POST("/llm/accounts/import-models-toml/apply", llmadminhandler.ImportModelsTOMLApply)
+
+	// Sync-target side of production-data-sync: sysadmin UI to pull
+	// registered data items from another (source) ChenWeb instance.
+	apiGroup.GET("/data-sync/items", datasync.HandleListSyncItems)
+	apiGroup.POST("/data-sync/items/:itemId/preview", datasync.HandlePreviewSync)
+	apiGroup.POST("/data-sync/items/:itemId/apply", datasync.HandleApplySync)
 	apiGroup.GET("/llm/profiles", llmadminhandler.ListProfiles)
 	apiGroup.POST("/llm/profiles", llmadminhandler.CreateProfile)
 	apiGroup.PUT("/llm/profiles/:id", llmadminhandler.UpdateProfile)
