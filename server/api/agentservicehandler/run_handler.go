@@ -144,6 +144,9 @@ func (h *RunHandler) Start(c echo.Context) error {
 			logger.Info("agent run settled", "run_id", attempt.ID, "status", outcome.Status)
 		}
 		if streamStarted && ctx.Err() == nil {
+			if message := publicRunMessage(outcome); message != "" {
+				_ = WriteAgentSSE(c.Response(), AgentPublicEvent{Type: "error", Message: message})
+			}
 			if outcome.Status == "completed" && len(verifiedSources) > 0 {
 				_ = WriteAgentSSE(c.Response(), AgentPublicEvent{Type: "sources", Sources: verifiedSources})
 			}
@@ -313,6 +316,18 @@ func mapRunOutcome(status string) (string, string) {
 		return "limit", "output_limit"
 	default:
 		return "failed", "gateway_failed"
+	}
+}
+
+func publicRunMessage(outcome AttemptOutcome) string {
+	switch outcome.Status {
+	case "completed": return ""
+	case "stopped": return "Run stopped. Any partial answer was saved."
+	case "limit": return "The answer reached its limit. Please ask a narrower question."
+	case "interrupted": return "The connection was interrupted. Any partial answer was saved."
+	default:
+		if outcome.ErrorCode == "source_access_changed" { return "A source changed or access was revoked. Please try again." }
+		return "The answer could not be completed. Please try again."
 	}
 }
 

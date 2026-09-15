@@ -41,6 +41,21 @@ run = 'go tool air'
 [tasks.dev-web]
 run = "cd web && bun run dev"
 
+[tasks.dev-agent-gateway]
+description = "Run the private Pi gateway for the ChenWeb agent-services pilot."
+run = 'cd "${PI_GATEWAY_DIR:?set PI_GATEWAY_DIR to ThirdParty/pi}" && bun run gateway'
+
+[tasks.dev-agent-services]
+description = "Start ChenWeb API, web UI, and the loopback-only Pi gateway together."
+run = '''
+./web/node_modules/.bin/concurrently \
+  --names "API,WEB,PI" \
+  --prefix-colors "bgBlue.bold,bgMagenta.bold,bgGreen.bold" \
+  'mise dev-server' \
+  'mise dev-web' \
+  'mise dev-agent-gateway'
+'''
+
 [tasks.docker-start]
 run = "colima start"
 

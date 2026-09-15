@@ -45,7 +45,7 @@ type PiProfile struct {
 	PermissionDefault          string        `json:"permission_default"`
 	Limits                     ProfileLimits `json:"limits"`
 	Enabled                    bool          `json:"enabled"`
-	PilotUsers                 []string      `json:"pilot_users,omitempty"`
+	PilotUsers                 []string      `json:"-"`
 	SaveAndResumeConversations bool          `json:"save_and_resume_conversations"`
 }
 

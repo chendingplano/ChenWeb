@@ -49,11 +49,13 @@ func TestAgentServiceListingUsesAuthenticatedPilotAvailability(t *testing.T) {
 	registry := testAgentProfileRegistry()
 	p := registry.versions["knowledge-guide"]["v1"]
 	p.PilotUsers = []string{"pilot"}
+	p.PilotUsers = append(p.PilotUsers, "private-pilot-user")
+	p.SystemPrompt = "private system instructions"
 	registry.versions["knowledge-guide"]["v1"] = p
 	e := echo.New()
 	RegisterConversationRoutes(e.Group("/api/v1/agent-services"), NewConversationHandler(nil, registry, nil))
 	rec := callAgentHandler(t, e, http.MethodGet, "/api/v1/agent-services", "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "knowledge-guide") || !strings.Contains(rec.Body.String(), "model-1") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "knowledge-guide") || !strings.Contains(rec.Body.String(), "model-1") || strings.Contains(rec.Body.String(), "private-pilot-user") || strings.Contains(rec.Body.String(), "private system instructions") {
 		t.Fatalf("pilot listing status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	withAgentUser(t, "other")

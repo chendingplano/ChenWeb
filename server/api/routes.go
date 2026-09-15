@@ -291,9 +291,6 @@ func RegisterRoutes(e *echo.Echo) error {
 	agentservicehandler.RegisterConversationRoutes(agentServiceGroup,
 		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources))
 	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
-	if piGatewayURL == "" {
-		piGatewayURL = "http://127.0.0.1:8765"
-	}
 	agentservicehandler.RegisterRunRoutes(agentServiceGroup,
 		agentservicehandler.NewRunHandler(agentStore, profileRegistry, agentSources,
 			agentservicehandler.NewPiGatewayClient(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner))

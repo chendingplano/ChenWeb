@@ -93,26 +93,26 @@
 - Modify: `server/api/routes.go`
 - Modify: relevant environment/config documentation
 
-- [ ] Start with tests for idempotent turn creation, capability minting, SSE framing, activity-vs-answer separation, approval/denial in both ask and auto modes, cancellation, disconnect/interruption, gateway failure, and exactly-once final state.
-- [ ] Add the streaming message endpoint. It creates one attempt, sends the pinned profile and bounded accessible history, relays safe gateway events as SSE, records answer text/tool activity/source dependencies/usage, and settles the attempt exactly once.
-- [ ] Add cancel and permission-decision endpoints and proxy them to the gateway with the shared secret. Ask mode pauses each not-yet-approved tool; auto mode proceeds only for tools already allowed by both profile and capability.
-- [ ] Return clear unavailable, stopped, interrupted, limit, and retry messages.
-- [ ] Run handler tests, then `go test ./server/api/...`.
+- [x] Start with tests for idempotent turn creation, capability minting, SSE framing, activity-vs-answer separation, approval/denial in both ask and auto modes, cancellation, disconnect/interruption, gateway failure, and exactly-once final state.
+- [x] Add the streaming message endpoint. It creates one attempt, sends the pinned profile and bounded accessible history, relays safe gateway events as SSE, records answer text/tool activity/source dependencies/usage, and settles the attempt exactly once.
+- [x] Add cancel and permission-decision endpoints and proxy them to the gateway with the shared secret. Ask mode pauses each not-yet-approved tool; auto mode proceeds only for tools already allowed by both profile and capability.
+- [x] Return clear unavailable, stopped, interrupted, limit, and retry messages.
+- [x] Run handler tests, then `go test ./server/api/...`.
 
 ### Task 7: Build the shared ChenWeb conversation page
 
 **Files:**
-- Create: `web/src/lib/components/home3/agent-services-client.ts`
-- Create: `web/src/lib/components/home3/agent-services-client.test.ts`
-- Create: `web/src/lib/components/home3/agent-services-view.svelte`
+- Create: `web/src/lib/services/agentServiceClient.ts`
+- Create: `web/src/lib/services/agentServiceStream.ts` and `.test.ts`
+- Create: `web/src/routes/home3/agent-services/+page.svelte`
 - Modify: `web/src/lib/components/home3/nav-rail.svelte`
-- Modify: `web/src/lib/components/home3/content-panel.svelte`
+- Modify: `server/api/agentservicehandler/types.go` and `store.go` for accessible saved source cards
 
-- [ ] Add a Workspace navigation entry and one responsive page shared by both services.
-- [ ] Provide service selection, capability/provider disclosure, conversation list/new/delete, message history, composer, streaming status, a plain-language activity panel (never hidden model reasoning), stop, retry, ask/auto permission selection, and approve/deny controls.
-- [ ] Render source cards with document, line/page, artifact identity, and a safe ChenWeb link; include the AI fallibility reminder.
-- [ ] Preserve partial responses and reconnect by refetching the authoritative conversation state.
-- [ ] Test SSE parsing and state transitions, then run `bun test` and `bun run check` in `web` and build the frontend.
+- [x] Add a Workspace navigation entry and one responsive page shared by both services.
+- [x] Provide service selection, capability/provider disclosure, conversation list/new/delete, message history, composer, streaming status, a plain-language activity panel (never hidden model reasoning), stop, retry, ask/auto permission selection, and approve/deny controls.
+- [x] Render source cards with document, line/page, artifact identity, and a safe ChenWeb link; include the AI fallibility reminder.
+- [x] Preserve partial responses and reconnect by refetching the authoritative conversation state.
+- [x] Test SSE parsing and state transitions, then run `bun test` and `bun run check` in `web` and build the frontend.
 
 ### Task 8: Add evaluation fixtures, operations notes, and end-to-end verification
 
@@ -121,9 +121,9 @@
 - Create: `docs/pi-agentic-services-operations.md`
 - Modify: `mise.toml`
 
-- [ ] Add representative normal, ambiguous, missing-evidence, conflicting-source, hostile-document, access-denial, and access-revoked-after-save cases for both profiles.
-- [ ] Document gateway start/health/shutdown, required environment variables, provider disclosure, retention/deletion behavior, limits, and troubleshooting.
-- [ ] Add a development task that starts the gateway beside ChenWeb without exposing it publicly.
-- [ ] Run migration up/down/up against the configured development database when available; otherwise validate the migration contract in tests and report the environmental limitation.
-- [ ] Run `bun test` and `bun run check` in `ThirdParty/pi`; run frontend tests/check/build; copy the generated build into the embed directory; run `go test ./...` and `mise build-server` in ChenWeb.
+- [x] Add representative normal, ambiguous, missing-evidence, conflicting-source, hostile-document, access-denial, and access-revoked-after-save cases for both profiles.
+- [x] Document gateway start/health/shutdown, required environment variables, provider disclosure, retention/deletion behavior, limits, and troubleshooting.
+- [x] Add a development task that starts the gateway beside ChenWeb without exposing it publicly.
+- [x] Run migration up/down/up against a dedicated empty development probe database; validate the migration contract in tests as well.
+- [x] Run `bun test` and `bun run check` in `ThirdParty/pi`; run frontend tests/check/build; copy the generated build into the embed directory; run `go test ./...` and `mise build-server` in ChenWeb.
 - [ ] Commit Pi and ChenWeb changes separately with `jj`, inspect both logs, and confirm no unrelated workspace changes were included.

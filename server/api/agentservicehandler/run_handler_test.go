@@ -38,6 +38,13 @@ func TestPiGatewayClientForwardsOnlyPrivateBearerAndBoundedRun(t *testing.T) {
 	}
 }
 
+func TestPiGatewayDefaultMatchesLoopbackGatewayPort(t *testing.T) {
+	client := NewPiGatewayClient("", "private-secret-private-secret", nil)
+	if !client.available() || client.endpoint("/health") != "http://127.0.0.1:4317/health" {
+		t.Fatalf("gateway default URL %q", client.endpoint("/health"))
+	}
+}
+
 func TestSSEFramesSafeEventAndSeparatesAnswerFromActivity(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteAgentSSE(&output, AgentPublicEvent{Type: "answer_delta", Text: "It is a pump."}); err != nil {
@@ -169,11 +176,12 @@ func (f *fakeRunStore) GetRunAttempt(context.Context, string, string, string) (R
 }
 
 type fakeGatewayBridge struct {
-	request   GatewayRunRequest
-	stream    string
-	startErr  error
-	cancelled bool
-	decision  bool
+	request      GatewayRunRequest
+	stream       string
+	streamReader io.ReadCloser
+	startErr     error
+	cancelled    bool
+	decision     bool
 }
 type allowRunSources struct{}
 
@@ -184,6 +192,9 @@ func (g *fakeGatewayBridge) Start(_ context.Context, run GatewayRunRequest) (io.
 	g.request = run
 	if g.startErr != nil {
 		return nil, g.startErr
+	}
+	if g.streamReader != nil {
+		return g.streamReader, nil
 	}
 	return io.NopCloser(strings.NewReader(g.stream)), nil
 }
@@ -264,7 +275,7 @@ func TestRunDoesNotTellBrowserCompletedBeforeFinalization(t *testing.T) {
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
-	if strings.Contains(rec.Body.String(), `"status":"completed"`) || !strings.Contains(rec.Body.String(), `"status":"failed"`) || len(store.settled) != 1 || store.settled[0].Status != "failed" {
+	if strings.Contains(rec.Body.String(), `"status":"completed"`) || !strings.Contains(rec.Body.String(), `"status":"failed"`) || !strings.Contains(rec.Body.String(), "event: error") || len(store.settled) != 1 || store.settled[0].Status != "failed" {
 		t.Fatalf("misleading completion: body=%s settled=%+v", rec.Body.String(), store.settled)
 	}
 }
@@ -316,5 +327,57 @@ func TestGatewayFailureSettlesRunAndReturnsRetryableUnavailable(t *testing.T) {
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
 	if rec.Code != http.StatusServiceUnavailable || len(store.settled) != 1 || store.settled[0].ErrorCode != "gateway_unavailable" || strings.Contains(rec.Body.String(), "connection refused") {
 		t.Fatalf("gateway failure status=%d settled=%+v body=%s", rec.Code, store.settled, rec.Body.String())
+	}
+}
+
+func TestRunWithoutGatewayCompletionIsInterruptedAndKeepsPartialAnswer(t *testing.T) {
+	withAgentUser(t, "user-1")
+	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
+	gateway := &fakeGatewayBridge{stream: `{"type":"answer_delta","text":"Partial check"}` + "\n"}
+	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
+	e := echo.New()
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
+	if store.answer != "Partial check" || len(store.settled) != 1 || store.settled[0].Status != "interrupted" || !strings.Contains(rec.Body.String(), `"status":"interrupted"`) {
+		t.Fatalf("incomplete stream answer=%q settled=%+v body=%s", store.answer, store.settled, rec.Body.String())
+	}
+}
+
+func TestGatewayTerminalStatesHaveDistinctChenWebOutcomes(t *testing.T) {
+	for gateway, want := range map[string]string{"cancelled": "stopped", "timed_out": "interrupted", "limit_reached": "limit", "failed": "failed"} {
+		got, _ := mapRunOutcome(gateway)
+		if got != want {
+			t.Errorf("%s maps to %s, want %s", gateway, got, want)
+		}
+	}
+}
+
+type cancelOnRead struct {
+	reader io.Reader
+	cancel context.CancelFunc
+}
+
+func (r *cancelOnRead) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.cancel()
+	}
+	return n, err
+}
+func (r *cancelOnRead) Close() error { return nil }
+
+func TestBrowserDisconnectSettlesAttemptWithoutLeakingFinalSignal(t *testing.T) {
+	withAgentUser(t, "user-1")
+	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	gateway := &fakeGatewayBridge{streamReader: &cancelOnRead{reader: strings.NewReader(`{"type":"answer_delta","text":"Partial"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"), cancel: cancel}}
+	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
+	e := echo.New()
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", strings.NewReader(`{"message":"Question","idempotency_key":"key-1"}`)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if len(store.settled) != 1 || store.settled[0].Status != "interrupted" || strings.Contains(rec.Body.String(), "event: completion") {
+		t.Fatalf("disconnect settled=%+v body=%s", store.settled, rec.Body.String())
 	}
 }

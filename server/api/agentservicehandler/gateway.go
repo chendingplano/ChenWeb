@@ -59,6 +59,9 @@ type PiGatewayClient struct {
 }
 
 func NewPiGatewayClient(rawURL, secret string, client *http.Client) *PiGatewayClient {
+	if rawURL == "" {
+		rawURL = "http://127.0.0.1:4317"
+	}
 	parsed, _ := url.Parse(rawURL)
 	if client == nil {
 		client = &http.Client{Timeout: 3 * time.Minute}
