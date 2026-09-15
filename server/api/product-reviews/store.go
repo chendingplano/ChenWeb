@@ -188,6 +188,7 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 	if tenantID == "" {
 		tenantID = "-"
 	}
+	out := []ProfileSummary{}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT p.id, p.tenant_id, p.name, p.product_description, p.keywords, p.notes, p.version,
 		       p.status, p.truncated, p.truncated_count, p.drawing_id, p.created_at, p.updated_at,
@@ -208,7 +209,6 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []ProfileSummary
 	for rows.Next() {
 		var (
 			p                ProfileSummary

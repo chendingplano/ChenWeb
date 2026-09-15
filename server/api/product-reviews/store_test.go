@@ -325,6 +325,38 @@ func TestListProfilesMixedRunHistory(t *testing.T) {
 	}
 }
 
+// Scenario: no profiles exist yet (spec: product-review-history-list) — the
+// intake page's past-reviews list must get back a JSON array it can call
+// .length on, not null. A nil Go slice marshals to JSON null, which crashed
+// the frontend's `profiles.length === 0` check and froze the "Loading past
+// reviews…" placeholder (bug found live on onto.bzton.cn 2026-09-16, the
+// feature's very first real run: kb.product_profiles was still empty when
+// the intake page's initial load queried it).
+func TestListProfilesEmpty(t *testing.T) {
+	store, mock, done := newMockStore(t)
+	defer done()
+
+	cols := []string{
+		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+		"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
+		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at",
+	}
+	mock.ExpectQuery(rx("FROM kb.product_profiles p")).
+		WithArgs("acme", 50).
+		WillReturnRows(sqlmock.NewRows(cols))
+
+	out, err := store.ListProfiles(context.Background(), "acme", 50)
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if out == nil {
+		t.Fatal("ListProfiles returned a nil slice for zero rows, want a non-nil empty slice (marshals to JSON null, not [])")
+	}
+	if len(out) != 0 {
+		t.Fatalf("len(out) = %d, want 0", len(out))
+	}
+}
+
 // Scenario: a profile with a kept drawing reports its drawing id (spec:
 // product-review-results-layout) — the Results page uses this to decide
 // whether to show the kept image or the inline generator.
