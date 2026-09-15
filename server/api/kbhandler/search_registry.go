@@ -365,6 +365,23 @@ func appendArtifactFilterClauses(clauses []string, args []any, nextArg int, arti
 		args = append(args, *filters.InputRecordID)
 		nextArg++
 	}
+	if filters.KnowledgeStoreID != "" {
+		clauses = append(clauses, fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM kb.inputs agent_input
+			JOIN kb.knowledge_store agent_store ON agent_store.id=agent_input.ks_store_id
+			WHERE agent_input.id=sa.input_record_id AND agent_store.status='active' AND agent_store.id::text=$%d
+		)`, nextArg))
+		args = append(args, filters.KnowledgeStoreID)
+		nextArg++
+	}
+	if filters.DocumentGroup != "" {
+		clauses = append(clauses, fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM kb.inputs agent_input
+			WHERE agent_input.id=sa.input_record_id AND agent_input.type=$%d
+		)`, nextArg))
+		args = append(args, filters.DocumentGroup)
+		nextArg++
+	}
 	if filters.CategoryPath != "" {
 		clauses = append(clauses, fmt.Sprintf("sa.category_paths::text ILIKE $%d", nextArg))
 		args = append(args, "%"+filters.CategoryPath+"%")

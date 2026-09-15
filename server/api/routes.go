@@ -19,6 +19,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
+	"github.com/chendingplano/deepdoc/server/api/agentservicehandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
@@ -253,6 +254,30 @@ func RegisterRoutes(e *echo.Echo) error {
 	// (public: pre-login pages need it). ADR 2026071102.
 	e.GET("/api/site-config", sitehandler.GetSiteConfig)
 	e.POST("/api/internal/mitmproxy/ingest", proxytracehandler.IngestMitmExchange)
+	var capabilitySigner *agentservicehandler.CapabilitySigner
+	if secret := os.Getenv("PI_RUN_CAPABILITY_SECRET"); secret != "" {
+		var signerErr error
+		capabilitySigner, signerErr = agentservicehandler.NewCapabilitySigner([]byte(secret), time.Now)
+		if signerErr != nil {
+			return fmt.Errorf("initialize Pi run capability signer: %w", signerErr)
+		}
+	}
+	var toolAccess agentservicehandler.KnowledgeAccessChecker = agentservicehandler.ActiveKnowledgeAccessChecker{DB: ApiTypes.ProjectDBHandle}
+	if capabilitySigner != nil && os.Getenv("PI_GATEWAY_SECRET") != "" {
+		promptDir := os.Getenv("PROMPT_DIR")
+		if promptDir == "" {
+			promptDir = "prompts"
+		}
+		profileRegistry, profileErr := agentservicehandler.LoadProfileRegistry(promptDir)
+		if profileErr != nil {
+			return fmt.Errorf("initialize Pi profile access checker: %w", profileErr)
+		}
+		toolAccess = agentservicehandler.ProfileAccessChecker{Registry: profileRegistry, Next: toolAccess}
+	}
+	toolService := agentservicehandler.NewKnowledgeToolService(
+		agentservicehandler.NewSQLKnowledgeToolBackend(ApiTypes.ProjectDBHandle), toolAccess)
+	agentservicehandler.RegisterInternalToolRoutes(e,
+		agentservicehandler.NewInternalToolHandler(os.Getenv("PI_GATEWAY_SECRET"), capabilitySigner, toolService))
 
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")

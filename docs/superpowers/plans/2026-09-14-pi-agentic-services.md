@@ -44,11 +44,11 @@
 - Create: `server/api/agentservicehandler/tools_test.go`
 - Modify: `server/api/routes.go`
 
-- [ ] Mint signed, short-lived, one-run capabilities containing user ID, profile/version, allowed tool names, knowledge-store/document scope, run ID, and expiry; reject tampering, expiry, cross-run reuse, and tools outside the allowlist.
-- [ ] Add internal-only endpoints for `search_knowledge`, `read_source_passages`, `get_artifact_details`, `get_document_context`, and `find_related_knowledge`. Enforce the intersection of current user access, profile scope, and requested resource on every call.
-- [ ] Reuse lower-level ChenWeb knowledge functions where safe, but shape bounded tool-specific responses. Never load/return an entire line file for a small passage request; cap query length, results, ranges, lines, related items, and response bytes.
-- [ ] Return stable source/document/artifact identity, page/line locations, validation status, and an explicit untrusted-evidence marker.
-- [ ] Add a replaceable access-check interface and test denial when access is revoked after a source was previously used.
+- [x] Mint signed, short-lived, one-run capabilities containing user ID, profile/version, allowed tool names, knowledge-store/document scope, run ID, and expiry; reject tampering, expiry, cross-run reuse, and tools outside the allowlist.
+- [x] Add internal-only endpoints for `search_knowledge`, `read_source_passages`, `get_artifact_details`, `get_document_context`, and `find_related_knowledge`. Enforce the intersection of current user access, profile scope, and requested resource on every call.
+- [x] Reuse lower-level ChenWeb knowledge functions where safe, but shape bounded tool-specific responses. Never load/return an entire line file for a small passage request; cap query length, results, ranges, lines, related items, and response bytes.
+- [x] Return stable source/document/artifact identity, page/line locations, validation status, and an explicit untrusted-evidence marker.
+- [x] Add a replaceable access-check interface and test denial when access is revoked after a source was previously used.
 
 ### Task 4: Build the Pi SDK session and event bridge
 

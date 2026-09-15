@@ -9,6 +9,8 @@ import (
 
 type artifactSearchFilters struct {
 	InputRecordID     *int64   `json:"input_record_id,omitempty"`
+	KnowledgeStoreID  string   `json:"-"`
+	DocumentGroup     string   `json:"-"`
 	ArtifactTypes     []string `json:"artifact_types,omitempty"`
 	CategoryPath      string   `json:"category_path,omitempty"`
 	TopicType         string   `json:"topic_type,omitempty"`

@@ -31,3 +31,21 @@ func TestAgenticServiceMigrationEnforcesAttemptSourceIntegrity(t *testing.T) {
 		}
 	}
 }
+
+func TestAgenticKnowledgeGrantMigrationIsUserAndStoreScoped(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not resolve test path")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(file), "../../../project_migrations/20260914000002_create_agentic_knowledge_grants.sql"))
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(body)
+	for _, required := range []string{"user_id", "knowledge_store_id", "document_id", "agentic_grant_document_store_fk", "active", "expires_at"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("grant migration missing %q", required)
+		}
+	}
+}
