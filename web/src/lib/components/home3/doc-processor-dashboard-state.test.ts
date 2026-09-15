@@ -13,7 +13,7 @@ import {
 	enforceEntityBeforeRelation,
 	entityExtractionSucceeded,
 	type StatusEntry
-} from './doc-processor-dashboard-state.ts';
+} from './doc-processor-dashboard-state';
 
 function makeRecord(status: StatusEntry[]) {
 	return { status };

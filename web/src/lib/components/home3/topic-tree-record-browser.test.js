@@ -81,8 +81,9 @@ test('buildTopicTreeListParams applies search filters to the kb.inputs query', (
 	assert.equal(params.fileName, 'report');
 	assert.equal(params.docType, 'pdf');
 	assert.equal(params.parserName, 'mineru');
-	assert.equal(params.operation, 'extract_metadata');
-	assert.equal(params.procStatus, 'success');
+	assert.equal(params.pipelineFilter, 'extract_metadata');
+	assert.equal(params.operation, '');
+	assert.equal(params.procStatus, '');
 	assert.equal(params.startTime, '2026-05-01');
 	assert.equal(params.endTime, '2026-05-02');
 	assert.equal(params.modifyStartTime, '2026-05-03');

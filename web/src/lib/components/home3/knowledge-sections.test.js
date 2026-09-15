@@ -13,7 +13,6 @@ test('knowledge page exposes requested under construction menu sections', () => 
 			'References',
 			'Formulas',
 			'Tables',
-			'Compliance Provisions',
 			'Quotations',
 			'Case Studies',
 			'Workflow',

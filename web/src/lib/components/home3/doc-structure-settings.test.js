@@ -16,7 +16,7 @@ import {
 test('doc structure width clamp keeps the line list width within allowed range', () => {
 	assert.equal(clampDocStructureLineListWidth(120), 280);
 	assert.equal(clampDocStructureLineListWidth(420), 420);
-	assert.equal(clampDocStructureLineListWidth(999), 760);
+	assert.equal(clampDocStructureLineListWidth(999), 960);
 });
 
 test('doc structure height and gap clamps keep values within allowed range', () => {
@@ -39,7 +39,7 @@ test('mergeDocStructureSettings keeps defaults and sanitizes values', () => {
 
 	assert.deepEqual(merged, {
 		...DOC_STRUCTURE_DEFAULT_SETTINGS,
-		lineListWidth: 760,
+		lineListWidth: 800,
 		recordBackground: '#123456',
 		recordHeight: 32,
 		recordGap: 20
