@@ -114,6 +114,7 @@
 			]
 		},
 		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon, group: 'Workspace' },
+		{ id: 'agent-services', label: 'Knowledge Desk', icon: BookMarkedIcon, group: 'Workspace', href: '/home3/agent-services' },
 		{
 			id: 'agents',
 			label: 'Agents',

@@ -200,6 +200,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream; charset=utf-8")
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
+	c.Response().Header().Set("X-Agent-Run-Id", attempt.ID)
 	c.Response().WriteHeader(http.StatusOK)
 	streamStarted = true
 	collector := NewRunEventCollector(attempt.ID, min(65536, max(4096, profile.Limits.MaxOutputTokens*16)))

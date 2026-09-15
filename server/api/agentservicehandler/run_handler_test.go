@@ -213,7 +213,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), handler)
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Why is flow low?","idempotency_key":"key-1","permission_mode":"auto"}`)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "event: answer_delta") || !strings.Contains(rec.Body.String(), "event: activity") || strings.Contains(rec.Body.String(), "Old answer") {
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Agent-Run-Id") != "run-1" || !strings.Contains(rec.Body.String(), "event: answer_delta") || !strings.Contains(rec.Body.String(), "event: activity") || strings.Contains(rec.Body.String(), "Old answer") {
 		t.Fatalf("stream status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	claims, err := signer.Verify(gateway.request.Capability, "run-1", "search_knowledge")

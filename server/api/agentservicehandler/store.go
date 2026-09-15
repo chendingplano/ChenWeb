@@ -228,7 +228,9 @@ ORDER BY m.sequence_no ASC`
 }
 
 func (s *Store) LoadSourceDependencies(ctx context.Context, ownerUserID, conversationID string) (map[string][]SourceRecord, error) {
-	const query = `SELECT src.message_id, src.document_id, src.source_fingerprint, src.source_version
+	const query = `SELECT src.message_id, src.document_id, src.source_fingerprint, src.source_version,
+       src.document_title, src.artifact_type, src.artifact_id, src.line_start, src.line_end,
+       src.page_start, src.page_end
 FROM kb.agentic_sources src
 JOIN kb.agentic_messages m ON m.id=src.message_id
 JOIN kb.agentic_conversations c ON c.id=m.conversation_id
@@ -242,7 +244,9 @@ ORDER BY src.message_id, src.id`
 	out := make(map[string][]SourceRecord)
 	for rows.Next() {
 		var item SourceRecord
-		if err := rows.Scan(&item.MessageID, &item.DocumentID, &item.Fingerprint, &item.SourceVersion); err != nil {
+		if err := rows.Scan(&item.MessageID, &item.DocumentID, &item.Fingerprint, &item.SourceVersion,
+			&item.DocumentTitle, &item.ArtifactType, &item.ArtifactID, &item.LineStart, &item.LineEnd,
+			&item.PageStart, &item.PageEnd); err != nil {
 			return nil, err
 		}
 		out[item.MessageID] = append(out[item.MessageID], item)

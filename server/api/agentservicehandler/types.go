@@ -10,10 +10,17 @@ import (
 )
 
 type SourceRecord struct {
-	MessageID     string
-	DocumentID    string
-	Fingerprint   string
-	SourceVersion string
+	MessageID     string `json:"message_id"`
+	DocumentID    string `json:"document_id"`
+	Fingerprint   string `json:"-"`
+	SourceVersion string `json:"source_version,omitempty"`
+	DocumentTitle string `json:"document_title,omitempty"`
+	ArtifactType  string `json:"artifact_type,omitempty"`
+	ArtifactID    string `json:"artifact_id,omitempty"`
+	LineStart     int    `json:"line_start,omitempty"`
+	LineEnd       int    `json:"line_end,omitempty"`
+	PageStart     int    `json:"page_start,omitempty"`
+	PageEnd       int    `json:"page_end,omitempty"`
 }
 
 type CurrentSourceAccessChecker struct{ DB *sql.DB }
@@ -46,14 +53,15 @@ WHERE g.user_id=$1 AND ks.ks_name=ANY($2) AND i.id::text=$3
 }
 
 type VisibleResumeState struct {
-	Conversation     Conversation `json:"conversation"`
-	Messages         []Message    `json:"messages"`
-	HiddenMessageIDs []string     `json:"hidden_message_ids,omitempty"`
-	OmissionNotice   string       `json:"omission_notice,omitempty"`
+	Conversation     Conversation              `json:"conversation"`
+	Messages         []Message                 `json:"messages"`
+	SourcesByMessage map[string][]SourceRecord `json:"sources_by_message,omitempty"`
+	HiddenMessageIDs []string                  `json:"hidden_message_ids,omitempty"`
+	OmissionNotice   string                    `json:"omission_notice,omitempty"`
 }
 
 func FilterResumeState(ctx context.Context, state ResumeState, sources map[string][]SourceRecord, check func(context.Context, SourceRecord) error) VisibleResumeState {
-	out := VisibleResumeState{Conversation: state.Conversation, Messages: make([]Message, 0, len(state.Messages))}
+	out := VisibleResumeState{Conversation: state.Conversation, Messages: make([]Message, 0, len(state.Messages)), SourcesByMessage: make(map[string][]SourceRecord)}
 	for _, message := range state.Messages {
 		if message.Role == "assistant" && message.Status == "complete" {
 			blocked := false
@@ -66,6 +74,9 @@ func FilterResumeState(ctx context.Context, state ResumeState, sources map[strin
 			if blocked {
 				out.HiddenMessageIDs = append(out.HiddenMessageIDs, message.ID)
 				continue
+			}
+			if len(sources[message.ID]) > 0 {
+				out.SourcesByMessage[message.ID] = append([]SourceRecord(nil), sources[message.ID]...)
 			}
 		}
 		out.Messages = append(out.Messages, message)

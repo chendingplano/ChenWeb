@@ -168,6 +168,20 @@ func TestFilterResumeStateHidesDependentAnswerAfterRevocation(t *testing.T) {
 	}
 }
 
+func TestFilterResumeStateReturnsOnlyAccessibleSourceCards(t *testing.T) {
+	state := ResumeState{Messages: []Message{{ID: "a1", Role: "assistant", Content: "answer", Status: "complete"}, {ID: "a2", Role: "assistant", Content: "hidden", Status: "complete"}}}
+	sources := map[string][]SourceRecord{"a1": {{DocumentID: "42", Fingerprint: "current", DocumentTitle: "Guide", LineStart: 3, LineEnd: 5}}, "a2": {{DocumentID: "43", Fingerprint: "revoked", DocumentTitle: "Private"}}}
+	visible := FilterResumeState(context.Background(), state, sources, func(_ context.Context, source SourceRecord) error {
+		if source.Fingerprint == "revoked" {
+			return ErrKnowledgeAccessDenied
+		}
+		return nil
+	})
+	if len(visible.SourcesByMessage["a1"]) != 1 || visible.SourcesByMessage["a1"][0].DocumentTitle != "Guide" || len(visible.SourcesByMessage["a2"]) != 0 {
+		t.Fatalf("unsafe source cards %+v", visible)
+	}
+}
+
 func TestGetConversationHidesSavedAnswerWhenGrantIsRevoked(t *testing.T) {
 	withAgentUser(t, "user-1")
 	db, mock, err := sqlmock.New()
@@ -187,8 +201,8 @@ func TestGetConversationHidesSavedAnswerWhenGrantIsRevoked(t *testing.T) {
 			AddRow("answer-message", "conversation-1", "attempt-1", 2, "assistant", "Private answer", "complete", now, now))
 	mock.ExpectQuery(`(?s)FROM kb.agentic_sources src.*owner_user_id`).
 		WithArgs("conversation-1", "user-1").
-		WillReturnRows(sqlmock.NewRows([]string{"message_id", "document_id", "fingerprint", "version"}).
-			AddRow("answer-message", "42", "old-fingerprint", "v1"))
+		WillReturnRows(sqlmock.NewRows([]string{"message_id", "document_id", "fingerprint", "version", "title", "artifact_type", "artifact_id", "line_start", "line_end", "page_start", "page_end"}).
+			AddRow("answer-message", "42", "old-fingerprint", "v1", "Private guide", "", "", 1, 2, 0, 0))
 	mock.ExpectQuery(`(?s)FROM kb.agentic_knowledge_grants g.*JOIN kb.inputs i`).
 		WithArgs("user-1", sqlmock.AnyArg(), "42", "old-fingerprint", sqlmock.AnyArg(), "v1").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
