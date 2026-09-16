@@ -1000,6 +1000,9 @@
 									>{m.pmr_drawing_discard()}</button
 								>
 							</div>
+							{#if drawingError}
+								<p class="drawing-error">{drawingError}</p>
+							{/if}
 						</div>
 					{:else}
 						<div class="drawing-generator">

@@ -184,6 +184,10 @@ func ServePendingContent(c echo.Context) error {
 }
 
 func KeepPending(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DRAW_003")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
 	token := c.Param("token")
 	src, ok := pendingPath(token)
 	if !ok || expired(src) {
@@ -191,11 +195,13 @@ func KeepPending(c echo.Context) error {
 	}
 	cfg := defaultConfig()
 	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
+		logger.Error("create product drawing directory failed", "dir", cfg.OutputDir, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create drawing storage"})
 	}
 	filename := drawingFilename()
 	dst := filepath.Join(cfg.OutputDir, filename)
 	if err := os.Rename(src, dst); err != nil {
+		logger.Error("keep product drawing failed", "src", src, "dst", dst, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to keep drawing"})
 	}
 	var req Request
@@ -213,6 +219,7 @@ func KeepPending(c echo.Context) error {
 	if ApiTypes.ProjectDBHandle != nil {
 		savedID, err := insertDrawingRow(c.Request().Context(), req.Name, req.Description, req.Prompt, req.Keywords, req.Notes, filename, dst, req.Model)
 		if err != nil {
+			logger.Error("save product drawing metadata failed", "err", err)
 			_ = os.Rename(dst, src)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save drawing metadata"})
 		}
