@@ -138,6 +138,20 @@ test('listProfiles passes a limit through as a query param', async () => {
 	}
 });
 
+test('listProfiles serializes sort, repeated keywords, and name filters', async () => {
+	const f = stubFetch({ status: true, profiles: [], keywords: ['icu', 'respiratory'] });
+	try {
+		await listProfiles({ sort: 'metrics_desc', keywords: ['icu', 'respiratory'], name: 'vent' });
+		const url = f.last().url;
+		assert.ok(url.includes('sort=metrics_desc'));
+		assert.ok(url.includes('keywords=icu'));
+		assert.ok(url.includes('keywords=respiratory'));
+		assert.ok(url.includes('name=vent'));
+	} finally {
+		f.restore();
+	}
+});
+
 test('listProfiles surfaces a { status: false } envelope as a rejected promise', async () => {
 	const f = stubFetch({ status: false, error_msg: 'db unavailable' }, 500);
 	try {

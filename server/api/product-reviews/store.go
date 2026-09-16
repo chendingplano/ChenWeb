@@ -7,7 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
+
+type ProfileListOptions struct {
+	Limit    int
+	Sort     string
+	Name     string
+	Keywords []string
+}
 
 // ErrMultipleRoots is returned when an edit would give a profile a second
 // `product`-kind node. A profile has exactly one root (spec: profile model).
@@ -186,12 +195,47 @@ func (s Store) FindProfileByName(ctx context.Context, tenantID, name string) (*P
 // carrying its latest review request/run (if any) — spec:
 // product-review-history-list. limit is clamped to at least 1 by the caller.
 func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]ProfileSummary, error) {
+	return s.ListProfilesFiltered(ctx, tenantID, ProfileListOptions{Limit: limit, Sort: "time_desc"})
+}
+
+func (s Store) ListProfilesFiltered(ctx context.Context, tenantID string, opts ProfileListOptions) ([]ProfileSummary, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		tenantID = "-"
 	}
 	out := []ProfileSummary{}
-	rows, err := s.DB.QueryContext(ctx, `
+	if opts.Limit < 1 {
+		opts.Limit = 50
+	}
+	orderBy := map[string]string{
+		"time_asc": "p.updated_at ASC, p.id ASC", "time_desc": "p.updated_at DESC, p.id DESC",
+		"name_asc":     "LOWER(COALESCE(NULLIF(p.name_cn, ''), p.name)) ASC, p.id ASC",
+		"name_desc":    "LOWER(COALESCE(NULLIF(p.name_cn, ''), p.name)) DESC, p.id DESC",
+		"metrics_asc":  "COALESCE(ru.result_count, 0) ASC, p.id ASC",
+		"metrics_desc": "COALESCE(ru.result_count, 0) DESC, p.id DESC",
+	}
+	order, ok := orderBy[opts.Sort]
+	if !ok {
+		order = orderBy["time_desc"]
+	}
+	args := []any{tenantID}
+	where := "WHERE p.tenant_id = $1"
+	if name := strings.TrimSpace(opts.Name); name != "" {
+		args = append(args, "%"+name+"%")
+		where += fmt.Sprintf(" AND (p.name ILIKE $%d OR p.name_cn ILIKE $%d OR p.name_en ILIKE $%d)", len(args), len(args), len(args))
+	}
+	keywords := make([]string, 0, len(opts.Keywords))
+	for _, keyword := range opts.Keywords {
+		if keyword = strings.TrimSpace(keyword); keyword != "" {
+			keywords = append(keywords, keyword)
+		}
+	}
+	if len(keywords) > 0 {
+		args = append(args, pq.Array(keywords))
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.keywords, '[]'::jsonb)) kw(value) WHERE kw.value = ANY($%d::text[]))", len(args))
+	}
+	args = append(args, opts.Limit)
+	query := fmt.Sprintf(`
 		SELECT p.id, p.tenant_id, p.name, p.name_cn, p.name_en, p.product_description, p.keywords, p.notes, p.version,
 		       p.status, p.truncated, p.truncated_count, p.drawing_id, p.created_at, p.updated_at,
 		       r.id, ru.id, ru.status, ru.finished_at, ru.result_count
@@ -204,9 +248,10 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 			SELECT id, status, finished_at, result_count FROM kb.product_review_runs
 			WHERE request_id = r.id ORDER BY run_number DESC LIMIT 1
 		) ru ON true
-		WHERE p.tenant_id = $1
-		ORDER BY p.updated_at DESC
-		LIMIT $2`, tenantID, limit)
+		%s
+		ORDER BY %s
+		LIMIT $%d`, where, order, len(args))
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +292,28 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func (s Store) ListProfileKeywords(ctx context.Context, tenantID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT DISTINCT BTRIM(value)
+		FROM kb.product_profiles p
+		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.keywords, '[]'::jsonb)) AS kw(value)
+		WHERE p.tenant_id = $1 AND BTRIM(value) <> ''
+		ORDER BY BTRIM(value)`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	keywords := []string{}
+	for rows.Next() {
+		var keyword string
+		if err := rows.Scan(&keyword); err != nil {
+			return nil, err
+		}
+		keywords = append(keywords, keyword)
+	}
+	return keywords, rows.Err()
 }
 
 // ListProductNames returns the approved+proposed kb.product_names catalog

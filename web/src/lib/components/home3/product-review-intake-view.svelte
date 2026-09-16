@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages.js';
 	import { AlertTriangle, Layers } from '@lucide/svelte';
@@ -51,22 +51,52 @@
 	let selectedProductName = $state<ProductNameEntry | null>(null);
 	let descriptionNodes = new SvelteMap<number, HTMLElement>();
 	let truncatedDescriptions = $state<Record<number, boolean>>({});
+	let historySort = $state<
+		'time_asc' | 'time_desc' | 'name_asc' | 'name_desc' | 'metrics_asc' | 'metrics_desc'
+	>('time_desc');
+	let selectedKeywords = $state<string[]>([]);
+	let keywordOptions = $state<string[]>([]);
+	let nameFilter = $state('');
+	let profileLoadToken = 0;
+	let nameFilterTimer: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
-		loadProfiles();
+		void loadProfiles();
 	});
+	onDestroy(() => clearTimeout(nameFilterTimer));
 
 	async function loadProfiles() {
+		const token = ++profileLoadToken;
 		loadingProfiles = true;
 		try {
-			const out = await listProfiles();
+			const out = await listProfiles({ sort: historySort, keywords: selectedKeywords, name: nameFilter });
+			if (token !== profileLoadToken) return;
 			profiles = out.profiles;
+			keywordOptions = out.keywords ?? [];
 		} catch {
+			if (token !== profileLoadToken) return;
 			// Past-reviews list is a convenience, not required to use the form —
 			// leave it empty rather than surfacing a load error here.
 		} finally {
 			loadingProfiles = false;
 		}
+	}
+
+	function refreshHistory() { void loadProfiles(); }
+	function setNameFilter(value: string) {
+		nameFilter = value;
+		clearTimeout(nameFilterTimer);
+		nameFilterTimer = setTimeout(refreshHistory, 250);
+	}
+	function toggleKeyword(keyword: string) {
+		selectedKeywords = selectedKeywords.includes(keyword)
+			? selectedKeywords.filter((value) => value !== keyword)
+			: [...selectedKeywords, keyword];
+		refreshHistory();
+	}
+	function removeKeyword(keyword: string) {
+		selectedKeywords = selectedKeywords.filter((value) => value !== keyword);
+		refreshHistory();
 	}
 
 	function selectProfile(p: ProfileSummary) {
@@ -371,9 +401,49 @@
 		</div>
 
 		<section class="history pmr-card">
-			<h2 class="history-heading">{m.pmr_intake_history_heading()}</h2>
+			<div class="history-header">
+				<h2 class="history-heading">{m.pmr_intake_history_heading()}</h2>
+				<div class="history-toolbar">
+					<label class="toolbar-field">
+						<span>{m.pmr_intake_history_sort_label()}</span>
+						<select bind:value={historySort} onchange={refreshHistory}>
+							<option value="time_asc">{m.pmr_intake_history_sort_time_asc()}</option>
+							<option value="time_desc">{m.pmr_intake_history_sort_time_desc()}</option>
+							<option value="name_asc">{m.pmr_intake_history_sort_name_asc()}</option>
+							<option value="name_desc">{m.pmr_intake_history_sort_name_desc()}</option>
+							<option value="metrics_asc">{m.pmr_intake_history_sort_metrics_asc()}</option>
+							<option value="metrics_desc">{m.pmr_intake_history_sort_metrics_desc()}</option>
+						</select>
+					</label>
+					<details class="keyword-filter">
+						<summary>{m.pmr_intake_history_keywords_label()}</summary>
+						<div class="keyword-menu">
+							{#if keywordOptions.length === 0}<span class="muted">{m.pmr_intake_history_keywords_empty()}</span>{/if}
+							{#each keywordOptions as keyword (keyword)}
+								<label class="keyword-option">
+									<input type="checkbox" checked={selectedKeywords.includes(keyword)} onchange={() => toggleKeyword(keyword)} />
+									<span>{keyword}</span>
+								</label>
+							{/each}
+						</div>
+					</details>
+					<label class="toolbar-field name-filter">
+						<span>{m.pmr_intake_history_name_label()}</span>
+						<input value={nameFilter} oninput={(e) => setNameFilter(e.currentTarget.value)} placeholder={m.pmr_intake_history_name_placeholder()} />
+					</label>
+				</div>
+			</div>
+			{#if selectedKeywords.length > 0}
+				<div class="selected-keywords">
+					{#each selectedKeywords as keyword (keyword)}
+						<button type="button" class="keyword-chip" onclick={() => removeKeyword(keyword)}>{keyword} ×</button>
+					{/each}
+				</div>
+			{/if}
 			{#if loadingProfiles}
 				<p class="muted">{m.pmr_intake_history_loading()}</p>
+			{:else if profiles.length === 0 && (nameFilter.trim() || selectedKeywords.length > 0)}
+				<p class="muted">{m.pmr_intake_history_no_matches()}</p>
 			{:else if profiles.length === 0}
 				<p class="muted">{m.pmr_intake_history_empty()}</p>
 			{:else}
@@ -684,13 +754,66 @@
 	.history {
 		text-align: left;
 	}
+	.history-header {
+		display: flex;
+		align-items: end;
+		justify-content: space-between;
+		gap: 14px;
+		margin-bottom: 12px;
+	}
 	.history-heading {
-		margin: 0 0 12px;
+		margin: 0;
 		font-size: 13px;
 		font-weight: 700;
 		letter-spacing: -0.01em;
 		color: var(--text);
 	}
+	.history-toolbar {
+		display: flex;
+		align-items: end;
+		gap: 8px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.toolbar-field {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11px;
+		color: var(--subtle);
+	}
+	.toolbar-field select,
+	.toolbar-field input,
+	.keyword-filter summary {
+		min-height: 32px;
+		padding: 6px 9px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text);
+		font-size: 11px;
+	}
+	.toolbar-field select { max-width: 180px; }
+	.name-filter input { width: 150px; }
+	.keyword-filter { position: relative; }
+	.keyword-filter summary { cursor: pointer; list-style: none; }
+	.keyword-filter summary::-webkit-details-marker { display: none; }
+	.keyword-menu {
+		position: absolute;
+		z-index: 3;
+		top: calc(100% + 5px);
+		right: 0;
+		min-width: 190px;
+		max-height: 220px;
+		overflow: auto;
+		padding: 8px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+	}
+	.keyword-option { display: flex; align-items: center; gap: 8px; padding: 6px; cursor: pointer; font-size: 11px; }
+	.keyword-option:hover { background: color-mix(in oklch, var(--surface) 70%, var(--accent) 12%); }
+	.selected-keywords { display: flex; flex-wrap: wrap; gap: 6px; margin: -3px 0 12px; }
+	.keyword-chip { padding: 4px 8px; border: 1px solid var(--accent); background: color-mix(in oklch, var(--surface) 82%, var(--accent) 18%); color: var(--text); font-size: 11px; cursor: pointer; }
 	.history-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -791,6 +914,8 @@
 		color: var(--subtle);
 	}
 	@media (max-width: 520px) {
+		.history-header { align-items: flex-start; flex-direction: column; }
+		.history-toolbar { justify-content: flex-start; }
 		.history-grid { grid-template-columns: 1fr; }
 		.history-card { flex-direction: column; }
 		.history-card-drawing { flex-basis: 92px; min-height: 92px; }

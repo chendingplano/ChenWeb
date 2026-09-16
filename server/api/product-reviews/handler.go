@@ -150,11 +150,38 @@ func ListProductProfiles(c echo.Context) error {
 	defer rc.Close()
 	limit := parseListLimit(c.QueryParam("limit"), defaultProfileListLimit, maxProfileListLimit)
 	tenantID := c.QueryParam("tenant_id")
-	profiles, err := newStore().ListProfiles(c.Request().Context(), tenantID, limit)
+	opts := parseProfileListOptions(c, limit)
+	store := newStore()
+	profiles, err := store.ListProfilesFiltered(c.Request().Context(), tenantID, opts)
 	if err != nil {
 		return fail(c, err)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "profiles": profiles})
+	keywords, err := store.ListProfileKeywords(c.Request().Context(), tenantID)
+	if err != nil {
+		return fail(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "profiles": profiles, "keywords": keywords})
+}
+
+func parseProfileListOptions(c echo.Context, limit int) ProfileListOptions {
+	keywords := []string{}
+	seen := map[string]bool{}
+	for _, raw := range c.QueryParams()["keywords"] {
+		for _, value := range strings.Split(raw, ",") {
+			value = strings.TrimSpace(value)
+			if value != "" && !seen[value] {
+				seen[value] = true
+				keywords = append(keywords, value)
+			}
+		}
+	}
+	sort := strings.TrimSpace(c.QueryParam("sort"))
+	switch sort {
+	case "time_asc", "time_desc", "name_asc", "name_desc", "metrics_asc", "metrics_desc":
+	default:
+		sort = "time_desc"
+	}
+	return ProfileListOptions{Limit: limit, Sort: sort, Name: strings.TrimSpace(c.QueryParam("name")), Keywords: keywords}
 }
 
 const (

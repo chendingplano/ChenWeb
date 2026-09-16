@@ -242,9 +242,24 @@ export type ProfileSummary = Profile & {
 	latest_metric_count?: number;
 };
 
-export function listProfiles(limit?: number): Promise<{ status: true; profiles: ProfileSummary[] }> {
-	const q = limit ? `?limit=${limit}` : '';
-	return call(`/product-profiles${q}`);
+export type ProfileListOptions = {
+	limit?: number;
+	sort?: 'time_asc' | 'time_desc' | 'name_asc' | 'name_desc' | 'metrics_asc' | 'metrics_desc';
+	keywords?: string[];
+	name?: string;
+};
+
+export type ProfileListResponse = { status: true; profiles: ProfileSummary[]; keywords: string[] };
+
+export function listProfiles(options?: ProfileListOptions | number): Promise<ProfileListResponse> {
+	const opts = typeof options === 'number' ? { limit: options } : options;
+	const params = new URLSearchParams();
+	if (opts?.limit) params.set('limit', String(opts.limit));
+	if (opts?.sort) params.set('sort', opts.sort);
+	for (const keyword of opts?.keywords ?? []) if (keyword.trim()) params.append('keywords', keyword.trim());
+	if (opts?.name?.trim()) params.set('name', opts.name.trim());
+	const query = params.toString();
+	return call(`/product-profiles${query ? `?${query}` : ''}`);
 }
 
 export function buildProfile(
