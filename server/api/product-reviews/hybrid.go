@@ -22,6 +22,13 @@ type rrfHit struct {
 	InputRecordID int64
 	SourceRowID   int64
 	Score         float64
+	// VectorSim is the raw cosine similarity (1 - embedding distance) to the
+	// query vector, 0 when there was no vector half or no semantic match.
+	// Unlike Score (a rank-fused value only meaningful within one node's own
+	// candidate list), this is comparable across different nodes' searches —
+	// needed to tell which of several matched nodes an artifact is actually
+	// closest to (bug 2026091601).
+	VectorSim float64
 }
 
 // rrfSearch fuses a lexical ranking and — when vec is non-nil — a pgvector
@@ -68,7 +75,7 @@ lex AS (
 	if len(vec) == 0 {
 		query = `WITH ` + lexCTE + `
 SELECT lex.artifact_type, lex.artifact_id, lex.input_record_id, lex.source_row_id,
-       1.0 / ($4 + lex.rnk) AS score
+       1.0 / ($4 + lex.rnk) AS score, 0.0 AS vecsim
 FROM lex
 ORDER BY score DESC, lex.artifact_id ASC`
 		args = []any{queryText, pq.Array(partitions), limit, rrfK}
@@ -77,7 +84,8 @@ ORDER BY score DESC, lex.artifact_id ASC`
 sem AS (
 	SELECT sa.artifact_type, sa.artifact_id, sa.input_record_id,
 	       COALESCE(sa.source_row_id, 0) AS source_row_id,
-	       ROW_NUMBER() OVER (ORDER BY sa.embedding <=> $4::vector, sa.artifact_id) AS rnk
+	       ROW_NUMBER() OVER (ORDER BY sa.embedding <=> $4::vector, sa.artifact_id) AS rnk,
+	       1 - (sa.embedding <=> $4::vector) AS vecsim
 	FROM kb.search_artifacts sa
 	WHERE sa.artifact_type = ANY($2) AND sa.embedding IS NOT NULL
 	  AND (1 - (sa.embedding <=> $4::vector)) >= $6
@@ -88,7 +96,8 @@ SELECT COALESCE(lex.artifact_type, sem.artifact_type),
        COALESCE(lex.artifact_id, sem.artifact_id),
        COALESCE(lex.input_record_id, sem.input_record_id),
        COALESCE(NULLIF(lex.source_row_id, 0), sem.source_row_id, 0),
-       COALESCE(1.0 / ($5 + lex.rnk), 0.0) + COALESCE(1.0 / ($5 + sem.rnk), 0.0) AS score
+       COALESCE(1.0 / ($5 + lex.rnk), 0.0) + COALESCE(1.0 / ($5 + sem.rnk), 0.0) AS score,
+       COALESCE(sem.vecsim, 0.0) AS vecsim
 FROM lex
 FULL OUTER JOIN sem
   ON lex.artifact_type = sem.artifact_type AND lex.artifact_id = sem.artifact_id
@@ -104,7 +113,7 @@ ORDER BY score DESC, 2 ASC`
 	var out []rrfHit
 	for rows.Next() {
 		var h rrfHit
-		if err := rows.Scan(&h.ArtifactType, &h.ArtifactID, &h.InputRecordID, &h.SourceRowID, &h.Score); err != nil {
+		if err := rows.Scan(&h.ArtifactType, &h.ArtifactID, &h.InputRecordID, &h.SourceRowID, &h.Score, &h.VectorSim); err != nil {
 			return nil, err
 		}
 		out = append(out, h)

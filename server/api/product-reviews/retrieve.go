@@ -37,6 +37,12 @@ func tierBonus(t string) float64 {
 	return float64(3 - tierRank(t))
 }
 
+// exactMatchNodeScore is the node-hit score recorded for an exact match
+// (subject-concept equality, or a normalized name-key match) — evidence that
+// always outranks a fuzzy embedding hit. Cosine similarity is bounded to
+// [-1, 1], so 2.0 is an unambiguous ceiling above any real VectorSim value.
+const exactMatchNodeScore = 2.0
+
 // Result is one retrieved artifact with its provenance.
 type Result struct {
 	ArtifactType    string          `json:"artifact_type"`
@@ -58,6 +64,10 @@ type pathHit struct {
 	Path       string // "document_first" | "direct_concept" | "direct_hybrid"
 	AnchorNode int64  // node whose hybrid search produced this hit (0 otherwise)
 	Score      float64
+	// VectorSim is AnchorNode's raw cosine similarity to this artifact (only
+	// set for "direct_hybrid"); used to compare match strength across the
+	// different nodes an artifact hits (bug 2026091601).
+	VectorSim float64
 }
 
 // RetrieveInput is the assembled state a run's retrieval works from.
@@ -145,16 +155,19 @@ func (r Retriever) Retrieve(ctx context.Context, in RetrieveInput) (*RetrieveRes
 			}
 			ids := make([]string, 0, len(rrf))
 			scoreByID := make(map[string]float64, len(rrf))
+			vecSimByID := make(map[string]float64, len(rrf))
 			for _, h := range rrf {
 				ids = append(ids, h.ArtifactID)
 				scoreByID[h.ArtifactID] = h.Score
+				vecSimByID[h.ArtifactID] = h.VectorSim
 			}
 			projected, err := adapter.Project(ctx, r.DB, ids)
 			if err != nil {
 				return nil, err
 			}
 			for _, a := range projected {
-				hits = append(hits, pathHit{Artifact: a, Path: "direct_hybrid", AnchorNode: n.ID, Score: scoreByID[a.ArtifactID]})
+				hits = append(hits, pathHit{Artifact: a, Path: "direct_hybrid", AnchorNode: n.ID,
+					Score: scoreByID[a.ArtifactID], VectorSim: vecSimByID[a.ArtifactID]})
 			}
 		}
 	}
@@ -193,7 +206,17 @@ func assembleResults(nodes []ScopeNode, scoped []ScopedDoc, hits []pathHit, budg
 		art      Artifact
 		paths    map[string]bool
 		rawScore float64
-		nodeHits map[int64]bool
+		// nodeHits maps a matched node to the strongest evidence found for it,
+		// so the winning node is the one an artifact is actually closest to,
+		// not just whichever node kind ranks highest (bug 2026091601: the
+		// product root ran its own broad hybrid search, so a weak root match
+		// used to always beat a much stronger part/module match).
+		nodeHits map[int64]float64
+	}
+	setNodeHit := func(a *agg, nid int64, score float64) {
+		if cur, ok := a.nodeHits[nid]; !ok || score > cur {
+			a.nodeHits[nid] = score
+		}
 	}
 	byKey := map[string]*agg{}
 	order := []string{}
@@ -201,7 +224,7 @@ func assembleResults(nodes []ScopeNode, scoped []ScopedDoc, hits []pathHit, budg
 		key := h.Artifact.ArtifactType + "\x1f" + h.Artifact.ArtifactID
 		a := byKey[key]
 		if a == nil {
-			a = &agg{art: h.Artifact, paths: map[string]bool{}, nodeHits: map[int64]bool{}}
+			a = &agg{art: h.Artifact, paths: map[string]bool{}, nodeHits: map[int64]float64{}}
 			byKey[key] = a
 			order = append(order, key)
 		}
@@ -214,14 +237,14 @@ func assembleResults(nodes []ScopeNode, scoped []ScopedDoc, hits []pathHit, budg
 		}
 		if h.Path == "direct_concept" {
 			for _, nid := range conceptToNodes[h.Artifact.SubjectConcept] {
-				a.nodeHits[nid] = true
+				setNodeHit(a, nid, exactMatchNodeScore)
 			}
 		}
 		if h.Path == "direct_hybrid" && h.AnchorNode != 0 {
-			a.nodeHits[h.AnchorNode] = true
+			setNodeHit(a, h.AnchorNode, h.VectorSim)
 		}
 		for _, nid := range keyToNodes[normalizeName(h.Artifact.SubjectText)] {
-			a.nodeHits[nid] = true
+			setNodeHit(a, nid, exactMatchNodeScore)
 		}
 	}
 
@@ -292,22 +315,38 @@ func assembleResults(nodes []ScopeNode, scoped []ScopedDoc, hits []pathHit, budg
 	return out
 }
 
-// tierFor picks the highest-precedence tier among the nodes an artifact matched.
-func tierFor(nodeHits map[int64]bool, kindByNode map[int64]string, rootID int64) (string, int64) {
-	best, bestNode := "", int64(0)
-	consider := func(tier string, node int64) {
-		if best == "" || tierRank(tier) < tierRank(best) {
-			best, bestNode = tier, node
-		}
-	}
+// tierFor picks the node an artifact matched most strongly, among every node
+// it hit, and returns the tier that node's kind implies. A node is only ever
+// beaten by a strictly stronger match (bug 2026091601: previously any root
+// hit won automatically, however weak, over however strong a part/module
+// match — see setNodeHit's exactMatchNodeScore for exact-match evidence).
+// Ties (equal score) fall back to tier precedence, then to the lowest node
+// id, so the choice stays deterministic regardless of map iteration order
+// (spec: Retrieval determinism).
+func tierFor(nodeHits map[int64]float64, kindByNode map[int64]string, rootID int64) (string, int64) {
+	ids := make([]int64, 0, len(nodeHits))
 	for nid := range nodeHits {
+		ids = append(ids, nid)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	best, bestNode := "", int64(0)
+	bestScore := 0.0
+	for _, nid := range ids {
+		var tier string
 		switch {
 		case nid == rootID:
-			consider(TierDirect, nid)
+			tier = TierDirect
 		case kindByNode[nid] == KindModule || kindByNode[nid] == KindPart:
-			consider(TierPart, nid)
+			tier = TierPart
 		case kindByNode[nid] == KindAspect:
-			consider(TierAspect, nid)
+			tier = TierAspect
+		default:
+			continue
+		}
+		score := nodeHits[nid]
+		if best == "" || score > bestScore || (score == bestScore && tierRank(tier) < tierRank(best)) {
+			best, bestNode, bestScore = tier, nid, score
 		}
 	}
 	return best, bestNode

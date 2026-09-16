@@ -193,6 +193,30 @@ func TestAssembleDeterministic(t *testing.T) {
 	}
 }
 
+// Bug 2026091601: the product root ran its own hybrid search with only its
+// own (generic) label as the query text, so almost anything on-topic cleared
+// the similarity floor and hit root — and tierFor treated *any* root hit as
+// an automatic win over a part/module hit, however weak, so a real match on
+// a specific part never got attributed once the root also lit up. Verified
+// against production data: 5/5 sampled "direct"-tier results had a part or
+// module that matched 1.5-2x better than the root by cosine similarity.
+func TestAssembleStrongerPartOutranksWeakRoot(t *testing.T) {
+	nodes := []ScopeNode{sn(1, KindProduct, "Nd:YAG Laser"), sn(2, KindPart, "Display")}
+	scoped := []ScopedDoc{{InputRecordID: 1}}
+	art := metricArt("1_mtc_176", 1, "Electronic digital-indicator gauge")
+	out := assembleResults(nodes, scoped, []pathHit{
+		{Artifact: art, Path: "direct_hybrid", AnchorNode: 1, VectorSim: 0.2269}, // root: weak
+		{Artifact: art, Path: "direct_hybrid", AnchorNode: 2, VectorSim: 0.4071}, // Display: much stronger
+	}, testBudgets)
+	if len(out.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(out.Results))
+	}
+	r := out.Results[0]
+	if r.Tier != TierPart || r.NodeID == nil || *r.NodeID != 2 {
+		t.Fatalf("tier/node = %s/%v, want part/2 (Display is the stronger match)", r.Tier, r.NodeID)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
 }
