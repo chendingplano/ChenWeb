@@ -26,6 +26,7 @@ func IntakeProductReview(c echo.Context) error {
 	defer rc.Close()
 	var body struct {
 		Name               string   `json:"name"`
+		ProductNameEN      string   `json:"product_name_en"`
 		ProductDescription string   `json:"product_description"`
 		Keywords           []string `json:"keywords"`
 		Notes              string   `json:"notes"`
@@ -60,7 +61,7 @@ func IntakeProductReview(c echo.Context) error {
 		}
 		created, err := store.CreateProfile(ctx, NewProfileInput{
 			TenantID: body.TenantID, Name: body.Name, ProductDescription: body.ProductDescription,
-			Keywords: body.Keywords, Notes: body.Notes,
+			ProductNameEN: body.ProductNameEN, Keywords: body.Keywords, Notes: body.Notes,
 		})
 		if err != nil {
 			return fail(c, err)

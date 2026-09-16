@@ -40,9 +40,9 @@ func profileRowsWithDrawing(id int64, name string, version int, status string, t
 		drawing = *drawingID
 	}
 	return sqlmock.NewRows([]string{
-		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+		"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 		"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-	}).AddRow(id, "-", name, "", []byte("[]"), "", version, status, truncated, truncatedCount, drawing, time.Now(), time.Now())
+	}).AddRow(id, "-", name, name, "", "", []byte("[]"), "", version, status, truncated, truncatedCount, drawing, time.Now(), time.Now())
 }
 
 // nodeCols is the column order of the nodeColumns SELECT list.

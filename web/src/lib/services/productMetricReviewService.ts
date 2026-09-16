@@ -53,6 +53,8 @@ export type Profile = {
 	id: number;
 	tenant_id: string;
 	name: string;
+	name_cn: string;
+	name_en: string;
 	product_description: string;
 	keywords: string[];
 	notes: string;
@@ -237,6 +239,7 @@ export type ProfileSummary = Profile & {
 	latest_run_id?: number;
 	latest_run_status?: string;
 	latest_run_finished_at?: string;
+	latest_metric_count?: number;
 };
 
 export function listProfiles(limit?: number): Promise<{ status: true; profiles: ProfileSummary[] }> {
@@ -328,6 +331,7 @@ export type IntakeResponse = {
 
 export function startProductReviewIntake(input: {
 	name: string;
+	product_name_en?: string;
 	product_description?: string;
 	keywords?: string[];
 	notes?: string;

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages.js';
 	import { AlertTriangle, Layers } from '@lucide/svelte';
 	import {
@@ -10,6 +11,8 @@
 		type ProfileSummary
 	} from '$lib/services/productMetricReviewService';
 	import ProductNameField from './product-name-field.svelte';
+	import { productDrawingContentUrl } from '$lib/services/productDrawingService';
+	import type { ProductNameEntry } from '$lib/services/productNamesService';
 
 	// `embedded`: rendered inside content-panel.svelte's app shell, which already
 	// supplies the breadcrumb/topbar — hide our own so it isn't shown twice.
@@ -45,6 +48,9 @@
 	let profiles = $state<ProfileSummary[]>([]);
 	let loadingProfiles = $state(true);
 	let selectedProfile = $state<ProfileSummary | null>(null);
+	let selectedProductName = $state<ProductNameEntry | null>(null);
+	let descriptionNodes = new SvelteMap<number, HTMLElement>();
+	let truncatedDescriptions = $state<Record<number, boolean>>({});
 
 	onMount(() => {
 		loadProfiles();
@@ -65,7 +71,8 @@
 
 	function selectProfile(p: ProfileSummary) {
 		selectedProfile = p;
-		name = p.name;
+		selectedProductName = null;
+		name = p.name_cn || p.name;
 		description = p.product_description ?? '';
 		keywordsInput = (p.keywords ?? []).join(', ');
 		notes = p.notes ?? '';
@@ -73,12 +80,45 @@
 		duplicateProfile = null;
 	}
 
+	function selectProductName(entry: ProductNameEntry) {
+		selectedProductName = entry;
+	}
+
+	function displayName(p: ProfileSummary): string {
+		const cn = p.name_cn || p.name;
+		return p.name_en ? `${cn} / ${p.name_en}` : cn;
+	}
+
+	function descriptionText(value: string | undefined): string {
+		return value?.trim() || '—';
+	}
+
+	function registerDescription(node: HTMLElement, id: number) {
+		descriptionNodes.set(id, node);
+		return { destroy: () => descriptionNodes.delete(id) };
+	}
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		requestAnimationFrame(() => {
+			const next: Record<number, boolean> = {};
+			for (const p of profiles) {
+				const node = descriptionNodes.get(p.id);
+				if (node) next[p.id] = node.scrollHeight > node.clientHeight + 1;
+			}
+			truncatedDescriptions = next;
+		});
+	});
+
 	// Editing the name away from the selected card drops the selection, so
 	// "Re-Run" can never fire against a profile the visible name no longer
 	// matches (design.md Decision 4).
 	$effect(() => {
 		if (selectedProfile && name.trim() !== selectedProfile.name.trim()) {
 			selectedProfile = null;
+		}
+		if (selectedProductName && name.trim() !== selectedProductName.product_name.trim()) {
+			selectedProductName = null;
 		}
 	});
 
@@ -170,6 +210,7 @@
 			}
 			const out = await startProductReviewIntake({
 				name: name.trim(),
+				product_name_en: selectedProductName?.product_name_en,
 				product_description: description.trim(),
 				keywords: parsedKeywords(),
 				notes: notes.trim(),
@@ -277,6 +318,7 @@
 					>
 						<ProductNameField
 							bind:value={name}
+							onSelect={selectProductName}
 							label={m.pmr_intake_name_label()}
 							placeholder={m.pmr_intake_name_placeholder()}
 							disabled={submitting}
@@ -347,36 +389,34 @@
 								if (e.key === 'Enter' || e.key === ' ') selectProfile(p);
 							}}
 						>
-							<div class="history-card-name">{p.name}</div>
-							{#if p.product_description}
-								<p class="history-card-desc">{p.product_description}</p>
-							{/if}
-							{#if p.keywords?.length}
-								<div class="history-card-keywords">
-									{#each p.keywords as kw (kw)}
-										<span class="chip">{kw}</span>
-									{/each}
+							<div class="history-card-drawing">
+								{#if p.drawing_id != null}
+									<img src={productDrawingContentUrl(p.drawing_id)} alt={`${displayName(p)} 3D drawing`} />
+								{:else}<span aria-hidden="true">⌁</span>{/if}
+							</div>
+							<div class="history-card-details">
+								<div class="history-card-name">{displayName(p)}</div>
+								<div class="history-card-attributes">
+									<div><span>Keywords</span><strong>{p.keywords?.join(', ') || '—'}</strong></div>
+									<div><span>Description</span><strong
+										use:registerDescription={p.id}
+										title={truncatedDescriptions[p.id] ? p.product_description : undefined}
+									>{descriptionText(p.product_description)}</strong></div>
+									<div><span>Metrics</span><strong>{p.latest_metric_count ?? '—'}</strong></div>
 								</div>
-							{/if}
-							<div class="history-card-status">
-								{statusWord(p)}
-								{#if p.latest_run_status === 'completed' && p.latest_run_finished_at}
-									<span class="muted"> · {relativeTime(p.latest_run_finished_at)}</span>
+								<div class="history-card-status">
+									{statusWord(p)}
+									{#if p.latest_run_status === 'completed' && p.latest_run_finished_at}
+										<span class="muted"> · {relativeTime(p.latest_run_finished_at)}</span>
+									{/if}
+								</div>
+								{#if p.latest_run_id != null}
+									{@const runId = p.latest_run_id}
+									<button type="button" class="history-card-view" onclick={(e) => { e.stopPropagation(); goToRun(runId); }}>
+										{m.pmr_intake_view_results()}
+									</button>
 								{/if}
 							</div>
-							{#if p.latest_run_id != null}
-								{@const runId = p.latest_run_id}
-								<button
-									type="button"
-									class="history-card-view"
-									onclick={(e) => {
-										e.stopPropagation();
-										goToRun(runId);
-									}}
-								>
-									{m.pmr_intake_view_results()}
-								</button>
-							{/if}
 						</div>
 					{/each}
 				</div>
@@ -653,13 +693,12 @@
 	}
 	.history-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
 		gap: 12px;
 	}
 	.history-card {
 		display: flex;
-		flex-direction: column;
-		gap: 6px;
+		gap: 14px;
 		padding: 12px 14px;
 		border: 1px solid var(--border);
 		background: var(--surface);
@@ -667,6 +706,33 @@
 		text-align: left;
 		font: inherit;
 		cursor: pointer;
+	}
+	.history-card-drawing {
+		flex: 0 0 104px;
+		min-height: 128px;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: color-mix(in oklch, var(--surface) 78%, var(--accent) 8%);
+		display: grid;
+		place-items: center;
+		overflow: hidden;
+	}
+	.history-card-drawing img {
+		width: 100%;
+		height: 100%;
+		min-height: 128px;
+		object-fit: cover;
+	}
+	.history-card-drawing span {
+		font-size: 32px;
+		color: var(--bronze);
+	}
+	.history-card-details {
+		min-width: 0;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
 	}
 	.history-card:hover {
 		border-color: var(--accent);
@@ -695,31 +761,39 @@
 		font-weight: 600;
 		color: var(--text);
 	}
-	.history-card-desc {
-		margin: 0;
-		font-size: 12px;
-		line-height: 1.4;
+	.history-card-attributes {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+		font-size: 11px;
+	}
+	.history-card-attributes > div {
+		display: grid;
+		grid-template-columns: 72px minmax(0, 1fr);
+		gap: 8px;
+		line-height: 1.35;
+	}
+	.history-card-attributes span {
 		color: var(--subtle);
+	}
+	.history-card-attributes strong {
+		min-width: 0;
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
-	}
-	.history-card-keywords {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-	}
-	.chip {
-		padding: 2px 7px;
-		border: 1px solid var(--border);
-		border-radius: 99px;
-		font-size: 10px;
-		color: var(--subtle);
+		font-weight: 500;
+		color: var(--text);
 	}
 	.history-card-status {
 		margin-top: 2px;
 		font-size: 11px;
 		color: var(--subtle);
+	}
+	@media (max-width: 520px) {
+		.history-grid { grid-template-columns: 1fr; }
+		.history-card { flex-direction: column; }
+		.history-card-drawing { flex-basis: 92px; min-height: 92px; }
+		.history-card-drawing img { min-height: 92px; }
 	}
 </style>

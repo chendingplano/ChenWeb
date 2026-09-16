@@ -93,13 +93,15 @@ func (s Store) CreateProfile(ctx context.Context, in NewProfileInput) (*Profile,
 	p := Profile{}
 	var keywordsRaw []byte
 	var drawingID sql.NullInt64
+	nameCN := name
+	nameEN := strings.TrimSpace(in.ProductNameEN)
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO kb.product_profiles (tenant_id, name, product_description, keywords, notes)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, tenant_id, name, product_description, keywords, notes, version, status,
+		INSERT INTO kb.product_profiles (tenant_id, name, name_cn, name_en, product_description, keywords, notes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, tenant_id, name, name_cn, name_en, product_description, keywords, notes, version, status,
 		          truncated, truncated_count, drawing_id, created_at, updated_at`,
-		tenant, name, strings.TrimSpace(in.ProductDescription), keywords, strings.TrimSpace(in.Notes),
-	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
+		tenant, name, nameCN, nameEN, strings.TrimSpace(in.ProductDescription), keywords, strings.TrimSpace(in.Notes),
+	).Scan(&p.ID, &p.TenantID, &p.Name, &p.NameCN, &p.NameEN, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
 		&p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -129,10 +131,10 @@ func (s Store) GetProfile(ctx context.Context, id int64) (*Profile, error) {
 	var keywordsRaw []byte
 	var drawingID sql.NullInt64
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT id, tenant_id, name, product_description, keywords, notes, version, status,
+		SELECT id, tenant_id, name, name_cn, name_en, product_description, keywords, notes, version, status,
 		       truncated, truncated_count, drawing_id, created_at, updated_at
 		FROM kb.product_profiles WHERE id = $1`, id,
-	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
+	).Scan(&p.ID, &p.TenantID, &p.Name, &p.NameCN, &p.NameEN, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
 		&p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -160,12 +162,12 @@ func (s Store) FindProfileByName(ctx context.Context, tenantID, name string) (*P
 	var keywordsRaw []byte
 	var drawingID sql.NullInt64
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT id, tenant_id, name, product_description, keywords, notes, version, status,
+		SELECT id, tenant_id, name, name_cn, name_en, product_description, keywords, notes, version, status,
 		       truncated, truncated_count, drawing_id, created_at, updated_at
 		FROM kb.product_profiles
 		WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))
 		ORDER BY updated_at DESC LIMIT 1`, tenant, name,
-	).Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
+	).Scan(&p.ID, &p.TenantID, &p.Name, &p.NameCN, &p.NameEN, &p.ProductDescription, &keywordsRaw, &p.Notes, &p.Version, &p.Status,
 		&p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -190,16 +192,16 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 	}
 	out := []ProfileSummary{}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT p.id, p.tenant_id, p.name, p.product_description, p.keywords, p.notes, p.version,
+		SELECT p.id, p.tenant_id, p.name, p.name_cn, p.name_en, p.product_description, p.keywords, p.notes, p.version,
 		       p.status, p.truncated, p.truncated_count, p.drawing_id, p.created_at, p.updated_at,
-		       r.id, ru.id, ru.status, ru.finished_at
+		       r.id, ru.id, ru.status, ru.finished_at, ru.result_count
 		FROM kb.product_profiles p
 		LEFT JOIN LATERAL (
 			SELECT id FROM kb.product_review_requests
 			WHERE profile_id = p.id ORDER BY created_at DESC LIMIT 1
 		) r ON true
 		LEFT JOIN LATERAL (
-			SELECT id, status, finished_at FROM kb.product_review_runs
+			SELECT id, status, finished_at, result_count FROM kb.product_review_runs
 			WHERE request_id = r.id ORDER BY run_number DESC LIMIT 1
 		) ru ON true
 		WHERE p.tenant_id = $1
@@ -217,10 +219,11 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 			requestID, runID sql.NullInt64
 			runStatus        sql.NullString
 			runFinishedAt    sql.NullTime
+			metricCount      sql.NullInt64
 		)
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.ProductDescription, &keywordsRaw, &p.Notes,
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.NameCN, &p.NameEN, &p.ProductDescription, &keywordsRaw, &p.Notes,
 			&p.Version, &p.Status, &p.Truncated, &p.TruncatedCount, &drawingID, &p.CreatedAt, &p.UpdatedAt,
-			&requestID, &runID, &runStatus, &runFinishedAt); err != nil {
+			&requestID, &runID, &runStatus, &runFinishedAt, &metricCount); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(keywordsRaw, &p.Keywords)
@@ -236,6 +239,10 @@ func (s Store) ListProfiles(ctx context.Context, tenantID string, limit int) ([]
 		p.LatestRunStatus = runStatus.String
 		if runFinishedAt.Valid {
 			p.LatestRunFinishedAt = &runFinishedAt.Time
+		}
+		if metricCount.Valid {
+			count := int(metricCount.Int64)
+			p.LatestMetricCount = &count
 		}
 		out = append(out, p)
 	}

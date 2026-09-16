@@ -55,6 +55,8 @@ type Profile struct {
 	ID                 int64     `json:"id"`
 	TenantID           string    `json:"tenant_id"`
 	Name               string    `json:"name"`
+	NameCN             string    `json:"name_cn"`
+	NameEN             string    `json:"name_en"`
 	ProductDescription string    `json:"product_description"`
 	Keywords           []string  `json:"keywords"`
 	Notes              string    `json:"notes"`
@@ -77,6 +79,7 @@ type ProfileSummary struct {
 	LatestRunID         *int64     `json:"latest_run_id,omitempty"`
 	LatestRunStatus     string     `json:"latest_run_status,omitempty"`
 	LatestRunFinishedAt *time.Time `json:"latest_run_finished_at,omitempty"`
+	LatestMetricCount   *int       `json:"latest_metric_count,omitempty"`
 }
 
 // SourceRef records why an expanded node is in the tree: the kb.semantic_assertions
@@ -137,6 +140,7 @@ type ProductNameEntry struct {
 type NewProfileInput struct {
 	TenantID           string   `json:"tenant_id"`
 	Name               string   `json:"name"`
+	ProductNameEN      string   `json:"product_name_en"`
 	ProductDescription string   `json:"product_description"`
 	Keywords           []string `json:"keywords"`
 	Notes              string   `json:"notes"`

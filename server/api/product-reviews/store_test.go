@@ -19,7 +19,7 @@ func TestCreateProfile(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(rx("INSERT INTO kb.product_profiles")).
-		WithArgs("-", "Ventilator", "", []byte("[]"), "").
+		WithArgs("-", "Ventilator", "Ventilator", "", "", []byte("[]"), "").
 		WillReturnRows(profileRows(1, "Ventilator", 1, "draft", false, 0))
 	mock.ExpectExec(rx("INSERT INTO kb.product_profile_nodes")).
 		WithArgs(int64(1), KindProduct, "Ventilator", OriginUserAdded, StatusAccepted).
@@ -130,11 +130,11 @@ func TestCreateProfileWithKeywordsAndNotes(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(rx("INSERT INTO kb.product_profiles")).
-		WithArgs("-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck").
+		WithArgs("-", "Ventilator", "Ventilator", "", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-		}).AddRow(1, "-", "Ventilator", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck", 1, "draft", false, 0, nil, time.Now(), time.Now()))
+		}).AddRow(1, "-", "Ventilator", "Ventilator", "", "", []byte(`["icu","respiratory"]`), "urgent, needs recheck", 1, "draft", false, 0, nil, time.Now(), time.Now()))
 	mock.ExpectExec(rx("INSERT INTO kb.product_profile_nodes")).
 		WithArgs(int64(1), KindProduct, "Ventilator", OriginUserAdded, StatusAccepted).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -180,9 +180,9 @@ func TestFindProfileByNameMatch(t *testing.T) {
 	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
 		WithArgs("acme", "  ventilator  ").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-		}).AddRow(9, "acme", "Ventilator", "", []byte("[]"), "", 2, "ready", false, 0, nil, time.Now(), time.Now()))
+		}).AddRow(9, "acme", "Ventilator", "Ventilator", "", "", []byte("[]"), "", 2, "ready", false, 0, nil, time.Now(), time.Now()))
 
 	p, err := store.FindProfileByName(context.Background(), "acme", "  ventilator  ")
 	if err != nil {
@@ -203,9 +203,9 @@ func TestDuplicateProfileResponseWithCompletedRun(t *testing.T) {
 	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
 		WithArgs("-", "Ventilator").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "ready", false, 0, nil, time.Now(), time.Now()))
+		}).AddRow(9, "-", "Ventilator", "Ventilator", "", "", []byte("[]"), "", 1, "ready", false, 0, nil, time.Now(), time.Now()))
 	mock.ExpectQuery(rx("FROM kb.product_review_requests")).WithArgs(int64(9)).
 		WillReturnRows(requestReturnRow(200, 9, 1))
 	mock.ExpectQuery(rx("FROM kb.product_review_runs")).WithArgs(int64(200)).
@@ -234,9 +234,9 @@ func TestDuplicateProfileResponseNoRunYet(t *testing.T) {
 	mock.ExpectQuery(rx("WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))")).
 		WithArgs("-", "Ventilator").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+			"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 			"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-		}).AddRow(9, "-", "Ventilator", "", []byte("[]"), "", 1, "draft", false, 0, nil, time.Now(), time.Now()))
+		}).AddRow(9, "-", "Ventilator", "Ventilator", "", "", []byte("[]"), "", 1, "draft", false, 0, nil, time.Now(), time.Now()))
 	mock.ExpectQuery(rx("FROM kb.product_review_requests")).WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "profile_id", "profile_version", "artifact_types",
@@ -288,17 +288,17 @@ func TestListProfilesMixedRunHistory(t *testing.T) {
 
 	now := time.Now()
 	cols := []string{
-		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+		"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 		"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at",
+		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at", "latest_metric_count",
 	}
 	mock.ExpectQuery(rx("FROM kb.product_profiles p")).
 		WithArgs("acme", 50).
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow(9, "acme", "Ventilator", "", []byte(`["icu"]`), "", 2, "ready", false, 0, int64(77), now, now,
-				int64(200), int64(300), RunCompleted, now).
-			AddRow(8, "acme", "Drone", "", []byte("[]"), "", 1, "draft", false, 0, nil, now, now,
-				nil, nil, nil, nil))
+			AddRow(9, "acme", "Ventilator", "Ventilator", "Ventilator EN", "", []byte(`["icu"]`), "", 2, "ready", false, 0, int64(77), now, now,
+				int64(200), int64(300), RunCompleted, now, 12).
+			AddRow(8, "acme", "Drone", "Drone", "", "", []byte("[]"), "", 1, "draft", false, 0, nil, now, now,
+				nil, nil, nil, nil, nil))
 
 	out, err := store.ListProfiles(context.Background(), "acme", 50)
 	if err != nil {
@@ -337,9 +337,9 @@ func TestListProfilesEmpty(t *testing.T) {
 	defer done()
 
 	cols := []string{
-		"id", "tenant_id", "name", "product_description", "keywords", "notes", "version", "status",
+		"id", "tenant_id", "name", "name_cn", "name_en", "product_description", "keywords", "notes", "version", "status",
 		"truncated", "truncated_count", "drawing_id", "created_at", "updated_at",
-		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at",
+		"latest_request_id", "latest_run_id", "latest_run_status", "latest_run_finished_at", "latest_metric_count",
 	}
 	mock.ExpectQuery(rx("FROM kb.product_profiles p")).
 		WithArgs("acme", 50).

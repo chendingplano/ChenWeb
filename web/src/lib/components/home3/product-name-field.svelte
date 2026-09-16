@@ -36,13 +36,15 @@
 		label = 'Product Name',
 		placeholder = '',
 		disabled = false,
-		style = ''
+		style = '',
+		onSelect
 	}: {
 		value?: string;
 		label?: string;
 		placeholder?: string;
 		disabled?: boolean;
 		style?: string;
+		onSelect?: (entry: ProductNameEntry) => void;
 	} = $props();
 
 	let productNames = $state<ProductNameEntry[]>([]);
@@ -80,6 +82,7 @@
 
 	function select(p: ProductNameEntry) {
 		value = p.product_name;
+		onSelect?.(p);
 		suggestionsOpen = false;
 	}
 </script>
