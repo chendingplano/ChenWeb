@@ -53,14 +53,16 @@ func metricConnectMaxLinks() int {
 // metricIndexConfig binds the shared artifact-indexing engine (artifact_indexing.go) to
 // the metric family (spec 3.1).
 var metricIndexConfig = artifactIndexConfig{
-	SelfType:                   searchArtifactMetric,
-	CategoryType:               "metric",
-	InstanceSource:             "extract_metrics",
-	Table:                      "kb.metrics",
-	IDColumn:                   "metric_id",
-	CategoryTreeFilename:       "metrics.txt",
-	LogPrefix:                  "metrics indexing",
-	WarnOnMissingCategoryPaths: true,
+	SelfType:             searchArtifactMetric,
+	CategoryType:         "metric",
+	InstanceSource:       "extract_metrics",
+	Table:                "kb.metrics",
+	IDColumn:             "metric_id",
+	CategoryTreeFilename: "metrics.txt",
+	LogPrefix:            "metrics indexing",
+	// Metrics no longer receive category paths from extract_metrics. Missing
+	// semantic-projection category coverage is therefore an expected no-op.
+	WarnOnMissingCategoryPaths: false,
 }
 
 var metricObjectConnectionConfig = artifactObjectConnectionConfig{

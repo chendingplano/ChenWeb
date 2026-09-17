@@ -39,6 +39,12 @@ func TestParseMetricCategoriesText(t *testing.T) {
 	}
 }
 
+func TestMetricIndexingDoesNotWarnForMissingCategoryPaths(t *testing.T) {
+	if metricIndexConfig.WarnOnMissingCategoryPaths {
+		t.Fatal("metric indexing should treat empty category paths as a no-op")
+	}
+}
+
 func TestLineSetFromSpansAndOverlap(t *testing.T) {
 	set := lineSetFromSpans([]string{"3", "5:7", "0", "-2"})
 	for _, n := range []int{3, 5, 6, 7} {
