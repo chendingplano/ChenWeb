@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/spf13/viper"
@@ -373,10 +374,20 @@ func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) err
 	return nil
 }
 
-func configuredNames() []string { return viper.GetStringSlice("doc-processing.required_processors") }
+func configuredNames() []string {
+	if names := viper.GetStringSlice("doc-processing.required_processors"); len(names) > 0 {
+		return names
+	}
+	required, _ := appconfig.GetDocProcessingProcessors()
+	return required
+}
 
 func configuredDefaultNames() []string {
-	return viper.GetStringSlice("doc-processing.default_processors")
+	if names := viper.GetStringSlice("doc-processing.default_processors"); len(names) > 0 {
+		return names
+	}
+	_, defaults := appconfig.GetDocProcessingProcessors()
+	return defaults
 }
 
 func resolveRequiredProcessors(requested []string) []string {

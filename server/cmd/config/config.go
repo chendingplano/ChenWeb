@@ -388,6 +388,12 @@ func GetPDFParserConfig() PDFParserConfig {
 	return AppConfig.PDFParser
 }
 
+// GetDocProcessingProcessors returns the configured processor catalog after
+// config.local.toml has been merged into the base config.
+func GetDocProcessingProcessors() (required, defaults []string) {
+	return appConfigViper.GetStringSlice("doc-processing.required_processors"), appConfigViper.GetStringSlice("doc-processing.default_processors")
+}
+
 func GetLLMConfig() LLMConfig {
 	cfg := AppConfig.LLM
 	if strings.TrimSpace(cfg.WorkspaceTimezone) == "" {
