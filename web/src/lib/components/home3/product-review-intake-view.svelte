@@ -12,6 +12,7 @@
 	} from '$lib/services/productMetricReviewService';
 	import ProductNameField from './product-name-field.svelte';
 	import { productDrawingContentUrl } from '$lib/services/productDrawingService';
+	import { getKbFrontendConfig, imageGenerationModelLabel } from '$lib/services/kbService';
 	import type { ProductNameEntry } from '$lib/services/productNamesService';
 
 	// `embedded`: rendered inside content-panel.svelte's app shell, which already
@@ -31,7 +32,8 @@
 	let description = $state('');
 	let keywordsInput = $state('');
 	let notes = $state('');
-	let model = $state<'Qwen' | 'OpenAI'>('Qwen');
+	let imageGenerationModels = $state(['Qwen', 'OpenAI']);
+	let model = $state('Qwen');
 	let submitting = $state(false);
 	let rerunning = $state(false);
 	let error = $state('');
@@ -62,8 +64,21 @@
 
 	onMount(() => {
 		void loadProfiles();
+		void loadImageGenerationModels();
 	});
 	onDestroy(() => clearTimeout(nameFilterTimer));
+
+	async function loadImageGenerationModels() {
+		try {
+			const config = await getKbFrontendConfig();
+			if (config.image_generation_models.length > 0) {
+				imageGenerationModels = config.image_generation_models;
+				model = imageGenerationModels[0];
+			}
+		} catch {
+			// Keep the built-in choices when frontend configuration is unavailable.
+		}
+	}
 
 	async function loadProfiles() {
 		const token = ++profileLoadToken;
@@ -366,8 +381,9 @@
 						<label>
 							<span>{m.pmr_intake_model_label()}</span>
 							<select bind:value={model} disabled={submitting}>
-								<option value="Qwen">Qwen · Aliyun</option>
-								<option value="OpenAI">OpenAI · ChatGPT Image 2.5</option>
+								{#each imageGenerationModels as imageModel}
+									<option value={imageModel}>{imageGenerationModelLabel(imageModel)}</option>
+								{/each}
 							</select>
 						</label>
 						<label class="wide">

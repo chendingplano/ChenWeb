@@ -1300,7 +1300,14 @@ export type KbFrontendConfig = {
 	mandatory_processors: string[];
 	required_processors: string[];
 	max_doc_process_pipelines: number;
+	image_generation_models: string[];
 };
+
+export function imageGenerationModelLabel(model: string): string {
+	if (model === 'Qwen') return 'Qwen · Aliyun';
+	if (model === 'OpenAI') return 'OpenAI · ChatGPT Image 2.5';
+	return model;
+}
 
 export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
 	const response = await fetchOrThrow<{ status: boolean; config: KbFrontendConfig }>(

@@ -54,6 +54,7 @@
 	import {
 		getKbInput,
 		getRawLines,
+		getKbFrontendConfig,
 		listKbMetrics,
 		type KbInputRecord,
 		type KbMetricRecord,
@@ -216,7 +217,8 @@
 	});
 	let drawingPrompt = $state('');
 	let drawingPromptTouched = $state(false);
-	let drawingModel = $state<'Qwen' | 'OpenAI'>('Qwen');
+	let imageGenerationModels = $state(['Qwen', 'OpenAI']);
+	let drawingModel = $state('Qwen');
 	let pendingDrawing = $state<PendingProductDrawing | null>(null);
 	let drawingGenerating = $state(false);
 	let drawingBusy = $state(false);
@@ -588,7 +590,22 @@
 		}
 	}
 
-	onMount(load);
+	async function loadImageGenerationModels() {
+		try {
+			const config = await getKbFrontendConfig();
+			if (config.image_generation_models.length > 0) {
+				imageGenerationModels = config.image_generation_models;
+				drawingModel = imageGenerationModels[0];
+			}
+		} catch {
+			// Keep the built-in choices when frontend configuration is unavailable.
+		}
+	}
+
+	onMount(() => {
+		void load();
+		void loadImageGenerationModels();
+	});
 
 	function openRun() {
 		const n = Number(runIdInput);
@@ -1021,8 +1038,9 @@
 									>{m.pmr_drawing_model_label()}</label
 								>
 								<select id="pmr-drawing-model" class="drawing-model-select" bind:value={drawingModel}>
-									<option value="Qwen">Qwen · Aliyun</option>
-									<option value="OpenAI">OpenAI · ChatGPT Image 2.5</option>
+									{#each imageGenerationModels as imageModel}
+										<option value={imageModel}>{imageModel}</option>
+									{/each}
 								</select>
 								<button
 									class="primary"

@@ -130,6 +130,9 @@ type LanguagesConfig struct {
 }
 
 type FrontendConfigSection struct {
+	// ImageGenerationModels controls the model choices shown by image-generation
+	// forms. An unset or empty value uses the built-in Qwen/OpenAI choices.
+	ImageGenerationModels []string `mapstructure:"image_generation_models"`
 	// DefaultKnowledgeStore is the ks_name of the kb.knowledge_store row that
 	// /home3/knowledge selects on entry. It must match exactly one row; when it
 	// is empty or matches none/several rows, no store is selected and the user
@@ -601,6 +604,21 @@ func GetSiteConfigFilename() string {
 // "" when it is not configured.
 func GetDefaultKnowledgeStoreName() string {
 	return strings.TrimSpace(AppConfig.Frontend.DefaultKnowledgeStore)
+}
+
+// GetImageGenerationModels returns the configured image-generation model
+// choices, defaulting to the models supported by the original UI.
+func GetImageGenerationModels() []string {
+	models := make([]string, 0, len(AppConfig.Frontend.ImageGenerationModels))
+	for _, model := range AppConfig.Frontend.ImageGenerationModels {
+		if model = strings.TrimSpace(model); model != "" {
+			models = append(models, model)
+		}
+	}
+	if len(models) == 0 {
+		return []string{"Qwen", "OpenAI"}
+	}
+	return models
 }
 
 // GetEnableLoginWithGithub returns [frontend].enable_login_with_github,

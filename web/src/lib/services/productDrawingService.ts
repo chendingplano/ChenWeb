@@ -1,4 +1,4 @@
-export type DrawingMetadata = { name: string; description?: string; prompt: string; keywords?: string; notes?: string; model?: 'Qwen' | 'OpenAI' };
+export type DrawingMetadata = { name: string; description?: string; prompt: string; keywords?: string; notes?: string; model?: string };
 export type PendingProductDrawing = DrawingMetadata & { token: string; image_url: string; expires_at: string };
 export type ProductDrawing = DrawingMetadata & { id: number; filename: string; model_name: string; image_url: string; created_at: string; updated_at: string };
 export type ProductDrawingPage = { drawings: ProductDrawing[]; total: number; page: number; page_size: number };

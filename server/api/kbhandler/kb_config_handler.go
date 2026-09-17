@@ -11,6 +11,8 @@ import (
 
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
+
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
 type kbFrontendConfig struct {
@@ -20,6 +22,7 @@ type kbFrontendConfig struct {
 	MandatoryProcessors    []string `json:"mandatory_processors"`
 	RequiredProcessors     []string `json:"required_processors"`
 	MaxDocProcessPipelines int      `json:"max_doc_process_pipelines"`
+	ImageGenerationModels  []string `json:"image_generation_models"`
 }
 
 type kbFrontendConfigResponse struct {
@@ -50,6 +53,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 				MandatoryProcessors:    mandatoryProcessorIDs,
 				RequiredProcessors:     []string{},
 				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
+				ImageGenerationModels:  appconfig.GetImageGenerationModels(),
 			},
 		})
 	}
@@ -104,6 +108,7 @@ func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 		MandatoryProcessors:    mandatoryProcessorIDs,
 		RequiredProcessors:     reqProcs,
 		MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
+		ImageGenerationModels:  appconfig.GetImageGenerationModels(),
 	}, nil
 }
 
