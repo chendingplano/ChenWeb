@@ -266,6 +266,41 @@ class TestRecordDuplicated:
         assert entries[0]["dup_rcd_id"] == 20
         assert entries[0]["start_time"] == "20260410 16:24:29"
 
+    def test_record_duplicated_copies_metadata_from_parsed_success_original(self):
+        conn = _FakeConn()
+        conn.row = (
+            "老年人室内运动健康设施要求", "GB/T 44691-2024",
+            "Artifacts/0/20/doc_mineru.json", "Backup/doc.pdf",
+            "2024-06-12", "Standards Committee", 7,
+            {"visibility": "public"}, "mineru",
+        )
+        raw = json.dumps([])
+
+        record_duplicated(conn, 21, raw, 20, "20260410 16:24:29")
+
+        assert "title           = %s" in conn.executed_sql
+        assert "public_info     = %s::jsonb" in conn.executed_sql
+        updated_status = conn.executed_params[0]
+        assert conn.executed_params == (
+            updated_status,
+            "老年人室内运动健康设施要求", "GB/T 44691-2024",
+            "Artifacts/0/20/doc_mineru.json", "Backup/doc.pdf",
+            "2024-06-12", "Standards Committee", 7,
+            json.dumps({"visibility": "public"}),
+            "mineru", 21,
+        )
+
+    def test_record_duplicated_skips_copy_when_original_not_parsed_success(self):
+        conn = _FakeConn()
+        conn.row = None  # matched record isn't parsed_success (e.g. itself a duplicate)
+        raw = json.dumps([])
+
+        record_duplicated(conn, 21, raw, 20, "20260410 16:24:29")
+
+        assert "title" not in conn.executed_sql
+        updated_status = conn.executed_params[0]
+        assert conn.executed_params == (updated_status, 21)
+
 
 class TestRecordParsedStatus:
     def test_record_parse_active_updates_parser_name_column(self):

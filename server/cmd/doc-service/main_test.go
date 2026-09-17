@@ -335,6 +335,24 @@ WHERE id = $3`)
 	}
 }
 
+// TestNewPDFStageEvent_DoesNotForceReprocessing guards against a regression
+// where a freshly staged PDF's kb.pdf.staged event set force=true. The
+// pdf-parser service (python/pdf-parser/pdf_parser.py) treats force=true as
+// "skip the cross-record MD5 duplicate check", which is only correct for a
+// user-triggered restart — not for a brand-new ingestion. Setting it here
+// silently disabled duplicate detection for every uploaded PDF.
+func TestNewPDFStageEvent_DoesNotForceReprocessing(t *testing.T) {
+	evt := newPDFStageEvent(42, "pdf", "/home/Artifacts/0/42/doc.pdf")
+
+	if evt.Force {
+		t.Fatalf("newPDFStageEvent: Force = true, want false so the pdf-parser service still runs its MD5 duplicate check")
+	}
+	if evt.RecordID != 42 || evt.Type != "pdf" || evt.Status != "success" ||
+		evt.FileFormat != "pdf" || evt.FileName != "/home/Artifacts/0/42/doc.pdf" {
+		t.Fatalf("newPDFStageEvent: unexpected event %+v", evt)
+	}
+}
+
 func TestUpsertStagedInputRecord_InsertsWhenNoExistingStagedRow(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

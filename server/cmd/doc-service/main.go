@@ -664,20 +664,29 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 		}
 
 		if publisher != nil && strings.EqualFold(fileType, "pdf") {
-			if err := publisher.Publish(stageEvent{
-				RecordID:   recordID,
-				Type:       fileType,
-				Status:     "success",
-				Force:      true,
-				FileFormat: fileType,
-				FileName:   homePath,
-			}); err != nil {
+			if err := publisher.Publish(newPDFStageEvent(recordID, fileType, homePath)); err != nil {
 				logger.Error("failed to publish stage event", "record_id", recordID, "error", err)
 			}
 		}
 	}
 
 	return nil
+}
+
+// newPDFStageEvent builds the kb.pdf.staged event for a freshly staged PDF (a
+// direct upload or one extracted from a zip). Force is intentionally left at
+// its zero value (false): the pdf-parser service only skips its cross-record
+// MD5 duplicate check when force is true, and a fresh ingestion is exactly the
+// case that check must run for — unlike a user-triggered restart, which sets
+// force explicitly elsewhere.
+func newPDFStageEvent(recordID int64, fileType, homePath string) stageEvent {
+	return stageEvent{
+		RecordID:   recordID,
+		Type:       fileType,
+		Status:     "success",
+		FileFormat: fileType,
+		FileName:   homePath,
+	}
 }
 
 func ingestInputFile(
@@ -771,14 +780,7 @@ func ingestZipChildren(
 			"updated_existing_row", updated,
 		)
 		if publisher != nil && strings.EqualFold(fileType, "pdf") {
-			if err := publisher.Publish(stageEvent{
-				RecordID:   recordID,
-				Type:       fileType,
-				Status:     "success",
-				Force:      true,
-				FileFormat: fileType,
-				FileName:   homePath,
-			}); err != nil {
+			if err := publisher.Publish(newPDFStageEvent(recordID, fileType, homePath)); err != nil {
 				logger.Error("failed to publish zip child stage event", "zip", zipHomePath, "entry", entry.Name, "record_id", recordID, "error", err)
 			}
 		}

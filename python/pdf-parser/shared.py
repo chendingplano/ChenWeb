@@ -540,7 +540,16 @@ def record_parsed_failure(
 def record_duplicated(
     conn, rec_id: int, raw_status: str, dup_rcd_id: int, start_time: str,
 ) -> str:
-    """Mark a record as duplicated (another record with same MD5 was already parsed)."""
+    """Mark a record as duplicated (another record with same MD5 was already parsed).
+
+    If `dup_rcd_id` currently refers to a clean, successfully-parsed original
+    (`parse_state = 'parsed_success'`), that record's descriptive metadata is
+    copied onto this record so duplicate rows are self-describing in the
+    Import Inputs list. A matched record that is not (or no longer) such an
+    original — e.g. it has itself since been marked duplicated — is never
+    copied from; this record's metadata columns are left untouched, same as
+    before this copy behavior existed.
+    """
     new_status = upsert_status(
         raw_status, PARSE_OPERATION,
         {
@@ -549,15 +558,65 @@ def record_duplicated(
             "start_time": start_time,
         },
     )
-    sql = """
-        UPDATE kb.inputs
-        SET status    = %s::jsonb,
-            error_msg = NULL,
-            modify_time = NOW()
-        WHERE id = %s
+
+    metadata_sql = """
+        SELECT title, doc_no, result_filename, backup_filename, publish_date,
+               authors, owner, public_info, parser_name
+        FROM kb.inputs
+        WHERE id = %s AND parse_state = 'parsed_success'
     """
     with conn.cursor() as cur:
-        cur.execute(sql, (new_status, rec_id))
+        cur.execute(metadata_sql, (dup_rcd_id,))
+        metadata = cur.fetchone()
+
+    if metadata is not None:
+        (
+            title, doc_no, result_filename, backup_filename, publish_date,
+            authors, owner, public_info, parser_name,
+        ) = metadata
+        log.info(
+            "(MID_2026091701) record id=%s duplicated; copying metadata from original id=%s",
+            rec_id, dup_rcd_id,
+        )
+        sql = """
+            UPDATE kb.inputs
+            SET status          = %s::jsonb,
+                error_msg       = NULL,
+                title           = %s,
+                doc_no          = %s,
+                result_filename = %s,
+                backup_filename = %s,
+                publish_date    = %s,
+                authors         = %s,
+                owner           = %s,
+                public_info     = %s::jsonb,
+                parser_name     = %s,
+                modify_time     = NOW()
+            WHERE id = %s
+        """
+        params = (
+            new_status, title, doc_no, result_filename, backup_filename,
+            publish_date, authors, owner,
+            json.dumps(public_info) if public_info is not None else None,
+            parser_name, rec_id,
+        )
+    else:
+        log.info(
+            "(MID_2026091702) record id=%s duplicated; matched id=%s is not a clean "
+            "parsed_success original, skipping metadata copy",
+            rec_id, dup_rcd_id,
+        )
+        sql = """
+            UPDATE kb.inputs
+            SET status    = %s::jsonb,
+                error_msg = NULL,
+                modify_time = NOW()
+            WHERE id = %s
+        """
+        params = (new_status, rec_id)
+
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
     conn.commit()
     return new_status
 

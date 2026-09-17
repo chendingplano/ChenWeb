@@ -799,6 +799,14 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<button
+					onclick={() => loadRecords()}
+					disabled={loading}
+					style="display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
+				>
+					<RefreshCwIcon class="h-3.5 w-3.5" />
+					Refresh
+				</button>
+				<button
 					onclick={() => { searchOpen = true; }}
 					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
 				>
@@ -827,7 +835,7 @@
 		class="rounded-xl overflow-hidden kb-import-table-card"
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
-		<div class="kb-import-table-scroll">
+		<div class="kb-import-table-scroll" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
 			{#snippet sortHead(label: string, field: string)}
 				<th class="cell head">
 					<button
