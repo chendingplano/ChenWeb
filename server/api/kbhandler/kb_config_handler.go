@@ -91,6 +91,16 @@ func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 	if err := toml.Unmarshal(body, &raw); err != nil {
 		return kbFrontendConfig{}, err
 	}
+	localPath := filepath.Join(filepath.Dir(path), "config.local.toml")
+	if filepath.Clean(localPath) != filepath.Clean(path) {
+		if localBody, localErr := os.ReadFile(localPath); localErr == nil {
+			if err := toml.Unmarshal(localBody, &raw); err != nil {
+				return kbFrontendConfig{}, err
+			}
+		} else if !os.IsNotExist(localErr) {
+			return kbFrontendConfig{}, localErr
+		}
+	}
 	types := raw.Frontend.TopicTypes
 	if types == nil {
 		types = []string{}
