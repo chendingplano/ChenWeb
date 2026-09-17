@@ -129,6 +129,10 @@ func configuredProcessorNames() []string {
 	return viper.GetStringSlice("doc-processing.required_processors")
 }
 
+func configuredDefaultProcessorNames() []string {
+	return viper.GetStringSlice("doc-processing.default_processors")
+}
+
 func filterConfiguredProcessors(
 	processors []docprocessing.Processor,
 	required []string,
@@ -307,6 +311,7 @@ func main() {
 		"max_doc_process_pipelines", control.MaxDocProcessPipelines,
 		"run_doc_processor_concurrent", docprocessing.RunDocProcessorConcurrentFromEnv(),
 		"configured_required_processors", configuredProcessorNames(),
+		"configured_default_processors", configuredDefaultProcessorNames(),
 		"processors", processorNames,
 		"started_at", time.Now().Format(time.RFC3339),
 	)

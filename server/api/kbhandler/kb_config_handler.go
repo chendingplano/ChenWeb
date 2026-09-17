@@ -21,6 +21,7 @@ type kbFrontendConfig struct {
 	DefaultLanguage        []string `json:"default_language"`
 	MandatoryProcessors    []string `json:"mandatory_processors"`
 	RequiredProcessors     []string `json:"required_processors"`
+	DefaultProcessors      []string `json:"default_processors"`
 	MaxDocProcessPipelines int      `json:"max_doc_process_pipelines"`
 	ImageGenerationModels  []string `json:"image_generation_models"`
 }
@@ -52,6 +53,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 				DefaultLanguage:        defaultLanguageList(),
 				MandatoryProcessors:    mandatoryProcessorIDs,
 				RequiredProcessors:     []string{},
+				DefaultProcessors:      []string{},
 				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 				ImageGenerationModels:  appconfig.GetImageGenerationModels(),
 			},
@@ -69,6 +71,7 @@ type rawKbFrontendSection struct {
 	} `toml:"frontend"`
 	DocProcessing struct {
 		RequiredProcessors []string `toml:"required_processors"`
+		DefaultProcessors  []string `toml:"default_processors"`
 	} `toml:"doc-processing"`
 }
 
@@ -101,12 +104,17 @@ func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 	if reqProcs == nil {
 		reqProcs = []string{}
 	}
+	defaultProcs := raw.DocProcessing.DefaultProcessors
+	if defaultProcs == nil {
+		defaultProcs = []string{}
+	}
 	return kbFrontendConfig{
 		TopicTypes:             types,
 		SupportedLanguages:     supportedLanguages,
 		DefaultLanguage:        defaultLanguage,
 		MandatoryProcessors:    mandatoryProcessorIDs,
 		RequiredProcessors:     reqProcs,
+		DefaultProcessors:      defaultProcs,
 		MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 		ImageGenerationModels:  appconfig.GetImageGenerationModels(),
 	}, nil

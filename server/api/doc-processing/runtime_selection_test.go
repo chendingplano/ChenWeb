@@ -44,6 +44,20 @@ func TestProductionRuntimeSelectedProcessorDependencyClosure(t *testing.T) {
 	}
 }
 
+func TestDefaultProcessorNamesAddsMandatoryMetadataStage(t *testing.T) {
+	svc := &ControlService{DefaultProcessors: []string{"extract_products", "extract_metrics"}}
+	if got, want := svc.defaultProcessorNames(), []string{"extract_products", "extract_metrics", "extract_doc_metadata"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("default processor names=%v want=%v", got, want)
+	}
+}
+
+func TestDefaultProcessorNamesPreservesExplicitMetadataStage(t *testing.T) {
+	svc := &ControlService{DefaultProcessors: []string{"extract_doc_metadata", "extract_metrics"}}
+	if got, want := svc.defaultProcessorNames(), []string{"extract_doc_metadata", "extract_metrics"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("default processor names=%v want=%v", got, want)
+	}
+}
+
 func TestNewProductionRuntimeOptionsRejectUnknownExplicitProcessorBeforeInitialization(t *testing.T) {
 	_, err := NewProductionRuntime(ProductionRuntimeOptions{RequiredProcessors: []string{"not_a_processor"}})
 	if err == nil || !strings.Contains(err.Error(), "not_a_processor") {
@@ -219,14 +233,19 @@ func TestNewProductionRuntimeSuccessfulExplicitAndDefaultSelection(t *testing.T)
 		t.Fatalf("explicit processors=%v want=%v", got, want)
 	}
 
-	viper.Set("doc-processing.required_processors", []string{"extract_provisions"})
+	viper.Set("doc-processing.required_processors", []string{"extract_metrics", "extract_provisions"})
+	viper.Set("doc-processing.default_processors", []string{"extract_metrics", "extract_provisions"})
 	t.Cleanup(func() { viper.Set("doc-processing.required_processors", nil) })
+	t.Cleanup(func() { viper.Set("doc-processing.default_processors", nil) })
 	defaults, err := NewProductionRuntime()
 	if err != nil {
 		t.Fatalf("default builder: %v", err)
 	}
-	if got, want := processorNames(defaults.Processors), []string{"static_analyzer", "chunking", "extract_doc_metadata", "extract_provisions"}; !reflect.DeepEqual(got, want) {
+	if got, want := processorNames(defaults.Processors), []string{"static_analyzer", "chunking", "extract_doc_metadata", "extract_metrics", "extract_provisions"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("default processors=%v want=%v", got, want)
+	}
+	if got, want := processorNames(defaults.Control.selectProcessors(defaults.Control.DefaultProcessors)), []string{"static_analyzer", "chunking", "extract_metrics", "extract_provisions"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("configured default event processors=%v want=%v", got, want)
 	}
 }
 

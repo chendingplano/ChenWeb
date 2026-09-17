@@ -43,6 +43,7 @@ type ProductionRuntimeOptions struct {
 	Logger             ApiTypes.JimoLogger
 	Overrides          map[string]string
 	RequiredProcessors []string
+	DefaultProcessors  []string
 	PlanFacts          ProductionPlanFacts
 }
 
@@ -151,6 +152,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	var logger ApiTypes.JimoLogger
 	var overrides map[string]string
 	var required []string
+	var defaults []string
 	var planFacts ProductionPlanFacts
 	explicitSelection := false
 	for _, arg := range args {
@@ -164,14 +166,24 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			required, explicitSelection = names, true
 		}
 		if opts, ok := arg.(ProductionRuntimeOptions); ok {
-			logger, overrides, required, planFacts, explicitSelection = opts.Logger, opts.Overrides, opts.RequiredProcessors, opts.PlanFacts, true
+			logger, overrides, required, defaults, planFacts, explicitSelection = opts.Logger, opts.Overrides, opts.RequiredProcessors, opts.DefaultProcessors, opts.PlanFacts, true
 		}
 	}
 	if !explicitSelection {
 		required = configuredNames()
+		defaults = configuredDefaultNames()
+		if len(defaults) == 0 {
+			defaults = append([]string(nil), required...)
+		}
 		required = append(required, "extract_doc_metadata")
-	} else if err := validateRequiredProcessors(required); err != nil {
+	}
+	if err := validateRequiredProcessors(required); err != nil {
 		return nil, err
+	}
+	if len(defaults) > 0 {
+		if err := validateRequiredProcessors(defaults); err != nil {
+			return nil, fmt.Errorf("invalid default processors: %w", err)
+		}
 	}
 	if len(planFacts.RequestedProcessors) == 0 {
 		planFacts.RequestedProcessors = append([]string(nil), required...)
@@ -207,7 +219,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			return nil, err
 		}
 	}
-	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, Facets: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required)}
+	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, Facets: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required), DefaultProcessors: defaults}
 	// The tier-3 applicability resolver is always constructed; classify_document
 	// itself is a routed processor (processor_plan.go) gated per-document via
 	// an authored kb.pipeline_rules row, not an env var.
@@ -363,6 +375,10 @@ func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) err
 
 func configuredNames() []string { return viper.GetStringSlice("doc-processing.required_processors") }
 
+func configuredDefaultNames() []string {
+	return viper.GetStringSlice("doc-processing.default_processors")
+}
+
 func resolveRequiredProcessors(requested []string) []string {
 	wanted := map[string]bool{"static_analyzer": true, "chunking": true}
 	for _, name := range requested {
@@ -438,17 +454,19 @@ func (r *ProductionRuntime) ResolvedConfig() ResolvedConfigSnapshot {
 }
 func makeResolvedConfig(c *ControlService, services map[string]any, plan ProductionProcessorPlan) ResolvedConfigSnapshot {
 	names := []string{}
+	defaults := []string{}
 	if c != nil {
 		for _, p := range c.Processors {
 			names = append(names, p.Name())
 		}
+		defaults = append(defaults, c.DefaultProcessors...)
 	}
 	sort.Strings(names)
 	pipelineMode, pipelineModeErr := DocPipelineModeFromEnv()
 	if pipelineModeErr != nil {
 		pipelineMode = ""
 	}
-	v := map[string]any{"processors": names, "max_doc_process_pipelines": 0, "run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv(), "chunk_size": envInt("CHUNK_SIZE", DefaultChunkSize, 1), "chunk_overlap_percent": envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0), "processor_plan_steps": plan.Steps(), "processor_plan_facts": plan.Facts(), "processor_pipeline_binding": plan.PipelineBinding(), "processor_pipeline_selection": plan.PipelineSelection(), "processor_pipeline_spec": plan.PipelineSpec(), "processor_pipeline_mode": pipelineMode}
+	v := map[string]any{"processors": names, "default_processors": defaults, "max_doc_process_pipelines": 0, "run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv(), "chunk_size": envInt("CHUNK_SIZE", DefaultChunkSize, 1), "chunk_overlap_percent": envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0), "processor_plan_steps": plan.Steps(), "processor_plan_facts": plan.Facts(), "processor_pipeline_binding": plan.PipelineBinding(), "processor_pipeline_selection": plan.PipelineSelection(), "processor_pipeline_spec": plan.PipelineSpec(), "processor_pipeline_mode": pipelineMode}
 	v["processor_routing_snapshot"] = plan.RoutingSnapshot()
 	v["prompt_hashes"] = map[string]string{}
 	v["model_references"] = map[string]any{}

@@ -35,6 +35,7 @@ type logNamedProcessor interface {
 
 type ControlService struct {
 	Processors        []Processor
+	DefaultProcessors []string  // selected for events without an explicit processor override
 	BlockingProcessor Processor // always runs before Processors, regardless of requested operations
 	Logger            ApiTypes.JimoLogger
 	InputStore        DocMetadataStore
@@ -788,6 +789,8 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			}
 			return nil
 		}
+	} else if len(s.DefaultProcessors) > 0 {
+		processors = s.selectProcessors(s.defaultProcessorNames())
 	}
 	var routingResult RoutingEnforcementResult
 	var routingFinalized bool
@@ -1602,6 +1605,9 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 	// (which trusts that field) becomes a no-op for the common case.
 	requested := append([]string(nil), evt.Operations...)
 	if len(requested) == 0 && s != nil {
+		requested = s.defaultProcessorNames()
+	}
+	if len(requested) == 0 && s != nil {
 		for _, p := range s.Processors {
 			if p != nil {
 				requested = append(requested, p.Name())
@@ -1631,6 +1637,21 @@ func (s *ControlService) resolveProductionPlanFacts(ctx context.Context, evt Lin
 		facts.Mode = mode
 	}
 	return facts, nil
+}
+
+func (s *ControlService) defaultProcessorNames() []string {
+	if s == nil || len(s.DefaultProcessors) == 0 {
+		return nil
+	}
+	requested := append([]string(nil), s.DefaultProcessors...)
+	// Metadata is mandatory for every normal line-file processing event, even
+	// when the configured default list contains only optional processors.
+	for _, name := range requested {
+		if canonicalOperationName(name) == "extract_doc_metadata" {
+			return requested
+		}
+	}
+	return append(requested, "extract_doc_metadata")
 }
 
 func (s *ControlService) persistControlFailure(ctx context.Context, rec DocMetadataInputRecord, procErr error) {

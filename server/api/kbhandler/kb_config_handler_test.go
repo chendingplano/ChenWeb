@@ -52,3 +52,20 @@ supported_languages = ["en", "zh-cn"]
 		t.Fatalf("DefaultLanguage = %#v, want [en]", cfg.DefaultLanguage)
 	}
 }
+
+func TestLoadKbFrontendConfigReadsDefaultProcessors(t *testing.T) {
+	path := writeTestConfig(t, `
+[doc-processing]
+required_processors = ["extract_metrics", "extract_products"]
+default_processors = ["extract_products"]
+`)
+	t.Setenv("KB_CONFIG_FILE", path)
+
+	cfg, err := LoadKbFrontendConfig()
+	if err != nil {
+		t.Fatalf("LoadKbFrontendConfig: %v", err)
+	}
+	if len(cfg.DefaultProcessors) != 1 || cfg.DefaultProcessors[0] != "extract_products" {
+		t.Fatalf("DefaultProcessors = %#v, want [extract_products]", cfg.DefaultProcessors)
+	}
+}
