@@ -23,6 +23,7 @@
 		buildManualLaunchPayload,
 		buildStageDefs,
 		computeStages,
+		defaultRestartProcessorSelection,
 		entityExtractionSucceeded,
 		isActiveRecord,
 		isMappingTriageFailure,
@@ -620,17 +621,7 @@
 	}
 
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
-		const unfinishedStageIds = new Set(
-			computeStages(record, selectableProcessorIds)
-				.filter((stage) => stage.status !== 'success' && selectableProcessorIds.includes(stage.id))
-				.map((stage) => stage.id)
-		);
-
-		if (!unfinishedStageIds.size) {
-			return Object.fromEntries(selectableProcessorIds.map((p) => [p, true]));
-		}
-
-		return Object.fromEntries(selectableProcessorIds.map((p) => [p, unfinishedStageIds.has(p)]));
+		return defaultRestartProcessorSelection(record, selectableProcessorIds);
 	}
 
 	type FailedStep = { operation: string; isMappingTriage: boolean };

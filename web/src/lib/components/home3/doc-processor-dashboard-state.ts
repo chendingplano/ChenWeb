@@ -15,6 +15,12 @@ export type StatusEntry = {
 
 export type PipelineRecord = {
 	status?: StatusEntry[];
+	doc_processing_plan?: {
+		plan_facts?: {
+			RequestedProcessors?: string[];
+			requested_processors?: string[];
+		};
+	};
 };
 
 export type StageInfo = {
@@ -115,6 +121,37 @@ export function enforceEntityBeforeRelation(chosen: string[], entityAlreadySucce
 	if (entityAlreadySucceeded) return chosen;
 	if (chosen.includes(ENTITY_PROCESSOR_ID)) return chosen;
 	return [...chosen, ENTITY_PROCESSOR_ID];
+}
+
+// A missing status entry means that a processor was not selected, not that it
+// is unfinished. Use the persisted request for new records; retain the status
+// fallback for records created before processor plans were persisted.
+export function defaultRestartProcessorSelection(
+	record: PipelineRecord,
+	selectableProcessorIds: string[]
+): Record<string, boolean> {
+	const requested = record.doc_processing_plan?.plan_facts?.RequestedProcessors
+		?? record.doc_processing_plan?.plan_facts?.requested_processors
+		?? [];
+	if (requested.length > 0) {
+		const selected = new Set(requested.map(normalizeOperationName));
+		for (const processorID of MANDATORY_PROCESSOR_IDS) selected.add(processorID);
+		return Object.fromEntries(
+			selectableProcessorIds.map((processorID) => [processorID, selected.has(normalizeOperationName(processorID))])
+		);
+	}
+
+	const unfinishedStageIds = new Set(
+		computeStages(record, selectableProcessorIds)
+			.filter((stage) => stage.status !== 'success' && selectableProcessorIds.includes(stage.id))
+			.map((stage) => stage.id)
+	);
+	if (!unfinishedStageIds.size) {
+		return Object.fromEntries(selectableProcessorIds.map((processorID) => [processorID, true]));
+	}
+	return Object.fromEntries(
+		selectableProcessorIds.map((processorID) => [processorID, unfinishedStageIds.has(processorID)])
+	);
 }
 
 export function buildManualLaunchOperations(

@@ -42,6 +42,12 @@ export type KbInputRecord = {
 		error?: string;
 		progress?: string;
 	}>;
+	doc_processing_plan?: {
+		plan_facts?: {
+			RequestedProcessors?: string[];
+			requested_processors?: string[];
+		};
+	};
 	create_time: string;
 	modify_time: string;
 	public_info?: unknown;

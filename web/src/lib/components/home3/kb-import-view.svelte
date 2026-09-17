@@ -13,7 +13,8 @@
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
 		buildStageDefs,
-		computeStages
+		computeStages,
+		defaultRestartProcessorSelection
 	} from './doc-processor-dashboard-state';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -62,6 +63,13 @@
 	let records = $state<KbInputRecord[]>([]);
 	let loading = $state(false);
 	let error = $state('');
+	const autoRefreshOptions = [
+		{ value: 0, label: 'Auto Refresh Off' },
+		{ value: 5000, label: 'Auto Refresh - 5 seconds' },
+		{ value: 10000, label: 'Auto Refresh - 10 seconds' },
+		{ value: 60000, label: 'Auto Refresh - 60 seconds' }
+	];
+	let autoRefreshMs = $state(0);
 	let statusDialogOpen = $state(false);
 	let statusDialogTitle = $state('');
 	let statusDialogRecord = $state<KbInputRecord | null>(null);
@@ -586,17 +594,7 @@
 	}
 
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
-		const unfinishedStageIds = new Set(
-			computeStages(record, selectableProcessorIds)
-				.filter((stage) => stage.status !== 'success' && selectableProcessorIds.includes(stage.id))
-				.map((stage) => stage.id)
-		);
-
-		if (!unfinishedStageIds.size) {
-			return Object.fromEntries(selectableProcessorIds.map((p) => [p, true]));
-		}
-
-		return Object.fromEntries(selectableProcessorIds.map((p) => [p, unfinishedStageIds.has(p)]));
+		return defaultRestartProcessorSelection(record, selectableProcessorIds);
 	}
 
 	function openRestart(record: KbInputRecord) {
@@ -752,6 +750,12 @@
 		return flattenNestedForDisplay(filtered);
 	});
 
+	$effect(() => {
+		if (!autoRefreshMs) return;
+		const id = setInterval(() => loadRecords(), autoRefreshMs);
+		return () => clearInterval(id);
+	});
+
 	onMount(() => {
 		loadRecords();
 		getKbFrontendConfig()
@@ -806,6 +810,15 @@
 					<RefreshCwIcon class="h-3.5 w-3.5" />
 					Refresh
 				</button>
+				<select
+					value={autoRefreshMs}
+					onchange={(e) => { autoRefreshMs = Number((e.currentTarget as HTMLSelectElement).value); }}
+					style="height:38px; padding:0 10px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer;"
+				>
+					{#each autoRefreshOptions as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
 				<button
 					onclick={() => { searchOpen = true; }}
 					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"

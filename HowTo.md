@@ -4994,3 +4994,8 @@ Ctrl-b 0..9 — jump to window N
 Ctrl-b , — rename window
 Ctrl-b w — pick from a list
 Or just click a tab / drag pane borders (mouse is back on)
+
+## How to Restore Chrome Tabs on Mac
+```text
+Command + Shift T
+```

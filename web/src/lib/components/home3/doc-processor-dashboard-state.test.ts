@@ -14,6 +14,7 @@ import {
 	entityExtractionSucceeded,
 	processorSelectionForPackage,
 	buildManualLaunchPayload,
+	defaultRestartProcessorSelection,
 	type StatusEntry
 } from './doc-processor-dashboard-state';
 
@@ -53,6 +54,22 @@ test('named package launch sends explicit processor operations', () => {
 		force: false,
 		force_clear: false,
 		operation: ['extract_products']
+	});
+});
+
+test('restart selects the processors requested by the original run', () => {
+	const selectable = [...MANDATORY_PROCESSOR_IDS, 'extract_metrics', 'extract_products', 'extract_provisions'];
+	const selected = defaultRestartProcessorSelection({
+		doc_processing_plan: { plan_facts: { RequestedProcessors: ['extract_metrics', 'extract_products'] } }
+	}, selectable);
+
+	assert.deepEqual(selected, {
+		static_analyzer: true,
+		chunking: true,
+		extract_doc_metadata: true,
+		extract_metrics: true,
+		extract_products: true,
+		extract_provisions: false
 	});
 });
 

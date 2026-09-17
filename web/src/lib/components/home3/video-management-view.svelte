@@ -3,6 +3,7 @@
 	import {
 		listVideos,
 		uploadVideo,
+		updateVideo,
 		deleteVideo,
 		videoStreamUrl,
 		videoDownloadUrl,
@@ -32,7 +33,22 @@
 	let info = $state<string | null>(null);
 	let selected = $state<VideoMeta | null>(null);
 
-	// --- Upload dialog state ---
+	// --- Sort / filter controls ---
+	const sortOptions = [
+		{ value: 'name-asc', label: 'By Name ASC', sortBy: 'name', sortDir: 'asc' },
+		{ value: 'name-desc', label: 'By Name DESC', sortBy: 'name', sortDir: 'desc' },
+		{ value: 'created_at-asc', label: 'By Time ASC', sortBy: 'created_at', sortDir: 'asc' },
+		{ value: 'created_at-desc', label: 'By Time DESC', sortBy: 'created_at', sortDir: 'desc' },
+		{ value: 'size_bytes-asc', label: 'By Size ASC', sortBy: 'size_bytes', sortDir: 'asc' },
+		{ value: 'size_bytes-desc', label: 'By Size DESC', sortBy: 'size_bytes', sortDir: 'desc' }
+	] as const;
+	let sortOption = $state<(typeof sortOptions)[number]['value']>('created_at-desc');
+	let filterName = $state('');
+	let filterTimeFrom = $state('');
+	let filterTimeTo = $state('');
+
+	// --- Upload/edit dialog state ---
+	let editingId = $state<number | null>(null);
 	let dialogOpen = $state(false);
 	let uploading = $state(false);
 	let uploadProgress = $state(0);
@@ -41,6 +57,7 @@
 	let dialogError = $state<string | null>(null);
 
 	let file = $state<File | null>(null);
+	let currentFilename = $state(''); // edit mode: the file already stored, shown until replaced
 	let name = $state('');
 	let description = $state('');
 	let source = $state('Recording');
@@ -85,8 +102,15 @@
 	async function refresh() {
 		loading = true;
 		error = null;
+		const chosen = sortOptions.find((o) => o.value === sortOption)!;
 		try {
-			videos = await listVideos();
+			videos = await listVideos({
+				sortBy: chosen.sortBy,
+				sortDir: chosen.sortDir,
+				name: filterName.trim() || undefined,
+				timeFrom: filterTimeFrom || undefined,
+				timeTo: filterTimeTo || undefined
+			});
 			if (selected && !videos.some((v) => v.id === selected!.id)) selected = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load videos';
@@ -96,7 +120,9 @@
 	}
 
 	function openDialog() {
+		editingId = null;
 		file = null;
+		currentFilename = '';
 		name = '';
 		description = '';
 		source = 'Recording';
@@ -109,6 +135,29 @@
 		status = 'draft';
 		notes = '';
 		videoType = '';
+		dialogError = null;
+		uploadProgress = 0;
+		dialogOpen = true;
+	}
+
+	function openEditDialog(video: VideoMeta) {
+		editingId = video.id;
+		file = null;
+		currentFilename = video.filename;
+		name = video.name;
+		description = video.description;
+		source = video.source || 'Recording';
+		url = video.url;
+		coverImage = video.image_id != null
+			? { id: video.image_id, content_url: video.image_url, filename: '', size_bytes: 0, content_type: '', origin: '', created_at: '' }
+			: null;
+		keywords = video.keywords;
+		category = video.category;
+		subcategory = video.subcategory;
+		container = video.container;
+		status = video.status || 'draft';
+		notes = video.notes;
+		videoType = video.video_type;
 		dialogError = null;
 		uploadProgress = 0;
 		dialogOpen = true;
@@ -144,8 +193,8 @@
 		}
 	}
 
-	async function submitUpload() {
-		if (!file) {
+	async function submitDialog() {
+		if (editingId === null && !file) {
 			dialogError = 'Please choose a video file.';
 			return;
 		}
@@ -179,13 +228,16 @@
 				notes: notes.trim(),
 				video_type: videoType.trim()
 			};
-			const meta = await uploadVideo(file, fields, (f) => (uploadProgress = f));
-			info = `Uploaded "${meta.name}"`;
+			const meta =
+				editingId === null
+					? await uploadVideo(file!, fields, (f) => (uploadProgress = f))
+					: await updateVideo(editingId, fields, file, (f) => (uploadProgress = f));
+			info = editingId === null ? `Uploaded "${meta.name}"` : `Updated "${meta.name}"`;
 			error = null;
 			dialogOpen = false;
 			await refresh();
 		} catch (e) {
-			dialogError = e instanceof Error ? e.message : 'Upload failed';
+			dialogError = e instanceof Error ? e.message : (editingId === null ? 'Upload failed' : 'Update failed');
 		} finally {
 			uploading = false;
 			uploadProgress = 0;
@@ -246,6 +298,58 @@
 		</div>
 	{/if}
 
+	<!-- Sort / filter controls -->
+	<div class="flex items-end gap-3 mb-4 flex-wrap">
+		<div class="flex flex-col gap-1.5">
+			<label for="v-sort" style="color:{textSecondary}; font-size:12px;">Sort</label>
+			<select
+				id="v-sort"
+				bind:value={sortOption}
+				onchange={refresh}
+				style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; font-size:13px;"
+			>
+				{#each sortOptions as opt (opt.value)}
+					<option value={opt.value}>{opt.label}</option>
+				{/each}
+			</select>
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<label for="v-filter-name" style="color:{textSecondary}; font-size:12px;">Filter by Name</label>
+			<input
+				id="v-filter-name"
+				bind:value={filterName}
+				onkeydown={(e) => e.key === 'Enter' && refresh()}
+				placeholder="Search name…"
+				style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; font-size:13px; min-width:180px;"
+			/>
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<label for="v-filter-from" style="color:{textSecondary}; font-size:12px;">Filter by Time</label>
+			<div class="flex items-center gap-2">
+				<input
+					id="v-filter-from"
+					type="date"
+					bind:value={filterTimeFrom}
+					style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; font-size:13px;"
+				/>
+				<span style="color:{textSecondary};">–</span>
+				<input
+					id="v-filter-to"
+					type="date"
+					bind:value={filterTimeTo}
+					style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; font-size:13px;"
+				/>
+			</div>
+		</div>
+		<button
+			onclick={refresh}
+			class="rounded-lg px-4 py-2 cursor-pointer"
+			style="background:{accentTint}; color:{accent}; font-size:13px; font-weight:500; border:none;"
+		>
+			Apply
+		</button>
+	</div>
+
 	<!-- Video list -->
 	<div class="rounded-xl overflow-hidden" style="border:1px solid {borderColor}; background:{surface};">
 		{#if loading}
@@ -285,6 +389,7 @@
 							<td style="padding:8px 14px; border-bottom:1px solid {borderColor}; color:{textSecondary};">{formatDate(video.created_at)}</td>
 							<td style="padding:8px 14px; border-bottom:1px solid {borderColor}; text-align:right; white-space:nowrap;">
 								<button onclick={() => (selected = video)} class="cursor-pointer" style="background:none; border:none; color:{accent}; font-size:13px; margin-left:8px;">View</button>
+								<button onclick={() => openEditDialog(video)} class="cursor-pointer" style="background:none; border:none; color:{accent}; font-size:13px; margin-left:12px;">Edit</button>
 								<a href={videoDownloadUrl(video.id)} style="color:{accent}; font-size:13px; margin-left:12px; text-decoration:none;">Download</a>
 								<button onclick={() => onDelete(video)} class="cursor-pointer" style="background:none; border:none; color:{dangerColor}; font-size:13px; margin-left:12px;">Delete</button>
 							</td>
@@ -307,7 +412,7 @@
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid {borderColor};">
-				<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">Upload video</h2>
+				<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">{editingId === null ? 'Upload video' : 'Edit video'}</h2>
 				<button onclick={() => !uploading && (dialogOpen = false)} class="cursor-pointer" style="background:none; border:none; color:{textSecondary}; font-size:16px;">✕</button>
 			</div>
 
@@ -316,11 +421,19 @@
 					<div style="color:{dangerColor}; font-size:13px;">{dialogError}</div>
 				{/if}
 
-				<!-- Video file -->
+				<!-- Video file (optional when editing — leave empty to keep the current file) -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-file" style="color:{textSecondary};">Video file</label>
+					<label for="v-file-display" style="color:{textSecondary};">
+						Video File Name{#if editingId === null}<span style="color:{dangerColor};"> *</span>{/if}
+					</label>
+					<div class="flex items-center gap-2">
+						<input id="v-file-display" type="text" readonly value={file ? file.name : currentFilename} placeholder="No file chosen"
+							style="flex:1; background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
+						<button type="button" onclick={() => dialogFileInput?.click()} class="cursor-pointer rounded-lg px-3 py-2"
+							style="background:{accentTint}; color:{accent}; border:none; font-size:13px; white-space:nowrap;">Pick File</button>
+					</div>
 					<input bind:this={dialogFileInput} id="v-file" type="file" accept="video/*" onchange={onDialogFileChosen}
-						style="color:{textPrimary};" />
+						style="display:none;" />
 				</div>
 
 				<!-- Name -->
@@ -433,7 +546,7 @@
 					</div>
 				</div>
 
-				{#if uploading}
+				{#if uploading && (editingId === null || file)}
 					<div style="width:100%; height:6px; background:{borderColor}; border-radius:999px; overflow:hidden;">
 						<div style="width:{Math.round(uploadProgress * 100)}%; height:100%; background:{accent}; transition:width 120ms;"></div>
 					</div>
@@ -443,9 +556,13 @@
 			<div class="flex items-center justify-end gap-3 px-5 py-4" style="border-top:1px solid {borderColor};">
 				<button onclick={() => !uploading && (dialogOpen = false)} class="cursor-pointer rounded-lg px-4 py-2"
 					style="background:none; border:1px solid {borderColor}; color:{textSecondary}; font-size:14px;">Cancel</button>
-				<button onclick={submitUpload} disabled={uploading} class="cursor-pointer rounded-lg px-4 py-2"
+				<button onclick={submitDialog} disabled={uploading} class="cursor-pointer rounded-lg px-4 py-2"
 					style="background:{accent}; color:#fff; border:none; font-size:14px; opacity:{uploading ? 0.6 : 1};">
-					{uploading ? `Uploading… ${Math.round(uploadProgress * 100)}%` : 'Upload'}
+					{#if editingId === null}
+						{uploading ? `Uploading… ${Math.round(uploadProgress * 100)}%` : 'Upload'}
+					{:else}
+						{uploading ? (file ? `Saving… ${Math.round(uploadProgress * 100)}%` : 'Saving…') : 'Save'}
+					{/if}
 				</button>
 			</div>
 		</div>

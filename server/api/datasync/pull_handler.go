@@ -32,27 +32,48 @@ type changesResponse struct {
 	Rows       []Row  `json:"rows"`
 }
 
-// HandlePullChanges serves GET /api/internal/data-sync/items/:itemId/changes.
-// It is called by a deployed target reaching out to this instance acting as
-// the sync source -- there is no session/cookie auth available, so access is
-// restricted with a shared-secret header instead (mirrors
-// shared/go/api/auth/sms_relay.go).
-func HandlePullChanges(c echo.Context) error {
+// authenticatePullRequest checks the shared-secret bearer token shared by
+// every endpoint in this file (mirrors shared/go/api/auth/sms_relay.go):
+// constant-time compare, fails closed if unconfigured. Writes the
+// appropriate JSON error response itself on failure; the caller should
+// return immediately when this returns false.
+func authenticatePullRequest(c echo.Context) bool {
 	sharedSecret := strings.TrimSpace(os.Getenv("DATA_SYNC_SHARED_SECRET"))
 	if sharedSecret == "" {
 		pullLogger.Error("DATA_SYNC_SHARED_SECRET is not configured; refusing all pull requests")
-		return c.JSON(http.StatusInternalServerError, map[string]string{
+		c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "data sync source is not configured",
 		})
+		return false
 	}
 	presented := strings.TrimPrefix(c.Request().Header.Get(echo.HeaderAuthorization), "Bearer ")
 	if subtle.ConstantTimeCompare([]byte(presented), []byte(sharedSecret)) != 1 {
-		pullLogger.Warn("rejected data-sync pull request with invalid shared secret")
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		pullLogger.Warn("rejected data-sync request with invalid shared secret")
+		c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return false
+	}
+	return true
+}
+
+// HandlePullChanges serves GET /api/internal/data-sync/items/:itemId/changes.
+// It is called by a deployed target reaching out to this instance acting as
+// the sync source -- there is no session/cookie auth available, so access is
+// restricted with a shared-secret header instead.
+func HandlePullChanges(c echo.Context) error {
+	if !authenticatePullRequest(c) {
+		return nil
+	}
+
+	if ApiTypes.ProjectDBHandle == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "project database is not initialized"})
 	}
 
 	itemID := c.Param("itemId")
-	item, ok := ItemByID(itemID)
+	item, ok, err := ResolveItem(c.Request().Context(), ApiTypes.ProjectDBHandle, itemID)
+	if err != nil {
+		pullLogger.Error("failed to resolve sync item", "item_id", itemID, "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to resolve sync item"})
+	}
 	if !ok {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "unknown sync item: " + itemID})
 	}
@@ -63,10 +84,6 @@ func HandlePullChanges(c echo.Context) error {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			limit = n
 		}
-	}
-
-	if ApiTypes.ProjectDBHandle == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "project database is not initialized"})
 	}
 
 	resp, err := fetchChangesPage(ApiTypes.ProjectDBHandle, item, since, limit)

@@ -39,10 +39,37 @@ export type VideoUploadFields = {
 	video_type?: string;
 };
 
-/** List all videos, newest first. */
-export async function listVideos(fetchFn: typeof fetch = fetch): Promise<VideoMeta[]> {
-	const res = await fetchFn('/api/v1/videos', { credentials: 'same-origin' });
-	if (!res.ok) throw new Error(`list videos failed: ${res.status}`);
+export type VideoListOptions = {
+	sortBy?: 'name' | 'created_at' | 'size_bytes';
+	sortDir?: 'asc' | 'desc';
+	name?: string;
+	timeFrom?: string; // YYYY-MM-DD
+	timeTo?: string; // YYYY-MM-DD
+};
+
+/** List videos, optionally sorted/filtered server-side across the entire table. */
+export async function listVideos(
+	options: VideoListOptions = {},
+	fetchFn: typeof fetch = fetch
+): Promise<VideoMeta[]> {
+	const params = new URLSearchParams();
+	if (options.sortBy) params.set('sort_by', options.sortBy);
+	if (options.sortDir) params.set('sort_dir', options.sortDir);
+	if (options.name) params.set('name', options.name);
+	if (options.timeFrom) params.set('time_from', options.timeFrom);
+	if (options.timeTo) params.set('time_to', options.timeTo);
+	const qs = params.toString();
+	const res = await fetchFn(`/api/v1/videos${qs ? `?${qs}` : ''}`, { credentials: 'same-origin' });
+	if (!res.ok) {
+		let msg = `list videos failed: ${res.status}`;
+		try {
+			const body = (await res.json()) as { error?: string };
+			if (body.error) msg = body.error;
+		} catch {
+			/* keep default message */
+		}
+		throw new Error(msg);
+	}
 	return (await res.json()) as VideoMeta[];
 }
 
@@ -100,6 +127,65 @@ export function uploadVideo(
 			}
 		};
 		xhr.onerror = () => reject(new Error('network error during upload'));
+		xhr.send(form);
+	});
+}
+
+/**
+ * Update a video's metadata, and optionally replace its file. `onProgress`
+ * (0–1) is reported when a replacement file is provided.
+ */
+export function updateVideo(
+	id: number,
+	fields: VideoUploadFields = {},
+	file?: File | null,
+	onProgress?: (fraction: number) => void
+): Promise<VideoMeta> {
+	return new Promise((resolve, reject) => {
+		const form = new FormData();
+		if (file) form.append('file', file);
+		if (fields.name) form.append('name', fields.name);
+		if (fields.description) form.append('description', fields.description);
+		if (fields.source) form.append('source', fields.source);
+		if (fields.url) form.append('url', fields.url);
+		if (fields.image_id != null) form.append('image_id', String(fields.image_id));
+		if (fields.keywords) form.append('keywords', fields.keywords);
+		if (fields.category) form.append('category', fields.category);
+		if (fields.subcategory) form.append('subcategory', fields.subcategory);
+		if (fields.container) form.append('container', fields.container);
+		if (fields.status) form.append('status', fields.status);
+		if (fields.notes) form.append('notes', fields.notes);
+		if (fields.video_type) form.append('video_type', fields.video_type);
+
+		const xhr = new XMLHttpRequest();
+		xhr.open('PATCH', `/api/v1/videos/${id}`, true);
+		xhr.withCredentials = true;
+
+		if (onProgress && xhr.upload) {
+			xhr.upload.onprogress = (e) => {
+				if (e.lengthComputable) onProgress(e.loaded / e.total);
+			};
+		}
+
+		xhr.onload = () => {
+			if (xhr.status >= 200 && xhr.status < 300) {
+				try {
+					resolve(JSON.parse(xhr.responseText) as VideoMeta);
+				} catch {
+					reject(new Error('update succeeded but response was not valid JSON'));
+				}
+			} else {
+				let msg = `update failed: ${xhr.status}`;
+				try {
+					const body = JSON.parse(xhr.responseText) as { error?: string };
+					if (body.error) msg = body.error;
+				} catch {
+					/* keep default message */
+				}
+				reject(new Error(msg));
+			}
+		};
+		xhr.onerror = () => reject(new Error('network error during update'));
 		xhr.send(form);
 	});
 }

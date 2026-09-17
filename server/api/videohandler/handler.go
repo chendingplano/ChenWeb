@@ -245,23 +245,219 @@ func UploadVideo(c echo.Context) error {
 	return c.JSON(http.StatusOK, meta)
 }
 
-// ListVideos handles GET /api/v1/videos.
+// UpdateVideo handles PATCH /api/v1/videos/:id — updates metadata fields
+// (name, description, source, url, image_id, keywords, category, subcategory,
+// container, status, notes, video_type) and, when a "file" part is present,
+// replaces the stored video too. uploaded_by and created_at are never modified.
+func UpdateVideo(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_VID_006")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	id, err := parseID(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "invalid video id (CWB_VID_060)"})
+	}
+
+	var oldFilename, oldStoredPath, oldContentType string
+	var oldSize int64
+	err = ApiTypes.ProjectDBHandle.QueryRow(
+		`SELECT filename, stored_path, size_bytes, content_type FROM kb.videos WHERE id = $1`, id,
+	).Scan(&oldFilename, &oldStoredPath, &oldSize, &oldContentType)
+	if err == sql.ErrNoRows {
+		return c.JSON(http.StatusNotFound, errorResponse{false, "video not found (CWB_VID_061)"})
+	} else if err != nil {
+		logger.Error("lookup video failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to load video (CWB_VID_062)"})
+	}
+
+	name := strings.TrimSpace(c.FormValue("name"))
+	description := strings.TrimSpace(c.FormValue("description"))
+	source := strings.TrimSpace(c.FormValue("source"))
+	if source == "" {
+		source = "Recording"
+	}
+	if source != "Recording" && source != "Web" {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "source must be Recording or Web (CWB_VID_063)"})
+	}
+	videoURL := strings.TrimSpace(c.FormValue("url"))
+	if source == "Web" && videoURL == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "url is required when source is Web (CWB_VID_064)"})
+	}
+	var imageID *int64
+	if raw := strings.TrimSpace(c.FormValue("image_id")); raw != "" {
+		if v, convErr := strconv.ParseInt(raw, 10, 64); convErr == nil && v > 0 {
+			imageID = &v
+		}
+	}
+
+	keywords := strings.TrimSpace(c.FormValue("keywords"))
+	category := strings.TrimSpace(c.FormValue("category"))
+	subcategory := strings.TrimSpace(c.FormValue("subcategory"))
+	container := strings.TrimSpace(c.FormValue("container"))
+	notes := strings.TrimSpace(c.FormValue("notes"))
+	status := strings.TrimSpace(c.FormValue("status"))
+	if status == "" {
+		status = "draft"
+	}
+	if _, ok := allowedVideoStatuses[status]; !ok {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "status must be draft, published, or archived (CWB_VID_065)"})
+	}
+	videoType := strings.TrimSpace(c.FormValue("video_type"))
+
+	// An uploaded file is optional on update — when present it replaces the
+	// stored video; when absent, the existing file fields are kept as-is.
+	newFilename, newStoredPath, newContentType, newSize := oldFilename, oldStoredPath, oldContentType, oldSize
+	replacedOldPath := ""
+	if header, ferr := c.FormFile("file"); ferr == nil {
+		if !isAllowedVideo(header) {
+			return c.JSON(http.StatusBadRequest, errorResponse{false, "unsupported video type (CWB_VID_067)"})
+		}
+		if header.Size <= 0 || header.Size > maxVideoBytes() {
+			return c.JSON(http.StatusBadRequest, errorResponse{false, "video exceeds the maximum allowed size (CWB_VID_068)"})
+		}
+		dir := videoDir()
+		if dir == "" {
+			logger.Error("VIDEO_DIR is not configured")
+			return c.JSON(http.StatusInternalServerError, errorResponse{false, "VIDEO_DIR is not configured (CWB_VID_069)"})
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			logger.Error("create video dir failed", "video_dir", dir, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to prepare video directory (CWB_VID_070)"})
+		}
+		destPath := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), sanitizeFilename(header.Filename)))
+		written, saveErr := saveMultipartFile(header, destPath)
+		if saveErr != nil {
+			_ = os.Remove(destPath)
+			logger.Error("save video failed", "filename", header.Filename, "err", saveErr)
+			return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to save video (CWB_VID_071)"})
+		}
+		newFilename = header.Filename
+		newStoredPath = destPath
+		newSize = written
+		newContentType = strings.TrimSpace(header.Header.Get("Content-Type"))
+		if newContentType == "" {
+			newContentType = "application/octet-stream"
+		}
+		replacedOldPath = oldStoredPath
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	var meta videoMeta
+	err = db.QueryRow(
+		`UPDATE kb.videos
+		    SET filename = $1, stored_path = $2, size_bytes = $3, content_type = $4,
+		        name = $5, description = $6, source = $7, url = $8, image_id = $9,
+		        keywords = $10, category = $11, subcategory = $12, container = $13,
+		        status = $14, notes = $15, video_type = $16
+		  WHERE id = $17
+		 RETURNING id, filename, COALESCE(name, filename), COALESCE(description, ''),
+		           COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
+		           COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
+		           COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
+		           COALESCE(video_type, ''),
+		           size_bytes, content_type, COALESCE(uploaded_by, ''), created_at`,
+		newFilename, newStoredPath, newSize, newContentType,
+		nullableString(name), nullableString(description), source, nullableString(videoURL), imageID,
+		nullableString(keywords), nullableString(category), nullableString(subcategory),
+		nullableString(container), status, nullableString(notes), nullableString(videoType),
+		id,
+	).Scan(&meta.ID, &meta.Filename, &meta.Name, &meta.Description, &meta.Source, &meta.URL,
+		&meta.ImageID, &meta.Keywords, &meta.Category, &meta.Subcategory, &meta.Container,
+		&meta.Status, &meta.Notes, &meta.VideoType,
+		&meta.SizeBytes, &meta.ContentType, &meta.UploadedBy, &meta.CreatedAt)
+	if err != nil {
+		if replacedOldPath != "" {
+			_ = os.Remove(newStoredPath)
+		}
+		logger.Error("update video metadata failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to update video (CWB_VID_066)"})
+	}
+	meta.ImageURL = imageURLFor(meta.ImageID)
+
+	if replacedOldPath != "" {
+		if err := os.Remove(replacedOldPath); err != nil && !os.IsNotExist(err) {
+			logger.Error("remove old video file failed", "id", id, "path", replacedOldPath, "err", err)
+		}
+	}
+
+	logger.Info("video updated", "id", meta.ID, "name", meta.Name, "by", currentUserEmail(rc))
+	return c.JSON(http.StatusOK, meta)
+}
+
+// videoListSortColumns allowlists the columns GET /api/v1/videos may sort by,
+// mapping the client-supplied sort_by value to a safe SQL expression so it is
+// never interpolated directly into the query.
+var videoListSortColumns = map[string]string{
+	"name":       "COALESCE(name, filename)",
+	"created_at": "created_at",
+	"size_bytes": "size_bytes",
+}
+
+// ListVideos handles GET /api/v1/videos. Optional query params:
+//   - sort_by (name|created_at|size_bytes, default created_at), sort_dir (asc|desc, default desc)
+//   - name: ILIKE substring match against the video name
+//   - time_from, time_to: inclusive YYYY-MM-DD upload-date range
 func ListVideos(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_VID_002")
 	defer rc.Close()
 	logger := rc.GetLogger()
 
+	sortExpr, ok := videoListSortColumns[c.QueryParam("sort_by")]
+	if !ok {
+		sortExpr = "created_at"
+	}
+	direction := "DESC"
+	if strings.EqualFold(c.QueryParam("sort_dir"), "asc") {
+		direction = "ASC"
+	}
+
+	var timeFrom, timeTo time.Time
+	if raw := c.QueryParam("time_from"); raw != "" {
+		t, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{false, "invalid time_from, expected YYYY-MM-DD (CWB_VID_022)"})
+		}
+		timeFrom = t
+	}
+	if raw := c.QueryParam("time_to"); raw != "" {
+		t, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{false, "invalid time_to, expected YYYY-MM-DD (CWB_VID_023)"})
+		}
+		timeTo = t
+	}
+	if !timeFrom.IsZero() && !timeTo.IsZero() && timeFrom.After(timeTo) {
+		return c.JSON(http.StatusBadRequest, errorResponse{false, "time_from must not be after time_to (CWB_VID_024)"})
+	}
+
+	where := []string{"TRUE"}
+	args := []any{}
+	if name := strings.TrimSpace(c.QueryParam("name")); name != "" {
+		args = append(args, "%"+name+"%")
+		where = append(where, fmt.Sprintf("COALESCE(name, filename) ILIKE $%d", len(args)))
+	}
+	if !timeFrom.IsZero() {
+		args = append(args, timeFrom)
+		where = append(where, fmt.Sprintf("created_at >= $%d", len(args)))
+	}
+	if !timeTo.IsZero() {
+		args = append(args, timeTo.Add(24*time.Hour))
+		where = append(where, fmt.Sprintf("created_at < $%d", len(args)))
+	}
+
 	db := ApiTypes.ProjectDBHandle
-	rows, err := db.Query(
-		`SELECT id, filename, COALESCE(name, filename), COALESCE(description, ''),
+	query := `SELECT id, filename, COALESCE(name, filename), COALESCE(description, ''),
 		        COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
 		        COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
 		        COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
 		        COALESCE(video_type, ''),
 		        size_bytes, content_type, COALESCE(uploaded_by, ''), created_at
 		   FROM kb.videos
-		  ORDER BY created_at DESC, id DESC`,
-	)
+		  WHERE ` + strings.Join(where, " AND ") + `
+		  ORDER BY ` + sortExpr + ` ` + direction + `, id ` + direction
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		logger.Error("list videos failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to list videos (CWB_VID_020)"})
@@ -319,6 +515,10 @@ func StreamVideo(c echo.Context) error {
 	}
 
 	c.Response().Header().Set("Content-Type", contentType)
+	// Without this, the browser's HTTP cache heuristically treats the response
+	// as fresh (same URL every time) and never re-requests it after a video is
+	// replaced via PATCH .../:id — it just keeps playing the old bytes.
+	c.Response().Header().Set("Cache-Control", "no-store")
 	// http.ServeContent negotiates Range requests for seeking.
 	http.ServeContent(c.Response(), c.Request(), filename, info.ModTime(), f)
 	return nil
@@ -346,6 +546,9 @@ func DownloadVideo(c echo.Context) error {
 	if _, err := os.Stat(path); err != nil {
 		return c.JSON(http.StatusNotFound, errorResponse{false, "video file missing (CWB_VID_043)"})
 	}
+	// See StreamVideo: same URL is reused across file replacements, so a
+	// cached response would silently serve the old file.
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.Attachment(path, filename)
 }
 

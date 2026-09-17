@@ -12,12 +12,50 @@ import (
 
 var adminLogger = loggerutil.CreateDefaultLogger("CWB_DSYNC_502")
 
+// originCompiled marks a syncItemView backed by the compiled Registry, which
+// has no SyncOrigin of its own (it isn't a kb.data_sync_items row at all).
+const originCompiled = "compiled"
+
+// syncItemView carries an item's full shape (not just its sync status) so
+// the admin UI can pre-fill the New Data Syncher form when editing --
+// there's no separate single-item endpoint, so the list response is the
+// only place this data can come from.
 type syncItemView struct {
-	ItemID       string `json:"item_id"`
-	Table        string `json:"table"`
-	LastSyncedAt string `json:"last_synced_at,omitempty"`
-	LastRowCount int    `json:"last_row_count"`
-	LastError    string `json:"last_error,omitempty"`
+	ItemID               string   `json:"item_id"`
+	Table                string   `json:"table"`
+	Kind                 string   `json:"kind"`
+	Origin               string   `json:"origin"`
+	CursorCol            string   `json:"cursor_col"`
+	NaturalKey           []string `json:"natural_key"`
+	Columns              []string `json:"columns"`
+	JSONColumns          []string `json:"json_columns"`
+	Filter               string   `json:"filter,omitempty"`
+	FileColumn           string   `json:"file_column,omitempty"`
+	FileDirEnv           string   `json:"file_dir_env,omitempty"`
+	FileDirDefaultSubdir string   `json:"file_dir_default_subdir,omitempty"`
+	LastSyncedAt         string   `json:"last_synced_at,omitempty"`
+	LastRowCount         int      `json:"last_row_count"`
+	LastError            string   `json:"last_error,omitempty"`
+}
+
+func toSyncItemView(item TableSyncItem, origin string, state SyncState) syncItemView {
+	return syncItemView{
+		ItemID:               item.ID,
+		Table:                item.Table,
+		Kind:                 kindOrDefault(item.Kind),
+		Origin:               origin,
+		CursorCol:            item.CursorCol,
+		NaturalKey:           item.NaturalKey,
+		Columns:              item.Columns,
+		JSONColumns:          item.JSONColumns,
+		Filter:               item.Filter,
+		FileColumn:           item.FileColumn,
+		FileDirEnv:           item.FileDirEnv,
+		FileDirDefaultSubdir: item.FileDirDefaultSubdir,
+		LastSyncedAt:         state.LastSyncedAt.String,
+		LastRowCount:         state.LastRowCount,
+		LastError:            state.LastError.String,
+	}
 }
 
 // sourceConfig reads the target-side env vars needed to reach the sync
@@ -39,26 +77,53 @@ type configError struct{ msg string }
 
 func (e *configError) Error() string { return e.msg }
 
-// HandleListSyncItems serves GET /api/v1/data-sync/items.
+// HandleListSyncItems serves GET /api/v1/data-sync/items. Before listing, it
+// best-effort refreshes this instance's cache of items its configured
+// source advertises (design.md Decision 4) -- a source-unreachable failure
+// here just means the list falls back to what's already known, it doesn't
+// fail the request, since previewing/syncing an already-known item doesn't
+// depend on discovery succeeding right now.
 func HandleListSyncItems(c echo.Context) error {
 	if ApiTypes.ProjectDBHandle == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
 	}
 	ctx := c.Request().Context()
-	views := make([]syncItemView, 0, len(Registry))
+	db := ApiTypes.ProjectDBHandle
+
+	if sourceURL, secret, err := sourceConfig(); err == nil {
+		learned, fetchErr := fetchSourceItemDefinitions(ctx, sourceURL, secret)
+		if fetchErr != nil {
+			adminLogger.Warn("could not refresh learned sync items from source", "error", fetchErr)
+		}
+		for _, item := range learned {
+			if cacheErr := upsertLearnedItem(ctx, db, item); cacheErr != nil {
+				adminLogger.Error("failed to cache learned sync item", "item_id", item.ID, "error", cacheErr)
+			}
+		}
+	}
+
+	dbItems, err := dbListItems(ctx, db)
+	if err != nil {
+		adminLogger.Error("failed to list local sync items", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list sync items"})
+	}
+
+	views := make([]syncItemView, 0, len(Registry)+len(dbItems))
 	for _, item := range Registry {
-		state, err := getSyncState(ctx, ApiTypes.ProjectDBHandle, item.ID)
+		state, err := getSyncState(ctx, db, item.ID)
 		if err != nil {
 			adminLogger.Error("failed to load sync state", "item_id", item.ID, "error", err)
 			return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load sync state"})
 		}
-		views = append(views, syncItemView{
-			ItemID:       item.ID,
-			Table:        item.Table,
-			LastSyncedAt: state.LastSyncedAt.String,
-			LastRowCount: state.LastRowCount,
-			LastError:    state.LastError.String,
-		})
+		views = append(views, toSyncItemView(item, originCompiled, state))
+	}
+	for _, item := range dbItems {
+		state, err := getSyncState(ctx, db, item.ID)
+		if err != nil {
+			adminLogger.Error("failed to load sync state", "item_id", item.ID, "error", err)
+			return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load sync state"})
+		}
+		views = append(views, toSyncItemView(item, string(item.Origin), state))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "items": views})
 }
@@ -67,12 +132,16 @@ func HandleListSyncItems(c echo.Context) error {
 // fetches changes from the source but never writes to the target database
 // and never advances the stored cursor.
 func HandlePreviewSync(c echo.Context) error {
-	item, ok := ItemByID(c.Param("itemId"))
-	if !ok {
-		return c.JSON(http.StatusNotFound, map[string]any{"ok": false, "message": "unknown sync item"})
-	}
 	if ApiTypes.ProjectDBHandle == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	item, ok, err := ResolveItem(c.Request().Context(), ApiTypes.ProjectDBHandle, c.Param("itemId"))
+	if err != nil {
+		adminLogger.Error("failed to resolve sync item", "item_id", c.Param("itemId"), "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to resolve sync item"})
+	}
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]any{"ok": false, "message": "unknown sync item"})
 	}
 	sourceURL, secret, err := sourceConfig()
 	if err != nil {
@@ -105,20 +174,24 @@ func HandlePreviewSync(c echo.Context) error {
 // advances the stored cursor. On any failure the stored cursor is left
 // untouched so a retry re-fetches from the same starting point.
 func HandleApplySync(c echo.Context) error {
-	item, ok := ItemByID(c.Param("itemId"))
-	if !ok {
-		return c.JSON(http.StatusNotFound, map[string]any{"ok": false, "message": "unknown sync item"})
-	}
 	if ApiTypes.ProjectDBHandle == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	db := ApiTypes.ProjectDBHandle
+	ctx := c.Request().Context()
+
+	item, ok, err := ResolveItem(ctx, db, c.Param("itemId"))
+	if err != nil {
+		adminLogger.Error("failed to resolve sync item", "item_id", c.Param("itemId"), "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to resolve sync item"})
+	}
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]any{"ok": false, "message": "unknown sync item"})
 	}
 	sourceURL, secret, err := sourceConfig()
 	if err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": err.Error()})
 	}
-
-	ctx := c.Request().Context()
-	db := ApiTypes.ProjectDBHandle
 
 	state, err := getSyncState(ctx, db, item.ID)
 	if err != nil {
@@ -130,6 +203,14 @@ func HandleApplySync(c echo.Context) error {
 		adminLogger.Error("apply fetch failed", "item_id", item.ID, "error", err)
 		_ = saveSyncError(ctx, db, item.ID, err.Error())
 		return c.JSON(http.StatusBadGateway, map[string]any{"ok": false, "message": err.Error()})
+	}
+
+	if item.Kind == KindTableWithFiles {
+		if err := materializeFiles(ctx, item, sourceURL, secret, rows); err != nil {
+			adminLogger.Error("apply file materialization failed", "item_id", item.ID, "error", err)
+			_ = saveSyncError(ctx, db, item.ID, err.Error())
+			return c.JSON(http.StatusBadGateway, map[string]any{"ok": false, "message": err.Error()})
+		}
 	}
 
 	if err := upsertRows(ctx, db, item, rows); err != nil {

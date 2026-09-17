@@ -1,8 +1,33 @@
 // Package datasync lets a deployed ChenWeb instance (the "target") pull
 // specific, registered data items from another instance (the "source"),
 // admin-triggered, over a token-authenticated connection the target itself
-// initiates. See openspec/changes/production-data-sync for the design.
+// initiates. See openspec/changes/production-data-sync for the original
+// design and openspec/changes/configurable-data-sync-items for runtime-
+// created items, the table_with_files kind, and cross-instance discovery.
 package datasync
+
+// SyncKind distinguishes what a sync item's rows carry. The zero value
+// behaves as KindTable, so every compiled item literal written before this
+// existed (kb_product_names) needs no changes.
+type SyncKind string
+
+const (
+	KindTable          SyncKind = "table"
+	KindTableWithFiles SyncKind = "table_with_files"
+)
+
+// SyncOrigin marks where a DB-backed (non-compiled) item's definition came
+// from. Compiled Registry items have no Origin (not stored in
+// kb.data_sync_items at all). See design.md Decision 6.
+type SyncOrigin string
+
+const (
+	// OriginLocal: created on this instance via the admin UI.
+	OriginLocal SyncOrigin = "local"
+	// OriginLearned: write-through-cached from this instance's configured
+	// DATA_SYNC_SOURCE_URL via item-definition discovery (client.go).
+	OriginLearned SyncOrigin = "learned"
+)
 
 // TableSyncItem describes one Postgres table that can be synced: an
 // admin-triggered, incremental, upsert-only pull from a source deployment
@@ -29,6 +54,27 @@ type TableSyncItem struct {
 	// Filter, if non-empty, is a raw SQL boolean expression ANDed into the
 	// source's pull query, scoping which rows this item ever touches.
 	Filter string
+
+	// Kind selects the sync behavior. Zero value ("") behaves as KindTable.
+	Kind SyncKind
+
+	// The following are only meaningful when Kind == KindTableWithFiles.
+
+	// FileColumn is one of Columns; it holds a server-local absolute file
+	// path on whichever instance is currently the source. Never trusted as
+	// a target-local path directly -- see files.go.
+	FileColumn string
+	// FileDirEnv, if set, names the env var this instance reads to resolve
+	// where it stores this item's files locally (e.g. "VIDEO_DIR").
+	FileDirEnv string
+	// FileDirDefaultSubdir is the fallback subdirectory under DATA_HOME_DIR
+	// when FileDirEnv is unset or empty, mirroring videohandler.videoDir()'s
+	// own resolution order.
+	FileDirDefaultSubdir string
+
+	// Origin is only meaningful for DB-backed items (empty for compiled
+	// Registry items, which aren't stored in kb.data_sync_items at all).
+	Origin SyncOrigin
 }
 
 // Registry lists every sync item known to this binary. Both the source pull

@@ -262,6 +262,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	// exists for that caller, so access is a shared-secret header instead
 	// (checked inside the handler, mirrors sms_relay.go).
 	e.GET("/api/internal/data-sync/items/:itemId/changes", datasync.HandlePullChanges)
+	// configurable-data-sync-items: per-row file transfer for table_with_files
+	// items, and item-definition discovery so a target can learn about items
+	// only this source knows about (runtime-created, not compiled in).
+	e.GET("/api/internal/data-sync/items/:itemId/files", datasync.HandleGetItemFile)
+	e.GET("/api/internal/data-sync/items", datasync.HandleListSourceItems)
 	promptDir := os.Getenv("PROMPT_DIR")
 	if promptDir == "" {
 		_, currentFile, _, _ := runtime.Caller(0)
@@ -363,6 +368,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/videos", videohandler.ListVideos)
 	apiGroup.GET("/videos/:id/stream", videohandler.StreamVideo)
 	apiGroup.GET("/videos/:id/download", videohandler.DownloadVideo)
+	apiGroup.PATCH("/videos/:id", videohandler.UpdateVideo)
 	apiGroup.DELETE("/videos/:id", videohandler.DeleteVideo)
 
 	// Image library (video covers) + AI cover generation.
@@ -448,7 +454,14 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Sync-target side of production-data-sync: sysadmin UI to pull
 	// registered data items from another (source) ChenWeb instance.
+	// Schema introspection backing the New Data Syncher form's table/column/
+	// natural-key pickers -- see schema_introspect.go.
+	apiGroup.GET("/data-sync/schema/tables", datasync.HandleListSyncableTables)
+	apiGroup.GET("/data-sync/schema/tables/:schema/:table", datasync.HandleGetTableSchema)
 	apiGroup.GET("/data-sync/items", datasync.HandleListSyncItems)
+	apiGroup.POST("/data-sync/items", datasync.HandleCreateSyncItem)
+	apiGroup.PUT("/data-sync/items/:itemId", datasync.HandleUpdateSyncItem)
+	apiGroup.DELETE("/data-sync/items/:itemId", datasync.HandleDeleteSyncItem)
 	apiGroup.POST("/data-sync/items/:itemId/preview", datasync.HandlePreviewSync)
 	apiGroup.POST("/data-sync/items/:itemId/apply", datasync.HandleApplySync)
 	apiGroup.GET("/llm/profiles", llmadminhandler.ListProfiles)
