@@ -126,6 +126,37 @@ export function buildManualLaunchOperations(
 	return enforceEntityBeforeRelation(chosen, entityAlreadySucceeded);
 }
 
+export type ProcessorPackages = Record<string, string[]>;
+
+export function processorSelectionForPackage(
+	packageName: string,
+	packages: ProcessorPackages,
+	selectableProcessorIds: string[]
+): Record<string, boolean> {
+	const configured = Object.entries(packages).find(([name]) => name.toLowerCase() === packageName.trim().toLowerCase());
+	if (!configured && Object.keys(packages).length === 0) {
+		return Object.fromEntries(selectableProcessorIds.map((id) => [id, true]));
+	}
+	const selected = new Set((configured?.[1] ?? []).map((id) => id.trim().toLowerCase().replace(/-/g, '_')));
+	return Object.fromEntries(selectableProcessorIds.map((id) => [id, id === 'static_analyzer' || id === 'chunking' || id === 'extract_doc_metadata' || selected.has(id.toLowerCase())]));
+}
+
+export function buildManualLaunchPayload(
+	recordId: number,
+	packageName: string,
+	operations: string[],
+	force: boolean,
+	forceClear: boolean
+): Record<string, unknown> {
+	const payload: Record<string, unknown> = {
+		record_id: String(recordId),
+		force,
+		force_clear: forceClear
+	};
+	if (packageName.trim().toLowerCase() !== 'default') payload.operation = operations;
+	return payload;
+}
+
 // ADR 2026081801 task 5.8: extract_metrics still legitimately fails a record
 // when a value_range_type string is unreviewed (DR12 keeps this failure --
 // it is not a semantic finding, it is a real "vocabulary needs triage"

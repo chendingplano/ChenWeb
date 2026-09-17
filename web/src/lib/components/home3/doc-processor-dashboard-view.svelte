@@ -20,12 +20,15 @@
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
 		buildManualLaunchOperations,
+		buildManualLaunchPayload,
 		buildStageDefs,
 		computeStages,
 		entityExtractionSucceeded,
 		isActiveRecord,
 		isMappingTriageFailure,
 		visibleStages,
+		processorSelectionForPackage,
+		type ProcessorPackages,
 		type StageInfo,
 		type StageStatus,
 		type StatusEntry
@@ -54,9 +57,11 @@
 
 	// ── Config ────────────────────────────────────────────────────────────
 
-	// requiredProcessors: the configurable processors that are enabled in config.toml.
+	// requiredProcessors: the configurable processors enabled in config.local.toml.
 	// Populated once on mount from GET /api/v1/kb/config.
 	let requiredProcessors = $state<string[]>([]);
+	let processorPackages = $state<ProcessorPackages>({});
+	let selectedProcessorPackage = $state('Default');
 
 	let selectableProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
 
@@ -469,8 +474,7 @@
 		// (ADR 2026061702). Done per record so a record that already has entities is not
 		// re-run unnecessarily.
 		const chosen = buildManualLaunchOperations(selectableProcessorIds, procs, entityExtractionSucceeded(record));
-		const payload: Record<string, unknown> = { record_id: String(record.id), force: runMode === 'force', force_clear: forceClear };
-		payload.operation = chosen;
+		const payload = buildManualLaunchPayload(record.id, selectedProcessorPackage, chosen, runMode === 'force', forceClear);
 		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}
 
@@ -819,8 +823,13 @@
 		getKbFrontendConfig().then((cfg) => {
 			const req = cfg.required_processors ?? [];
 			requiredProcessors = req;
+			processorPackages = cfg.processor_packages ?? {};
+			const packageNames = Object.keys(processorPackages);
+			if (packageNames.length > 0) {
+				selectedProcessorPackage = packageNames.find((name) => name.toLowerCase() === 'default') ?? packageNames[0];
+			}
 			activePipelineLimit = Math.max(1, cfg.max_doc_process_pipelines ?? 10);
-			processors = Object.fromEntries([...MANDATORY_PROCESSOR_IDS, ...req].map((p) => [p, true]));
+			processors = processorSelectionForPackage(selectedProcessorPackage, processorPackages, [...MANDATORY_PROCESSOR_IDS, ...req]);
 		}).catch(() => {
 			// Keep defaults on failure
 		});
@@ -1468,7 +1477,26 @@
 				class="rounded-xl p-4"
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
-				<div style="font-size:12px; color:{textMuted}; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
+				<div class="mb-3 flex items-center justify-between gap-4">
+					<div style="font-size:12px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
+					{#if Object.keys(processorPackages).length > 0}
+						<label class="flex items-center gap-2" style="font-size:12px; color:{textSecondary};">
+							<span style="white-space:nowrap;">Select Processors</span>
+							<select
+								bind:value={selectedProcessorPackage}
+								onchange={() => {
+									processors = processorSelectionForPackage(selectedProcessorPackage, processorPackages, selectableProcessorIds);
+								}}
+								class="rounded-lg px-3 py-2"
+								style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:12px; min-width:140px;"
+							>
+								{#each Object.keys(processorPackages) as packageName}
+									<option value={packageName}>{packageName}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
+				</div>
 
 				<div class="mb-4 space-y-1.5">
 					<!-- Optional pre-processor: Parse File -->

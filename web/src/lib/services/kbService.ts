@@ -1299,6 +1299,8 @@ export type KbFrontendConfig = {
 	default_language: string[];
 	mandatory_processors: string[];
 	required_processors: string[];
+	default_processors: string[];
+	processor_packages: Record<string, string[]>;
 	max_doc_process_pipelines: number;
 	image_generation_models: string[];
 };

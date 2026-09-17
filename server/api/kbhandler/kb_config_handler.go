@@ -16,14 +16,15 @@ import (
 )
 
 type kbFrontendConfig struct {
-	TopicTypes             []string `json:"topic_types"`
-	SupportedLanguages     []string `json:"supported_languages"`
-	DefaultLanguage        []string `json:"default_language"`
-	MandatoryProcessors    []string `json:"mandatory_processors"`
-	RequiredProcessors     []string `json:"required_processors"`
-	DefaultProcessors      []string `json:"default_processors"`
-	MaxDocProcessPipelines int      `json:"max_doc_process_pipelines"`
-	ImageGenerationModels  []string `json:"image_generation_models"`
+	TopicTypes             []string            `json:"topic_types"`
+	SupportedLanguages     []string            `json:"supported_languages"`
+	DefaultLanguage        []string            `json:"default_language"`
+	MandatoryProcessors    []string            `json:"mandatory_processors"`
+	RequiredProcessors     []string            `json:"required_processors"`
+	DefaultProcessors      []string            `json:"default_processors"`
+	ProcessorPackages      map[string][]string `json:"processor_packages"`
+	MaxDocProcessPipelines int                 `json:"max_doc_process_pipelines"`
+	ImageGenerationModels  []string            `json:"image_generation_models"`
 }
 
 type kbFrontendConfigResponse struct {
@@ -54,6 +55,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 				MandatoryProcessors:    mandatoryProcessorIDs,
 				RequiredProcessors:     []string{},
 				DefaultProcessors:      []string{},
+				ProcessorPackages:      map[string][]string{},
 				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 				ImageGenerationModels:  appconfig.GetImageGenerationModels(),
 			},
@@ -73,6 +75,7 @@ type rawKbFrontendSection struct {
 		RequiredProcessors []string `toml:"required_processors"`
 		DefaultProcessors  []string `toml:"default_processors"`
 	} `toml:"doc-processing"`
+	ProcessorPackages map[string][]string `toml:"doc-processing-packages"`
 }
 
 // LoadKbFrontendConfig reads the [frontend] and [doc-processing] sections from
@@ -108,6 +111,10 @@ func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 	if defaultProcs == nil {
 		defaultProcs = []string{}
 	}
+	packages := raw.ProcessorPackages
+	if packages == nil {
+		packages = map[string][]string{}
+	}
 	return kbFrontendConfig{
 		TopicTypes:             types,
 		SupportedLanguages:     supportedLanguages,
@@ -115,6 +122,7 @@ func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 		MandatoryProcessors:    mandatoryProcessorIDs,
 		RequiredProcessors:     reqProcs,
 		DefaultProcessors:      defaultProcs,
+		ProcessorPackages:      packages,
 		MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 		ImageGenerationModels:  appconfig.GetImageGenerationModels(),
 	}, nil

@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -55,6 +56,10 @@ supported_languages = ["en", "zh-cn"]
 
 func TestLoadKbFrontendConfigReadsDefaultProcessors(t *testing.T) {
 	path := writeTestConfig(t, `
+[doc-processing-packages]
+Default = ["extract_metrics"]
+Minimal = ["extract_products"]
+
 [doc-processing]
 required_processors = ["extract_metrics", "extract_products"]
 default_processors = ["extract_products"]
@@ -67,5 +72,8 @@ default_processors = ["extract_products"]
 	}
 	if len(cfg.DefaultProcessors) != 1 || cfg.DefaultProcessors[0] != "extract_products" {
 		t.Fatalf("DefaultProcessors = %#v, want [extract_products]", cfg.DefaultProcessors)
+	}
+	if got, want := cfg.ProcessorPackages["Default"], []string{"extract_metrics"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ProcessorPackages[Default] = %#v, want %v", got, want)
 	}
 }

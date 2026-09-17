@@ -12,8 +12,49 @@ import {
 	visibleStages,
 	enforceEntityBeforeRelation,
 	entityExtractionSucceeded,
+	processorSelectionForPackage,
+	buildManualLaunchPayload,
 	type StatusEntry
 } from './doc-processor-dashboard-state';
+
+test('package selection keeps every processor visible and checks package members', () => {
+	const selectable = ['static_analyzer', 'chunking', 'extract_metrics', 'extract_products'];
+	const selected = processorSelectionForPackage('Minimal', {
+		Default: ['extract_metrics'],
+		Minimal: ['extract_products']
+	}, selectable);
+
+	assert.deepEqual(selected, {
+		static_analyzer: true,
+		chunking: true,
+		extract_metrics: false,
+		extract_products: true
+	});
+});
+
+test('missing package configuration preserves the existing all-selected behavior', () => {
+	assert.deepEqual(
+		processorSelectionForPackage('Default', {}, ['static_analyzer', 'extract_metrics']),
+		{ static_analyzer: true, extract_metrics: true }
+	);
+});
+
+test('Default package launch omits operation to exercise automatic processing', () => {
+	assert.deepEqual(buildManualLaunchPayload(42, 'Default', ['extract_metrics'], false, false), {
+		record_id: '42',
+		force: false,
+		force_clear: false
+	});
+});
+
+test('named package launch sends explicit processor operations', () => {
+	assert.deepEqual(buildManualLaunchPayload(42, 'Minimal', ['extract_products'], false, false), {
+		record_id: '42',
+		force: false,
+		force_clear: false,
+		operation: ['extract_products']
+	});
+});
 
 function makeRecord(status: StatusEntry[]) {
 	return { status };
