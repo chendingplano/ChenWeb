@@ -83,6 +83,30 @@ func imageURLFor(imageID *int64) string {
 	return fmt.Sprintf("/api/v1/images/%d/content", *imageID)
 }
 
+// imageUIDForID resolves the numeric kb.images.id the API/frontend still
+// speak (the picker, image_id form field, and imageURLFor's /api/v1/images/:id
+// URLs are all unchanged) to kb.images.uid, the column kb.videos.image_uid
+// actually stores -- kb.videos and kb.images are synced independently
+// (server/api/datasync), and a copied surrogate id has no relationship to the
+// right row on another instance, so the stable uid is what's persisted
+// (see openspec/changes/configurable-data-sync-items design.md Decision 8).
+// Returns nil (no error) for a nil or nonexistent id, same lenient handling
+// this code already gave an image_id that didn't exist.
+func imageUIDForID(db *sql.DB, imageID *int64) (any, error) {
+	if imageID == nil {
+		return nil, nil
+	}
+	var uid string
+	err := db.QueryRow(`SELECT uid FROM kb.images WHERE id = $1`, *imageID).Scan(&uid)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return uid, nil
+}
+
 // videoDir resolves the storage directory. VIDEO_DIR is the explicit override;
 // when it is unset we fall back to <DATA_HOME_DIR>/Videos so uploads work out of
 // the box on any deployment that already sets DATA_HOME_DIR. Only when neither is
@@ -215,19 +239,32 @@ func UploadVideo(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	imageUID, err := imageUIDForID(db, imageID)
+	if err != nil {
+		_ = os.Remove(destPath)
+		logger.Error("resolve image_id to kb.images.uid failed", "image_id", imageID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to resolve cover image (CWB_VID_016)"})
+	}
 	var meta videoMeta
 	err = db.QueryRow(
-		`INSERT INTO kb.videos (filename, stored_path, size_bytes, content_type, uploaded_by, name, description, source, url, image_id,
-		                        keywords, category, subcategory, container, status, notes, video_type)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-		 RETURNING id, filename, COALESCE(name, filename), COALESCE(description, ''),
-		           COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
-		           COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
-		           COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
-		           COALESCE(video_type, ''),
-		           size_bytes, content_type, COALESCE(uploaded_by, ''), created_at`,
+		`WITH ins AS (
+		     INSERT INTO kb.videos (filename, stored_path, size_bytes, content_type, uploaded_by, name, description, source, url, image_uid,
+		                             keywords, category, subcategory, container, status, notes, video_type)
+		     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		     RETURNING id, filename, COALESCE(name, filename) AS name, COALESCE(description, '') AS description,
+		               COALESCE(source, 'Recording') AS source, COALESCE(url, '') AS url, image_uid,
+		               COALESCE(keywords, '') AS keywords, COALESCE(category, '') AS category, COALESCE(subcategory, '') AS subcategory,
+		               COALESCE(container, '') AS container, COALESCE(status, 'draft') AS status, COALESCE(notes, '') AS notes,
+		               COALESCE(video_type, '') AS video_type,
+		               size_bytes, content_type, COALESCE(uploaded_by, '') AS uploaded_by, created_at
+		 )
+		 SELECT ins.id, ins.filename, ins.name, ins.description, ins.source, ins.url, i.id,
+		        ins.keywords, ins.category, ins.subcategory, ins.container, ins.status, ins.notes, ins.video_type,
+		        ins.size_bytes, ins.content_type, ins.uploaded_by, ins.created_at
+		   FROM ins
+		   LEFT JOIN kb.images i ON i.uid = ins.image_uid`,
 		header.Filename, destPath, written, contentType, nullableString(uploadedBy),
-		nullableString(name), nullableString(description), source, nullableString(videoURL), imageID,
+		nullableString(name), nullableString(description), source, nullableString(videoURL), imageUID,
 		nullableString(keywords), nullableString(category), nullableString(subcategory),
 		nullableString(container), status, nullableString(notes), nullableString(videoType),
 	).Scan(&meta.ID, &meta.Filename, &meta.Name, &meta.Description, &meta.Source, &meta.URL,
@@ -343,22 +380,37 @@ func UpdateVideo(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
+	imageUID, err := imageUIDForID(db, imageID)
+	if err != nil {
+		if replacedOldPath != "" {
+			_ = os.Remove(newStoredPath)
+		}
+		logger.Error("resolve image_id to kb.images.uid failed", "image_id", imageID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{false, "failed to resolve cover image (CWB_VID_066)"})
+	}
 	var meta videoMeta
 	err = db.QueryRow(
-		`UPDATE kb.videos
-		    SET filename = $1, stored_path = $2, size_bytes = $3, content_type = $4,
-		        name = $5, description = $6, source = $7, url = $8, image_id = $9,
-		        keywords = $10, category = $11, subcategory = $12, container = $13,
-		        status = $14, notes = $15, video_type = $16
-		  WHERE id = $17
-		 RETURNING id, filename, COALESCE(name, filename), COALESCE(description, ''),
-		           COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
-		           COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
-		           COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
-		           COALESCE(video_type, ''),
-		           size_bytes, content_type, COALESCE(uploaded_by, ''), created_at`,
+		`WITH upd AS (
+		     UPDATE kb.videos
+		        SET filename = $1, stored_path = $2, size_bytes = $3, content_type = $4,
+		            name = $5, description = $6, source = $7, url = $8, image_uid = $9,
+		            keywords = $10, category = $11, subcategory = $12, container = $13,
+		            status = $14, notes = $15, video_type = $16
+		      WHERE id = $17
+		     RETURNING id, filename, COALESCE(name, filename) AS name, COALESCE(description, '') AS description,
+		               COALESCE(source, 'Recording') AS source, COALESCE(url, '') AS url, image_uid,
+		               COALESCE(keywords, '') AS keywords, COALESCE(category, '') AS category, COALESCE(subcategory, '') AS subcategory,
+		               COALESCE(container, '') AS container, COALESCE(status, 'draft') AS status, COALESCE(notes, '') AS notes,
+		               COALESCE(video_type, '') AS video_type,
+		               size_bytes, content_type, COALESCE(uploaded_by, '') AS uploaded_by, created_at
+		 )
+		 SELECT upd.id, upd.filename, upd.name, upd.description, upd.source, upd.url, i.id,
+		        upd.keywords, upd.category, upd.subcategory, upd.container, upd.status, upd.notes, upd.video_type,
+		        upd.size_bytes, upd.content_type, upd.uploaded_by, upd.created_at
+		   FROM upd
+		   LEFT JOIN kb.images i ON i.uid = upd.image_uid`,
 		newFilename, newStoredPath, newSize, newContentType,
-		nullableString(name), nullableString(description), source, nullableString(videoURL), imageID,
+		nullableString(name), nullableString(description), source, nullableString(videoURL), imageUID,
 		nullableString(keywords), nullableString(category), nullableString(subcategory),
 		nullableString(container), status, nullableString(notes), nullableString(videoType),
 		id,
@@ -389,9 +441,9 @@ func UpdateVideo(c echo.Context) error {
 // mapping the client-supplied sort_by value to a safe SQL expression so it is
 // never interpolated directly into the query.
 var videoListSortColumns = map[string]string{
-	"name":       "COALESCE(name, filename)",
-	"created_at": "created_at",
-	"size_bytes": "size_bytes",
+	"name":       "COALESCE(v.name, v.filename)",
+	"created_at": "v.created_at",
+	"size_bytes": "v.size_bytes",
 }
 
 // ListVideos handles GET /api/v1/videos. Optional query params:
@@ -435,27 +487,28 @@ func ListVideos(c echo.Context) error {
 	args := []any{}
 	if name := strings.TrimSpace(c.QueryParam("name")); name != "" {
 		args = append(args, "%"+name+"%")
-		where = append(where, fmt.Sprintf("COALESCE(name, filename) ILIKE $%d", len(args)))
+		where = append(where, fmt.Sprintf("COALESCE(v.name, v.filename) ILIKE $%d", len(args)))
 	}
 	if !timeFrom.IsZero() {
 		args = append(args, timeFrom)
-		where = append(where, fmt.Sprintf("created_at >= $%d", len(args)))
+		where = append(where, fmt.Sprintf("v.created_at >= $%d", len(args)))
 	}
 	if !timeTo.IsZero() {
 		args = append(args, timeTo.Add(24*time.Hour))
-		where = append(where, fmt.Sprintf("created_at < $%d", len(args)))
+		where = append(where, fmt.Sprintf("v.created_at < $%d", len(args)))
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	query := `SELECT id, filename, COALESCE(name, filename), COALESCE(description, ''),
-		        COALESCE(source, 'Recording'), COALESCE(url, ''), image_id,
-		        COALESCE(keywords, ''), COALESCE(category, ''), COALESCE(subcategory, ''),
-		        COALESCE(container, ''), COALESCE(status, 'draft'), COALESCE(notes, ''),
-		        COALESCE(video_type, ''),
-		        size_bytes, content_type, COALESCE(uploaded_by, ''), created_at
-		   FROM kb.videos
+	query := `SELECT v.id, v.filename, COALESCE(v.name, v.filename), COALESCE(v.description, ''),
+		        COALESCE(v.source, 'Recording'), COALESCE(v.url, ''), i.id,
+		        COALESCE(v.keywords, ''), COALESCE(v.category, ''), COALESCE(v.subcategory, ''),
+		        COALESCE(v.container, ''), COALESCE(v.status, 'draft'), COALESCE(v.notes, ''),
+		        COALESCE(v.video_type, ''),
+		        v.size_bytes, v.content_type, COALESCE(v.uploaded_by, ''), v.created_at
+		   FROM kb.videos v
+		   LEFT JOIN kb.images i ON i.uid = v.image_uid
 		  WHERE ` + strings.Join(where, " AND ") + `
-		  ORDER BY ` + sortExpr + ` ` + direction + `, id ` + direction
+		  ORDER BY ` + sortExpr + ` ` + direction + `, v.id ` + direction
 
 	rows, err := db.Query(query, args...)
 	if err != nil {

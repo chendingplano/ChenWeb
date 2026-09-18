@@ -4,6 +4,10 @@
 // initiates. See openspec/changes/production-data-sync for the original
 // design and openspec/changes/configurable-data-sync-items for runtime-
 // created items, the table_with_files kind, and cross-instance discovery.
+// A row that references another synced table's row (e.g. kb.videos.image_uid
+// -> kb.images.uid) must store that table's stable natural key as plain data,
+// never its surrogate id -- see design.md Decision 8; no support for this is
+// (or needs to be) built into this package itself.
 package datasync
 
 // SyncKind distinguishes what a sync item's rows carry. The zero value
