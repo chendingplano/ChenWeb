@@ -22,6 +22,12 @@ type configRow struct {
 	EntryDesc  string
 }
 
+type pageConfigEntryFilters struct {
+	ZHLabel  string
+	ENLabel  string
+	EntryKey string
+}
+
 // pageExists reports whether a kb.page_def row exists for pageKey.
 func pageExists(ctx context.Context, db *sql.DB, pageKey string) (bool, error) {
 	var exists bool
@@ -32,11 +38,27 @@ func pageExists(ctx context.Context, db *sql.DB, pageKey string) (bool, error) {
 
 // loadPageConfigRows loads every kb.page_config row for a page, across all
 // languages. Callers group by entry_key to resolve per-entry access + content.
-func loadPageConfigRows(ctx context.Context, db *sql.DB, pageKey string) ([]configRow, error) {
+func loadPageConfigRows(ctx context.Context, db *sql.DB, pageKey string, filters pageConfigEntryFilters) ([]configRow, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT entry_key, language, content, access_role, accessible, enabled, COALESCE(entry_desc, '')
-		FROM kb.page_config
-		WHERE page_key = $1`, pageKey)
+		FROM kb.page_config pc
+		WHERE pc.page_key = $1
+		  AND ($2 = '' OR pc.entry_key ILIKE '%' || $2 || '%')
+		  AND ($3 = '' OR EXISTS (
+			  SELECT 1 FROM kb.page_config en
+			  WHERE en.page_key = pc.page_key
+			    AND en.entry_key = pc.entry_key
+			    AND en.language = 'en'
+			    AND COALESCE(en.content->>'label', '') ILIKE '%' || $3 || '%'
+		  ))
+		  AND ($4 = '' OR EXISTS (
+			  SELECT 1 FROM kb.page_config zh
+			  WHERE zh.page_key = pc.page_key
+			    AND zh.entry_key = pc.entry_key
+			    AND zh.language = 'zh-cn'
+			    AND COALESCE(zh.content->>'label', '') ILIKE '%' || $4 || '%'
+		  ))`,
+		pageKey, filters.EntryKey, filters.ENLabel, filters.ZHLabel)
 	if err != nil {
 		return nil, err
 	}

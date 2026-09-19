@@ -59,15 +59,24 @@ type CurrentBalance struct {
 }
 
 type ModelActivityReport struct {
-	Provider     string  `json:"provider"`
-	ModelName    string  `json:"model_name"`
-	CurrencyCode string  `json:"currency_code"`
-	WorkspaceDay string  `json:"workspace_day"`
-	SpendAmount  float64 `json:"spend_amount"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	RequestCount int64   `json:"request_count"`
+	Provider              string  `json:"provider"`
+	ModelName             string  `json:"model_name"`
+	APIKeyName            string  `json:"api_key_name"`
+	CurrencyCode          string  `json:"currency_code"`
+	WorkspaceDay          string  `json:"workspace_day"`
+	SpendAmount           float64 `json:"spend_amount"`
+	PromptCacheHitTokens  int64   `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int64   `json:"prompt_cache_miss_tokens"`
+	OutputTokens          int64   `json:"output_tokens"`
+	TotalTokens           int64   `json:"total_tokens"`
+	RequestCount          int64   `json:"request_count"`
+}
+
+type ModelActivityReportFilters struct {
+	From       *time.Time
+	To         *time.Time
+	APIKeyRef  string
+	ModelNames []string
 }
 
 type TodaySummary struct {
@@ -209,12 +218,14 @@ LIMIT $1`
 	return out, rows.Err()
 }
 
-func (s *Store) ListModelActivityReports(ctx context.Context, limit int) ([]ModelActivityReport, error) {
+func (s *Store) ListModelActivityReports(ctx context.Context, limit int, filters ModelActivityReportFilters) ([]ModelActivityReport, error) {
 	const query = `WITH recent_days AS (
     SELECT DISTINCT workspace_day
     FROM llm_daily_account_report
+    WHERE ($2::date IS NULL OR workspace_day >= $2::date)
+      AND ($3::date IS NULL OR workspace_day <= $3::date)
     ORDER BY workspace_day DESC
-    LIMIT $1
+    LIMIT CASE WHEN $2::date IS NULL AND $3::date IS NULL THEN $1 ELSE 10000 END
 ),
 model_usage AS (
     SELECT
@@ -222,13 +233,18 @@ model_usage AS (
         evt.account_id,
         evt.provider,
         evt.model_name,
-        COALESCE(SUM(evt.input_tokens), 0) AS input_tokens,
+        acct.api_key_ref,
+        COALESCE(SUM(evt.prompt_cache_hit_tokens), 0) AS prompt_cache_hit_tokens,
+        COALESCE(SUM(evt.prompt_cache_miss_tokens), 0) AS prompt_cache_miss_tokens,
         COALESCE(SUM(evt.output_tokens), 0) AS output_tokens,
         COALESCE(SUM(evt.total_tokens), 0) AS total_tokens,
         COUNT(*) AS request_count
     FROM llm_usage_event evt
+    JOIN llm_account acct ON acct.id = evt.account_id
     JOIN recent_days days ON days.workspace_day = evt.workspace_day
-    GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name
+    WHERE ($4 = '' OR acct.api_key_ref = $4)
+      AND ($5::text[] IS NULL OR evt.model_name = ANY($5::text[]))
+    GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name, acct.api_key_ref
 ),
 account_day_totals AS (
     SELECT account_id, workspace_day, COALESCE(SUM(total_tokens), 0) AS account_total_tokens
@@ -238,6 +254,7 @@ account_day_totals AS (
 SELECT
     mu.provider,
     mu.model_name,
+    mu.api_key_ref,
     COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code,
     COALESCE(TO_CHAR(mu.workspace_day, 'YYYY-MM-DD'), '') AS workspace_day,
     COALESCE(SUM(
@@ -246,7 +263,8 @@ SELECT
             ELSE 0
         END
     ), 0) AS spend_amount,
-    COALESCE(SUM(mu.input_tokens), 0) AS input_tokens,
+    COALESCE(SUM(mu.prompt_cache_hit_tokens), 0) AS prompt_cache_hit_tokens,
+    COALESCE(SUM(mu.prompt_cache_miss_tokens), 0) AS prompt_cache_miss_tokens,
     COALESCE(SUM(mu.output_tokens), 0) AS output_tokens,
     COALESCE(SUM(mu.total_tokens), 0) AS total_tokens,
     COALESCE(SUM(mu.request_count), 0) AS request_count
@@ -257,10 +275,21 @@ JOIN account_day_totals adt
 LEFT JOIN llm_daily_account_report report
   ON report.account_id = mu.account_id
  AND report.workspace_day = mu.workspace_day
-GROUP BY mu.provider, mu.model_name, mu.workspace_day
-ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`
+GROUP BY mu.provider, mu.model_name, mu.api_key_ref, mu.workspace_day
+ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC, mu.api_key_ref ASC`
 
-	rows, err := s.db.QueryContext(ctx, query, limit)
+	var from, to any
+	if filters.From != nil {
+		from = filters.From
+	}
+	if filters.To != nil {
+		to = filters.To
+	}
+	var modelNames any
+	if len(filters.ModelNames) > 0 {
+		modelNames = pq.Array(filters.ModelNames)
+	}
+	rows, err := s.db.QueryContext(ctx, query, limit, from, to, filters.APIKeyRef, modelNames)
 	if err != nil {
 		return nil, err
 	}
@@ -272,10 +301,12 @@ ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`
 		if err := rows.Scan(
 			&row.Provider,
 			&row.ModelName,
+			&row.APIKeyName,
 			&row.CurrencyCode,
 			&row.WorkspaceDay,
 			&row.SpendAmount,
-			&row.InputTokens,
+			&row.PromptCacheHitTokens,
+			&row.PromptCacheMissTokens,
 			&row.OutputTokens,
 			&row.TotalTokens,
 			&row.RequestCount,

@@ -87,10 +87,16 @@ export async function listPages(fetchFn: typeof fetch = fetch): Promise<PageDef[
 
 export async function listEntries(
 	pageKey: string,
+	filters: { zhCnLabel?: string; enLabel?: string; entryKey?: string } = {},
 	fetchFn: typeof fetch = fetch
 ): Promise<AdminEntry[]> {
+	const params = new URLSearchParams();
+	if (filters.zhCnLabel?.trim()) params.set('zh_cn_label', filters.zhCnLabel.trim());
+	if (filters.enLabel?.trim()) params.set('en_label', filters.enLabel.trim());
+	if (filters.entryKey?.trim()) params.set('entry_key', filters.entryKey.trim());
+	const query = params.toString() ? `?${params.toString()}` : '';
 	const res = await fetchFn(
-		`/api/v1/page-config/admin/pages/${encodeURIComponent(pageKey)}/entries`,
+		`/api/v1/page-config/admin/pages/${encodeURIComponent(pageKey)}/entries${query}`,
 		{ credentials: 'same-origin' }
 	);
 	if (!res.ok) throw new Error(`list entries failed: ${res.status}`);

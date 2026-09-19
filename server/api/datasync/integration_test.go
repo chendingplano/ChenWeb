@@ -3,6 +3,7 @@ package datasync
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -196,5 +197,60 @@ func TestUpsertRowsAgainstRealPostgres(t *testing.T) {
 	}
 	if len(page3.Rows) != 0 {
 		t.Fatalf("len(Rows) round 3 = %d, want 0", len(page3.Rows))
+	}
+}
+
+// TestUpsertRowsSkipsExistingLogicalRowWhenNaturalKeyDiffers covers rows that
+// existed before a portable UUID natural key was added. The source and target
+// have different UUIDs, but the target's other unique identity and cursor are
+// already current, so applying the source row must be a no-op rather than a
+// duplicate-key failure.
+func TestUpsertRowsSkipsExistingLogicalRowWhenNaturalKeyDiffers(t *testing.T) {
+	db := testDB(t)
+	table := fmt.Sprintf("public.datasync_it_uuid_%d", time.Now().UnixNano())
+	_, err := db.Exec(fmt.Sprintf(`
+		CREATE TABLE %s (
+			uid UUID NOT NULL UNIQUE,
+			page_key TEXT NOT NULL UNIQUE,
+			update_time TIMESTAMPTZ NOT NULL,
+			title TEXT NOT NULL
+		)`, table))
+	if err != nil {
+		t.Fatalf("create scratch table: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("DROP TABLE IF EXISTS " + table) })
+
+	item := TableSyncItem{
+		ID:         "uuid-mismatch",
+		Table:      table,
+		CursorCol:  "update_time",
+		NaturalKey: []string{"uid"},
+		Columns:    []string{"uid", "page_key", "update_time", "title"},
+	}
+	if _, err := db.Exec(fmt.Sprintf(
+		`INSERT INTO %s (uid, page_key, update_time, title) VALUES ('00000000-0000-0000-0000-000000000002', 'home3-knowledge', '2026-09-17T00:00:00Z', 'current')`, table)); err != nil {
+		t.Fatalf("seed target row: %v", err)
+	}
+
+	row := Row{
+		"uid":         json.RawMessage(`"00000000-0000-0000-0000-000000000001"`),
+		"page_key":    json.RawMessage(`"home3-knowledge"`),
+		"update_time": json.RawMessage(`"2026-09-17T00:00:00Z"`),
+		"title":       json.RawMessage(`"current"`),
+	}
+	if err := upsertRows(context.Background(), db, item, []Row{row}); err != nil {
+		t.Fatalf("upsertRows() with equal cursor and mismatched UUID: %v", err)
+	}
+
+	var uid, title string
+	if err := db.QueryRow(fmt.Sprintf(`SELECT uid::text, title FROM %s`, table)).Scan(&uid, &title); err != nil {
+		t.Fatalf("read target row: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(fmt.Sprintf(`SELECT count(*) FROM %s`, table)).Scan(&count); err != nil {
+		t.Fatalf("count target rows: %v", err)
+	}
+	if count != 1 || uid != "00000000-0000-0000-0000-000000000002" || title != "current" {
+		t.Fatalf("target row after equal-cursor apply = (count=%d, uid=%q, title=%q), want the existing row unchanged", count, uid, title)
 	}
 }

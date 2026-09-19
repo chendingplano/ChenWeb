@@ -17,9 +17,10 @@ import (
 func HandleListAspects(c echo.Context) error {
 	locale := strings.TrimSpace(c.QueryParam("lang"))
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":   true,
-		"aspects":  ListAspectsForLocale(locale),
-		"packages": localizedPackageOrder(locale),
+		"status":            true,
+		"aspects":           ListAspectsForLocale(locale),
+		"packages":          localizedPackageOrder(locale),
+		"reviewer_packages": localizedReviewerPackageOrder(locale),
 	})
 }
 

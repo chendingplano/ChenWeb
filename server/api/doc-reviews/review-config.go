@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -95,11 +96,17 @@ func pickLocale(locale, en, zhCN string) string {
 
 // DocReviewConfig is the parsed doc-review.local.toml.
 type DocReviewConfig struct {
-	MaxFindings  []int                          `toml:"max_findings"`
-	MaxAnalyses  []int                          `toml:"max_analyses"`
-	Packages     map[string]ReviewPackageConfig `toml:"packages"`
-	Reviewers    map[string]ReviewAspectConfig  `toml:"reviewers"`
-	PackageOrder []ReviewPackageInfo            `toml:"-"`
+	MaxFindings []int                          `toml:"max_findings"`
+	MaxAnalyses []int                          `toml:"max_analyses"`
+	Packages    map[string]ReviewPackageConfig `toml:"packages"`
+	Reviewers   map[string]ReviewAspectConfig  `toml:"reviewers"`
+	// ReviewerPackages is the user-selectable package list. The legacy field
+	// keeps the existing local spelling working while deployments migrate to
+	// [doc-reviewer-packages].
+	ReviewerPackages           map[string][]string `toml:"doc-reviewer-packages"`
+	UnderscoreReviewerPackages map[string][]string `toml:"doc-reviewer_packages"`
+	LegacyReviewerPackages     map[string][]string `toml:"reviewer_packages"`
+	PackageOrder               []ReviewPackageInfo `toml:"-"`
 }
 
 // ResolvedReviewerConfig is the effective configuration for one aspect after
@@ -240,6 +247,86 @@ func localizedPackageOrder(locale string) []ReviewPackageInfo {
 		}
 	}
 	return order
+}
+
+// localizedReviewerPackageOrder returns the implicit All option followed by
+// packages configured in [doc-reviewer-packages]. Package members may be
+// aspect keys (for example, grammar_spelling) or their configured display
+// labels (for example, Grammar & Spelling).
+func localizedReviewerPackageOrder(locale string) []ReviewerPackageInfo {
+	all := ListAspectsForLocale(locale)
+	allNames := make([]string, 0, len(all))
+	for _, aspect := range all {
+		if aspect.Checked {
+			allNames = append(allNames, aspect.Name)
+		}
+	}
+	out := []ReviewerPackageInfo{{Key: "all", Label: "All", AspectNames: allNames}}
+	cfg, err := GetDocReviewConfig()
+	if err != nil || cfg == nil {
+		return out
+	}
+	configured := cfg.ReviewerPackages
+	if len(configured) == 0 {
+		configured = cfg.UnderscoreReviewerPackages
+	}
+	if len(configured) == 0 {
+		configured = cfg.LegacyReviewerPackages
+	}
+	keys := make([]string, 0, len(configured))
+	for key := range configured {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" || strings.EqualFold(key, "all") {
+			continue
+		}
+		aspectNames := resolveReviewerPackageMembers(configured[key], all, localizedPackageOrder(locale))
+		if len(aspectNames) == 0 {
+			continue
+		}
+		out = append(out, ReviewerPackageInfo{Key: key, Label: key, AspectNames: aspectNames})
+	}
+	return out
+}
+
+func resolveReviewerPackageMembers(members []string, aspects []AspectInfo, groups []ReviewPackageInfo) []string {
+	byName := make(map[string]string, len(aspects))
+	byLabel := make(map[string]string, len(aspects))
+	byGroup := make(map[string]string, len(groups)*2)
+	for _, aspect := range aspects {
+		byName[strings.ToLower(strings.TrimSpace(aspect.Name))] = aspect.Name
+		byLabel[strings.ToLower(strings.TrimSpace(aspect.Label))] = aspect.Name
+	}
+	for _, group := range groups {
+		byGroup[strings.ToLower(strings.TrimSpace(group.Key))] = group.Key
+		byGroup[strings.ToLower(strings.TrimSpace(group.Label))] = group.Key
+	}
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(members))
+	for _, member := range members {
+		member = strings.ToLower(strings.TrimSpace(member))
+		if group, ok := byGroup[member]; ok {
+			for _, aspect := range aspects {
+				if aspect.Group == group && !seen[aspect.Name] {
+					seen[aspect.Name] = true
+					out = append(out, aspect.Name)
+				}
+			}
+			continue
+		}
+		name, ok := byName[member]
+		if !ok {
+			name, ok = byLabel[member]
+		}
+		if ok && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func defaultReviewPackageOrder() []ReviewPackageInfo {

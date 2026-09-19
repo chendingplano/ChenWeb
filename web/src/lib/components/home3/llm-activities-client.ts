@@ -17,13 +17,25 @@ export type LLMDailyReport = {
 export type LLMModelActivityReport = {
 	provider: string;
 	model_name: string;
+	api_key_name: string;
 	currency_code: string;
 	workspace_day: string;
 	spend_amount: number;
-	input_tokens: number;
+	prompt_cache_hit_tokens: number;
+	prompt_cache_miss_tokens: number;
 	output_tokens: number;
 	total_tokens: number;
 	request_count: number;
+};
+
+export type LLMReportFilters = {
+	from?: string;
+	to?: string;
+	apiKey?: string;
+};
+
+export type LLMAPIKeyOption = {
+	name: string;
 };
 
 export type LLMUsageEvent = {
@@ -98,6 +110,7 @@ export type ListLLMDailyReportsResponse = {
 
 export type ListLLMModelActivityReportsResponse = {
 	reports: LLMModelActivityReport[];
+	api_keys: LLMAPIKeyOption[];
 };
 
 export type ListLLMUsageEventsResponse = {
@@ -141,7 +154,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 					? String((parsed as { error: unknown }).error)
 					: parsed && typeof parsed === 'object' && parsed !== null && 'error_msg' in parsed
 						? String((parsed as { error_msg: unknown }).error_msg)
-				: `HTTP ${res.status}`;
+						: `HTTP ${res.status}`;
 		throw new Error(msg);
 	}
 	return parsed as T;
@@ -151,8 +164,17 @@ export function listLLMDailyReports(limit = 30): Promise<ListLLMDailyReportsResp
 	return req<ListLLMDailyReportsResponse>(`/api/v1/llm/reports/daily?limit=${limit}`);
 }
 
-export function listLLMModelActivityReports(limit = 30): Promise<ListLLMModelActivityReportsResponse> {
-	return req<ListLLMModelActivityReportsResponse>(`/api/v1/llm/reports/models?limit=${limit}`);
+export function listLLMModelActivityReports(
+	limit = 30,
+	filters: LLMReportFilters = {}
+): Promise<ListLLMModelActivityReportsResponse> {
+	const params = new URLSearchParams({ limit: String(limit) });
+	if (filters.from) params.set('from', filters.from);
+	if (filters.to) params.set('to', filters.to);
+	if (filters.apiKey) params.set('api_key', filters.apiKey);
+	return req<ListLLMModelActivityReportsResponse>(
+		`/api/v1/llm/reports/models?${params.toString()}`
+	);
 }
 
 export function listLLMUsageEvents(limit = 50): Promise<ListLLMUsageEventsResponse> {

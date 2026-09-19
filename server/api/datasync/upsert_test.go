@@ -9,7 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-const wantUpsertQuery = `INSERT INTO kb.product_names (seq_no, sub_catalog, category_l1, category_l2, description, intended_use, product_name, product_name_en, regulatory_class, aliases, keywords, source, notes, extra_info, status, update_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) ON CONFLICT (source, seq_no, product_name) DO UPDATE SET sub_catalog = EXCLUDED.sub_catalog, category_l1 = EXCLUDED.category_l1, category_l2 = EXCLUDED.category_l2, description = EXCLUDED.description, intended_use = EXCLUDED.intended_use, product_name_en = EXCLUDED.product_name_en, regulatory_class = EXCLUDED.regulatory_class, aliases = EXCLUDED.aliases, keywords = EXCLUDED.keywords, notes = EXCLUDED.notes, extra_info = EXCLUDED.extra_info, status = EXCLUDED.status, update_time = EXCLUDED.update_time`
+const wantUpsertQuery = `INSERT INTO kb.product_names (seq_no, sub_catalog, category_l1, category_l2, description, intended_use, product_name, product_name_en, regulatory_class, aliases, keywords, source, notes, extra_info, status, update_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) ON CONFLICT DO NOTHING`
 
 func jsonStr(t *testing.T, v string) json.RawMessage {
 	t.Helper()

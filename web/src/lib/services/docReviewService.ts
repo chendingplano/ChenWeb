@@ -84,6 +84,12 @@ export type ReviewPackageInfo = {
 	label: string;
 };
 
+export type ReviewerPackageInfo = {
+	key: string;
+	label: string;
+	aspect_names: string[];
+};
+
 export type FindingItem = {
 	id: number;
 	pass: string;
@@ -109,12 +115,16 @@ export type FindingItem = {
 // text. `packages` drives the per-group headers on the selection page.
 export async function listAspects(
 	locale?: string
-): Promise<{ aspects: AspectInfo[]; packages: ReviewPackageInfo[] }> {
+): Promise<{ aspects: AspectInfo[]; packages: ReviewPackageInfo[]; reviewer_packages: ReviewerPackageInfo[] }> {
 	const query = locale ? `?lang=${encodeURIComponent(locale)}` : '';
 	const res = await fetch(`${BASE}/aspects${query}`, { credentials: 'same-origin' });
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load aspects');
-	return { aspects: data.aspects || [], packages: data.packages || [] };
+	return {
+		aspects: data.aspects || [],
+		packages: data.packages || [],
+		reviewer_packages: data.reviewer_packages || [{ key: 'all', label: 'All', aspect_names: [] }],
+	};
 }
 
 export async function listTiers(): Promise<TierInfo[]> {

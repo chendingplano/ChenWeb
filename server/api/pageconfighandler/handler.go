@@ -74,7 +74,7 @@ func GetPageConfig(c echo.Context) error {
 		})
 	}
 
-	rows, err := loadPageConfigRows(ctx, db, pageKey)
+	rows, err := loadPageConfigRows(ctx, db, pageKey, pageConfigEntryFilters{})
 	if err != nil {
 		rc.GetLogger().Error("page-config: load rows failed", "page_key", pageKey, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load page config"})

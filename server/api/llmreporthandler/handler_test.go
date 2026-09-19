@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,19 +15,21 @@ import (
 )
 
 type stubReportStore struct {
-	daily      []DailyReport
-	model      []ModelActivityReport
-	usage      []UsageEvent
-	bal        []CurrentBalance
-	sum        TodaySummary
-	usageByIDs []UsageEventAdmin
+	daily        []DailyReport
+	model        []ModelActivityReport
+	usage        []UsageEvent
+	bal          []CurrentBalance
+	sum          TodaySummary
+	usageByIDs   []UsageEventAdmin
+	modelFilters ModelActivityReportFilters
 }
 
 func (s *stubReportStore) ListDailyReports(_ context.Context, limit int) ([]DailyReport, error) {
 	return s.daily, nil
 }
 
-func (s *stubReportStore) ListModelActivityReports(_ context.Context, limit int) ([]ModelActivityReport, error) {
+func (s *stubReportStore) ListModelActivityReports(_ context.Context, limit int, filters ModelActivityReportFilters) ([]ModelActivityReport, error) {
+	s.modelFilters = filters
 	return s.model, nil
 }
 
@@ -170,6 +174,94 @@ func TestListModelActivityReportsReturnsRows(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"model_name":"deepseek-v4-flash"`) || !strings.Contains(rec.Body.String(), `"workspace_day":"2026-06-20"`) || !strings.Contains(rec.Body.String(), `"spend_amount":11.88`) {
 		t.Fatalf("unexpected body = %s", rec.Body.String())
+	}
+}
+
+func TestListModelActivityReportsRejectsInvalidDate(t *testing.T) {
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore { return &stubReportStore{} }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/reports/models?from=not-a-date", nil)
+	rec := httptest.NewRecorder()
+	if err := ListModelActivityReports(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListModelActivityReports() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestLoadModelAPIKeyOptionsReturnsNamesWithoutSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	if err := os.WriteFile(path, []byte(`[model-api-keys]
+	provider-pro = [
+	api_key = 'sk-primary'
+]
+
+[provider-pro]
+model_name = 'provider-pro'
+api_key = 'sk-primary'
+`), 0600); err != nil {
+		t.Fatalf("write models TOML: %v", err)
+	}
+	t.Setenv("CHENWEB_MODELS_TOML", path)
+
+	options, refs, models, err := loadModelAPIKeyOptions()
+	if err != nil {
+		t.Fatalf("loadModelAPIKeyOptions() error = %v", err)
+	}
+	if len(options) != 1 || options[0].Name != "provider-pro" {
+		t.Fatalf("unexpected options = %+v", options)
+	}
+	if refs["provider-pro"] != "sk-primary" {
+		t.Fatalf("unexpected reference map = %+v", refs)
+	}
+	ref, err := apiKeyRefForName("provider-pro", refs)
+	if err != nil || ref != "sk-primary" {
+		t.Fatalf("apiKeyRefForName() = %q, %v; want sk-primary", ref, err)
+	}
+	if len(models["provider-pro"]) != 1 || models["provider-pro"][0] != "provider-pro" {
+		t.Fatalf("unexpected model mappings = %+v", models)
+	}
+}
+
+func TestLoadModelAPIKeyOptionsMapsDeepSeekProAliasToProModel(t *testing.T) {
+	path := filepath.Join("..", "..", "..", ".models.toml")
+	t.Setenv("CHENWEB_MODELS_TOML", path)
+
+	_, refs, models, err := loadModelAPIKeyOptions()
+	if err != nil {
+		t.Fatalf("loadModelAPIKeyOptions() error = %v", err)
+	}
+	if refs["deepseek-4-1-pro"] == "" {
+		t.Fatal("deepseek-4-1-pro reference was not loaded")
+	}
+	got := models["deepseek-4-1-pro"]
+	if len(got) != 1 || got[0] != "deepseek-v4-pro" {
+		t.Fatalf("deepseek-4-1-pro models = %#v, want [deepseek-v4-pro]", got)
+	}
+}
+
+func TestListModelActivityReportsFiltersSelectedAliasToItsModel(t *testing.T) {
+	t.Setenv("CHENWEB_MODELS_TOML", filepath.Join("..", "..", "..", ".models.toml"))
+	store := &stubReportStore{}
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore { return store }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/reports/models?api_key=deepseek-4-1-pro", nil)
+	rec := httptest.NewRecorder()
+	if err := ListModelActivityReports(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListModelActivityReports() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(store.modelFilters.ModelNames) != 1 || store.modelFilters.ModelNames[0] != "deepseek-v4-pro" {
+		t.Fatalf("model filters = %#v, want [deepseek-v4-pro]", store.modelFilters.ModelNames)
 	}
 }
 

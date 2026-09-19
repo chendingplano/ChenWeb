@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
-    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem, ReviewPackageInfo } from '$lib/services/docReviewService';
+    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem, ReviewPackageInfo, ReviewerPackageInfo } from '$lib/services/docReviewService';
     import { uploadKbInputs, listKnowledgeStores } from '$lib/services/kbService';
     import type { KbInputRecord, KnowledgeStoreRecord } from '$lib/services/kbService';
     import { knowledgeStoreState } from './knowledge-store-state.svelte';
@@ -39,6 +39,8 @@
     // Package (group) list from doc-review.local.toml, with labels localized
     // server-side. Drives the per-group headers (P1..P6) in the check-level step.
     let packages = $state<ReviewPackageInfo[]>([]);
+    let reviewerPackages = $state<ReviewerPackageInfo[]>([]);
+    let selectedReviewerPackage = $state('all');
     let tiers = $state<TierInfo[]>([]);
     let currentStep = $state(1);
     let selectedDocId = $state<number | null>(null);
@@ -267,6 +269,14 @@
         setAllInTier(tier, !tierIsOn(tier));
     }
 
+    function selectReviewerPackage(key: string) {
+        selectedReviewerPackage = key;
+        const selected = reviewerPackages.find((pkg) => pkg.key === key);
+        if (!selected) return;
+        selectedAspects = new Set(selected.aspect_names);
+        expandedTiers = new Set(tiers.map((tier) => tier.key));
+    }
+
     function groupSelectedCount(items: Array<{ name: string }>): number {
         return items.reduce((n, it) => n + (selectedAspects.has(it.name) ? 1 : 0), 0);
     }
@@ -292,6 +302,8 @@
             const res = await listAspects(getLocale());
             aspects = res.aspects;
             packages = res.packages;
+            reviewerPackages = res.reviewer_packages;
+            selectedReviewerPackage = reviewerPackages[0]?.key ?? 'all';
             tiers = await listTiers();
             // Initial selection driven by [reviewers.<aspect>].checked in doc-review.local.toml.
             selectedAspects = new Set(aspects.filter(a => a.checked).map(a => a.name));
@@ -590,6 +602,13 @@
                     Toggle a level On to review its aspects, then expand it to fine-tune. {effectiveAspects.length} aspect{effectiveAspects.length === 1 ? '' : 's'} selected.
                 </p>
                 <fieldset style="margin: 0 0 1rem 0; padding: 0; border: none;">
+                    <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">Package</legend>
+                    <select aria-label="Package" bind:value={selectedReviewerPackage} onchange={(event) => selectReviewerPackage((event.currentTarget as HTMLSelectElement).value)}
+                        style="display: block; min-width: 15rem; margin-bottom: 1rem; padding: 0.45rem 0.7rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; color: {textPrimary}; font-size: 0.85rem;">
+                        {#each reviewerPackages as reviewerPackage}
+                            <option value={reviewerPackage.key}>{reviewerPackage.label}</option>
+                        {/each}
+                    </select>
                     <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">{labelFor('dr-s2-depth-label', 'Review depth')}</legend>
                     <div role="radiogroup" aria-label="Review depth" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         {#each [1, 2, 3] as depth}

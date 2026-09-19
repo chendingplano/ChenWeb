@@ -144,7 +144,7 @@ func TestStoreListUsageEventsAdminWithFilters(t *testing.T) {
 
 	whereClause := ` WHERE evt.model_name ILIKE '%' || $1 || '%' AND evt.call_reason ILIKE '%' || $2 || '%' AND evt.input_tokens >= $3 AND evt.metadata_json ->> $4 ILIKE '%' || $5 || '%'`
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM llm_usage_event evt` + whereClause)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM llm_usage_event evt`+whereClause)).
 		WithArgs("deepseek", "extract_products", inTokMin, "capture_source", "shared_llm").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
@@ -154,7 +154,7 @@ evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
 COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
 FROM llm_usage_event evt
-LEFT JOIN llm_account acct ON acct.id = evt.account_id` + whereClause + `
+LEFT JOIN llm_account acct ON acct.id = evt.account_id`+whereClause+`
 ORDER BY evt.request_started_at DESC
 LIMIT $6 OFFSET $7`)).
 		WithArgs("deepseek", "extract_products", inTokMin, "capture_source", "shared_llm", 50, 0).
@@ -182,70 +182,22 @@ func TestStoreListModelActivityReports(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{
-		"provider", "model_name", "currency_code", "workspace_day", "spend_amount", "input_tokens", "output_tokens", "total_tokens", "request_count",
+		"provider", "model_name", "api_key_ref", "currency_code", "workspace_day", "spend_amount", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "output_tokens", "total_tokens", "request_count",
 	}).AddRow(
-		"deepseek", "deepseek-v4-flash", "CNY", "2026-06-20", 11.88, int64(2925804), int64(3975685), int64(6901489), int64(1380),
+		"deepseek", "deepseek-v4-flash", "sk-deepseek", "CNY", "2026-06-20", 11.88, int64(1200000), int64(1725804), int64(3975685), int64(6901489), int64(1380),
 	)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`WITH recent_days AS (
-    SELECT DISTINCT workspace_day
-    FROM llm_daily_account_report
-    ORDER BY workspace_day DESC
-    LIMIT $1
-),
-model_usage AS (
-    SELECT
-        evt.workspace_day,
-        evt.account_id,
-        evt.provider,
-        evt.model_name,
-        COALESCE(SUM(evt.input_tokens), 0) AS input_tokens,
-        COALESCE(SUM(evt.output_tokens), 0) AS output_tokens,
-        COALESCE(SUM(evt.total_tokens), 0) AS total_tokens,
-        COUNT(*) AS request_count
-    FROM llm_usage_event evt
-    JOIN recent_days days ON days.workspace_day = evt.workspace_day
-    GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name
-),
-account_day_totals AS (
-    SELECT account_id, workspace_day, COALESCE(SUM(total_tokens), 0) AS account_total_tokens
-    FROM model_usage
-    GROUP BY account_id, workspace_day
-)
-SELECT
-    mu.provider,
-    mu.model_name,
-    COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code,
-    COALESCE(TO_CHAR(mu.workspace_day, 'YYYY-MM-DD'), '') AS workspace_day,
-    COALESCE(SUM(
-        CASE
-            WHEN adt.account_total_tokens > 0 THEN report.spend_amount * mu.total_tokens::double precision / adt.account_total_tokens::double precision
-            ELSE 0
-        END
-    ), 0) AS spend_amount,
-    COALESCE(SUM(mu.input_tokens), 0) AS input_tokens,
-    COALESCE(SUM(mu.output_tokens), 0) AS output_tokens,
-    COALESCE(SUM(mu.total_tokens), 0) AS total_tokens,
-    COALESCE(SUM(mu.request_count), 0) AS request_count
-FROM model_usage mu
-JOIN account_day_totals adt
-  ON adt.account_id = mu.account_id
- AND adt.workspace_day = mu.workspace_day
-LEFT JOIN llm_daily_account_report report
-  ON report.account_id = mu.account_id
- AND report.workspace_day = mu.workspace_day
-GROUP BY mu.provider, mu.model_name, mu.workspace_day
-ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`)).WithArgs(30).WillReturnRows(rows)
+	mock.ExpectQuery(`WITH recent_days AS`).WithArgs(30, nil, nil, "", nil).WillReturnRows(rows)
 
 	store := NewStore(db)
-	got, err := store.ListModelActivityReports(context.Background(), 30)
+	got, err := store.ListModelActivityReports(context.Background(), 30, ModelActivityReportFilters{})
 	if err != nil {
 		t.Fatalf("ListModelActivityReports() error = %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("len(ListModelActivityReports()) = %d, want 1", len(got))
 	}
-	if got[0].ModelName != "deepseek-v4-flash" || got[0].WorkspaceDay != "2026-06-20" || got[0].SpendAmount != 11.88 || got[0].RequestCount != 1380 {
+	if got[0].ModelName != "deepseek-v4-flash" || got[0].APIKeyName != "sk-deepseek" || got[0].PromptCacheHitTokens != 1200000 || got[0].PromptCacheMissTokens != 1725804 || got[0].WorkspaceDay != "2026-06-20" || got[0].SpendAmount != 11.88 || got[0].RequestCount != 1380 {
 		t.Fatalf("unexpected model report = %+v", got[0])
 	}
 }

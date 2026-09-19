@@ -120,7 +120,11 @@ func ListEntries(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "unknown page_key", "page_key": pageKey})
 	}
 
-	rows, err := loadPageConfigRows(ctx, ApiTypes.ProjectDBHandle, pageKey)
+	rows, err := loadPageConfigRows(ctx, ApiTypes.ProjectDBHandle, pageKey, pageConfigEntryFilters{
+		ZHLabel:  strings.TrimSpace(c.QueryParam("zh_cn_label")),
+		ENLabel:  strings.TrimSpace(c.QueryParam("en_label")),
+		EntryKey: strings.TrimSpace(c.QueryParam("entry_key")),
+	})
 	if err != nil {
 		rc.GetLogger().Error("page-config admin: load rows failed", "page_key", pageKey, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load entries"})
@@ -152,7 +156,8 @@ func ListEntries(c echo.Context) error {
 // every language row so the default-language row is always authoritative and in
 // sync. Admin write.
 // Endpoints: POST /api/v1/page-config/admin/pages/:pageKey/entries
-//            PUT  /api/v1/page-config/admin/pages/:pageKey/entries/:entryKey
+//
+//	PUT  /api/v1/page-config/admin/pages/:pageKey/entries/:entryKey
 func UpsertEntry(c echo.Context) error {
 	user, rc, err := requireAdmin(c, "CWB_PGC_012")
 	if err != nil {

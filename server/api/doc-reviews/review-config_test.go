@@ -103,3 +103,52 @@ func TestLoadDocReviewConfigValidatesOutputLimits(t *testing.T) {
 		t.Fatalf("loadDocReviewConfig error=%v, want max_findings validation error", err)
 	}
 }
+
+func TestReviewerPackagesResolveConfiguredLabels(t *testing.T) {
+	cfg, err := parseDocReviewConfig([]byte(`
+[doc-reviewer-packages]
+minimum = ["Consistency", "grammar_spelling", "Grammar & Spelling"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldCfg, oldErr := docReviewCfg, docReviewCfgErr
+	docReviewCfg = cfg
+	docReviewCfgErr = nil
+	t.Cleanup(func() {
+		docReviewCfg = oldCfg
+		docReviewCfgErr = oldErr
+	})
+
+	packages := localizedReviewerPackageOrder("")
+	if len(packages) != 2 {
+		t.Fatalf("packages = %#v, want All plus minimum", packages)
+	}
+	if packages[0].Key != "all" || packages[0].Label != "All" {
+		t.Fatalf("default package = %#v, want All", packages[0])
+	}
+	want := []string{"internal_contradictions", "terminology_consistency", "cross_reference_correctness", "requirement_traceability", "grammar_spelling"}
+	got := packages[1].AspectNames
+	if len(got) != len(want) {
+		t.Fatalf("minimum aspect names = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("minimum aspect %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestReviewerPackagesAcceptUnderscoreSection(t *testing.T) {
+	cfg, err := parseDocReviewConfig([]byte(`
+[doc-reviewer_packages]
+minimum = ["Grammar & Spelling"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.UnderscoreReviewerPackages["minimum"]) != 1 {
+		t.Fatalf("underscore reviewer package config = %#v", cfg.UnderscoreReviewerPackages)
+	}
+}

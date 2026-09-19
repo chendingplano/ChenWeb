@@ -137,6 +137,31 @@ test('listLLMModelActivityReports applies the limit query parameter', async () =
 	}
 });
 
+test('listLLMModelActivityReports serializes spend report filters', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			reports: [],
+			api_keys: [{ name: 'deepseek-4-1-flash' }]
+		})
+	);
+
+	try {
+		const response = await listLLMModelActivityReports(30, {
+			from: '2026-09-01',
+			to: '2026-09-19',
+			apiKey: 'deepseek-4-1-flash'
+		});
+
+		assert.equal(
+			String(mock.calls[0].input),
+			'/api/v1/llm/reports/models?limit=30&from=2026-09-01&to=2026-09-19&api_key=deepseek-4-1-flash'
+		);
+		assert.equal(response.api_keys[0].name, 'deepseek-4-1-flash');
+	} finally {
+		mock.restore();
+	}
+});
+
 test('listLLMCurrentBalances applies the limit query parameter', async () => {
 	const mock = installFetchMock(async () =>
 		Response.json({

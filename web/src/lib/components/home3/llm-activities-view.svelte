@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { Chart } from 'svelte-echarts';
 	import type { EChartsOption } from 'echarts';
 	import { BarChart } from 'echarts/charts';
@@ -15,6 +16,7 @@
 		runLLMReconciliationNow,
 		type LLMCurrentBalance,
 		type LLMModelActivityReport,
+		type LLMReportFilters,
 		type LLMTodaySummary,
 		type LLMUsageEvent
 	} from './llm-activities-client';
@@ -45,6 +47,23 @@
 	let notice = $state<string | null>(null);
 	let reportLimit = $state(30);
 	let eventLimit = $state(50);
+	let reportLoading = $state(false);
+	let reportFilterError = $state<string | null>(null);
+	let timePreset = $state('last_30_days');
+	let customFrom = $state('');
+	let customTo = $state('');
+	let selectedAPIKey = $state('');
+	let apiKeyOptions = $state<{ name: string }[]>([]);
+
+	const timeOptions = [
+		{ value: 'today', label: 'Today' },
+		{ value: 'yesterday', label: 'Yesterday' },
+		{ value: 'last_7_days', label: 'Last 7 Days' },
+		{ value: 'last_30_days', label: 'Last 30 Days' },
+		{ value: 'this_month', label: 'This Month' },
+		{ value: 'last_month', label: 'Last Month' },
+		{ value: 'custom', label: 'Custom' }
+	];
 
 	onMount(() => {
 		load();
@@ -57,21 +76,86 @@
 			notice = null;
 		}
 		try {
-			const [summaryResponse, balancesResponse, reportsResponse, eventsResponse] = await Promise.all([
-				getLLMTodaySummary(),
-				listLLMCurrentBalances(),
-				listLLMModelActivityReports(reportLimit),
-				listLLMUsageEvents(eventLimit)
-			]);
+			const [summaryResponse, balancesResponse, reportsResponse, eventsResponse] =
+				await Promise.all([
+					getLLMTodaySummary(),
+					listLLMCurrentBalances(),
+					listLLMModelActivityReports(reportLimit, getReportFilters()),
+					listLLMUsageEvents(eventLimit)
+				]);
 			todaySummary = summaryResponse.summary;
 			balances = balancesResponse.balances;
 			modelReports = reportsResponse.reports;
+			apiKeyOptions = reportsResponse.api_keys || [];
 			usageEvents = eventsResponse.usage_events;
 		} catch (err) {
 			error = String((err as Error).message ?? err);
 		} finally {
 			loading = false;
 		}
+	}
+
+	function dateOnly(date: Date): string {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
+	}
+
+	function getReportFilters(): LLMReportFilters {
+		const today = new Date();
+		const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+		let from = dateOnly(todayDate);
+		let to = from;
+
+		switch (timePreset) {
+			case 'yesterday':
+				from = to = dateOnly(new Date(todayDate.getTime() - 24 * 60 * 60 * 1000));
+				break;
+			case 'last_7_days':
+				from = dateOnly(new Date(todayDate.getTime() - 6 * 24 * 60 * 60 * 1000));
+				break;
+			case 'last_30_days':
+				from = dateOnly(new Date(todayDate.getTime() - 29 * 24 * 60 * 60 * 1000));
+				break;
+			case 'this_month':
+				from = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
+				break;
+			case 'last_month':
+				from = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1));
+				to = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth(), 0));
+				break;
+			case 'custom':
+				if (!customFrom || !customTo) {
+					throw new Error('Choose both a custom start date and end date.');
+				}
+				if (customFrom > customTo) {
+					throw new Error('Custom start date must not be after the end date.');
+				}
+				from = customFrom;
+				to = customTo;
+				break;
+		}
+
+		return { from, to, apiKey: selectedAPIKey || undefined };
+	}
+
+	async function loadModelReports() {
+		reportFilterError = null;
+		reportLoading = true;
+		try {
+			const response = await listLLMModelActivityReports(reportLimit, getReportFilters());
+			modelReports = response.reports;
+			apiKeyOptions = response.api_keys || apiKeyOptions;
+		} catch (err) {
+			reportFilterError = String((err as Error).message ?? err);
+		} finally {
+			reportLoading = false;
+		}
+	}
+
+	function handleReportFilterChange() {
+		void loadModelReports();
 	}
 
 	async function runReconciliation() {
@@ -109,17 +193,15 @@
 		if (!trimmed) {
 			return '';
 		}
-		const day = trimmed.includes('T') ? trimmed.slice(0, trimmed.indexOf('T')) : trimmed.slice(0, 10);
+		const day = trimmed.includes('T')
+			? trimmed.slice(0, trimmed.indexOf('T'))
+			: trimmed.slice(0, 10);
 		return day || trimmed;
 	}
 
 	function isEmbeddingModel(modelName: string): boolean {
 		const normalized = (modelName || '').trim().toLowerCase();
 		return normalized.includes('embedding') || normalized.includes('embed');
-	}
-
-	function tokenOutputLabel(modelName: string): string {
-		return isEmbeddingModel(modelName) ? 'Completion Tokens' : 'Output Tokens';
 	}
 
 	function tokenSummary(event: LLMUsageEvent): string {
@@ -139,7 +221,6 @@
 	const spendBar = $derived(darkMode ? '#F59E0B' : '#D97706');
 	const inputBar = $derived(darkMode ? '#3B82F6' : '#2563EB');
 	const outputBar = $derived(darkMode ? '#22C55E' : '#16A34A');
-	const callsBar = $derived(darkMode ? '#7C83FD' : '#4F46E5');
 
 	type ModelChartGroup = {
 		key: string;
@@ -151,9 +232,9 @@
 
 	const modelChartGroups = $derived(
 		(() => {
-			const grouped = new Map<string, ModelChartGroup>();
+			const grouped = new SvelteMap<string, ModelChartGroup>();
 			for (const row of modelReports) {
-				const key = `${row.provider}:${row.model_name}`;
+				const key = `${row.provider}:${row.model_name}:${row.api_key_name}`;
 				const existing = grouped.get(key);
 				if (existing) {
 					existing.rows.push(row);
@@ -176,17 +257,18 @@
 					...group,
 					rows: [...group.rows].sort((a, b) => a.workspace_day.localeCompare(b.workspace_day))
 				}))
-				.sort((a, b) => a.modelName.localeCompare(b.modelName) || a.provider.localeCompare(b.provider));
+				.sort(
+					(a, b) => a.modelName.localeCompare(b.modelName) || a.provider.localeCompare(b.provider)
+				);
 		})()
 	);
 
 	function buildModelChartOptions(group: ModelChartGroup): EChartsOption {
 		const days = group.rows.map((row) => fmtWorkspaceDay(row.workspace_day));
-		const outputLabel = tokenOutputLabel(group.modelName);
 		return {
 			backgroundColor: 'transparent',
 			animationDuration: 250,
-			color: [spendBar, inputBar, outputBar, callsBar],
+			color: [inputBar, '#8B5CF6', outputBar, spendBar],
 			legend: {
 				top: 0,
 				textStyle: {
@@ -235,18 +317,6 @@
 				},
 				{
 					type: 'value',
-					name: 'Calls',
-					position: 'right',
-					offset: 0,
-					nameTextStyle: { color: sub },
-					axisLabel: {
-						color: sub,
-						formatter: (value: number) => fmtNum(value)
-					},
-					splitLine: { show: false }
-				},
-				{
-					type: 'value',
 					name: `Spend (${group.currencyCode || 'USD'})`,
 					position: 'right',
 					offset: 64,
@@ -260,32 +330,32 @@
 			],
 			series: [
 				{
-					name: 'Spending',
-					type: 'bar',
-					yAxisIndex: 2,
-					barMaxWidth: 18,
-					data: group.rows.map((row) => row.spend_amount)
-				},
-				{
-					name: 'Input Tokens',
+					name: 'Input (Cache Hit)',
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 18,
-					data: group.rows.map((row) => row.input_tokens)
+					data: group.rows.map((row) => row.prompt_cache_hit_tokens)
 				},
 				{
-					name: outputLabel,
+					name: 'Input (Cache Miss)',
+					type: 'bar',
+					yAxisIndex: 0,
+					barMaxWidth: 18,
+					data: group.rows.map((row) => row.prompt_cache_miss_tokens)
+				},
+				{
+					name: 'Output',
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 18,
 					data: group.rows.map((row) => row.output_tokens)
 				},
 				{
-					name: 'Calls',
+					name: 'Spend',
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 18,
-					data: group.rows.map((row) => row.request_count)
+					data: group.rows.map((row) => row.spend_amount)
 				}
 			]
 		};
@@ -305,8 +375,14 @@
 	<header class="toolbar">
 		<div>
 			<h2>LLM Activities</h2>
-			<p class="muted">Provider-side daily spend reconciliation plus per-call usage telemetry for debugging and optimization.</p>
-			<p class="muted">`Refresh` reloads stored activity data. `Run Reconciliation` fetches fresh provider balances and updates spend rows.</p>
+			<p class="muted">
+				Provider-side daily spend reconciliation plus per-call usage telemetry for debugging and
+				optimization.
+			</p>
+			<p class="muted">
+				`Refresh` reloads stored activity data. `Run Reconciliation` fetches fresh provider balances
+				and updates spend rows.
+			</p>
 		</div>
 		<div class="toolbar-actions">
 			<label>
@@ -329,7 +405,9 @@
 	<div class="summary-grid">
 		<div class="summary-card">
 			<div class="summary-label">Today's Spend</div>
-			<div class="summary-value">{fmtMoney(todaySummary.spend_amount, todaySummary.currency_code || 'USD')}</div>
+			<div class="summary-value">
+				{fmtMoney(todaySummary.spend_amount, todaySummary.currency_code || 'USD')}
+			</div>
 		</div>
 		<div class="summary-card">
 			<div class="summary-label">Today's Requests</div>
@@ -357,13 +435,18 @@
 		<div class="panel-head">
 			<div>
 				<h3>Current Balances</h3>
-				<p class="muted">Latest stored provider-side balance snapshot per account. Use `Run Reconciliation` to fetch a fresh balance.</p>
+				<p class="muted">
+					Latest stored provider-side balance snapshot per account. Use `Run Reconciliation` to
+					fetch a fresh balance.
+				</p>
 			</div>
 		</div>
 		{#if loading && balances.length === 0}
 			<div class="empty">Loading current balances…</div>
 		{:else if balances.length === 0}
-			<div class="empty">No balance snapshots yet. Run reconciliation to capture the latest provider balance.</div>
+			<div class="empty">
+				No balance snapshots yet. Run reconciliation to capture the latest provider balance.
+			</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
@@ -395,14 +478,52 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Daily Spend Reports</h3>
-				<p class="muted">Per-model activity aggregated across the recent report window. Spending is allocated from each account/day by that model&apos;s token share.</p>
+				<h3>Spend Reports</h3>
+				<p class="muted">
+					Per-model activity aggregated by workspace day. Spending is allocated from each
+					account/day by that model&apos;s token share.
+				</p>
+			</div>
+			<div class="report-filters">
+				<label>
+					<span>Time</span>
+					<select bind:value={timePreset} onchange={handleReportFilterChange}>
+						{#each timeOptions as option (option.value)}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
+				</label>
+				<label>
+					<span>API Key</span>
+					<select bind:value={selectedAPIKey} onchange={handleReportFilterChange}>
+						<option value="">All API Keys</option>
+						{#each apiKeyOptions as option (option.name)}
+							<option value={option.name}>{option.name}</option>
+						{/each}
+					</select>
+				</label>
+				{#if timePreset === 'custom'}
+					<label>
+						<span>Start date</span>
+						<input type="date" bind:value={customFrom} onchange={handleReportFilterChange} />
+					</label>
+					<label>
+						<span>End date</span>
+						<input type="date" bind:value={customTo} onchange={handleReportFilterChange} />
+					</label>
+				{/if}
 			</div>
 		</div>
-		{#if loading && modelReports.length === 0}
+		{#if reportFilterError}
+			<div class="filter-error" role="alert">{reportFilterError}</div>
+		{/if}
+		{#if (loading || reportLoading) && modelReports.length === 0}
 			<div class="empty">Loading model activity reports…</div>
 		{:else if modelReports.length === 0}
-			<div class="empty">No model activity reports yet. Reconciliation plus captured usage events will populate this section.</div>
+			<div class="empty">
+				No model activity reports yet. Reconciliation plus captured usage events will populate this
+				section.
+			</div>
 		{:else}
 			<div class="model-chart-grid">
 				{#each modelChartGroups as group (group.key)}
@@ -411,7 +532,9 @@
 							<div>
 								<div class="cell-primary">{group.modelName}</div>
 								<div class="cell-secondary">
-									{group.provider} · {fmtNum(group.rows.length)} day(s) · grouped by workspace day
+									{group.provider} · {group.rows[0].api_key_name || 'API key unavailable'} · {fmtNum(
+										group.rows.length
+									)} day(s) · grouped by workspace day
 								</div>
 								{#if isEmbeddingModel(group.modelName)}
 									<div class="cell-secondary">
@@ -421,7 +544,11 @@
 							</div>
 						</div>
 						<div class="model-chart">
-							<Chart {init} options={buildModelChartOptions(group)} style="width: 100%; height: 100%;" />
+							<Chart
+								{init}
+								options={buildModelChartOptions(group)}
+								style="width: 100%; height: 100%;"
+							/>
 						</div>
 					</div>
 				{/each}
@@ -433,13 +560,18 @@
 		<div class="panel-head">
 			<div>
 				<h3>Recent Usage Events</h3>
-				<p class="muted">Per-request capture from `shared/go/api/llm`, including prompt names, token counts, and failures.</p>
+				<p class="muted">
+					Per-request capture from `shared/go/api/llm`, including prompt names, token counts, and
+					failures.
+				</p>
 			</div>
 		</div>
 		{#if loading && usageEvents.length === 0}
 			<div class="empty">Loading usage events…</div>
 		{:else if usageEvents.length === 0}
-			<div class="empty">No usage events yet. This view will fill in once call logging is persisted.</div>
+			<div class="empty">
+				No usage events yet. This view will fill in once call logging is persisted.
+			</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
@@ -475,7 +607,9 @@
 								<td>
 									<div class="cell-primary">{tokenSummary(event)}</div>
 									{#if isEmbeddingModel(event.model_name)}
-										<div class="cell-secondary">Vectors returned separately; not counted as output tokens.</div>
+										<div class="cell-secondary">
+											Vectors returned separately; not counted as output tokens.
+										</div>
 									{/if}
 								</td>
 								<td>{fmtNum(event.latency_ms)} ms</td>
@@ -501,13 +635,17 @@
 		min-height: 100%;
 		padding: 16px 20px 32px;
 	}
-	.toolbar, .panel-head, .toolbar-actions {
+	.toolbar,
+	.panel-head,
+	.toolbar-actions {
 		display: flex;
 	}
-	.toolbar, .panel-head {
+	.toolbar,
+	.panel-head {
 		justify-content: space-between;
 		align-items: flex-end;
 		gap: 12px;
+		flex-wrap: wrap;
 	}
 	.toolbar-actions {
 		align-items: flex-end;
@@ -524,10 +662,22 @@
 	.toolbar-actions input {
 		width: 88px;
 	}
-	h2, h3 { margin: 0; color: var(--heading); }
-	h2 { font-size: 20px; }
-	h3 { font-size: 16px; }
-	.muted { color: var(--sub); font-size: 12px; margin: 4px 0 0; }
+	h2,
+	h3 {
+		margin: 0;
+		color: var(--heading);
+	}
+	h2 {
+		font-size: 20px;
+	}
+	h3 {
+		font-size: 16px;
+	}
+	.muted {
+		color: var(--sub);
+		font-size: 12px;
+		margin: 4px 0 0;
+	}
 	.primary {
 		background: var(--btn);
 		color: white;
@@ -537,7 +687,10 @@
 		font-size: 13px;
 		cursor: pointer;
 	}
-	.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+	.primary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
 	.secondary {
 		background: transparent;
 		color: var(--heading);
@@ -547,13 +700,17 @@
 		font-size: 13px;
 		cursor: pointer;
 	}
-	.secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+	.secondary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
 	.summary-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 		gap: 10px;
 	}
-	.summary-card, .panel {
+	.summary-card,
+	.panel {
 		background: var(--card);
 		border: 1px solid var(--border);
 		border-radius: 10px;
@@ -576,6 +733,32 @@
 	.panel {
 		padding: 16px;
 	}
+	.report-filters {
+		display: flex;
+		align-items: flex-end;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.report-filters label {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		font-size: 12px;
+		color: var(--sub);
+	}
+	.report-filters select,
+	.report-filters input {
+		min-width: 150px;
+	}
+	.filter-error {
+		margin-top: 12px;
+		padding: 8px 10px;
+		border: 1px solid rgba(248, 113, 113, 0.4);
+		border-radius: 8px;
+		background: rgba(248, 113, 113, 0.12);
+		color: #f87171;
+		font-size: 13px;
+	}
 	.error {
 		background: rgba(248, 113, 113, 0.12);
 		color: #f87171;
@@ -596,7 +779,7 @@
 	}
 	.model-chart-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		grid-template-columns: minmax(0, 1fr);
 		gap: 14px;
 		margin-top: 12px;
 	}
@@ -608,7 +791,7 @@
 	}
 	.model-chart {
 		width: 100%;
-		height: 320px;
+		height: 360px;
 	}
 	.model-chart-head {
 		display: flex;
@@ -621,7 +804,8 @@
 		width: 100%;
 		border-collapse: collapse;
 	}
-	th, td {
+	th,
+	td {
 		padding: 12px 10px;
 		border-top: 1px solid var(--border);
 		font-size: 13px;
@@ -638,6 +822,15 @@
 		padding-top: 0;
 	}
 	input {
+		background: var(--input-bg);
+		color: var(--heading);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 8px 10px;
+		font-size: 13px;
+		font-family: inherit;
+	}
+	select {
 		background: var(--input-bg);
 		color: var(--heading);
 		border: 1px solid var(--border);

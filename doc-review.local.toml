@@ -26,6 +26,20 @@ max_analyses = [10, 20, 30]
 [doc-reviever]
 max_artifacts_passed_to_llm = 10
 
+[doc-reviewer-packages]
+review-minimum = [
+	"formatting_consistency",
+	"grammar_spelling",
+	"completeness",
+]
+
+review-basic = [
+	"formatting_consistency",
+	"grammar_spelling",
+	"completeness",
+	"tone_voice"
+]
+
 [packages.P5]
 enabled = true
 name_en = "Technical & Compliance Standards"

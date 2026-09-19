@@ -4,8 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,11 +19,12 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
 	"github.com/labstack/echo/v4"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 type reportStore interface {
 	ListDailyReports(ctx context.Context, limit int) ([]DailyReport, error)
-	ListModelActivityReports(ctx context.Context, limit int) ([]ModelActivityReport, error)
+	ListModelActivityReports(ctx context.Context, limit int, filters ModelActivityReportFilters) ([]ModelActivityReport, error)
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
@@ -112,11 +117,231 @@ func ListModelActivityReports(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
 	}
 	limit := intParamDefault(c.QueryParam("limit"), 30)
-	rows, err := store.ListModelActivityReports(c.Request().Context(), limit)
+	filters, err := parseModelActivityReportFilters(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
+	}
+	apiKeys, keyRefs, keyModels, err := loadModelAPIKeyOptions()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load model API keys", "error": err.Error()})
+	}
+	if filters.APIKeyRef, err = apiKeyRefForName(c.QueryParam("api_key"), keyRefs); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
+	}
+	selectedAPIKeyName := strings.TrimSpace(c.QueryParam("api_key"))
+	filters.ModelNames = keyModels[selectedAPIKeyName]
+	rows, err := store.ListModelActivityReports(c.Request().Context(), limit, filters)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm model activity reports", "error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"reports": rows})
+	refToName := make(map[string]string, len(keyRefs))
+	for name, ref := range keyRefs {
+		if _, exists := refToName[ref]; !exists {
+			refToName[ref] = name
+		}
+	}
+	for i := range rows {
+		if selectedAPIKeyName != "" {
+			rows[i].APIKeyName = selectedAPIKeyName
+			continue
+		}
+		if name, ok := refToName[rows[i].APIKeyName]; ok {
+			rows[i].APIKeyName = name
+		} else {
+			rows[i].APIKeyName = "Unknown"
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"reports": rows, "api_keys": apiKeys})
+}
+
+type modelAPIKeyEntry struct {
+	APIKey string `toml:"api_key"`
+}
+
+type modelAPIKeyConfig struct {
+	ModelAPIKeys map[string][]modelAPIKeyEntry `toml:"model-api-keys"`
+	Profiles     map[string]modelProfile
+}
+
+type modelProfile struct {
+	ModelName string
+	APIKey    string
+}
+
+type ModelAPIKeyOption struct {
+	Name string `json:"name"`
+}
+
+func parseModelActivityReportFilters(c echo.Context) (ModelActivityReportFilters, error) {
+	filters := ModelActivityReportFilters{}
+	for value, target := range map[string]**time.Time{
+		"from": &filters.From,
+		"to":   &filters.To,
+	} {
+		raw := strings.TrimSpace(c.QueryParam(value))
+		if raw == "" {
+			continue
+		}
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return filters, fmt.Errorf("%s must be a YYYY-MM-DD date", value)
+		}
+		*target = &parsed
+	}
+	if filters.From != nil && filters.To != nil && filters.From.After(*filters.To) {
+		return filters, fmt.Errorf("from date must not be after to date")
+	}
+	return filters, nil
+}
+
+func loadModelAPIKeyOptions() ([]ModelAPIKeyOption, map[string]string, map[string][]string, error) {
+	path := strings.TrimSpace(os.Getenv("CHENWEB_MODELS_TOML"))
+	if path == "" {
+		path = filepath.Join(".", ".models.toml")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ModelAPIKeyOption{}, map[string]string{}, map[string][]string{}, nil
+		}
+		return nil, nil, nil, err
+	}
+	var config modelAPIKeyConfig
+	looseConfig, looseErr := parseLooseModelAPIKeys(raw)
+	if err := toml.Unmarshal(raw, &config); err != nil {
+		if looseErr != nil {
+			return nil, nil, nil, err
+		}
+		config = looseConfig
+	} else if looseErr == nil {
+		config.Profiles = looseConfig.Profiles
+	}
+	keys := make([]string, 0, len(config.ModelAPIKeys))
+	refs := make(map[string]string, len(config.ModelAPIKeys))
+	for name, entries := range config.ModelAPIKeys {
+		if len(entries) == 0 || strings.TrimSpace(entries[0].APIKey) == "" {
+			continue
+		}
+		keys = append(keys, name)
+		refs[name] = strings.TrimSpace(entries[0].APIKey)
+	}
+	sort.Strings(keys)
+	options := make([]ModelAPIKeyOption, 0, len(keys))
+	for _, name := range keys {
+		options = append(options, ModelAPIKeyOption{Name: name})
+	}
+	modelNames := make(map[string][]string, len(keys))
+	for _, name := range keys {
+		modelNames[name] = modelNamesForAPIKey(name, refs[name], config.Profiles)
+	}
+	return options, refs, modelNames, nil
+}
+
+func parseLooseModelAPIKeys(raw []byte) (modelAPIKeyConfig, error) {
+	section := false
+	var current string
+	config := modelAPIKeyConfig{
+		ModelAPIKeys: map[string][]modelAPIKeyEntry{},
+		Profiles:     map[string]modelProfile{},
+	}
+	namePattern := regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*\[\s*$`)
+	keyPattern := regexp.MustCompile(`^\s*api_key\s*=\s*['"]([^'"]+)['"]`)
+	valuePattern := regexp.MustCompile(`^\s*(model_name|api_key)\s*=\s*['"]([^'"]+)['"]`)
+	sectionName := regexp.MustCompile(`^\[([^]]+)\]$`)
+	currentSection := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if matches := sectionName.FindStringSubmatch(trimmed); len(matches) == 2 {
+			currentSection = matches[1]
+			section = currentSection == "model-api-keys"
+			current = ""
+			continue
+		}
+		if section {
+			if matches := namePattern.FindStringSubmatch(line); len(matches) == 2 {
+				current = matches[1]
+				continue
+			}
+			if current != "" {
+				if matches := keyPattern.FindStringSubmatch(line); len(matches) == 2 {
+					config.ModelAPIKeys[current] = []modelAPIKeyEntry{{APIKey: matches[1]}}
+					current = ""
+				}
+			}
+			continue
+		}
+		if currentSection != "" {
+			if matches := valuePattern.FindStringSubmatch(line); len(matches) == 3 {
+				profile := config.Profiles[currentSection]
+				if matches[1] == "model_name" {
+					profile.ModelName = matches[2]
+				} else {
+					profile.APIKey = matches[2]
+				}
+				config.Profiles[currentSection] = profile
+			}
+		}
+	}
+	return config, nil
+}
+
+func modelNamesForAPIKey(keyName, apiKey string, profiles map[string]modelProfile) []string {
+	keyTokens := normalizedTokens(keyName)
+	bestScore := 0
+	best := make([]string, 0)
+	for profileName, profile := range profiles {
+		if profile.APIKey != apiKey || profile.ModelName == "" {
+			continue
+		}
+		score := tokenOverlap(keyTokens, normalizedTokens(profileName))
+		score += tokenOverlap(keyTokens, normalizedTokens(profile.ModelName))
+		if score > bestScore {
+			bestScore = score
+			best = []string{profile.ModelName}
+		} else if score > 0 && score == bestScore {
+			best = append(best, profile.ModelName)
+		}
+	}
+	sort.Strings(best)
+	return best
+}
+
+func normalizedTokens(value string) []string {
+	raw := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	for i, token := range raw {
+		if strings.HasPrefix(token, "v") && len(token) > 1 && strings.Trim(token[1:], "0123456789") == "" {
+			raw[i] = token[1:]
+		}
+	}
+	return raw
+}
+
+func tokenOverlap(left, right []string) int {
+	set := make(map[string]struct{}, len(right))
+	for _, token := range right {
+		set[token] = struct{}{}
+	}
+	score := 0
+	for _, token := range left {
+		if _, ok := set[token]; ok {
+			score++
+		}
+	}
+	return score
+}
+
+func apiKeyRefForName(name string, refs map[string]string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", nil
+	}
+	ref, ok := refs[name]
+	if !ok {
+		return "", fmt.Errorf("unknown API key %q", name)
+	}
+	return ref, nil
 }
 
 func ListCurrentBalances(c echo.Context) error {

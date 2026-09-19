@@ -25,6 +25,9 @@
 	let entries = $state<AdminEntry[]>([]);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
+	let zhCnLabelFilter = $state('');
+	let enLabelFilter = $state('');
+	let entryKeyFilter = $state('');
 
 	// Canonical access roles (same source as User Management). Used by the inline
 	// ACCESS_ROLE chip editor. Fails soft: an empty list just means "no add menu".
@@ -275,7 +278,11 @@
 		if (!selectedPageKey) return;
 		loadError = null;
 		try {
-			entries = (await listEntries(selectedPageKey)).sort((a, b) =>
+			entries = (await listEntries(selectedPageKey, {
+				zhCnLabel: zhCnLabelFilter,
+				enLabel: enLabelFilter,
+				entryKey: entryKeyFilter
+			})).sort((a, b) =>
 				a.entry_key.localeCompare(b.entry_key)
 			);
 		} catch (e) {
@@ -301,6 +308,10 @@
 	}
 
 	function onSelectPage() {
+		loadEntries();
+	}
+
+	function onFilterInput() {
 		loadEntries();
 	}
 
@@ -458,6 +469,18 @@
 		>
 			{previewOpen ? 'Hide preview' : 'Show preview'}
 		</button>
+		<label class="filter-field">
+			<span>ZH-CN LABEL</span>
+			<input aria-label="Filter by ZH-CN LABEL" placeholder="LIKE…" bind:value={zhCnLabelFilter} oninput={onFilterInput} />
+		</label>
+		<label class="filter-field">
+			<span>EN LABEL</span>
+			<input aria-label="Filter by EN LABEL" placeholder="LIKE…" bind:value={enLabelFilter} oninput={onFilterInput} />
+		</label>
+		<label class="filter-field">
+			<span>ENTRY_KEY</span>
+			<input aria-label="Filter by ENTRY_KEY" placeholder="LIKE…" bind:value={entryKeyFilter} oninput={onFilterInput} />
+		</label>
 	</div>
 
 	<div class="split" class:preview-open={previewOpen} class:dragging bind:this={splitEl}>
@@ -756,6 +779,24 @@
 	.field span {
 		color: var(--sub);
 		font-size: 0.8rem;
+	}
+	.filter-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		min-width: 9rem;
+	}
+	.filter-field span {
+		color: var(--sub);
+		font-size: 0.8rem;
+	}
+	.filter-field input {
+		width: 9rem;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--input-bg);
+		color: var(--heading);
 	}
 	.route-hint {
 		color: var(--sub);

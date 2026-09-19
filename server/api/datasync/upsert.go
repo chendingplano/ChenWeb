@@ -21,22 +21,66 @@ func upsertRows(ctx context.Context, db *sql.DB, item TableSyncItem, rows []Row)
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
 
-	var setClauses []string
+	var (
+		setClauses []string
+	)
+	updateColumnCount := 0
 	for _, col := range item.Columns {
 		if item.isNaturalKeyColumn(col) {
 			continue
 		}
-		setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", col, col))
+		updateColumnCount++
+		param := updateColumnCount
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", col, param))
 	}
 
-	query := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO UPDATE SET %s",
+	keyConditions := make([]string, len(item.NaturalKey))
+	for i, col := range item.NaturalKey {
+		keyConditions[i] = fmt.Sprintf("%s = $%d", col, updateColumnCount+i+1)
+	}
+	cursorParam := updateColumnCount + len(item.NaturalKey) + 1
+	updateQuery := fmt.Sprintf(
+		"UPDATE %s SET %s WHERE %s AND %s < $%d",
+		item.Table,
+		strings.Join(setClauses, ", "),
+		strings.Join(keyConditions, " AND "),
+		item.CursorCol,
+		cursorParam,
+	)
+
+	insertQuery := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES (%s) ON CONFLICT DO NOTHING",
 		item.Table,
 		strings.Join(item.Columns, ", "),
 		strings.Join(placeholders, ", "),
-		strings.Join(item.NaturalKey, ", "),
-		strings.Join(setClauses, ", "),
 	)
+
+	queryArgs := func(item TableSyncItem, row Row) ([]any, error) {
+		args, err := rowArgs(item, row)
+		if err != nil {
+			return nil, err
+		}
+		updateColumnArgs := make([]any, 0, updateColumnCount)
+		naturalKeyArgs := make([]any, 0, len(item.NaturalKey))
+		var cursorArg any
+		argsByColumn := make(map[string]any, len(item.Columns))
+		for i, col := range item.Columns {
+			argsByColumn[col] = args[i]
+			if item.isNaturalKeyColumn(col) {
+				continue
+			}
+			updateColumnArgs = append(updateColumnArgs, args[i])
+			if col == item.CursorCol {
+				cursorArg = args[i]
+			}
+		}
+		for _, col := range item.NaturalKey {
+			naturalKeyArgs = append(naturalKeyArgs, argsByColumn[col])
+		}
+		updateArgs := append(append([]any{}, updateColumnArgs...), naturalKeyArgs...)
+		updateArgs = append(updateArgs, cursorArg)
+		return updateArgs, nil
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -49,8 +93,22 @@ func upsertRows(ctx context.Context, db *sql.DB, item TableSyncItem, rows []Row)
 		if err != nil {
 			return fmt.Errorf("build upsert args for %s: %w", item.ID, err)
 		}
-		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		result, err := tx.ExecContext(ctx, insertQuery, args...)
+		if err != nil {
 			return fmt.Errorf("upsert row for %s: %w", item.ID, err)
+		}
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("inspect upsert result for %s: %w", item.ID, err)
+		}
+		if inserted == 0 {
+			updateArgs, err := queryArgs(item, row)
+			if err != nil {
+				return fmt.Errorf("build update args for %s: %w", item.ID, err)
+			}
+			if _, err := tx.ExecContext(ctx, updateQuery, updateArgs...); err != nil {
+				return fmt.Errorf("update existing row for %s: %w", item.ID, err)
+			}
 		}
 	}
 

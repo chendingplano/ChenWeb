@@ -323,6 +323,14 @@ type ReviewPackageInfo struct {
 	Label string `json:"label"`
 }
 
+// ReviewerPackageInfo describes a user-selectable reviewer package from
+// [doc-reviewer-packages] in doc-review.local.toml.
+type ReviewerPackageInfo struct {
+	Key         string   `json:"key"`
+	Label       string   `json:"label"`
+	AspectNames []string `json:"aspect_names"`
+}
+
 // ReportRow represents a row from kb.doc_review_reports (partial, for listing).
 type ReportRow struct {
 	ID                int64  `json:"id"`
