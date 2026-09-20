@@ -277,7 +277,7 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
     SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
         account_id, currency_code, date_trunc('%s', captured_at) AS hour_started_at, balance_amount
     FROM llm_balance_snapshot
-    WHERE workspace_day = $2
+    WHERE workspace_day = $2 AND entry_kind <> 'deposit'
     ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
 ), pivoted AS (
     SELECT account_id, hour_started_at,
@@ -285,6 +285,10 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
         MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'CNY') AS balance_cny
     FROM latest_per_bucket
     GROUP BY account_id, hour_started_at
+), deposits AS (
+    SELECT account_id, date_trunc('%s', captured_at) AS hour_started_at, SUM(deposit_amount) AS deposit_amount
+    FROM llm_balance_snapshot WHERE workspace_day = $2 AND entry_kind = 'deposit' AND UPPER(currency_code) = 'CNY'
+    GROUP BY account_id, date_trunc('%s', captured_at)
 ), with_previous AS (
     SELECT *, LAG(balance_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_balance_cny
     FROM pivoted
@@ -292,11 +296,12 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
 SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_at,
        report.balance_usd, report.balance_cny,
        CASE WHEN report.previous_balance_cny IS NULL OR report.balance_cny IS NULL THEN NULL
-            ELSE GREATEST(report.previous_balance_cny - report.balance_cny, 0) END AS spending_cny
+            ELSE GREATEST(report.previous_balance_cny + COALESCE(deposits.deposit_amount, 0) - report.balance_cny, 0) END AS spending_cny
 FROM with_previous report
 JOIN llm_account acct ON acct.id = report.account_id
+LEFT JOIN deposits ON deposits.account_id = report.account_id AND deposits.hour_started_at = report.hour_started_at
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
-LIMIT $1`, bucket, bucket, bucket)
+LIMIT $1`, bucket, bucket, bucket, bucket, bucket)
 	rows, err := s.db.QueryContext(ctx, query, limit, workspaceDay)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@
 
 	import {
 		applyLLMAccountsImport,
+		addLLMDeposit,
 		createLLMAccount,
 		importLLMAccountsPreview,
 		listLLMAccounts,
@@ -31,6 +32,8 @@
 	let preview = $state<ImportLLMAccountsPreviewResponse | null>(null);
 	let lastImportResult = $state<ApplyLLMAccountsImportResponse | null>(null);
 	let editingAccountID = $state<string | null>(null);
+	let showDeposit = $state(false);
+	let deposit = $state({ account_id: '', currency_code: 'CNY', deposit_amount: 0, balance_amount: 0, captured_at: '', note: '' });
 
 	let draft = $state<CreateLLMAccountInput>({
 		account_name: '',
@@ -89,6 +92,13 @@
 	onMount(() => {
 		loadAccounts();
 	});
+
+	async function submitDeposit() {
+		submitting = true; error = null;
+		try { await addLLMDeposit({ ...deposit, captured_at: deposit.captured_at ? new Date(deposit.captured_at).toISOString() : '' }); info = 'Deposit recorded.'; showDeposit = false; }
+		catch (err) { error = String((err as Error).message ?? err); }
+		finally { submitting = false; }
+	}
 
 	async function loadAccounts() {
 		loading = true;
@@ -317,8 +327,19 @@
 			>
 				{showCreate ? 'Cancel' : '+ New Account'}
 			</button>
+			<button class="alt-btn" onclick={() => { showDeposit = !showDeposit; showCreate = false; showAddModel = false; }}> {showDeposit ? 'Cancel' : 'Add Deposit'} </button>
 		</div>
 	</header>
+
+	{#if showDeposit}
+		<form class="create-form" onsubmit={(e) => { e.preventDefault(); void submitDeposit(); }}>
+			<h3>Add Deposit</h3>
+			<div class="row two"><label><span>API Key / Account</span><select bind:value={deposit.account_id} required><option value="">Select an API key</option>{#each accounts as account (account.id)}<option value={account.id}>{account.account_name}</option>{/each}</select></label><label><span>Currency</span><select bind:value={deposit.currency_code}><option value="CNY">CNY</option><option value="USD">USD</option></select></label></div>
+			<div class="row two"><label><span>Deposit Amount</span><input type="number" min="0.000001" step="0.01" bind:value={deposit.deposit_amount} required /></label><label><span>Balance After Deposit</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label></div>
+			<div class="row two"><label><span>Timestamp</span><input type="datetime-local" bind:value={deposit.captured_at} /></label><label><span>Note</span><input bind:value={deposit.note} placeholder="Optional reference" /></label></div>
+			<div class="row form-foot"><button class="primary" disabled={submitting}>{submitting ? 'Saving…' : 'Save Deposit'}</button></div>
+		</form>
+	{/if}
 
 	<div class="summary-grid">
 		<div class="summary-card">

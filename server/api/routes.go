@@ -448,6 +448,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// LLM accounts/admin endpoints
 	apiGroup.GET("/llm/accounts", llmadminhandler.ListAccounts)
 	apiGroup.POST("/llm/accounts", llmadminhandler.CreateAccount)
+	apiGroup.POST("/llm/balances/deposits", llmadminhandler.AddDeposit)
 	apiGroup.PUT("/llm/accounts/:id", llmadminhandler.UpdateAccount)
 	apiGroup.POST("/llm/accounts/import-models-toml", llmadminhandler.ImportModelsTOMLPreview)
 	apiGroup.POST("/llm/accounts/import-models-toml/apply", llmadminhandler.ImportModelsTOMLApply)
