@@ -733,7 +733,6 @@
 	.panel-head,
 	.form-foot,
 	.toolbar-actions,
-	.manual-actions,
 	.toggle-row,
 	.preview-columns,
 	.summary-grid,
