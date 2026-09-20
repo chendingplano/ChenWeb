@@ -388,7 +388,7 @@
 			legend: { top: 0, textStyle: { color: sub } },
 			tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
 			grid: { top: 36, right: 30, bottom: 94, left: 70 },
-			xAxis: { type: 'category', data: group.rows.map((row) => fmtDate(row.hour_started_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 45, margin: 16, hideOverlap: true } },
+			xAxis: { type: 'category', data: group.rows.map((row) => fmtBalanceBucket(row.hour_started_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 40, margin: 18, hideOverlap: true } },
 			yAxis: [{ type: 'value', name: 'USD', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { lineStyle: { color: border, opacity: 0.45 } } }, { type: 'value', name: 'CNY', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { show: false } }],
 			series: [
 				{ name: 'Current balance (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.balance_usd) },
@@ -400,6 +400,19 @@
 
 	function balanceChartWidth(group: BalanceChartGroup): string {
 		return `${Math.max(900, group.rows.length * 72)}px`;
+	}
+
+	function fmtBalanceBucket(raw: string): string {
+		const date = new Date(raw);
+		const yyyy = date.getFullYear();
+		const mm = String(date.getMonth() + 1).padStart(2, '0');
+		const dd = String(date.getDate()).padStart(2, '0');
+		if (balanceFrequency === 'daily') return `${yyyy}/${mm}/${dd}`;
+		if (balanceFrequency === 'monthly') return `${yyyy}/${mm}`;
+		const hour = date.getHours();
+		const suffix = hour >= 12 ? 'PM' : 'AM';
+		const hour12 = hour % 12 || 12;
+		return `${yyyy}/${mm}/${dd} ${hour12} ${suffix}`;
 	}
 </script>
 
