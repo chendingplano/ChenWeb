@@ -6,5 +6,6 @@ test('deposit form accepts whole-number amounts and explains timestamp behavior'
 	const source = await readFile(new URL('./llm-accounts-view.svelte', import.meta.url), 'utf8');
 
 	assert.match(source, /<span>Deposit Amount<\/span><input type="number" min="1" step="1"/);
+	assert.match(source, /<span>Balance After Deposit<\/span><input type="number" step="0\.01"/);
 	assert.match(source, /Leave blank to use the current time; use this to backdate a deposit\./);
 });
