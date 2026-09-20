@@ -1,16 +1,13 @@
 package agentservicehandler
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
+
+	sharedllm "github.com/chendingplano/shared/go/api/llm"
 )
 
 type GatewayRunProfile struct {
@@ -29,13 +26,7 @@ type GatewayRunProfile struct {
 }
 
 func MapGatewayProfile(profile PiProfile, permission string) GatewayRunProfile {
-	return GatewayRunProfile{
-		Slug: profile.Slug, Version: profile.Version, Provider: profile.Provider, Model: profile.Model,
-		SystemPrompt: profile.SystemPrompt, ThinkingLevel: profile.ThinkingLevel,
-		PermissionDefault: permission, AllowedTools: append([]string(nil), profile.AllowedTools...),
-		MaxToolCalls: profile.Limits.MaxToolCalls, MaxElapsedMs: profile.Limits.MaxElapsed.Milliseconds(),
-		MaxOutputTokens: profile.Limits.MaxOutputTokens, MaxEvidenceBytes: profile.Limits.MaxEvidenceBytes,
-	}
+	return GatewayRunProfile{Slug: profile.Slug, Version: profile.Version, Provider: profile.Provider, Model: profile.Model, SystemPrompt: profile.SystemPrompt, ThinkingLevel: profile.ThinkingLevel, PermissionDefault: permission, AllowedTools: append([]string(nil), profile.AllowedTools...), MaxToolCalls: profile.Limits.MaxToolCalls, MaxElapsedMs: profile.Limits.MaxElapsed.Milliseconds(), MaxOutputTokens: profile.Limits.MaxOutputTokens, MaxEvidenceBytes: profile.Limits.MaxEvidenceBytes}
 }
 
 type GatewayHistoryMessage struct {
@@ -51,93 +42,33 @@ type GatewayRunRequest struct {
 	Profile        GatewayRunProfile       `json:"profile"`
 	History        []GatewayHistoryMessage `json:"history"`
 }
-
-type PiGatewayClient struct {
-	baseURL *url.URL
-	secret  string
-	client  *http.Client
-}
+type PiGatewayClient struct{ client *sharedllm.PiGatewayClient }
 
 func NewPiGatewayClient(rawURL, secret string, client *http.Client) *PiGatewayClient {
-	if rawURL == "" {
-		rawURL = "http://127.0.0.1:4317"
-	}
-	parsed, _ := url.Parse(rawURL)
-	if client == nil {
-		client = &http.Client{Timeout: 3 * time.Minute}
-	}
-	return &PiGatewayClient{baseURL: parsed, secret: secret, client: client}
+	return &PiGatewayClient{client: sharedllm.NewPiGatewayClient(rawURL, secret, client)}
 }
-
 func (g *PiGatewayClient) available() bool {
-	return g != nil && g.baseURL != nil && (g.baseURL.Scheme == "http" || g.baseURL.Scheme == "https") && g.baseURL.Host != "" && len(g.secret) >= 16 && g.client != nil
+	return g != nil && g.client != nil
 }
-
 func (g *PiGatewayClient) endpoint(path string) string {
-	u := *g.baseURL
+	if g == nil || g.client == nil {
+		return ""
+	}
+	// Preserve the historical test-only helper without owning gateway HTTP.
+	u, _ := url.Parse("http://127.0.0.1:4317")
+	if raw := g.client.BaseURL(); raw != "" {
+		u, _ = url.Parse(raw)
+	}
 	u.Path = strings.TrimRight(u.Path, "/") + path
 	u.RawQuery = ""
 	return u.String()
 }
-
 func (g *PiGatewayClient) Start(ctx context.Context, run GatewayRunRequest) (io.ReadCloser, error) {
-	if !g.available() {
-		return nil, errors.New("Pi gateway unavailable")
-	}
-	encoded, err := json.Marshal(run)
-	if err != nil || len(encoded) > 128*1024 {
-		return nil, errors.New("Pi run request too large")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint("/v1/runs"), bytes.NewReader(encoded))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+g.secret)
-	req.Header.Set("Content-Type", "application/json")
-	response, err := g.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		response.Body.Close()
-		return nil, fmt.Errorf("Pi gateway refused run (%d)", response.StatusCode)
-	}
-	if !strings.HasPrefix(response.Header.Get("Content-Type"), "application/x-ndjson") {
-		response.Body.Close()
-		return nil, errors.New("Pi gateway returned unexpected stream type")
-	}
-	return response.Body, nil
+	return g.client.Start(ctx, sharedllm.PiGatewayRun{RunID: run.RunID, ConversationID: run.ConversationID, UserID: run.UserID, Message: run.Message, Capability: run.Capability, Profile: run.Profile, History: run.History, Capture: &sharedllm.RequestCapture{UserID: run.UserID}})
 }
-
-func (g *PiGatewayClient) postControl(ctx context.Context, path string, payload any) error {
-	if !g.available() {
-		return errors.New("Pi gateway unavailable")
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint(path), bytes.NewReader(encoded))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+g.secret)
-	req.Header.Set("Content-Type", "application/json")
-	response, err := g.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("Pi control refused (%d)", response.StatusCode)
-	}
-	return nil
-}
-
 func (g *PiGatewayClient) Cancel(ctx context.Context, runID string) error {
-	return g.postControl(ctx, "/v1/runs/"+url.PathEscape(runID)+"/cancel", map[string]any{})
+	return g.client.Cancel(ctx, runID)
 }
-
 func (g *PiGatewayClient) Decide(ctx context.Context, runID, requestID string, allowed bool) error {
-	return g.postControl(ctx, "/v1/runs/"+url.PathEscape(runID)+"/permissions/"+url.PathEscape(requestID), map[string]bool{"allowed": allowed})
+	return g.client.Decide(ctx, runID, requestID, allowed)
 }

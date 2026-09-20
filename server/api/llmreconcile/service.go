@@ -3,16 +3,15 @@ package llmreconcile
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	sharedllm "github.com/chendingplano/shared/go/api/llm"
 )
 
 type AccountStore interface {
@@ -173,66 +172,22 @@ type DeepSeekBalanceClient struct {
 	HTTPClient *http.Client
 }
 
-type deepSeekBalanceResponse struct {
-	BalanceInfos []struct {
-		Currency     string `json:"currency"`
-		TotalBalance string `json:"total_balance"`
-	} `json:"balance_infos"`
-}
-
 func (c *DeepSeekBalanceClient) FetchBalance(ctx context.Context, baseURL string, apiKey string) (BalanceFetchResult, error) {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
-		baseURL = "https://api.deepseek.com"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/user/balance", nil)
+	result, err := sharedllm.NewDeepSeekBalanceClient(c.HTTPClient).Fetch(ctx, baseURL, apiKey, nil)
 	if err != nil {
 		return BalanceFetchResult{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := c.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return BalanceFetchResult{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return BalanceFetchResult{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return BalanceFetchResult{}, fmt.Errorf("deepseek balance request failed: status %d", resp.StatusCode)
-	}
-
-	var decoded deepSeekBalanceResponse
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return BalanceFetchResult{}, err
-	}
-	if len(decoded.BalanceInfos) == 0 {
-		return BalanceFetchResult{}, errors.New("deepseek balance response missing balance_infos")
-	}
-
-	selected := decoded.BalanceInfos[0]
-	for _, info := range decoded.BalanceInfos {
-		if strings.EqualFold(info.Currency, "USD") {
-			selected = info
+	selected := result.Balances[0]
+	for _, balance := range result.Balances {
+		if strings.EqualFold(balance.CurrencyCode, "USD") {
+			selected = balance
 			break
 		}
 	}
-
-	balanceAmount, err := strconv.ParseFloat(strings.TrimSpace(selected.TotalBalance), 64)
-	if err != nil {
-		return BalanceFetchResult{}, err
-	}
 	return BalanceFetchResult{
-		BalanceAmount: balanceAmount,
-		CurrencyCode:  firstNonEmpty(selected.Currency, "USD"),
-		RawPayload:    body,
+		BalanceAmount: selected.Amount,
+		CurrencyCode:  firstNonEmpty(selected.CurrencyCode, "USD"),
+		RawPayload:    result.RawPayload,
 	}, nil
 }
 

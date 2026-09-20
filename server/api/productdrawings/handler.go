@@ -14,6 +14,7 @@ import (
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
+	sharedllm "github.com/chendingplano/shared/go/api/llm"
 	"github.com/labstack/echo/v4"
 )
 
@@ -54,7 +55,12 @@ func NewHandler(cfg Config) echo.HandlerFunc {
 			logger.Error("load product drawing prompt failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load drawing prompt"})
 		}
-		img, err := cfg.Provider.Generate(c.Request().Context(), req.Model, prompt)
+		userID := ""
+		if user := rc.IsAuthenticated(); user != nil {
+			userID = strings.TrimSpace(user.UserId)
+		}
+		ctx := sharedllm.WithImageRequestCapture(c.Request().Context(), &sharedllm.RequestCapture{UserID: userID})
+		img, err := cfg.Provider.Generate(ctx, req.Model, prompt)
 		if err != nil {
 			logger.Error("product drawing generation failed", "err", err)
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "image generation failed"})
@@ -138,7 +144,12 @@ func GeneratePending(c echo.Context) error {
 	}
 	req.Prompt = prompt
 	modelName := modelNameForSelection(selection)
-	img, err := cfg.Provider.Generate(c.Request().Context(), selection, prompt)
+	userID := ""
+	if user := rc.IsAuthenticated(); user != nil {
+		userID = strings.TrimSpace(user.UserId)
+	}
+	ctx := sharedllm.WithImageRequestCapture(c.Request().Context(), &sharedllm.RequestCapture{UserID: userID})
+	img, err := cfg.Provider.Generate(ctx, selection, prompt)
 	if err != nil {
 		logger.Error("pending product drawing generation failed", "err", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "image generation failed"})
@@ -330,4 +341,4 @@ func writeExclusive(path string, content []byte) error {
 	return file.Close()
 }
 
-var _ ImageProvider = (*openAIProvider)(nil)
+var _ ImageProvider = (*sharedImageProvider)(nil)
