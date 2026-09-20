@@ -101,9 +101,9 @@ export type LLMHourlyBalanceReport = {
 	account_name: string;
 	provider: string;
 	hour_started_at: string;
-	balance_usd: number;
-	balance_cny: number;
-	spending_cny: number;
+	balance_usd: number | null;
+	balance_cny: number | null;
+	spending_cny: number | null;
 };
 
 export type LLMTodaySummary = {

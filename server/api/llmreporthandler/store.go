@@ -78,9 +78,9 @@ type HourlyBalanceReport struct {
 	AccountName   string    `json:"account_name"`
 	Provider      string    `json:"provider"`
 	HourStartedAt time.Time `json:"hour_started_at"`
-	BalanceUSD    float64   `json:"balance_usd"`
-	BalanceCNY    float64   `json:"balance_cny"`
-	SpendingCNY   float64   `json:"spending_cny"`
+	BalanceUSD    *float64  `json:"balance_usd"`
+	BalanceCNY    *float64  `json:"balance_cny"`
+	SpendingCNY   *float64  `json:"spending_cny"`
 }
 
 type ModelActivityReport struct {
@@ -274,8 +274,8 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int) ([]Hour
     ORDER BY account_id, currency_code, date_trunc('hour', captured_at), captured_at DESC
 ), pivoted AS (
     SELECT account_id, hour_started_at,
-        COALESCE(MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'USD'), 0) AS balance_usd,
-        COALESCE(MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'CNY'), 0) AS balance_cny
+        MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'USD') AS balance_usd,
+        MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'CNY') AS balance_cny
     FROM latest_per_hour
     GROUP BY account_id, hour_started_at
 ), with_previous AS (
@@ -284,7 +284,8 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int) ([]Hour
 )
 SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_at,
        report.balance_usd, report.balance_cny,
-       GREATEST(COALESCE(report.previous_balance_cny - report.balance_cny, 0), 0) AS spending_cny
+       CASE WHEN report.previous_balance_cny IS NULL OR report.balance_cny IS NULL THEN NULL
+            ELSE GREATEST(report.previous_balance_cny - report.balance_cny, 0) END AS spending_cny
 FROM with_previous report
 JOIN llm_account acct ON acct.id = report.account_id
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
@@ -297,8 +298,18 @@ LIMIT $1`
 	out := []HourlyBalanceReport{}
 	for rows.Next() {
 		var row HourlyBalanceReport
-		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.HourStartedAt, &row.BalanceUSD, &row.BalanceCNY, &row.SpendingCNY); err != nil {
+		var usd, cny, spend sql.NullFloat64
+		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.HourStartedAt, &usd, &cny, &spend); err != nil {
 			return nil, err
+		}
+		if usd.Valid {
+			row.BalanceUSD = &usd.Float64
+		}
+		if cny.Valid {
+			row.BalanceCNY = &cny.Float64
+		}
+		if spend.Valid {
+			row.SpendingCNY = &spend.Float64
 		}
 		out = append(out, row)
 	}
