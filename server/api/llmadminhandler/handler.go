@@ -5,16 +5,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/llmimport"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 type depositRequest struct {
-	AccountID     string  `json:"account_id"`
+	APIKeyName    string  `json:"api_key_name"`
 	CurrencyCode  string  `json:"currency_code"`
 	DepositAmount float64 `json:"deposit_amount"`
 	BalanceAmount float64 `json:"balance_amount"`
@@ -23,15 +25,31 @@ type depositRequest struct {
 }
 
 func AddDeposit(c echo.Context) error {
-	if ApiTypes.ProjectDBHandle == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": "project database is not initialized"})
-	}
 	var in depositRequest
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid deposit"})
 	}
-	if strings.TrimSpace(in.AccountID) == "" || strings.TrimSpace(in.CurrencyCode) == "" || in.DepositAmount <= 0 {
-		return c.JSON(http.StatusBadRequest, map[string]any{"message": "account, currency, and a positive deposit amount are required"})
+	if strings.TrimSpace(in.APIKeyName) == "" || strings.TrimSpace(in.CurrencyCode) == "" || in.DepositAmount <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "API key, currency, and a positive deposit amount are required"})
+	}
+	apiKeyRefs, err := loadDepositAPIKeyRefs()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "failed to read configured API keys", "error": err.Error()})
+	}
+	apiKeyRef, ok := apiKeyRefs[strings.TrimSpace(in.APIKeyName)]
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "selected API key is not configured"})
+	}
+	store := adminStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": "project database is not initialized"})
+	}
+	accountID, err := store.FindAccountIDByAPIKeyRef(c.Request().Context(), apiKeyRef)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to find account for API key", "error": err.Error()})
+	}
+	if accountID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "no matching account exists for the selected API key"})
 	}
 	captured := time.Now().UTC()
 	if strings.TrimSpace(in.CapturedAt) != "" {
@@ -41,11 +59,52 @@ func AddDeposit(c echo.Context) error {
 		}
 		captured = parsed
 	}
-	_, err := ApiTypes.ProjectDBHandle.ExecContext(c.Request().Context(), `INSERT INTO llm_balance_snapshot (account_id,captured_at,workspace_day,balance_amount,currency_code,capture_source,raw_payload_ref,entry_kind,deposit_amount,note) VALUES ($1,$2,$3,$4,$5,'admin_deposit','', 'deposit',$6,$7)`, in.AccountID, captured, captured, in.BalanceAmount, strings.ToUpper(in.CurrencyCode), in.DepositAmount, strings.TrimSpace(in.Note))
-	if err != nil {
+	if err := store.AddDeposit(c.Request().Context(), depositRecord{AccountID: accountID, CapturedAt: captured, CurrencyCode: strings.ToUpper(in.CurrencyCode), DepositAmount: in.DepositAmount, BalanceAmount: in.BalanceAmount, Note: strings.TrimSpace(in.Note)}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to save deposit", "error": err.Error()})
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"ok": true})
+}
+
+type modelAPIKeyConfig struct {
+	ModelAPIKeys map[string][]struct {
+		APIKey string `toml:"api_key"`
+	} `toml:"model-api-keys"`
+}
+
+func loadDepositAPIKeyRefs() (map[string]string, error) {
+	path := strings.TrimSpace(os.Getenv("CHENWEB_MODELS_TOML"))
+	if path == "" {
+		path = filepath.Join(".", ".models.toml")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var config modelAPIKeyConfig
+	if err := toml.Unmarshal(raw, &config); err != nil {
+		return nil, err
+	}
+	refs := make(map[string]string, len(config.ModelAPIKeys))
+	for name, entries := range config.ModelAPIKeys {
+		if len(entries) == 0 || strings.TrimSpace(entries[0].APIKey) == "" {
+			continue
+		}
+		refs[name] = strings.TrimSpace(entries[0].APIKey)
+	}
+	return refs, nil
+}
+
+func ListDepositAPIKeys(c echo.Context) error {
+	refs, err := loadDepositAPIKeyRefs()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "failed to read configured API keys", "error": err.Error()})
+	}
+	names := make([]string, 0, len(refs))
+	for name := range refs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return c.JSON(http.StatusOK, map[string]any{"api_keys": names})
 }
 
 type accountAdminStore interface {
@@ -57,6 +116,8 @@ type accountAdminStore interface {
 	CreateProfile(ctx context.Context, in CreateProfileInput) (ModelProfile, error)
 	UpdateProfile(ctx context.Context, id string, in CreateProfileInput) (ModelProfile, error)
 	UpsertAccountAndProfile(ctx context.Context, accountIn CreateAccountInput, profileIn CreateProfileInput) (ModelProfile, error)
+	FindAccountIDByAPIKeyRef(ctx context.Context, apiKeyRef string) (string, error)
+	AddDeposit(ctx context.Context, in depositRecord) error
 }
 
 var adminStoreFactory = func() accountAdminStore {

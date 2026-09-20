@@ -6,6 +6,7 @@
 		addLLMDeposit,
 		createLLMAccount,
 		importLLMAccountsPreview,
+		listDepositAPIKeys,
 		listLLMAccounts,
 		updateLLMAccount,
 		type ApplyLLMAccountsImportResponse,
@@ -22,6 +23,7 @@
 	} = $props();
 
 	let accounts = $state<LLMAccount[]>([]);
+	let depositAPIKeys = $state<string[]>([]);
 	let loading = $state(false);
 	let submitting = $state(false);
 	let importing = $state(false);
@@ -33,7 +35,7 @@
 	let lastImportResult = $state<ApplyLLMAccountsImportResponse | null>(null);
 	let editingAccountID = $state<string | null>(null);
 	let showDeposit = $state(false);
-	let deposit = $state({ account_id: '', currency_code: 'CNY', deposit_amount: 0, balance_amount: 0, captured_at: '', note: '' });
+	let deposit = $state({ api_key_name: '', currency_code: 'CNY', deposit_amount: 0, balance_amount: 0, captured_at: '', note: '' });
 
 	let draft = $state<CreateLLMAccountInput>({
 		account_name: '',
@@ -91,6 +93,7 @@
 
 	onMount(() => {
 		loadAccounts();
+		loadDepositAPIKeys();
 	});
 
 	async function submitDeposit() {
@@ -110,6 +113,14 @@
 			error = String((err as Error).message ?? err);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadDepositAPIKeys() {
+		try {
+			depositAPIKeys = (await listDepositAPIKeys()).api_keys;
+		} catch (err) {
+			error = String((err as Error).message ?? err);
 		}
 	}
 
@@ -281,6 +292,8 @@
 	const altBtn = $derived(darkMode ? '#818CF8' : '#6366F1');
 	const inputBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
 	const panelBg = $derived(darkMode ? '#151A29' : '#FDFDFD');
+	const selectBorder = $derived(darkMode ? '#4B5872' : '#9CA3AF');
+	const selectColorScheme = $derived(darkMode ? 'dark' : 'light');
 </script>
 
 <div
@@ -294,6 +307,8 @@
 	style:--alt-btn={altBtn}
 	style:--input-bg={inputBg}
 	style:--panel-bg={panelBg}
+	style:--select-border={selectBorder}
+	style:--select-color-scheme={selectColorScheme}
 >
 	<header class="toolbar">
 		<div>
@@ -334,7 +349,7 @@
 	{#if showDeposit}
 		<form class="create-form" onsubmit={(e) => { e.preventDefault(); void submitDeposit(); }}>
 			<h3>Add Deposit</h3>
-			<div class="row two"><label><span>API Key / Account</span><select bind:value={deposit.account_id} required><option value="">Select an API key</option>{#each accounts as account (account.id)}<option value={account.id}>{account.account_name}</option>{/each}</select></label><label><span>Currency</span><select bind:value={deposit.currency_code}><option value="CNY">CNY</option><option value="USD">USD</option></select></label></div>
+			<div class="row two"><label><span>API Key</span><select bind:value={deposit.api_key_name} required><option value="">Select an API key</option>{#each depositAPIKeys as apiKey (apiKey)}<option value={apiKey}>{apiKey}</option>{/each}</select></label><label><span>Currency</span><select bind:value={deposit.currency_code}><option value="CNY">CNY</option><option value="USD">USD</option></select></label></div>
 			<div class="row two"><label><span>Deposit Amount</span><input type="number" min="0.000001" step="0.01" bind:value={deposit.deposit_amount} required /></label><label><span>Balance After Deposit</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label></div>
 			<div class="row two"><label><span>Timestamp</span><input type="datetime-local" bind:value={deposit.captured_at} /></label><label><span>Note</span><input bind:value={deposit.note} placeholder="Optional reference" /></label></div>
 			<div class="row form-foot"><button class="primary" disabled={submitting}>{submitting ? 'Saving…' : 'Save Deposit'}</button></div>
@@ -868,7 +883,8 @@
 		font-size: 12px;
 		color: var(--sub);
 	}
-	input {
+	input,
+	select {
 		background: var(--input-bg);
 		color: var(--heading);
 		border: 1px solid var(--border);
@@ -876,6 +892,10 @@
 		padding: 8px 10px;
 		font-size: 13px;
 		font-family: inherit;
+	}
+	select {
+		border-color: var(--select-border);
+		color-scheme: var(--select-color-scheme);
 	}
 	.toggle-row {
 		align-items: center;

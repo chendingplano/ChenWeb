@@ -39,7 +39,8 @@ export type ApplyLLMAccountsImportResponse = {
 	accounts_imported: number;
 	profiles_imported: number;
 };
-export type AddLLMDepositInput = { account_id: string; currency_code: string; deposit_amount: number; balance_amount: number; captured_at: string; note: string };
+export type ListDepositAPIKeysResponse = { api_keys: string[] };
+export type AddLLMDepositInput = { api_key_name: string; currency_code: string; deposit_amount: number; balance_amount: number; captured_at: string; note: string };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, {
@@ -95,6 +96,10 @@ export function applyLLMAccountsImport(): Promise<ApplyLLMAccountsImportResponse
 	return req<ApplyLLMAccountsImportResponse>('/api/v1/llm/accounts/import-models-toml/apply', {
 		method: 'POST'
 	});
+}
+
+export function listDepositAPIKeys(): Promise<ListDepositAPIKeysResponse> {
+	return req<ListDepositAPIKeysResponse>('/api/v1/llm/deposit-api-keys');
 }
 
 export function addLLMDeposit(input: AddLLMDepositInput): Promise<{ ok: boolean }> {

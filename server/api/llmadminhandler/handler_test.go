@@ -27,6 +27,10 @@ type stubAdminStore struct {
 	importResult         ImportResult
 	importErr            error
 	lastImportParsed     int
+	accountIDByAPIKeyRef string
+	findAccountErr       error
+	lastDeposit          depositRecord
+	addDepositErr        error
 }
 
 func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
@@ -63,6 +67,15 @@ func (s *stubAdminStore) UpdateProfile(_ context.Context, _ string, _ CreateProf
 
 func (s *stubAdminStore) UpsertAccountAndProfile(_ context.Context, _ CreateAccountInput, _ CreateProfileInput) (ModelProfile, error) {
 	return ModelProfile{}, nil
+}
+
+func (s *stubAdminStore) FindAccountIDByAPIKeyRef(_ context.Context, _ string) (string, error) {
+	return s.accountIDByAPIKeyRef, s.findAccountErr
+}
+
+func (s *stubAdminStore) AddDeposit(_ context.Context, in depositRecord) error {
+	s.lastDeposit = in
+	return s.addDepositErr
 }
 
 func TestImportModelsTOMLPreviewReturnsParsedAccountsAndProfiles(t *testing.T) {
@@ -272,5 +285,71 @@ timeout_sec = 200
 	}
 	if !strings.Contains(rec.Body.String(), `"accounts_imported":1`) {
 		t.Fatalf("unexpected body = %s", rec.Body.String())
+	}
+}
+
+func TestListDepositAPIKeysReturnsNamesWithoutSecrets(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, ".models.toml")
+	if err := os.WriteFile(modelsPath, []byte("[model-api-keys]\nqwen = [{ api_key = 'secret-qwen' }]\ndeepseek-chen = [{ api_key = 'secret-deepseek' }]\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("CHENWEB_MODELS_TOML", modelsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/deposit-api-keys", nil)
+	rec := httptest.NewRecorder()
+	if err := ListDepositAPIKeys(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListDepositAPIKeys() error = %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deepseek-chen"`) || strings.Contains(rec.Body.String(), "secret-") {
+		t.Fatalf("unexpected response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAddDepositResolvesConfiguredAPIKeyToFirstMatchingAccount(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, ".models.toml")
+	if err := os.WriteFile(modelsPath, []byte("[model-api-keys]\ndeepseek-chen = [{ api_key = 'secret-deepseek' }]\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("CHENWEB_MODELS_TOML", modelsPath)
+	prev := adminStoreFactory
+	t.Cleanup(func() { adminStoreFactory = prev })
+	store := &stubAdminStore{accountIDByAPIKeyRef: "acct_first"}
+	adminStoreFactory = func() accountAdminStore { return store }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/llm/balances/deposits", strings.NewReader(`{"api_key_name":"deepseek-chen","currency_code":"cny","deposit_amount":10,"balance_amount":25}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := AddDeposit(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("AddDeposit() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated || store.lastDeposit.AccountID != "acct_first" || store.lastDeposit.CurrencyCode != "CNY" {
+		t.Fatalf("unexpected result: status=%d deposit=%+v", rec.Code, store.lastDeposit)
+	}
+}
+
+func TestAddDepositRejectsConfiguredAPIKeyWithoutMatchingAccount(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, ".models.toml")
+	if err := os.WriteFile(modelsPath, []byte("[model-api-keys]\nqwen = [{ api_key = 'secret-qwen' }]\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("CHENWEB_MODELS_TOML", modelsPath)
+	prev := adminStoreFactory
+	t.Cleanup(func() { adminStoreFactory = prev })
+	adminStoreFactory = func() accountAdminStore { return &stubAdminStore{} }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/llm/balances/deposits", strings.NewReader(`{"api_key_name":"qwen","currency_code":"USD","deposit_amount":10,"balance_amount":25}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := AddDeposit(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("AddDeposit() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "matching account") {
+		t.Fatalf("unexpected response: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

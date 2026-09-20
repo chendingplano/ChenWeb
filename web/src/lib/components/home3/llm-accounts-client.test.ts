@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
 	createLLMAccount,
 	applyLLMAccountsImport,
+	addLLMDeposit,
+	listDepositAPIKeys,
 	importLLMAccountsPreview,
 	listLLMAccounts,
 	updateLLMAccount,
@@ -228,6 +230,26 @@ test('applyLLMAccountsImport calls the bootstrap apply endpoint', async () => {
 		assert.equal(mock.calls[0].init?.method, 'POST');
 		assert.equal(result.accounts_imported, 2);
 		assert.equal(result.profiles_imported, 3);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('deposit API key options and submission use names instead of account IDs', async () => {
+	const mock = installFetchMock(async (call) => {
+		if (String(call.input) === '/api/v1/llm/deposit-api-keys') {
+			return Response.json({ api_keys: ['deepseek-chen', 'qwen'] });
+		}
+		return Response.json({ ok: true }, { status: 201 });
+	});
+
+	try {
+		const options = await listDepositAPIKeys();
+		await addLLMDeposit({ api_key_name: 'deepseek-chen', currency_code: 'CNY', deposit_amount: 10, balance_amount: 25, captured_at: '', note: '' });
+
+		assert.deepEqual(options.api_keys, ['deepseek-chen', 'qwen']);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/deposit-api-keys');
+		assert.deepEqual(JSON.parse(String(mock.calls[1].init?.body)), { api_key_name: 'deepseek-chen', currency_code: 'CNY', deposit_amount: 10, balance_amount: 25, captured_at: '', note: '' });
 	} finally {
 		mock.restore();
 	}

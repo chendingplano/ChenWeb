@@ -41,8 +41,31 @@ type ImportResult struct {
 	ProfilesImported int `json:"profiles_imported"`
 }
 
+type depositRecord struct {
+	AccountID     string
+	CurrencyCode  string
+	DepositAmount float64
+	BalanceAmount float64
+	CapturedAt    time.Time
+	Note          string
+}
+
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
+}
+
+func (s *Store) FindAccountIDByAPIKeyRef(ctx context.Context, apiKeyRef string) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM llm_account WHERE api_key_ref = $1 ORDER BY created_at ASC, id ASC LIMIT 1`, apiKeyRef).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+
+func (s *Store) AddDeposit(ctx context.Context, in depositRecord) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO llm_balance_snapshot (account_id,captured_at,workspace_day,balance_amount,currency_code,capture_source,raw_payload_ref,entry_kind,deposit_amount,note) VALUES ($1,$2,$3,$4,$5,'admin_deposit','', 'deposit',$6,$7)`, in.AccountID, in.CapturedAt, in.CapturedAt, in.BalanceAmount, in.CurrencyCode, in.DepositAmount, in.Note)
+	return err
 }
 
 func (s *Store) ListAccounts(ctx context.Context) ([]Account, error) {
