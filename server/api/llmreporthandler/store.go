@@ -70,6 +70,19 @@ type BalanceHistory struct {
 	CurrencyCode  string    `json:"currency_code"`
 }
 
+// HourlyBalanceReport combines the two official balance currencies with the
+// CNY spending derived from the immediately preceding hourly CNY balance.
+// It never allocates an account balance to a model.
+type HourlyBalanceReport struct {
+	AccountID     string    `json:"account_id"`
+	AccountName   string    `json:"account_name"`
+	Provider      string    `json:"provider"`
+	HourStartedAt time.Time `json:"hour_started_at"`
+	BalanceUSD    float64   `json:"balance_usd"`
+	BalanceCNY    float64   `json:"balance_cny"`
+	SpendingCNY   float64   `json:"spending_cny"`
+}
+
 type ModelActivityReport struct {
 	Provider              string  `json:"provider"`
 	ModelName             string  `json:"model_name"`
@@ -246,6 +259,45 @@ LIMIT $1`
 	for rows.Next() {
 		var row BalanceHistory
 		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.CapturedAt, &row.BalanceAmount, &row.CurrencyCode); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int) ([]HourlyBalanceReport, error) {
+	const query = `WITH latest_per_hour AS (
+    SELECT DISTINCT ON (account_id, currency_code, date_trunc('hour', captured_at))
+        account_id, currency_code, date_trunc('hour', captured_at) AS hour_started_at, balance_amount
+    FROM llm_balance_snapshot
+    ORDER BY account_id, currency_code, date_trunc('hour', captured_at), captured_at DESC
+), pivoted AS (
+    SELECT account_id, hour_started_at,
+        COALESCE(MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'USD'), 0) AS balance_usd,
+        COALESCE(MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'CNY'), 0) AS balance_cny
+    FROM latest_per_hour
+    GROUP BY account_id, hour_started_at
+), with_previous AS (
+    SELECT *, LAG(balance_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_balance_cny
+    FROM pivoted
+)
+SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_at,
+       report.balance_usd, report.balance_cny,
+       GREATEST(COALESCE(report.previous_balance_cny - report.balance_cny, 0), 0) AS spending_cny
+FROM with_previous report
+JOIN llm_account acct ON acct.id = report.account_id
+ORDER BY report.hour_started_at DESC, acct.account_name ASC
+LIMIT $1`
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HourlyBalanceReport{}
+	for rows.Next() {
+		var row HourlyBalanceReport
+		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.HourStartedAt, &row.BalanceUSD, &row.BalanceCNY, &row.SpendingCNY); err != nil {
 			return nil, err
 		}
 		out = append(out, row)

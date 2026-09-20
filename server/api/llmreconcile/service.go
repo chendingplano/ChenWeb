@@ -16,6 +16,7 @@ import (
 
 type AccountStore interface {
 	ListDeepSeekReconciliationAccounts(ctx context.Context) ([]Account, error)
+	ClaimHourlyBalanceCapture(ctx context.Context, accountID string, hour time.Time) (bool, error)
 	InsertBalanceSnapshot(ctx context.Context, snap BalanceSnapshot) error
 	LatestBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error)
 	FirstBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error)
@@ -39,12 +40,12 @@ type Balance struct {
 }
 
 type Runner struct {
-	Store        AccountStore
-	BalanceAPI   BalanceFetcher
-	ArchiveRoot  string
-	WorkspaceTZ  *time.Location
-	TimezoneName string
-	Now          func() time.Time
+	Store         AccountStore
+	BalanceAPI    BalanceFetcher
+	ArchiveRoot   string
+	WorkspaceTZ   *time.Location
+	TimezoneName  string
+	Now           func() time.Time
 	CaptureSource string
 }
 
@@ -80,6 +81,13 @@ func (r *Runner) RunWithResult(ctx context.Context) (RunResult, error) {
 	result := RunResult{AccountsConsidered: len(accounts)}
 
 	for _, account := range accounts {
+		claimed, err := r.Store.ClaimHourlyBalanceCapture(ctx, account.ID, capturedAt.In(loc).Truncate(time.Hour).UTC())
+		if err != nil {
+			return RunResult{}, err
+		}
+		if !claimed {
+			continue
+		}
 		balance, err := r.BalanceAPI.FetchBalance(ctx, account.BaseURL, account.APIKeyRef)
 		if err != nil {
 			return RunResult{}, err
@@ -220,7 +228,7 @@ func (c *DeepSeekBalanceClient) FetchBalance(ctx context.Context, baseURL string
 			}
 			return out
 		}(),
-		RawPayload:    result.RawPayload,
+		RawPayload: result.RawPayload,
 	}, nil
 }
 

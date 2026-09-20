@@ -57,7 +57,7 @@ func TestStoreInsertBalanceSnapshot(t *testing.T) {
 
 	capturedAt := time.Date(2026, 6, 20, 7, 0, 0, 0, time.UTC)
 	workspaceDay := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
-mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_balance_snapshot (
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_balance_snapshot (
     account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
@@ -242,6 +242,10 @@ type sqlNoRowsStore struct{}
 
 func (sqlNoRowsStore) ListDeepSeekReconciliationAccounts(context.Context) ([]Account, error) {
 	return nil, nil
+}
+
+func (sqlNoRowsStore) ClaimHourlyBalanceCapture(context.Context, string, time.Time) (bool, error) {
+	return true, nil
 }
 
 func (sqlNoRowsStore) InsertBalanceSnapshot(context.Context, BalanceSnapshot) error {

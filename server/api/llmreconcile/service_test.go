@@ -21,6 +21,10 @@ func (s *fakeStore) ListDeepSeekReconciliationAccounts(context.Context) ([]Accou
 	return s.accounts, nil
 }
 
+func (s *fakeStore) ClaimHourlyBalanceCapture(context.Context, string, time.Time) (bool, error) {
+	return true, nil
+}
+
 func (s *fakeStore) InsertBalanceSnapshot(_ context.Context, snap BalanceSnapshot) error {
 	s.insertedSnapshots = append(s.insertedSnapshots, snap)
 	key := snap.AccountID + "|" + snap.WorkspaceDay.Format("2006-01-02")
@@ -68,10 +72,10 @@ func TestRunnerRunPersistsEveryDeepSeekCurrency(t *testing.T) {
 	now := time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
 	store := &fakeStore{accounts: []Account{{ID: "acct_1", BaseURL: "https://api.deepseek.com", APIKeyRef: "secret"}}}
 	runner := &Runner{
-		Store: store,
-		BalanceAPI: fakeBalanceFetcher{result: BalanceFetchResult{Balances: []Balance{{Amount: 100.00, CurrencyCode: "CNY"}, {Amount: 10.00, CurrencyCode: "USD"}}, RawPayload: []byte(`{"balance_infos":[]}`)}},
+		Store:       store,
+		BalanceAPI:  fakeBalanceFetcher{result: BalanceFetchResult{Balances: []Balance{{Amount: 100.00, CurrencyCode: "CNY"}, {Amount: 10.00, CurrencyCode: "USD"}}, RawPayload: []byte(`{"balance_infos":[]}`)}},
 		WorkspaceTZ: time.UTC,
-		Now: func() time.Time { return now },
+		Now:         func() time.Time { return now },
 	}
 
 	if err := runner.Run(context.Background()); err != nil {

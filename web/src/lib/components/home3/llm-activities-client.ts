@@ -96,6 +96,16 @@ export type LLMCurrentBalance = {
 
 export type LLMBalanceHistory = Omit<LLMCurrentBalance, 'workspace_day'>;
 
+export type LLMHourlyBalanceReport = {
+	account_id: string;
+	account_name: string;
+	provider: string;
+	hour_started_at: string;
+	balance_usd: number;
+	balance_cny: number;
+	spending_cny: number;
+};
+
 export type LLMTodaySummary = {
 	workspace_day: string;
 	timezone_name: string;
@@ -124,6 +134,7 @@ export type ListLLMCurrentBalancesResponse = {
 };
 
 export type ListLLMBalanceHistoryResponse = { balances: LLMBalanceHistory[] };
+export type ListLLMHourlyBalanceReportsResponse = { reports: LLMHourlyBalanceReport[] };
 
 export type GetLLMTodaySummaryResponse = {
 	summary: LLMTodaySummary;
@@ -200,6 +211,10 @@ export function listLLMCurrentBalances(limit = 20): Promise<ListLLMCurrentBalanc
 
 export function listLLMBalanceHistory(limit = 24 * 14): Promise<ListLLMBalanceHistoryResponse> {
 	return req<ListLLMBalanceHistoryResponse>(`/api/v1/llm/balances/history?limit=${limit}`);
+}
+
+export function listLLMHourlyBalanceReports(limit = 24 * 14): Promise<ListLLMHourlyBalanceReportsResponse> {
+	return req<ListLLMHourlyBalanceReportsResponse>(`/api/v1/llm/balances/hourly?limit=${limit}`);
 }
 
 export function getLLMTodaySummary(): Promise<GetLLMTodaySummaryResponse> {

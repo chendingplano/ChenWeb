@@ -10,13 +10,13 @@
 
 	import {
 		getLLMTodaySummary,
-		listLLMBalanceHistory,
+		listLLMHourlyBalanceReports,
 		listLLMCurrentBalances,
 		listLLMModelActivityReports,
 		listLLMUsageEvents,
 		runLLMReconciliationNow,
 		type LLMCurrentBalance,
-		type LLMBalanceHistory,
+		type LLMHourlyBalanceReport,
 		type LLMModelActivityReport,
 		type LLMReportFilters,
 		type LLMTodaySummary,
@@ -33,7 +33,7 @@
 
 	let modelReports = $state<LLMModelActivityReport[]>([]);
 	let balances = $state<LLMCurrentBalance[]>([]);
-	let balanceHistory = $state<LLMBalanceHistory[]>([]);
+	let hourlyBalanceReports = $state<LLMHourlyBalanceReport[]>([]);
 	let usageEvents = $state<LLMUsageEvent[]>([]);
 	let todaySummary = $state<LLMTodaySummary>({
 		workspace_day: '',
@@ -79,17 +79,17 @@
 			notice = null;
 		}
 		try {
-			const [summaryResponse, balancesResponse, historyResponse, reportsResponse, eventsResponse] =
+			const [summaryResponse, balancesResponse, hourlyResponse, reportsResponse, eventsResponse] =
 				await Promise.all([
 					getLLMTodaySummary(),
 					listLLMCurrentBalances(),
-					listLLMBalanceHistory(),
+					listLLMHourlyBalanceReports(),
 					listLLMModelActivityReports(reportLimit, getReportFilters()),
 					listLLMUsageEvents(eventLimit)
 				]);
 			todaySummary = summaryResponse.summary;
 			balances = balancesResponse.balances;
-			balanceHistory = historyResponse.balances;
+			hourlyBalanceReports = hourlyResponse.reports;
 			modelReports = reportsResponse.reports;
 			apiKeyOptions = reportsResponse.api_keys || [];
 			usageEvents = eventsResponse.usage_events;
@@ -366,24 +366,29 @@
 		};
 	}
 
-	type BalanceChartGroup = { key: string; accountName: string; currencyCode: string; rows: LLMBalanceHistory[] };
+	type BalanceChartGroup = { key: string; accountName: string; rows: LLMHourlyBalanceReport[] };
 	const balanceChartGroups = $derived((() => {
 		const grouped = new SvelteMap<string, BalanceChartGroup>();
-		for (const row of balanceHistory) {
-			const key = `${row.account_id}:${row.currency_code}`;
-			const group = grouped.get(key) ?? { key, accountName: row.account_name, currencyCode: row.currency_code, rows: [] };
+		for (const row of hourlyBalanceReports) {
+			const key = row.account_id;
+			const group = grouped.get(key) ?? { key, accountName: row.account_name, rows: [] };
 			group.rows.push(row); grouped.set(key, group);
 		}
-		return Array.from(grouped.values()).map((group) => ({ ...group, rows: [...group.rows].sort((a, b) => a.captured_at.localeCompare(b.captured_at)) }));
+		return Array.from(grouped.values()).map((group) => ({ ...group, rows: [...group.rows].sort((a, b) => a.hour_started_at.localeCompare(b.hour_started_at)) }));
 	})());
 
 	function buildBalanceChartOptions(group: BalanceChartGroup): EChartsOption {
-		return { backgroundColor: 'transparent', animationDuration: 250, color: ['#14B8A6'],
-			tooltip: { trigger: 'axis', backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
+		return { backgroundColor: 'transparent', animationDuration: 250, color: ['#38BDF8', '#14B8A6', spendBar],
+			legend: { top: 0, textStyle: { color: sub } },
+			tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
 			grid: { top: 28, right: 30, bottom: 58, left: 70 },
-			xAxis: { type: 'category', data: group.rows.map((row) => fmtDate(row.captured_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 35 } },
-			yAxis: { type: 'value', name: `Official balance (${group.currencyCode})`, nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { lineStyle: { color: border, opacity: 0.45 } } },
-			series: [{ name: 'Official balance', type: 'bar', barMaxWidth: 20, data: group.rows.map((row) => row.balance_amount) }]
+			xAxis: { type: 'category', data: group.rows.map((row) => fmtDate(row.hour_started_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 35 } },
+			yAxis: [{ type: 'value', name: 'USD', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { lineStyle: { color: border, opacity: 0.45 } } }, { type: 'value', name: 'CNY', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { show: false } }],
+			series: [
+				{ name: 'Current balance (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.balance_usd) },
+				{ name: 'Current balance (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.balance_cny) },
+				{ name: 'Spending (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.spending_cny) }
+			]
 		};
 	}
 </script>
@@ -504,11 +509,11 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Official Account Balance</h3>
-				<p class="muted">Provider-reported DeepSeek balance by API key and currency. This is an account track, not a per-model allocation.</p>
+				<h3>Official Account Balance and Hourly Spending</h3>
+				<p class="muted">Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from the preceding hourly snapshot; balance increases are shown as zero spending.</p>
 			</div>
 		</div>
-		{#if loading && balanceHistory.length === 0}
+		{#if loading && hourlyBalanceReports.length === 0}
 			<div class="empty">Loading official balance history…</div>
 		{:else if balanceChartGroups.length === 0}
 			<div class="empty">No official balance history yet. Hourly snapshots will appear here after the next capture.</div>
@@ -516,7 +521,7 @@
 			<div class="model-chart-grid">
 				{#each balanceChartGroups as group (group.key)}
 					<div class="model-chart-card">
-						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance · {group.currencyCode}</div></div></div>
+						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance and hourly spending</div></div></div>
 						<div class="model-chart"><Chart {init} options={buildBalanceChartOptions(group)} style="width: 100%; height: 100%;" /></div>
 					</div>
 				{/each}

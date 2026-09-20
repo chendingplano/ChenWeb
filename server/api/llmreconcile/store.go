@@ -73,8 +73,26 @@ ORDER BY account_name ASC`
 	return out, rows.Err()
 }
 
+// ClaimHourlyBalanceCapture makes the provider balance read idempotent for an
+// account/hour. Manual reconciliation therefore cannot create a burst of paid
+// balance reads or misleading sub-hourly chart points.
+func (s *Store) ClaimHourlyBalanceCapture(ctx context.Context, accountID string, hour time.Time) (bool, error) {
+	const stmt = `INSERT INTO llm_balance_capture_slot (account_id, scheduled_hour)
+VALUES ($1, $2)
+ON CONFLICT (account_id, scheduled_hour) DO NOTHING`
+	result, err := s.db.ExecContext(ctx, stmt, accountID, hour.UTC())
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
 func (s *Store) InsertBalanceSnapshot(ctx context.Context, snap BalanceSnapshot) error {
- 	const stmt = `INSERT INTO llm_balance_snapshot (
+	const stmt = `INSERT INTO llm_balance_snapshot (
     account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7

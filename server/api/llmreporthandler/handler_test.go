@@ -15,14 +15,15 @@ import (
 )
 
 type stubReportStore struct {
-	daily          []DailyReport
-	model          []ModelActivityReport
-	usage          []UsageEvent
-	bal            []CurrentBalance
-	balanceHistory []BalanceHistory
-	sum            TodaySummary
-	usageByIDs     []UsageEventAdmin
-	modelFilters   ModelActivityReportFilters
+	daily                []DailyReport
+	model                []ModelActivityReport
+	usage                []UsageEvent
+	bal                  []CurrentBalance
+	balanceHistory       []BalanceHistory
+	hourlyBalanceReports []HourlyBalanceReport
+	sum                  TodaySummary
+	usageByIDs           []UsageEventAdmin
+	modelFilters         ModelActivityReportFilters
 }
 
 func (s *stubReportStore) ListDailyReports(_ context.Context, limit int) ([]DailyReport, error) {
@@ -44,6 +45,10 @@ func (s *stubReportStore) ListCurrentBalances(_ context.Context, limit int) ([]C
 
 func (s *stubReportStore) ListBalanceHistory(_ context.Context, limit int) ([]BalanceHistory, error) {
 	return s.balanceHistory, nil
+}
+
+func (s *stubReportStore) ListHourlyBalanceReports(_ context.Context, limit int) ([]HourlyBalanceReport, error) {
+	return s.hourlyBalanceReports, nil
 }
 
 func (s *stubReportStore) GetTodaySummary(_ context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error) {
