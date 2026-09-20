@@ -384,11 +384,11 @@
 	})());
 
 	function buildBalanceChartOptions(group: BalanceChartGroup): EChartsOption {
-		return { backgroundColor: 'transparent', animationDuration: 250, color: ['#38BDF8', '#14B8A6', spendBar],
+		return { backgroundColor: 'transparent', animationDuration: 250, color: [inputBar, outputBar, spendBar],
 			legend: { top: 0, textStyle: { color: sub } },
 			tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
-			grid: { top: 28, right: 30, bottom: 58, left: 70 },
-			xAxis: { type: 'category', data: group.rows.map((row) => fmtDate(row.hour_started_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 35 } },
+			grid: { top: 36, right: 30, bottom: 94, left: 70 },
+			xAxis: { type: 'category', data: group.rows.map((row) => fmtDate(row.hour_started_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 45, margin: 16, hideOverlap: true } },
 			yAxis: [{ type: 'value', name: 'USD', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { lineStyle: { color: border, opacity: 0.45 } } }, { type: 'value', name: 'CNY', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { show: false } }],
 			series: [
 				{ name: 'Current balance (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.balance_usd) },
@@ -481,7 +481,6 @@
 					fetch a fresh balance.
 				</p>
 			</div>
-			<label class="balance-frequency"><span>Frequency</span><select bind:value={balanceFrequency} onchange={() => void loadBalanceReports()}><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="monthly">Monthly</option></select></label>
 		</div>
 		{#if loading && balances.length === 0}
 			<div class="empty">Loading current balances…</div>
@@ -523,6 +522,7 @@
 				<h3>Official Account Balance and Hourly Spending</h3>
 				<p class="muted">Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from the preceding hourly snapshot; balance increases are shown as zero spending.</p>
 			</div>
+			<label class="balance-frequency"><span>Frequency</span><select bind:value={balanceFrequency} onchange={() => void loadBalanceReports()}><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="monthly">Monthly</option></select></label>
 		</div>
 		{#if loading && hourlyBalanceReports.length === 0}
 			<div class="empty">Loading official balance history…</div>
@@ -855,7 +855,7 @@
 	}
 	.model-chart {
 		width: 100%;
-		height: 360px;
+		height: 410px;
 	}
 	.balance-chart-scroll { overflow-x: auto; width: 100%; }
 	.balance-frequency { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--sub); }
