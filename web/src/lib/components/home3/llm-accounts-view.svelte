@@ -348,13 +348,14 @@
 			>
 				{showCreate ? 'Cancel' : '+ New Account'}
 			</button>
-			<button class="alt-btn" onclick={() => { showDeposit = !showDeposit; showCreate = false; showAddModel = false; }}> {showDeposit ? 'Cancel' : 'Add Deposit'} </button>
+			<button class="alt-btn" onclick={() => { manualMode = 'deposit'; showDeposit = !showDeposit; showCreate = false; showAddModel = false; }}> {showDeposit && manualMode === 'deposit' ? 'Cancel' : 'Add Deposit'} </button>
+			<button class="ghost" onclick={() => { manualMode = 'set-total-spending'; showDeposit = true; showCreate = false; showAddModel = false; }}>Set Total Spend</button>
 		</div>
 	</header>
 
 	{#if showDeposit}
 		<form class="create-form" onsubmit={(e) => { e.preventDefault(); void submitDeposit(); }}>
-			<div class="manual-actions"><button class="alt-btn" type="button" onclick={() => manualMode = 'deposit'}>Add Deposit</button><button class="ghost" type="button" onclick={() => manualMode = 'set-total-spending'}>Set Total Spend</button></div><h3>{manualMode === 'deposit' ? 'Add Deposit' : 'Set Total Spend'}</h3>
+			<h3>{manualMode === 'deposit' ? 'Add Deposit' : 'Set Total Spend'}</h3>
 			<div class="row two"><label><span>API Key</span><select bind:value={deposit.api_key_name} required><option value="">Select an API key</option>{#each depositAPIKeys as apiKey (apiKey)}<option value={apiKey}>{apiKey}</option>{/each}</select></label><label><span>Currency</span><select bind:value={deposit.currency_code}><option value="CNY">CNY</option><option value="USD">USD</option></select></label></div>
 			<div class="row two"><label><span>{manualMode === 'deposit' ? 'Deposit Amount' : 'Total Spending'}</span><input type="number" min="1" step="1" bind:value={deposit.deposit_amount} required /></label>{#if manualMode === 'deposit'}<label><span>Balance After Deposit</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label>{/if}</div>
 			<div class="row two"><label><span>Timestamp</span><input type="datetime-local" bind:value={deposit.captured_at} /><small class="field-help">Leave blank to use the current time; use this to backdate a deposit.</small></label><label><span>Note</span><input bind:value={deposit.note} placeholder="Optional reference" /></label></div>
