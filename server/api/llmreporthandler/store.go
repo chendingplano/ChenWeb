@@ -266,7 +266,7 @@ LIMIT $1`
 	return out, rows.Err()
 }
 
-func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequency string, workspaceDay time.Time) ([]HourlyBalanceReport, error) {
+func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequency string, filters ModelActivityReportFilters) ([]HourlyBalanceReport, error) {
 	bucket := "hour"
 	if frequency == "daily" {
 		bucket = "day"
@@ -277,7 +277,9 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
     SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
         account_id, currency_code, date_trunc('%s', captured_at) AS hour_started_at, balance_amount
     FROM llm_balance_snapshot
-    WHERE workspace_day = $2 AND entry_kind <> 'deposit'
+    WHERE workspace_day >= $2::date AND workspace_day <= $3::date
+      AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
+      AND entry_kind <> 'deposit'
     ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
 ), pivoted AS (
     SELECT account_id, hour_started_at,
@@ -287,7 +289,9 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
     GROUP BY account_id, hour_started_at
 ), deposits AS (
     SELECT account_id, date_trunc('%s', captured_at) AS hour_started_at, SUM(deposit_amount) AS deposit_amount
-    FROM llm_balance_snapshot WHERE workspace_day = $2 AND entry_kind = 'deposit' AND UPPER(currency_code) = 'CNY'
+    FROM llm_balance_snapshot WHERE workspace_day >= $2::date AND workspace_day <= $3::date
+      AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
+      AND entry_kind = 'deposit' AND UPPER(currency_code) = 'CNY'
     GROUP BY account_id, date_trunc('%s', captured_at)
 ), with_previous AS (
     SELECT *, LAG(balance_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_balance_cny
@@ -302,7 +306,7 @@ JOIN llm_account acct ON acct.id = report.account_id
 LEFT JOIN deposits ON deposits.account_id = report.account_id AND deposits.hour_started_at = report.hour_started_at
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
 LIMIT $1`, bucket, bucket, bucket, bucket, bucket)
-	rows, err := s.db.QueryContext(ctx, query, limit, workspaceDay)
+	rows, err := s.db.QueryContext(ctx, query, limit, filters.From, filters.To, filters.APIKeyRef)
 	if err != nil {
 		return nil, err
 	}

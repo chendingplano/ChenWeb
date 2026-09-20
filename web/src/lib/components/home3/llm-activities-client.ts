@@ -213,8 +213,18 @@ export function listLLMBalanceHistory(limit = 24 * 14): Promise<ListLLMBalanceHi
 	return req<ListLLMBalanceHistoryResponse>(`/api/v1/llm/balances/history?limit=${limit}`);
 }
 
-export function listLLMHourlyBalanceReports(limit = 24, frequency = 'hourly'): Promise<ListLLMHourlyBalanceReportsResponse> {
-	return req<ListLLMHourlyBalanceReportsResponse>(`/api/v1/llm/balances/hourly?limit=${limit}&frequency=${encodeURIComponent(frequency)}`);
+export function listLLMHourlyBalanceReports(
+	limit = 24,
+	frequency = 'hourly',
+	filters: LLMReportFilters = {}
+): Promise<ListLLMHourlyBalanceReportsResponse> {
+	const params = new URLSearchParams({ limit: String(limit), frequency });
+	if (filters.from) params.set('from', filters.from);
+	if (filters.to) params.set('to', filters.to);
+	if (filters.apiKey) params.set('api_key', filters.apiKey);
+	return req<ListLLMHourlyBalanceReportsResponse>(
+		`/api/v1/llm/balances/hourly?${params.toString()}`
+	);
 }
 
 export function getLLMTodaySummary(): Promise<GetLLMTodaySummaryResponse> {

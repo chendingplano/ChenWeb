@@ -57,7 +57,16 @@
 	let customTo = $state('');
 	let selectedAPIKey = $state('');
 	let apiKeyOptions = $state<{ name: string }[]>([]);
-	let balanceFrequency = $state('hourly');
+	let balanceTimePreset = $state('last_30_days');
+	let balanceCustomFrom = $state('');
+	let balanceCustomTo = $state('');
+	let balanceSelectedAPIKey = $state('');
+	let balanceLoading = $state(false);
+	let balanceFilterError = $state<string | null>(null);
+	const balanceReportLimit = 1000;
+	const balanceFrequency = $derived(
+		balanceTimePreset === 'today' || balanceTimePreset === 'yesterday' ? 'hourly' : 'daily'
+	);
 
 	const timeOptions = [
 		{ value: 'today', label: 'Today' },
@@ -84,7 +93,7 @@
 				await Promise.all([
 					getLLMTodaySummary(),
 					listLLMCurrentBalances(),
-					listLLMHourlyBalanceReports(24, balanceFrequency),
+					listLLMHourlyBalanceReports(balanceReportLimit, balanceFrequency, getBalanceFilters()),
 					listLLMModelActivityReports(reportLimit, getReportFilters()),
 					listLLMUsageEvents(eventLimit)
 				]);
@@ -108,13 +117,13 @@
 		return `${year}-${month}-${day}`;
 	}
 
-	function getReportFilters(): LLMReportFilters {
+	function timeFiltersFor(preset: string, fromDate: string, toDate: string): LLMReportFilters {
 		const today = new Date();
 		const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 		let from = dateOnly(todayDate);
 		let to = from;
 
-		switch (timePreset) {
+		switch (preset) {
 			case 'yesterday':
 				from = to = dateOnly(new Date(todayDate.getTime() - 24 * 60 * 60 * 1000));
 				break;
@@ -132,18 +141,29 @@
 				to = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth(), 0));
 				break;
 			case 'custom':
-				if (!customFrom || !customTo) {
+				if (!fromDate || !toDate) {
 					throw new Error('Choose both a custom start date and end date.');
 				}
-				if (customFrom > customTo) {
+				if (fromDate > toDate) {
 					throw new Error('Custom start date must not be after the end date.');
 				}
-				from = customFrom;
-				to = customTo;
+				from = fromDate;
+				to = toDate;
 				break;
 		}
 
-		return { from, to, apiKey: selectedAPIKey || undefined };
+		return { from, to };
+	}
+
+	function getReportFilters(): LLMReportFilters {
+		return { ...timeFiltersFor(timePreset, customFrom, customTo), apiKey: selectedAPIKey || undefined };
+	}
+
+	function getBalanceFilters(): LLMReportFilters {
+		return {
+			...timeFiltersFor(balanceTimePreset, balanceCustomFrom, balanceCustomTo),
+			apiKey: balanceSelectedAPIKey || undefined
+		};
 	}
 
 	async function loadModelReports() {
@@ -165,8 +185,24 @@
 	}
 
 	async function loadBalanceReports() {
-		const response = await listLLMHourlyBalanceReports(24, balanceFrequency);
-		hourlyBalanceReports = response.reports;
+		balanceFilterError = null;
+		balanceLoading = true;
+		try {
+			const response = await listLLMHourlyBalanceReports(
+				balanceReportLimit,
+				balanceFrequency,
+				getBalanceFilters()
+			);
+			hourlyBalanceReports = response.reports;
+		} catch (err) {
+			balanceFilterError = String((err as Error).message ?? err);
+		} finally {
+			balanceLoading = false;
+		}
+	}
+
+	function handleBalanceFilterChange() {
+		void loadBalanceReports();
 	}
 
 	async function runReconciliation() {
@@ -408,7 +444,6 @@
 		const mm = String(date.getMonth() + 1).padStart(2, '0');
 		const dd = String(date.getDate()).padStart(2, '0');
 		if (balanceFrequency === 'daily') return `${yyyy}/${mm}/${dd}`;
-		if (balanceFrequency === 'monthly') return `${yyyy}/${mm}`;
 		const hour = date.getHours();
 		const suffix = hour >= 12 ? 'PM' : 'AM';
 		const hour12 = hour % 12 || 12;
@@ -532,12 +567,43 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Official Account Balance and Hourly Spending</h3>
-				<p class="muted">Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from the preceding hourly snapshot; balance increases are shown as zero spending.</p>
+				<h3>Official Account Balance and Spending</h3>
+				<p class="muted">Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from the preceding snapshot; balance increases are shown as zero spending.</p>
 			</div>
-			<label class="balance-frequency"><span>Frequency</span><select bind:value={balanceFrequency} onchange={() => void loadBalanceReports()}><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="monthly">Monthly</option></select></label>
+			<div class="report-filters">
+				<label>
+					<span>Time</span>
+					<select bind:value={balanceTimePreset} onchange={handleBalanceFilterChange}>
+						{#each timeOptions as option (option.value)}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
+				</label>
+				<label>
+					<span>API Key</span>
+					<select bind:value={balanceSelectedAPIKey} onchange={handleBalanceFilterChange}>
+						<option value="">All API Keys</option>
+						{#each apiKeyOptions as option (option.name)}
+							<option value={option.name}>{option.name}</option>
+						{/each}
+					</select>
+				</label>
+				{#if balanceTimePreset === 'custom'}
+					<label>
+						<span>Start date</span>
+						<input type="date" bind:value={balanceCustomFrom} onchange={handleBalanceFilterChange} />
+					</label>
+					<label>
+						<span>End date</span>
+						<input type="date" bind:value={balanceCustomTo} onchange={handleBalanceFilterChange} />
+					</label>
+				{/if}
+			</div>
 		</div>
-		{#if loading && hourlyBalanceReports.length === 0}
+		{#if balanceFilterError}
+			<div class="filter-error" role="alert">{balanceFilterError}</div>
+		{/if}
+		{#if (loading || balanceLoading) && hourlyBalanceReports.length === 0}
 			<div class="empty">Loading official balance history…</div>
 		{:else if balanceChartGroups.length === 0}
 			<div class="empty">No official balance history yet. Hourly snapshots will appear here after the next capture.</div>
@@ -545,7 +611,7 @@
 			<div class="model-chart-grid">
 				{#each balanceChartGroups as group (group.key)}
 					<div class="model-chart-card">
-						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance and hourly spending</div></div></div>
+						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance and {balanceFrequency} spending</div></div></div>
 						<div class="balance-chart-scroll"><div class="model-chart" style:width={balanceChartWidth(group)}><Chart {init} options={buildBalanceChartOptions(group)} style="width: 100%; height: 100%;" /></div></div>
 					</div>
 				{/each}
@@ -871,7 +937,6 @@
 		height: 410px;
 	}
 	.balance-chart-scroll { overflow-x: auto; width: 100%; }
-	.balance-frequency { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--sub); }
 	.model-chart-head {
 		display: flex;
 		justify-content: space-between;

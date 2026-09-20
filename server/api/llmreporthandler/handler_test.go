@@ -24,6 +24,7 @@ type stubReportStore struct {
 	sum                  TodaySummary
 	usageByIDs           []UsageEventAdmin
 	modelFilters         ModelActivityReportFilters
+	balanceFilters       ModelActivityReportFilters
 }
 
 func (s *stubReportStore) ListDailyReports(_ context.Context, limit int) ([]DailyReport, error) {
@@ -47,7 +48,8 @@ func (s *stubReportStore) ListBalanceHistory(_ context.Context, limit int) ([]Ba
 	return s.balanceHistory, nil
 }
 
-func (s *stubReportStore) ListHourlyBalanceReports(_ context.Context, limit int, frequency string, workspaceDay time.Time) ([]HourlyBalanceReport, error) {
+func (s *stubReportStore) ListHourlyBalanceReports(_ context.Context, limit int, frequency string, filters ModelActivityReportFilters) ([]HourlyBalanceReport, error) {
+	s.balanceFilters = filters
 	return s.hourlyBalanceReports, nil
 }
 
@@ -200,6 +202,52 @@ func TestListModelActivityReportsRejectsInvalidDate(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestListHourlyBalanceReportsRejectsInvalidDate(t *testing.T) {
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore { return &stubReportStore{} }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/balances/hourly?from=not-a-date", nil)
+	rec := httptest.NewRecorder()
+	if err := ListHourlyBalanceReports(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListHourlyBalanceReports() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestListHourlyBalanceReportsForwardsDateAndAPIKeyFilters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	if err := os.WriteFile(path, []byte(`[model-api-keys]
+provider-key = [{ api_key = 'provider-secret-ref' }]
+`), 0600); err != nil {
+		t.Fatalf("write models TOML: %v", err)
+	}
+	t.Setenv("CHENWEB_MODELS_TOML", path)
+
+	store := &stubReportStore{}
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore { return store }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/balances/hourly?frequency=daily&from=2026-09-01&to=2026-09-19&api_key=provider-key", nil)
+	rec := httptest.NewRecorder()
+	if err := ListHourlyBalanceReports(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListHourlyBalanceReports() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.balanceFilters.From == nil || store.balanceFilters.From.Format("2006-01-02") != "2026-09-01" ||
+		store.balanceFilters.To == nil || store.balanceFilters.To.Format("2006-01-02") != "2026-09-19" ||
+		store.balanceFilters.APIKeyRef != "provider-secret-ref" {
+		t.Fatalf("unexpected balance filters = %+v", store.balanceFilters)
 	}
 }
 

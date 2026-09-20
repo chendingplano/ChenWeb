@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
 	getLLMTodaySummary,
+	listLLMHourlyBalanceReports,
 	listLLMCurrentBalances,
 	listLLMDailyReports,
 	listLLMModelActivityReports,
@@ -157,6 +158,25 @@ test('listLLMModelActivityReports serializes spend report filters', async () => 
 			'/api/v1/llm/reports/models?limit=30&from=2026-09-01&to=2026-09-19&api_key=deepseek-4-1-flash'
 		);
 		assert.equal(response.api_keys[0].name, 'deepseek-4-1-flash');
+	} finally {
+		mock.restore();
+	}
+});
+
+test('listLLMHourlyBalanceReports serializes balance filters', async () => {
+	const mock = installFetchMock(async () => Response.json({ reports: [] }));
+
+	try {
+		await listLLMHourlyBalanceReports(240, 'daily', {
+			from: '2026-09-01',
+			to: '2026-09-19',
+			apiKey: 'deepseek-4-1-flash'
+		});
+
+		assert.equal(
+			String(mock.calls[0].input),
+			'/api/v1/llm/balances/hourly?limit=240&frequency=daily&from=2026-09-01&to=2026-09-19&api_key=deepseek-4-1-flash'
+		);
 	} finally {
 		mock.restore();
 	}

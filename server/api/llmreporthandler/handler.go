@@ -28,7 +28,7 @@ type reportStore interface {
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
 	ListBalanceHistory(ctx context.Context, limit int) ([]BalanceHistory, error)
-	ListHourlyBalanceReports(ctx context.Context, limit int, frequency string, workspaceDay time.Time) ([]HourlyBalanceReport, error)
+	ListHourlyBalanceReports(ctx context.Context, limit int, frequency string, filters ModelActivityReportFilters) ([]HourlyBalanceReport, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
 	ListUsageEventsAdmin(ctx context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error)
 	GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error)
@@ -428,6 +428,17 @@ func ListHourlyBalanceReports(c echo.Context) error {
 	if frequency != "hourly" && frequency != "daily" && frequency != "monthly" {
 		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": "frequency must be hourly, daily, or monthly"})
 	}
+	filters, err := parseModelActivityReportFilters(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
+	}
+	_, keyRefs, _, err := loadModelAPIKeyOptions()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load model API keys", "error": err.Error()})
+	}
+	if filters.APIKeyRef, err = apiKeyRefForName(c.QueryParam("api_key"), keyRefs); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
+	}
 	llmCfg := config.GetLLMConfig()
 	loc, err := time.LoadLocation(llmCfg.WorkspaceTimezone)
 	if err != nil {
@@ -435,7 +446,13 @@ func ListHourlyBalanceReports(c echo.Context) error {
 	}
 	now := time.Now().In(loc)
 	workspaceDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	rows, err := store.ListHourlyBalanceReports(c.Request().Context(), intParamDefault(c.QueryParam("limit"), 24), frequency, workspaceDay)
+	if filters.From == nil {
+		filters.From = &workspaceDay
+	}
+	if filters.To == nil {
+		filters.To = &workspaceDay
+	}
+	rows, err := store.ListHourlyBalanceReports(c.Request().Context(), intParamDefault(c.QueryParam("limit"), 24), frequency, filters)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list hourly official balance reports", "error": err.Error()})
 	}
