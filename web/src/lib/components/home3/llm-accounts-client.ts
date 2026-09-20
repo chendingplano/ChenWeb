@@ -41,6 +41,7 @@ export type ApplyLLMAccountsImportResponse = {
 };
 export type ListDepositAPIKeysResponse = { api_keys: string[] };
 export type AddLLMDepositInput = { api_key_name: string; currency_code: string; deposit_amount: number; balance_amount: number; captured_at: string; note: string };
+export type ManualLLMRecord = { api_key_name: string; captured_at: string; currency_code: string; amount: number; entry_kind: string; note: string };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, {
@@ -105,3 +106,5 @@ export function listDepositAPIKeys(): Promise<ListDepositAPIKeysResponse> {
 export function addLLMDeposit(input: AddLLMDepositInput): Promise<{ ok: boolean }> {
 	return req<{ ok: boolean }>('/api/v1/llm/balances/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
 }
+export function setLLMTotalSpending(input: AddLLMDepositInput): Promise<{ ok: boolean }> { return req('/api/v1/llm/balances/total-spending', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); }
+export function listLLMManualRecords(): Promise<{ records: ManualLLMRecord[] }> { return req('/api/v1/llm/balances/manual-records'); }

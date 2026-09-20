@@ -420,7 +420,7 @@
 	})());
 
 	function buildBalanceChartOptions(group: BalanceChartGroup): EChartsOption {
-		return { backgroundColor: 'transparent', animationDuration: 250, color: [inputBar, outputBar, spendBar],
+		return { backgroundColor: 'transparent', animationDuration: 250, color: [inputBar, outputBar, spendBar, '#A78BFA', '#22D3EE'],
 			legend: { top: 0, textStyle: { color: sub } },
 			tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
 			grid: { top: 36, right: 30, bottom: 94, left: 70 },
@@ -430,6 +430,8 @@
 				{ name: 'Current balance (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.balance_usd) },
 				{ name: 'Current balance (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.balance_cny) },
 				{ name: 'Spending (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.spending_cny) }
+				,{ name: 'Total Spending (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.total_spending_cny) }
+				,{ name: 'Total Spending (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.total_spending_usd) }
 			]
 		};
 	}

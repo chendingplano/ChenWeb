@@ -74,13 +74,15 @@ type BalanceHistory struct {
 // CNY spending derived from the immediately preceding hourly CNY balance.
 // It never allocates an account balance to a model.
 type HourlyBalanceReport struct {
-	AccountID     string    `json:"account_id"`
-	AccountName   string    `json:"account_name"`
-	Provider      string    `json:"provider"`
-	HourStartedAt time.Time `json:"hour_started_at"`
-	BalanceUSD    *float64  `json:"balance_usd"`
-	BalanceCNY    *float64  `json:"balance_cny"`
-	SpendingCNY   *float64  `json:"spending_cny"`
+	AccountID        string    `json:"account_id"`
+	AccountName      string    `json:"account_name"`
+	Provider         string    `json:"provider"`
+	HourStartedAt    time.Time `json:"hour_started_at"`
+	BalanceUSD       *float64  `json:"balance_usd"`
+	BalanceCNY       *float64  `json:"balance_cny"`
+	SpendingCNY      *float64  `json:"spending_cny"`
+	TotalSpendingCNY *float64  `json:"total_spending_cny"`
+	TotalSpendingUSD *float64  `json:"total_spending_usd"`
 }
 
 type ModelActivityReport struct {
@@ -279,7 +281,7 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
     FROM llm_balance_snapshot
     WHERE workspace_day >= $2::date AND workspace_day <= $3::date
       AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
-      AND entry_kind <> 'deposit'
+      AND entry_kind NOT IN ('deposit', 'set-total-spending')
     ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
 ), pivoted AS (
     SELECT account_id, hour_started_at,
@@ -297,15 +299,25 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
     SELECT *, LAG(balance_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_balance_cny
     FROM pivoted
 )
+ , manual_totals AS (
+    SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at)) account_id, currency_code, date_trunc('%s', captured_at) AS hour_started_at, deposit_amount
+    FROM llm_balance_snapshot WHERE workspace_day >= $2::date AND workspace_day <= $3::date AND entry_kind = 'set-total-spending'
+      AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
+    ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
+)
 SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_at,
        report.balance_usd, report.balance_cny,
        CASE WHEN report.previous_balance_cny IS NULL OR report.balance_cny IS NULL THEN NULL
-            ELSE GREATEST(report.previous_balance_cny + COALESCE(deposits.deposit_amount, 0) - report.balance_cny, 0) END AS spending_cny
+            ELSE GREATEST(report.previous_balance_cny + COALESCE(deposits.deposit_amount, 0) - report.balance_cny, 0) END AS spending_cny,
+       COALESCE(CASE WHEN report.previous_balance_cny IS NULL OR report.balance_cny IS NULL THEN 0 ELSE GREATEST(report.previous_balance_cny + COALESCE(deposits.deposit_amount, 0) - report.balance_cny, 0) END, 0) + COALESCE(manual_cny.deposit_amount, 0) AS total_spending_cny,
+       manual_usd.deposit_amount AS total_spending_usd
 FROM with_previous report
 JOIN llm_account acct ON acct.id = report.account_id
 LEFT JOIN deposits ON deposits.account_id = report.account_id AND deposits.hour_started_at = report.hour_started_at
+LEFT JOIN manual_totals manual_cny ON manual_cny.account_id = report.account_id AND manual_cny.hour_started_at = report.hour_started_at AND UPPER(manual_cny.currency_code) = 'CNY'
+LEFT JOIN manual_totals manual_usd ON manual_usd.account_id = report.account_id AND manual_usd.hour_started_at = report.hour_started_at AND UPPER(manual_usd.currency_code) = 'USD'
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
-LIMIT $1`, bucket, bucket, bucket, bucket, bucket)
+LIMIT $1`, bucket, bucket, bucket, bucket, bucket, bucket, bucket, bucket)
 	rows, err := s.db.QueryContext(ctx, query, limit, filters.From, filters.To, filters.APIKeyRef)
 	if err != nil {
 		return nil, err
@@ -314,8 +326,8 @@ LIMIT $1`, bucket, bucket, bucket, bucket, bucket)
 	out := []HourlyBalanceReport{}
 	for rows.Next() {
 		var row HourlyBalanceReport
-		var usd, cny, spend sql.NullFloat64
-		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.HourStartedAt, &usd, &cny, &spend); err != nil {
+		var usd, cny, spend, totalCNY, totalUSD sql.NullFloat64
+		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.HourStartedAt, &usd, &cny, &spend, &totalCNY, &totalUSD); err != nil {
 			return nil, err
 		}
 		if usd.Valid {
@@ -326,6 +338,12 @@ LIMIT $1`, bucket, bucket, bucket, bucket, bucket)
 		}
 		if spend.Valid {
 			row.SpendingCNY = &spend.Float64
+		}
+		if totalCNY.Valid {
+			row.TotalSpendingCNY = &totalCNY.Float64
+		}
+		if totalUSD.Valid {
+			row.TotalSpendingUSD = &totalUSD.Float64
 		}
 		out = append(out, row)
 	}

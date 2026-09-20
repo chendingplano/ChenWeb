@@ -25,6 +25,12 @@ type depositRequest struct {
 }
 
 func AddDeposit(c echo.Context) error {
+	return addManualEntry(c, "deposit")
+}
+func SetTotalSpending(c echo.Context) error {
+	return addManualEntry(c, "set-total-spending")
+}
+func addManualEntry(c echo.Context, entryKind string) error {
 	var in depositRequest
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid deposit"})
@@ -59,10 +65,34 @@ func AddDeposit(c echo.Context) error {
 		}
 		captured = parsed
 	}
-	if err := store.AddDeposit(c.Request().Context(), depositRecord{AccountID: accountID, CapturedAt: captured, CurrencyCode: strings.ToUpper(in.CurrencyCode), DepositAmount: in.DepositAmount, BalanceAmount: in.BalanceAmount, Note: strings.TrimSpace(in.Note)}); err != nil {
+	if err := store.AddDeposit(c.Request().Context(), depositRecord{AccountID: accountID, CapturedAt: captured, CurrencyCode: strings.ToUpper(in.CurrencyCode), DepositAmount: in.DepositAmount, BalanceAmount: in.BalanceAmount, Note: strings.TrimSpace(in.Note), EntryKind: entryKind}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to save deposit", "error": err.Error()})
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"ok": true})
+}
+
+func ListManualRecords(c echo.Context) error {
+	store := adminStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": "project database is not initialized"})
+	}
+	rows, err := store.ListManualRecords(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to list manual records"})
+	}
+	refs, err := loadDepositAPIKeyRefs()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "failed to read configured API keys"})
+	}
+	names := map[string]string{}
+	for name, ref := range refs {
+		names[ref] = name
+	}
+	for i := range rows {
+		rows[i].APIKeyName = names[rows[i].APIKeyRef]
+		rows[i].APIKeyRef = ""
+	}
+	return c.JSON(http.StatusOK, map[string]any{"records": rows})
 }
 
 type modelAPIKeyConfig struct {
@@ -118,6 +148,7 @@ type accountAdminStore interface {
 	UpsertAccountAndProfile(ctx context.Context, accountIn CreateAccountInput, profileIn CreateProfileInput) (ModelProfile, error)
 	FindAccountIDByAPIKeyRef(ctx context.Context, apiKeyRef string) (string, error)
 	AddDeposit(ctx context.Context, in depositRecord) error
+	ListManualRecords(ctx context.Context) ([]ManualRecord, error)
 }
 
 var adminStoreFactory = func() accountAdminStore {

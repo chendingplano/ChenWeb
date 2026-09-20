@@ -48,6 +48,17 @@ type depositRecord struct {
 	BalanceAmount float64
 	CapturedAt    time.Time
 	Note          string
+	EntryKind     string
+}
+
+type ManualRecord struct {
+	APIKeyRef    string
+	CapturedAt   time.Time `json:"captured_at"`
+	CurrencyCode string    `json:"currency_code"`
+	Amount       float64   `json:"amount"`
+	EntryKind    string    `json:"entry_kind"`
+	Note         string    `json:"note"`
+	APIKeyName   string    `json:"api_key_name"`
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -64,8 +75,29 @@ func (s *Store) FindAccountIDByAPIKeyRef(ctx context.Context, apiKeyRef string) 
 }
 
 func (s *Store) AddDeposit(ctx context.Context, in depositRecord) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO llm_balance_snapshot (account_id,captured_at,workspace_day,balance_amount,currency_code,capture_source,raw_payload_ref,entry_kind,deposit_amount,note) VALUES ($1,$2,$3,$4,$5,'admin_deposit','', 'deposit',$6,$7)`, in.AccountID, in.CapturedAt, in.CapturedAt, in.BalanceAmount, in.CurrencyCode, in.DepositAmount, in.Note)
+	entryKind := in.EntryKind
+	if entryKind == "" {
+		entryKind = "deposit"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO llm_balance_snapshot (account_id,captured_at,workspace_day,balance_amount,currency_code,capture_source,raw_payload_ref,entry_kind,deposit_amount,note) VALUES ($1,$2,$3,$4,$5,'admin_deposit','',$6,$7,$8)`, in.AccountID, in.CapturedAt, in.CapturedAt, in.BalanceAmount, in.CurrencyCode, entryKind, in.DepositAmount, in.Note)
 	return err
+}
+
+func (s *Store) ListManualRecords(ctx context.Context) ([]ManualRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.api_key_ref, snap.captured_at, snap.currency_code, snap.deposit_amount, snap.entry_kind, snap.note FROM llm_balance_snapshot snap JOIN llm_account a ON a.id = snap.account_id WHERE snap.entry_kind IN ('deposit', 'set-total-spending') ORDER BY snap.captured_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ManualRecord{}
+	for rows.Next() {
+		var row ManualRecord
+		if err := rows.Scan(&row.APIKeyRef, &row.CapturedAt, &row.CurrencyCode, &row.Amount, &row.EntryKind, &row.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListAccounts(ctx context.Context) ([]Account, error) {

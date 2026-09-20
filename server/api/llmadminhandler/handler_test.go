@@ -77,6 +77,9 @@ func (s *stubAdminStore) AddDeposit(_ context.Context, in depositRecord) error {
 	s.lastDeposit = in
 	return s.addDepositErr
 }
+func (s *stubAdminStore) ListManualRecords(_ context.Context) ([]ManualRecord, error) {
+	return nil, nil
+}
 
 func TestImportModelsTOMLPreviewReturnsParsedAccountsAndProfiles(t *testing.T) {
 	tmpDir := t.TempDir()

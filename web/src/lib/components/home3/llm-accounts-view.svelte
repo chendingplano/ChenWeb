@@ -7,6 +7,8 @@
 		createLLMAccount,
 		importLLMAccountsPreview,
 		listDepositAPIKeys,
+		listLLMManualRecords,
+		setLLMTotalSpending,
 		listLLMAccounts,
 		updateLLMAccount,
 		type ApplyLLMAccountsImportResponse,
@@ -24,6 +26,8 @@
 
 	let accounts = $state<LLMAccount[]>([]);
 	let depositAPIKeys = $state<string[]>([]);
+	let manualRecords = $state<any[]>([]);
+	let manualMode = $state<'deposit' | 'set-total-spending'>('deposit');
 	let loading = $state(false);
 	let submitting = $state(false);
 	let importing = $state(false);
@@ -94,11 +98,12 @@
 	onMount(() => {
 		loadAccounts();
 		loadDepositAPIKeys();
+		loadManualRecords();
 	});
 
 	async function submitDeposit() {
 		submitting = true; error = null;
-		try { await addLLMDeposit({ ...deposit, captured_at: deposit.captured_at ? new Date(deposit.captured_at).toISOString() : '' }); info = 'Deposit recorded.'; showDeposit = false; }
+		try { const payload = { ...deposit, balance_amount: manualMode === 'deposit' ? deposit.balance_amount : 0, captured_at: deposit.captured_at ? new Date(deposit.captured_at).toISOString() : '' }; if (manualMode === 'deposit') await addLLMDeposit(payload); else await setLLMTotalSpending(payload); info = manualMode === 'deposit' ? 'Deposit recorded.' : 'Total spending recorded.'; await loadManualRecords(); showDeposit = false; }
 		catch (err) { error = String((err as Error).message ?? err); }
 		finally { submitting = false; }
 	}
@@ -123,6 +128,7 @@
 			error = String((err as Error).message ?? err);
 		}
 	}
+	async function loadManualRecords() { try { manualRecords = (await listLLMManualRecords()).records; } catch (err) { error = String((err as Error).message ?? err); } }
 
 	async function submitCreate() {
 		error = null;
@@ -348,13 +354,14 @@
 
 	{#if showDeposit}
 		<form class="create-form" onsubmit={(e) => { e.preventDefault(); void submitDeposit(); }}>
-			<h3>Add Deposit</h3>
+			<div class="manual-actions"><button class="alt-btn" type="button" onclick={() => manualMode = 'deposit'}>Add Deposit</button><button class="ghost" type="button" onclick={() => manualMode = 'set-total-spending'}>Set Total Spend</button></div><h3>{manualMode === 'deposit' ? 'Add Deposit' : 'Set Total Spend'}</h3>
 			<div class="row two"><label><span>API Key</span><select bind:value={deposit.api_key_name} required><option value="">Select an API key</option>{#each depositAPIKeys as apiKey (apiKey)}<option value={apiKey}>{apiKey}</option>{/each}</select></label><label><span>Currency</span><select bind:value={deposit.currency_code}><option value="CNY">CNY</option><option value="USD">USD</option></select></label></div>
-			<div class="row two"><label><span>Deposit Amount</span><input type="number" min="1" step="1" bind:value={deposit.deposit_amount} required /></label><label><span>Balance After Deposit</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label></div>
+			<div class="row two"><label><span>{manualMode === 'deposit' ? 'Deposit Amount' : 'Total Spending'}</span><input type="number" min="1" step="1" bind:value={deposit.deposit_amount} required /></label>{#if manualMode === 'deposit'}<label><span>Balance After Deposit</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label>{/if}</div>
 			<div class="row two"><label><span>Timestamp</span><input type="datetime-local" bind:value={deposit.captured_at} /><small class="field-help">Leave blank to use the current time; use this to backdate a deposit.</small></label><label><span>Note</span><input bind:value={deposit.note} placeholder="Optional reference" /></label></div>
 			<div class="row form-foot"><button class="primary" disabled={submitting}>{submitting ? 'Saving…' : 'Save Deposit'}</button></div>
 		</form>
 	{/if}
+	<div class="panel"><div class="panel-head"><h3>Manual Records</h3></div>{#if manualRecords.length === 0}<div class="empty compact">No deposits or total-spending records yet.</div>{:else}<div class="table-wrap"><table><thead><tr><th>Timestamp</th><th>API Key</th><th>Type</th><th>Currency</th><th>Amount</th><th>Note</th></tr></thead><tbody>{#each manualRecords as record}<tr><td>{fmtDate(record.captured_at)}</td><td>{record.api_key_name}</td><td>{record.entry_kind === 'deposit' ? 'Deposit' : 'Total Spending'}</td><td>{record.currency_code}</td><td>{record.amount}</td><td>{record.note}</td></tr>{/each}</tbody></table></div>{/if}</div>
 
 	<div class="summary-grid">
 		<div class="summary-card">
@@ -725,6 +732,7 @@
 	.panel-head,
 	.form-foot,
 	.toolbar-actions,
+	.manual-actions,
 	.toggle-row,
 	.preview-columns,
 	.summary-grid,

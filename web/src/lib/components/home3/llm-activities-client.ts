@@ -104,6 +104,8 @@ export type LLMHourlyBalanceReport = {
 	balance_usd: number | null;
 	balance_cny: number | null;
 	spending_cny: number | null;
+	total_spending_cny: number | null;
+	total_spending_usd: number | null;
 };
 
 export type LLMTodaySummary = {
