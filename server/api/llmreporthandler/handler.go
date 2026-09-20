@@ -27,6 +27,7 @@ type reportStore interface {
 	ListModelActivityReports(ctx context.Context, limit int, filters ModelActivityReportFilters) ([]ModelActivityReport, error)
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
+	ListBalanceHistory(ctx context.Context, limit int) ([]BalanceHistory, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
 	ListUsageEventsAdmin(ctx context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error)
 	GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error)
@@ -141,6 +142,7 @@ func ListModelActivityReports(c echo.Context) error {
 		}
 	}
 	for i := range rows {
+		applyDeepSeekLocalCNYPricing(&rows[i])
 		if selectedAPIKeyName != "" {
 			rows[i].APIKeyName = selectedAPIKeyName
 			continue
@@ -152,6 +154,47 @@ func ListModelActivityReports(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"reports": rows, "api_keys": apiKeys})
+}
+
+type deepSeekCNYPricing struct {
+	InputCacheHit  map[string]string `toml:"input-cache-hit"`
+	InputCacheMiss map[string]string `toml:"input-cache-miss"`
+	Output         map[string]string `toml:"output"`
+}
+
+// applyDeepSeekLocalCNYPricing intentionally applies only to Flash. The
+// current config has one generic DeepSeek CNY rate card; Pro remains unknown
+// until it has an explicit model-specific rate rather than borrowing Flash's.
+func applyDeepSeekLocalCNYPricing(row *ModelActivityReport) {
+	if !strings.EqualFold(strings.TrimSpace(row.Provider), "deepseek") || !strings.Contains(strings.ToLower(row.ModelName), "flash") {
+		return
+	}
+	path := strings.TrimSpace(os.Getenv("CHENWEB_MODELS_TOML"))
+	if path == "" {
+		path = filepath.Join(".", ".models.toml")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var config struct {
+		DeepSeekBilling struct {
+			ChineseYuan deepSeekCNYPricing `toml:"chinese-yuan"`
+		} `toml:"deepseek-billing"`
+	}
+	if toml.Unmarshal(raw, &config) != nil {
+		return
+	}
+	parse := func(values map[string]string) float64 {
+		value, _ := strconv.ParseFloat(strings.TrimSpace(values["off-peak"]), 64)
+		return value
+	}
+	hit, miss, output := parse(config.DeepSeekBilling.ChineseYuan.InputCacheHit), parse(config.DeepSeekBilling.ChineseYuan.InputCacheMiss), parse(config.DeepSeekBilling.ChineseYuan.Output)
+	if hit == 0 && miss == 0 && output == 0 {
+		return
+	}
+	row.CurrencyCode = "CNY"
+	row.SpendAmount = (float64(row.PromptCacheHitTokens)*hit + float64(row.PromptCacheMissTokens)*miss + float64(row.OutputTokens)*output) / 1_000_000
 }
 
 type modelAPIKeyEntry struct {
@@ -353,6 +396,21 @@ func ListCurrentBalances(c echo.Context) error {
 	rows, err := store.ListCurrentBalances(c.Request().Context(), limit)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list current llm balances", "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"balances": rows})
+}
+
+// ListBalanceHistory serves the official provider balance track. It is kept
+// separate from locally calculated, per-model token costs.
+func ListBalanceHistory(c echo.Context) error {
+	store := reportStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	limit := intParamDefault(c.QueryParam("limit"), 24*14)
+	rows, err := store.ListBalanceHistory(c.Request().Context(), limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list official balance history", "error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"balances": rows})
 }

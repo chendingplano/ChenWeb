@@ -58,6 +58,18 @@ type CurrentBalance struct {
 	CurrencyCode  string    `json:"currency_code"`
 }
 
+// BalanceHistory is an immutable provider-reported account balance.  It is
+// deliberately account/API-key scoped: DeepSeek does not report a balance per
+// model, so this must never be allocated to Flash or Pro.
+type BalanceHistory struct {
+	AccountID     string    `json:"account_id"`
+	AccountName   string    `json:"account_name"`
+	Provider      string    `json:"provider"`
+	CapturedAt    time.Time `json:"captured_at"`
+	BalanceAmount float64   `json:"balance_amount"`
+	CurrencyCode  string    `json:"currency_code"`
+}
+
 type ModelActivityReport struct {
 	Provider              string  `json:"provider"`
 	ModelName             string  `json:"model_name"`
@@ -218,6 +230,29 @@ LIMIT $1`
 	return out, rows.Err()
 }
 
+func (s *Store) ListBalanceHistory(ctx context.Context, limit int) ([]BalanceHistory, error) {
+	const query = `SELECT snap.account_id, acct.account_name, acct.provider,
+snap.captured_at, snap.balance_amount, snap.currency_code
+FROM llm_balance_snapshot snap
+JOIN llm_account acct ON acct.id = snap.account_id
+ORDER BY snap.captured_at DESC, acct.account_name ASC
+LIMIT $1`
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []BalanceHistory{}
+	for rows.Next() {
+		var row BalanceHistory
+		if err := rows.Scan(&row.AccountID, &row.AccountName, &row.Provider, &row.CapturedAt, &row.BalanceAmount, &row.CurrencyCode); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListModelActivityReports(ctx context.Context, limit int, filters ModelActivityReportFilters) ([]ModelActivityReport, error) {
 	const query = `WITH recent_days AS (
     SELECT DISTINCT workspace_day
@@ -258,10 +293,7 @@ SELECT
     COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code,
     COALESCE(TO_CHAR(mu.workspace_day, 'YYYY-MM-DD'), '') AS workspace_day,
     COALESCE(SUM(
-        CASE
-            WHEN adt.account_total_tokens > 0 THEN report.spend_amount * mu.total_tokens::double precision / adt.account_total_tokens::double precision
-            ELSE 0
-        END
+        0
     ), 0) AS spend_amount,
     COALESCE(SUM(mu.prompt_cache_hit_tokens), 0) AS prompt_cache_hit_tokens,
     COALESCE(SUM(mu.prompt_cache_miss_tokens), 0) AS prompt_cache_miss_tokens,

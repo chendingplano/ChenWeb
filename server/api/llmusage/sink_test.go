@@ -120,6 +120,37 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	}
 }
 
+func TestSinkCapturePersistsRecordUserID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	startedAt := time.Date(2026, 9, 20, 13, 30, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(time.Second)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (`)).
+		WithArgs(
+			"evt-user-id", "acct_1", "prof_1", "user_123", "openai", "gpt-4o-mini", "user-attributed",
+			startedAt, finishedAt, time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+			int64(0), int64(0), int64(0), int64(0), int64(0), int64(1000), 0,
+			"", "", "", "", `{"capture_source":"shared_llm"}`, nil, "", "", nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	sink := &Sink{DB: db, WorkspaceTZ: time.UTC, NewID: func() string { return "evt-user-id" }, Now: func() time.Time { return finishedAt }}
+	_, err = sink.Capture(context.Background(), sharedllm.UsageCaptureRecord{
+		AccountID: "acct_1", ProfileID: "prof_1", UserID: "user_123", Provider: sharedllm.ProviderOpenAI,
+		ModelName: "gpt-4o-mini", PromptName: "user-attributed", RequestStartedAt: startedAt, RequestFinishedAt: finishedAt,
+	})
+	if err != nil {
+		t.Fatalf("Capture() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

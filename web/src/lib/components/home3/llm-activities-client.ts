@@ -94,6 +94,8 @@ export type LLMCurrentBalance = {
 	currency_code: string;
 };
 
+export type LLMBalanceHistory = Omit<LLMCurrentBalance, 'workspace_day'>;
+
 export type LLMTodaySummary = {
 	workspace_day: string;
 	timezone_name: string;
@@ -120,6 +122,8 @@ export type ListLLMUsageEventsResponse = {
 export type ListLLMCurrentBalancesResponse = {
 	balances: LLMCurrentBalance[];
 };
+
+export type ListLLMBalanceHistoryResponse = { balances: LLMBalanceHistory[] };
 
 export type GetLLMTodaySummaryResponse = {
 	summary: LLMTodaySummary;
@@ -192,6 +196,10 @@ export function getLLMUsageEventsByIds(ids: string[]): Promise<LLMUsageEventDeta
 
 export function listLLMCurrentBalances(limit = 20): Promise<ListLLMCurrentBalancesResponse> {
 	return req<ListLLMCurrentBalancesResponse>(`/api/v1/llm/balances/current?limit=${limit}`);
+}
+
+export function listLLMBalanceHistory(limit = 24 * 14): Promise<ListLLMBalanceHistoryResponse> {
+	return req<ListLLMBalanceHistoryResponse>(`/api/v1/llm/balances/history?limit=${limit}`);
 }
 
 export function getLLMTodaySummary(): Promise<GetLLMTodaySummaryResponse> {

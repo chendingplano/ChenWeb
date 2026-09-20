@@ -64,6 +64,27 @@ type fakeBalanceFetcher struct {
 	result BalanceFetchResult
 }
 
+func TestRunnerRunPersistsEveryDeepSeekCurrency(t *testing.T) {
+	now := time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
+	store := &fakeStore{accounts: []Account{{ID: "acct_1", BaseURL: "https://api.deepseek.com", APIKeyRef: "secret"}}}
+	runner := &Runner{
+		Store: store,
+		BalanceAPI: fakeBalanceFetcher{result: BalanceFetchResult{Balances: []Balance{{Amount: 100.00, CurrencyCode: "CNY"}, {Amount: 10.00, CurrencyCode: "USD"}}, RawPayload: []byte(`{"balance_infos":[]}`)}},
+		WorkspaceTZ: time.UTC,
+		Now: func() time.Time { return now },
+	}
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(store.insertedSnapshots) != 2 {
+		t.Fatalf("len(insertedSnapshots) = %d, want 2", len(store.insertedSnapshots))
+	}
+	if store.insertedSnapshots[0].CurrencyCode != "CNY" || store.insertedSnapshots[1].CurrencyCode != "USD" {
+		t.Fatalf("unexpected currencies: %+v", store.insertedSnapshots)
+	}
+}
+
 func (f fakeBalanceFetcher) FetchBalance(context.Context, string, string) (BalanceFetchResult, error) {
 	return f.result, nil
 }

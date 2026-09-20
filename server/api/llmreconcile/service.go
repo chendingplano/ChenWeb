@@ -29,7 +29,13 @@ type BalanceFetcher interface {
 type BalanceFetchResult struct {
 	BalanceAmount float64
 	CurrencyCode  string
+	Balances      []Balance
 	RawPayload    []byte
+}
+
+type Balance struct {
+	Amount       float64
+	CurrencyCode string
 }
 
 type Runner struct {
@@ -39,6 +45,7 @@ type Runner struct {
 	WorkspaceTZ  *time.Location
 	TimezoneName string
 	Now          func() time.Time
+	CaptureSource string
 }
 
 type RunResult struct {
@@ -78,23 +85,35 @@ func (r *Runner) RunWithResult(ctx context.Context) (RunResult, error) {
 			return RunResult{}, err
 		}
 
-		rawPayloadRef, err := writeBalanceArchive(r.ArchiveRoot, today, account.ID, balance.RawPayload)
+		rawPayloadRef, err := writeBalanceArchive(r.ArchiveRoot, today, account.ID, capturedAt, balance.RawPayload)
 		if err != nil {
 			return RunResult{}, err
 		}
 
-		snapshot := BalanceSnapshot{
-			AccountID:     account.ID,
-			CapturedAt:    capturedAt.UTC(),
-			WorkspaceDay:  today,
-			BalanceAmount: balance.BalanceAmount,
-			CurrencyCode:  balance.CurrencyCode,
-			RawPayloadRef: rawPayloadRef,
+		balances := balance.Balances
+		if len(balances) == 0 {
+			balances = []Balance{{Amount: balance.BalanceAmount, CurrencyCode: balance.CurrencyCode}}
 		}
-		if err := r.Store.InsertBalanceSnapshot(ctx, snapshot); err != nil {
-			return RunResult{}, err
+		for _, currencyBalance := range balances {
+			snapshot := BalanceSnapshot{
+				AccountID:     account.ID,
+				CapturedAt:    capturedAt.UTC(),
+				WorkspaceDay:  today,
+				BalanceAmount: currencyBalance.Amount,
+				CurrencyCode:  currencyBalance.CurrencyCode,
+				CaptureSource: r.captureSource(),
+				RawPayloadRef: rawPayloadRef,
+			}
+			if err := r.Store.InsertBalanceSnapshot(ctx, snapshot); err != nil {
+				return RunResult{}, err
+			}
+			result.SnapshotsCreated++
 		}
-		result.SnapshotsCreated++
+		snapshot := BalanceSnapshot{AccountID: account.ID, CapturedAt: capturedAt.UTC(), WorkspaceDay: today, BalanceAmount: balance.BalanceAmount, CurrencyCode: balance.CurrencyCode, CaptureSource: r.captureSource(), RawPayloadRef: rawPayloadRef}
+		if len(balance.Balances) > 0 {
+			snapshot.BalanceAmount = balance.Balances[0].Amount
+			snapshot.CurrencyCode = balance.Balances[0].CurrencyCode
+		}
 
 		openingTodaySnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
 		if err != nil {
@@ -168,6 +187,13 @@ func (r *Runner) timezoneName() string {
 	return r.location().String()
 }
 
+func (r *Runner) captureSource() string {
+	if strings.TrimSpace(r.CaptureSource) != "" {
+		return r.CaptureSource
+	}
+	return "manual"
+}
+
 type DeepSeekBalanceClient struct {
 	HTTPClient *http.Client
 }
@@ -187,11 +213,18 @@ func (c *DeepSeekBalanceClient) FetchBalance(ctx context.Context, baseURL string
 	return BalanceFetchResult{
 		BalanceAmount: selected.Amount,
 		CurrencyCode:  firstNonEmpty(selected.CurrencyCode, "USD"),
+		Balances: func() []Balance {
+			out := make([]Balance, 0, len(result.Balances))
+			for _, balance := range result.Balances {
+				out = append(out, Balance{Amount: balance.Amount, CurrencyCode: firstNonEmpty(balance.CurrencyCode, "USD")})
+			}
+			return out
+		}(),
 		RawPayload:    result.RawPayload,
 	}, nil
 }
 
-func writeBalanceArchive(root string, workspaceDay time.Time, accountID string, rawPayload []byte) (string, error) {
+func writeBalanceArchive(root string, workspaceDay time.Time, accountID string, capturedAt time.Time, rawPayload []byte) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", nil
 	}
@@ -200,7 +233,7 @@ func writeBalanceArchive(root string, workspaceDay time.Time, accountID string, 
 		workspaceDay.Format("2006-01"),
 		workspaceDay.Format("2006-01-02"),
 		"reconciliation",
-		fmt.Sprintf("deepseek-account-%s-balance.json", accountID),
+		fmt.Sprintf("deepseek-account-%s-balance-%s.json", accountID, capturedAt.UTC().Format("20060102T150405.000000000Z")),
 	)
 	fullPath := filepath.Join(root, relPath)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {

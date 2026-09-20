@@ -57,12 +57,12 @@ func TestStoreInsertBalanceSnapshot(t *testing.T) {
 
 	capturedAt := time.Date(2026, 6, 20, 7, 0, 0, 0, time.UTC)
 	workspaceDay := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_balance_snapshot (
-    account_id, captured_at, workspace_day, balance_amount, currency_code, raw_payload_ref
+mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_balance_snapshot (
+    account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7
 )`)).
-		WithArgs("acct_1", capturedAt, workspaceDay, 19.25, "USD", "2026/2026-06/2026-06-20/reconciliation/deepseek-account-acct_1-balance.json").
+		WithArgs("acct_1", capturedAt, workspaceDay, 19.25, "USD", "manual", "2026/2026-06/2026-06-20/reconciliation/deepseek-account-acct_1-balance.json").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	store := NewStore(db)
@@ -72,7 +72,33 @@ func TestStoreInsertBalanceSnapshot(t *testing.T) {
 		WorkspaceDay:  workspaceDay,
 		BalanceAmount: 19.25,
 		CurrencyCode:  "USD",
+		CaptureSource: "manual",
 		RawPayloadRef: "2026/2026-06/2026-06-20/reconciliation/deepseek-account-acct_1-balance.json",
+	})
+	if err != nil {
+		t.Fatalf("InsertBalanceSnapshot() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestStoreInsertBalanceSnapshotPreservesCaptureSourceAndNumericAmount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	capturedAt := time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
+	workspaceDay := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_balance_snapshot (`)).
+		WithArgs("acct_1", capturedAt, workspaceDay, 19.25, "CNY", "manual", "archive/balance-1.json").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = NewStore(db).InsertBalanceSnapshot(context.Background(), BalanceSnapshot{
+		AccountID: "acct_1", CapturedAt: capturedAt, WorkspaceDay: workspaceDay,
+		BalanceAmount: 19.25, CurrencyCode: "CNY", CaptureSource: "manual", RawPayloadRef: "archive/balance-1.json",
 	})
 	if err != nil {
 		t.Fatalf("InsertBalanceSnapshot() error = %v", err)

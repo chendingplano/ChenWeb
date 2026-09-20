@@ -263,11 +263,12 @@ func main() {
 	llmreconcile.StartBackgroundReconciliation(
 		context.Background(),
 		&llmreconcile.Runner{
-			Store:        llmreconcile.NewStore(ApiTypes.ProjectDBHandle),
-			BalanceAPI:   &llmreconcile.DeepSeekBalanceClient{},
-			ArchiveRoot:  llmCfg.ArchiveRoot,
-			WorkspaceTZ:  llmLoc,
-			TimezoneName: llmCfg.WorkspaceTimezone,
+			Store:         llmreconcile.NewStore(ApiTypes.ProjectDBHandle),
+			BalanceAPI:    &llmreconcile.DeepSeekBalanceClient{},
+			ArchiveRoot:   llmCfg.ArchiveRoot,
+			WorkspaceTZ:   llmLoc,
+			TimezoneName:  llmCfg.WorkspaceTimezone,
+			CaptureSource: "hourly",
 		},
 		logger,
 		llmCfg.ReconciliationRunHour,

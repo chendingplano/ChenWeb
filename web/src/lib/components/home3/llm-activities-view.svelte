@@ -10,11 +10,13 @@
 
 	import {
 		getLLMTodaySummary,
+		listLLMBalanceHistory,
 		listLLMCurrentBalances,
 		listLLMModelActivityReports,
 		listLLMUsageEvents,
 		runLLMReconciliationNow,
 		type LLMCurrentBalance,
+		type LLMBalanceHistory,
 		type LLMModelActivityReport,
 		type LLMReportFilters,
 		type LLMTodaySummary,
@@ -31,6 +33,7 @@
 
 	let modelReports = $state<LLMModelActivityReport[]>([]);
 	let balances = $state<LLMCurrentBalance[]>([]);
+	let balanceHistory = $state<LLMBalanceHistory[]>([]);
 	let usageEvents = $state<LLMUsageEvent[]>([]);
 	let todaySummary = $state<LLMTodaySummary>({
 		workspace_day: '',
@@ -76,15 +79,17 @@
 			notice = null;
 		}
 		try {
-			const [summaryResponse, balancesResponse, reportsResponse, eventsResponse] =
+			const [summaryResponse, balancesResponse, historyResponse, reportsResponse, eventsResponse] =
 				await Promise.all([
 					getLLMTodaySummary(),
 					listLLMCurrentBalances(),
+					listLLMBalanceHistory(),
 					listLLMModelActivityReports(reportLimit, getReportFilters()),
 					listLLMUsageEvents(eventLimit)
 				]);
 			todaySummary = summaryResponse.summary;
 			balances = balancesResponse.balances;
+			balanceHistory = historyResponse.balances;
 			modelReports = reportsResponse.reports;
 			apiKeyOptions = reportsResponse.api_keys || [];
 			usageEvents = eventsResponse.usage_events;
@@ -317,7 +322,7 @@
 				},
 				{
 					type: 'value',
-					name: `Spend (${group.currencyCode || 'USD'})`,
+					name: `Local estimate (${group.currencyCode || 'CNY'})`,
 					position: 'right',
 					offset: 64,
 					nameTextStyle: { color: sub },
@@ -351,13 +356,34 @@
 					data: group.rows.map((row) => row.output_tokens)
 				},
 				{
-					name: 'Spend',
+					name: 'Local estimate',
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 18,
 					data: group.rows.map((row) => row.spend_amount)
 				}
 			]
+		};
+	}
+
+	type BalanceChartGroup = { key: string; accountName: string; currencyCode: string; rows: LLMBalanceHistory[] };
+	const balanceChartGroups = $derived((() => {
+		const grouped = new SvelteMap<string, BalanceChartGroup>();
+		for (const row of balanceHistory) {
+			const key = `${row.account_id}:${row.currency_code}`;
+			const group = grouped.get(key) ?? { key, accountName: row.account_name, currencyCode: row.currency_code, rows: [] };
+			group.rows.push(row); grouped.set(key, group);
+		}
+		return Array.from(grouped.values()).map((group) => ({ ...group, rows: [...group.rows].sort((a, b) => a.captured_at.localeCompare(b.captured_at)) }));
+	})());
+
+	function buildBalanceChartOptions(group: BalanceChartGroup): EChartsOption {
+		return { backgroundColor: 'transparent', animationDuration: 250, color: ['#14B8A6'],
+			tooltip: { trigger: 'axis', backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
+			grid: { top: 28, right: 30, bottom: 58, left: 70 },
+			xAxis: { type: 'category', data: group.rows.map((row) => fmtDate(row.captured_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 35 } },
+			yAxis: { type: 'value', name: `Official balance (${group.currencyCode})`, nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { lineStyle: { color: border, opacity: 0.45 } } },
+			series: [{ name: 'Official balance', type: 'bar', barMaxWidth: 20, data: group.rows.map((row) => row.balance_amount) }]
 		};
 	}
 </script>
@@ -404,7 +430,7 @@
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Today's Spend</div>
+			<div class="summary-label">Today's provider delta</div>
 			<div class="summary-value">
 				{fmtMoney(todaySummary.spend_amount, todaySummary.currency_code || 'USD')}
 			</div>
@@ -478,10 +504,32 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
+				<h3>Official Account Balance</h3>
+				<p class="muted">Provider-reported DeepSeek balance by API key and currency. This is an account track, not a per-model allocation.</p>
+			</div>
+		</div>
+		{#if loading && balanceHistory.length === 0}
+			<div class="empty">Loading official balance history…</div>
+		{:else if balanceChartGroups.length === 0}
+			<div class="empty">No official balance history yet. Hourly snapshots will appear here after the next capture.</div>
+		{:else}
+			<div class="model-chart-grid">
+				{#each balanceChartGroups as group (group.key)}
+					<div class="model-chart-card">
+						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance · {group.currencyCode}</div></div></div>
+						<div class="model-chart"><Chart {init} options={buildBalanceChartOptions(group)} style="width: 100%; height: 100%;" /></div>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<div class="panel">
+		<div class="panel-head">
+			<div>
 				<h3>Spend Reports</h3>
 				<p class="muted">
-					Per-model activity aggregated by workspace day. Spending is allocated from each
-					account/day by that model&apos;s token share.
+					Per-model activity aggregated by workspace day. Local estimates use the configured DeepSeek CNY token prices and remain separate from provider balances.
 				</p>
 			</div>
 			<div class="report-filters">

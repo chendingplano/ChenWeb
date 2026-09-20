@@ -7,6 +7,9 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
+// StartBackgroundReconciliation captures official provider balances once per
+// hour. runHour remains in the signature for backwards-compatible callers;
+// daily reporting still uses it, but balance history must be hourly.
 func StartBackgroundReconciliation(ctx context.Context, runner *Runner, logger ApiTypes.JimoLogger, runHour int) {
 	if runner == nil {
 		return
@@ -14,7 +17,7 @@ func StartBackgroundReconciliation(ctx context.Context, runner *Runner, logger A
 	go func() {
 		runReconciliationOnce(ctx, runner, logger)
 		for {
-			nextRun := nextReconciliationRunAt(time.Now(), runner.location(), runHour)
+			nextRun := nextHourlyReconciliationRunAt(time.Now(), runner.location())
 			timer := time.NewTimer(time.Until(nextRun))
 			select {
 			case <-ctx.Done():
@@ -25,6 +28,14 @@ func StartBackgroundReconciliation(ctx context.Context, runner *Runner, logger A
 			}
 		}
 	}()
+}
+
+func nextHourlyReconciliationRunAt(now time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	localNow := now.In(loc)
+	return time.Date(localNow.Year(), localNow.Month(), localNow.Day(), localNow.Hour()+1, 0, 0, 0, loc)
 }
 
 func nextReconciliationRunAt(now time.Time, loc *time.Location, runHour int) time.Time {

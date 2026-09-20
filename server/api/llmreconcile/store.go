@@ -20,6 +20,7 @@ type BalanceSnapshot struct {
 	WorkspaceDay  time.Time
 	BalanceAmount float64
 	CurrencyCode  string
+	CaptureSource string
 	RawPayloadRef string
 }
 
@@ -73,10 +74,10 @@ ORDER BY account_name ASC`
 }
 
 func (s *Store) InsertBalanceSnapshot(ctx context.Context, snap BalanceSnapshot) error {
-	const stmt = `INSERT INTO llm_balance_snapshot (
-    account_id, captured_at, workspace_day, balance_amount, currency_code, raw_payload_ref
+ 	const stmt = `INSERT INTO llm_balance_snapshot (
+    account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7
 )`
 
 	_, err := s.db.ExecContext(
@@ -87,6 +88,7 @@ func (s *Store) InsertBalanceSnapshot(ctx context.Context, snap BalanceSnapshot)
 		snap.WorkspaceDay,
 		snap.BalanceAmount,
 		snap.CurrencyCode,
+		snap.CaptureSource,
 		snap.RawPayloadRef,
 	)
 	return err

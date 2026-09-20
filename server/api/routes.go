@@ -474,6 +474,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/llm/reports/daily", llmreporthandler.ListDailyReports)
 	apiGroup.GET("/llm/reports/models", llmreporthandler.ListModelActivityReports)
 	apiGroup.GET("/llm/balances/current", llmreporthandler.ListCurrentBalances)
+	apiGroup.GET("/llm/balances/history", llmreporthandler.ListBalanceHistory)
 	apiGroup.GET("/llm/usage-events", llmreporthandler.ListUsageEvents)
 	apiGroup.GET("/llm/usage-events-admin", llmreporthandler.ListUsageEventsAdmin)
 	apiGroup.GET("/llm/usage-events/by-ids", llmreporthandler.GetUsageEventsByIDs)
