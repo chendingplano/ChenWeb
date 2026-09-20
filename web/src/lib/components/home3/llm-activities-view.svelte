@@ -486,7 +486,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each balances as balance (balance.account_id)}
+						{#each balances as balance (`${balance.account_id}:${balance.currency_code}`)}
 							<tr>
 								<td>{balance.account_name}</td>
 								<td>{balance.provider}</td>
