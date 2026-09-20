@@ -57,6 +57,7 @@
 	let customTo = $state('');
 	let selectedAPIKey = $state('');
 	let apiKeyOptions = $state<{ name: string }[]>([]);
+	let balanceFrequency = $state('hourly');
 
 	const timeOptions = [
 		{ value: 'today', label: 'Today' },
@@ -83,7 +84,7 @@
 				await Promise.all([
 					getLLMTodaySummary(),
 					listLLMCurrentBalances(),
-					listLLMHourlyBalanceReports(),
+					listLLMHourlyBalanceReports(24, balanceFrequency),
 					listLLMModelActivityReports(reportLimit, getReportFilters()),
 					listLLMUsageEvents(eventLimit)
 				]);
@@ -161,6 +162,11 @@
 
 	function handleReportFilterChange() {
 		void loadModelReports();
+	}
+
+	async function loadBalanceReports() {
+		const response = await listLLMHourlyBalanceReports(24, balanceFrequency);
+		hourlyBalanceReports = response.reports;
 	}
 
 	async function runReconciliation() {
@@ -391,6 +397,10 @@
 			]
 		};
 	}
+
+	function balanceChartWidth(group: BalanceChartGroup): string {
+		return `${Math.max(900, group.rows.length * 72)}px`;
+	}
 </script>
 
 <div
@@ -471,6 +481,7 @@
 					fetch a fresh balance.
 				</p>
 			</div>
+			<label class="balance-frequency"><span>Frequency</span><select bind:value={balanceFrequency} onchange={() => void loadBalanceReports()}><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="monthly">Monthly</option></select></label>
 		</div>
 		{#if loading && balances.length === 0}
 			<div class="empty">Loading current balances…</div>
@@ -522,7 +533,7 @@
 				{#each balanceChartGroups as group (group.key)}
 					<div class="model-chart-card">
 						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance and hourly spending</div></div></div>
-						<div class="model-chart"><Chart {init} options={buildBalanceChartOptions(group)} style="width: 100%; height: 100%;" /></div>
+						<div class="balance-chart-scroll"><div class="model-chart" style:width={balanceChartWidth(group)}><Chart {init} options={buildBalanceChartOptions(group)} style="width: 100%; height: 100%;" /></div></div>
 					</div>
 				{/each}
 			</div>
@@ -846,6 +857,8 @@
 		width: 100%;
 		height: 360px;
 	}
+	.balance-chart-scroll { overflow-x: auto; width: 100%; }
+	.balance-frequency { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--sub); }
 	.model-chart-head {
 		display: flex;
 		justify-content: space-between;

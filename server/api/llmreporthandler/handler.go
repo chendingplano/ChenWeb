@@ -28,7 +28,7 @@ type reportStore interface {
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
 	ListBalanceHistory(ctx context.Context, limit int) ([]BalanceHistory, error)
-	ListHourlyBalanceReports(ctx context.Context, limit int) ([]HourlyBalanceReport, error)
+	ListHourlyBalanceReports(ctx context.Context, limit int, frequency string, workspaceDay time.Time) ([]HourlyBalanceReport, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
 	ListUsageEventsAdmin(ctx context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error)
 	GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error)
@@ -421,7 +421,21 @@ func ListHourlyBalanceReports(c echo.Context) error {
 	if store == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
 	}
-	rows, err := store.ListHourlyBalanceReports(c.Request().Context(), intParamDefault(c.QueryParam("limit"), 24*14))
+	frequency := strings.ToLower(strings.TrimSpace(c.QueryParam("frequency")))
+	if frequency == "" {
+		frequency = "hourly"
+	}
+	if frequency != "hourly" && frequency != "daily" && frequency != "monthly" {
+		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": "frequency must be hourly, daily, or monthly"})
+	}
+	llmCfg := config.GetLLMConfig()
+	loc, err := time.LoadLocation(llmCfg.WorkspaceTimezone)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load workspace timezone", "error": err.Error()})
+	}
+	now := time.Now().In(loc)
+	workspaceDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	rows, err := store.ListHourlyBalanceReports(c.Request().Context(), intParamDefault(c.QueryParam("limit"), 24), frequency, workspaceDay)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list hourly official balance reports", "error": err.Error()})
 	}

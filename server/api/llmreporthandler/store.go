@@ -266,17 +266,24 @@ LIMIT $1`
 	return out, rows.Err()
 }
 
-func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int) ([]HourlyBalanceReport, error) {
-	const query = `WITH latest_per_hour AS (
-    SELECT DISTINCT ON (account_id, currency_code, date_trunc('hour', captured_at))
-        account_id, currency_code, date_trunc('hour', captured_at) AS hour_started_at, balance_amount
+func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequency string, workspaceDay time.Time) ([]HourlyBalanceReport, error) {
+	bucket := "hour"
+	if frequency == "daily" {
+		bucket = "day"
+	} else if frequency == "monthly" {
+		bucket = "month"
+	}
+	query := fmt.Sprintf(`WITH latest_per_bucket AS (
+    SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
+        account_id, currency_code, date_trunc('%s', captured_at) AS hour_started_at, balance_amount
     FROM llm_balance_snapshot
-    ORDER BY account_id, currency_code, date_trunc('hour', captured_at), captured_at DESC
+    WHERE workspace_day = $2
+    ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
 ), pivoted AS (
     SELECT account_id, hour_started_at,
         MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'USD') AS balance_usd,
         MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'CNY') AS balance_cny
-    FROM latest_per_hour
+    FROM latest_per_bucket
     GROUP BY account_id, hour_started_at
 ), with_previous AS (
     SELECT *, LAG(balance_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_balance_cny
@@ -289,8 +296,8 @@ SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_
 FROM with_previous report
 JOIN llm_account acct ON acct.id = report.account_id
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
-LIMIT $1`
-	rows, err := s.db.QueryContext(ctx, query, limit)
+LIMIT $1`, bucket, bucket, bucket)
+	rows, err := s.db.QueryContext(ctx, query, limit, workspaceDay)
 	if err != nil {
 		return nil, err
 	}

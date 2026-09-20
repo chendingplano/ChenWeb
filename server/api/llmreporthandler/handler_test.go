@@ -47,7 +47,7 @@ func (s *stubReportStore) ListBalanceHistory(_ context.Context, limit int) ([]Ba
 	return s.balanceHistory, nil
 }
 
-func (s *stubReportStore) ListHourlyBalanceReports(_ context.Context, limit int) ([]HourlyBalanceReport, error) {
+func (s *stubReportStore) ListHourlyBalanceReports(_ context.Context, limit int, frequency string, workspaceDay time.Time) ([]HourlyBalanceReport, error) {
 	return s.hourlyBalanceReports, nil
 }
 
