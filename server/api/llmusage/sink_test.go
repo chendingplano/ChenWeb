@@ -23,22 +23,23 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
-    id, account_id, profile_id, provider, model_name, prompt_name,
+    id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24, $25
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22::jsonb,
+    $23, $24, $25, $26
 )`)).
 		WithArgs(
 			"evt-test-1",
 			"acct_1",
 			"prof_1",
+			"usr_1",
 			"openai_compatible",
 			"deepseek-chat",
 			"extract-products-v2",
@@ -76,6 +77,7 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	record := sharedllm.UsageCaptureRecord{
 		AccountID:             "acct_1",
 		ProfileID:             "prof_1",
+		UserID:                "usr_1",
 		Provider:              sharedllm.ProviderOpenAICompatible,
 		ModelName:             "deepseek-chat",
 		PromptName:            "extract-products-v2",
@@ -163,22 +165,23 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
-    id, account_id, profile_id, provider, model_name, prompt_name,
+    id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24, $25
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22::jsonb,
+    $23, $24, $25, $26
 )`)).
 		WithArgs(
 			"evt-test-meta",
 			"acct_1",
 			"prof_1",
+			"usr_meta",
 			"openai_compatible",
 			"deepseek-chat",
 			"review-provision",
@@ -216,6 +219,7 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 	record := sharedllm.UsageCaptureRecord{
 		AccountID:         "acct_1",
 		ProfileID:         "prof_1",
+		UserID:            "usr_meta",
 		Provider:          sharedllm.ProviderOpenAICompatible,
 		ModelName:         "deepseek-chat",
 		PromptName:        "review-provision",
@@ -247,7 +251,7 @@ func TestSinkCapturePersistsWithoutAccountProfileLinkage(t *testing.T) {
 	archiveRoot := t.TempDir()
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (`)).
 		WithArgs(
-			"evt-test-2", nil, nil, "openai", "gpt-4o-mini", "no-account-yet",
+			"evt-test-2", nil, nil, "usr_2", "openai", "gpt-4o-mini", "no-account-yet",
 			startedAt, finishedAt, time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC),
 			int64(0), int64(0), int64(0), int64(0), int64(0), int64(60000), 0,
 			"",
@@ -266,6 +270,7 @@ func TestSinkCapturePersistsWithoutAccountProfileLinkage(t *testing.T) {
 	}
 
 	record := sharedllm.UsageCaptureRecord{
+		UserID:           "usr_2",
 		Provider:         sharedllm.ProviderOpenAI,
 		ModelName:        "gpt-4o-mini",
 		PromptName:       "no-account-yet",
@@ -310,22 +315,23 @@ LIMIT 1`)).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}).AddRow("acct_22", "prof_33"))
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
-    id, account_id, profile_id, provider, model_name, prompt_name,
+    id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24, $25
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22::jsonb,
+    $23, $24, $25, $26
 )`)).
 		WithArgs(
 			"evt-test-3",
 			"acct_22",
 			"prof_33",
+			"usr_3",
 			"deepseek",
 			"deepseek-chat",
 			"extract-provisions-v1",
@@ -361,6 +367,7 @@ LIMIT 1`)).
 	}
 
 	record := sharedllm.UsageCaptureRecord{
+		UserID:            "usr_3",
 		Provider:          sharedllm.ProviderID("deepseek"),
 		BaseURL:           "https://api.deepseek.com",
 		APIKey:            "sk-live",
@@ -409,22 +416,23 @@ LIMIT 1`)).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}).AddRow("acct_22", "prof_33"))
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
-    id, account_id, profile_id, provider, model_name, prompt_name,
+    id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24, $25
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22::jsonb,
+    $23, $24, $25, $26
 )`)).
 		WithArgs(
 			"evt-test-4",
 			"acct_22",
 			"prof_33",
+			"usr_4",
 			"deepseek",
 			"deepseek-chat",
 			"extract-provisions-v1",
@@ -460,6 +468,7 @@ LIMIT 1`)).
 	}
 
 	record := sharedllm.UsageCaptureRecord{
+		UserID:            "usr_4",
 		Provider:          sharedllm.ProviderID("deepseek"),
 		BaseURL:           "https://api.deepseek.com/",
 		APIKey:            "sk-live",
@@ -519,22 +528,23 @@ LIMIT 1`)).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}).AddRow("acct_44", "prof_55"))
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
-    id, account_id, profile_id, provider, model_name, prompt_name,
+    id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21::jsonb,
-    $22, $23, $24, $25
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22::jsonb,
+    $23, $24, $25, $26
 )`)).
 		WithArgs(
 			"evt-test-5",
 			"acct_44",
 			"prof_55",
+			"usr_5",
 			"deepseek",
 			"deepseek-v4-flash",
 			"extract-products-v2",
@@ -570,6 +580,7 @@ LIMIT 1`)).
 	}
 
 	record := sharedllm.UsageCaptureRecord{
+		UserID:            "usr_5",
 		Provider:          sharedllm.ProviderID("deepseek"),
 		BaseURL:           "https://api.deepseek.com",
 		APIKey:            "sk-live",

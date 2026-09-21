@@ -266,7 +266,7 @@ api_key = 'sk-primary'
 	}
 	t.Setenv("CHENWEB_MODELS_TOML", path)
 
-	options, refs, models, err := loadModelAPIKeyOptions()
+	options, refs, err := loadModelAPIKeyOptions()
 	if err != nil {
 		t.Fatalf("loadModelAPIKeyOptions() error = %v", err)
 	}
@@ -280,37 +280,34 @@ api_key = 'sk-primary'
 	if err != nil || ref != "sk-primary" {
 		t.Fatalf("apiKeyRefForName() = %q, %v; want sk-primary", ref, err)
 	}
-	if len(models["provider-pro"]) != 1 || models["provider-pro"][0] != "provider-pro" {
-		t.Fatalf("unexpected model mappings = %+v", models)
-	}
 }
 
-func TestLoadModelAPIKeyOptionsMapsDeepSeekProAliasToProModel(t *testing.T) {
-	path := filepath.Join("..", "..", "..", ".models.toml")
+// TestListModelActivityReportsDoesNotRestrictModelsForSelectedAlias guards
+// against reintroducing a model-name guess on top of the api_key_ref filter:
+// an API key can legitimately be declared against one model profile in
+// .models.toml while production traffic actually uses a different model, so
+// the handler must scope by account only and let every real model for that
+// account come back.
+func TestListModelActivityReportsDoesNotRestrictModelsForSelectedAlias(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	if err := os.WriteFile(path, []byte(`[model-api-keys]
+alias-name = [{ api_key = 'sk-shared' }]
+
+[declared-profile]
+model_name = 'declared-model'
+api_key = 'sk-shared'
+`), 0600); err != nil {
+		t.Fatalf("write models TOML: %v", err)
+	}
 	t.Setenv("CHENWEB_MODELS_TOML", path)
 
-	_, refs, models, err := loadModelAPIKeyOptions()
-	if err != nil {
-		t.Fatalf("loadModelAPIKeyOptions() error = %v", err)
-	}
-	if refs["deepseek-4-1-pro"] == "" {
-		t.Fatal("deepseek-4-1-pro reference was not loaded")
-	}
-	got := models["deepseek-4-1-pro"]
-	if len(got) != 1 || got[0] != "deepseek-v4-pro" {
-		t.Fatalf("deepseek-4-1-pro models = %#v, want [deepseek-v4-pro]", got)
-	}
-}
-
-func TestListModelActivityReportsFiltersSelectedAliasToItsModel(t *testing.T) {
-	t.Setenv("CHENWEB_MODELS_TOML", filepath.Join("..", "..", "..", ".models.toml"))
 	store := &stubReportStore{}
 	prev := reportStoreFactory
 	t.Cleanup(func() { reportStoreFactory = prev })
 	reportStoreFactory = func() reportStore { return store }
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/reports/models?api_key=deepseek-4-1-pro", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/reports/models?api_key=alias-name", nil)
 	rec := httptest.NewRecorder()
 	if err := ListModelActivityReports(e.NewContext(req, rec)); err != nil {
 		t.Fatalf("ListModelActivityReports() error = %v", err)
@@ -318,8 +315,11 @@ func TestListModelActivityReportsFiltersSelectedAliasToItsModel(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if len(store.modelFilters.ModelNames) != 1 || store.modelFilters.ModelNames[0] != "deepseek-v4-pro" {
-		t.Fatalf("model filters = %#v, want [deepseek-v4-pro]", store.modelFilters.ModelNames)
+	if store.modelFilters.APIKeyRef != "sk-shared" {
+		t.Fatalf("api key ref = %q, want sk-shared", store.modelFilters.APIKeyRef)
+	}
+	if len(store.modelFilters.ModelNames) != 0 {
+		t.Fatalf("model filters = %#v, want none (any model actually used under this key must come back)", store.modelFilters.ModelNames)
 	}
 }
 

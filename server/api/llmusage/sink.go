@@ -181,7 +181,42 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	if err != nil {
 		return "", err
 	}
+	if userID == nil {
+		s.alarmForMissingUserID(ctx, record)
+	}
 	return eventID, nil
+}
+
+// alarmForMissingUserID raises an operator alarm (alarms_errors, surfaced
+// alongside every other alarm on /semos/admin/alarms) whenever a row is
+// inserted into llm_usage_event with no user_id -- the backstop for every
+// caller, known or not yet audited, that still fails to supply one upstream
+// (doc-processing's own generators are expected to have already alarmed at
+// publish time, see docprocessing.RoutingAlarmKindMissingUserID). Dedup'd by
+// run_id/record_id where available, same as routing alarms, so a hot loop of
+// unattributed calls in one run doesn't flood the alarms table. Write
+// failures are logged only -- an alarms-table outage must not affect usage
+// capture, which has already succeeded by this point.
+func (s *Sink) alarmForMissingUserID(ctx context.Context, record sharedllm.UsageCaptureRecord) {
+	if s.DB == nil {
+		return
+	}
+	const kind = "missing_user_id"
+	message := "llm_usage_event inserted with no user_id; call_loc=" + record.CallLoc + " call_reason=" + record.CallReason
+	var err error
+	switch {
+	case record.RunID != 0:
+		_, err = s.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, run_id, kind) VALUES ('warning',$1,$2,$3)
+ON CONFLICT (run_id, kind) WHERE run_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, message, record.RunID, kind)
+	case record.RecordID != 0:
+		_, err = s.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, record_id, kind) VALUES ('warning',$1,$2,$3)
+ON CONFLICT (record_id, kind) WHERE run_id IS NULL AND record_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, message, record.RecordID, kind)
+	default:
+		_, err = s.DB.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, kind) VALUES ('warning',$1,$2)`, message, kind)
+	}
+	if err != nil {
+		sinkLogger.Warn("failed writing missing-user-id alarm", "error", err, "call_loc", record.CallLoc)
+	}
 }
 
 func (s *Sink) resolveAccountProfileIDs(ctx context.Context, record sharedllm.UsageCaptureRecord) (accountID string, profileID string, err error) {

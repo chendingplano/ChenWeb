@@ -74,12 +74,28 @@ func (s *Store) FindAccountIDByAPIKeyRef(ctx context.Context, apiKeyRef string) 
 	return id, err
 }
 
+// AddDeposit records a manual 'deposit' or 'set-total-spending' entry and
+// derives total_spending in the same statement: a deposit carries forward the
+// previous total_spending unchanged (a deposit is not spend and is never used
+// as a provider_balance reference), while set-total-spending hard-resets
+// total_spending to the deposit_amount being set.
 func (s *Store) AddDeposit(ctx context.Context, in depositRecord) error {
 	entryKind := in.EntryKind
 	if entryKind == "" {
 		entryKind = "deposit"
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO llm_balance_snapshot (account_id,captured_at,workspace_day,balance_amount,currency_code,capture_source,raw_payload_ref,entry_kind,deposit_amount,note) VALUES ($1,$2,$3,$4,$5,'admin_deposit','',$6,$7,$8)`, in.AccountID, in.CapturedAt, in.CapturedAt, in.BalanceAmount, in.CurrencyCode, entryKind, in.DepositAmount, in.Note)
+	const stmt = `WITH prev_total AS (
+    SELECT total_spending
+    FROM llm_balance_snapshot
+    WHERE account_id = $1 AND currency_code = $5
+    ORDER BY captured_at DESC
+    LIMIT 1
+)
+INSERT INTO llm_balance_snapshot (account_id,captured_at,workspace_day,balance_amount,currency_code,capture_source,raw_payload_ref,entry_kind,deposit_amount,note,total_spending)
+VALUES ($1,$2,$3,$4,$5,'admin_deposit','',$6,$7,$8,
+    CASE WHEN $6 = 'set-total-spending' THEN $7 ELSE COALESCE((SELECT total_spending FROM prev_total), 0) END
+)`
+	_, err := s.db.ExecContext(ctx, stmt, in.AccountID, in.CapturedAt, in.CapturedAt, in.BalanceAmount, in.CurrencyCode, entryKind, in.DepositAmount, in.Note)
 	return err
 }
 

@@ -89,6 +89,9 @@ func (c InventoryCategoryCurator) embed(ctx context.Context, surface string) []f
 		return nil
 	}
 	vec, err := c.Embedder.Embed(ctx, llmclients.EmbedInput{
+		UserID:    llmUserIDFromContext(ctx),
+		RecordID:  llmRecordIDFromContext(ctx),
+		RunID:     llmRunIDFromContext(ctx),
 		ModelName: c.EmbedModelName,
 		InputText: surface,
 	})

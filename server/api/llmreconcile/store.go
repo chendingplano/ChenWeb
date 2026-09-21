@@ -73,6 +73,23 @@ ORDER BY account_name ASC`
 	return out, rows.Err()
 }
 
+// AlarmKindBalanceFetchFailed is persisted verbatim into alarms_errors' `kind`
+// column so a fetch failure is deduplicated per account (via
+// uq_alarms_errors_scope_id_kind, scope_id = account.ID) instead of writing a
+// fresh row every hour the account keeps failing.
+const AlarmKindBalanceFetchFailed = "deepseek_balance_fetch_failed"
+
+// RaiseBalanceFetchAlarm records that one account's hourly balance capture
+// failed, surfaced alongside every other operator alarm on
+// /semos/admin/alarms. It is deliberately best-effort: the reconciliation run
+// must continue to the next account regardless of whether the alarm write
+// itself succeeds.
+func (s *Store) RaiseBalanceFetchAlarm(ctx context.Context, accountID string, message string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO alarms_errors (severity, message, scope_id, kind) VALUES ('error',$1,$2,$3)
+ON CONFLICT (scope_id, kind) WHERE scope_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`, message, accountID, AlarmKindBalanceFetchFailed)
+	return err
+}
+
 // ClaimHourlyBalanceCapture makes the provider balance read idempotent for an
 // account/hour. Manual reconciliation therefore cannot create a burst of paid
 // balance reads or misleading sub-hourly chart points.
@@ -91,11 +108,32 @@ ON CONFLICT (account_id, scheduled_hour) DO NOTHING`
 	return affected == 1, nil
 }
 
+// InsertBalanceSnapshot records a provider-polled balance reading and derives
+// total_spending in the same statement: previous total_spending for this
+// account/currency, plus the drop (never negative) from the last
+// provider_balance reading to this one. Deposit and set-total-spending rows
+// are not provider_balance, so they are never used as the "previous" balance
+// reference -- a deposit bump is not mistaken for negative spending.
 func (s *Store) InsertBalanceSnapshot(ctx context.Context, snap BalanceSnapshot) error {
-	const stmt = `INSERT INTO llm_balance_snapshot (
-    account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref
+	const stmt = `WITH prev_balance AS (
+    SELECT balance_amount
+    FROM llm_balance_snapshot
+    WHERE account_id = $1 AND currency_code = $5 AND entry_kind = 'provider_balance'
+    ORDER BY captured_at DESC
+    LIMIT 1
+), prev_total AS (
+    SELECT total_spending
+    FROM llm_balance_snapshot
+    WHERE account_id = $1 AND currency_code = $5
+    ORDER BY captured_at DESC
+    LIMIT 1
+)
+INSERT INTO llm_balance_snapshot (
+    account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref, total_spending
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7,
+    COALESCE((SELECT total_spending FROM prev_total), 0)
+        + GREATEST(COALESCE((SELECT balance_amount FROM prev_balance), $4) - $4, 0)
 )`
 
 	_, err := s.db.ExecContext(

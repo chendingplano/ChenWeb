@@ -32,6 +32,22 @@ func modelsTOMLPath() string {
 	return filepath.Join(".", ".models.toml")
 }
 
+// reservedModelAPIKeysKey is a top-level TOML table used by loadDepositAPIKeyRefs
+// (see handler.go) to map deposit-tracking names to account API keys. It does not
+// conform to ApiTypes.LLMModelDef, so it must never be decoded/encoded as a model
+// entry — doing so silently zeroes it out (go-toml decodes the mismatched shape into
+// a zero-value struct instead of erroring). readModelsTOML excludes it from the model
+// map and writeModelsTOML re-reads and preserves its raw content untouched.
+const reservedModelAPIKeysKey = "model-api-keys"
+
+// reservedDeepSeekBillingKey is the top-level TOML table read by
+// applyDeepSeekLocalCNYPricing (llmreporthandler/handler.go) for DeepSeek's CNY
+// peak/off-peak rate cards. Same shape mismatch hazard as reservedModelAPIKeysKey
+// above, so it gets the same exclude-on-read / preserve-on-write treatment.
+const reservedDeepSeekBillingKey = "deepseek-billing"
+
+var reservedTopLevelKeys = []string{reservedModelAPIKeysKey, reservedDeepSeekBillingKey}
+
 func readModelsTOML(path string) (ApiTypes.LLMModelsFile, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -47,15 +63,50 @@ func readModelsTOML(path string) (ApiTypes.LLMModelsFile, error) {
 	if models == nil {
 		models = make(ApiTypes.LLMModelsFile)
 	}
+	for _, key := range reservedTopLevelKeys {
+		delete(models, key)
+	}
 	return models, nil
 }
 
+func readReservedTopLevelSections(path string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var generic map[string]any
+	if err := toml.Unmarshal(raw, &generic); err != nil {
+		return nil, err
+	}
+	reserved := make(map[string]any, len(reservedTopLevelKeys))
+	for _, key := range reservedTopLevelKeys {
+		if value, ok := generic[key]; ok {
+			reserved[key] = value
+		}
+	}
+	return reserved, nil
+}
+
 func writeModelsTOML(path string, models ApiTypes.LLMModelsFile) error {
-	out, err := toml.Marshal(models)
+	reserved, err := readReservedTopLevelSections(path)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0644)
+	out := make(map[string]any, len(models)+len(reserved))
+	for k, v := range models {
+		out[k] = v
+	}
+	for k, v := range reserved {
+		out[k] = v
+	}
+	data, err := toml.Marshal(out)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // UpsertModelsTOMLEntry reads, modifies, and writes the TOML file.

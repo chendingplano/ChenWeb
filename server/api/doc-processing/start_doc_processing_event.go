@@ -9,7 +9,12 @@ import (
 )
 
 type StartDocProcessingEvent struct {
-	RecordIDs      []int64
+	RecordIDs []int64
+	// UserID is the id of the user who triggered this run; forwarded onto
+	// each spawned LineFileGeneratedEvent (see HandleStartDocProcessingEvent
+	// / buildLineFileGeneratedPayload in control.go) so it reaches
+	// withLLMUserID the same way an automated trigger's user_id would.
+	UserID         string
 	Filename       string
 	All            string
 	DocProcessors  []string
@@ -61,6 +66,7 @@ func ParseStartDocProcessingEvent(payload []byte) (StartDocProcessingEvent, erro
 
 	return StartDocProcessingEvent{
 		RecordIDs:      recordIDs,
+		UserID:         strings.TrimSpace(asString(raw["user_id"])),
 		Filename:       firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
 		All:            all,
 		DocProcessors:  parseOperations(firstPresentValue(raw, "doc-processors", "doc_processors", "operation")),

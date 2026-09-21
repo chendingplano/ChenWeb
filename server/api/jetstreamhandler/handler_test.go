@@ -31,7 +31,7 @@ func TestValidateSubjectPayload_StartDocProcessingAcceptsRecordIDs(t *testing.T)
 }
 
 func TestNormalizeSubjectPayload_PDFParsedConvertsStringRecordIDToNumber(t *testing.T) {
-	got, err := normalizeSubjectPayload("kb.pdf.parsed", `{"record_id":"376","type":"pdf","status":"success","force":true}`)
+	got, err := normalizeSubjectPayload("kb.pdf.parsed", `{"record_id":"376","type":"pdf","status":"success","force":true}`, "")
 	if err != nil {
 		t.Fatalf("normalizeSubjectPayload() error = %v, want nil", err)
 	}

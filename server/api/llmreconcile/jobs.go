@@ -54,13 +54,24 @@ func nextReconciliationRunAt(now time.Time, loc *time.Location, runHour int) tim
 }
 
 func runReconciliationOnce(ctx context.Context, runner *Runner, logger ApiTypes.JimoLogger) {
-	if err := runner.Run(ctx); err != nil {
+	result, err := runner.RunWithResult(ctx)
+	if err != nil {
 		if logger != nil {
-			logger.Warn("llm provider reconciliation failed", "error", err)
+			logger.Warn("llm provider reconciliation run failed", "error", err)
 		}
 		return
 	}
+	for _, failure := range result.Failures {
+		if logger != nil {
+			logger.Warn("llm provider reconciliation failed for account",
+				"account_id", failure.AccountID, "account_name", failure.AccountName, "error", failure.Err)
+		}
+	}
 	if logger != nil {
-		logger.Info("llm provider reconciliation completed", "timezone", runner.timezoneName())
+		logger.Info("llm provider reconciliation completed",
+			"timezone", runner.timezoneName(),
+			"accounts_considered", result.AccountsConsidered,
+			"snapshots_created", result.SnapshotsCreated,
+			"failures", len(result.Failures))
 	}
 }

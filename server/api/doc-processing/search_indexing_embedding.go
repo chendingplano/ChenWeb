@@ -159,11 +159,14 @@ func embedQueryText(ctx context.Context, text string) ([]float64, bool) {
 		defer cancel()
 	}
 	vec, err := embedder.Embed(ctx, llmclients.EmbedInput{
-		ModelName: modelName, 
-		InputText: text,
+		UserID:     llmUserIDFromContext(ctx),
+		RecordID:   llmRecordIDFromContext(ctx),
+		RunID:      llmRunIDFromContext(ctx),
+		ModelName:  modelName,
+		InputText:  text,
 		CallReason: "embed query text",
-		CallLoc: "MID_2026091201",
-		})
+		CallLoc:    "MID_2026091201",
+	})
 	if err != nil || len(vec) != kbsearch.ConfiguredEmbeddingDim() {
 		return nil, false
 	}
@@ -361,6 +364,9 @@ func embedWithRetry(
 	var lastErr error
 	for attempt := 1; attempt <= embeddingMaxAttempts; attempt++ {
 		vec, err := embedder.Embed(ctx, llmclients.EmbedInput{
+			UserID:     llmUserIDFromContext(ctx),
+			RecordID:   llmRecordIDFromContext(ctx),
+			RunID:      llmRunIDFromContext(ctx),
 			ModelName:  modelName,
 			InputText:  text,
 			CallReason: callReason,
@@ -422,6 +428,9 @@ func embedBatchWithRetry(
 	var lastErr error
 	for attempt := 1; attempt <= embeddingMaxAttempts; attempt++ {
 		vecs, err := batcher.EmbedBatch(ctx, llmclients.EmbedBatchInput{
+			UserID:     llmUserIDFromContext(ctx),
+			RecordID:   llmRecordIDFromContext(ctx),
+			RunID:      llmRunIDFromContext(ctx),
 			ModelName:  modelName,
 			InputTexts: texts,
 			CallReason: callReason,

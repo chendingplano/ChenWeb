@@ -73,6 +73,7 @@ type ProductsProcessor struct {
 	ArtifactWebDir       string
 	ProductNames         ProductNameStore
 	MaxTasks             int
+	Pass1Only            bool
 
 	// batch* fields hold per-run state for the ChunkBatchProcessor path
 	// (InitChunkBatch/ProcessChunk/FinalizeChunkBatch), set up by
@@ -149,11 +150,11 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	}
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_PROMPT"},
-		"prompt-extract-product-mentions-v1.md",
+		"prompt-extract-product-mentions-v2.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_PRODUCT_MENTION_PROMPT"},
-		"prompt-enrich-product-mention-v2.md",
+		"prompt-enrich-product-mention-v4.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
@@ -226,7 +227,27 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		ArtifactWebDir:       strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ProductNames:         ProductNameSQLStore{DB: ApiTypes.ProjectDBHandle},
 		MaxTasks:             envInt("EXTRACT_PRODUCTS_MAX_TASKS", 1, 1),
+		Pass1Only:            ExtractProductPass1OnlyFromEnv(),
 	}
+}
+
+// ExtractProductPass1OnlyFromEnv resolves the EXTRACT_PRODUCT_PASS_1_ONLY
+// setting (default: false). Unset (or any value that does not parse as a
+// boolean) resolves to false. When true, the processor runs only Pass 1
+// (mention extraction) and Deterministic Step A (merge/dedup), persisting the
+// deduplicated candidates straight to kb.products and skipping Pass 2/3
+// entirely -- see "Testing: Pass-1-Only Mode" in extract-products-spec.md.
+// Testing only; never enable in production.
+func ExtractProductPass1OnlyFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("EXTRACT_PRODUCT_PASS_1_ONLY"))
+	if raw == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return enabled
 }
 
 func (p *ProductsProcessor) Name() string { return "extract_products" }
@@ -521,6 +542,46 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		chunksBySeq[c.SeqNo] = c
 	}
 
+	var result productExtractionResult
+	if p.Pass1Only {
+		p.Logger.Warn("EXTRACT_PRODUCT_PASS_1_ONLY is set; skipping Pass 2/3 and persisting Pass 1 candidates directly",
+			"candidate_count", len(candidates),
+		)
+		result = productExtractionResult{
+			Products:      buildPass1OnlyProductRows(candidates),
+			ModelName:     firstNonEmptyTrimmed(p.batchMentionModel, p.MentionModelName),
+			LLMCallCount:  llmCallCount,
+			FallbackCount: fallbackCount,
+			MentionsCount: mentionsCount,
+		}
+		if p.batchForce {
+			_, _ = p.Store.DeleteProductsByInputRecordID(ctx, p.batchRecordID)
+		}
+		outputRows := p.buildProductOutputRows(result.Products, p.batchStart, len(p.batchBlocks), result.ModelName)
+		for i := range outputRows {
+			outputRows[i]["product_rel_id"] = fmt.Sprintf("%d_prd_%d", p.batchRecordID, i+1)
+		}
+		inserted, err := p.Store.SaveProducts(ctx, SaveProductsRequest{
+			InputRecordID: p.batchRecordID,
+			Products:      outputRows,
+		})
+		if err != nil {
+			p.persistProductsStatus(ctx, rec, p.batchStart, err)
+			return fmt.Errorf("(MID_26092101) %s save products (pass-1-only): %w", p.Name(), err)
+		}
+		runID, _ := runIDFromContext(ctx)
+		p.Logger.Info("products extracted (pass-1-only)",
+			"record_id", p.batchRecordID,
+			"run_id", runID,
+			"inserted_rows", inserted,
+			"products_count", len(outputRows),
+			"blocks", len(p.batchBlocks),
+		)
+		p.persistProductsStatus(ctx, rec, p.batchStart, nil)
+		p.logProductsSummary(ctx, p.batchStart, p.Now(), result, len(p.batchBlocks))
+		return nil
+	}
+
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, p.batchDocCtx, maxTasks)
 	if pass2Err != nil {
@@ -574,7 +635,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		return fmt.Errorf("(MID_26091217) %s resolve product names: %w", p.Name(), resolveErr)
 	}
 
-	result := productExtractionResult{
+	result = productExtractionResult{
 		Products:      products,
 		ModelName:     firstNonEmptyTrimmed(usedRelationModel, p.batchMentionModel, p.RelationModelName, p.ModelName),
 		LLMCallCount:  llmCallCount,
@@ -710,6 +771,19 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		"record_stage", "post_merge",
 	)
 
+	if p.Pass1Only {
+		p.Logger.Warn("EXTRACT_PRODUCT_PASS_1_ONLY is set; skipping Pass 2/3 and persisting Pass 1 candidates directly",
+			"candidate_count", len(candidates),
+		)
+		return productExtractionResult{
+			Products:      buildPass1OnlyProductRows(candidates),
+			ModelName:     usedMentionModel,
+			LLMCallCount:  llmCallCount,
+			FallbackCount: fallbackCount,
+			MentionsCount: len(mentions),
+		}, nil
+	}
+
 	// Pass 2: concurrent per-candidate relation enrichment, same fan-out.
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, docCtx, maxTasks)
@@ -806,10 +880,12 @@ func (p *ProductsProcessor) extractProductMentionsForChunk(
 	mentions := normalizeProductMentions(raw, block)
 	didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != ""
 	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	outputTokens := outputTokenCount(p.Extractor)
 	p.Logger.Info("extract product mentions - end",
 		"mention count", len(mentions),
 		"cache_hit", cacheHit,
 		"cache_miss", cacheMiss,
+		"output_tokens", outputTokens,
 		"ms_used", time.Since(callStart).Milliseconds())
 	return mentions, modelName, didFallback, nil
 }
@@ -882,12 +958,14 @@ func (p *ProductsProcessor) enrichProductCandidatesWithLLM(
 		soFar := productsSoFar
 		mu.Unlock()
 		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+		outputTokens := outputTokenCount(p.Extractor)
 		p.Logger.Info("enrich product - end",
 			"candidate_id", candidate.CandidateID,
 			"rows", len(normalized),
 			"products_so_far", soFar,
 			"cache_hit", cacheHit,
 			"cache_miss", cacheMiss,
+			"output_tokens", outputTokens,
 			"ms_used", time.Since(callStart).Milliseconds())
 		return productPass2Result{
 			rows:        normalized,
@@ -1335,40 +1413,86 @@ func normalizedProductCandidateKey(canonicalHint string, mentionText string) str
 	return strings.Join(strings.Fields(base), " ")
 }
 
+// dedupeFinalProductRows merges rows that describe the same product-relation
+// pair. Two rows are duplicates when they share canonical_name + relation_type
+// AND their evidence_lines overlap — Pass 2 (an LLM call) can paraphrase
+// requirement_text differently across rows derived from the same underlying
+// evidence, so exact requirement_text equality alone is not a reliable
+// dedup signal (see extract-products-spec.md, Deterministic Step B).
 func dedupeFinalProductRows(products []map[string]any) []map[string]any {
-	grouped := map[string]map[string]any{}
-	order := make([]string, 0, len(products))
-	for _, product := range products {
-		key := strings.Join([]string{
+	groupKey := func(product map[string]any) string {
+		return strings.Join([]string{
 			normalizedProductCandidateKey(asString(product["canonical_name"]), asString(product["product_name"])),
 			strings.ToLower(strings.TrimSpace(asString(product["relation_type"]))),
-			strings.ToLower(strings.TrimSpace(asString(product["requirement_text"]))),
 		}, "|")
-		if existing, ok := grouped[key]; ok {
-			mergedLines := toStringSlice(existing["evidence_lines"])
-			for _, line := range toStringSlice(product["evidence_lines"]) {
-				mergedLines = appendUniqueString(mergedLines, line)
+	}
+	lineSet := func(product map[string]any) map[string]bool {
+		set := map[string]bool{}
+		for _, line := range toStringSlice(product["evidence_lines"]) {
+			set[line] = true
+		}
+		return set
+	}
+	overlaps := func(a, b map[string]bool) bool {
+		for line := range a {
+			if b[line] {
+				return true
 			}
-			existing["evidence_lines"] = mergedLines
-			if toFloat(product["confidence"]) > toFloat(existing["confidence"]) {
-				existing["confidence"] = product["confidence"]
-				existing["confidence_reason"] = product["confidence_reason"]
+		}
+		return false
+	}
+
+	type cluster struct {
+		row   map[string]any
+		lines map[string]bool
+	}
+	clustersByKey := map[string][]*cluster{}
+	order := make([]*cluster, 0, len(products))
+
+	for _, product := range products {
+		key := groupKey(product)
+		lines := lineSet(product)
+
+		var target *cluster
+		for _, c := range clustersByKey[key] {
+			if overlaps(c.lines, lines) {
+				target = c
+				break
 			}
-			if strings.TrimSpace(asString(existing["evidence_quote"])) == "" {
-				existing["evidence_quote"] = product["evidence_quote"]
+		}
+		if target == nil {
+			cloned := map[string]any{}
+			for k, v := range product {
+				cloned[k] = v
 			}
+			target = &cluster{row: cloned, lines: lines}
+			clustersByKey[key] = append(clustersByKey[key], target)
+			order = append(order, target)
 			continue
 		}
-		cloned := map[string]any{}
-		for k, v := range product {
-			cloned[k] = v
+
+		for line := range lines {
+			target.lines[line] = true
 		}
-		grouped[key] = cloned
-		order = append(order, key)
+		existing := target.row
+		mergedLines := toStringSlice(existing["evidence_lines"])
+		for _, line := range toStringSlice(product["evidence_lines"]) {
+			mergedLines = appendUniqueString(mergedLines, line)
+		}
+		existing["evidence_lines"] = mergedLines
+		if toFloat(product["confidence"]) > toFloat(existing["confidence"]) {
+			existing["confidence"] = product["confidence"]
+			existing["confidence_reason"] = product["confidence_reason"]
+			existing["requirement_text"] = product["requirement_text"]
+		}
+		if strings.TrimSpace(asString(existing["evidence_quote"])) == "" {
+			existing["evidence_quote"] = product["evidence_quote"]
+		}
 	}
+
 	out := make([]map[string]any, 0, len(order))
-	for _, key := range order {
-		out = append(out, grouped[key])
+	for _, c := range order {
+		out = append(out, c.row)
 	}
 	return out
 }
@@ -1434,6 +1558,41 @@ func normalizeProductList(items []any) []map[string]any {
 			"confidence_reason_en": strings.TrimSpace(asString(raw["confidence_reason_en"])),
 			"category_paths":       raw["category_paths"],
 			"category_paths_en":    raw["category_paths_en"],
+		})
+	}
+	return out
+}
+
+// buildPass1OnlyProductRows converts deduplicated Pass 1 candidates directly
+// into product-relation rows for EXTRACT_PRODUCT_PASS_1_ONLY mode, skipping
+// Pass 2 (relation enrichment) and Pass 3 (translation + name/category
+// resolution) entirely. Candidates are already deduplicated by Deterministic
+// Step A (mergeProductMentionCandidates), so no further dedup is needed here.
+// relation_type, requirement/translation fields, and category_paths are left
+// unset -- buildProductOutputRows defaults them for any row missing them.
+func buildPass1OnlyProductRows(candidates []productCandidate) []map[string]any {
+	out := make([]map[string]any, 0, len(candidates))
+	for _, c := range candidates {
+		evidenceQuote := ""
+		var evidenceLines []string
+		confidence := 0.0
+		for _, m := range c.SupportingMentions {
+			if evidenceQuote == "" {
+				evidenceQuote = strings.TrimSpace(asString(m["evidence_quote"]))
+			}
+			evidenceLines = append(evidenceLines, normalizeProductEvidenceLines(m["evidence_lines"])...)
+			if conf := toFloat(m["confidence"]); conf > confidence {
+				confidence = conf
+			}
+		}
+		out = append(out, map[string]any{
+			"product_name":      c.ProductName,
+			"canonical_name":    c.CanonicalName,
+			"product_type":      c.ProductTypeHint,
+			"evidence_quote":    evidenceQuote,
+			"evidence_lines":    uniqueStrings(evidenceLines),
+			"confidence":        confidence,
+			"confidence_reason": "",
 		})
 	}
 	return out

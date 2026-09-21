@@ -246,7 +246,7 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 			}
 			continue
 		}
-		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops)
+		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops, cmd.UserID)
 		if err != nil {
 			mu.Lock()
 			if firstErr == nil {
@@ -316,13 +316,16 @@ func (s *ControlService) resolveStartDocProcessingRecords(ctx context.Context, c
 	return records, nil
 }
 
-func buildLineFileGeneratedPayload(recordID int64, filename string, operations []string) ([]byte, error) {
+func buildLineFileGeneratedPayload(recordID int64, filename string, operations []string, userID string) ([]byte, error) {
 	body := map[string]any{"record_id": strconv.FormatInt(recordID, 10)}
 	if strings.TrimSpace(filename) != "" {
 		body["filename"] = strings.TrimSpace(filename)
 	}
 	if len(operations) > 0 {
 		body["operation"] = operations
+	}
+	if strings.TrimSpace(userID) != "" {
+		body["user_id"] = strings.TrimSpace(userID)
 	}
 	return json.Marshal(body)
 }
@@ -626,6 +629,14 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		return err
 	}
+	// Tag ctx with the event's user_id as early as possible so every LLM
+	// call made anywhere in this run (routing/facets/resolver, not just the
+	// processors below) stamps llm_usage_event.user_id -- mirrors withRunID,
+	// which does the same for run_id once the run row exists further down.
+	// The event's generator (jetstreamhandler.PublishEvent, etc.) is
+	// responsible for supplying user_id and alarming when it can't; this
+	// call site only extracts what it was given.
+	ctx = withLLMUserID(ctx, evt.UserID)
 	if s.Logger != nil {
 		s.Logger.Info("start processing request",
 			"record_id", evt.RecordID,
@@ -1169,8 +1180,10 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 	ctx, span := startProcessorSpan(ctx, p, processorPhase(p), recordID)
 	defer span.End()
 	if s.Logger != nil {
+		runID, _ := runIDFromContext(ctx)
 		s.Logger.Info("start running processor",
 			"record_id", recordID,
+			"run_id", runID,
 			"processor", processorName,
 		)
 	}
@@ -1189,8 +1202,10 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 			s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
 		}
 		if s.Logger != nil {
+			runID, _ := runIDFromContext(ctx)
 			s.Logger.Info("finish running processor",
 				"record_id", recordID,
+				"run_id", runID,
 				"processor", processorName,
 				"proc_status", procStatus,
 				"ms_used", res.msUsed,
@@ -1202,8 +1217,10 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 	}
 	res := procResult{operation: processorName, msUsed: time.Since(procStart).Milliseconds()}
 	if s.Logger != nil {
+		runID, _ := runIDFromContext(ctx)
 		s.Logger.Info("finish running processor",
 			"record_id", recordID,
+			"run_id", runID,
 			"processor", processorName,
 			"proc_status", "success",
 			"ms_used", res.msUsed,

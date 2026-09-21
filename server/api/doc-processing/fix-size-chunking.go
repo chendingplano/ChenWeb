@@ -2337,6 +2337,9 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 
 	for _, topic := range topics {
 		vec, err := s.embedWithRetry(ctx, s.Embedder, llmclients.EmbedInput{
+			UserID:     llmUserIDFromContext(ctx),
+			RecordID:   recordID,
+			RunID:      llmRunIDFromContext(ctx),
 			ModelName:  s.TopicEmbeddingModelName,
 			InputText:  topic.Topic,
 			CallReason: "embed_topic",
@@ -2377,6 +2380,9 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 			continue
 		}
 		vec, err := s.embedWithRetry(ctx, s.Embedder, llmclients.EmbedInput{
+			UserID:     llmUserIDFromContext(ctx),
+			RecordID:   recordID,
+			RunID:      llmRunIDFromContext(ctx),
 			ModelName:  s.SummaryEmbeddingModelName,
 			InputText:  summaryText,
 			CallReason: "embed_summary",

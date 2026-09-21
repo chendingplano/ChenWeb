@@ -1,6 +1,7 @@
 package jetstreamhandler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -220,11 +221,19 @@ func validateSubjectPayload(subject string, payload string) error {
 	return nil
 }
 
-func normalizeSubjectPayload(subject string, payload string) (string, error) {
+// normalizeSubjectPayload cleans up a caller-supplied payload before it's
+// published. For the doc-processing trigger subjects it also stamps the
+// authenticated caller's user_id onto the payload when the caller didn't
+// already set one, so downstream doc-processing (which only extracts
+// user_id, see docprocessing.withLLMUserID) has something to attribute its
+// LLM usage to. callerUserID is the id of whoever is calling PublishEvent
+// (from rc.IsAuthenticated()), not a payload field.
+func normalizeSubjectPayload(subject string, payload string, callerUserID string) (string, error) {
 	if _, ok := map[string]bool{
-		"kb.pdf.parsed":          true,
-		"kb.pdf.staged":          true,
-		"kb.line-file-generated": true,
+		"kb.pdf.parsed":               true,
+		"kb.pdf.staged":               true,
+		"kb.line-file-generated":      true,
+		"kb.pdf.start-doc-processing": true,
 	}[subject]; !ok {
 		return payload, nil
 	}
@@ -244,11 +253,64 @@ func normalizeSubjectPayload(subject string, payload string) (string, error) {
 		decoded["record_id"] = recordID
 	}
 
+	if existing, ok := decoded["user_id"]; !ok || existing == nil || strings.TrimSpace(fmt.Sprint(existing)) == "" {
+		if strings.TrimSpace(callerUserID) != "" {
+			decoded["user_id"] = strings.TrimSpace(callerUserID)
+		}
+	}
+
 	out, err := json.Marshal(decoded)
 	if err != nil {
 		return "", fmt.Errorf("failed to normalize payload for subject %s", subject)
 	}
 	return string(out), nil
+}
+
+func isDocProcessingTriggerSubject(subject string) bool {
+	switch subject {
+	case "kb.line-file-generated", "kb.pdf.start-doc-processing":
+		return true
+	default:
+		return false
+	}
+}
+
+// payloadUserID reads the (already-normalized) "user_id" field back out of a
+// published payload, so callers can tell whether normalizeSubjectPayload
+// actually had something to stamp on it.
+func payloadUserID(payload string) string {
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		return ""
+	}
+	v, ok := decoded["user_id"]
+	if !ok || v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+// alarmForMissingUserID raises a docprocessing.RoutingAlarm (surfaced on
+// /semos/admin/alarms alongside every other operator alarm) when this
+// handler -- the generator of a doc-processing trigger event -- is about to
+// publish one with no user_id. Per the "callers who generate the event
+// raise the alarm" design (doc-processing itself only extracts user_id, see
+// withLLMUserID), this is the choke point for every manual/admin-triggered
+// publish; a write failure is logged but never blocks the already-published
+// event.
+func alarmForMissingUserID(ctx context.Context, subject string, payload string, logger ApiTypes.JimoLogger) {
+	if ApiTypes.ProjectDBHandle == nil {
+		return
+	}
+	writer := docprocessing.RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}
+	err := writer.WriteAlarm(ctx, docprocessing.RoutingAlarm{
+		Kind:     docprocessing.RoutingAlarmKindMissingUserID,
+		Severity: docprocessing.RoutingAlarmSeverityWarning,
+		Message:  fmt.Sprintf("jetstream publish to %s carries no user_id; its LLM usage will be logged unattributed. payload=%s", subject, payload),
+	})
+	if err != nil {
+		logger.Warn("failed writing missing-user-id alarm", "subject", subject, "error", err)
+	}
 }
 
 func normalizeRecordID(value any) (int64, error) {
@@ -675,7 +737,11 @@ func PublishEvent(c echo.Context) error {
 			"subject": req.Subject,
 		})
 	}
-	normalizedPayload, err := normalizeSubjectPayload(req.Subject, req.Payload)
+	callerUserID := ""
+	if info := rc.IsAuthenticated(); info != nil {
+		callerUserID = strings.TrimSpace(info.UserId)
+	}
+	normalizedPayload, err := normalizeSubjectPayload(req.Subject, req.Payload, callerUserID)
 	if err != nil {
 		logger.Warn("invalid event payload", "subject", req.Subject, "error", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
@@ -717,6 +783,10 @@ func PublishEvent(c echo.Context) error {
 			"subject": req.Subject,
 			"error":   err.Error(),
 		})
+	}
+
+	if isDocProcessingTriggerSubject(req.Subject) && payloadUserID(normalizedPayload) == "" {
+		alarmForMissingUserID(c.Request().Context(), req.Subject, normalizedPayload, logger)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{

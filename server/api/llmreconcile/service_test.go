@@ -2,6 +2,7 @@ package llmreconcile
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -15,6 +16,12 @@ type fakeStore struct {
 	latestSnapshots   map[string]BalanceSnapshot
 	firstSnapshots    map[string]BalanceSnapshot
 	upsertedReports   []ReconciledDailyReport
+	raisedAlarms      []fakeAlarm
+}
+
+type fakeAlarm struct {
+	AccountID string
+	Message   string
 }
 
 func (s *fakeStore) ListDeepSeekReconciliationAccounts(context.Context) ([]Account, error) {
@@ -64,6 +71,11 @@ func (s *fakeStore) UpsertProviderReconciledDailyReport(_ context.Context, repor
 	return nil
 }
 
+func (s *fakeStore) RaiseBalanceFetchAlarm(_ context.Context, accountID string, message string) error {
+	s.raisedAlarms = append(s.raisedAlarms, fakeAlarm{AccountID: accountID, Message: message})
+	return nil
+}
+
 type fakeBalanceFetcher struct {
 	result BalanceFetchResult
 }
@@ -91,6 +103,58 @@ func TestRunnerRunPersistsEveryDeepSeekCurrency(t *testing.T) {
 
 func (f fakeBalanceFetcher) FetchBalance(context.Context, string, string) (BalanceFetchResult, error) {
 	return f.result, nil
+}
+
+type failingThenSucceedingFetcher struct {
+	failForAccountID string
+	failErr          error
+	result           BalanceFetchResult
+}
+
+func (f failingThenSucceedingFetcher) FetchBalance(_ context.Context, baseURL string, apiKey string) (BalanceFetchResult, error) {
+	if apiKey == f.failForAccountID {
+		return BalanceFetchResult{}, f.failErr
+	}
+	return f.result, nil
+}
+
+// TestRunnerRunIsolatesOneAccountsFailure verifies that one account's
+// FetchBalance failure (a) does not stop other accounts in the same run from
+// being captured, and (b) raises exactly one alarm for the failing account,
+// instead of aborting the whole run as RunWithResult used to.
+func TestRunnerRunIsolatesOneAccountsFailure(t *testing.T) {
+	now := time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
+	fetchErr := errors.New("deepseek balance request failed: status 401")
+	store := &fakeStore{
+		accounts: []Account{
+			{ID: "acct_bad", AccountName: "Broken Account", BaseURL: "https://api.deepseek.com", APIKeyRef: "acct_bad"},
+			{ID: "acct_good", AccountName: "Healthy Account", BaseURL: "https://api.deepseek.com", APIKeyRef: "acct_good"},
+		},
+	}
+	runner := &Runner{
+		Store: store,
+		BalanceAPI: failingThenSucceedingFetcher{
+			failForAccountID: "acct_bad",
+			failErr:          fetchErr,
+			result:           BalanceFetchResult{BalanceAmount: 10.00, CurrencyCode: "USD", RawPayload: []byte(`{"is_available":true}`)},
+		},
+		WorkspaceTZ: time.UTC,
+		Now:         func() time.Time { return now },
+	}
+
+	result, err := runner.RunWithResult(context.Background())
+	if err != nil {
+		t.Fatalf("RunWithResult() error = %v, want nil (per-account failures must not abort the run)", err)
+	}
+	if len(store.insertedSnapshots) != 1 || store.insertedSnapshots[0].AccountID != "acct_good" {
+		t.Fatalf("insertedSnapshots = %+v, want exactly one snapshot for acct_good", store.insertedSnapshots)
+	}
+	if len(result.Failures) != 1 || result.Failures[0].AccountID != "acct_bad" {
+		t.Fatalf("result.Failures = %+v, want exactly one failure for acct_bad", result.Failures)
+	}
+	if len(store.raisedAlarms) != 1 || store.raisedAlarms[0].AccountID != "acct_bad" {
+		t.Fatalf("raisedAlarms = %+v, want exactly one alarm for acct_bad", store.raisedAlarms)
+	}
 }
 
 func TestRunnerRunCapturesSnapshotAndReconcilesYesterday(t *testing.T) {

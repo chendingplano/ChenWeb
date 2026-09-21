@@ -188,9 +188,9 @@ export function buildManualLaunchPayload(
 	const payload: Record<string, unknown> = {
 		record_id: String(recordId),
 		force,
-		force_clear: forceClear
+		force_clear: forceClear,
+		operation: operations
 	};
-	if (packageName.trim().toLowerCase() !== 'default') payload.operation = operations;
 	return payload;
 }
 

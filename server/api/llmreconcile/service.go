@@ -21,6 +21,7 @@ type AccountStore interface {
 	LatestBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error)
 	FirstBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error)
 	UpsertProviderReconciledDailyReport(ctx context.Context, report ReconciledDailyReport) error
+	RaiseBalanceFetchAlarm(ctx context.Context, accountID string, message string) error
 }
 
 type BalanceFetcher interface {
@@ -50,9 +51,20 @@ type Runner struct {
 }
 
 type RunResult struct {
-	AccountsConsidered int `json:"accounts_considered"`
-	SnapshotsCreated   int `json:"snapshots_created"`
-	ReportsReconciled  int `json:"reports_reconciled"`
+	AccountsConsidered int              `json:"accounts_considered"`
+	SnapshotsCreated   int              `json:"snapshots_created"`
+	ReportsReconciled  int              `json:"reports_reconciled"`
+	Failures           []AccountFailure `json:"failures,omitempty"`
+}
+
+// AccountFailure is one account's reconciliation failure within a run. It
+// never aborts the run for other accounts (see RunWithResult) -- the caller
+// (runReconciliationOnce) logs each one, and the failing account has already
+// had an alarms_errors row raised for it.
+type AccountFailure struct {
+	AccountID   string `json:"account_id"`
+	AccountName string `json:"account_name"`
+	Err         error  `json:"-"`
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -81,104 +93,125 @@ func (r *Runner) RunWithResult(ctx context.Context) (RunResult, error) {
 	result := RunResult{AccountsConsidered: len(accounts)}
 
 	for _, account := range accounts {
-		claimed, err := r.Store.ClaimHourlyBalanceCapture(ctx, account.ID, capturedAt.In(loc).Truncate(time.Hour).UTC())
+		snapshotsCreated, reportsReconciled, err := r.processAccount(ctx, account, capturedAt, today, yesterday, loc)
+		result.SnapshotsCreated += snapshotsCreated
+		result.ReportsReconciled += reportsReconciled
 		if err != nil {
-			return RunResult{}, err
-		}
-		if !claimed {
+			result.Failures = append(result.Failures, AccountFailure{AccountID: account.ID, AccountName: account.AccountName, Err: err})
+			alarmMessage := fmt.Sprintf("deepseek balance reconciliation failed for account %s (%s): %v", account.AccountName, account.ID, err)
+			if alarmErr := r.Store.RaiseBalanceFetchAlarm(ctx, account.ID, alarmMessage); alarmErr != nil {
+				result.Failures = append(result.Failures, AccountFailure{AccountID: account.ID, AccountName: account.AccountName, Err: fmt.Errorf("failed to raise alarm: %w", alarmErr)})
+			}
 			continue
 		}
-		balance, err := r.BalanceAPI.FetchBalance(ctx, account.BaseURL, account.APIKeyRef)
-		if err != nil {
-			return RunResult{}, err
-		}
-
-		rawPayloadRef, err := writeBalanceArchive(r.ArchiveRoot, today, account.ID, capturedAt, balance.RawPayload)
-		if err != nil {
-			return RunResult{}, err
-		}
-
-		balances := balance.Balances
-		if len(balances) == 0 {
-			balances = []Balance{{Amount: balance.BalanceAmount, CurrencyCode: balance.CurrencyCode}}
-		}
-		for _, currencyBalance := range balances {
-			snapshot := BalanceSnapshot{
-				AccountID:     account.ID,
-				CapturedAt:    capturedAt.UTC(),
-				WorkspaceDay:  today,
-				BalanceAmount: currencyBalance.Amount,
-				CurrencyCode:  currencyBalance.CurrencyCode,
-				CaptureSource: r.captureSource(),
-				RawPayloadRef: rawPayloadRef,
-			}
-			if err := r.Store.InsertBalanceSnapshot(ctx, snapshot); err != nil {
-				return RunResult{}, err
-			}
-			result.SnapshotsCreated++
-		}
-		snapshot := BalanceSnapshot{AccountID: account.ID, CapturedAt: capturedAt.UTC(), WorkspaceDay: today, BalanceAmount: balance.BalanceAmount, CurrencyCode: balance.CurrencyCode, CaptureSource: r.captureSource(), RawPayloadRef: rawPayloadRef}
-		if len(balance.Balances) > 0 {
-			snapshot.BalanceAmount = balance.Balances[0].Amount
-			snapshot.CurrencyCode = balance.Balances[0].CurrencyCode
-		}
-
-		openingTodaySnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
-		if err != nil {
-			if !isMissingSnapshot(err) {
-				return RunResult{}, err
-			}
-		} else {
-			todayReport := ReconciledDailyReport{
-				AccountID:        account.ID,
-				WorkspaceDay:     today,
-				TimezoneName:     r.timezoneName(),
-				OpeningBalance:   openingTodaySnapshot.BalanceAmount,
-				ClosingBalance:   snapshot.BalanceAmount,
-				SpendAmount:      openingTodaySnapshot.BalanceAmount - snapshot.BalanceAmount,
-				CurrencyCode:     firstNonEmpty(balance.CurrencyCode, openingTodaySnapshot.CurrencyCode, "USD"),
-				SourcePayloadRef: rawPayloadRef,
-			}
-			if err := r.Store.UpsertProviderReconciledDailyReport(ctx, todayReport); err != nil {
-				return RunResult{}, err
-			}
-			result.ReportsReconciled++
-		}
-
-		openingSnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, yesterday)
-		if err != nil {
-			if isMissingSnapshot(err) {
-				continue
-			}
-			return RunResult{}, err
-		}
-
-		closingSnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
-		if err != nil {
-			if isMissingSnapshot(err) {
-				closingSnapshot = snapshot
-			} else {
-				return RunResult{}, err
-			}
-		}
-
-		report := ReconciledDailyReport{
-			AccountID:        account.ID,
-			WorkspaceDay:     yesterday,
-			TimezoneName:     r.timezoneName(),
-			OpeningBalance:   openingSnapshot.BalanceAmount,
-			ClosingBalance:   closingSnapshot.BalanceAmount,
-			SpendAmount:      openingSnapshot.BalanceAmount - closingSnapshot.BalanceAmount,
-			CurrencyCode:     firstNonEmpty(closingSnapshot.CurrencyCode, openingSnapshot.CurrencyCode, balance.CurrencyCode, "USD"),
-			SourcePayloadRef: rawPayloadRef,
-		}
-		if err := r.Store.UpsertProviderReconciledDailyReport(ctx, report); err != nil {
-			return RunResult{}, err
-		}
-		result.ReportsReconciled++
 	}
 
 	return result, nil
+}
+
+// processAccount runs one account's hourly balance capture and daily
+// reconciliation. A returned error means this account's capture failed --
+// the caller (RunWithResult) alarms it and moves on to the next account
+// rather than aborting the whole run, and next hour's capture slot is
+// unaffected since ClaimHourlyBalanceCapture is keyed per (account, hour).
+func (r *Runner) processAccount(ctx context.Context, account Account, capturedAt, today, yesterday time.Time, loc *time.Location) (snapshotsCreated int, reportsReconciled int, err error) {
+	claimed, err := r.Store.ClaimHourlyBalanceCapture(ctx, account.ID, capturedAt.In(loc).Truncate(time.Hour).UTC())
+	if err != nil {
+		return 0, 0, err
+	}
+	if !claimed {
+		return 0, 0, nil
+	}
+	balance, err := r.BalanceAPI.FetchBalance(ctx, account.BaseURL, account.APIKeyRef)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	rawPayloadRef, err := writeBalanceArchive(r.ArchiveRoot, today, account.ID, capturedAt, balance.RawPayload)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	balances := balance.Balances
+	if len(balances) == 0 {
+		balances = []Balance{{Amount: balance.BalanceAmount, CurrencyCode: balance.CurrencyCode}}
+	}
+	for _, currencyBalance := range balances {
+		snapshot := BalanceSnapshot{
+			AccountID:     account.ID,
+			CapturedAt:    capturedAt.UTC(),
+			WorkspaceDay:  today,
+			BalanceAmount: currencyBalance.Amount,
+			CurrencyCode:  currencyBalance.CurrencyCode,
+			CaptureSource: r.captureSource(),
+			RawPayloadRef: rawPayloadRef,
+		}
+		if err := r.Store.InsertBalanceSnapshot(ctx, snapshot); err != nil {
+			return snapshotsCreated, reportsReconciled, err
+		}
+		snapshotsCreated++
+	}
+	snapshot := BalanceSnapshot{AccountID: account.ID, CapturedAt: capturedAt.UTC(), WorkspaceDay: today, BalanceAmount: balance.BalanceAmount, CurrencyCode: balance.CurrencyCode, CaptureSource: r.captureSource(), RawPayloadRef: rawPayloadRef}
+	if len(balance.Balances) > 0 {
+		snapshot.BalanceAmount = balance.Balances[0].Amount
+		snapshot.CurrencyCode = balance.Balances[0].CurrencyCode
+	}
+
+	openingTodaySnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
+	if err != nil {
+		if !isMissingSnapshot(err) {
+			return snapshotsCreated, reportsReconciled, err
+		}
+	} else {
+		todayReport := ReconciledDailyReport{
+			AccountID:        account.ID,
+			WorkspaceDay:     today,
+			TimezoneName:     r.timezoneName(),
+			OpeningBalance:   openingTodaySnapshot.BalanceAmount,
+			ClosingBalance:   snapshot.BalanceAmount,
+			SpendAmount:      openingTodaySnapshot.BalanceAmount - snapshot.BalanceAmount,
+			CurrencyCode:     firstNonEmpty(balance.CurrencyCode, openingTodaySnapshot.CurrencyCode, "USD"),
+			SourcePayloadRef: rawPayloadRef,
+		}
+		if err := r.Store.UpsertProviderReconciledDailyReport(ctx, todayReport); err != nil {
+			return snapshotsCreated, reportsReconciled, err
+		}
+		reportsReconciled++
+	}
+
+	openingSnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, yesterday)
+	if err != nil {
+		if isMissingSnapshot(err) {
+			return snapshotsCreated, reportsReconciled, nil
+		}
+		return snapshotsCreated, reportsReconciled, err
+	}
+
+	closingSnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
+	if err != nil {
+		if isMissingSnapshot(err) {
+			closingSnapshot = snapshot
+		} else {
+			return snapshotsCreated, reportsReconciled, err
+		}
+	}
+
+	report := ReconciledDailyReport{
+		AccountID:        account.ID,
+		WorkspaceDay:     yesterday,
+		TimezoneName:     r.timezoneName(),
+		OpeningBalance:   openingSnapshot.BalanceAmount,
+		ClosingBalance:   closingSnapshot.BalanceAmount,
+		SpendAmount:      openingSnapshot.BalanceAmount - closingSnapshot.BalanceAmount,
+		CurrencyCode:     firstNonEmpty(closingSnapshot.CurrencyCode, openingSnapshot.CurrencyCode, balance.CurrencyCode, "USD"),
+		SourcePayloadRef: rawPayloadRef,
+	}
+	if err := r.Store.UpsertProviderReconciledDailyReport(ctx, report); err != nil {
+		return snapshotsCreated, reportsReconciled, err
+	}
+	reportsReconciled++
+
+	return snapshotsCreated, reportsReconciled, nil
 }
 
 func (r *Runner) location() *time.Location {

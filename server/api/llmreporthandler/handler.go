@@ -123,7 +123,7 @@ func ListModelActivityReports(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
 	}
-	apiKeys, keyRefs, keyModels, err := loadModelAPIKeyOptions()
+	apiKeys, keyRefs, err := loadModelAPIKeyOptions()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load model API keys", "error": err.Error()})
 	}
@@ -131,7 +131,6 @@ func ListModelActivityReports(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
 	}
 	selectedAPIKeyName := strings.TrimSpace(c.QueryParam("api_key"))
-	filters.ModelNames = keyModels[selectedAPIKeyName]
 	rows, err := store.ListModelActivityReports(c.Request().Context(), limit, filters)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm model activity reports", "error": err.Error()})
@@ -163,11 +162,21 @@ type deepSeekCNYPricing struct {
 	Output         map[string]string `toml:"output"`
 }
 
-// applyDeepSeekLocalCNYPricing intentionally applies only to Flash. The
-// current config has one generic DeepSeek CNY rate card; Pro remains unknown
-// until it has an explicit model-specific rate rather than borrowing Flash's.
+// applyDeepSeekLocalCNYPricing prices Flash and Pro from their own rate cards
+// (DeepSeek bills them differently) and, within each, applies the peak-hour
+// rate or the off-peak rate per token bucket rather than a single flat rate.
 func applyDeepSeekLocalCNYPricing(row *ModelActivityReport) {
-	if !strings.EqualFold(strings.TrimSpace(row.Provider), "deepseek") || !strings.Contains(strings.ToLower(row.ModelName), "flash") {
+	if !strings.EqualFold(strings.TrimSpace(row.Provider), "deepseek") {
+		return
+	}
+	modelLower := strings.ToLower(row.ModelName)
+	var tierKey string
+	switch {
+	case strings.Contains(modelLower, "flash"):
+		tierKey = "flash"
+	case strings.Contains(modelLower, "pro"):
+		tierKey = "pro"
+	default:
 		return
 	}
 	path := strings.TrimSpace(os.Getenv("CHENWEB_MODELS_TOML"))
@@ -180,22 +189,36 @@ func applyDeepSeekLocalCNYPricing(row *ModelActivityReport) {
 	}
 	var config struct {
 		DeepSeekBilling struct {
-			ChineseYuan deepSeekCNYPricing `toml:"chinese-yuan"`
+			ChineseYuan struct {
+				Flash deepSeekCNYPricing `toml:"flash"`
+				Pro   deepSeekCNYPricing `toml:"pro"`
+			} `toml:"chinese-yuan"`
 		} `toml:"deepseek-billing"`
 	}
 	if toml.Unmarshal(raw, &config) != nil {
 		return
 	}
-	parse := func(values map[string]string) float64 {
-		value, _ := strconv.ParseFloat(strings.TrimSpace(values["off-peak"]), 64)
+	tier := config.DeepSeekBilling.ChineseYuan.Flash
+	if tierKey == "pro" {
+		tier = config.DeepSeekBilling.ChineseYuan.Pro
+	}
+	parse := func(values map[string]string, key string) float64 {
+		value, _ := strconv.ParseFloat(strings.TrimSpace(values[key]), 64)
 		return value
 	}
-	hit, miss, output := parse(config.DeepSeekBilling.ChineseYuan.InputCacheHit), parse(config.DeepSeekBilling.ChineseYuan.InputCacheMiss), parse(config.DeepSeekBilling.ChineseYuan.Output)
-	if hit == 0 && miss == 0 && output == 0 {
+	hitPeak, hitOffPeak := parse(tier.InputCacheHit, "peak"), parse(tier.InputCacheHit, "off-peak")
+	missPeak, missOffPeak := parse(tier.InputCacheMiss, "peak"), parse(tier.InputCacheMiss, "off-peak")
+	outputPeak, outputOffPeak := parse(tier.Output, "peak"), parse(tier.Output, "off-peak")
+	if hitPeak == 0 && hitOffPeak == 0 && missPeak == 0 && missOffPeak == 0 && outputPeak == 0 && outputOffPeak == 0 {
 		return
 	}
 	row.CurrencyCode = "CNY"
-	row.SpendAmount = (float64(row.PromptCacheHitTokens)*hit + float64(row.PromptCacheMissTokens)*miss + float64(row.OutputTokens)*output) / 1_000_000
+	row.SpendAmount = (float64(row.PromptCacheHitTokensPeak)*hitPeak +
+		float64(row.PromptCacheHitTokensOffPeak)*hitOffPeak +
+		float64(row.PromptCacheMissTokensPeak)*missPeak +
+		float64(row.PromptCacheMissTokensOffPeak)*missOffPeak +
+		float64(row.OutputTokensPeak)*outputPeak +
+		float64(row.OutputTokensOffPeak)*outputOffPeak) / 1_000_000
 }
 
 type modelAPIKeyEntry struct {
@@ -204,12 +227,6 @@ type modelAPIKeyEntry struct {
 
 type modelAPIKeyConfig struct {
 	ModelAPIKeys map[string][]modelAPIKeyEntry `toml:"model-api-keys"`
-	Profiles     map[string]modelProfile
-}
-
-type modelProfile struct {
-	ModelName string
-	APIKey    string
 }
 
 type ModelAPIKeyOption struct {
@@ -238,7 +255,7 @@ func parseModelActivityReportFilters(c echo.Context) (ModelActivityReportFilters
 	return filters, nil
 }
 
-func loadModelAPIKeyOptions() ([]ModelAPIKeyOption, map[string]string, map[string][]string, error) {
+func loadModelAPIKeyOptions() ([]ModelAPIKeyOption, map[string]string, error) {
 	path := strings.TrimSpace(os.Getenv("CHENWEB_MODELS_TOML"))
 	if path == "" {
 		path = filepath.Join(".", ".models.toml")
@@ -246,19 +263,17 @@ func loadModelAPIKeyOptions() ([]ModelAPIKeyOption, map[string]string, map[strin
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []ModelAPIKeyOption{}, map[string]string{}, map[string][]string{}, nil
+			return []ModelAPIKeyOption{}, map[string]string{}, nil
 		}
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	var config modelAPIKeyConfig
-	looseConfig, looseErr := parseLooseModelAPIKeys(raw)
 	if err := toml.Unmarshal(raw, &config); err != nil {
+		looseConfig, looseErr := parseLooseModelAPIKeys(raw)
 		if looseErr != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		config = looseConfig
-	} else if looseErr == nil {
-		config.Profiles = looseConfig.Profiles
 	}
 	keys := make([]string, 0, len(config.ModelAPIKeys))
 	refs := make(map[string]string, len(config.ModelAPIKeys))
@@ -274,11 +289,7 @@ func loadModelAPIKeyOptions() ([]ModelAPIKeyOption, map[string]string, map[strin
 	for _, name := range keys {
 		options = append(options, ModelAPIKeyOption{Name: name})
 	}
-	modelNames := make(map[string][]string, len(keys))
-	for _, name := range keys {
-		modelNames[name] = modelNamesForAPIKey(name, refs[name], config.Profiles)
-	}
-	return options, refs, modelNames, nil
+	return options, refs, nil
 }
 
 func parseLooseModelAPIKeys(raw []byte) (modelAPIKeyConfig, error) {
@@ -286,18 +297,14 @@ func parseLooseModelAPIKeys(raw []byte) (modelAPIKeyConfig, error) {
 	var current string
 	config := modelAPIKeyConfig{
 		ModelAPIKeys: map[string][]modelAPIKeyEntry{},
-		Profiles:     map[string]modelProfile{},
 	}
 	namePattern := regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*\[\s*$`)
 	keyPattern := regexp.MustCompile(`^\s*api_key\s*=\s*['"]([^'"]+)['"]`)
-	valuePattern := regexp.MustCompile(`^\s*(model_name|api_key)\s*=\s*['"]([^'"]+)['"]`)
 	sectionName := regexp.MustCompile(`^\[([^]]+)\]$`)
-	currentSection := ""
 	for _, line := range strings.Split(string(raw), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if matches := sectionName.FindStringSubmatch(trimmed); len(matches) == 2 {
-			currentSection = matches[1]
-			section = currentSection == "model-api-keys"
+			section = matches[1] == "model-api-keys"
 			current = ""
 			continue
 		}
@@ -312,68 +319,9 @@ func parseLooseModelAPIKeys(raw []byte) (modelAPIKeyConfig, error) {
 					current = ""
 				}
 			}
-			continue
-		}
-		if currentSection != "" {
-			if matches := valuePattern.FindStringSubmatch(line); len(matches) == 3 {
-				profile := config.Profiles[currentSection]
-				if matches[1] == "model_name" {
-					profile.ModelName = matches[2]
-				} else {
-					profile.APIKey = matches[2]
-				}
-				config.Profiles[currentSection] = profile
-			}
 		}
 	}
 	return config, nil
-}
-
-func modelNamesForAPIKey(keyName, apiKey string, profiles map[string]modelProfile) []string {
-	keyTokens := normalizedTokens(keyName)
-	bestScore := 0
-	best := make([]string, 0)
-	for profileName, profile := range profiles {
-		if profile.APIKey != apiKey || profile.ModelName == "" {
-			continue
-		}
-		score := tokenOverlap(keyTokens, normalizedTokens(profileName))
-		score += tokenOverlap(keyTokens, normalizedTokens(profile.ModelName))
-		if score > bestScore {
-			bestScore = score
-			best = []string{profile.ModelName}
-		} else if score > 0 && score == bestScore {
-			best = append(best, profile.ModelName)
-		}
-	}
-	sort.Strings(best)
-	return best
-}
-
-func normalizedTokens(value string) []string {
-	raw := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
-	})
-	for i, token := range raw {
-		if strings.HasPrefix(token, "v") && len(token) > 1 && strings.Trim(token[1:], "0123456789") == "" {
-			raw[i] = token[1:]
-		}
-	}
-	return raw
-}
-
-func tokenOverlap(left, right []string) int {
-	set := make(map[string]struct{}, len(right))
-	for _, token := range right {
-		set[token] = struct{}{}
-	}
-	score := 0
-	for _, token := range left {
-		if _, ok := set[token]; ok {
-			score++
-		}
-	}
-	return score
 }
 
 func apiKeyRefForName(name string, refs map[string]string) (string, error) {
@@ -432,7 +380,7 @@ func ListHourlyBalanceReports(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
 	}
-	_, keyRefs, _, err := loadModelAPIKeyOptions()
+	_, keyRefs, err := loadModelAPIKeyOptions()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load model API keys", "error": err.Error()})
 	}

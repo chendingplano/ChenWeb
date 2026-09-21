@@ -41,6 +41,30 @@ func llmRunIDFromContext(ctx context.Context) int64 {
 	return runID
 }
 
+type llmUserIDKey struct{}
+
+// withLLMUserID tags ctx with the user_id carried on the triggering event
+// (LineFileGeneratedEvent.UserID / StartDocProcessingEvent.UserID), so every
+// processor's LLM calls made through newLLMJSONInput stamp
+// llm_usage_event.user_id -- mirroring withLLMRunID above. The event
+// generator (jetstreamhandler.PublishEvent, etc.) is responsible for
+// supplying the user_id in the first place; this only extracts it.
+func withLLMUserID(ctx context.Context, userID string) context.Context {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, llmUserIDKey{}, userID)
+}
+
+func llmUserIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	userID, _ := ctx.Value(llmUserIDKey{}).(string)
+	return userID
+}
+
 func newLLMJSONInput(
 	ctx context.Context,
 	promptName string,
@@ -58,6 +82,7 @@ func newLLMJSONInput(
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
+		UserID:     llmUserIDFromContext(ctx),
 		RecordID:   llmRecordIDFromContext(ctx),
 		RunID:      llmRunIDFromContext(ctx),
 		CallReason: callReason,

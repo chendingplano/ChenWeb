@@ -58,10 +58,8 @@ func TestStoreInsertBalanceSnapshot(t *testing.T) {
 	capturedAt := time.Date(2026, 6, 20, 7, 0, 0, 0, time.UTC)
 	workspaceDay := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_balance_snapshot (
-    account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
-)`)).
+    account_id, captured_at, workspace_day, balance_amount, currency_code, capture_source, raw_payload_ref, total_spending
+) VALUES (`)).
 		WithArgs("acct_1", capturedAt, workspaceDay, 19.25, "USD", "manual", "2026/2026-06/2026-06-20/reconciliation/deepseek-account-acct_1-balance.json").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -238,6 +236,27 @@ ON CONFLICT (account_id, workspace_day) DO UPDATE SET
 	}
 }
 
+func TestStoreRaiseBalanceFetchAlarm(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO alarms_errors (severity, message, scope_id, kind) VALUES ('error',$1,$2,$3)
+ON CONFLICT (scope_id, kind) WHERE scope_id IS NOT NULL AND kind IS NOT NULL DO NOTHING`)).
+		WithArgs("account failed: boom", "acct_1", AlarmKindBalanceFetchFailed).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store := NewStore(db)
+	if err := store.RaiseBalanceFetchAlarm(context.Background(), "acct_1", "account failed: boom"); err != nil {
+		t.Fatalf("RaiseBalanceFetchAlarm() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 type sqlNoRowsStore struct{}
 
 func (sqlNoRowsStore) ListDeepSeekReconciliationAccounts(context.Context) ([]Account, error) {
@@ -261,5 +280,9 @@ func (sqlNoRowsStore) FirstBalanceSnapshotForDay(context.Context, string, time.T
 }
 
 func (sqlNoRowsStore) UpsertProviderReconciledDailyReport(context.Context, ReconciledDailyReport) error {
+	return nil
+}
+
+func (sqlNoRowsStore) RaiseBalanceFetchAlarm(context.Context, string, string) error {
 	return nil
 }

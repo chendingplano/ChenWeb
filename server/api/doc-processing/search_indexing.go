@@ -206,7 +206,12 @@ func replaceRegistryRows(
 		// semantic search is on.
 		if (artifactType != searchArtifactEntity && artifactType != searchArtifactRelation) ||
 			kbsearch.EmbedEntityRelationEnabled() {
-			embedRegistryRows(ctx, rows, logger, callReason, callLoc)
+			// Stamp record_id here (rather than relying on the caller's ctx
+			// already carrying it) so every embedding call this makes is
+			// attributed the same way newLLMJSONInput attributes extraction
+			// calls -- ctx may already carry run_id/user_id from handleEvent,
+			// but record_id isn't guaranteed at this call depth otherwise.
+			embedRegistryRows(withLLMRecordID(ctx, recordID), rows, logger, callReason, callLoc)
 		}
 	}
 	deleted, err := kbsearch.DeleteSearchRegistryRowsForRecord(ctx, db, artifactType, recordID)

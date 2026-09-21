@@ -182,9 +182,13 @@ func TestStoreListModelActivityReports(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{
-		"provider", "model_name", "api_key_ref", "currency_code", "workspace_day", "spend_amount", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "output_tokens", "total_tokens", "request_count",
+		"provider", "model_name", "api_key_ref", "currency_code", "workspace_day", "spend_amount", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "output_tokens", "total_tokens",
+		"prompt_cache_hit_tokens_peak", "prompt_cache_hit_tokens_offpeak", "prompt_cache_miss_tokens_peak", "prompt_cache_miss_tokens_offpeak", "output_tokens_peak", "output_tokens_offpeak",
+		"request_count",
 	}).AddRow(
-		"deepseek", "deepseek-v4-flash", "sk-deepseek", "CNY", "2026-06-20", 11.88, int64(1200000), int64(1725804), int64(3975685), int64(6901489), int64(1380),
+		"deepseek", "deepseek-v4-flash", "sk-deepseek", "CNY", "2026-06-20", 11.88, int64(1200000), int64(1725804), int64(3975685), int64(6901489),
+		int64(700000), int64(500000), int64(1000000), int64(725804), int64(2200000), int64(1775685),
+		int64(1380),
 	)
 
 	mock.ExpectQuery(`WITH recent_days AS`).WithArgs(30, nil, nil, "", nil).WillReturnRows(rows)

@@ -96,7 +96,15 @@ type ModelActivityReport struct {
 	PromptCacheMissTokens int64   `json:"prompt_cache_miss_tokens"`
 	OutputTokens          int64   `json:"output_tokens"`
 	TotalTokens           int64   `json:"total_tokens"`
-	RequestCount          int64   `json:"request_count"`
+	// Beijing-time peak/off-peak split of the totals above, used by
+	// applyDeepSeekLocalCNYPricing to price each bucket at its own rate.
+	PromptCacheHitTokensPeak     int64 `json:"prompt_cache_hit_tokens_peak"`
+	PromptCacheHitTokensOffPeak  int64 `json:"prompt_cache_hit_tokens_offpeak"`
+	PromptCacheMissTokensPeak    int64 `json:"prompt_cache_miss_tokens_peak"`
+	PromptCacheMissTokensOffPeak int64 `json:"prompt_cache_miss_tokens_offpeak"`
+	OutputTokensPeak             int64 `json:"output_tokens_peak"`
+	OutputTokensOffPeak          int64 `json:"output_tokens_offpeak"`
+	RequestCount                 int64 `json:"request_count"`
 }
 
 type ModelActivityReportFilters struct {
@@ -275,49 +283,58 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
 	} else if frequency == "monthly" {
 		bucket = "month"
 	}
-	query := fmt.Sprintf(`WITH latest_per_bucket AS (
+	// spending_cny is derived from the persisted total_spending column rather
+	// than recomputed from raw balances: it is simply the change in
+	// total_spending between this bucket and the previous one. That is the
+	// same query for every granularity -- only the date_trunc unit (bucket)
+	// differs between hourly, daily, and monthly.
+	query := fmt.Sprintf(`WITH latest_balance AS (
     SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
-        account_id, currency_code, date_trunc('%s', captured_at) AS hour_started_at, balance_amount
+        account_id, currency_code, date_trunc('%s', captured_at) AS bucket_start, balance_amount
     FROM llm_balance_snapshot
     WHERE workspace_day >= $2::date AND workspace_day <= $3::date
       AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
-      AND entry_kind NOT IN ('deposit', 'set-total-spending')
+      AND entry_kind = 'provider_balance'
     ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
-), pivoted AS (
-    SELECT account_id, hour_started_at,
+), latest_total AS (
+    SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
+        account_id, currency_code, date_trunc('%s', captured_at) AS bucket_start, total_spending
+    FROM llm_balance_snapshot
+    WHERE workspace_day >= $2::date AND workspace_day <= $3::date
+      AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
+    ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
+), balance_pivot AS (
+    SELECT account_id, bucket_start,
         MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'USD') AS balance_usd,
         MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'CNY') AS balance_cny
-    FROM latest_per_bucket
-    GROUP BY account_id, hour_started_at
-), deposits AS (
-    SELECT account_id, date_trunc('%s', captured_at) AS hour_started_at, SUM(deposit_amount) AS deposit_amount
-    FROM llm_balance_snapshot WHERE workspace_day >= $2::date AND workspace_day <= $3::date
-      AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
-      AND entry_kind = 'deposit' AND UPPER(currency_code) = 'CNY'
-    GROUP BY account_id, date_trunc('%s', captured_at)
+    FROM latest_balance
+    GROUP BY account_id, bucket_start
+), total_pivot AS (
+    SELECT account_id, bucket_start,
+        MAX(total_spending) FILTER (WHERE UPPER(currency_code) = 'CNY') AS total_spending_cny,
+        MAX(total_spending) FILTER (WHERE UPPER(currency_code) = 'USD') AS total_spending_usd
+    FROM latest_total
+    GROUP BY account_id, bucket_start
+), combined AS (
+    SELECT COALESCE(b.account_id, t.account_id) AS account_id,
+           COALESCE(b.bucket_start, t.bucket_start) AS hour_started_at,
+           b.balance_usd, b.balance_cny, t.total_spending_cny, t.total_spending_usd
+    FROM balance_pivot b
+    FULL OUTER JOIN total_pivot t ON t.account_id = b.account_id AND t.bucket_start = b.bucket_start
 ), with_previous AS (
-    SELECT *, LAG(balance_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_balance_cny
-    FROM pivoted
-)
- , manual_totals AS (
-    SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at)) account_id, currency_code, date_trunc('%s', captured_at) AS hour_started_at, deposit_amount
-    FROM llm_balance_snapshot WHERE workspace_day >= $2::date AND workspace_day <= $3::date AND entry_kind = 'set-total-spending'
-      AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
-    ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
+    SELECT *, LAG(total_spending_cny) OVER (PARTITION BY account_id ORDER BY hour_started_at) AS previous_total_spending_cny
+    FROM combined
 )
 SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_at,
        report.balance_usd, report.balance_cny,
-       CASE WHEN report.previous_balance_cny IS NULL OR report.balance_cny IS NULL THEN NULL
-            ELSE GREATEST(report.previous_balance_cny + COALESCE(deposits.deposit_amount, 0) - report.balance_cny, 0) END AS spending_cny,
-       COALESCE(CASE WHEN report.previous_balance_cny IS NULL OR report.balance_cny IS NULL THEN 0 ELSE GREATEST(report.previous_balance_cny + COALESCE(deposits.deposit_amount, 0) - report.balance_cny, 0) END, 0) + COALESCE(manual_cny.deposit_amount, 0) AS total_spending_cny,
-       manual_usd.deposit_amount AS total_spending_usd
+       CASE WHEN report.previous_total_spending_cny IS NULL OR report.total_spending_cny IS NULL THEN NULL
+            ELSE GREATEST(report.total_spending_cny - report.previous_total_spending_cny, 0) END AS spending_cny,
+       report.total_spending_cny,
+       report.total_spending_usd
 FROM with_previous report
 JOIN llm_account acct ON acct.id = report.account_id
-LEFT JOIN deposits ON deposits.account_id = report.account_id AND deposits.hour_started_at = report.hour_started_at
-LEFT JOIN manual_totals manual_cny ON manual_cny.account_id = report.account_id AND manual_cny.hour_started_at = report.hour_started_at AND UPPER(manual_cny.currency_code) = 'CNY'
-LEFT JOIN manual_totals manual_usd ON manual_usd.account_id = report.account_id AND manual_usd.hour_started_at = report.hour_started_at AND UPPER(manual_usd.currency_code) = 'USD'
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
-LIMIT $1`, bucket, bucket, bucket, bucket, bucket, bucket, bucket, bucket)
+LIMIT $1`, bucket, bucket, bucket, bucket, bucket, bucket)
 	rows, err := s.db.QueryContext(ctx, query, limit, filters.From, filters.To, filters.APIKeyRef)
 	if err != nil {
 		return nil, err
@@ -370,6 +387,25 @@ model_usage AS (
         COALESCE(SUM(evt.prompt_cache_miss_tokens), 0) AS prompt_cache_miss_tokens,
         COALESCE(SUM(evt.output_tokens), 0) AS output_tokens,
         COALESCE(SUM(evt.total_tokens), 0) AS total_tokens,
+        -- Beijing-time peak hours are 09:00-12:00 and 14:00-18:00 (DeepSeek CNY billing).
+        COALESCE(SUM(evt.prompt_cache_hit_tokens) FILTER (
+            WHERE EXTRACT(HOUR FROM evt.request_started_at AT TIME ZONE 'Asia/Shanghai') IN (9, 10, 11, 14, 15, 16, 17)
+        ), 0) AS prompt_cache_hit_tokens_peak,
+        COALESCE(SUM(evt.prompt_cache_hit_tokens) FILTER (
+            WHERE EXTRACT(HOUR FROM evt.request_started_at AT TIME ZONE 'Asia/Shanghai') NOT IN (9, 10, 11, 14, 15, 16, 17)
+        ), 0) AS prompt_cache_hit_tokens_offpeak,
+        COALESCE(SUM(evt.prompt_cache_miss_tokens) FILTER (
+            WHERE EXTRACT(HOUR FROM evt.request_started_at AT TIME ZONE 'Asia/Shanghai') IN (9, 10, 11, 14, 15, 16, 17)
+        ), 0) AS prompt_cache_miss_tokens_peak,
+        COALESCE(SUM(evt.prompt_cache_miss_tokens) FILTER (
+            WHERE EXTRACT(HOUR FROM evt.request_started_at AT TIME ZONE 'Asia/Shanghai') NOT IN (9, 10, 11, 14, 15, 16, 17)
+        ), 0) AS prompt_cache_miss_tokens_offpeak,
+        COALESCE(SUM(evt.output_tokens) FILTER (
+            WHERE EXTRACT(HOUR FROM evt.request_started_at AT TIME ZONE 'Asia/Shanghai') IN (9, 10, 11, 14, 15, 16, 17)
+        ), 0) AS output_tokens_peak,
+        COALESCE(SUM(evt.output_tokens) FILTER (
+            WHERE EXTRACT(HOUR FROM evt.request_started_at AT TIME ZONE 'Asia/Shanghai') NOT IN (9, 10, 11, 14, 15, 16, 17)
+        ), 0) AS output_tokens_offpeak,
         COUNT(*) AS request_count
     FROM llm_usage_event evt
     JOIN llm_account acct ON acct.id = evt.account_id
@@ -377,11 +413,6 @@ model_usage AS (
     WHERE ($4 = '' OR acct.api_key_ref = $4)
       AND ($5::text[] IS NULL OR evt.model_name = ANY($5::text[]))
     GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name, acct.api_key_ref
-),
-account_day_totals AS (
-    SELECT account_id, workspace_day, COALESCE(SUM(total_tokens), 0) AS account_total_tokens
-    FROM model_usage
-    GROUP BY account_id, workspace_day
 )
 SELECT
     mu.provider,
@@ -389,18 +420,19 @@ SELECT
     mu.api_key_ref,
     COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code,
     COALESCE(TO_CHAR(mu.workspace_day, 'YYYY-MM-DD'), '') AS workspace_day,
-    COALESCE(SUM(
-        0
-    ), 0) AS spend_amount,
+    0::double precision AS spend_amount,
     COALESCE(SUM(mu.prompt_cache_hit_tokens), 0) AS prompt_cache_hit_tokens,
     COALESCE(SUM(mu.prompt_cache_miss_tokens), 0) AS prompt_cache_miss_tokens,
     COALESCE(SUM(mu.output_tokens), 0) AS output_tokens,
     COALESCE(SUM(mu.total_tokens), 0) AS total_tokens,
+    COALESCE(SUM(mu.prompt_cache_hit_tokens_peak), 0) AS prompt_cache_hit_tokens_peak,
+    COALESCE(SUM(mu.prompt_cache_hit_tokens_offpeak), 0) AS prompt_cache_hit_tokens_offpeak,
+    COALESCE(SUM(mu.prompt_cache_miss_tokens_peak), 0) AS prompt_cache_miss_tokens_peak,
+    COALESCE(SUM(mu.prompt_cache_miss_tokens_offpeak), 0) AS prompt_cache_miss_tokens_offpeak,
+    COALESCE(SUM(mu.output_tokens_peak), 0) AS output_tokens_peak,
+    COALESCE(SUM(mu.output_tokens_offpeak), 0) AS output_tokens_offpeak,
     COALESCE(SUM(mu.request_count), 0) AS request_count
 FROM model_usage mu
-JOIN account_day_totals adt
-  ON adt.account_id = mu.account_id
- AND adt.workspace_day = mu.workspace_day
 LEFT JOIN llm_daily_account_report report
   ON report.account_id = mu.account_id
  AND report.workspace_day = mu.workspace_day
@@ -438,6 +470,12 @@ ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC, mu.api_key_r
 			&row.PromptCacheMissTokens,
 			&row.OutputTokens,
 			&row.TotalTokens,
+			&row.PromptCacheHitTokensPeak,
+			&row.PromptCacheHitTokensOffPeak,
+			&row.PromptCacheMissTokensPeak,
+			&row.PromptCacheMissTokensOffPeak,
+			&row.OutputTokensPeak,
+			&row.OutputTokensOffPeak,
 			&row.RequestCount,
 		); err != nil {
 			return nil, err

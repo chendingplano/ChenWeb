@@ -332,21 +332,23 @@
 			</button>
 			<button
 				class="alt-btn"
+				disabled={showAddModel}
 				onclick={() => {
-					showAddModel = !showAddModel;
+					showAddModel = true;
 					showCreate = false;
 				}}
 			>
-				{showAddModel ? 'Cancel' : '+ Add a Model'}
+				+ Add a Model
 			</button>
 			<button
 				class="primary"
+				disabled={showCreate}
 				onclick={() => {
-					showCreate = !showCreate;
+					showCreate = true;
 					showAddModel = false;
 				}}
 			>
-				{showCreate ? 'Cancel' : '+ New Account'}
+				+ New Account
 			</button>
 			<button class="alt-btn" onclick={() => { manualMode = 'deposit'; showDeposit = !showDeposit; showCreate = false; showAddModel = false; }}> {showDeposit && manualMode === 'deposit' ? 'Cancel' : 'Add Deposit'} </button>
 			<button class="ghost" onclick={() => { manualMode = 'set-total-spending'; showDeposit = true; showCreate = false; showAddModel = false; }}>Set Total Spend</button>
@@ -428,6 +430,7 @@
 				<input type="checkbox" bind:checked={draft.is_reconciliation_enabled} />
 			</label>
 			<div class="form-foot">
+				<button class="ghost" type="button" onclick={() => (showCreate = false)}>Cancel</button>
 				<button class="primary" type="submit" disabled={submitting || !draft.account_name.trim()}>
 					{submitting ? 'Creating…' : 'Create account'}
 				</button>
@@ -515,6 +518,7 @@
 				/>
 			</label>
 			<div class="form-foot">
+				<button class="ghost" type="button" onclick={() => (showAddModel = false)}>Cancel</button>
 				<button
 					class="alt-btn"
 					type="submit"
@@ -919,6 +923,7 @@
 	}
 	.form-foot {
 		justify-content: flex-end;
+		gap: 8px;
 	}
 	.error,
 	.info {

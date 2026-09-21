@@ -26,6 +26,12 @@ const (
 	// structural/configuration problem, not an applicability conflict. It is
 	// alarmed but does not block processing (see IsDecisionRelevantPlanConflict).
 	RoutingAlarmKindPlanBuildFailure = "plan_build_failure"
+	// RoutingAlarmKindMissingUserID is raised by an event *generator* (e.g.
+	// jetstreamhandler.PublishEvent) when it publishes a doc-processing
+	// trigger event without a user_id -- doc-processing itself only extracts
+	// user_id from the event (withLLMUserID in llm_capture_input.go), it
+	// never raises this; see spec discussion 2026092101.
+	RoutingAlarmKindMissingUserID = "missing_user_id"
 )
 
 const (

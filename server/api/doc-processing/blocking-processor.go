@@ -238,8 +238,10 @@ func (p *BlockingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	}
 
 	if p.Logger != nil {
+		runID, _ := runIDFromContext(ctx)
 		p.Logger.Info("blocking processor completed",
 			"record_id", evt.RecordID,
+			"run_id", runID,
 			"input_file", inputPath,
 			"num_blocks", len(buf.Blocks),
 		)

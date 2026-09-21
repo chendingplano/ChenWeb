@@ -15,7 +15,13 @@ import (
 const DefaultEventSubject = "kb.pdf.start-doc-processing"
 
 type LineFileGeneratedEvent struct {
-	RecordID         int64
+	RecordID int64
+	// UserID is the id of the user who triggered this run, carried on the
+	// event by its generator (jetstreamhandler.PublishEvent for manual
+	// triggers). Threaded into every LLM call this run makes via
+	// withLLMUserID (see llm_capture_input.go) -- doc-processing only
+	// extracts it here, it does not invent one when the generator omitted it.
+	UserID           string
 	Filename         string
 	Force            bool
 	ForceClear       bool
@@ -69,6 +75,7 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 
 	return LineFileGeneratedEvent{
 		RecordID:               rid,
+		UserID:                 strings.TrimSpace(asString(raw["user_id"])),
 		Filename:               firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
 		Force:                  force,
 		ForceClear:             forceClear,

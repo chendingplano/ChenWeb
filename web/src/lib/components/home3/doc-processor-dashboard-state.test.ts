@@ -40,11 +40,12 @@ test('missing package configuration preserves the existing all-selected behavior
 	);
 });
 
-test('Default package launch omits operation to exercise automatic processing', () => {
+test('Default package launch still sends the explicitly checked processors', () => {
 	assert.deepEqual(buildManualLaunchPayload(42, 'Default', ['extract_metrics'], false, false), {
 		record_id: '42',
 		force: false,
-		force_clear: false
+		force_clear: false,
+		operation: ['extract_metrics']
 	});
 });
 

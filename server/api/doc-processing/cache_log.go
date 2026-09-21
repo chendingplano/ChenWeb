@@ -48,3 +48,17 @@ func cacheTokenCounts(extractor any) (hit, miss int64) {
 	}
 	return int64(usage.PromptCacheHitTokens), int64(usage.PromptCacheMissTokens)
 }
+
+// outputTokenCount is the output-token counterpart to cacheTokenCounts, for the same
+// per-goroutine "end" log lines. Returns 0 when the extractor reports no usage.
+func outputTokenCount(extractor any) int64 {
+	reporter, ok := extractor.(llmJSONUsageReporter)
+	if !ok {
+		return 0
+	}
+	usage := reporter.LastJSONUsage()
+	if usage == nil {
+		return 0
+	}
+	return int64(usage.OutputTokens)
+}

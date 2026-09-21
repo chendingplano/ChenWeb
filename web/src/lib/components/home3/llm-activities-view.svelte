@@ -402,6 +402,9 @@
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 18,
+					tooltip: {
+						valueFormatter: (value) => Number(value).toFixed(2)
+					},
 					data: group.rows.map((row) => row.spend_amount)
 				}
 			]

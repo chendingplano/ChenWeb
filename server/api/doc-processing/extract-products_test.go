@@ -112,6 +112,74 @@ func TestMergeProductMentionCandidates_PreservesNonEnglishMentions(t *testing.T)
 	}
 }
 
+func TestDedupeFinalProductRows_MergesOverlappingEvidenceWithDifferentRequirementText(t *testing.T) {
+	// Reproduces kb.products duplicates 416_prd_37 / 416_prd_42: same
+	// canonical_name + relation_type, evidence_lines overlapping (both
+	// anchored on line 123), but Pass 2 paraphrased requirement_text
+	// differently across the two rows, so the old exact-match key on
+	// requirement_text let both through.
+	products := []map[string]any{
+		{
+			"canonical_name":    "成品肥料",
+			"product_name":      "成品肥料",
+			"relation_type":     "performance_requirement",
+			"requirement_text":  "机器成肥、太阳能辅助堆肥产出的成品肥料，植物种子发芽指数应≥60%，发芽实验方法见附录B；粪大肠菌群数和蛔虫卵死亡率应达到NY884的要求。机器成肥产出的肥料其他指标应达到表 2和表3的要求。太阳能辅助堆肥产出的成品肥料重金属限量应达到表 3的要求。",
+			"evidence_quote":    "机器成肥、太阳能辅助堆肥产出的成品肥料，植物种子发芽指数应≥60%，发芽实验方法见附录B；粪大肠菌群数和蛔虫卵死亡率应达到NY884的要求。机器成肥产出的肥料其他指标应达到表 2和表3的要求。太阳能辅助堆肥产出的成品肥料重金属限量应达到表 3的要求。",
+			"evidence_lines":    []string{"123", "124"},
+			"confidence":        0.95,
+			"confidence_reason": "Explicit performance requirements for fertilizer products.",
+		},
+		{
+			"canonical_name":    "成品肥料",
+			"product_name":      "成品肥料",
+			"relation_type":     "performance_requirement",
+			"requirement_text":  "成品肥料植物种子发芽指数应≥60%；粪大肠菌群数和蛔虫卵死亡率应达到NY884的要求。",
+			"evidence_quote":    "机器成肥、太阳能辅助堆肥产出的成品肥料，植物种子发芽指数应≥60%，发芽实验方法见附录B；粪大肠菌群数和蛔虫卵死亡率应达到NY884的要求。",
+			"evidence_lines":    []string{"123"},
+			"confidence":        0.9,
+			"confidence_reason": "成品肥料产品明确，性能指标要求明确。",
+		},
+	}
+
+	got := dedupeFinalProductRows(products)
+	if len(got) != 1 {
+		t.Fatalf("row count=%d, want 1 (rows share canonical_name/relation_type and overlapping evidence_lines)", len(got))
+	}
+	if toFloat(got[0]["confidence"]) != 0.95 {
+		t.Fatalf("confidence=%v, want the higher-confidence row (0.95) to win", got[0]["confidence"])
+	}
+	lines := toStringSlice(got[0]["evidence_lines"])
+	if len(lines) != 2 {
+		t.Fatalf("evidence_lines=%v, want union of both rows' lines", lines)
+	}
+}
+
+func TestDedupeFinalProductRows_KeepsDistinctRelationsForSameProduct(t *testing.T) {
+	products := []map[string]any{
+		{
+			"canonical_name":   "成品肥料",
+			"product_name":     "成品肥料",
+			"relation_type":    "performance_requirement",
+			"requirement_text": "植物种子发芽指数应≥60%。",
+			"evidence_lines":   []string{"10"},
+			"confidence":       0.9,
+		},
+		{
+			"canonical_name":   "成品肥料",
+			"product_name":     "成品肥料",
+			"relation_type":    "storage_requirement",
+			"requirement_text": "应存放于阴凉干燥处。",
+			"evidence_lines":   []string{"50"},
+			"confidence":       0.9,
+		},
+	}
+
+	got := dedupeFinalProductRows(products)
+	if len(got) != 2 {
+		t.Fatalf("row count=%d, want 2 (different relation_type, non-overlapping evidence)", len(got))
+	}
+}
+
 func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", tmp)
@@ -271,6 +339,122 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	}
 	if len(artifactRecords) != 1 {
 		t.Fatalf("artifact product count=%d, want 1", len(artifactRecords))
+	}
+}
+
+func TestProductsProcessor_HandleEvent_Pass1OnlySkipsPass2And3(t *testing.T) {
+	t.Setenv("EXTRACT_PRODUCT_PASS_1_ONLY", "true")
+
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
+
+	stagingFilename := filepath.Join(tmp, "ocr_rslt_5102.pdf")
+	writeTestArtifacts(t, tmp, 5102, stagingFilename, "opendata",
+		strings.Join([]string{
+			"10\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tThe infusion pump shall be inspected monthly.",
+			"11\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOverlap context.",
+			"12\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tEach infusion pump must have a maintenance log.",
+		}, "\n"),
+		"overlap: [11]\nlines: [10]\n\noverlap: []\nlines: [12]\n",
+	)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              5102,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_5102.json"),
+		StagingFilename: stagingFilename,
+		StatusRaw:       "[]",
+	}}
+	productStore := &fakeProductsStore{}
+	extractor := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{
+				"mentions": []any{
+					map[string]any{
+						"mention_text":      "infusion pump",
+						"canonical_hint":    "infusion pump",
+						"product_type_hint": "equipment",
+						"evidence_quote":    "The infusion pump shall be inspected monthly.",
+						"evidence_lines":    []any{"10"},
+						"is_explicit":       true,
+						"confidence":        0.91,
+						"confidence_reason": "explicit mention",
+					},
+				},
+			},
+			{
+				"mentions": []any{
+					map[string]any{
+						"mention_text":      "infusion pump",
+						"canonical_hint":    "infusion pump",
+						"product_type_hint": "equipment",
+						"evidence_quote":    "Each infusion pump must have a maintenance log.",
+						"evidence_lines":    []any{"12"},
+						"is_explicit":       true,
+						"confidence":        0.93,
+						"confidence_reason": "explicit mention",
+					},
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+
+	p := NewProductsProcessor(inputStore, productStore, extractor, nil)
+	if !p.Pass1Only {
+		t.Fatalf("Pass1Only=false, want true (EXTRACT_PRODUCT_PASS_1_ONLY=true)")
+	}
+	p.MentionPromptText = "extract mentions"
+	p.MentionPromptRef = "prompt-extract-product-mentions-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "gpt-test"
+	p.RelationPromptText = "enrich relations"
+	p.RelationPromptRef = "prompt-enrich-product-relations-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "gpt-test"
+	p.PromptRef = p.RelationPromptRef
+	p.ModelName = p.RelationModelName
+	p.TranslateEnabled = true
+	p.TranslatePromptText = "translate"
+	p.TranslatePromptRef = "prompt-translate-products-v1.md"
+	p.TranslateModelName = "gpt-test"
+	p.TranslatePromptErr = nil
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"5102","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	// Only the 2 Pass 1 mention calls should have run -- no Pass 2 (relation
+	// enrichment) or Pass 3 (translation) calls.
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2 (Pass 1 only, no Pass 2/3)", extractor.structuredCalledCount)
+	}
+	if productStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", productStore.saveCalled)
+	}
+	// The two mentions dedup into one candidate (same canonical_hint), so
+	// exactly one row is persisted -- dedup still happens even though
+	// enrichment is skipped.
+	if len(productStore.lastSave.Products) != 1 {
+		t.Fatalf("saved products=%d, want 1", len(productStore.lastSave.Products))
+	}
+	row := productStore.lastSave.Products[0]
+	if got := strings.TrimSpace(asString(row["product_name"])); got != "infusion pump" {
+		t.Fatalf("product_name=%q, want infusion pump", got)
+	}
+	if got := strings.TrimSpace(asString(row["relation_type"])); got != "" {
+		t.Fatalf("relation_type=%q, want empty (Pass 2 skipped)", got)
+	}
+	if got := strings.TrimSpace(asString(row["product_name_en"])); got != "" {
+		t.Fatalf("product_name_en=%q, want empty (Pass 3a skipped)", got)
+	}
+	if row["category_paths"] != nil {
+		t.Fatalf("category_paths=%#v, want nil (Pass 3b skipped)", row["category_paths"])
+	}
+	if got := strings.TrimSpace(asString(row["product_rel_id"])); got != "5102_prd_1" {
+		t.Fatalf("product_rel_id=%q, want 5102_prd_1", got)
 	}
 }
 
