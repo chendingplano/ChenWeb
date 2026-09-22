@@ -75,6 +75,26 @@ type ProductsProcessor struct {
 	MaxTasks             int
 	Pass1Only            bool
 
+	// MergedPass (EXTRACT_PRODUCTS_MERGED_PASS) swaps Pass 1 + Deterministic
+	// Step A + Pass 2 for a single per-chunk call that detects products and
+	// assigns their relations together, using MergedPrompt*. Everything from
+	// Deterministic Step B onward (final dedup, Pass 3a, Pass 3b, storage) is
+	// unchanged. Off by default; see "Merged-Pass Mode" in
+	// extract-products-spec.md for the measured trade-off.
+	MergedPass       bool
+	MergedPromptText string
+	MergedPromptRef  string
+	MergedPromptPath string
+	MergedPromptErr  error
+	MergedModelRef   string
+	MergedModelName  string
+	MergedModelCfg   structureModelConfig
+	// Reasoning (EXTRACT_PRODUCTS_REASONING) is false when the extraction
+	// passes must run with provider-side reasoning turned off. Recorded here
+	// only so it can be logged; the effect is applied to the model configs at
+	// construction time.
+	Reasoning bool
+
 	// batch* fields hold per-run state for the ChunkBatchProcessor path
 	// (InitChunkBatch/ProcessChunk/FinalizeChunkBatch), set up by
 	// InitChunkBatch and read/written by ProcessChunk (under batchMu, since
@@ -91,6 +111,11 @@ type ProductsProcessor struct {
 	batchMentions      []productMention
 	batchFallbackCount int
 	batchMentionModel  string
+	// batchMergedRows collects merged-pass relation rows instead of
+	// batchMentions when MergedPass is on (ProcessChunk writes both under
+	// batchMu; only one is populated per run).
+	batchMergedRows  []map[string]any
+	batchMergedModel string
 }
 
 type ProductsStore interface {
@@ -184,10 +209,14 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	// for endpoints that reject the `thinking` field, e.g. local
 	// llama.cpp/ollama hosts).
 	translateModelCfg.ThinkingType = normalizeThinkingType(envString("TRANSLATE_PRODUCTS_THINKING", "disabled"))
+	mergedPromptText, mergedPromptRef, mergedPromptPath, mergedPromptErr := loadProductPromptFromEnvKeys(
+		[]string{"EXTRACT_PRODUCT_MERGED_PROMPT"},
+		"prompt-extract-products-merged-v1.md",
+	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
-	return &ProductsProcessor{
+	proc := &ProductsProcessor{
 		InputStore:           inputStore,
 		Store:                store,
 		Extractor:            extractor,
@@ -240,7 +269,33 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		ProductNames:         ProductNameSQLStore{DB: ApiTypes.ProjectDBHandle},
 		MaxTasks:             envInt("EXTRACT_PRODUCTS_MAX_TASKS", 1, 1),
 		Pass1Only:            ExtractProductPass1OnlyFromEnv(),
+		MergedPass:           ExtractProductsMergedPassFromEnv(),
+		MergedPromptText:     mergedPromptText,
+		MergedPromptRef:      mergedPromptRef,
+		MergedPromptPath:     mergedPromptPath,
+		MergedPromptErr:      mergedPromptErr,
+		MergedModelRef:       mentionModelRef,
+		MergedModelName:      mentionModelCfg.ModelName,
+		MergedModelCfg:       mentionModelCfg,
+		Reasoning:            ExtractProductsReasoningFromEnv(),
 	}
+	// Pass-1-only and merged-pass are mutually exclusive: the merged pass
+	// produces relation rows directly and never emits the mentions that
+	// pass-1-only exists to inspect. Merged wins, loudly, rather than
+	// silently running some hybrid of the two.
+	if proc.MergedPass && proc.Pass1Only {
+		logger.Warn("EXTRACT_PRODUCT_PASS_1_ONLY ignored because EXTRACT_PRODUCTS_MERGED_PASS is set; the merged pass emits no mentions to stop at")
+		proc.Pass1Only = false
+	}
+	proc.applyProductsReasoning()
+	if proc.MergedPass || !proc.Reasoning {
+		logger.Info("extract_products evaluation controls active",
+			"merged_pass", proc.MergedPass,
+			"merged_prompt", proc.MergedPromptRef,
+			"reasoning", proc.Reasoning,
+		)
+	}
+	return proc
 }
 
 // ExtractProductPass1OnlyFromEnv resolves the EXTRACT_PRODUCT_PASS_1_ONLY
@@ -262,6 +317,73 @@ func ExtractProductPass1OnlyFromEnv() bool {
 	return enabled
 }
 
+// ExtractProductsMergedPassFromEnv reports whether EXTRACT_PRODUCTS_MERGED_PASS
+// is set to a truthy value. Unset, empty, or unparseable resolves to false --
+// the two-pass pipeline is the default. When true the processor replaces
+// Pass 1, Deterministic Step A, and Pass 2 with a single per-chunk call using
+// EXTRACT_PRODUCT_MERGED_PROMPT; Deterministic Step B onward is unchanged.
+//
+// This is a permanent evaluation control, not a migration flag: whether
+// merging is a win depends on the model, and every new model or model version
+// has to be re-measured. See "Merged-Pass Mode" in extract-products-spec.md
+// for the record-416 numbers that made two-pass the default.
+func ExtractProductsMergedPassFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("EXTRACT_PRODUCTS_MERGED_PASS"))
+	if raw == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+// ExtractProductsReasoningFromEnv reports whether the extraction passes may
+// use provider-side reasoning. Unset, empty, or unparseable resolves to
+// **true** -- each model keeps whatever thinking_type its .models.toml entry
+// declares, which for hybrid-reasoning models such as DeepSeek's means
+// reasoning stays on.
+//
+// Set it to false to force thinking_type="disabled" on this processor's
+// extraction models (mention, relation, merged, and their fallbacks). That is
+// a real quality lever, not just a cost one, and the direction is
+// model-specific: on deepseek-flash, disabling reasoning cut Pass 1 output
+// tokens 9.5x but also cost ~20% of distinct mentions, because that prompt's
+// facility/citation exclusion rules are applied in the reasoning trace. A
+// different model may not need the trace at all -- hence a permanent knob.
+//
+// Pass 3a translation is deliberately not covered here; it has its own
+// TRANSLATE_PRODUCTS_THINKING control and defaults to disabled, since
+// translating five short fields needs no reasoning on any model tested.
+func ExtractProductsReasoningFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("EXTRACT_PRODUCTS_REASONING"))
+	if raw == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return true
+	}
+	return enabled
+}
+
+// applyProductsReasoning forces thinking off on every extraction-pass model
+// when reasoning is disabled. When reasoning is enabled the configs are left
+// exactly as .models.toml declared them -- this knob never *turns on* a
+// thinking field that the model definition did not ask for, so endpoints that
+// reject the field keep working.
+func (p *ProductsProcessor) applyProductsReasoning() {
+	if p.Reasoning {
+		return
+	}
+	p.ModelCfg = forceDisableThinking(p.ModelCfg)
+	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
+	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
+	p.MergedModelCfg = forceDisableThinking(p.MergedModelCfg)
+	p.FallbackModelCfg = forceDisableThinking(p.FallbackModelCfg)
+}
+
 func (p *ProductsProcessor) Name() string { return "extract_products" }
 
 func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
@@ -279,6 +401,9 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	}
 	if p.RelationPromptErr != nil {
 		return fmt.Errorf("(MID_26052003) load product relations prompt %q: %w", p.RelationPromptRef, p.RelationPromptErr)
+	}
+	if p.MergedPass && p.MergedPromptErr != nil {
+		return fmt.Errorf("(MID_26092204) load merged products prompt %q: %w", p.MergedPromptRef, p.MergedPromptErr)
 	}
 	if p.InputStore == nil {
 		return errors.New("(MID_26052004) input store is nil")
@@ -445,6 +570,9 @@ func (p *ProductsProcessor) InitChunkBatch(ctx context.Context, recordID int64, 
 	if p.RelationPromptErr != nil {
 		return fmt.Errorf("(MID_26091211) %s relation prompt error: %w", p.Name(), p.RelationPromptErr)
 	}
+	if p.MergedPass && p.MergedPromptErr != nil {
+		return fmt.Errorf("(MID_26092203) %s merged prompt error: %w", p.Name(), p.MergedPromptErr)
+	}
 	p.batchSkip = false
 	if p.MentionModelErr != nil {
 		p.Logger.Warn("products extraction skipped: mention model config error",
@@ -480,8 +608,10 @@ func (p *ProductsProcessor) InitChunkBatch(ctx context.Context, recordID int64, 
 	p.batchBlocks = chunksToBlocks(chunks)
 	p.batchDocCtx = docCtx
 	p.batchMentions = nil
+	p.batchMergedRows = nil
 	p.batchFallbackCount = 0
 	p.batchMentionModel = strings.TrimSpace(p.MentionModelName)
+	p.batchMergedModel = strings.TrimSpace(p.MergedModelName)
 	return nil
 }
 
@@ -501,6 +631,28 @@ func (p *ProductsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) erro
 	}
 	chunk := p.batchChunks[chunkIdx]
 	block := chunksToBlocks([]Chunk{chunk})[0]
+
+	if p.MergedPass {
+		rows, modelName, didFallback, err := p.extractProductsMergedForChunk(ctx, eventIDFromContext(ctx), chunkIdx, len(p.batchChunks), block, chunk, p.batchDocCtx)
+		if err != nil {
+			if isCtxStopped(ctx) {
+				return ErrPipelineStopped
+			}
+			p.Logger.Warn("extract_products merged chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+			return nil
+		}
+		p.batchMu.Lock()
+		p.batchMergedRows = append(p.batchMergedRows, rows...)
+		if didFallback {
+			p.batchFallbackCount++
+		}
+		if m := strings.TrimSpace(modelName); m != "" {
+			p.batchMergedModel = m
+		}
+		p.batchMu.Unlock()
+		return nil
+	}
+
 	mentions, modelName, didFallback, err := p.extractProductMentionsForChunk(ctx, eventIDFromContext(ctx), chunkIdx, len(p.batchChunks), block, chunk, p.batchDocCtx)
 	if err != nil {
 		if isCtxStopped(ctx) {
@@ -542,12 +694,15 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	fallbackCount := p.batchFallbackCount
 	mentionsCount := len(p.batchMentions)
 
-	candidates := mergeProductMentionCandidates(p.batchMentions)
-	p.Logger.Info("Merged product mention candidates",
-		"mentions_count", mentionsCount,
-		"candidate_count", len(candidates),
-		"record_stage", "post_merge",
-	)
+	var candidates []productCandidate
+	if !p.MergedPass {
+		candidates = mergeProductMentionCandidates(p.batchMentions)
+		p.Logger.Info("Merged product mention candidates",
+			"mentions_count", mentionsCount,
+			"candidate_count", len(candidates),
+			"record_stage", "post_merge",
+		)
+	}
 
 	chunksBySeq := make(map[int]Chunk, len(p.batchChunks))
 	for _, c := range p.batchChunks {
@@ -595,25 +750,41 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	}
 
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, p.batchDocCtx, maxTasks)
-	if pass2Err != nil {
-		if isCtxStopped(ctx) || errors.Is(pass2Err, ErrPipelineStopped) {
-			p.stopAndPersistProducts(context.Background(), rec, p.batchStart)
-			return ErrPipelineStopped
-		}
-		p.persistProductsStatus(ctx, rec, p.batchStart, pass2Err)
-		return fmt.Errorf("(MID_26091215) %s enrich product relations: %w", p.Name(), pass2Err)
-	}
+	var products []map[string]any
 
-	products := make([]map[string]any, 0, len(candidates))
-	for _, r := range pass2Results {
-		products = append(products, r.rows...)
-		llmCallCount++
-		if r.didFallback {
-			fallbackCount++
+	if p.MergedPass {
+		// ProcessChunk already produced finished relation rows for every
+		// chunk, so there is no Pass 2 to run here -- go straight to
+		// Deterministic Step B below. llmCallCount already counts the one
+		// merged call per chunk.
+		products = p.batchMergedRows
+		usedRelationModel = firstNonEmptyTrimmed(p.batchMergedModel, p.MergedModelName)
+		p.Logger.Warn("EXTRACT_PRODUCTS_MERGED_PASS is set; skipping Pass 2 (rows came from the merged pass)",
+			"rows", len(products),
+			"prompt_name", p.MergedPromptRef,
+			"model_name", usedRelationModel,
+		)
+	} else {
+		pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, p.batchDocCtx, maxTasks)
+		if pass2Err != nil {
+			if isCtxStopped(ctx) || errors.Is(pass2Err, ErrPipelineStopped) {
+				p.stopAndPersistProducts(context.Background(), rec, p.batchStart)
+				return ErrPipelineStopped
+			}
+			p.persistProductsStatus(ctx, rec, p.batchStart, pass2Err)
+			return fmt.Errorf("(MID_26091215) %s enrich product relations: %w", p.Name(), pass2Err)
 		}
-		if r.modelName != "" {
-			usedRelationModel = r.modelName
+
+		products = make([]map[string]any, 0, len(candidates))
+		for _, r := range pass2Results {
+			products = append(products, r.rows...)
+			llmCallCount++
+			if r.didFallback {
+				fallbackCount++
+			}
+			if r.modelName != "" {
+				usedRelationModel = r.modelName
+			}
 		}
 	}
 
@@ -728,93 +899,126 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		chunksBySeq[c.SeqNo] = c
 	}
 
-	// Pass 1: concurrent per-block mention extraction (mirrors
-	// extract_metrics' extractMetricsFromChunksWithLLM). Each block is
-	// independent -- no cross-block state -- so this is the same fan-out
-	// extract_metrics already uses; MaxTasks defaults to 1 (sequential,
-	// today's behavior) until EXTRACT_PRODUCTS_MAX_TASKS raises it.
-	pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(blocks), func(concCtx context.Context, idx int) (productPass1Result, error) {
-		block := blocks[idx]
-		if isCtxStopped(concCtx) {
-			return productPass1Result{}, ErrPipelineStopped
+	var (
+		products          []map[string]any
+		mentionsCount     int
+		llmCallCount      int
+		fallbackCount     int
+		usedRelationModel string
+	)
+
+	if p.MergedPass {
+		// Merged-pass mode: one call per chunk produces relation rows
+		// directly. Pass 1, Deterministic Step A, and Pass 2 are all skipped;
+		// mentionsCount stays 0 because no mentions are ever materialized.
+		p.Logger.Warn("EXTRACT_PRODUCTS_MERGED_PASS is set; running the single merged pass instead of Pass 1 + Step A + Pass 2",
+			"blocks", len(blocks),
+			"prompt_name", p.MergedPromptRef,
+			"model_name", p.MergedModelName,
+		)
+		mergedRows, mergedModel, mergedFallbacks, mergedErr := p.runMergedPassOverBlocks(ctx, eventID, blocks, chunksBySeq, docCtx, maxTasks)
+		if mergedErr != nil {
+			if isCtxStopped(ctx) || errors.Is(mergedErr, ErrPipelineStopped) {
+				return productExtractionResult{}, ErrPipelineStopped
+			}
+			return productExtractionResult{}, mergedErr
 		}
-		chunk, ok := chunksBySeq[block.Index]
-		if !ok {
-			return productPass1Result{}, fmt.Errorf("(MID_26052040) extract product mentions: no chunk with seq %d (chunks=%d)", block.Index, len(chunks))
-		}
-		mentions, modelName, didFallback, err := p.extractProductMentionsForChunk(concCtx, eventID, idx, len(blocks), block, chunk, docCtx)
-		if err != nil {
+		products = mergedRows
+		usedRelationModel = mergedModel
+		usedMentionModel = mergedModel
+		llmCallCount = len(blocks)
+		fallbackCount = mergedFallbacks
+	} else {
+		// Pass 1: concurrent per-block mention extraction (mirrors
+		// extract_metrics' extractMetricsFromChunksWithLLM). Each block is
+		// independent -- no cross-block state -- so this is the same fan-out
+		// extract_metrics already uses; MaxTasks defaults to 1 (sequential,
+		// today's behavior) until EXTRACT_PRODUCTS_MAX_TASKS raises it.
+		pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(blocks), func(concCtx context.Context, idx int) (productPass1Result, error) {
+			block := blocks[idx]
 			if isCtxStopped(concCtx) {
 				return productPass1Result{}, ErrPipelineStopped
 			}
-			p.Logger.Error("failed extracting product mentions", "error", err)
-			return productPass1Result{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
+			chunk, ok := chunksBySeq[block.Index]
+			if !ok {
+				return productPass1Result{}, fmt.Errorf("(MID_26052040) extract product mentions: no chunk with seq %d (chunks=%d)", block.Index, len(chunks))
+			}
+			mentions, modelName, didFallback, err := p.extractProductMentionsForChunk(concCtx, eventID, idx, len(blocks), block, chunk, docCtx)
+			if err != nil {
+				if isCtxStopped(concCtx) {
+					return productPass1Result{}, ErrPipelineStopped
+				}
+				p.Logger.Error("failed extracting product mentions", "error", err)
+				return productPass1Result{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
+			}
+			return productPass1Result{
+				mentions:    mentions,
+				modelName:   strings.TrimSpace(modelName),
+				didFallback: didFallback,
+			}, nil
+		})
+		if pass1Err != nil {
+			if isCtxStopped(ctx) || errors.Is(pass1Err, ErrPipelineStopped) {
+				return productExtractionResult{}, ErrPipelineStopped
+			}
+			return productExtractionResult{}, pass1Err
 		}
-		return productPass1Result{
-			mentions:    mentions,
-			modelName:   strings.TrimSpace(modelName),
-			didFallback: didFallback,
-		}, nil
-	})
-	if pass1Err != nil {
-		if isCtxStopped(ctx) || errors.Is(pass1Err, ErrPipelineStopped) {
-			return productExtractionResult{}, ErrPipelineStopped
-		}
-		return productExtractionResult{}, pass1Err
-	}
 
-	mentions := make([]productMention, 0, len(blocks))
-	llmCallCount := len(blocks)
-	fallbackCount := 0
-	for _, r := range pass1Results {
-		mentions = append(mentions, r.mentions...)
-		if r.didFallback {
-			fallbackCount++
+		mentions := make([]productMention, 0, len(blocks))
+		llmCallCount = len(blocks)
+		fallbackCount = 0
+		for _, r := range pass1Results {
+			mentions = append(mentions, r.mentions...)
+			if r.didFallback {
+				fallbackCount++
+			}
+			if r.modelName != "" {
+				usedMentionModel = r.modelName
+			}
 		}
-		if r.modelName != "" {
-			usedMentionModel = r.modelName
-		}
-	}
 
-	candidates := mergeProductMentionCandidates(mentions)
-	p.Logger.Info("Merged product mention candidates",
-		"mentions_count", len(mentions),
-		"candidate_count", len(candidates),
-		"record_stage", "post_merge",
-	)
+		mentionsCount = len(mentions)
 
-	if p.Pass1Only {
-		p.Logger.Warn("EXTRACT_PRODUCT_PASS_1_ONLY is set; skipping Pass 2/3 and persisting Pass 1 candidates directly",
+		candidates := mergeProductMentionCandidates(mentions)
+		p.Logger.Info("Merged product mention candidates",
+			"mentions_count", len(mentions),
 			"candidate_count", len(candidates),
+			"record_stage", "post_merge",
 		)
-		return productExtractionResult{
-			Products:      buildPass1OnlyProductRows(candidates),
-			ModelName:     usedMentionModel,
-			LLMCallCount:  llmCallCount,
-			FallbackCount: fallbackCount,
-			MentionsCount: len(mentions),
-		}, nil
-	}
 
-	// Pass 2: concurrent per-candidate relation enrichment, same fan-out.
-	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, docCtx, maxTasks)
-	if pass2Err != nil {
-		if isCtxStopped(ctx) || errors.Is(pass2Err, ErrPipelineStopped) {
-			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+		if p.Pass1Only {
+			p.Logger.Warn("EXTRACT_PRODUCT_PASS_1_ONLY is set; skipping Pass 2/3 and persisting Pass 1 candidates directly",
+				"candidate_count", len(candidates),
+			)
+			return productExtractionResult{
+				Products:      buildPass1OnlyProductRows(candidates),
+				ModelName:     usedMentionModel,
+				LLMCallCount:  llmCallCount,
+				FallbackCount: fallbackCount,
+				MentionsCount: mentionsCount,
+			}, nil
 		}
-		return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, pass2Err
-	}
 
-	products := make([]map[string]any, 0, len(candidates))
-	for _, r := range pass2Results {
-		products = append(products, r.rows...)
-		llmCallCount++
-		if r.didFallback {
-			fallbackCount++
+		// Pass 2: concurrent per-candidate relation enrichment, same fan-out.
+		usedRelationModel = strings.TrimSpace(p.RelationModelName)
+		pass2Results, pass2Err := p.enrichProductCandidatesWithLLM(ctx, eventID, candidates, chunksBySeq, docCtx, maxTasks)
+		if pass2Err != nil {
+			if isCtxStopped(ctx) || errors.Is(pass2Err, ErrPipelineStopped) {
+				return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: mentionsCount}, ErrPipelineStopped
+			}
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: mentionsCount}, pass2Err
 		}
-		if r.modelName != "" {
-			usedRelationModel = r.modelName
+
+		products = make([]map[string]any, 0, len(candidates))
+		for _, r := range pass2Results {
+			products = append(products, r.rows...)
+			llmCallCount++
+			if r.didFallback {
+				fallbackCount++
+			}
+			if r.modelName != "" {
+				usedRelationModel = r.modelName
+			}
 		}
 	}
 
@@ -834,7 +1038,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		var translateErr error
 		products, translateErr = p.translateProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
 		if translateErr != nil {
-			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, translateErr
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: mentionsCount}, translateErr
 		}
 	}
 	p.Logger.Info("Starting product name resolution + catalog categorization",
@@ -843,14 +1047,14 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	var resolveErr error
 	products, resolveErr = p.resolveProductNamesAndCategories(ctx, products)
 	if resolveErr != nil {
-		return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, resolveErr
+		return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: mentionsCount}, resolveErr
 	}
 	return productExtractionResult{
 		Products:      products,
 		ModelName:     firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
 		LLMCallCount:  llmCallCount,
 		FallbackCount: fallbackCount,
-		MentionsCount: len(mentions),
+		MentionsCount: mentionsCount,
 	}, nil
 }
 
@@ -900,6 +1104,100 @@ func (p *ProductsProcessor) extractProductMentionsForChunk(
 		"output_tokens", outputTokens,
 		"ms_used", time.Since(callStart).Milliseconds())
 	return mentions, modelName, didFallback, nil
+}
+
+// extractProductsMergedForChunk runs the merged pass for exactly one
+// chunk/block: detection and relation assignment in a single call, returning
+// finished product-relation rows rather than mentions. It sends the identical
+// canonicalChunkInputText document Pass 1 would have sent for this chunk, so
+// it rides the same cross-processor prompt cache, and it reuses
+// normalizeProductList so its rows are shape-identical to Pass 2's -- which is
+// what lets Deterministic Step B onward run unchanged.
+func (p *ProductsProcessor) extractProductsMergedForChunk(
+	ctx context.Context,
+	eventID string,
+	idx int,
+	total int,
+	block Block,
+	chunk Chunk,
+	docCtx string,
+) ([]map[string]any, string, bool, error) {
+	callStart := p.Now()
+	p.Logger.Info("extract products (merged pass) - begin",
+		"idx", idx,
+		"total", total,
+		"model_name", p.MergedModelName,
+		"prompt_name", p.MergedPromptRef,
+	)
+	inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+	taskText := p.MergedPromptText + "\n\n" + buildProductMentionsTaskPrompt(block.Index)
+	payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+		"extract products merged", inputText,
+		taskText, p.MergedPromptRef,
+		p.MergedModelName, p.MergedModelCfg)
+	p.logLLMCall(ctx, fmt.Sprintf("%s_m_b%d", eventID, idx), "extract_products_merged", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MergedPromptRef), nil, err, callStart, p.Now())
+	if err != nil {
+		return nil, modelName, false, err
+	}
+	raw, _ := payload["products"].([]any)
+	rows := normalizeProductList(raw)
+	didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MergedModelName) && strings.TrimSpace(modelName) != ""
+	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	outputTokens := outputTokenCount(p.Extractor)
+	p.Logger.Info("extract products (merged pass) - end",
+		"rows", len(rows),
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+		"output_tokens", outputTokens,
+		"ms_used", time.Since(callStart).Milliseconds())
+	return rows, modelName, didFallback, nil
+}
+
+// runMergedPassOverBlocks fans the merged pass out across every block, the
+// same shape as Pass 1's fan-out, and returns the concatenated rows.
+func (p *ProductsProcessor) runMergedPassOverBlocks(
+	ctx context.Context,
+	eventID string,
+	blocks []Block,
+	chunksBySeq map[int]Chunk,
+	docCtx string,
+	maxTasks int,
+) ([]map[string]any, string, int, error) {
+	usedModel := strings.TrimSpace(p.MergedModelName)
+	results, err := runConcurrent(ctx, maxTasks, len(blocks), func(concCtx context.Context, idx int) (productPass2Result, error) {
+		block := blocks[idx]
+		if isCtxStopped(concCtx) {
+			return productPass2Result{}, ErrPipelineStopped
+		}
+		chunk, ok := chunksBySeq[block.Index]
+		if !ok {
+			return productPass2Result{}, fmt.Errorf("(MID_26092201) extract products merged: no chunk with seq %d (chunks=%d)", block.Index, len(chunksBySeq))
+		}
+		rows, modelName, didFallback, callErr := p.extractProductsMergedForChunk(concCtx, eventID, idx, len(blocks), block, chunk, docCtx)
+		if callErr != nil {
+			if isCtxStopped(concCtx) {
+				return productPass2Result{}, ErrPipelineStopped
+			}
+			p.Logger.Error("failed extracting products (merged pass)", "error", callErr)
+			return productPass2Result{}, fmt.Errorf("(MID_26092202) extract products merged via llm: %w", callErr)
+		}
+		return productPass2Result{rows: rows, modelName: strings.TrimSpace(modelName), didFallback: didFallback}, nil
+	})
+	if err != nil {
+		return nil, usedModel, 0, err
+	}
+	products := make([]map[string]any, 0, len(blocks))
+	fallbackCount := 0
+	for _, r := range results {
+		products = append(products, r.rows...)
+		if r.didFallback {
+			fallbackCount++
+		}
+		if r.modelName != "" {
+			usedModel = r.modelName
+		}
+	}
+	return products, usedModel, fallbackCount, nil
 }
 
 // enrichProductCandidatesWithLLM runs pass 2 (concurrent per-candidate

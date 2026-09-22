@@ -863,3 +863,205 @@ func TestTranslateProductRows_MidBatchDropDoesNotMisassignLaterRows(t *testing.T
 		}
 	}
 }
+
+// TestProductsProcessor_HandleEvent_MergedPassSkipsPass1AndPass2 covers
+// EXTRACT_PRODUCTS_MERGED_PASS: one merged call per block produces finished
+// relation rows, and neither the mentions pass nor the per-candidate
+// enrichment pass runs. Deterministic Step B onward must still run, so the
+// translation call and the persisted row shape are checked too.
+func TestProductsProcessor_HandleEvent_MergedPassSkipsPass1AndPass2(t *testing.T) {
+	t.Setenv("EXTRACT_PRODUCTS_MERGED_PASS", "true")
+
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
+
+	stagingFilename := filepath.Join(tmp, "ocr_rslt_5103.pdf")
+	writeTestArtifacts(t, tmp, 5103, stagingFilename, "opendata",
+		strings.Join([]string{
+			"10\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tThe infusion pump shall be inspected monthly.",
+			"11\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOverlap context.",
+			"12\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tEach infusion pump must have a maintenance log.",
+		}, "\n"),
+		"overlap: [11]\nlines: [10]\n\noverlap: []\nlines: [12]\n",
+	)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              5103,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_5103.json"),
+		StagingFilename: stagingFilename,
+		StatusRaw:       "[]",
+	}}
+	productStore := &fakeProductsStore{}
+	mergedRow := func(quote, line, relation string) map[string]any {
+		return map[string]any{
+			"product_name":    "infusion pump",
+			"canonical_name":  "infusion pump",
+			"product_type":    "equipment",
+			"relation_type":   relation,
+			"product_summary": "The document imposes a requirement on the infusion pump.",
+			"evidence_quote":  quote,
+			"evidence_lines":  []any{line},
+			"relation_details": map[string]any{
+				"obligation_level": "mandatory",
+				"requirement_text": quote,
+			},
+			"confidence":        0.92,
+			"confidence_reason": "explicit",
+		}
+	}
+	extractor := &fakeJSONExtractor{
+		outs: []map[string]any{
+			// one merged call per block
+			{"products": []any{mergedRow("The infusion pump shall be inspected monthly.", "10", "testing_requirement")}},
+			{"products": []any{mergedRow("Each infusion pump must have a maintenance log.", "12", "maintenance_requirement")}},
+			// Pass 3a translation batch (both rows in one batch)
+			{"products": []any{
+				map[string]any{"idx": float64(0), "product_name_en": "infusion pump"},
+				map[string]any{"idx": float64(1), "product_name_en": "infusion pump"},
+			}},
+		},
+	}
+
+	p := NewProductsProcessor(inputStore, productStore, extractor, nil)
+	if !p.MergedPass {
+		t.Fatalf("MergedPass=false, want true (EXTRACT_PRODUCTS_MERGED_PASS=true)")
+	}
+	p.MergedPromptText = "merged extract"
+	p.MergedPromptRef = "prompt-extract-products-merged-v1.md"
+	p.MergedPromptErr = nil
+	p.MergedModelName = "gpt-test"
+	p.MentionPromptText = "extract mentions"
+	p.MentionPromptRef = "prompt-extract-product-mentions-v2.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "gpt-test"
+	p.RelationPromptText = "enrich relations"
+	p.RelationPromptRef = "prompt-enrich-product-mention-v4.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "gpt-test"
+	p.PromptRef = p.MergedPromptRef
+	p.ModelName = p.MergedModelName
+	p.TranslateEnabled = true
+	p.TranslatePromptText = "translate"
+	p.TranslatePromptRef = "prompt-translate-products-v2.md"
+	p.TranslateModelName = "gpt-test"
+	p.TranslatePromptErr = nil
+
+	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"5103","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	// 2 merged calls + 1 translation batch. A two-pass run over the same
+	// input would have been 2 mention calls + 1 enrichment call + 1
+	// translation call.
+	if extractor.structuredCalledCount != 3 {
+		t.Fatalf("structuredCalledCount=%d, want 3 (2 merged + 1 translate)", extractor.structuredCalledCount)
+	}
+	for _, name := range extractor.promptNames {
+		if name == "prompt-extract-product-mentions-v2.md" || name == "prompt-enrich-product-mention-v4.md" {
+			t.Fatalf("merged pass still called %q; Pass 1/Pass 2 must be skipped", name)
+		}
+	}
+	if productStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", productStore.saveCalled)
+	}
+	// Two rows, distinct relation types, neither merged away by Step B
+	// (different evidence_lines).
+	if len(productStore.lastSave.Products) != 2 {
+		t.Fatalf("saved products=%d, want 2", len(productStore.lastSave.Products))
+	}
+	seen := map[string]bool{}
+	for _, row := range productStore.lastSave.Products {
+		seen[strings.TrimSpace(asString(row["relation_type"]))] = true
+	}
+	if !seen["testing_requirement"] || !seen["maintenance_requirement"] {
+		t.Fatalf("relation types=%v, want both testing_requirement and maintenance_requirement", seen)
+	}
+}
+
+func TestExtractProductsMergedPassFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{{"", false}, {"true", true}, {"1", true}, {"false", false}, {"nonsense", false}} {
+		t.Run("raw="+tc.raw, func(t *testing.T) {
+			t.Setenv("EXTRACT_PRODUCTS_MERGED_PASS", tc.raw)
+			if got := ExtractProductsMergedPassFromEnv(); got != tc.want {
+				t.Fatalf("ExtractProductsMergedPassFromEnv()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExtractProductsReasoningFromEnv pins the default to true: an unset or
+// unparseable value must never silently disable reasoning, since doing so
+// costs ~20% of distinct mentions on deepseek-flash.
+func TestExtractProductsReasoningFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{{"", true}, {"true", true}, {"false", false}, {"0", false}, {"nonsense", true}} {
+		t.Run("raw="+tc.raw, func(t *testing.T) {
+			t.Setenv("EXTRACT_PRODUCTS_REASONING", tc.raw)
+			if got := ExtractProductsReasoningFromEnv(); got != tc.want {
+				t.Fatalf("ExtractProductsReasoningFromEnv()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyProductsReasoning checks both directions: disabling forces
+// thinking off on every extraction model, and enabling leaves each model's
+// configured value untouched (it must never *add* a thinking field that the
+// model definition did not ask for).
+func TestApplyProductsReasoning(t *testing.T) {
+	newProc := func(reasoning bool) *ProductsProcessor {
+		return &ProductsProcessor{
+			Reasoning:        reasoning,
+			ModelCfg:         structureModelConfig{ThinkingType: ""},
+			MentionModelCfg:  structureModelConfig{ThinkingType: ""},
+			RelationModelCfg: structureModelConfig{ThinkingType: "enabled"},
+			MergedModelCfg:   structureModelConfig{ThinkingType: ""},
+			FallbackModelCfg: structureModelConfig{ThinkingType: ""},
+		}
+	}
+
+	off := newProc(false)
+	off.applyProductsReasoning()
+	for name, got := range map[string]string{
+		"ModelCfg":         off.ModelCfg.ThinkingType,
+		"MentionModelCfg":  off.MentionModelCfg.ThinkingType,
+		"RelationModelCfg": off.RelationModelCfg.ThinkingType,
+		"MergedModelCfg":   off.MergedModelCfg.ThinkingType,
+		"FallbackModelCfg": off.FallbackModelCfg.ThinkingType,
+	} {
+		if got != "disabled" {
+			t.Fatalf("%s.ThinkingType=%q, want disabled", name, got)
+		}
+	}
+
+	on := newProc(true)
+	on.applyProductsReasoning()
+	if on.MentionModelCfg.ThinkingType != "" {
+		t.Fatalf("MentionModelCfg.ThinkingType=%q, want unchanged (empty)", on.MentionModelCfg.ThinkingType)
+	}
+	if on.RelationModelCfg.ThinkingType != "enabled" {
+		t.Fatalf("RelationModelCfg.ThinkingType=%q, want unchanged (enabled)", on.RelationModelCfg.ThinkingType)
+	}
+}
+
+// TestNewProductsProcessor_MergedPassOverridesPass1Only: the two testing
+// modes are mutually exclusive, and merged wins rather than the processor
+// running some hybrid of the two.
+func TestNewProductsProcessor_MergedPassOverridesPass1Only(t *testing.T) {
+	t.Setenv("EXTRACT_PRODUCTS_MERGED_PASS", "true")
+	t.Setenv("EXTRACT_PRODUCT_PASS_1_ONLY", "true")
+	p := NewProductsProcessor(&fakeDocMetadataStore{}, &fakeProductsStore{}, &fakeJSONExtractor{}, nil)
+	if !p.MergedPass {
+		t.Fatalf("MergedPass=false, want true")
+	}
+	if p.Pass1Only {
+		t.Fatalf("Pass1Only=true, want false (merged pass must win)")
+	}
+}
