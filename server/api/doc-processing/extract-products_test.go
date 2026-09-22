@@ -1065,3 +1065,58 @@ func TestNewProductsProcessor_MergedPassOverridesPass1Only(t *testing.T) {
 		t.Fatalf("Pass1Only=true, want false (merged pass must win)")
 	}
 }
+
+// TestBuildMergedProductsTaskPrompt_PinsProductsSchema is the regression
+// guard for the record-416 2026-09-22 07:47 run: the merged pass reused
+// buildProductMentionsTaskPrompt, whose schema suffix told the model to
+// return {"mentions": [...]}. Being last in the prompt it won, the model
+// complied, productExtractionContract accepted it (it allows either key), and
+// every chunk produced 0 rows with no error.
+func TestBuildMergedProductsTaskPrompt_PinsProductsSchema(t *testing.T) {
+	got := buildMergedProductsTaskPrompt(9)
+	if !strings.Contains(got, `"products"`) {
+		t.Fatalf("merged task prompt does not pin the products key:\n%s", got)
+	}
+	if strings.Contains(got, `"mentions"`) {
+		t.Fatalf("merged task prompt must not mention the Pass 1 mentions schema:\n%s", got)
+	}
+	if !strings.Contains(got, `"relation_type"`) {
+		t.Fatalf("merged task prompt should carry the relation schema:\n%s", got)
+	}
+	if !strings.Contains(got, "Block index: 9") {
+		t.Fatalf("merged task prompt lost the block index:\n%s", got)
+	}
+}
+
+// TestExtractProductsMergedForChunk_RejectsMentionShapedPayload: even with
+// the schema pinned, a model that answers with the Pass 1 shape must fail
+// loudly rather than contributing 0 rows silently.
+func TestExtractProductsMergedForChunk_RejectsMentionShapedPayload(t *testing.T) {
+	block := Block{Index: 3, Lines: []BlockLine{
+		{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."},
+	}}
+	chunk := Chunk{SeqNo: 3, Lines: []MarkedLine{
+		{Mark: "r", Line: Line{LineNo: 10, PageNo: 1, LineType: "paragraph", Content: "The infusion pump shall be inspected monthly."}},
+	}}
+	extractor := &fakeJSONExtractor{
+		out: map[string]any{"mentions": []any{
+			map[string]any{"mention_text": "infusion pump"},
+		}},
+	}
+	p := &ProductsProcessor{
+		Extractor:        extractor,
+		Logger:           loggerutil.CreateDefaultLogger("MID_TEST_MERGED"),
+		Now:              time.Now,
+		MergedPass:       true,
+		MergedPromptText: "merged extract",
+		MergedPromptRef:  "prompt-extract-products-merged-v1.md",
+		MergedModelName:  "gpt-test",
+	}
+	_, _, _, err := p.extractProductsMergedForChunk(context.Background(), "evt", 0, 1, block, chunk, "doc")
+	if err == nil {
+		t.Fatalf("expected an error for a mention-shaped merged payload, got nil")
+	}
+	if !strings.Contains(err.Error(), "mention-shaped") {
+		t.Fatalf("error should name the shape mismatch, got: %v", err)
+	}
+}

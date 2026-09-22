@@ -116,6 +116,11 @@ type ProductsProcessor struct {
 	// batchMu; only one is populated per run).
 	batchMergedRows  []map[string]any
 	batchMergedModel string
+	// batchMergedFailures counts chunks whose merged call errored. Chunk
+	// failures are non-fatal individually (same as Pass 1), but if *every*
+	// chunk failed the run must not be treated as a legitimate empty
+	// extraction -- see the all-failed guard in FinalizeChunkBatch.
+	batchMergedFailures int
 }
 
 type ProductsStore interface {
@@ -609,6 +614,7 @@ func (p *ProductsProcessor) InitChunkBatch(ctx context.Context, recordID int64, 
 	p.batchDocCtx = docCtx
 	p.batchMentions = nil
 	p.batchMergedRows = nil
+	p.batchMergedFailures = 0
 	p.batchFallbackCount = 0
 	p.batchMentionModel = strings.TrimSpace(p.MentionModelName)
 	p.batchMergedModel = strings.TrimSpace(p.MergedModelName)
@@ -639,6 +645,9 @@ func (p *ProductsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) erro
 				return ErrPipelineStopped
 			}
 			p.Logger.Warn("extract_products merged chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+			p.batchMu.Lock()
+			p.batchMergedFailures++
+			p.batchMu.Unlock()
 			return nil
 		}
 		p.batchMu.Lock()
@@ -757,6 +766,17 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		// chunk, so there is no Pass 2 to run here -- go straight to
 		// Deterministic Step B below. llmCallCount already counts the one
 		// merged call per chunk.
+		// A run where every chunk failed is not an empty document -- it is a
+		// broken run, and must not be allowed to reach the force-delete below
+		// and wipe the record's existing rows while reporting success. That
+		// is exactly what happened to record 416 on 2026-09-22 (1219 rows
+		// deleted, 0 inserted, proc_status=success) when the merged pass was
+		// sending the wrong output schema.
+		if len(p.batchChunks) > 0 && p.batchMergedFailures == len(p.batchChunks) {
+			mergedErr := fmt.Errorf("(MID_26092206) %s merged pass: all %d chunks failed; refusing to overwrite record %d with an empty result", p.Name(), len(p.batchChunks), p.batchRecordID)
+			p.persistProductsStatus(ctx, rec, p.batchStart, mergedErr)
+			return mergedErr
+		}
 		products = p.batchMergedRows
 		usedRelationModel = firstNonEmptyTrimmed(p.batchMergedModel, p.MergedModelName)
 		p.Logger.Warn("EXTRACT_PRODUCTS_MERGED_PASS is set; skipping Pass 2 (rows came from the merged pass)",
@@ -1130,7 +1150,7 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 		"prompt_name", p.MergedPromptRef,
 	)
 	inputText := canonicalChunkInputText(chunk.Lines, docCtx)
-	taskText := p.MergedPromptText + "\n\n" + buildProductMentionsTaskPrompt(block.Index)
+	taskText := p.MergedPromptText + "\n\n" + buildMergedProductsTaskPrompt(block.Index)
 	payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
 		"extract products merged", inputText,
 		taskText, p.MergedPromptRef,
@@ -1138,6 +1158,16 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 	p.logLLMCall(ctx, fmt.Sprintf("%s_m_b%d", eventID, idx), "extract_products_merged", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MergedPromptRef), nil, err, callStart, p.Now())
 	if err != nil {
 		return nil, modelName, false, err
+	}
+	// productExtractionContract accepts either "products" or "mentions", so a
+	// merged call that came back mention-shaped validates fine and would
+	// otherwise yield 0 rows with no error at all. Treat it as the prompt/
+	// schema mismatch it is rather than silently dropping the chunk.
+	if _, ok := payload["products"]; !ok {
+		if mentionsRaw, hasMentions := payload["mentions"]; hasMentions {
+			items, _ := normalizeProductItems(mentionsRaw)
+			return nil, modelName, false, fmt.Errorf("(MID_26092205) merged pass returned a mention-shaped payload (%d mentions, no \"products\" key) for block %d: prompt %q and its task schema disagree on the output shape", len(items), block.Index, p.MergedPromptRef)
+		}
 	}
 	raw, _ := payload["products"].([]any)
 	rows := normalizeProductList(raw)
@@ -1483,6 +1513,41 @@ func buildProductMentionsTaskPrompt(blockIndex int) string {
 			"evidence_quote":    "short supporting quote from the input",
 			"evidence_lines":    []string{"32", "35-45"},
 			"is_explicit":       true,
+			"confidence":        0.0,
+			"confidence_reason": "brief reason",
+		}},
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nBlock index: " + strconv.Itoa(blockIndex)
+}
+
+// buildMergedProductsTaskPrompt is the merged pass's task suffix. It must
+// pin the *products* top-level key: the suffix is the last thing the model
+// reads, so reusing buildProductMentionsTaskPrompt here silently overrode the
+// merged prompt's own schema and the model returned {"mentions": [...]}
+// instead -- which productExtractionContract accepts (it allows either key),
+// so every chunk validated cleanly and yielded 0 rows. Record 416, run
+// 2026-09-22 07:47.
+func buildMergedProductsTaskPrompt(blockIndex int) string {
+	schema := map[string]any{
+		"products": []map[string]any{{
+			"product_name":    "string",
+			"canonical_name":  "string",
+			"product_type":    "specific_product|product_class|component|material|software|system|equipment|consumable|packaging|other",
+			"relation_type":   "scope|regulated_object|requirement_target|performance_requirement|design_requirement|material_requirement|testing_requirement|certification_requirement|usage_condition|installation_requirement|maintenance_requirement|storage_requirement|prohibited_product|exempted_product|component_of|contains_product|compatible_with|replacement_or_alternative|measurement_object|risk_source|other",
+			"product_summary": "one concise sentence describing how the input relates to this product",
+			"evidence_quote":  "short supporting quote from the input",
+			"evidence_lines":  []string{"32", "35-45"},
+			"relation_details": map[string]any{
+				"obligation_level":         "mandatory|recommended|permitted|prohibited|conditional|descriptive|unknown",
+				"requirement_text":         "relevant original text or concise paraphrase, or null",
+				"conditions":               []string{"condition 1"},
+				"exceptions":               []string{"exception 1"},
+				"thresholds_or_parameters": []map[string]any{{"name": "string", "value": "string", "unit": "string or null"}},
+				"related_products":         []map[string]any{{"product_name": "string", "relationship": "component_of|contains_product|compatible_with|replacement_or_alternative|compared_with|other"}},
+				"responsible_actor":        "string or null",
+			},
 			"confidence":        0.0,
 			"confidence_reason": "brief reason",
 		}},
