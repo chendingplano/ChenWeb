@@ -172,6 +172,18 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		[]string{"TRANSLATION_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
+	// Pass 3a is mechanical: translate five short fields per row, no
+	// reasoning required. On a hybrid-reasoning model that thinks by default
+	// it was spending ~78% of its output tokens on discarded reasoning_content
+	// (measured 2026-09-22 over 14 days of `product translation` calls).
+	// Disabling thinking cut output tokens 81.6% across a 6-call replay with
+	// every batch's row count preserved and only wording-level differences in
+	// the translations. Contrast Pass 1, where the same change cost ~20% of
+	// distinct mentions -- so this is scoped to translation, not applied
+	// processor-wide. Override with TRANSLATE_PRODUCTS_THINKING (set it to ""
+	// for endpoints that reject the `thinking` field, e.g. local
+	// llama.cpp/ollama hosts).
+	translateModelCfg.ThinkingType = normalizeThinkingType(envString("TRANSLATE_PRODUCTS_THINKING", "disabled"))
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
