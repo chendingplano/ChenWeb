@@ -196,15 +196,17 @@ done
 [ -n "$cfg_files" ] && echo "==> staged reviewer configs:$cfg_files"
 
 # Ship config.toml + the config/ tree too. config.LoadConfig reads config.toml
-# from disk at every startup (not go:embed'd), and /api/site-config's
+# and the optional sibling config.local.toml from disk at every startup (not go:embed'd), and /api/site-config's
 # LoadSiteConfig reads config/site/*.toml the same way -- see the deploy
 # runbook §2.3. config.toml specifically drifted on onto.bzton.cn for real
 # (2026-09-23): the box's copy predated the 2026-09-17 commit that moved
 # [doc-processing] required_processors out of config.toml into
 # config.local.toml-only, so the box's stale copy kept winning over every
 # config.local.toml edit no matter how many times doc-processor was restarted
-# (see devdoc 2026092301-devdoc-doc-processor-config-drift.md). Always shipped
-# regardless of BINS: this is app config, not per-binary.
+# (see devdoc 2026092301-devdoc-doc-processor-config-drift.md). Always ship the
+# base config regardless of BINS: this is app config, not per-binary.
+# Deliberately do not ship config.local.toml. It is gitignored and machine-specific;
+# the China box must keep its own local values, including [llm].workspace_timezone.
 if [ -f "$REPO/config.toml" ]; then
   cp "$REPO/config.toml" "$OUT/config.toml"
   echo "==> staged config.toml"

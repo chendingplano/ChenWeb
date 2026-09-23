@@ -206,6 +206,39 @@ func TestStoreListModelActivityReports(t *testing.T) {
 	}
 }
 
+func TestStoreListModelActivityReportsHourly(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"provider", "model_name", "api_key_ref", "currency_code", "workspace_day", "spend_amount", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "output_tokens", "total_tokens",
+		"prompt_cache_hit_tokens_peak", "prompt_cache_hit_tokens_offpeak", "prompt_cache_miss_tokens_peak", "prompt_cache_miss_tokens_offpeak", "output_tokens_peak", "output_tokens_offpeak", "request_count",
+	}).AddRow(
+		"deepseek", "deepseek-v4-flash", "sk-deepseek", "USD", "2026-06-20 14:00:00", 0, int64(100), int64(20), int64(30), int64(150),
+		int64(0), int64(100), int64(0), int64(20), int64(0), int64(30), int64(1),
+	)
+
+	from := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`WITH recent_days AS`).WithArgs(30, from, from, "", nil, "").WillReturnRows(rows)
+
+	store := NewStore(db)
+	got, err := store.ListModelActivityReports(context.Background(), 30, ModelActivityReportFilters{
+		From: &from, To: &from, Frequency: "hourly",
+	})
+	if err != nil {
+		t.Fatalf("ListModelActivityReports() error = %v", err)
+	}
+	if len(got) != 1 || got[0].WorkspaceDay != "2026-06-20 14:00:00" {
+		t.Fatalf("unexpected hourly report = %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock expectations: %v", err)
+	}
+}
+
 func TestStoreListCurrentBalances(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

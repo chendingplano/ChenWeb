@@ -108,10 +108,12 @@ type ModelActivityReport struct {
 }
 
 type ModelActivityReportFilters struct {
-	From       *time.Time
-	To         *time.Time
-	APIKeyRef  string
-	ModelNames []string
+	From         *time.Time
+	To           *time.Time
+	APIKeyRef    string
+	ModelNames   []string
+	Frequency    string
+	TimezoneName string
 }
 
 type TodaySummary struct {
@@ -368,7 +370,7 @@ LIMIT $1`, bucket, bucket, bucket, bucket, bucket, bucket)
 }
 
 func (s *Store) ListModelActivityReports(ctx context.Context, limit int, filters ModelActivityReportFilters) ([]ModelActivityReport, error) {
-	const query = `WITH recent_days AS (
+	query := `WITH recent_days AS (
     SELECT DISTINCT workspace_day
     FROM llm_daily_account_report
     WHERE ($2::date IS NULL OR workspace_day >= $2::date)
@@ -438,6 +440,20 @@ LEFT JOIN llm_daily_account_report report
  AND report.workspace_day = mu.workspace_day
 GROUP BY mu.provider, mu.model_name, mu.api_key_ref, mu.workspace_day
 ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC, mu.api_key_ref ASC`
+	if filters.Frequency == "hourly" {
+		query = strings.Replace(query,
+			"evt.workspace_day,\n        evt.account_id",
+			"evt.workspace_day AS activity_day,\n        date_trunc('hour', evt.request_started_at AT TIME ZONE $6) AS workspace_day,\n        evt.account_id", 1)
+		query = strings.Replace(query,
+			"GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name, acct.api_key_ref",
+			"GROUP BY evt.workspace_day, date_trunc('hour', evt.request_started_at AT TIME ZONE $6), evt.account_id, evt.provider, evt.model_name, acct.api_key_ref", 1)
+		query = strings.Replace(query, "'YYYY-MM-DD'), '') AS workspace_day", "'YYYY-MM-DD HH24:00:00'), '') AS workspace_day", 1)
+		query = strings.Replace(query, "COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code", "'USD'::text AS currency_code", 1)
+		query = strings.Replace(query, `LEFT JOIN llm_daily_account_report report
+  ON report.account_id = mu.account_id
+ AND report.workspace_day = mu.workspace_day
+`, "", 1)
+	}
 
 	var from, to any
 	if filters.From != nil {
@@ -450,7 +466,11 @@ ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC, mu.api_key_r
 	if len(filters.ModelNames) > 0 {
 		modelNames = pq.Array(filters.ModelNames)
 	}
-	rows, err := s.db.QueryContext(ctx, query, limit, from, to, filters.APIKeyRef, modelNames)
+	args := []any{limit, from, to, filters.APIKeyRef, modelNames}
+	if filters.Frequency == "hourly" {
+		args = append(args, filters.TimezoneName)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

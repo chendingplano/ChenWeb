@@ -124,3 +124,42 @@ workflows = false
 		t.Fatalf("expected agents to remain enabled from base config, got %v ok=%v", got, ok)
 	}
 }
+
+func TestGetLLMConfigLocalOverrideWins(t *testing.T) {
+	oldConfig := AppConfig
+	oldViper := appConfigViper
+	t.Cleanup(func() {
+		AppConfig = oldConfig
+		appConfigViper = oldViper
+		viper.Reset()
+	})
+	viper.Reset()
+	appConfigViper = viper.New()
+	appConfigViper.SetConfigType("toml")
+
+	base := `[llm]
+workspace_timezone = "America/Chicago"
+archive_root = "Data/llm-logs"
+`
+	local := `[llm]
+workspace_timezone = "Asia/Shanghai"
+archive_root = "/var/lib/chenweb/llm-logs"
+`
+	if err := appConfigViper.ReadConfig(strings.NewReader(base)); err != nil {
+		t.Fatalf("read base config: %v", err)
+	}
+	if err := appConfigViper.MergeConfig(strings.NewReader(local)); err != nil {
+		t.Fatalf("merge local config: %v", err)
+	}
+	if err := appConfigViper.Unmarshal(&AppConfig); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	cfg := GetLLMConfig()
+	if cfg.WorkspaceTimezone != "Asia/Shanghai" {
+		t.Fatalf("workspace timezone = %q, want Asia/Shanghai", cfg.WorkspaceTimezone)
+	}
+	if cfg.ArchiveRoot != "/var/lib/chenweb/llm-logs" {
+		t.Fatalf("archive root = %q, want China local override", cfg.ArchiveRoot)
+	}
+}

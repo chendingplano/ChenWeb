@@ -64,6 +64,9 @@
 	let balanceLoading = $state(false);
 	let balanceFilterError = $state<string | null>(null);
 	const balanceReportLimit = 1000;
+	const reportFrequency = $derived(
+		timePreset === 'today' || timePreset === 'yesterday' ? 'hourly' : 'daily'
+	);
 	const balanceFrequency = $derived(
 		balanceTimePreset === 'today' || balanceTimePreset === 'yesterday' ? 'hourly' : 'daily'
 	);
@@ -89,15 +92,22 @@
 			notice = null;
 		}
 		try {
-			const [summaryResponse, balancesResponse, hourlyResponse, reportsResponse, eventsResponse] =
-				await Promise.all([
-					getLLMTodaySummary(),
+			// Fetch first: "today"/"yesterday"/etc. presets below are anchored on
+			// this server-computed workspace day (workspace_timezone), not the
+			// viewer's browser clock/timezone, which is frequently a different
+			// zone than the deployment (e.g. a Chicago browser against a
+			// Shanghai-workspace box) and would otherwise silently mis-bucket or
+			// truncate the current workspace day.
+			const summaryResponse = await getLLMTodaySummary();
+			todaySummary = summaryResponse.summary;
+			const [balancesResponse, hourlyResponse, reportsResponse, eventsResponse] = await Promise.all(
+				[
 					listLLMCurrentBalances(),
 					listLLMHourlyBalanceReports(balanceReportLimit, balanceFrequency, getBalanceFilters()),
 					listLLMModelActivityReports(reportLimit, getReportFilters()),
 					listLLMUsageEvents(eventLimit)
-				]);
-			todaySummary = summaryResponse.summary;
+				]
+			);
 			balances = balancesResponse.balances;
 			hourlyBalanceReports = hourlyResponse.reports;
 			modelReports = reportsResponse.reports;
@@ -110,16 +120,32 @@
 		}
 	}
 
+	// Pure calendar-date helpers: dates are handled as UTC-midnight `Date`
+	// instants purely as a day-count/formatting convenience, never read back
+	// via local getters. That keeps day arithmetic (add/subtract days, start
+	// of month, ...) free of any implicit timezone (browser or system) --
+	// the real timezone anchor is workspaceTodayString() below.
+	function parseDateOnly(dateStr: string): Date {
+		const [year, month, day] = dateStr.split('-').map(Number);
+		return new Date(Date.UTC(year, month - 1, day));
+	}
+
 	function dateOnly(date: Date): string {
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
+		const year = date.getUTCFullYear();
+		const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+		const day = String(date.getUTCDate()).padStart(2, '0');
 		return `${year}-${month}-${day}`;
 	}
 
+	// "Today" per the server's configured workspace_timezone (see
+	// GetLLMTodaySummary), falling back to the browser's local date only if
+	// that hasn't loaded yet (e.g. the summary request itself failed).
+	function workspaceTodayString(): string {
+		return todaySummary.workspace_day || dateOnly(new Date());
+	}
+
 	function timeFiltersFor(preset: string, fromDate: string, toDate: string): LLMReportFilters {
-		const today = new Date();
-		const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+		const todayDate = parseDateOnly(workspaceTodayString());
 		let from = dateOnly(todayDate);
 		let to = from;
 
@@ -134,11 +160,13 @@
 				from = dateOnly(new Date(todayDate.getTime() - 29 * 24 * 60 * 60 * 1000));
 				break;
 			case 'this_month':
-				from = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
+				from = dateOnly(new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth(), 1)));
 				break;
 			case 'last_month':
-				from = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1));
-				to = dateOnly(new Date(todayDate.getFullYear(), todayDate.getMonth(), 0));
+				from = dateOnly(
+					new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth() - 1, 1))
+				);
+				to = dateOnly(new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth(), 0)));
 				break;
 			case 'custom':
 				if (!fromDate || !toDate) {
@@ -156,7 +184,11 @@
 	}
 
 	function getReportFilters(): LLMReportFilters {
-		return { ...timeFiltersFor(timePreset, customFrom, customTo), apiKey: selectedAPIKey || undefined };
+		return {
+			...timeFiltersFor(timePreset, customFrom, customTo),
+			apiKey: selectedAPIKey || undefined,
+			frequency: reportFrequency
+		};
 	}
 
 	function getBalanceFilters(): LLMReportFilters {
@@ -246,6 +278,18 @@
 		return day || trimmed;
 	}
 
+	function fmtReportBucket(raw: string): string {
+		const trimmed = raw?.trim() ?? '';
+		if (!trimmed || reportFrequency !== 'hourly') {
+			return fmtWorkspaceDay(trimmed);
+		}
+
+		const normalized = trimmed.replace('T', ' ');
+		const date = normalized.slice(0, 10);
+		const hour = normalized.slice(11, 13);
+		return hour ? `${date} ${hour}:00` : date;
+	}
+
 	function isEmbeddingModel(modelName: string): boolean {
 		const normalized = (modelName || '').trim().toLowerCase();
 		return normalized.includes('embedding') || normalized.includes('embed');
@@ -311,7 +355,7 @@
 	);
 
 	function buildModelChartOptions(group: ModelChartGroup): EChartsOption {
-		const days = group.rows.map((row) => fmtWorkspaceDay(row.workspace_day));
+		const days = group.rows.map((row) => fmtReportBucket(row.workspace_day));
 		return {
 			backgroundColor: 'transparent',
 			animationDuration: 250,
@@ -412,29 +456,94 @@
 	}
 
 	type BalanceChartGroup = { key: string; accountName: string; rows: LLMHourlyBalanceReport[] };
-	const balanceChartGroups = $derived((() => {
-		const grouped = new SvelteMap<string, BalanceChartGroup>();
-		for (const row of hourlyBalanceReports) {
-			const key = row.account_id;
-			const group = grouped.get(key) ?? { key, accountName: row.account_name, rows: [] };
-			group.rows.push(row); grouped.set(key, group);
-		}
-		return Array.from(grouped.values()).map((group) => ({ ...group, rows: [...group.rows].sort((a, b) => a.hour_started_at.localeCompare(b.hour_started_at)) }));
-	})());
+	const balanceChartGroups = $derived(
+		(() => {
+			const grouped = new SvelteMap<string, BalanceChartGroup>();
+			for (const row of hourlyBalanceReports) {
+				const key = row.account_id;
+				const group = grouped.get(key) ?? { key, accountName: row.account_name, rows: [] };
+				group.rows.push(row);
+				grouped.set(key, group);
+			}
+			return Array.from(grouped.values()).map((group) => ({
+				...group,
+				rows: [...group.rows].sort((a, b) => a.hour_started_at.localeCompare(b.hour_started_at))
+			}));
+		})()
+	);
 
 	function buildBalanceChartOptions(group: BalanceChartGroup): EChartsOption {
-		return { backgroundColor: 'transparent', animationDuration: 250, color: [inputBar, outputBar, spendBar, '#A78BFA', '#22D3EE'],
+		return {
+			backgroundColor: 'transparent',
+			animationDuration: 250,
+			color: [inputBar, outputBar, spendBar, '#A78BFA', '#22D3EE'],
 			legend: { top: 0, textStyle: { color: sub } },
-			tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: darkMode ? '#0F1320' : '#FFFFFF', borderColor: border, textStyle: { color: heading } },
+			tooltip: {
+				trigger: 'axis',
+				axisPointer: { type: 'shadow' },
+				backgroundColor: darkMode ? '#0F1320' : '#FFFFFF',
+				borderColor: border,
+				textStyle: { color: heading }
+			},
 			grid: { top: 36, right: 30, bottom: 94, left: 70 },
-			xAxis: { type: 'category', data: group.rows.map((row) => fmtBalanceBucket(row.hour_started_at)), axisLine: { lineStyle: { color: border } }, axisLabel: { color: sub, rotate: 40, margin: 18, hideOverlap: true } },
-			yAxis: [{ type: 'value', name: 'USD', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { lineStyle: { color: border, opacity: 0.45 } } }, { type: 'value', name: 'CNY', nameTextStyle: { color: sub }, axisLabel: { color: sub }, splitLine: { show: false } }],
+			xAxis: {
+				type: 'category',
+				data: group.rows.map((row) => fmtBalanceBucket(row.hour_started_at)),
+				axisLine: { lineStyle: { color: border } },
+				axisLabel: { color: sub, rotate: 40, margin: 18, hideOverlap: true }
+			},
+			yAxis: [
+				{
+					type: 'value',
+					name: 'USD',
+					nameTextStyle: { color: sub },
+					axisLabel: { color: sub },
+					splitLine: { lineStyle: { color: border, opacity: 0.45 } }
+				},
+				{
+					type: 'value',
+					name: 'CNY',
+					nameTextStyle: { color: sub },
+					axisLabel: { color: sub },
+					splitLine: { show: false }
+				}
+			],
 			series: [
-				{ name: 'Current balance (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.balance_usd) },
-				{ name: 'Current balance (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.balance_cny) },
-				{ name: 'Spending (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.spending_cny) }
-				,{ name: 'Total Spending (CNY)', type: 'bar', yAxisIndex: 1, barMaxWidth: 20, data: group.rows.map((row) => row.total_spending_cny) }
-				,{ name: 'Total Spending (USD)', type: 'bar', yAxisIndex: 0, barMaxWidth: 20, data: group.rows.map((row) => row.total_spending_usd) }
+				{
+					name: 'Current balance (USD)',
+					type: 'bar',
+					yAxisIndex: 0,
+					barMaxWidth: 20,
+					data: group.rows.map((row) => row.balance_usd)
+				},
+				{
+					name: 'Current balance (CNY)',
+					type: 'bar',
+					yAxisIndex: 1,
+					barMaxWidth: 20,
+					data: group.rows.map((row) => row.balance_cny)
+				},
+				{
+					name: 'Spending (CNY)',
+					type: 'bar',
+					yAxisIndex: 1,
+					barMaxWidth: 20,
+					data: group.rows.map((row) => row.spending_cny)
+				},
+				{
+					name: 'Total Spending (CNY)',
+					type: 'bar',
+					yAxisIndex: 1,
+					barMaxWidth: 20,
+					data: group.rows.map((row) => row.total_spending_cny)
+				},
+				{
+					name: 'Total Spending (USD)',
+					type: 'bar',
+					yAxisIndex: 0,
+					barMaxWidth: 20,
+					data: group.rows.map((row) => row.total_spending_usd)
+				}
 			]
 		};
 	}
@@ -573,7 +682,10 @@
 		<div class="panel-head">
 			<div>
 				<h3>Official Account Balance and Spending</h3>
-				<p class="muted">Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from the preceding snapshot; balance increases are shown as zero spending.</p>
+				<p class="muted">
+					Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from
+					the preceding snapshot; balance increases are shown as zero spending.
+				</p>
 			</div>
 			<div class="report-filters">
 				<label>
@@ -596,7 +708,11 @@
 				{#if balanceTimePreset === 'custom'}
 					<label>
 						<span>Start date</span>
-						<input type="date" bind:value={balanceCustomFrom} onchange={handleBalanceFilterChange} />
+						<input
+							type="date"
+							bind:value={balanceCustomFrom}
+							onchange={handleBalanceFilterChange}
+						/>
 					</label>
 					<label>
 						<span>End date</span>
@@ -611,13 +727,30 @@
 		{#if (loading || balanceLoading) && hourlyBalanceReports.length === 0}
 			<div class="empty">Loading official balance history…</div>
 		{:else if balanceChartGroups.length === 0}
-			<div class="empty">No official balance history yet. Hourly snapshots will appear here after the next capture.</div>
+			<div class="empty">
+				No official balance history yet. Hourly snapshots will appear here after the next capture.
+			</div>
 		{:else}
 			<div class="model-chart-grid">
 				{#each balanceChartGroups as group (group.key)}
 					<div class="model-chart-card">
-						<div class="model-chart-head"><div><div class="cell-primary">{group.accountName}</div><div class="cell-secondary">Official provider balance and {balanceFrequency} spending</div></div></div>
-						<div class="balance-chart-scroll"><div class="model-chart" style:width={balanceChartWidth(group)}><Chart {init} options={buildBalanceChartOptions(group)} style="width: 100%; height: 100%;" /></div></div>
+						<div class="model-chart-head">
+							<div>
+								<div class="cell-primary">{group.accountName}</div>
+								<div class="cell-secondary">
+									Official provider balance and {balanceFrequency} spending
+								</div>
+							</div>
+						</div>
+						<div class="balance-chart-scroll">
+							<div class="model-chart" style:width={balanceChartWidth(group)}>
+								<Chart
+									{init}
+									options={buildBalanceChartOptions(group)}
+									style="width: 100%; height: 100%;"
+								/>
+							</div>
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -629,7 +762,8 @@
 			<div>
 				<h3>Spend Reports</h3>
 				<p class="muted">
-					Per-model activity aggregated by workspace day. Local estimates use the configured DeepSeek CNY token prices and remain separate from provider balances.
+					Per-model activity aggregated by workspace day. Local estimates use the configured
+					DeepSeek CNY token prices and remain separate from provider balances.
 				</p>
 			</div>
 			<div class="report-filters">
@@ -682,7 +816,11 @@
 								<div class="cell-secondary">
 									{group.provider} · {group.rows[0].api_key_name || 'API key unavailable'} · {fmtNum(
 										group.rows.length
-									)} day(s) · grouped by workspace day
+									)}
+									{reportFrequency === 'hourly' ? 'hour(s)' : 'day(s)'} · grouped by {reportFrequency ===
+									'hourly'
+										? 'hour'
+										: 'workspace day'}
 								</div>
 								{#if isEmbeddingModel(group.modelName)}
 									<div class="cell-secondary">
@@ -941,7 +1079,10 @@
 		width: 100%;
 		height: 410px;
 	}
-	.balance-chart-scroll { overflow-x: auto; width: 100%; }
+	.balance-chart-scroll {
+		overflow-x: auto;
+		width: 100%;
+	}
 	.model-chart-head {
 		display: flex;
 		justify-content: space-between;

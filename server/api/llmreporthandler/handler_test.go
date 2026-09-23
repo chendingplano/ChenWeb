@@ -126,6 +126,22 @@ func TestListDailyReportsReturnsRows(t *testing.T) {
 	}
 }
 
+func TestListModelActivityReportsRejectsInvalidFrequency(t *testing.T) {
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore { return &stubReportStore{} }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/reports/models?frequency=weekly", nil)
+	rec := httptest.NewRecorder()
+	if err := ListModelActivityReports(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListModelActivityReports() error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestListUsageEventsReturnsRows(t *testing.T) {
 	prev := reportStoreFactory
 	t.Cleanup(func() { reportStoreFactory = prev })

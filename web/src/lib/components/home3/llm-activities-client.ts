@@ -32,6 +32,7 @@ export type LLMReportFilters = {
 	from?: string;
 	to?: string;
 	apiKey?: string;
+	frequency?: 'hourly' | 'daily';
 };
 
 export type LLMAPIKeyOption = {
@@ -189,6 +190,7 @@ export function listLLMModelActivityReports(
 	if (filters.from) params.set('from', filters.from);
 	if (filters.to) params.set('to', filters.to);
 	if (filters.apiKey) params.set('api_key', filters.apiKey);
+	if (filters.frequency) params.set('frequency', filters.frequency);
 	return req<ListLLMModelActivityReportsResponse>(
 		`/api/v1/llm/reports/models?${params.toString()}`
 	);

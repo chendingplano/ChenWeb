@@ -31,12 +31,6 @@ table_name_cust_request_logs    = "cust_request_logs"
 jwt_secret = "super-secret-key"
 session_duration_hours = 24
 
-[llm]
-workspace_timezone = "America/Chicago"
-usage_retention_days = 30
-archive_root = "/Users/cding/Apps/llm-logs"
-reconciliation_run_hour = 2
-
 [migration]
 verbose 					= "true"
 allow_outof_order 			= "true"

@@ -130,6 +130,7 @@ func ListModelActivityReports(c echo.Context) error {
 	if filters.APIKeyRef, err = apiKeyRefForName(c.QueryParam("api_key"), keyRefs); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
 	}
+	filters.TimezoneName = config.GetLLMConfig().WorkspaceTimezone
 	selectedAPIKeyName := strings.TrimSpace(c.QueryParam("api_key"))
 	rows, err := store.ListModelActivityReports(c.Request().Context(), limit, filters)
 	if err != nil {
@@ -234,7 +235,13 @@ type ModelAPIKeyOption struct {
 }
 
 func parseModelActivityReportFilters(c echo.Context) (ModelActivityReportFilters, error) {
-	filters := ModelActivityReportFilters{}
+	filters := ModelActivityReportFilters{Frequency: strings.ToLower(strings.TrimSpace(c.QueryParam("frequency")))}
+	if filters.Frequency == "" {
+		filters.Frequency = "daily"
+	}
+	if filters.Frequency != "daily" && filters.Frequency != "hourly" {
+		return filters, fmt.Errorf("frequency must be hourly or daily")
+	}
 	for value, target := range map[string]**time.Time{
 		"from": &filters.From,
 		"to":   &filters.To,

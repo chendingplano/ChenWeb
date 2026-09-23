@@ -163,6 +163,25 @@ test('listLLMModelActivityReports serializes spend report filters', async () => 
 	}
 });
 
+test('listLLMModelActivityReports requests hourly buckets when requested', async () => {
+	const mock = installFetchMock(async () => Response.json({ reports: [], api_keys: [] }));
+
+	try {
+		await listLLMModelActivityReports(30, {
+			from: '2026-09-23',
+			to: '2026-09-23',
+			frequency: 'hourly'
+		});
+
+		assert.equal(
+			String(mock.calls[0].input),
+			'/api/v1/llm/reports/models?limit=30&from=2026-09-23&to=2026-09-23&frequency=hourly'
+		);
+	} finally {
+		mock.restore();
+	}
+});
+
 test('listLLMHourlyBalanceReports serializes balance filters', async () => {
 	const mock = installFetchMock(async () => Response.json({ reports: [] }));
 
