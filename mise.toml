@@ -90,7 +90,7 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + *.local.toml reviewer configs into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all five."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + prompts/ + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all five."
 run = '''
 set -euo pipefail
 
@@ -158,11 +158,28 @@ for d in project_migrations shared_migrations; do
   fi
 done
 
+# Ship the prompts/ directory too. PROMPT_DIR (or the ./prompts fallback) is
+# read from disk per-call (doc-structure-analyzer.go, extract-doc-metadata.go,
+# extract-metrics.go, etc.), not go:embed'd, so a binaries-only payload leaves
+# the box's prompts frozen wherever the last hand-rsync left them -- this bit
+# onto.bzton.cn for real (2026-09-22: box was missing/stale on product-mention
+# and product-extraction prompts after a rename on the Mac went undeployed).
+# Always shipped regardless of BINS: prompts are not per-binary.
+if [ -d "$REPO/prompts" ]; then
+  mkdir -p "$OUT/prompts"
+  cp -a "$REPO/prompts"/. "$OUT/prompts"/
+  prompt_count=$(ls -1 "$OUT/prompts" | wc -l | tr -d " ")
+  echo "==> staged prompts ($prompt_count files)"
+else
+  echo "==> WARNING: $REPO/prompts not found -- no prompts staged" >&2
+  prompt_count=0
+fi
+
 # Ship the *.local.toml reviewer configs too. Despite the ".local." name these
 # are git-tracked repo-root files (not gitignored machine overrides, unlike
 # mise.local.toml/config.local.toml) that GetDocReviewConfig()/
 # productreviews.GetConfig() read from disk on demand -- not go:embed'd, so
-# they're invisible to a binaries-only payload just like prompts/ (see the
+# they're invisible to a binaries-only payload just like prompts/ was (see the
 # deploy runbook's Gotcha section). Missing doc-review.local.toml silently
 # disables 6 reviewer aspects; missing product-review.local.toml fails every
 # Product Review build request outright. Both have already been hit for real
@@ -178,6 +195,44 @@ for f in doc-review.local.toml product-review.local.toml; do
 done
 [ -n "$cfg_files" ] && echo "==> staged reviewer configs:$cfg_files"
 
+# Ship config.toml + the config/ tree too. config.LoadConfig reads config.toml
+# from disk at every startup (not go:embed'd), and /api/site-config's
+# LoadSiteConfig reads config/site/*.toml the same way -- see the deploy
+# runbook §2.3. config.toml specifically drifted on onto.bzton.cn for real
+# (2026-09-23): the box's copy predated the 2026-09-17 commit that moved
+# [doc-processing] required_processors out of config.toml into
+# config.local.toml-only, so the box's stale copy kept winning over every
+# config.local.toml edit no matter how many times doc-processor was restarted
+# (see devdoc 2026092301-devdoc-doc-processor-config-drift.md). Always shipped
+# regardless of BINS: this is app config, not per-binary.
+if [ -f "$REPO/config.toml" ]; then
+  cp "$REPO/config.toml" "$OUT/config.toml"
+  echo "==> staged config.toml"
+else
+  echo "==> WARNING: $REPO/config.toml not found -- not staged" >&2
+fi
+
+if [ -d "$REPO/config" ]; then
+  mkdir -p "$OUT/config"
+  cp -a "$REPO/config"/. "$OUT/config"/
+  config_count=$(find "$OUT/config" -type f | wc -l | tr -d " ")
+  echo "==> staged config/ ($config_count files)"
+else
+  echo "==> WARNING: $REPO/config not found -- no config/ staged" >&2
+  config_count=0
+fi
+
+# docs/doc-templates/*.typ are read from disk by the typst report renderer
+# (server/api/doc-reviews/typst_report.go, correction_report.go), not
+# go:embed'd. Always shipped regardless of BINS.
+if [ -d "$REPO/docs/doc-templates" ]; then
+  mkdir -p "$OUT/docs/doc-templates"
+  cp -a "$REPO/docs/doc-templates"/. "$OUT/docs/doc-templates"/
+  echo "==> staged docs/doc-templates"
+else
+  echo "==> WARNING: $REPO/docs/doc-templates not found -- not staged" >&2
+fi
+
 {
   echo "git_rev:   $(git rev-parse HEAD)"
   echo "git_short: $(git rev-parse --short HEAD)"
@@ -186,7 +241,9 @@ done
   echo "built_on:  $(hostname)"
   echo "binaries: $built"
   echo "migrations:$mig_counts"
+  echo "prompts: $prompt_count files"
   echo "reviewer_configs:${cfg_files:- <none staged>}"
+  echo "config: config.toml + config/ ($config_count files) + docs/doc-templates"
 } > "$OUT/MANIFEST"
 
 echo

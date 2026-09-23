@@ -9,9 +9,12 @@
 #                      bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy
 #
 # Run ON THE BOX, as root (systemctl needs it; `gui` is not a sudoer).
-# First, syncs migration files (project_migrations/, shared_migrations/) if the
-# payload carries them -- this must happen before any unit starts, because every
-# binary runs goose at startup and reads those dirs from disk.
+# First, syncs migration files (project_migrations/, shared_migrations/), then
+# prompts/ (mirrored with --delete), then the *.local.toml reviewer configs,
+# then config.toml + config/ + docs/doc-templates -- all read from disk at
+# runtime, not compiled into the binaries, so a binaries-only payload leaves
+# them stale or missing. Migrations must land before any unit starts, since
+# every binary runs goose at startup.
 # Then per binary: verify sha256, verify ELF/arch, back up the current binary,
 # stop -> swap -> start the matching service, health-check, and auto-roll-back
 # to the previous binary if the health-check fails.
@@ -121,11 +124,33 @@ else
 fi
 echo
 
+# --- prompts ------------------------------------------------------------------
+# prompts/ is read from disk per-call (PROMPT_DIR, falling back to ./prompts),
+# not go:embed'd, so a binaries-only payload leaves the box's prompts frozen
+# wherever the last hand-rsync left them. Unlike migrations, mirrored with
+# --delete: a prompt renamed/removed on the source should not keep being read
+# on the box (there's no "already applied" tracking to protect, unlike goose).
+# This bit onto.bzton.cn for real (2026-09-22: stale product-mention /
+# product-extraction prompts after a rename went undeployed for days).
+echo "== prompts =="
+src="$SRC_DIR/prompts"; dst="$CHENWEB_DIR/prompts"
+if [ ! -d "$src" ]; then
+  echo "  prompts: not in payload -- skipped (build predates prompt shipping?)"
+else
+  before=$(ls -1 "$dst" 2>/dev/null | wc -l | tr -d " ")
+  run mkdir -p "$dst"
+  run rsync -a --delete "$src"/ "$dst"/
+  run chown -R "$RUN_USER:$RUN_USER" "$dst"
+  after=$(ls -1 "$src" 2>/dev/null | wc -l | tr -d " ")
+  echo "  prompts: synced ($before -> $after files)"
+fi
+echo
+
 # --- reviewer configs ---------------------------------------------------------
 # doc-review.local.toml / product-review.local.toml are git-tracked repo-root
 # files read from disk (not compiled into the binary), so a binaries-only
 # payload leaves the box's copy stale or missing entirely -- see the runbook's
-# Gotcha section (prompts/ hit the same class of bug 2026-09-16;
+# Gotcha section (prompts/ hit the same class of bug, fixed 2026-09-22;
 # product-review.local.toml was never deployed here at all until 2026-09-16).
 # Verbatim copy, no per-box translation needed (only symbolic model/prompt refs
 # inside). Always synced regardless of which binaries are named on the command
@@ -143,6 +168,42 @@ for f in doc-review.local.toml product-review.local.toml; do
     echo "  $f: installing"
     run install -m 0644 -o "$RUN_USER" -g "$RUN_USER" "$src" "$dst"
   fi
+done
+echo
+
+# --- app config -----------------------------------------------------------
+# config.toml (root) and the config/ tree are read from disk at runtime
+# (config.LoadConfig / /api/site-config's LoadSiteConfig), not compiled into
+# the binary -- same class of bug as prompts/ and the reviewer configs above.
+# Hit for real on onto.bzton.cn 2026-09-23: the box's config.toml predated the
+# 2026-09-17 commit that moved [doc-processing] required_processors out of
+# config.toml into config.local.toml-only, so the box's stale copy kept
+# silently overriding every config.local.toml edit no matter how many times
+# doc-processor was restarted. config/ is mirrored with --delete like
+# prompts/: it's plain config data, no "already applied" tracking to protect.
+# Always synced regardless of which binaries are named on the command line.
+echo "== app config =="
+f=config.toml
+src="$SRC_DIR/$f"; dst="$CHENWEB_DIR/$f"
+if [ ! -f "$src" ]; then
+  echo "  $f: not in payload -- skipped (build predates config shipping?)"
+elif [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+  echo "  $f: already current"
+else
+  echo "  $f: installing"
+  run install -m 0644 -o "$RUN_USER" -g "$RUN_USER" "$src" "$dst"
+fi
+
+for d in config docs/doc-templates; do
+  src="$SRC_DIR/$d"; dst="$CHENWEB_DIR/$d"
+  if [ ! -d "$src" ]; then
+    echo "  $d/: not in payload -- skipped (build predates config shipping?)"
+    continue
+  fi
+  run mkdir -p "$dst"
+  run rsync -a --delete "$src"/ "$dst"/
+  run chown -R "$RUN_USER:$RUN_USER" "$dst"
+  echo "  $d/: synced ($(find "$src" -type f | wc -l | tr -d ' ') files)"
 done
 echo
 
