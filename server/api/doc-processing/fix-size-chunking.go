@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -3327,10 +3328,12 @@ func asString(v any) string {
 func envInt(key string, fallback int, min int) int {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
+		log.Printf("WARN: %s is not set, falling back to default %d", key, fallback)
 		return fallback
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
+		log.Printf("WARN: %s=%q is not a valid int, falling back to default %d", key, raw, fallback)
 		return fallback
 	}
 	if n < min {
@@ -3342,10 +3345,12 @@ func envInt(key string, fallback int, min int) int {
 func envFloat(key string, fallback float64, minVal float64) float64 {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
+		log.Printf("WARN: %s is not set, falling back to default %v", key, fallback)
 		return fallback
 	}
 	n, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
+		log.Printf("WARN: %s=%q is not a valid float, falling back to default %v", key, raw, fallback)
 		return fallback
 	}
 	if n < minVal {
