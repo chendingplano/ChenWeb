@@ -254,7 +254,7 @@ cat "$OUT"/*.sha256
 echo
 echo "next:"
 echo "  scp -P 8822 -r $OUT gui@210.5.158.91:~/"
-echo "  ssh -p 8822 gui@210.5.158.91   # then:  su -  ;  bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy"
+echo "  ssh -p 8822 gui@210.5.158.91   # then:  bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy  (no su needed -- gui has a scoped sudoers rule for systemctl)"
 '''
 
 [tasks.serve]

@@ -8,7 +8,12 @@
 # Deploy side (box):   su -
 #                      bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy
 #
-# Run ON THE BOX, as root (systemctl needs it; `gui` is not a sudoer).
+# Run ON THE BOX, either as root (su -) or as `gui` directly -- `gui` has a
+# scoped sudoers rule (/etc/sudoers.d/gui-chenweb-services, added 2026-09-23)
+# granting passwordless `sudo systemctl {start,stop,restart,status}` on
+# exactly chenweb/doc-processor/parser-result-converter/doc-service/kratos/
+# nats-server, nothing else. Everything this script writes lives under
+# ~/Workspace/ChenWeb, already owned by gui, so no other step needs root.
 # First, syncs migration files (project_migrations/, shared_migrations/), then
 # prompts/ (mirrored with --delete), then the *.local.toml reviewer configs,
 # then config.toml + config/ + docs/doc-templates -- all read from disk at
@@ -46,6 +51,9 @@ DRY_RUN=${DRY_RUN:-0}
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 run() { if [ "$DRY_RUN" = 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
+# systemctl needs root; run it directly if we already are root (su -), else
+# through the scoped sudoers rule for gui -- see the header comment above.
+systemctl_cmd() { if [ "$IS_ROOT" = 1 ]; then systemctl "$@"; else sudo -n /bin/systemctl "$@"; fi; }
 # sorted basenames of the *.sql in $1 (empty, not an error, if $1 has none/missing)
 list_sql() { (cd "$1" 2>/dev/null && ls -1 ./*.sql 2>/dev/null) | sed 's|^\./||' | sort; }
 
@@ -67,7 +75,12 @@ SRC_DIR=${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 [ $# -gt 0 ] && shift || true
 NAMES=("$@")
 
-[ "$DRY_RUN" = 1 ] || [ "$(id -u)" -eq 0 ] || die "must run as root (su -); systemctl needs it. Or set DRY_RUN=1."
+IS_ROOT=0
+[ "$(id -u)" -eq 0 ] && IS_ROOT=1
+if [ "$DRY_RUN" != 1 ] && [ "$IS_ROOT" != 1 ]; then
+  sudo -n /bin/systemctl status chenweb >/dev/null 2>&1 \
+    || die "must run as root (su -), or as gui with the scoped sudoers rule (/etc/sudoers.d/gui-chenweb-services) for systemctl. Or set DRY_RUN=1."
+fi
 [ -d "$SRC_DIR" ] || die "source dir not found: $SRC_DIR"
 [ "$DRY_RUN" = 1 ] || [ -d "$CHENWEB_DIR" ] || die "ChenWeb dir not found: $CHENWEB_DIR"
 
@@ -243,9 +256,9 @@ for n in "${NAMES[@]}"; do
     continue
   fi
 
-  run systemctl stop "$svc"
+  run systemctl_cmd stop "$svc"
   run install -m 0755 -o "$RUN_USER" -g "$RUN_USER" "$bin" "$dst"
-  run systemctl start "$svc"
+  run systemctl_cmd start "$svc"
 
   if [ "$DRY_RUN" = 1 ]; then echo "  [dry-run] skip health check"; deployed+=("$n"); continue; fi
 
@@ -265,9 +278,9 @@ for n in "${NAMES[@]}"; do
   if [ "$ok" != yes ]; then
     echo "  !! health check FAILED for $svc -- rolling back"
     latest=$(ls -1t "$dst".bak-* 2>/dev/null | head -1 || true)
-    run systemctl stop "$svc"
+    run systemctl_cmd stop "$svc"
     if [ -n "$latest" ]; then cp -a "$latest" "$dst"; echo "  restored $latest"; fi
-    run systemctl start "$svc"
+    run systemctl_cmd start "$svc"
     echo "  ---- journalctl -u $svc -n 50 ----"
     journalctl -u "$svc" -n 50 --no-pager || true
     die "deploy of $n-linux failed; rolled back to ${latest:-<none>}"
