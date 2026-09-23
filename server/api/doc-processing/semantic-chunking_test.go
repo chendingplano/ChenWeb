@@ -17,8 +17,23 @@ import (
 )
 
 func TestNewSemanticChunkingService_UsesExtractTopicModelEnv(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[topic-extractor]
+host = "cloud"
+model_name = "deepseek-v4-flash"
+api_key = "sk-test"
+base_url = "https://api.deepseek.com"
+timeout_sec = 100
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
 	t.Setenv("SEMANTIC_CHUNKING_MODEL_NAME", "")
 	t.Setenv("EXTRACT_TOPIC_MODEL_NAME", "topic-extractor")
+	t.Setenv("CHUNK_EXTRACT_TOPIC_MODELS_FILE", modelsPath)
 
 	logger := &fakeLogger{}
 	svc := NewSemanticChunkingService(&fakeStore{}, &fakeSemanticExtractor{}, logger)
@@ -33,6 +48,32 @@ func TestNewSemanticChunkingService_UsesExtractTopicModelEnv(t *testing.T) {
 	}
 	if len(logger.errors) != 0 {
 		t.Fatalf("startup logged unexpected errors: %#v", logger.errors)
+	}
+}
+
+// Regression: an EXTRACT_TOPIC_MODEL_NAME that names a profile absent from the
+// resolved models file must surface as ModelErr, not silently resolve to a
+// model config carrying the raw profile ref as its model name (see
+// TestLoadFixedSizeTopicModelFromEnv_UnknownProfile_Errors in
+// fix_size_chunking_model_test.go for the underlying loader contract).
+func TestNewSemanticChunkingService_UnknownExtractTopicModel_SetsModelErr(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	if err := os.WriteFile(modelsPath, []byte("\n"), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("SEMANTIC_CHUNKING_MODEL_NAME", "")
+	t.Setenv("EXTRACT_TOPIC_MODEL_NAME", "topic-extractor")
+	t.Setenv("CHUNK_EXTRACT_TOPIC_MODELS_FILE", modelsPath)
+
+	logger := &fakeLogger{}
+	svc := NewSemanticChunkingService(&fakeStore{}, &fakeSemanticExtractor{}, logger)
+	if svc == nil {
+		t.Fatalf("service is nil")
+	}
+	if svc.ModelErr == nil {
+		t.Fatalf("ModelErr is nil, want an error for an unresolvable profile")
 	}
 }
 

@@ -168,7 +168,12 @@ func ResolveProcessorGate(spec ProcessorSpec, gates []PipelineGate, facts semrul
 // operation. This is a safety net, not an expected path; both conflict
 // modes now fail the same way (the block/fallback distinction no longer
 // applies to this case).
-func resolveIndeterminateGate(spec ProcessorSpec, resolution ProcessorGateResolution, gates []PipelineGate, results map[int64]semrules.Result, options GateResolutionOptions) (ProcessorGateResolution, error) {
+func resolveIndeterminateGate(
+	spec ProcessorSpec,
+	resolution ProcessorGateResolution,
+	_ []PipelineGate, // 'gates' is the set of indeterminate gates at the same priority/specificity level
+	_ map[int64]semrules.Result, // 'results' is the map of gate ID to evaluation result for all gates at this level
+	_ GateResolutionOptions) (ProcessorGateResolution, error) { // 'options' is the resolution options passed to ResolveProcessorGate
 	return resolution, &PipelineGateResolutionError{Processor: spec.Name, Reason: "indeterminate_after_validated_pipeline"}
 }
 

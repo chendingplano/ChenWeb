@@ -32,6 +32,13 @@ const (
 	// user_id from the event (withLLMUserID in llm_capture_input.go), it
 	// never raises this; see spec discussion 2026092101.
 	RoutingAlarmKindMissingUserID = "missing_user_id"
+	// RoutingAlarmKindLLMResponseTruncated is raised when a structured LLM
+	// extraction call comes back with finish_reason=length -- the provider
+	// cut the response short before it finished writing JSON. This is a
+	// configuration problem (max_output_tokens too low for the model in
+	// .models.toml), not transient, so it always warrants an operator look;
+	// see MID_26092201/MID_26092202 in shared/go/api/llm.
+	RoutingAlarmKindLLMResponseTruncated = "llm_response_truncated"
 )
 
 const (

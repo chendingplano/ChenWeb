@@ -3362,7 +3362,7 @@ func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg st
 
 	modelPath, err = resolveModelsFilePath("CHUNK_EXTRACT_TOPIC_MODELS_FILE")
 	if err != nil {
-		return modelRef, "", structureModelConfig{ModelName: modelRef}, nil
+		return modelRef, "", structureModelConfig{}, fmt.Errorf("(MID_26042016) resolve models file for EXTRACT_TOPIC_MODEL_NAME %q failed: %w", modelRef, err)
 	}
 	raw, err := os.ReadFile(modelPath)
 	if err != nil {
@@ -3374,7 +3374,7 @@ func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg st
 	}
 	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRef, modelPath, structureModelConfig{ModelName: modelRef}, nil
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042021) EXTRACT_TOPIC_MODEL_NAME %q not found in %s", modelRef, modelPath)
 	}
 	if strings.TrimSpace(modelDef.ModelName) == "" {
 		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042019) model %q in %s missing model_name", modelRef, modelPath)
@@ -3410,7 +3410,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 			modelPath, err = resolveModelsFilePath("CHUNK_EXTRACT_TOPIC_MODELS_FILE")
 		}
 		if err != nil {
-			return modelRef, "", structureModelConfig{ModelName: modelRef}, nil
+			return modelRef, "", structureModelConfig{}, fmt.Errorf("(MID_26042905) resolve models file for CHUNK_SUMMARY_MODEL_NAME %q failed: %w", modelRef, err)
 		}
 	}
 	raw, err := os.ReadFile(modelPath)
@@ -3423,7 +3423,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 	}
 	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRef, modelPath, structureModelConfig{ModelName: modelRef}, nil
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042909) CHUNK_SUMMARY_MODEL_NAME %q not found in %s", modelRef, modelPath)
 	}
 	if strings.TrimSpace(modelDef.ModelName) == "" {
 		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042908) model %q in %s missing model_name", modelRef, modelPath)

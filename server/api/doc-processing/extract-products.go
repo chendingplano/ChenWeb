@@ -779,7 +779,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		}
 		products = p.batchMergedRows
 		usedRelationModel = firstNonEmptyTrimmed(p.batchMergedModel, p.MergedModelName)
-		p.Logger.Warn("EXTRACT_PRODUCTS_MERGED_PASS is set; skipping Pass 2 (rows came from the merged pass)",
+		p.Logger.Info("+++++ EXTRACT_PRODUCTS_MERGED_PASS is set; skipping Pass 2 (rows came from the merged pass)",
 			"rows", len(products),
 			"prompt_name", p.MergedPromptRef,
 			"model_name", usedRelationModel,
@@ -1175,6 +1175,7 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 	outputTokens := outputTokenCount(p.Extractor)
 	p.Logger.Info("extract products (merged pass) - end",
+		"idx", idx,
 		"rows", len(rows),
 		"cache_hit", cacheHit,
 		"cache_miss", cacheMiss,
@@ -1339,13 +1340,17 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 		"model_name", modelName,
 		"fallback_model", p.FallbackModelName,
 		"payload", payloadVal,
+		"raw_response", rawStructuredOutput(err),
 		"ms_used", time.Since(primaryStart).Milliseconds())
+
+	alarmOnTruncatedOutput(ctx, p.Logger, err, opr, modelName)
 
 	if isEmptyProductExtractionError(err) {
 		p.Logger.Warn("primary products extraction returned empty JSON; treating as empty result without fallback",
 			"model_name", modelName,
 			"error", err,
 			"prompt_name", promptRef,
+			"payload", payloadVal,
 		)
 		return map[string]any{"products": []any{}, "mentions": []any{}}, strings.TrimSpace(modelName), nil
 	}
@@ -1391,6 +1396,44 @@ func isEmptyProductExtractionError(err error) bool {
 		strings.Contains(msg, "json:{[]}")
 }
 
+// rawStructuredOutput pulls the raw LLM response text out of a
+// *llmclients.StructuredOutputError, if err wraps one. This is the actual
+// content the model returned (e.g. a provider error body that failed schema
+// validation) which is otherwise dropped from the logged payload.
+func rawStructuredOutput(err error) string {
+	var structuredErr *llmclients.StructuredOutputError
+	if errors.As(err, &structuredErr) && structuredErr.Raw != "" {
+		return structuredErr.Raw
+	}
+	return "nil"
+}
+
+// alarmOnTruncatedOutput raises an operator alarm (alarms_errors, surfaced on
+// /semos/admin/alarms alongside every other routing alarm) when err wraps
+// llmclients.ErrStructuredOutputTruncated -- the provider cut the response
+// short (finish_reason=length) before it finished writing JSON. This is a
+// max_output_tokens configuration problem, not a transient failure, so it
+// always warrants an operator look rather than just a log line. Write
+// failures are logged only -- an alarms-table outage must not affect
+// extraction.
+func alarmOnTruncatedOutput(ctx context.Context, logger ApiTypes.JimoLogger, err error, opr, modelName string) {
+	if !errors.Is(err, llmclients.ErrStructuredOutputTruncated) {
+		return
+	}
+	alarm := RoutingAlarm{
+		Kind:     RoutingAlarmKindLLMResponseTruncated,
+		Severity: RoutingAlarmSeverityError,
+		Message:  fmt.Sprintf("llm response truncated before completion: action=%s model_name=%s error=%s", opr, modelName, err.Error()),
+		RunID:    llmRunIDFromContext(ctx),
+		RecordID: llmRecordIDFromContext(ctx),
+	}
+	writer := RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}
+	if writeErr := writer.WriteAlarm(ctx, alarm); writeErr != nil && logger != nil {
+		logger.Warn("failed writing llm-response-truncated alarm",
+			"error", writeErr, "action", opr, "model_name", modelName)
+	}
+}
+
 func (p *ProductsProcessor) extractProductPayload(
 	ctx context.Context,
 	opr string,
@@ -1401,7 +1444,7 @@ func (p *ProductsProcessor) extractProductPayload(
 	cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 
-	startTime := time.Now()
+	// startTime := time.Now()
 	// p.Logger.Info("extract products - begin",
 	// 	"action", opr,
 	// 	"model", modelName,
@@ -1455,12 +1498,14 @@ func (p *ProductsProcessor) extractProductPayload(
 	}
 	payload["products"] = items
 
-	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
-	p.Logger.Info("extract products - end",
-		"action", opr,
-		"ms_used", time.Since(startTime).Milliseconds(),
-		"cache_hit", cacheHit,
-		"cache_miss", cacheMiss)
+	// cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	// outputTokens := outputTokenCount(p.Extractor)
+	// p.Logger.Info("extract products - end",
+	// 	"action", opr,
+	// 	"ms_used", time.Since(startTime).Milliseconds(),
+	// 	"cache_hit", cacheHit,
+	// 	"cache_miss", cacheMiss,
+	// 	"output_tokens", outputTokens)
 	return payload, nil
 }
 
@@ -2142,11 +2187,25 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 			})
 		}
 		rowInput, _ := json.Marshal(map[string]any{"products": items})
+		p.Logger.Info("translate products - begin",
+			"batch", b,
+			"batch_size", end-start,
+			"model_name", p.TranslateModelName,
+			"prompt_name", p.TranslatePromptRef,
+		)
 		payload, modelName, err := p.extractProductPayloadWithFallback(concCtx,
 			"product translation", string(rowInput),
 			p.TranslatePromptText, p.TranslatePromptRef,
 			p.TranslateModelName, p.TranslateModelCfg)
 		p.logLLMCall(ctx, fmt.Sprintf("%s_p3_t%d", eventID, b), "translate_products", 3, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.TranslatePromptRef), nil, err, callStart, p.Now())
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+		outputTokens := outputTokenCount(p.Extractor)
+		p.Logger.Info("translate products - end",
+			"batch", b,
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
+			"output_tokens", outputTokens,
+			"ms_used", time.Since(callStart).Milliseconds())
 		outcome := translateBatchOutcome{calls: 1}
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.TranslateModelName) && strings.TrimSpace(modelName) != "" {
 			outcome.fallbacks = 1
@@ -2619,12 +2678,6 @@ func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
 	return string(bs), nil
 }
 
-/*
-func loadProductsPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	return loadProductPromptFromEnvKeys([]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"}, "prompt-enrich-product-relations-v1.md")
-}
-*/
-
 func loadProductPromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptPath string, promptErr error) {
 	for _, key := range envKeys {
 		promptRef = strings.TrimSpace(os.Getenv(key))
@@ -2751,6 +2804,7 @@ func loadModelConfigByRef(modelRef, modelsFileEnv string) (modelRefOut string, m
 		MaxRequestsPerMinute: modelDef.MaxRequestsPerMinute,
 		MaxTokensPerMinute:   modelDef.MaxTokensPerMinute,
 		TokenReservePerCall:  modelDef.TokenReservePerCall,
+		MaxOutputTokens:      modelDef.MaxOutputTokens,
 	}
 	return modelRef, modelPath, cfg, nil
 }

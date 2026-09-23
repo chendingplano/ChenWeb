@@ -422,6 +422,10 @@ type structureModelConfig struct {
 	MaxRequestsPerMinute int
 	MaxTokensPerMinute   int
 	TokenReservePerCall  int
+	// MaxOutputTokens, when > 0, is sent as the request's max_tokens so a
+	// large chunk's response isn't cut off mid-JSON by the provider's
+	// default output cap. See ApiTypes.LLMModelDef.MaxOutputTokens.
+	MaxOutputTokens int
 }
 
 func loadStructureModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
@@ -469,6 +473,7 @@ func loadModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef 
 		MaxRequestsPerMinute: modelDef.MaxRequestsPerMinute,
 		MaxTokensPerMinute:   modelDef.MaxTokensPerMinute,
 		TokenReservePerCall:  modelDef.TokenReservePerCall,
+		MaxOutputTokens:      modelDef.MaxOutputTokens,
 	}
 	return modelRef, modelPath, cfg, nil
 }
@@ -534,6 +539,7 @@ func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg struct
 		client.BaseURL = v
 	}
 	client.ThinkingType = normalizeThinkingType(cfg.ThinkingType)
+	client.MaxOutputTokens = cfg.MaxOutputTokens
 	if cfg.TimeoutSec <= 0 {
 		return
 	}

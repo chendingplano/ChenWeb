@@ -117,14 +117,14 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, $21, $22::jsonb,
-    $23, $24, $25, $26
+    $18, $19, $20, $21, $22, $23::jsonb,
+    $24, $25, $26, $27
 )`
 
 	var recordID any
@@ -169,6 +169,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		latencyMS,
 		s.DefaultStatus,
 		record.ErrorMessage,
+		record.RawResponse,
 		inputRef,
 		outputRef,
 		record.ProviderRequestID,

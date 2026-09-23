@@ -56,7 +56,9 @@ func ValidatePipelineVersion(draft PipelineVersionDraft) error {
 // validateProcessorClosure is DR8 check 1: every Requires artifact kind of
 // every selected processor must be Produced by another selected processor,
 // or guaranteed by a baseline processor.
-func validateProcessorClosure(names []string, selected map[string]bool) error {
+func validateProcessorClosure(
+	names []string,
+	_ map[string]bool) error { // 'selected' is the set of processor names in this pipeline version
 	producers := map[string]bool{}
 	for _, name := range append(append([]string(nil), names...), baselineProcessors...) {
 		spec, ok := LookupProcessor(normalizeRuntimeName(name))

@@ -26,14 +26,14 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, $21, $22::jsonb,
-    $23, $24, $25, $26
+    $18, $19, $20, $21, $22, $23::jsonb,
+    $24, $25, $26, $27
 )`)).
 		WithArgs(
 			"evt-test-1",
@@ -53,6 +53,7 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 			int64(3),
 			int64(1500),
 			0,
+			"",
 			"",
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_1", "bodies", "evt-test-1-input.json.gz"),
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_1", "bodies", "evt-test-1-output.json.gz"),
@@ -136,7 +137,7 @@ func TestSinkCapturePersistsRecordUserID(t *testing.T) {
 			"evt-user-id", "acct_1", "prof_1", "user_123", "openai", "gpt-4o-mini", "user-attributed",
 			startedAt, finishedAt, time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
 			int64(0), int64(0), int64(0), int64(0), int64(0), int64(1000), 0,
-			"", "", "", "", `{"capture_source":"shared_llm"}`, nil, "", "", nil,
+			"", "", "", "", "", `{"capture_source":"shared_llm"}`, nil, "", "", nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -168,14 +169,14 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, $21, $22::jsonb,
-    $23, $24, $25, $26
+    $18, $19, $20, $21, $22, $23::jsonb,
+    $24, $25, $26, $27
 )`)).
 		WithArgs(
 			"evt-test-meta",
@@ -195,6 +196,7 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 			int64(0),
 			int64(1500),
 			0,
+			"",
 			"",
 			"",
 			"",
@@ -254,6 +256,7 @@ func TestSinkCapturePersistsWithoutAccountProfileLinkage(t *testing.T) {
 			"evt-test-2", nil, nil, "usr_2", "openai", "gpt-4o-mini", "no-account-yet",
 			startedAt, finishedAt, time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC),
 			int64(0), int64(0), int64(0), int64(0), int64(0), int64(60000), 0,
+			"",
 			"",
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-input.json.gz"),
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-output.json.gz"),
@@ -318,14 +321,14 @@ LIMIT 1`)).
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, $21, $22::jsonb,
-    $23, $24, $25, $26
+    $18, $19, $20, $21, $22, $23::jsonb,
+    $24, $25, $26, $27
 )`)).
 		WithArgs(
 			"evt-test-3",
@@ -345,6 +348,7 @@ LIMIT 1`)).
 			int64(0),
 			int64(2000),
 			0,
+			"",
 			"",
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_22", "bodies", "evt-test-3-input.json.gz"),
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_22", "bodies", "evt-test-3-output.json.gz"),
@@ -419,14 +423,14 @@ LIMIT 1`)).
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, $21, $22::jsonb,
-    $23, $24, $25, $26
+    $18, $19, $20, $21, $22, $23::jsonb,
+    $24, $25, $26, $27
 )`)).
 		WithArgs(
 			"evt-test-4",
@@ -446,6 +450,7 @@ LIMIT 1`)).
 			int64(0),
 			int64(2000),
 			0,
+			"",
 			"",
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_22", "bodies", "evt-test-4-input.json.gz"),
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_22", "bodies", "evt-test-4-output.json.gz"),
@@ -531,14 +536,14 @@ LIMIT 1`)).
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc, run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, $21, $22::jsonb,
-    $23, $24, $25, $26
+    $18, $19, $20, $21, $22, $23::jsonb,
+    $24, $25, $26, $27
 )`)).
 		WithArgs(
 			"evt-test-5",
@@ -558,6 +563,7 @@ LIMIT 1`)).
 			int64(0),
 			int64(2000),
 			0,
+			"",
 			"",
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_44", "bodies", "evt-test-5-input.json.gz"),
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_44", "bodies", "evt-test-5-output.json.gz"),

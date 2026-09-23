@@ -643,7 +643,7 @@ func TestLoadProductPromptFromEnvKeys_PrefersFirstConfiguredKey(t *testing.T) {
 	t.Setenv("EXTRACT_PRODUCTS_PROMPT", "older-prompt.md")
 
 	got, ref, gotPath, err := loadProductPromptFromEnvKeys(
-		[]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"},
+		[]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT"},
 		"default.md",
 	)
 	if err != nil {
