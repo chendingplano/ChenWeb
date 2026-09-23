@@ -20,4 +20,4 @@ fi
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$CHENWEB_DIR"
 tar -xzf "$archive" -C "$CHENWEB_DIR" --strip-components=1
-bash "$DEPLOY_DIR/deploy-server-china.sh" "$DEPLOY_DIR" server
+bash "$DEPLOY_DIR/deploy-server-china.sh" "$DEPLOY_DIR"
