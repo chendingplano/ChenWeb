@@ -15,15 +15,19 @@ STAGING_DIR="$CHENWEB_DIR/deploy_staging"
 RELAY_HOST=47.189.245.217
 RELAY_PORT=8896
 RELAY_USER=cding
-RELAY_DIR=Backups
+RELAY_DIR=/home/cding/Backups
 
 if [ "$#" -gt 0 ]; then
   archive=$1
 else
   rm -rf "$STAGING_DIR"
   mkdir -p "$STAGING_DIR"
+  # cding's login shell on the relay is tcsh, and plain `ssh host "cmd"` runs
+  # "cmd" under that login shell, not bash -- tcsh doesn't understand bash's
+  # `2>/dev/null` redirect syntax and fails with "Ambiguous output redirect."
+  # Force bash explicitly for the remote command instead.
   latest=$(ssh -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
-    "ls -t $RELAY_DIR/runshen-*.tar.gz 2>/dev/null | head -n 1")
+    bash -c "'ls -t $RELAY_DIR/runshen-*.tar.gz 2>/dev/null | head -n 1'")
   [ -n "$latest" ] || { echo "No runshen archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR" >&2; exit 1; }
   echo "Pulling $latest from $RELAY_USER@$RELAY_HOST:$RELAY_PORT ..."
   scp -P "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST:$latest" "$STAGING_DIR/"

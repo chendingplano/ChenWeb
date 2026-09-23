@@ -16,7 +16,7 @@ archive="/tmp/runshen-depoly-${timestamp}.tar.gz"
 RELAY_HOST=192.168.29.96
 RELAY_PORT=8822
 RELAY_USER=cding
-RELAY_DIR=~/Backups
+RELAY_DIR=/home/cding/Backups
 
 tar -czvf "$archive" /tmp/chenweb-deploy
 scp -P "$RELAY_PORT" "$archive" "$RELAY_USER@$RELAY_HOST:$RELAY_DIR/"
