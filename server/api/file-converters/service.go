@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 const statusTimeLayout = "20060102 15:04:05"
@@ -41,6 +43,12 @@ type InputRecord struct {
 	StatusRaw      string
 	FileName       string
 	ResultFilename string
+	// TenantID is kb.inputs.tenant_id, used as the user_id attributed on the
+	// automatic doc-processing trigger this converter emits -- there is no
+	// authenticated caller for an automatically-triggered run, so cost
+	// attribution falls back to whichever tenant owns the record. Defaults
+	// to "-" at the DB level (never NULL) when unset.
+	TenantID string
 }
 
 type Store interface {
@@ -53,7 +61,11 @@ type Publisher interface {
 }
 
 type LineFileGeneratedEvent struct {
-	RecordID         int64  `json:"record_id"`
+	RecordID int64 `json:"record_id"`
+	// UserID attributes this automatic run's LLM usage for billing -- see
+	// emitLineFileGeneratedEvent, which derives it from kb.inputs.tenant_id
+	// and refuses to publish (raising an alarm instead) when that's unset.
+	UserID           string `json:"user_id,omitempty"`
 	Type             string `json:"type"`
 	Status           string `json:"status"`
 	FileFormat       string `json:"file_format"`
@@ -200,7 +212,7 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 
 	lineFilePaths, procErr = s.convert(ctx, rec)
 	for _, lineFilePath := range lineFilePaths {
-		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath); emitErr != nil {
+		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath, rec.TenantID); emitErr != nil {
 			procErr = errors.Join(procErr, emitErr)
 		}
 	}
@@ -494,7 +506,7 @@ func preferredOpenDataJSONName(path string) string {
 }
 */
 
-func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string) error {
+func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string, tenantID string) error {
 	if s.Publisher == nil {
 		return nil
 	}
@@ -505,6 +517,19 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 		)
 		return nil
 	}
+
+	// There is no authenticated caller behind an automatic trigger, so cost
+	// attribution falls back to the record's owning tenant. tenant_id
+	// defaults to "-" at the DB level (never NULL) when never set -- treat
+	// that the same as empty. user_id is billing-critical, so refuse to
+	// auto-trigger doc processing rather than publish an unattributed run;
+	// see docprocessing.RoutingAlarmKindMissingUserID.
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" || tenantID == "-" {
+		raiseMissingTenantIDAlarm(ctx, recordID, s.Logger)
+		return fmt.Errorf("(MID_26092303) record_id=%d: kb.inputs.tenant_id is unset; refusing to auto-trigger doc processing", recordID)
+	}
+
 	subject := strings.TrimSpace(s.PublishSubject)
 	if subject == "" {
 		subject = DefaultLineFileGeneratedSubject
@@ -512,6 +537,7 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 
 	ev := LineFileGeneratedEvent{
 		RecordID:         recordID,
+		UserID:           tenantID,
 		Type:             "pdf",
 		Status:           "success",
 		FileFormat:       "txt",
@@ -531,6 +557,25 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 		"line_file", lineFilePath,
 	)
 	return nil
+}
+
+// raiseMissingTenantIDAlarm surfaces on /semos/admin/alarms alongside every
+// other operator alarm, deduplicated per record_id (no run row exists yet at
+// this point in the automatic pipeline -- see RoutingAlarmSQLWriter.WriteAlarm).
+func raiseMissingTenantIDAlarm(ctx context.Context, recordID int64, logger *slog.Logger) {
+	if ApiTypes.ProjectDBHandle == nil {
+		return
+	}
+	writer := docprocessing.RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}
+	err := writer.WriteAlarm(ctx, docprocessing.RoutingAlarm{
+		Kind:     docprocessing.RoutingAlarmKindMissingUserID,
+		Severity: docprocessing.RoutingAlarmSeverityError,
+		Message:  fmt.Sprintf("record_id=%d: kb.inputs.tenant_id is unset; automatic doc-processing trigger refused", recordID),
+		RecordID: recordID,
+	})
+	if err != nil && logger != nil {
+		logger.Warn("failed writing missing-tenant-id alarm", "record_id", recordID, "error", err)
+	}
 }
 
 func resolveInputFile(req ConvertRequest, rec InputRecord) (string, error) {
@@ -700,7 +745,8 @@ SELECT id,
        COALESCE(parser_name, ''),
        COALESCE(status::text, '[]'),
        COALESCE(file_name, ''),
-       COALESCE(result_filename, '')
+       COALESCE(result_filename, ''),
+       COALESCE(tenant_id, '')
 FROM kb.inputs
 WHERE id = $1`
 
@@ -712,6 +758,7 @@ WHERE id = $1`
 		&rec.StatusRaw,
 		&rec.FileName,
 		&rec.ResultFilename,
+		&rec.TenantID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

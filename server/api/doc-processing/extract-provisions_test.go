@@ -874,7 +874,7 @@ func TestControlService_ChunkingOperationDoesNotSelectProvisions(t *testing.T) {
 		},
 	}
 
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":"chunking"}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":"chunking"}`))
 
 	want := []string{"static_analyzer", "chunking"}
 	if len(got) != len(want) {

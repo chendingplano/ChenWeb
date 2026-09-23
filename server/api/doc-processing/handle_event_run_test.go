@@ -145,6 +145,7 @@ func TestHandleEvent_CreatesAndClosesRunAndThreadsRunIDToProcessors(t *testing.T
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`",
 		"operation":["extract_metrics"]
@@ -364,6 +365,7 @@ func TestHandleEvent_ExplicitOperationsBypassPolicyGates(t *testing.T) {
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`",
 		"operation":["extract_metrics","extract_provisions"]
@@ -449,6 +451,7 @@ func TestHandleEvent_PipelineOverrideOutranksCanonicalBindingAndStoreDefault(t *
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`",
 		"pipeline_override":"override_pipeline"
@@ -527,6 +530,7 @@ func TestHandleEvent_EnforcedModeExcludesProcessorsNotInPipeline_NoExplicitOpera
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`"
 	}`))
@@ -588,6 +592,7 @@ func TestHandleEvent_PlanOnlyModeStillRunsEverythingRequested(t *testing.T) {
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`",
 		"operation":["extract_metrics","extract_provisions"]
@@ -656,6 +661,7 @@ func TestHandleEvent_BlockModeConflictFailsBeforeAnyProcessorRuns(t *testing.T) 
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`"
 	}`))
@@ -747,7 +753,7 @@ func TestHandleEvent_BlockModeConflictAlarmDedupesByRecordIDAcrossRetries(t *tes
 		Processors:    []Processor{fakeProcessor{name: "extract_metrics"}},
 	}
 
-	payload := []byte(`{"record_id":"4821","filename":"` + inputPath + `"}`)
+	payload := []byte(`{"user_id":"test-user","record_id":"4821","filename":"` + inputPath + `"}`)
 	if err := svc.handleEvent(context.Background(), payload); err == nil {
 		t.Fatal("want error on first block-mode conflict")
 	}
@@ -761,7 +767,7 @@ func TestHandleEvent_BlockModeConflictAlarmDedupesByRecordIDAcrossRetries(t *tes
 			StagingFilename: inputPath, StatusRaw: "[]", InputDocType: "pdf", SourceLanguage: "en",
 		},
 	}
-	if err := svc.handleEvent(context.Background(), []byte(`{"record_id":"9001","filename":"`+inputPath+`"}`)); err == nil {
+	if err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"9001","filename":"`+inputPath+`"}`)); err == nil {
 		t.Fatal("want error for the different record's conflict too")
 	}
 
@@ -824,6 +830,7 @@ func TestHandleEvent_FallbackModeGateConflictNowBlocksProcessing(t *testing.T) {
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`"
 	}`))
@@ -910,6 +917,7 @@ func TestHandleEvent_UnclearedSuppressiveBindingRaisesFallbackEvent(t *testing.T
 	}
 
 	err := svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`"
 	}`))
@@ -966,6 +974,7 @@ func TestHandleEvent_ClosesRunAsFailedWhenProcessorFails(t *testing.T) {
 	}
 
 	_ = svc.handleEvent(context.Background(), []byte(`{
+		"user_id":"test-user",
 		"record_id":"4821",
 		"filename":"`+inputPath+`",
 		"operation":["extract_metrics"]

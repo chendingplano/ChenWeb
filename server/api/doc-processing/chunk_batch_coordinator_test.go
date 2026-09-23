@@ -74,7 +74,7 @@ func TestRunPhaseBProcessorsRunsPhaseABeforeChunkBatch(t *testing.T) {
 		},
 	}
 
-	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"244"}`))
+	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"244"}`))
 	if err != nil {
 		t.Fatalf("handleEvent returned error: %v", err)
 	}

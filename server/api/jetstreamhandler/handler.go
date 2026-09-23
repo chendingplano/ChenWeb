@@ -292,12 +292,12 @@ func payloadUserID(payload string) string {
 
 // alarmForMissingUserID raises a docprocessing.RoutingAlarm (surfaced on
 // /semos/admin/alarms alongside every other operator alarm) when this
-// handler -- the generator of a doc-processing trigger event -- is about to
-// publish one with no user_id. Per the "callers who generate the event
-// raise the alarm" design (doc-processing itself only extracts user_id, see
-// withLLMUserID), this is the choke point for every manual/admin-triggered
-// publish; a write failure is logged but never blocks the already-published
-// event.
+// handler -- the generator of a doc-processing trigger event -- is asked to
+// publish one with no user_id. user_id drives llm_usage_event attribution,
+// which is billing-critical, so PublishEvent refuses to publish in this case
+// (see its call site) rather than merely logging a warning after the fact --
+// a manually-triggered run always has an authenticated caller behind it, so
+// reaching this point is a bug, not an expected condition.
 func alarmForMissingUserID(ctx context.Context, subject string, payload string, logger ApiTypes.JimoLogger) {
 	if ApiTypes.ProjectDBHandle == nil {
 		return
@@ -305,8 +305,8 @@ func alarmForMissingUserID(ctx context.Context, subject string, payload string, 
 	writer := docprocessing.RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}
 	err := writer.WriteAlarm(ctx, docprocessing.RoutingAlarm{
 		Kind:     docprocessing.RoutingAlarmKindMissingUserID,
-		Severity: docprocessing.RoutingAlarmSeverityWarning,
-		Message:  fmt.Sprintf("jetstream publish to %s carries no user_id; its LLM usage will be logged unattributed. payload=%s", subject, payload),
+		Severity: docprocessing.RoutingAlarmSeverityError,
+		Message:  fmt.Sprintf("jetstream publish to %s refused: no user_id (unauthenticated caller?). payload=%s", subject, payload),
 	})
 	if err != nil {
 		logger.Warn("failed writing missing-user-id alarm", "subject", subject, "error", err)
@@ -751,6 +751,16 @@ func PublishEvent(c echo.Context) error {
 		})
 	}
 
+	if isDocProcessingTriggerSubject(req.Subject) && payloadUserID(normalizedPayload) == "" {
+		alarmForMissingUserID(c.Request().Context(), req.Subject, normalizedPayload, logger)
+		logger.Error("refusing to publish doc-processing trigger with no user_id", "subject", req.Subject)
+		return c.JSON(http.StatusForbidden, map[string]any{
+			"ok":      false,
+			"message": "no user_id available for this request (log in and retry); refusing to publish an unattributed doc-processing trigger",
+			"subject": req.Subject,
+		})
+	}
+
 	connURL := natsURL()
 	opts, authMode := natsConnectOptions()
 	logger.Info("connecting to nats for jetstream publish", "url", connURL, "auth_mode", authMode)
@@ -783,10 +793,6 @@ func PublishEvent(c echo.Context) error {
 			"subject": req.Subject,
 			"error":   err.Error(),
 		})
-	}
-
-	if isDocProcessingTriggerSubject(req.Subject) && payloadUserID(normalizedPayload) == "" {
-		alarmForMissingUserID(c.Request().Context(), req.Subject, normalizedPayload, logger)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{

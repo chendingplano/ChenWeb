@@ -628,6 +628,7 @@ func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       filepath.Join(tmp, "source.pdf"),
 		ResultFilename: filepath.Base(jsonPath),
+		TenantID:       "test-tenant",
 	}}
 
 	svc := NewService(st, slog.Default())
@@ -735,6 +736,7 @@ func TestHandleRequestMarksConvertedFailedWhenDownstreamPublishFails(t *testing.
 		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       filepath.Join(tmp, "source.pdf"),
 		ResultFilename: filepath.Base(jsonPath),
+		TenantID:       "test-tenant",
 	}}
 
 	svc := NewService(st, slog.Default())
@@ -1050,6 +1052,7 @@ func TestHandleRequestMineruSuccess(t *testing.T) {
 		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       filepath.Join(tmp, "std_1521701.pdf"),
 		ResultFilename: filepath.Base(jsonPath),
+		TenantID:       "test-tenant",
 	}}
 
 	svc := NewService(st, slog.Default())
@@ -1108,6 +1111,7 @@ func TestHandleRequestConvertsAllParserFiles(t *testing.T) {
 		ParserName: "mineru",
 		StatusRaw:  `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:   filepath.Join(tmp, "doc.pdf"),
+		TenantID:   "test-tenant",
 	}}
 
 	pub := &fakePublisher{}

@@ -214,7 +214,7 @@ func TestRunProcessorsChunkBatched_PersistsBatchProcessorLifecycle(t *testing.T)
 	storeChunksInContext(ctx, []Chunk{
 		{SeqNo: 1, Lines: []MarkedLine{{Line: Line{LineNo: 1, PageNo: 1, LineType: "paragraph", Content: "Intro"}, Mark: "r"}}},
 	})
-	payload := []byte(fmt.Sprintf(`{"record_id":"7","filename":"%s","operation":["extract_metrics"]}`, lineFile))
+	payload := []byte(fmt.Sprintf(`{"user_id":"test-user","record_id":"7","filename":"%s","operation":["extract_metrics"]}`, lineFile))
 
 	var (
 		requestFailed  bool
@@ -311,7 +311,7 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 		},
 	}
 
-	payload := []byte(`{"record_id":"1","operation":["extract_metrics","chunking"]}`)
+	payload := []byte(`{"user_id":"test-user","record_id":"1","operation":["extract_metrics","chunking"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
 	want := []string{"extract_metrics", "static_analyzer", "chunking"}
@@ -328,7 +328,7 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 func TestControlService_RunEventDelegatesSynchronously(t *testing.T) {
 	wantErr := errors.New("processor failed")
 	svc := &ControlService{Processors: []Processor{fakeProcessor{name: "extract_metrics", retErr: wantErr}}}
-	err := svc.RunEvent(context.Background(), []byte(`{"record_id":"1","operation":["extract_metrics"]}`))
+	err := svc.RunEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["extract_metrics"]}`))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("RunEvent error=%v, want %v", err, wantErr)
 	}
@@ -380,7 +380,7 @@ func TestControlService_SkipsSatisfiedAutoDependenciesOnRerun(t *testing.T) {
 		},
 	}
 
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":["extract_metrics"]}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["extract_metrics"]}`))
 
 	want := []string{"extract_metrics"}
 	if !equalStrings(got, want) {
@@ -399,7 +399,7 @@ func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 		},
 	}
 
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 
 	want := []string{"chunking", "extract_doc_metadata", "extract_metrics"}
 	if len(got) != len(want) {
@@ -424,7 +424,7 @@ func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking
 		},
 	}
 
-	payload := []byte(`{"record_id":"1","operation":["chunking","generate_summaries","extract_metrics"]}`)
+	payload := []byte(`{"user_id":"test-user","record_id":"1","operation":["chunking","generate_summaries","extract_metrics"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
 	want := []string{"static_analyzer", "chunking", "generate_summaries", "extract_metrics"}
@@ -449,7 +449,7 @@ func TestControlService_GenerateSummariesRequestRunsDependenciesFirst(t *testing
 		},
 	}
 
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":["generate_summaries"]}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["generate_summaries"]}`))
 
 	want := []string{"static_analyzer", "chunking", "generate_summaries"}
 	if len(got) != len(want) {
@@ -472,7 +472,7 @@ func TestControlService_StaticAnalyzerClearsStaleBlockBuffer(t *testing.T) {
 		},
 	}
 
-	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"1","operation":["chunking"]}`))
+	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["chunking"]}`))
 	if err != nil {
 		t.Fatalf("handleEvent returned error: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestControlService_DefaultOrderRunsStandaloneGenerateProcessorsAfterChunkin
 		},
 	}
 
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 
 	want := []string{"chunking", "generate_summaries", "generate_topics", "extract_metrics"}
 	if len(got) != len(want) {
@@ -568,6 +568,7 @@ func TestControlService_StartDocProcessingAllParsed(t *testing.T) {
 	}
 
 	err := svc.HandleStartDocProcessingEvent(context.Background(), []byte(`{
+		"user_id": "test-user",
 		"all": "parsed",
 		"doc-processors": ["extract_metrics"],
 		"failed-proc-only": false
@@ -603,6 +604,7 @@ func TestControlService_StartDocProcessingFiltersFailedProcessorsByDefault(t *te
 	}
 
 	err := svc.HandleStartDocProcessingEvent(context.Background(), []byte(`{
+		"user_id": "test-user",
 		"record_ids": [7],
 		"doc-processors": ["extract_metrics", "generate_topics"]
 	}`))
@@ -659,6 +661,7 @@ func TestHandleEvent_ResetsOnlySelectedProcessorStatusesBeforeRerun(t *testing.T
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- svc.handleEvent(context.Background(), []byte(`{
+			"user_id":"test-user",
 			"record_id":"7",
 			"filename":"`+inputPath+`",
 			"operation":["extract_metrics","generate_topics"]
@@ -729,7 +732,7 @@ func TestControlService_DefaultSubjectUsesAutoModeByDefault(t *testing.T) {
 		Processors: []Processor{fakeProcessor{name: "extract_metrics", calls: &got}},
 	}
 
-	err := svc.handleDefaultSubjectEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	err := svc.handleDefaultSubjectEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 	if err != nil {
 		t.Fatalf("handleDefaultSubjectEvent: %v", err)
 	}
@@ -761,6 +764,7 @@ func TestControlService_DefaultSubjectUsesDevModeWhenConfigured(t *testing.T) {
 	}
 
 	err := svc.handleDefaultSubjectEvent(context.Background(), []byte(`{
+		"user_id": "test-user",
 		"record_ids": [9],
 		"doc-processors": ["extract_metrics", "generate_topics"]
 	}`))
@@ -795,7 +799,7 @@ func TestControlService_HandleJetStreamEvent_DoesNotFailWhenEventInsertFails(t *
 	svc := &ControlService{
 		EventStore: fakeEventStore{insertErr: errors.New(`pq: relation "kb.events" does not exist (42P01)`)},
 	}
-	err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1"}`))
+	err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"user_id":"test-user","record_id":"1"}`))
 	if err != nil {
 		t.Fatalf("HandleJetStreamEvent() error = %v, want nil", err)
 	}
@@ -850,7 +854,7 @@ func TestControlService_HandleJetStreamEvent_RespectsMaxDocProcessPipelines(t *t
 	for i := 0; i < 4; i++ {
 		go func() {
 			defer handlers.Done()
-			if err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1"}`)); err != nil {
+			if err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"user_id":"test-user","record_id":"1"}`)); err != nil {
 				t.Errorf("HandleJetStreamEvent() error = %v, want nil", err)
 			}
 		}()
@@ -905,7 +909,7 @@ func TestControlService_HandleJetStreamEvent_MarksOnlyRunningSlotActive(t *testi
 		Now:                    time.Now,
 	}
 
-	err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1","filename":"`+inputPath+`"}`))
+	err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"user_id":"test-user","record_id":"1","filename":"`+inputPath+`"}`))
 	if err != nil {
 		t.Fatalf("HandleJetStreamEvent() error = %v, want nil", err)
 	}
@@ -955,7 +959,7 @@ func TestControlService_WaitForInFlightPipelines_BlocksUntilDispatchedPipelineFi
 		Now:                    time.Now,
 	}
 
-	if err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1","filename":"`+inputPath+`"}`)); err != nil {
+	if err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"user_id":"test-user","record_id":"1","filename":"`+inputPath+`"}`)); err != nil {
 		t.Fatalf("HandleJetStreamEvent() error = %v, want nil", err)
 	}
 	// HandleJetStreamEvent has already returned, but the pipeline it dispatched
@@ -1047,7 +1051,7 @@ func TestTwoPhase_NoLostStatusEntries(t *testing.T) {
 			&statusWritingProcessor{name: "extract_inventory_items", store: store, id: 7},
 		},
 	}
-	_ = svc.handleEvent(context.Background(), []byte(`{"record_id":"7"}`))
+	_ = svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"7"}`))
 
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(store.raw), &arr); err != nil {
@@ -1140,7 +1144,7 @@ func TestControlService_PhaseCKeepsPipelineRunningWithoutProcessorName(t *testin
 
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.handleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+		done <- svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 	}()
 
 	select {
@@ -1571,7 +1575,7 @@ func TestTwoPhase_PhaseABeforePhaseB(t *testing.T) {
 			recordingProcessor{name: "generate_topics", rec: rec},
 		},
 	}
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 
 	// Every Phase A end appears before any Phase B start.
 	firstPhaseB := indexOfPrefix(rec.calls, "start:extract_metrics", "start:generate_topics")
@@ -1595,7 +1599,7 @@ func TestTwoPhase_PhaseBOverlaps(t *testing.T) {
 		},
 	}
 	done := make(chan struct{})
-	go func() { svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`)); close(done) }()
+	go func() { svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`)); close(done) }()
 	<-started
 	<-started // both must start before either is released → proves overlap
 	close(release)
@@ -1611,7 +1615,7 @@ func TestTwoPhase_FlagOffIsSequential(t *testing.T) {
 			fakeProcessor{name: "generate_topics", calls: &got},
 		},
 	}
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 	want := []string{"extract_metrics", "generate_topics"}
 	if !equalStrings(got, want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -1627,7 +1631,7 @@ func TestTwoPhase_FailureIsolation(t *testing.T) {
 			recordingProcessor{name: "generate_topics", rec: rec},
 		},
 	}
-	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 	if err == nil {
 		t.Fatal("expected failure error")
 	}

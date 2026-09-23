@@ -633,10 +633,41 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// call made anywhere in this run (routing/facets/resolver, not just the
 	// processors below) stamps llm_usage_event.user_id -- mirrors withRunID,
 	// which does the same for run_id once the run row exists further down.
-	// The event's generator (jetstreamhandler.PublishEvent, etc.) is
-	// responsible for supplying user_id and alarming when it can't; this
-	// call site only extracts what it was given.
-	ctx = withLLMUserID(ctx, evt.UserID)
+	// Event generators (jetstreamhandler.PublishEvent for manual triggers,
+	// fileconverters.emitLineFileGeneratedEvent for automatic ones) are
+	// responsible for supplying a real user_id -- a manual trigger's from the
+	// authenticated caller, an automatic one's derived from
+	// kb.inputs.tenant_id -- and are expected to refuse to publish and alarm
+	// instead when they can't. This is the last-resort backstop for anything
+	// that reaches processing without one anyway (a raw NATS publish
+	// bypassing every API guard, a generator bug, an operator mistake):
+	// user_id drives llm_usage_event attribution, which is billing-critical,
+	// so an event with none is refused rather than silently processed
+	// unattributed.
+	userID := strings.TrimSpace(evt.UserID)
+	if userID == "" {
+		if s.RoutingAlarms != nil {
+			alarmErr := s.RoutingAlarms.WriteAlarm(ctx, RoutingAlarm{
+				Kind:     RoutingAlarmKindMissingUserID,
+				Severity: RoutingAlarmSeverityError,
+				Message:  fmt.Sprintf("doc-processing event for record_id=%d carries no user_id; refusing to run (billing attribution would be lost)", evt.RecordID),
+				RecordID: evt.RecordID,
+			})
+			if alarmErr != nil && s.Logger != nil {
+				s.Logger.Warn("failed writing missing-user-id alarm", "record_id", evt.RecordID, "error", alarmErr)
+			}
+		}
+		if s.Logger != nil {
+			s.Logger.Error("doc processor refusing to run: event carries no user_id", "record_id", evt.RecordID)
+			s.Logger.Info("finish processing request",
+				"record_id", evt.RecordID,
+				"proc_status", "failed",
+				"ms_used", time.Since(requestStart).Milliseconds(),
+			)
+		}
+		return fmt.Errorf("(MID_26092302) record_id=%d: event carries no user_id; refusing to run", evt.RecordID)
+	}
+	ctx = withLLMUserID(ctx, userID)
 	if s.Logger != nil {
 		s.Logger.Info("start processing request",
 			"record_id", evt.RecordID,

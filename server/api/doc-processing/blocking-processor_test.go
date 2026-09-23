@@ -263,7 +263,7 @@ func TestControlService_BlockingProcessorAlwaysRuns(t *testing.T) {
 	}
 
 	// Request only chunking — blocking should still run before it.
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":["chunking"]}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["chunking"]}`))
 
 	if len(got) != 3 {
 		t.Fatalf("want 3 calls (blocking + static_analyzer + chunking), got %v", got)
@@ -288,7 +288,7 @@ func TestControlService_BlockingProcessorRunsWithNoOperations(t *testing.T) {
 		},
 	}
 
-	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1"}`))
 
 	if len(got) != 2 {
 		t.Fatalf("want 2 calls, got %v", got)
