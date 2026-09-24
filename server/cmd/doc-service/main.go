@@ -27,6 +27,7 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/fsnotify/fsnotify"
 	"github.com/joho/godotenv"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 const (
@@ -723,6 +724,24 @@ func ingestInputFile(
 	return recordID, updated, homePath, backupPath, fileType, nil
 }
 
+// decodeZipEntryFilename returns entry.Name decoded to UTF-8. Zip archives
+// built on Chinese Windows commonly store non-ASCII names as GBK/GB18030
+// bytes without setting the zip format's UTF-8 flag; archive/zip surfaces
+// that case via entry.NonUTF8 and leaves Name holding the raw, undecoded
+// bytes. GB18030 is a superset of GBK and is backward-compatible with
+// ASCII, so it's tried as the fallback encoding; if decoding fails the
+// original (possibly garbled) name is kept rather than dropping the file.
+func decodeZipEntryFilename(entry *zip.File) string {
+	if !entry.NonUTF8 {
+		return entry.Name
+	}
+	decoded, err := simplifiedchinese.GB18030.NewDecoder().String(entry.Name)
+	if err != nil {
+		return entry.Name
+	}
+	return decoded
+}
+
 func ingestZipChildren(
 	ctx context.Context,
 	logger ApiTypes.JimoLogger,
@@ -740,17 +759,18 @@ func ingestZipChildren(
 		if entry.FileInfo().IsDir() {
 			continue
 		}
+		entryName := decodeZipEntryFilename(entry)
 
 		rc, err := entry.Open()
 		if err != nil {
-			logger.Warn("open zip entry failed", "zip", zipHomePath, "entry", entry.Name, "error", err)
+			logger.Warn("open zip entry failed", "zip", zipHomePath, "entry", entryName, "error", err)
 			continue
 		}
 
-		tmpFile, err := os.CreateTemp("", "pdf-parser-zip-*"+filepath.Ext(entry.Name))
+		tmpFile, err := os.CreateTemp("", "pdf-parser-zip-*"+filepath.Ext(entryName))
 		if err != nil {
 			_ = rc.Close()
-			logger.Warn("create temp file for zip entry failed", "zip", zipHomePath, "entry", entry.Name, "error", err)
+			logger.Warn("create temp file for zip entry failed", "zip", zipHomePath, "entry", entryName, "error", err)
 			continue
 		}
 
@@ -760,20 +780,20 @@ func ingestZipChildren(
 		tmpCloseErr := tmpFile.Close()
 		if copyErr != nil || closeErr != nil || syncErr != nil || tmpCloseErr != nil {
 			_ = os.Remove(tmpFile.Name())
-			logger.Warn("materialize zip entry failed", "zip", zipHomePath, "entry", entry.Name, "copy_error", copyErr, "close_error", closeErr, "sync_error", syncErr, "tmp_close_error", tmpCloseErr)
+			logger.Warn("materialize zip entry failed", "zip", zipHomePath, "entry", entryName, "copy_error", copyErr, "close_error", closeErr, "sync_error", syncErr, "tmp_close_error", tmpCloseErr)
 			continue
 		}
 
-		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entry.Name), tmpFile.Name())
+		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entryName), tmpFile.Name())
 		_ = os.Remove(tmpFile.Name())
 		if err != nil {
-			logger.Error("failed to ingest zip child", "zip", zipHomePath, "entry", entry.Name, "error", err)
+			logger.Error("failed to ingest zip child", "zip", zipHomePath, "entry", entryName, "error", err)
 			continue
 		}
 
 		logger.Info("zip child ingested",
 			"zip", zipHomePath,
-			"entry", entry.Name,
+			"entry", entryName,
 			"home", homePath,
 			"type", fileType,
 			"record_id", recordID,
@@ -781,7 +801,7 @@ func ingestZipChildren(
 		)
 		if publisher != nil && strings.EqualFold(fileType, "pdf") {
 			if err := publisher.Publish(newPDFStageEvent(recordID, fileType, homePath)); err != nil {
-				logger.Error("failed to publish zip child stage event", "zip", zipHomePath, "entry", entry.Name, "record_id", recordID, "error", err)
+				logger.Error("failed to publish zip child stage event", "zip", zipHomePath, "entry", entryName, "record_id", recordID, "error", err)
 			}
 		}
 	}

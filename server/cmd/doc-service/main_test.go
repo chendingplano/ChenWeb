@@ -15,6 +15,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 type testLogger struct{}
@@ -62,6 +63,93 @@ func writeTempZipFile(t *testing.T, dir, name string, files map[string]string) s
 		t.Fatalf("close zip writer: %v", err)
 	}
 	return path
+}
+
+// writeTempZipFileWithHeaders lets tests control each entry's FileHeader
+// directly, so they can produce zip entries whose Name bytes are a legacy
+// encoding (e.g. GBK) without the UTF-8 flag set — the situation Chinese
+// Windows zip tools produce and archive/zip's own Writer.Create cannot
+// reproduce, since it always sets the UTF-8 flag for valid UTF-8 names.
+func writeTempZipFileWithHeaders(t *testing.T, dir, name string, headers []*zip.FileHeader, contents []string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create zip file: %v", err)
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+	for i, header := range headers {
+		w, err := zw.CreateHeader(header)
+		if err != nil {
+			t.Fatalf("create zip entry %q: %v", header.Name, err)
+		}
+		if _, err := w.Write([]byte(contents[i])); err != nil {
+			t.Fatalf("write zip entry %q: %v", header.Name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+	return path
+}
+
+func TestDecodeZipEntryFilename_DecodesGBKNameWhenUTF8FlagUnset(t *testing.T) {
+	tmpDir := t.TempDir()
+	gbkName, err := simplifiedchinese.GB18030.NewEncoder().String("谷物冷却机.pdf")
+	if err != nil {
+		t.Fatalf("encode GBK name: %v", err)
+	}
+
+	zipPath := writeTempZipFileWithHeaders(t, tmpDir, "bundle.zip",
+		[]*zip.FileHeader{{Name: gbkName, NonUTF8: true, Method: zip.Store}},
+		[]string{"%PDF-1.4\nhello"},
+	)
+
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer reader.Close()
+
+	if len(reader.File) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(reader.File))
+	}
+	entry := reader.File[0]
+	if !entry.NonUTF8 {
+		t.Fatalf("expected entry to be marked NonUTF8")
+	}
+
+	got := decodeZipEntryFilename(entry)
+	want := "谷物冷却机.pdf"
+	if got != want {
+		t.Fatalf("decodeZipEntryFilename() = %q, want %q", got, want)
+	}
+}
+
+func TestDecodeZipEntryFilename_LeavesUTF8FlaggedNameUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	zipPath := writeTempZipFile(t, tmpDir, "bundle.zip", map[string]string{
+		"文档.pdf": "%PDF-1.4\nhello",
+	})
+
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer reader.Close()
+
+	entry := reader.File[0]
+	if entry.NonUTF8 {
+		t.Fatalf("expected entry to carry the UTF-8 flag")
+	}
+
+	got := decodeZipEntryFilename(entry)
+	want := "文档.pdf"
+	if got != want {
+		t.Fatalf("decodeZipEntryFilename() = %q, want %q", got, want)
+	}
 }
 
 func TestRepoDirForRecordUsesThousandRecordShards(t *testing.T) {
@@ -328,6 +416,106 @@ WHERE id = $3`)
 	}
 	if _, err := os.Stat(srcPath); !os.IsNotExist(err) {
 		t.Fatalf("expected staging zip to be removed, stat err=%v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+// TestProcessStagingOnceDecodesGBKZipChildFilename guards against a
+// regression where a zip child entry whose name was stored as GBK bytes
+// (the norm for zips built on Chinese Windows, which don't set the zip
+// format's UTF-8 flag) was ingested using the raw, undecoded bytes as its
+// filename instead of the correctly decoded Chinese name.
+func TestProcessStagingOnceDecodesGBKZipChildFilename(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	tmpDir := t.TempDir()
+	stagingDir := filepath.Join(tmpDir, "staging")
+	backupDir := filepath.Join(tmpDir, "backup")
+	homeDir := filepath.Join(tmpDir, "SemOS")
+	t.Setenv("DATA_BACKUP_DIR", backupDir)
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+
+	const childName = "谷物冷却机.pdf"
+	gbkName, err := simplifiedchinese.GB18030.NewEncoder().String(childName)
+	if err != nil {
+		t.Fatalf("encode GBK name: %v", err)
+	}
+	srcPath := writeTempZipFileWithHeaders(t, stagingDir, "bundle.zip",
+		[]*zip.FileHeader{{Name: gbkName, NonUTF8: true, Method: zip.Store}},
+		[]string{"%PDF-1.4\nhello"},
+	)
+
+	updateSQL := regexp.QuoteMeta(`
+UPDATE kb.inputs
+SET staging_filename = $1,
+    md5 = $2,
+    modify_time = NOW()
+WHERE file_name = $3
+  AND COALESCE(backup_filename, '') = ''
+RETURNING id`)
+
+	insertSQL := regexp.QuoteMeta(`
+INSERT INTO kb.inputs (
+    staging_filename,
+    type,
+    file_name,
+    backup_filename,
+    status,
+    md5
+) VALUES (
+    $1,
+    $2,
+    $3,
+    '',
+    $4::jsonb,
+    $5
+)
+RETURNING id`)
+
+	finalizeSQL := regexp.QuoteMeta(`
+UPDATE kb.inputs
+SET file_name = $1,
+    backup_filename = $2,
+    modify_time = NOW()
+WHERE id = $3`)
+
+	childHomePath := filepath.Join(homeDir, "Artifacts", "0", "11", childName)
+
+	mock.ExpectQuery(updateSQL).
+		WithArgs("bundle.zip", sqlmock.AnyArg(), srcPath).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(insertSQL).
+		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
+	mock.ExpectExec(finalizeSQL).
+		WithArgs(filepath.Join("Artifacts", "0", "10", "bundle.zip"), filepath.Join("backup", "bundle.zip"), int64(10)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	mock.ExpectQuery(updateSQL).
+		WithArgs(childName, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(insertSQL).
+		WithArgs(childName, "pdf", sqlmock.AnyArg(), "[]", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
+	mock.ExpectExec(finalizeSQL).
+		WithArgs(filepath.Join("Artifacts", "0", "11", childName), filepath.Join("backup", childName), int64(11)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil, nil); err != nil {
+		t.Fatalf("processStagingOnce: %v", err)
+	}
+
+	if _, err := os.Stat(childHomePath); err != nil {
+		t.Fatalf("expected extracted child at decoded path %q: %v", childHomePath, err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
