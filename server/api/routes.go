@@ -24,6 +24,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/agentservicehandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
+	"github.com/chendingplano/deepdoc/server/api/calendarhandler"
 	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
 	"github.com/chendingplano/deepdoc/server/api/chadsessionshandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
@@ -45,6 +46,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
+	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
 	productreviews "github.com/chendingplano/deepdoc/server/api/product-reviews"
 	"github.com/chendingplano/deepdoc/server/api/productdrawings"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
@@ -353,6 +355,30 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/page-config/admin/pages/:pageKey/entries", pageconfighandler.UpsertEntry)
 	apiGroup.PUT("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.UpsertEntry)
 	apiGroup.DELETE("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.DeleteEntry)
+
+	// Holiday calendar admin (System Admin > System > Calendar). Admin-only:
+	// year-independent holiday definitions plus year-specific date bindings
+	// (public.holiday_info / public.calendars / public.calendar_holidays).
+	apiGroup.GET("/calendars/holiday-info", calendarhandler.ListHolidayInfo)
+	apiGroup.POST("/calendars/holiday-info", calendarhandler.CreateHolidayInfo)
+	apiGroup.PUT("/calendars/holiday-info/:id", calendarhandler.UpdateHolidayInfo)
+	apiGroup.DELETE("/calendars/holiday-info/:id", calendarhandler.DeleteHolidayInfo)
+	apiGroup.GET("/calendars", calendarhandler.GetCalendar)
+	apiGroup.PUT("/calendars/dates", calendarhandler.UpsertCalendarDates)
+	apiGroup.DELETE("/calendars/:id/dates/:date", calendarhandler.DeleteCalendarDate)
+	apiGroup.DELETE("/calendars/:id", calendarhandler.DeleteCalendar)
+	apiGroup.GET("/calendars/default-country", calendarhandler.GetDefaultCountry)
+	apiGroup.PUT("/calendars/default-country", calendarhandler.SetDefaultCountry)
+	apiGroup.DELETE("/calendars/default-country", calendarhandler.ClearDefaultCountry)
+
+	// Peak hours admin (System Admin > System > Peak Hours). CRUD is
+	// admin-only; is-active is a public evaluation endpoint for other
+	// backend code to query (public.peak_hours).
+	apiGroup.GET("/peak-hours", peakhourshandler.List)
+	apiGroup.POST("/peak-hours", peakhourshandler.Create)
+	apiGroup.PUT("/peak-hours/:name", peakhourshandler.Update)
+	apiGroup.DELETE("/peak-hours/:name", peakhourshandler.Delete)
+	apiGroup.GET("/peak-hours/:name/is-active", peakhourshandler.IsActive)
 
 	// External Terminology Resources (System Admin > Resources). Downloads write
 	// local artifacts + unapproved draft manifests under TERMINOLOGY_DIR.

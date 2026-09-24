@@ -314,7 +314,15 @@
 						{ id: 'sysadmin-doc-process-semantic-retry-queue', label: 'Semantic Retry Queue' }
 					]
 				},
-				{ id: 'sysadmin-page-config', label: 'Page Content' }
+				{ id: 'sysadmin-page-config', label: 'Page Content' },
+				{
+					id: 'sysadmin-system',
+					label: 'System',
+					children: [
+						{ id: 'sysadmin-system-calendar', label: 'Calendar' },
+						{ id: 'sysadmin-system-peak-hours', label: 'Peak Hours' }
+					]
+				}
 			]
 		},
 		{
