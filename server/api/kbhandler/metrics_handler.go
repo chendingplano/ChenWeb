@@ -1375,8 +1375,12 @@ func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
 
 func deleteInputFiles(logger ApiTypes.JimoLogger, assets inputDeleteAssets) {
 	seen := make(map[string]struct{}, 3)
-	for _, candidate := range []string{assets.FileName, assets.BackupFileName, assets.ResultFileName} {
-		path := strings.TrimSpace(candidate)
+	for _, path := range []string{
+		pathutil.ResolveDataHomePath(assets.FileName),
+		pathutil.ResolveBackupPath(assets.BackupFileName),
+		pathutil.ResolveDataHomePath(assets.ResultFileName),
+	} {
+		path = strings.TrimSpace(path)
 		if path == "" {
 			continue
 		}
@@ -1600,6 +1604,10 @@ func writeDeleteInputDocProcLog(recordID int64, webStats artifactWebCleanupStats
 	}, deleteInputDocProcLogLoc)
 }
 
+func shouldDeleteInputFiles(c echo.Context) bool {
+	return strings.EqualFold(strings.TrimSpace(c.QueryParam("delete_file")), "true")
+}
+
 // DeleteInput handles DELETE /api/v1/kb/inputs/:id
 func DeleteInput(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_400")
@@ -1679,8 +1687,10 @@ func DeleteInput(c echo.Context) error {
 		})
 	}
 
-	deleteInputFiles(logger, assets)
-	deleteInputArtifactDirs(logger, id, assets)
+	if shouldDeleteInputFiles(c) {
+		deleteInputFiles(logger, assets)
+		deleteInputArtifactDirs(logger, id, assets)
+	}
 	webStats := cleanupInputArtifactWeb(logger, id)
 	if err := writeDeleteInputDocProcLog(id, webStats); err != nil {
 		logger.Warn("write delete input doc proc log failed", "record_id", id, "err", err)

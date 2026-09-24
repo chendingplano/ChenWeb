@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from typing import Any, Callable
 
 from parser_base import ParserBackend
@@ -78,7 +79,35 @@ class OpenDataParser(ParserBackend):
             "--quiet",
         ]
         log.info("running opendataloader: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+        # subprocess.run() blocks with no checkpoint until the whole CLI exits,
+        # so an abort request could never be noticed until the parse already
+        # finished on its own. Poll instead, re-checking on_progress (which
+        # raises when the user aborts) so the subprocess can be killed promptly.
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        stop_exc: list[BaseException] = []
+        while proc.poll() is None:
+            try:
+                on_progress(0, 1)
+            except Exception as exc:
+                stop_exc.append(exc)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                break
+            time.sleep(1.0)
+
+        rc = proc.wait()
+        output = proc.stdout.read() if proc.stdout else ""
+        if stop_exc:
+            raise stop_exc[0]
+        if rc != 0:
+            raise RuntimeError(f"opendataloader exited {rc}: {output}")
 
         json_files = glob.glob(os.path.join(output_dir, "*.json"))
         if not json_files:

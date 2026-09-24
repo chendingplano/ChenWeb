@@ -76,6 +76,22 @@ def has_parse_success_or_active(raw_status: str) -> bool:
     return False
 
 
+def has_stop_requested(raw_status: str | None) -> bool:
+    """Return true when a user has requested that the current parse stop."""
+    for entry in decode_status(raw_status):
+        operation = str(entry.get("operation", "")).strip().lower()
+        if operation != "stop_requested":
+            continue
+        proc_status = str(entry.get("proc_status", "")).strip().lower()
+        if not proc_status:
+            proc_status = str(entry.get("proc-status", "")).strip().lower()
+        if not proc_status:
+            proc_status = str(entry.get("status", "")).strip().lower()
+        if proc_status == "pending":
+            return True
+    return False
+
+
 def upsert_status(raw_status: str, operation: str, patch: dict) -> str:
     """Update an existing status entry by operation name, or append a new one.
 
@@ -294,12 +310,14 @@ def claim_candidates(conn, batch_size: int, claim_timeout: int) -> list[dict]:
                COALESCE(staging_filename, ''),
                COALESCE(file_name, ''),
                COALESCE(parser_name, ''),
+               COALESCE(processing_mode, 'auto'),
                COALESCE(status::text, '[]'),
                COALESCE(md5, ''),
                COALESCE(result_filename, ''),
                COALESCE(backup_filename, '')
         FROM kb.inputs
         WHERE LOWER(type) = 'pdf'
+          AND COALESCE(processing_mode, 'auto') <> 'upload_only'
           AND (
               parse_state = 'pending'
               OR (
@@ -323,10 +341,11 @@ def claim_candidates(conn, batch_size: int, claim_timeout: int) -> list[dict]:
                 "name": r[1],
                 "file_name": r[2],
                 "parser_name": r[3],
-                "status": r[4],
-                "md5": r[5],
-                "result_filename": r[6],
-                "backup_filename": r[7],
+                "processing_mode": r[4],
+                "status": r[5],
+                "md5": r[6],
+                "result_filename": r[7],
+                "backup_filename": r[8],
             }
             # Stamp proc_status=active in the same locked transaction so the claim
             # is durable and visible once committed.
@@ -355,6 +374,7 @@ def fetch_record_by_id(conn, rec_id: int) -> dict | None:
                COALESCE(staging_filename, ''),
                COALESCE(file_name, ''),
                COALESCE(parser_name, ''),
+               COALESCE(processing_mode, 'auto'),
                COALESCE(status::text, '[]'),
                COALESCE(md5, ''),
                COALESCE(result_filename, ''),
@@ -374,10 +394,11 @@ def fetch_record_by_id(conn, rec_id: int) -> dict | None:
         "name": row[1],
         "file_name": row[2],
         "parser_name": row[3],
-        "status": row[4],
-        "md5": row[5],
-        "result_filename": row[6],
-        "backup_filename": row[7],
+        "processing_mode": row[4],
+        "status": row[5],
+        "md5": row[6],
+        "result_filename": row[7],
+        "backup_filename": row[8],
     }
 
 
@@ -533,6 +554,35 @@ def record_parsed_failure(
     """
     with conn.cursor() as cur:
         cur.execute(sql, (new_status, parser_name, error, rec_id))
+    conn.commit()
+    return new_status
+
+
+def record_parsed_stopped(
+    conn, rec_id: int, raw_status: str,
+    start_time: str, ms_used: int, parser_name: str,
+) -> str:
+    """Persist a user-requested stop without turning it into a parse failure."""
+    new_status = upsert_status(
+        raw_status, PARSE_OPERATION,
+        {
+            "proc_status": "stopped",
+            "parser_name": parser_name,
+            "start_time": start_time,
+            "ms_used": ms_used,
+            "error": "stopped by user request",
+        },
+    )
+    sql = """
+        UPDATE kb.inputs
+        SET status = %s::jsonb,
+            parser_name = COALESCE(NULLIF(%s, ''), parser_name),
+            error_msg = NULL,
+            modify_time = NOW()
+        WHERE id = %s
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (new_status, parser_name, rec_id))
     conn.commit()
     return new_status
 

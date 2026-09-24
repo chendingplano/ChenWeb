@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 func writeTempFile(t *testing.T, dir, name, content string) string {
@@ -19,6 +20,39 @@ func writeTempFile(t *testing.T, dir, name, content string) string {
 		t.Fatalf("write temp file: %v", err)
 	}
 	return path
+}
+
+func TestProcessStagingOnce_SkipsPendingFiles(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	stagingDir := t.TempDir()
+	backupDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	pendingPath := writeTempFile(t, stagingDir, "report.pdf.pending", "hello")
+	logger := loggerutil.CreateDefaultLogger("TEST-PDF-001")
+	defer logger.Close()
+
+	if err := processStagingOnce(context.Background(), logger, db, stagingDir, backupDir, homeDir); err != nil {
+		t.Fatalf("processStagingOnce: %v", err)
+	}
+
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("expected .pending file to remain in staging dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backupDir, "report.pdf.pending")); !os.IsNotExist(err) {
+		t.Fatalf("expected no backup copy of .pending file, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, "report.pdf.pending")); !os.IsNotExist(err) {
+		t.Fatalf("expected no home copy of .pending file, err=%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expected no DB calls for a .pending file: %v", err)
+	}
 }
 
 func TestUpsertStagedInputRecord_UpdatesExistingStagedRow(t *testing.T) {

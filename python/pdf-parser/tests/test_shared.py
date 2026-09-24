@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-from shared import decode_status, has_operation, has_parse_success_or_active, upsert_status
+from shared import decode_status, has_operation, has_parse_success_or_active, has_stop_requested, upsert_status
 from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir, relativize_to_data_home, relativize_to_backup_root, resolve_repo_path, resolve_backup_path
 from shared import claim_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
 from shared import record_parse_active, record_parsed_failure, record_parsed_success
@@ -58,6 +58,20 @@ class TestHasParseSuccessOrActive:
     def test_success_parse_is_already_parsed(self):
         raw = json.dumps([{"operation": "parsed", "proc_status": "success"}])
         assert has_parse_success_or_active(raw) is True
+
+
+class TestHasStopRequested:
+    def test_pending_stop_request_is_detected(self):
+        raw = json.dumps([{"operation": "stop_requested", "proc_status": "pending"}])
+        assert has_stop_requested(raw) is True
+
+    def test_completed_stop_request_is_not_detected(self):
+        raw = json.dumps([{"operation": "stop_requested", "proc_status": "handled"}])
+        assert has_stop_requested(raw) is False
+
+    def test_other_operations_are_not_stop_requests(self):
+        raw = json.dumps([{"operation": "parsed", "proc_status": "active"}])
+        assert has_stop_requested(raw) is False
 
     def test_active_parse_is_in_progress(self):
         raw = json.dumps([{"operation": "parsed", "proc_status": "active"}])
@@ -376,7 +390,7 @@ class TestReadQueriesCloseTransactions:
     def test_claim_candidates_stamps_active_and_commits(self):
         conn = _FakeConn()
         conn.rows = [
-            (11, "doc.pdf", "/tmp/doc.pdf", "docling", "[]", "md5", "", ""),
+            (11, "doc.pdf", "/tmp/doc.pdf", "docling", "auto", "[]", "md5", "", ""),
         ]
 
         records = claim_candidates(conn, 25, 1800)
@@ -390,7 +404,7 @@ class TestReadQueriesCloseTransactions:
 
     def test_fetch_record_by_id_commits_after_select(self):
         conn = _FakeConn()
-        conn.row = (12, "doc.pdf", "/tmp/doc.pdf", "docling", "[]", "md5", "", "")
+        conn.row = (12, "doc.pdf", "/tmp/doc.pdf", "docling", "auto", "[]", "md5", "", "")
 
         record = fetch_record_by_id(conn, 12)
 

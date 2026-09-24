@@ -4,11 +4,13 @@
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import { shouldShowOverflowScrollbar } from '$lib/components/home3/kb-import-status-dialog.js';
+	import { selectedPageIds, togglePageRecord, togglePageSelection } from './kb-input-selection';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig } from '$lib/services/kbService';
+	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig, updateKbInput, listPendingFiles, claimPendingFiles, type PendingFileEntry, type ClaimPendingFilesResult } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import { createDefaultRecordBrowserFilters } from '$lib/components/home3/topic-tree-record-browser.js';
+	import { listManagedUsers, type ManagedUser } from '$lib/services/userManagementService';
 	import {
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
@@ -61,6 +63,8 @@
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	let total = $state(0);
 	let records = $state<KbInputRecord[]>([]);
+	let usersById = $state<Record<string, ManagedUser>>({});
+	let selectedRecordIds = $state(new Set<number>());
 	let loading = $state(false);
 	let error = $state('');
 	const autoRefreshOptions = [
@@ -82,12 +86,39 @@
 	let uploadError = $state('');
 	let uploadLaunchError = $state('');
 
+	// Pending Files: admin-only claiming of files copied directly into the
+	// staging directory with a `.pending` suffix. Visibility is decided by
+	// whether GET /kb/pending-files succeeds (401/403 hides the button) --
+	// the backend is the real access-control boundary, not this flag.
+	let pendingFilesVisible = $state(false);
+	let pendingFilesDialogOpen = $state(false);
+	let pendingFilesList = $state<PendingFileEntry[]>([]);
+	let pendingFilesSelected = $state(new Set<string>());
+	let pendingFilesLoading = $state(false);
+	let pendingFilesLaunchError = $state('');
+	let pendingFilesError = $state('');
+	let pendingFilesSubmitting = $state(false);
+	let pendingFilesResults = $state<ClaimPendingFilesResult[]>([]);
+	let pendingFilesProcessingMode = $state<'auto' | 'upload_only' | 'pdf_parsing'>('auto');
+	let pendingFilesParserName = $state<(typeof uploadParserOptions)[number]>('docling');
+
 	// Search dialog
 	let searchOpen = $state(false);
 	// Delete confirmation
 	let deleteConfirmRecord = $state<KbInputRecord | null>(null);
+	let deleteConfirmRecords = $state<KbInputRecord[]>([]);
+	let deleteFileToo = $state(false);
 	let deleteError = $state('');
 	let deleteSubmitting = $state(false);
+	let editRecord = $state<KbInputRecord | null>(null);
+	let editTitle = $state('');
+	let editDocNo = $state('');
+	let editAuthors = $state('');
+	let editOwner = $state('');
+	let editNotes = $state('');
+	let editErrorMsg = $state('');
+	let editError = $state('');
+	let editSubmitting = $state(false);
 
 	// ── Restart pipeline dialog (mirrors the doc-processor dashboard) ──────
 	// requiredProcessors: the configurable processors enabled in config.toml.
@@ -117,12 +148,17 @@
 	let uploadNotes = $state('');
 	let uploadKsDesc = $state('');
 	let uploadParserName = $state<(typeof uploadParserOptions)[number]>('docling');
+	let uploadProcessingMode = $state<'auto' | 'upload_only' | 'pdf_parsing'>('auto');
 	let selectedFiles = $state<File[]>([]);
 	let filePicker = $state<HTMLInputElement | null>(null);
 	let dirPicker = $state<HTMLInputElement | null>(null);
 	let uploadRecursive = $state(true);
 	let uploadDirProcessing = $state(false);
 	let uploadSkippedCount = $state(0);
+	let visibleRecordIds = $derived(records.map((record) => record.id));
+	let allVisibleSelected = $derived(
+		visibleRecordIds.length > 0 && !togglePageSelection(selectedRecordIds, visibleRecordIds)
+	);
 
 	const typeExtensions: Record<string, string[]> = {
 		pdf: ['.pdf'],
@@ -244,19 +280,6 @@
 
 	function parsingTime(record: KbInputRecord): string {
 		return formatOptionalTime(parsingItem(record)?.start_time);
-	}
-
-	function convertedItem(record: KbInputRecord): StatusItem | null {
-		return findStatusItem(record, 'converted');
-	}
-
-	function convertLabel(record: KbInputRecord): string {
-		const item = convertedItem(record);
-		return item?.proc_status ?? item?.['proc-status'] ?? '';
-	}
-
-	function convertTime(record: KbInputRecord): string {
-		return formatOptionalTime(convertedItem(record)?.start_time);
 	}
 
 	async function openStatusDialog(record: KbInputRecord) {
@@ -402,7 +425,7 @@
 			uploadError = 'No active knowledge store is selected.';
 			return;
 		}
-		if (!activeStore.tenant_id?.trim()) {
+		if (!activeStore.tenant_id?.trim() || activeStore.tenant_id.trim() === '-') {
 			uploadError = 'The active knowledge store is missing tenant_id.';
 			return;
 		}
@@ -420,6 +443,7 @@
 			notes: uploadNotes,
 			ks_desc: uploadKsDesc,
 			parser_name: uploadParserName,
+			processing_mode: uploadProcessingMode,
 			ks_store_id: activeStore.id,
 			tenant_id: activeStore.tenant_id
 		};
@@ -463,6 +487,7 @@
 	}
 
 	async function loadRecords() {
+		selectedRecordIds = new Set();
 		loading = true;
 		error = '';
 		try {
@@ -492,6 +517,27 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function loadUsers() {
+		try {
+			const result = await listManagedUsers();
+			usersById = Object.fromEntries(result.users.map((user) => [user.id, user]));
+		} catch {
+			// The table remains usable when user lookup is unavailable.
+			usersById = {};
+		}
+	}
+
+	function userDisplayValue(record: KbInputRecord): string {
+		const user = record.tenant_id ? usersById[record.tenant_id] : undefined;
+		if (!user) return 'name-not-found';
+
+		const fullName = [user.first_name, user.last_name]
+			.map((part) => part?.trim())
+			.filter(Boolean)
+			.join(' ');
+		return fullName || user.email?.trim() || user.user_mobile?.trim() || 'name-not-found';
 	}
 
 	function toggleSort(field: string) {
@@ -527,14 +573,98 @@
 		loadRecords();
 	}
 
+	function resetSearch() {
+		recordId = '';
+		title = '';
+		docNo = '';
+		fileName = '';
+		docType = 'all';
+		parserName = '';
+		pipelineFilter = '';
+		procStatus = 'all';
+		startTime = '';
+		endTime = '';
+		modifyStartTime = '';
+		modifyEndTime = '';
+		parseState = 'all';
+		page = 1;
+		loadRecords();
+	}
+
 	function openDeleteConfirm(record: KbInputRecord) {
 		deleteConfirmRecord = record;
+		deleteConfirmRecords = [record];
+		deleteFileToo = false;
 		deleteError = '';
 		deleteSubmitting = false;
 	}
 
+	function authorsForEdit(value?: string): string {
+		if (!value?.trim()) return '';
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean).join('\n');
+		} catch {
+			// Keep legacy plain-text author values editable as-is.
+		}
+		return value;
+	}
+
+	function openEditDialog(record: KbInputRecord) {
+		editRecord = record;
+		editTitle = record.title ?? '';
+		editDocNo = record.doc_no ?? '';
+		editAuthors = authorsForEdit(record.authors);
+		editOwner = record.owner == null ? '' : String(record.owner);
+		editNotes = record.notes ?? '';
+		editErrorMsg = record.error_msg ?? '';
+		editError = '';
+		editSubmitting = false;
+	}
+
+	function closeEditDialog() {
+		if (editSubmitting) return;
+		editRecord = null;
+		editError = '';
+	}
+
+	async function saveEditDialog() {
+		if (!editRecord || editSubmitting) return;
+		const ownerText = editOwner.trim();
+		if (ownerText && !/^\d+$/.test(ownerText)) {
+			editError = 'Owner must be a numeric user ID or left empty.';
+			return;
+		}
+
+		editSubmitting = true;
+		editError = '';
+		try {
+			const authors = editAuthors
+				.split(/\r?\n|,/)
+				.map((item) => item.trim())
+				.filter(Boolean);
+			const result = await updateKbInput(editRecord.id, {
+				title: editTitle.trim(),
+				doc_no: editDocNo.trim(),
+				authors,
+				owner: ownerText ? Number(ownerText) : null,
+				notes: editNotes,
+					error_msg: editErrorMsg
+			});
+			records = records.map((record) => (record.id === result.record.id ? result.record : record));
+			editRecord = null;
+			editError = '';
+		} catch (err) {
+			editError = err instanceof Error ? err.message : 'Failed to save input changes.';
+		} finally {
+			editSubmitting = false;
+		}
+	}
+
 	function closeDeleteConfirm() {
 		deleteConfirmRecord = null;
+		deleteConfirmRecords = [];
+		deleteFileToo = false;
 		deleteError = '';
 		deleteSubmitting = false;
 	}
@@ -544,7 +674,9 @@
 		deleteSubmitting = true;
 		deleteError = '';
 		try {
-			await deleteKbInput(deleteConfirmRecord.id);
+			for (const record of deleteConfirmRecords) {
+				await deleteKbInput(record.id, deleteFileToo);
+			}
 			closeDeleteConfirm();
 			await loadRecords();
 		} catch (err) {
@@ -552,6 +684,24 @@
 		} finally {
 			deleteSubmitting = false;
 		}
+	}
+
+	function toggleRecordSelection(id: number) {
+		selectedRecordIds = togglePageRecord(selectedRecordIds, id);
+	}
+
+	function toggleAllVisibleRecords(selectVisible: boolean) {
+		selectedRecordIds = selectedPageIds(selectedRecordIds, visibleRecordIds, selectVisible);
+	}
+
+	function openBatchDeleteConfirm() {
+		const selected = records.filter((record) => selectedRecordIds.has(record.id));
+		if (selected.length === 0) return;
+		deleteConfirmRecord = selected[0];
+		deleteConfirmRecords = selected;
+		deleteFileToo = false;
+		deleteError = '';
+		deleteSubmitting = false;
 	}
 
 	// ── Restart pipeline ──────────────────────────────────────────────────
@@ -758,6 +908,7 @@
 
 	onMount(() => {
 		loadRecords();
+		loadUsers();
 		getKbFrontendConfig()
 			.then((cfg) => {
 				requiredProcessors = cfg.required_processors ?? [];
@@ -765,7 +916,105 @@
 			.catch(() => {
 				// Keep defaults on failure
 			});
+		listPendingFiles()
+			.then(() => {
+				pendingFilesVisible = true;
+			})
+			.catch(() => {
+				// Non-admin (401/403) or the endpoint is unreachable -- either
+				// way, keep the button hidden.
+			});
 	});
+
+	async function openPendingFilesDialog() {
+		pendingFilesLaunchError = '';
+		pendingFilesLoading = true;
+		try {
+			const result = await listPendingFiles();
+			if (result.files.length === 0) {
+				pendingFilesLaunchError = 'No pending files found.';
+				return;
+			}
+			pendingFilesList = result.files;
+			pendingFilesSelected = new Set();
+			pendingFilesError = '';
+			pendingFilesResults = [];
+			pendingFilesDialogOpen = true;
+		} catch (err) {
+			pendingFilesLaunchError = err instanceof Error ? err.message : 'Failed to list pending files';
+		} finally {
+			pendingFilesLoading = false;
+		}
+	}
+
+	function closePendingFilesDialog() {
+		pendingFilesDialogOpen = false;
+		pendingFilesSubmitting = false;
+		pendingFilesError = '';
+	}
+
+	function togglePendingFileSelection(pendingName: string) {
+		const next = new Set(pendingFilesSelected);
+		if (next.has(pendingName)) {
+			next.delete(pendingName);
+		} else {
+			next.add(pendingName);
+		}
+		pendingFilesSelected = next;
+	}
+
+	async function refreshPendingFilesList() {
+		try {
+			const result = await listPendingFiles();
+			pendingFilesList = result.files;
+			const stillPending = new Set(result.files.map((f) => f.pending_name));
+			pendingFilesSelected = new Set([...pendingFilesSelected].filter((name) => stillPending.has(name)));
+		} catch {
+			// Keep the current (possibly stale) list if the refresh itself fails.
+		}
+	}
+
+	async function submitClaimPendingFiles() {
+		pendingFilesError = '';
+		const activeStore = knowledgeStoreState.activeStore;
+		if (!activeStore) {
+			pendingFilesError = 'No active knowledge store is selected.';
+			return;
+		}
+		if (!activeStore.tenant_id?.trim() || activeStore.tenant_id.trim() === '-') {
+			pendingFilesError = 'The active knowledge store is missing tenant_id.';
+			return;
+		}
+		if (pendingFilesSelected.size === 0) {
+			pendingFilesError = 'Pick at least one pending file.';
+			return;
+		}
+
+		pendingFilesSubmitting = true;
+		try {
+			const response = await claimPendingFiles({
+				filenames: [...pendingFilesSelected],
+				processing_mode: pendingFilesProcessingMode,
+				parser_name: pendingFilesParserName,
+				ks_store_id: activeStore.id,
+				tenant_id: activeStore.tenant_id
+			});
+			pendingFilesResults = response.results;
+
+			const hadFailure = response.results.some((r) => !r.status);
+			if (hadFailure) {
+				await refreshPendingFilesList();
+			} else {
+				closePendingFilesDialog();
+				page = 1;
+				await loadRecords();
+			}
+		} catch (err) {
+			pendingFilesError = err instanceof Error ? err.message : 'Failed to claim pending files';
+		} finally {
+			pendingFilesSubmitting = false;
+		}
+	}
 
 	$effect(() => {
 		if (!statusDialogOpen || !statusDialogRawJsonEl) {
@@ -802,6 +1051,15 @@
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
+				{#if selectedRecordIds.size > 0}
+					<button
+						onclick={openBatchDeleteConfirm}
+						disabled={loading}
+						style="height:38px; padding:0 14px; border:1px solid rgba(239,68,68,0.4); border-radius:10px; background:rgba(239,68,68,0.1); color:#ef4444; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
+					>
+						Delete ({selectedRecordIds.size})
+					</button>
+				{/if}
 				<button
 					onclick={() => loadRecords()}
 					disabled={loading}
@@ -819,6 +1077,16 @@
 						<option value={option.value}>{option.label}</option>
 					{/each}
 				</select>
+				<select
+					bind:value={uploadProcessingMode}
+					aria-label="Auto Process"
+					title="Auto Process"
+					style="height:38px; padding:0 10px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer;"
+				>
+					<option value="auto">Auto</option>
+					<option value="upload_only">Upload Files Only</option>
+					<option value="pdf_parsing">PDF Parsing</option>
+				</select>
 				<button
 					onclick={() => { searchOpen = true; }}
 					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
@@ -826,15 +1094,34 @@
 					Search
 				</button>
 				<button
+					onclick={resetSearch}
+					disabled={loading}
+					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
+				>
+					Reset Search
+				</button>
+				<button
 					onclick={openUploadDialog}
 					style="height:38px; padding:0 14px; border:none; border-radius:10px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
 				>
 					Upload Files
 				</button>
+				{#if pendingFilesVisible}
+					<button
+						onclick={openPendingFilesDialog}
+						disabled={pendingFilesLoading}
+						style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{pendingFilesLoading ? 0.65 : 1};"
+					>
+						{pendingFilesLoading ? 'Checking…' : 'Pending Files'}
+					</button>
+				{/if}
 			</div>
 		</div>
 		{#if uploadLaunchError}
 			<div style="margin-top:10px; font-size:12px; color:#ef4444;">{uploadLaunchError}</div>
+		{/if}
+		{#if pendingFilesLaunchError}
+			<div style="margin-top:10px; font-size:12px; color:#ef4444;">{pendingFilesLaunchError}</div>
 		{/if}
 		{#if loading}
 			<div style="margin-top:10px; font-size:12px; color:{textMuted};">Loading...</div>
@@ -864,10 +1151,38 @@
 					</button>
 				</th>
 			{/snippet}
-			<table style="width:100%; border-collapse:collapse; min-width:960px;">
+			<table style="width:100%; border-collapse:collapse; min-width:1000px;">
+				<colgroup>
+					<col style="width:40px;" />
+					<col />
+					<col style="width:160px;" />
+					<col style="width:325px;" />
+					<col />
+					<col style="width:100px;" />
+					<col style="width:325px;" />
+					<col />
+					<col />
+					<col />
+					<col />
+					<col style="width:180px;" />
+					<col style="width:180px;" />
+					<col />
+					<col />
+				</colgroup>
 				<thead style="background:{pageBg};">
 					<tr>
+						<th class="cell head" style="width:40px; text-align:center;">
+							<input
+								type="checkbox"
+								checked={allVisibleSelected}
+								disabled={records.length === 0 || loading}
+								onchange={(event) => toggleAllVisibleRecords((event.currentTarget as HTMLInputElement).checked)}
+								aria-label="Select all records on this page"
+								style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;"
+							/>
+						</th>
 						{@render sortHead('ID', 'id')}
+						<th class="cell head">User</th>
 						{@render sortHead('Title', 'title')}
 						{@render sortHead('Doc No', 'doc_no')}
 						{@render sortHead('Type', 'type')}
@@ -875,8 +1190,7 @@
 						{@render sortHead('Parser', 'parser_name')}
 						<th class="cell head">Parsing</th>
 						<th class="cell head">Time</th>
-						<th class="cell head">Convert</th>
-						<th class="cell head">Time</th>
+						<th class="cell head">Process Mode</th>
 						{@render sortHead('Create Time', 'create_time')}
 						{@render sortHead('Modify Time', 'modify_time')}
 						<th class="cell head">Status</th>
@@ -886,30 +1200,53 @@
 				<tbody>
 					{#if !loading && records.length === 0}
 						<tr>
-							<td class="cell" colspan={14} style="text-align:center; color:{textMuted};">No records</td>
+					<td class="cell" colspan={15} style="text-align:center; color:{textMuted};">No records</td>
 						</tr>
 					{:else}
 						{#each records as record (record.id)}
 							<tr style="border-top:1px solid {borderColor};">
+								<td class="cell" style="width:40px; text-align:center;">
+									<input
+										type="checkbox"
+										checked={selectedRecordIds.has(record.id)}
+										onchange={() => toggleRecordSelection(record.id)}
+										aria-label="Select record {record.id}"
+										style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;"
+									/>
+								</td>
 								<td class="cell" style="color:{textSecondary};">{record.id}</td>
-								<td class="cell" style="color:{textPrimary};">{record.title ?? '-'}</td>
+								<td class="cell user-cell" title={userDisplayValue(record)} style="color:{textPrimary};">
+									<span class="ellipsis-cell">{userDisplayValue(record)}</span>
+								</td>
+								<td class="cell title-cell" title={record.title ?? '-'} style="color:{textPrimary};">
+									<span class="ellipsis-cell">{record.title ?? '-'}</span>
+								</td>
 								<td class="cell" style="color:{textPrimary};">{record.doc_no ?? '-'}</td>
 								<td class="cell" style="color:{textPrimary};">{record.type}</td>
-								<td class="cell" style="color:{textPrimary};">{record.file_name ?? '-'}</td>
+								<td class="cell file-name-cell" title={record.file_name ?? '-'} style="color:{textPrimary};">
+									<span class="ellipsis-cell">{record.file_name ?? '-'}</span>
+								</td>
 								<td class="cell" style="color:{textMuted};">{record.parser_name ?? '-'}</td>
 								<td class="cell" style="color:{textPrimary};">{parsingLabel(record)}</td>
 								<td class="cell" style="color:{textSecondary};">{parsingTime(record)}</td>
-								<td class="cell" style="color:{textPrimary};">{convertLabel(record)}</td>
-								<td class="cell" style="color:{textSecondary};">{convertTime(record)}</td>
+								<td class="cell" style="color:{textPrimary};">{record.processing_mode ?? '-'}</td>
 								<td class="cell" style="color:{textSecondary};">{formatTime(record.create_time)}</td>
 								<td class="cell" style="color:{textSecondary};">{formatTime(record.modify_time)}</td>
 								<td class="cell">
+									<div class="flex items-center gap-2">
 									<button
 										onclick={() => openStatusDialog(record)}
 										style="height:28px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 									>
 										View
 									</button>
+										<button
+										onclick={() => openEditDialog(record)}
+										style="height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
+									>
+										Edit
+									</button>
+									</div>
 								</td>
 								<td class="cell">
 									<div class="flex items-center gap-2">
@@ -1015,6 +1352,85 @@
 	{darkMode}
 	onSelect={applySearchFilters}
 />
+
+{#if editRecord}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.62);"
+		onclick={closeEditDialog}
+		onkeydown={(event) => { if (event.key === 'Escape') closeEditDialog(); }}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="w-full max-w-2xl rounded-xl overflow-hidden"
+			style="background:{cardBg}; border:1px solid {borderColor};"
+			onclick={(event) => event.stopPropagation()}
+			onkeydown={(event) => event.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Edit input"
+			tabindex="0"
+		>
+			<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
+				<div>
+					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Edit Input #{editRecord.id}</h3>
+					<div style="margin-top:4px; font-size:12px; color:{textMuted};">Update input metadata.</div>
+				</div>
+				<button
+					type="button"
+					onclick={closeEditDialog}
+					disabled={editSubmitting}
+					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+				>Close</button>
+			</div>
+
+			<div class="edit-input-form">
+				<label>
+					<span>Title</span>
+					<input bind:value={editTitle} />
+				</label>
+				<label>
+					<span>Doc No</span>
+					<input bind:value={editDocNo} />
+				</label>
+				<label>
+					<span>Authors</span>
+					<textarea rows="3" bind:value={editAuthors} placeholder="One author per line"></textarea>
+				</label>
+				<label>
+					<span>Owner</span>
+					<input type="number" min="0" step="1" bind:value={editOwner} placeholder="Unassigned" />
+				</label>
+				<label>
+					<span>Notes</span>
+					<textarea rows="3" bind:value={editNotes}></textarea>
+				</label>
+				<label>
+					<span>Error Message</span>
+					<textarea rows="3" bind:value={editErrorMsg}></textarea>
+				</label>
+				{#if editError}
+					<div style="font-size:12px; color:#ef4444;">{editError}</div>
+				{/if}
+				<div class="flex justify-end gap-2">
+					<button
+						type="button"
+						onclick={closeEditDialog}
+						disabled={editSubmitting}
+						style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+					>Cancel</button>
+					<button
+						type="button"
+						onclick={saveEditDialog}
+						disabled={editSubmitting}
+						style="height:34px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:12px; font-weight:600; cursor:pointer; opacity:{editSubmitting ? 0.6 : 1};"
+					>{editSubmitting ? 'Saving…' : 'Save Changes'}</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if uploadDialogOpen}
 	<div
@@ -1173,6 +1589,120 @@
 	</div>
 {/if}
 
+{#if pendingFilesDialogOpen}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.72); backdrop-filter:blur(3px);"
+		onclick={closePendingFilesDialog}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') closePendingFilesDialog();
+		}}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="w-full max-w-2xl rounded-xl overflow-hidden"
+			style="background:{cardBg}; border:1px solid {borderColor};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Pending files dialog"
+			tabindex="0"
+		>
+			<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
+				<div>
+					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Pending Files</h3>
+					<div style="margin-top:4px; font-size:12px; color:{textMuted};">
+						Active Knowledge Store:
+						{#if knowledgeStoreState.activeStore}
+							<span style="color:{textPrimary};">{knowledgeStoreState.activeStore.ks_name}</span>
+							<span class="mono" style="margin-left:8px;">ID {knowledgeStoreState.activeStore.id}</span>
+						{:else}
+							<span style="color:#ef4444;">None selected</span>
+						{/if}
+					</div>
+				</div>
+				<button
+					onclick={closePendingFilesDialog}
+					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+				>
+					Close
+				</button>
+			</div>
+
+			<div class="p-4">
+				<div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Auto Process</span>
+						<select
+							bind:value={pendingFilesProcessingMode}
+							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
+						>
+							<option value="auto">Auto</option>
+							<option value="upload_only">Upload Files Only</option>
+							<option value="pdf_parsing">PDF Parsing</option>
+						</select>
+					</label>
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">PDF Parser</span>
+						<select
+							bind:value={pendingFilesParserName}
+							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
+						>
+							{#each uploadParserOptions as option}
+								<option value={option}>{option}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+
+				<div class="mt-3 rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2}; max-height:280px; overflow:auto;">
+					{#each pendingFilesList as file (file.pending_name)}
+						<label
+							class="flex items-center gap-2 px-2 py-1.5 rounded-md"
+							style="cursor:pointer; font-size:13px; color:{textPrimary};"
+						>
+							<input
+								type="checkbox"
+								checked={pendingFilesSelected.has(file.pending_name)}
+								onchange={() => togglePendingFileSelection(file.pending_name)}
+								style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;"
+							/>
+							<span style="flex:1;">{file.name}</span>
+							<span style="font-size:11px; color:{textMuted};">{new Date(file.mod_time).toLocaleString()}</span>
+						</label>
+					{/each}
+				</div>
+
+				{#if pendingFilesResults.length > 0}
+					<div class="mt-3 space-y-1" style="font-size:12px;">
+						{#each pendingFilesResults as result (result.filename)}
+							<div style="color:{result.status ? '#22c55e' : '#ef4444'};">
+								{result.filename}: {result.status ? 'claimed' : result.error_msg}
+							</div>
+						{/each}
+					</div>
+				{/if}
+
+				<div class="mt-4 flex flex-wrap items-center gap-2">
+					<button
+						onclick={submitClaimPendingFiles}
+						disabled={pendingFilesSubmitting}
+						type="button"
+						style="height:36px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{pendingFilesSubmitting ? 0.65 : 1};"
+					>
+						{pendingFilesSubmitting ? 'Uploading…' : 'Upload Files'}
+					</button>
+					{#if pendingFilesError}
+						<span style="font-size:12px; color:#ef4444;">{pendingFilesError}</span>
+					{/if}
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if deleteConfirmRecord}
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center p-6"
@@ -1196,11 +1726,21 @@
 				<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Delete Record</h3>
 			</div>
 			<div class="px-5 py-4">
-				<p style="font-size:14px; color:{textSecondary}; margin-bottom:8px;">
-					Are you sure you want to delete record <span style="color:{textPrimary}; font-weight:600;">#{deleteConfirmRecord.id}</span>
-					{#if deleteConfirmRecord.file_name}— <span style="color:{textPrimary};">{deleteConfirmRecord.file_name}</span>{/if}?
-				</p>
+				{#if deleteConfirmRecords.length === 1}
+					<p style="font-size:14px; color:{textSecondary}; margin-bottom:8px;">
+						Are you sure you want to delete record <span style="color:{textPrimary}; font-weight:600;">#{deleteConfirmRecord.id}</span>
+						{#if deleteConfirmRecord.file_name}— <span style="color:{textPrimary};">{deleteConfirmRecord.file_name}</span>{/if}?
+					</p>
+				{:else}
+					<p style="font-size:14px; color:{textSecondary}; margin-bottom:8px;">
+						Are you sure you want to delete <span style="color:{textPrimary}; font-weight:600;">{deleteConfirmRecords.length} records</span>?
+					</p>
+				{/if}
 				<p style="font-size:12px; color:#ef4444;">This action cannot be undone.</p>
+				<label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:{textSecondary}; cursor:pointer;">
+					<input type="checkbox" bind:checked={deleteFileToo} style="width:14px; height:14px; accent-color:#ef4444; cursor:pointer;" />
+					Also delete the physical file and generated artifacts
+				</label>
 				{#if deleteError}
 					<div style="margin-top:10px; font-size:12px; color:#ef4444;">{deleteError}</div>
 				{/if}
@@ -1466,6 +2006,57 @@
 		font-size: 13px;
 		vertical-align: middle;
 		text-align: left;
+	}
+
+	.file-name-cell {
+		width: 325px;
+		max-width: 325px;
+	}
+
+	.title-cell {
+		width: 325px;
+		max-width: 325px;
+	}
+
+	.user-cell {
+		width: 160px;
+		max-width: 160px;
+	}
+
+	.ellipsis-cell {
+		display: block;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.edit-input-form {
+		display: grid;
+		gap: 12px;
+		padding: 16px;
+	}
+
+	.edit-input-form label {
+		display: grid;
+		gap: 6px;
+		font-size: 12px;
+		color: var(--text-secondary, #94a3b8);
+	}
+
+	.edit-input-form input,
+	.edit-input-form textarea {
+		width: 100%;
+		box-sizing: border-box;
+		border: 1px solid var(--border, #2d3348);
+		border-radius: 8px;
+		background: var(--surface, #252a3a);
+		color: var(--text-primary, #e2e8f0);
+		font: inherit;
+		padding: 8px 10px;
+	}
+
+	.edit-input-form textarea {
+		resize: vertical;
 	}
 
 	.head {

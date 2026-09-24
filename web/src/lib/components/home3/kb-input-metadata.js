@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 /**
- * @typedef {'text' | 'textarea' | 'datetime' | 'array' | 'json'} MetadataEditorKind
+ * @typedef {'text' | 'textarea' | 'datetime' | 'array' | 'json' | 'user-select'} MetadataEditorKind
  * @typedef {{
  *   label: string;
  *   key: string;
@@ -10,6 +10,7 @@
  *   editable: boolean;
  *   editor?: MetadataEditorKind;
  *   editKey?: string;
+ *   options?: Array<{ value: string; label: string }>;
  *   wide?: boolean;
  *   pathLike?: boolean;
  * }} MetadataRow
@@ -245,30 +246,186 @@ export function getKbInputDocMetadataValue(record) {
 }
 
 /**
+ * @param {Array<{ id?: string; name?: string; email?: string }> | undefined} users
+ * @returns {Array<{ value: string; label: string }>}
+ */
+export function buildUserSelectOptions(users = []) {
+	return users
+		.map((user) => {
+			const value = String(user.id ?? '').trim();
+			if (!value) return null;
+			const name = String(user.name ?? '').trim();
+			const email = String(user.email ?? '').trim();
+			const label = name && email ? `${name} (${email})` : name || email || value;
+			return { value, label };
+		})
+		.filter(Boolean);
+}
+
+/**
  * @param {KbInputRecord | null} currentInput
  * @returns {MetadataRow[]}
  */
-export function buildKbInputRecordMetadataRows(currentInput) {
+export function buildKbInputRecordMetadataRows(currentInput, userOptions = []) {
 	if (!currentInput) return [];
 	const authorsArray = parseAuthors(currentInput.authors);
 	return [
-		{ label: 'ID', key: 'id', value: String(currentInput.id), rawValue: currentInput.id, editable: false, editKey: 'field:id' },
-		{ label: 'Type', key: 'type', value: currentInput.type || '—', rawValue: currentInput.type, editable: false, editKey: 'field:type' },
-		{ label: 'Name', key: 'name', value: currentInput.name || '—', rawValue: currentInput.name, editable: false, editKey: 'field:name' },
-		{ label: 'Title', key: 'title', value: currentInput.title || '—', rawValue: currentInput.title ?? '', editable: true, editor: 'text', editKey: 'field:title' },
-		{ label: 'Doc No', key: 'doc_no', value: currentInput.doc_no || '—', rawValue: currentInput.doc_no ?? '', editable: true, editor: 'text', editKey: 'field:doc_no' },
-		{ label: 'Source', key: 'source', value: currentInput.source || '—', rawValue: currentInput.source ?? '', editable: true, editor: 'text', editKey: 'field:source' },
-		{ label: 'Published', key: 'publish_date', value: formatMaybeDate(currentInput.publish_date), rawValue: toDateTimeLocalInput(currentInput.publish_date), editable: true, editor: 'datetime', editKey: 'field:publish_date' },
-		{ label: 'Authors', key: 'authors', value: authorsArray.length > 0 ? authorsArray.join(', ') : '—', rawValue: authorsArray, editable: true, editor: 'array', editKey: 'field:authors' },
-		{ label: 'Owner', key: 'owner', value: currentInput.owner == null ? '—' : String(currentInput.owner), rawValue: currentInput.owner == null ? '' : String(currentInput.owner), editable: true, editor: 'text', editKey: 'field:owner' },
-		{ label: 'Public Info', key: 'public_info', value: asDisplayText(currentInput.public_info), rawValue: currentInput.public_info ?? null, editable: true, editor: 'json', editKey: 'field:public_info' },
-		{ label: 'Private Info', key: 'private_info', value: asDisplayText(currentInput.private_info), rawValue: currentInput.private_info ?? null, editable: true, editor: 'json', editKey: 'field:private_info' },
-		{ label: 'File', key: 'file_name', value: currentInput.file_name || '—', rawValue: currentInput.file_name, editable: false, editKey: 'field:file_name' },
-		{ label: 'Result File', key: 'result_filename', value: currentInput.result_filename || '—', rawValue: currentInput.result_filename, editable: false, editKey: 'field:result_filename' },
-		{ label: 'Notes', key: 'notes', value: currentInput.notes || '—', rawValue: currentInput.notes ?? '', editable: true, editor: 'textarea', editKey: 'field:notes' },
-		{ label: 'Error', key: 'error_msg', value: currentInput.error_msg || '—', rawValue: currentInput.error_msg ?? '', editable: true, editor: 'textarea', editKey: 'field:error_msg' },
-		{ label: 'Created', key: 'create_time', value: formatMaybeDate(currentInput.create_time), rawValue: currentInput.create_time, editable: false, editKey: 'field:create_time' },
-		{ label: 'Updated', key: 'modify_time', value: formatMaybeDate(currentInput.modify_time), rawValue: currentInput.modify_time, editable: false, editKey: 'field:modify_time' }
+		{
+			label: 'ID',
+			key: 'id',
+			value: String(currentInput.id),
+			rawValue: currentInput.id,
+			editable: false,
+			editKey: 'field:id'
+		},
+		{
+			label: 'tenant_id',
+			key: 'tenant_id',
+			value: currentInput.tenant_id || '—',
+			rawValue: currentInput.tenant_id ?? '',
+			editable: true,
+			editor: 'user-select',
+			editKey: 'field:tenant_id',
+			options: userOptions
+		},
+		{
+			label: 'Type',
+			key: 'type',
+			value: currentInput.type || '—',
+			rawValue: currentInput.type,
+			editable: false,
+			editKey: 'field:type'
+		},
+		{
+			label: 'Name',
+			key: 'name',
+			value: currentInput.name || '—',
+			rawValue: currentInput.name,
+			editable: false,
+			editKey: 'field:name'
+		},
+		{
+			label: 'Title',
+			key: 'title',
+			value: currentInput.title || '—',
+			rawValue: currentInput.title ?? '',
+			editable: true,
+			editor: 'text',
+			editKey: 'field:title'
+		},
+		{
+			label: 'Doc No',
+			key: 'doc_no',
+			value: currentInput.doc_no || '—',
+			rawValue: currentInput.doc_no ?? '',
+			editable: true,
+			editor: 'text',
+			editKey: 'field:doc_no'
+		},
+		{
+			label: 'Source',
+			key: 'source',
+			value: currentInput.source || '—',
+			rawValue: currentInput.source ?? '',
+			editable: true,
+			editor: 'text',
+			editKey: 'field:source'
+		},
+		{
+			label: 'Published',
+			key: 'publish_date',
+			value: formatMaybeDate(currentInput.publish_date),
+			rawValue: toDateTimeLocalInput(currentInput.publish_date),
+			editable: true,
+			editor: 'datetime',
+			editKey: 'field:publish_date'
+		},
+		{
+			label: 'Authors',
+			key: 'authors',
+			value: authorsArray.length > 0 ? authorsArray.join(', ') : '—',
+			rawValue: authorsArray,
+			editable: true,
+			editor: 'array',
+			editKey: 'field:authors'
+		},
+		{
+			label: 'Owner',
+			key: 'owner',
+			value: currentInput.owner == null ? '—' : String(currentInput.owner),
+			rawValue: currentInput.owner == null ? '' : String(currentInput.owner),
+			editable: true,
+			editor: 'text',
+			editKey: 'field:owner'
+		},
+		{
+			label: 'Public Info',
+			key: 'public_info',
+			value: asDisplayText(currentInput.public_info),
+			rawValue: currentInput.public_info ?? null,
+			editable: true,
+			editor: 'json',
+			editKey: 'field:public_info'
+		},
+		{
+			label: 'Private Info',
+			key: 'private_info',
+			value: asDisplayText(currentInput.private_info),
+			rawValue: currentInput.private_info ?? null,
+			editable: true,
+			editor: 'json',
+			editKey: 'field:private_info'
+		},
+		{
+			label: 'File',
+			key: 'file_name',
+			value: currentInput.file_name || '—',
+			rawValue: currentInput.file_name,
+			editable: false,
+			editKey: 'field:file_name'
+		},
+		{
+			label: 'Result File',
+			key: 'result_filename',
+			value: currentInput.result_filename || '—',
+			rawValue: currentInput.result_filename,
+			editable: false,
+			editKey: 'field:result_filename'
+		},
+		{
+			label: 'Notes',
+			key: 'notes',
+			value: currentInput.notes || '—',
+			rawValue: currentInput.notes ?? '',
+			editable: true,
+			editor: 'textarea',
+			editKey: 'field:notes'
+		},
+		{
+			label: 'Error',
+			key: 'error_msg',
+			value: currentInput.error_msg || '—',
+			rawValue: currentInput.error_msg ?? '',
+			editable: true,
+			editor: 'textarea',
+			editKey: 'field:error_msg'
+		},
+		{
+			label: 'Created',
+			key: 'create_time',
+			value: formatMaybeDate(currentInput.create_time),
+			rawValue: currentInput.create_time,
+			editable: false,
+			editKey: 'field:create_time'
+		},
+		{
+			label: 'Updated',
+			key: 'modify_time',
+			value: formatMaybeDate(currentInput.modify_time),
+			rawValue: currentInput.modify_time,
+			editable: false,
+			editKey: 'field:modify_time'
+		}
 	];
 }
 
@@ -297,17 +454,19 @@ export function buildKbInputDocMetadataRows(currentInput) {
 				pathLike: true
 			}));
 		} catch {
-			return [{
-				label: 'doc_metadata',
-				key: 'doc_metadata',
-				value: raw,
-				rawValue: raw,
-				editor: 'text',
-				editable: true,
-				editKey: 'docmeta:doc_metadata',
-				wide: true,
-				pathLike: true
-			}];
+			return [
+				{
+					label: 'doc_metadata',
+					key: 'doc_metadata',
+					value: raw,
+					rawValue: raw,
+					editor: 'text',
+					editable: true,
+					editKey: 'docmeta:doc_metadata',
+					wide: true,
+					pathLike: true
+				}
+			];
 		}
 	}
 
@@ -493,6 +652,11 @@ export function buildKbInputUpdatePayloadForMetadataEdit(currentInput, row, draf
 			case 'owner': {
 				const trimmed = draft.trim();
 				payload.owner = trimmed === '' ? null : trimmed;
+				break;
+			}
+			case 'tenant_id': {
+				const trimmed = draft.trim();
+				payload.tenant_id = trimmed === '' ? null : trimmed;
 				break;
 			}
 			case 'public_info':

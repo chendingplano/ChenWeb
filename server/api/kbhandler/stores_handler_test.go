@@ -176,7 +176,7 @@ WHERE id = $1
 	}
 }
 
-func TestCreateKnowledgeStoreDefaultsTenantID(t *testing.T) {
+func TestCreateKnowledgeStoreDefaultsTenantIDToNull(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -197,7 +197,7 @@ INSERT INTO kb.knowledge_store (
 RETURNING id
 `)
 	mock.ExpectQuery(insertQuery).
-		WithArgs("-", nil, "Default Tenant Store", nil, "manual", sqlmock.AnyArg(), "active", nil, `{}`, `{}`).
+		WithArgs(nil, nil, "Default Tenant Store", nil, "manual", sqlmock.AnyArg(), "active", nil, `{}`, `{}`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(8)))
 
 	selectQuery := regexp.QuoteMeta(`
@@ -213,7 +213,7 @@ WHERE id = $1
 		"ks_sources", "status", "notes", "error_msg", "public_info", "private_info",
 		"create_time", "modify_time",
 	}).AddRow(
-		int64(8), "-", nil, "Default Tenant Store", nil, "manual",
+		int64(8), nil, nil, "Default Tenant Store", nil, "manual",
 		`{}`, "active", nil, nil, `{}`, `{}`,
 		time.Date(2026, 4, 25, 14, 0, 0, 0, time.UTC), time.Date(2026, 4, 25, 14, 0, 0, 0, time.UTC),
 	)

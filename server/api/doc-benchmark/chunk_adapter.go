@@ -537,6 +537,9 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 	} else {
 		return SeededInput{}, readErr
 	}
+	if docprocessing.IsTenantIDUnset(req.TenantID) {
+		docprocessing.AlarmMissingTenantIDAtInsert(ctx, "doc-benchmark.SeedInput")
+	}
 	var id int64
 	err = tx.QueryRowContext(ctx, seedInputQuery, req.TenantID, req.StoreID, "pdf", req.Title, req.ParserName, stagingMetadata, linePath, BenchmarkInputFilename, req.Status).Scan(&id)
 	if err != nil {

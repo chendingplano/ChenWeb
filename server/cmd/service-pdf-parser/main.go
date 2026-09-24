@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -75,12 +76,12 @@ func main() {
 		return
 	}
 
-	stagingDir := strings.TrimSpace(os.Getenv("DATA_STAGING_DIR"))
+	stagingDir := strings.TrimSpace(os.Getenv("UPLOAD_FILE_STAGING_DIR"))
 	backupDir := strings.TrimSpace(os.Getenv("DATA_BACKUP_DIR"))
 	homeDir := strings.TrimSpace(os.Getenv("DATA_HOME_DIR"))
 	if stagingDir == "" || backupDir == "" || homeDir == "" {
 		logger.Error("staging directories not configured",
-			"DATA_STAGING_DIR", stagingDir,
+			"UPLOAD_FILE_STAGING_DIR", stagingDir,
 			"DATA_BACKUP_DIR", backupDir,
 			"DATA_HOME_DIR", homeDir,
 		)
@@ -145,6 +146,9 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".pending") {
 			continue
 		}
 		info, err := entry.Info()
@@ -288,6 +292,7 @@ INSERT INTO kb.inputs (
     $4::jsonb,
     $5
 )`
+	docprocessing.AlarmMissingTenantIDAtInsert(ctx, "service-pdf-parser")
 	_, err = db.ExecContext(ctx, insertStmt, name, homePath, backupPath, string(status), md5Hex)
 	if err != nil {
 		return false, fmt.Errorf("insert kb.inputs failed: %w", err)

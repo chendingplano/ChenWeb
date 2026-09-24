@@ -23,6 +23,7 @@ export type KbInputRecord = {
 	title?: string;
 	doc_no?: string;
 	ks_desc?: string;
+	processing_mode?: string;
 	source?: string;
 	file_name?: string;
 	backup_filename?: string;
@@ -362,6 +363,7 @@ export type UploadKbInputsPayload = {
 	notes?: string;
 	ks_desc?: string;
 	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
+	processing_mode?: 'auto' | 'upload_only' | 'pdf_parsing';
 	ks_store_id: number;
 	tenant_id: string;
 	files: File[];
@@ -381,6 +383,7 @@ export async function uploadKbInputs(
 	form.set('parser_name', payload.parser_name);
 	form.set('ks_store_id', String(payload.ks_store_id));
 	form.set('tenant_id', payload.tenant_id);
+	form.set('processing_mode', payload.processing_mode ?? 'auto');
 	if (payload.title?.trim()) form.set('title', payload.title.trim());
 	if (payload.doc_no?.trim()) form.set('doc_no', payload.doc_no.trim());
 	if (payload.authors?.trim()) form.set('authors', payload.authors.trim());
@@ -406,6 +409,69 @@ export async function uploadKbInputs(
 		throw new Error(msg);
 	}
 	return response.json() as Promise<UploadKbInputsResponse>;
+}
+
+export type PendingFileEntry = {
+	name: string;
+	pending_name: string;
+	mod_time: string;
+};
+
+export type ListPendingFilesResponse = {
+	status: boolean;
+	files: PendingFileEntry[];
+};
+
+// Admin-only: lists files copied directly into the staging directory with a
+// `.pending` suffix, waiting to be claimed. A 401/403 here means the caller
+// isn't an admin.
+export async function listPendingFiles(): Promise<ListPendingFilesResponse> {
+	return fetchOrThrow<ListPendingFilesResponse>(
+		`${BASE}/pending-files`,
+		'Failed to list pending files'
+	);
+}
+
+export type ClaimPendingFilesPayload = {
+	filenames: string[];
+	processing_mode?: 'auto' | 'upload_only' | 'pdf_parsing';
+	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
+	ks_store_id: number;
+	tenant_id: string;
+};
+
+export type ClaimPendingFilesResult = {
+	filename: string;
+	status: boolean;
+	id?: number;
+	error_msg?: string;
+};
+
+export type ClaimPendingFilesResponse = {
+	status: boolean;
+	results: ClaimPendingFilesResult[];
+};
+
+// Admin-only: claims selected pending files, ingesting each through the same
+// insert path a browser upload uses so tenant_id is attributed correctly.
+export async function claimPendingFiles(
+	payload: ClaimPendingFilesPayload
+): Promise<ClaimPendingFilesResponse> {
+	const response = await fetch(`${BASE}/pending-files/claim`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to claim pending files (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<ClaimPendingFilesResponse>;
 }
 
 export async function checkKbInputMD5s(md5s: string[]): Promise<Set<string>> {
@@ -1011,8 +1077,9 @@ export async function updateKnowledgeStore(
 	return response.json() as Promise<KnowledgeStoreResponse>;
 }
 
-export async function deleteKbInput(id: number): Promise<{ status: boolean }> {
-	const response = await fetch(`${BASE}/inputs/${encodeURIComponent(String(id))}`, {
+export async function deleteKbInput(id: number, deleteFile = false): Promise<{ status: boolean }> {
+	const query = deleteFile ? '?delete_file=true' : '';
+	const response = await fetch(`${BASE}/inputs/${encodeURIComponent(String(id))}${query}`, {
 		method: 'DELETE',
 		credentials: 'same-origin'
 	});

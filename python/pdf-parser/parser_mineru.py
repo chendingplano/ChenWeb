@@ -135,19 +135,10 @@ class MineruParser(ParserBackend):
         # Shared mutable state for heartbeat thread (dict is GIL-safe).
         _state: dict[str, int] = {"pages_done": 0, "total": total_pages_hint}
         _stop_heartbeat = threading.Event()
-
-        def _heartbeat() -> None:
-            while not _stop_heartbeat.wait(timeout=15.0):
-                if _progress_lock.acquire(blocking=False):
-                    try:
-                        on_progress(_state["pages_done"], _state["total"])
-                    except Exception as exc:
-                        log.debug("heartbeat on_progress error: %s", exc)
-                    finally:
-                        _progress_lock.release()
-
-        heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
-        heartbeat_thread.start()
+        # Raised by on_progress when the user aborts. The heartbeat runs on a
+        # background thread, so the exception can't just propagate — it's
+        # stashed here and re-raised on the main thread once proc exits.
+        _stop_exc: list[BaseException] = []
 
         # Stream output line-by-line so the stdout/stderr pipe can never fill
         # and deadlock a long-running mineru subprocess. Keep last N lines for
@@ -159,6 +150,23 @@ class MineruParser(ParserBackend):
             text=True,
             bufsize=1,
         )
+
+        def _heartbeat() -> None:
+            while not _stop_heartbeat.wait(timeout=15.0):
+                if _progress_lock.acquire(blocking=False):
+                    try:
+                        on_progress(_state["pages_done"], _state["total"])
+                    except Exception as exc:
+                        _stop_exc.append(exc)
+                        # Kill the subprocess so the main thread's stdout read
+                        # loop unblocks on EOF instead of running to completion.
+                        proc.terminate()
+                    finally:
+                        _progress_lock.release()
+
+        heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
+        heartbeat_thread.start()
+
         tail: list[str] = []
         assert proc.stdout is not None
         try:
@@ -188,6 +196,14 @@ class MineruParser(ParserBackend):
         finally:
             _stop_heartbeat.set()
             heartbeat_thread.join(timeout=5)
+
+        if _stop_exc:
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise _stop_exc[0]
 
         rc = proc.wait()
         if rc != 0:

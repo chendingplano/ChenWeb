@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -625,14 +626,27 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 		}
 
 		srcPath := filepath.Join(stagingDir, entry.Name())
-		recordID, updated, homePath, backupPath, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, entry.Name(), srcPath)
+		recordID, updated, homePath, backupPath, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, entry.Name(), srcPath, "", inputStoreMetadata{})
 		if err != nil {
 			logger.Error("failed to insert kb.inputs row for staged file", "source", srcPath, "error", err)
 			continue
 		}
+		processingMode := "auto"
+		if updated {
+			processingMode, err = loadProcessingMode(ctx, db, recordID)
+			if err != nil {
+				logger.Error("failed to load upload processing mode", "record_id", recordID, "error", err)
+				continue
+			}
+		}
 
 		if strings.EqualFold(filepath.Ext(entry.Name()), ".zip") {
-			if err := ingestZipChildren(ctx, logger, db, homeDir, backupDir, homePath, publisher); err != nil {
+			zipMetadata, err := loadInputStoreMetadata(ctx, db, recordID)
+			if err != nil {
+				logger.Error("failed to load zip record tenant_id", "source", srcPath, "record_id", recordID, "error", err)
+				continue
+			}
+			if err := ingestZipChildren(ctx, logger, db, homeDir, backupDir, homePath, processingMode, publisher, zipMetadata); err != nil {
 				logger.Error("failed to ingest zip entries", "source", srcPath, "record_id", recordID, "home", homePath, "error", err)
 				continue
 			}
@@ -664,7 +678,7 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			continue
 		}
 
-		if publisher != nil && strings.EqualFold(fileType, "pdf") {
+		if publisher != nil && strings.EqualFold(fileType, "pdf") && processingMode != "upload_only" {
 			if err := publisher.Publish(newPDFStageEvent(recordID, fileType, homePath)); err != nil {
 				logger.Error("failed to publish stage event", "record_id", recordID, "error", err)
 			}
@@ -690,10 +704,16 @@ func newPDFStageEvent(recordID int64, fileType, homePath string) stageEvent {
 	}
 }
 
+// ingestInputFile registers one staged file as a kb.inputs row. tenantID is
+// the tenant to stamp on a freshly-inserted row (empty when there is no
+// parent record to inherit from, e.g. a bare file dropped directly into the
+// staging dir); it is ignored when an existing upload row is reused, since
+// that row's own tenant_id (set at upload time) must not be overwritten.
 func ingestInputFile(
 	ctx context.Context,
 	db *sql.DB,
-	homeDir, backupDir, stagingName, srcPath string,
+	homeDir, backupDir, stagingName, srcPath, tenantID string,
+	metadata inputStoreMetadata,
 ) (recordID int64, updated bool, homePath string, backupPath string, fileType string, err error) {
 	fileType = detectInputType(stagingName)
 
@@ -705,7 +725,7 @@ func ingestInputFile(
 		return 0, false, "", "", fileType, fmt.Errorf("backup staged file: %w", err)
 	}
 
-	recordID, updated, err = upsertStagedInputRecord(ctx, db, filepath.Base(stagingName), srcPath, fileType)
+	recordID, updated, err = upsertStagedInputRecord(ctx, db, filepath.Base(stagingName), srcPath, fileType, tenantID, metadata)
 	if err != nil {
 		return 0, false, "", backupPath, fileType, err
 	}
@@ -742,12 +762,18 @@ func decodeZipEntryFilename(entry *zip.File) string {
 	return decoded
 }
 
+// ingestZipChildren registers one kb.inputs row per file inside the zip
+// archive at zipHomePath. tenantID is the archive's own kb.inputs.tenant_id
+// (loaded by the caller via loadTenantID) -- every child record inherits it,
+// since the archive is the only attributable unit the tenant assigned.
 func ingestZipChildren(
 	ctx context.Context,
 	logger ApiTypes.JimoLogger,
 	db *sql.DB,
 	homeDir, backupDir, zipHomePath string,
+	processingMode string,
 	publisher *stageEventPublisher,
+	metadata inputStoreMetadata,
 ) error {
 	reader, err := zip.OpenReader(zipHomePath)
 	if err != nil {
@@ -784,11 +810,17 @@ func ingestZipChildren(
 			continue
 		}
 
-		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entryName), tmpFile.Name())
+		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entryName), tmpFile.Name(), metadata.TenantID.String, metadata)
 		_ = os.Remove(tmpFile.Name())
 		if err != nil {
 			logger.Error("failed to ingest zip child", "zip", zipHomePath, "entry", entryName, "error", err)
 			continue
+		}
+		if processingMode != "auto" {
+			if err := setProcessingMode(ctx, db, recordID, processingMode); err != nil {
+				logger.Error("failed to inherit zip processing mode", "zip", zipHomePath, "entry", entryName, "record_id", recordID, "processing_mode", processingMode, "error", err)
+				continue
+			}
 		}
 
 		logger.Info("zip child ingested",
@@ -799,7 +831,7 @@ func ingestZipChildren(
 			"record_id", recordID,
 			"updated_existing_row", updated,
 		)
-		if publisher != nil && strings.EqualFold(fileType, "pdf") {
+		if publisher != nil && strings.EqualFold(fileType, "pdf") && processingMode != "upload_only" {
 			if err := publisher.Publish(newPDFStageEvent(recordID, fileType, homePath)); err != nil {
 				logger.Error("failed to publish zip child stage event", "zip", zipHomePath, "entry", entryName, "record_id", recordID, "error", err)
 			}
@@ -807,6 +839,47 @@ func ingestZipChildren(
 	}
 
 	return nil
+}
+
+type inputStoreMetadata struct {
+	Provided  bool
+	TenantID  sql.NullString
+	KSStoreID sql.NullInt64
+	KSDesc    sql.NullString
+}
+
+// loadInputStoreMetadata reads the metadata of an already-inserted kb.inputs
+// row, so a zip archive's own record can pass its store identity and
+// description down to every child record it creates.
+func loadInputStoreMetadata(ctx context.Context, db *sql.DB, recordID int64) (inputStoreMetadata, error) {
+	var metadata inputStoreMetadata
+	if err := db.QueryRowContext(ctx,
+		`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`,
+		recordID,
+	).Scan(&metadata.TenantID, &metadata.KSStoreID, &metadata.KSDesc); err != nil {
+		return inputStoreMetadata{}, err
+	}
+	metadata.Provided = true
+	return metadata, nil
+}
+
+func loadProcessingMode(ctx context.Context, db *sql.DB, recordID int64) (string, error) {
+	var mode string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(NULLIF(BTRIM(processing_mode), ''), 'auto') FROM kb.inputs WHERE id = $1`,
+		recordID,
+	).Scan(&mode); err != nil {
+		return "", err
+	}
+	return strings.ToLower(strings.TrimSpace(mode)), nil
+}
+
+func setProcessingMode(ctx context.Context, db *sql.DB, recordID int64, mode string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE kb.inputs SET processing_mode = $1, modify_time = NOW() WHERE id = $2`,
+		mode, recordID,
+	)
+	return err
 }
 
 func resolveRepoPathForStagedFile(srcPath, homeDir, fileName string) (homePath string, shouldCopy bool, err error) {
@@ -846,7 +919,11 @@ func repoDirForRecord(homeDir string, recordID int64) (string, error) {
 	return filepath.Join(homeDir, "Artifacts", strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10)), nil
 }
 
-func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath, fileType string) (int64, bool, error) {
+func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath, fileType, tenantID string, metadataArgs ...inputStoreMetadata) (int64, bool, error) {
+	var metadata inputStoreMetadata
+	if len(metadataArgs) > 0 {
+		metadata = metadataArgs[0]
+	}
 	md5Hex, err := fileMD5Hex(srcPath)
 	if err != nil {
 		return 0, false, fmt.Errorf("calculate file md5 failed: %w", err)
@@ -874,25 +951,69 @@ RETURNING id`
 		return 0, false, fmt.Errorf("marshal default status failed: %w", err)
 	}
 
-	const insertStmt = `
+	insertStmt := `
 INSERT INTO kb.inputs (
     staging_filename,
     type,
     file_name,
     backup_filename,
     status,
-    md5
+    md5,
+    tenant_id
 ) VALUES (
     $1,
     $2,
     $3,
     '',
     $4::jsonb,
-    $5
+    $5,
+    $6
 )
 RETURNING id`
+	if docprocessing.IsTenantIDUnset(tenantID) {
+		docprocessing.AlarmMissingTenantIDAtInsert(ctx, "doc-service.upsertStagedInputRecord")
+	}
+	var tenantIDArg any
+	if tenantID != "" {
+		tenantIDArg = tenantID
+	}
+	args := []any{staging_filename, fileType, srcPath, string(status), md5Hex, tenantIDArg}
+	if metadata.Provided {
+		insertStmt = `
+INSERT INTO kb.inputs (
+    staging_filename,
+    type,
+    file_name,
+    backup_filename,
+    status,
+    md5,
+    tenant_id,
+    ks_store_id,
+    ks_desc
+) VALUES (
+    $1,
+    $2,
+    $3,
+    '',
+    $4::jsonb,
+    $5,
+    $6,
+    $7,
+    $8
+)
+RETURNING id`
+		var storeIDArg any
+		if metadata.KSStoreID.Valid {
+			storeIDArg = metadata.KSStoreID.Int64
+		}
+		var descArg any
+		if metadata.KSDesc.Valid {
+			descArg = metadata.KSDesc.String
+		}
+		args = append(args, storeIDArg, descArg)
+	}
 	var insertedID int64
-	if err := db.QueryRowContext(ctx, insertStmt, staging_filename, fileType, srcPath, string(status), md5Hex).Scan(&insertedID); err != nil {
+	if err := db.QueryRowContext(ctx, insertStmt, args...).Scan(&insertedID); err != nil {
 		return 0, false, fmt.Errorf("insert kb.inputs failed: %w", err)
 	}
 	return insertedID, false, nil

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 // cdmInputType marks a kb.inputs row as SemOS-authored rather than uploaded
@@ -67,8 +69,8 @@ type execQuerier interface {
 
 func createDraftTx(ctx context.Context, q execQuerier, in DraftInput) (int64, error) {
 	tenantID := in.TenantID
-	if tenantID == "" {
-		tenantID = "-"
+	if docprocessing.IsTenantIDUnset(tenantID) {
+		docprocessing.AlarmMissingTenantIDAtInsert(ctx, "cdm.CreateDraft")
 	}
 
 	var id int64

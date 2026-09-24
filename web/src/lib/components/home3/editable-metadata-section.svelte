@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { safePrettyJson } from './kb-input-metadata.js';
 
-	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json';
+	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json' | 'user-select';
+	type MetadataOption = { value: string; label: string };
 	type MetadataRow = {
 		label: string;
 		key: string;
@@ -12,6 +13,7 @@
 		editKey?: string;
 		wide?: boolean;
 		pathLike?: boolean;
+		options?: MetadataOption[];
 	};
 
 	let {
@@ -89,7 +91,7 @@
 		<div class="metadata-empty">{emptyText}</div>
 	{:else}
 		<div class="metadata-fields">
-			{#each rows as row ((row.editKey ?? row.key))}
+			{#each rows as row (row.editKey ?? row.key)}
 				<div class="metadata-row" class:metadata-row-wide={row.wide}>
 					<span class="metadata-key" class:metadata-key-path={row.pathLike} title={row.label}>
 						{row.label}
@@ -97,7 +99,14 @@
 					<div class="metadata-val-wrap">
 						{#if isEditingRow(row)}
 							<div class="metadata-editor">
-								{#if editingEditor === 'textarea' || editingEditor === 'json' || editingEditor === 'array'}
+								{#if editingEditor === 'user-select'}
+									<select class="metadata-input" bind:value={editingDraft}>
+										<option value="">— Unassigned —</option>
+										{#each row.options ?? [] as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								{:else if editingEditor === 'textarea' || editingEditor === 'json' || editingEditor === 'array'}
 									<textarea
 										class="metadata-input metadata-input-textarea"
 										rows={editingEditor === 'json' ? 8 : editingEditor === 'array' ? 5 : 4}

@@ -203,6 +203,7 @@ func prepareGoldInput(ctx context.Context, db *sql.DB, artifactRoot, typstBin st
 INSERT INTO kb.inputs (type, staging_filename, title, parser_name, result_filename, status)
 VALUES ('cdm', $1, $2, 'gold-run', 'pending', '[]'::jsonb)
 RETURNING id`
+	docprocessing.AlarmMissingTenantIDAtInsert(ctx, "doc-benchmark.prepareGoldInput")
 	if err := db.QueryRowContext(ctx, insertStmt, doc.Key, doc.Title).Scan(&recordID); err != nil {
 		return 0, "", 0, fmt.Errorf("insert kb.inputs: %w", err)
 	}

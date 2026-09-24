@@ -232,7 +232,7 @@ RETURNING id`)
 		WithArgs("doc.pdf", sqlmock.AnyArg(), srcPath).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(22)))
 
-	recordID, updated, err := upsertStagedInputRecord(context.Background(), db, "doc.pdf", srcPath, "pdf")
+	recordID, updated, err := upsertStagedInputRecord(context.Background(), db, "doc.pdf", srcPath, "pdf", "")
 	if err != nil {
 		t.Fatalf("upsertStagedInputRecord: %v", err)
 	}
@@ -287,18 +287,20 @@ INSERT INTO kb.inputs (
     file_name,
     backup_filename,
     status,
-    md5
+    md5,
+    tenant_id
 ) VALUES (
     $1,
     $2,
     $3,
     '',
     $4::jsonb,
-    $5
+    $5,
+    $6
 )
 RETURNING id`)
 	mock.ExpectQuery(insertSQL).
-		WithArgs("doc.pdf", "pdf", srcPath, "[]", sqlmock.AnyArg()).
+		WithArgs("doc.pdf", "pdf", srcPath, "[]", sqlmock.AnyArg(), nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(53)))
 
 	finalizeSQL := regexp.QuoteMeta(`
@@ -363,14 +365,16 @@ INSERT INTO kb.inputs (
     file_name,
     backup_filename,
     status,
-    md5
+    md5,
+    tenant_id
 ) VALUES (
     $1,
     $2,
     $3,
     '',
     $4::jsonb,
-    $5
+    $5,
+    $6
 )
 RETURNING id`)
 
@@ -381,6 +385,8 @@ SET file_name = $1,
     modify_time = NOW()
 WHERE id = $3`)
 
+	storeMetadataQuery := regexp.QuoteMeta(`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
+
 	parentHomePath := filepath.Join(homeDir, "Artifacts", "0", "10", "bundle.zip")
 	childHomePath := filepath.Join(homeDir, "Artifacts", "0", "11", "doc.pdf")
 
@@ -388,17 +394,44 @@ WHERE id = $3`)
 		WithArgs("bundle.zip", sqlmock.AnyArg(), srcPath).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(insertSQL).
-		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg()).
+		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg(), nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
 	mock.ExpectExec(finalizeSQL).
 		WithArgs(filepath.Join("Artifacts", "0", "10", "bundle.zip"), filepath.Join("backup", "bundle.zip"), int64(10)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
+	mock.ExpectQuery(storeMetadataQuery).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "ks_desc"}).AddRow(nil, nil, nil))
+
 	mock.ExpectQuery(updateSQL).
 		WithArgs("doc.pdf", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(insertSQL).
-		WithArgs("doc.pdf", "pdf", sqlmock.AnyArg(), "[]", sqlmock.AnyArg()).
+	childInsertSQL := regexp.QuoteMeta(`
+INSERT INTO kb.inputs (
+    staging_filename,
+    type,
+    file_name,
+    backup_filename,
+    status,
+    md5,
+    tenant_id,
+    ks_store_id,
+    ks_desc
+) VALUES (
+    $1,
+    $2,
+    $3,
+    '',
+    $4::jsonb,
+    $5,
+    $6,
+    $7,
+    $8
+)
+RETURNING id`)
+	mock.ExpectQuery(childInsertSQL).
+		WithArgs("doc.pdf", "pdf", sqlmock.AnyArg(), "[]", sqlmock.AnyArg(), nil, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
 	mock.ExpectExec(finalizeSQL).
 		WithArgs(filepath.Join("Artifacts", "0", "11", "doc.pdf"), filepath.Join("backup", "doc.pdf"), int64(11)).
@@ -416,6 +449,113 @@ WHERE id = $3`)
 	}
 	if _, err := os.Stat(srcPath); !os.IsNotExist(err) {
 		t.Fatalf("expected staging zip to be removed, stat err=%v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+// TestProcessStagingOnceZipChildInheritsParentTenantID guards against a
+// regression where a record extracted from a zip archive was inserted with
+// no tenant_id, even though the archive's own kb.inputs row (e.g. created by
+// kbhandler.UploadInputs, which requires a real tenant_id) already carries
+// one -- see devdoc 2026092403. The archive is the only attributable unit
+// the caller assigned a tenant to, so every file it contains must inherit
+// that same tenant_id.
+func TestProcessStagingOnceZipChildInheritsParentTenantID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	tmpDir := t.TempDir()
+	stagingDir := filepath.Join(tmpDir, "staging")
+	backupDir := filepath.Join(tmpDir, "backup")
+	homeDir := filepath.Join(tmpDir, "SemOS")
+	t.Setenv("DATA_BACKUP_DIR", backupDir)
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+
+	srcPath := writeTempZipFile(t, stagingDir, "bundle.zip", map[string]string{
+		"nested/doc.pdf": "%PDF-1.4\nhello",
+	})
+
+	updateSQL := regexp.QuoteMeta(`
+UPDATE kb.inputs
+SET staging_filename = $1,
+    md5 = $2,
+    modify_time = NOW()
+WHERE file_name = $3
+  AND COALESCE(backup_filename, '') = ''
+RETURNING id`)
+
+	finalizeSQL := regexp.QuoteMeta(`
+UPDATE kb.inputs
+SET file_name = $1,
+    backup_filename = $2,
+    modify_time = NOW()
+WHERE id = $3`)
+
+	storeMetadataQuery := regexp.QuoteMeta(`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
+	processingModeQuery := regexp.QuoteMeta(`SELECT COALESCE(NULLIF(BTRIM(processing_mode), ''), 'auto') FROM kb.inputs WHERE id = $1`)
+
+	// Parent zip already has a kb.inputs row (e.g. from UploadInputs, which
+	// requires a real tenant_id), so the UPDATE match path is taken, not INSERT.
+	mock.ExpectQuery(updateSQL).
+		WithArgs("bundle.zip", sqlmock.AnyArg(), srcPath).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
+	mock.ExpectExec(finalizeSQL).
+		WithArgs(filepath.Join("Artifacts", "0", "10", "bundle.zip"), filepath.Join("backup", "bundle.zip"), int64(10)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// updated=true for the matched parent row, so processStagingOnce looks up
+	// its processing_mode before deciding whether to ingest the zip's children.
+	mock.ExpectQuery(processingModeQuery).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("auto"))
+
+	mock.ExpectQuery(storeMetadataQuery).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "ks_desc"}).AddRow("tenant-xyz", int64(42), "active store desc"))
+
+	mock.ExpectQuery(updateSQL).
+		WithArgs("doc.pdf", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnError(sql.ErrNoRows)
+	childInsertSQL := regexp.QuoteMeta(`
+INSERT INTO kb.inputs (
+    staging_filename,
+    type,
+    file_name,
+    backup_filename,
+    status,
+    md5,
+    tenant_id,
+    ks_store_id,
+    ks_desc
+) VALUES (
+    $1,
+    $2,
+    $3,
+    '',
+    $4::jsonb,
+    $5,
+    $6,
+    $7,
+    $8
+)
+RETURNING id`)
+	mock.ExpectQuery(childInsertSQL).
+		WithArgs("doc.pdf", "pdf", sqlmock.AnyArg(), "[]", sqlmock.AnyArg(), "tenant-xyz", int64(42), "active store desc").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
+	mock.ExpectExec(finalizeSQL).
+		WithArgs(filepath.Join("Artifacts", "0", "11", "doc.pdf"), filepath.Join("backup", "doc.pdf"), int64(11)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil, nil); err != nil {
+		t.Fatalf("processStagingOnce: %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -470,14 +610,16 @@ INSERT INTO kb.inputs (
     file_name,
     backup_filename,
     status,
-    md5
+    md5,
+    tenant_id
 ) VALUES (
     $1,
     $2,
     $3,
     '',
     $4::jsonb,
-    $5
+    $5,
+    $6
 )
 RETURNING id`)
 
@@ -488,23 +630,52 @@ SET file_name = $1,
     modify_time = NOW()
 WHERE id = $3`)
 
+	storeMetadataQuery := regexp.QuoteMeta(`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
+
 	childHomePath := filepath.Join(homeDir, "Artifacts", "0", "11", childName)
 
 	mock.ExpectQuery(updateSQL).
 		WithArgs("bundle.zip", sqlmock.AnyArg(), srcPath).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(insertSQL).
-		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg()).
+		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg(), nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
 	mock.ExpectExec(finalizeSQL).
 		WithArgs(filepath.Join("Artifacts", "0", "10", "bundle.zip"), filepath.Join("backup", "bundle.zip"), int64(10)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
+	mock.ExpectQuery(storeMetadataQuery).
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "ks_desc"}).AddRow(nil, nil, nil))
+
 	mock.ExpectQuery(updateSQL).
 		WithArgs(childName, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(insertSQL).
-		WithArgs(childName, "pdf", sqlmock.AnyArg(), "[]", sqlmock.AnyArg()).
+	childInsertSQL := regexp.QuoteMeta(`
+INSERT INTO kb.inputs (
+    staging_filename,
+    type,
+    file_name,
+    backup_filename,
+    status,
+    md5,
+    tenant_id,
+    ks_store_id,
+    ks_desc
+) VALUES (
+    $1,
+    $2,
+    $3,
+    '',
+    $4::jsonb,
+    $5,
+    $6,
+    $7,
+    $8
+)
+RETURNING id`)
+	mock.ExpectQuery(childInsertSQL).
+		WithArgs(childName, "pdf", sqlmock.AnyArg(), "[]", sqlmock.AnyArg(), nil, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
 	mock.ExpectExec(finalizeSQL).
 		WithArgs(filepath.Join("Artifacts", "0", "11", childName), filepath.Join("backup", childName), int64(11)).
@@ -570,21 +741,23 @@ INSERT INTO kb.inputs (
     file_name,
     backup_filename,
     status,
-    md5
+    md5,
+    tenant_id
 ) VALUES (
     $1,
     $2,
     $3,
     '',
     $4::jsonb,
-    $5
+    $5,
+    $6
 )
 RETURNING id`)
 	mock.ExpectQuery(insertSQL).
-		WithArgs("doc.pdf", "pdf", srcPath, "[]", sqlmock.AnyArg()).
+		WithArgs("doc.pdf", "pdf", srcPath, "[]", sqlmock.AnyArg(), nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(33)))
 
-	recordID, updated, err := upsertStagedInputRecord(context.Background(), db, "doc.pdf", srcPath, "pdf")
+	recordID, updated, err := upsertStagedInputRecord(context.Background(), db, "doc.pdf", srcPath, "pdf", "")
 	if err != nil {
 		t.Fatalf("upsertStagedInputRecord: %v", err)
 	}
@@ -623,7 +796,7 @@ func TestRelativePathFromParentDir(t *testing.T) {
 	}
 }
 
-func TestUpsertStagedInputRecord_InsertsZipTypeWhenRequested(t *testing.T) {
+func TestUpsertStagedInputRecord_InsertsZipTypeAndTenantIDWhenRequested(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -652,21 +825,23 @@ INSERT INTO kb.inputs (
     file_name,
     backup_filename,
     status,
-    md5
+    md5,
+    tenant_id
 ) VALUES (
     $1,
     $2,
     $3,
     '',
     $4::jsonb,
-    $5
+    $5,
+    $6
 )
 RETURNING id`)
 	mock.ExpectQuery(insertSQL).
-		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg()).
+		WithArgs("bundle.zip", "zip", srcPath, "[]", sqlmock.AnyArg(), "tenant-seed").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(77)))
 
-	recordID, updated, err := upsertStagedInputRecord(context.Background(), db, "bundle.zip", srcPath, "zip")
+	recordID, updated, err := upsertStagedInputRecord(context.Background(), db, "bundle.zip", srcPath, "zip", "tenant-seed")
 	if err != nil {
 		t.Fatalf("upsertStagedInputRecord: %v", err)
 	}
@@ -704,7 +879,7 @@ RETURNING id`)
 		WithArgs("doc.pdf", sqlmock.AnyArg(), srcPath).
 		WillReturnError(fmt.Errorf("db down"))
 
-	_, _, err = upsertStagedInputRecord(context.Background(), db, "doc.pdf", srcPath, "pdf")
+	_, _, err = upsertStagedInputRecord(context.Background(), db, "doc.pdf", srcPath, "pdf", "")
 	if err == nil {
 		t.Fatalf("expected error")
 	}

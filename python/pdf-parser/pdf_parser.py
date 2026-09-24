@@ -8,7 +8,8 @@ Required env vars:
   PG_HOST, PG_PORT, PG_DB_NAME, PG_USER_NAME, PG_PASSWORD
 
 Optional env vars:
-  STAGING_DIR / PDF_STAGING_DIR   Staging directory for new PDFs
+  UPLOAD_FILE_STAGING_DIR / STAGING_DIR / PDF_STAGING_DIR
+                                  Staging directory for new PDFs
   PDF_REPO_DIR                    Base result directory
   PDF_BACKUP_DIR                  Backup directory for originals
   PDF_POLL_INTERVAL               Seconds between DB polls (default: 10)
@@ -37,12 +38,14 @@ from shared import (
     pg_connect,
     claim_candidates,
     fetch_record_by_id,
+    has_stop_requested,
     has_parse_success_or_active,
     scan_staging_once,
     find_duplicate_processed_record,
     record_parse_active,
     record_parsed_success,
     record_parsed_failure,
+    record_parsed_stopped,
     record_duplicated,
     file_md5,
     copy_file,
@@ -73,6 +76,10 @@ logging.basicConfig(
     datefmt="%Y%m%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+class ParseStopped(Exception):
+    """Raised when the user aborts the active PDF parse."""
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -109,7 +116,17 @@ def _backup_dir() -> str:
     return "/tmp/pdf-backup"
 
 def _staging_dir() -> str:
-    return _env("STAGING_DIR") or _env("PDF_STAGING_DIR") or _env("DATA_STAGING_DIR")
+    return (
+        _env("UPLOAD_FILE_STAGING_DIR")
+        or _env("STAGING_DIR")
+        or _env("PDF_STAGING_DIR")
+        or _env("DATA_STAGING_DIR")
+    )
+
+
+def should_publish_parsed_event(rec: dict) -> bool:
+    """Return false when parsing is the requested terminal stage."""
+    return str(rec.get("processing_mode") or "auto").strip().lower() != "pdf_parsing"
 
 
 def _poll_interval() -> float:
@@ -514,7 +531,18 @@ def _process_record(
     total_pages = 0
     result_path = ""
 
+    def _stop_if_requested() -> None:
+        # Unit-test callers may use a sentinel connection because the normal
+        # parse status writes are monkeypatched. Real service connections always
+        # expose cursor().
+        if not hasattr(conn, "cursor"):
+            return
+        current = fetch_record_by_id(conn, rec_id)
+        if current and has_stop_requested(current.get("status", "")):
+            raise ParseStopped()
+
     try:
+        _stop_if_requested()
         backend = get_backend(parser_name, backend_cache)
 
         # If the file came from staging, copy it to the result dir and backup
@@ -543,12 +571,14 @@ def _process_record(
         # Throttled progress callback
         def _db_progress(ms_used: int, pct: int, n_pages: int = 0) -> None:
             nonlocal raw_status
+            _stop_if_requested()
             raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct, parser_name, n_pages)
 
         throttled = make_throttled_progress(_db_progress, min_interval=3.0)
 
         log.info("(MID_2026040710) parsing record id=%s parser=%s file=%s", rec_id, parser_name, repo_pdf_path)
         result = backend.parse(repo_pdf_path, record_dir, throttled)
+        _stop_if_requested()
 
         # Font-encoding garble guard: if a mineru text-layer parse produced the
         # CJK-passthrough signature (Latin mapped into the CJK block), re-parse
@@ -567,6 +597,7 @@ def _process_record(
             try:
                 ocr_backend = _get_ocr_mineru(backend_cache)
                 ocr_result = ocr_backend.parse(repo_pdf_path, record_dir, throttled)
+                _stop_if_requested()
                 if _looks_font_garbled(ocr_result, _ocr_fallback_min_run()):
                     log.warning(
                         "(MID_2026062303) record id=%s: OCR fallback still garbled "
@@ -588,6 +619,7 @@ def _process_record(
                 )
 
         total_pages = result.get("total_pages", 0)
+        _stop_if_requested()
 
         # Write aggregated result JSON
         result_output = {
@@ -629,6 +661,18 @@ def _process_record(
             "error": "",
         }
 
+    except ParseStopped:
+        ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
+        record_parsed_stopped(conn, rec_id, raw_status, parse_start, ms_used, parser_name)
+        log.info("(MID_2026040718) parse stopped by user id=%s", rec_id)
+        return {
+            "record_id": rec_id,
+            "type": "pdf",
+            "status": "stopped",
+            "file_format": "json",
+            "result_filename": "",
+            "error": "stopped by user request",
+        }
     except Exception as exc:
         ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
         record_parsed_failure(conn, rec_id, raw_status, parse_start, ms_used, str(exc), parser_name)
@@ -851,13 +895,14 @@ async def run_jetstream() -> None:
                     # ACK before publishing: even if publish fails, the record
                     # won't be re-parsed on the next redelivery.
                     await msg.ack()
-                    try:
-                        await bus.publish_parsed(result)
-                    except Exception as pub_exc:
-                        log.error(
-                            "(MID_2026040717) publish parsed event failed id=%s: %s",
-                            rec_id, pub_exc,
-                        )
+                    if result.get("status") != "stopped" and should_publish_parsed_event(rec):
+                        try:
+                            await bus.publish_parsed(result)
+                        except Exception as pub_exc:
+                            log.error(
+                                "(MID_2026040717) publish parsed event failed id=%s: %s",
+                                rec_id, pub_exc,
+                            )
                 except Exception as exc:
                     log.error("(MID_2026040713) jetstream stage event handling failed payload=%s error=%s", payload, exc)
                     if should_drop_stage_event(exc):
@@ -926,10 +971,11 @@ def run() -> None:
                         conn, rec, backend_cache,
                         repo_dirs, backup_dir, staging_dir, default_parser,
                     )
-                    try:
-                        asyncio.run(publish_parsed_event_once(result))
-                    except Exception as exc:
-                        log.error("(MID_2026040714) failed to publish parsed event id=%s error=%s", rec["id"], exc)
+                    if result.get("status") != "stopped" and should_publish_parsed_event(rec):
+                        try:
+                            asyncio.run(publish_parsed_event_once(result))
+                        except Exception as exc:
+                            log.error("(MID_2026040714) failed to publish parsed event id=%s error=%s", rec["id"], exc)
 
         except psycopg2.Error as exc:
             log.error("(MID_2026040707) postgres error: %s — reconnecting", exc)

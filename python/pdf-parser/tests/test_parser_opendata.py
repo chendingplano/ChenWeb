@@ -47,8 +47,12 @@ class TestOpenDataParserParse:
 
             progress_calls = []
 
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0)
+            mock_proc = MagicMock()
+            mock_proc.poll.return_value = 0  # already finished, loop body never runs
+            mock_proc.wait.return_value = 0
+            mock_proc.stdout.read.return_value = ""
+
+            with patch("subprocess.Popen", return_value=mock_proc):
                 result = parser.parse(pdf_path, out_dir, lambda p, t: progress_calls.append((p, t)))
 
             assert result["engine"] == "opendata"
@@ -57,16 +61,55 @@ class TestOpenDataParserParse:
             assert progress_calls[-1] == (1, 1)
 
     def test_parse_raises_on_subprocess_failure(self):
-        import subprocess
+        parser = OpenDataParser()
+        parser._jar_path = "/fake/jar.jar"
+        parser._initialized = True
+
+        with tempfile.TemporaryDirectory() as out_dir:
+            mock_proc = MagicMock()
+            mock_proc.poll.return_value = 1
+            mock_proc.wait.return_value = 1
+            mock_proc.stdout.read.return_value = "boom"
+
+            with patch("subprocess.Popen", return_value=mock_proc):
+                try:
+                    parser.parse("/fake/test.pdf", out_dir, lambda p, t: None)
+                    assert False, "Should have raised"
+                except RuntimeError as e:
+                    assert "boom" in str(e)
+
+    def test_parse_terminates_subprocess_on_abort(self):
+        """When on_progress raises (abort requested), the subprocess is
+        terminated and the exception propagates instead of the parse
+        silently running to completion."""
+
+        class Aborted(Exception):
+            pass
 
         parser = OpenDataParser()
         parser._jar_path = "/fake/jar.jar"
         parser._initialized = True
 
         with tempfile.TemporaryDirectory() as out_dir:
-            with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "java")):
+            mock_proc = MagicMock()
+            # Still running on the loop's first check, so the loop body
+            # executes and calls on_progress, which raises.
+            mock_proc.poll.return_value = None
+            mock_proc.wait.return_value = -15
+            mock_proc.stdout.read.return_value = ""
+
+            calls = {"n": 0}
+
+            def on_progress(p, t):
+                calls["n"] += 1
+                if calls["n"] == 2:  # first call is the initial on_progress(0, 1)
+                    raise Aborted()
+
+            with patch("subprocess.Popen", return_value=mock_proc):
                 try:
-                    parser.parse("/fake/test.pdf", out_dir, lambda p, t: None)
+                    parser.parse("/fake/test.pdf", out_dir, on_progress)
                     assert False, "Should have raised"
-                except subprocess.CalledProcessError:
+                except Aborted:
                     pass
+
+            mock_proc.terminate.assert_called_once()

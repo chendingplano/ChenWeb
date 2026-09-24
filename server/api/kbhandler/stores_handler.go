@@ -206,7 +206,7 @@ func CreateKnowledgeStore(c echo.Context) error {
 	}
 
 	var (
-		tenantID    any = "-"
+		tenantID    any = nil
 		ksType      any
 		ksName      string
 		ksDesc      any

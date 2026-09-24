@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
@@ -530,12 +531,17 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	retainedFile := filepath.Join(t.TempDir(), "uploaded.pdf")
+	if err := os.WriteFile(retainedFile, []byte("keep me"), 0o600); err != nil {
+		t.Fatalf("write retained file: %v", err)
+	}
+
 	expectResolveInputTablePlural(mock)
 	mock.ExpectBegin()
 	selectQuery := regexp.QuoteMeta(`SELECT COALESCE(file_name, ''), COALESCE(backup_filename, ''), COALESCE(result_filename, '') FROM kb.inputs WHERE id = $1`)
 	mock.ExpectQuery(selectQuery).
 		WithArgs(int64(430)).
-		WillReturnRows(sqlmock.NewRows([]string{"file_name", "backup_filename", "result_filename"}).AddRow("", "", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"file_name", "backup_filename", "result_filename"}).AddRow(retainedFile, "", ""))
 
 	expectDocProcRunLogCleanup(mock, true)
 	for _, spec := range inputRelatedDeleteSpecs {
@@ -615,9 +621,68 @@ INSERT INTO kb.doc_proc_logs (
 	if !payload["status"] {
 		t.Fatalf("expected status=true")
 	}
+	if _, err := os.Stat(retainedFile); err != nil {
+		t.Fatalf("expected file to be retained by default, stat error: %v", err)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestShouldDeleteInputFilesDefaultsToFalse(t *testing.T) {
+	c, _ := newDeleteInputContext(t, "430")
+	if shouldDeleteInputFiles(c) {
+		t.Fatal("expected file deletion to be disabled by default")
+	}
+
+	c.QueryParams().Set("delete_file", "false")
+	if shouldDeleteInputFiles(c) {
+		t.Fatal("expected delete_file=false to retain files")
+	}
+}
+
+func TestShouldDeleteInputFilesWhenExplicitlyEnabled(t *testing.T) {
+	c, _ := newDeleteInputContext(t, "430")
+	c.QueryParams().Set("delete_file", "true")
+	if !shouldDeleteInputFiles(c) {
+		t.Fatal("expected delete_file=true to enable file deletion")
+	}
+
+	c.QueryParams().Set("delete_file", "TRUE")
+	if !shouldDeleteInputFiles(c) {
+		t.Fatal("expected case-insensitive true to enable file deletion")
+	}
+}
+
+func TestDeleteInputFilesResolvesRelativePathsWithSpaces(t *testing.T) {
+	dataHome := t.TempDir()
+	backupHome := t.TempDir()
+	t.Setenv("DATA_HOME_DIR", dataHome)
+	t.Setenv("DATA_BACKUP_DIR", backupHome)
+
+	dataFile := filepath.Join(dataHome, "Artifacts", "0", "656", "GBT 45821-2025.pdf")
+	backupFile := pathutil.ResolveBackupPath("Backup/GBT 45821-2025.pdf")
+	resultFile := filepath.Join(dataHome, "Artifacts", "0", "656", "GBT 45821-2025_mineru.json")
+	for _, path := range []string{dataFile, backupFile, resultFile} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte("delete me"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	deleteInputFiles(nil, inputDeleteAssets{
+		FileName:       "Artifacts/0/656/GBT 45821-2025.pdf",
+		BackupFileName: "Backup/GBT 45821-2025.pdf",
+		ResultFileName: "Artifacts/0/656/GBT 45821-2025_mineru.json",
+	})
+
+	for _, path := range []string{dataFile, backupFile, resultFile} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be deleted, stat error: %v", path, err)
+		}
 	}
 }
 

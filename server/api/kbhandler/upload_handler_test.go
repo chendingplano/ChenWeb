@@ -53,9 +53,9 @@ func buildUploadMultipartBody(t *testing.T, fields map[string]string, files map[
 
 func TestUploadInputsSuccess(t *testing.T) {
 	stagingDir := t.TempDir()
-	oldStagingDir := os.Getenv("STAGING_DIR")
-	t.Setenv("STAGING_DIR", stagingDir)
-	defer os.Setenv("STAGING_DIR", oldStagingDir)
+	oldStagingDir := os.Getenv("UPLOAD_FILE_STAGING_DIR")
+	t.Setenv("UPLOAD_FILE_STAGING_DIR", stagingDir)
+	defer os.Setenv("UPLOAD_FILE_STAGING_DIR", oldStagingDir)
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -68,12 +68,16 @@ func TestUploadInputsSuccess(t *testing.T) {
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
 	expectResolveInputTablePlural(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ks_desc FROM kb.knowledge_store WHERE id = $1`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"ks_desc"}).AddRow("active store desc"))
 	mock.ExpectBegin()
 
 	insertQuery := regexp.QuoteMeta(`INSERT INTO kb.inputs (
     tenant_id,
     ks_store_id,
     requested_pipeline,
+    processing_mode,
     type,
     title,
     doc_no,
@@ -94,15 +98,16 @@ func TestUploadInputsSuccess(t *testing.T) {
     $4,
     $5,
     $6,
-    $7::jsonb,
+    $7,
     $8::jsonb,
-    $9,
+    $9::jsonb,
     $10,
     $11,
     $12,
     $13,
     $14,
     $15,
+    $16,
     '[]'::jsonb
 )
 RETURNING id`)
@@ -111,6 +116,7 @@ RETURNING id`)
 			"tenant-alpha",
 			int64(7),
 			"narrative_default",
+			"auto",
 			"pdf",
 			"Doc Title",
 			"DOC-42",
@@ -118,7 +124,7 @@ RETURNING id`)
 			`"public text"`,
 			`"private text"`,
 			"note body",
-			"store upload desc",
+			"active store desc",
 			"docling",
 			"sample.pdf",
 			sqlmock.AnyArg(),
@@ -135,7 +141,7 @@ RETURNING id`)
 		"public_info":        "public text",
 		"private_info":       "private text",
 		"notes":              "note body",
-		"ks_desc":            "store upload desc",
+		"ks_desc":            "client supplied desc",
 		"parser_name":        "docling",
 		"ks_store_id":        "7",
 		"tenant_id":          "tenant-alpha",
@@ -170,7 +176,7 @@ RETURNING id`)
 }
 
 func TestUploadInputsRequiresKnowledgeStore(t *testing.T) {
-	t.Setenv("STAGING_DIR", t.TempDir())
+	t.Setenv("UPLOAD_FILE_STAGING_DIR", t.TempDir())
 
 	body, contentType := buildUploadMultipartBody(t, map[string]string{
 		"type":        "pdf",
@@ -189,14 +195,35 @@ func TestUploadInputsRequiresKnowledgeStore(t *testing.T) {
 	}
 }
 
-func TestUploadInputsRequiresStagingDir(t *testing.T) {
-	oldStagingDir, had := os.LookupEnv("STAGING_DIR")
-	if had {
-		defer os.Setenv("STAGING_DIR", oldStagingDir)
-	} else {
-		defer os.Unsetenv("STAGING_DIR")
+func TestUploadInputsRejectsSentinelTenantID(t *testing.T) {
+	t.Setenv("UPLOAD_FILE_STAGING_DIR", t.TempDir())
+
+	body, contentType := buildUploadMultipartBody(t, map[string]string{
+		"type":        "pdf",
+		"parser_name": "docling",
+		"tenant_id":   "-",
+		"ks_store_id": "7",
+	}, map[string]string{
+		"sample.pdf": "hello world",
+	})
+
+	c, rec := newUploadInputsContext(t, body, contentType)
+	if err := UploadInputs(c); err != nil {
+		t.Fatalf("UploadInputs returned error: %v", err)
 	}
-	_ = os.Unsetenv("STAGING_DIR")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for sentinel tenant_id \"-\", got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUploadInputsRequiresStagingDir(t *testing.T) {
+	oldStagingDir, had := os.LookupEnv("UPLOAD_FILE_STAGING_DIR")
+	if had {
+		defer os.Setenv("UPLOAD_FILE_STAGING_DIR", oldStagingDir)
+	} else {
+		defer os.Unsetenv("UPLOAD_FILE_STAGING_DIR")
+	}
+	_ = os.Unsetenv("UPLOAD_FILE_STAGING_DIR")
 
 	body, contentType := buildUploadMultipartBody(t, map[string]string{
 		"type":        "pdf",

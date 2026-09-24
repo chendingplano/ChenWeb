@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import {
 		getKbInput,
 		updateKbInput,
@@ -14,8 +15,10 @@
 		buildKbInputDocMetadataRows,
 		buildKbInputRecordMetadataRows,
 		buildKbInputUpdatePayloadForMetadataEdit,
-		getKbInputDocMetadataValue
+		getKbInputDocMetadataValue,
+		buildUserSelectOptions
 	} from './kb-input-metadata.js';
+	import { listManagedUsers, type ManagedUser } from '$lib/services/userManagementService';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -69,7 +72,8 @@
 	let pdfNumPages = $state(0);
 	let pdfZoom = $state(0.5);
 
-	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json';
+	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json' | 'user-select';
+	type MetadataOption = { value: string; label: string };
 	type RecordMetaRow = {
 		label: string;
 		key: string;
@@ -80,6 +84,7 @@
 		editKey?: string;
 		wide?: boolean;
 		pathLike?: boolean;
+		options?: MetadataOption[];
 	};
 	type DocMetaRow = {
 		label: string;
@@ -91,6 +96,7 @@
 		editKey?: string;
 		wide?: boolean;
 		pathLike?: boolean;
+		options?: MetadataOption[];
 	};
 
 	let editingFieldKey = $state<string | null>(null);
@@ -98,6 +104,8 @@
 	let editingDraft = $state('');
 	let editingError = $state('');
 	let editingSaving = $state(false);
+	let userOptions = $state<MetadataOption[]>([]);
+	let userLoadError = $state('');
 
 	const docTypeOptions = [
 		'all',
@@ -109,7 +117,7 @@
 		'json',
 		'xml',
 		'markdown',
-		'typst',
+		'typst'
 	];
 	const procStatusOptions = ['all', 'success', 'fail'];
 
@@ -312,9 +320,37 @@
 		return d.toISOString();
 	}
 
-	let recordMetaRows = $derived.by(() => buildKbInputRecordMetadataRows(currentInput));
+	let recordMetaRows = $derived.by(() => buildKbInputRecordMetadataRows(currentInput, userOptions));
 
 	let docMetadataRows = $derived.by(() => buildKbInputDocMetadataRows(currentInput));
+
+	function userDisplayName(user: ManagedUser): string {
+		const fullName = [user.first_name, user.last_name]
+			.map((part) => part?.trim())
+			.filter(Boolean)
+			.join(' ');
+		return fullName || user.name?.trim() || user.email?.trim() || user.id;
+	}
+
+	async function loadUsers() {
+		userLoadError = '';
+		try {
+			const result = await listManagedUsers();
+			userOptions = buildUserSelectOptions(
+				result.users.map((user) => ({
+					id: user.id,
+					name: userDisplayName(user),
+					email: user.email
+				}))
+			).sort((a, b) => a.label.localeCompare(b.label));
+		} catch (error) {
+			userLoadError = error instanceof Error ? error.message : 'Failed to load users.';
+		}
+	}
+
+	onMount(() => {
+		void loadUsers();
+	});
 
 	let pagesGrouped = $derived.by(() => {
 		const map = new Map<number, RawLine[]>();
@@ -478,7 +514,11 @@
 		};
 	}
 
-	async function saveInputMetadataRow(row: RecordMetaRow | DocMetaRow, draft: string, editor: EditorKind) {
+	async function saveInputMetadataRow(
+		row: RecordMetaRow | DocMetaRow,
+		draft: string,
+		editor: EditorKind
+	) {
 		if (!currentInput) return;
 		const payload = buildKbInputUpdatePayloadForMetadataEdit(currentInput, row, draft, editor);
 		const updated = await updateKbInput(currentInput.id, payload);
@@ -507,7 +547,11 @@
 
 	function startFieldEdit(fieldKey: string, editor: EditorKind | string, rawValue: unknown) {
 		const normalizedEditor: EditorKind =
-			editor === 'text' || editor === 'textarea' || editor === 'datetime' || editor === 'array' || editor === 'json'
+			editor === 'text' ||
+			editor === 'textarea' ||
+			editor === 'datetime' ||
+			editor === 'array' ||
+			editor === 'json'
 				? editor
 				: 'text';
 		editingFieldKey = fieldKey;
@@ -699,7 +743,6 @@
 			editingSaving = false;
 		}
 	}
-
 </script>
 
 <div
@@ -877,6 +920,9 @@
 										canEdit={true}
 										onSave={saveInputMetadataRow}
 									/>
+									{#if userLoadError}
+										<div style="font-size:11px; color:var(--crimson);">{userLoadError}</div>
+									{/if}
 
 									<EditableMetadataSection
 										title="Doc Metadata"
@@ -1407,6 +1453,4 @@
 			background: var(--crimson-faint);
 		}
 	}
-
-
 </style>

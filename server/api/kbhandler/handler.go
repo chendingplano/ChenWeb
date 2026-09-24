@@ -36,6 +36,7 @@ type inputRecord struct {
 	Title             *string                    `json:"title,omitempty"`
 	DocNo             *string                    `json:"doc_no,omitempty"`
 	KSDesc            *string                    `json:"ks_desc,omitempty"`
+	ProcessingMode    *string                    `json:"processing_mode,omitempty"`
 	Source            *string                    `json:"source,omitempty"`
 	FileName          *string                    `json:"file_name,omitempty"`
 	BackupFileName    *string                    `json:"backup_filename,omitempty"`
@@ -417,6 +418,7 @@ SELECT
     i.title,
     i.doc_no,
     i.ks_desc,
+    i.processing_mode,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -452,14 +454,15 @@ FROM %s i
 	out := make([]inputRecord, 0)
 	for rows.Next() {
 		var (
-			record              inputRecord
-			statusBytes         []byte
-			publicInfoBytes     []byte
-			privateInfoBytes    []byte
-			publishDate         sql.NullTime
-			publicInfoNullable  sql.NullString
-			privateInfoNullable sql.NullString
-			docMetadataNullable sql.NullString
+			record                 inputRecord
+			statusBytes            []byte
+			publicInfoBytes        []byte
+			privateInfoBytes       []byte
+			publishDate            sql.NullTime
+			publicInfoNullable     sql.NullString
+			privateInfoNullable    sql.NullString
+			docMetadataNullable    sql.NullString
+			processingModeNullable sql.NullString
 		)
 
 		if err := rows.Scan(
@@ -472,6 +475,7 @@ FROM %s i
 			&record.Title,
 			&record.DocNo,
 			&record.KSDesc,
+			&processingModeNullable,
 			&record.Source,
 			&record.FileName,
 			&record.BackupFileName,
@@ -494,6 +498,9 @@ FROM %s i
 		if publishDate.Valid {
 			ts := publishDate.Time
 			record.PublishDate = &ts
+		}
+		if processingModeNullable.Valid {
+			record.ProcessingMode = &processingModeNullable.String
 		}
 
 		record.Status = json.RawMessage(statusBytes)

@@ -20,7 +20,12 @@
 		listKnowledgeStores,
 		updateKnowledgeStore
 	} from '$lib/services/kbService';
+	import { listManagedUsers } from '$lib/services/userManagementService';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
+	import {
+		buildKnowledgeStoreUserOptions,
+		type KnowledgeStoreUserOption
+	} from './knowledge-store-user-options.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -36,6 +41,7 @@
 	let editingStore = $state<KnowledgeStoreRecord | null>(null);
 
 	let formName = $state('');
+	let formTenantId = $state('');
 	let formType = $state('');
 	let formDescription = $state('');
 	let formSyncMode = $state<'auto' | 'manual'>('manual');
@@ -47,6 +53,8 @@
 	let draftCardStylePreset = $state<CardStylePreset>('neon');
 	let draftCardBackgroundColor = $state('#7c4dff');
 	let browserReady = $state(false);
+	let userOptions = $state<KnowledgeStoreUserOption[]>([]);
+	let userLoadError = $state('');
 
 	let pageBg = $derived(darkMode ? '#111827' : '#f5efe4');
 	let shellBg = $derived(darkMode ? '#161f2b' : '#fcf8f2');
@@ -73,7 +81,8 @@
 			: 'linear-gradient(180deg, rgba(215, 222, 232, 0.55), rgba(215, 222, 232, 0.28))'
 	);
 
-	const emptyText = 'No active knowledge store selected yet. Click a card to make it the active knowledge store for this page.';
+	const emptyText =
+		'No active knowledge store selected yet. Click a card to make it the active knowledge store for this page.';
 	const CARD_STYLE_STORAGE_KEY = 'knowledge-store-card-style';
 	const CARD_COLOR_STORAGE_KEY = 'knowledge-store-card-bg-color';
 
@@ -139,6 +148,7 @@
 		dialogError = '';
 		editingStore = null;
 		formName = '';
+		formTenantId = '';
 		formType = '';
 		formDescription = '';
 		formSyncMode = 'manual';
@@ -152,10 +162,11 @@
 		dialogError = '';
 		editingStore = store;
 		formName = store.ks_name ?? '';
+		formTenantId = store.tenant_id ?? '';
 		formType = store.ks_type ?? '';
 		formDescription = store.ks_desc ?? '';
 		formSyncMode = (store.ks_sync_mode === 'auto' ? 'auto' : 'manual') as 'auto' | 'manual';
-		formStatus = ((store.status as 'active' | 'suspended' | 'inactive') || 'active');
+		formStatus = (store.status as 'active' | 'suspended' | 'inactive') || 'active';
 		formSources = normalizeSources(store.ks_sources).join('\n');
 		formNotes = store.notes ?? '';
 	}
@@ -212,6 +223,7 @@
 	function buildPayload(): CreateKnowledgeStorePayload | UpdateKnowledgeStorePayload {
 		return {
 			ks_name: formName.trim(),
+			tenant_id: formTenantId.trim() || null,
 			ks_type: formType.trim() || null,
 			ks_desc: formDescription.trim() || null,
 			ks_sync_mode: formSyncMode,
@@ -219,6 +231,16 @@
 			status: formStatus,
 			notes: formNotes.trim() || null
 		};
+	}
+
+	async function loadUsers() {
+		userLoadError = '';
+		try {
+			const result = await listManagedUsers();
+			userOptions = buildKnowledgeStoreUserOptions(result.users);
+		} catch (err) {
+			userLoadError = err instanceof Error ? err.message : 'Failed to load users';
+		}
 	}
 
 	async function loadStores() {
@@ -311,17 +333,23 @@
 			cardBackgroundColor = storedColor;
 			draftCardBackgroundColor = storedColor;
 		}
-		loadStores();
+		void loadStores();
+		void loadUsers();
 	});
 </script>
 
-<div class="knowledge-store-view" style="--page-bg:{pageBg}; --shell-bg:{shellBg}; --card-bg:{cardBg}; --card-raised:{cardBgRaised}; --border:{borderColor}; --border-soft:{borderSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --accent:{accent}; --accent-soft:{accentSoft}; --success-soft:{successSoft}; --danger:{danger}; --danger-soft:{dangerSoft}; --user-card-color:{cardBackgroundColor}; --neon-slab:{neonSlab}; --neon-slab-soft:{neonSlabSoft}; --neon-slab-raised:{neonSlabRaised}; --neon-slab-raised-soft:{neonSlabRaisedSoft}; --neon-pill-text:{neonPillText}; --source-panel-bg:{sourcePanelBg};">
+<div
+	class="knowledge-store-view"
+	style="--page-bg:{pageBg}; --shell-bg:{shellBg}; --card-bg:{cardBg}; --card-raised:{cardBgRaised}; --border:{borderColor}; --border-soft:{borderSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --accent:{accent}; --accent-soft:{accentSoft}; --success-soft:{successSoft}; --danger:{danger}; --danger-soft:{dangerSoft}; --user-card-color:{cardBackgroundColor}; --neon-slab:{neonSlab}; --neon-slab-soft:{neonSlabSoft}; --neon-slab-raised:{neonSlabRaised}; --neon-slab-raised-soft:{neonSlabRaisedSoft}; --neon-pill-text:{neonPillText}; --source-panel-bg:{sourcePanelBg};"
+>
 	<section class="hero-shell">
 		<div class="hero-copy">
 			<div class="eyebrow">Knowledge Stores</div>
 			<h2>Choose a Knowledge Store to Explore</h2>
 			<p>
-				This page is the control surface for what the rest of the Knowledge System operates on. Cards are selection-first, but they also expose the configuration you need to edit with confidence.
+				This page is the control surface for what the rest of the Knowledge System operates on.
+				Cards are selection-first, but they also expose the configuration you need to edit with
+				confidence.
 			</p>
 			<div class="hero-active-strip">
 				<div class="active-banner-icon">
@@ -334,11 +362,15 @@
 				<div class="active-banner-copy">
 					<div class="active-banner-label">Active Knowledge Store</div>
 					<div class="active-banner-title">
-						{knowledgeStoreState.activeStore ? knowledgeStoreState.activeStore.ks_name : 'Nothing selected'}
+						{knowledgeStoreState.activeStore
+							? knowledgeStoreState.activeStore.ks_name
+							: 'Nothing selected'}
 					</div>
 					<div class="active-banner-text">
 						{#if knowledgeStoreState.activeStore}
-							<span class="mono">{knowledgeStoreState.activeStore.ks_name}</span> is currently selected. Most sections in <span class="mono">/home3/knowledge</span> should assume this store.
+							<span class="mono">{knowledgeStoreState.activeStore.ks_name}</span> is currently
+							selected. Most sections in <span class="mono">/home3/knowledge</span> should assume this
+							store.
 						{:else}
 							{emptyText}
 						{/if}
@@ -381,7 +413,9 @@
 		<div class="state-panel">
 			<div class="state-glyph">◎</div>
 			<div class="state-title">No knowledge stores yet</div>
-			<div class="state-copy">Create the first store to define what this knowledge workspace should contain.</div>
+			<div class="state-copy">
+				Create the first store to define what this knowledge workspace should contain.
+			</div>
 			<button class="add-button" type="button" onclick={openCreateDialog}>
 				<PlusIcon class="h-4 w-4" />
 				Create First Store
@@ -418,7 +452,8 @@
 					</div>
 
 					<p class="store-description">
-						{store.ks_desc?.trim() || 'No description yet. Use Modify to explain the scope and intended contents of this store.'}
+						{store.ks_desc?.trim() ||
+							'No description yet. Use Modify to explain the scope and intended contents of this store.'}
 					</p>
 
 					<div class="badge-row">
@@ -441,7 +476,9 @@
 								{/each}
 							</ul>
 						{:else}
-							<div class="source-empty">Add directories, URLs, or tables to give this store a knowledge scope.</div>
+							<div class="source-empty">
+								Add directories, URLs, or tables to give this store a knowledge scope.
+							</div>
 						{/if}
 					</div>
 
@@ -508,7 +545,8 @@
 						<h3>Remove <span class="mono">{editingStore?.ks_name}</span>?</h3>
 						<p>
 							{#if editingStore && knowledgeStoreState.activeStoreId === editingStore.id}
-								This store is currently active. Deleting it will clear the active knowledge store for this page.
+								This store is currently active. Deleting it will clear the active knowledge store
+								for this page.
 							{:else}
 								This action removes the knowledge store from the management catalog.
 							{/if}
@@ -527,7 +565,10 @@
 					<div class="dialog-header">
 						<div class="dialog-eyebrow">Card Style</div>
 						<h3>Pick the card look for your knowledge stores</h3>
-						<p>Choose one of the three presets, then tune the background color. Your selection is remembered on this browser.</p>
+						<p>
+							Choose one of the three presets, then tune the background color. Your selection is
+							remembered on this browser.
+						</p>
 					</div>
 
 					<div class="style-grid">
@@ -556,13 +597,15 @@
 							<input
 								bind:value={draftCardBackgroundColor}
 								type="color"
-								oninput={(event) => handleDraftCardColorChange((event.currentTarget as HTMLInputElement).value)}
+								oninput={(event) =>
+									handleDraftCardColorChange((event.currentTarget as HTMLInputElement).value)}
 							/>
 							<input
 								bind:value={draftCardBackgroundColor}
 								type="text"
 								pattern="^#[0-9a-fA-F]{6}$"
-								onchange={(event) => handleDraftCardColorChange((event.currentTarget as HTMLInputElement).value)}
+								onchange={(event) =>
+									handleDraftCardColorChange((event.currentTarget as HTMLInputElement).value)}
 							/>
 						</div>
 					</div>
@@ -573,15 +616,40 @@
 					</div>
 				{:else}
 					<div class="dialog-header">
-						<div class="dialog-eyebrow">{dialogMode === 'create' ? 'Create Knowledge Store' : 'Modify Knowledge Store'}</div>
-						<h3>{dialogMode === 'create' ? 'Add a new knowledge store' : `Edit ${editingStore?.ks_name}`}</h3>
-						<p>Describe what this store contains first, then layer on status and sync behavior as supporting details.</p>
+						<div class="dialog-eyebrow">
+							{dialogMode === 'create' ? 'Create Knowledge Store' : 'Modify Knowledge Store'}
+						</div>
+						<h3>
+							{dialogMode === 'create'
+								? 'Add a new knowledge store'
+								: `Edit ${editingStore?.ks_name}`}
+						</h3>
+						<p>
+							Describe what this store contains first, then layer on status and sync behavior as
+							supporting details.
+						</p>
 					</div>
 
 					<div class="dialog-grid">
 						<label class="field field-wide">
 							<span>Name</span>
-							<input bind:value={formName} type="text" placeholder="Semiconductor Standards Library" />
+							<input
+								bind:value={formName}
+								type="text"
+								placeholder="Semiconductor Standards Library"
+							/>
+						</label>
+						<label class="field field-wide">
+							<span>tenant_id (user)</span>
+							<select bind:value={formTenantId} disabled={userOptions.length === 0}>
+								<option value="">— Unassigned —</option>
+								{#each userOptions as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
+							</select>
+							{#if userLoadError}
+								<small class="field-error">{userLoadError}</small>
+							{/if}
 						</label>
 						<label class="field">
 							<span>Type</span>
@@ -596,11 +664,19 @@
 						</label>
 						<label class="field field-wide">
 							<span>Description</span>
-							<textarea bind:value={formDescription} rows="3" placeholder="What does this store cover, and why would someone choose it as the active store?"></textarea>
+							<textarea
+								bind:value={formDescription}
+								rows="3"
+								placeholder="What does this store cover, and why would someone choose it as the active store?"
+							></textarea>
 						</label>
 						<label class="field field-wide">
 							<span>Sources</span>
-							<textarea bind:value={formSources} rows="5" placeholder="/data/specs&#10;https://example.com/reference&#10;kb.table_name"></textarea>
+							<textarea
+								bind:value={formSources}
+								rows="5"
+								placeholder="/data/specs&#10;https://example.com/reference&#10;kb.table_name"
+							></textarea>
 						</label>
 						<label class="field">
 							<span>Status</span>
@@ -612,7 +688,11 @@
 						</label>
 						<label class="field field-wide">
 							<span>Notes</span>
-							<textarea bind:value={formNotes} rows="3" placeholder="Optional operational notes or handoff context"></textarea>
+							<textarea
+								bind:value={formNotes}
+								rows="3"
+								placeholder="Optional operational notes or handoff context"
+							></textarea>
 						</label>
 					</div>
 
@@ -865,8 +945,7 @@
 		cursor: pointer;
 		background:
 			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
-			linear-gradient(135deg, rgba(89, 159, 255, 0.10), transparent 62%),
-			var(--card-bg);
+			linear-gradient(135deg, rgba(89, 159, 255, 0.1), transparent 62%), var(--card-bg);
 		transition:
 			transform 160ms ease,
 			border-color 160ms ease,
@@ -876,22 +955,32 @@
 
 	.store-card.style-blush {
 		background:
-			linear-gradient(180deg, color-mix(in srgb, var(--user-card-color) 56%, white 34%), rgba(255, 255, 255, 0.02) 42%),
-			linear-gradient(135deg, rgba(255, 244, 214, 0.16), transparent 70%),
-			var(--card-bg);
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--user-card-color) 56%, white 34%),
+				rgba(255, 255, 255, 0.02) 42%
+			),
+			linear-gradient(135deg, rgba(255, 244, 214, 0.16), transparent 70%), var(--card-bg);
 	}
 
 	.store-card.style-blush:hover,
 	.store-card.style-blush.selected {
 		background:
-			linear-gradient(180deg, color-mix(in srgb, var(--user-card-color) 62%, white 30%), rgba(255, 255, 255, 0.04) 40%),
-			linear-gradient(135deg, rgba(255, 244, 214, 0.2), transparent 68%),
-			var(--card-raised);
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--user-card-color) 62%, white 30%),
+				rgba(255, 255, 255, 0.04) 40%
+			),
+			linear-gradient(135deg, rgba(255, 244, 214, 0.2), transparent 68%), var(--card-raised);
 	}
 
 	.store-card.style-graphite {
 		background:
-			radial-gradient(circle at top left, color-mix(in srgb, var(--user-card-color) 26%, white 10%), transparent 42%),
+			radial-gradient(
+				circle at top left,
+				color-mix(in srgb, var(--user-card-color) 26%, white 10%),
+				transparent 42%
+			),
 			linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
 			color-mix(in srgb, var(--user-card-color) 20%, var(--card-bg) 80%);
 		border-color: color-mix(in srgb, white 18%, var(--border));
@@ -900,15 +989,17 @@
 	.store-card.style-graphite:hover,
 	.store-card.style-graphite.selected {
 		background:
-			radial-gradient(circle at top left, color-mix(in srgb, var(--user-card-color) 32%, white 12%), transparent 42%),
+			radial-gradient(
+				circle at top left,
+				color-mix(in srgb, var(--user-card-color) 32%, white 12%),
+				transparent 42%
+			),
 			linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
 			color-mix(in srgb, var(--user-card-color) 26%, var(--card-raised) 74%);
 	}
 
 	.store-card.style-neon {
-		background:
-			linear-gradient(180deg, var(--neon-slab), var(--neon-slab-soft)),
-			var(--card-bg);
+		background: linear-gradient(180deg, var(--neon-slab), var(--neon-slab-soft)), var(--card-bg);
 		box-shadow:
 			0 0 0 1px color-mix(in srgb, var(--user-card-color) 75%, #39d0ff 25%),
 			0 0 34px color-mix(in srgb, var(--user-card-color) 48%, transparent),

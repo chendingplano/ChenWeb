@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"context"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -40,6 +42,12 @@ var allowedUploadTypes = map[string]struct{}{
 	"typst":    {},
 }
 
+var allowedProcessingModes = map[string]struct{}{
+	"auto":        {},
+	"upload_only": {},
+	"pdf_parsing": {},
+}
+
 type uploadInputsResponse struct {
 	Status bool    `json:"status"`
 	Count  int     `json:"count"`
@@ -52,11 +60,11 @@ func UploadInputs(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	stagingDir := strings.TrimSpace(os.Getenv("STAGING_DIR"))
+	stagingDir := strings.TrimSpace(os.Getenv("UPLOAD_FILE_STAGING_DIR"))
 	if stagingDir == "" {
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
-			ErrorMsg: "STAGING_DIR is not configured (CWB_KB_U_010)",
+			ErrorMsg: "UPLOAD_FILE_STAGING_DIR is not configured (CWB_KB_U_010)",
 		})
 	}
 
@@ -85,7 +93,7 @@ func UploadInputs(c echo.Context) error {
 	}
 
 	tenantID := strings.TrimSpace(c.FormValue("tenant_id"))
-	if tenantID == "" {
+	if tenantID == "" || tenantID == "-" {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
 			ErrorMsg: "tenant_id is required (CWB_KB_U_014)",
@@ -126,6 +134,18 @@ func UploadInputs(c echo.Context) error {
 		})
 	}
 
+	var activeStoreDesc sql.NullString
+	if err := db.QueryRow(
+		`SELECT ks_desc FROM kb.knowledge_store WHERE id = $1`,
+		ksStoreID,
+	).Scan(&activeStoreDesc); err != nil {
+		logger.Error("resolve active knowledge store failed", "ks_store_id", ksStoreID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to resolve active knowledge store (CWB_KB_U_026)",
+		})
+	}
+
 	title := normalizeOptionalString(c.FormValue("title"))
 	docNo := normalizeOptionalString(c.FormValue("doc_no"))
 	authors := normalizeOptionalString(c.FormValue("authors"))
@@ -144,8 +164,18 @@ func UploadInputs(c echo.Context) error {
 		})
 	}
 	notes := normalizeOptionalString(c.FormValue("notes"))
-	ksDesc := normalizeOptionalString(c.FormValue("ks_desc"))
+	var ksDesc *string
+	if activeStoreDesc.Valid {
+		ksDesc = normalizeOptionalString(activeStoreDesc.String)
+	}
 	requestedPipeline := normalizeOptionalString(c.FormValue("requested_pipeline"))
+	processingMode := strings.ToLower(strings.TrimSpace(c.FormValue("processing_mode")))
+	if processingMode == "" {
+		processingMode = "auto"
+	}
+	if _, ok := allowedProcessingModes[processingMode]; !ok {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid processing_mode (CWB_KB_U_025)"})
+	}
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -192,6 +222,7 @@ func UploadInputs(c echo.Context) error {
 				Notes:             notes,
 				KSDesc:            ksDesc,
 				RequestedPipeline: requestedPipeline,
+				ProcessingMode:    processingMode,
 				ParserName:        parserName,
 				StagingName:       stageName,
 				StagingAbsPath:    destPath,
@@ -237,6 +268,7 @@ type uploadedInputInsert struct {
 	Notes             *string
 	KSDesc            *string
 	RequestedPipeline *string
+	ProcessingMode    string
 	ParserName        string
 	StagingName       string
 	StagingAbsPath    string
@@ -244,11 +276,16 @@ type uploadedInputInsert struct {
 }
 
 func insertUploadedInputRecord(tx *sql.Tx, inputTable string, req uploadedInputInsert) (int64, error) {
+	if docprocessing.IsTenantIDUnset(req.TenantID) {
+		docprocessing.AlarmMissingTenantIDAtInsert(context.Background(), "kbhandler.UploadInputs")
+	}
+
 	query := fmt.Sprintf(`
 INSERT INTO %s (
     tenant_id,
     ks_store_id,
     requested_pipeline,
+    processing_mode,
     type,
     title,
     doc_no,
@@ -269,15 +306,16 @@ INSERT INTO %s (
     $4,
     $5,
     $6,
-    $7::jsonb,
+    $7,
     $8::jsonb,
-    $9,
+    $9::jsonb,
     $10,
     $11,
     $12,
     $13,
     $14,
     $15,
+    $16,
     '[]'::jsonb
 )
 RETURNING id`, inputTable)
@@ -288,6 +326,7 @@ RETURNING id`, inputTable)
 		req.TenantID,
 		req.KSStoreID,
 		req.RequestedPipeline,
+		req.ProcessingMode,
 		req.Type,
 		req.Title,
 		req.DocNo,

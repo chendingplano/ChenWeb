@@ -278,6 +278,7 @@ SELECT
     i.title,
     i.doc_no,
     i.ks_desc,
+    i.processing_mode,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -296,12 +297,12 @@ SELECT
 FROM kb.inputs i
  WHERE LOWER(i.type) = LOWER($1) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $2 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $3 OFFSET $4`)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
+		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
-		int64(101), "Report A", "mineru", "pdf", "tenant-alpha", int64(7), "Annual Report", nil, "Store desc", "upload", "/tmp/report-a.pdf",
+		int64(101), "Report A", "mineru", "pdf", "tenant-alpha", int64(7), "Annual Report", nil, "Store desc", "auto", "upload", "/tmp/report-a.pdf",
 		"/backup/report-a.pdf", "/result/report-a.json", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[
 			{"operation":"parsing","status":"success"},
@@ -351,6 +352,9 @@ FROM kb.inputs i
 	}
 	if payload.Results[0].ID != 101 {
 		t.Fatalf("expected result id=101, got %d", payload.Results[0].ID)
+	}
+	if got, want := payload.Results[0].ProcessingMode, "auto"; got == nil || *got != want {
+		t.Fatalf("processing_mode=%v want=%q", got, want)
 	}
 	if payload.Results[0].DocProcessingPlan == nil {
 		t.Fatal("expected doc_processing_plan to be populated")
@@ -456,6 +460,7 @@ func TestListInputsDataQueryFailure(t *testing.T) {
     i.title,
     i.doc_no,
     i.ks_desc,
+    i.processing_mode,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -508,7 +513,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(500, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
+			"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
 			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 			"notes", "error_msg",
@@ -601,6 +606,7 @@ func TestListInputsExtendedQueryParams(t *testing.T) {
     i.title,
     i.doc_no,
     i.ks_desc,
+    i.processing_mode,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -622,12 +628,12 @@ FROM kb.inputs i
 				WHERE ps.record_id = i.id AND ps.processor = kb.canonical_op($8) AND ps.proc_status = LOWER($9)
 			) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $14 OFFSET $15`)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
+		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
-		int64(84), "Input #84", "mineru", "pdf", "tenant-alpha", int64(7), "Title", "GB/T 123", "Store desc", "upload", "/tmp/std.pdf",
+		int64(84), "Input #84", "mineru", "pdf", "tenant-alpha", int64(7), "Title", "GB/T 123", "Store desc", "pdf_parsing", "upload", "/tmp/std.pdf",
 		"/backup/std.pdf", "/result/std.json", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[{"operation":"extract_metadata","proc_status":"success"}]`, time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC), time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",

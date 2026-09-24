@@ -16,6 +16,7 @@ from pdf_parser import (
     _repo_dirs,
     _process_record,
     _resolve_input_file,
+    should_publish_parsed_event,
 )
 
 
@@ -48,6 +49,12 @@ class TestConfig:
     def test_repo_dirs_use_data_home_dir_directly(self, monkeypatch):
         monkeypatch.setenv("DATA_HOME_DIR", "/Users/cding/Apps/SemOS")
         assert _repo_dirs() == ["/Users/cding/Apps/SemOS"]
+
+    def test_processing_mode_controls_parsed_event(self):
+        assert should_publish_parsed_event({}) is True
+        assert should_publish_parsed_event({"processing_mode": "auto"}) is True
+        assert should_publish_parsed_event({"processing_mode": "pdf_parsing"}) is False
+        assert should_publish_parsed_event({"processing_mode": "upload_only"}) is True
 
 
 class TestJetStreamStreamRecovery:
