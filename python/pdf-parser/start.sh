@@ -1,1 +1,1 @@
-PYTHONPATH=. caffeinate -i -s mise ocr-service-start-sync
+PYTHONPATH=. mise ocr-service-start-sync

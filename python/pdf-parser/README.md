@@ -53,9 +53,7 @@ uv pip install -e ".[docling,paddle]"
 
 ```bash
 # Foreground (from ChenWeb/)
-caffeinate -i -s mise ocr-service-start-sync
-
-`caffeinate` applies to macOS only. `-i` prevents idle sleep, `-s` prevents system sleep on AC power.
+mise ocr-service-start-sync
 
 # Background (from ChenWeb/)
 mise ocr-service-start
@@ -66,6 +64,18 @@ mise ocr-service-status
 cd ChenWeb/python/pdf-parser
 PYTHONPATH=. .venv/bin/python pdf_parser.py
 ```
+
+The service does **not** keep the Mac awake. If a long batch must run while you are
+away, keep the Mac awake from the workspace root (macOS only):
+
+```bash
+mise start caffeinate   # before the batch
+mise check caffeinate   # is it running?
+mise stop caffeinate    # afterwards, so the Mac can sleep again
+```
+
+These tasks live in `Workspace/mise.toml`; no ChenWeb module starts or stops
+`caffeinate` itself.
 
 ## Environment Variables
 
