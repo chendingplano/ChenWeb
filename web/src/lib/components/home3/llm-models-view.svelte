@@ -30,6 +30,7 @@
 	host: 'cloud',
 	model_type: 'llm',
 	model_name: '',
+	dimension: 0,
 		base_url: '',
 		timeout_sec: 120,
 		thinking_type: '',
@@ -193,6 +194,10 @@
 					<span>Model Type</span>
 					<input bind:value={draft.model_type} placeholder="llm" />
 				</label>
+				<label>
+					<span>Embedding Dimension</span>
+					<input type="number" bind:value={draft.dimension} min="0" step="1" />
+				</label>
 			</div>
 			<div class="row two">
 				<label>
@@ -329,6 +334,10 @@
 												<label>
 													<span>Model Type</span>
 													<input bind:value={editDraft.model_type} placeholder="llm" />
+												</label>
+												<label>
+													<span>Embedding Dimension</span>
+													<input type="number" bind:value={editDraft.dimension} min="0" step="1" />
 												</label>
 											</div>
 											<div class="row two">

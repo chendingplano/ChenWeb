@@ -22,6 +22,7 @@
 	import ResearchTopicsView from '$lib/components/home3/research-topics-view.svelte';
 	import LLMActivitiesView from '$lib/components/home3/llm-activities-view.svelte';
 	import LLMAccountsView from '$lib/components/home3/llm-accounts-view.svelte';
+	import EmbeddingView from '$lib/components/home3/embedding-view.svelte';
 	import LLMModelProfilesView from '$lib/components/home3/llm-model-profiles-view.svelte';
 	import LLMModelsView from '$lib/components/home3/llm-models-view.svelte';
 	import ChadSessionsView from '$lib/components/home3/chad-sessions-view.svelte';
@@ -289,6 +290,8 @@
 			<DocReviewLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-embedding'}
+			<EmbeddingView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-model-profiles'}
 			<LLMModelProfilesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-models'}
