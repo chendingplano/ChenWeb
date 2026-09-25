@@ -94,7 +94,7 @@ func embeddingClient(model embeddingModelConfig) *llmclients.OpenAIJSONClient {
 		APIKey:              strings.TrimSpace(model.cfg.APIKey),
 		BaseURL:             strings.TrimSpace(model.cfg.BaseURL),
 		ProfileName:         model.key,
-		EmbeddingDimensions: model.cfg.Dimension,
+		EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(model.cfg.ModelName, model.cfg.BaseURL),
 		HTTPClient:          &http.Client{Timeout: time.Duration(timeout) * time.Second},
 	}
 }
