@@ -56,7 +56,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	eventID := newID()
 
 	if s.DB != nil && (record.AccountID == "" || record.ProfileID == "") {
-		accountID, profileID, err := s.resolveAccountProfileIDs(ctx, record)
+		accountID, profileID, provider, err := s.resolveAccountProfileIDs(ctx, record)
 		if err != nil {
 			return "", err
 		}
@@ -66,10 +66,15 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		if record.ProfileID == "" {
 			record.ProfileID = profileID
 		}
+		if accountID != "" && provider != "" {
+			record.Provider = sharedllm.ProviderID(provider)
+		}
 	}
 
 	if record.AccountID == "" || record.ProfileID == "" {
-		sinkLogger.Warn("(MID-20260708-01) llm usage event account/profile not resolved; event will be logged without account linkage",
+		sinkLogger.Warn("(MID-20260708-01) llm usage event account/profile not fully resolved; event will be logged with available linkage",
+			"account_id", record.AccountID,
+			"profile_id", record.ProfileID,
 			"provider", string(record.Provider),
 			"base_url", record.BaseURL,
 			"model", record.ModelName,
@@ -220,56 +225,65 @@ ON CONFLICT (record_id, kind) WHERE run_id IS NULL AND record_id IS NOT NULL AND
 	}
 }
 
-func (s *Sink) resolveAccountProfileIDs(ctx context.Context, record sharedllm.UsageCaptureRecord) (accountID string, profileID string, err error) {
+func (s *Sink) resolveAccountProfileIDs(ctx context.Context, record sharedllm.UsageCaptureRecord) (accountID string, profileID string, provider string, err error) {
 	if s.DB == nil {
-		return "", "", nil
+		return "", "", "", nil
 	}
-	provider := strings.TrimSpace(string(record.Provider))
 	baseURL := strings.TrimSpace(record.BaseURL)
 	apiKey := strings.TrimSpace(record.APIKey)
 	profileName := strings.TrimSpace(record.ProfileName)
 	modelName := strings.TrimSpace(record.ModelName)
-	if provider == "" || baseURL == "" || apiKey == "" || (profileName == "" && modelName == "") {
-		return "", "", nil
+	if baseURL == "" {
+		return "", "", "", nil
 	}
 
-	const profileQuery = `SELECT a.id, p.id
-FROM llm_account a
-JOIN llm_account_model_profile p ON p.account_id = a.id
-WHERE LOWER(a.provider) = LOWER($1)
-  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
-  AND a.api_key_ref = $3
-  AND LOWER(p.profile_name) = LOWER($4)
+	const accountQuery = `SELECT id, provider
+FROM llm_account
+WHERE LOWER(TRIM(TRAILING '/' FROM base_url)) = LOWER(TRIM(TRAILING '/' FROM $1))
+  AND api_key_ref = $2
+ORDER BY created_at ASC, id ASC
+LIMIT 1`
+	if err := s.DB.QueryRowContext(ctx, accountQuery, baseURL, apiKey).Scan(&accountID, &provider); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", "", nil
+		}
+		return "", "", "", err
+	}
+	if profileName == "" && modelName == "" {
+		return accountID, "", provider, nil
+	}
+
+	const profileNameQuery = `SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(profile_name) = LOWER($2)
 LIMIT 1`
 
 	if profileName != "" {
-		if err := s.DB.QueryRowContext(ctx, profileQuery, provider, baseURL, apiKey, profileName).Scan(&accountID, &profileID); err == nil {
-			return accountID, profileID, nil
+		if err := s.DB.QueryRowContext(ctx, profileNameQuery, accountID, profileName).Scan(&profileID); err == nil {
+			return accountID, profileID, provider, nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
-			return "", "", err
+			return accountID, "", provider, err
 		}
 	}
 
 	if modelName == "" {
-		return "", "", nil
+		return accountID, "", provider, nil
 	}
 
-	const modelQuery = `SELECT a.id, p.id
-FROM llm_account a
-JOIN llm_account_model_profile p ON p.account_id = a.id
-WHERE LOWER(a.provider) = LOWER($1)
-  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
-  AND a.api_key_ref = $3
-  AND LOWER(p.model_name) = LOWER($4)
+	const modelQuery = `SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(model_name) = LOWER($2)
 LIMIT 1`
 
-	if err := s.DB.QueryRowContext(ctx, modelQuery, provider, baseURL, apiKey, modelName).Scan(&accountID, &profileID); err != nil {
+	if err := s.DB.QueryRowContext(ctx, modelQuery, accountID, modelName).Scan(&profileID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil
+			return accountID, "", provider, nil
 		}
-		return "", "", err
+		return accountID, "", provider, err
 	}
-	return accountID, profileID, nil
+	return accountID, profileID, provider, nil
 }
 
 func InstallDefaultSink() error {

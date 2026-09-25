@@ -295,7 +295,7 @@ func TestSinkCapturePersistsWithoutAccountProfileLinkage(t *testing.T) {
 	}
 }
 
-func TestSinkCaptureResolvesAccountProfileFromLookupHints(t *testing.T) {
+func TestSinkCaptureResolvesAccountProfileUsingBaseURLAndAPIKey(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
@@ -306,16 +306,21 @@ func TestSinkCaptureResolvesAccountProfileFromLookupHints(t *testing.T) {
 	finishedAt := startedAt.Add(2 * time.Second)
 	tmpDir := t.TempDir()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT a.id, p.id
-FROM llm_account a
-JOIN llm_account_model_profile p ON p.account_id = a.id
-WHERE LOWER(a.provider) = LOWER($1)
-  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
-  AND a.api_key_ref = $3
-  AND LOWER(p.profile_name) = LOWER($4)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, provider
+FROM llm_account
+WHERE LOWER(TRIM(TRAILING '/' FROM base_url)) = LOWER(TRIM(TRAILING '/' FROM $1))
+  AND api_key_ref = $2
+ORDER BY created_at ASC, id ASC
 LIMIT 1`)).
-		WithArgs("deepseek", "https://api.deepseek.com", "sk-live", "deepseek-prod").
-		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}).AddRow("acct_22", "prof_33"))
+		WithArgs("http://127.0.0.1:18083", "").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow("acct_22", "local"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(profile_name) = LOWER($2)
+LIMIT 1`)).
+		WithArgs("acct_22", "bge-m3-llama-cpp").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("prof_33"))
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
@@ -335,8 +340,8 @@ LIMIT 1`)).
 			"acct_22",
 			"prof_33",
 			"usr_3",
-			"deepseek",
-			"deepseek-chat",
+			"local",
+			"bge-m3-mac",
 			"extract-provisions-v1",
 			startedAt,
 			finishedAt,
@@ -372,11 +377,11 @@ LIMIT 1`)).
 
 	record := sharedllm.UsageCaptureRecord{
 		UserID:            "usr_3",
-		Provider:          sharedllm.ProviderID("deepseek"),
-		BaseURL:           "https://api.deepseek.com",
-		APIKey:            "sk-live",
-		ProfileName:       "deepseek-prod",
-		ModelName:         "deepseek-chat",
+		Provider:          sharedllm.ProviderOpenAICompatible,
+		BaseURL:           "http://127.0.0.1:18083",
+		APIKey:            "",
+		ProfileName:       "bge-m3-llama-cpp",
+		ModelName:         "bge-m3-mac",
 		PromptName:        "extract-provisions-v1",
 		RequestStartedAt:  startedAt,
 		RequestFinishedAt: finishedAt,
@@ -397,6 +402,55 @@ LIMIT 1`)).
 	}
 }
 
+func TestResolveAccountKeepsAccountWhenNoProfileMatches(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, provider
+FROM llm_account
+WHERE LOWER(TRIM(TRAILING '/' FROM base_url)) = LOWER(TRIM(TRAILING '/' FROM $1))
+  AND api_key_ref = $2
+ORDER BY created_at ASC, id ASC
+LIMIT 1`)).
+		WithArgs("http://127.0.0.1:18083", "").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow("acct_local", "local"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(profile_name) = LOWER($2)
+LIMIT 1`)).
+		WithArgs("acct_local", "bge-m3-llama-cpp").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(model_name) = LOWER($2)
+LIMIT 1`)).
+		WithArgs("acct_local", "bge-m3-mac").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	sink := &Sink{DB: db}
+	accountID, profileID, provider, err := sink.resolveAccountProfileIDs(context.Background(), sharedllm.UsageCaptureRecord{
+		Provider:    sharedllm.ProviderOpenAICompatible,
+		BaseURL:     "http://127.0.0.1:18083",
+		APIKey:      "",
+		ProfileName: "bge-m3-llama-cpp",
+		ModelName:   "bge-m3-mac",
+	})
+	if err != nil {
+		t.Fatalf("resolveAccountProfileIDs() error = %v", err)
+	}
+	if accountID != "acct_local" || profileID != "" || provider != "local" {
+		t.Fatalf("resolveAccountProfileIDs() = (%q, %q, %q), want (%q, %q, %q)", accountID, profileID, provider, "acct_local", "", "local")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestSinkCaptureResolvesAccountProfileWhenBaseURLTrailingSlashDiffers(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -408,16 +462,21 @@ func TestSinkCaptureResolvesAccountProfileWhenBaseURLTrailingSlashDiffers(t *tes
 	finishedAt := startedAt.Add(2 * time.Second)
 	tmpDir := t.TempDir()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT a.id, p.id
-FROM llm_account a
-JOIN llm_account_model_profile p ON p.account_id = a.id
-WHERE LOWER(a.provider) = LOWER($1)
-  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
-  AND a.api_key_ref = $3
-  AND LOWER(p.profile_name) = LOWER($4)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, provider
+FROM llm_account
+WHERE LOWER(TRIM(TRAILING '/' FROM base_url)) = LOWER(TRIM(TRAILING '/' FROM $1))
+  AND api_key_ref = $2
+ORDER BY created_at ASC, id ASC
 LIMIT 1`)).
-		WithArgs("deepseek", "https://api.deepseek.com/", "sk-live", "deepseek-prod").
-		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}).AddRow("acct_22", "prof_33"))
+		WithArgs("https://api.deepseek.com/", "sk-live").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow("acct_22", "deepseek"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(profile_name) = LOWER($2)
+LIMIT 1`)).
+		WithArgs("acct_22", "deepseek-prod").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("prof_33"))
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
@@ -510,27 +569,29 @@ func TestSinkCaptureResolvesAccountProfileByModelNameFallback(t *testing.T) {
 	finishedAt := startedAt.Add(2 * time.Second)
 	tmpDir := t.TempDir()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT a.id, p.id
-FROM llm_account a
-JOIN llm_account_model_profile p ON p.account_id = a.id
-WHERE LOWER(a.provider) = LOWER($1)
-  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
-  AND a.api_key_ref = $3
-  AND LOWER(p.profile_name) = LOWER($4)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, provider
+FROM llm_account
+WHERE LOWER(TRIM(TRAILING '/' FROM base_url)) = LOWER(TRIM(TRAILING '/' FROM $1))
+  AND api_key_ref = $2
+ORDER BY created_at ASC, id ASC
 LIMIT 1`)).
-		WithArgs("deepseek", "https://api.deepseek.com", "sk-live", "missing-profile").
-		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}))
+		WithArgs("https://api.deepseek.com", "sk-live").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow("acct_44", "deepseek"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(profile_name) = LOWER($2)
+LIMIT 1`)).
+		WithArgs("acct_44", "missing-profile").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT a.id, p.id
-FROM llm_account a
-JOIN llm_account_model_profile p ON p.account_id = a.id
-WHERE LOWER(a.provider) = LOWER($1)
-  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
-  AND a.api_key_ref = $3
-  AND LOWER(p.model_name) = LOWER($4)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id
+FROM llm_account_model_profile
+WHERE account_id = $1
+  AND LOWER(model_name) = LOWER($2)
 LIMIT 1`)).
-		WithArgs("deepseek", "https://api.deepseek.com", "sk-live", "deepseek-v4-flash").
-		WillReturnRows(sqlmock.NewRows([]string{"account_id", "profile_id"}).AddRow("acct_44", "prof_55"))
+		WithArgs("acct_44", "deepseek-v4-flash").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("prof_55"))
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, user_id, provider, model_name, prompt_name,
