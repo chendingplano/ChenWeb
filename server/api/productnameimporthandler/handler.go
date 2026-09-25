@@ -263,6 +263,10 @@ func translateNames(ctx context.Context, rows []csvRecord, c echo.Context) ([]st
 	llmclients.RegisterModelBudget(model)
 	rc := EchoFactory.NewFromEcho(c, "CWB_PNI_020")
 	defer rc.Close()
+	userID := strings.TrimSpace(rc.GetUserID())
+	if userID == "" {
+		return nil, errors.New("authenticated user ID is unavailable for translation usage attribution")
+	}
 	client, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
 		ModelName: model.ModelName, APIKey: model.APIKey, BaseURL: model.BaseURL,
 		ProfileName: modelRef, TimeoutSec: model.TimeoutSec, ThinkingType: model.ThinkingType,
@@ -285,7 +289,7 @@ func translateNames(ctx context.Context, rows []csvRecord, c echo.Context) ([]st
 		}
 		input, _ := json.Marshal(map[string]any{"products": products})
 		out, callErr := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-			PromptName: "translate_china_mechanical_product_names_v1", PromptText: string(prompt), ModelName: model.ModelName,
+			UserID: userID, PromptName: "translate_china_mechanical_product_names_v1", PromptText: string(prompt), ModelName: model.ModelName,
 			InputText: string(input), CallReason: "translate_china_mechanical_product_names", CallLoc: "CWB_PNI_020",
 		})
 		if callErr != nil {
