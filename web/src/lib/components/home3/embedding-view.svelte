@@ -376,6 +376,12 @@
 		gap: 1rem;
 		color: #1f2937;
 		padding: 1.25rem;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+	.embedding-admin * {
+		user-select: text;
+		-webkit-user-select: text;
 	}
 	.embedding-admin.dark {
 		color: #e5e7eb;
