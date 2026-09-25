@@ -329,6 +329,38 @@ WHERE id = $3`)
 	}
 }
 
+func TestProcessStagingOnceSkipsPendingFiles(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	tmpDir := t.TempDir()
+	stagingDir := filepath.Join(tmpDir, "staging")
+	backupDir := filepath.Join(tmpDir, "backup")
+	homeDir := filepath.Join(tmpDir, "SemOS")
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	pendingPath := writeTempFile(t, stagingDir, "report.pdf.pending", "hello")
+	t.Setenv("DATA_BACKUP_DIR", backupDir)
+
+	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil, nil); err != nil {
+		t.Fatalf("processStagingOnce: %v", err)
+	}
+
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("expected .pending file to remain in staging dir: %v", err)
+	}
+	if entries, err := os.ReadDir(backupDir); err == nil && len(entries) > 0 {
+		t.Fatalf("expected no backup copy of .pending file, found: %v", entries)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expected no DB calls for a .pending file: %v", err)
+	}
+}
+
 func TestProcessStagingOnceCreatesZipParentAndChildRecords(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

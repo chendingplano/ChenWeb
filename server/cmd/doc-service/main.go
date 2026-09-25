@@ -404,12 +404,12 @@ func main() {
 		return
 	}
 
-	stagingDir := strings.TrimSpace(os.Getenv("DATA_STAGING_DIR"))
+	stagingDir := strings.TrimSpace(os.Getenv("UPLOAD_FILE_STAGING_DIR"))
 	backupDir := strings.TrimSpace(os.Getenv("DATA_BACKUP_DIR"))
 	homeDir := strings.TrimSpace(os.Getenv("DATA_HOME_DIR"))
 	if stagingDir == "" || backupDir == "" || homeDir == "" {
 		logger.Error("staging directories not configured",
-			"DATA_STAGING_DIR", stagingDir,
+			"UPLOAD_FILE_STAGING_DIR", stagingDir,
 			"DATA_BACKUP_DIR", backupDir,
 			"DATA_HOME_DIR", homeDir,
 		)
@@ -612,6 +612,9 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".pending") {
 			continue
 		}
 		info, err := entry.Info()

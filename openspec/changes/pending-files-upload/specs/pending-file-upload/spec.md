@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Staging watcher ignores `.pending` files
-The staging directory poller (`server/cmd/service-pdf-parser`) SHALL NOT
+The staging directory poller (`server/cmd/doc-service`) SHALL NOT
 detect, move, back up, or otherwise process any file in the staging
 directory (`UPLOAD_FILE_STAGING_DIR`) whose name ends in `.pending`,
 regardless of how long the file remains there.
@@ -59,7 +59,7 @@ active knowledge store to set `tenant_id`, and using the selected processing
 mode (Auto / Upload Files Only / PDF Parsing) exactly as the normal upload UI
 does — then rename the file on disk to strip `.pending`, so it becomes a
 normal staged file that the existing staging poller
-(`server/cmd/service-pdf-parser`) picks up and completes exactly as it would
+(`server/cmd/doc-service`) picks up and completes exactly as it would
 a normal upload.
 
 #### Scenario: Admin claims a single PDF pending file
@@ -74,10 +74,11 @@ a normal upload.
 
 #### Scenario: Admin claims a pending zip file
 - **WHEN** an admin selects `archive.zip.pending` and clicks "Upload Files"
-- **THEN** the backend creates a single `type='zip'` `kb.inputs` row for
+- **THEN** the backend creates a `type='zip'` `kb.inputs` parent row for
   `archive.zip` and renames the file, identical in shape to what a browser
-  upload of a `.zip` file produces today (no per-entry child records — this
-  codebase does not extract zip contents at ingestion time)
+  upload of a `.zip` file produces today — including that the existing
+  staging service subsequently extracts each entry inside the archive into
+  its own child `kb.inputs` row, inheriting the parent's `tenant_id`
 
 #### Scenario: Successful claim renames the pending file for the poller to pick up
 - **WHEN** a pending file's `kb.inputs` row is successfully inserted

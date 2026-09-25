@@ -2,8 +2,11 @@
 
 - [x] 1.1 `server/api/kbhandler/upload_handler.go`: read `UPLOAD_FILE_STAGING_DIR`
       instead of `STAGING_DIR`
-- [x] 1.2 `server/cmd/service-pdf-parser/main.go`: read `UPLOAD_FILE_STAGING_DIR`
-      instead of `DATA_STAGING_DIR`
+- [x] 1.2 `server/cmd/service-pdf-parser/main.go`: read
+      `UPLOAD_FILE_STAGING_DIR` instead of `DATA_STAGING_DIR` — **turned out
+      to be dead code, see task 7**; `doc-service`, the real staging
+      service, was already reading `UPLOAD_FILE_STAGING_DIR` before this
+      change and needed no edit here
 - [x] 1.3 `mise.local.toml`: replace the two `STAGING_DIR`/`DATA_STAGING_DIR`
       lines with a single `UPLOAD_FILE_STAGING_DIR`
 - [x] 1.4 `python/pdf-parser/pdf_parser.py`: add `UPLOAD_FILE_STAGING_DIR` as
@@ -13,9 +16,12 @@
 ## 2. Staging poller: ignore `.pending` files
 
 - [x] 2.1 In `service-pdf-parser/main.go`'s `processStagingOnce`, skip any
-      entry whose name ends in `.pending` before stat/copy/insert
+      entry whose name ends in `.pending` before stat/copy/insert —
+      **applied to the wrong (dead) service, see task 7 for the real fix in
+      `doc-service`**
 - [x] 2.2 Add/verify a unit test asserting a `.pending` file is left in place
-      and produces no copy/insert side effects
+      and produces no copy/insert side effects (in `service-pdf-parser`'s
+      test file; a matching test for `doc-service` is task 7.2)
 
 ## 3. Backend: list pending files endpoint
 
@@ -85,5 +91,31 @@
 
 - [x] 6.1 Update `KnowledgeStore/Capsules/coding-capsules/input-management/inputs-processing-spec.md`
       to document the `.pending` convention, the `UPLOAD_FILE_STAGING_DIR`
-      env var, and the Pending Files claim flow — and correct its zip
-      parent/child description, which does not match the current Go code
+      env var, and the Pending Files claim flow — and correct its staging
+      service name and zip-handling description to match `doc-service`
+
+## 7. Fix: tasks 1.2/2.1/2.2 initially patched the wrong service
+
+Manual verification (task 5.6) surfaced that a real `.pending` file placed
+in staging was ingested unattributed by the live `doc-service` process —
+tasks 1.2/2.1/2.2 above had patched `server/cmd/service-pdf-parser`
+instead, which is dead code not wired into any `mise` task and does not run
+in this environment. `server/cmd/doc-service` is the real staging service.
+
+- [x] 7.1 Add the `.pending` skip filter to `doc-service/main.go`'s
+      `processStagingOnce` (the actual fix; `service-pdf-parser`'s copy is
+      harmless dead code left in place, not reverted, since it does no harm
+      and isn't this session's call to delete)
+- [x] 7.2 Add `TestProcessStagingOnceSkipsPendingFiles` in
+      `doc-service/main_test.go`
+- [x] 7.3 Clean up the bad state the bug produced during manual testing:
+      `kb.inputs` record `726` (inserted unattributed, `type='pending'`)
+      deleted; its misnamed file moved back from
+      `DATA_HOME_DIR/Artifacts/0/726/jixie_pdf_new.zip.pending` to
+      `UPLOAD_FILE_STAGING_DIR/jixie_pdf_new.zip.pending` for the user to
+      retry; the stray backup copy removed
+- [x] 7.4 Correct `design.md`, `tasks.md`, and the KnowledgeStore spec doc's
+      references from `service-pdf-parser` to `doc-service`, and restore the
+      accurate description of `doc-service`'s real zip child extraction
+      (wrongly described as nonexistent in the first pass, since that
+      investigation was against the wrong file)

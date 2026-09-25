@@ -82,7 +82,7 @@ These override config file values when set:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATA_STAGING_DIR` | Yes* | Staging directory path |
+| `UPLOAD_FILE_STAGING_DIR` | Yes* | Staging directory path |
 | `DATA_BACKUP_DIR` | Yes* | Backup directory path |
 | `DATA_HOME_DIR` | Yes* | Home/repository directory path |
 
@@ -254,7 +254,7 @@ The `result_filename` column is missing. Run `mise pdf-parser-migrate` to apply 
 
 **Files sit in staging without being processed**
 1. Check that the service is running: `mise pdf-parser-status`
-2. Verify `DATA_STAGING_DIR` (or `pdf_parser.staging_dir` in config) points to the correct directory.
+2. Verify `UPLOAD_FILE_STAGING_DIR` points to the correct directory.
 3. Check `.cache/pdf-parser.log` for errors.
 
 **OCR results not appearing**

@@ -4,60 +4,60 @@ caddy = "latest"
 go = "1.25.7"
 node = "latest"
 
-[tasks.build-pdf-parser]
-run = "go build -buildvcs=false -o ../../../.cache/pdf-parser.exe ."
+[tasks.build-doc-service]
+run = "go build -buildvcs=false -o ../../../.cache/doc-service.exe ."
 
-[tasks.pdf-parser-run]
+[tasks.doc-service-run]
 run = "go run ."
 
-[tasks.pdf-parser-once]
+[tasks.doc-service-once]
 run = "go run . --once"
 
-[tasks.pdf-parser-migrate]
+[tasks.doc-service-migrate]
 run = "go run . --migrate-only"
 
-[tasks.pdf-parser-verify-schema]
+[tasks.doc-service-verify-schema]
 run = "go run . --verify-schema-only"
 
-[tasks.pdf-parser-start]
+[tasks.doc-service-start]
 run = '''
 mkdir -p ../../../.cache
-if [ -f ../../../.cache/pdf-parser.pid ] && kill -0 "$(cat ../../../.cache/pdf-parser.pid)" 2>/dev/null; then
-  echo "pdf-parser already running (pid $(cat ../../../.cache/pdf-parser.pid))"
+if [ -f ../../../.cache/doc-service.pid ] && kill -0 "$(cat ../../../.cache/doc-service.pid)" 2>/dev/null; then
+  echo "doc-service already running (pid $(cat ../../../.cache/doc-service.pid))"
   exit 0
 fi
-nohup go run . > ../../../.cache/pdf-parser.log 2>&1 &
-echo $! > ../../../.cache/pdf-parser.pid
-echo "pdf-parser (staging) started (pid $(cat ../../../.cache/pdf-parser.pid))"
+nohup go run . > ../../../.cache/doc-service.log 2>&1 &
+echo $! > ../../../.cache/doc-service.pid
+echo "doc-service (staging) started (pid $(cat ../../../.cache/doc-service.pid))"
 '''
 
-[tasks.pdf-parser-stop]
+[tasks.doc-service-stop]
 run = '''
-if [ ! -f ../../../.cache/pdf-parser.pid ]; then
-  echo "pdf-parser is not running (no pid file)"
+if [ ! -f ../../../.cache/doc-service.pid ]; then
+  echo "doc-service is not running (no pid file)"
   exit 0
 fi
-PID="$(cat ../../../.cache/pdf-parser.pid)"
+PID="$(cat ../../../.cache/doc-service.pid)"
 if kill -0 "$PID" 2>/dev/null; then
   kill "$PID"
-  echo "stopped pdf-parser (pid $PID)"
+  echo "stopped doc-service (pid $PID)"
 else
   echo "stale pid file found for pid $PID"
 fi
-rm -f ../../../.cache/pdf-parser.pid
+rm -f ../../../.cache/doc-service.pid
 '''
 
-[tasks.pdf-parser-status]
+[tasks.doc-service-status]
 run = '''
-if [ ! -f ../../../.cache/pdf-parser.pid ]; then
-  echo "pdf-parser not running"
+if [ ! -f ../../../.cache/doc-service.pid ]; then
+  echo "doc-service not running"
   exit 1
 fi
-PID="$(cat ../../../.cache/pdf-parser.pid)"
+PID="$(cat ../../../.cache/doc-service.pid)"
 if kill -0 "$PID" 2>/dev/null; then
-  echo "pdf-parser running (pid $PID)"
+  echo "doc-service running (pid $PID)"
   exit 0
 fi
-echo "pdf-parser not running (stale pid $PID)"
+echo "doc-service not running (stale pid $PID)"
 exit 1
 '''
