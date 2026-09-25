@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Enable ChenWeb's shared Go LLM client to call Jev's structured decision API through a Jev model profile.
+**Goal:** Enable ChenWeb to route any `model_type = 'decision-model'` profile to the Jev-compatible System One protocol, independent of its profile name.
 
-**Architecture:** Add a dedicated Jev provider adapter to `shared/go/api/llm`, with typed question definitions on `llm.Request`, environment-based key resolution, structured answer JSON in `Response.Content`, and no streaming support. Register the Jev provider in ChenWeb's `.models.toml` importer and add the `jev-latest` profile without storing a secret.
+**Architecture:** Add a vendor-neutral Jev-compatible provider to `shared/go/api/llm`, with typed question definitions on `llm.Request`, an official-host environment-key fallback, structured answer JSON in `Response.Content`, and no streaming support. Use `model_type` to select the protocol in the TOML importer. Preserve `model_type` through ChenWeb's model API and editor so users can create multiple decision-model profiles.
 
 **Tech Stack:** Go 1.25, `net/http`, `encoding/json`, TOML model configuration.
 
@@ -17,8 +17,13 @@
 - `shared/go/api/llm/jev.go`: HTTP request, validation, response, usage mapping, and unsupported streaming.
 - `shared/go/api/llm/jev_test.go`: focused HTTP behavior coverage.
 - `shared/go/api/llm/client_test.go`: provider factory and key resolution behavior.
-- `ChenWeb/server/api/llmimport/models_toml.go`: infer provider `jev` from `jev-ai.pro`.
+- `shared/go/api/ApiTypes/ApiTypes.go`: TOML model type field.
+- `ChenWeb/server/api/llmimport/models_toml.go`: infer provider from `decision-model`.
 - `ChenWeb/server/api/llmimport/models_toml_test.go`: importer mapping behavior.
+- `ChenWeb/server/api/llmadminhandler/toml_handler.go` and tests: preserve model type in the TOML API.
+- `ChenWeb/server/api/llmadminhandler/model_handler.go`: preserve model type in AddModel.
+- `ChenWeb/web/src/lib/components/home3/llm-models-client.ts` and `llm-models-view.svelte`: allow model type edits in the TOML UI.
+- `ChenWeb/web/src/lib/components/home3/llm-accounts-client.ts` and `llm-accounts-view.svelte`: carry model type through Add Model.
 - `ChenWeb/.models.toml`: add the keyless `jev-latest` entry.
 
 ## Chunk 1: Shared Jev client
@@ -30,10 +35,10 @@
 - Modify: `shared/go/api/llm/client.go`
 - Modify: `shared/go/api/llm/client_test.go`
 
-- [x] Add `ProviderJev` and a typed `JevQuestion` whose custom wire encoding emits the Jev `criteria` key: `noul` emits no criteria; `choice` emits its nonempty option-ID-to-description map; `score` emits its nonempty ordered label list. Reject unknown types, criteria on `noul`, missing criteria on `choice`/`score`, and the wrong criteria field for each type. Add `JevQuestions map[string]JevQuestion` to `Request`.
-- [x] Make `NewClient` resolve an empty Jev `APIKey` from trimmed `JEV_AI_API_KEY`; unset, empty, or whitespace-only values return `ErrMissingAPIKey`. Preserve explicit config key precedence and existing missing-key behavior for all other providers.
-- [x] Dispatch Jev clients to `jevClient`; default Jev base URL to `https://jev-ai.pro/api`.
-- [x] Add a factory case for Jev and a focused missing-key/env-fallback check.
+- [x] Add `ProviderJevCompatible`, retain `ProviderJev` as a compatibility alias, and add `ModelType` to `LLMModelDef`.
+- [x] Keep typed Jev question validation, answer and usage mapping, and last plain-text user state handling.
+- [x] Resolve `JEV_AI_API_KEY` only for the official Jev host when the configured key is blank; require configured keys for other compatible endpoints.
+- [x] Dispatch the generic provider to the shared Jev-compatible adapter.
 
 ### Task 2: Implement Jev completion behavior
 
@@ -46,7 +51,7 @@
 - [x] Decode `answers` and optional token usage; return compact JSON for `answers` as `Response.Content`, and map usage fields to `llm.Usage`.
 - [x] Wrap HTTP and decode failures in `ProviderError` without echoing request content or authorization headers; cap stored error bodies at 512 bytes. Cover truncation with an oversized provider error response.
 - [x] Implement `Stream` with an explicit unsupported-operation error.
-- [x] Cover serialization, response mapping, validation, HTTP failure, malformed response, and streaming behavior.
+- [x] Cover serialization, response mapping, validation, key handling, HTTP failure, malformed response, and streaming behavior.
 
 ## Chunk 2: ChenWeb model registration
 
@@ -57,15 +62,16 @@
 - Modify: `ChenWeb/server/api/llmimport/models_toml_test.go`
 - Modify: `ChenWeb/.models.toml`
 
-- [x] Infer provider `jev` for the `jev-ai.pro` host before generic OpenAI-compatible inference.
-- [x] Add an importer fixture asserting Jev provider, base URL, model profile values, and blank account key.
-- [x] Add `[jev-latest]` with `host = 'cloud'`, `model_type = 'llm'`, `model_name = 'jev-latest'`, `api_key = ''`, and `base_url = 'https://jev-ai.pro/api'`, matching the file's existing rate and timeout fields.
+- [x] Infer `jev_compatible` from `model_type = 'decision-model'`; retain Jev hostname inference as a legacy fallback.
+- [x] Add importer coverage for multiple arbitrary profile/model names and base URLs with decision-model type.
+- [x] Set `[jev-latest]` to `model_type = 'decision-model'`.
+- [x] Preserve and edit `model_type` through the TOML API, TOML editor, and Add Model flow.
 
 ## Documentation and verification
 
-- No separate developer guide is needed for this initial adapter; document the call shape on the exported request types and in package comments.
+- The Jev devdoc in KnowledgeStore documents both the `.models.toml` configuration and the vendor-neutral provider call shape.
 - Run `gofmt` on changed Go files.
-- Run `cd shared/go && go test ./api/llm` and `cd ChenWeb && go test ./server/api/llmimport`; both focused package suites must pass.
+- Run `cd shared/go && go test ./api/llm` and `cd ChenWeb && go test ./server/api/llmimport ./server/api/llmadminhandler`; all focused suites must pass.
 - `shared/go` dependency files do not need updating; no dependency is added.
 
 ## Commit notes

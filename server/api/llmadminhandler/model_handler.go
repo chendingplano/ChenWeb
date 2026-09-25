@@ -11,6 +11,7 @@ import (
 type addModelRequest struct {
 	ProfileName          string `json:"profile_name"`
 	ModelName            string `json:"model_name"`
+	ModelType            string `json:"model_type"`
 	ThinkingType         string `json:"thinking_type"`
 	TimeoutSec           int    `json:"timeout_sec"`
 	MaxInflight          int    `json:"max_inflight"`
@@ -46,6 +47,7 @@ func AddModel(c echo.Context) error {
 	tomlPath := modelsTOMLPath()
 	if err := UpsertModelsTOMLEntry(tomlPath, req.ProfileName, ApiTypes.LLMModelDef{
 		Host:                 req.Host,
+		ModelType:            strings.TrimSpace(req.ModelType),
 		ModelName:            strings.TrimSpace(req.ModelName),
 		APIKey:               strings.TrimSpace(req.APIKey),
 		BaseURL:              strings.TrimSpace(req.BaseURL),

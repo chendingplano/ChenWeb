@@ -26,9 +26,10 @@
 	type ModelDraft = Omit<LLMModelEntry, 'key'> & { key: string };
 
 	const emptyDraft = (): ModelDraft => ({
-		key: '',
-		host: 'cloud',
-		model_name: '',
+	key: '',
+	host: 'cloud',
+	model_type: 'llm',
+	model_name: '',
 		base_url: '',
 		timeout_sec: 120,
 		thinking_type: '',
@@ -188,6 +189,10 @@
 					<span>Model Name</span>
 					<input bind:value={draft.model_name} placeholder="deepseek-chat" />
 				</label>
+				<label>
+					<span>Model Type</span>
+					<input bind:value={draft.model_type} placeholder="llm" />
+				</label>
 			</div>
 			<div class="row two">
 				<label>
@@ -275,6 +280,9 @@
 							<tr>
 								<td>
 									<div class="cell-primary">{m.key}</div>
+									{#if m.model_type}
+										<div class="cell-secondary">type: {m.model_type}</div>
+									{/if}
 									{#if m.thinking_type}
 										<div class="cell-secondary">thinking: {m.thinking_type}</div>
 									{/if}
@@ -317,6 +325,10 @@
 												<label>
 													<span>Model Name</span>
 													<input bind:value={editDraft.model_name} />
+												</label>
+												<label>
+													<span>Model Type</span>
+													<input bind:value={editDraft.model_type} placeholder="llm" />
 												</label>
 											</div>
 											<div class="row two">

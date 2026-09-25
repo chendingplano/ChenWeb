@@ -48,7 +48,7 @@ token_reserve_per_call = 256
 	}
 }
 
-func TestParseModelsTOMLRecognizesJevAccount(t *testing.T) {
+func TestParseModelsTOMLRecognizesLegacyJevHostAsCompatibleAccount(t *testing.T) {
 	raw := []byte(`
 [jev-latest]
 host = "cloud"
@@ -71,8 +71,8 @@ token_reserve_per_call = 256
 	}
 
 	account := got.Accounts[0]
-	if account.Provider != "jev" {
-		t.Fatalf("provider = %q, want jev", account.Provider)
+	if account.Provider != "jev_compatible" {
+		t.Fatalf("provider = %q, want jev_compatible", account.Provider)
 	}
 	if account.BaseURL != "https://jev-ai.pro/api" {
 		t.Fatalf("base_url = %q", account.BaseURL)
@@ -87,6 +87,38 @@ token_reserve_per_call = 256
 	}
 	if profile.TimeoutSec != 300 || profile.MaxInflight != 100 || profile.MaxRequestsPerMinute != 3000 || profile.MaxTokensPerMinute != 200000 || profile.TokenReservePerCall != 256 {
 		t.Fatalf("unexpected profile values: %+v", profile)
+	}
+}
+
+func TestParseModelsTOMLUsesDecisionModelTypeForMultipleProfiles(t *testing.T) {
+	raw := []byte(`
+[decision-model-alpha]
+host = "cloud"
+model_type = "decision-model"
+model_name = "arbitrary-alpha"
+api_key = "shared-key"
+base_url = "https://models.example/api"
+
+[decision-model-beta]
+host = "cloud"
+model_type = "decision-model"
+model_name = "arbitrary-beta"
+api_key = "shared-key"
+base_url = "https://models.example/api"
+`)
+
+	got, err := ParseModelsTOML(raw)
+	if err != nil {
+		t.Fatalf("ParseModelsTOML() error = %v", err)
+	}
+	if len(got.Accounts) != 1 || got.Accounts[0].Provider != "jev_compatible" {
+		t.Fatalf("accounts = %+v, want one jev_compatible account", got.Accounts)
+	}
+	if len(got.Profiles) != 2 {
+		t.Fatalf("profiles = %d, want 2", len(got.Profiles))
+	}
+	if got.Profiles[0].ModelName != "arbitrary-alpha" || got.Profiles[1].ModelName != "arbitrary-beta" {
+		t.Fatalf("model names = %q, %q", got.Profiles[0].ModelName, got.Profiles[1].ModelName)
 	}
 }
 

@@ -8,13 +8,14 @@ import (
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	toml "github.com/pelletier/go-toml/v2"
 	"github.com/labstack/echo/v4"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 type modelTOMLEntry struct {
 	Key                  string `json:"key"`
 	Host                 string `json:"host"`
+	ModelType            string `json:"model_type"`
 	ModelName            string `json:"model_name"`
 	BaseURL              string `json:"base_url"`
 	TimeoutSec           int    `json:"timeout_sec"`
@@ -145,6 +146,7 @@ func GetModelsTOML(c echo.Context) error {
 		entries = append(entries, modelTOMLEntry{
 			Key:                  k,
 			Host:                 m.Host,
+			ModelType:            m.ModelType,
 			ModelName:            m.ModelName,
 			BaseURL:              m.BaseURL,
 			TimeoutSec:           m.TimeoutSec,
@@ -157,9 +159,9 @@ func GetModelsTOML(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"ok":      true,
-		"path":    path,
-		"models":  entries,
+		"ok":     true,
+		"path":   path,
+		"models": entries,
 	})
 }
 
@@ -184,6 +186,7 @@ func UpsertModelTOML(c echo.Context) error {
 	path := modelsTOMLPath()
 	if err := UpsertModelsTOMLEntry(path, key, ApiTypes.LLMModelDef{
 		Host:                 req.Host,
+		ModelType:            req.ModelType,
 		ModelName:            req.ModelName,
 		BaseURL:              req.BaseURL,
 		TimeoutSec:           req.TimeoutSec,

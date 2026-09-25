@@ -54,7 +54,7 @@ func ParseModelsTOML(raw []byte) (ParsedModels, error) {
 	profiles := make([]ImportedProfile, 0, len(keys))
 	for _, key := range keys {
 		model := models[key]
-		provider := inferProvider(key, model.BaseURL)
+		provider := inferProvider(key, model.ModelType, model.BaseURL)
 		accountKey := makeAccountKey(provider, model.BaseURL, model.APIKey)
 		if _, exists := accountMap[accountKey]; !exists {
 			accountName := uniqueAccountName(usedAccountNames, defaultAccountName(provider, model.BaseURL))
@@ -90,12 +90,15 @@ func ParseModelsTOML(raw []byte) (ParsedModels, error) {
 	}, nil
 }
 
-func inferProvider(profileName, baseURL string) string {
+func inferProvider(profileName, modelType, baseURL string) string {
 	base := strings.ToLower(strings.TrimSpace(baseURL))
+	if strings.EqualFold(strings.TrimSpace(modelType), "decision-model") {
+		return "jev_compatible"
+	}
 	if u, err := url.Parse(base); err == nil {
 		host := strings.ToLower(u.Hostname())
 		if host == "jev-ai.pro" || strings.HasSuffix(host, ".jev-ai.pro") {
-			return "jev"
+			return "jev_compatible"
 		}
 	}
 	switch {

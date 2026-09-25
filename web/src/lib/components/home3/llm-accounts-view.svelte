@@ -65,6 +65,7 @@
 	type AddModelDraft = {
 		profile_name: string;
 		model_name: string;
+		model_type: string;
 		provider: string;
 		base_url: string;
 		api_key: string;
@@ -82,6 +83,7 @@
 	let addModelDraft = $state<AddModelDraft>({
 		profile_name: '',
 		model_name: '',
+		model_type: 'llm',
 		provider: 'deepseek',
 		base_url: 'https://api.deepseek.com',
 		api_key: '',
@@ -260,6 +262,7 @@
 			await addModel({
 				profile_name: profileName,
 				model_name: addModelDraft.model_name.trim(),
+				model_type: addModelDraft.model_type.trim(),
 				provider: addModelDraft.provider.trim(),
 				base_url: addModelDraft.base_url.trim(),
 				api_key: addModelDraft.api_key.trim(),
@@ -274,6 +277,7 @@
 			});
 			addModelDraft.profile_name = '';
 			addModelDraft.model_name = '';
+			addModelDraft.model_type = 'llm';
 			addModelDraft.api_key = '';
 			showAddModel = false;
 			info = `Model "${profileName}" added to .models.toml and registered in the database.`;
@@ -460,6 +464,10 @@
 					<input bind:value={addModelDraft.model_name} placeholder="deepseek-chat" />
 				</label>
 			</div>
+			<label>
+				<span>Model Type</span>
+				<input bind:value={addModelDraft.model_type} placeholder="llm" />
+			</label>
 			<div class="row two">
 				<label>
 					<span>Provider</span>

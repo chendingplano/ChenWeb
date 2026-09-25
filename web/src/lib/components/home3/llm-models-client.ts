@@ -1,6 +1,7 @@
 export type LLMModelEntry = {
 	key: string;
 	host: string;
+	model_type: string;
 	model_name: string;
 	base_url: string;
 	timeout_sec: number;
@@ -62,6 +63,7 @@ export function deleteModelTOML(key: string): Promise<{ ok: boolean; key: string
 export function addModel(input: {
 	profile_name: string;
 	model_name: string;
+	model_type: string;
 	thinking_type: string;
 	timeout_sec: number;
 	max_inflight: number;

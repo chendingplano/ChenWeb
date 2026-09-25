@@ -33,6 +33,42 @@ type stubAdminStore struct {
 	addDepositErr        error
 }
 
+func TestModelTOMLEndpointsPreserveModelType(t *testing.T) {
+	modelsPath := filepath.Join(t.TempDir(), ".models.toml")
+	t.Setenv("CHENWEB_MODELS_TOML", modelsPath)
+
+	e := echo.New()
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/llm/models-toml/decision-alpha", strings.NewReader(`{"host":"cloud","model_type":"decision-model","model_name":"alpha","base_url":"https://models.example/api"}`))
+	putReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	putRec := httptest.NewRecorder()
+	putCtx := e.NewContext(putReq, putRec)
+	putCtx.SetParamNames("key")
+	putCtx.SetParamValues("decision-alpha")
+	if err := UpsertModelTOML(putCtx); err != nil {
+		t.Fatalf("UpsertModelTOML() error = %v", err)
+	}
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body = %s", putRec.Code, putRec.Body.String())
+	}
+
+	models, err := readModelsTOML(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := models["decision-alpha"].ModelType; got != "decision-model" {
+		t.Fatalf("stored model_type = %q, want decision-model", got)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/llm/models-toml", nil)
+	getRec := httptest.NewRecorder()
+	if err := GetModelsTOML(e.NewContext(getReq, getRec)); err != nil {
+		t.Fatalf("GetModelsTOML() error = %v", err)
+	}
+	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), `"model_type":"decision-model"`) {
+		t.Fatalf("GET response lost model_type: status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+}
+
 func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
 	return s.listAccountsResult, s.listAccountsErr
 }
