@@ -92,6 +92,12 @@ func ParseModelsTOML(raw []byte) (ParsedModels, error) {
 
 func inferProvider(profileName, baseURL string) string {
 	base := strings.ToLower(strings.TrimSpace(baseURL))
+	if u, err := url.Parse(base); err == nil {
+		host := strings.ToLower(u.Hostname())
+		if host == "jev-ai.pro" || strings.HasSuffix(host, ".jev-ai.pro") {
+			return "jev"
+		}
+	}
 	switch {
 	case strings.Contains(base, "deepseek"):
 		return "deepseek"

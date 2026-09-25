@@ -48,6 +48,48 @@ token_reserve_per_call = 256
 	}
 }
 
+func TestParseModelsTOMLRecognizesJevAccount(t *testing.T) {
+	raw := []byte(`
+[jev-latest]
+host = "cloud"
+model_name = "jev-latest"
+api_key = ""
+base_url = "https://jev-ai.pro/api"
+timeout_sec = 300
+max_inflight = 100
+max_requests_per_minute = 3000
+max_tokens_per_minute = 200000
+token_reserve_per_call = 256
+`)
+
+	got, err := ParseModelsTOML(raw)
+	if err != nil {
+		t.Fatalf("ParseModelsTOML() error = %v", err)
+	}
+	if len(got.Accounts) != 1 || len(got.Profiles) != 1 {
+		t.Fatalf("accounts = %d, profiles = %d; want 1 each", len(got.Accounts), len(got.Profiles))
+	}
+
+	account := got.Accounts[0]
+	if account.Provider != "jev" {
+		t.Fatalf("provider = %q, want jev", account.Provider)
+	}
+	if account.BaseURL != "https://jev-ai.pro/api" {
+		t.Fatalf("base_url = %q", account.BaseURL)
+	}
+	if account.APIKey != "" {
+		t.Fatalf("api_key = %q, want blank", account.APIKey)
+	}
+
+	profile := got.Profiles[0]
+	if profile.ProfileName != "jev-latest" || profile.ModelName != "jev-latest" {
+		t.Fatalf("unexpected profile identity: %+v", profile)
+	}
+	if profile.TimeoutSec != 300 || profile.MaxInflight != 100 || profile.MaxRequestsPerMinute != 3000 || profile.MaxTokensPerMinute != 200000 || profile.TokenReservePerCall != 256 {
+		t.Fatalf("unexpected profile values: %+v", profile)
+	}
+}
+
 func TestParseModelsTOMLDeduplicatesProfilesSharingSameAccount(t *testing.T) {
 	raw := []byte(`
 [deepseek-v4-flash]
