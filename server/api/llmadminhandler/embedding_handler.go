@@ -11,6 +11,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/EchoFactory"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/labstack/echo/v4"
 )
@@ -82,11 +83,23 @@ func embeddingClient(model embeddingModelConfig) *llmclients.OpenAIJSONClient {
 	}
 }
 
-func embedText(ctx context.Context, model embeddingModelConfig, content string) ([]float64, error) {
+func embeddingRequestUserID(c echo.Context) string {
+	rc := EchoFactory.NewFromEcho(c, "CWB_EMBED_USER_ID")
+	defer rc.Close()
+	return strings.TrimSpace(rc.GetUserID())
+}
+
+func embedText(ctx context.Context, model embeddingModelConfig, content, userID, callReason string) ([]float64, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("content is required")
 	}
-	vec, err := embeddingClient(model).Embed(ctx, llmclients.EmbedInput{ModelName: model.cfg.ModelName, InputText: content})
+	vec, err := embeddingClient(model).Embed(ctx, llmclients.EmbedInput{
+		UserID:     userID,
+		ModelName:  model.cfg.ModelName,
+		InputText:  content,
+		CallReason: callReason,
+		CallLoc:    "CWB_LLM_EMBEDDING",
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +125,11 @@ func CreateEmbedding(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"message": err.Error()})
 	}
-	vec, err := embedText(c.Request().Context(), model, req.Content)
+	userID := embeddingRequestUserID(c)
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
+	}
+	vec, err := embedText(c.Request().Context(), model, req.Content, userID, "embedding_test")
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]any{"message": "embedding request failed", "error": err.Error()})
 	}
@@ -142,7 +159,11 @@ func SearchEmbeddingSimilarity(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"message": err.Error()})
 	}
-	vec, err := embedText(c.Request().Context(), model, req.Content)
+	userID := embeddingRequestUserID(c)
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
+	}
+	vec, err := embedText(c.Request().Context(), model, req.Content, userID, "embedding_similarity_search")
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]any{"message": "embedding request failed", "error": err.Error()})
 	}
@@ -237,6 +258,10 @@ func mutateEmbeddingRecord(c echo.Context, updateContent bool) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"message": err.Error()})
 	}
+	userID := embeddingRequestUserID(c)
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
+	}
 	db, err := embeddingDB(c)
 	if err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": err.Error()})
@@ -248,7 +273,11 @@ func mutateEmbeddingRecord(c echo.Context, updateContent bool) error {
 			return c.JSON(http.StatusNotFound, map[string]any{"message": "embedding record not found"})
 		}
 	}
-	vec, err := embedText(c.Request().Context(), model, content)
+	callReason := "embedding_regenerate"
+	if updateContent {
+		callReason = "embedding_edit"
+	}
+	vec, err := embedText(c.Request().Context(), model, content, userID, callReason)
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]any{"message": "embedding request failed", "error": err.Error()})
 	}
