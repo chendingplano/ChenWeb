@@ -49,6 +49,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
 	productreviews "github.com/chendingplano/deepdoc/server/api/product-reviews"
 	"github.com/chendingplano/deepdoc/server/api/productdrawings"
+	"github.com/chendingplano/deepdoc/server/api/productnameimporthandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
@@ -404,6 +405,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/product-drawings", productdrawings.Generate)
 	apiGroup.POST("/product-drawings/generate", productdrawings.GeneratePending)
 	apiGroup.POST("/product-drawings/compose-prompt", productdrawings.ComposePrompt)
+	apiGroup.POST("/product-names/china-mechanical/preview", productnameimporthandler.Preview)
+	apiGroup.POST("/product-names/china-mechanical/import", productnameimporthandler.Import)
 	apiGroup.GET("/product-drawings", productdrawings.List)
 	apiGroup.GET("/product-drawings/pending/:token/content", productdrawings.ServePendingContent)
 	apiGroup.POST("/product-drawings/pending/:token/keep", productdrawings.KeepPending)

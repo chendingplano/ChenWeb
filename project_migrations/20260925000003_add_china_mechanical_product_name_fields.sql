@@ -1,0 +1,17 @@
+-- +goose Up
+ALTER TABLE kb.product_names
+    ADD COLUMN IF NOT EXISTS code_group TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS child_code_group TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS industry_code TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS cpc TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS entry_no TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS entry_no_new TEXT NOT NULL DEFAULT '';
+
+-- +goose Down
+ALTER TABLE kb.product_names
+    DROP COLUMN IF EXISTS entry_no_new,
+    DROP COLUMN IF EXISTS entry_no,
+    DROP COLUMN IF EXISTS cpc,
+    DROP COLUMN IF EXISTS industry_code,
+    DROP COLUMN IF EXISTS child_code_group,
+    DROP COLUMN IF EXISTS code_group;

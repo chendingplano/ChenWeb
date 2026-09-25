@@ -60,6 +60,7 @@
 	import KeywordRewriteRulesView from '$lib/components/home3/keyword-rewrite-rules-view.svelte';
 	import CalendarAdminView from '$lib/components/home3/calendar-admin-view.svelte';
 	import PeakHoursView from '$lib/components/home3/peak-hours-view.svelte';
+	import MechanicalProductNamesImportView from '$lib/components/home3/mechanical-product-names-import-view.svelte';
 	import Canvas01 from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01 from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -370,6 +371,8 @@
 			<ReviewExternalResourcesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-sync-data'}
 			<SyncDataView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-resources-china-mechanical-product-names'}
+			<MechanicalProductNamesImportView {darkMode} />
 		{:else if activeMenu?.childId === 'videos-training'}
 			<TrainingVideoViewer {darkMode} />
 		{:else if activeMenu?.childId === 'docs-users-manual'}

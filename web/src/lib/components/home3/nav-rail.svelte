@@ -36,7 +36,8 @@
 		childTitle?: string;
 	};
 
-	type NavGrandchild = { id: string; label: string };
+	type NavGreatGrandchild = { id: string; label: string };
+	type NavGrandchild = { id: string; label: string; children?: NavGreatGrandchild[] };
 	type NavChild = { id: string; label: string; children?: NavGrandchild[] };
 	type NavItem = {
 		id: string;
@@ -287,6 +288,13 @@
 						{ id: 'sysadmin-resources-videos', label: 'Videos' },
 						{ id: 'sysadmin-resources-product-drawings', label: 'Generate 3D Product Drawings' },
 						{
+							id: 'sysadmin-resources-import-product-names',
+							label: 'Import Product Names',
+							children: [
+								{ id: 'sysadmin-resources-china-mechanical-product-names', label: 'Mechanical Product Names' }
+							]
+						},
+						{
 							id: 'sysadmin-resources-external-terminology',
 							label: 'External Terminology Resources'
 						},
@@ -407,9 +415,19 @@
 					if (!isVisible(child.id)) continue;
 					let grandchildren: NavGrandchild[] | undefined;
 					if (child.children) {
-						grandchildren = child.children
-							.filter((gc) => isVisible(gc.id))
-							.map((gc) => ({ ...gc, label: labelFor(gc.id, gc.label) }));
+						grandchildren = [];
+						for (const gc of child.children) {
+							if (!isVisible(gc.id)) continue;
+							const greatGrandchildren = gc.children
+								?.filter((ggc) => isVisible(ggc.id))
+								.map((ggc) => ({ ...ggc, label: labelFor(ggc.id, ggc.label) }));
+							if (gc.children && greatGrandchildren?.length === 0) continue;
+							grandchildren.push({
+								...gc,
+								label: labelFor(gc.id, gc.label),
+								...(greatGrandchildren ? { children: greatGrandchildren } : {})
+							});
+						}
 						if (grandchildren.length === 0) continue; // sub-group collapses
 					}
 					children.push({
@@ -442,6 +460,9 @@
 			for (const child of item.children ?? []) {
 				ids.add(child.id);
 				for (const gc of child.children ?? []) ids.add(gc.id);
+				for (const gc of child.children ?? []) {
+					for (const ggc of gc.children ?? []) ids.add(ggc.id);
+				}
 			}
 		}
 		return ids;
@@ -515,7 +536,7 @@
 	}
 
 	function isGrandchildActive(gc: NavGrandchild): boolean {
-		return !!activeMenu && activeMenu.childId === gc.id;
+		return !!activeMenu && (activeMenu.childId === gc.id || !!gc.children?.some((ggc) => activeMenu.childId === ggc.id));
 	}
 
 	function isSubGroupActive(child: NavChild): boolean {
@@ -674,38 +695,42 @@
 								</button>
 								<!-- Grandchildren -->
 								{#if subAccordionOpen[child.id]}
+					<div class="ml-3" style="border-left:2px solid {borderColor};">
+						{#each child.children as gc (gc.id)}
+							{#if gc.children}
+								<button
+									onclick={() => toggleSubAccordion(gc.id)}
+									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
+									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:12px;"
+								>
+									<span class="flex-1 truncate">{gc.label}</span>
+									<ChevronDownIcon class="h-3 w-3" style="transform:rotate({subAccordionOpen[gc.id] ? '180deg' : '0deg'});" />
+								</button>
+								{#if subAccordionOpen[gc.id]}
 									<div class="ml-3" style="border-left:2px solid {borderColor};">
-										{#each child.children as gc (gc.id)}
+										{#each gc.children as ggc (ggc.id)}
 											<button
-												onclick={() => selectItem(item, gc)}
-												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
-												style="
-													color: {isGrandchildActive(gc) ? accent : textMuted};
-													background: {isGrandchildActive(gc) ? accentTint : 'transparent'};
-													font-size: 13px;
-												"
-												onmouseenter={(e) => {
-													const el = e.currentTarget as HTMLElement;
-													if (!isGrandchildActive(gc)) {
-														el.style.background = hoverBg;
-														el.style.color = textPrimary;
-													}
-												}}
-												onmouseleave={(e) => {
-													const el = e.currentTarget as HTMLElement;
-													if (!isGrandchildActive(gc)) {
-														el.style.background = 'transparent';
-														el.style.color = textMuted;
-													}
-												}}
+												onclick={() => selectItem(item, ggc)}
+												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors duration-150"
+												style="color:{activeMenu?.childId === ggc.id ? accent : textMuted};background:{activeMenu?.childId === ggc.id ? accentTint : 'transparent'};"
 											>
-												<div
-													class="h-1 w-1 flex-shrink-0 rounded-full"
-													style="background:currentColor; opacity:0.5;"
-												></div>
-												{gc.label}
+												<span class="h-1 w-1 rounded-full" style="background:currentColor;opacity:.5;"></span>
+												{ggc.label}
 											</button>
 										{/each}
+									</div>
+								{/if}
+							{:else}
+								<button
+									onclick={() => selectItem(item, gc)}
+									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
+									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:13px;"
+								>
+									<span class="h-1 w-1 flex-shrink-0 rounded-full" style="background:currentColor;opacity:.5;"></span>
+									{gc.label}
+								</button>
+							{/if}
+						{/each}
 									</div>
 								{/if}
 							{:else}

@@ -1,0 +1,1 @@
+Translate each Chinese product name to concise, accurate English suitable for a product catalog. Preserve technical meaning and do not add explanations. Return a JSON object with a "products" array. Each item must contain the same integer "idx" from its input and a string "product_name_en". Do not omit or reorder items.
