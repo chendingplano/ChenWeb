@@ -181,6 +181,14 @@ func EmbedSearchQuery(ctx context.Context, text string) ([]float64, bool) {
 	return embedQueryText(ctx, text)
 }
 
+// EmbedRegistryRows is the exported form of embedRegistryRows, for offline
+// callers that re-embed many rows at once (server/cmd/search-embedding-backfill).
+// It uses the same batched, concurrent, rate-limited path as indexing; rows that
+// fail keep a nil Embedding.
+func EmbedRegistryRows(ctx context.Context, rows []kbsearch.RegistryRow, logger ApiTypes.JimoLogger, callReason, callLoc string) {
+	embedRegistryRows(ctx, rows, logger, callReason, callLoc)
+}
+
 func truncateRunes(s string, max int) string {
 	if max <= 0 {
 		return s

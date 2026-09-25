@@ -7,10 +7,10 @@ import (
 )
 
 // EmbeddingDim is the default dimensionality of the embedding vectors stored in
-// kb.search_artifacts.embedding. It should match the vector(N) type in the
-// pgvector migration unless EMBEDDING_DIMENSIONS is intentionally overridden to
-// a compatible value.
-const EmbeddingDim = 1536
+// kb.search_artifacts.embedding (and the other kb.* embedding columns). It must
+// match the vector(N) type set by migration 20260925000004 (bge-m3, 1024);
+// EMBEDDING_DIMENSIONS may override it only to a value the columns accept.
+const EmbeddingDim = 1024
 const QwenCloudEmbeddingMaxBatchItems = 10
 const QwenCloudEmbeddingMaxBatchRunes = 30000
 

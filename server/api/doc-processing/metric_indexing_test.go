@@ -504,6 +504,7 @@ func TestParseVectorLiteral(t *testing.T) {
 
 func TestHydrateArtifactEmbeddingsLoadsStoredVectors(t *testing.T) {
 	t.Setenv("SEARCH_SEMANTIC_ENABLED", "true")
+	t.Setenv("EMBEDDING_DIMENSIONS", "")
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -511,7 +512,7 @@ func TestHydrateArtifactEmbeddingsLoadsStoredVectors(t *testing.T) {
 	}
 	defer db.Close()
 
-	vecText := "[" + strings.TrimSpace(strings.Repeat("0.1,", 1535)) + "0.1]"
+	vecText := "[" + strings.TrimSpace(strings.Repeat("0.1,", kbsearch.EmbeddingDim-1)) + "0.1]"
 	mock.ExpectQuery("SELECT artifact_id, embedding::text\\s+FROM kb.search_artifacts").
 		WithArgs(searchArtifactEntity, int64(177)).
 		WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "embedding"}).
@@ -523,8 +524,8 @@ func TestHydrateArtifactEmbeddingsLoadsStoredVectors(t *testing.T) {
 	}
 	hydrateArtifactEmbeddings(context.Background(), db, 177, searchArtifactEntity, artifacts, nil, "entity indexing")
 
-	if got := len(artifacts[0].Embedding); got != 1536 {
-		t.Fatalf("hydrated embedding len = %d, want 1536", got)
+	if got := len(artifacts[0].Embedding); got != kbsearch.EmbeddingDim {
+		t.Fatalf("hydrated embedding len = %d, want %d", got, kbsearch.EmbeddingDim)
 	}
 	if len(artifacts[1].Embedding) != 0 {
 		t.Fatalf("unexpected embedding for second artifact: len=%d", len(artifacts[1].Embedding))

@@ -10,7 +10,7 @@ per governed class term, created by a goose migration. A "governed class term" h
 `term_kind = 'metric_definition'`, not `'class'`. Each row SHALL
 carry at least: `class_term_id` (primary key), the class's `current_contract_revision_id`, its
 `definition_state`, its `module_id`, a `search_document` text field, a `search_vector` tsvector
-over that text, an optional `embedding_text`, an optional `embedding` of type `vector(1536)`, an
+over that text, an optional `embedding_text`, an optional `embedding` of type `vector(1024)` (bge-m3; was `vector(1536)` before migration 20260925000004), an
 `instance_count`, and an `updated_at` timestamp. The migration SHALL create a GIN index on
 `search_vector` and an HNSW (`vector_cosine_ops`) index on `embedding`. The table SHALL NOT be
 partitioned and SHALL be independent of `kb.search_artifacts`.
