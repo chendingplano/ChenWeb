@@ -31,6 +31,7 @@
 	model_type: 'llm',
 	model_name: '',
 	dimension: 0,
+	max_chars: 0,
 		base_url: '',
 		timeout_sec: 120,
 		thinking_type: '',
@@ -198,6 +199,10 @@
 					<span>Embedding Dimension</span>
 					<input type="number" bind:value={draft.dimension} min="0" step="1" />
 				</label>
+				<label>
+					<span>Maximum Characters</span>
+					<input type="number" bind:value={draft.max_chars} min="0" step="1" />
+				</label>
 			</div>
 			<div class="row two">
 				<label>
@@ -338,6 +343,10 @@
 												<label>
 													<span>Embedding Dimension</span>
 													<input type="number" bind:value={editDraft.dimension} min="0" step="1" />
+												</label>
+												<label>
+													<span>Maximum Characters</span>
+													<input type="number" bind:value={editDraft.max_chars} min="0" step="1" />
 												</label>
 											</div>
 											<div class="row two">

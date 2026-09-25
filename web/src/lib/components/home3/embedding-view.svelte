@@ -36,6 +36,8 @@
 	let notice = $state('');
 	let dark = $derived(darkMode);
 	let model = $derived(models.find((entry) => entry.key === modelKey));
+	let maxChars = $derived(model && model.max_chars > 0 ? model.max_chars : 6000);
+	let remainingBytes = $derived(maxChars - Array.from(content).length);
 	let dimensionModels = $derived(
 		models.filter(
 			(entry) => entry.model_type === 'embedding' && entry.dimension === (model?.dimension ?? 0)
@@ -236,10 +238,11 @@
 			>Content<textarea bind:value={content} rows="5" placeholder="Enter text to embed"
 			></textarea></label
 		>
-		<div class="actions">
+		<div class="actions generate-actions">
 			<label class="check"
 				><input type="checkbox" bind:checked={saveToDatabase} /> Save embedding to database</label
-			><button onclick={runEmbedding} disabled={busy || !content.trim()}
+			><span class:over-limit={remainingBytes < 0} class="remaining-bytes">Remaining Bytes: {remainingBytes}</span>
+			><button onclick={runEmbedding} disabled={busy || !content.trim() || remainingBytes < 0}
 				>{busy ? 'Working…' : 'Generate embedding'}</button
 			>
 		</div>
@@ -308,7 +311,7 @@
 				<table>
 					<thead
 						><tr
-							><th>Select</th><th>ID</th><th>Model</th><th>Content</th><th>Updated</th><th
+							><th>Select</th><th>ID</th><th>Model</th><th>Content</th><th>Time (ms)</th><th>Chars</th><th>Tokens</th><th>Updated</th><th
 								>Actions</th
 							></tr
 						></thead
@@ -330,7 +333,7 @@
 											>Save</button
 										><button class="secondary" onclick={() => (editingID = null)}>Cancel</button
 										>{:else}{record.content}{/if}</td
-								><td>{new Date(record.updated_at).toLocaleString()}</td><td class="row-actions"
+								><td>{record.time_ms}</td><td>{record.num_chars}</td><td>{record.num_tokens}</td><td>{new Date(record.updated_at).toLocaleString()}</td><td class="row-actions"
 									><button
 										class="secondary"
 										onclick={() => {
@@ -464,6 +467,10 @@
 		display: flex;
 		align-items: center;
 	}
+	.generate-actions { margin-top: 0.75rem; }
+	.remaining-bytes { margin-left: auto; color: #8791a1; font-size: 0.86rem; }
+	.remaining-bytes.over-limit { color: #ef8585; }
+	.generate-actions > button { margin-top: 0.45rem; }
 	.similarity-form {
 		display: flex;
 		align-items: end;

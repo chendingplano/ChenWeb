@@ -4,6 +4,7 @@ export type LLMModelEntry = {
 	model_type: string;
 	model_name: string;
 	dimension: number;
+	max_chars: number;
 	base_url: string;
 	timeout_sec: number;
 	thinking_type: string;

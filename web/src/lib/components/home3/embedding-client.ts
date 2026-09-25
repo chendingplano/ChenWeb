@@ -7,6 +7,9 @@ export type EmbeddingRecord = {
 	content: string;
 	created_at: string;
 	updated_at: string;
+	time_ms: number;
+	num_chars: number;
+	num_tokens: number;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {

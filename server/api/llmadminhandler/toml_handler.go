@@ -18,6 +18,7 @@ type modelTOMLEntry struct {
 	ModelType            string `json:"model_type"`
 	ModelName            string `json:"model_name"`
 	Dimension            int    `json:"dimension"`
+	MaxChars             int    `json:"max_chars"`
 	BaseURL              string `json:"base_url"`
 	TimeoutSec           int    `json:"timeout_sec"`
 	ThinkingType         string `json:"thinking_type"`
@@ -150,6 +151,7 @@ func GetModelsTOML(c echo.Context) error {
 			ModelType:            m.ModelType,
 			ModelName:            m.ModelName,
 			Dimension:            m.Dimension,
+			MaxChars:             m.MaxChars,
 			BaseURL:              m.BaseURL,
 			TimeoutSec:           m.TimeoutSec,
 			ThinkingType:         m.ThinkingType,
@@ -191,6 +193,7 @@ func UpsertModelTOML(c echo.Context) error {
 		ModelType:            req.ModelType,
 		ModelName:            req.ModelName,
 		Dimension:            req.Dimension,
+		MaxChars:             req.MaxChars,
 		BaseURL:              req.BaseURL,
 		TimeoutSec:           req.TimeoutSec,
 		ThinkingType:         req.ThinkingType,

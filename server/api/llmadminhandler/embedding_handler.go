@@ -3,11 +3,13 @@ package llmadminhandler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -30,7 +32,21 @@ type embeddingRecord struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	TimeMS    int64     `json:"time_ms"`
+	NumChars  int       `json:"num_chars"`
+	NumTokens int       `json:"num_tokens"`
 }
+
+type embeddingResult struct {
+	vector    []float64
+	timeMS    int64
+	numChars  int
+	numTokens int
+}
+
+type embeddingInputError struct{ message string }
+
+func (e embeddingInputError) Error() string { return e.message }
 
 type embeddingModelConfig struct {
 	key string
@@ -89,11 +105,24 @@ func embeddingRequestUserID(c echo.Context) string {
 	return strings.TrimSpace(rc.GetUserID())
 }
 
-func embedText(ctx context.Context, model embeddingModelConfig, content, userID, callReason string) ([]float64, error) {
-	if strings.TrimSpace(content) == "" {
-		return nil, fmt.Errorf("content is required")
+func embeddingMaxChars(model embeddingModelConfig) int {
+	if model.cfg.MaxChars > 0 {
+		return model.cfg.MaxChars
 	}
-	vec, err := embeddingClient(model).Embed(ctx, llmclients.EmbedInput{
+	return 6000
+}
+
+func embedText(ctx context.Context, model embeddingModelConfig, content, userID, callReason string) (embeddingResult, error) {
+	if strings.TrimSpace(content) == "" {
+		return embeddingResult{}, embeddingInputError{message: "content is required"}
+	}
+	numChars := utf8.RuneCountInString(content)
+	if numChars > embeddingMaxChars(model) {
+		return embeddingResult{}, embeddingInputError{message: fmt.Sprintf("content has %d characters; selected model accepts at most %d", numChars, embeddingMaxChars(model))}
+	}
+	client := embeddingClient(model)
+	started := time.Now()
+	vec, err := client.Embed(ctx, llmclients.EmbedInput{
 		UserID:     userID,
 		ModelName:  model.cfg.ModelName,
 		InputText:  content,
@@ -101,12 +130,27 @@ func embedText(ctx context.Context, model embeddingModelConfig, content, userID,
 		CallLoc:    "CWB_LLM_EMBEDDING",
 	})
 	if err != nil {
-		return nil, err
+		return embeddingResult{}, err
 	}
 	if len(vec) != model.cfg.Dimension {
-		return nil, fmt.Errorf("embedding model returned dimension %d, configured dimension is %d", len(vec), model.cfg.Dimension)
+		return embeddingResult{}, fmt.Errorf("embedding model returned dimension %d, configured dimension is %d", len(vec), model.cfg.Dimension)
 	}
-	return vec, nil
+	numTokens := 0
+	if usage := client.LastEmbeddingUsage(); usage != nil {
+		numTokens = usage.InputTokens
+	}
+	if numTokens <= 0 {
+		numTokens = llmclients.EstimateEmbeddingTokens(content)
+	}
+	return embeddingResult{vector: vec, timeMS: time.Since(started).Milliseconds(), numChars: numChars, numTokens: numTokens}, nil
+}
+
+func embeddingErrorStatus(err error) int {
+	var inputErr embeddingInputError
+	if errors.As(err, &inputErr) {
+		return http.StatusBadRequest
+	}
+	return http.StatusBadGateway
 }
 
 func embeddingDB(c echo.Context) (*sql.DB, error) {
@@ -129,11 +173,11 @@ func CreateEmbedding(c echo.Context) error {
 	if userID == "" {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
 	}
-	vec, err := embedText(c.Request().Context(), model, req.Content, userID, "embedding_test")
+	embedded, err := embedText(c.Request().Context(), model, req.Content, userID, "embedding_test")
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]any{"message": "embedding request failed", "error": err.Error()})
+		return c.JSON(embeddingErrorStatus(err), map[string]any{"message": "embedding request failed", "error": err.Error()})
 	}
-	result := map[string]any{"model_key": model.key, "model_name": model.cfg.ModelName, "dimension": len(vec), "embedding": vec}
+	result := map[string]any{"model_key": model.key, "model_name": model.cfg.ModelName, "dimension": len(embedded.vector), "embedding": embedded.vector, "time_ms": embedded.timeMS, "num_chars": embedded.numChars, "num_tokens": embedded.numTokens}
 	if req.Save {
 		db, dbErr := embeddingDB(c)
 		if dbErr != nil {
@@ -141,7 +185,7 @@ func CreateEmbedding(c echo.Context) error {
 		}
 		table, _ := embeddingTable(model.cfg.Dimension)
 		var id int64
-		err = db.QueryRowContext(c.Request().Context(), "INSERT INTO "+table+" (model_key, model_name, content, embedding) VALUES ($1, $2, $3, $4::vector) RETURNING id", model.key, model.cfg.ModelName, req.Content, kbsearch.FormatVectorLiteral(vec)).Scan(&id)
+		err = db.QueryRowContext(c.Request().Context(), "INSERT INTO "+table+" (model_key, model_name, content, embedding, time_ms, num_chars, num_tokens) VALUES ($1, $2, $3, $4::vector, $5, $6, $7) RETURNING id", model.key, model.cfg.ModelName, req.Content, kbsearch.FormatVectorLiteral(embedded.vector), embedded.timeMS, embedded.numChars, embedded.numTokens).Scan(&id)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to save embedding", "error": err.Error()})
 		}
@@ -163,9 +207,9 @@ func SearchEmbeddingSimilarity(c echo.Context) error {
 	if userID == "" {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
 	}
-	vec, err := embedText(c.Request().Context(), model, req.Content, userID, "embedding_similarity_search")
+	embedded, err := embedText(c.Request().Context(), model, req.Content, userID, "embedding_similarity_search")
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]any{"message": "embedding request failed", "error": err.Error()})
+		return c.JSON(embeddingErrorStatus(err), map[string]any{"message": "embedding request failed", "error": err.Error()})
 	}
 	db, err := embeddingDB(c)
 	if err != nil {
@@ -176,7 +220,7 @@ func SearchEmbeddingSimilarity(c echo.Context) error {
 	if topN < 1 {
 		topN = 10
 	}
-	rows, err := db.QueryContext(c.Request().Context(), "SELECT id, model_key, model_name, content, created_at, updated_at, 1 - (embedding <=> $1::vector) AS similarity FROM "+table+" WHERE model_key = $2 ORDER BY embedding <=> $1::vector LIMIT $3", kbsearch.FormatVectorLiteral(vec), model.key, topN)
+	rows, err := db.QueryContext(c.Request().Context(), "SELECT id, model_key, model_name, content, created_at, updated_at, time_ms, num_chars, num_tokens, 1 - (embedding <=> $1::vector) AS similarity FROM "+table+" WHERE model_key = $2 ORDER BY embedding <=> $1::vector LIMIT $3", kbsearch.FormatVectorLiteral(embedded.vector), model.key, topN)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "similarity search failed", "error": err.Error()})
 	}
@@ -188,7 +232,7 @@ func SearchEmbeddingSimilarity(c echo.Context) error {
 	matches := []match{}
 	for rows.Next() {
 		var item match
-		if err := rows.Scan(&item.ID, &item.ModelKey, &item.ModelName, &item.Content, &item.CreatedAt, &item.UpdatedAt, &item.Similarity); err != nil {
+		if err := rows.Scan(&item.ID, &item.ModelKey, &item.ModelName, &item.Content, &item.CreatedAt, &item.UpdatedAt, &item.TimeMS, &item.NumChars, &item.NumTokens, &item.Similarity); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]any{"message": err.Error()})
 		}
 		matches = append(matches, item)
@@ -215,7 +259,7 @@ func ListEmbeddingRecords(c echo.Context) error {
 	if err := db.QueryRowContext(c.Request().Context(), "SELECT COUNT(*) FROM "+table+" WHERE ($1 = '' OR model_key = $1)", modelKey).Scan(&total); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"message": err.Error()})
 	}
-	rows, err := db.QueryContext(c.Request().Context(), "SELECT id, model_key, model_name, content, created_at, updated_at FROM "+table+" WHERE ($1 = '' OR model_key = $1) ORDER BY id DESC LIMIT $2 OFFSET $3", modelKey, limit, (page-1)*limit)
+	rows, err := db.QueryContext(c.Request().Context(), "SELECT id, model_key, model_name, content, created_at, updated_at, time_ms, num_chars, num_tokens FROM "+table+" WHERE ($1 = '' OR model_key = $1) ORDER BY id DESC LIMIT $2 OFFSET $3", modelKey, limit, (page-1)*limit)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"message": err.Error()})
 	}
@@ -223,7 +267,7 @@ func ListEmbeddingRecords(c echo.Context) error {
 	items := []embeddingRecord{}
 	for rows.Next() {
 		var row embeddingRecord
-		if err := rows.Scan(&row.ID, &row.ModelKey, &row.ModelName, &row.Content, &row.CreatedAt, &row.UpdatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.ModelKey, &row.ModelName, &row.Content, &row.CreatedAt, &row.UpdatedAt, &row.TimeMS, &row.NumChars, &row.NumTokens); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]any{"message": err.Error()})
 		}
 		items = append(items, row)
@@ -277,11 +321,11 @@ func mutateEmbeddingRecord(c echo.Context, updateContent bool) error {
 	if updateContent {
 		callReason = "embedding_edit"
 	}
-	vec, err := embedText(c.Request().Context(), model, content, userID, callReason)
+	embedded, err := embedText(c.Request().Context(), model, content, userID, callReason)
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]any{"message": "embedding request failed", "error": err.Error()})
+		return c.JSON(embeddingErrorStatus(err), map[string]any{"message": "embedding request failed", "error": err.Error()})
 	}
-	_, err = db.ExecContext(c.Request().Context(), "UPDATE "+table+" SET content=$1, embedding=$2::vector, updated_at=NOW() WHERE id=$3 AND model_key=$4", content, kbsearch.FormatVectorLiteral(vec), id, model.key)
+	_, err = db.ExecContext(c.Request().Context(), "UPDATE "+table+" SET content=$1, embedding=$2::vector, time_ms=$3, num_chars=$4, num_tokens=$5, updated_at=NOW() WHERE id=$6 AND model_key=$7", content, kbsearch.FormatVectorLiteral(embedded.vector), embedded.timeMS, embedded.numChars, embedded.numTokens, id, model.key)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to update embedding", "error": err.Error()})
 	}
