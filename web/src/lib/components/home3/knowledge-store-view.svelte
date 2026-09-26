@@ -447,7 +447,7 @@
 							<h3>{store.ks_name}</h3>
 						</div>
 						{#if knowledgeStoreState.activeStoreId === store.id}
-							<span class="active-pill">Active</span>
+							<span class="active-pill">Selected</span>
 						{/if}
 					</div>
 
@@ -1027,9 +1027,26 @@
 		box-shadow: 0 26px 60px rgba(4, 10, 24, 0.34);
 	}
 
-	.store-card.selected {
-		border-color: color-mix(in srgb, var(--user-card-color) 60%, #76a7ff 40%);
-		box-shadow: 0 32px 72px rgba(7, 12, 26, 0.36);
+	.store-card.selected,
+	.store-card.style-blush.selected,
+	.store-card.style-graphite.selected,
+	.store-card.style-neon.selected {
+		border-color: var(--accent);
+		outline: 3px solid color-mix(in srgb, var(--accent) 72%, white 28%);
+		outline-offset: 2px;
+		background:
+			linear-gradient(
+				125deg,
+				color-mix(in srgb, var(--accent) 26%, transparent),
+				color-mix(in srgb, var(--accent) 4%, transparent) 72%
+			),
+			linear-gradient(180deg, var(--neon-slab-raised), var(--neon-slab-raised-soft)),
+			var(--card-raised);
+		box-shadow:
+			inset 5px 0 0 var(--accent),
+			0 0 0 2px color-mix(in srgb, var(--accent) 68%, white 32%),
+			0 0 34px color-mix(in srgb, var(--accent) 52%, transparent),
+			0 24px 56px rgba(7, 12, 26, 0.48);
 	}
 
 	.store-card.warning {
@@ -1065,6 +1082,12 @@
 	.active-pill {
 		background: var(--success-soft);
 		color: #8ce5cc;
+	}
+
+	.store-card.selected .active-pill {
+		background: var(--accent);
+		color: #17120e;
+		font-weight: 700;
 	}
 
 	.badge-row {

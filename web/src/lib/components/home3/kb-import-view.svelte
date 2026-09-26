@@ -92,6 +92,7 @@
 	// the backend is the real access-control boundary, not this flag.
 	let pendingFilesVisible = $state(false);
 	let pendingFilesDialogOpen = $state(false);
+	let pendingFilesEmptyDialogOpen = $state(false);
 	let pendingFilesList = $state<PendingFileEntry[]>([]);
 	let pendingFilesSelected = $state(new Set<string>());
 	let pendingFilesLoading = $state(false);
@@ -932,7 +933,7 @@
 		try {
 			const result = await listPendingFiles();
 			if (result.files.length === 0) {
-				pendingFilesLaunchError = 'No pending files found.';
+				pendingFilesEmptyDialogOpen = true;
 				return;
 			}
 			pendingFilesList = result.files;
@@ -1427,6 +1428,41 @@
 						style="height:34px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:12px; font-weight:600; cursor:pointer; opacity:{editSubmitting ? 0.6 : 1};"
 					>{editSubmitting ? 'Saving…' : 'Save Changes'}</button>
 				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if pendingFilesEmptyDialogOpen}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.72); backdrop-filter:blur(3px);"
+		onclick={() => (pendingFilesEmptyDialogOpen = false)}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') pendingFilesEmptyDialogOpen = false;
+		}}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="w-full max-w-sm rounded-xl p-5"
+			style="background:{cardBg}; border:1px solid {borderColor};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Pending files"
+			tabindex="0"
+		>
+			<p style="margin:0; color:{textPrimary}; font-size:14px;">No pending files found.</p>
+			<div class="mt-5 flex justify-end">
+				<button
+					autofocus
+					onclick={() => (pendingFilesEmptyDialogOpen = false)}
+					style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:12px; cursor:pointer;"
+				>
+					OK
+				</button>
 			</div>
 		</div>
 	</div>
