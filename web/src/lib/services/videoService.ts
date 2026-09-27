@@ -40,6 +40,7 @@ export type VideoUploadFields = {
 };
 
 export type VideoListOptions = {
+	sorts?: { field: 'name' | 'created_at' | 'size_bytes'; direction: 'asc' | 'desc' }[];
 	sortBy?: 'name' | 'created_at' | 'size_bytes';
 	sortDir?: 'asc' | 'desc';
 	name?: string;
@@ -53,8 +54,15 @@ export async function listVideos(
 	fetchFn: typeof fetch = fetch
 ): Promise<VideoMeta[]> {
 	const params = new URLSearchParams();
-	if (options.sortBy) params.set('sort_by', options.sortBy);
-	if (options.sortDir) params.set('sort_dir', options.sortDir);
+	if (options.sorts) {
+		for (const sort of options.sorts) {
+			params.append('sort_by', sort.field);
+			params.append('sort_dir', sort.direction);
+		}
+	} else {
+		if (options.sortBy) params.set('sort_by', options.sortBy);
+		if (options.sortDir) params.set('sort_dir', options.sortDir);
+	}
 	if (options.name) params.set('name', options.name);
 	if (options.timeFrom) params.set('time_from', options.timeFrom);
 	if (options.timeTo) params.set('time_to', options.timeTo);

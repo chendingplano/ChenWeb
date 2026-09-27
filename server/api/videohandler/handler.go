@@ -447,7 +447,8 @@ var videoListSortColumns = map[string]string{
 }
 
 // ListVideos handles GET /api/v1/videos. Optional query params:
-//   - sort_by (name|created_at|size_bytes, default created_at), sort_dir (asc|desc, default desc)
+//   - repeated sort_by and sort_dir pairs (name|created_at|size_bytes, asc|desc)
+//     or the legacy single sort_by/sort_dir pair; defaults to created_at DESC
 //   - name: ILIKE substring match against the video name
 //   - time_from, time_to: inclusive YYYY-MM-DD upload-date range
 func ListVideos(c echo.Context) error {
@@ -455,14 +456,26 @@ func ListVideos(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	sortExpr, ok := videoListSortColumns[c.QueryParam("sort_by")]
-	if !ok {
-		sortExpr = "created_at"
+	sortFields := c.QueryParams()["sort_by"]
+	sortDirections := c.QueryParams()["sort_dir"]
+	orderBy := make([]string, 0, len(sortFields)+1)
+	seenSortFields := make(map[string]bool, len(sortFields))
+	for i, field := range sortFields {
+		sortExpr, ok := videoListSortColumns[field]
+		if !ok || seenSortFields[field] {
+			continue
+		}
+		seenSortFields[field] = true
+		direction := "DESC"
+		if i < len(sortDirections) && strings.EqualFold(sortDirections[i], "asc") {
+			direction = "ASC"
+		}
+		orderBy = append(orderBy, sortExpr+" "+direction)
 	}
-	direction := "DESC"
-	if strings.EqualFold(c.QueryParam("sort_dir"), "asc") {
-		direction = "ASC"
+	if len(orderBy) == 0 {
+		orderBy = append(orderBy, "v.created_at DESC")
 	}
+	orderBy = append(orderBy, "v.id DESC")
 
 	var timeFrom, timeTo time.Time
 	if raw := c.QueryParam("time_from"); raw != "" {
@@ -508,7 +521,7 @@ func ListVideos(c echo.Context) error {
 		   FROM kb.videos v
 		   LEFT JOIN kb.images i ON i.uid = v.image_uid
 		  WHERE ` + strings.Join(where, " AND ") + `
-		  ORDER BY ` + sortExpr + ` ` + direction + `, v.id ` + direction
+		  ORDER BY ` + strings.Join(orderBy, ", ")
 
 	rows, err := db.Query(query, args...)
 	if err != nil {

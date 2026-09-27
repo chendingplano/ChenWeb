@@ -18,7 +18,8 @@ interpolating the client-supplied sort key directly into SQL), and appends
 
 **Goals:**
 - Sort the entire `kb.videos` table by name, upload time, or size, ascending
-  or descending, via one `sort_by`/`sort_dir` param pair.
+  or descending, using repeated `sort_by`/`sort_dir` query parameter pairs.
+  Sort priority follows the order in which fields are selected.
 - Filter the entire table by a name substring (`ILIKE`) and/or an upload-time
   range (`time_from`/`time_to`), combinable with sort and with each other.
 - Reuse the assertions-store allowlist/parameterized-query pattern so the sort
@@ -39,8 +40,8 @@ interpolating the client-supplied sort key directly into SQL), and appends
 ## Decisions
 
 1. **Query params on the existing endpoint, not a new one.**
-   `GET /api/v1/videos` gains optional `sort_by`, `sort_dir`, `name`,
-   `time_from`, `time_to` params. Omitting all of them reproduces today's
+   `GET /api/v1/videos` gains repeated `sort_by` and `sort_dir` params plus
+   `name`, `time_from`, and `time_to`. Omitting all sort params reproduces today's
    behavior exactly (`ORDER BY created_at DESC, id DESC`), so this is
    backward compatible.
 
@@ -52,10 +53,11 @@ interpolating the client-supplied sort key directly into SQL), and appends
        "size_bytes": "size_bytes",
    }
    ```
-   `sort_by` not in the map (or empty) falls back to `created_at`; `sort_dir`
-   anything other than case-insensitive `asc` becomes `DESC`. A stable
-   secondary key (`, id <dir>`) is kept to match the existing tie-break
-   behavior.
+   Each valid `sort_by` maps through the allowlist, paired by position with its
+   `sort_dir`; only case-insensitive `asc` selects ascending order, and other
+   directions become `DESC`. Valid fields are applied in query order, followed
+   by `id DESC` for stable results. With no valid fields the query defaults to
+   `created_at DESC, id DESC`.
 
 3. **Name filter** is `ILIKE '%<name>%'` against `COALESCE(name, filename)`
    (the same expression the table already displays), parameterized —
@@ -68,18 +70,17 @@ interpolating the client-supplied sort key directly into SQL), and appends
    it.
 
 5. **Frontend controls row**: a new row above the table in
-   `video-management-view.svelte` with a `<select>` for Sort (6 fixed
-   options mapping to `sort_by`+`sort_dir` pairs), a text `<input>` for Filter
+   `video-management-view.svelte` with a text `<input>` for Filter
    by Name, and two `<input type="date">` fields for Filter by Time, plus an
    Apply action — mirroring the filter-panel + "Apply Filters" affordance in
-   `semantic-assertions-view.svelte` rather than the assertions view's
-   separate clickable-column-header sort (a single dropdown was what was
-   requested, not per-column click-to-sort).
+   `semantic-assertions-view.svelte`. Each sortable table heading has a
+   dropdown with Sort ASC, Sort DESC, and No Sort. Selecting a new field adds
+   it as the lowest-priority sort; changing or removing a field keeps the
+   priority of the remaining fields.
 
-6. **Response shape unchanged** (`VideoMeta[]`) — see Non-Goals. Only
-   `listVideos()`'s signature grows an optional options argument
-   (`{sortBy?, sortDir?, name?, timeFrom?, timeTo?}`) that gets serialized
-   into `URLSearchParams`.
+6. **Response shape unchanged** (`VideoMeta[]`) — see Non-Goals. `listVideos()`
+   accepts repeated ordered sort descriptors as well as the legacy single-sort
+   options, and serializes them into `URLSearchParams`.
 
 ## Risks / Trade-offs
 

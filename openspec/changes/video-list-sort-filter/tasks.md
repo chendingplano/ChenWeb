@@ -1,12 +1,12 @@
 ## 1. Backend: query params on `GET /api/v1/videos`
 
 - [x] 1.1 In `server/api/videohandler/handler.go`, extend `ListVideos` to read
-      `sort_by`, `sort_dir`, `name`, `time_from`, `time_to` query params via
-      `c.QueryParam(...)`.
+      repeated `sort_by`/`sort_dir` pairs plus `name`, `time_from`, and
+      `time_to` query params.
 - [x] 1.2 Add the sort allowlist map (`name` → `COALESCE(name, filename)`,
-      `created_at` → `created_at`, `size_bytes` → `size_bytes`), defaulting to
-      `created_at DESC` when `sort_by`/`sort_dir` are absent or unrecognized,
-      with `, id <dir>` as a stable tie-break — matching the pattern in
+      `created_at` → `created_at`, `size_bytes` → `size_bytes`), applying
+      valid fields in query order and defaulting to `created_at DESC` when no
+      valid fields are supplied, with `id DESC` as a stable tie-break — matching the pattern in
       `server/api/ontology/assertions/assertions_store.go`.
 - [x] 1.3 Build a parameterized `WHERE` clause: append
       `COALESCE(name, filename) ILIKE $n` when `name` is non-empty, and
@@ -19,17 +19,16 @@
 
 ## 2. Frontend: service layer
 
-- [x] 2.1 In `web/src/lib/services/videoService.ts`, add an optional options
-      param to `listVideos()`: `{ sortBy?, sortDir?, name?, timeFrom?, timeTo? }`,
-      serialized into `URLSearchParams` and appended to the `/api/v1/videos`
-      request when present.
+- [x] 2.1 In `web/src/lib/services/videoService.ts`, add ordered sort
+      descriptors to `listVideos()` options, serialized as repeated
+      `sort_by`/`sort_dir` query params; retain the legacy single-sort options.
 - [x] 2.2 Keep the return type `VideoMeta[]` (no response-shape change).
 
 ## 3. Frontend: controls UI
 
 - [x] 3.1 In `web/src/lib/components/home3/video-management-view.svelte`, add
-      a controls row above the table: a Sort `<select>` (By Name ASC/DESC, By
-      Time ASC/DESC, By Size ASC/DESC), a Filter by Name text `<input>`, and
+      Sort ASC, Sort DESC, and No Sort menus to the Name, Size, and Uploaded
+      headings, plus a Filter by Name text `<input>` and
       Filter by Time start/end `<input type="date">` fields, styled
       consistently with the page's existing dark-theme controls (e.g. the
       "Upload video" button).

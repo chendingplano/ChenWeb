@@ -34,15 +34,14 @@
 	let selected = $state<VideoMeta | null>(null);
 
 	// --- Sort / filter controls ---
-	const sortOptions = [
-		{ value: 'name-asc', label: 'By Name ASC', sortBy: 'name', sortDir: 'asc' },
-		{ value: 'name-desc', label: 'By Name DESC', sortBy: 'name', sortDir: 'desc' },
-		{ value: 'created_at-asc', label: 'By Time ASC', sortBy: 'created_at', sortDir: 'asc' },
-		{ value: 'created_at-desc', label: 'By Time DESC', sortBy: 'created_at', sortDir: 'desc' },
-		{ value: 'size_bytes-asc', label: 'By Size ASC', sortBy: 'size_bytes', sortDir: 'asc' },
-		{ value: 'size_bytes-desc', label: 'By Size DESC', sortBy: 'size_bytes', sortDir: 'desc' }
-	] as const;
-	let sortOption = $state<(typeof sortOptions)[number]['value']>('created_at-desc');
+	type SortField = 'name' | 'created_at' | 'size_bytes';
+	type SortDirection = 'asc' | 'desc';
+	const sortableColumns: { field: SortField; label: string }[] = [
+		{ field: 'name', label: 'Name' },
+		{ field: 'size_bytes', label: 'Size' },
+		{ field: 'created_at', label: 'Uploaded' }
+	];
+	let sorts = $state<{ field: SortField; direction: SortDirection }[]>([]);
 	let filterName = $state('');
 	let filterTimeFrom = $state('');
 	let filterTimeTo = $state('');
@@ -103,11 +102,9 @@
 	async function refresh() {
 		loading = true;
 		error = null;
-		const chosen = sortOptions.find((o) => o.value === sortOption)!;
 		try {
 			videos = await listVideos({
-				sortBy: chosen.sortBy,
-				sortDir: chosen.sortDir,
+				sorts,
 				name: filterName.trim() || undefined,
 				timeFrom: filterTimeFrom || undefined,
 				timeTo: filterTimeTo || undefined
@@ -120,18 +117,20 @@
 		}
 	}
 
-	function sortByColumn(sortBy: 'name' | 'created_at' | 'size_bytes') {
-		const current = sortOptions.find((option) => option.value === sortOption)!;
-		const sortDir = current.sortBy === sortBy
-			? current.sortDir === 'asc' ? 'desc' : 'asc'
-			: sortBy === 'created_at' ? 'desc' : 'asc';
-		sortOption = `${sortBy}-${sortDir}` as (typeof sortOptions)[number]['value'];
+	function setSort(field: SortField, direction: SortDirection | 'none') {
+		const existingIndex = sorts.findIndex((sort) => sort.field === field);
+		if (direction === 'none') {
+			if (existingIndex >= 0) sorts.splice(existingIndex, 1);
+		} else if (existingIndex >= 0) {
+			sorts[existingIndex] = { field, direction };
+		} else {
+			sorts.push({ field, direction });
+		}
 		void refresh();
 	}
 
-	function sortIndicator(sortBy: 'name' | 'created_at' | 'size_bytes') {
-		const current = sortOptions.find((option) => option.value === sortOption)!;
-		return current.sortBy === sortBy ? (current.sortDir === 'asc' ? '↑' : '↓') : '';
+	function sortDirection(field: SortField): SortDirection | 'none' {
+		return sorts.find((sort) => sort.field === field)?.direction ?? 'none';
 	}
 
 	function openDialog() {
@@ -321,19 +320,6 @@
 	<!-- Sort / filter controls -->
 	<div class="flex items-end gap-3 mb-4 flex-wrap">
 		<div class="flex flex-col gap-1.5">
-			<label for="v-sort" style="color:{textSecondary}; font-size:12px;">Sort</label>
-			<select
-				id="v-sort"
-				bind:value={sortOption}
-				onchange={refresh}
-				style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; font-size:13px;"
-			>
-				{#each sortOptions as opt (opt.value)}
-					<option value={opt.value}>{opt.label}</option>
-				{/each}
-			</select>
-		</div>
-		<div class="flex flex-col gap-1.5">
 			<label for="v-filter-name" style="color:{textSecondary}; font-size:12px;">Filter by Name</label>
 			<input
 				id="v-filter-name"
@@ -381,16 +367,29 @@
 				<thead>
 					<tr style="text-align:left; color:{textSecondary};">
 						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Cover</th>
-						<th aria-sort={sortOptions.find((option) => option.value === sortOption)?.sortBy === 'name' ? (sortOption.endsWith('asc') ? 'ascending' : 'descending') : 'none'} style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">
-							<button onclick={() => sortByColumn('name')} class="cursor-pointer" style="background:none; border:none; color:inherit; font:inherit; padding:0;">Name {sortIndicator('name')}</button>
+						<th style="padding:6px 10px; border-bottom:1px solid {borderColor}; font-weight:500;">
+							<label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
+								<span>Name</span>
+								<select aria-label="Sort Name" value={sortDirection('name')} onchange={(event) => setSort('name', event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
+									<option value="none">No Sort</option>
+									<option value="asc">Sort ASC</option>
+									<option value="desc">Sort DESC</option>
+								</select>
+							</label>
 						</th>
 						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Source</th>
-						<th aria-sort={sortOptions.find((option) => option.value === sortOption)?.sortBy === 'size_bytes' ? (sortOption.endsWith('asc') ? 'ascending' : 'descending') : 'none'} style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">
-							<button onclick={() => sortByColumn('size_bytes')} class="cursor-pointer" style="background:none; border:none; color:inherit; font:inherit; padding:0;">Size {sortIndicator('size_bytes')}</button>
-						</th>
-						<th aria-sort={sortOptions.find((option) => option.value === sortOption)?.sortBy === 'created_at' ? (sortOption.endsWith('asc') ? 'ascending' : 'descending') : 'none'} style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">
-							<button onclick={() => sortByColumn('created_at')} class="cursor-pointer" style="background:none; border:none; color:inherit; font:inherit; padding:0;">Uploaded {sortIndicator('created_at')}</button>
-						</th>
+						{#each sortableColumns.slice(1) as column (column.field)}
+							<th style="padding:6px 10px; border-bottom:1px solid {borderColor}; font-weight:500;">
+								<label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
+									<span>{column.label}</span>
+									<select aria-label="Sort {column.label}" value={sortDirection(column.field)} onchange={(event) => setSort(column.field, event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
+										<option value="none">No Sort</option>
+										<option value="asc">Sort ASC</option>
+										<option value="desc">Sort DESC</option>
+									</select>
+								</label>
+							</th>
+						{/each}
 						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500; text-align:right;">Actions</th>
 					</tr>
 				</thead>
