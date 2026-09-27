@@ -675,6 +675,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/semantic-decisions/repair-stale-projections", kbhandler.RepairStaleProjections)
 	apiGroup.GET("/kb/default-store", kbhandler.GetDefaultKnowledgeStore)
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
+	apiGroup.GET("/kb/inputs/process-parsed", kbhandler.ListProcessParsedInputIDs)
 	apiGroup.GET("/kb/inputs/:id", kbhandler.GetInput)
 	apiGroup.PUT("/kb/inputs/:id", kbhandler.UpdateInput)
 	apiGroup.POST("/kb/inputs/upload", kbhandler.UploadInputs)

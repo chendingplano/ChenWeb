@@ -137,6 +137,9 @@
 	let restartConvert = $state(false);
 	let showRestartDialog = $state(false);
 	let restarting = $state(false);
+	let processingParsed = $state(false);
+	let showProcessParsedMenu = $state(false);
+	let processParsedMessage = $state<{ kind: 'success' | 'error'; text: string } | null>(null);
 	let restartError = $state('');
 	let restartToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
 
@@ -720,6 +723,65 @@
 		}
 	}
 
+	async function processParsedInputs(selectedOnly = false) {
+		if (processingParsed) return;
+		if (selectedOnly && selectedRecordIds.size === 0) return;
+		processingParsed = true;
+		showProcessParsedMenu = false;
+		processParsedMessage = null;
+		let queued = 0;
+		let failed = 0;
+		try {
+			const selectedIDs = selectedOnly ? [...selectedRecordIds] : [];
+			const query = selectedOnly ? `?ids=${encodeURIComponent(selectedIDs.join(','))}` : '';
+			const response = await fetch(`/api/v1/kb/inputs/process-parsed${query}`, { credentials: 'same-origin' });
+			const result = await response.json().catch(() => null);
+			if (!response.ok) throw new Error(result?.error_msg ?? `Request failed (${response.status})`);
+			const inputs: Array<{ id: number; converted_after_parse: boolean }> = result?.inputs ?? [];
+			let conversionQueued = 0;
+			let processingQueued = 0;
+			for (const input of inputs) {
+				try {
+					if (input.converted_after_parse) {
+						// The line file already exists, so start doc processing directly.
+						await publishEvent('kb.pdf.start-doc-processing', {
+							record_id: String(input.id),
+							force: true
+						});
+						processingQueued++;
+					} else {
+						// Convert parser output first; the converter's line-file event starts doc processing.
+						await publishEvent('kb.pdf.parsed', {
+							record_id: String(input.id),
+							type: 'pdf',
+							status: 'success',
+							force: true
+						});
+						conversionQueued++;
+					}
+					queued++;
+				} catch {
+					failed++;
+				}
+			}
+			processParsedMessage = {
+				kind: failed > 0 ? 'error' : 'success',
+				text: inputs.length === 0
+					? 'No parsed inputs are ready to process'
+					: `Queued ${queued} of ${inputs.length} parsed inputs: ${conversionQueued} for conversion and ${processingQueued} for document processing${failed > 0 ? `; ${failed} failed` : ''}`
+			};
+		} catch (err) {
+			processParsedMessage = {
+				kind: 'error',
+				text: err instanceof Error
+					? `${err.message}${queued > 0 ? ` (${queued} already queued)` : ''}`
+					: 'Failed to process parsed inputs'
+			};
+		} finally {
+			processingParsed = false;
+		}
+	}
+
 	async function doLaunch(
 		record: KbInputRecord,
 		procs: Record<string, boolean>,
@@ -1069,6 +1131,38 @@
 					<RefreshCwIcon class="h-3.5 w-3.5" />
 					Refresh
 				</button>
+				<div style="position:relative;">
+					<button
+						type="button"
+						onclick={() => { showProcessParsedMenu = !showProcessParsedMenu; }}
+						disabled={processingParsed}
+						aria-haspopup="menu"
+						aria-expanded={showProcessParsedMenu}
+						style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{processingParsed ? 0.6 : 1};"
+					>
+						{processingParsed ? 'Processing…' : 'Process Parsed'} ▾
+					</button>
+					{#if showProcessParsedMenu}
+						<div role="menu" style="position:absolute; z-index:30; top:calc(100% + 6px); right:0; min-width:210px; padding:4px; border:1px solid {borderColor}; border-radius:8px; background:{cardBg}; box-shadow:0 12px 28px rgba(0,0,0,0.28);">
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => processParsedInputs(false)}
+								style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;"
+							>Process Parsed - All</button>
+							<span title={selectedRecordIds.size === 0 ? 'Select the records you want to process first.' : ''} style="display:block;">
+								<button
+									type="button"
+									role="menuitem"
+									onclick={() => processParsedInputs(true)}
+									disabled={selectedRecordIds.size === 0 || processingParsed}
+									aria-disabled={selectedRecordIds.size === 0 || processingParsed}
+									style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{selectedRecordIds.size === 0 ? textMuted : textPrimary}; text-align:left; font-size:13px; cursor:{selectedRecordIds.size === 0 ? 'not-allowed' : 'pointer'}; white-space:nowrap; opacity:{selectedRecordIds.size === 0 ? 0.55 : 1};"
+								>Process Parsed - Selected</button>
+							</span>
+						</div>
+					{/if}
+				</div>
 				<select
 					value={autoRefreshMs}
 					onchange={(e) => { autoRefreshMs = Number((e.currentTarget as HTMLSelectElement).value); }}
@@ -1802,6 +1896,33 @@
 		style="background:{restartToast.kind === 'success' ? colorSuccess : colorError}; color:white; font-size:13px; font-weight:600; box-shadow:0 16px 40px rgba(0,0,0,0.35);"
 	>
 		{restartToast.msg}
+	</div>
+{/if}
+
+{#if processParsedMessage}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.72); backdrop-filter:blur(3px);"
+		onmousedown={(e) => { if (e.target === e.currentTarget) processParsedMessage = null; }}
+	>
+		<div
+			class="w-full max-w-md rounded-xl p-5"
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="process-parsed-error-title"
+		>
+			<h3 id="process-parsed-error-title" style="font-size:16px; font-weight:600; color:{processParsedMessage.kind === 'error' ? colorError : textPrimary}; margin:0 0 10px;">Process Parsed</h3>
+			<p style="font-size:13px; color:{textSecondary}; margin:0 0 18px;">{processParsedMessage.text}</p>
+			<div style="display:flex; justify-content:flex-end;">
+				<button
+					type="button"
+					onclick={() => { processParsedMessage = null; }}
+					style="height:36px; padding:0 14px; border:0; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer;"
+				>OK</button>
+			</div>
+		</div>
 	</div>
 {/if}
 

@@ -79,6 +79,7 @@ type errorResponse struct {
 }
 
 type listInputsFilters struct {
+	OwnerTenantID   string
 	RecordID        *int64
 	KsStoreID       *int64
 	DocType         string
@@ -204,6 +205,24 @@ func ListInputs(c echo.Context) error {
 			Status:   false,
 			ErrorMsg: fmt.Sprintf("invalid parse_state: %q (CWB_KB_031)", strings.TrimSpace(strings.ToLower(filters.ParseState))),
 		})
+	}
+
+	user := rc.IsAuthenticated()
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, errorResponse{
+			Status:   false,
+			ErrorMsg: "authentication required (CWB_KB_032)",
+		})
+	}
+	if !hasInputListAdminRole(user.Roles) {
+		userID := strings.TrimSpace(user.UserId)
+		if userID == "" {
+			return c.JSON(http.StatusUnauthorized, errorResponse{
+				Status:   false,
+				ErrorMsg: "authenticated user has no ID (CWB_KB_033)",
+			})
+		}
+		filters.OwnerTenantID = userID
 	}
 
 	db := ApiTypes.ProjectDBHandle
@@ -332,6 +351,107 @@ func ListInputs(c echo.Context) error {
 		PageSize: pageSize,
 		Total:    total,
 	})
+}
+
+// ListProcessParsedInputIDs returns parsed inputs that still need conversion
+// into line files, ordered by creation time.
+func ListProcessParsedInputIDs(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_075")
+	defer rc.Close()
+	user := rc.IsAuthenticated()
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authentication required"})
+	}
+	ownerID := ""
+	if !hasInputListAdminRole(user.Roles) {
+		ownerID = strings.TrimSpace(user.UserId)
+		if ownerID == "" {
+			return c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authenticated user has no ID"})
+		}
+	}
+
+	query := `
+SELECT i.id,
+       EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS converted(entry)
+           WHERE lower(COALESCE(converted.entry->>'operation', '')) = 'converted'
+             AND lower(COALESCE(converted.entry->>'proc_status', converted.entry->>'proc-status', converted.entry->>'status', '')) = 'success'
+             AND converted.entry->>'start_time' >= parsed.entry->>'start_time'
+       ) AS converted_after_parse
+FROM kb.inputs i
+CROSS JOIN LATERAL (
+    SELECT entry
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS parsed(entry)
+    WHERE lower(COALESCE(parsed.entry->>'operation', '')) = 'parsed'
+      AND lower(COALESCE(parsed.entry->>'proc_status', parsed.entry->>'proc-status', parsed.entry->>'status', '')) = 'success'
+    ORDER BY parsed.entry->>'start_time' DESC
+    LIMIT 1
+) AS parsed
+WHERE i.processing_mode = 'pdf_parsing'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS doc_processing(entry)
+      WHERE lower(COALESCE(doc_processing.entry->>'operation', '')) = 'doc_processing'
+        AND lower(COALESCE(doc_processing.entry->>'proc_status', doc_processing.entry->>'proc-status', doc_processing.entry->>'status', '')) IN ('success', 'running', 'active')
+        AND doc_processing.entry->>'start_time' >= parsed.entry->>'start_time'
+  )`
+	args := make([]any, 0)
+	if rawIDs := strings.TrimSpace(c.QueryParam("ids")); rawIDs != "" {
+		parts := strings.Split(rawIDs, ",")
+		if len(parts) > 5000 {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "too many selected inputs"})
+		}
+		placeholders := make([]string, 0, len(parts))
+		for _, part := range parts {
+			id, parseErr := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+			if parseErr != nil || id <= 0 {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid selected input IDs"})
+			}
+			args = append(args, id)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		query += " AND i.id IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	if ownerID != "" {
+		args = append(args, ownerID)
+		query += fmt.Sprintf(" AND i.tenant_id = $%d", len(args))
+	}
+	query += " ORDER BY i.create_time ASC, i.id ASC"
+	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), query, args...)
+	if err != nil {
+		rc.GetLogger().Error("failed to list parsed inputs for processing", "error", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to find parsed inputs"})
+	}
+	defer rows.Close()
+	type processParsedInput struct {
+		ID                  int64 `json:"id"`
+		ConvertedAfterParse bool  `json:"converted_after_parse"`
+	}
+	inputs := make([]processParsedInput, 0)
+	for rows.Next() {
+		var input processParsedInput
+		if err := rows.Scan(&input.ID, &input.ConvertedAfterParse); err != nil {
+			rc.GetLogger().Error("failed to read parsed input ID", "error", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read parsed inputs"})
+		}
+		inputs = append(inputs, input)
+	}
+	if err := rows.Err(); err != nil {
+		rc.GetLogger().Error("failed while listing parsed inputs", "error", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read parsed inputs"})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "inputs": inputs})
+}
+
+func hasInputListAdminRole(roles []string) bool {
+	for _, role := range roles {
+		role = strings.ToLower(strings.TrimSpace(role))
+		if role == "admin" || role == "root" {
+			return true
+		}
+	}
+	return false
 }
 
 func optionalInt64Value(v *int64) any {
@@ -882,6 +1002,9 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	}
 	if filters.ModifyTimeEnd != nil {
 		whereParts = append(whereParts, fmt.Sprintf("i.modify_time <= %s", nextArg(*filters.ModifyTimeEnd)))
+	}
+	if ownerTenantID := strings.TrimSpace(filters.OwnerTenantID); ownerTenantID != "" {
+		whereParts = append(whereParts, fmt.Sprintf("i.tenant_id = %s", nextArg(ownerTenantID)))
 	}
 
 	return strings.Join(whereParts, " AND "), args, nil

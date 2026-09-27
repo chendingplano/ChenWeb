@@ -40,3 +40,15 @@ func assertSeqnos(t *testing.T, got map[int64]int, want map[int64]int) {
 		}
 	}
 }
+
+func TestOverlappingDate(t *testing.T) {
+	if got := overlappingDate([]string{"2026-01-01", "2026-01-02"}, []string{"2026-01-04"}); got != "" {
+		t.Errorf("disjoint lists: got %q, want \"\"", got)
+	}
+	if got := overlappingDate([]string{"2026-01-01", "2026-01-04"}, []string{"2026-01-04"}); got != "2026-01-04" {
+		t.Errorf("overlap: got %q, want 2026-01-04", got)
+	}
+	if got := overlappingDate(nil, []string{"2026-01-04"}); got != "" {
+		t.Errorf("adjusted only: got %q, want \"\"", got)
+	}
+}

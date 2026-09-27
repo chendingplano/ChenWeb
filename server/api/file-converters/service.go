@@ -29,6 +29,7 @@ var ErrParserNotImplemented = errors.New("parser converter is not implemented")
 
 type ConvertRequest struct {
 	RecordID       int64  `json:"record_id"`
+	UserID         string `json:"user_id,omitempty"`
 	ResultFilename string `json:"result_filename"`
 	FileFormat     string `json:"file_format"`
 	Type           string `json:"type"`
@@ -43,11 +44,10 @@ type InputRecord struct {
 	StatusRaw      string
 	FileName       string
 	ResultFilename string
-	// TenantID is kb.inputs.tenant_id, used as the user_id attributed on the
-	// automatic doc-processing trigger this converter emits -- there is no
-	// authenticated caller for an automatically-triggered run, so cost
-	// attribution falls back to whichever tenant owns the record. Defaults
-	// to "-" at the DB level (never NULL) when unset.
+	// TenantID is kb.inputs.tenant_id and the fallback user_id attribution for
+	// automatic conversion runs. A manually triggered conversion carries the
+	// authenticated caller's ID in ConvertRequest.UserID instead. Defaults to
+	// "-" at the DB level (never NULL) when unset.
 	TenantID string
 }
 
@@ -105,6 +105,7 @@ func ParseRequest(payload []byte) (ConvertRequest, error) {
 	// JSON string (manual UI trigger) are accepted.
 	var raw struct {
 		RecordID       json.RawMessage `json:"record_id"`
+		UserID         string          `json:"user_id"`
 		ResultFilename string          `json:"result_filename"`
 		FileFormat     string          `json:"file_format"`
 		Type           string          `json:"type"`
@@ -121,6 +122,7 @@ func ParseRequest(payload []byte) (ConvertRequest, error) {
 	}
 	return ConvertRequest{
 		RecordID:       rid,
+		UserID:         strings.TrimSpace(raw.UserID),
 		ResultFilename: raw.ResultFilename,
 		FileFormat:     raw.FileFormat,
 		Type:           raw.Type,
@@ -212,7 +214,11 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 
 	lineFilePaths, procErr = s.convert(ctx, rec)
 	for _, lineFilePath := range lineFilePaths {
-		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath, rec.TenantID); emitErr != nil {
+		userID := strings.TrimSpace(req.UserID)
+		if userID == "" {
+			userID = rec.TenantID
+		}
+		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath, userID); emitErr != nil {
 			procErr = errors.Join(procErr, emitErr)
 		}
 	}

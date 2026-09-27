@@ -209,6 +209,7 @@ func UpsertCalendarDates(c echo.Context) error {
 		Country       string   `json:"country"`
 		CalendarType  string   `json:"calendar_type"`
 		Dates         []string `json:"dates"`
+		AdjustedDates []string `json:"adjusted_dates"`
 		HolidayInfoID int64    `json:"holiday_info_id"`
 	}
 	if err := decodeJSON(c, &payload); err != nil {
@@ -218,11 +219,14 @@ func UpsertCalendarDates(c echo.Context) error {
 	if payload.CalendarType == "" {
 		payload.CalendarType = "holidays"
 	}
-	if payload.Year == 0 || payload.Country == "" || len(payload.Dates) == 0 || payload.HolidayInfoID == 0 {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "year, country, dates, and holiday_info_id are required (CWB_CAL_112)"})
+	if payload.Year == 0 || payload.Country == "" || len(payload.Dates)+len(payload.AdjustedDates) == 0 || payload.HolidayInfoID == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "year, country, dates or adjusted_dates, and holiday_info_id are required (CWB_CAL_112)"})
+	}
+	if d := overlappingDate(payload.Dates, payload.AdjustedDates); d != "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "date " + d + " cannot be both a holiday and an adjusted day (CWB_CAL_115)"})
 	}
 
-	calendarID, err := upsertCalendarDates(c.Request().Context(), ApiTypes.ProjectDBHandle, payload.Year, payload.Country, payload.CalendarType, payload.Dates, payload.HolidayInfoID)
+	calendarID, err := upsertCalendarDates(c.Request().Context(), ApiTypes.ProjectDBHandle, payload.Year, payload.Country, payload.CalendarType, payload.Dates, payload.AdjustedDates, payload.HolidayInfoID)
 	if err != nil {
 		rc.GetLogger().Error("upsert calendar dates failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to save calendar dates (CWB_CAL_113)"})

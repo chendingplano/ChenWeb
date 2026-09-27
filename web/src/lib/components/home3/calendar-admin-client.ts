@@ -9,7 +9,9 @@ export type HolidayInfo = {
 	updated_at: string;
 };
 
-export type CalendarDate = { holiday_date: string; holiday_info_id: number; holiday_info_name: string };
+export type DayKind = 'holiday' | 'adjusted';
+
+export type CalendarDate = { holiday_date: string; holiday_info_id: number; holiday_info_name: string; day_kind: DayKind };
 
 export type Calendar = { id: number; year: number; country: string; calendar_type: string; dates: CalendarDate[] };
 
@@ -62,12 +64,13 @@ export async function upsertCalendarDates(
 	country: string,
 	calendarType: string,
 	dates: string[],
-	holidayInfoId: number
+	holidayInfoId: number,
+	adjustedDates: string[] = []
 ): Promise<Calendar> {
 	const result = await request<Calendar>('/api/v1/calendars/dates', {
 		method: 'PUT',
 		headers: jsonHeaders,
-		body: JSON.stringify({ year, country, calendar_type: calendarType, dates, holiday_info_id: holidayInfoId })
+		body: JSON.stringify({ year, country, calendar_type: calendarType, dates, adjusted_dates: adjustedDates, holiday_info_id: holidayInfoId })
 	});
 	return result.record as Calendar;
 }

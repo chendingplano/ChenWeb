@@ -5,7 +5,7 @@
   listHolidayInfo, createHolidayInfo, updateHolidayInfo, deleteHolidayInfo,
   getCalendar, upsertCalendarDates, deleteCalendarDate, deleteCalendar,
   getDefaultCountry, setDefaultCountry, clearDefaultCountry,
-  type HolidayInfo, type Calendar
+  type HolidayInfo, type Calendar, type DayKind
  } from './calendar-admin-client';
 
  let { darkMode = true }: { darkMode?: boolean } = $props();
@@ -25,7 +25,11 @@
  let loading = $state(false);
  let error = $state('');
 
- let selected = $state(new Set<string>());
+ // Pending selections, one set per day kind; selectMode picks which set a click edits.
+ let selectMode = $state<DayKind>('holiday');
+ let selectedHolidays = $state(new Set<string>());
+ let selectedAdjusted = $state(new Set<string>());
+ let selectedCount = $derived(selectedHolidays.size + selectedAdjusted.size);
  let boundByDate = $derived(new Map((calendar?.dates ?? []).map((d) => [d.holiday_date, d])));
 
  let holidayInfos = $state<HolidayInfo[]>([]);
@@ -57,7 +61,7 @@
   loading = true; error = '';
   try {
    calendar = await getCalendar(year, country, calendarType);
-   selected = new Set();
+   clearSelection();
   } catch (e) {
    error = e instanceof Error ? e.message : 'Unable to load calendar.';
   } finally {
@@ -92,10 +96,15 @@
 
  onMount(async () => { await loadDefaultCountry(); loadCalendar(); loadHolidayInfos(); });
 
+ function clearSelection() { selectedHolidays = new Set(); selectedAdjusted = new Set(); }
+
+ // Toggle key in the active mode's set; adding it there removes it from the other set.
  function toggleDay(key: string) {
-  const next = new Set(selected);
-  if (next.has(key)) next.delete(key); else next.add(key);
-  selected = next;
+  const mine = new Set(selectMode === 'holiday' ? selectedHolidays : selectedAdjusted);
+  const other = new Set(selectMode === 'holiday' ? selectedAdjusted : selectedHolidays);
+  if (mine.has(key)) mine.delete(key); else { mine.add(key); other.delete(key); }
+  if (selectMode === 'holiday') { selectedHolidays = mine; selectedAdjusted = other; }
+  else { selectedAdjusted = mine; selectedHolidays = other; }
  }
 
  function openAttach() {
@@ -116,8 +125,8 @@
     holidayInfos = [...holidayInfos, created];
    }
    if (!holidayInfoId || Number.isNaN(holidayInfoId)) { attachError = 'Select or create a holiday.'; attaching = false; return; }
-   calendar = await upsertCalendarDates(year, country, calendarType, Array.from(selected), holidayInfoId);
-   selected = new Set();
+   calendar = await upsertCalendarDates(year, country, calendarType, Array.from(selectedHolidays), holidayInfoId, Array.from(selectedAdjusted));
+   clearSelection();
    attachModal = false;
   } catch (e) {
    attachError = e instanceof Error ? e.message : 'Unable to attach holiday.';
@@ -163,7 +172,7 @@
 
 <div class="page" style={`background:${colors.bg};color:${colors.text}`}>
  <section class="card intro" style={`background:${colors.card};border-color:${colors.border}`}>
-  <div><h1>Holiday Calendar</h1><p>Define holiday calendars by year, country, and calendar type. Select day cells to attach a holiday.</p></div>
+  <div><h1>Holiday Calendar</h1><p>Define holiday calendars by year, country, and calendar type. Select holiday days and adjusted working days, then attach a holiday.</p></div>
   <div class="controls">
    <label>Year<input type="number" bind:value={year} onchange={loadCalendar} /></label>
    <label>Country<select bind:value={country} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
@@ -176,10 +185,18 @@
 
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
-   <span>{selected.size} day(s) selected</span>
-   <button disabled={selected.size === 0} onclick={openAttach}>Attach Holiday</button>
-   <button class="secondary" disabled={selected.size === 0} onclick={() => (selected = new Set())}>Clear Selection</button>
+   <span>{selectedHolidays.size} holiday day(s), {selectedAdjusted.size} adjusted day(s) selected</span>
+   <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} onclick={() => (selectMode = 'holiday')}>Set Holidays</button>
+   <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} onclick={() => (selectMode = 'adjusted')}>Set Adjusted Days</button>
+   <button disabled={selectedCount === 0} onclick={openAttach}>Attach Holiday</button>
+   <button class="secondary" disabled={selectedCount === 0} onclick={clearSelection}>Clear Selection</button>
    {#if calendar?.id}<button class="danger" onclick={removeCalendar}>Delete Calendar</button>{/if}
+  </div>
+  <div class="legend">
+   <span><i class="swatch selected"></i>Selected holiday</span>
+   <span><i class="swatch selected-adjusted"></i>Selected adjusted day</span>
+   <span><i class="swatch bound"></i>Holiday</span>
+   <span><i class="swatch bound-adjusted"></i>Adjusted working day</span>
   </div>
   {#if loading}<div class="state">Loading calendar…</div>
   {:else}
@@ -196,9 +213,11 @@
          {@const bound = boundByDate.get(key)}
          <button
           class="cell"
-          class:selected={selected.has(key)}
-          class:bound={!!bound}
-          title={bound ? bound.holiday_info_name : ''}
+          class:selected={selectedHolidays.has(key)}
+          class:selected-adjusted={selectedAdjusted.has(key)}
+          class:bound={bound?.day_kind === 'holiday'}
+          class:bound-adjusted={bound?.day_kind === 'adjusted'}
+          title={bound ? (bound.day_kind === 'adjusted' ? `${bound.holiday_info_name} (adjusted working day)` : bound.holiday_info_name) : ''}
           onclick={() => (bound ? removeBinding(key) : toggleDay(key))}
          >{day}</button>
         {/if}
@@ -226,7 +245,7 @@
 {#if attachModal}
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (attachModal = false)}>
  <div class="modal" role="dialog" aria-modal="true" aria-label="Attach holiday" style={`background:${colors.card};color:${colors.text};border-color:${colors.border}`}>
-  <div class="modal-head"><h2>Attach Holiday to {selected.size} Date(s)</h2><button class="link" onclick={() => (attachModal = false)}>Close</button></div>
+  <div class="modal-head"><h2>Attach Holiday to {selectedHolidays.size} Holiday Day(s), {selectedAdjusted.size} Adjusted Day(s)</h2><button class="link" onclick={() => (attachModal = false)}>Close</button></div>
   <div class="form">
    <label class="check"><input type="checkbox" bind:checked={attachNew} /> Create a new holiday</label>
    {#if attachNew}
@@ -288,7 +307,20 @@
  .cell{aspect-ratio:1;border-radius:5px;border:1px solid transparent;background:transparent;color:inherit;font-size:11px;cursor:pointer;padding:0}
  .cell.empty{cursor:default}
  .cell.selected{background:#6366f1;color:#fff}
+ .cell.selected-adjusted{background:transparent;border:2px solid #f59e0b;color:inherit}
  .cell.bound{background:#15803d;color:#fff}
+ .cell.bound-adjusted{background:#d97706;color:#fff}
+ .mode{background:transparent;border:1px solid #6366f1;color:inherit}
+ .mode.active{background:#6366f1;color:#fff}
+ .mode.adjusted{border-color:#f59e0b}
+ .mode.adjusted.active{background:#d97706;color:#fff}
+ .legend{display:flex;gap:16px;flex-wrap:wrap;margin:-4px 0 12px;font-size:11px;color:#94a3b8}
+ .legend span{display:flex;align-items:center;gap:6px}
+ .swatch{width:12px;height:12px;border-radius:3px;display:inline-block;box-sizing:border-box}
+ .swatch.selected{background:#6366f1}
+ .swatch.selected-adjusted{border:2px solid #f59e0b}
+ .swatch.bound{background:#15803d}
+ .swatch.bound-adjusted{background:#d97706}
  .table-wrap{overflow:auto}
  table{width:100%;border-collapse:collapse}
  th,td{text-align:left;border-bottom:1px solid #64748b44;padding:9px 8px}

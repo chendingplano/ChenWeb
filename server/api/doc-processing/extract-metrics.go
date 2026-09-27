@@ -3868,6 +3868,7 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 
 	seqno := newMetricSeqnoCounter(existing)
 	merged := mergeMetrics(existing, candidates, seqno, p.batchRecordID)
+	/*
 	for _, decision := range merged.Decisions {
 		p.Logger.Info("metrics merge decision", "record_id", p.batchRecordID,
 			"metric_name", decision.MetricName,
@@ -3880,6 +3881,7 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 			"static_comparisons", decision.Comparisons,
 		)
 	}
+	*/
 	p.Logger.Info("metrics merge classification summary", "record_id", p.batchRecordID,
 		"existing_count", len(existing),
 		"new_count", len(candidates),

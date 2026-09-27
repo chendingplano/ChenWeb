@@ -29,6 +29,27 @@ type CalendarDate struct {
 	HolidayDate     string `json:"holiday_date"`
 	HolidayInfoID   int64  `json:"holiday_info_id"`
 	HolidayInfoName string `json:"holiday_info_name"`
+	DayKind         string `json:"day_kind"`
+}
+
+// Day kinds stored in calendar_holidays.day_kind.
+const (
+	DayKindHoliday  = "holiday"
+	DayKindAdjusted = "adjusted"
+)
+
+// overlappingDate returns the first date present in both lists, or "".
+func overlappingDate(holidayDates, adjustedDates []string) string {
+	seen := make(map[string]struct{}, len(holidayDates))
+	for _, d := range holidayDates {
+		seen[d] = struct{}{}
+	}
+	for _, d := range adjustedDates {
+		if _, ok := seen[d]; ok {
+			return d
+		}
+	}
+	return ""
 }
 
 // Calendar is the (year, country, calendar_type) container plus its bound
@@ -240,7 +261,7 @@ func getCalendar(ctx context.Context, db *sql.DB, year int, country, calendarTyp
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT ch.holiday_date, ch.holiday_info_id, hi.name
+		SELECT ch.holiday_date, ch.holiday_info_id, hi.name, ch.day_kind
 		FROM public.calendar_holidays ch
 		JOIN public.holiday_info hi ON hi.id = ch.holiday_info_id
 		WHERE ch.calendar_id = $1
@@ -252,7 +273,7 @@ func getCalendar(ctx context.Context, db *sql.DB, year int, country, calendarTyp
 	for rows.Next() {
 		var d CalendarDate
 		var holidayDate time.Time
-		if err := rows.Scan(&holidayDate, &d.HolidayInfoID, &d.HolidayInfoName); err != nil {
+		if err := rows.Scan(&holidayDate, &d.HolidayInfoID, &d.HolidayInfoName, &d.DayKind); err != nil {
 			return Calendar{}, err
 		}
 		d.HolidayDate = holidayDate.Format("2006-01-02")
@@ -262,9 +283,10 @@ func getCalendar(ctx context.Context, db *sql.DB, year int, country, calendarTyp
 }
 
 // upsertCalendarDates creates the calendars row if missing, then upserts one
-// calendar_holidays binding per date, replacing any existing binding for that
-// date. Returns the calendar id.
-func upsertCalendarDates(ctx context.Context, db *sql.DB, year int, country, calendarType string, dates []string, holidayInfoID int64) (int64, error) {
+// calendar_holidays binding per date (holidayDates as day kind "holiday",
+// adjustedDates as "adjusted"), replacing any existing binding for that date.
+// Returns the calendar id.
+func upsertCalendarDates(ctx context.Context, db *sql.DB, year int, country, calendarType string, holidayDates, adjustedDates []string, holidayInfoID int64) (int64, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -281,15 +303,25 @@ func upsertCalendarDates(ctx context.Context, db *sql.DB, year int, country, cal
 		return 0, err
 	}
 
-	for _, date := range dates {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO public.calendar_holidays (calendar_id, holiday_info_id, holiday_date)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (calendar_id, holiday_date) DO UPDATE SET
-				holiday_info_id = EXCLUDED.holiday_info_id,
-				updated_at = NOW()`, calendarID, holidayInfoID, date); err != nil {
-			return 0, err
+	upsert := func(dates []string, dayKind string) error {
+		for _, date := range dates {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO public.calendar_holidays (calendar_id, holiday_info_id, holiday_date, day_kind)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (calendar_id, holiday_date) DO UPDATE SET
+					holiday_info_id = EXCLUDED.holiday_info_id,
+					day_kind = EXCLUDED.day_kind,
+					updated_at = NOW()`, calendarID, holidayInfoID, date, dayKind); err != nil {
+				return err
+			}
 		}
+		return nil
+	}
+	if err := upsert(holidayDates, DayKindHoliday); err != nil {
+		return 0, err
+	}
+	if err := upsert(adjustedDates, DayKindAdjusted); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err

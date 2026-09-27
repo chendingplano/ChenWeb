@@ -310,7 +310,6 @@
 					label: 'Keyword Normalization',
 					children: [{ id: 'sysadmin-keyword-rewrite-rules', label: 'Rewrite Rules' }]
 				},
-				{ id: 'sysadmin-schedules', label: 'Schedules' },
 				{
 					id: 'sysadmin-doc-process-pipeline',
 					label: 'Doc Process Pipeline',
@@ -329,7 +328,8 @@
 					label: 'System',
 					children: [
 						{ id: 'sysadmin-system-calendar', label: 'Calendar' },
-						{ id: 'sysadmin-system-peak-hours', label: 'Peak Hours' }
+						{ id: 'sysadmin-system-peak-hours', label: 'Peak Hours' },
+						{ id: 'sysadmin-schedules', label: 'Schedules' }
 					]
 				}
 			]
