@@ -14,6 +14,8 @@
 
 - Modify `server/api/aiassistanthandler/handler.go`: derive name and email from `EchoFactory.NewFromEcho(...).IsAuthenticated()` and return only those fields.
 - Modify `web/src/lib/components/home3/nav-rail.svelte`: replace the sample profile constant with typed reactive profile state and fetch the existing endpoint on mount.
+- Modify `web/src/lib/components/home3/content-panel.svelte`: route the `__user_info__` selection to a dedicated profile view.
+- Create `web/src/lib/components/home3/current-user-info-view.svelte`: load and display current name and email with loading and error states.
 
 ## Chunk 1: Authenticated profile response and rail display
 
@@ -35,11 +37,22 @@
 - [x] In `onMount`, fetch `/api/v1/ai-assistant/user-info` with same-origin credentials; require an OK status and validate that the JSON contains string `user.name` and `user.email` before updating state. Keep the profile blank on HTTP, parsing, or shape errors.
 - [x] Render the initials, name, and email only from loaded current-user profile state; use email for initials when the returned name is blank. Do not restore sample identity on failure.
 
-### Task 3: Review the change
+### Task 3: Render the selected User Info page
+
+**Files:**
+- Modify: `web/src/lib/components/home3/content-panel.svelte`
+- Create: `web/src/lib/components/home3/current-user-info-view.svelte`
+
+- [x] Route `sectionId === '__user_info__'` to the dedicated view so it does not fall through to the generic placeholder.
+- [x] Fetch the existing current-user endpoint and display name and email, with loading, error, and retry states.
+
+### Task 4: Review the change
 
 **Files:**
 - Review: `server/api/aiassistanthandler/handler.go`
 - Review: `web/src/lib/components/home3/nav-rail.svelte`
+- Review: `web/src/lib/components/home3/content-panel.svelte`
+- Review: `web/src/lib/components/home3/current-user-info-view.svelte`
 
 - [x] Run the existing frontend check/build command from `web/package.json`.
 - [x] Do not add or run tests unless the user asks for them.

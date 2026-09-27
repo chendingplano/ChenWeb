@@ -57,6 +57,7 @@
 	import ProductDrawingsView from '$lib/components/home3/product-drawings-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
 	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
+	import CurrentUserInfoView from '$lib/components/home3/current-user-info-view.svelte';
 	import KeywordRewriteRulesView from '$lib/components/home3/keyword-rewrite-rules-view.svelte';
 	import CalendarAdminView from '$lib/components/home3/calendar-admin-view.svelte';
 	import PeakHoursView from '$lib/components/home3/peak-hours-view.svelte';
@@ -377,6 +378,8 @@
 			<TrainingVideoViewer {darkMode} />
 		{:else if activeMenu?.childId === 'docs-users-manual'}
 			<UserManualViewer {darkMode} />
+		{:else if sectionId === '__user_info__'}
+			<CurrentUserInfoView {darkMode} />
 		{:else if sectionId === 'chat'}
 			<Chatter01 {darkMode} />
 		{:else if isDashboard}
