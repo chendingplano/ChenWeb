@@ -3,7 +3,9 @@
 ### Requirement: Sort the video list
 The system SHALL let an admin sort the Resources > Videos table by name,
 upload time, or file size, in ascending or descending order, applied to the
-entire `kb.videos` table (not just currently-rendered rows).
+entire `kb.videos` table (not just currently-rendered rows). The Name, Size,
+and Uploaded column headings SHALL be clickable sort controls and reflect the
+active direction.
 
 #### Scenario: Default order unchanged
 - **WHEN** an admin opens the Videos page without choosing a sort option
@@ -20,6 +22,11 @@ entire `kb.videos` table (not just currently-rendered rows).
 - **WHEN** an admin selects "By Size DESC" from the Sort dropdown
 - **THEN** the table re-renders with all matching videos ordered by file size
   largest first
+
+#### Scenario: Sort from a column heading
+- **WHEN** an admin clicks the Name, Size, or Uploaded column heading
+- **THEN** the table sorts by that field and shows the active direction; clicking
+  the same heading again reverses the direction
 
 ### Requirement: Filter the video list by name
 The system SHALL let an admin filter the Resources > Videos table to only

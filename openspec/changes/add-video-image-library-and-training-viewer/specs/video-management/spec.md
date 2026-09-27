@@ -29,6 +29,10 @@ The upload dialog SHALL let the user set the cover image either by picking one f
 - **WHEN** the user clicks Pick an Image and chooses one
 - **THEN** that image becomes the selected cover (its id is submitted as `image_id`)
 
+#### Scenario: Select with a double-click
+- **WHEN** the user double-clicks an image in the library picker
+- **THEN** that image becomes the selected cover and the upload dialog remains open
+
 #### Scenario: Auto-generate a cover
 - **WHEN** the user clicks Auto-Generate
 - **THEN** a new image is generated, saved to the library, and selected as the cover; clicking again replaces the selection with another new image

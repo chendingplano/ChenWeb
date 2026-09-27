@@ -54,6 +54,7 @@
 	let uploadProgress = $state(0);
 	let generating = $state(false);
 	let showPicker = $state(false);
+	let ignoreDialogBackdropUntil = 0;
 	let dialogError = $state<string | null>(null);
 
 	let file = $state<File | null>(null);
@@ -119,6 +120,20 @@
 		}
 	}
 
+	function sortByColumn(sortBy: 'name' | 'created_at' | 'size_bytes') {
+		const current = sortOptions.find((option) => option.value === sortOption)!;
+		const sortDir = current.sortBy === sortBy
+			? current.sortDir === 'asc' ? 'desc' : 'asc'
+			: sortBy === 'created_at' ? 'desc' : 'asc';
+		sortOption = `${sortBy}-${sortDir}` as (typeof sortOptions)[number]['value'];
+		void refresh();
+	}
+
+	function sortIndicator(sortBy: 'name' | 'created_at' | 'size_bytes') {
+		const current = sortOptions.find((option) => option.value === sortOption)!;
+		return current.sortBy === sortBy ? (current.sortDir === 'asc' ? '↑' : '↓') : '';
+	}
+
 	function openDialog() {
 		editingId = null;
 		file = null;
@@ -138,6 +153,11 @@
 		dialogError = null;
 		uploadProgress = 0;
 		dialogOpen = true;
+	}
+
+	function onDialogBackdropClick() {
+		if (Date.now() < ignoreDialogBackdropUntil) return;
+		if (!uploading) dialogOpen = false;
 	}
 
 	function openEditDialog(video: VideoMeta) {
@@ -361,10 +381,16 @@
 				<thead>
 					<tr style="text-align:left; color:{textSecondary};">
 						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Cover</th>
-						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Name</th>
+						<th aria-sort={sortOptions.find((option) => option.value === sortOption)?.sortBy === 'name' ? (sortOption.endsWith('asc') ? 'ascending' : 'descending') : 'none'} style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">
+							<button onclick={() => sortByColumn('name')} class="cursor-pointer" style="background:none; border:none; color:inherit; font:inherit; padding:0;">Name {sortIndicator('name')}</button>
+						</th>
 						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Source</th>
-						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Size</th>
-						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Uploaded</th>
+						<th aria-sort={sortOptions.find((option) => option.value === sortOption)?.sortBy === 'size_bytes' ? (sortOption.endsWith('asc') ? 'ascending' : 'descending') : 'none'} style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">
+							<button onclick={() => sortByColumn('size_bytes')} class="cursor-pointer" style="background:none; border:none; color:inherit; font:inherit; padding:0;">Size {sortIndicator('size_bytes')}</button>
+						</th>
+						<th aria-sort={sortOptions.find((option) => option.value === sortOption)?.sortBy === 'created_at' ? (sortOption.endsWith('asc') ? 'ascending' : 'descending') : 'none'} style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">
+							<button onclick={() => sortByColumn('created_at')} class="cursor-pointer" style="background:none; border:none; color:inherit; font:inherit; padding:0;">Uploaded {sortIndicator('created_at')}</button>
+						</th>
 						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500; text-align:right;">Actions</th>
 					</tr>
 				</thead>
@@ -405,7 +431,7 @@
 {#if dialogOpen}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-40 flex items-center justify-center p-4" style="background:{overlayBg};" onclick={() => !uploading && (dialogOpen = false)}>
+	<div class="fixed inset-0 z-40 flex items-center justify-center p-4" style="background:{overlayBg};" onclick={onDialogBackdropClick}>
 		<div
 			class="w-full max-w-lg rounded-2xl overflow-hidden flex flex-col"
 			style="background:{surface}; border:1px solid {borderColor}; max-height:88vh;"
@@ -574,6 +600,7 @@
 		{darkMode}
 		onPick={(img) => {
 			coverImage = img;
+			ignoreDialogBackdropUntil = Date.now() + 500;
 			showPicker = false;
 		}}
 		onClose={() => (showPicker = false)}
