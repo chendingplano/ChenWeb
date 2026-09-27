@@ -1,10 +1,12 @@
-// Package aiassistanthandler provides HTTP handler stubs for the AI Assistant home2 page.
-// All handlers return stub data. Replace with real database/service calls.
+// Package aiassistanthandler provides HTTP handlers for the AI Assistant home2 page.
+// Most handlers return stub data; GetUserInfo returns the authenticated profile.
 package aiassistanthandler
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
 )
@@ -132,18 +134,28 @@ func GetKnowledgeBase(c echo.Context) error {
 // GetUserInfo returns the currently authenticated user's profile information.
 // GET /api/v1/ai-assistant/user-info
 func GetUserInfo(c echo.Context) error {
-	logger := loggerutil.CreateDefaultLogger("CWB_AIAS_130")
+	rc := EchoFactory.NewFromEcho(c, "CWB_AIAS_130")
+	defer rc.Close()
+	logger := rc.GetLogger()
 	logger.Info("GetUserInfo called")
 
-	// TODO: fetch user from session / auth middleware context
+	user := rc.IsAuthenticated()
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Login required"})
+	}
+
+	name := strings.TrimSpace(strings.TrimSpace(user.FirstName) + " " + strings.TrimSpace(user.LastName))
+	if name == "" {
+		name = strings.TrimSpace(user.UserName)
+	}
+	if name == "" {
+		name = strings.TrimSpace(user.Email)
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{
 		"user": map[string]any{
-			"id":        "user-1",
-			"name":      "Alex Johnson",
-			"email":     "alex@example.com",
-			"avatar":    "/avatars/user.jpg",
-			"role":      "admin",
-			"createdAt": "2025-01-15T00:00:00Z",
+			"name":  name,
+			"email": user.Email,
 		},
 	})
 }

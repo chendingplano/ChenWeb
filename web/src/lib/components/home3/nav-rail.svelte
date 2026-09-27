@@ -394,6 +394,45 @@
 			});
 	});
 
+	type UserProfile = { name: string; email: string };
+	let user = $state<UserProfile>({ name: '', email: '' });
+	let userDisplayName = $derived(user.name || user.email);
+	let userInitials = $derived(
+		userDisplayName
+			.split(' ')
+			.map((part) => part[0])
+			.join('')
+	);
+
+	onMount(() => {
+		fetch('/api/v1/ai-assistant/user-info', { credentials: 'same-origin' })
+			.then(async (response) => {
+				if (!response.ok) return;
+				const payload: unknown = await response.json();
+				if (
+					typeof payload !== 'object' ||
+					payload === null ||
+					!('user' in payload) ||
+					typeof payload.user !== 'object' ||
+					payload.user === null ||
+					!('name' in payload.user) ||
+					!('email' in payload.user) ||
+					typeof payload.user.name !== 'string' ||
+					typeof payload.user.email !== 'string'
+				) {
+					return;
+				}
+
+				user = {
+					name: payload.user.name.trim(),
+					email: payload.user.email.trim()
+				};
+			})
+			.catch(() => {
+				// Keep the profile blank when the current identity cannot be loaded.
+			});
+	});
+
 	// Fail open before load / on error: everything visible with default labels.
 	// Once loaded, an id is hidden only if the resolver put it in `hidden`; its
 	// label comes from the resolved override, else the hardcoded default.
@@ -483,8 +522,6 @@
 			);
 		}
 	});
-
-	const user = { name: 'Alex Johnson', email: 'alex@example.com' };
 
 	function isItemActive(item: NavItem): boolean {
 		return !!activeMenu && activeMenu.itemId === item.id;
@@ -820,15 +857,12 @@
 					class="flex flex-shrink-0 items-center justify-center rounded-lg text-xs font-semibold"
 					style="width:32px; height:32px; background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
 				>
-					{user.name
-						.split(' ')
-						.map((n) => n[0])
-						.join('')}
+					{userInitials}
 				</div>
 				<!-- Name + email -->
 				<div class="min-w-0 flex-1">
 					<div class="truncate" style="font-size:13px; font-weight:500; color:{textPrimary};">
-						{user.name}
+						{userDisplayName}
 					</div>
 					<div class="truncate" style="font-size:11px; color:{textMuted};">{user.email}</div>
 				</div>

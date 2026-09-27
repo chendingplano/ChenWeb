@@ -8,11 +8,11 @@ Show the authenticated user's actual name and email in the lower-left profile ar
 
 The existing `GET /api/v1/ai-assistant/user-info` route is already protected by the API group's authentication middleware, but its handler currently returns a sample profile. Change the handler to read `ApiTypes.UserInfo` from `EchoFactory.NewFromEcho(c, ...).IsAuthenticated()` and return an explicit, minimal `{ "user": { "name": ..., "email": ... } }` projection. Do not serialize the full auth object, which contains sensitive fields. Return an authentication error if the context has no authenticated user.
 
-The Home3 `NavRail` will fetch this endpoint when mounted and store the returned name and email in component state. It will show the account name when present, otherwise the joined first and last name, then the email. The email is shown as provided by the authenticated profile. The initials use the displayed name, falling back to email when needed. During loading or if the request fails, the profile area stays empty rather than showing another user's identity.
+The Home3 `NavRail` will fetch this endpoint when mounted and store the returned name and email in component state. It will show the joined first and last name when present, otherwise the account name, then the email. In the current auth mapping, the account name may itself be the email address, so the real profile name takes priority. The initials use the displayed name, falling back to email when needed. During loading or if the request fails, the profile area stays empty rather than showing another user's identity.
 
 ## Scope and verification
 
-Changes are limited to the existing user-info handler and the Home3 nav rail. No database or auth schema changes are needed. Verify the frontend build/type check and relevant Go package tests; inspect the response contract and UI loading/failure behavior.
+Changes are limited to the existing user-info handler and the Home3 nav rail. No database or auth schema changes are needed. Verify the frontend type check and Go package build; inspect the response contract and UI loading/failure behavior.
 
 ## Knowledge and documentation
 
