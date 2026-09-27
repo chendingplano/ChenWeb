@@ -133,6 +133,11 @@
 		return sorts.find((sort) => sort.field === field)?.direction ?? 'none';
 	}
 
+	function sortArrow(field: SortField) {
+		const direction = sortDirection(field);
+		return direction === 'asc' ? '↑' : direction === 'desc' ? '↓' : '';
+	}
+
 	function openDialog() {
 		editingId = null;
 		file = null;
@@ -370,10 +375,13 @@
 						<th style="padding:6px 10px; border-bottom:1px solid {borderColor}; font-weight:500;">
 							<label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
 								<span>Name</span>
+								{#if sortArrow('name')}
+									<span aria-label={sortDirection('name') === 'asc' ? 'Sorted ascending' : 'Sorted descending'} style="color:{accent}; font-size:16px; font-weight:700;">{sortArrow('name')}</span>
+								{/if}
 								<select aria-label="Sort Name" value={sortDirection('name')} onchange={(event) => setSort('name', event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
 									<option value="none">No Sort</option>
-									<option value="asc">Sort ASC</option>
-									<option value="desc">Sort DESC</option>
+									<option value="asc">↑ Ascending</option>
+									<option value="desc">↓ Descending</option>
 								</select>
 							</label>
 						</th>
@@ -382,10 +390,13 @@
 							<th style="padding:6px 10px; border-bottom:1px solid {borderColor}; font-weight:500;">
 								<label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
 									<span>{column.label}</span>
+									{#if sortArrow(column.field)}
+										<span aria-label={sortDirection(column.field) === 'asc' ? 'Sorted ascending' : 'Sorted descending'} style="color:{accent}; font-size:16px; font-weight:700;">{sortArrow(column.field)}</span>
+									{/if}
 									<select aria-label="Sort {column.label}" value={sortDirection(column.field)} onchange={(event) => setSort(column.field, event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
 										<option value="none">No Sort</option>
-										<option value="asc">Sort ASC</option>
-										<option value="desc">Sort DESC</option>
+										<option value="asc">↑ Ascending</option>
+										<option value="desc">↓ Descending</option>
 									</select>
 								</label>
 							</th>
