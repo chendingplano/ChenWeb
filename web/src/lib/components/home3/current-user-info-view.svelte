@@ -15,6 +15,11 @@
 	let user = $state<UserProfile | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let editing = $state(false);
+	let saving = $state(false);
+	let saveError = $state('');
+	let saveSuccess = $state('');
+	let draft = $state({ firstName: '', lastName: '', phone: '' });
 
 	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
 	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB');
@@ -34,6 +39,63 @@
 		if (!value) return '—';
 		const date = new Date(value);
 		return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+	}
+
+	function beginEdit() {
+		if (!user) return;
+		draft = { firstName: user.firstName, lastName: user.lastName, phone: user.phone };
+		saveError = '';
+		saveSuccess = '';
+		editing = true;
+	}
+
+	function cancelEdit() {
+		if (user) {
+			draft = { firstName: user.firstName, lastName: user.lastName, phone: user.phone };
+		}
+		saveError = '';
+		editing = false;
+	}
+
+	async function saveProfile() {
+		const firstName = draft.firstName.trim();
+		const lastName = draft.lastName.trim();
+		const phone = draft.phone.trim();
+		if (!firstName || !lastName) {
+			saveError = 'First and last name are required.';
+			return;
+		}
+
+		saving = true;
+		saveError = '';
+		saveSuccess = '';
+		try {
+			const response = await fetch('/api/v1/ai-assistant/user-info', {
+				method: 'PUT',
+				credentials: 'same-origin',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					first_name: firstName,
+					last_name: lastName,
+					phone_number: phone
+				})
+			});
+			const payload: unknown = await response.json().catch(() => null);
+			if (!response.ok) {
+				const message = isRecord(payload) && typeof payload.error === 'string'
+					? payload.error
+					: 'Failed to update your profile.';
+				throw new Error(message);
+			}
+
+			if (user) user = { ...user, firstName, lastName, phone };
+			editing = false;
+			saveSuccess = 'Profile updated.';
+		} catch (cause) {
+			saveError = cause instanceof Error ? cause.message : 'Failed to update your profile.';
+		} finally {
+			saving = false;
+		}
 	}
 
 	async function loadUserInfo() {
@@ -90,9 +152,19 @@
 		style="background:{cardBg}; border:1px solid {borderColor};"
 		aria-labelledby="current-user-info-title"
 	>
-		<h1 id="current-user-info-title" style="color:{textPrimary}; font-size:20px; font-weight:600;">
-			User Info
-		</h1>
+		<div class="flex items-center justify-between gap-4">
+			<h1 id="current-user-info-title" style="color:{textPrimary}; font-size:20px; font-weight:600;">
+				User Info
+			</h1>
+			{#if user && !editing}
+				<button
+					type="button"
+					class="cursor-pointer rounded-lg px-4 py-2"
+					style="background:{accent}; color:white; border:none; font-size:13px; font-weight:600;"
+					onclick={beginEdit}>Edit</button
+				>
+			{/if}
+		</div>
 
 		{#if loading}
 			<p class="mt-4" style="color:{textSecondary};" aria-live="polite">Loading user information…</p>
@@ -109,11 +181,33 @@
 			<dl class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
 					<dt style="color:{textSecondary}; font-size:12px;">First Name</dt>
-					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.firstName || '—'}</dd>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">
+						{#if editing}
+							<input
+								class="w-full rounded-md px-3 py-2"
+								style="background:{darkMode ? '#171B26' : '#FFFFFF'}; color:{textPrimary}; border:1px solid {borderColor};"
+								bind:value={draft.firstName}
+								aria-label="First Name"
+								required
+								maxlength="100"
+							/>
+						{:else}{user.firstName || '—'}{/if}
+					</dd>
 				</div>
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
 					<dt style="color:{textSecondary}; font-size:12px;">Last Name</dt>
-					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.lastName || '—'}</dd>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">
+						{#if editing}
+							<input
+								class="w-full rounded-md px-3 py-2"
+								style="background:{darkMode ? '#171B26' : '#FFFFFF'}; color:{textPrimary}; border:1px solid {borderColor};"
+								bind:value={draft.lastName}
+								aria-label="Last Name"
+								required
+								maxlength="100"
+							/>
+						{:else}{user.lastName || '—'}{/if}
+					</dd>
 				</div>
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
 					<dt style="color:{textSecondary}; font-size:12px;">Email</dt>
@@ -121,7 +215,19 @@
 				</div>
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
 					<dt style="color:{textSecondary}; font-size:12px;">Phone Number</dt>
-					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.phone || '—'}</dd>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">
+						{#if editing}
+							<input
+								class="w-full rounded-md px-3 py-2"
+								style="background:{darkMode ? '#171B26' : '#FFFFFF'}; color:{textPrimary}; border:1px solid {borderColor};"
+								bind:value={draft.phone}
+								aria-label="Phone Number"
+								type="tel"
+								placeholder="+8613812345678"
+								maxlength="14"
+							/>
+						{:else}{user.phone || '—'}{/if}
+					</dd>
 				</div>
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
 					<dt style="color:{textSecondary}; font-size:12px;">Roles</dt>
@@ -148,6 +254,29 @@
 					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{formatDateTime(user.lastLogin)}</dd>
 				</div>
 			</dl>
+			{#if editing}
+				<div class="mt-5 flex justify-end gap-3">
+					<button
+						type="button"
+						class="cursor-pointer rounded-lg px-4 py-2"
+						style="background:transparent; color:{textPrimary}; border:1px solid {borderColor};"
+						disabled={saving}
+						onclick={cancelEdit}>Cancel</button
+					>
+					<button
+						type="button"
+						class="cursor-pointer rounded-lg px-4 py-2"
+						style="background:{accent}; color:white; border:none; font-weight:600;"
+						disabled={saving}
+						onclick={saveProfile}>{saving ? 'Saving…' : 'Save'}</button
+					>
+				</div>
+				{#if saveError}
+					<p class="mt-3 text-right" role="alert" style="color:#F87171;">{saveError}</p>
+				{/if}
+			{:else if saveSuccess}
+				<p class="mt-3 text-right" role="status" style="color:{textSecondary};">{saveSuccess}</p>
+			{/if}
 		{/if}
 	</section>
 </div>

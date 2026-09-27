@@ -12,9 +12,11 @@ The Home3 `NavRail` will fetch this endpoint when mounted and store the returned
 
 The User Info menu action already selects the `__user_info__` item. `ContentPanel` routes that item to a dedicated view that fetches the current session and displays the requested seven fields, with loading, error, and retry states. Timestamps are formatted in the browser's local timezone. Missing optional values display as an em dash.
 
+An Edit button lets the authenticated user update first name, last name, and phone number. Save sends those fields to a new authenticated `PUT /api/v1/ai-assistant/user-info` handler, which updates only the identity attached to the current session. The edit form validates required names and the Kratos phone format; users can cancel without changing the saved profile.
+
 ## Scope and verification
 
-Changes are limited to the shared Kratos session response and ChenWeb's dedicated User Info view and routing branch. No database or auth schema changes are needed. Verify the frontend type check and Go package builds; inspect the response contract and UI loading/failure behavior.
+Changes are limited to the shared Kratos session response and ChenWeb's User Info view, routing branch, and authenticated update handler. No database or auth schema changes are needed. Verify the frontend type check and Go package builds; inspect the response contract and UI loading/failure behavior.
 
 ## Knowledge and documentation
 

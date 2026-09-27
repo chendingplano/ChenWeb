@@ -4,12 +4,16 @@ package aiassistanthandler
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/EchoFactory"
+	"github.com/chendingplano/shared/go/api/auth"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
 )
+
+var userPhonePattern = regexp.MustCompile(`^\+861[3-9][0-9]{9}$`)
 
 // GetDashboard returns dashboard overview stats and recent activity.
 // GET /api/v1/ai-assistant/dashboard
@@ -158,6 +162,61 @@ func GetUserInfo(c echo.Context) error {
 			"email": user.Email,
 		},
 	})
+}
+
+type updateUserInfoRequest struct {
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	PhoneNumber string `json:"phone_number"`
+}
+
+// UpdateUserInfo updates editable profile fields for the authenticated user.
+// PUT /api/v1/ai-assistant/user-info
+func UpdateUserInfo(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_AIAS_135")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	currentUser := rc.IsAuthenticated()
+	if currentUser == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Login required"})
+	}
+	if currentUser.UserId == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "User identity is unavailable"})
+	}
+
+	var req updateUserInfoRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid profile data"})
+	}
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
+	req.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+	if req.FirstName == "" || req.LastName == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "First and last name are required"})
+	}
+	if req.PhoneNumber != "" && !userPhonePattern.MatchString(req.PhoneNumber) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Phone number must be a valid +86 mobile number"})
+	}
+	if strings.TrimSpace(currentUser.Email) == "" && req.PhoneNumber == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Phone number is required for this account"})
+	}
+
+	if err := auth.KratosUpdateIdentity(logger, currentUser.UserId, auth.KratosIdentityUpdate{
+		Traits: map[string]interface{}{
+			"name": map[string]interface{}{
+				"first": req.FirstName,
+				"last":  req.LastName,
+			},
+			"phone": req.PhoneNumber,
+		},
+	}); err != nil {
+		logger.Error("failed to update current user profile", "user_id", currentUser.UserId, "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to update profile"})
+	}
+
+	logger.Info("current user profile updated", "user_id", currentUser.UserId)
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // GetSettings returns the current application settings for the user.

@@ -15,7 +15,8 @@
 - Modify `server/api/aiassistanthandler/handler.go`: derive name and email from `EchoFactory.NewFromEcho(...).IsAuthenticated()` and return only those fields.
 - Modify `web/src/lib/components/home3/nav-rail.svelte`: replace the sample profile constant with typed reactive profile state and fetch the existing endpoint on mount.
 - Modify `web/src/lib/components/home3/content-panel.svelte`: route the `__user_info__` selection to a dedicated profile view.
-- Create `web/src/lib/components/home3/current-user-info-view.svelte`: load and display identity details from `/auth/me` with loading and error states.
+- Create `web/src/lib/components/home3/current-user-info-view.svelte`: load and display identity details from `/auth/me`, and edit first name, last name, and phone number.
+- Modify `server/api/aiassistanthandler/handler.go` and `server/api/routes.go`: add an authenticated self-profile update endpoint.
 - Modify `shared/go/api/auth/kratos.go`: include phone in the explicit `/auth/me` session identity traits.
 - Modify `shared/svelte/src/lib/stores/auth.svelte.ts`: describe the optional phone trait in the frontend session type.
 
@@ -49,10 +50,21 @@
 - [x] Fetch `/auth/me` and display first name, last name, email, phone number, roles, create time, and last login time, with loading, error, and retry states.
 - [x] Format timestamps in local time and use an em dash for missing values.
 
-### Task 4: Review the change
+### Task 4: Allow editing supported profile fields
+
+**Files:**
+- Modify: `server/api/aiassistanthandler/handler.go`
+- Modify: `server/api/routes.go`
+- Modify: `web/src/lib/components/home3/current-user-info-view.svelte`
+
+- [x] Add authenticated `PUT /api/v1/ai-assistant/user-info` that updates only the current user's first name, last name, and phone in Kratos.
+- [x] Add Edit, Save, and Cancel controls for those fields; validate phone format, preserve read-only fields, and show update errors.
+
+### Task 5: Review the change
 
 **Files:**
 - Review: `server/api/aiassistanthandler/handler.go`
+- Review: `server/api/routes.go`
 - Review: `web/src/lib/components/home3/nav-rail.svelte`
 - Review: `web/src/lib/components/home3/content-panel.svelte`
 - Review: `web/src/lib/components/home3/current-user-info-view.svelte`
@@ -60,10 +72,10 @@
 - Review: `shared/svelte/src/lib/stores/auth.svelte.ts`
 
 - [x] Run the existing frontend check/build command from `web/package.json`.
-- [ ] Run `go work sync` and build the shared auth package plus ChenWeb server package.
+- [x] Run `go work sync` and build the shared auth package plus ChenWeb server package. The shared auth change was synchronized and built in the earlier profile implementation; the ChenWeb server package was rebuilt for this endpoint.
 - [x] Do not add or run tests unless the user asks for them.
 - [x] Confirm the endpoint response contains no fields beyond `name` and `email`, and that both `/development` and `/home3` use the updated `NavRail`.
-- [ ] Commit the implementation using `jj` and confirm the `jj` log is linear.
+- [x] Commit the implementation using `jj` and confirm the `jj` log is linear.
 
 ## Reference
 

@@ -465,6 +465,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/ai-assistant/applications", aiassistanthandler.GetApplications)
 	apiGroup.GET("/ai-assistant/knowledge-base", aiassistanthandler.GetKnowledgeBase)
 	apiGroup.GET("/ai-assistant/user-info", aiassistanthandler.GetUserInfo)
+	apiGroup.PUT("/ai-assistant/user-info", aiassistanthandler.UpdateUserInfo)
 	apiGroup.GET("/ai-assistant/settings", aiassistanthandler.GetSettings)
 	apiGroup.PUT("/ai-assistant/settings", aiassistanthandler.UpdateSettings)
 	apiGroup.PUT("/ai-assistant/agents/:id", aiassistanthandler.UpdateAgent)
