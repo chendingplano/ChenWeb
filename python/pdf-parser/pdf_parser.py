@@ -59,7 +59,7 @@ from parser_base import ParserBackend
 from parser_docling import DoclingParser
 from parser_opendata import OpenDataParser
 from parser_paddle import PaddleParser
-from parser_mineru import MineruParser
+from parser_mineru import MineruParser, PhaseTracker
 
 import psycopg2
 
@@ -566,13 +566,29 @@ def _process_record(
 
         # Initial in-progress status (idempotent: in poll mode the claim already
         # stamped proc_status=active; this merges/refreshes it).
-        raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, 0, 0, parser_name)
+        initial_phases = PhaseTracker().phases if isinstance(backend, MineruParser) else []
+        raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, 0, 0, parser_name, 0, initial_phases)
 
         # Throttled progress callback
+        phase_snapshot: list[dict] | None = initial_phases
+        last_phase_write = 0.0
+
         def _db_progress(ms_used: int, pct: int, n_pages: int = 0) -> None:
             nonlocal raw_status
             _stop_if_requested()
-            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct, parser_name, n_pages)
+            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct, parser_name, n_pages, phase_snapshot)
+
+        def _phase_progress(phases: list[dict], force: bool) -> None:
+            nonlocal phase_snapshot, last_phase_write
+            phase_snapshot = phases
+            now = time.monotonic()
+            if force or now - last_phase_write >= 3.0:
+                ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
+                _db_progress(ms_used, 0, 0)
+                last_phase_write = now
+
+        if isinstance(backend, MineruParser):
+            backend.on_phase_progress = _phase_progress
 
         throttled = make_throttled_progress(_db_progress, min_interval=3.0)
 
@@ -596,6 +612,8 @@ def _process_record(
             )
             try:
                 ocr_backend = _get_ocr_mineru(backend_cache)
+                if isinstance(ocr_backend, MineruParser):
+                    ocr_backend.on_phase_progress = _phase_progress
                 ocr_result = ocr_backend.parse(repo_pdf_path, record_dir, throttled)
                 _stop_if_requested()
                 if _looks_font_garbled(ocr_result, _ocr_fallback_min_run()):

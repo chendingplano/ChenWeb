@@ -1,4 +1,28 @@
-from parser_mineru import annotate_equation_image_paths, annotate_list_item_bboxes
+from parser_mineru import PhaseTracker, annotate_equation_image_paths, annotate_list_item_bboxes
+
+
+def test_phase_tracker_reports_all_nine_phases_and_elapsed_time(monkeypatch):
+    ticks = iter([10.0, 16.245, 17.0])
+    monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
+    tracker = PhaseTracker()
+
+    started, force = tracker.update("Sep 28 02:30:14 Layout Predict:   0%|          | 0/16 [00:00<?, ?it/s]")
+    assert force is True
+    assert len(started) == 9
+    assert started[0] == {"name": "Layout Predict", "progress": 0, "status": "active"}
+    assert all(phase["status"] == "pending" for phase in started[1:])
+
+    finished, force = tracker.update("Layout Predict: 100%|██████████| 16/16 [00:06<00:00, 2.49it/s]")
+    assert force is True
+    assert finished[0]["elapsed_seconds"] == 6.25
+    assert finished[0]["progress"] == 100
+    assert finished[0]["status"] == "complete"
+
+    active, force = tracker.update("MFR Predict:  55%|█████▌    | 16/29 [00:05<00:04]")
+    assert force is False
+    assert active[1]["progress"] == 55
+    assert active[1]["status"] == "active"
+    assert tracker.update("unrelated log line") is None
 
 
 def test_annotate_equation_image_paths_from_middle_json():

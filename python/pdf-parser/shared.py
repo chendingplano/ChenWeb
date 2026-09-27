@@ -464,6 +464,7 @@ def record_parse_active(
     conn, rec_id: int, raw_status: str,
     start_time: str, ms_used: int, progress_pct: int,
     parser_name: str = "", num_pages: int = 0,
+    phases: list[dict] | None = None,
 ) -> str:
     """Upsert the single 'parsed' entry to proc_status='active' with progress."""
     new_status = upsert_status(
@@ -475,6 +476,7 @@ def record_parse_active(
             "ms_used": ms_used,
             "parser_name": parser_name,
             "num_pages": num_pages,
+            **({"phases": phases} if phases is not None else {}),
         },
     )
     sql = """

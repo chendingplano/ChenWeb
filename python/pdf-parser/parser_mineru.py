@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from typing import Any, Callable
 
 from parser_base import ParserBackend
@@ -30,6 +31,45 @@ log = logging.getLogger(__name__)
 
 # Matches "X/Y" in tqdm output like "Processing pages: 60%|██| 3/5 [00:06<00:04]"
 _PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
+PHASE_NAMES = (
+    "Layout Predict", "MFR Predict", "Table-ocr det", "Table-ocr rec ch",
+    "Table-wireless Predict", "Table-wired Predict", "OCR-det ch",
+    "OCR-rec Predict", "Processing pages",
+)
+_PHASE_PROGRESS_RE = re.compile(
+    r'(' + '|'.join(re.escape(name) for name in PHASE_NAMES) + r'):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)'
+)
+
+
+class PhaseTracker:
+    """Turn MinerU's tqdm updates into nine ordered phase snapshots."""
+
+    def __init__(self) -> None:
+        self.phases = [dict(name=name, progress=0, status="pending") for name in PHASE_NAMES]
+        self.started: dict[str, float] = {}
+
+    def update(self, line: str) -> tuple[list[dict], bool] | None:
+        match = _PHASE_PROGRESS_RE.search(line)
+        if not match:
+            return None
+        name, done, total = match.group(1), int(match.group(2)), int(match.group(3))
+        if total <= 0:
+            return None
+        phase = self.phases[PHASE_NAMES.index(name)]
+        now = time.monotonic()
+        if name not in self.started:
+            self.started[name] = now
+        progress = min(100, int(done * 100 / total))
+        complete = done >= total
+        if phase["status"] == "complete":
+            return None
+        if phase["progress"] == progress and phase["status"] == ("complete" if complete else "active"):
+            return None
+        phase["progress"] = progress
+        phase["status"] = "complete" if complete else "active"
+        if complete:
+            phase["elapsed_seconds"] = round(now - self.started[name], 2)
+        return [dict(item) for item in self.phases], complete or progress == 0
 
 _DEFAULT_MINERU_CLI_PATHS = [
     os.path.expanduser("~/Workspace/ThirdParty/mineru/.venv/bin/mineru"),
@@ -59,6 +99,7 @@ class MineruParser(ParserBackend):
         self._backend: str = ""
         self._extra_args: list[str] = []
         self._initialized: bool = False
+        self.on_phase_progress: Callable[[list[dict], bool], None] | None = None
 
     def init(self) -> None:
         if self._initialized:
@@ -132,6 +173,7 @@ class MineruParser(ParserBackend):
         # on_progress calls with a non-blocking lock: the heartbeat skips
         # a tick if the main thread is currently doing a DB write.
         _progress_lock = threading.Lock()
+        phase_tracker = PhaseTracker()
         # Shared mutable state for heartbeat thread (dict is GIL-safe).
         _state: dict[str, int] = {"pages_done": 0, "total": total_pages_hint}
         _stop_heartbeat = threading.Event()
@@ -185,6 +227,19 @@ class MineruParser(ParserBackend):
                 # Extract page progress from tqdm lines, e.g.
                 # "Processing pages: 60%|██| 3/5 [00:06<00:04]"
                 for seg in segments or [line]:
+                    phase_update = phase_tracker.update(seg)
+                    if phase_update and self.on_phase_progress:
+                        try:
+                            with _progress_lock:
+                                self.on_phase_progress(*phase_update)
+                        except BaseException:
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.wait()
+                            raise
                     m = _PAGE_PROGRESS_RE.search(seg)
                     if m:
                         x, y = int(m.group(1)), int(m.group(2))

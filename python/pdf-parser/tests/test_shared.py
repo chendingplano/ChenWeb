@@ -317,6 +317,12 @@ class TestRecordDuplicated:
 
 
 class TestRecordParsedStatus:
+    def test_record_parse_active_persists_phase_snapshot(self):
+        conn = _FakeConn()
+        phases = [{"name": "Layout Predict", "progress": 100, "status": "complete", "elapsed_seconds": 6.25}]
+        updated = record_parse_active(conn, 21, "[]", "20260928 02:30:14", 6250, 0, "mineru", 16, phases)
+        assert json.loads(updated)[0]["phases"] == phases
+
     def test_record_parse_active_updates_parser_name_column(self):
         conn = _FakeConn()
         raw = json.dumps([])

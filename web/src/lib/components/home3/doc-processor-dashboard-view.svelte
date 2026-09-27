@@ -142,11 +142,14 @@
 	]);
 	let barMax = $derived(Math.max(1, ...barData.map((b) => b.value)));
 
+	type ParsePhase = { name: string; progress: number; status: 'pending' | 'active' | 'complete'; elapsed_seconds?: number };
+	type ParseEntry = KbInputRecord['status'][number] & { phases?: ParsePhase[] };
+
 	// Read a 0–100 percentage from a parsing entry's free-form progress string
 	// ("45%", "3/10", …). Returns null when no numeric progress is available.
 	// The PDF parser writes operation="parsed" (proc_status: active → success/fail).
 	// Match any of the canonical parse operation names so progress is found.
-	function findParseEntry(record: KbInputRecord) {
+	function findParseEntry(record: KbInputRecord): ParseEntry | undefined {
 		const PARSE_OPS = new Set(['parsed', 'parsing', 'parse']);
 		return (record.status ?? []).find((e) => PARSE_OPS.has((e.operation ?? '').toLowerCase()));
 	}
@@ -1240,6 +1243,7 @@
 				{#each pdfActiveParsing as record (record.id)}
 					{@const pct = parseProgressPercent(record)}
 					{@const progressText = parsingProgressText(record)}
+					{@const phases = findParseEntry(record)?.phases}
 					<div
 						class="rounded-xl p-3.5"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
@@ -1297,7 +1301,26 @@
 							</div>
 						</div>
 
-						<!-- Progress bar -->
+						{#if phases?.length === 9}
+							<div class="pdf-phase-grid mt-3">
+								{#each phases as phase, index}
+									{@const phaseColor = phase.status === 'complete' ? colorSuccess : phase.status === 'active' ? accent : textMuted}
+									<div class="pdf-phase" style="background:{surface2}; border:1px solid {phase.status === 'active' ? accent : borderColor};" aria-label={`${phase.name}: ${phase.progress}%${phase.status === 'complete' && phase.elapsed_seconds !== undefined ? `, ${phase.elapsed_seconds.toFixed(2)} seconds` : ''}`}>
+										<div class="flex items-center justify-between gap-2">
+											<span class="truncate" style="color:{phaseColor}; font-size:11px; font-weight:600;" title={phase.name}>{index + 1}. {phase.name}</span>
+											<span style="color:{phaseColor}; font-size:11px; font-family:monospace; flex-shrink:0;">{phase.progress}%</span>
+										</div>
+										<div class="mt-2 overflow-hidden rounded-full" style="height:5px; background:{borderColor};" role="progressbar" aria-label={phase.name} aria-valuenow={phase.progress} aria-valuemin="0" aria-valuemax="100">
+											<div class="h-full rounded-full" style="width:{phase.progress}%; background:{phaseColor}; transition:width 0.3s ease;"></div>
+										</div>
+										<div class="mt-1" style="color:{textMuted}; font-size:10px; min-height:14px;">
+											{phase.status === 'complete' && phase.elapsed_seconds !== undefined ? `${phase.elapsed_seconds.toFixed(2)} s` : phase.status === 'active' ? 'In progress' : 'Waiting'}
+										</div>
+									</div>
+								{/each}
+							</div>
+						{:else}
+						<!-- Progress bar for parser backends without phase reporting -->
 						<div class="mt-3 flex items-center gap-3">
 							<div
 								class="relative flex-1 overflow-hidden rounded-full"
@@ -1320,6 +1343,7 @@
 								{pct !== null ? `${Math.round(pct)}%` : (progressText || 'parsing…')}
 							</span>
 						</div>
+						{/if}
 					</div>
 				{/each}
 			</div>
@@ -2130,6 +2154,22 @@
 {/if}
 
 <style>
+	.pdf-phase-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 8px;
+	}
+	.pdf-phase {
+		min-width: 0;
+		border-radius: 8px;
+		padding: 8px 10px;
+	}
+	@media (max-width: 900px) {
+		.pdf-phase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	}
+	@media (max-width: 600px) {
+		.pdf-phase-grid { grid-template-columns: minmax(0, 1fr); }
+	}
 	@keyframes pulse {
 		0%, 100% { opacity: 1; transform: scale(1); }
 		50%       { opacity: 0.5; transform: scale(0.85); }
