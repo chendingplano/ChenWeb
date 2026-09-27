@@ -202,14 +202,20 @@ func UpdateUserInfo(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Phone number is required for this account"})
 	}
 
-	if err := auth.KratosUpdateIdentity(logger, currentUser.UserId, auth.KratosIdentityUpdate{
-		Traits: map[string]interface{}{
-			"name": map[string]interface{}{
-				"first": req.FirstName,
-				"last":  req.LastName,
-			},
-			"phone": req.PhoneNumber,
+	traits := map[string]interface{}{
+		"name": map[string]interface{}{
+			"first": req.FirstName,
+			"last":  req.LastName,
 		},
+	}
+	// Kratos validates a present phone trait against its E.164 schema. Leave
+	// the trait untouched when the optional phone field is blank.
+	if req.PhoneNumber != "" {
+		traits["phone"] = req.PhoneNumber
+	}
+
+	if err := auth.KratosUpdateIdentity(logger, currentUser.UserId, auth.KratosIdentityUpdate{
+		Traits: traits,
 	}); err != nil {
 		logger.Error("failed to update current user profile", "user_id", currentUser.UserId, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to update profile"})

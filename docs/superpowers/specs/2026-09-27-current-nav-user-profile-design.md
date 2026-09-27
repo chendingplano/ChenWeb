@@ -12,7 +12,7 @@ The Home3 `NavRail` will fetch this endpoint when mounted and store the returned
 
 The User Info menu action already selects the `__user_info__` item. `ContentPanel` routes that item to a dedicated view that fetches the current session and displays the requested seven fields, with loading, error, and retry states. Timestamps are formatted in the browser's local timezone. Missing optional values display as an em dash.
 
-An Edit button lets the authenticated user update first name, last name, and phone number. Save sends those fields to a new authenticated `PUT /api/v1/ai-assistant/user-info` handler, which updates only the identity attached to the current session. The edit form validates required names and the Kratos phone format; users can cancel without changing the saved profile.
+An Edit button lets the authenticated user update first name, last name, and phone number. Save sends those fields to a new authenticated `PUT /api/v1/ai-assistant/user-info` handler, which updates only the identity attached to the current session. The edit form validates required names and the Kratos phone format; users can cancel without changing the saved profile. When phone is blank, the handler omits that trait from the Kratos update, allowing name-only edits and preserving any existing phone value.
 
 ## Scope and verification
 
