@@ -4,7 +4,7 @@
 
 **Goal:** Show the authenticated user's name and email in the Home3 navigation rail.
 
-**Architecture:** Reuse the authenticated `GET /api/v1/ai-assistant/user-info` endpoint, changing its sample response to a minimal projection from the authenticated `ApiTypes.UserInfo`. The Home3 nav rail fetches the endpoint on mount and renders the returned profile, with deterministic name fallbacks and no sample identity on loading or failure.
+**Architecture:** Keep the nav rail's authenticated profile endpoint for its name and email. The User Info page reads the current authenticated session from `/auth/me`, which supplies profile fields, roles, account creation time, and current session authentication time; add phone to that response. Return only explicit session identity fields and do not serialize the full auth object.
 
 **Tech Stack:** Go, Echo, Svelte 5, TypeScript.
 
@@ -15,7 +15,9 @@
 - Modify `server/api/aiassistanthandler/handler.go`: derive name and email from `EchoFactory.NewFromEcho(...).IsAuthenticated()` and return only those fields.
 - Modify `web/src/lib/components/home3/nav-rail.svelte`: replace the sample profile constant with typed reactive profile state and fetch the existing endpoint on mount.
 - Modify `web/src/lib/components/home3/content-panel.svelte`: route the `__user_info__` selection to a dedicated profile view.
-- Create `web/src/lib/components/home3/current-user-info-view.svelte`: load and display current name and email with loading and error states.
+- Create `web/src/lib/components/home3/current-user-info-view.svelte`: load and display identity details from `/auth/me` with loading and error states.
+- Modify `shared/go/api/auth/kratos.go`: include phone in the explicit `/auth/me` session identity traits.
+- Modify `shared/svelte/src/lib/stores/auth.svelte.ts`: describe the optional phone trait in the frontend session type.
 
 ## Chunk 1: Authenticated profile response and rail display
 
@@ -44,7 +46,8 @@
 - Create: `web/src/lib/components/home3/current-user-info-view.svelte`
 
 - [x] Route `sectionId === '__user_info__'` to the dedicated view so it does not fall through to the generic placeholder.
-- [x] Fetch the existing current-user endpoint and display name and email, with loading, error, and retry states.
+- [x] Fetch `/auth/me` and display first name, last name, email, phone number, roles, create time, and last login time, with loading, error, and retry states.
+- [x] Format timestamps in local time and use an em dash for missing values.
 
 ### Task 4: Review the change
 
@@ -53,8 +56,11 @@
 - Review: `web/src/lib/components/home3/nav-rail.svelte`
 - Review: `web/src/lib/components/home3/content-panel.svelte`
 - Review: `web/src/lib/components/home3/current-user-info-view.svelte`
+- Review: `shared/go/api/auth/kratos.go`
+- Review: `shared/svelte/src/lib/stores/auth.svelte.ts`
 
 - [x] Run the existing frontend check/build command from `web/package.json`.
+- [ ] Run `go work sync` and build the shared auth package plus ChenWeb server package.
 - [x] Do not add or run tests unless the user asks for them.
 - [x] Confirm the endpoint response contains no fields beyond `name` and `email`, and that both `/development` and `/home3` use the updated `NavRail`.
 - [ ] Commit the implementation using `jj` and confirm the `jj` log is linear.

@@ -3,7 +3,15 @@
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
-	type UserProfile = { name: string; email: string };
+	type UserProfile = {
+		firstName: string;
+		lastName: string;
+		email: string;
+		phone: string;
+		roles: string[];
+		createdAt: string;
+		lastLogin: string;
+	};
 	let user = $state<UserProfile | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -18,34 +26,55 @@
 		void loadUserInfo();
 	});
 
+	function isRecord(value: unknown): value is Record<string, unknown> {
+		return typeof value === 'object' && value !== null && !Array.isArray(value);
+	}
+
+	function formatDateTime(value: string): string {
+		if (!value) return '—';
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+	}
+
 	async function loadUserInfo() {
 		loading = true;
 		error = '';
 
 		try {
-			const response = await fetch('/api/v1/ai-assistant/user-info', {
+			const response = await fetch('/auth/me', {
 				credentials: 'same-origin'
 			});
 			if (!response.ok) throw new Error('Could not load your user information.');
 
 			const payload: unknown = await response.json();
-			if (
-				typeof payload !== 'object' ||
-				payload === null ||
-				!('user' in payload) ||
-				typeof payload.user !== 'object' ||
-				payload.user === null ||
-				!('name' in payload.user) ||
-				!('email' in payload.user) ||
-				typeof payload.user.name !== 'string' ||
-				typeof payload.user.email !== 'string'
-			) {
+			if (!isRecord(payload) || !isRecord(payload.session)) {
+				throw new Error('The user information response was invalid.');
+			}
+			const session = payload.session;
+			if (!isRecord(session.identity)) {
+				throw new Error('The user information response was invalid.');
+			}
+			const identity = session.identity;
+			if (!isRecord(identity.traits) || !isRecord(identity.metadata_public)) {
+				throw new Error('The user information response was invalid.');
+			}
+			const traits = identity.traits;
+			const metadata = identity.metadata_public;
+			const name = isRecord(traits.name) ? traits.name : {};
+			if (typeof traits.email !== 'string') {
 				throw new Error('The user information response was invalid.');
 			}
 
 			user = {
-				name: payload.user.name.trim(),
-				email: payload.user.email.trim()
+				firstName: typeof name.first === 'string' ? name.first.trim() : '',
+				lastName: typeof name.last === 'string' ? name.last.trim() : '',
+				email: traits.email.trim(),
+				phone: typeof traits.phone === 'string' ? traits.phone.trim() : '',
+				roles: Array.isArray(metadata.roles)
+					? metadata.roles.filter((role): role is string => typeof role === 'string')
+					: [],
+				createdAt: typeof identity.created_at === 'string' ? identity.created_at : '',
+				lastLogin: typeof session.authenticated_at === 'string' ? session.authenticated_at : ''
 			};
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Could not load your user information.';
@@ -77,14 +106,46 @@
 				>
 			</div>
 		{:else if user}
-			<dl class="mt-5 grid gap-4 sm:grid-cols-2">
+			<dl class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
-					<dt style="color:{textSecondary}; font-size:12px;">Name</dt>
-					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.name || '—'}</dd>
+					<dt style="color:{textSecondary}; font-size:12px;">First Name</dt>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.firstName || '—'}</dd>
+				</div>
+				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
+					<dt style="color:{textSecondary}; font-size:12px;">Last Name</dt>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.lastName || '—'}</dd>
 				</div>
 				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
 					<dt style="color:{textSecondary}; font-size:12px;">Email</dt>
 					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.email || '—'}</dd>
+				</div>
+				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
+					<dt style="color:{textSecondary}; font-size:12px;">Phone Number</dt>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{user.phone || '—'}</dd>
+				</div>
+				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
+					<dt style="color:{textSecondary}; font-size:12px;">Roles</dt>
+					<dd class="mt-2 flex flex-wrap gap-2">
+						{#if user.roles.length > 0}
+							{#each user.roles as role (role)}
+								<span
+									class="rounded-full px-2.5 py-1"
+									style="background:{darkMode ? '#2D3348' : '#ECEEF2'}; color:{textPrimary}; font-size:12px;"
+									>{role}</span
+								>
+							{/each}
+						{:else}
+							<span style="color:{textPrimary}; font-size:15px;">—</span>
+						{/if}
+					</dd>
+				</div>
+				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
+					<dt style="color:{textSecondary}; font-size:12px;">Create Time</dt>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{formatDateTime(user.createdAt)}</dd>
+				</div>
+				<div class="rounded-lg p-4" style="border:1px solid {borderColor};">
+					<dt style="color:{textSecondary}; font-size:12px;">Last Login Time</dt>
+					<dd class="mt-1" style="color:{textPrimary}; font-size:15px;">{formatDateTime(user.lastLogin)}</dd>
 				</div>
 			</dl>
 		{/if}
