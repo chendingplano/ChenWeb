@@ -8,11 +8,20 @@ adjusted working days SHALL be shown in different colors. Pending holiday-day se
 pending adjusted-day selections SHALL also be shown in different colors from each other and
 from saved bindings, and the page SHALL show a legend for these colors.
 
-#### Scenario: View empty calendar
+#### Scenario: View calendar that does not exist
 - **WHEN** an admin selects a (year, country, calendar type) combination with no existing
   `calendars` row
-- **THEN** the system renders the 12-month grid for that year with no dates marked, and no
-  `calendars` row is created until the admin saves a holiday binding
+- **THEN** the system renders the 12-month grid for that year with no dates marked and day
+  selection disabled, hides the holiday definitions list, and shows a Create button
+
+#### Scenario: Create a calendar
+- **WHEN** an admin clicks Create for a (year, country, calendar type) with no `calendars` row
+- **THEN** the system creates the empty `calendars` row, enables day selection, and shows the
+  holiday definitions list
+
+#### Scenario: Incomplete calendar key
+- **WHEN** the year, country or calendar type is empty
+- **THEN** the system loads no calendar and day selection stays disabled
 
 #### Scenario: View existing calendar
 - **WHEN** an admin selects a (year, country, calendar type) combination with an existing

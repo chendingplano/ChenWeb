@@ -30,3 +30,11 @@
 - [x] 5.5 Update devdoc and design/spec
 - [x] 5.6 Modify also saves new selections, each bound to the holiday of its nearest saved day (no dialog)
 - [ ] 5.7 Logged-in browser click-through
+
+## 6. Create calendar before editing (added 2026-09-28)
+
+- [x] 6.1 `POST /calendars` (`CreateCalendar`, idempotent) + route + `createCalendar` client
+- [x] 6.2 Page: `keyValid` guard; grid and Set/Attach disabled while the calendar doesn't exist; lower panel shows Create instead of the holiday list
+- [x] 6.3 `go build ./api/...`, `go test ./api/calendarhandler/`, `svelte-check` clean for calendar files
+- [x] 6.4 Update devdoc, design, spec
+- [ ] 6.5 Logged-in browser click-through of Create

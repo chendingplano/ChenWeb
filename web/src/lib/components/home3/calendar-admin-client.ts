@@ -59,6 +59,15 @@ export async function getCalendar(year: number, country: string, calendarType: s
 	return result.record as Calendar;
 }
 
+export async function createCalendar(year: number, country: string, calendarType: string): Promise<Calendar> {
+	const result = await request<Calendar>('/api/v1/calendars', {
+		method: 'POST',
+		headers: jsonHeaders,
+		body: JSON.stringify({ year, country, calendar_type: calendarType })
+	});
+	return result.record as Calendar;
+}
+
 export async function upsertCalendarDates(
 	year: number,
 	country: string,

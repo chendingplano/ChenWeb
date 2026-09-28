@@ -195,6 +195,43 @@ func GetCalendar(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "record": cal})
 }
 
+// CreateCalendar handles POST /api/v1/calendars. It creates an empty calendar
+// for {year, country, calendar_type}, so its dates can then be edited.
+func CreateCalendar(c echo.Context) error {
+	rc, err := requireAdmin(c, "CWB_CAL_140")
+	if err != nil {
+		rc.Close()
+		return err
+	}
+	defer rc.Close()
+
+	var payload struct {
+		Year         int    `json:"year"`
+		Country      string `json:"country"`
+		CalendarType string `json:"calendar_type"`
+	}
+	if err := decodeJSON(c, &payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_CAL_141)"})
+	}
+	payload.Country, payload.CalendarType = strings.TrimSpace(payload.Country), strings.TrimSpace(payload.CalendarType)
+	if payload.Year <= 0 || payload.Country == "" || payload.CalendarType == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "year, country and calendar_type are required (CWB_CAL_142)"})
+	}
+
+	ctx := c.Request().Context()
+	if err := createCalendar(ctx, ApiTypes.ProjectDBHandle, payload.Year, payload.Country, payload.CalendarType); err != nil {
+		rc.GetLogger().Error("create calendar failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create calendar (CWB_CAL_143)"})
+	}
+	cal, err := getCalendar(ctx, ApiTypes.ProjectDBHandle, payload.Year, payload.Country, payload.CalendarType)
+	if err != nil {
+		rc.GetLogger().Error("reload calendar after create failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to reload calendar (CWB_CAL_144)"})
+	}
+	rc.GetLogger().Info("calendar created", "year", payload.Year, "country", payload.Country, "calendar_type", payload.CalendarType, "id", cal.ID)
+	return c.JSON(http.StatusCreated, map[string]any{"status": true, "record": cal})
+}
+
 // UpsertCalendarDates handles PUT /api/v1/calendars/dates
 func UpsertCalendarDates(c echo.Context) error {
 	rc, err := requireAdmin(c, "CWB_CAL_110")

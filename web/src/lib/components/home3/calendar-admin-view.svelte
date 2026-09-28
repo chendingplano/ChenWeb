@@ -3,7 +3,7 @@
  import { COUNTRIES } from './country-list';
  import {
   listHolidayInfo, createHolidayInfo, updateHolidayInfo, deleteHolidayInfo,
-  getCalendar, upsertCalendarDates, deleteCalendarDate, deleteCalendar,
+  getCalendar, createCalendar, upsertCalendarDates, deleteCalendarDate, deleteCalendar,
   getDefaultCountry, setDefaultCountry, clearDefaultCountry,
   type HolidayInfo, type Calendar, type DayKind
  } from './calendar-admin-client';
@@ -22,6 +22,11 @@
  let defaultCountryBusy = $state(false);
 
  let calendar = $state<Calendar | null>(null);
+ // Year, country and calendar type together identify one holiday calendar.
+ let keyValid = $derived(Number.isInteger(year) && year > 0 && !!country && calendarType.trim() !== '');
+ // Days can only be selected once the identified calendar exists in the database.
+ let calendarExists = $derived(!!calendar?.id);
+ let creating = $state(false);
  let loading = $state(false);
  let error = $state('');
 
@@ -65,14 +70,28 @@
  }
 
  async function loadCalendar() {
+  if (!keyValid) { calendar = null; clearSelection(); return; }
   loading = true; error = '';
   try {
-   calendar = await getCalendar(year, country, calendarType);
+   calendar = await getCalendar(year, country, calendarType.trim());
    clearSelection();
   } catch (e) {
    error = e instanceof Error ? e.message : 'Unable to load calendar.';
   } finally {
    loading = false;
+  }
+ }
+
+ async function createCurrentCalendar() {
+  if (!keyValid) return;
+  creating = true; error = '';
+  try {
+   calendar = await createCalendar(year, country, calendarType.trim());
+   clearSelection();
+  } catch (e) {
+   error = e instanceof Error ? e.message : 'Unable to create calendar.';
+  } finally {
+   creating = false;
   }
  }
 
@@ -226,12 +245,12 @@
 
 <div class="page" style={`background:${colors.bg};color:${colors.text}`}>
  <section class="card intro" style={`background:${colors.card};border-color:${colors.border}`}>
-  <div><h1>Holiday Calendar</h1><p>Define holiday calendars by year, country, and calendar type. Select holiday days and adjusted working days, then attach a holiday.</p></div>
+  <div><h1>Holiday Calendar</h1><p>Year, country and calendar type identify a holiday calendar. Create it if it doesn't exist, then select holiday days and adjusted working days and attach a holiday.</p></div>
   <div class="controls">
    <label>Year<input type="number" bind:value={year} onchange={loadCalendar} /></label>
    <label>Country<select bind:value={country} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
    <label>Calendar Type<input bind:value={calendarType} onchange={loadCalendar} /></label>
-   <button onclick={loadCalendar}>Refresh</button>
+   <button disabled={!keyValid} onclick={loadCalendar}>Refresh</button>
   </div>
  </section>
 
@@ -240,9 +259,9 @@
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
    <span>{selectedHolidays.size} holiday day(s), {selectedAdjusted.size} adjusted day(s) selected{#if pendingEdits.size}, {pendingEdits.size} saved day(s) changed{/if}</span>
-   <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} onclick={() => (selectMode = 'holiday')}>Set Holidays</button>
-   <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} onclick={() => (selectMode = 'adjusted')}>Set Adjusted Days</button>
-   <button disabled={selectedCount === 0} onclick={openAttach}>Attach Holiday</button>
+   <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} disabled={!calendarExists} onclick={() => (selectMode = 'holiday')}>Set Holidays</button>
+   <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} disabled={!calendarExists} onclick={() => (selectMode = 'adjusted')}>Set Adjusted Days</button>
+   <button disabled={!calendarExists || selectedCount === 0} onclick={openAttach}>Attach Holiday</button>
    <button disabled={!canModify} onclick={saveModifications}>{modifying ? 'Saving…' : 'Modify'}</button>
    <button class="secondary" disabled={selectedCount === 0 && pendingEdits.size === 0} onclick={clearSelection}>Clear Selection</button>
    {#if calendar?.id}<button class="danger" onclick={removeCalendar}>Delete Calendar</button>{/if}
@@ -256,6 +275,7 @@
   </div>
   {#if loading}<div class="state">Loading calendar…</div>
   {:else}
+   {#if !calendarExists}<div class="state">{keyValid ? 'This holiday calendar does not exist yet. Create it below to start selecting days.' : 'Enter a year, country and calendar type to choose a holiday calendar.'}</div>{/if}
    <div class="months">
     {#each monthNames as monthName, m}
      <div class="month" style={`border-color:${colors.border}`}>
@@ -270,6 +290,7 @@
          {@const kind = bound ? effectiveKind(key) : undefined}
          <button
           class="cell"
+          disabled={!calendarExists}
           class:selected={selectedHolidays.has(key)}
           class:selected-adjusted={selectedAdjusted.has(key)}
           class:bound={kind === 'holiday'}
@@ -291,12 +312,23 @@
   <div class="toolbar">
    <h2>Holiday Definitions ({country})</h2>
    <label class="check inline"><input type="checkbox" checked={isDefaultCountry} disabled={defaultCountryBusy} onchange={toggleDefaultCountry} /> Set as default country</label>
-   <button onclick={openNewInfo}>New Holiday</button>
+   {#if calendarExists}<button onclick={openNewInfo}>New Holiday</button>{/if}
   </div>
-  <div class="table-wrap"><table><thead><tr><th>Order</th><th>Name</th><th>Description</th><th>Note</th><th></th></tr></thead><tbody>
-   {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>Edit</button><button class="link danger" onclick={() => removeInfo(h)}>Delete</button></td></tr>
-   {:else}<tr><td colspan="5" class="state">No holiday definitions for {country} yet.</td></tr>{/each}
-  </tbody></table></div>
+  {#if calendarExists}
+   <div class="table-wrap"><table><thead><tr><th>Order</th><th>Name</th><th>Description</th><th>Note</th><th></th></tr></thead><tbody>
+    {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>Edit</button><button class="link danger" onclick={() => removeInfo(h)}>Delete</button></td></tr>
+    {:else}<tr><td colspan="5" class="state">No holiday definitions for {country} yet.</td></tr>{/each}
+   </tbody></table></div>
+  {:else if !loading}
+   <div class="state create">
+    {#if keyValid}
+     <p>No <strong>{calendarType.trim()}</strong> calendar exists for {country} {year}.</p>
+     <button disabled={creating} onclick={createCurrentCalendar}>{creating ? 'Creating…' : 'Create'}</button>
+    {:else}
+     <p>Enter a year, country and calendar type to choose a holiday calendar.</p>
+    {/if}
+   </div>
+  {/if}
  </section>
 </div>
 
@@ -357,6 +389,8 @@
  .toolbar h2{margin:0;font-size:16px;flex:1}
  .error{color:#fca5a5}
  .state{text-align:center;padding:24px;color:#94a3b8}
+ .cell:disabled{cursor:default}
+ .create p{margin:0 0 12px}
  .months{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
  .month{border:1px solid;border-radius:10px;padding:10px}
  .month h3{margin:0 0 8px;font-size:13px;text-align:center}

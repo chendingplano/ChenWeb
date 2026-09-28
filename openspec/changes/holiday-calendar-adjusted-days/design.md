@@ -65,6 +65,13 @@ Alternative rejected: a new bulk endpoint that applies all edits in one transact
 make the save atomic, but a partial failure here only leaves some edits saved; the page reloads
 and shows the true state. We can add the endpoint later if that proves to be a problem.
 
+**3b. A calendar must be created before its days can be edited (added 2026-09-28).**
+Year, country and calendar type identify one holiday calendar. If it has no `calendars` row,
+the day grid is disabled and the lower panel shows a **Create** button instead of the holiday
+list. A new endpoint, `POST /calendars`, creates the empty row; it is idempotent.
+`PUT /calendars/dates` still creates the row when it is missing, so older clients keep working.
+The page just never relies on that any more.
+
 **4. Colors.** Holiday days use indigo while pending and green once saved; these are today's
 colors. Adjusted days use a solid amber fill while pending and a solid rust fill once saved.
 Both stand out from green and indigo in the light and dark themes. A saved day with a staged

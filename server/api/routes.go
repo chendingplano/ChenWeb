@@ -365,6 +365,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/calendars/holiday-info/:id", calendarhandler.UpdateHolidayInfo)
 	apiGroup.DELETE("/calendars/holiday-info/:id", calendarhandler.DeleteHolidayInfo)
 	apiGroup.GET("/calendars", calendarhandler.GetCalendar)
+	apiGroup.POST("/calendars", calendarhandler.CreateCalendar)
 	apiGroup.PUT("/calendars/dates", calendarhandler.UpsertCalendarDates)
 	apiGroup.DELETE("/calendars/:id/dates/:date", calendarhandler.DeleteCalendarDate)
 	apiGroup.DELETE("/calendars/:id", calendarhandler.DeleteCalendar)

@@ -282,6 +282,16 @@ func getCalendar(ctx context.Context, db *sql.DB, year int, country, calendarTyp
 	return cal, rows.Err()
 }
 
+// createCalendar creates the calendars row for (year, country, calendarType)
+// with no dates. It is idempotent: an existing row is kept as is.
+func createCalendar(ctx context.Context, db *sql.DB, year int, country, calendarType string) error {
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO public.calendars (year, country, calendar_type)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (year, country, calendar_type) DO NOTHING`, year, country, calendarType)
+	return err
+}
+
 // upsertCalendarDates creates the calendars row if missing, then upserts one
 // calendar_holidays binding per date (holidayDates as day kind "holiday",
 // adjustedDates as "adjusted"), replacing any existing binding for that date.
