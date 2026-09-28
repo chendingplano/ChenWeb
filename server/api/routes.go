@@ -47,6 +47,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
+	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	productreviews "github.com/chendingplano/deepdoc/server/api/product-reviews"
 	"github.com/chendingplano/deepdoc/server/api/productdrawings"
 	"github.com/chendingplano/deepdoc/server/api/productnameimporthandler"
@@ -381,6 +382,12 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/peak-hours/:name", peakhourshandler.Update)
 	apiGroup.DELETE("/peak-hours/:name", peakhourshandler.Delete)
 	apiGroup.GET("/peak-hours/:name/is-active", peakhourshandler.IsActive)
+
+	// Release notes admin (System Admin > System > Releases).
+	apiGroup.GET("/releases", releaseshandler.ListReleases)
+	apiGroup.POST("/releases", releaseshandler.CreateRelease)
+	apiGroup.PUT("/releases/:id", releaseshandler.UpdateRelease)
+	apiGroup.DELETE("/releases/:id", releaseshandler.DeleteRelease)
 
 	// External Terminology Resources (System Admin > Resources). Downloads write
 	// local artifacts + unapproved draft manifests under TERMINOLOGY_DIR.

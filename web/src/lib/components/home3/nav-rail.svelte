@@ -328,6 +328,7 @@
 					children: [
 						{ id: 'sysadmin-system-calendar', label: 'Calendar' },
 						{ id: 'sysadmin-system-peak-hours', label: 'Peak Hours' },
+						{ id: 'sysadmin-system-releases', label: 'Releases' },
 						{ id: 'sysadmin-schedules', label: 'Schedules' },
 						{ id: 'sysadmin-page-config', label: 'Page Config' }
 					]
