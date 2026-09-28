@@ -322,14 +322,14 @@
 						{ id: 'sysadmin-doc-process-semantic-retry-queue', label: 'Semantic Retry Queue' }
 					]
 				},
-				{ id: 'sysadmin-page-config', label: 'Page Content' },
 				{
 					id: 'sysadmin-system',
 					label: 'System',
 					children: [
 						{ id: 'sysadmin-system-calendar', label: 'Calendar' },
 						{ id: 'sysadmin-system-peak-hours', label: 'Peak Hours' },
-						{ id: 'sysadmin-schedules', label: 'Schedules' }
+						{ id: 'sysadmin-schedules', label: 'Schedules' },
+						{ id: 'sysadmin-page-config', label: 'Page Config' }
 					]
 				}
 			]
@@ -896,7 +896,7 @@
 							User Info
 						</DropdownMenu.Item>
 						<DropdownMenu.Item
-							onclick={() => onSelect({ itemId: '__account__', itemTitle: 'Account' })}
+							disabled
 						>
 							<CreditCardIcon class="mr-2 h-4 w-4" />
 							Account
@@ -938,7 +938,7 @@
 						User Info
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
-						onclick={() => onSelect({ itemId: '__account__', itemTitle: 'Account' })}
+						disabled
 					>
 						<CreditCardIcon class="mr-2 h-4 w-4" />
 						Account
