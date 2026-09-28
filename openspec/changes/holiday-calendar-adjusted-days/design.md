@@ -66,9 +66,12 @@ make the save atomic, but a partial failure here only leaves some edits saved; t
 and shows the true state. We can add the endpoint later if that proves to be a problem.
 
 **3b. A calendar must be created before its days can be edited (added 2026-09-28).**
-Year, country and calendar type identify one holiday calendar. If it has no `calendars` row,
-the day grid is disabled and the lower panel shows a **Create** button instead of the holiday
-list. A new endpoint, `POST /calendars`, creates the empty row; it is idempotent.
+The page shows two concepts. A *holiday info* (lower panel) is identified by country +
+calendar type: the list of specific holidays, shared across years. It exists once it has at
+least one holiday, and its Create button opens the New Holiday form. *Holidays* (upper panel)
+are that holiday info bound to one year, identified by year + country + calendar type. If the
+year has no `calendars` row, the day grid is disabled and the upper panel shows a **Create**
+button. That button is available only once the holiday info exists. A new endpoint, `POST /calendars`, creates the empty row; it is idempotent.
 `PUT /calendars/dates` still creates the row when it is missing, so older clients keep working.
 The page just never relies on that any more.
 

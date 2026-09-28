@@ -12,12 +12,19 @@ from saved bindings, and the page SHALL show a legend for these colors.
 - **WHEN** an admin selects a (year, country, calendar type) combination with no existing
   `calendars` row
 - **THEN** the system renders the 12-month grid for that year with no dates marked and day
-  selection disabled, hides the holiday definitions list, and shows a Create button
+  selection disabled, and shows a Create button in the upper panel if the (country, calendar
+  type) holiday info exists, or asks the admin to create the holiday info first
 
 #### Scenario: Create a calendar
-- **WHEN** an admin clicks Create for a (year, country, calendar type) with no `calendars` row
-- **THEN** the system creates the empty `calendars` row, enables day selection, and shows the
-  holiday definitions list
+- **WHEN** an admin clicks the upper panel's Create for a (year, country, calendar type) with
+  no `calendars` row
+- **THEN** the system creates the empty `calendars` row and enables day selection
+
+#### Scenario: Holiday info shown independent of year
+- **WHEN** an admin selects a country and calendar type, whatever the year and whether that
+  year's calendar exists
+- **THEN** the lower panel shows that (country, calendar type)'s holiday info, or, if it has
+  no holidays yet, a Create button that opens the New Holiday form
 
 #### Scenario: Holiday definitions scoped to country and calendar type
 - **WHEN** an admin selects a country and a calendar type
@@ -30,8 +37,9 @@ from saved bindings, and the page SHALL show a legend for these colors.
 - **THEN** the system rejects the request with 400 and changes no data
 
 #### Scenario: Incomplete calendar key
-- **WHEN** the year, country or calendar type is empty
-- **THEN** the system loads no calendar and day selection stays disabled
+- **WHEN** the year is empty or invalid
+- **THEN** the system loads no calendar and hides the day grid, while the lower panel still
+  shows the holiday info for the country and calendar type
 
 #### Scenario: View existing calendar
 - **WHEN** an admin selects a (year, country, calendar type) combination with an existing

@@ -23,9 +23,13 @@
  let defaultCountryBusy = $state(false);
 
  let calendar = $state<Calendar | null>(null);
- // Year, country and calendar type together identify one holiday calendar.
- let keyValid = $derived(Number.isInteger(year) && year > 0 && !!country && calendarType.trim() !== '');
- // Days can only be selected once the identified calendar exists in the database.
+ // Country + calendar type identify a holiday info: the list of specific holidays (元旦, 春节, …),
+ // shared across years. It exists once it has at least one holiday.
+ let infoKeyValid = $derived(!!country && calendarType.trim() !== '');
+ let infosLoaded = $state(false);
+ // Year + country + calendar type identify the holidays of one year: the holiday info bound to dates.
+ let keyValid = $derived(Number.isInteger(year) && year > 0 && infoKeyValid);
+ // Days can only be selected once that year's holidays exist in the database.
  let calendarExists = $derived(!!calendar?.id);
  let creating = $state(false);
  let loading = $state(false);
@@ -46,6 +50,7 @@
  let canModify = $derived(!modifying && (pendingEdits.size > 0 || (selectedCount > 0 && (calendar?.dates ?? []).length > 0)));
 
  let holidayInfos = $state<HolidayInfo[]>([]);
+ let holidayInfoExists = $derived(holidayInfos.length > 0);
  let attachModal = $state(false);
  let attachHolidayId = $state<number | ''>('');
  let attachNew = $state(false);
@@ -97,7 +102,10 @@
  }
 
  async function loadHolidayInfos() {
+  if (!infoKeyValid) { holidayInfos = []; return; }
+  infosLoaded = false;
   try { holidayInfos = await listHolidayInfo(country, calendarType); } catch (e) { error = e instanceof Error ? e.message : 'Unable to load holiday info.'; }
+  finally { infosLoaded = true; }
  }
 
  async function loadDefaultCountry() {
@@ -246,7 +254,7 @@
 
 <div class="page" style={`background:${colors.bg};color:${colors.text}`}>
  <section class="card intro" style={`background:${colors.card};border-color:${colors.border}`}>
-  <div><h1>Holiday Calendar</h1><p>Year, country and calendar type identify a holiday calendar. Create it if it doesn't exist, then select holiday days and adjusted working days and attach a holiday.</p></div>
+  <div><h1>Holiday Calendar</h1><p>Country and calendar type identify a holiday info, the list of holidays shared across years (lower panel). Adding a year gives that year's holidays: select holiday days and adjusted working days and attach a holiday.</p></div>
   <div class="controls">
    <label>Year<input type="number" bind:value={year} onchange={loadCalendar} /></label>
    <label>Country<select bind:value={country} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
@@ -274,9 +282,19 @@
    <span><i class="swatch bound-adjusted"></i>Adjusted working day</span>
    <span><i class="swatch changed"></i>Unsaved change</span>
   </div>
-  {#if loading}<div class="state">Loading calendar…</div>
+  {#if !keyValid}<div class="state">Enter a year, country and calendar type to choose the holidays of a year.</div>
+  {:else if loading}<div class="state">Loading calendar…</div>
   {:else}
-   {#if !calendarExists}<div class="state">{keyValid ? 'This holiday calendar does not exist yet. Create it below to start selecting days.' : 'Enter a year, country and calendar type to choose a holiday calendar.'}</div>{/if}
+   {#if !calendarExists}
+    <div class="state create">
+     {#if holidayInfoExists}
+      <p>No <strong>{calendarType.trim()}</strong> holidays exist for {country} {year}.</p>
+      <button disabled={creating} onclick={createCurrentCalendar}>{creating ? 'Creating…' : 'Create'}</button>
+     {:else}
+      <p>Create the holiday info for {country} · {calendarType.trim()} below first, then create the {year} holidays.</p>
+     {/if}
+    </div>
+   {/if}
    <div class="months">
     {#each monthNames as monthName, m}
      <div class="month" style={`border-color:${colors.border}`}>
@@ -311,23 +329,19 @@
 
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
-   <h2>Holiday Definitions ({country} · {calendarType})</h2>
+   <h2>Holiday Info ({country} · {calendarType})</h2>
    <label class="check inline"><input type="checkbox" checked={isDefaultCountry} disabled={defaultCountryBusy} onchange={toggleDefaultCountry} /> Set as default country</label>
-   {#if calendarExists}<button onclick={openNewInfo}>New Holiday</button>{/if}
+   {#if holidayInfoExists}<button onclick={openNewInfo}>New Holiday</button>{/if}
   </div>
-  {#if calendarExists}
+  {#if !infoKeyValid}<div class="state">Choose a country and calendar type to see their holiday info.</div>
+  {:else if holidayInfoExists}
    <div class="table-wrap"><table><thead><tr><th>Order</th><th>Name</th><th>Description</th><th>Note</th><th></th></tr></thead><tbody>
-    {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>Edit</button><button class="link danger" onclick={() => removeInfo(h)}>Delete</button></td></tr>
-    {:else}<tr><td colspan="5" class="state">No holiday definitions for {country} · {calendarType} yet.</td></tr>{/each}
+    {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>Edit</button><button class="link danger" onclick={() => removeInfo(h)}>Delete</button></td></tr>{/each}
    </tbody></table></div>
-  {:else if !loading}
+  {:else if infosLoaded}
    <div class="state create">
-    {#if keyValid}
-     <p>No <strong>{calendarType.trim()}</strong> calendar exists for {country} {year}.</p>
-     <button disabled={creating} onclick={createCurrentCalendar}>{creating ? 'Creating…' : 'Create'}</button>
-    {:else}
-     <p>Enter a year, country and calendar type to choose a holiday calendar.</p>
-    {/if}
+    <p>No holiday info exists for {country} · {calendarType.trim()}. Create it by adding its first holiday.</p>
+    <button onclick={openNewInfo}>Create</button>
    </div>
   {/if}
  </section>

@@ -46,3 +46,10 @@
 - [x] 7.3 Frontend: Calendar Type dropdown (`calendar-types.ts`), definitions list and modal scoped by type
 - [x] 7.4 Update devdoc, design, spec
 - [ ] 7.5 Logged-in browser click-through
+
+## 8. Holiday info vs. holidays panels (added 2026-09-28)
+
+- [x] 8.1 Lower panel = holiday info (country + type), independent of year; Create opens New Holiday when it has no holidays
+- [x] 8.2 Upper panel = holidays of a year; Create moves here, available only once the holiday info exists; grid hidden while the year is invalid
+- [x] 8.3 `svelte-check` clean for calendar files; devdoc, design, spec updated
+- [ ] 8.4 Logged-in browser click-through
