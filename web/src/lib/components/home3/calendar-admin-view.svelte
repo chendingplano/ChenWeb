@@ -32,6 +32,11 @@
  let selectedCount = $derived(selectedHolidays.size + selectedAdjusted.size);
  let boundByDate = $derived(new Map((calendar?.dates ?? []).map((d) => [d.holiday_date, d])));
 
+ // Staged edits to saved bindings, keyed by date: the new day kind, or null to remove the binding.
+ // Modify saves them; Clear Selection or reloading the calendar discards them.
+ let pendingEdits = $state(new Map<string, DayKind | null>());
+ let modifying = $state(false);
+
  let holidayInfos = $state<HolidayInfo[]>([]);
  let attachModal = $state(false);
  let attachHolidayId = $state<number | ''>('');
@@ -96,7 +101,44 @@
 
  onMount(async () => { await loadDefaultCountry(); loadCalendar(); loadHolidayInfos(); });
 
- function clearSelection() { selectedHolidays = new Set(); selectedAdjusted = new Set(); }
+ function clearSelection() { selectedHolidays = new Set(); selectedAdjusted = new Set(); pendingEdits = new Map(); }
+
+ function effectiveKind(key: string): DayKind | null | undefined {
+  return pendingEdits.has(key) ? pendingEdits.get(key) : boundByDate.get(key)?.day_kind;
+ }
+
+ // Clicking a saved day in the active mode toggles it between that kind and removed.
+ // An edit that restores the saved kind is dropped, so Modify only sees real changes.
+ function toggleBound(key: string, savedKind: DayKind) {
+  const next = effectiveKind(key) === selectMode ? null : selectMode;
+  const edits = new Map(pendingEdits);
+  if (next === savedKind) edits.delete(key); else edits.set(key, next);
+  pendingEdits = edits;
+ }
+
+ async function saveModifications() {
+  if (!calendar?.id || pendingEdits.size === 0) return;
+  modifying = true; error = '';
+  // Kind changes go through the upsert endpoint, which takes one holiday per call.
+  const byHoliday = new Map<number, { holidays: string[]; adjusted: string[] }>();
+  const removals: string[] = [];
+  for (const [date, kind] of pendingEdits) {
+   if (kind === null) { removals.push(date); continue; }
+   const holidayInfoId = boundByDate.get(date)!.holiday_info_id;
+   const group = byHoliday.get(holidayInfoId) ?? { holidays: [], adjusted: [] };
+   (kind === 'holiday' ? group.holidays : group.adjusted).push(date);
+   byHoliday.set(holidayInfoId, group);
+  }
+  try {
+   for (const [holidayInfoId, g] of byHoliday) await upsertCalendarDates(year, country, calendarType, g.holidays, holidayInfoId, g.adjusted);
+   for (const date of removals) await deleteCalendarDate(calendar.id, date);
+  } catch (e) {
+   error = e instanceof Error ? e.message : 'Unable to save changes.';
+  } finally {
+   modifying = false;
+   await loadCalendar();
+  }
+ }
 
  // Toggle key in the active mode's set; adding it there removes it from the other set.
  function toggleDay(key: string) {
@@ -133,11 +175,6 @@
   } finally {
    attaching = false;
   }
- }
-
- async function removeBinding(date: string) {
-  if (!calendar || !confirm(`Remove holiday on ${date}?`)) return;
-  try { await deleteCalendarDate(calendar.id, date); await loadCalendar(); } catch (e) { error = e instanceof Error ? e.message : 'Unable to remove holiday.'; }
  }
 
  async function removeCalendar() {
@@ -185,11 +222,12 @@
 
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
-   <span>{selectedHolidays.size} holiday day(s), {selectedAdjusted.size} adjusted day(s) selected</span>
+   <span>{selectedHolidays.size} holiday day(s), {selectedAdjusted.size} adjusted day(s) selected{#if pendingEdits.size}, {pendingEdits.size} saved day(s) changed{/if}</span>
    <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} onclick={() => (selectMode = 'holiday')}>Set Holidays</button>
    <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} onclick={() => (selectMode = 'adjusted')}>Set Adjusted Days</button>
    <button disabled={selectedCount === 0} onclick={openAttach}>Attach Holiday</button>
-   <button class="secondary" disabled={selectedCount === 0} onclick={clearSelection}>Clear Selection</button>
+   <button disabled={pendingEdits.size === 0 || modifying} onclick={saveModifications}>{modifying ? 'Saving…' : 'Modify'}</button>
+   <button class="secondary" disabled={selectedCount === 0 && pendingEdits.size === 0} onclick={clearSelection}>Clear Selection</button>
    {#if calendar?.id}<button class="danger" onclick={removeCalendar}>Delete Calendar</button>{/if}
   </div>
   <div class="legend">
@@ -197,6 +235,7 @@
    <span><i class="swatch selected-adjusted"></i>Selected adjusted day</span>
    <span><i class="swatch bound"></i>Holiday</span>
    <span><i class="swatch bound-adjusted"></i>Adjusted working day</span>
+   <span><i class="swatch changed"></i>Unsaved change</span>
   </div>
   {#if loading}<div class="state">Loading calendar…</div>
   {:else}
@@ -211,14 +250,16 @@
         {:else}
          {@const key = dateKey(year, m, day)}
          {@const bound = boundByDate.get(key)}
+         {@const kind = bound ? effectiveKind(key) : undefined}
          <button
           class="cell"
           class:selected={selectedHolidays.has(key)}
           class:selected-adjusted={selectedAdjusted.has(key)}
-          class:bound={bound?.day_kind === 'holiday'}
-          class:bound-adjusted={bound?.day_kind === 'adjusted'}
-          title={bound ? (bound.day_kind === 'adjusted' ? `${bound.holiday_info_name} (adjusted working day)` : bound.holiday_info_name) : ''}
-          onclick={() => (bound ? removeBinding(key) : toggleDay(key))}
+          class:bound={kind === 'holiday'}
+          class:bound-adjusted={kind === 'adjusted'}
+          class:changed={pendingEdits.has(key)}
+          title={bound ? `${bound.holiday_info_name}${kind === 'adjusted' ? ' (adjusted working day)' : kind === null ? ' (will be removed)' : ''}` : ''}
+          onclick={() => (bound ? toggleBound(key, bound.day_kind) : toggleDay(key))}
          >{day}</button>
         {/if}
        {/each}
@@ -310,6 +351,7 @@
  .cell.selected-adjusted{background:#f59e0b;color:#1c1917}
  .cell.bound{background:#15803d;color:#fff}
  .cell.bound-adjusted{background:#9a3412;color:#fff}
+ .cell.changed{border:2px dashed #ec4899}
  .mode{background:transparent;border:1px solid #6366f1;color:inherit}
  .mode.active{background:#6366f1;color:#fff}
  .mode.adjusted{border-color:#f59e0b}
@@ -321,6 +363,7 @@
  .swatch.selected-adjusted{background:#f59e0b}
  .swatch.bound{background:#15803d}
  .swatch.bound-adjusted{background:#9a3412}
+ .swatch.changed{border:2px dashed #ec4899}
  .table-wrap{overflow:auto}
  table{width:100%;border-collapse:collapse}
  th,td{text-align:left;border-bottom:1px solid #64748b44;padding:9px 8px}

@@ -49,12 +49,22 @@ The two Set buttons work as a toggle group that picks the current *selection mod
 is Holidays, which matches today's behavior. Clicking an unbound day toggles it in the current
 mode's set, and removes it from the other set if it was there. The page keeps two `Set<string>`
 values, `selectedHolidays` and `selectedAdjusted`. **Attach Holiday** is enabled when either set
-is non-empty, and the modal title shows both counts. Clicking a day that is already bound still
-removes its binding, as before.
+is non-empty, and the modal title shows both counts.
+
+**3a. Saved days are edited in place and saved with Modify (added 2026-09-28).**
+Clicking a saved day no longer deletes it at once. It stages an edit: in the active mode the day
+toggles between that mode's kind and removed. The day keeps its holiday. A **Modify** button,
+placed after Attach Holiday, is disabled until there is at least one staged edit. It saves the
+edits with the existing endpoints: one `PUT /calendars/dates` per holiday for kind changes, then
+one `DELETE` per removed date. Clear Selection discards staged edits.
+Alternative rejected: a new bulk endpoint that applies all edits in one transaction. It would
+make the save atomic, but a partial failure here only leaves some edits saved; the page reloads
+and shows the true state. We can add the endpoint later if that proves to be a problem.
 
 **4. Colors.** Holiday days use indigo while pending and green once saved; these are today's
-colors. Adjusted days use an amber outline while pending and a solid amber fill once saved.
-Amber stands out from both green and indigo in the light and dark themes. A small legend below
+colors. Adjusted days use a solid amber fill while pending and a solid rust fill once saved.
+Both stand out from green and indigo in the light and dark themes. A saved day with a staged
+edit gets a pink dashed outline. A small legend below
 the toolbar names all four states. The tooltip on an adjusted day reads
 `<holiday name> (adjusted working day)`.
 
@@ -64,7 +74,7 @@ the toolbar names all four states. The tooltip on an adjusted day reads
   migration in one pass, then confirm with
   `SELECT ... FROM project_db_migration ORDER BY id DESC`.
 - [An admin could bind an adjusted day to the wrong holiday] → The tooltip shows the holiday
-  name, and clicking the day removes the binding, the same as for holiday days.
+  name, and clicking the day stages its removal, the same as for holiday days.
 
 ## Migration Plan
 

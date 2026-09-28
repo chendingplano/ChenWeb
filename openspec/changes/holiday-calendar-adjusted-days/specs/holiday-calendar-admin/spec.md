@@ -57,3 +57,28 @@ one day kind.
 #### Scenario: Legacy request without adjusted dates
 - **WHEN** a client submits `dates` without `adjusted_dates`
 - **THEN** the system binds those dates with day kind `holiday`, as before this change
+
+### Requirement: Edit and delete calendar date bindings
+The system SHALL let an admin stage changes to saved date bindings (change a date's day kind, or
+remove the binding) and save all staged changes with a "Modify" action, or delete an entire
+calendar (all date bindings for a given year, country, and calendar type) in one action. The
+Modify action SHALL be disabled while there are no staged changes.
+
+#### Scenario: Stage and save changes to saved dates
+- **WHEN** an admin, in "Set Holidays" mode, clicks a saved holiday day and a saved adjusted day,
+  then clicks Modify
+- **THEN** the system removes the first date's binding, rebinds the second date to the same
+  holiday info with day kind `holiday`, and the grid shows the saved result
+
+#### Scenario: Modify disabled without changes
+- **WHEN** there are no staged changes, including after an admin clicks a saved date twice so
+  that it returns to its saved kind
+- **THEN** the Modify button is disabled
+
+#### Scenario: Discard staged changes
+- **WHEN** an admin has staged changes and clicks Clear Selection
+- **THEN** the system discards them and saved bindings are unchanged
+
+#### Scenario: Delete entire calendar
+- **WHEN** an admin deletes the calendar for the active (year, country, calendar type)
+- **THEN** the system deletes the `calendars` row and all its date bindings

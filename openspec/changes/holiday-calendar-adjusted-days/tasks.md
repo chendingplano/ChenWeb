@@ -20,3 +20,12 @@
 ## 4. Docs
 
 - [x] 4.1 Update devdoc `2026092401-devdoc-holiday-calendar-admin.md` (schema, API, frontend, verification)
+
+## 5. Modify saved days (added 2026-09-28)
+
+- [x] 5.1 `calendar-admin-view.svelte`: clicking a saved day stages a kind change or removal in `pendingEdits` instead of deleting at once
+- [x] 5.2 Modify button, disabled with no staged edits; saves through the existing upsert/delete endpoints and reloads; Clear Selection discards edits
+- [x] 5.3 Pink dashed outline + legend entry for saved days with unsaved edits
+- [x] 5.4 `svelte-check` has no errors in the calendar files
+- [x] 5.5 Update devdoc and design/spec
+- [ ] 5.6 Logged-in browser click-through
