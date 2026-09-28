@@ -171,7 +171,7 @@ func (a Application) ExecuteCase(ctx context.Context, experiment *Experiment, ru
 		if tenant == "" {
 			tenant = "benchmark-" + attempt.ID
 		}
-		state.seeded, err = seed(ctx, a.Config.DB, SeedInputRequest{AttemptID: attempt.ID, Workspace: workspace.Path(), TenantID: tenant, StoreID: a.Config.StoreID, ParserName: parser, Case: datasetCase, Status: `[]`})
+		state.seeded, err = seed(ctx, a.Config.DB, SeedInputRequest{AttemptID: attempt.ID, Workspace: workspace.Path(), UserID: tenant, StoreID: a.Config.StoreID, ParserName: parser, Case: datasetCase, Status: `[]`})
 		if err != nil {
 			return err
 		}

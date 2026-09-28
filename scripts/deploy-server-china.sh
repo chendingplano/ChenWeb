@@ -25,6 +25,7 @@
 # to the previous binary if the health-check fails.
 #
 #   bash deploy-server-china.sh <dir> [name ...]
+#   DEPLOY_NAMES=server,doc-processor bash deploy-server-china.sh <dir>
 #
 #   <dir>   directory holding <name>-linux + <name>-linux.sha256
 #           (default: the directory this script lives in)
@@ -39,6 +40,8 @@
 #   KEEP_BAKS     (default 3)            how many .bak-<ts> copies to retain
 #   SKIP_MIGRATIONS=1  leave migration files untouched (binaries only)
 #   DRY_RUN=1     print privileged actions instead of running them
+#   DEPLOY_NAMES  comma-separated names for wrappers that cannot forward args;
+#                 ignored when names are provided positionally
 
 set -euo pipefail
 
@@ -74,6 +77,9 @@ svc_for() {
 SRC_DIR=${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 [ $# -gt 0 ] && shift || true
 NAMES=("$@")
+if [ ${#NAMES[@]} -eq 0 ] && [ -n "${DEPLOY_NAMES:-}" ]; then
+  read -r -a NAMES <<< "${DEPLOY_NAMES//,/ }"
+fi
 
 IS_ROOT=0
 [ "$(id -u)" -eq 0 ] && IS_ROOT=1

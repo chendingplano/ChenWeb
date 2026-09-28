@@ -51,7 +51,7 @@ func TestLockDocStateTx_BlocksConcurrentReader(t *testing.T) {
 	key := fmt.Sprintf("doc:lock-test-%d", time.Now().UnixNano())
 	var inputID int64
 	err := db.QueryRow(`
-		INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, status)
+		INSERT INTO kb.inputs (user_id, ks_store_id, type, title, status)
 		VALUES ('tenant-x', NULL, 'cdm', 'Lock Test', $1::jsonb) RETURNING id
 	`, draftStatus).Scan(&inputID)
 	if err != nil {

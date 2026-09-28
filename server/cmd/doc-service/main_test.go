@@ -288,7 +288,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id
+    user_id
 ) VALUES (
     $1,
     $2,
@@ -398,7 +398,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id
+    user_id
 ) VALUES (
     $1,
     $2,
@@ -417,7 +417,7 @@ SET file_name = $1,
     modify_time = NOW()
 WHERE id = $3`)
 
-	storeMetadataQuery := regexp.QuoteMeta(`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
+	storeMetadataQuery := regexp.QuoteMeta(`SELECT user_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
 
 	parentHomePath := filepath.Join(homeDir, "Artifacts", "0", "10", "bundle.zip")
 	childHomePath := filepath.Join(homeDir, "Artifacts", "0", "11", "doc.pdf")
@@ -434,7 +434,7 @@ WHERE id = $3`)
 
 	mock.ExpectQuery(storeMetadataQuery).
 		WithArgs(int64(10)).
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "ks_desc"}).AddRow(nil, nil, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "ks_store_id", "ks_desc"}).AddRow(nil, nil, nil))
 
 	mock.ExpectQuery(updateSQL).
 		WithArgs("doc.pdf", sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -447,7 +447,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id,
+    user_id,
     ks_store_id,
     ks_desc
 ) VALUES (
@@ -488,14 +488,14 @@ RETURNING id`)
 	}
 }
 
-// TestProcessStagingOnceZipChildInheritsParentTenantID guards against a
+// TestProcessStagingOnceZipChildInheritsParentUserID guards against a
 // regression where a record extracted from a zip archive was inserted with
-// no tenant_id, even though the archive's own kb.inputs row (e.g. created by
-// kbhandler.UploadInputs, which requires a real tenant_id) already carries
+// no user_id, even though the archive's own kb.inputs row (e.g. created by
+// kbhandler.UploadInputs, which requires a real user_id) already carries
 // one -- see devdoc 2026092403. The archive is the only attributable unit
 // the caller assigned a tenant to, so every file it contains must inherit
-// that same tenant_id.
-func TestProcessStagingOnceZipChildInheritsParentTenantID(t *testing.T) {
+// that same user_id.
+func TestProcessStagingOnceZipChildInheritsParentUserID(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -531,11 +531,11 @@ SET file_name = $1,
     modify_time = NOW()
 WHERE id = $3`)
 
-	storeMetadataQuery := regexp.QuoteMeta(`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
+	storeMetadataQuery := regexp.QuoteMeta(`SELECT user_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
 	processingModeQuery := regexp.QuoteMeta(`SELECT COALESCE(NULLIF(BTRIM(processing_mode), ''), 'auto') FROM kb.inputs WHERE id = $1`)
 
 	// Parent zip already has a kb.inputs row (e.g. from UploadInputs, which
-	// requires a real tenant_id), so the UPDATE match path is taken, not INSERT.
+	// requires a real user_id), so the UPDATE match path is taken, not INSERT.
 	mock.ExpectQuery(updateSQL).
 		WithArgs("bundle.zip", sqlmock.AnyArg(), srcPath).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
@@ -551,7 +551,7 @@ WHERE id = $3`)
 
 	mock.ExpectQuery(storeMetadataQuery).
 		WithArgs(int64(10)).
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "ks_desc"}).AddRow("tenant-xyz", int64(42), "active store desc"))
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "ks_store_id", "ks_desc"}).AddRow("tenant-xyz", int64(42), "active store desc"))
 
 	mock.ExpectQuery(updateSQL).
 		WithArgs("doc.pdf", sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -564,7 +564,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id,
+    user_id,
     ks_store_id,
     ks_desc
 ) VALUES (
@@ -643,7 +643,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id
+    user_id
 ) VALUES (
     $1,
     $2,
@@ -662,7 +662,7 @@ SET file_name = $1,
     modify_time = NOW()
 WHERE id = $3`)
 
-	storeMetadataQuery := regexp.QuoteMeta(`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
+	storeMetadataQuery := regexp.QuoteMeta(`SELECT user_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`)
 
 	childHomePath := filepath.Join(homeDir, "Artifacts", "0", "11", childName)
 
@@ -678,7 +678,7 @@ WHERE id = $3`)
 
 	mock.ExpectQuery(storeMetadataQuery).
 		WithArgs(int64(10)).
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "ks_desc"}).AddRow(nil, nil, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "ks_store_id", "ks_desc"}).AddRow(nil, nil, nil))
 
 	mock.ExpectQuery(updateSQL).
 		WithArgs(childName, sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -691,7 +691,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id,
+    user_id,
     ks_store_id,
     ks_desc
 ) VALUES (
@@ -774,7 +774,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id
+    user_id
 ) VALUES (
     $1,
     $2,
@@ -828,7 +828,7 @@ func TestRelativePathFromParentDir(t *testing.T) {
 	}
 }
 
-func TestUpsertStagedInputRecord_InsertsZipTypeAndTenantIDWhenRequested(t *testing.T) {
+func TestUpsertStagedInputRecord_InsertsZipTypeAndUserIDWhenRequested(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -858,7 +858,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id
+    user_id
 ) VALUES (
     $1,
     $2,

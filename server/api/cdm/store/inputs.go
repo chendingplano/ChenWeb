@@ -34,7 +34,7 @@ const publishedStatus = `[{"operation":"parsed","proc_status":"success"}]`
 // DraftInput carries the fields needed to register a new CDM document's
 // kb.inputs row.
 type DraftInput struct {
-	TenantID  string
+	UserID    string
 	KSStoreID sql.NullInt64
 	Title     string
 }
@@ -68,17 +68,17 @@ type execQuerier interface {
 }
 
 func createDraftTx(ctx context.Context, q execQuerier, in DraftInput) (int64, error) {
-	tenantID := in.TenantID
-	if docprocessing.IsTenantIDUnset(tenantID) {
-		docprocessing.AlarmMissingTenantIDAtInsert(ctx, "cdm.CreateDraft")
+	userID := in.UserID
+	if docprocessing.IsUserIDUnset(userID) {
+		docprocessing.AlarmMissingUserIDAtInsert(ctx, "cdm.CreateDraft")
 	}
 
 	var id int64
 	err := q.QueryRowContext(ctx, `
-		INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, status)
+		INSERT INTO kb.inputs (user_id, ks_store_id, type, title, status)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
 		RETURNING id
-	`, tenantID, in.KSStoreID, cdmInputType, in.Title, draftStatus).Scan(&id)
+	`, userID, in.KSStoreID, cdmInputType, in.Title, draftStatus).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("cdm: create draft input row: %w", err)
 	}

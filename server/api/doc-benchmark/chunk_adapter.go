@@ -351,9 +351,9 @@ func (a ChunkAdapter) Cleanup(ctx context.Context, id int64) error {
 const BenchmarkInputFilename = "benchmark-input.pdf"
 
 type SeedInputRequest struct {
-	AttemptID, Workspace, TenantID, Title, ParserName, ResultFilename, Status string
-	StoreID                                                                   int64
-	Case                                                                      DatasetCase
+	AttemptID, Workspace, UserID, Title, ParserName, ResultFilename, Status string
+	StoreID                                                                 int64
+	Case                                                                    DatasetCase
 }
 
 type SeededInput struct {
@@ -361,7 +361,7 @@ type SeededInput struct {
 	ParserName, StagingFilename, ResultFilename, FileName string
 }
 
-const seedInputQuery = `INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
+const seedInputQuery = `INSERT INTO kb.inputs (user_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
 
 func safeLeaf(s string) bool {
 	return s != "" && s != "." && s != ".." && filepath.Base(s) == s && !strings.ContainsAny(s, `/\`)
@@ -507,12 +507,12 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 		return SeededInput{}, err
 	}
 	if owned.Valid {
-		var tenant, parser, staging, result, fileName, status string
+		var userID, parser, staging, result, fileName, status string
 		var storeID int64
-		if err = tx.QueryRowContext(ctx, `SELECT tenant_id, ks_store_id, parser_name, staging_filename, result_filename, file_name, status::text FROM kb.inputs WHERE id=$1`, owned.Int64).Scan(&tenant, &storeID, &parser, &staging, &result, &fileName, &status); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT user_id, ks_store_id, parser_name, staging_filename, result_filename, file_name, status::text FROM kb.inputs WHERE id=$1`, owned.Int64).Scan(&userID, &storeID, &parser, &staging, &result, &fileName, &status); err != nil {
 			return SeededInput{}, err
 		}
-		if tenant != req.TenantID || storeID != req.StoreID || parser != req.ParserName || staging != stagingMetadata || result != linePath || fileName != BenchmarkInputFilename {
+		if userID != req.UserID || storeID != req.StoreID || parser != req.ParserName || staging != stagingMetadata || result != linePath || fileName != BenchmarkInputFilename {
 			return SeededInput{}, fmt.Errorf("seed input retry metadata conflict")
 		}
 		existing, readErr := os.ReadFile(linePath)
@@ -537,11 +537,11 @@ func SeedInput(ctx context.Context, db *sql.DB, req SeedInputRequest) (SeededInp
 	} else {
 		return SeededInput{}, readErr
 	}
-	if docprocessing.IsTenantIDUnset(req.TenantID) {
-		docprocessing.AlarmMissingTenantIDAtInsert(ctx, "doc-benchmark.SeedInput")
+	if docprocessing.IsUserIDUnset(req.UserID) {
+		docprocessing.AlarmMissingUserIDAtInsert(ctx, "doc-benchmark.SeedInput")
 	}
 	var id int64
-	err = tx.QueryRowContext(ctx, seedInputQuery, req.TenantID, req.StoreID, "pdf", req.Title, req.ParserName, stagingMetadata, linePath, BenchmarkInputFilename, req.Status).Scan(&id)
+	err = tx.QueryRowContext(ctx, seedInputQuery, req.UserID, req.StoreID, "pdf", req.Title, req.ParserName, stagingMetadata, linePath, BenchmarkInputFilename, req.Status).Scan(&id)
 	if err != nil {
 		return SeededInput{}, err
 	}

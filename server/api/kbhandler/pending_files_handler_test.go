@@ -86,7 +86,7 @@ func TestClaimOnePendingFile_InsertsRowAndRenames(t *testing.T) {
 	}
 
 	id, err := claimOnePendingFile(db, "kb.inputs", uploadedInputInsert{
-		TenantID:       "tenant-alpha",
+		UserID:         "tenant-alpha",
 		KSStoreID:      7,
 		Type:           "pdf",
 		ProcessingMode: "auto",
@@ -131,7 +131,7 @@ func TestClaimOnePendingFile_RollsBackWhenFileAlreadyGone(t *testing.T) {
 
 	md5Hex := "deadbeef"
 	_, err = claimOnePendingFile(db, "kb.inputs", uploadedInputInsert{
-		TenantID:       "tenant-alpha",
+		UserID:         "tenant-alpha",
 		KSStoreID:      7,
 		Type:           "pdf",
 		ProcessingMode: "auto",

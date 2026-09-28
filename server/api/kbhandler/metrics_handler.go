@@ -359,7 +359,7 @@ func fetchInputRecordByID(db *sql.DB, inputTable string, id int64) (inputRecord,
 
 	query := fmt.Sprintf(`
 SELECT
-    i.id, %s AS name, %s AS parser_name, i.type, i.tenant_id, i.ks_store_id, i.title, i.doc_no, i.ks_desc, i.source,
+    i.id, %s AS name, %s AS parser_name, i.type, i.user_id, i.ks_store_id, i.title, i.doc_no, i.ks_desc, i.source,
     i.file_name, i.backup_filename, i.result_filename, i.publish_date,
     i.authors, i.owner, COALESCE(i.status, '[]'::jsonb) AS status,
     i.create_time, i.modify_time, i.public_info, i.private_info, i.doc_metadata::text,
@@ -378,7 +378,7 @@ WHERE i.id = $1
 		docMetadataNullable sql.NullString
 	)
 	if err := row.Scan(
-		&record.ID, &record.Name, &record.ParserName, &record.Type, &record.TenantID, &record.KSStoreID, &record.Title, &record.DocNo, &record.KSDesc, &record.Source,
+		&record.ID, &record.Name, &record.ParserName, &record.Type, &record.UserID, &record.KSStoreID, &record.Title, &record.DocNo, &record.KSDesc, &record.Source,
 		&record.FileName, &record.BackupFileName, &record.ResultFileName, &publishDate,
 		&record.Authors, &record.Owner, &statusBytes,
 		&record.CreateTime, &record.ModifyTime, &publicInfoNullable, &privateInfoNullable, &docMetadataNullable,
@@ -661,7 +661,7 @@ func UpdateInput(c echo.Context) error {
 	for _, field := range fields {
 		raw := payload[field]
 		switch field {
-		case "title", "doc_no", "source", "tenant_id":
+		case "title", "doc_no", "source", "user_id":
 			value, err := decodeStringValue(raw, true)
 			if err != nil {
 				return c.JSON(http.StatusBadRequest, errorResponse{

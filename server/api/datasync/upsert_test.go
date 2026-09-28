@@ -9,7 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-const wantUpsertQuery = `INSERT INTO kb.product_names (seq_no, sub_catalog, category_l1, category_l2, description, intended_use, product_name, product_name_en, regulatory_class, aliases, keywords, source, notes, extra_info, status, update_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) ON CONFLICT DO NOTHING`
+const wantUpsertQuery = `INSERT INTO kb.product_names (seq_no, sub_catalog, category_l1, category_l2, description, intended_use, product_name, product_name_en, regulatory_class, aliases, keywords, source, notes, extra_info, status, update_time, code_group, child_code_group, industry_code, cpc, entry_no, entry_no_new) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) ON CONFLICT DO NOTHING`
 
 func jsonStr(t *testing.T, v string) json.RawMessage {
 	t.Helper()
@@ -38,6 +38,12 @@ func testRow(t *testing.T) Row {
 		"extra_info":       json.RawMessage(`{}`),
 		"status":           jsonStr(t, "approved"),
 		"update_time":      jsonStr(t, "2026-09-15T00:00:00Z"),
+		"code_group":       jsonStr(t, "group"),
+		"child_code_group": jsonStr(t, "child"),
+		"industry_code":    jsonStr(t, "industry"),
+		"cpc":              jsonStr(t, "cpc"),
+		"entry_no":         jsonStr(t, "entry"),
+		"entry_no_new":     jsonStr(t, "entry-new"),
 	}
 }
 
@@ -58,6 +64,7 @@ func TestUpsertRowsAppliesInsertOrUpdate(t *testing.T) {
 		WithArgs(
 			"1", "Cat A", "L1", "L2", "desc", "use", "Widget", "Widget EN", "Class II",
 			`["W"]`, `{"k":1}`, "cn_nmpa_medical_device_classification_catalog", nil, `{}`, "approved", "2026-09-15T00:00:00Z",
+			"group", "child", "industry", "cpc", "entry", "entry-new",
 		).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

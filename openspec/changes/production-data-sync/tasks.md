@@ -6,7 +6,7 @@
 
 ## 2. Sync item registry (shared by source and target)
 
-- [x] 2.1 Create `server/api/datasync/registry.go` with a `TableSyncItem{ID, Table, CursorCol, NaturalKey, Columns, Filter}` struct and a `Registry []TableSyncItem` containing one entry for `kb_product_names` (table `kb.product_names`, cursor `update_time`, natural key `(source, seq_no, product_name)`, columns per the current schema excluding `id`, filter `source = 'cn_nmpa_medical_device_classification_catalog'`). (Added a `JSONColumns` field too, needed for correct JSONB round-tripping — see row.go/upsert.go.)
+- [x] 2.1 Create `server/api/datasync/registry.go` with a `TableSyncItem{ID, Table, CursorCol, NaturalKey, Columns, Filter}` struct and a `Registry []TableSyncItem` containing one entry for `kb_product_names` (table `kb.product_names`, cursor `update_time`, natural key `(source, seq_no, product_name)`, columns per the current schema excluding `id`, filter `status = 'approved'`). (Added a `JSONColumns` field too, needed for correct JSONB round-tripping — see row.go/upsert.go.)
 - [x] 2.2 Add a small lookup helper (`ItemByID(id string) (TableSyncItem, bool)`) for use by both the pull handler and the admin handlers.
 
 ## 3. Source pull API (Mac side)

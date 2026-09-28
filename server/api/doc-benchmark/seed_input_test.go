@@ -21,14 +21,14 @@ func TestSeedInputStagesExactBytesAndBindsInInsertTransaction(t *testing.T) {
 	workspace, _ = filepath.EvalSymlinks(workspace)
 	body := []byte{0, 1, '\n', 0xff, 'x'}
 	mock.ExpectBegin()
-	const expectedSeedQuery = `INSERT INTO kb.inputs (tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
+	const expectedSeedQuery = `INSERT INTO kb.inputs (user_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id`
 	stagingMetadata := filepath.Join(workspace, BenchmarkInputFilename)
 	linePath := filepath.Join(workspace, "benchmark-input_benchmark.txt")
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`)).WithArgs("attempt").WillReturnRows(sqlmock.NewRows([]string{"input_record_id"}).AddRow(nil))
 	mock.ExpectQuery(regexp.QuoteMeta(expectedSeedQuery)).WithArgs("tenant", int64(44), "pdf", "case-a", "benchmark", stagingMetadata, linePath, BenchmarkInputFilename, "[]").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
 	expectSeedBinding(mock, "attempt", 91)
 	mock.ExpectCommit()
-	seeded, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
+	seeded, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, UserID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
 	if err != nil || seeded.ID != 91 {
 		t.Fatalf("seeded=%#v err=%v", seeded, err)
 	}
@@ -55,10 +55,10 @@ func TestSeedInputRollsBackInsertWhenBindingFails(t *testing.T) {
 	workspace, _ = filepath.EvalSymlinks(workspace)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT input_record_id FROM kb.benchmark_workspaces WHERE execution_attempt_id=$1 FOR UPDATE`)).WithArgs("attempt").WillReturnRows(sqlmock.NewRows([]string{"input_record_id"}).AddRow(nil))
-	mock.ExpectQuery(`INSERT INTO kb\.inputs \(tenant_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status\) VALUES \(\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9::jsonb\) RETURNING id`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
+	mock.ExpectQuery(`INSERT INTO kb\.inputs \(user_id, ks_store_id, type, title, parser_name, staging_filename, result_filename, file_name, status\) VALUES \(\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9::jsonb\) RETURNING id`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(91)))
 	mock.ExpectExec("UPDATE kb\\.benchmark_workspaces").WillReturnError(errors.New("forced bind failure"))
 	mock.ExpectRollback()
-	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: []byte("x")}})
+	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, UserID: "tenant", StoreID: 44, Title: "case-a", ParserName: "benchmark", Case: DatasetCase{InputBytes: []byte("x")}})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -88,13 +88,13 @@ func TestSeedInputRetryPreservesWinner(t *testing.T) {
 			_ = os.WriteFile(linePath, []byte("winner"), 0o600)
 			mock.ExpectBegin()
 			mock.ExpectQuery(`SELECT input_record_id FROM kb\.benchmark_workspaces`).WithArgs("attempt").WillReturnRows(sqlmock.NewRows([]string{"input_record_id"}).AddRow(int64(91)))
-			mock.ExpectQuery(`SELECT tenant_id, ks_store_id, parser_name, staging_filename, result_filename, file_name, status::text FROM kb\.inputs`).WithArgs(int64(91)).WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "ks_store_id", "parser_name", "staging_filename", "result_filename", "file_name", "status"}).AddRow("tenant", int64(44), "benchmark", filepath.Join(workspace, BenchmarkInputFilename), linePath, BenchmarkInputFilename, "[]"))
+			mock.ExpectQuery(`SELECT user_id, ks_store_id, parser_name, staging_filename, result_filename, file_name, status::text FROM kb\.inputs`).WithArgs(int64(91)).WillReturnRows(sqlmock.NewRows([]string{"user_id", "ks_store_id", "parser_name", "staging_filename", "result_filename", "file_name", "status"}).AddRow("tenant", int64(44), "benchmark", filepath.Join(workspace, BenchmarkInputFilename), linePath, BenchmarkInputFilename, "[]"))
 			if tc.wantErr {
 				mock.ExpectRollback()
 			} else {
 				mock.ExpectCommit()
 			}
-			seeded, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, ParserName: "benchmark", Case: DatasetCase{InputBytes: tc.input}})
+			seeded, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, UserID: "tenant", StoreID: 44, ParserName: "benchmark", Case: DatasetCase{InputBytes: tc.input}})
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("seeded=%#v err=%v", seeded, err)
 			}
@@ -136,7 +136,7 @@ func TestSeedAndArtifactPathsRejectEscape(t *testing.T) {
 	}
 	db, _, _ := sqlmock.New()
 	defer db.Close()
-	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "a", Workspace: workspace, TenantID: "t", StoreID: 1, ParserName: "safe", ResultFilename: filepath.Join(workspace, "..", "outside.txt")})
+	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "a", Workspace: workspace, UserID: "t", StoreID: 1, ParserName: "safe", ResultFilename: filepath.Join(workspace, "..", "outside.txt")})
 	if err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("outside result err=%v", err)
 	}
@@ -150,7 +150,7 @@ func TestSeedAndArtifactPathsRejectSymlinkDescendant(t *testing.T) {
 	}
 	db, _, _ := sqlmock.New()
 	defer db.Close()
-	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "a", Workspace: workspace, TenantID: "t", StoreID: 1, ParserName: "safe", ResultFilename: filepath.Join(workspace, "linked", "missing.txt")})
+	_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "a", Workspace: workspace, UserID: "t", StoreID: 1, ParserName: "safe", ResultFilename: filepath.Join(workspace, "linked", "missing.txt")})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("seed symlink err=%v", err)
 	}
@@ -180,7 +180,7 @@ func TestSeedInputAdoptsMatchingOrphanAndPreservesFileOnCommitError(t *testing.T
 			} else {
 				mock.ExpectCommit().WillReturnError(commitErr)
 			}
-			_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, TenantID: "tenant", StoreID: 44, ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
+			_, err := SeedInput(context.Background(), db, SeedInputRequest{AttemptID: "attempt", Workspace: workspace, UserID: "tenant", StoreID: 44, ParserName: "benchmark", Case: DatasetCase{InputBytes: body}})
 			if (err != nil) != (commitErr != nil) {
 				t.Fatalf("err=%v", err)
 			}

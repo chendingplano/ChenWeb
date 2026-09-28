@@ -50,8 +50,8 @@ func TestCreateDraft_DerivedStatesAreTerminal(t *testing.T) {
 	r := store.NewInputRegistrar(db)
 
 	id, err := r.CreateDraft(context.Background(), store.DraftInput{
-		TenantID: "tenant-x",
-		Title:    "Draft Doc",
+		UserID: "tenant-x",
+		Title:  "Draft Doc",
 	})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
@@ -74,7 +74,7 @@ func TestCreateDraft_InvisibleToBothWorklists(t *testing.T) {
 	db := testDB(t)
 	r := store.NewInputRegistrar(db)
 
-	id, err := r.CreateDraft(context.Background(), store.DraftInput{TenantID: "tenant-x"})
+	id, err := r.CreateDraft(context.Background(), store.DraftInput{UserID: "tenant-x"})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestPublish_EnqueuesForDocProcessingOnly(t *testing.T) {
 	db := testDB(t)
 	r := store.NewInputRegistrar(db)
 
-	id, err := r.CreateDraft(context.Background(), store.DraftInput{TenantID: "tenant-x"})
+	id, err := r.CreateDraft(context.Background(), store.DraftInput{UserID: "tenant-x"})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestPublish_NonCDMRowIsNotTouched(t *testing.T) {
 
 	var id int64
 	if err := db.QueryRow(`
-		INSERT INTO kb.inputs (tenant_id, type, title, status)
+		INSERT INTO kb.inputs (user_id, type, title, status)
 		VALUES ('tenant-x', 'pdf', 'Uploaded Doc', '[]'::jsonb)
 		RETURNING id
 	`).Scan(&id); err != nil {

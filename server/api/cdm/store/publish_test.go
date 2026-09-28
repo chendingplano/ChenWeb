@@ -42,7 +42,7 @@ func TestPublisher_PublishEndToEnd(t *testing.T) {
 	}
 
 	inputID, err := inputs.CreateDraft(context.Background(), store.DraftInput{
-		TenantID: "tenant-x", Title: doc.Title,
+		UserID: "tenant-x", Title: doc.Title,
 	})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
@@ -159,7 +159,7 @@ func TestPublisher_PreviewMatchesPublishedArtifact(t *testing.T) {
 	}
 
 	inputID, err := inputs.CreateDraft(context.Background(), store.DraftInput{
-		TenantID: "tenant-x", Title: doc.Title,
+		UserID: "tenant-x", Title: doc.Title,
 	})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
@@ -223,7 +223,7 @@ func TestPublisher_RepublishSupersedesArtifacts(t *testing.T) {
 	if _, err := docStore.Save(context.Background(), &doc, 0); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	inputID, err := inputs.CreateDraft(context.Background(), store.DraftInput{TenantID: "tenant-x"})
+	inputID, err := inputs.CreateDraft(context.Background(), store.DraftInput{UserID: "tenant-x"})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}

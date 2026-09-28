@@ -173,7 +173,7 @@ func TestUpdateInputSuccess(t *testing.T) {
 	expectResolveParserNameColumn(mock, true)
 	selectQuery := regexp.QuoteMeta(`
 SELECT
-    i.id, i.staging_filename AS name, COALESCE(i.parser_name, '') AS parser_name, i.type, i.tenant_id, i.ks_store_id, i.title, i.doc_no, i.ks_desc, i.source,
+    i.id, i.staging_filename AS name, COALESCE(i.parser_name, '') AS parser_name, i.type, i.user_id, i.ks_store_id, i.title, i.doc_no, i.ks_desc, i.source,
     i.file_name, i.backup_filename, i.result_filename, i.publish_date,
     i.authors, i.owner, COALESCE(i.status, '[]'::jsonb) AS status,
     i.create_time, i.modify_time, i.public_info, i.private_info, i.doc_metadata::text,
@@ -182,7 +182,7 @@ FROM kb.inputs i
 WHERE i.id = $1
 `)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
+		"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",

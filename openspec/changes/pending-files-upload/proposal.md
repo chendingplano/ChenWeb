@@ -3,8 +3,8 @@
 Internal developers and admins sometimes need to get files into the Knowledge
 Store without going through the browser file picker (e.g. large files, or
 files already sitting on the server). Today the only ingestion path is the
-web upload UI, which is what attaches an authenticated user's `tenant_id` to
-the resulting `kb.inputs` record — required by the doc-processing pipeline's
+web upload UI, which is what attaches the authenticated requester's `user_id`
+to `kb.inputs.user_id` — required by the doc-processing pipeline's
 user/tenant attribution backstop (see
 `KnowledgeStore/doc-repo/devdocs/202609/2026092403-devdoc-doc-processing-user-id-attribution.md`).
 A file dropped directly into `DATA_STAGING_DIR` has no such identity and,
@@ -32,8 +32,9 @@ UI, which attributes them correctly just like a normal upload.
   Auto / Upload Files Only / PDF Parsing processing mode the normal upload UI
   offers, and clicks **Upload Files** in the dialog.
 - That action ingests the selected files server-side through the same
-  ingestion path the normal authenticated upload uses (so `tenant_id` is set
-  from the admin's active knowledge store), stripping the `.pending` suffix
+  ingestion path the normal authenticated upload uses (so the authenticated
+  admin's `user_id` is stored in `kb.inputs.user_id`, independent of the
+  active knowledge store's `tenant_id`), stripping the `.pending` suffix
   when writing to `DATA_BACKUP_DIR` and `DATA_HOME_DIR/Artifacts`, and
   removing the original file from `DATA_STAGING_DIR` on success — matching
   existing staging-cleanup and zip parent/child behavior.
@@ -63,4 +64,8 @@ UI, which attributes them correctly just like a normal upload.
   — both gated by admin role server-side.
 - `ChenWeb/home3/knowledge` frontend: new **Pending Files** button (admin
   role-gated) and selection dialog next to the existing Upload Files UI.
-- No breaking changes to existing upload behavior or `kb.inputs` schema.
+- Normal and pending-file uploads derive `kb.inputs.user_id` attribution
+  from the authenticated caller's `user_id`; the active store's `tenant_id`
+  is not required for upload.
+- A goose migration renames `kb.inputs.tenant_id` to `kb.inputs.user_id`
+  without changing existing values.

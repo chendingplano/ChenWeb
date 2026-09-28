@@ -54,19 +54,37 @@ from the list.
 ### Requirement: Claiming a pending file ingests it via the authenticated upload path
 Claiming one or more selected pending files SHALL create a `kb.inputs` row
 for each, via the same insert logic the authenticated browser upload uses
-(`insertUploadedInputRecord`), using the claiming admin's current session /
-active knowledge store to set `tenant_id`, and using the selected processing
+(`insertUploadedInputRecord`), using the claiming admin's authenticated
+`user_id` to set `kb.inputs.user_id`, independent of the
+active knowledge store's `tenant_id`, and using the selected processing
 mode (Auto / Upload Files Only / PDF Parsing) exactly as the normal upload UI
 does — then rename the file on disk to strip `.pending`, so it becomes a
 normal staged file that the existing staging poller
 (`server/cmd/doc-service`) picks up and completes exactly as it would
 a normal upload.
 
+Normal browser uploads and pending-file claims SHALL require an authenticated
+caller with a non-empty `user_id`. They SHALL store that authenticated
+`user_id` in `kb.inputs.user_id` and SHALL ignore
+`kb.knowledge_store.tenant_id` for request and processing attribution.
+
+#### Scenario: Upload from a knowledge store without tenant_id
+- **WHEN** an authenticated user with a valid `user_id` uploads a file using
+  a knowledge store whose `tenant_id` is NULL, empty, or `-`
+- **THEN** the upload succeeds and `kb.inputs.user_id` contains the
+  authenticated user's `user_id`
+
+#### Scenario: Upload without authenticated user identity
+- **WHEN** an upload or pending-file claim request has no authenticated caller
+  with a valid `user_id`
+- **THEN** the backend rejects the request before creating an input record or
+  moving the file into normal staging
+
 #### Scenario: Admin claims a single PDF pending file
 - **WHEN** an admin selects `report.pdf.pending` in the Pending Files dialog,
   leaves mode as Auto, and clicks "Upload Files"
 - **THEN** the backend creates a `kb.inputs` row for `report.pdf` with
-  `tenant_id` set from the admin's active knowledge store (the same row
+  `user_id` set to the authenticated admin's `user_id` (the same row
   shape a browser upload of `report.pdf` would produce), renames
   `report.pdf.pending` to `report.pdf` in the staging directory, and the
   existing staging poller subsequently backs it up, copies it to the home
@@ -78,7 +96,8 @@ a normal upload.
   `archive.zip` and renames the file, identical in shape to what a browser
   upload of a `.zip` file produces today — including that the existing
   staging service subsequently extracts each entry inside the archive into
-  its own child `kb.inputs` row, inheriting the parent's `tenant_id`
+  its own child `kb.inputs` row, inheriting the parent's `user_id` (the
+  requester's `user_id`)
 
 #### Scenario: Successful claim renames the pending file for the poller to pick up
 - **WHEN** a pending file's `kb.inputs` row is successfully inserted

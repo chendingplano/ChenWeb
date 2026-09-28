@@ -26,8 +26,8 @@ func TestCreate_LinksDocumentToInputRow(t *testing.T) {
 	doc.Key = key
 
 	res, err := s.Create(context.Background(), &doc, store.DraftInput{
-		TenantID: "tenant-x",
-		Title:    doc.Title,
+		UserID: "tenant-x",
+		Title:  doc.Title,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -65,8 +65,8 @@ func TestCreate_DraftIsOffBothWorklists(t *testing.T) {
 	doc.Key = key
 
 	res, err := s.Create(context.Background(), &doc, store.DraftInput{
-		TenantID: "tenant-x",
-		Title:    doc.Title,
+		UserID: "tenant-x",
+		Title:  doc.Title,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -109,8 +109,8 @@ func TestCreate_InvalidDocumentWritesNeitherRow(t *testing.T) {
 	})
 
 	if _, err := s.Create(context.Background(), &doc, store.DraftInput{
-		TenantID: "tenant-x",
-		Title:    key,
+		UserID: "tenant-x",
+		Title:  key,
 	}); err == nil {
 		t.Fatal("expected create to fail validation")
 	}

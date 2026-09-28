@@ -58,6 +58,10 @@ func requirePendingFilesAdmin(c echo.Context, loc string) (ApiTypes.RequestConte
 	if user == nil {
 		return rc, c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authentication required (" + loc + ")"})
 	}
+	userID := strings.TrimSpace(user.UserId)
+	if userID == "" || userID == "-" {
+		return rc, c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authenticated user has no valid ID (" + loc + ")"})
+	}
 	admin := user.IsOwner || user.Admin
 	if !admin {
 		for _, role := range user.Roles {
@@ -198,10 +202,9 @@ func ClaimPendingFiles(c echo.Context) error {
 	if req.KSStoreID <= 0 {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "active knowledge store is required (CWB_KB_PF_013)"})
 	}
-	tenantID := strings.TrimSpace(req.TenantID)
-	if tenantID == "" || tenantID == "-" {
-		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "tenant_id is required (CWB_KB_PF_014)"})
-	}
+	// The active knowledge store's tenant_id is unrelated; kb.inputs.user_id
+	// records the authenticated requester.
+	userID := strings.TrimSpace(rc.IsAuthenticated().UserId)
 	processingMode := strings.ToLower(strings.TrimSpace(req.ProcessingMode))
 	if processingMode == "" {
 		processingMode = "auto"
@@ -259,7 +262,7 @@ func ClaimPendingFiles(c echo.Context) error {
 		}
 
 		id, err := claimOnePendingFile(db, inputTable, uploadedInputInsert{
-			TenantID:          tenantID,
+			UserID:            userID,
 			KSStoreID:         req.KSStoreID,
 			Type:              docType,
 			KSDesc:            ksDesc,

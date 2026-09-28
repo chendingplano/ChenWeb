@@ -273,7 +273,7 @@ SELECT
     i.staging_filename AS name,
     COALESCE(i.parser_name, '') AS parser_name,
     i.type,
-    i.tenant_id,
+    i.user_id,
     i.ks_store_id,
     i.title,
     i.doc_no,
@@ -297,7 +297,7 @@ SELECT
 FROM kb.inputs i
  WHERE LOWER(i.type) = LOWER($1) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $2 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $3 OFFSET $4`)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
+		"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
@@ -455,7 +455,7 @@ func TestListInputsDataQueryFailure(t *testing.T) {
     i.staging_filename AS name,
     COALESCE(i.parser_name, '') AS parser_name,
     i.type,
-    i.tenant_id,
+    i.user_id,
     i.ks_store_id,
     i.title,
     i.doc_no,
@@ -513,7 +513,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(500, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
+			"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
 			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 			"notes", "error_msg",
@@ -601,7 +601,7 @@ func TestListInputsExtendedQueryParams(t *testing.T) {
     i.staging_filename AS name,
     COALESCE(i.parser_name, '') AS parser_name,
     i.type,
-    i.tenant_id,
+    i.user_id,
     i.ks_store_id,
     i.title,
     i.doc_no,
@@ -628,7 +628,7 @@ FROM kb.inputs i
 				WHERE ps.record_id = i.id AND ps.processor = kb.canonical_op($8) AND ps.proc_status = LOWER($9)
 			) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $14 OFFSET $15`)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
+		"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",

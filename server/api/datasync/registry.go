@@ -96,12 +96,12 @@ var Registry = []TableSyncItem{
 			"seq_no", "sub_catalog", "category_l1", "category_l2", "description",
 			"intended_use", "product_name", "product_name_en", "regulatory_class",
 			"aliases", "keywords", "source", "notes", "extra_info", "status", "update_time",
+			"code_group", "child_code_group", "industry_code", "cpc", "entry_no", "entry_no_new",
 		},
 		JSONColumns: []string{"aliases", "keywords", "extra_info"},
-		// Scopes the sync to the one-time NMPA catalog import, excluding
-		// each deployment's own locally-generated status='proposed' rows
-		// (server/api/doc-processing/product_names_resolve.go, extract-products.go).
-		Filter: "source = 'cn_nmpa_medical_device_classification_catalog'",
+		// Sync every approved row regardless of its source label, including
+		// manually-added names. Locally-generated proposed rows remain excluded.
+		Filter: "status = 'approved'",
 	},
 }
 

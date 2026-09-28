@@ -400,16 +400,22 @@ func ListHourlyBalanceReports(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load workspace timezone", "error": err.Error()})
 	}
 	now := time.Now().In(loc)
-	workspaceDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	// The query treats these filters as calendar dates; keep the date fields
+	// anchored at UTC midnight so PostgreSQL's ::date cast cannot shift them.
+	workspaceDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	if filters.From == nil {
 		filters.From = &workspaceDay
 	}
 	if filters.To == nil {
 		filters.To = &workspaceDay
 	}
+	filters.TimezoneName = llmCfg.WorkspaceTimezone
 	rows, err := store.ListHourlyBalanceReports(c.Request().Context(), intParamDefault(c.QueryParam("limit"), 24), frequency, filters)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list hourly official balance reports", "error": err.Error()})
+	}
+	for i := range rows {
+		rows[i].TimezoneName = llmCfg.WorkspaceTimezone
 	}
 	return c.JSON(http.StatusOK, map[string]any{"reports": rows})
 }

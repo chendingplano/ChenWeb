@@ -637,7 +637,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// fileconverters.emitLineFileGeneratedEvent for automatic ones) are
 	// responsible for supplying a real user_id -- a manual trigger's from the
 	// authenticated caller, an automatic one's derived from
-	// kb.inputs.tenant_id -- and are expected to refuse to publish and alarm
+	// kb.inputs.user_id -- and are expected to refuse to publish and alarm
 	// instead when they can't. This is the last-resort backstop for anything
 	// that reaches processing without one anyway (a raw NATS publish
 	// bypassing every API guard, a generator bug, an operator mistake):

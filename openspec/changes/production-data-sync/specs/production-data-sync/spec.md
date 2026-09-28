@@ -8,10 +8,10 @@ The system SHALL maintain a compiled-in registry of syncable data items, where e
 - **THEN** it loads the same compiled-in registry of sync items, so both the source's pull handler and the target's apply logic operate on identical item definitions
 
 ### Requirement: kb_product_names sync item
-The system SHALL register `kb.product_names` as a syncable item, scoped by filter to rows where `source = 'cn_nmpa_medical_device_classification_catalog'`, using `(source, seq_no, product_name)` as its natural key.
+The system SHALL register `kb.product_names` as a syncable item, scoped to all rows where `status = 'approved'` regardless of their `source`, using `(source, seq_no, product_name)` as its natural key. The sync SHALL include the mechanical-import columns `code_group`, `child_code_group`, `industry_code`, `cpc`, `entry_no`, and `entry_no_new`.
 
-#### Scenario: Locally-created rows are excluded
-- **WHEN** a deployed box's own doc-processing pipeline has created `kb.product_names` rows with `status = 'proposed'` (a different `source` value than the catalog import)
+#### Scenario: Non-approved rows are excluded
+- **WHEN** a deployed box's own doc-processing pipeline has created `kb.product_names` rows with `status = 'proposed'`
 - **THEN** a sync of the `kb_product_names` item never fetches, upserts, or otherwise touches those rows
 
 ### Requirement: update_time maintained automatically

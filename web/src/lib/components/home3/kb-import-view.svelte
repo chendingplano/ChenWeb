@@ -429,10 +429,6 @@
 			uploadError = 'No active knowledge store is selected.';
 			return;
 		}
-		if (!activeStore.tenant_id?.trim() || activeStore.tenant_id.trim() === '-') {
-			uploadError = 'The active knowledge store is missing tenant_id.';
-			return;
-		}
 		if (selectedFiles.length === 0) {
 			uploadError = 'Pick at least one file to upload.';
 			return;
@@ -449,7 +445,6 @@
 			parser_name: uploadParserName,
 			processing_mode: uploadProcessingMode,
 			ks_store_id: activeStore.id,
-			tenant_id: activeStore.tenant_id
 		};
 
 		uploadSubmitting = true;
@@ -534,7 +529,7 @@
 	}
 
 	function userDisplayValue(record: KbInputRecord): string {
-		const user = record.tenant_id ? usersById[record.tenant_id] : undefined;
+		const user = record.user_id ? usersById[record.user_id] : undefined;
 		if (!user) return 'name-not-found';
 
 		const fullName = [user.first_name, user.last_name]
@@ -1044,10 +1039,6 @@
 			pendingFilesError = 'No active knowledge store is selected.';
 			return;
 		}
-		if (!activeStore.tenant_id?.trim() || activeStore.tenant_id.trim() === '-') {
-			pendingFilesError = 'The active knowledge store is missing tenant_id.';
-			return;
-		}
 		if (pendingFilesSelected.size === 0) {
 			pendingFilesError = 'Pick at least one pending file.';
 			return;
@@ -1060,7 +1051,6 @@
 				processing_mode: pendingFilesProcessingMode,
 				parser_name: pendingFilesParserName,
 				ks_store_id: activeStore.id,
-				tenant_id: activeStore.tenant_id
 			});
 			pendingFilesResults = response.results;
 
@@ -1551,7 +1541,6 @@
 			<p style="margin:0; color:{textPrimary}; font-size:14px;">No pending files found.</p>
 			<div class="mt-5 flex justify-end">
 				<button
-					autofocus
 					onclick={() => (pendingFilesEmptyDialogOpen = false)}
 					style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:12px; cursor:pointer;"
 				>

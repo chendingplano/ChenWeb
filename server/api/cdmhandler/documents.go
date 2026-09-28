@@ -34,9 +34,8 @@ func keyParam(c echo.Context) (string, error) {
 // CreateDocument handles POST /api/v1/cdm/documents.
 //
 // The body is canonical document JSON; any document_key it carries is
-// ignored, since keys are server-allocated (ADR 2026072603 DR5). tenant_id
-// and ks_store_id come from query parameters, matching how the existing
-// upload handler takes them.
+// ignored, since keys are server-allocated (ADR 2026072603 DR5). The
+// authenticated requester supplies kb.inputs.user_id; ks_store_id is optional.
 func CreateDocument(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_CDM_001")
 	defer rc.Close()
@@ -53,10 +52,11 @@ func CreateDocument(c echo.Context) error {
 		return fail(c, http.StatusBadRequest, "schema_version is required (CWB_CDM_004)")
 	}
 
-	tenantID := strings.TrimSpace(c.QueryParam("tenant_id"))
-	if tenantID == "" {
-		return fail(c, http.StatusBadRequest, "tenant_id is required (CWB_CDM_005)")
+	user := rc.IsAuthenticated()
+	if user == nil || strings.TrimSpace(user.UserId) == "" {
+		return fail(c, http.StatusUnauthorized, "authenticated user ID is required (CWB_CDM_005)")
 	}
+	userID := strings.TrimSpace(user.UserId)
 	var ksStoreID sql.NullInt64
 	if raw := strings.TrimSpace(c.QueryParam("ks_store_id")); raw != "" {
 		v := parsePositiveInt(raw, 0)
@@ -77,7 +77,7 @@ func CreateDocument(c echo.Context) error {
 	doc.Key = key
 
 	res, err := store.New(db).Create(ctx, doc, store.DraftInput{
-		TenantID:  tenantID,
+		UserID:    userID,
 		KSStoreID: ksStoreID,
 		Title:     doc.Title,
 	})
@@ -86,7 +86,7 @@ func CreateDocument(c echo.Context) error {
 	}
 
 	logger.Info("cdm document created",
-		"document_key", doc.Key, "input_record_id", res.InputRecordID, "tenant_id", tenantID)
+		"document_key", doc.Key, "input_record_id", res.InputRecordID, "user_id", userID)
 	return c.JSON(http.StatusCreated, doc)
 }
 
@@ -185,10 +185,8 @@ func SaveDocumentToNewVersion(c echo.Context) error {
 
 // ListDocuments handles GET /api/v1/cdm/documents.
 //
-// tenant_id is a query parameter rather than something derived from the
-// session, because ApiTypes.UserInfo carries no tenant and the rest of this
-// API takes tenant_id from the client the same way. That makes this a filter,
-// not an isolation boundary — see the note in the change's design.
+// Filter by the authenticated user. The knowledge store's tenant_id is
+// separate from the requester ID stored on kb.inputs.
 func ListDocuments(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_CDM_040")
 	defer rc.Close()
@@ -199,7 +197,11 @@ func ListDocuments(c echo.Context) error {
 	if pageSize > maxPageSize {
 		pageSize = maxPageSize
 	}
-	tenantID := strings.TrimSpace(c.QueryParam("tenant_id"))
+	user := rc.IsAuthenticated()
+	if user == nil || strings.TrimSpace(user.UserId) == "" {
+		return fail(c, http.StatusUnauthorized, "authenticated user ID is required (CWB_CDM_042)")
+	}
+	userID := strings.TrimSpace(user.UserId)
 
 	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), `
 		SELECT d.document_key, d.title, d.content_version,
@@ -208,10 +210,10 @@ func ListDocuments(c echo.Context) error {
 		       d.create_time, d.update_time
 		FROM kb.cdm_documents d
 		LEFT JOIN kb.inputs i ON i.id = d.input_record_id
-		WHERE ($1 = '' OR i.tenant_id = $1)
+		WHERE i.user_id = $1
 		ORDER BY d.update_time DESC
 		LIMIT $2 OFFSET $3
-	`, tenantID, pageSize, (page-1)*pageSize)
+	`, userID, pageSize, (page-1)*pageSize)
 	if err != nil {
 		logger.Error("list cdm documents failed", "err", err)
 		return fail(c, http.StatusInternalServerError, "internal error (CWB_CDM_041)")

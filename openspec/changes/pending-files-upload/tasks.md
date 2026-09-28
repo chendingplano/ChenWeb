@@ -40,8 +40,8 @@
 
 - [x] 4.1 Add `POST /kb/pending-files/claim` accepting selected pending
       filenames, `processing_mode`, `parser_name`, `ks_store_id`,
-      `tenant_id` (same required fields/validation as `UploadInputs`),
-      admin-gated the same way as the list endpoint
+      admin-gated the same way as the list endpoint; derive the input's
+      `user_id` from the authenticated session
 - [x] 4.2 Port the frontend's extension→type map
       (`kb-import-view.svelte`'s `typeExtensions`) to Go for per-file type
       derivation; reject files with unrecognized extensions with a per-file
@@ -77,15 +77,16 @@
       selector, since the backend requires a valid one for every claim just
       like `UploadInputs` does)
 - [x] 5.4 Wire the dialog's "Upload Files" action to
-      `POST /kb/pending-files/claim`, reusing the same
-      `ks_store_id`/`tenant_id` payload shape `submitUpload()` builds from
-      `knowledgeStoreState.activeStore`; show per-file success/error results
+      `POST /kb/pending-files/claim`, reusing the same `ks_store_id` payload
+      as `submitUpload()`; the server derives `kb.inputs.user_id` from the
+      authenticated requester's `user_id`; show per-file results
 - [x] 5.5 On a "no longer available" error for any file, re-fetch the
       pending files list in the dialog rather than leaving it stale
 - [ ] 5.6 Manually verify in a live `mise dev` session: copy a file named
       `<name>.pending` into `UPLOAD_FILE_STAGING_DIR`, confirm it's invisible
       to normal upload processing, claim it as admin, confirm it's ingested
-      and attributed to the active knowledge store's tenant
+      and attributed to the authenticated user's ID stored in
+      `kb.inputs.user_id`, regardless of the active store's tenant value
 
 ## 6. Documentation
 

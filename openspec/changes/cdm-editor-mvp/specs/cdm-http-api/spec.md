@@ -196,18 +196,13 @@ cancellation SHALL cancel its Typst compilation.
   again
 - **THEN** the associated Typst compilation is canceled
 
-### Requirement: Documents are listed and filtered by tenant
+### Requirement: Documents are listed and filtered by authenticated user
 
-`GET /api/v1/cdm/documents` SHALL list CDM documents, filtered by a
-`tenant_id` query parameter resolved through the linked `kb.inputs` row, and
-paged.
+`GET /api/v1/cdm/documents` SHALL list CDM documents created by the
+authenticated caller, resolved through `kb.inputs.user_id`, and paged.
 
-**This is a filter, not an isolation boundary.** `ApiTypes.UserInfo` carries no
-tenant, so there is no server-side tenant identity to scope against; the rest
-of this API takes `tenant_id` from the client the same way
-(`upload_handler.go:87`). A caller who supplies a different `tenant_id` sees
-that tenant's documents. Making this a real boundary requires a
-multi-tenancy decision beyond this change.
+The filter uses the server-authenticated user ID. The active knowledge
+store's `tenant_id` is independent and does not determine document ownership.
 
 #### Scenario: Listing is filtered by the requested tenant
 

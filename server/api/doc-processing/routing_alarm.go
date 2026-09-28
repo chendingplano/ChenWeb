@@ -181,18 +181,15 @@ ON CONFLICT (record_id, kind) WHERE run_id IS NULL AND record_id IS NOT NULL AND
 	return err
 }
 
-// IsTenantIDUnset reports whether tenantID represents "no tenant assigned" --
-// a NULL kb.inputs.tenant_id/kb.knowledge_store.tenant_id surfaces to Go as
-// "", and a legacy '-' sentinel value (written before tenant_id stopped
-// defaulting to it -- see migration
-// 20260924135637_drop_tenant_id_sentinel_default.sql) counts as unset too.
-func IsTenantIDUnset(tenantID string) bool {
-	t := strings.TrimSpace(tenantID)
-	return t == "" || t == "-"
+// IsUserIDUnset reports whether a kb.inputs.user_id is absent. The legacy
+// tenant_id column stored this same requester ID before it was renamed.
+func IsUserIDUnset(userID string) bool {
+	u := strings.TrimSpace(userID)
+	return u == "" || u == "-"
 }
 
-// AlarmMissingTenantIDAtInsert raises RoutingAlarmKindMissingUserID for a
-// kb.inputs row about to be written with no tenant_id. Call it immediately
+// AlarmMissingUserIDAtInsert raises RoutingAlarmKindMissingUserID for a
+// kb.inputs row about to be written with no user_id. Call it immediately
 // before the INSERT so operators are alerted at the moment an unattributed
 // record is created, not only later when automatic doc-processing separately
 // refuses to run for it. No record id exists yet at this point, so the alarm
@@ -200,7 +197,7 @@ func IsTenantIDUnset(tenantID string) bool {
 // RoutingAlarmSQLWriter.WriteAlarm) -- source identifies the inserting code
 // path for operators reading alarms_errors. Best-effort: a failure to write
 // the alarm must never block the insert it is warning about.
-func AlarmMissingTenantIDAtInsert(ctx context.Context, source string) {
+func AlarmMissingUserIDAtInsert(ctx context.Context, source string) {
 	if ApiTypes.ProjectDBHandle == nil {
 		return
 	}
@@ -208,7 +205,7 @@ func AlarmMissingTenantIDAtInsert(ctx context.Context, source string) {
 	_ = writer.WriteAlarm(ctx, RoutingAlarm{
 		Kind:     RoutingAlarmKindMissingUserID,
 		Severity: RoutingAlarmSeverityError,
-		Message:  fmt.Sprintf("%s: inserting kb.inputs row with unset tenant_id", source),
+		Message:  fmt.Sprintf("%s: inserting kb.inputs row with unset user_id", source),
 	})
 }
 

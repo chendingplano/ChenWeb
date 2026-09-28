@@ -74,7 +74,7 @@ func TestUploadInputsSuccess(t *testing.T) {
 	mock.ExpectBegin()
 
 	insertQuery := regexp.QuoteMeta(`INSERT INTO kb.inputs (
-    tenant_id,
+    user_id,
     ks_store_id,
     requested_pipeline,
     processing_mode,

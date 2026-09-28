@@ -41,7 +41,6 @@ JOIN kb.inputs i ON i.ks_store_id=ks.id
 WHERE g.user_id=$1 AND ks.ks_name=ANY($2) AND i.id::text=$3
   AND ks.status='active' AND g.active AND (g.expires_at IS NULL OR g.expires_at>now())
   AND (g.document_id IS NULL OR g.document_id=i.id)
-  AND i.tenant_id=ks.tenant_id
   AND COALESCE(NULLIF(i.md5, ''), 'input:' || i.id::text || ':' || EXTRACT(EPOCH FROM i.modify_time)::bigint::text)=$4
   AND (CARDINALITY($5::text[])=0 OR i.type=ANY($5))
   AND ($6='' OR i.modify_time::text=$6)

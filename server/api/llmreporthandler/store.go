@@ -77,6 +77,7 @@ type HourlyBalanceReport struct {
 	AccountID        string    `json:"account_id"`
 	AccountName      string    `json:"account_name"`
 	Provider         string    `json:"provider"`
+	TimezoneName     string    `json:"timezone_name"`
 	HourStartedAt    time.Time `json:"hour_started_at"`
 	BalanceUSD       *float64  `json:"balance_usd"`
 	BalanceCNY       *float64  `json:"balance_cny"`
@@ -172,7 +173,7 @@ LIMIT $1`
 }
 
 func (s *Store) ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error) {
-	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
+	const query = `SELECT evt.id, evt.account_id, acct.account_name, COALESCE(evt.profile_id, ''), evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
 evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message
 FROM llm_usage_event evt
 JOIN llm_account acct ON acct.id = evt.account_id
@@ -290,21 +291,22 @@ func (s *Store) ListHourlyBalanceReports(ctx context.Context, limit int, frequen
 	// total_spending between this bucket and the previous one. That is the
 	// same query for every granularity -- only the date_trunc unit (bucket)
 	// differs between hourly, daily, and monthly.
+	bucketExpr := fmt.Sprintf("date_trunc('%s', captured_at AT TIME ZONE $5) AT TIME ZONE $5", bucket)
 	query := fmt.Sprintf(`WITH latest_balance AS (
-    SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
-        account_id, currency_code, date_trunc('%s', captured_at) AS bucket_start, balance_amount
+    SELECT DISTINCT ON (account_id, currency_code, %s)
+        account_id, currency_code, %s AS bucket_start, balance_amount
     FROM llm_balance_snapshot
     WHERE workspace_day >= $2::date AND workspace_day <= $3::date
       AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
       AND entry_kind = 'provider_balance'
-    ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
+    ORDER BY account_id, currency_code, %s, captured_at DESC
 ), latest_total AS (
-    SELECT DISTINCT ON (account_id, currency_code, date_trunc('%s', captured_at))
-        account_id, currency_code, date_trunc('%s', captured_at) AS bucket_start, total_spending
+    SELECT DISTINCT ON (account_id, currency_code, %s)
+        account_id, currency_code, %s AS bucket_start, total_spending
     FROM llm_balance_snapshot
     WHERE workspace_day >= $2::date AND workspace_day <= $3::date
       AND ($4 = '' OR account_id IN (SELECT id FROM llm_account WHERE api_key_ref = $4))
-    ORDER BY account_id, currency_code, date_trunc('%s', captured_at), captured_at DESC
+    ORDER BY account_id, currency_code, %s, captured_at DESC
 ), balance_pivot AS (
     SELECT account_id, bucket_start,
         MAX(balance_amount) FILTER (WHERE UPPER(currency_code) = 'USD') AS balance_usd,
@@ -336,8 +338,8 @@ SELECT report.account_id, acct.account_name, acct.provider, report.hour_started_
 FROM with_previous report
 JOIN llm_account acct ON acct.id = report.account_id
 ORDER BY report.hour_started_at DESC, acct.account_name ASC
-LIMIT $1`, bucket, bucket, bucket, bucket, bucket, bucket)
-	rows, err := s.db.QueryContext(ctx, query, limit, filters.From, filters.To, filters.APIKeyRef)
+LIMIT $1`, bucketExpr, bucketExpr, bucketExpr, bucketExpr, bucketExpr, bucketExpr)
+	rows, err := s.db.QueryContext(ctx, query, limit, filters.From, filters.To, filters.APIKeyRef, filters.TimezoneName)
 	if err != nil {
 		return nil, err
 	}

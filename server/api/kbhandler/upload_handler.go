@@ -59,6 +59,14 @@ func UploadInputs(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_U_001")
 	defer rc.Close()
 	logger := rc.GetLogger()
+	user := rc.IsAuthenticated()
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authentication required (CWB_KB_U_027)"})
+	}
+	userID := strings.TrimSpace(user.UserId)
+	if userID == "" || userID == "-" {
+		return c.JSON(http.StatusUnauthorized, errorResponse{Status: false, ErrorMsg: "authenticated user has no valid ID (CWB_KB_U_028)"})
+	}
 
 	stagingDir := strings.TrimSpace(os.Getenv("UPLOAD_FILE_STAGING_DIR"))
 	if stagingDir == "" {
@@ -89,14 +97,6 @@ func UploadInputs(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
 			ErrorMsg: "active knowledge store is required (CWB_KB_U_013)",
-		})
-	}
-
-	tenantID := strings.TrimSpace(c.FormValue("tenant_id"))
-	if tenantID == "" || tenantID == "-" {
-		return c.JSON(http.StatusBadRequest, errorResponse{
-			Status:   false,
-			ErrorMsg: "tenant_id is required (CWB_KB_U_014)",
 		})
 	}
 
@@ -211,7 +211,7 @@ func UploadInputs(c echo.Context) error {
 			tx,
 			inputTable,
 			uploadedInputInsert{
-				TenantID:          tenantID,
+				UserID:            userID,
 				KSStoreID:         ksStoreID,
 				Type:              docType,
 				Title:             title,
@@ -257,7 +257,7 @@ func UploadInputs(c echo.Context) error {
 }
 
 type uploadedInputInsert struct {
-	TenantID          string
+	UserID            string
 	KSStoreID         int64
 	Type              string
 	Title             *string
@@ -276,13 +276,13 @@ type uploadedInputInsert struct {
 }
 
 func insertUploadedInputRecord(tx *sql.Tx, inputTable string, req uploadedInputInsert) (int64, error) {
-	if docprocessing.IsTenantIDUnset(req.TenantID) {
-		docprocessing.AlarmMissingTenantIDAtInsert(context.Background(), "kbhandler.UploadInputs")
+	if docprocessing.IsUserIDUnset(req.UserID) {
+		docprocessing.AlarmMissingUserIDAtInsert(context.Background(), "kbhandler.UploadInputs")
 	}
 
 	query := fmt.Sprintf(`
 INSERT INTO %s (
-    tenant_id,
+    user_id,
     ks_store_id,
     requested_pipeline,
     processing_mode,
@@ -323,7 +323,7 @@ RETURNING id`, inputTable)
 	var id int64
 	if err := tx.QueryRow(
 		query,
-		req.TenantID,
+		req.UserID,
 		req.KSStoreID,
 		req.RequestedPipeline,
 		req.ProcessingMode,

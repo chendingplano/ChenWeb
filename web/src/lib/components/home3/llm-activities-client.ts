@@ -101,6 +101,7 @@ export type LLMHourlyBalanceReport = {
 	account_id: string;
 	account_name: string;
 	provider: string;
+	timezone_name?: string;
 	hour_started_at: string;
 	balance_usd: number | null;
 	balance_cny: number | null;

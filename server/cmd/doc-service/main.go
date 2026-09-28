@@ -646,7 +646,7 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 		if strings.EqualFold(filepath.Ext(entry.Name()), ".zip") {
 			zipMetadata, err := loadInputStoreMetadata(ctx, db, recordID)
 			if err != nil {
-				logger.Error("failed to load zip record tenant_id", "source", srcPath, "record_id", recordID, "error", err)
+				logger.Error("failed to load zip record user_id", "source", srcPath, "record_id", recordID, "error", err)
 				continue
 			}
 			if err := ingestZipChildren(ctx, logger, db, homeDir, backupDir, homePath, processingMode, publisher, zipMetadata); err != nil {
@@ -707,15 +707,15 @@ func newPDFStageEvent(recordID int64, fileType, homePath string) stageEvent {
 	}
 }
 
-// ingestInputFile registers one staged file as a kb.inputs row. tenantID is
-// the tenant to stamp on a freshly-inserted row (empty when there is no
+// ingestInputFile registers one staged file as a kb.inputs row. userID is
+// the requester to stamp on a freshly-inserted row (empty when there is no
 // parent record to inherit from, e.g. a bare file dropped directly into the
 // staging dir); it is ignored when an existing upload row is reused, since
-// that row's own tenant_id (set at upload time) must not be overwritten.
+// that row's own user_id (set at upload time) must not be overwritten.
 func ingestInputFile(
 	ctx context.Context,
 	db *sql.DB,
-	homeDir, backupDir, stagingName, srcPath, tenantID string,
+	homeDir, backupDir, stagingName, srcPath, userID string,
 	metadata inputStoreMetadata,
 ) (recordID int64, updated bool, homePath string, backupPath string, fileType string, err error) {
 	fileType = detectInputType(stagingName)
@@ -728,7 +728,7 @@ func ingestInputFile(
 		return 0, false, "", "", fileType, fmt.Errorf("backup staged file: %w", err)
 	}
 
-	recordID, updated, err = upsertStagedInputRecord(ctx, db, filepath.Base(stagingName), srcPath, fileType, tenantID, metadata)
+	recordID, updated, err = upsertStagedInputRecord(ctx, db, filepath.Base(stagingName), srcPath, fileType, userID, metadata)
 	if err != nil {
 		return 0, false, "", backupPath, fileType, err
 	}
@@ -766,9 +766,9 @@ func decodeZipEntryFilename(entry *zip.File) string {
 }
 
 // ingestZipChildren registers one kb.inputs row per file inside the zip
-// archive at zipHomePath. tenantID is the archive's own kb.inputs.tenant_id
-// (loaded by the caller via loadTenantID) -- every child record inherits it,
-// since the archive is the only attributable unit the tenant assigned.
+// archive at zipHomePath. userID is the archive's own kb.inputs.user_id
+// (loaded by the caller via loadInputStoreMetadata) -- every child inherits it,
+// since the archive was uploaded by the same requester.
 func ingestZipChildren(
 	ctx context.Context,
 	logger ApiTypes.JimoLogger,
@@ -813,7 +813,7 @@ func ingestZipChildren(
 			continue
 		}
 
-		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entryName), tmpFile.Name(), metadata.TenantID.String, metadata)
+		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entryName), tmpFile.Name(), metadata.UserID.String, metadata)
 		_ = os.Remove(tmpFile.Name())
 		if err != nil {
 			logger.Error("failed to ingest zip child", "zip", zipHomePath, "entry", entryName, "error", err)
@@ -846,7 +846,7 @@ func ingestZipChildren(
 
 type inputStoreMetadata struct {
 	Provided  bool
-	TenantID  sql.NullString
+	UserID    sql.NullString
 	KSStoreID sql.NullInt64
 	KSDesc    sql.NullString
 }
@@ -857,9 +857,9 @@ type inputStoreMetadata struct {
 func loadInputStoreMetadata(ctx context.Context, db *sql.DB, recordID int64) (inputStoreMetadata, error) {
 	var metadata inputStoreMetadata
 	if err := db.QueryRowContext(ctx,
-		`SELECT tenant_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`,
+		`SELECT user_id, ks_store_id, ks_desc FROM kb.inputs WHERE id = $1`,
 		recordID,
-	).Scan(&metadata.TenantID, &metadata.KSStoreID, &metadata.KSDesc); err != nil {
+	).Scan(&metadata.UserID, &metadata.KSStoreID, &metadata.KSDesc); err != nil {
 		return inputStoreMetadata{}, err
 	}
 	metadata.Provided = true
@@ -922,7 +922,7 @@ func repoDirForRecord(homeDir string, recordID int64) (string, error) {
 	return filepath.Join(homeDir, "Artifacts", strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10)), nil
 }
 
-func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath, fileType, tenantID string, metadataArgs ...inputStoreMetadata) (int64, bool, error) {
+func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath, fileType, userID string, metadataArgs ...inputStoreMetadata) (int64, bool, error) {
 	var metadata inputStoreMetadata
 	if len(metadataArgs) > 0 {
 		metadata = metadataArgs[0]
@@ -962,7 +962,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id
+    user_id
 ) VALUES (
     $1,
     $2,
@@ -973,14 +973,14 @@ INSERT INTO kb.inputs (
     $6
 )
 RETURNING id`
-	if docprocessing.IsTenantIDUnset(tenantID) {
-		docprocessing.AlarmMissingTenantIDAtInsert(ctx, "doc-service.upsertStagedInputRecord")
+	if docprocessing.IsUserIDUnset(userID) {
+		docprocessing.AlarmMissingUserIDAtInsert(ctx, "doc-service.upsertStagedInputRecord")
 	}
-	var tenantIDArg any
-	if tenantID != "" {
-		tenantIDArg = tenantID
+	var userIDArg any
+	if userID != "" {
+		userIDArg = userID
 	}
-	args := []any{staging_filename, fileType, srcPath, string(status), md5Hex, tenantIDArg}
+	args := []any{staging_filename, fileType, srcPath, string(status), md5Hex, userIDArg}
 	if metadata.Provided {
 		insertStmt = `
 INSERT INTO kb.inputs (
@@ -990,7 +990,7 @@ INSERT INTO kb.inputs (
     backup_filename,
     status,
     md5,
-    tenant_id,
+    user_id,
     ks_store_id,
     ks_desc
 ) VALUES (

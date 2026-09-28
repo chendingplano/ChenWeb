@@ -58,9 +58,12 @@ func TestStoreListUsageEvents(t *testing.T) {
 	}).AddRow(
 		"evt_1", "acct_1", "deepseek:api.deepseek.com", "prof_1", 88, "deepseek", "deepseek-v4-flash", "extract-products-v2", "extract_products", "MID-CWB-TEST",
 		time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "",
+	).AddRow(
+		"evt_2", "acct_1", "deepseek:api.deepseek.com", "", nil, "deepseek", "deepseek-v4-flash", "extract-products-v2", "extract_products", "MID-CWB-TEST",
+		time.Date(2026, 6, 19, 11, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "",
 	)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, COALESCE(evt.profile_id, ''), evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
 evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message
 FROM llm_usage_event evt
 JOIN llm_account acct ON acct.id = evt.account_id
@@ -72,11 +75,14 @@ LIMIT $1`)).WithArgs(50).WillReturnRows(rows)
 	if err != nil {
 		t.Fatalf("ListUsageEvents() error = %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("len(ListUsageEvents()) = %d, want 1", len(got))
+	if len(got) != 2 {
+		t.Fatalf("len(ListUsageEvents()) = %d, want 2", len(got))
 	}
 	if got[0].ModelName != "deepseek-v4-flash" || got[0].TotalTokens != 125 || got[0].PromptCacheHitTokens != 80 || got[0].PromptCacheMissTokens != 20 || got[0].AccountName != "deepseek:api.deepseek.com" || got[0].RecordID == nil || *got[0].RecordID != 88 || got[0].CallLoc != "MID-CWB-TEST" {
 		t.Fatalf("unexpected usage event = %+v", got[0])
+	}
+	if got[1].ProfileID != "" || got[1].RecordID != nil {
+		t.Fatalf("unexpected unresolved usage event = %+v", got[1])
 	}
 }
 

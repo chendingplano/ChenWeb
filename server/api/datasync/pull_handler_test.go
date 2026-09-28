@@ -18,13 +18,14 @@ func testItem() TableSyncItem {
 			"seq_no", "sub_catalog", "category_l1", "category_l2", "description",
 			"intended_use", "product_name", "product_name_en", "regulatory_class",
 			"aliases", "keywords", "source", "notes", "extra_info", "status", "update_time",
+			"code_group", "child_code_group", "industry_code", "cpc", "entry_no", "entry_no_new",
 		},
 		JSONColumns: []string{"aliases", "keywords", "extra_info"},
-		Filter:      "source = 'cn_nmpa_medical_device_classification_catalog'",
+		Filter:      "status = 'approved'",
 	}
 }
 
-const wantChangesQuery = `SELECT seq_no, sub_catalog, category_l1, category_l2, description, intended_use, product_name, product_name_en, regulatory_class, aliases, keywords, source, notes, extra_info, status, update_time FROM kb.product_names WHERE (source = 'cn_nmpa_medical_device_classification_catalog') AND update_time > $1 ORDER BY update_time, source, seq_no, product_name LIMIT $2`
+const wantChangesQuery = `SELECT seq_no, sub_catalog, category_l1, category_l2, description, intended_use, product_name, product_name_en, regulatory_class, aliases, keywords, source, notes, extra_info, status, update_time, code_group, child_code_group, industry_code, cpc, entry_no, entry_no_new FROM kb.product_names WHERE (status = 'approved') AND update_time > $1 ORDER BY update_time, source, seq_no, product_name LIMIT $2`
 
 // JSON columns use []byte, matching what the real Postgres driver (lib/pq)
 // returns for jsonb text-format values -- unlike a plain Go string, []byte is
@@ -34,6 +35,7 @@ func addProductNameRow(rows *sqlmock.Rows, updateTime string) *sqlmock.Rows {
 	return rows.AddRow(
 		"1", "Cat A", "L1", "L2", "desc", "use", "Widget", "Widget EN", "Class II",
 		[]byte("[]"), []byte("{}"), "cn_nmpa_medical_device_classification_catalog", "", []byte("{}"), "approved", updateTime,
+		"", "", "", "", "", "",
 	)
 }
 

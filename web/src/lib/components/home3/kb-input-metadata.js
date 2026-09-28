@@ -279,13 +279,13 @@ export function buildKbInputRecordMetadataRows(currentInput, userOptions = []) {
 			editKey: 'field:id'
 		},
 		{
-			label: 'tenant_id',
-			key: 'tenant_id',
-			value: currentInput.tenant_id || '—',
-			rawValue: currentInput.tenant_id ?? '',
+			label: 'user_id',
+			key: 'user_id',
+			value: currentInput.user_id || '—',
+			rawValue: currentInput.user_id ?? '',
 			editable: true,
 			editor: 'user-select',
-			editKey: 'field:tenant_id',
+			editKey: 'field:user_id',
 			options: userOptions
 		},
 		{
@@ -654,9 +654,9 @@ export function buildKbInputUpdatePayloadForMetadataEdit(currentInput, row, draf
 				payload.owner = trimmed === '' ? null : trimmed;
 				break;
 			}
-			case 'tenant_id': {
+			case 'user_id': {
 				const trimmed = draft.trim();
-				payload.tenant_id = trimmed === '' ? null : trimmed;
+				payload.user_id = trimmed === '' ? null : trimmed;
 				break;
 			}
 			case 'public_info':

@@ -21,8 +21,8 @@ func createTestDoc(t *testing.T, db *sql.DB, s *store.Store, key string) int64 {
 	cleanupDocument(t, db, key)
 
 	res, err := s.Create(context.Background(), &doc, store.DraftInput{
-		TenantID: "tenant-x",
-		Title:    doc.Title,
+		UserID: "tenant-x",
+		Title:  doc.Title,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)

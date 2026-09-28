@@ -92,7 +92,7 @@ API in the app outside `/api/v1` and would need its own auth wiring.
 `input_record_id`. This is the fix for the dead column.
 
 Everything downstream depends on the link existing: tenant scoping reads
-`kb.inputs.tenant_id`, publish needs the input record ID, and the frozen check
+`kb.inputs.user_id`, publish needs the input record ID, and the frozen check
 (D4) reads the input row's status. Populating it at creation — the only moment
 both rows are being written anyway — is both the cheapest and the only place
 where the two cannot diverge.

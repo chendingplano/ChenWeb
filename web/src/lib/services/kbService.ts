@@ -18,7 +18,7 @@ export type KbInputRecord = {
 	name?: string;
 	parser_name?: string;
 	type: string;
-	tenant_id?: string;
+	user_id?: string;
 	ks_store_id?: number;
 	title?: string;
 	doc_no?: string;
@@ -365,7 +365,6 @@ export type UploadKbInputsPayload = {
 	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
 	processing_mode?: 'auto' | 'upload_only' | 'pdf_parsing';
 	ks_store_id: number;
-	tenant_id: string;
 	files: File[];
 };
 
@@ -382,7 +381,6 @@ export async function uploadKbInputs(
 	form.set('type', payload.type);
 	form.set('parser_name', payload.parser_name);
 	form.set('ks_store_id', String(payload.ks_store_id));
-	form.set('tenant_id', payload.tenant_id);
 	form.set('processing_mode', payload.processing_mode ?? 'auto');
 	if (payload.title?.trim()) form.set('title', payload.title.trim());
 	if (payload.doc_no?.trim()) form.set('doc_no', payload.doc_no.trim());
@@ -437,7 +435,6 @@ export type ClaimPendingFilesPayload = {
 	processing_mode?: 'auto' | 'upload_only' | 'pdf_parsing';
 	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
 	ks_store_id: number;
-	tenant_id: string;
 };
 
 export type ClaimPendingFilesResult = {
@@ -453,7 +450,7 @@ export type ClaimPendingFilesResponse = {
 };
 
 // Admin-only: claims selected pending files, ingesting each through the same
-// insert path a browser upload uses so tenant_id is attributed correctly.
+// insert path a browser upload uses so user_id is attributed correctly.
 export async function claimPendingFiles(
 	payload: ClaimPendingFilesPayload
 ): Promise<ClaimPendingFilesResponse> {

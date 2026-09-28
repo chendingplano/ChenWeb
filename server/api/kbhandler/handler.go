@@ -31,7 +31,7 @@ type inputRecord struct {
 	Name              *string                    `json:"name,omitempty"`
 	ParserName        *string                    `json:"parser_name,omitempty"`
 	Type              string                     `json:"type"`
-	TenantID          *string                    `json:"tenant_id,omitempty"`
+	UserID            *string                    `json:"user_id,omitempty"`
 	KSStoreID         *int64                     `json:"ks_store_id,omitempty"`
 	Title             *string                    `json:"title,omitempty"`
 	DocNo             *string                    `json:"doc_no,omitempty"`
@@ -79,7 +79,7 @@ type errorResponse struct {
 }
 
 type listInputsFilters struct {
-	OwnerTenantID   string
+	OwnerUserID     string
 	RecordID        *int64
 	KsStoreID       *int64
 	DocType         string
@@ -222,7 +222,7 @@ func ListInputs(c echo.Context) error {
 				ErrorMsg: "authenticated user has no ID (CWB_KB_033)",
 			})
 		}
-		filters.OwnerTenantID = userID
+		filters.OwnerUserID = userID
 	}
 
 	db := ApiTypes.ProjectDBHandle
@@ -415,7 +415,7 @@ WHERE i.processing_mode = 'pdf_parsing'
 	}
 	if ownerID != "" {
 		args = append(args, ownerID)
-		query += fmt.Sprintf(" AND i.tenant_id = $%d", len(args))
+		query += fmt.Sprintf(" AND i.user_id = $%d", len(args))
 	}
 	query += " ORDER BY i.create_time ASC, i.id ASC"
 	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), query, args...)
@@ -533,7 +533,7 @@ SELECT
     %s AS name,
     %s AS parser_name,
     i.type,
-    i.tenant_id,
+    i.user_id,
     i.ks_store_id,
     i.title,
     i.doc_no,
@@ -590,7 +590,7 @@ FROM %s i
 			&record.Name,
 			&record.ParserName,
 			&record.Type,
-			&record.TenantID,
+			&record.UserID,
 			&record.KSStoreID,
 			&record.Title,
 			&record.DocNo,
@@ -1003,8 +1003,8 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	if filters.ModifyTimeEnd != nil {
 		whereParts = append(whereParts, fmt.Sprintf("i.modify_time <= %s", nextArg(*filters.ModifyTimeEnd)))
 	}
-	if ownerTenantID := strings.TrimSpace(filters.OwnerTenantID); ownerTenantID != "" {
-		whereParts = append(whereParts, fmt.Sprintf("i.tenant_id = %s", nextArg(ownerTenantID)))
+	if ownerUserID := strings.TrimSpace(filters.OwnerUserID); ownerUserID != "" {
+		whereParts = append(whereParts, fmt.Sprintf("i.user_id = %s", nextArg(ownerUserID)))
 	}
 
 	return strings.Join(whereParts, " AND "), args, nil

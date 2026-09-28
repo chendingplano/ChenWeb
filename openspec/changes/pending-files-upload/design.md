@@ -30,7 +30,7 @@ The real architecture (`server/cmd/doc-service/main.go`):
   the uploaded file into a staging directory (env var `STAGING_DIR`, now
   `UPLOAD_FILE_STAGING_DIR`) and, in the same DB transaction, inserts a
   `kb.inputs` row via `insertUploadedInputRecord` with
-  `tenant_id`/`ks_store_id`/`type`/`processing_mode`/etc. and `file_name` set
+  `user_id`/`ks_store_id`/`type`/`processing_mode`/etc. and `file_name` set
   to the staged path, `backup_filename` left empty. It does not copy the
   file to backup/home itself.
 - Independently, `doc-service` watches the staging directory via `fsnotify`
@@ -40,10 +40,10 @@ The real architecture (`server/cmd/doc-service/main.go`):
   either **updates** the existing `kb.inputs` row where
   `file_name = <staged path> AND backup_filename = ''` (the row
   `UploadInputs` already inserted) or, if no such row exists, **inserts** a
-  brand-new one with no `tenant_id` and raises `AlarmMissingTenantIDAtInsert`.
+  brand-new one with no `user_id` and raises `AlarmMissingUserIDAtInsert`.
   For a `.zip`, it then opens the archive and calls `ingestInputFile` again
   per entry (`ingestZipChildren`), each child inheriting the parent zip
-  record's `tenant_id`/`ks_store_id`/`ks_desc`/processing mode.
+  record's `user_id`/`ks_store_id`/`ks_desc`/processing mode.
 - In this repo's `mise.local.toml`, `STAGING_DIR` and `DATA_STAGING_DIR` were
   set to the same path — two env var names for what is meant to be one
   directory. Confirmed to be an accidental duplication, not an intentional
@@ -55,14 +55,16 @@ The real architecture (`server/cmd/doc-service/main.go`):
 
 As of the 2026-09-24 doc-processing attribution fix
 (`KnowledgeStore/doc-repo/devdocs/202609/2026092403-devdoc-doc-processing-user-id-attribution.md`),
-a `kb.inputs` row with an empty/default `tenant_id` now causes doc-processing
+a `kb.inputs` row with an empty/default `user_id` now causes doc-processing
 to refuse to run. A file copied directly into the staging directory outside
 `UploadInputs` never gets a matching pre-existing row, so `doc-service`
 inserts it unattributed and it hits that refusal. This capability closes that
 gap: keep such files out of the pipeline (`.pending` suffix) until an
 authenticated admin claims them, and have the claim itself do exactly what
 `UploadInputs` does — insert the same kind of pre-existing row with a real
-`tenant_id` — before the file becomes visible under its real name. The
+`user_id` — before the file becomes visible under its real name. The column
+is now named `kb.inputs.user_id`; the rename migration preserves existing
+values. The
 existing `doc-service` staging loop then completes it exactly as it
 would a normal upload, unmodified — zip child extraction included, since
 that logic triggers on the file's real extension on disk, not on anything
@@ -169,7 +171,7 @@ rather than per-file waits.
 ## Risks / Trade-offs
 
 - **[Risk]** Shared staging directory means any admin can see and claim any
-  other admin's pending file, misattributing its `tenant_id` to whichever
+  other admin's pending file, misattributing its `user_id` to whichever
   admin claims it first. → **Mitigation**: accepted for this release per the
   trust model (machine access is already restricted to internal
   developers/admins); documented explicitly in the proposal.
