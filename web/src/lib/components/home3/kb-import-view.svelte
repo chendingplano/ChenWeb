@@ -8,7 +8,7 @@
 	import { selectedPageIds, togglePageRecord, togglePageSelection } from './kb-input-selection';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig, updateKbInput, listPendingFiles, claimPendingFiles, type PendingFileEntry, type ClaimPendingFilesResult } from '$lib/services/kbService';
+	import { listKbInputs, listAllKbInputIds, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig, updateKbInput, listPendingFiles, claimPendingFiles, type ListKbInputsParams, type PendingFileEntry, type ClaimPendingFilesResult } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import { createDefaultRecordBrowserFilters } from '$lib/components/home3/topic-tree-record-browser.js';
 	import { listManagedUsers, type ManagedUser } from '$lib/services/userManagementService';
@@ -56,7 +56,8 @@
 	let parserName = $state('');
 	let pipelineFilter = $state('');
 	let procStatus = $state('all');
-	let showFailed = $state(false);
+	let quickFilter = $state<'none' | 'failed' | 'no_doc_processors'>('none');
+	let showQuickFiltersMenu = $state(false);
 	let modifyStartTime = $state('');
 	let modifyEndTime = $state('');
 	let page = $state(1);
@@ -454,30 +455,37 @@
 		}
 	}
 
+	function currentFilterParams(): Omit<ListKbInputsParams, 'page' | 'pageSize'> {
+		return {
+			docType,
+			parseState,
+			fileName,
+			startTime,
+			endTime,
+			recordId,
+			title,
+			docNo,
+			parserName,
+			pipelineFilter,
+			procStatus: pipelineFilter.trim() ? '' : procStatus === 'all' ? '' : procStatus,
+			showFailed: quickFilter === 'failed',
+			noDocProcessors: quickFilter === 'no_doc_processors',
+			modifyStartTime,
+			modifyEndTime,
+			orderBy: sortField,
+			orderDir: sortDir
+		};
+	}
+
 	async function loadRecords() {
 		selectedRecordIds = new Set();
 		loading = true;
 		error = '';
 		try {
 			const result = await listKbInputs({
-				docType,
-				parseState,
-				fileName,
-				startTime,
-				endTime,
-				recordId,
-				title,
-				docNo,
-				parserName,
-				pipelineFilter,
-				procStatus: pipelineFilter.trim() ? '' : procStatus === 'all' ? '' : procStatus,
-				showFailed,
-				modifyStartTime,
-				modifyEndTime,
+				...currentFilterParams(),
 				page,
-				pageSize,
-				orderBy: sortField,
-				orderDir: sortDir
+				pageSize
 			});
 			records = result.results ?? [];
 			total = result.total ?? 0;
@@ -551,7 +559,7 @@
 		parserName = '';
 		pipelineFilter = '';
 		procStatus = 'all';
-		showFailed = false;
+		quickFilter = 'none';
 		startTime = '';
 		endTime = '';
 		modifyStartTime = '';
@@ -561,8 +569,9 @@
 		loadRecords();
 	}
 
-	function toggleShowFailed() {
-		showFailed = !showFailed;
+	function setQuickFilter(filter: 'none' | 'failed' | 'no_doc_processors') {
+		quickFilter = quickFilter === filter ? 'none' : filter;
+		showQuickFiltersMenu = false;
 		page = 1;
 		loadRecords();
 	}
@@ -695,7 +704,7 @@
 		}
 	}
 
-	async function processParsedInputs(selectedOnly = false) {
+	async function processInputs(selectedOnly = false, failedOnly = false) {
 		if (processingParsed) return;
 		if (selectedOnly && selectedRecordIds.size === 0) return;
 		processingParsed = true;
@@ -704,26 +713,51 @@
 		let queued = 0;
 		let failed = 0;
 		try {
-			const selectedIDs = selectedOnly ? [...selectedRecordIds] : [];
-			const query = selectedOnly ? `?ids=${encodeURIComponent(selectedIDs.join(','))}` : '';
-			const response = await fetch(`/api/v1/kb/inputs/process-parsed${query}`, { credentials: 'same-origin' });
-			const result = await response.json().catch(() => null);
-			if (!response.ok) throw new Error(result?.error_msg ?? `Request failed (${response.status})`);
-			const inputs: Array<{ id: number; converted_after_parse: boolean }> = result?.inputs ?? [];
+			let targetIDs = await listAllKbInputIds({
+				...currentFilterParams(),
+				...(failedOnly ? { failedProcessorsOnly: true } : {})
+			});
+			if (selectedOnly) {
+				const selected = new Set(selectedRecordIds);
+				targetIDs = targetIDs.filter((id) => selected.has(id));
+			}
+			let inputs: Array<{ id: number; converted_after_parse: boolean }> = [];
+			if (failedOnly) {
+				for (let offset = 0; offset < targetIDs.length; offset += 5000) {
+					const ids = targetIDs.slice(offset, offset + 5000);
+					try {
+						await publishEvent('kb.pdf.start-doc-processing', {
+							record_ids: ids.map(String),
+							'failed-proc-only': true,
+							force: true
+						});
+						queued += ids.length;
+					} catch {
+						failed += ids.length;
+					}
+				}
+			} else {
+				for (let offset = 0; offset < targetIDs.length; offset += 5000) {
+					const ids = targetIDs.slice(offset, offset + 5000);
+					const query = `?ids=${encodeURIComponent(ids.join(','))}`;
+					const response = await fetch(`/api/v1/kb/inputs/process-parsed${query}`, { credentials: 'same-origin' });
+					const result = await response.json().catch(() => null);
+					if (!response.ok) throw new Error(result?.error_msg ?? `Request failed (${response.status})`);
+					inputs.push(...(result?.inputs ?? []));
+				}
+			}
 			let conversionQueued = 0;
 			let processingQueued = 0;
 			for (const input of inputs) {
 				try {
 					if (input.converted_after_parse) {
-						// The line file already exists, so start doc processing directly.
 						await publishEvent('kb.pdf.start-doc-processing', {
 							record_id: String(input.id),
 							force: true
 						});
 						processingQueued++;
 					} else {
-						// Convert parser output first; the converter's line-file event starts doc processing.
-						await publishEvent('kb.pdf.parsed', {
+					await publishEvent('kb.pdf.parsed', {
 							record_id: String(input.id),
 							type: 'pdf',
 							status: 'success',
@@ -738,9 +772,11 @@
 			}
 			processParsedMessage = {
 				kind: failed > 0 ? 'error' : 'success',
-				text: inputs.length === 0
-					? 'No parsed inputs are ready to process'
-					: `Queued ${queued} of ${inputs.length} parsed inputs: ${conversionQueued} for conversion and ${processingQueued} for document processing${failed > 0 ? `; ${failed} failed` : ''}`
+				text: failedOnly
+					? (targetIDs.length === 0 ? 'No failed doc processor operations match the current filters' : `Queued failed processor retries for ${queued} of ${targetIDs.length} inputs${failed > 0 ? `; ${failed} failed` : ''}`)
+					: (inputs.length === 0
+						? 'No parsed inputs are ready to process'
+						: `Queued ${queued} of ${inputs.length} parsed inputs: ${conversionQueued} for conversion and ${processingQueued} for document processing${failed > 0 ? `; ${failed} failed` : ''}`)
 			};
 		} catch (err) {
 			processParsedMessage = {
@@ -751,6 +787,7 @@
 			};
 		} finally {
 			processingParsed = false;
+			loadRecords();
 		}
 	}
 
@@ -768,7 +805,14 @@
 			return;
 		}
 		if (reConvert) {
-			await publishEvent('kb.pdf.parsed', { record_id: String(record.id), type: 'pdf', status: 'success', force: true });
+			const payload: Record<string, unknown> = {
+				record_id: String(record.id),
+				type: 'pdf',
+				status: 'success',
+				force: true
+			};
+			if (record.user_id?.trim()) payload.user_id = record.user_id.trim();
+			await publishEvent('kb.pdf.parsed', payload);
 			return;
 		}
 		const chosen = selectableProcessorIds.filter((p) => procs[p]);
@@ -1107,25 +1151,41 @@
 						aria-expanded={showProcessParsedMenu}
 						style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{processingParsed ? 0.6 : 1};"
 					>
-						{processingParsed ? 'Processing…' : 'Process Parsed'} ▾
+						{processingParsed ? 'Processing…' : 'Continue Process'} ▾
 					</button>
 					{#if showProcessParsedMenu}
 						<div role="menu" style="position:absolute; z-index:30; top:calc(100% + 6px); right:0; min-width:210px; padding:4px; border:1px solid {borderColor}; border-radius:8px; background:{cardBg}; box-shadow:0 12px 28px rgba(0,0,0,0.28);">
 							<button
 								type="button"
 								role="menuitem"
-								onclick={() => processParsedInputs(false)}
+								onclick={() => processInputs(false, false)}
 								style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;"
 							>Process Parsed - All</button>
 							<span title={selectedRecordIds.size === 0 ? 'Select the records you want to process first.' : ''} style="display:block;">
 								<button
 									type="button"
 									role="menuitem"
-									onclick={() => processParsedInputs(true)}
+									onclick={() => processInputs(true, false)}
 									disabled={selectedRecordIds.size === 0 || processingParsed}
 									aria-disabled={selectedRecordIds.size === 0 || processingParsed}
 									style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{selectedRecordIds.size === 0 ? textMuted : textPrimary}; text-align:left; font-size:13px; cursor:{selectedRecordIds.size === 0 ? 'not-allowed' : 'pointer'}; white-space:nowrap; opacity:{selectedRecordIds.size === 0 ? 0.55 : 1};"
 								>Process Parsed - Selected</button>
+							</span>
+							<button
+								type="button"
+								role="menuitem"
+								onclick={() => processInputs(false, true)}
+								style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;"
+							>Process Failed - All</button>
+							<span title={selectedRecordIds.size === 0 ? 'Select the records you want to process first.' : ''} style="display:block;">
+								<button
+									type="button"
+									role="menuitem"
+									onclick={() => processInputs(true, true)}
+									disabled={selectedRecordIds.size === 0 || processingParsed}
+									aria-disabled={selectedRecordIds.size === 0 || processingParsed}
+									style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{selectedRecordIds.size === 0 ? textMuted : textPrimary}; text-align:left; font-size:13px; cursor:{selectedRecordIds.size === 0 ? 'not-allowed' : 'pointer'}; white-space:nowrap; opacity:{selectedRecordIds.size === 0 ? 0.55 : 1};"
+								>Process Failed - Selected</button>
 							</span>
 						</div>
 					{/if}
@@ -1162,14 +1222,27 @@
 				>
 					Reset Search
 				</button>
-				<button
-					onclick={toggleShowFailed}
-					disabled={loading}
-					aria-pressed={showFailed}
-					style="height:38px; padding:0 14px; border:1px solid {showFailed ? accent + '40' : borderColor}; border-radius:10px; background:{showFailed ? accentTint : surface2}; color:{showFailed ? accent : textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
-				>
-					Show Failed
-				</button>
+				<div style="position:relative;">
+					<button
+						type="button"
+						onclick={() => { showQuickFiltersMenu = !showQuickFiltersMenu; }}
+						disabled={loading}
+						aria-haspopup="menu"
+						aria-expanded={showQuickFiltersMenu}
+						style="height:38px; padding:0 14px; border:1px solid {quickFilter !== 'none' ? accent + '40' : borderColor}; border-radius:10px; background:{quickFilter !== 'none' ? accentTint : surface2}; color:{quickFilter !== 'none' ? accent : textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
+					>
+						Quick Filters ▾
+					</button>
+					{#if showQuickFiltersMenu}
+						<div role="menu" style="position:absolute; z-index:30; top:calc(100% + 6px); right:0; min-width:210px; padding:4px; border:1px solid {borderColor}; border-radius:8px; background:{cardBg}; box-shadow:0 12px 28px rgba(0,0,0,0.28);">
+							<button type="button" role="menuitem" onclick={() => setQuickFilter('failed')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:{quickFilter === 'failed' ? accentTint : 'transparent'}; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">Show Failed</button>
+							<button type="button" role="menuitem" onclick={() => setQuickFilter('no_doc_processors')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:{quickFilter === 'no_doc_processors' ? accentTint : 'transparent'}; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">Show no doc processors</button>
+							{#if quickFilter !== 'none'}
+								<button type="button" role="menuitem" onclick={() => setQuickFilter('none')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textSecondary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">Clear Quick Filter</button>
+							{/if}
+						</div>
+					{/if}
+				</div>
 				<button
 					onclick={openUploadDialog}
 					style="height:38px; padding:0 14px; border:none; border-radius:10px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"

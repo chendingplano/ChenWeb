@@ -79,25 +79,27 @@ type errorResponse struct {
 }
 
 type listInputsFilters struct {
-	OwnerUserID     string
-	RecordID        *int64
-	KsStoreID       *int64
-	DocType         string
-	ParseState      string
-	Name            string
-	Title           string
-	DocNo           string
-	FileName        string
-	ParserName      string
-	Operation       string
-	ProcStatus      string
-	ShowFailed      bool
-	PipelineFilter  string
-	ExcludeDocType  string
-	CreateTimeStart *time.Time
-	CreateTimeEnd   *time.Time
-	ModifyTimeStart *time.Time
-	ModifyTimeEnd   *time.Time
+	OwnerUserID          string
+	RecordID             *int64
+	KsStoreID            *int64
+	DocType              string
+	ParseState           string
+	Name                 string
+	Title                string
+	DocNo                string
+	FileName             string
+	ParserName           string
+	Operation            string
+	ProcStatus           string
+	ShowFailed           bool
+	FailedProcessorsOnly bool
+	NoDocProcessors      bool
+	PipelineFilter       string
+	ExcludeDocType       string
+	CreateTimeStart      *time.Time
+	CreateTimeEnd        *time.Time
+	ModifyTimeStart      *time.Time
+	ModifyTimeEnd        *time.Time
 }
 
 // ListInputs handles GET /api/v1/kb/inputs.
@@ -158,24 +160,26 @@ func ListInputs(c echo.Context) error {
 	}
 
 	filters := listInputsFilters{
-		RecordID:        recordID,
-		KsStoreID:       ksStoreID,
-		DocType:         c.QueryParam("doc_type"),
-		ParseState:      c.QueryParam("parse_state"),
-		Name:            c.QueryParam("name"),
-		Title:           c.QueryParam("title"),
-		DocNo:           c.QueryParam("doc_no"),
-		FileName:        c.QueryParam("file_name"),
-		ParserName:      c.QueryParam("parser_name"),
-		Operation:       c.QueryParam("operation"),
-		ProcStatus:      c.QueryParam("proc_status"),
-		ShowFailed:      strings.EqualFold(strings.TrimSpace(c.QueryParam("show_failed")), "true"),
-		PipelineFilter:  c.QueryParam("pipeline_filter"),
-		ExcludeDocType:  c.QueryParam("exclude_doc_type"),
-		CreateTimeStart: createStartTime,
-		CreateTimeEnd:   createEndTime,
-		ModifyTimeStart: modifyStartTime,
-		ModifyTimeEnd:   modifyEndTime,
+		RecordID:             recordID,
+		KsStoreID:            ksStoreID,
+		DocType:              c.QueryParam("doc_type"),
+		ParseState:           c.QueryParam("parse_state"),
+		Name:                 c.QueryParam("name"),
+		Title:                c.QueryParam("title"),
+		DocNo:                c.QueryParam("doc_no"),
+		FileName:             c.QueryParam("file_name"),
+		ParserName:           c.QueryParam("parser_name"),
+		Operation:            c.QueryParam("operation"),
+		ProcStatus:           c.QueryParam("proc_status"),
+		ShowFailed:           strings.EqualFold(strings.TrimSpace(c.QueryParam("show_failed")), "true"),
+		FailedProcessorsOnly: strings.EqualFold(strings.TrimSpace(c.QueryParam("failed_processors_only")), "true"),
+		NoDocProcessors:      strings.EqualFold(strings.TrimSpace(c.QueryParam("no_doc_processors")), "true"),
+		PipelineFilter:       c.QueryParam("pipeline_filter"),
+		ExcludeDocType:       c.QueryParam("exclude_doc_type"),
+		CreateTimeStart:      createStartTime,
+		CreateTimeEnd:        createEndTime,
+		ModifyTimeStart:      modifyStartTime,
+		ModifyTimeEnd:        modifyEndTime,
 	}
 
 	/*
@@ -897,8 +901,32 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	if filters.ShowFailed {
 		whereParts = append(whereParts, `EXISTS (
 			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS status_entry(entry)
-			WHERE LOWER(BTRIM(COALESCE(entry->>'proc_status', entry->>'proc-status', entry->>'status', ''))) <> 'success'
+			WHERE LOWER(BTRIM(COALESCE(entry->>'proc_status', entry->>'proc-status', entry->>'status', ''))) = 'failed'
 		)`)
+	}
+	if filters.FailedProcessorsOnly {
+		whereParts = append(whereParts, "i.has_failed_proc")
+	}
+	if filters.NoDocProcessors {
+		aliasList := getAllProcessorAliases()
+		aliases := make([]string, 0)
+		for _, group := range aliasList {
+			if len(group) > 0 {
+				aliases = append(aliases, group[0])
+			}
+		}
+		if len(aliases) == 0 {
+			whereParts = append(whereParts, "1=1")
+		} else {
+			aliasArgs := make([]string, 0, len(aliases))
+			for _, alias := range aliases {
+				aliasArgs = append(aliasArgs, nextArg(alias))
+			}
+			whereParts = append(whereParts, fmt.Sprintf(`NOT EXISTS (
+				SELECT 1 FROM kb.input_proc_status ps
+				WHERE ps.record_id = i.id AND ps.processor = ANY(ARRAY[%s]::text[])
+			)`, strings.Join(aliasArgs, ", ")))
+		}
 	}
 	pipelineFilter := strings.TrimSpace(strings.ToLower(filters.PipelineFilter))
 	switch pipelineFilter {

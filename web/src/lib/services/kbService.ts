@@ -75,6 +75,8 @@ export type ListKbInputsParams = {
 	operation?: string;
 	procStatus?: string;
 	showFailed?: boolean;
+	failedProcessorsOnly?: boolean;
+	noDocProcessors?: boolean;
 	pipelineFilter?: string;
 	excludeDocType?: string;
 	modifyStartTime?: string;
@@ -105,6 +107,8 @@ function buildQuery(params: ListKbInputsParams): string {
 	if (params.operation?.trim()) query.set('operation', params.operation.trim());
 	if (params.procStatus?.trim()) query.set('proc_status', params.procStatus.trim());
 	if (params.showFailed) query.set('show_failed', 'true');
+	if (params.failedProcessorsOnly) query.set('failed_processors_only', 'true');
+	if (params.noDocProcessors) query.set('no_doc_processors', 'true');
 	if (params.pipelineFilter?.trim()) query.set('pipeline_filter', params.pipelineFilter.trim());
 	if (params.excludeDocType?.trim()) query.set('exclude_doc_type', params.excludeDocType.trim());
 	if (params.startTime.trim()) query.set('start_time', params.startTime.trim());
@@ -150,6 +154,24 @@ export async function listKbInputs(params: ListKbInputsParams): Promise<ListKbIn
 		throw new Error(msg);
 	}
 	return response.json();
+}
+
+export async function listAllKbInputIds(
+	params: Omit<ListKbInputsParams, 'page' | 'pageSize'>
+): Promise<number[]> {
+	const pageSize = 500;
+	const ids: number[] = [];
+	let page = 1;
+	let total = 0;
+	do {
+		const result = await listKbInputs({ ...params, page, pageSize });
+		const records = result.results ?? [];
+		if (records.length === 0) break;
+		ids.push(...records.map((record) => record.id));
+		total = result.total ?? 0;
+		page++;
+	} while (ids.length < total);
+	return ids;
 }
 
 export async function listDocProcLogs(params: {
