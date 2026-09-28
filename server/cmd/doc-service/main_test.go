@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -991,6 +992,13 @@ func TestAppendReroutedStatus_RecordsNoteAndPaths(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in rerouted status %q", want, got)
 		}
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(got), &entries); err != nil {
+		t.Fatalf("decode rerouted status: %v", err)
+	}
+	if len(entries) != 1 || entries[0]["proc_status"] != "success" {
+		t.Fatalf("rerouted status must contain proc_status=success, got %v", entries)
 	}
 }
 

@@ -107,8 +107,8 @@ func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 	if got := strings.TrimSpace(asString(row["file_type"])); got != "pdf" {
 		t.Fatalf("file_type=%q, want pdf", got)
 	}
-	if got := strings.TrimSpace(asString(row["operation"])); got != "static_analzyer" {
-		t.Fatalf("operation=%q, want static_analzyer", got)
+	if got := strings.TrimSpace(asString(row["operation"])); got != "static_analyzer" {
+		t.Fatalf("operation=%q, want static_analyzer", got)
 	}
 	if got := strings.TrimSpace(asString(row["proc_status"])); got != "success" {
 		t.Fatalf("proc_status=%q, want success", got)
@@ -168,7 +168,7 @@ func TestStaticAnalyzer_MissingArtifactDirFailsFast(t *testing.T) {
 
 func TestStaticAnalyzer_StatusReplacesExistingEntry(t *testing.T) {
 	start := time.Date(2026, 4, 23, 10, 0, 0, 0, time.UTC)
-	raw := `[{"operation":"static_analyzer","proc_status":"failed"},{"operation":"chunking","proc_status":"success"}]`
+	raw := `[{"operation":"static_analyzer","proc_status":"failed"},{"operation":"static_analzyer","proc_status":"failed"},{"operation":"chunking","proc_status":"success"}]`
 	got, err := appendStaticAnalyzerStatus(raw, staticStatusParams{
 		RecordID:        42,
 		FileType:        "pdf",
@@ -196,8 +196,8 @@ func TestStaticAnalyzer_StatusReplacesExistingEntry(t *testing.T) {
 	if strings.TrimSpace(asString(arr[0]["file_type"])) != "pdf" {
 		t.Fatalf("first file_type=%q, want pdf", asString(arr[0]["file_type"]))
 	}
-	if strings.TrimSpace(asString(arr[0]["operation"])) != "static_analzyer" {
-		t.Fatalf("first operation=%q, want static_analzyer", asString(arr[0]["operation"]))
+	if strings.TrimSpace(asString(arr[0]["operation"])) != "static_analyzer" {
+		t.Fatalf("first operation=%q, want static_analyzer", asString(arr[0]["operation"]))
 	}
 	if strings.TrimSpace(asString(arr[0]["proc_status"])) != "success" {
 		t.Fatalf("first proc_status=%q, want success", asString(arr[0]["proc_status"]))
@@ -228,8 +228,8 @@ func TestStaticAnalyzer_FailureStatusOmitsSuccessOnlyCounts(t *testing.T) {
 		t.Fatalf("status len=%d, want 1", len(arr))
 	}
 	row := arr[0]
-	if strings.TrimSpace(asString(row["operation"])) != "static_analzyer" {
-		t.Fatalf("operation=%q, want static_analzyer", asString(row["operation"]))
+	if strings.TrimSpace(asString(row["operation"])) != "static_analyzer" {
+		t.Fatalf("operation=%q, want static_analyzer", asString(row["operation"]))
 	}
 	if strings.TrimSpace(asString(row["proc_status"])) != "failed" {
 		t.Fatalf("proc_status=%q, want failed", asString(row["proc_status"]))

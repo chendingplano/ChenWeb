@@ -170,6 +170,7 @@ func appendReroutedStatus(rawStatus string, start time.Time, note, originalRelPa
 	entries := decodeStatusEntries(rawStatus)
 	entry := statusEntry{
 		"operation":          "docx-rerouted",
+		"proc_status":        "success",
 		"start_time":         start.Format(statusTimeLayout),
 		"note":               note,
 		"original_docx_path": originalRelPath,

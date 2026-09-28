@@ -231,6 +231,8 @@ func canonicalOperationName(raw string) string {
 	op := strings.ToLower(strings.TrimSpace(raw))
 	op = strings.ReplaceAll(op, "-", "_")
 	switch op {
+	case "static_analzyer":
+		return "static_analyzer"
 	case "chunked":
 		return "chunking"
 	case "extract_metadata":

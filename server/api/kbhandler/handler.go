@@ -91,6 +91,7 @@ type listInputsFilters struct {
 	ParserName      string
 	Operation       string
 	ProcStatus      string
+	ShowFailed      bool
 	PipelineFilter  string
 	ExcludeDocType  string
 	CreateTimeStart *time.Time
@@ -168,6 +169,7 @@ func ListInputs(c echo.Context) error {
 		ParserName:      c.QueryParam("parser_name"),
 		Operation:       c.QueryParam("operation"),
 		ProcStatus:      c.QueryParam("proc_status"),
+		ShowFailed:      strings.EqualFold(strings.TrimSpace(c.QueryParam("show_failed")), "true"),
 		PipelineFilter:  c.QueryParam("pipeline_filter"),
 		ExcludeDocType:  c.QueryParam("exclude_doc_type"),
 		CreateTimeStart: createStartTime,
@@ -891,6 +893,12 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	}
 	if parserName := strings.TrimSpace(filters.ParserName); parserName != "" {
 		whereParts = append(whereParts, fmt.Sprintf("%s ILIKE %s", parserNameExpr, nextArg("%"+parserName+"%")))
+	}
+	if filters.ShowFailed {
+		whereParts = append(whereParts, `EXISTS (
+			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS status_entry(entry)
+			WHERE LOWER(BTRIM(COALESCE(entry->>'proc_status', entry->>'proc-status', entry->>'status', ''))) <> 'success'
+		)`)
 	}
 	pipelineFilter := strings.TrimSpace(strings.ToLower(filters.PipelineFilter))
 	switch pipelineFilter {

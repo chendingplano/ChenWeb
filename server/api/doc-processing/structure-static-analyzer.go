@@ -1726,7 +1726,7 @@ func appendStaticAnalyzerStatus(raw string, p staticStatusParams) (string, error
 	entry := map[string]any{
 		"record_id":      strconv.FormatInt(p.RecordID, 10),
 		"file_type":      sanitizeUTF8Text(strings.ToLower(strings.TrimSpace(p.FileType))),
-		"operation":      "static_analzyer",
+		"operation":      "static_analyzer",
 		"input_filename": sanitizeUTF8Text(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,

@@ -182,6 +182,32 @@ func TestUpsertProcessorRuntimeStatus_ReplacesLegacyAlias(t *testing.T) {
 	}
 }
 
+func TestStaticAnalyzerStatusCanonicalizesLegacySpelling(t *testing.T) {
+	if got := canonicalOperationName("static_analzyer"); got != "static_analyzer" {
+		t.Fatalf("canonicalOperationName=%q, want static_analyzer", got)
+	}
+
+	now := time.Date(2026, 7, 23, 18, 5, 0, 0, time.UTC)
+	raw := `[{"operation":"static_analzyer","proc_status":"failed","start_time":"20260723 17:00:00"}]`
+	got, err := upsertProcessorRuntimeStatus(raw, now, "static_analyzer", "active", "")
+	if err != nil {
+		t.Fatalf("upsertProcessorRuntimeStatus: %v", err)
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(got), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries)=%d, want 1: %s", len(entries), got)
+	}
+	if operation := asString(entries[0]["operation"]); operation != "static_analyzer" {
+		t.Fatalf("operation=%q, want static_analyzer", operation)
+	}
+	if status := asString(entries[0]["proc_status"]); status != "active" {
+		t.Fatalf("proc_status=%q, want active", status)
+	}
+}
+
 func TestRunProcessorsChunkBatched_PersistsBatchProcessorLifecycle(t *testing.T) {
 	tmp := t.TempDir()
 	lineFile := filepath.Join(tmp, "record.txt")

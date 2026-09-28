@@ -471,7 +471,7 @@ func primaryProcessorStatusOperation(name string) string {
 	case "chunking":
 		return "chunked"
 	case "static_analyzer":
-		return "static_analzyer"
+		return "static_analyzer"
 	case "extract_doc_metadata":
 		return "extract_metadata"
 	case "generate_scene_blocks":

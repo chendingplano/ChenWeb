@@ -4,6 +4,7 @@
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import { shouldShowOverflowScrollbar } from '$lib/components/home3/kb-import-status-dialog.js';
+	import { formatInputStatus } from '$lib/components/home3/kb-import-status-summary.js';
 	import { selectedPageIds, togglePageRecord, togglePageSelection } from './kb-input-selection';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
@@ -55,6 +56,7 @@
 	let parserName = $state('');
 	let pipelineFilter = $state('');
 	let procStatus = $state('all');
+	let showFailed = $state(false);
 	let modifyStartTime = $state('');
 	let modifyEndTime = $state('');
 	let page = $state(1);
@@ -246,44 +248,11 @@
 	let colorSuccess = $derived(darkMode ? '#34D399' : '#10B981');
 	let colorError = $derived(darkMode ? '#F87171' : '#EF4444');
 
-	type StatusItem = KbInputRecord['status'][number];
-
-	function findStatusItem(record: KbInputRecord, operation: string): StatusItem | null {
-		return (
-			(record.status ?? []).find((item) => (item?.operation ?? '').toLowerCase() === operation.toLowerCase()) ??
-			null
-		);
-	}
-
 	function formatTime(value?: string): string {
 		if (!value) return '-';
 		const d = new Date(value);
 		if (Number.isNaN(d.getTime())) return value;
 		return d.toLocaleString();
-	}
-
-	function formatOptionalTime(value?: string): string {
-		if (!value) return '';
-		const d = new Date(value);
-		if (Number.isNaN(d.getTime())) return value;
-		return d.toLocaleString();
-	}
-
-	function parsingItem(record: KbInputRecord): StatusItem | null {
-		return findStatusItem(record, 'parsing') ?? findStatusItem(record, 'parsed');
-	}
-
-	function parsingLabel(record: KbInputRecord): string {
-		const item = parsingItem(record);
-		if (!item) return '';
-		const operation = (item.operation ?? '').toLowerCase();
-		if (operation === 'parsing') return 'parsing';
-		if (operation === 'parsed') return item.proc_status ?? item['proc-status'] ?? '';
-		return '';
-	}
-
-	function parsingTime(record: KbInputRecord): string {
-		return formatOptionalTime(parsingItem(record)?.start_time);
 	}
 
 	async function openStatusDialog(record: KbInputRecord) {
@@ -502,6 +471,7 @@
 				parserName,
 				pipelineFilter,
 				procStatus: pipelineFilter.trim() ? '' : procStatus === 'all' ? '' : procStatus,
+				showFailed,
 				modifyStartTime,
 				modifyEndTime,
 				page,
@@ -581,11 +551,18 @@
 		parserName = '';
 		pipelineFilter = '';
 		procStatus = 'all';
+		showFailed = false;
 		startTime = '';
 		endTime = '';
 		modifyStartTime = '';
 		modifyEndTime = '';
 		parseState = 'all';
+		page = 1;
+		loadRecords();
+	}
+
+	function toggleShowFailed() {
+		showFailed = !showFailed;
 		page = 1;
 		loadRecords();
 	}
@@ -1186,6 +1163,14 @@
 					Reset Search
 				</button>
 				<button
+					onclick={toggleShowFailed}
+					disabled={loading}
+					aria-pressed={showFailed}
+					style="height:38px; padding:0 14px; border:1px solid {showFailed ? accent + '40' : borderColor}; border-radius:10px; background:{showFailed ? accentTint : surface2}; color:{showFailed ? accent : textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
+				>
+					Show Failed
+				</button>
+				<button
 					onclick={openUploadDialog}
 					style="height:38px; padding:0 14px; border:none; border-radius:10px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
 				>
@@ -1236,7 +1221,7 @@
 					</button>
 				</th>
 			{/snippet}
-			<table style="width:100%; border-collapse:collapse; min-width:1000px;">
+			<table style="width:100%; border-collapse:collapse; min-width:2200px;">
 				<colgroup>
 					<col style="width:40px;" />
 					<col />
@@ -1245,14 +1230,11 @@
 					<col />
 					<col style="width:100px;" />
 					<col style="width:325px;" />
-					<col />
-					<col />
-					<col />
-					<col />
+					<col style="width:520px;" />
+					<col style="width:140px;" />
 					<col style="width:180px;" />
 					<col style="width:180px;" />
-					<col />
-					<col />
+					<col style="width:270px;" />
 				</colgroup>
 				<thead style="background:{pageBg};">
 					<tr>
@@ -1272,23 +1254,21 @@
 						{@render sortHead('Doc No', 'doc_no')}
 						{@render sortHead('Type', 'type')}
 						{@render sortHead('File Name', 'file_name')}
-						{@render sortHead('Parser', 'parser_name')}
-						<th class="cell head">Parsing</th>
-						<th class="cell head">Time</th>
+						<th class="cell head">Status</th>
 						<th class="cell head">Process Mode</th>
 						{@render sortHead('Create Time', 'create_time')}
 						{@render sortHead('Modify Time', 'modify_time')}
-						<th class="cell head">Status</th>
-					<th class="cell head">Actions</th>
+						<th class="cell head">Actions</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if !loading && records.length === 0}
 						<tr>
-					<td class="cell" colspan={15} style="text-align:center; color:{textMuted};">No records</td>
+						<td class="cell" colspan={12} style="text-align:center; color:{textMuted};">No records</td>
 						</tr>
 					{:else}
 						{#each records as record (record.id)}
+							{@const statusSummary = formatInputStatus(record.status)}
 							<tr style="border-top:1px solid {borderColor};">
 								<td class="cell" style="width:40px; text-align:center;">
 									<input
@@ -1311,30 +1291,26 @@
 								<td class="cell file-name-cell" title={record.file_name ?? '-'} style="color:{textPrimary};">
 									<span class="ellipsis-cell">{record.file_name ?? '-'}</span>
 								</td>
-								<td class="cell" style="color:{textMuted};">{record.parser_name ?? '-'}</td>
-								<td class="cell" style="color:{textPrimary};">{parsingLabel(record)}</td>
-								<td class="cell" style="color:{textSecondary};">{parsingTime(record)}</td>
-								<td class="cell" style="color:{textPrimary};">{record.processing_mode ?? '-'}</td>
+								<td class="cell status-cell" title={statusSummary} style="color:{textPrimary};">
+									<span class="ellipsis-cell">{statusSummary}</span>
+								</td>
+								<td class="cell process-mode-cell" style="color:{textPrimary};">{record.processing_mode ?? '-'}</td>
 								<td class="cell" style="color:{textSecondary};">{formatTime(record.create_time)}</td>
 								<td class="cell" style="color:{textSecondary};">{formatTime(record.modify_time)}</td>
 								<td class="cell">
 									<div class="flex items-center gap-2">
-									<button
-										onclick={() => openStatusDialog(record)}
-										style="height:28px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-									>
-										View
-									</button>
 										<button
-										onclick={() => openEditDialog(record)}
-										style="height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
-									>
-										Edit
-									</button>
-									</div>
-								</td>
-								<td class="cell">
-									<div class="flex items-center gap-2">
+											onclick={() => openStatusDialog(record)}
+											style="height:28px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+										>
+											View
+										</button>
+										<button
+											onclick={() => openEditDialog(record)}
+											style="height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
+										>
+											Edit
+										</button>
 										<button
 											onclick={() => openRestart(record)}
 											style="display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
@@ -2157,6 +2133,16 @@
 	.file-name-cell {
 		width: 325px;
 		max-width: 325px;
+	}
+
+	.status-cell {
+		width: 520px;
+		max-width: 520px;
+	}
+
+	.process-mode-cell {
+		width: 140px;
+		max-width: 140px;
 	}
 
 	.title-cell {

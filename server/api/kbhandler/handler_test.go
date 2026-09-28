@@ -247,6 +247,36 @@ func TestBuildWhereClauseRunningProcessorStatus(t *testing.T) {
 	}
 }
 
+func TestBuildWhereClauseShowFailedMatchesAnyNonSuccessStatusEntry(t *testing.T) {
+	whereSQL, args, err := buildWhereClause(listInputsFilters{ShowFailed: true})
+	if err != nil {
+		t.Fatalf("buildWhereClause returned error: %v", err)
+	}
+	for _, want := range []string{
+		"EXISTS (",
+		"jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END)",
+		"entry->>'proc_status'",
+		"entry->>'proc-status'",
+		"entry->>'status'",
+		"<> 'success'",
+	} {
+		if !strings.Contains(whereSQL, want) {
+			t.Fatalf("expected whereSQL to contain %q, got: %s", want, whereSQL)
+		}
+	}
+	if len(args) != 0 {
+		t.Fatalf("args=%v, want none", args)
+	}
+
+	withoutFilter, _, err := buildWhereClause(listInputsFilters{})
+	if err != nil {
+		t.Fatalf("buildWhereClause without filter: %v", err)
+	}
+	if strings.Contains(withoutFilter, "jsonb_array_elements(") {
+		t.Fatalf("unexpected status scan without ShowFailed: %s", withoutFilter)
+	}
+}
+
 func TestListInputsSuccess(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

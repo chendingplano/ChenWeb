@@ -4982,10 +4982,10 @@ Note: max output length: 384KB
 Pricing
 |    | Input (cache hit) | Input (cache miss) | Output |
 |----|-------------------|--------------------|--------|
-| Off-Peak | $0.003 | $0.15 | $0.6 |
-| Peak | $0.006 | $0.3 | $1.20 |
+| Off-Peak | $0.003/¥0.02 | $0.15/¥1.00 | $0.6/¥4.00 |
+| Peak | $0.006/¥0.04 | $0.3/¥2.00 | $8.00 |
 
-Peak hours: 1:00-4:00 and 6:00-10:00 UTC on weekdays, 
+Peak hours: 9:00 - 12:00 and 14:00-18:00 UTC on weekdays, 
 
 ## Qwen Prices
 | Model | Input | Output |
