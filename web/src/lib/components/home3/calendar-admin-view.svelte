@@ -307,9 +307,9 @@
  .cell{aspect-ratio:1;border-radius:5px;border:1px solid transparent;background:transparent;color:inherit;font-size:11px;cursor:pointer;padding:0}
  .cell.empty{cursor:default}
  .cell.selected{background:#6366f1;color:#fff}
- .cell.selected-adjusted{background:transparent;border:2px solid #f59e0b;color:inherit}
+ .cell.selected-adjusted{background:#f59e0b;color:#1c1917}
  .cell.bound{background:#15803d;color:#fff}
- .cell.bound-adjusted{background:#d97706;color:#fff}
+ .cell.bound-adjusted{background:#9a3412;color:#fff}
  .mode{background:transparent;border:1px solid #6366f1;color:inherit}
  .mode.active{background:#6366f1;color:#fff}
  .mode.adjusted{border-color:#f59e0b}
@@ -318,9 +318,9 @@
  .legend span{display:flex;align-items:center;gap:6px}
  .swatch{width:12px;height:12px;border-radius:3px;display:inline-block;box-sizing:border-box}
  .swatch.selected{background:#6366f1}
- .swatch.selected-adjusted{border:2px solid #f59e0b}
+ .swatch.selected-adjusted{background:#f59e0b}
  .swatch.bound{background:#15803d}
- .swatch.bound-adjusted{background:#d97706}
+ .swatch.bound-adjusted{background:#9a3412}
  .table-wrap{overflow:auto}
  table{width:100%;border-collapse:collapse}
  th,td{text-align:left;border-bottom:1px solid #64748b44;padding:9px 8px}
