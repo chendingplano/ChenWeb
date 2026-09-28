@@ -18,6 +18,7 @@ import glob
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -31,22 +32,36 @@ log = logging.getLogger(__name__)
 
 # Matches "X/Y" in tqdm output like "Processing pages: 60%|██| 3/5 [00:06<00:04]"
 _PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
-PHASE_NAMES = (
+LINUX_PHASE_NAMES = (
     "Layout Predict", "MFR Predict", "Table-ocr det", "Table-ocr rec ch",
     "Table-wireless Predict", "Table-wired Predict", "OCR-det ch",
     "OCR-rec Predict", "Processing pages",
 )
+MAC_PHASE_NAMES = ("Layout Preparation", "Extract Preparation", "Post Processing", "Processing pages")
 _PHASE_PROGRESS_RE = re.compile(
-    r'(' + '|'.join(re.escape(name) for name in PHASE_NAMES) + r'):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)'
+    r'(' + '|'.join(re.escape(name) for name in (*LINUX_PHASE_NAMES, *MAC_PHASE_NAMES, "Predict")) + r'):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)'
 )
 
 
-class PhaseTracker:
-    """Turn MinerU's tqdm updates into nine ordered phase snapshots."""
+def _processing_pages(line: str) -> tuple[int, int] | None:
+    if "Processing pages:" not in line:
+        return None
+    match = _PAGE_PROGRESS_RE.search(line)
+    if not match:
+        return None
+    done, total = int(match.group(1)), int(match.group(2))
+    return (done, total) if total > 0 else None
 
-    def __init__(self) -> None:
-        self.phases = [dict(name=name, progress=0, status="pending") for name in PHASE_NAMES]
+
+class PhaseTracker:
+    """Turn host-specific MinerU tqdm updates into ordered phase snapshots."""
+
+    def __init__(self, system: str | None = None) -> None:
+        self.mac = (system or platform.system()) == "Darwin"
+        self.names = MAC_PHASE_NAMES if self.mac else LINUX_PHASE_NAMES
+        self.phases = [dict(name=name, progress=0, status="pending") for name in self.names]
         self.started: dict[str, float] = {}
+        self.predict_phase = 0
 
     def update(self, line: str) -> tuple[list[dict], bool] | None:
         match = _PHASE_PROGRESS_RE.search(line)
@@ -55,7 +70,19 @@ class PhaseTracker:
         name, done, total = match.group(1), int(match.group(2)), int(match.group(3))
         if total <= 0:
             return None
-        phase = self.phases[PHASE_NAMES.index(name)]
+        if self.mac:
+            if name in MAC_PHASE_NAMES[:2]:
+                self.predict_phase = MAC_PHASE_NAMES.index(name)
+                # The preparation counter finishes before its costly Predict pass.
+                # Keep the combined phase active until Predict reaches 100%.
+                done = 0
+            elif name == "Predict":
+                name = MAC_PHASE_NAMES[self.predict_phase]
+            elif name not in MAC_PHASE_NAMES:
+                return None
+        elif name not in LINUX_PHASE_NAMES:
+            return None
+        phase = self.phases[self.names.index(name)]
         now = time.monotonic()
         if name not in self.started:
             self.started[name] = now
@@ -142,7 +169,7 @@ class MineruParser(ParserBackend):
         # Use the real page count so the dashboard shows accurate total from
         # the start rather than the placeholder value of 1.
         pdf_page_count = _get_pdf_page_count(pdf_path)
-        total_pages_hint = max(pdf_page_count, 1)
+        total_pages_hint = pdf_page_count
         on_progress(0, total_pages_hint)
 
         # Clear any prior mineru output for this PDF. MinerU nests per-run output
@@ -224,8 +251,8 @@ class MineruParser(ParserBackend):
                 if len(tail) > 50:
                     tail.pop(0)
 
-                # Extract page progress from tqdm lines, e.g.
-                # "Processing pages: 60%|██| 3/5 [00:06<00:04]"
+                # Only Processing pages counts pages. Other phase totals can
+                # be much larger (e.g. 303 extraction items for a 16-page PDF).
                 for seg in segments or [line]:
                     phase_update = phase_tracker.update(seg)
                     if phase_update and self.on_phase_progress:
@@ -240,14 +267,13 @@ class MineruParser(ParserBackend):
                                 proc.kill()
                                 proc.wait()
                             raise
-                    m = _PAGE_PROGRESS_RE.search(seg)
-                    if m:
-                        x, y = int(m.group(1)), int(m.group(2))
-                        if y > 0:
-                            _state["pages_done"] = x
-                            if y > _state["total"]:
-                                _state["total"] = y
-                            break
+                    page_progress = _processing_pages(seg)
+                    if page_progress:
+                        x, y = page_progress
+                        _state["pages_done"] = x
+                        if y > _state["total"]:
+                            _state["total"] = y
+                        break
         finally:
             _stop_heartbeat.set()
             heartbeat_thread.join(timeout=5)

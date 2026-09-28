@@ -143,7 +143,7 @@
 	let barMax = $derived(Math.max(1, ...barData.map((b) => b.value)));
 
 	type ParsePhase = { name: string; progress: number; status: 'pending' | 'active' | 'complete'; elapsed_seconds?: number };
-	type ParseEntry = KbInputRecord['status'][number] & { phases?: ParsePhase[] };
+	type ParseEntry = KbInputRecord['status'][number] & { phases?: ParsePhase[]; num_pages?: number };
 
 	// Read a 0–100 percentage from a parsing entry's free-form progress string
 	// ("45%", "3/10", …). Returns null when no numeric progress is available.
@@ -1243,7 +1243,8 @@
 				{#each pdfActiveParsing as record (record.id)}
 					{@const pct = parseProgressPercent(record)}
 					{@const progressText = parsingProgressText(record)}
-					{@const phases = findParseEntry(record)?.phases}
+					{@const parseEntry = findParseEntry(record)}
+					{@const phases = parseEntry?.phases}
 					<div
 						class="rounded-xl p-3.5"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
@@ -1259,6 +1260,9 @@
 									style="font-size:13px; font-weight:500; color:{textPrimary}; max-width:360px;"
 									title={record.file_name ?? recordTitle(record)}
 								>{record.file_name?.trim() || recordTitle(record)}</span>
+								{#if parseEntry?.num_pages && parseEntry.num_pages > 0}
+									<span style="color:{textSecondary}; font-size:11px; white-space:nowrap;">{parseEntry.num_pages} {parseEntry.num_pages === 1 ? 'page' : 'pages'}</span>
+								{/if}
 							</div>
 							<div class="flex flex-shrink-0 items-center gap-2">
 								<!-- Detail -->
@@ -1301,7 +1305,7 @@
 							</div>
 						</div>
 
-						{#if phases?.length === 9}
+						{#if phases?.length}
 							<div class="pdf-phase-grid mt-3">
 								{#each phases as phase, index}
 									{@const phaseColor = phase.status === 'complete' ? colorSuccess : phase.status === 'active' ? accent : textMuted}

@@ -572,11 +572,14 @@ def _process_record(
         # Throttled progress callback
         phase_snapshot: list[dict] | None = initial_phases
         last_phase_write = 0.0
+        num_pages_known = 0
 
         def _db_progress(ms_used: int, pct: int, n_pages: int = 0) -> None:
-            nonlocal raw_status
+            nonlocal raw_status, num_pages_known
             _stop_if_requested()
-            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct, parser_name, n_pages, phase_snapshot)
+            if n_pages > 0:
+                num_pages_known = n_pages
+            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct, parser_name, num_pages_known, phase_snapshot)
 
         def _phase_progress(phases: list[dict], force: bool) -> None:
             nonlocal phase_snapshot, last_phase_write

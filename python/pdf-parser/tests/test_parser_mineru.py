@@ -1,10 +1,10 @@
-from parser_mineru import PhaseTracker, annotate_equation_image_paths, annotate_list_item_bboxes
+from parser_mineru import PhaseTracker, _processing_pages, annotate_equation_image_paths, annotate_list_item_bboxes
 
 
 def test_phase_tracker_reports_all_nine_phases_and_elapsed_time(monkeypatch):
     ticks = iter([10.0, 16.245, 17.0])
     monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
-    tracker = PhaseTracker()
+    tracker = PhaseTracker(system="Linux")
 
     started, force = tracker.update("Sep 28 02:30:14 Layout Predict:   0%|          | 0/16 [00:00<?, ?it/s]")
     assert force is True
@@ -23,6 +23,39 @@ def test_phase_tracker_reports_all_nine_phases_and_elapsed_time(monkeypatch):
     assert active[1]["progress"] == 55
     assert active[1]["status"] == "active"
     assert tracker.update("unrelated log line") is None
+
+
+def test_mac_phase_tracker_maps_each_predict_to_its_preparation(monkeypatch):
+    ticks = iter([1.0, 2.0, 104.25, 105.0, 106.0, 344.5, 345.0, 345.1, 346.0, 346.5])
+    monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
+    tracker = PhaseTracker(system="Darwin")
+    assert [phase["name"] for phase in tracker.phases] == [
+        "Layout Preparation", "Extract Preparation", "Post Processing", "Processing pages"
+    ]
+    layout, force = tracker.update("Layout Preparation: 100%|████| 16/16 [00:00<00:00]")
+    assert force is True
+    assert layout[0]["status"] == "active" and layout[0]["progress"] == 0
+    tracker.update("Predict:   0%|          | 0/16 [00:00<?, ?it/s]")
+    layout, force = tracker.update("Predict: 100%|████| 16/16 [01:43<00:00]")
+    assert force is True
+    assert layout[0]["elapsed_seconds"] == 103.25
+    extract, force = tracker.update("Extract Preparation: 100%|████| 16/16 [00:00<00:00]")
+    assert extract[1]["status"] == "active" and force is True
+    tracker.update("Predict:   0%|          | 0/303 [00:00<?, ?it/s]")
+    extract, force = tracker.update("Predict: 100%|████| 303/303 [03:58<00:00]")
+    assert extract[1]["status"] == "complete" and extract[1]["elapsed_seconds"] == 239.5
+    tracker.update("Post Processing:   0%|          | 0/16 [00:00<?, ?it/s]")
+    post, _ = tracker.update("Post Processing: 100%|████| 16/16 [00:00<00:00]")
+    assert post[2]["status"] == "complete"
+    tracker.update("Processing pages:   0%|          | 0/16 [00:00<?, ?it/s]")
+    pages, _ = tracker.update("Processing pages: 100%|████| 16/16 [00:00<00:00]")
+    assert pages[3]["status"] == "complete"
+    assert all(phase["progress"] == 100 for phase in pages)
+
+
+def test_only_processing_pages_counter_is_a_page_count():
+    assert _processing_pages("Predict: 100%|████| 303/303 [03:58<00:00]") is None
+    assert _processing_pages("Processing pages: 100%|████| 16/16 [00:00<00:00]") == (16, 16)
 
 
 def test_annotate_equation_image_paths_from_middle_json():
