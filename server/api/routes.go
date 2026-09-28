@@ -47,6 +47,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
+	"github.com/chendingplano/deepdoc/server/api/priceshandler"
 	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	productreviews "github.com/chendingplano/deepdoc/server/api/product-reviews"
 	"github.com/chendingplano/deepdoc/server/api/productdrawings"
@@ -388,6 +389,12 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/releases", releaseshandler.CreateRelease)
 	apiGroup.PUT("/releases/:id", releaseshandler.UpdateRelease)
 	apiGroup.DELETE("/releases/:id", releaseshandler.DeleteRelease)
+
+	// Price definitions admin (System Admin > System > Price Management).
+	apiGroup.GET("/prices", priceshandler.ListPrices)
+	apiGroup.POST("/prices", priceshandler.CreatePrice)
+	apiGroup.PUT("/prices/:id", priceshandler.UpdatePrice)
+	apiGroup.DELETE("/prices/:id", priceshandler.DeletePrice)
 
 	// External Terminology Resources (System Admin > Resources). Downloads write
 	// local artifacts + unapproved draft manifests under TERMINOLOGY_DIR.

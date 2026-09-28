@@ -62,6 +62,7 @@
 	import CalendarAdminView from '$lib/components/home3/calendar-admin-view.svelte';
 	import PeakHoursView from '$lib/components/home3/peak-hours-view.svelte';
 	import ReleasesView from '$lib/components/home3/releases-view.svelte';
+	import PricesView from '$lib/components/home3/prices-view.svelte';
 	import MechanicalProductNamesImportView from '$lib/components/home3/mechanical-product-names-import-view.svelte';
 	import Canvas01 from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01 from '$lib/components/shared-ui/chatter-01.svelte';
@@ -369,6 +370,8 @@
 			<PeakHoursView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-system-releases'}
 			<ReleasesView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-system-prices'}
+			<PricesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-external-terminology'}
 			<ExternalTerminologyResourcesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-review-external-terminology'}
