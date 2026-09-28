@@ -54,9 +54,13 @@ is non-empty, and the modal title shows both counts.
 **3a. Saved days are edited in place and saved with Modify (added 2026-09-28).**
 Clicking a saved day no longer deletes it at once. It stages an edit: in the active mode the day
 toggles between that mode's kind and removed. The day keeps its holiday. A **Modify** button,
-placed after Attach Holiday, is disabled until there is at least one staged edit. It saves the
-edits with the existing endpoints: one `PUT /calendars/dates` per holiday for kind changes, then
-one `DELETE` per removed date. Clear Selection discards staged edits.
+placed after Attach Holiday, saves every change to the active calendar, meaning the one chosen
+by year, country and calendar type: staged edits and new holiday/adjusted selections. It is
+disabled when there are no changes. No dialog asks for a holiday. Each new day joins the
+holiday of its nearest saved day, because adjusted days, and days added to a holiday, sit next
+to that holiday. The button is also disabled when there are only new selections and the
+calendar has no saved days. Modify uses the existing endpoints: one `PUT /calendars/dates` per
+holiday, then one `DELETE` per removed date. Clear Selection discards staged edits.
 Alternative rejected: a new bulk endpoint that applies all edits in one transaction. It would
 make the save atomic, but a partial failure here only leaves some edits saved; the page reloads
 and shows the true state. We can add the endpoint later if that proves to be a problem.

@@ -60,7 +60,9 @@ one day kind.
 
 ### Requirement: Edit and delete calendar date bindings
 The system SHALL let an admin stage changes to saved date bindings (change a date's day kind, or
-remove the binding) and save all staged changes with a "Modify" action, or delete an entire
+remove the binding), select new holiday or adjusted days, and save all of these changes to the
+active calendar with a "Modify" action, which binds each new day to the holiday of its nearest
+saved date without prompting, or delete an entire
 calendar (all date bindings for a given year, country, and calendar type) in one action. The
 Modify action SHALL be disabled while there are no staged changes.
 
@@ -69,6 +71,11 @@ Modify action SHALL be disabled while there are no staged changes.
   then clicks Modify
 - **THEN** the system removes the first date's binding, rebinds the second date to the same
   holiday info with day kind `holiday`, and the grid shows the saved result
+
+#### Scenario: Modify adds a new adjusted day to the nearest holiday
+- **WHEN** Jan 1–3 are saved holiday days of 元旦, and an admin selects Jan 4 in "Set Adjusted
+  Days" mode and clicks Modify
+- **THEN** the system binds Jan 4 to 元旦 with day kind `adjusted`, with no dialog
 
 #### Scenario: Modify disabled without changes
 - **WHEN** there are no staged changes, including after an admin clicks a saved date twice so

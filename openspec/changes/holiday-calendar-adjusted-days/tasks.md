@@ -28,4 +28,5 @@
 - [x] 5.3 Pink dashed outline + legend entry for saved days with unsaved edits
 - [x] 5.4 `svelte-check` has no errors in the calendar files
 - [x] 5.5 Update devdoc and design/spec
-- [ ] 5.6 Logged-in browser click-through
+- [x] 5.6 Modify also saves new selections, each bound to the holiday of its nearest saved day (no dialog)
+- [ ] 5.7 Logged-in browser click-through

@@ -36,6 +36,8 @@
  // Modify saves them; Clear Selection or reloading the calendar discards them.
  let pendingEdits = $state(new Map<string, DayKind | null>());
  let modifying = $state(false);
+ // New selections can only join an existing holiday, so they need at least one saved day.
+ let canModify = $derived(!modifying && (pendingEdits.size > 0 || (selectedCount > 0 && (calendar?.dates ?? []).length > 0)));
 
  let holidayInfos = $state<HolidayInfo[]>([]);
  let attachModal = $state(false);
@@ -116,15 +118,30 @@
   pendingEdits = edits;
  }
 
+ // The holiday of the saved day closest to date; a new day joins that holiday.
+ function nearestHolidayId(date: string): number {
+  const t = Date.parse(date);
+  let best = calendar!.dates[0];
+  for (const d of calendar!.dates) if (Math.abs(Date.parse(d.holiday_date) - t) < Math.abs(Date.parse(best.holiday_date) - t)) best = d;
+  return best.holiday_info_id;
+ }
+
+ // Saves every change to the active calendar: staged edits to saved days, and new selections,
+ // each bound to the holiday of its nearest saved day.
  async function saveModifications() {
-  if (!calendar?.id || pendingEdits.size === 0) return;
+  if (!calendar?.id || !canModify) return;
   modifying = true; error = '';
-  // Kind changes go through the upsert endpoint, which takes one holiday per call.
+  // Upserts go through the upsert endpoint, which takes one holiday per call.
   const byHoliday = new Map<number, { holidays: string[]; adjusted: string[] }>();
   const removals: string[] = [];
-  for (const [date, kind] of pendingEdits) {
+  const changes: [string, DayKind | null][] = [
+   ...pendingEdits,
+   ...[...selectedHolidays].map((d): [string, DayKind] => [d, 'holiday']),
+   ...[...selectedAdjusted].map((d): [string, DayKind] => [d, 'adjusted'])
+  ];
+  for (const [date, kind] of changes) {
    if (kind === null) { removals.push(date); continue; }
-   const holidayInfoId = boundByDate.get(date)!.holiday_info_id;
+   const holidayInfoId = boundByDate.get(date)?.holiday_info_id ?? nearestHolidayId(date);
    const group = byHoliday.get(holidayInfoId) ?? { holidays: [], adjusted: [] };
    (kind === 'holiday' ? group.holidays : group.adjusted).push(date);
    byHoliday.set(holidayInfoId, group);
@@ -226,7 +243,7 @@
    <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} onclick={() => (selectMode = 'holiday')}>Set Holidays</button>
    <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} onclick={() => (selectMode = 'adjusted')}>Set Adjusted Days</button>
    <button disabled={selectedCount === 0} onclick={openAttach}>Attach Holiday</button>
-   <button disabled={pendingEdits.size === 0 || modifying} onclick={saveModifications}>{modifying ? 'Saving…' : 'Modify'}</button>
+   <button disabled={!canModify} onclick={saveModifications}>{modifying ? 'Saving…' : 'Modify'}</button>
    <button class="secondary" disabled={selectedCount === 0 && pendingEdits.size === 0} onclick={clearSelection}>Clear Selection</button>
    {#if calendar?.id}<button class="danger" onclick={removeCalendar}>Delete Calendar</button>{/if}
   </div>
