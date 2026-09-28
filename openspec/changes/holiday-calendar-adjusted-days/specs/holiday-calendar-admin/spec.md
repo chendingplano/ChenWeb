@@ -19,6 +19,16 @@ from saved bindings, and the page SHALL show a legend for these colors.
 - **THEN** the system creates the empty `calendars` row, enables day selection, and shows the
   holiday definitions list
 
+#### Scenario: Holiday definitions scoped to country and calendar type
+- **WHEN** an admin selects a country and a calendar type
+- **THEN** the holiday definitions list shows only the definitions of that (country, calendar
+  type), in their display order, whatever the selected year
+
+#### Scenario: Holiday from another calendar type rejected
+- **WHEN** a client binds dates of a (country, calendar type) calendar to a holiday info of a
+  different country or calendar type
+- **THEN** the system rejects the request with 400 and changes no data
+
 #### Scenario: Incomplete calendar key
 - **WHEN** the year, country or calendar type is empty
 - **THEN** the system loads no calendar and day selection stays disabled

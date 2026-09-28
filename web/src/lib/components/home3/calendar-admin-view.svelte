@@ -1,6 +1,7 @@
 <script lang="ts">
  import { onMount } from 'svelte';
  import { COUNTRIES } from './country-list';
+ import { CALENDAR_TYPES } from './calendar-types';
  import {
   listHolidayInfo, createHolidayInfo, updateHolidayInfo, deleteHolidayInfo,
   getCalendar, createCalendar, upsertCalendarDates, deleteCalendarDate, deleteCalendar,
@@ -16,7 +17,7 @@
 
  let year = $state(new Date().getFullYear());
  let country = $state(COUNTRIES[0].code);
- let calendarType = $state('holidays');
+ let calendarType = $state(CALENDAR_TYPES[0].code);
  let defaultCountry = $state<string | null>(null);
  let isDefaultCountry = $derived(defaultCountry === country);
  let defaultCountryBusy = $state(false);
@@ -54,7 +55,7 @@
 
  let infoModal = $state(false);
  let infoEditing = $state<HolidayInfo | null>(null);
- let infoDraft = $state({ country: COUNTRIES[0].code, name: '', display_seqno: 1, description: '', note: '' });
+ let infoDraft = $state({ country: COUNTRIES[0].code, calendar_type: CALENDAR_TYPES[0].code, name: '', display_seqno: 1, description: '', note: '' });
  let infoSaving = $state(false);
  let infoError = $state('');
 
@@ -96,7 +97,7 @@
  }
 
  async function loadHolidayInfos() {
-  try { holidayInfos = await listHolidayInfo(country); } catch (e) { error = e instanceof Error ? e.message : 'Unable to load holiday info.'; }
+  try { holidayInfos = await listHolidayInfo(country, calendarType); } catch (e) { error = e instanceof Error ? e.message : 'Unable to load holiday info.'; }
  }
 
  async function loadDefaultCountry() {
@@ -198,7 +199,7 @@
   try {
    if (attachNew) {
     if (!newHoliday.name.trim()) { attachError = 'Holiday name is required.'; attaching = false; return; }
-    const created = await createHolidayInfo({ country, name: newHoliday.name.trim(), description: newHoliday.description.trim(), note: newHoliday.note.trim() });
+    const created = await createHolidayInfo({ country, calendar_type: calendarType, name: newHoliday.name.trim(), description: newHoliday.description.trim(), note: newHoliday.note.trim() });
     holidayInfoId = created.id;
     holidayInfos = [...holidayInfos, created];
    }
@@ -218,8 +219,8 @@
   try { await deleteCalendar(calendar.id); await loadCalendar(); } catch (e) { error = e instanceof Error ? e.message : 'Unable to delete calendar.'; }
  }
 
- function openNewInfo() { infoEditing = null; infoError = ''; infoDraft = { country, name: '', display_seqno: 1, description: '', note: '' }; infoModal = true; }
- function openEditInfo(h: HolidayInfo) { infoEditing = h; infoError = ''; infoDraft = { country: h.country, name: h.name, display_seqno: h.display_seqno, description: h.description, note: h.note }; infoModal = true; }
+ function openNewInfo() { infoEditing = null; infoError = ''; infoDraft = { country, calendar_type: calendarType, name: '', display_seqno: 1, description: '', note: '' }; infoModal = true; }
+ function openEditInfo(h: HolidayInfo) { infoEditing = h; infoError = ''; infoDraft = { country: h.country, calendar_type: h.calendar_type, name: h.name, display_seqno: h.display_seqno, description: h.description, note: h.note }; infoModal = true; }
 
  async function saveInfo() {
    if (!infoDraft.country.trim() || !infoDraft.name.trim()) { infoError = 'Country and name are required.'; return; }
@@ -227,7 +228,7 @@
   infoSaving = true; infoError = '';
   try {
    if (infoEditing) await updateHolidayInfo(infoEditing.id, infoDraft);
-   else await createHolidayInfo({ country: infoDraft.country, name: infoDraft.name, description: infoDraft.description, note: infoDraft.note });
+   else await createHolidayInfo({ country: infoDraft.country, calendar_type: infoDraft.calendar_type, name: infoDraft.name, description: infoDraft.description, note: infoDraft.note });
    infoModal = false;
    await loadHolidayInfos();
   } catch (e) {
@@ -249,7 +250,7 @@
   <div class="controls">
    <label>Year<input type="number" bind:value={year} onchange={loadCalendar} /></label>
    <label>Country<select bind:value={country} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
-   <label>Calendar Type<input bind:value={calendarType} onchange={loadCalendar} /></label>
+   <label>Calendar Type<select bind:value={calendarType} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each CALENDAR_TYPES as t}<option value={t.code}>{t.name}</option>{/each}</select></label>
    <button disabled={!keyValid} onclick={loadCalendar}>Refresh</button>
   </div>
  </section>
@@ -310,14 +311,14 @@
 
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
-   <h2>Holiday Definitions ({country})</h2>
+   <h2>Holiday Definitions ({country} · {calendarType})</h2>
    <label class="check inline"><input type="checkbox" checked={isDefaultCountry} disabled={defaultCountryBusy} onchange={toggleDefaultCountry} /> Set as default country</label>
    {#if calendarExists}<button onclick={openNewInfo}>New Holiday</button>{/if}
   </div>
   {#if calendarExists}
    <div class="table-wrap"><table><thead><tr><th>Order</th><th>Name</th><th>Description</th><th>Note</th><th></th></tr></thead><tbody>
     {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>Edit</button><button class="link danger" onclick={() => removeInfo(h)}>Delete</button></td></tr>
-    {:else}<tr><td colspan="5" class="state">No holiday definitions for {country} yet.</td></tr>{/each}
+    {:else}<tr><td colspan="5" class="state">No holiday definitions for {country} · {calendarType} yet.</td></tr>{/each}
    </tbody></table></div>
   {:else if !loading}
    <div class="state create">
@@ -358,6 +359,7 @@
   <div class="modal-head"><h2>{infoEditing ? 'Edit Holiday' : 'New Holiday'}</h2><button class="link" onclick={() => (infoModal = false)}>Close</button></div>
   <div class="form">
    <label>Country<select bind:value={infoDraft.country}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
+   <label>Calendar Type<select bind:value={infoDraft.calendar_type}>{#each CALENDAR_TYPES as t}<option value={t.code}>{t.name}</option>{/each}</select></label>
    <label>Name<input bind:value={infoDraft.name} /></label>
    {#if infoEditing}<label>Display order<input type="number" min="1" step="1" bind:value={infoDraft.display_seqno} /></label>{/if}
    <label>Description<input bind:value={infoDraft.description} /></label>

@@ -1,6 +1,7 @@
 export type HolidayInfo = {
 	id: number;
 	country: string;
+	calendar_type: string;
 	name: string;
 	display_seqno: number;
 	description: string;
@@ -32,12 +33,16 @@ async function request<T>(url: string, init?: RequestInit): Promise<Envelope<T>>
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
-export async function listHolidayInfo(country = ''): Promise<HolidayInfo[]> {
-	const result = await request<HolidayInfo[]>(`/api/v1/calendars/holiday-info${country ? `?country=${encodeURIComponent(country)}` : ''}`);
+export async function listHolidayInfo(country = '', calendarType = ''): Promise<HolidayInfo[]> {
+	const params = new URLSearchParams();
+	if (country) params.set('country', country);
+	if (calendarType) params.set('calendar_type', calendarType);
+	const query = params.toString();
+	const result = await request<HolidayInfo[]>(`/api/v1/calendars/holiday-info${query ? `?${query}` : ''}`);
 	return result.results ?? [];
 }
 
-export type HolidayInfoInput = { country: string; name: string; description: string; note: string; display_seqno?: number };
+export type HolidayInfoInput = { country: string; calendar_type: string; name: string; description: string; note: string; display_seqno?: number };
 
 export async function createHolidayInfo(input: HolidayInfoInput): Promise<HolidayInfo> {
 	const result = await request<HolidayInfo>('/api/v1/calendars/holiday-info', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input) });

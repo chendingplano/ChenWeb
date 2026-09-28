@@ -72,6 +72,18 @@ list. A new endpoint, `POST /calendars`, creates the empty row; it is idempotent
 `PUT /calendars/dates` still creates the row when it is missing, so older clients keep working.
 The page just never relies on that any more.
 
+**3c. Holiday definitions belong to (country, calendar type) (added 2026-09-28).**
+Country + calendar type define the list of specific holidays, reused across years but not
+across calendar types. For example, a future "Product A Promotion Days" type has its own list.
+`holiday_info` gets a `calendar_type` column; existing rows backfill to `holidays`. Name and
+display-order uniqueness become per `(country, calendar_type)`. Saving dates checks that the
+holiday's country and calendar type match the calendar's, and returns 400 otherwise. The
+Calendar Type field becomes a dropdown fed by `calendar-types.ts`, with one entry, `holidays`,
+for now.
+Alternative rejected: a foreign key from `calendar_holidays` to a composite key on
+`holiday_info`. It would enforce the match in the database, but it needs duplicated columns on
+`calendar_holidays`; one check in the only write path is enough for now.
+
 **4. Colors.** Holiday days use indigo while pending and green once saved; these are today's
 colors. Adjusted days use a solid amber fill while pending and a solid rust fill once saved.
 Both stand out from green and indigo in the light and dark themes. A saved day with a staged

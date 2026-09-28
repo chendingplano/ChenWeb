@@ -58,7 +58,7 @@ func ListHolidayInfo(c echo.Context) error {
 	}
 	defer rc.Close()
 
-	list, err := listHolidayInfo(c.Request().Context(), ApiTypes.ProjectDBHandle, strings.TrimSpace(c.QueryParam("country")))
+	list, err := listHolidayInfo(c.Request().Context(), ApiTypes.ProjectDBHandle, strings.TrimSpace(c.QueryParam("country")), strings.TrimSpace(c.QueryParam("calendar_type")))
 	if err != nil {
 		rc.GetLogger().Error("list holiday info failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to list holiday info (CWB_CAL_002)"})
@@ -80,6 +80,7 @@ func CreateHolidayInfo(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_CAL_011)"})
 	}
 	payload.Country, payload.Name = strings.TrimSpace(payload.Country), strings.TrimSpace(payload.Name)
+	payload.CalendarType = normalizeCalendarType(payload.CalendarType)
 	if payload.Country == "" || payload.Name == "" {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "country and name are required (CWB_CAL_012)"})
 	}
@@ -109,6 +110,7 @@ func UpdateHolidayInfo(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_CAL_022)"})
 	}
 	payload.Country, payload.Name = strings.TrimSpace(payload.Country), strings.TrimSpace(payload.Name)
+	payload.CalendarType = normalizeCalendarType(payload.CalendarType)
 	if payload.DisplaySeqno < 1 {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "display_seqno must be a positive integer (CWB_CAL_023)"})
 	}
@@ -150,13 +152,22 @@ func holidayInfoError(c echo.Context, rc ApiTypes.RequestContext, op, loc string
 	case errors.Is(err, ErrHolidayInfoInUse):
 		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "holiday info is still bound to a calendar date (" + loc + ")"})
 	case strings.Contains(err.Error(), "23505"):
-		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "a holiday with this country and name already exists (" + loc + ")"})
+		return c.JSON(http.StatusConflict, errorResponse{Status: false, ErrorMsg: "a holiday with this country, calendar type and name already exists (" + loc + ")"})
 	default:
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: op + " (" + loc + ")"})
 	}
 }
 
 // -- Calendar handlers ---------------------------------------------------------
+
+// normalizeCalendarType trims a calendar type; an empty one means "holidays",
+// the type every calendar had before calendar types were introduced.
+func normalizeCalendarType(calendarType string) string {
+	if calendarType = strings.TrimSpace(calendarType); calendarType == "" {
+		return "holidays"
+	}
+	return calendarType
+}
 
 func parseCalendarKey(c echo.Context) (year int, country, calendarType string, err error) {
 	year, err = strconv.Atoi(c.QueryParam("year"))
@@ -253,9 +264,7 @@ func UpsertCalendarDates(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_CAL_111)"})
 	}
 	payload.Country = strings.TrimSpace(payload.Country)
-	if payload.CalendarType == "" {
-		payload.CalendarType = "holidays"
-	}
+	payload.CalendarType = normalizeCalendarType(payload.CalendarType)
 	if payload.Year == 0 || payload.Country == "" || len(payload.Dates)+len(payload.AdjustedDates) == 0 || payload.HolidayInfoID == 0 {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "year, country, dates or adjusted_dates, and holiday_info_id are required (CWB_CAL_112)"})
 	}
@@ -266,6 +275,12 @@ func UpsertCalendarDates(c echo.Context) error {
 	calendarID, err := upsertCalendarDates(c.Request().Context(), ApiTypes.ProjectDBHandle, payload.Year, payload.Country, payload.CalendarType, payload.Dates, payload.AdjustedDates, payload.HolidayInfoID)
 	if err != nil {
 		rc.GetLogger().Error("upsert calendar dates failed", "err", err)
+		switch {
+		case errors.Is(err, ErrHolidayInfoMismatch):
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "the holiday belongs to a different country or calendar type (CWB_CAL_116)"})
+		case errors.Is(err, sql.ErrNoRows):
+			return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "holiday info not found (CWB_CAL_117)"})
+		}
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to save calendar dates (CWB_CAL_113)"})
 	}
 	cal, err := getCalendar(c.Request().Context(), ApiTypes.ProjectDBHandle, payload.Year, payload.Country, payload.CalendarType)

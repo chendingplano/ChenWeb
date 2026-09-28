@@ -38,3 +38,11 @@
 - [x] 6.3 `go build ./api/...`, `go test ./api/calendarhandler/`, `svelte-check` clean for calendar files
 - [x] 6.4 Update devdoc, design, spec
 - [ ] 6.5 Logged-in browser click-through of Create
+
+## 7. Holiday definitions per calendar type (added 2026-09-28)
+
+- [x] 7.1 Migration `20260928000002_add_holiday_info_calendar_type.sql` (column + per-(country, type) uniqueness); applied to `miner`, Down/Up tested in a rolled-back transaction
+- [x] 7.2 Store/handler: `calendar_type` on holiday info list/create/update and display ordering; binding rejects a holiday of another country/type (`CWB_CAL_116`)
+- [x] 7.3 Frontend: Calendar Type dropdown (`calendar-types.ts`), definitions list and modal scoped by type
+- [x] 7.4 Update devdoc, design, spec
+- [ ] 7.5 Logged-in browser click-through

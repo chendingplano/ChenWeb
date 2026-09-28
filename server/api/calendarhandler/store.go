@@ -7,14 +7,20 @@ import (
 	"time"
 )
 
+// ErrHolidayInfoMismatch signals a binding to a holiday info whose
+// (country, calendar_type) differs from the calendar's.
+var ErrHolidayInfoMismatch = errors.New("holiday info belongs to a different country or calendar type")
+
 // ErrHolidayInfoInUse signals a holiday info deletion blocked by an existing
 // calendar_holidays binding.
 var ErrHolidayInfoInUse = errors.New("holiday info is still bound to a calendar date")
 
-// HolidayInfo is a year-independent holiday definition (public.holiday_info).
+// HolidayInfo is a year-independent holiday definition (public.holiday_info),
+// belonging to one (country, calendar_type).
 type HolidayInfo struct {
 	ID           int64     `json:"id"`
 	Country      string    `json:"country"`
+	CalendarType string    `json:"calendar_type"`
 	Name         string    `json:"name"`
 	DisplaySeqno int       `json:"display_seqno"`
 	Description  string    `json:"description"`
@@ -62,24 +68,22 @@ type Calendar struct {
 	Dates        []CalendarDate `json:"dates"`
 }
 
-const holidayInfoColumns = `id, country, name, display_seqno, COALESCE(description, ''), COALESCE(note, ''), created_at, updated_at`
+const holidayInfoColumns = `id, country, calendar_type, name, display_seqno, COALESCE(description, ''), COALESCE(note, ''), created_at, updated_at`
 
 func scanHolidayInfo(scan func(dest ...any) error) (HolidayInfo, error) {
 	var h HolidayInfo
-	if err := scan(&h.ID, &h.Country, &h.Name, &h.DisplaySeqno, &h.Description, &h.Note, &h.CreatedAt, &h.UpdatedAt); err != nil {
+	if err := scan(&h.ID, &h.Country, &h.CalendarType, &h.Name, &h.DisplaySeqno, &h.Description, &h.Note, &h.CreatedAt, &h.UpdatedAt); err != nil {
 		return HolidayInfo{}, err
 	}
 	return h, nil
 }
 
-func listHolidayInfo(ctx context.Context, db *sql.DB, country string) ([]HolidayInfo, error) {
-	query := `SELECT ` + holidayInfoColumns + ` FROM public.holiday_info`
-	args := []any{}
-	if country != "" {
-		query += ` WHERE country = $1`
-		args = append(args, country)
-	}
-	query += ` ORDER BY country, display_seqno, id`
+// listHolidayInfo lists holiday definitions, optionally filtered by country
+// and by calendar type ("" means no filter).
+func listHolidayInfo(ctx context.Context, db *sql.DB, country, calendarType string) ([]HolidayInfo, error) {
+	query := `SELECT ` + holidayInfoColumns + ` FROM public.holiday_info WHERE ($1 = '' OR country = $1) AND ($2 = '' OR calendar_type = $2)`
+	args := []any{country, calendarType}
+	query += ` ORDER BY country, calendar_type, display_seqno, id`
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -104,10 +108,10 @@ func createHolidayInfo(ctx context.Context, db *sql.DB, h HolidayInfo) (HolidayI
 	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRowContext(ctx, `
-		INSERT INTO public.holiday_info (country, name, display_seqno, description, note)
-		VALUES ($1, $2, COALESCE((SELECT MAX(display_seqno) + 1 FROM public.holiday_info WHERE country = $1), 1), NULLIF($3, ''), NULLIF($4, ''))
+		INSERT INTO public.holiday_info (country, calendar_type, name, display_seqno, description, note)
+		VALUES ($1, $2, $3, COALESCE((SELECT MAX(display_seqno) + 1 FROM public.holiday_info WHERE country = $1 AND calendar_type = $2), 1), NULLIF($4, ''), NULLIF($5, ''))
 		RETURNING `+holidayInfoColumns,
-		h.Country, h.Name, h.Description, h.Note)
+		h.Country, h.CalendarType, h.Name, h.Description, h.Note)
 	created, err := scanHolidayInfo(row.Scan)
 	if err != nil {
 		return HolidayInfo{}, err
@@ -128,13 +132,14 @@ func updateHolidayInfo(ctx context.Context, db *sql.DB, id int64, h HolidayInfo)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var oldCountry string
+	// Display order is numbered within one (country, calendar_type) group.
+	var oldCountry, oldType string
 	var oldSeqno int
-	if err := tx.QueryRowContext(ctx, `SELECT country, display_seqno FROM public.holiday_info WHERE id = $1 FOR UPDATE`, id).Scan(&oldCountry, &oldSeqno); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT country, calendar_type, display_seqno FROM public.holiday_info WHERE id = $1 FOR UPDATE`, id).Scan(&oldCountry, &oldType, &oldSeqno); err != nil {
 		return HolidayInfo{}, err
 	}
 	var targetCount int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM public.holiday_info WHERE country = $1 AND id <> $2`, h.Country, id).Scan(&targetCount); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM public.holiday_info WHERE country = $1 AND calendar_type = $2 AND id <> $3`, h.Country, h.CalendarType, id).Scan(&targetCount); err != nil {
 		return HolidayInfo{}, err
 	}
 	maxTargetSeqno := targetCount + 1
@@ -145,16 +150,16 @@ func updateHolidayInfo(ctx context.Context, db *sql.DB, id int64, h HolidayInfo)
 	if _, err := tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1000000000 WHERE id = $1`, id); err != nil {
 		return HolidayInfo{}, err
 	}
-	if oldCountry == h.Country {
+	if oldCountry == h.Country && oldType == h.CalendarType {
 		if h.DisplaySeqno < oldSeqno {
-			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1 WHERE country = $1 AND display_seqno >= $2 AND display_seqno < $3 AND id <> $4`, oldCountry, h.DisplaySeqno, oldSeqno, id)
+			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno >= $3 AND display_seqno < $4 AND id <> $5`, oldCountry, oldType, h.DisplaySeqno, oldSeqno, id)
 		} else if h.DisplaySeqno > oldSeqno {
-			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1 WHERE country = $1 AND display_seqno > $2 AND display_seqno <= $3 AND id <> $4`, oldCountry, oldSeqno, h.DisplaySeqno, id)
+			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno > $3 AND display_seqno <= $4 AND id <> $5`, oldCountry, oldType, oldSeqno, h.DisplaySeqno, id)
 		}
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1 WHERE country = $1 AND display_seqno > $2`, oldCountry, oldSeqno)
+		_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno > $3`, oldCountry, oldType, oldSeqno)
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1 WHERE country = $1 AND display_seqno >= $2`, h.Country, h.DisplaySeqno)
+			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno >= $3`, h.Country, h.CalendarType, h.DisplaySeqno)
 		}
 	}
 	if err != nil {
@@ -163,10 +168,10 @@ func updateHolidayInfo(ctx context.Context, db *sql.DB, id int64, h HolidayInfo)
 
 	row := tx.QueryRowContext(ctx, `
 		UPDATE public.holiday_info
-		SET country = $2, name = $3, display_seqno = $4, description = NULLIF($5, ''), note = NULLIF($6, ''), updated_at = NOW()
+		SET country = $2, calendar_type = $3, name = $4, display_seqno = $5, description = NULLIF($6, ''), note = NULLIF($7, ''), updated_at = NOW()
 		WHERE id = $1
 		RETURNING `+holidayInfoColumns,
-		id, h.Country, h.Name, h.DisplaySeqno, h.Description, h.Note)
+		id, h.Country, h.CalendarType, h.Name, h.DisplaySeqno, h.Description, h.Note)
 	updated, err := scanHolidayInfo(row.Scan)
 	if err != nil {
 		return HolidayInfo{}, err
@@ -302,6 +307,14 @@ func upsertCalendarDates(ctx context.Context, db *sql.DB, year int, country, cal
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var infoCountry, infoType string
+	if err := tx.QueryRowContext(ctx, `SELECT country, calendar_type FROM public.holiday_info WHERE id = $1`, holidayInfoID).Scan(&infoCountry, &infoType); err != nil {
+		return 0, err
+	}
+	if infoCountry != country || infoType != calendarType {
+		return 0, ErrHolidayInfoMismatch
+	}
 
 	var calendarID int64
 	err = tx.QueryRowContext(ctx, `
