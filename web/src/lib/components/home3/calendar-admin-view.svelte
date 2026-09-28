@@ -403,7 +403,7 @@
  .cell.selected{background:#6366f1;color:#fff}
  .cell.selected-adjusted{background:#f59e0b;color:#1c1917}
  .cell.bound{background:#15803d;color:#fff}
- .cell.bound-adjusted{background:#9a3412;color:#fff}
+ .cell.bound-adjusted{background:#7dd3fc;color:#0c4a6e}
  .cell.changed{border:2px dashed #ec4899}
  .mode{background:transparent;border:1px solid #6366f1;color:inherit}
  .mode.active{background:#6366f1;color:#fff}
@@ -415,7 +415,7 @@
  .swatch.selected{background:#6366f1}
  .swatch.selected-adjusted{background:#f59e0b}
  .swatch.bound{background:#15803d}
- .swatch.bound-adjusted{background:#9a3412}
+ .swatch.bound-adjusted{background:#7dd3fc}
  .swatch.changed{border:2px dashed #ec4899}
  .table-wrap{overflow:auto}
  table{width:100%;border-collapse:collapse}

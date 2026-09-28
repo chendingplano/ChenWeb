@@ -85,7 +85,7 @@ Alternative rejected: a foreign key from `calendar_holidays` to a composite key 
 `calendar_holidays`; one check in the only write path is enough for now.
 
 **4. Colors.** Holiday days use indigo while pending and green once saved; these are today's
-colors. Adjusted days use a solid amber fill while pending and a solid rust fill once saved.
+colors. Adjusted days use a solid amber fill while pending and a solid light blue fill once saved.
 Both stand out from green and indigo in the light and dark themes. A saved day with a staged
 edit gets a pink dashed outline. A small legend below
 the toolbar names all four states. The tooltip on an adjusted day reads
