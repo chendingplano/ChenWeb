@@ -56,7 +56,7 @@ func TestEvaluateActive_DeepSeekExample_ActiveWithinMorningWindow(t *testing.T) 
 
 	mock.ExpectQuery(rx("FROM public.calendar_holidays ch")).
 		WithArgs(2026, "CN", "2026-09-21").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		WillReturnRows(sqlmock.NewRows([]string{"day_kind"}).AddRow(""))
 
 	active, err := EvaluateActive(context.Background(), ApiTypes.ProjectDBHandle, p, at)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestEvaluateActive_DeepSeekExample_InactiveBetweenWindows(t *testing.T) {
 
 	mock.ExpectQuery(rx("FROM public.calendar_holidays ch")).
 		WithArgs(2026, "CN", "2026-09-21").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		WillReturnRows(sqlmock.NewRows([]string{"day_kind"}).AddRow(""))
 
 	active, err := EvaluateActive(context.Background(), ApiTypes.ProjectDBHandle, p, at)
 	if err != nil {
@@ -90,10 +90,14 @@ func TestEvaluateActive_DeepSeekExample_InactiveBetweenWindows(t *testing.T) {
 }
 
 func TestEvaluateActive_DeepSeekExample_InactiveOnWeekend(t *testing.T) {
-	installMockDB(t)
+	mock := installMockDB(t)
 	p := deepSeekExample()
 	// 2026-09-20 is a Sunday.
 	at := mustParse(t, "2026-09-20T10:00:00+08:00")
+
+	mock.ExpectQuery(rx("FROM public.calendar_holidays ch")).
+		WithArgs(2026, "CN", "2026-09-20").
+		WillReturnRows(sqlmock.NewRows([]string{"day_kind"}).AddRow(""))
 
 	active, err := EvaluateActive(context.Background(), ApiTypes.ProjectDBHandle, p, at)
 	if err != nil {
@@ -112,7 +116,7 @@ func TestEvaluateActive_DeepSeekExample_InactiveOnHoliday(t *testing.T) {
 
 	mock.ExpectQuery(rx("FROM public.calendar_holidays ch")).
 		WithArgs(2026, "CN", "2026-10-01").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		WillReturnRows(sqlmock.NewRows([]string{"day_kind"}).AddRow("holiday"))
 
 	active, err := EvaluateActive(context.Background(), ApiTypes.ProjectDBHandle, p, at)
 	if err != nil {
@@ -200,5 +204,47 @@ func TestEvaluateActive_ExcludeSpecificDateRange(t *testing.T) {
 	}
 	if active {
 		t.Fatalf("active = true, want false (2026-12-28 is within the excluded range)")
+	}
+}
+
+func TestEvaluateActive_DeepSeekExample_ActiveOnAdjustedWorkingDay(t *testing.T) {
+	mock := installMockDB(t)
+	p := deepSeekExample()
+	// 2026-01-04 is a Sunday bound as a CN adjusted working day (New Year).
+	at := mustParse(t, "2026-01-04T10:00:00+08:00")
+
+	// One lookup serves the workdays, weekends and holidays checks.
+	mock.ExpectQuery(rx("FROM public.calendar_holidays ch")).
+		WithArgs(2026, "CN", "2026-01-04").
+		WillReturnRows(sqlmock.NewRows([]string{"day_kind"}).AddRow("adjusted"))
+
+	active, err := EvaluateActive(context.Background(), ApiTypes.ProjectDBHandle, p, at)
+	if err != nil {
+		t.Fatalf("EvaluateActive: %v", err)
+	}
+	if !active {
+		t.Fatalf("active = false, want true (adjusted working day is a workday)")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected DB calls: %v", err)
+	}
+}
+
+func TestEvaluateActive_AdjustedWeekdayIsNotAHoliday(t *testing.T) {
+	mock := installMockDB(t)
+	p := deepSeekExample()
+	// A Monday bound as an adjusted day must not be excluded as a holiday.
+	at := mustParse(t, "2026-09-21T10:00:00+08:00")
+
+	mock.ExpectQuery(rx("FROM public.calendar_holidays ch")).
+		WithArgs(2026, "CN", "2026-09-21").
+		WillReturnRows(sqlmock.NewRows([]string{"day_kind"}).AddRow("adjusted"))
+
+	active, err := EvaluateActive(context.Background(), ApiTypes.ProjectDBHandle, p, at)
+	if err != nil {
+		t.Fatalf("EvaluateActive: %v", err)
+	}
+	if !active {
+		t.Fatalf("active = false, want true (adjusted day is not a holiday)")
 	}
 }

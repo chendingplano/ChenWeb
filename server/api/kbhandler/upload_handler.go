@@ -43,9 +43,10 @@ var allowedUploadTypes = map[string]struct{}{
 }
 
 var allowedProcessingModes = map[string]struct{}{
-	"auto":        {},
-	"upload_only": {},
-	"pdf_parsing": {},
+	"auto":         {},
+	"auto_offpeak": {},
+	"upload_only":  {},
+	"pdf_parsing":  {},
 }
 
 type uploadInputsResponse struct {

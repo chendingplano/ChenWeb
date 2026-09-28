@@ -103,7 +103,7 @@
 	let pendingFilesError = $state('');
 	let pendingFilesSubmitting = $state(false);
 	let pendingFilesResults = $state<ClaimPendingFilesResult[]>([]);
-	let pendingFilesProcessingMode = $state<'auto' | 'upload_only' | 'pdf_parsing'>('auto');
+	let pendingFilesProcessingMode = $state<'auto_offpeak' | 'auto' | 'upload_only' | 'pdf_parsing'>('auto_offpeak');
 	let pendingFilesParserName = $state<(typeof uploadParserOptions)[number]>('docling');
 
 	// Search dialog
@@ -155,7 +155,7 @@
 	let uploadNotes = $state('');
 	let uploadKsDesc = $state('');
 	let uploadParserName = $state<(typeof uploadParserOptions)[number]>('docling');
-	let uploadProcessingMode = $state<'auto' | 'upload_only' | 'pdf_parsing'>('auto');
+	let uploadProcessingMode = $state<'auto_offpeak' | 'auto' | 'upload_only' | 'pdf_parsing'>('auto_offpeak');
 	let selectedFiles = $state<File[]>([]);
 	let filePicker = $state<HTMLInputElement | null>(null);
 	let dirPicker = $state<HTMLInputElement | null>(null);
@@ -1205,6 +1205,7 @@
 					title="Auto Process"
 					style="height:38px; padding:0 10px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer;"
 				>
+					<option value="auto_offpeak">Auto - off-peak only</option>
 					<option value="auto">Auto</option>
 					<option value="upload_only">Upload Files Only</option>
 					<option value="pdf_parsing">PDF Parsing</option>
@@ -1807,6 +1808,7 @@
 							bind:value={pendingFilesProcessingMode}
 							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
 						>
+							<option value="auto_offpeak">Auto - off-peak only</option>
 							<option value="auto">Auto</option>
 							<option value="upload_only">Upload Files Only</option>
 							<option value="pdf_parsing">PDF Parsing</option>

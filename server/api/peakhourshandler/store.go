@@ -279,22 +279,21 @@ func orEmptyStrings(s []string) []string {
 	return s
 }
 
-// isHoliday reports whether date (in the record's timezone) is a bound
-// holiday date for country under the default "holidays" calendar type. It
-// returns false, not an error, when country is empty or no matching
-// calendar row exists.
-func isHoliday(ctx context.Context, db *sql.DB, country string, date time.Time) (bool, error) {
+// calendarDayKind returns how date (in the record's timezone) is bound in
+// country's default "holidays" calendar type: "holiday", "adjusted", or ""
+// when country is empty, no calendar row exists, or the date is unbound.
+func calendarDayKind(ctx context.Context, db *sql.DB, country string, date time.Time) (string, error) {
 	if country == "" {
-		return false, nil
+		return "", nil
 	}
-	var exists bool
+	var kind string
 	err := db.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1
+		SELECT COALESCE((
+			SELECT ch.day_kind
 			FROM public.calendar_holidays ch
 			JOIN public.calendars c ON c.id = ch.calendar_id
 			WHERE c.year = $1 AND c.country = $2 AND c.calendar_type = 'holidays'
 			  AND ch.holiday_date = $3
-		)`, date.Year(), country, date.Format("2006-01-02")).Scan(&exists)
-	return exists, err
+		), '')`, date.Year(), country, date.Format("2006-01-02")).Scan(&kind)
+	return kind, err
 }

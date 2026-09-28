@@ -67,7 +67,10 @@ type ControlService struct {
 	// tier-3 classifier observations before pipeline binding and processor
 	// gate evaluation. When nil, behavior is unchanged (base facts only).
 	Resolver *ApplicabilityResolver
-	Now      func() time.Time
+	// OffPeak holds the LLM processors of auto_offpeak inputs around the
+	// configured peak-hours window (offpeak_gate.go). Nil disables holding.
+	OffPeak *OffPeakGate
+	Now     func() time.Time
 
 	DocProcessorMode       string
 	MaxDocProcessPipelines int
@@ -128,11 +131,12 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 	if err != nil {
 		return err
 	}
+	lease := newPipelineSlotLease(s.acquirePipelineSlot, releaseSlot)
 	s.inFlightPipelines.Go(func() {
-		defer releaseSlot()
+		defer lease.Release()
 		procStart := s.now()
 		var procErr error
-		procCtx := withEventID(ctx, eventID)
+		procCtx := withPipelineSlotLease(withEventID(ctx, eventID), lease)
 		if strings.TrimSpace(subject) == DefaultEventSubject {
 			procErr = s.handleDefaultSubjectEvent(procCtx, payload)
 		} else {
@@ -271,9 +275,10 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 				mu.Unlock()
 				return
 			}
-			defer releaseSlot()
+			lease := newPipelineSlotLease(s.acquirePipelineSlot, releaseSlot)
+			defer lease.Release()
 
-			if err := s.handleEvent(ctx, eventPayload); err != nil {
+			if err := s.handleEvent(withPipelineSlotLease(ctx, lease), eventPayload); err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = err
@@ -991,6 +996,14 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}()
 
+	if s.offPeakOnly(ctx, evt.RecordID) {
+		ctx = withOffPeakHold(ctx)
+		if s.Logger != nil {
+			s.Logger.Info("auto_offpeak input: LLM processors wait for off-peak hours",
+				"record_id", evt.RecordID, "peak_hours_name", s.OffPeak.WindowName)
+		}
+	}
+
 	var allProcResults []procResult
 
 	// Always run the blocking processor first, regardless of requested operations.
@@ -1024,6 +1037,17 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// The event's force/force_clear ride along on the context the same way the
 	// chunk-batch coordinator threads them, so phase_d.go can honor "Force Run"
 	// (a Phase A/B processor instead re-parses the payload it is handed).
+	if hasPostProcessIndexers(processors) {
+		if err := s.holdForOffPeak(ctx, evt.RecordID); err != nil {
+			if isCtxStopped(ctx) {
+				requestStopped = true
+				return nil
+			}
+			requestFailed = true
+			firstErr = err
+			return err
+		}
+	}
 	s.runPostProcessIndexing(withDocProcessorFlags(ctx, evt.Force, evt.ForceClear), processors, evt.RecordID)
 
 	pipelineMSUsed := time.Since(requestStart).Milliseconds()
@@ -1220,7 +1244,15 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 	}
 	s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "active", "")
 	s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
-	if err := p.HandleEvent(ctx, payload); err != nil {
+	var err error
+	if processorUsesLLM(p.Name()) {
+		err = s.holdForOffPeak(ctx, recordID, processorName)
+		procStart = s.now() // ms_used excludes time spent held
+	}
+	if err == nil {
+		err = p.HandleEvent(ctx, payload)
+	}
+	if err != nil {
 		res := procResult{failed: true, err: err, operation: processorName, msUsed: time.Since(procStart).Milliseconds()}
 		procStatus := "failed"
 		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {

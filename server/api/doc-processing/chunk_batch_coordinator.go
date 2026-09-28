@@ -64,8 +64,21 @@ func (s *ControlService) runProcessorsChunkBatched(
 	}
 
 	batchAsProcs := make([]Processor, len(batchProcessors))
+	batchNames := make([]string, len(batchProcessors))
 	for i, bp := range batchProcessors {
 		batchAsProcs[i] = bp.(Processor)
+		batchNames[i] = processorLogName(batchAsProcs[i])
+	}
+	if err := s.holdForOffPeak(ctx, recordID, batchNames...); err != nil {
+		if isCtxStopped(ctx) {
+			*requestStopped = true
+			return
+		}
+		*requestFailed = true
+		if *firstErr == nil {
+			*firstErr = err
+		}
+		return
 	}
 	_, phaseBSpan := startPhaseSpan(ctx, "B", recordID, batchAsProcs)
 	defer phaseBSpan.End()

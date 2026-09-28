@@ -229,6 +229,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	// environment with no classifier model configured behaves exactly as
 	// before -- ControlService simply carries no Resolver.
 	control.Resolver = buildProductionResolver(ApiTypes.ProjectDBHandle, logger)
+	control.OffPeak = NewOffPeakGateFromEnv(ApiTypes.ProjectDBHandle, logger)
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err

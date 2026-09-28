@@ -387,7 +387,7 @@ export type UploadKbInputsPayload = {
 	notes?: string;
 	ks_desc?: string;
 	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
-	processing_mode?: 'auto' | 'upload_only' | 'pdf_parsing';
+	processing_mode?: 'auto_offpeak' | 'auto' | 'upload_only' | 'pdf_parsing';
 	ks_store_id: number;
 	files: File[];
 };
@@ -405,7 +405,7 @@ export async function uploadKbInputs(
 	form.set('type', payload.type);
 	form.set('parser_name', payload.parser_name);
 	form.set('ks_store_id', String(payload.ks_store_id));
-	form.set('processing_mode', payload.processing_mode ?? 'auto');
+	form.set('processing_mode', payload.processing_mode ?? 'auto_offpeak');
 	if (payload.title?.trim()) form.set('title', payload.title.trim());
 	if (payload.doc_no?.trim()) form.set('doc_no', payload.doc_no.trim());
 	if (payload.authors?.trim()) form.set('authors', payload.authors.trim());
@@ -456,7 +456,7 @@ export async function listPendingFiles(): Promise<ListPendingFilesResponse> {
 
 export type ClaimPendingFilesPayload = {
 	filenames: string[];
-	processing_mode?: 'auto' | 'upload_only' | 'pdf_parsing';
+	processing_mode?: 'auto_offpeak' | 'auto' | 'upload_only' | 'pdf_parsing';
 	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
 	ks_store_id: number;
 };
