@@ -359,7 +359,7 @@
         const type = typeFromExtension(uploadFile.name);
         if (!type) { uploadError = 'Unsupported file type.'; return; }
         const activeStore = knowledgeStoreState.activeStore;
-        if (!activeStore?.tenant_id?.trim()) {
+        if (!activeStore) {
             uploadError = 'Select an active knowledge store before uploading.';
             return;
         }
@@ -372,7 +372,6 @@
                 title: uploadFile.name,
                 parser_name: uploadParser,
                 ks_store_id: activeStore.id,
-                tenant_id: activeStore.tenant_id,
                 files: [uploadFile],
             });
             const newId = result.ids?.[0];
