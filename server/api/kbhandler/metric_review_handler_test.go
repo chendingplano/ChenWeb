@@ -1,0 +1,159 @@
+package kbhandler
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestBuildMetricReviewInput_FormatsLinesAndMetrics(t *testing.T) {
+	h := metricReviewDocHeader{RecordID: 416, Title: "农村生活垃圾分类处理规范", DocNo: "DB33/T"}
+	lines := []rawLine{
+		{LineNumber: 50, LineType: "paragraph", Content: "农村生活垃圾分为四大类"},
+		{LineNumber: 126, LineType: "table", Content: "<table>...</table>"},
+	}
+	metrics := []metricReviewInputMetric{{MetricID: "416_mtc_2", MetricName: "分类类别数", MetricValue: "4"}}
+
+	text, err := buildMetricReviewInput(h, lines, metrics)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"record_id: 416",
+		"title: 农村生活垃圾分类处理规范",
+		"L50\tparagraph\t农村生活垃圾分为四大类\n",
+		"L126\ttable\t<table>...</table>\n",
+		"METRICS\n",
+		`"metric_id": "416_mtc_2"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("input missing %q\n---\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "value_min") {
+		t.Errorf("null value_min should be omitted")
+	}
+}
+
+func TestBuildMetricReviewInput_TooLarge(t *testing.T) {
+	big := strings.Repeat("字", metricReviewMaxInputChars)
+	_, err := buildMetricReviewInput(metricReviewDocHeader{RecordID: 1},
+		[]rawLine{{LineNumber: 1, LineType: "paragraph", Content: big}},
+		[]metricReviewInputMetric{{MetricID: "1_mtc_1"}})
+	if err == nil || !strings.Contains(err.Error(), "document too large") {
+		t.Fatalf("want document-too-large error, got %v", err)
+	}
+}
+
+func TestFinalizeMetricReview_TallyAndFiltering(t *testing.T) {
+	metrics := []metricReviewInputMetric{
+		{MetricID: "m1", MetricName: "a", SourceLineSpans: json.RawMessage(`["50"]`)},
+		{MetricID: "m2", MetricName: "b"},
+		{MetricID: "m3", MetricName: "c"},
+		{MetricID: "m4", MetricName: "d"},
+		{MetricID: "m5", MetricName: "e"},
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(`{
+		"summary": "ok",
+		"tally": {"stored": 999},
+		"missed_metrics": [{"lines": 123, "name": "x", "value": 60, "severity": "HIGH"}],
+		"non_metrics": [
+			{"metric_ids": ["m1", "ghost"], "category": "not_metric", "reason": "slogan"},
+			{"metric_ids": ["m2"], "category": "duplicate", "duplicate_of": "m3"},
+			{"metric_ids": ["m1", "m4"], "category": "formula_input"},
+			{"metric_ids": ["ghost2"], "category": "not_metric"},
+			{"metric_ids": ["m5"], "category": "weird", "duplicate_of": "m1"}
+		],
+		"attribute_issues": [
+			{"metric_ids": ["m3", "ghost"], "field": "condition", "severity": "bogus"},
+			{"metric_ids": ["ghost3"], "field": "unit"}
+		],
+		"recommendations": ["fix merge", "  "]
+	}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	report, dropped, err := finalizeMetricReview(payload, metrics)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := metricReviewTally{Stored: 5, Kept: 1, NotMetric: 2, Duplicate: 1, FormulaInput: 1, Missed: 1}
+	if report.Tally != want {
+		t.Errorf("tally = %+v, want %+v", report.Tally, want)
+	}
+	if strings.Join(dropped, ",") != "ghost,ghost2,ghost3" {
+		t.Errorf("dropped = %v", dropped)
+	}
+	if len(report.NonMetrics) != 4 {
+		t.Fatalf("non_metrics len = %d, want 4 (ghost-only entry removed)", len(report.NonMetrics))
+	}
+	if got := report.NonMetrics[0].MetricIDs; len(got) != 1 || got[0] != "m1" {
+		t.Errorf("unknown id not filtered: %v", got)
+	}
+	if report.NonMetrics[1].DuplicateOf != "m3" {
+		t.Errorf("duplicate_of lost: %q", report.NonMetrics[1].DuplicateOf)
+	}
+	if nm := report.NonMetrics[3]; nm.Category != "not_metric" || nm.DuplicateOf != "" {
+		t.Errorf("category/duplicate_of not normalised: %+v", nm)
+	}
+	if len(report.AttributeIssues) != 1 || report.AttributeIssues[0].Severity != "medium" {
+		t.Errorf("attribute issues = %+v", report.AttributeIssues)
+	}
+	if m := report.MissedMetrics[0]; m.Lines != "123" || m.Value != "60" || m.Severity != "high" {
+		t.Errorf("missed metric not normalised: %+v", m)
+	}
+	if len(report.Recommendations) != 1 {
+		t.Errorf("blank recommendation kept: %v", report.Recommendations)
+	}
+	if len(report.Metrics) != 5 || report.Metrics[0].Lines != "50" {
+		t.Errorf("snapshot = %+v", report.Metrics)
+	}
+}
+
+func TestFinalizeMetricReview_SchemaMismatch(t *testing.T) {
+	_, _, err := finalizeMetricReview(map[string]any{"non_metrics": "not-a-list"}, nil)
+	if err == nil {
+		t.Fatal("want schema error")
+	}
+}
+
+func TestShouldStartMetricReview(t *testing.T) {
+	cases := []struct {
+		name   string
+		latest *metricReviewRow
+		force  bool
+		want   bool
+	}{
+		{"none", nil, false, true},
+		{"done no force", &metricReviewRow{Status: metricReviewStatusDone}, false, false},
+		{"done force", &metricReviewRow{Status: metricReviewStatusDone}, true, true},
+		{"running force", &metricReviewRow{Status: metricReviewStatusRunning}, true, false},
+		{"failed no force", &metricReviewRow{Status: metricReviewStatusFailed}, false, true},
+	}
+	for _, tc := range cases {
+		if got := shouldStartMetricReview(tc.latest, tc.force); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestApplyStaleRunningStatus(t *testing.T) {
+	now := time.Now()
+	fresh := &metricReviewRow{Status: metricReviewStatusRunning, CreatedAt: now.Add(-time.Minute)}
+	applyStaleRunningStatus(fresh, now)
+	if fresh.Status != metricReviewStatusRunning {
+		t.Errorf("fresh run marked %s", fresh.Status)
+	}
+	stale := &metricReviewRow{Status: metricReviewStatusRunning, CreatedAt: now.Add(-metricReviewRunTimeout - time.Minute)}
+	applyStaleRunningStatus(stale, now)
+	if stale.Status != metricReviewStatusFailed || !strings.Contains(stale.ErrorMsg, "interrupted") {
+		t.Errorf("stale run = %+v", stale)
+	}
+	// A stale running row must not block a new review.
+	if !shouldStartMetricReview(stale, false) {
+		t.Error("stale run should allow a new review")
+	}
+}

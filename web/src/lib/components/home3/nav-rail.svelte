@@ -252,7 +252,8 @@
 						{ id: 'sysadmin-llm-model-profiles', label: 'Model Profiles' },
 						{ id: 'sysadmin-llm-models', label: 'LLM Models' },
 						{ id: 'sysadmin-llm-chat-sessions', label: 'Chad Sessions' },
-						{ id: 'sysadmin-llm-pi-sessions', label: 'Pi Sessions' }
+						{ id: 'sysadmin-llm-pi-sessions', label: 'Pi Sessions' },
+						{ id: 'sysadmin-llm-review-metrics', label: 'Review Metrics' }
 					]
 				},
 				{

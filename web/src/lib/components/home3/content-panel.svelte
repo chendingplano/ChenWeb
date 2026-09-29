@@ -26,6 +26,7 @@
 	import LLMModelProfilesView from '$lib/components/home3/llm-model-profiles-view.svelte';
 	import LLMModelsView from '$lib/components/home3/llm-models-view.svelte';
 	import ChadSessionsView from '$lib/components/home3/chad-sessions-view.svelte';
+	import MetricReviewView from '$lib/components/home3/metric-review-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
@@ -186,6 +187,7 @@
 			activeMenu?.childId !== 'sysadmin-db-resolve-metric-range-types' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-orphaned-labels' &&
 			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
+			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
@@ -304,6 +306,8 @@
 			<ChadSessionsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-pi-sessions'}
 			<ChadSessionsView {darkMode} harness="pi" />
+		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
+			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}
 			<DbConsistencyView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-clean-artifact-data'}
