@@ -59,3 +59,27 @@ For multi-step tasks, state a brief plan:
 # 2. Prompts
 * All prompts should be saved in `prompts`. File names must be prefixed with `prompt-` and endded with `-v<number>.md` (for markdown) or `_v<number>.txt` for other types. Example: `prompt-for-my-test-v1.md. Example: `prompt-for-my-test-v1.md`
 * NEVER hard-code prompts in code
+
+# 3. Internationalization (English + Chinese)
+Every page must work in English and Chinese. Decision and rationale: ADR
+`KnowledgeStore/doc-repo/adrs/202609/2026093001-adr-paraglide-standard-i18n.md`.
+
+* **All user-visible text goes through Paraglide.** In `.svelte` files write `{m.<key>()}` (import
+  `{ m } from '$lib/paraglide/messages.js'`), never literal text — this includes `placeholder`,
+  `title`, `aria-label`, `alt`, button labels, menu labels, empty/error/status messages, and strings
+  built in `<script>` that end up on screen.
+* **Add each key to both `web/messages/en.json` and `web/messages/zh-cn.json` in the same change**,
+  with a real Chinese translation (not a copy of the English). Prefix keys by page/feature (e.g.
+  `mrv_*` for Review Metrics, `nav_*` for the side menu). Use parameters (`{count}`) instead of
+  concatenating translated fragments.
+* **Do not add `kb.page_config` rows to translate text.** `kb.page_config` is only for
+  operator-controlled visibility, role-based access, and runtime label overrides.
+* **New menu item** in `nav-rail.svelte`: `label: m.nav_<id>()` (id with `-` → `_`) plus both keys.
+* **Verify with `bun run check`** (from `web/`). It fails when the two message files differ or when a
+  `.svelte` file has more hard-coded text than `web/i18n-baseline.json` allows (new files: zero).
+  `bun scripts/check-i18n.ts --list <file>` shows what it found. After converting a page, run
+  `bun scripts/check-i18n.ts --update` to lower its baseline — never to allow new hard-coded text.
+* **Text generated on the server** (LLM output, reports) is not covered by Paraglide: pass
+  `getLocale()` to the API and produce/store it per language (see Review Metrics, `lang`).
+* Locale in code: `getLocale()` from `$lib/paraglide/runtime` (`en` | `zh-cn`); a language switch
+  reloads the page.

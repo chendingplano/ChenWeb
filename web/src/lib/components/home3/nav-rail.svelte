@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getLocale } from '$lib/paraglide/runtime';
+	import { m } from '$lib/paraglide/messages.js';
 	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 
@@ -102,253 +103,264 @@
 	let accordionOpen = $state<Record<string, boolean>>({});
 	let subAccordionOpen = $state<Record<string, boolean>>({});
 
-	// Nav item definitions
+	// Group headings. `group` stays an English id (it is compared between items);
+	// only its display text is localised.
+	const GROUP_LABEL: Record<string, string> = {
+		Workspace: m.nav_group_workspace(),
+		'System Admin': m.nav_group_system_admin(),
+		Personal: m.nav_group_personal(),
+		Resources: m.nav_group_resources()
+	};
+
+	// Nav item definitions. Labels are Paraglide messages (nav_<id>) in en and
+	// zh-cn; kb.page_config can still override a label per language, and still
+	// controls visibility/access (spec 2026072001 §11, ADR 2026093001).
 	const mainNav: NavItem[] = [
 		{
 			id: 'dashboard',
-			label: 'Dashboard',
+			label: m.nav_dashboard(),
 			icon: LayoutDashboardIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'doc-processor-dashboard', label: 'Doc Processor' },
-				{ id: 'llm-activities', label: 'LLM Activities' }
+				{ id: 'doc-processor-dashboard', label: m.nav_doc_processor_dashboard() },
+				{ id: 'llm-activities', label: m.nav_llm_activities() }
 			]
 		},
-		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon, group: 'Workspace' },
-		{ id: 'agent-services', label: 'Knowledge Desk', icon: BookMarkedIcon, group: 'Workspace', href: '/home3/agent-services' },
+		{ id: 'chat', label: m.nav_chat(), icon: MessageSquareIcon, group: 'Workspace' },
+		{ id: 'agent-services', label: m.nav_agent_services(), icon: BookMarkedIcon, group: 'Workspace', href: '/home3/agent-services' },
 		{
 			id: 'agents',
-			label: 'Agents',
+			label: m.nav_agents(),
 			icon: BotIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'agents-my', label: 'My Agents' },
-				{ id: 'agents-browse', label: 'Browse Library' },
-				{ id: 'agents-create', label: 'Create Agent' }
+				{ id: 'agents-my', label: m.nav_agents_my() },
+				{ id: 'agents-browse', label: m.nav_agents_browse() },
+				{ id: 'agents-create', label: m.nav_agents_create() }
 			]
 		},
 		{
 			id: 'skills',
-			label: 'Skills',
+			label: m.nav_skills(),
 			icon: ZapIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'skills-all', label: 'All Skills' },
-				{ id: 'skills-active', label: 'Active' },
-				{ id: 'skills-create', label: 'New Skill' }
+				{ id: 'skills-all', label: m.nav_skills_all() },
+				{ id: 'skills-active', label: m.nav_skills_active() },
+				{ id: 'skills-create', label: m.nav_skills_create() }
 			]
 		},
 		{
 			id: 'applications',
-			label: 'Applications',
+			label: m.nav_applications(),
 			icon: LayoutGridIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'apps-installed', label: 'Installed' },
-				{ id: 'apps-browse', label: 'Browse' },
-				{ id: 'apps-configure', label: 'Configure' },
-				{ id: 'apps-generate-doc', label: 'Generate Doc' },
-				{ id: 'apps-document-review', label: 'Document Review' },
-				{ id: 'apps-product-review', label: 'Product Review' }
+				{ id: 'apps-installed', label: m.nav_apps_installed() },
+				{ id: 'apps-browse', label: m.nav_apps_browse() },
+				{ id: 'apps-configure', label: m.nav_apps_configure() },
+				{ id: 'apps-generate-doc', label: m.nav_apps_generate_doc() },
+				{ id: 'apps-document-review', label: m.nav_apps_document_review() },
+				{ id: 'apps-product-review', label: m.nav_apps_product_review() }
 			]
 		},
 		{
 			id: 'coding',
-			label: 'Coding Assistant',
+			label: m.nav_coding(),
 			icon: CodeIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'coding-review', label: 'Code Review' },
-				{ id: 'coding-gen', label: 'Code Generation' },
-				{ id: 'coding-debug', label: 'Debugger' }
+				{ id: 'coding-review', label: m.nav_coding_review() },
+				{ id: 'coding-gen', label: m.nav_coding_gen() },
+				{ id: 'coding-debug', label: m.nav_coding_debug() }
 			]
 		},
 		{
 			id: 'personal',
-			label: 'Personal Assistant',
+			label: m.nav_personal(),
 			icon: UserIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'personal-tasks', label: 'Tasks' },
-				{ id: 'personal-calendar', label: 'Calendar' },
-				{ id: 'personal-email', label: 'Email' }
+				{ id: 'personal-tasks', label: m.nav_personal_tasks() },
+				{ id: 'personal-calendar', label: m.nav_personal_calendar() },
+				{ id: 'personal-email', label: m.nav_personal_email() }
 			]
 		},
 		{
 			id: 'knowledge',
-			label: 'Knowledge System',
+			label: m.nav_knowledge(),
 			icon: BookOpenIcon,
 			group: 'Workspace',
 			href: '/home3/knowledge'
 		},
 		{
 			id: 'knowledge-engineering',
-			label: 'Knowledge Engineering',
+			label: m.nav_knowledge_engineering(),
 			icon: BrainIcon,
 			group: 'Workspace',
-			children: [{ id: 'ke-research-topics', label: 'Research Topics' }]
+			children: [{ id: 'ke-research-topics', label: m.nav_ke_research_topics() }]
 		},
 		{
 			id: 'ontology',
-			label: 'Ontology',
+			label: m.nav_ontology(),
 			icon: LayersIcon,
 			group: 'Workspace',
-			children: [{ id: 'ontology-doc-facets', label: 'Doc Facets' }]
+			children: [{ id: 'ontology-doc-facets', label: m.nav_ontology_doc_facets() }]
 		},
 		{
 			id: 'tools',
-			label: 'Tools',
+			label: m.nav_tools(),
 			icon: WorkflowIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'kb-search-lab', label: 'KB Search Lab' },
-				{ id: 'flow', label: 'Flow' },
-				{ id: 'prompt-optimizer', label: 'Prompt Optimizer' },
-				{ id: 'openmetadata', label: 'OpenMetadata' },
-				{ id: 'cdm-editor', label: 'CDM Editor' }
+				{ id: 'kb-search-lab', label: m.nav_kb_search_lab() },
+				{ id: 'flow', label: m.nav_flow() },
+				{ id: 'prompt-optimizer', label: m.nav_prompt_optimizer() },
+				{ id: 'openmetadata', label: m.nav_openmetadata() },
+				{ id: 'cdm-editor', label: m.nav_cdm_editor() }
 			]
 		},
 		{
 			id: 'agent-platform',
-			label: 'Agent Platform',
+			label: m.nav_agent_platform(),
 			icon: BotIcon,
 			group: 'Workspace',
 			children: [
-				{ id: 'ap-board', label: 'Board' },
-				{ id: 'ap-agents', label: 'Agents' },
-				{ id: 'ap-projects', label: 'Projects' }
+				{ id: 'ap-board', label: m.nav_ap_board() },
+				{ id: 'ap-agents', label: m.nav_ap_agents() },
+				{ id: 'ap-projects', label: m.nav_ap_projects() }
 			]
 		},
 		{
 			id: 'system-admin',
-			label: 'System Admin',
+			label: m.nav_system_admin(),
 			icon: ShieldIcon,
 			group: 'System Admin',
 			children: [
 				{
 					id: 'jetstream',
-					label: 'JetStream',
+					label: m.nav_jetstream(),
 					children: [
-						{ id: 'sysadmin-jetstream-logs', label: 'JetStream Logs' },
-						{ id: 'sysadmin-jetstream-events', label: 'JetStream Events' },
-						{ id: 'sysadmin-jetstream-subjects', label: 'JetStream Subjects' }
+						{ id: 'sysadmin-jetstream-logs', label: m.nav_sysadmin_jetstream_logs() },
+						{ id: 'sysadmin-jetstream-events', label: m.nav_sysadmin_jetstream_events() },
+						{ id: 'sysadmin-jetstream-subjects', label: m.nav_sysadmin_jetstream_subjects() }
 					]
 				},
 				{
 					id: 'sysadmin-logs',
-					label: 'Logs',
+					label: m.nav_sysadmin_logs(),
 					children: [
-						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' },
-						{ id: 'sysadmin-llm-usage-logs', label: 'LLM Usage Logs' },
-						{ id: 'sysadmin-doc-review-logs', label: 'Doc Review Logs' }
+						{ id: 'sysadmin-doc-proc-logs', label: m.nav_sysadmin_doc_proc_logs() },
+						{ id: 'sysadmin-llm-usage-logs', label: m.nav_sysadmin_llm_usage_logs() },
+						{ id: 'sysadmin-doc-review-logs', label: m.nav_sysadmin_doc_review_logs() }
 					]
 				},
 				{
 					id: 'sysadmin-llm',
-					label: 'LLM',
+					label: m.nav_sysadmin_llm(),
 					children: [
-						{ id: 'sysadmin-llm-accounts', label: 'LLM Accounts' },
-						{ id: 'sysadmin-llm-embedding', label: 'Embedding' },
-						{ id: 'sysadmin-llm-model-profiles', label: 'Model Profiles' },
-						{ id: 'sysadmin-llm-models', label: 'LLM Models' },
-						{ id: 'sysadmin-llm-chat-sessions', label: 'Chad Sessions' },
-						{ id: 'sysadmin-llm-pi-sessions', label: 'Pi Sessions' },
-						{ id: 'sysadmin-llm-review-metrics', label: 'Review Metrics' }
+						{ id: 'sysadmin-llm-accounts', label: m.nav_sysadmin_llm_accounts() },
+						{ id: 'sysadmin-llm-embedding', label: m.nav_sysadmin_llm_embedding() },
+						{ id: 'sysadmin-llm-model-profiles', label: m.nav_sysadmin_llm_model_profiles() },
+						{ id: 'sysadmin-llm-models', label: m.nav_sysadmin_llm_models() },
+						{ id: 'sysadmin-llm-chat-sessions', label: m.nav_sysadmin_llm_chat_sessions() },
+						{ id: 'sysadmin-llm-pi-sessions', label: m.nav_sysadmin_llm_pi_sessions() },
+						{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() }
 					]
 				},
 				{
 					id: 'sysadmin-db',
-					label: 'Database Maintenance',
+					label: m.nav_sysadmin_db(),
 					children: [
-						{ id: 'sysadmin-db-consistency', label: 'Consistency Check' },
-						{ id: 'sysadmin-db-clean-artifact-data', label: 'Clean Artifact Data' },
-						{ id: 'sysadmin-db-maint-log', label: 'Maintenance Log' },
-						{ id: 'sysadmin-db-resolve-ambiguous', label: 'Resolve Ambiguous Objects' },
-						{ id: 'sysadmin-db-resolve-metric-range-types', label: 'Resolve Metric Range Types' },
-						{ id: 'sysadmin-db-resolve-orphaned-labels', label: 'Resolve Orphaned Labels' }
+						{ id: 'sysadmin-db-consistency', label: m.nav_sysadmin_db_consistency() },
+						{ id: 'sysadmin-db-clean-artifact-data', label: m.nav_sysadmin_db_clean_artifact_data() },
+						{ id: 'sysadmin-db-maint-log', label: m.nav_sysadmin_db_maint_log() },
+						{ id: 'sysadmin-db-resolve-ambiguous', label: m.nav_sysadmin_db_resolve_ambiguous() },
+						{ id: 'sysadmin-db-resolve-metric-range-types', label: m.nav_sysadmin_db_resolve_metric_range_types() },
+						{ id: 'sysadmin-db-resolve-orphaned-labels', label: m.nav_sysadmin_db_resolve_orphaned_labels() }
 					]
 				},
 				{
 					id: 'sysadmin-users',
-					label: 'Users and Accesses',
+					label: m.nav_sysadmin_users(),
 					children: [
-						{ id: 'sysadmin-user-management', label: 'User Management' },
-						{ id: 'sysadmin-role-management', label: 'Role Management' },
-						{ id: 'sysadmin-access-controls', label: 'Access Controls' }
+						{ id: 'sysadmin-user-management', label: m.nav_sysadmin_user_management() },
+						{ id: 'sysadmin-role-management', label: m.nav_sysadmin_role_management() },
+						{ id: 'sysadmin-access-controls', label: m.nav_sysadmin_access_controls() }
 					]
 				},
 				{
 					id: 'sysadmin-benchmark',
-					label: 'Benchmark',
-					children: [{ id: 'sysadmin-benchmark-setup', label: 'Setup' }]
+					label: m.nav_sysadmin_benchmark(),
+					children: [{ id: 'sysadmin-benchmark-setup', label: m.nav_sysadmin_benchmark_setup() }]
 				},
 				{
 					id: 'sysadmin-resources',
-					label: 'Resources',
+					label: m.nav_sysadmin_resources(),
 					children: [
-						{ id: 'sysadmin-resources-videos', label: 'Videos' },
-						{ id: 'sysadmin-resources-product-drawings', label: 'Generate 3D Product Drawings' },
+						{ id: 'sysadmin-resources-videos', label: m.nav_sysadmin_resources_videos() },
+						{ id: 'sysadmin-resources-product-drawings', label: m.nav_sysadmin_resources_product_drawings() },
 						{
 							id: 'sysadmin-resources-import-product-names',
-							label: 'Import Product Names',
+							label: m.nav_sysadmin_resources_import_product_names(),
 							children: [
-								{ id: 'sysadmin-resources-china-mechanical-product-names', label: 'Mechanical Product Names' }
+								{ id: 'sysadmin-resources-china-mechanical-product-names', label: m.nav_sysadmin_resources_china_mechanical_product_names() }
 							]
 						},
 						{
 							id: 'sysadmin-resources-external-terminology',
-							label: 'External Terminology Resources'
+							label: m.nav_sysadmin_resources_external_terminology()
 						},
 						{
 							id: 'sysadmin-resources-review-external-terminology',
-							label: 'Review External Resources'
+							label: m.nav_sysadmin_resources_review_external_terminology()
 						},
-						{ id: 'sysadmin-resources-sync-data', label: 'Sync Data' }
+						{ id: 'sysadmin-resources-sync-data', label: m.nav_sysadmin_resources_sync_data() }
 					]
 				},
 				{
 					id: 'sysadmin-keyword-normalization',
-					label: 'Keyword Normalization',
-					children: [{ id: 'sysadmin-keyword-rewrite-rules', label: 'Rewrite Rules' }]
+					label: m.nav_sysadmin_keyword_normalization(),
+					children: [{ id: 'sysadmin-keyword-rewrite-rules', label: m.nav_sysadmin_keyword_rewrite_rules() }]
 				},
 				{
 					id: 'sysadmin-doc-process-pipeline',
-					label: 'Doc Process Pipeline',
+					label: m.nav_sysadmin_doc_process_pipeline(),
 					children: [
-						{ id: 'sysadmin-doc-process-dag', label: 'Doc Process DAG' },
-						{ id: 'sysadmin-doc-process-processors', label: 'Doc Processors' },
-						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: 'Semantic Decision Candidates' },
-						{ id: 'sysadmin-doc-process-semantic-assertions', label: 'Semantic Assertions' },
-						{ id: 'sysadmin-doc-process-assertion-evidence', label: 'Assertion Evidence' },
-						{ id: 'sysadmin-doc-process-semantic-retry-queue', label: 'Semantic Retry Queue' }
+						{ id: 'sysadmin-doc-process-dag', label: m.nav_sysadmin_doc_process_dag() },
+						{ id: 'sysadmin-doc-process-processors', label: m.nav_sysadmin_doc_process_processors() },
+						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: m.nav_sysadmin_doc_process_semantic_decision_candidates() },
+						{ id: 'sysadmin-doc-process-semantic-assertions', label: m.nav_sysadmin_doc_process_semantic_assertions() },
+						{ id: 'sysadmin-doc-process-assertion-evidence', label: m.nav_sysadmin_doc_process_assertion_evidence() },
+						{ id: 'sysadmin-doc-process-semantic-retry-queue', label: m.nav_sysadmin_doc_process_semantic_retry_queue() }
 					]
 				},
 				{
 					id: 'sysadmin-system',
-					label: 'System',
+					label: m.nav_sysadmin_system(),
 					children: [
-						{ id: 'sysadmin-system-calendar', label: 'Calendar' },
-						{ id: 'sysadmin-system-peak-hours', label: 'Peak Hours' },
-						{ id: 'sysadmin-system-releases', label: 'Releases' },
-						{ id: 'sysadmin-system-prices', label: 'Price Management' },
-						{ id: 'sysadmin-schedules', label: 'Schedules' },
-						{ id: 'sysadmin-page-config', label: 'Page Config' }
+						{ id: 'sysadmin-system-calendar', label: m.nav_sysadmin_system_calendar() },
+						{ id: 'sysadmin-system-peak-hours', label: m.nav_sysadmin_system_peak_hours() },
+						{ id: 'sysadmin-system-releases', label: m.nav_sysadmin_system_releases() },
+						{ id: 'sysadmin-system-prices', label: m.nav_sysadmin_system_prices() },
+						{ id: 'sysadmin-schedules', label: m.nav_sysadmin_schedules() },
+						{ id: 'sysadmin-page-config', label: m.nav_sysadmin_page_config() }
 					]
 				}
 			]
 		},
 		{
 			id: 'my-workspace',
-			label: 'My Workspace',
+			label: m.nav_my_workspace(),
 			icon: BookMarkedIcon,
 			group: 'Personal',
-			children: [{ id: 'diary', label: 'Diary' }]
+			children: [{ id: 'diary', label: m.nav_diary() }]
 		}
 	];
 
 	const bottomNav: NavItem[] = [
-		{ id: 'settings', label: 'Settings', icon: SettingsIcon },
-		{ id: 'about', label: 'About', icon: InfoIcon }
+		{ id: 'settings', label: m.nav_settings(), icon: SettingsIcon },
+		{ id: 'about', label: m.nav_about(), icon: InfoIcon }
 	];
 
 	// Resources page (pageKey='resources') gets its own menu tree, rendered in
@@ -359,20 +371,20 @@
 	const resourcesNav: NavItem[] = [
 		{
 			id: 'documents',
-			label: 'Documents',
+			label: m.nav_documents(),
 			icon: FolderIcon,
 			group: 'Resources',
 			children: [
 				{ id: 'docs-users-manual', label: "User's Manual" },
-				{ id: 'docs-development', label: 'Development' }
+				{ id: 'docs-development', label: m.nav_docs_development() }
 			]
 		},
 		{
 			id: 'videos',
-			label: 'Videos',
+			label: m.nav_videos(),
 			icon: VideoIcon,
 			group: 'Resources',
-			children: [{ id: 'videos-training', label: 'Training' }]
+			children: [{ id: 'videos-training', label: m.nav_videos_training() }]
 		}
 	];
 
@@ -601,7 +613,7 @@
 	>
 		{#if showLabels}
 			<div class="flex w-full items-center justify-between px-1">
-				<span style="font-size:13px; font-weight:600; color:{accent};">Navigation</span>
+				<span style="font-size:13px; font-weight:600; color:{accent};">{m.nav_rail_title()}</span>
 				<button
 					onclick={onToggleRail}
 					class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
@@ -653,7 +665,7 @@
 						class="px-2 py-2 text-xs tracking-wide uppercase"
 						style="color:{textMuted}; font-weight:600;"
 					>
-						{item.group}
+						{GROUP_LABEL[item.group] ?? item.group}
 					</div>
 				{/if}
 				<!-- Parent item button -->
@@ -885,7 +897,7 @@
 									(e.currentTarget as HTMLElement).style.color = textMuted;
 									(e.currentTarget as HTMLElement).style.background = 'transparent';
 								}}
-								aria-label="User menu"
+								aria-label={m.nav_user_menu()}
 							>
 								<MoreHorizontalIcon class="h-4 w-4" />
 							</button>
@@ -896,20 +908,20 @@
 							onclick={() => onSelect({ itemId: '__user_info__', itemTitle: 'User Info' })}
 						>
 							<UserCircle2Icon class="mr-2 h-4 w-4" />
-							User Info
+							{m.nav_user_info()}
 						</DropdownMenu.Item>
 						<DropdownMenu.Item
 							disabled
 						>
 							<CreditCardIcon class="mr-2 h-4 w-4" />
-							Account
+							{m.nav_account()}
 						</DropdownMenu.Item>
 						<DropdownMenu.Separator />
 						<DropdownMenu.Item
 							onclick={() => onSelect({ itemId: '__logout__', itemTitle: 'Logout' })}
 						>
 							<LogOutIcon class="mr-2 h-4 w-4" />
-							Log Out
+							{m.nav_log_out()}
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
@@ -923,7 +935,7 @@
 							{...props}
 							class="flex h-9 w-full cursor-pointer items-center justify-center rounded-lg"
 							style="background:{accentTint}; color:{accent}; font-size:11px; font-weight:600;"
-							aria-label="User menu"
+							aria-label={m.nav_user_menu()}
 							title={user.name}
 						>
 							{user.name
@@ -938,20 +950,20 @@
 						onclick={() => onSelect({ itemId: '__user_info__', itemTitle: 'User Info' })}
 					>
 						<UserCircle2Icon class="mr-2 h-4 w-4" />
-						User Info
+						{m.nav_user_info()}
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
 						disabled
 					>
 						<CreditCardIcon class="mr-2 h-4 w-4" />
-						Account
+						{m.nav_account()}
 					</DropdownMenu.Item>
 					<DropdownMenu.Separator />
 					<DropdownMenu.Item
 						onclick={() => onSelect({ itemId: '__logout__', itemTitle: 'Logout' })}
 					>
 						<LogOutIcon class="mr-2 h-4 w-4" />
-						Log Out
+						{m.nav_log_out()}
 					</DropdownMenu.Item>
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
