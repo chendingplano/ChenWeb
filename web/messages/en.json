@@ -223,5 +223,6 @@
 	"mrv_empty": "(empty)",
 	"mrv_sev_high": "high",
 	"mrv_sev_medium": "medium",
-	"mrv_sev_low": "low"
+	"mrv_sev_low": "low",
+	"mrv_translate_failed": "Translation failed ({time}): {error}"
 }

@@ -54,7 +54,10 @@ reason `review_metrics_translate`.
 
 **D5 — GET tells the page what else exists.** `GET ...?lang=X` returns
 `{review, other_langs}` where `other_langs` lists languages ≠ X that have a done review.
-The page shows a translate prompt when `review` is null and `other_langs` is non-empty;
+`other_langs` is filled when `review` is null **or failed** — a failed translation (first
+seen live: the env var was missing until `mise dev` restarted) must stay retryable
+without a full re-review. The page shows a translate prompt in both cases when
+`other_langs` is non-empty;
 the user confirms with a **Translate** button (or can run a fresh Review instead).
 
 **D6 — Export is client-side.** The report is already on the page, so no endpoint.

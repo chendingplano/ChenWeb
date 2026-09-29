@@ -33,6 +33,10 @@ be stored as a new review in the current language that references its source rev
 - **WHEN** the user ignores the prompt
 - **THEN** no LLM call is made
 
+#### Scenario: Failed translation can be retried
+- **WHEN** the latest review in the current language is a failed translation (or any failed review) and a done review exists in another language
+- **THEN** the page shows the failure (as a translation failure when it was one) together with the translate prompt, so the user can translate again without running a full review
+
 #### Scenario: Partial translation output
 - **WHEN** the LLM omits some strings
 - **THEN** those fields keep the source text and the translation still completes

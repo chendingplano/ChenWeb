@@ -223,5 +223,6 @@
 	"mrv_empty": "（空）",
 	"mrv_sev_high": "高",
 	"mrv_sev_medium": "中",
-	"mrv_sev_low": "低"
+	"mrv_sev_low": "低",
+	"mrv_translate_failed": "翻译失败（{time}）：{error}"
 }

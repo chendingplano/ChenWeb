@@ -105,9 +105,10 @@
 		pollTimer = setTimeout(async () => {
 			if (selected?.id !== recordId) return;
 			try {
-				const { review: r } = await getMetricReview(recordId, lang);
+				const { review: r, otherLangs: ol } = await getMetricReview(recordId, lang);
 				if (selected?.id !== recordId) return;
 				review = r;
+				otherLangs = ol;
 				if (r?.status === 'running') schedulePoll(recordId);
 			} catch (e) {
 				reviewError = e instanceof Error ? e.message : String(e);
@@ -284,6 +285,24 @@
 
 <svelte:window onclick={() => (exportOpen = false)} />
 
+{#snippet translateBanner()}
+	<div
+		class="flex flex-wrap items-center gap-3 rounded-lg p-3 text-sm"
+		style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"
+	>
+		<LanguagesIcon class="w-4 h-4 flex-shrink-0" style="color:{accent};" />
+		<span class="flex-1 min-w-0">
+			{m.mrv_translate_prompt({ lang: langLabel(lang), others: otherLangs.map(langLabel).join(', ') })}
+		</span>
+		<button
+			onclick={runTranslate}
+			disabled={starting}
+			class="rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer disabled:opacity-50"
+			style="background:{accent}; color:#fff;">{m.mrv_translate()}</button
+		>
+	</div>
+{/snippet}
+
 {#snippet severityBadge(s: string)}
 	<span
 		class="rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
@@ -438,21 +457,7 @@
 							<CircleAlertIcon class="w-4 h-4" />{reviewError}
 						</p>
 					{:else if !review && otherLangs.length > 0}
-						<div
-							class="flex flex-wrap items-center gap-3 rounded-lg p-3 text-sm"
-							style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"
-						>
-							<LanguagesIcon class="w-4 h-4 flex-shrink-0" style="color:{accent};" />
-							<span class="flex-1 min-w-0">
-								{m.mrv_translate_prompt({ lang: langLabel(lang), others: otherLangs.map(langLabel).join(', ') })}
-							</span>
-							<button
-								onclick={runTranslate}
-								disabled={starting}
-								class="rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer disabled:opacity-50"
-								style="background:{accent}; color:#fff;">{m.mrv_translate()}</button
-							>
-						</div>
+						{@render translateBanner()}
 					{:else if !review}
 						<p class="text-sm" style="color:{textSecondary};">{m.mrv_not_reviewed()}</p>
 					{:else if review.status === 'running'}
@@ -465,8 +470,16 @@
 					{:else if review.status === 'failed'}
 						<p class="flex items-start gap-2 text-sm" style="color:{danger};">
 							<CircleAlertIcon class="w-4 h-4 mt-0.5 flex-shrink-0" />
-							<span>{m.mrv_failed({ time: fmtTime(review.created_at), error: review.error_msg ?? '' })}</span>
+							<span
+								>{(review.translated_from_id ? m.mrv_translate_failed : m.mrv_failed)({
+									time: fmtTime(review.created_at),
+									error: review.error_msg ?? ''
+								})}</span
+							>
 						</p>
+						{#if otherLangs.length > 0}
+							{@render translateBanner()}
+						{/if}
 					{:else}
 						<p class="text-xs" style="color:{textMuted};">
 							{m.mrv_reviewed()}

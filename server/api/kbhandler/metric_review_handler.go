@@ -88,7 +88,7 @@ type metricReviewResponse struct {
 	// Started is true when the POST launched a new LLM run.
 	Started bool `json:"started,omitempty"`
 	// OtherLangs (GET only) lists the other languages that have a done review,
-	// so the page can offer a translation when Review is nil.
+	// so the page can offer a translation when Review is nil or failed.
 	OtherLangs []string `json:"other_langs,omitempty"`
 }
 
@@ -234,7 +234,9 @@ func GetMetricReview(c echo.Context) error {
 		applyStaleRunningStatus(row, time.Now())
 	}
 	resp := metricReviewResponse{Status: true, Review: row}
-	if row == nil {
+	// Offer a translation when there is no usable review in lang: none, or the
+	// latest one failed (e.g. a failed translation, which must stay retryable).
+	if row == nil || row.Status == metricReviewStatusFailed {
 		if resp.OtherLangs, err = loadOtherMetricReviewLangs(ctx, db, recordID, lang); err != nil {
 			logger.Error("load other review languages failed", "record_id", recordID, "lang", lang, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load review (CWB_KB_MRV_121)"})
@@ -540,7 +542,7 @@ func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 		InputText:  inputText,
 		RecordID:   recordID,
 		CallReason: "review_metrics",
-		CallLoc:    "MID-CWB-REVIEW-METRICS",
+		CallLoc:    "MID-20260929-05",
 	})
 	if err != nil {
 		return metricReviewReport{}, cfg.ModelName, promptName, fmt.Errorf("LLM call failed (CWB_KB_MRV_321): %w", err)
@@ -906,7 +908,7 @@ func executeMetricReviewTranslation(ctx context.Context, logger ApiTypes.JimoLog
 		InputText:  string(inputJSON),
 		RecordID:   recordID,
 		CallReason: "review_metrics_translate",
-		CallLoc:    "MID-CWB-REVIEW-METRICS-TRANSLATE",
+		CallLoc:    "MID-20260929-04",
 	})
 	if err != nil {
 		return report, cfg.ModelName, promptName, fmt.Errorf("LLM call failed (CWB_KB_MRV_444): %w", err)
