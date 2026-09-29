@@ -839,6 +839,7 @@ func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matc
 	if len(matches) == 0 {
 		return
 	}
+	tableRows := r.loadMatchedMetricTableRows(ctx, matches)
 	linesByRecord := make(map[int64][]Line)
 	failedRecords := make(map[int64]bool)
 	for idx, list := range matches {
@@ -867,13 +868,63 @@ func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matc
 				}
 				linesByRecord[list[i].recordID] = lines
 			}
-			list[i].context = artifactSourceContextLines(lines, spans)
+			list[i].context = artifactSourceContextLinesWithRows(lines, spans, tableRows[list[i].view.MetricID])
 		}
 		matches[idx] = list
 	}
 }
 
+// loadMatchedMetricTableRows fetches kb.metrics.source_table_rows for the matched
+// metrics in one query. Failures are logged and yield no row refs (whole tables are
+// then shown as numbered rows).
+func (r *metricsReviewer) loadMatchedMetricTableRows(ctx context.Context, matches map[int][]matchedMetric) map[string][]docprocessing.TableRowRef {
+	out := map[string][]docprocessing.TableRowRef{}
+	if r.db == nil {
+		return out
+	}
+	var ids []string
+	for _, list := range matches {
+		for _, m := range list {
+			if m.view.MetricID != "" {
+				ids = append(ids, m.view.MetricID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT metric_id, source_table_rows::text
+FROM kb.metrics
+WHERE metric_id = ANY($1) AND source_table_rows IS NOT NULL`, pq.Array(ids))
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("metrics review: table row refs unavailable", "error", err)
+		}
+		return out
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			continue
+		}
+		if refs := docprocessing.ParseTableRowRefs(raw); len(refs) > 0 {
+			out[id] = refs
+		}
+	}
+	return out
+}
+
 func artifactSourceContextLines(lines []Line, spans []string) []map[string]any {
+	return artifactSourceContextLinesWithRows(lines, spans, nil)
+}
+
+// artifactSourceContextLinesWithRows is artifactSourceContextLines with table lines
+// rendered for the LLM: when refs cite rows of a table line, that line becomes the
+// header + cited rows + ±1 neighbor rows (openspec change table-row-context);
+// otherwise the whole table is shown as numbered rows instead of raw HTML.
+func artifactSourceContextLinesWithRows(lines []Line, spans []string, refs []docprocessing.TableRowRef) []map[string]any {
 	if len(lines) == 0 || len(spans) == 0 {
 		return nil
 	}
@@ -906,9 +957,17 @@ func artifactSourceContextLines(lines []Line, spans []string) []map[string]any {
 	out := make([]map[string]any, 0, len(include))
 	for _, ln := range lines {
 		if include[ln.LineNo] {
+			content := ln.Content
+			if ln.LineType == "table" {
+				if w, ok := docprocessing.BuildTableContextWindow(ln.LineNo, ln.Content, "", refs, docprocessing.TableContextRadius); ok {
+					content = w.RenderNumbered()
+				} else {
+					content = docprocessing.LLMLineContent(ln.LineType, ln.LineNo, ln.Content)
+				}
+			}
 			out = append(out, map[string]any{
 				"line_number": ln.LineNo,
-				"content":     ln.Content,
+				"content":     content,
 			})
 		}
 	}

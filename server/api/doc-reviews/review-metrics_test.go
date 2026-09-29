@@ -641,3 +641,24 @@ func TestArtifactSourceContextLines(t *testing.T) {
 		t.Fatalf("context did not include actual range line 22: %v", got)
 	}
 }
+
+func TestArtifactSourceContextLinesWithRows_TableWindow(t *testing.T) {
+	table := `<table><tr><td>项目</td><td>要求</td></tr><tr><td>A</td><td>a</td></tr><tr><td>B</td><td>b</td></tr><tr><td>C</td><td>c</td></tr><tr><td>D</td><td>d</td></tr></table>`
+	lines := []Line{
+		{LineNo: 10, LineType: "table-caption", Content: "表1 要求"},
+		{LineNo: 11, LineType: "table", Content: table},
+	}
+	got := artifactSourceContextLinesWithRows(lines, []string{"11"}, []docprocessing.TableRowRef{{Line: 11, Rows: []string{"r3"}}})
+	if len(got) != 2 {
+		t.Fatalf("got %d lines", len(got))
+	}
+	want := "11#h0: 项目 | 要求\n11#r2: B | b\n11#r3 (matched): C | c\n11#r4: D | d"
+	if got[1]["content"] != want {
+		t.Fatalf("table content =\n%v\nwant\n%s", got[1]["content"], want)
+	}
+	// Without refs the whole table is numbered rows, never raw HTML.
+	got = artifactSourceContextLines(lines, []string{"11"})
+	if c := got[1]["content"].(string); strings.Contains(c, "<td>") || !strings.HasPrefix(c, "11#h0: 项目 | 要求") {
+		t.Fatalf("no-ref content = %q", c)
+	}
+}

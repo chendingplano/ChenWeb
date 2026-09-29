@@ -486,7 +486,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v5.md",
+		"prompt-enrich-metrics-v6.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -721,6 +721,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		allMetrics[i] = m
 	}
 	canonicalizeMetricValueRangeTypes(allMetrics)
+	p.applyTableMetricContextsForRecord(rec, evt.RecordID, allMetrics)
 
 	inserted, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
 		InputRecordID: evt.RecordID,
@@ -1518,6 +1519,7 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 			"metric_name":           "string",
 			"metric_name_en":        "string",
 			"source_line_spans":     []string{"5", "12:14"},
+			"source_table_rows":     []string{"116#r1"},
 			"subject":               "string",
 			"subject_en":            "string",
 			"desc":                  "string",
@@ -1612,6 +1614,9 @@ func normalizeMetricList(items []any) []map[string]any {
 			normalized["objects"] = objects
 		}
 		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"])
+		if refs := tableRowRefsFromValue(raw["source_table_rows"]); len(refs) > 0 {
+			normalized["source_table_rows"] = refs
+		}
 		out = append(out, normalized)
 	}
 	return out
@@ -1699,7 +1704,7 @@ func metricCandidateHasNormalEvidence(block Block, spans []string, quote string)
 }
 
 func parseMetricLineSpan(span string) (int, int, bool) {
-	span = strings.TrimSpace(span)
+	span = stripTableRowRefs(strings.TrimSpace(span))
 	if span == "" {
 		return 0, 0, false
 	}
@@ -2722,7 +2727,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v5.md"
+		promptRef = "prompt-enrich-metrics-v6.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -2869,7 +2874,8 @@ SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_sub
        value_data_type, value_range_type, value_class, value_class_en,
        formula_or_definition, threshold_or_target, measurement_frequency,
 	       metric_categories, metric_categories_en, category_paths, category_paths_en,
-	       keyword_concept_id, metric_definition_term_id, subject_concept_id, ext_info
+	       keyword_concept_id, metric_definition_term_id, subject_concept_id, ext_info,
+	       source_table_rows
 FROM kb.metrics
 WHERE input_record_id = $1`
 	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
@@ -2887,12 +2893,13 @@ WHERE input_record_id = $1`
 			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn     sql.NullString
 			keywordConceptID, metricDefinitionTermID, subjectConceptID                   sql.NullString
 			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
+			tableRowsJSON                                                                sql.NullString
 		)
 		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,
 			&desc, &descEn, &ctx1, &ctxEn, &keywordsJSON, &keywordsEnJSON, &unit, &unitEn, &value,
 			&valueDataType, &valueRangeType, &valueClass, &valueClassEn, &formula, &threshold, &freq,
 			&categories, &categoriesEn, &catPaths, &catPathsEn, &keywordConceptID,
-			&metricDefinitionTermID, &subjectConceptID, &extInfoJSON); err != nil {
+			&metricDefinitionTermID, &subjectConceptID, &extInfoJSON, &tableRowsJSON); err != nil {
 			return nil, err
 		}
 		m := map[string]any{
@@ -2949,6 +2956,9 @@ WHERE input_record_id = $1`
 			var ext map[string]any
 			_ = json.Unmarshal([]byte(extInfoJSON.String), &ext)
 			m["ext_info"] = ext
+		}
+		if refs := parseTableRowRefs(tableRowsJSON.String); len(refs) > 0 {
+			m["source_table_rows"] = refs
 		}
 		out = append(out, m)
 	}
@@ -3008,10 +3018,11 @@ INSERT INTO kb.metrics (
 	ext_info,
 	keyword_concept_id,
 	metric_definition_term_id,
-	subject_concept_id
+	subject_concept_id,
+	source_table_rows
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40,$41::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -3120,6 +3131,7 @@ VALUES (
 			keywordConceptIDVal,
 			metricDefTermIDVal,
 			subjectConceptIDVal,
+			sourceTableRowsSQLValue(metric["source_table_rows"]),
 		)
 		if err != nil {
 			return inserted, err
@@ -3154,10 +3166,11 @@ INSERT INTO kb.metrics (
 	metric_value, value_data_type, value_range_type, value_class, value_class_en, formula_or_definition,
 	threshold_or_target, measurement_frequency, confidence, is_explicit_metric, table_name_or_section,
 	reasoning_tags, metric_categories, metric_categories_en, category_paths, category_paths_en,
-	search_document, ext_info, keyword_concept_id, metric_definition_term_id, subject_concept_id
+	search_document, ext_info, keyword_concept_id, metric_definition_term_id, subject_concept_id,
+	source_table_rows
 ) VALUES (
 	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,
-	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40
+	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40,$41::jsonb
 )
 ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE SET
 	metric_name = EXCLUDED.metric_name, metric_name_en = EXCLUDED.metric_name_en,
@@ -3175,7 +3188,8 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 	category_paths_en = EXCLUDED.category_paths_en, search_document = EXCLUDED.search_document,
 	ext_info = EXCLUDED.ext_info, keyword_concept_id = EXCLUDED.keyword_concept_id,
 	metric_definition_term_id = EXCLUDED.metric_definition_term_id,
-	subject_concept_id = EXCLUDED.subject_concept_id`
+	subject_concept_id = EXCLUDED.subject_concept_id,
+	source_table_rows = EXCLUDED.source_table_rows`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
 		strings.EqualFold(strings.TrimSpace(req.Language), "english")
@@ -3247,6 +3261,7 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 			string(metricCategoriesJSON), string(metricCategoriesEnJSON), string(categoryPathsJSON),
 			string(categoryPathsEnJSON), searchDocument, string(extInfo),
 			keywordConceptIDVal, metricDefTermIDVal, subjectConceptIDVal,
+			sourceTableRowsSQLValue(metric["source_table_rows"]),
 		)
 		if err != nil {
 			return affected, err
@@ -3295,7 +3310,8 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 		       COALESCE(category_paths, '[]'::jsonb),
 		       COALESCE(category_paths_en, '[]'::jsonb),
 		       COALESCE(search_document, ''),
-		       kb.connected_artifacts(input_record_id, 'metric', id)
+		       kb.connected_artifacts(input_record_id, 'metric', id),
+		       COALESCE(source_table_rows::text, '')
 		FROM kb.metrics
 		WHERE input_record_id = $1
 		ORDER BY id`, recordID)
@@ -3327,6 +3343,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			categoryPathsRaw, categoryPathsEnRaw      []byte
 			searchDocument                            string
 			connectedArtifactsRaw                     []byte
+			sourceTableRowsRaw                        string
 		)
 		if err := rows.Scan(
 			&metricID, &metricName, &metricNameEn,
@@ -3347,6 +3364,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			&categoryPathsRaw, &categoryPathsEnRaw,
 			&searchDocument,
 			&connectedArtifactsRaw,
+			&sourceTableRowsRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -3384,6 +3402,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			"category_paths_en":     jsonColumnToValue(categoryPathsEnRaw, []any{}),
 			"search_document":       strings.TrimSpace(searchDocument),
 			"connected_artifacts":   jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"source_table_rows":     parseTableRowRefs(sourceTableRowsRaw),
 		})
 	}
 	return out, rows.Err()
@@ -3679,6 +3698,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			m["metric_id"] = fmt.Sprintf("%d_mtc_%d", p.batchRecordID, i+1)
 			metrics[i] = m
 		}
+		p.applyTableMetricContextsForRecord(rec, p.batchRecordID, metrics)
 		deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
 		p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
 			"deleted_rows", deleted, "new_count", len(metrics))
@@ -3727,6 +3747,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		return fmt.Errorf("(MID_26071112) %s merge metrics: %w", p.Name(), err)
 	}
 	if len(dirty) > 0 {
+		p.applyTableMetricContextsForRecord(rec, p.batchRecordID, dirty)
 		inserted, err := p.Store.UpsertMetrics(ctx, SaveMetricsRequest{
 			InputRecordID: p.batchRecordID,
 			EventID:       eventIDFromContext(ctx),
@@ -3975,6 +3996,7 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 				w = reconstructed
 			}
 			assignMergedMetricCandidateID(w, groupByID, absorbed)
+			unionAbsorbedTableRows(w, groupByID, absorbed)
 			action := "added"
 			if wasExisting {
 				action = "merged"

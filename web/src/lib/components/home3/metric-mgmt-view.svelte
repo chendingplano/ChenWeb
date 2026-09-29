@@ -16,6 +16,7 @@
 		type SourceLineSpan
 	} from '$lib/services/kbService';
 	import { searchKbMetrics, type KbMetricSearchResult } from '$lib/services/kbMetricSearch';
+	import { clipTableCell, splitTableContextRows } from './metric-table-context';
 	import {
 		buildMetricGroupAttrs,
 		normalizeMetricSpans,
@@ -1888,6 +1889,38 @@
 										{#if metric.metric_desc}
 											<div class="metric-floating-desc">{metric.metric_desc}</div>
 										{/if}
+										{#each metric.table_context ?? [] as win (win.line)}
+											{@const parts = splitTableContextRows(win)}
+											<div class="metric-floating-table-wrap">
+												{#if win.caption}
+													<div class="metric-floating-table-caption">{win.caption}</div>
+												{/if}
+												<table class="metric-floating-table">
+													<thead>
+														{#each parts.head as row (row.id)}
+															<tr>
+																{#each row.cells as cell, ci (ci)}<th>{cell}</th>{/each}
+															</tr>
+														{/each}
+													</thead>
+													<tbody>
+														{#each parts.body as row (row.id)}
+															<tr class:matched={row.matched}>
+																{#if row.full_width}
+																	<td colspan={win.columns.length} title={row.cells[0]}
+																		>{clipTableCell(row.cells[0])}</td
+																	>
+																{:else}
+																	{#each row.cells as cell, ci (ci)}
+																		<td title={cell}>{clipTableCell(cell)}</td>
+																	{/each}
+																{/if}
+															</tr>
+														{/each}
+													</tbody>
+												</table>
+											</div>
+										{/each}
 										<div class="metric-floating-meta">
 											{#if metric.metric_value}<span>{metric.metric_value}</span>{/if}
 											{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
@@ -3622,6 +3655,38 @@
 		line-height: 1.5;
 		color: var(--text-secondary);
 		max-width: 42ch;
+	}
+	.metric-floating-table-wrap {
+		max-width: min(640px, 70vw);
+		max-height: 260px;
+		overflow: auto;
+	}
+	.metric-floating-table-caption {
+		font-size: 11px;
+		color: var(--text-secondary);
+		margin-bottom: 4px;
+	}
+	.metric-floating-table {
+		border-collapse: collapse;
+		font-size: 11px;
+		line-height: 1.4;
+		color: var(--text-secondary);
+	}
+	.metric-floating-table th,
+	.metric-floating-table td {
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		padding: 3px 6px;
+		text-align: left;
+		vertical-align: top;
+	}
+	.metric-floating-table th {
+		color: var(--text-primary);
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.metric-floating-table tr.matched td {
+		color: var(--paper);
+		background: rgba(22, 163, 74, 0.16);
 	}
 	.doc-foot-hint {
 		font-size: 12px;

@@ -313,7 +313,7 @@ func validateSummaryLines(summaryID string, lines []string) error {
 }
 
 func parseSummaryLineSpan(span string) (int, int, bool) {
-	trimmed := strings.TrimSpace(strings.Trim(span, "[]"))
+	trimmed := stripTableRowRefs(strings.TrimSpace(strings.Trim(span, "[]")))
 	if trimmed == "" {
 		return 0, 0, false
 	}

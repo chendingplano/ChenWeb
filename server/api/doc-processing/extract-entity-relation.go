@@ -1019,7 +1019,7 @@ func normalizeEntityLineSpans(value any) []string {
 				spans = append(spans, span{n, n})
 			}
 		case string:
-			s := strings.TrimSpace(v)
+			s := stripTableRowRefs(strings.TrimSpace(v))
 			sep := strings.IndexAny(s, "-:")
 			if sep > 0 {
 				start, err1 := strconv.Atoi(strings.TrimSpace(s[:sep]))
@@ -1160,7 +1160,7 @@ func normalizeRelationRows(raw any, chunkSeqNo int) []map[string]any {
 // parseLineSpanRange parses a single span string ("14" or "14-16") into (start, end).
 // Returns (0, 0) on parse failure.
 func parseLineSpanRange(s string) (start, end int) {
-	s = strings.TrimSpace(s)
+	s = stripTableRowRefs(strings.TrimSpace(s))
 	sep := strings.IndexAny(s, "-:")
 	if sep > 0 {
 		a, err1 := strconv.Atoi(strings.TrimSpace(s[:sep]))

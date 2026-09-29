@@ -1078,7 +1078,7 @@ func normalizeProvisionSourceLineSpans(value any, lineToPage map[int]int) []stri
 				lineNumbers = append(lineNumbers, int(v))
 			}
 		case string:
-			s := strings.TrimSpace(v)
+			s := stripTableRowRefs(strings.TrimSpace(v))
 			if s == "" {
 				return
 			}

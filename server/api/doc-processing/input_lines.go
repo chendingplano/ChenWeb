@@ -11,6 +11,17 @@ type lineForLLM struct {
 	Content    string `json:"content"`
 }
 
+// llmLineContent is the content sent to LLMs for one line. Table lines (one whole
+// HTML table per line, as MinerU emits them) are rendered as numbered rows
+// ("116#r1: cell | cell"), so models can cite individual rows; all other lines pass
+// through unchanged. Line numbers are never altered.
+func llmLineContent(lineType string, lineNo int, content string) string {
+	if lineType != "table" {
+		return content
+	}
+	return renderTableLineContent(lineNo, content)
+}
+
 // blockLinesToJSON serialises []BlockLine as a JSON array for LLM input.
 func blockLinesToJSON(lines []BlockLine) string {
 	out := make([]lineForLLM, len(lines))
@@ -20,7 +31,7 @@ func blockLinesToJSON(lines []BlockLine) string {
 			LineNumber: l.LineNumber,
 			PageNumber: l.PageNumber,
 			LineType:   l.LineType,
-			Content:    l.Content,
+			Content:    llmLineContent(l.LineType, l.LineNumber, l.Content),
 		}
 	}
 	bs, _ := json.Marshal(out)
@@ -40,7 +51,7 @@ func markedLinesToJSON(lines []MarkedLine) string {
 			LineNumber: l.Line.LineNo,
 			PageNumber: l.Line.PageNo,
 			LineType:   l.Line.LineType,
-			Content:    l.Line.Content,
+			Content:    llmLineContent(l.Line.LineType, l.Line.LineNo, l.Line.Content),
 		})
 	}
 	bs, _ := json.Marshal(out)
@@ -72,7 +83,7 @@ func rawLinesToJSON(lines []Line) string {
 			LineNumber: l.LineNo,
 			PageNumber: l.PageNo,
 			LineType:   l.LineType,
-			Content:    l.Content,
+			Content:    llmLineContent(l.LineType, l.LineNo, l.Content),
 		})
 	}
 	bs, _ := json.Marshal(out)

@@ -68,6 +68,12 @@ type metricRecord struct {
 	// spec 2026080403 §19 step 12.
 	KeywordConceptID       *string `json:"keyword_concept_id,omitempty"`
 	MetricDefinitionTermID *string `json:"metric_definition_term_id,omitempty"`
+	// SourceTableRows is kb.metrics.source_table_rows: the table rows this metric
+	// came from (openspec change table-row-context).
+	SourceTableRows json.RawMessage `json:"source_table_rows,omitempty"`
+	// TableContext is built at read time from SourceTableRows: header + matched rows
+	// + one neighbor data row either side. Never stored.
+	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
 }
 
 type listMetricsResponse struct {
@@ -164,7 +170,8 @@ SELECT
     ao.object_name,
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
-    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error
+    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
+    m.source_table_rows
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -199,6 +206,7 @@ ORDER BY m.id ASC
 			keywordsBytes   []byte
 			keywordsEnBytes []byte
 			reasoningBytes  []byte
+			tableRowsBytes  []byte
 			confidence      sql.NullFloat64
 			isExplicit      sql.NullBool
 		)
@@ -212,6 +220,7 @@ ORDER BY m.id ASC
 			&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
 			&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
+			&tableRowsBytes,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -231,6 +240,9 @@ ORDER BY m.id ASC
 		if len(reasoningBytes) > 0 {
 			r.ReasoningTags = json.RawMessage(reasoningBytes)
 		}
+		if len(tableRowsBytes) > 0 {
+			r.SourceTableRows = json.RawMessage(tableRowsBytes)
+		}
 		if confidence.Valid {
 			v := confidence.Float64
 			r.Confidence = &v
@@ -248,6 +260,7 @@ ORDER BY m.id ASC
 			ErrorMsg: "failed to iterate kb metrics (CWB_KB_M_022)",
 		})
 	}
+	attachMetricTableContexts(c.Request().Context(), db, inputID, out, logger)
 	sort.SliceStable(out, func(i, j int) bool {
 		left := firstMetricSourceLine(out[i].SourceLineSpans)
 		right := firstMetricSourceLine(out[j].SourceLineSpans)
@@ -262,6 +275,34 @@ ORDER BY m.id ASC
 		Results: out,
 		Total:   len(out),
 	})
+}
+
+// attachMetricTableContexts fills TableContext for metrics that carry table-row
+// references. The record's line file is read once, and only when at least one metric
+// needs it; a failure is logged and leaves TableContext empty.
+func attachMetricTableContexts(ctx context.Context, db *sql.DB, inputID int64, metrics []metricRecord, logger ApiTypes.JimoLogger) {
+	need := false
+	for i := range metrics {
+		if len(metrics[i].SourceTableRows) > 0 {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	lines, err := docprocessing.LoadRecordLinesByID(ctx, db, inputID)
+	if err != nil {
+		logger.Warn("table context: record lines unavailable", "input_record_id", inputID, "err", err)
+		return
+	}
+	for i := range metrics {
+		if len(metrics[i].SourceTableRows) == 0 {
+			continue
+		}
+		refs := docprocessing.ParseTableRowRefs(string(metrics[i].SourceTableRows))
+		metrics[i].TableContext = docprocessing.TableContextWindows(lines, refs)
+	}
 }
 
 func fetchMetricByID(db *sql.DB, id int64) (metricRecord, error) {
@@ -279,7 +320,8 @@ SELECT
     ao.object_name,
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
-    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error
+    m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
+    m.source_table_rows
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -301,6 +343,7 @@ WHERE m.id = $1
 		keywordsBytes   []byte
 		keywordsEnBytes []byte
 		reasoningBytes  []byte
+		tableRowsBytes  []byte
 		confidence      sql.NullFloat64
 		isExplicit      sql.NullBool
 	)
@@ -314,9 +357,13 @@ WHERE m.id = $1
 		&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
 		&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
+		&tableRowsBytes,
 	)
 	if err != nil {
 		return metricRecord{}, err
+	}
+	if len(tableRowsBytes) > 0 {
+		r.SourceTableRows = json.RawMessage(tableRowsBytes)
 	}
 	if len(spansBytes) > 0 {
 		r.SourceLineSpans = json.RawMessage(spansBytes)

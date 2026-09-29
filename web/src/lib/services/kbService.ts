@@ -8,6 +8,7 @@ import type {
 	SummaryRecordCard,
 	SummaryTreeRecord
 } from '$lib/components/home3/summary-types';
+import type { TableContextWindow } from '$lib/components/home3/metric-table-context';
 
 const BASE = '/api/v1/kb';
 
@@ -239,6 +240,8 @@ export type KbMetricRecord = {
 	keyword_concept_id?: string | null;
 	metric_definition_term_id?: string | null;
 	value_range_type_error?: string | null;
+	source_table_rows?: { line: number; rows: string[]; row_hash?: Record<string, string> }[] | null;
+	table_context?: TableContextWindow[];
 };
 
 export type ListKbMetricsResponse = {

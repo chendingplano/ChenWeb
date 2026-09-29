@@ -547,7 +547,26 @@ func mergeStaticMetric(existing, candidate map[string]any) map[string]any {
 		merged[key] = value
 	}
 	merged["metric_id"] = existing["metric_id"]
+	if refs := mergeTableRowRefs(append(tableRowRefsFromValue(existing["source_table_rows"]),
+		tableRowRefsFromValue(candidate["source_table_rows"])...)); len(refs) > 0 {
+		merged["source_table_rows"] = refs
+	}
 	return merged
+}
+
+// unionAbsorbedTableRows adds the table-row references of every absorbed metric to
+// the merge winner, so a winner that absorbs metrics from other rows of the same
+// table keeps pointing at all of them.
+func unionAbsorbedTableRows(winner map[string]any, groupByID map[string]map[string]any, absorbed []any) {
+	refs := tableRowRefsFromValue(winner["source_table_rows"])
+	for _, a := range absorbed {
+		if g, ok := groupByID[asString(a)]; ok {
+			refs = append(refs, tableRowRefsFromValue(g["source_table_rows"])...)
+		}
+	}
+	if merged := mergeTableRowRefs(refs); len(merged) > 0 {
+		winner["source_table_rows"] = merged
+	}
 }
 
 func cloneMetricMap(m map[string]any) map[string]any {

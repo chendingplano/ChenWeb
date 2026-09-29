@@ -1686,7 +1686,7 @@ func mentionHasNormalEvidence(block Block, spans []string, quote string) bool {
 }
 
 func parseCompactLineSpan(span string) (int, int, bool) {
-	span = strings.TrimSpace(span)
+	span = stripTableRowRefs(strings.TrimSpace(span))
 	if span == "" {
 		return 0, 0, false
 	}

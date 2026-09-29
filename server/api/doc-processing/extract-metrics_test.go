@@ -1490,6 +1490,7 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			nil,
+			nil, // source_table_rows: no table row references
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -1562,7 +1563,8 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
@@ -1622,6 +1624,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
 		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en",
 		"keyword_concept_id", "metric_definition_term_id", "subject_concept_id", "ext_info",
+		"source_table_rows",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1631,6 +1634,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"", "<=200", "daily",
 		`["performance"]`, `["performance"]`, `[{"category_path":[{"name":"System Safety"},{"name":"Alarm Thresholds"}]}]`, `[{"category_path":[{"name":"System Safety"}]}]`,
 		"kwc:latency", "mdt:latency", "kwc:api", `{"language":"zh","schema_version":"2"}`,
+		`[{"line":116,"rows":["r1"],"row_hash":{"r1":"3fa1c09b7e22"}}]`,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).
@@ -1676,6 +1680,10 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 	catPathsEn, ok := row["category_paths_en"].([]any)
 	if !ok || len(catPathsEn) != 1 {
 		t.Fatalf("category_paths_en=%#v, want non-empty []any", row["category_paths_en"])
+	}
+	refs, ok := row["source_table_rows"].([]TableRowRef)
+	if !ok || len(refs) != 1 || refs[0].Line != 116 || refs[0].Rows[0] != "r1" || refs[0].RowHash["r1"] != "3fa1c09b7e22" {
+		t.Fatalf("source_table_rows=%#v", row["source_table_rows"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
