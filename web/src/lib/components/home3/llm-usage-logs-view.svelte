@@ -256,7 +256,7 @@
 	}
 
 	function renderJsonHtml(value: unknown, depth: number): string {
-		const indent = depth * 16;
+		const indent = depth * 8;
 
 		if (value === null) return `<span style="color:${textMuted}; font-family:monospace; font-size:12px;">null</span>`;
 		if (typeof value === 'boolean') return `<span style="color:${accent}; font-family:monospace; font-size:12px;">${value}</span>`;
@@ -270,12 +270,12 @@
 			return value.map((item, i) => {
 				const isComplex = item !== null && typeof item === 'object';
 				if (isComplex) {
-					return `<div style="padding-left:${indent + 16}px; margin-top:4px;">
+					return `<div style="padding-left:${indent + 8}px; margin-top:4px;">
 						<div style="color:${textMuted}; font-size:11px; font-family:monospace; margin-bottom:2px;">[${i}]</div>
 						${renderJsonHtml(item, depth + 1)}
 					</div>`;
 				}
-				return `<div style="display:flex; gap:12px; padding-left:${indent + 16}px; padding-top:1px; padding-bottom:1px; align-items:flex-start;">
+				return `<div style="display:flex; gap:8px; padding-left:${indent + 8}px; padding-top:1px; padding-bottom:1px; align-items:flex-start;">
 					<span style="color:${textMuted}; font-size:11px; font-family:monospace; flex-shrink:0;">[${i}]</span>
 					${renderJsonHtml(item, depth + 1)}
 				</div>`;
@@ -286,16 +286,20 @@
 			const entries = Object.entries(value as Record<string, unknown>);
 			if (entries.length === 0) return `<span style="color:${textMuted}; font-size:12px;">—</span>`;
 			return entries.map(([k, v]) => {
-				const isComplex = v !== null && typeof v === 'object';
+				let renderedValue = v;
+				if (k === 'content' && typeof v === 'string' && typeof (value as Record<string, unknown>).role === 'string') {
+					try { renderedValue = JSON.parse(v); } catch { /* Keep non-JSON content as a string. */ }
+				}
+				const isComplex = renderedValue !== null && typeof renderedValue === 'object';
 				if (isComplex) {
 					return `<div style="padding-left:${indent}px; margin-top:5px;">
 						<div style="color:${textMuted}; font-size:12px; font-family:monospace; font-weight:500; margin-bottom:2px;">${escHtml(k)}</div>
-						${renderJsonHtml(v, depth + 1)}
+						${renderJsonHtml(renderedValue, depth + 1)}
 					</div>`;
 				}
-				return `<div style="display:flex; align-items:flex-start; gap:16px; padding-left:${indent}px; padding-top:2px; padding-bottom:2px;">
+				return `<div style="display:flex; align-items:flex-start; gap:10px; padding-left:${indent}px; padding-top:2px; padding-bottom:2px;">
 					<span style="color:${textMuted}; font-family:monospace; font-size:12px; min-width:130px; flex-shrink:0;">${escHtml(k)}</span>
-					${renderJsonHtml(v, depth)}
+					${renderJsonHtml(renderedValue, depth)}
 				</div>`;
 			}).join('');
 		}
@@ -568,13 +572,13 @@
 
 <!-- Body viewer modal -->
 {#if modalVisible}
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center p-6"
 		style="background:{overlay};"
-		onclick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+		onpointerdown={(e) => { if (e.target === e.currentTarget) closeModal(); }}
 	>
-		<div class="rounded-xl flex flex-col" style="background:{cardBg}; border:1px solid {borderColor}; width:min(900px,100%); max-height:80vh;">
+		<div class="rounded-xl flex flex-col" style="background:{cardBg}; border:1px solid {borderColor}; width:min(900px, calc(100vw - 3rem)); height:min(80vh, 760px); min-width:min(420px, calc(100vw - 3rem)); min-height:min(240px, calc(100vh - 3rem)); max-width:calc(100vw - 3rem); max-height:calc(100vh - 3rem); resize:both; overflow:hidden;">
 			<!-- Modal header -->
 			<div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid {borderColor};">
 				<span style="font-size:14px; font-weight:600; color:{textPrimary}; font-family:monospace;">{modalTitle}</span>
