@@ -1591,7 +1591,10 @@
 							<div class="card-rule" aria-hidden="true"></div>
 							<div class="card-body">
 								<div class="card-row-top">
-									<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-index">
+										⌕ {String(idx + 1).padStart(3, '0')}
+										{#if result.metric_id}<span class="card-metric-id">· {result.metric_id}</span>{/if}
+									</div>
 									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
 								</div>
 								<div class="card-name">{result.primary_label}</div>
@@ -1641,7 +1644,10 @@
 							<div class="card-rule" aria-hidden="true"></div>
 							<div class="card-body">
 								<div class="card-row-top">
-									<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-index">
+										№ {String(idx + 1).padStart(3, '0')}
+										{#if m.metric_id}<span class="card-metric-id">· {m.metric_id}</span>{/if}
+									</div>
 									<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
 								</div>
 								<div class="card-name">{metricNameOf(m)}</div>
@@ -1871,6 +1877,9 @@
 												<span class="metric-floating-confidence"
 													>{Math.round(Number(metric.confidence) * 100)}%</span
 												>
+											{/if}
+											{#if metric.metric_id}
+												<span class="metric-floating-metric-id">{metric.metric_id}</span>
 											{/if}
 										</div>
 										<div class="metric-floating-name">
@@ -2949,6 +2958,13 @@
 		color: var(--text-muted);
 		text-transform: uppercase;
 	}
+	.card-metric-id {
+		text-transform: none;
+		letter-spacing: 0.02em;
+	}
+	.metric-floating-metric-id {
+		text-transform: none;
+	}
 	.card-conf {
 		font-family: var(--font-mono);
 		font-size: 11px;
@@ -3585,6 +3601,7 @@
 	}
 	.metric-floating-id,
 	.metric-floating-confidence,
+	.metric-floating-metric-id,
 	.metric-floating-meta span {
 		padding: 3px 7px;
 		border-radius: 999px;
