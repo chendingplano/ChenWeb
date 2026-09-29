@@ -101,6 +101,16 @@
 	let searchHasRun = $state(false);
 	let searchTotal = $state(0);
 	let searchPage = $state<number>(KB_METRIC_SEARCH_DEFAULTS.page);
+	// Global Metric Search dialog: every result seen this session (across
+	// pages) and the ids still checked. New results arrive checked.
+	let globalSearchOpen = $state(false);
+	let searchSeen = $state.raw(new Map<number, KbMetricSearchResult>());
+	let searchCheckedIds = $state<Set<number>>(new Set());
+	// Metrics returned to the sidebar by the dialog's Select button; while
+	// non-empty they replace the current record's metric list.
+	let globalPicks = $state<KbMetricSearchResult[]>([]);
+	let metricIdQuery = $state('');
+	let metricIdError = $state('');
 	let metricNameDropdownValue = $state<number | ''>('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
@@ -855,6 +865,9 @@
 
 	function handleUserRecordSelect(record: KbInputRecord) {
 		if (currentInput?.id === record.id) return;
+		// Picking a record from the browser returns the sidebar to that
+		// record's metrics.
+		globalPicks = [];
 		currentInput = record;
 		void loadMetricsForRecord(record.id);
 	}
@@ -882,6 +895,27 @@
 		if (m) void selectMetric(m);
 	}
 
+	// Accepts the business metric_id (e.g. "28_mtc_213") or the numeric row id.
+	function findMetricById(raw: string): KbMetricRecord | undefined {
+		const q = raw.trim().toLowerCase();
+		if (!q) return undefined;
+		return metrics.find(
+			(m) => (m.metric_id ?? '').trim().toLowerCase() === q || String(m.id) === q
+		);
+	}
+
+	function jumpToMetricId(reportMiss: boolean) {
+		metricIdError = '';
+		const q = metricIdQuery.trim();
+		if (!q) return;
+		const m = findMetricById(q);
+		if (m) {
+			void selectMetric(m);
+		} else if (reportMiss) {
+			metricIdError = `No metric "${q}" in the current record.`;
+		}
+	}
+
 	function shortenLine(x1: number, y1: number, x2: number, y2: number, d1: number, d2: number) {
 		const dx = x2 - x1,
 			dy = y2 - y1;
@@ -893,13 +927,14 @@
 	}
 
 	async function loadMetricsForRecord(id: number) {
-		// A record selection must reset every panel-level filter and the global
-		// metric-search state, otherwise stale searchResults (or a stale
-		// confidence filter) keep hijacking the card list instead of showing
-		// this record's metrics.
+		// A record selection must reset every panel-level filter, otherwise a
+		// stale confidence filter keeps hiding this record's metrics. The global
+		// search dialog state and globalPicks are deliberately kept: clicking a
+		// picked metric from another record loads that record through here.
 		keywordFilter = '';
 		confidenceFilter = '';
-		clearMetricSearch();
+		metricIdQuery = '';
+		metricIdError = '';
 		errorMsg = '';
 		loading = true;
 		metrics = [];
@@ -962,6 +997,16 @@
 			searchResults = response.results ?? [];
 			searchTotal = response.total ?? 0;
 			searchPage = response.page ?? page;
+			// Results default to checked the first time they are seen; revisiting
+			// a page keeps whatever the user toggled.
+			const seen = new Map(searchSeen);
+			const checked = new Set(searchCheckedIds);
+			for (const r of searchResults) {
+				if (!seen.has(r.id)) checked.add(r.id);
+				seen.set(r.id, r);
+			}
+			searchSeen = seen;
+			searchCheckedIds = checked;
 		} catch (err) {
 			searchResults = [];
 			searchTotal = 0;
@@ -980,6 +1025,32 @@
 		searchHasRun = false;
 		searchTotal = 0;
 		searchPage = KB_METRIC_SEARCH_DEFAULTS.page;
+		searchSeen = new Map();
+		searchCheckedIds = new Set();
+	}
+
+	// A new query starts a fresh selection; Prev/Next paging keeps it.
+	function startMetricSearch() {
+		searchSeen = new Map();
+		searchCheckedIds = new Set();
+		void runMetricSearch();
+	}
+
+	function toggleSearchChecked(id: number) {
+		const checked = new Set(searchCheckedIds);
+		if (checked.has(id)) checked.delete(id);
+		else checked.add(id);
+		searchCheckedIds = checked;
+	}
+
+	function setAllSearchChecked(on: boolean) {
+		searchCheckedIds = on ? new Set(searchSeen.keys()) : new Set();
+	}
+
+	function confirmGlobalSearchSelection() {
+		globalPicks = [...searchSeen.values()].filter((r) => searchCheckedIds.has(r.id));
+		errorMsg = '';
+		globalSearchOpen = false;
 	}
 
 	async function handleMetricSearchResultClick(result: KbMetricSearchResult) {
@@ -1348,8 +1419,8 @@
 			<div class="left-meta">
 				<div class="left-meta-title">Metrics</div>
 				<div class="left-meta-count">
-					{#if metricSearchActive && searchHasRun}
-						{searchTotal} global hit{searchTotal === 1 ? '' : 's'}
+					{#if globalPicks.length > 0}
+						{globalPicks.length} global pick{globalPicks.length === 1 ? '' : 's'}
 					{:else}
 						{metrics.length} found
 					{/if}
@@ -1371,6 +1442,40 @@
 						<option value={m.id}>{metricNameOf(m)}</option>
 					{/each}
 				</select>
+				<div class="toolbar-kw-wrap">
+					<input
+						class="toolbar-kw-input"
+						type="text"
+						list="metric-ids-datalist"
+						placeholder="Search by Metric ID…"
+						title="Jump to a metric of the current record by metric ID (e.g. 28_mtc_213) or row ID. Press Enter to search."
+						bind:value={metricIdQuery}
+						oninput={() => jumpToMetricId(false)}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') jumpToMetricId(true);
+						}}
+					/>
+					<datalist id="metric-ids-datalist">
+						{#each metrics as m (m.id)}
+							{#if m.metric_id}<option value={m.metric_id}>{metricNameOf(m)}</option>{/if}
+						{/each}
+					</datalist>
+					{#if metricIdQuery}
+						<button
+							type="button"
+							class="toolbar-kw-clear"
+							onclick={() => {
+								metricIdQuery = '';
+								metricIdError = '';
+							}}
+							title="Clear metric ID"
+							aria-label="Clear metric ID">×</button
+						>
+					{/if}
+				</div>
+				{#if metricIdError}
+					<div class="metric-id-error" role="status">{metricIdError}</div>
+				{/if}
 				<div class="toolbar-kw-wrap">
 					<input
 						class="toolbar-kw-input"
@@ -1423,115 +1528,56 @@
 				</div>
 			</div>
 
-			<div class="search-panel">
-				<div class="search-panel-head">
-					<div class="search-panel-title">Global Metric Search</div>
-					<div class="search-panel-sub">
-						Search the whole `kb.metrics` corpus with agent-friendly filters.
-					</div>
-				</div>
-				<div class="search-grid">
-					<input
-						class="search-input search-query"
-						type="text"
-						placeholder="Search metrics, thresholds, units, keywords…"
-						bind:value={searchQuery}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') void runMetricSearch();
-						}}
-					/>
-					<input
-						class="search-input"
-						type="text"
-						placeholder="Record ID"
-						bind:value={searchFilters.inputRecordId}
-					/>
-					<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
-						<option value="">Explicit metric?</option>
-						<option value="true">Explicit only</option>
-						<option value="false">Implicit only</option>
-					</select>
-					<input
-						class="search-input"
-						type="text"
-						placeholder="Value class"
-						bind:value={searchFilters.valueClass}
-					/>
-					<input
-						class="search-input"
-						type="text"
-						placeholder="Value type"
-						bind:value={searchFilters.valueDataType}
-					/>
-					<input
-						class="search-input"
-						type="text"
-						placeholder="Metric unit"
-						bind:value={searchFilters.metricUnit}
-					/>
-				</div>
-				<div class="search-actions">
-					<button
-						type="button"
-						class="search-btn primary"
-						disabled={searchLoading}
-						onclick={() => void runMetricSearch()}
-					>
-						{searchLoading ? 'Searching…' : 'Search'}
-					</button>
-					<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
+			<div class="global-search-launch">
+				<button
+					type="button"
+					class="search-btn primary global-search-btn"
+					onclick={() => (globalSearchOpen = true)}
+					title="Search the whole kb.metrics corpus and pick metrics to list here"
+				>
+					Global Metric Search
+				</button>
+				{#if globalPicks.length > 0}
 					<button
 						type="button"
 						class="search-btn"
-						disabled={!currentInput}
-						onclick={() => {
-							searchFilters = {
-								...searchFilters,
-								inputRecordId: currentInput ? String(currentInput.id) : ''
-							};
-						}}>Use Current</button
+						onclick={() => (globalPicks = [])}
+						title="Return to the current record's metrics">Back to record</button
 					>
-				</div>
-				{#if searchError}
-					<div class="search-status">{searchError}</div>
-				{:else if metricSearchActive && searchHasRun}
-					<div class="search-status">
-						{searchTotal} result{searchTotal === 1 ? '' : 's'}
-						{#if searchQuery.trim()}for "{searchQuery.trim()}"{/if}
-						{#if searchTotalPages > 1}
-							· page {searchPage} / {searchTotalPages}
-							<button
-								type="button"
-								class="search-page-btn"
-								disabled={searchLoading || searchPage <= 1}
-								onclick={() => void runMetricSearch(searchPage - 1)}>Prev</button
-							>
-							<button
-								type="button"
-								class="search-page-btn"
-								disabled={searchLoading || searchPage >= searchTotalPages}
-								onclick={() => void runMetricSearch(searchPage + 1)}>Next</button
-							>
-						{/if}
-					</div>
 				{/if}
 			</div>
 
 			<div class="metrics-list">
 				{#if errorMsg}
 					<div class="error">{errorMsg}</div>
-				{:else if searchLoading}
-					<div class="empty">
-						<div class="empty-glyph">⌕</div>
-						<div class="empty-title">Searching metrics</div>
-						<div class="empty-sub">Ranking results across the full metrics corpus…</div>
-					</div>
-				{:else if metricSearchActive && searchHasRun && searchResults.length === 0}
-					<div class="empty">
-						<div class="empty-glyph">⌕</div>
-						<div class="empty-title">No global matches</div>
-						<div class="empty-sub">Try broader keywords or relax one of the semantic filters.</div>
-					</div>
+				{:else if globalPicks.length > 0}
+					{#each globalPicks as result, idx (result.id)}
+						<button
+							type="button"
+							class="metric-card"
+							class:selected={selectedMetricId === result.id}
+							onclick={() => handleMetricSearchResultClick(result)}
+						>
+							<div class="card-rule" aria-hidden="true"></div>
+							<div class="card-body">
+								<div class="card-row-top">
+									<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+								</div>
+								<div class="card-name">{result.primary_label}</div>
+								<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
+								<div class="card-foot">
+									<span class="chip">
+										<span class="chip-dot"></span>
+										record {result.input_record_id}
+									</span>
+									{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
+										<span class="chip chip-quiet">{chip}</span>
+									{/each}
+								</div>
+							</div>
+						</button>
+					{/each}
 				{:else if !loading && metrics.length === 0}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
@@ -1554,38 +1600,6 @@
 							{/if}
 						</div>
 					</div>
-				{:else if metricSearchActive && searchHasRun}
-					{#each searchResults as result, idx (result.id)}
-						<button
-							type="button"
-							class="metric-card"
-							class:selected={selectedMetricId === result.id}
-							onclick={() => handleMetricSearchResultClick(result)}
-						>
-							<div class="card-rule" aria-hidden="true"></div>
-							<div class="card-body">
-								<div class="card-row-top">
-									<div class="card-index">
-										⌕ {String(
-											(searchPage - 1) * KB_METRIC_SEARCH_DEFAULTS.pageSize + idx + 1
-										).padStart(3, '0')}
-									</div>
-									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
-								</div>
-								<div class="card-name">{result.primary_label}</div>
-								<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
-								<div class="card-foot">
-									<span class="chip">
-										<span class="chip-dot"></span>
-										record {result.input_record_id}
-									</span>
-									{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
-										<span class="chip chip-quiet">{chip}</span>
-									{/each}
-								</div>
-							</div>
-						</button>
-					{/each}
 				{:else}
 					{#each filteredMetrics as m, idx (m.id)}
 						<button
@@ -2029,6 +2043,222 @@
 			</div>
 		</section>
 	</div>
+	{#if globalSearchOpen}
+		<div
+			class="dialog-overlay"
+			aria-hidden="true"
+			onclick={() => (globalSearchOpen = false)}
+		>
+			<div
+				class="dialog gs-dialog"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Global metric search"
+				tabindex="0"
+				onclick={(e) => e.stopPropagation()}
+				onkeydown={(e) => {
+					e.stopPropagation();
+					if (e.key === 'Escape') globalSearchOpen = false;
+				}}
+			>
+				<div class="dialog-head">
+					<div>
+						<div class="dialog-eyebrow">KB.Metrics</div>
+						<h2 class="dialog-title">Global Metric Search</h2>
+						<p class="dialog-subtitle">
+							Search the whole `kb.metrics` corpus with agent-friendly filters. Results start
+							checked — uncheck any you do not want, then press Select to list them in the Metrics
+							panel.
+						</p>
+					</div>
+				</div>
+
+				<div class="dialog-controls">
+					<div class="dialog-section">
+						<div class="search-grid gs-grid">
+							<input
+								class="search-input search-query"
+								type="text"
+								placeholder="Search metrics, thresholds, units, keywords…"
+								bind:value={searchQuery}
+								onkeydown={(event) => {
+									if (event.key === 'Enter') startMetricSearch();
+								}}
+							/>
+							<input
+								class="search-input"
+								type="text"
+								placeholder="Record ID"
+								bind:value={searchFilters.inputRecordId}
+							/>
+							<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
+								<option value="">Explicit metric?</option>
+								<option value="true">Explicit only</option>
+								<option value="false">Implicit only</option>
+							</select>
+							<input
+								class="search-input"
+								type="text"
+								placeholder="Value class"
+								bind:value={searchFilters.valueClass}
+							/>
+							<input
+								class="search-input"
+								type="text"
+								placeholder="Value type"
+								bind:value={searchFilters.valueDataType}
+							/>
+							<input
+								class="search-input"
+								type="text"
+								placeholder="Metric unit"
+								bind:value={searchFilters.metricUnit}
+							/>
+						</div>
+						<div class="search-actions gs-actions">
+							<button
+								type="button"
+								class="search-btn primary"
+								disabled={searchLoading}
+								onclick={startMetricSearch}
+							>
+								{searchLoading ? 'Searching…' : 'Search'}
+							</button>
+							<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
+							<button
+								type="button"
+								class="search-btn"
+								disabled={!currentInput}
+								onclick={() => {
+									searchFilters = {
+										...searchFilters,
+										inputRecordId: currentInput ? String(currentInput.id) : ''
+									};
+								}}>Use Current</button
+							>
+						</div>
+					</div>
+				</div>
+
+				<div class="gs-body">
+					<div class="gs-results-head">
+						<div class="search-status">
+							{#if searchError}
+								{searchError}
+							{:else if metricSearchActive && searchHasRun}
+								{searchTotal} result{searchTotal === 1 ? '' : 's'}
+								{#if searchQuery.trim()}for "{searchQuery.trim()}"{/if}
+								{#if searchTotalPages > 1}
+									· page {searchPage} / {searchTotalPages}
+									<button
+										type="button"
+										class="search-page-btn"
+										disabled={searchLoading || searchPage <= 1}
+										onclick={() => void runMetricSearch(searchPage - 1)}>Prev</button
+									>
+									<button
+										type="button"
+										class="search-page-btn"
+										disabled={searchLoading || searchPage >= searchTotalPages}
+										onclick={() => void runMetricSearch(searchPage + 1)}>Next</button
+									>
+								{/if}
+							{:else}
+								Enter a query or set a filter, then press Search.
+							{/if}
+						</div>
+						{#if searchSeen.size > 0}
+							<div class="gs-bulk">
+								<span class="search-status"
+									>{searchCheckedIds.size} of {searchSeen.size} selected</span
+								>
+								<button
+									type="button"
+									class="search-page-btn"
+									disabled={searchCheckedIds.size === searchSeen.size}
+									onclick={() => setAllSearchChecked(true)}>Select all</button
+								>
+								<button
+									type="button"
+									class="search-page-btn"
+									disabled={searchCheckedIds.size === 0}
+									onclick={() => setAllSearchChecked(false)}>Deselect all</button
+								>
+							</div>
+						{/if}
+					</div>
+
+					{#if searchLoading}
+						<div class="empty">
+							<div class="empty-glyph">⌕</div>
+							<div class="empty-title">Searching metrics</div>
+							<div class="empty-sub">Ranking results across the full metrics corpus…</div>
+						</div>
+					{:else if searchHasRun && !searchError && searchResults.length === 0}
+						<div class="empty">
+							<div class="empty-glyph">⌕</div>
+							<div class="empty-title">No global matches</div>
+							<div class="empty-sub">Try broader keywords or relax one of the semantic filters.</div>
+						</div>
+					{:else}
+						<div class="gs-results">
+							{#each searchResults as result, idx (result.id)}
+								<label class="metric-card gs-row" class:selected={searchCheckedIds.has(result.id)}>
+									<input
+										type="checkbox"
+										class="gs-check"
+										checked={searchCheckedIds.has(result.id)}
+										onchange={() => toggleSearchChecked(result.id)}
+									/>
+									<div class="card-body">
+										<div class="card-row-top">
+											<div class="card-index">
+												⌕ {String(
+													(searchPage - 1) * KB_METRIC_SEARCH_DEFAULTS.pageSize + idx + 1
+												).padStart(3, '0')}
+												{#if result.metric_id}· {result.metric_id}{/if}
+											</div>
+											<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+										</div>
+										<div class="card-name">{result.primary_label}</div>
+										<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
+										<div class="card-foot">
+											<span class="chip">
+												<span class="chip-dot"></span>
+												record {result.input_record_id}
+											</span>
+											{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
+												<span class="chip chip-quiet">{chip}</span>
+											{/each}
+										</div>
+									</div>
+								</label>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				<div class="dialog-foot">
+					<div class="dialog-foot-hint">
+						Selections are kept while paging; a new search starts over.
+					</div>
+					<div class="dialog-foot-buttons">
+						<button
+							type="button"
+							class="am-btn-foot am-btn-foot-cancel"
+							onclick={() => (globalSearchOpen = false)}>Cancel</button
+						>
+						<button
+							type="button"
+							class="am-btn-foot dialog-search-btn"
+							disabled={searchCheckedIds.size === 0}
+							onclick={confirmGlobalSearchSelection}>Select ({searchCheckedIds.size})</button
+						>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 {#if addMetricOpen}
@@ -2542,37 +2772,6 @@
 	}
 	.metrics-list::-webkit-scrollbar-thumb {
 		background: var(--ink-line);
-	}
-
-	.search-panel {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		margin: 0 16px 14px;
-		padding: 14px;
-		border: 1px solid var(--ink-line);
-		border-radius: 18px;
-		background: linear-gradient(
-			180deg,
-			color-mix(in srgb, var(--panel-bg-alt) 88%, transparent),
-			var(--panel-bg)
-		);
-	}
-
-	.search-panel-head {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.search-panel-title {
-		font: 600 0.95rem/1.2 var(--font-sans);
-		color: var(--text-primary);
-	}
-
-	.search-panel-sub {
-		font: 500 0.78rem/1.35 var(--font-sans);
-		color: var(--text-muted);
 	}
 
 	.search-grid {
@@ -3587,6 +3786,86 @@
 		100% {
 			background: var(--crimson-faint);
 		}
+	}
+
+	/* ---- Global Metric Search launcher + dialog ---- */
+	.metric-id-error {
+		font: 500 0.74rem/1.3 var(--font-sans);
+		color: var(--crimson);
+	}
+	.global-search-launch {
+		display: flex;
+		gap: 8px;
+		margin: 0 16px 14px;
+	}
+	.global-search-btn {
+		flex: 1;
+	}
+	.gs-dialog {
+		min-width: 760px;
+		min-height: 560px;
+		max-width: 1000px;
+		overflow: hidden;
+	}
+	.gs-grid {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+	.gs-actions {
+		margin-top: 10px;
+	}
+	.gs-body {
+		flex: 1 1 auto;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 4px 28px 16px;
+	}
+	.gs-results-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.gs-bulk {
+		display: flex;
+		align-items: center;
+	}
+	.gs-results {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+	.gs-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+		padding-left: 14px;
+		cursor: pointer;
+	}
+	.gs-row.selected {
+		border-color: var(--brass);
+	}
+	.gs-row:not(.selected) {
+		opacity: 0.6;
+	}
+	.gs-check {
+		flex: 0 0 auto;
+		margin-top: 14px;
+		width: 16px;
+		height: 16px;
+		accent-color: var(--brass);
+		cursor: pointer;
+	}
+	.gs-row .card-body {
+		flex: 1;
+		min-width: 0;
 	}
 
 	/* ---------- Dialog ---------- */
