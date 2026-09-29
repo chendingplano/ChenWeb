@@ -12,6 +12,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
@@ -22,6 +23,17 @@ func newUploadInputsContext(t *testing.T, body *bytes.Buffer, contentType string
 	req.Header.Set(echo.HeaderContentType, contentType)
 	rec := httptest.NewRecorder()
 	return e.NewContext(req, rec), rec
+}
+
+// stubUploadUser makes IsAuthenticated return a user with the given ID;
+// UploadInputs takes kb.inputs.user_id from the session, not the form.
+func stubUploadUser(t *testing.T, userID string) {
+	t.Helper()
+	oldAuth := EchoFactory.DefaultAuthenticator
+	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+		return &ApiTypes.UserInfo{UserId: userID}, nil
+	}
+	t.Cleanup(func() { EchoFactory.DefaultAuthenticator = oldAuth })
 }
 
 func buildUploadMultipartBody(t *testing.T, fields map[string]string, files map[string]string) (*bytes.Buffer, string) {
@@ -52,6 +64,7 @@ func buildUploadMultipartBody(t *testing.T, fields map[string]string, files map[
 }
 
 func TestUploadInputsSuccess(t *testing.T) {
+	stubUploadUser(t, "user-alpha")
 	stagingDir := t.TempDir()
 	oldStagingDir := os.Getenv("UPLOAD_FILE_STAGING_DIR")
 	t.Setenv("UPLOAD_FILE_STAGING_DIR", stagingDir)
@@ -113,7 +126,7 @@ func TestUploadInputsSuccess(t *testing.T) {
 RETURNING id`)
 	mock.ExpectQuery(insertQuery).
 		WithArgs(
-			"tenant-alpha",
+			"user-alpha",
 			int64(7),
 			"narrative_default",
 			"auto",
@@ -144,7 +157,6 @@ RETURNING id`)
 		"ks_desc":            "client supplied desc",
 		"parser_name":        "docling",
 		"ks_store_id":        "7",
-		"tenant_id":          "tenant-alpha",
 		"requested_pipeline": "narrative_default",
 	}, map[string]string{
 		"sample.pdf": "hello world",
@@ -176,12 +188,12 @@ RETURNING id`)
 }
 
 func TestUploadInputsRequiresKnowledgeStore(t *testing.T) {
+	stubUploadUser(t, "user-alpha")
 	t.Setenv("UPLOAD_FILE_STAGING_DIR", t.TempDir())
 
 	body, contentType := buildUploadMultipartBody(t, map[string]string{
 		"type":        "pdf",
 		"parser_name": "docling",
-		"tenant_id":   "tenant-alpha",
 	}, map[string]string{
 		"sample.pdf": "hello world",
 	})
@@ -195,13 +207,13 @@ func TestUploadInputsRequiresKnowledgeStore(t *testing.T) {
 	}
 }
 
-func TestUploadInputsRejectsSentinelTenantID(t *testing.T) {
+func TestUploadInputsRejectsSentinelUserID(t *testing.T) {
 	t.Setenv("UPLOAD_FILE_STAGING_DIR", t.TempDir())
+	stubUploadUser(t, "-")
 
 	body, contentType := buildUploadMultipartBody(t, map[string]string{
 		"type":        "pdf",
 		"parser_name": "docling",
-		"tenant_id":   "-",
 		"ks_store_id": "7",
 	}, map[string]string{
 		"sample.pdf": "hello world",
@@ -211,12 +223,13 @@ func TestUploadInputsRejectsSentinelTenantID(t *testing.T) {
 	if err := UploadInputs(c); err != nil {
 		t.Fatalf("UploadInputs returned error: %v", err)
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for sentinel tenant_id \"-\", got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for sentinel user ID \"-\", got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestUploadInputsRequiresStagingDir(t *testing.T) {
+	stubUploadUser(t, "user-alpha")
 	oldStagingDir, had := os.LookupEnv("UPLOAD_FILE_STAGING_DIR")
 	if had {
 		defer os.Setenv("UPLOAD_FILE_STAGING_DIR", oldStagingDir)
@@ -228,7 +241,6 @@ func TestUploadInputsRequiresStagingDir(t *testing.T) {
 	body, contentType := buildUploadMultipartBody(t, map[string]string{
 		"type":        "pdf",
 		"parser_name": "docling",
-		"tenant_id":   "tenant-alpha",
 		"ks_store_id": "7",
 	}, map[string]string{
 		"sample.pdf": "hello world",

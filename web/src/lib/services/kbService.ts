@@ -338,7 +338,7 @@ export async function getKbInput(id: number): Promise<GetKbInputResponse> {
 }
 
 export type UpdateKbInputPayload = {
-	tenant_id?: string | null;
+	user_id?: string | null;
 	ks_store_id?: string | number | null;
 	title?: string | null;
 	doc_no?: string | null;
