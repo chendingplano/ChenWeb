@@ -713,6 +713,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/metric-value-range-type-map/apply", kbhandler.ApplyValueRangeTypeMapEntry)
 	apiGroup.GET("/kb/metric-reviews/:record_id", kbhandler.GetMetricReview)
 	apiGroup.POST("/kb/metric-reviews/:record_id", kbhandler.StartMetricReview)
+	apiGroup.POST("/kb/metric-reviews/:record_id/translate", kbhandler.TranslateMetricReview)
 	apiGroup.GET("/kb/artifacts/wiki", kbhandler.GetArtifactWiki)
 	apiGroup.GET("/kb/search", kbhandler.SearchAllArtifacts)
 	apiGroup.POST("/kb/search/backfill-embeddings", kbhandler.BackfillSearchEmbeddings)

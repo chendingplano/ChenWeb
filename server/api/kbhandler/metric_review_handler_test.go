@@ -15,13 +15,14 @@ func TestBuildMetricReviewInput_FormatsLinesAndMetrics(t *testing.T) {
 	}
 	metrics := []metricReviewInputMetric{{MetricID: "416_mtc_2", MetricName: "分类类别数", MetricValue: "4"}}
 
-	text, err := buildMetricReviewInput(h, lines, metrics)
+	text, err := buildMetricReviewInput(h, "zh-cn", lines, metrics)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, want := range []string{
 		"record_id: 416",
 		"title: 农村生活垃圾分类处理规范",
+		"output_language: zh-cn (Simplified Chinese)\n",
 		"L50\tparagraph\t农村生活垃圾分为四大类\n",
 		"L126\ttable\t<table>...</table>\n",
 		"METRICS\n",
@@ -38,7 +39,7 @@ func TestBuildMetricReviewInput_FormatsLinesAndMetrics(t *testing.T) {
 
 func TestBuildMetricReviewInput_TooLarge(t *testing.T) {
 	big := strings.Repeat("字", metricReviewMaxInputChars)
-	_, err := buildMetricReviewInput(metricReviewDocHeader{RecordID: 1},
+	_, err := buildMetricReviewInput(metricReviewDocHeader{RecordID: 1}, "en",
 		[]rawLine{{LineNumber: 1, LineType: "paragraph", Content: big}},
 		[]metricReviewInputMetric{{MetricID: "1_mtc_1"}})
 	if err == nil || !strings.Contains(err.Error(), "document too large") {
@@ -155,5 +156,61 @@ func TestApplyStaleRunningStatus(t *testing.T) {
 	// A stale running row must not block a new review.
 	if !shouldStartMetricReview(stale, false) {
 		t.Error("stale run should allow a new review")
+	}
+}
+
+func TestNormalizeMetricReviewLang(t *testing.T) {
+	for in, want := range map[string]string{"": "en", "en": "en", "EN": "en", "zh-cn": "zh-cn", "zh_CN": "zh-cn", "zh": "zh-cn"} {
+		got, ok := normalizeMetricReviewLang(in)
+		if !ok || got != want {
+			t.Errorf("normalizeMetricReviewLang(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := normalizeMetricReviewLang("fr"); ok {
+		t.Errorf("fr should be unsupported")
+	}
+}
+
+func TestMetricReviewTranslationStrings_CollectAndApply(t *testing.T) {
+	r := metricReviewReport{
+		Summary:       "Good extraction.",
+		Tally:         metricReviewTally{Stored: 3, Kept: 2, Missed: 1},
+		MissedMetrics: []metricReviewMissed{{Lines: "153", Name: "bottle volume", Value: "500", Unit: "mL", Reason: "missed", Severity: "medium"}},
+		NonMetrics:    []metricReviewNonMetric{{MetricIDs: []string{"m1"}, Category: "not_metric", Reason: "descriptor"}},
+		AttributeIssues: []metricReviewAttributeIssue{{MetricIDs: []string{"m2"}, Field: "value_range_type", Stored: "range", Suggested: "lower_bound", Reason: "wording", Severity: "high"},
+			{MetricIDs: []string{"m3"}, Field: "metric_value", Stored: "Comparator included in value", Suggested: "30", Reason: "bare number", Severity: "medium"}},
+		Recommendations: []string{"do x", ""},
+	}
+	got := collectMetricReviewStrings(&r)
+	want := []string{"summary", "missed_metrics.0.name", "missed_metrics.0.reason", "non_metrics.0.reason",
+		"attribute_issues.0.reason", "attribute_issues.1.stored", "attribute_issues.1.reason", "recommendations.0"}
+	if len(got) != len(want) {
+		t.Fatalf("collected %d strings, want %d: %v", len(got), len(want), got)
+	}
+	for _, k := range want {
+		if _, ok := got[k]; !ok {
+			t.Errorf("missing key %q", k)
+		}
+	}
+
+	n := applyMetricReviewStrings(&r, map[string]any{
+		"summary":                   "提取良好。",
+		"missed_metrics.0.reason":   "遗漏",
+		"attribute_issues.1.stored": "值中包含比较符",
+		"non_metrics.0.reason":      "",  // empty: keep source
+		"recommendations.0":         42,  // non-string: keep source
+		"unknown.key":               "x", // ignored
+	})
+	if n != 3 {
+		t.Errorf("applied = %d, want 3", n)
+	}
+	if r.Summary != "提取良好。" || r.MissedMetrics[0].Reason != "遗漏" || r.AttributeIssues[1].Stored != "值中包含比较符" {
+		t.Errorf("translation not applied: %+v", r)
+	}
+	if r.NonMetrics[0].Reason != "descriptor" || r.Recommendations[0] != "do x" || r.MissedMetrics[0].Name != "bottle volume" {
+		t.Errorf("untranslated fields should keep source text: %+v", r)
+	}
+	if r.Tally.Stored != 3 || r.AttributeIssues[0].Stored != "range" || r.AttributeIssues[0].Suggested != "lower_bound" || r.AttributeIssues[1].Suggested != "30" || r.MissedMetrics[0].Lines != "153" || r.AttributeIssues[0].Severity != "high" {
+		t.Errorf("non-prose fields must be unchanged: %+v", r)
 	}
 }

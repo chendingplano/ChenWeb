@@ -3,7 +3,9 @@ package kbhandler
 // LLM review of one record's extracted kb.metrics (System Admin -> LLM ->
 // Review Metrics). See openspec/changes/llm-review-metrics for the design:
 // reviews are stored in kb.metric_reviews (one row per run, newest = current),
-// run in the background, and are polled by the page.
+// run in the background, and are polled by the page. Reviews are per language
+// and can be translated from another language (openspec change
+// metric-review-i18n-export).
 
 import (
 	"context"
@@ -36,12 +38,36 @@ const (
 	metricReviewStatusRunning = "running"
 	metricReviewStatusDone    = "done"
 	metricReviewStatusFailed  = "failed"
+
+	metricReviewDefaultLang = "en"
 )
+
+// metricReviewLangNames are the supported report languages (the paraglide UI
+// locales) and the names given to the LLM.
+var metricReviewLangNames = map[string]string{
+	"en":    "English",
+	"zh-cn": "Simplified Chinese",
+}
+
+// normalizeMetricReviewLang maps a request language to a supported code. Empty
+// means English, which keeps pre-i18n clients working.
+func normalizeMetricReviewLang(s string) (string, bool) {
+	v := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
+	switch v {
+	case "":
+		return metricReviewDefaultLang, true
+	case "zh", "zh-hans":
+		v = "zh-cn"
+	}
+	_, ok := metricReviewLangNames[v]
+	return v, ok
+}
 
 // metricReviewRow is one kb.metric_reviews row as returned to the page.
 type metricReviewRow struct {
 	ID            int64           `json:"id"`
 	InputRecordID int64           `json:"input_record_id"`
+	Lang          string          `json:"lang"`
 	Status        string          `json:"status"`
 	Report        json.RawMessage `json:"report,omitempty"`
 	ErrorMsg      string          `json:"error_msg,omitempty"`
@@ -51,6 +77,9 @@ type metricReviewRow struct {
 	CreatedBy     string          `json:"created_by,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
 	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+	// TranslatedFromID is the review this one was translated from (nil for an
+	// LLM review).
+	TranslatedFromID *int64 `json:"translated_from_id,omitempty"`
 }
 
 type metricReviewResponse struct {
@@ -58,6 +87,9 @@ type metricReviewResponse struct {
 	Review *metricReviewRow `json:"review"`
 	// Started is true when the POST launched a new LLM run.
 	Started bool `json:"started,omitempty"`
+	// OtherLangs (GET only) lists the other languages that have a done review,
+	// so the page can offer a translation when Review is nil.
+	OtherLangs []string `json:"other_langs,omitempty"`
 }
 
 // metricReviewReport is the stored report (design D5).
@@ -187,23 +219,37 @@ func GetMetricReview(c echo.Context) error {
 	if err != nil || recordID <= 0 {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid record_id (CWB_KB_MRV_110)"})
 	}
-	row, err := loadLatestMetricReview(c.Request().Context(), ApiTypes.ProjectDBHandle, recordID)
+	lang, ok := normalizeMetricReviewLang(c.QueryParam("lang"))
+	if !ok {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "unsupported lang (CWB_KB_MRV_111)"})
+	}
+	ctx := c.Request().Context()
+	db := ApiTypes.ProjectDBHandle
+	row, err := loadLatestMetricReview(ctx, db, recordID, lang)
 	if err != nil {
-		logger.Error("load latest metric review failed", "record_id", recordID, "err", err)
+		logger.Error("load latest metric review failed", "record_id", recordID, "lang", lang, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load review (CWB_KB_MRV_120)"})
 	}
 	if row != nil {
 		applyStaleRunningStatus(row, time.Now())
 	}
-	return c.JSON(http.StatusOK, metricReviewResponse{Status: true, Review: row})
+	resp := metricReviewResponse{Status: true, Review: row}
+	if row == nil {
+		if resp.OtherLangs, err = loadOtherMetricReviewLangs(ctx, db, recordID, lang); err != nil {
+			logger.Error("load other review languages failed", "record_id", recordID, "lang", lang, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load review (CWB_KB_MRV_121)"})
+		}
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 type startMetricReviewRequest struct {
-	Force bool `json:"force"`
+	Force bool   `json:"force"`
+	Lang  string `json:"lang"`
 }
 
 // StartMetricReview handles POST /api/v1/kb/metric-reviews/:record_id with body
-// {"force": bool}. It returns an existing review when design D3's cache rules
+// {"force": bool, "lang": "en"|"zh-cn"}. Within that language it returns an existing review when design D3's cache rules
 // allow it; otherwise it inserts a 'running' row and starts the LLM review in
 // the background.
 func StartMetricReview(c echo.Context) error {
@@ -223,8 +269,12 @@ func StartMetricReview(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_MRV_211)"})
 		}
 	}
+	lang, ok := normalizeMetricReviewLang(req.Lang)
+	if !ok {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "unsupported lang (CWB_KB_MRV_212)"})
+	}
 
-	latest, err := loadLatestMetricReview(ctx, db, recordID)
+	latest, err := loadLatestMetricReview(ctx, db, recordID, lang)
 	if err != nil {
 		logger.Error("load latest metric review failed", "record_id", recordID, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load review (CWB_KB_MRV_220)"})
@@ -234,7 +284,7 @@ func StartMetricReview(c echo.Context) error {
 		applyStaleRunningStatus(latest, now)
 	}
 	if !shouldStartMetricReview(latest, req.Force) {
-		logger.Info("returning existing metric review", "record_id", recordID, "review_id", latest.ID, "status", latest.Status, "force", req.Force)
+		logger.Info("returning existing metric review", "record_id", recordID, "lang", lang, "review_id", latest.ID, "status", latest.Status, "force", req.Force)
 		return c.JSON(http.StatusOK, metricReviewResponse{Status: true, Review: latest})
 	}
 
@@ -251,17 +301,17 @@ func StartMetricReview(c echo.Context) error {
 	if user := rc.IsAuthenticated(); user != nil {
 		userName, userID = user.UserName, user.UserId
 	}
-	row := &metricReviewRow{InputRecordID: recordID, Status: metricReviewStatusRunning, MetricsCount: metricsCount, CreatedBy: userName}
+	row := &metricReviewRow{InputRecordID: recordID, Lang: lang, Status: metricReviewStatusRunning, MetricsCount: metricsCount, CreatedBy: userName}
 	if err := db.QueryRowContext(ctx, `
-INSERT INTO kb.metric_reviews (input_record_id, status, metrics_count, created_by)
-VALUES ($1, $2, $3, NULLIF($4, ''))
-RETURNING id, created_at`, recordID, metricReviewStatusRunning, metricsCount, userName).Scan(&row.ID, &row.CreatedAt); err != nil {
+INSERT INTO kb.metric_reviews (input_record_id, lang, status, metrics_count, created_by)
+VALUES ($1, $2, $3, $4, NULLIF($5, ''))
+RETURNING id, created_at`, recordID, lang, metricReviewStatusRunning, metricsCount, userName).Scan(&row.ID, &row.CreatedAt); err != nil {
 		logger.Error("insert metric review failed", "record_id", recordID, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create review (CWB_KB_MRV_240)"})
 	}
-	logger.Info("starting metric review", "record_id", recordID, "review_id", row.ID, "metrics_count", metricsCount, "force", req.Force)
+	logger.Info("starting metric review", "record_id", recordID, "lang", lang, "review_id", row.ID, "metrics_count", metricsCount, "force", req.Force)
 
-	go runMetricReview(db, row.ID, recordID, userID)
+	go runMetricReview(db, row.ID, recordID, lang, userID)
 
 	return c.JSON(http.StatusOK, metricReviewResponse{Status: true, Review: row, Started: true})
 }
@@ -291,21 +341,60 @@ func applyStaleRunningStatus(row *metricReviewRow, now time.Time) {
 	}
 }
 
-func loadLatestMetricReview(ctx context.Context, db *sql.DB, recordID int64) (*metricReviewRow, error) {
+const metricReviewSelectCols = `
+SELECT id, input_record_id, lang, status, report, error_msg, model_name, prompt_name,
+       metrics_count, created_by, created_at, finished_at, translated_from_id
+FROM kb.metric_reviews`
+
+// loadLatestMetricReview returns the record's newest review in lang, or nil.
+func loadLatestMetricReview(ctx context.Context, db *sql.DB, recordID int64, lang string) (*metricReviewRow, error) {
+	return scanMetricReviewRow(db.QueryRowContext(ctx, metricReviewSelectCols+`
+WHERE input_record_id = $1 AND lang = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1`, recordID, lang))
+}
+
+// loadTranslationSource returns the record's newest done review in any
+// language other than lang (the source of a translation), or nil.
+func loadTranslationSource(ctx context.Context, db *sql.DB, recordID int64, lang string) (*metricReviewRow, error) {
+	return scanMetricReviewRow(db.QueryRowContext(ctx, metricReviewSelectCols+`
+WHERE input_record_id = $1 AND lang <> $2 AND status = $3 AND report IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1`, recordID, lang, metricReviewStatusDone))
+}
+
+// loadOtherMetricReviewLangs lists the languages other than lang that have a
+// done review for the record.
+func loadOtherMetricReviewLangs(ctx context.Context, db *sql.DB, recordID int64, lang string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT DISTINCT lang FROM kb.metric_reviews
+WHERE input_record_id = $1 AND lang <> $2 AND status = $3 AND report IS NOT NULL
+ORDER BY lang`, recordID, lang, metricReviewStatusDone)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var l string
+		if err := rows.Scan(&l); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func scanMetricReviewRow(sc *sql.Row) (*metricReviewRow, error) {
 	var (
 		row                                      metricReviewRow
 		report                                   []byte
 		errMsg, modelName, promptName, createdBy sql.NullString
 		finishedAt                               sql.NullTime
+		translatedFrom                           sql.NullInt64
 	)
-	err := db.QueryRowContext(ctx, `
-SELECT id, input_record_id, status, report, error_msg, model_name, prompt_name,
-       metrics_count, created_by, created_at, finished_at
-FROM kb.metric_reviews
-WHERE input_record_id = $1
-ORDER BY created_at DESC, id DESC
-LIMIT 1`, recordID).Scan(&row.ID, &row.InputRecordID, &row.Status, &report, &errMsg, &modelName,
-		&promptName, &row.MetricsCount, &createdBy, &row.CreatedAt, &finishedAt)
+	err := sc.Scan(&row.ID, &row.InputRecordID, &row.Lang, &row.Status, &report, &errMsg, &modelName,
+		&promptName, &row.MetricsCount, &createdBy, &row.CreatedAt, &finishedAt, &translatedFrom)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -319,17 +408,26 @@ LIMIT 1`, recordID).Scan(&row.ID, &row.InputRecordID, &row.Status, &report, &err
 	if finishedAt.Valid {
 		row.FinishedAt = &finishedAt.Time
 	}
+	if translatedFrom.Valid {
+		row.TranslatedFromID = &translatedFrom.Int64
+	}
 	return &row, nil
 }
 
 // runMetricReview is the background run. It owns its context and logger
 // because the HTTP request that started it has already returned.
-func runMetricReview(db *sql.DB, reviewID, recordID int64, userID string) {
+func runMetricReview(db *sql.DB, reviewID, recordID int64, lang, userID string) {
 	logger := loggerutil.CreateDefaultLogger("20260929-714")
 	ctx, cancel := context.WithTimeout(context.Background(), metricReviewRunTimeout)
 	defer cancel()
 
-	report, modelName, promptName, err := executeMetricReview(ctx, db, logger, recordID, userID)
+	report, modelName, promptName, err := executeMetricReview(ctx, db, logger, recordID, lang, userID)
+	finishMetricReview(db, logger, reviewID, recordID, report, modelName, promptName, err)
+}
+
+// finishMetricReview stores the outcome of a background run (review or
+// translation) on its kb.metric_reviews row.
+func finishMetricReview(db *sql.DB, logger ApiTypes.JimoLogger, reviewID, recordID int64, report metricReviewReport, modelName, promptName string, err error) {
 	if err != nil {
 		logger.Error("metric review failed", "review_id", reviewID, "record_id", recordID, "err", err)
 		if _, uerr := db.Exec(`
@@ -354,24 +452,59 @@ WHERE id = $1`, reviewID, metricReviewStatusDone, reportJSON, modelName, promptN
 		"stored", report.Tally.Stored, "kept", report.Tally.Kept, "missed", report.Tally.Missed)
 }
 
-// executeMetricReview loads the prompt, model, document and metrics, calls the
-// LLM, and returns the post-processed report.
-func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, userID string) (metricReviewReport, string, string, error) {
-	promptName := strings.TrimSpace(os.Getenv("REVIEW_METRICS_PROMPT"))
+// newMetricReviewLLMClient builds the client for the model named by
+// REVIEW_METRICS_MODEL_NAME (used by both reviews and translations).
+func newMetricReviewLLMClient(logger ApiTypes.JimoLogger) (ApiTypes.LLMModelDef, *llmclients.OpenAIJSONClient, error) {
+	modelRef, cfg, err := loadWikiModelDef("REVIEW_METRICS_MODEL_NAME")
+	if err != nil {
+		return cfg, nil, fmt.Errorf("load model named by REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_302): %w", err)
+	}
+	if modelRef == "" {
+		return cfg, nil, fmt.Errorf("missing env var REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_303)")
+	}
+	client, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
+		ModelName:            cfg.ModelName,
+		APIKey:               cfg.APIKey,
+		BaseURL:              cfg.BaseURL,
+		ProfileName:          modelRef,
+		TimeoutSec:           cfg.TimeoutSec,
+		ThinkingType:         cfg.ThinkingType,
+		MaxOutputTokens:      cfg.MaxOutputTokens,
+		OmitTemperature:      cfg.OmitTemperature,
+		MaxInflight:          cfg.MaxInflight,
+		MaxRequestsPerMinute: cfg.MaxRequestsPerMinute,
+		MaxTokensPerMinute:   cfg.MaxTokensPerMinute,
+		TokenReservePerCall:  cfg.TokenReservePerCall,
+	}, logger)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("create LLM client failed (CWB_KB_MRV_320): %w", err)
+	}
+	return cfg, client, nil
+}
+
+// loadMetricReviewPrompt reads the prompt file named by envVar from prompts/.
+func loadMetricReviewPrompt(envVar, missingLoc, unreadableLoc string) (string, string, error) {
+	promptName := strings.TrimSpace(os.Getenv(envVar))
 	if promptName == "" {
-		return metricReviewReport{}, "", "", fmt.Errorf("missing env var REVIEW_METRICS_PROMPT (CWB_KB_MRV_300)")
+		return "", "", fmt.Errorf("missing env var %s (%s)", envVar, missingLoc)
 	}
 	promptBytes, err := os.ReadFile(filepath.Join("prompts", promptName))
 	if err != nil || strings.TrimSpace(string(promptBytes)) == "" {
-		return metricReviewReport{}, "", promptName, fmt.Errorf("cannot read prompt prompts/%s named by REVIEW_METRICS_PROMPT (CWB_KB_MRV_301): %v", promptName, err)
+		return "", promptName, fmt.Errorf("cannot read prompt prompts/%s named by %s (%s): %v", promptName, envVar, unreadableLoc, err)
 	}
+	return strings.TrimSpace(string(promptBytes)), promptName, nil
+}
 
-	modelRef, cfg, err := loadWikiModelDef("REVIEW_METRICS_MODEL_NAME")
+// executeMetricReview loads the prompt, model, document and metrics, calls the
+// LLM, and returns the post-processed report.
+func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, lang, userID string) (metricReviewReport, string, string, error) {
+	promptText, promptName, err := loadMetricReviewPrompt("REVIEW_METRICS_PROMPT", "CWB_KB_MRV_300", "CWB_KB_MRV_301")
 	if err != nil {
-		return metricReviewReport{}, "", promptName, fmt.Errorf("load model named by REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_302): %w", err)
+		return metricReviewReport{}, "", promptName, err
 	}
-	if modelRef == "" {
-		return metricReviewReport{}, "", promptName, fmt.Errorf("missing env var REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_303)")
+	cfg, client, err := newMetricReviewLLMClient(logger)
+	if err != nil {
+		return metricReviewReport{}, cfg.ModelName, promptName, err
 	}
 
 	header, err := loadMetricReviewDocHeader(ctx, db, recordID)
@@ -393,33 +526,16 @@ func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 		return metricReviewReport{}, cfg.ModelName, promptName, fmt.Errorf("record %d has no extracted metrics (CWB_KB_MRV_313)", recordID)
 	}
 
-	inputText, err := buildMetricReviewInput(header, lines, metrics)
+	inputText, err := buildMetricReviewInput(header, lang, lines, metrics)
 	if err != nil {
 		return metricReviewReport{}, cfg.ModelName, promptName, err
 	}
 
-	client, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
-		ModelName:            cfg.ModelName,
-		APIKey:               cfg.APIKey,
-		BaseURL:              cfg.BaseURL,
-		ProfileName:          modelRef,
-		TimeoutSec:           cfg.TimeoutSec,
-		ThinkingType:         cfg.ThinkingType,
-		MaxOutputTokens:      cfg.MaxOutputTokens,
-		OmitTemperature:      cfg.OmitTemperature,
-		MaxInflight:          cfg.MaxInflight,
-		MaxRequestsPerMinute: cfg.MaxRequestsPerMinute,
-		MaxTokensPerMinute:   cfg.MaxTokensPerMinute,
-		TokenReservePerCall:  cfg.TokenReservePerCall,
-	}, logger)
-	if err != nil {
-		return metricReviewReport{}, cfg.ModelName, promptName, fmt.Errorf("create LLM client failed (CWB_KB_MRV_320): %w", err)
-	}
-	logger.Info("calling LLM for metric review", "record_id", recordID, "model_name", cfg.ModelName, "input_chars", len(inputText), "metrics", len(metrics))
+	logger.Info("calling LLM for metric review", "record_id", recordID, "lang", lang, "model_name", cfg.ModelName, "input_chars", len(inputText), "metrics", len(metrics))
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		UserID:     userID,
 		PromptName: promptName,
-		PromptText: strings.TrimSpace(string(promptBytes)),
+		PromptText: promptText,
 		ModelName:  cfg.ModelName,
 		InputText:  inputText,
 		RecordID:   recordID,
@@ -510,12 +626,12 @@ ORDER BY id`, recordID)
 }
 
 // buildMetricReviewInput renders the LLM input (design D4): document header,
-// source lines as "L<n>\t<type>\t<text>", then the metrics as JSON. It fails
+// output language, source lines as "L<n>\t<type>\t<text>", then the metrics as JSON. It fails
 // rather than truncating when the result exceeds metricReviewMaxInputChars.
-func buildMetricReviewInput(h metricReviewDocHeader, lines []rawLine, metrics []metricReviewInputMetric) (string, error) {
+func buildMetricReviewInput(h metricReviewDocHeader, lang string, lines []rawLine, metrics []metricReviewInputMetric) (string, error) {
 	var b strings.Builder
 	b.WriteString("DOCUMENT\n")
-	fmt.Fprintf(&b, "record_id: %d\ntitle: %s\ndoc_no: %s\n\n", h.RecordID, h.Title, h.DocNo)
+	fmt.Fprintf(&b, "record_id: %d\ntitle: %s\ndoc_no: %s\noutput_language: %s\n\n", h.RecordID, h.Title, h.DocNo, metricReviewLangLabel(lang))
 	for _, ln := range lines {
 		fmt.Fprintf(&b, "L%d\t%s\t%s\n", ln.LineNumber, ln.LineType, ln.Content)
 	}
@@ -675,4 +791,203 @@ func formatMetricReviewSpans(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// metricReviewLangLabel renders a language for the LLM, e.g. "zh-cn (Simplified Chinese)".
+func metricReviewLangLabel(lang string) string {
+	return fmt.Sprintf("%s (%s)", lang, metricReviewLangNames[lang])
+}
+
+type translateMetricReviewRequest struct {
+	Lang string `json:"lang"`
+}
+
+// TranslateMetricReview handles POST /api/v1/kb/metric-reviews/:record_id/translate
+// with body {"lang": "en"|"zh-cn"} (design D4 of metric-review-i18n-export). A
+// review already running or done in lang is returned as is; otherwise the newest
+// done review in another language is translated in the background into a new row.
+func TranslateMetricReview(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_MRV_400")
+	defer rc.Close()
+	logger := rc.GetLogger()
+	ctx := c.Request().Context()
+	db := ApiTypes.ProjectDBHandle
+
+	recordID, err := strconv.ParseInt(strings.TrimSpace(c.Param("record_id")), 10, 64)
+	if err != nil || recordID <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid record_id (CWB_KB_MRV_410)"})
+	}
+	var req translateMetricReviewRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_MRV_411)"})
+	}
+	lang, ok := normalizeMetricReviewLang(req.Lang)
+	if !ok || strings.TrimSpace(req.Lang) == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "unsupported or missing lang (CWB_KB_MRV_412)"})
+	}
+
+	latest, err := loadLatestMetricReview(ctx, db, recordID, lang)
+	if err != nil {
+		logger.Error("load latest metric review failed", "record_id", recordID, "lang", lang, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load review (CWB_KB_MRV_420)"})
+	}
+	if latest != nil {
+		applyStaleRunningStatus(latest, time.Now())
+		if latest.Status != metricReviewStatusFailed {
+			logger.Info("review already exists in target language; not translating", "record_id", recordID, "lang", lang, "review_id", latest.ID, "status", latest.Status)
+			return c.JSON(http.StatusOK, metricReviewResponse{Status: true, Review: latest})
+		}
+	}
+	source, err := loadTranslationSource(ctx, db, recordID, lang)
+	if err != nil {
+		logger.Error("load translation source failed", "record_id", recordID, "lang", lang, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load review (CWB_KB_MRV_421)"})
+	}
+	if source == nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("record %d has no finished review in another language to translate (CWB_KB_MRV_422)", recordID)})
+	}
+
+	var userName, userID string
+	if user := rc.IsAuthenticated(); user != nil {
+		userName, userID = user.UserName, user.UserId
+	}
+	sourceID := source.ID
+	row := &metricReviewRow{InputRecordID: recordID, Lang: lang, Status: metricReviewStatusRunning,
+		MetricsCount: source.MetricsCount, CreatedBy: userName, TranslatedFromID: &sourceID}
+	if err := db.QueryRowContext(ctx, `
+INSERT INTO kb.metric_reviews (input_record_id, lang, status, metrics_count, created_by, translated_from_id)
+VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6)
+RETURNING id, created_at`, recordID, lang, metricReviewStatusRunning, source.MetricsCount, userName, sourceID).Scan(&row.ID, &row.CreatedAt); err != nil {
+		logger.Error("insert metric review translation failed", "record_id", recordID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create translation (CWB_KB_MRV_430)"})
+	}
+	logger.Info("starting metric review translation", "record_id", recordID, "lang", lang, "review_id", row.ID, "source_review_id", sourceID, "source_lang", source.Lang)
+
+	go runMetricReviewTranslation(db, row.ID, recordID, source.Report, lang, userID)
+
+	return c.JSON(http.StatusOK, metricReviewResponse{Status: true, Review: row, Started: true})
+}
+
+// runMetricReviewTranslation is the background translation run.
+func runMetricReviewTranslation(db *sql.DB, reviewID, recordID int64, sourceReport json.RawMessage, lang, userID string) {
+	logger := loggerutil.CreateDefaultLogger("20260929-382")
+	ctx, cancel := context.WithTimeout(context.Background(), metricReviewRunTimeout)
+	defer cancel()
+
+	report, modelName, promptName, err := executeMetricReviewTranslation(ctx, logger, recordID, sourceReport, lang, userID)
+	finishMetricReview(db, logger, reviewID, recordID, report, modelName, promptName, err)
+}
+
+func executeMetricReviewTranslation(ctx context.Context, logger ApiTypes.JimoLogger, recordID int64, sourceReport json.RawMessage, lang, userID string) (metricReviewReport, string, string, error) {
+	var report metricReviewReport
+	if err := json.Unmarshal(sourceReport, &report); err != nil {
+		return report, "", "", fmt.Errorf("source review report is not valid JSON (CWB_KB_MRV_440): %w", err)
+	}
+	promptText, promptName, err := loadMetricReviewPrompt("REVIEW_METRICS_TRANSLATE_PROMPT", "CWB_KB_MRV_441", "CWB_KB_MRV_442")
+	if err != nil {
+		return report, "", promptName, err
+	}
+	cfg, client, err := newMetricReviewLLMClient(logger)
+	if err != nil {
+		return report, cfg.ModelName, promptName, err
+	}
+
+	strs := collectMetricReviewStrings(&report)
+	inputJSON, err := json.Marshal(map[string]any{"target_language": metricReviewLangLabel(lang), "strings": strs})
+	if err != nil {
+		return report, cfg.ModelName, promptName, fmt.Errorf("marshal translation input failed (CWB_KB_MRV_443): %w", err)
+	}
+	logger.Info("calling LLM for metric review translation", "record_id", recordID, "lang", lang, "model_name", cfg.ModelName, "strings", len(strs))
+	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		UserID:     userID,
+		PromptName: promptName,
+		PromptText: promptText,
+		ModelName:  cfg.ModelName,
+		InputText:  string(inputJSON),
+		RecordID:   recordID,
+		CallReason: "review_metrics_translate",
+		CallLoc:    "MID-CWB-REVIEW-METRICS-TRANSLATE",
+	})
+	if err != nil {
+		return report, cfg.ModelName, promptName, fmt.Errorf("LLM call failed (CWB_KB_MRV_444): %w", err)
+	}
+	translated, _ := payload["strings"].(map[string]any)
+	applied := applyMetricReviewStrings(&report, translated)
+	if applied < len(strs) {
+		logger.Warn("translation left some strings untranslated; kept source text", "record_id", recordID, "lang", lang, "applied", applied, "total", len(strs))
+	}
+	return report, cfg.ModelName, promptName, nil
+}
+
+// metricReviewProseFields lists the report fields a translation changes (design
+// D3), keyed by path. IDs, severities, categories, field names, line numbers,
+// values/units, tally and snapshot are not included and so are copied
+// unchanged. Multi-word stored/suggested values are included because the model
+// often writes prose there; the translate prompt keeps literal codes as is.
+func metricReviewProseFields(r *metricReviewReport) []struct {
+	key string
+	ptr *string
+} {
+	var out []struct {
+		key string
+		ptr *string
+	}
+	add := func(key string, p *string) {
+		out = append(out, struct {
+			key string
+			ptr *string
+		}{key, p})
+	}
+	// addValue skips single-token field values (codes such as "qualitative",
+	// numbers, units, "≥30"), which the model otherwise sometimes translates.
+	addValue := func(key string, p *string) {
+		if len(strings.Fields(*p)) > 1 {
+			add(key, p)
+		}
+	}
+	add("summary", &r.Summary)
+	for i := range r.MissedMetrics {
+		add(fmt.Sprintf("missed_metrics.%d.name", i), (*string)(&r.MissedMetrics[i].Name))
+		add(fmt.Sprintf("missed_metrics.%d.reason", i), (*string)(&r.MissedMetrics[i].Reason))
+	}
+	for i := range r.NonMetrics {
+		add(fmt.Sprintf("non_metrics.%d.reason", i), (*string)(&r.NonMetrics[i].Reason))
+	}
+	for i := range r.AttributeIssues {
+		addValue(fmt.Sprintf("attribute_issues.%d.stored", i), (*string)(&r.AttributeIssues[i].Stored))
+		addValue(fmt.Sprintf("attribute_issues.%d.suggested", i), (*string)(&r.AttributeIssues[i].Suggested))
+		add(fmt.Sprintf("attribute_issues.%d.reason", i), (*string)(&r.AttributeIssues[i].Reason))
+	}
+	for i := range r.Recommendations {
+		add(fmt.Sprintf("recommendations.%d", i), &r.Recommendations[i])
+	}
+	return out
+}
+
+// collectMetricReviewStrings returns the non-empty prose fields by path.
+func collectMetricReviewStrings(r *metricReviewReport) map[string]string {
+	out := map[string]string{}
+	for _, f := range metricReviewProseFields(r) {
+		if strings.TrimSpace(*f.ptr) != "" {
+			out[f.key] = *f.ptr
+		}
+	}
+	return out
+}
+
+// applyMetricReviewStrings writes translated strings back by path. A missing,
+// empty or non-string value keeps the source text. It returns how many fields
+// were replaced.
+func applyMetricReviewStrings(r *metricReviewReport, translated map[string]any) int {
+	applied := 0
+	for _, f := range metricReviewProseFields(r) {
+		if strings.TrimSpace(*f.ptr) == "" {
+			continue
+		}
+		if s, ok := translated[f.key].(string); ok && strings.TrimSpace(s) != "" {
+			*f.ptr = strings.TrimSpace(s)
+			applied++
+		}
+	}
+	return applied
 }

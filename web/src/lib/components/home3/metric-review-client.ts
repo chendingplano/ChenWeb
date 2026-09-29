@@ -1,5 +1,8 @@
 // API client + pure helpers for the "Review Metrics" admin page
-// (System Admin -> LLM). See openspec/changes/llm-review-metrics for the design.
+// (System Admin -> LLM). See openspec/changes/llm-review-metrics for the design,
+// and openspec/changes/metric-review-i18n-export for languages and export.
+
+import { Marked } from 'marked';
 
 export type ReviewSeverity = 'high' | 'medium' | 'low';
 export type NonMetricCategory = 'not_metric' | 'duplicate' | 'formula_input';
@@ -66,6 +69,8 @@ export type MetricReviewReport = {
 export type MetricReview = {
 	id: number;
 	input_record_id: number;
+	/** Language of the report prose: 'en' | 'zh-cn'. */
+	lang: string;
 	status: 'running' | 'done' | 'failed';
 	report?: MetricReviewReport;
 	error_msg?: string;
@@ -75,9 +80,17 @@ export type MetricReview = {
 	created_by?: string;
 	created_at: string;
 	finished_at?: string;
+	/** Set when this review is a translation of another review. */
+	translated_from_id?: number;
 };
 
-type MetricReviewResponse = { status: boolean; review: MetricReview | null; started?: boolean };
+type MetricReviewResponse = {
+	status: boolean;
+	review: MetricReview | null;
+	started?: boolean;
+	/** GET only: other languages that have a finished review. */
+	other_langs?: string[];
+};
 
 /** A purely numeric query searches by record ID; anything else by title. */
 export function buildInputSearchQuery(query: string): string {
@@ -139,15 +152,154 @@ export async function searchInputs(query: string): Promise<InputRecordSummary[]>
 	return res.results ?? [];
 }
 
-export async function getMetricReview(recordId: number): Promise<MetricReview | null> {
-	const res = await req<MetricReviewResponse>(`/api/v1/kb/metric-reviews/${recordId}`);
-	return res.review;
+/** The record's newest review in `lang`, plus the other languages that have one. */
+export async function getMetricReview(
+	recordId: number,
+	lang: string
+): Promise<{ review: MetricReview | null; otherLangs: string[] }> {
+	const res = await req<MetricReviewResponse>(
+		`/api/v1/kb/metric-reviews/${recordId}?lang=${encodeURIComponent(lang)}`
+	);
+	return { review: res.review, otherLangs: res.other_langs ?? [] };
 }
 
-export async function startMetricReview(recordId: number, force: boolean): Promise<MetricReviewResponse> {
+export async function startMetricReview(recordId: number, force: boolean, lang: string): Promise<MetricReviewResponse> {
 	return req<MetricReviewResponse>(`/api/v1/kb/metric-reviews/${recordId}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ force })
+		body: JSON.stringify({ force, lang })
 	});
+}
+
+/** Translates the record's newest finished review in another language into `lang`. */
+export async function translateMetricReview(recordId: number, lang: string): Promise<MetricReviewResponse> {
+	return req<MetricReviewResponse>(`/api/v1/kb/metric-reviews/${recordId}/translate`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ lang })
+	});
+}
+
+// --- Export ---
+
+/** Localised text used by the Markdown/PDF export (built by the page from paraglide messages). */
+export type ReviewExportLabels = {
+	title: string;
+	record: string;
+	reviewed: string;
+	model: string;
+	prompt: string;
+	/** Already formatted, e.g. "Translated from review #4"; empty when not a translation. */
+	translatedFrom: string;
+	tally: Record<keyof MetricReviewTally, string>;
+	missed: string;
+	nonMetrics: string;
+	attributes: string;
+	recommendations: string;
+	none: string;
+	duplicateOf: string;
+	empty: string;
+	category: Record<NonMetricCategory, string>;
+	severity: Record<ReviewSeverity, string>;
+};
+
+export function reviewExportFilename(recordId: number, lang: string, ext: string): string {
+	return `review-${recordId}-${lang}.${ext}`;
+}
+
+/** Renders a done review as Markdown in the review's language (the labels' language). */
+export function buildReviewMarkdown(
+	rec: InputRecordSummary,
+	review: MetricReview,
+	L: ReviewExportLabels,
+	fmtTime: (s?: string) => string
+): string {
+	const r = review.report;
+	if (!r) return '';
+	const snap = new Map(r.metrics.map((m) => [m.metric_id, m]));
+	const ids = (list: string[]) =>
+		list
+			.map((id) => {
+				const name = snap.get(id)?.name;
+				return name ? `\`${id}\` ${name}` : `\`${id}\``;
+			})
+			.join(', ');
+	const sev = (s: ReviewSeverity) => `**[${L.severity[s] ?? s}]**`;
+	const out: string[] = [];
+
+	out.push(`# ${L.title}: ${rec.title || rec.file_name || ''}`.trimEnd(), '');
+	out.push(`- ${L.record}: #${rec.id}${rec.doc_no ? ` · ${rec.doc_no}` : ''}`);
+	out.push(`- ${L.reviewed}: ${fmtTime(review.finished_at || review.created_at)}${review.created_by ? ` · ${review.created_by}` : ''}`);
+	out.push(`- ${L.model}: ${review.model_name ?? ''} · ${L.prompt}: ${review.prompt_name ?? ''}`);
+	if (L.translatedFrom) out.push(`- ${L.translatedFrom}`);
+	out.push('', r.summary, '');
+
+	const keys: (keyof MetricReviewTally)[] = ['stored', 'kept', 'not_metric', 'duplicate', 'formula_input', 'missed'];
+	out.push(`| ${keys.map((k) => L.tally[k]).join(' | ')} |`);
+	out.push(`|${keys.map(() => '---:').join('|')}|`);
+	out.push(`| ${keys.map((k) => r.tally[k]).join(' | ')} |`, '');
+
+	out.push(`## ${L.missed} (${r.missed_metrics.length})`, '');
+	if (r.missed_metrics.length === 0) out.push(L.none, '');
+	for (const m of sortBySeverity(r.missed_metrics)) {
+		const val = [m.value, m.unit].filter(Boolean).join(' ');
+		out.push(`- ${sev(m.severity)} **${m.name}**${val ? ` — ${val}` : ''}${m.lines ? ` (L${m.lines})` : ''}`);
+		if (m.reason) out.push(`  ${m.reason}`);
+	}
+	out.push('');
+
+	const removed = r.tally.not_metric + r.tally.duplicate + r.tally.formula_input;
+	out.push(`## ${L.nonMetrics} (${removed})`, '');
+	if (r.non_metrics.length === 0) out.push(L.none, '');
+	for (const g of groupNonMetrics(r.non_metrics)) {
+		out.push(`### ${L.category[g.category]}`, '');
+		for (const e of g.entries) {
+			out.push(`- ${ids(e.metric_ids)}${e.duplicate_of ? ` — ${L.duplicateOf} ${ids([e.duplicate_of])}` : ''}`);
+			if (e.reason) out.push(`  ${e.reason}`);
+		}
+		out.push('');
+	}
+
+	out.push(`## ${L.attributes} (${r.attribute_issues.length})`, '');
+	if (r.attribute_issues.length === 0) out.push(L.none, '');
+	for (const a of sortBySeverity(r.attribute_issues)) {
+		out.push(`- ${sev(a.severity)} \`${a.field}\` — ${ids(a.metric_ids)}`);
+		if (a.stored || a.suggested) out.push(`  ${a.stored || L.empty} → ${a.suggested || L.empty}`);
+		if (a.reason) out.push(`  ${a.reason}`);
+	}
+	out.push('');
+
+	if (r.recommendations.length > 0) {
+		out.push(`## ${L.recommendations}`, '');
+		r.recommendations.forEach((x, i) => out.push(`${i + 1}. ${x}`));
+		out.push('');
+	}
+	return out.join('\n');
+}
+
+function escapeHtml(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Report text comes from an LLM, so raw HTML in it is shown as text, never rendered.
+const safeMarked = new Marked({
+	renderer: {
+		html({ text }) {
+			return escapeHtml(text);
+		}
+	}
+});
+
+/** A standalone, print-styled HTML page of the Markdown export (for Export PDF). */
+export function buildReviewPrintHtml(markdown: string, title: string, lang: string): string {
+	const body = safeMarked.parse(markdown, { async: false }) as string;
+	return `<!doctype html><html lang="${escapeHtml(lang)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+@page { margin: 16mm; }
+body { font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #111; font-size: 11pt; line-height: 1.5; max-width: 180mm; margin: 0 auto; }
+h1 { font-size: 16pt; margin: 0 0 8pt; } h2 { font-size: 13pt; margin: 16pt 0 6pt; border-bottom: 1px solid #ddd; padding-bottom: 2pt; } h3 { font-size: 11pt; margin: 10pt 0 4pt; color: #444; }
+ul, ol { padding-left: 18pt; } li { margin: 3pt 0; break-inside: avoid; }
+code { font-family: ui-monospace, Menlo, monospace; font-size: 9.5pt; background: #f2f2f2; padding: 0 2pt; border-radius: 2pt; }
+table { border-collapse: collapse; margin: 8pt 0; } th, td { border: 1px solid #ccc; padding: 3pt 8pt; text-align: right; }
+</style></head><body>${body}</body></html>`;
 }

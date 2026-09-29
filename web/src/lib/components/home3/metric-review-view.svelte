@@ -1,22 +1,34 @@
 <script lang="ts">
 	// System Admin -> LLM -> Review Metrics. Search kb.inputs, select a record,
 	// and show (or run) an LLM review of its extracted metrics. See
-	// openspec/changes/llm-review-metrics.
+	// openspec/changes/llm-review-metrics. Reviews are per UI language, can be
+	// translated from another language, and exported (metric-review-i18n-export).
 	import { onDestroy } from 'svelte';
+	import { m } from '$lib/paraglide/messages.js';
+	import { getLocale } from '$lib/paraglide/runtime';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import LanguagesIcon from '@lucide/svelte/icons/languages';
 	import {
+		buildReviewMarkdown,
+		buildReviewPrintHtml,
 		getMetricReview,
 		groupNonMetrics,
-		NON_METRIC_CATEGORY_LABEL,
+		reviewExportFilename,
 		searchInputs,
 		sortBySeverity,
 		startMetricReview,
+		translateMetricReview,
 		type InputRecordSummary,
 		type MetricReview,
-		type MetricSnapshot
+		type MetricSnapshot,
+		type NonMetricCategory,
+		type ReviewExportLabels,
+		type ReviewSeverity
 	} from './metric-review-client.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -35,6 +47,22 @@
 	let danger = $derived(darkMode ? '#F87171' : '#DC2626');
 
 	const POLL_MS = 4000;
+
+	// Paraglide reloads the page on a locale switch, so the locale is fixed here.
+	const lang = getLocale();
+	const LANG_LABELS: Record<string, string> = { en: 'English', 'zh-cn': '中文' };
+	const langLabel = (l: string) => LANG_LABELS[l] ?? l;
+
+	const CATEGORY_LABEL: Record<NonMetricCategory, string> = {
+		not_metric: m.mrv_cat_not_metric(),
+		duplicate: m.mrv_cat_duplicate(),
+		formula_input: m.mrv_cat_formula_input()
+	};
+	const SEVERITY_LABEL: Record<ReviewSeverity, string> = {
+		high: m.mrv_sev_high(),
+		medium: m.mrv_sev_medium(),
+		low: m.mrv_sev_low()
+	};
 
 	// --- Search ---
 	let query = $state('');
@@ -63,6 +91,8 @@
 	let reviewError = $state('');
 	let force = $state(false);
 	let starting = $state(false);
+	// Languages with a finished review when the current language has none.
+	let otherLangs = $state<string[]>([]);
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function stopPolling() {
@@ -75,7 +105,7 @@
 		pollTimer = setTimeout(async () => {
 			if (selected?.id !== recordId) return;
 			try {
-				const r = await getMetricReview(recordId);
+				const { review: r } = await getMetricReview(recordId, lang);
 				if (selected?.id !== recordId) return;
 				review = r;
 				if (r?.status === 'running') schedulePoll(recordId);
@@ -89,12 +119,15 @@
 		stopPolling();
 		selected = rec;
 		review = null;
+		otherLangs = [];
 		reviewError = '';
 		loadingReview = true;
 		try {
-			const r = await getMetricReview(rec.id);
+			const res = await getMetricReview(rec.id, lang);
 			if (selected?.id !== rec.id) return;
-			review = r;
+			review = res.review;
+			otherLangs = res.otherLangs;
+			const r = res.review;
 			if (r?.status === 'running') schedulePoll(rec.id);
 		} catch (e) {
 			reviewError = e instanceof Error ? e.message : String(e);
@@ -109,9 +142,28 @@
 		starting = true;
 		reviewError = '';
 		try {
-			const res = await startMetricReview(recordId, force);
+			const res = await startMetricReview(recordId, force, lang);
 			if (selected?.id !== recordId) return;
 			review = res.review;
+			otherLangs = [];
+			if (res.review?.status === 'running') schedulePoll(recordId);
+		} catch (e) {
+			reviewError = e instanceof Error ? e.message : String(e);
+		} finally {
+			starting = false;
+		}
+	}
+
+	async function runTranslate() {
+		if (!selected) return;
+		const recordId = selected.id;
+		starting = true;
+		reviewError = '';
+		try {
+			const res = await translateMetricReview(recordId, lang);
+			if (selected?.id !== recordId) return;
+			review = res.review;
+			otherLangs = [];
 			if (res.review?.status === 'running') schedulePoll(recordId);
 		} catch (e) {
 			reviewError = e instanceof Error ? e.message : String(e);
@@ -121,6 +173,72 @@
 	}
 
 	onDestroy(stopPolling);
+
+	// --- Export ---
+	let exportOpen = $state(false);
+
+	function exportLabels(r: MetricReview): ReviewExportLabels {
+		return {
+			title: m.mrv_title(),
+			record: m.mrv_record(),
+			reviewed: m.mrv_reviewed(),
+			model: m.mrv_model(),
+			prompt: m.mrv_prompt(),
+			translatedFrom: r.translated_from_id ? m.mrv_translated_from({ id: r.translated_from_id }) : '',
+			tally: {
+				stored: m.mrv_tally_stored(),
+				kept: m.mrv_tally_kept(),
+				not_metric: m.mrv_tally_not_metric(),
+				duplicate: m.mrv_tally_duplicate(),
+				formula_input: m.mrv_tally_formula_input(),
+				missed: m.mrv_tally_missed()
+			},
+			missed: m.mrv_sec_missed(),
+			nonMetrics: m.mrv_sec_non_metrics(),
+			attributes: m.mrv_sec_attributes(),
+			recommendations: m.mrv_sec_recommendations(),
+			none: m.mrv_none(),
+			duplicateOf: m.mrv_duplicate_of(),
+			empty: m.mrv_empty(),
+			category: CATEGORY_LABEL,
+			severity: SEVERITY_LABEL
+		};
+	}
+
+	function currentMarkdown(): string {
+		if (!selected || !review || review.status !== 'done') return '';
+		return buildReviewMarkdown(selected, review, exportLabels(review), fmtTime);
+	}
+
+	function exportMarkdown() {
+		exportOpen = false;
+		const md = currentMarkdown();
+		if (!md || !selected) return;
+		const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = reviewExportFilename(selected.id, review?.lang ?? lang, 'md');
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
+	// PDF: a print-styled copy in a new window; the browser's "Save as PDF"
+	// renders CJK text correctly without embedding fonts (design D6).
+	function exportPdf() {
+		exportOpen = false;
+		const md = currentMarkdown();
+		if (!md || !selected) return;
+		const title = reviewExportFilename(selected.id, review?.lang ?? lang, 'pdf').replace(/\.pdf$/, '');
+		const w = window.open('', '_blank');
+		if (!w) {
+			reviewError = m.mrv_export_popup_blocked();
+			return;
+		}
+		w.document.write(buildReviewPrintHtml(md, title, review?.lang ?? lang));
+		w.document.close();
+		w.focus();
+		setTimeout(() => w.print(), 300);
+	}
 
 	// --- Report helpers ---
 	let report = $derived(review?.status === 'done' ? review.report : undefined);
@@ -151,34 +269,34 @@
 {#snippet metricChips(ids: string[])}
 	<span class="inline-flex flex-wrap gap-1">
 		{#each ids as id (id)}
-			{@const m = snapshotById.get(id)}
+			{@const snap = snapshotById.get(id)}
 			<span
 				class="rounded px-1.5 py-0.5 text-xs"
 				style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
-				title={metricTitle(m, id)}
+				title={metricTitle(snap, id)}
 			>
 				<span style="color:{accent}; font-family:ui-monospace,monospace;">{shortId(id)}</span>
-				{#if m?.name}<span style="color:{textSecondary};"> {m.name}</span>{/if}
+				{#if snap?.name}<span style="color:{textSecondary};"> {snap.name}</span>{/if}
 			</span>
 		{/each}
 	</span>
 {/snippet}
 
+<svelte:window onclick={() => (exportOpen = false)} />
+
 {#snippet severityBadge(s: string)}
 	<span
 		class="rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
-		style="color:{severityColor(s)}; border:1px solid {severityColor(s)};">{s}</span
+		style="color:{severityColor(s)}; border:1px solid {severityColor(s)};"
+		>{SEVERITY_LABEL[s as ReviewSeverity] ?? s}</span
 	>
 {/snippet}
 
 <div class="p-6 space-y-4 h-full flex flex-col overflow-hidden" style="background:{pageBg};">
 	<!-- Header -->
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
-		<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">Review Metrics</h2>
-		<p style="font-size:13px; color:{textSecondary}; margin-top:2px;">
-			LLM review of the metrics extracted from a document: missed metrics, rows that should not be metrics, and
-			attribute correctness. Reviews are stored; tick <em>Force to Review</em> to run a fresh one.
-		</p>
+		<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">{m.mrv_title()}</h2>
+		<p style="font-size:13px; color:{textSecondary}; margin-top:2px;">{m.mrv_intro()}</p>
 	</div>
 
 	<div class="flex flex-1 min-h-0 gap-4">
@@ -196,7 +314,7 @@
 			>
 				<input
 					bind:value={query}
-					placeholder="Record ID or title"
+					placeholder={m.mrv_search_placeholder()}
 					class="flex-1 min-w-0 rounded-lg px-3 py-2 text-sm outline-none"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				/>
@@ -205,7 +323,7 @@
 					disabled={searching}
 					class="rounded-lg px-3 py-2 cursor-pointer"
 					style="background:{accent}; color:#fff;"
-					aria-label="Search"
+					aria-label={m.mrv_search()}
 				>
 					<SearchIcon class="w-4 h-4 {searching ? 'animate-pulse' : ''}" />
 				</button>
@@ -215,7 +333,7 @@
 			{/if}
 			<div class="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
 				{#if searched && results.length === 0}
-					<p class="px-2 text-sm" style="color:{textMuted};">No records found.</p>
+					<p class="px-2 text-sm" style="color:{textMuted};">{m.mrv_no_records()}</p>
 				{/if}
 				{#each results as rec (rec.id)}
 					<button
@@ -230,7 +348,7 @@
 							#{rec.id}{rec.doc_no ? ` · ${rec.doc_no}` : ''}
 						</div>
 						<div class="text-sm truncate" style="color:{textPrimary};">
-							{rec.title || rec.file_name || '(untitled)'}
+							{rec.title || rec.file_name || m.mrv_untitled()}
 						</div>
 					</button>
 				{/each}
@@ -244,7 +362,7 @@
 		>
 			{#if !selected}
 				<div class="h-full flex items-center justify-center text-sm" style="color:{textMuted};">
-					Search for a document and select it to see its metrics review.
+					{m.mrv_select_hint()}
 				</div>
 			{:else}
 				<div class="p-6 space-y-6 max-w-5xl">
@@ -252,16 +370,16 @@
 					<div class="flex flex-wrap items-start justify-between gap-4">
 						<div class="min-w-0">
 							<div class="text-xs" style="color:{textMuted};">
-								Record #{selected.id}{selected.doc_no ? ` · ${selected.doc_no}` : ''}
+								{m.mrv_record()} #{selected.id}{selected.doc_no ? ` · ${selected.doc_no}` : ''}
 							</div>
 							<h3 class="text-lg font-semibold" style="color:{textPrimary};">
-								{selected.title || selected.file_name || '(untitled)'}
+								{selected.title || selected.file_name || m.mrv_untitled()}
 							</h3>
 						</div>
 						<div class="flex items-center gap-3">
 							<label class="flex items-center gap-2 text-sm cursor-pointer" style="color:{textSecondary};">
 								<input type="checkbox" bind:checked={force} />
-								Force to Review
+								{m.mrv_force()}
 							</label>
 							<button
 								onclick={runReview}
@@ -270,38 +388,90 @@
 								style="background:{accent}; color:#fff;"
 							>
 								<SparklesIcon class="w-4 h-4" />
-								Review
+								{m.mrv_review()}
 							</button>
+							<div class="relative">
+								<button
+									onclick={(e) => {
+										e.stopPropagation();
+										exportOpen = !exportOpen;
+									}}
+									disabled={!report}
+									aria-haspopup="menu"
+									aria-expanded={exportOpen}
+									class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-default"
+									style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
+								>
+									<DownloadIcon class="w-4 h-4" />
+									{m.mrv_export()}
+									<ChevronDownIcon class="w-4 h-4" />
+								</button>
+								{#if exportOpen && report}
+									<div
+										role="menu"
+										class="absolute right-0 mt-1 z-20 min-w-44 rounded-lg py-1 shadow-lg"
+										style="background:{cardBg}; border:1px solid {borderColor};"
+									>
+										{#each [{ label: m.mrv_export_md(), run: exportMarkdown }, { label: m.mrv_export_pdf(), run: exportPdf }] as item (item.label)}
+											<button
+												role="menuitem"
+												class="block w-full text-left px-3 py-2 text-sm cursor-pointer export-item"
+												style="color:{textPrimary}; --hover-bg:{surface2};"
+												onclick={(e) => {
+													e.stopPropagation();
+													item.run();
+												}}>{item.label}</button
+											>
+										{/each}
+									</div>
+								{/if}
+							</div>
 						</div>
 					</div>
 
 					<!-- Status line -->
 					{#if loadingReview}
-						<p class="text-sm" style="color:{textMuted};">Loading review…</p>
+						<p class="text-sm" style="color:{textMuted};">{m.mrv_loading()}</p>
 					{:else if reviewError}
 						<p class="flex items-center gap-2 text-sm" style="color:{danger};">
 							<CircleAlertIcon class="w-4 h-4" />{reviewError}
 						</p>
+					{:else if !review && otherLangs.length > 0}
+						<div
+							class="flex flex-wrap items-center gap-3 rounded-lg p-3 text-sm"
+							style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"
+						>
+							<LanguagesIcon class="w-4 h-4 flex-shrink-0" style="color:{accent};" />
+							<span class="flex-1 min-w-0">
+								{m.mrv_translate_prompt({ lang: langLabel(lang), others: otherLangs.map(langLabel).join(', ') })}
+							</span>
+							<button
+								onclick={runTranslate}
+								disabled={starting}
+								class="rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer disabled:opacity-50"
+								style="background:{accent}; color:#fff;">{m.mrv_translate()}</button
+							>
+						</div>
 					{:else if !review}
-						<p class="text-sm" style="color:{textSecondary};">
-							This document has not been reviewed yet. Press <strong>Review</strong> to run one.
-						</p>
+						<p class="text-sm" style="color:{textSecondary};">{m.mrv_not_reviewed()}</p>
 					{:else if review.status === 'running'}
 						<p class="flex items-center gap-2 text-sm" style="color:{accent};">
 							<RefreshCwIcon class="w-4 h-4 animate-spin" />
-							Reviewing {review.metrics_count} metrics… started {fmtTime(review.created_at)}. This can take a few
-							minutes.
+							{review.translated_from_id
+								? m.mrv_translating({ id: review.translated_from_id, time: fmtTime(review.created_at) })
+								: m.mrv_running({ count: review.metrics_count, time: fmtTime(review.created_at) })}
 						</p>
 					{:else if review.status === 'failed'}
 						<p class="flex items-start gap-2 text-sm" style="color:{danger};">
 							<CircleAlertIcon class="w-4 h-4 mt-0.5 flex-shrink-0" />
-							<span>Review failed ({fmtTime(review.created_at)}): {review.error_msg}</span>
+							<span>{m.mrv_failed({ time: fmtTime(review.created_at), error: review.error_msg ?? '' })}</span>
 						</p>
 					{:else}
 						<p class="text-xs" style="color:{textMuted};">
-							Reviewed {fmtTime(review.finished_at || review.created_at)} · {review.model_name} · {review.prompt_name}{review.created_by
-								? ` · by ${review.created_by}`
-								: ''}
+							{m.mrv_reviewed()}
+							{fmtTime(review.finished_at || review.created_at)} · {review.model_name} · {review.prompt_name}{review.created_by
+								? ` · ${m.mrv_by({ user: review.created_by })}`
+								: ''}{review.translated_from_id ? ` · ${m.mrv_translated_from({ id: review.translated_from_id })}` : ''}
 						</p>
 					{/if}
 
@@ -311,7 +481,7 @@
 
 						<!-- Tally -->
 						<div class="grid grid-cols-3 md:grid-cols-6 gap-3">
-							{#each [{ label: 'Stored', n: report.tally.stored, c: textPrimary }, { label: 'Kept', n: report.tally.kept, c: success }, { label: 'Not a metric', n: report.tally.not_metric, c: danger }, { label: 'Duplicates', n: report.tally.duplicate, c: warning }, { label: 'Formula inputs', n: report.tally.formula_input, c: warning }, { label: 'Missed', n: report.tally.missed, c: accent }] as t (t.label)}
+							{#each [{ label: m.mrv_tally_stored(), n: report.tally.stored, c: textPrimary }, { label: m.mrv_tally_kept(), n: report.tally.kept, c: success }, { label: m.mrv_tally_not_metric(), n: report.tally.not_metric, c: danger }, { label: m.mrv_tally_duplicate(), n: report.tally.duplicate, c: warning }, { label: m.mrv_tally_formula_input(), n: report.tally.formula_input, c: warning }, { label: m.mrv_tally_missed(), n: report.tally.missed, c: accent }] as t (t.label)}
 								<div class="rounded-lg p-3" style="background:{surface2};">
 									<div class="text-2xl font-semibold" style="color:{t.c};">{t.n}</div>
 									<div class="text-xs" style="color:{textSecondary};">{t.label}</div>
@@ -322,20 +492,20 @@
 						<!-- 1. Missed metrics -->
 						<section class="space-y-2">
 							<h4 class="font-semibold" style="color:{textPrimary};">
-								1. Missed metrics <span style="color:{textMuted};">({report.missed_metrics.length})</span>
+								{m.mrv_sec_missed()} <span style="color:{textMuted};">({report.missed_metrics.length})</span>
 							</h4>
 							{#if report.missed_metrics.length === 0}
-								<p class="text-sm" style="color:{textMuted};">None — every metric in the document was found.</p>
+								<p class="text-sm" style="color:{textMuted};">{m.mrv_none_missed()}</p>
 							{/if}
-							{#each sortBySeverity(report.missed_metrics) as m, i (i)}
+							{#each sortBySeverity(report.missed_metrics) as mm, i (i)}
 								<div class="rounded-lg p-3 space-y-1" style="border:1px solid {borderColor};">
 									<div class="flex flex-wrap items-center gap-2">
-										{@render severityBadge(m.severity)}
-										<span class="font-medium" style="color:{textPrimary};">{m.name}</span>
-										{#if m.value}<span style="color:{accent};">{m.value} {m.unit}</span>{/if}
-										{#if m.lines}<span class="text-xs" style="color:{textMuted};">L{m.lines}</span>{/if}
+										{@render severityBadge(mm.severity)}
+										<span class="font-medium" style="color:{textPrimary};">{mm.name}</span>
+										{#if mm.value}<span style="color:{accent};">{mm.value} {mm.unit}</span>{/if}
+										{#if mm.lines}<span class="text-xs" style="color:{textMuted};">L{mm.lines}</span>{/if}
 									</div>
-									<p class="text-sm" style="color:{textSecondary};">{m.reason}</p>
+									<p class="text-sm" style="color:{textSecondary};">{mm.reason}</p>
 								</div>
 							{/each}
 						</section>
@@ -343,25 +513,25 @@
 						<!-- 2. Not metrics -->
 						<section class="space-y-3">
 							<h4 class="font-semibold" style="color:{textPrimary};">
-								2. Rows that should not be metrics
+								{m.mrv_sec_non_metrics()}
 								<span style="color:{textMuted};"
 									>({report.tally.not_metric + report.tally.duplicate + report.tally.formula_input})</span
 								>
 							</h4>
 							{#if report.non_metrics.length === 0}
-								<p class="text-sm" style="color:{textMuted};">None.</p>
+								<p class="text-sm" style="color:{textMuted};">{m.mrv_none()}</p>
 							{/if}
 							{#each groupNonMetrics(report.non_metrics) as g (g.category)}
 								<div class="space-y-2">
 									<div class="text-xs font-semibold uppercase tracking-wide" style="color:{textSecondary};">
-										{NON_METRIC_CATEGORY_LABEL[g.category]}
+										{CATEGORY_LABEL[g.category]}
 									</div>
 									{#each g.entries as e, i (i)}
 										<div class="rounded-lg p-3 space-y-1.5" style="border:1px solid {borderColor};">
 											<div class="flex flex-wrap items-center gap-2">
 												{@render metricChips(e.metric_ids)}
 												{#if e.duplicate_of}
-													<span class="text-xs" style="color:{textMuted};">duplicate of</span>
+													<span class="text-xs" style="color:{textMuted};">{m.mrv_duplicate_of()}</span>
 													{@render metricChips([e.duplicate_of])}
 												{/if}
 											</div>
@@ -375,10 +545,10 @@
 						<!-- 3. Attribute issues -->
 						<section class="space-y-2">
 							<h4 class="font-semibold" style="color:{textPrimary};">
-								3. Attribute issues <span style="color:{textMuted};">({report.attribute_issues.length})</span>
+								{m.mrv_sec_attributes()} <span style="color:{textMuted};">({report.attribute_issues.length})</span>
 							</h4>
 							{#if report.attribute_issues.length === 0}
-								<p class="text-sm" style="color:{textMuted};">None.</p>
+								<p class="text-sm" style="color:{textMuted};">{m.mrv_none()}</p>
 							{/if}
 							{#each sortBySeverity(report.attribute_issues) as a, i (i)}
 								<div class="rounded-lg p-3 space-y-1.5" style="border:1px solid {borderColor};">
@@ -391,9 +561,9 @@
 									</div>
 									{#if a.stored || a.suggested}
 										<div class="text-sm flex flex-wrap items-center gap-2">
-											<span style="color:{danger}; text-decoration:line-through;">{a.stored || '(empty)'}</span>
+											<span style="color:{danger}; text-decoration:line-through;">{a.stored || m.mrv_empty()}</span>
 											<span style="color:{textMuted};">→</span>
-											<span style="color:{success};">{a.suggested || '(empty)'}</span>
+											<span style="color:{success};">{a.suggested || m.mrv_empty()}</span>
 										</div>
 									{/if}
 									<p class="text-sm" style="color:{textSecondary};">{a.reason}</p>
@@ -404,7 +574,7 @@
 						<!-- Recommendations -->
 						{#if report.recommendations.length > 0}
 							<section class="space-y-2">
-								<h4 class="font-semibold" style="color:{textPrimary};">Recommendations</h4>
+								<h4 class="font-semibold" style="color:{textPrimary};">{m.mrv_sec_recommendations()}</h4>
 								<ol class="list-decimal pl-5 space-y-1 text-sm" style="color:{textSecondary};">
 									{#each report.recommendations as r, i (i)}
 										<li>{r}</li>
@@ -418,3 +588,9 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	.export-item:hover {
+		background: var(--hover-bg);
+	}
+</style>
