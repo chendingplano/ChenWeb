@@ -12,6 +12,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
@@ -247,7 +248,7 @@ func TestBuildWhereClauseRunningProcessorStatus(t *testing.T) {
 	}
 }
 
-func TestBuildWhereClauseShowFailedMatchesAnyNonSuccessStatusEntry(t *testing.T) {
+func TestBuildWhereClauseShowFailedMatchesFailedStatusEntry(t *testing.T) {
 	whereSQL, args, err := buildWhereClause(listInputsFilters{ShowFailed: true})
 	if err != nil {
 		t.Fatalf("buildWhereClause returned error: %v", err)
@@ -258,7 +259,7 @@ func TestBuildWhereClauseShowFailedMatchesAnyNonSuccessStatusEntry(t *testing.T)
 		"entry->>'proc_status'",
 		"entry->>'proc-status'",
 		"entry->>'status'",
-		"<> 'success'",
+		"= 'failed'",
 	} {
 		if !strings.Contains(whereSQL, want) {
 			t.Fatalf("expected whereSQL to contain %q, got: %s", want, whereSQL)
@@ -277,7 +278,32 @@ func TestBuildWhereClauseShowFailedMatchesAnyNonSuccessStatusEntry(t *testing.T)
 	}
 }
 
+// stubListInputsUser makes IsAuthenticated return the given user. ListInputs
+// scopes non-admin callers to their own rows via i.user_id.
+func stubListInputsUser(t *testing.T, user *ApiTypes.UserInfo) {
+	t.Helper()
+	oldAuth := EchoFactory.DefaultAuthenticator
+	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+		return user, nil
+	}
+	t.Cleanup(func() { EchoFactory.DefaultAuthenticator = oldAuth })
+}
+
+func TestBuildWhereClauseOwnerUserIDScopesToUser(t *testing.T) {
+	whereSQL, args, err := buildWhereClause(listInputsFilters{OwnerUserID: " user-alpha "})
+	if err != nil {
+		t.Fatalf("buildWhereClause returned error: %v", err)
+	}
+	if !strings.Contains(whereSQL, "i.user_id = $1") {
+		t.Fatalf("expected whereSQL to scope by i.user_id, got: %s", whereSQL)
+	}
+	if len(args) != 1 || args[0] != "user-alpha" {
+		t.Fatalf("args=%v, want [user-alpha]", args)
+	}
+}
+
 func TestListInputsSuccess(t *testing.T) {
+	stubListInputsUser(t, &ApiTypes.UserInfo{UserId: "admin-1", Roles: []string{"admin"}})
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -332,7 +358,7 @@ FROM kb.inputs i
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
-		int64(101), "Report A", "mineru", "pdf", "tenant-alpha", int64(7), "Annual Report", nil, "Store desc", "auto", "upload", "/tmp/report-a.pdf",
+		int64(101), "Report A", "mineru", "pdf", "user-alpha", int64(7), "Annual Report", nil, "Store desc", "auto", "upload", "/tmp/report-a.pdf",
 		"/backup/report-a.pdf", "/result/report-a.json", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[
 			{"operation":"parsing","status":"success"},
@@ -436,6 +462,7 @@ func TestListInputsInvalidParseState(t *testing.T) {
 }
 
 func TestListInputsCountQueryFailure(t *testing.T) {
+	stubListInputsUser(t, &ApiTypes.UserInfo{UserId: "admin-1", Roles: []string{"admin"}})
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -464,6 +491,7 @@ func TestListInputsCountQueryFailure(t *testing.T) {
 }
 
 func TestListInputsDataQueryFailure(t *testing.T) {
+	stubListInputsUser(t, &ApiTypes.UserInfo{UserId: "admin-1", Roles: []string{"admin"}})
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -525,6 +553,7 @@ FROM kb.inputs i
 }
 
 func TestListInputsPageSizeCap(t *testing.T) {
+	stubListInputsUser(t, &ApiTypes.UserInfo{UserId: "admin-1", Roles: []string{"admin"}})
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -563,6 +592,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 }
 
 func TestListInputsWithDateQueryParams(t *testing.T) {
+	stubListInputsUser(t, &ApiTypes.UserInfo{UserId: "admin-1", Roles: []string{"admin"}})
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -602,6 +632,7 @@ func TestListInputsWithDateQueryParams(t *testing.T) {
 }
 
 func TestListInputsExtendedQueryParams(t *testing.T) {
+	stubListInputsUser(t, &ApiTypes.UserInfo{UserId: "admin-1", Roles: []string{"admin"}})
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -663,7 +694,7 @@ FROM kb.inputs i
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
-		int64(84), "Input #84", "mineru", "pdf", "tenant-alpha", int64(7), "Title", "GB/T 123", "Store desc", "pdf_parsing", "upload", "/tmp/std.pdf",
+		int64(84), "Input #84", "mineru", "pdf", "user-alpha", int64(7), "Title", "GB/T 123", "Store desc", "pdf_parsing", "upload", "/tmp/std.pdf",
 		"/backup/std.pdf", "/result/std.json", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[{"operation":"extract_metadata","proc_status":"success"}]`, time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC), time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
