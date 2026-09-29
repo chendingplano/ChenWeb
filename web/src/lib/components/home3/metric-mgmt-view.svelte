@@ -93,6 +93,8 @@
 	let recordBrowserFolded = $state(false);
 	let keywordFilter = $state('');
 	let confidenceFilter = $state('');
+	type MetricOrderBy = 'source' | 'id_asc' | 'id_desc' | 'name_asc' | 'name_desc';
+	let metricOrderBy = $state<MetricOrderBy>('source');
 	let searchQuery = $state('');
 	let searchFilters = $state(createEmptyKbMetricSearchFilters());
 	let searchResults = $state<KbMetricSearchResult[]>([]);
@@ -666,7 +668,23 @@
 				}
 			}
 		}
+		const byText = (x: string, y: string) => x.localeCompare(y, undefined, { numeric: true });
+		const byMetricId = (a: KbMetricRecord, b: KbMetricRecord) =>
+			byText(a.metric_id?.trim() || String(a.id), b.metric_id?.trim() || String(b.id)) ||
+			a.id - b.id;
+		const byName = (a: KbMetricRecord, b: KbMetricRecord) =>
+			byText(metricNameOf(a), metricNameOf(b)) || a.id - b.id;
 		return [...result].sort((a, b) => {
+			switch (metricOrderBy) {
+				case 'id_asc':
+					return byMetricId(a, b);
+				case 'id_desc':
+					return byMetricId(b, a);
+				case 'name_asc':
+					return byName(a, b);
+				case 'name_desc':
+					return byName(b, a);
+			}
 			const lineDiff = firstMetricSourceLine(a) - firstMetricSourceLine(b);
 			if (lineDiff !== 0) return lineDiff;
 			return a.id - b.id;
@@ -1526,6 +1544,18 @@
 						>
 					{/if}
 				</div>
+				<select
+					class="toolbar-select"
+					bind:value={metricOrderBy}
+					title="Order the metric list"
+					aria-label="Order by"
+				>
+					<option value="source">Order by: source order</option>
+					<option value="id_asc">Order by: metric ID ASC</option>
+					<option value="id_desc">Order by: metric ID DESC</option>
+					<option value="name_asc">Order by: metric name ASC</option>
+					<option value="name_desc">Order by: metric name DESC</option>
+				</select>
 			</div>
 
 			<div class="global-search-launch">
