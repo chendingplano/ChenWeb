@@ -292,7 +292,7 @@ INSERT INTO kb.inputs (
     $4::jsonb,
     $5
 )`
-	docprocessing.AlarmMissingTenantIDAtInsert(ctx, "service-pdf-parser")
+	docprocessing.AlarmMissingUserIDAtInsert(ctx, "service-pdf-parser")
 	_, err = db.ExecContext(ctx, insertStmt, name, homePath, backupPath, string(status), md5Hex)
 	if err != nil {
 		return false, fmt.Errorf("insert kb.inputs failed: %w", err)
