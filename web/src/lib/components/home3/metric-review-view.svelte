@@ -292,7 +292,8 @@
 	>
 {/snippet}
 
-<div class="p-6 space-y-4 h-full flex flex-col overflow-hidden" style="background:{pageBg};">
+<!-- The dashboard shell sets select-none; opt back in so report text can be copied. -->
+<div class="p-6 space-y-4 h-full flex flex-col overflow-hidden select-text" style="background:{pageBg};">
 	<!-- Header -->
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">{m.mrv_title()}</h2>
