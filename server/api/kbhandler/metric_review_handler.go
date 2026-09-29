@@ -406,6 +406,7 @@ func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 		TimeoutSec:           cfg.TimeoutSec,
 		ThinkingType:         cfg.ThinkingType,
 		MaxOutputTokens:      cfg.MaxOutputTokens,
+		OmitTemperature:      cfg.OmitTemperature,
 		MaxInflight:          cfg.MaxInflight,
 		MaxRequestsPerMinute: cfg.MaxRequestsPerMinute,
 		MaxTokensPerMinute:   cfg.MaxTokensPerMinute,
