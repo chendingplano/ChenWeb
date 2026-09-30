@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/nodes/McpNode.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import BaseNode from './BaseNode.svelte';
   let { id, data, selected }: { id: string; data: Record<string,any>; selected?: boolean } = $props();
 </script>
@@ -8,6 +9,6 @@
   onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:#6b7280; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">
-    {data.server_url ?? 'no server'}
+    {data.server_url ?? m.mcpnode_no_server()}
   </div>
 </BaseNode>

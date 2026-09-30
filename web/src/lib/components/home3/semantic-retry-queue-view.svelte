@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { listRetryQueue, type RetryQueueJob, type RetryQueueFilters } from './semantic-retry-queue-client';
@@ -19,62 +20,60 @@
 	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px;font-weight:600;color:{text}">Semantic Retry Queue</h2>
+				<h2 style="font-size:18px;font-weight:600;color:{text}">{m.semantic_retry_queue_semantic_retry_queue()}</h2>
 				<p style="font-size:13px;color:{muted};margin-top:2px">
-					Read-only view of <code style="color:{accent}">kb.semantic_retry_queue</code> (ADR 2026081801
-					DR10). Jobs are keyed on the dependency they are waiting for, not on re-running a
-					processor.
+					{m.semantic_retry_queue_read_only_view_of()} <code style="color:{accent}">kb.semantic_retry_queue</code> {m.semantic_retry_queue_adr_2026081801_dr10_jobs_are()}
 				</p>
 			</div>
 			<button onclick={load} disabled={loading} class="cursor-pointer rounded-lg px-3 py-2 text-sm" style="background:{surface};color:{text};border:1px solid {border}">
-				<RefreshCwIcon class="inline h-4 w-4" /> Refresh
+				<RefreshCwIcon class="inline h-4 w-4" /> {m.semantic_retry_queue_refresh()}
 			</button>
 		</div>
 	</div>
 
 	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
 		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
-			<label style="color:{muted}">State
+			<label style="color:{muted}">{m.semantic_retry_queue_state()}
 				<select bind:value={filters.state} class="w-full rounded px-2 py-1.5 text-sm" style="background:{surface};color:{text};border:1px solid {border}">
-					<option value="">Any</option>
+					<option value="">{m.semantic_retry_queue_any()}</option>
 					{#each states as s}<option>{s}</option>{/each}
 				</select>
 			</label>
-			<label style="color:{muted}">Outcome ID
+			<label style="color:{muted}">{m.semantic_retry_queue_outcome_id()}
 				<input bind:value={filters.outcome_id} class="w-full rounded px-2 py-1.5 text-sm" style="background:{surface};color:{text};border:1px solid {border}" />
 			</label>
 		</div>
-		<button onclick={apply} class="mt-3 cursor-pointer rounded-lg px-3 py-2 text-sm" style="background:{accent};color:white">Apply Filters</button>
+		<button onclick={apply} class="mt-3 cursor-pointer rounded-lg px-3 py-2 text-sm" style="background:{accent};color:white">{m.semantic_retry_queue_apply_filters()}</button>
 	</div>
 
 	{#if error}<div class="rounded-xl p-4" style="background:{danger}20;color:{danger}">{error}</div>{/if}
 
 	<div class="overflow-hidden rounded-xl" style="background:{card};border:1px solid {border}">
 		<div class="flex justify-between px-5 py-3 text-sm" style="border-bottom:1px solid {border};color:{muted}">
-			<span>Total: {total}{#if total} &middot; page {page} of {totalPages}{/if}</span>
+			<span>{m.semantic_retry_queue_total({ total })}{#if total} {m.semantic_retry_queue_page_of({ page, totalPages })}{/if}</span>
 			<div class="flex items-center gap-2">
 				<button onclick={()=>{if(page>1){page--;load()}}} disabled={page<=1||loading}>&lsaquo;</button>
 				<button onclick={()=>{if(page<totalPages){page++;load()}}} disabled={page>=totalPages||loading}>&rsaquo;</button>
 			</div>
 		</div>
 		{#if loading}
-			<div class="p-8 text-center" style="color:{muted}">Loading&hellip;</div>
+			<div class="p-8 text-center" style="color:{muted}">{m.semantic_retry_queue_loading()}</div>
 		{:else if !rows.length}
-			<div class="p-8 text-center" style="color:{muted}">No retry queue jobs found.</div>
+			<div class="p-8 text-center" style="color:{muted}">{m.semantic_retry_queue_no_retry_queue_jobs_found()}</div>
 		{:else}
 			<div class="overflow-auto">
 				<table class="w-full text-left text-sm">
 					<thead style="color:{muted}">
 						<tr>
-							<th class="px-4 py-3">ID</th>
-							<th class="px-4 py-3">State</th>
-							<th class="px-4 py-3">Outcome</th>
-							<th class="px-4 py-3">Artifact</th>
-							<th class="px-4 py-3">Stage</th>
-							<th class="px-4 py-3">Target Fingerprint</th>
-							<th class="px-4 py-3">Attempts</th>
-							<th class="px-4 py-3">Last Error</th>
-							<th class="px-4 py-3">Modified</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_id()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_state()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_outcome()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_artifact()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_stage()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_target_fingerprint()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_attempts()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_last_error()}</th>
+							<th class="px-4 py-3">{m.semantic_retry_queue_modified()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -84,7 +83,7 @@
 								<td class="px-4 py-3">
 									<span style="padding:0.1rem 0.5rem;border-radius:999px;background:{stateColor(row.state)}20;color:{stateColor(row.state)};font-size:12px;font-weight:600">{row.state}</span>
 								</td>
-								<td class="px-4 py-3">#{row.outcome_id}{#if row.outcome_input_record_id} &middot; doc {row.outcome_input_record_id}{/if}</td>
+								<td class="px-4 py-3">#{row.outcome_id}{#if row.outcome_input_record_id} {m.semantic_retry_queue_doc({ outcome_input_record_id: row.outcome_input_record_id })}{/if}</td>
 								<td class="max-w-40 truncate px-4 py-3" title="{row.outcome_artifact_type}:{row.outcome_artifact_id}">{row.outcome_artifact_type}:{row.outcome_artifact_id}</td>
 								<td class="px-4 py-3">{row.outcome_stage_term_id || '—'}</td>
 								<td class="max-w-48 truncate px-4 py-3" style="font-family:monospace;font-size:12px" title={row.target_dependency_fingerprint}>{row.target_dependency_fingerprint}</td>

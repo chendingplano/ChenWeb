@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// The CDM Editor's top-level shell: a persistent two-pane frame (left:
 	// browse the document list, or edit one; right: a docked live preview),
 	// with a draggable divider between them. This is the ONE CDM Editor
@@ -78,7 +79,8 @@
 				knowledgeStoreState.setActiveStore(stores[0]);
 			}
 		} catch (err) {
-			storesError = err instanceof Error ? err.message : 'Failed to load knowledge stores.';
+			storesError =
+				err instanceof Error ? err.message : m.cdmeditorshell_failed_to_load_knowledge_stores();
 		} finally {
 			storesLoading = false;
 		}
@@ -244,15 +246,16 @@
 	style:--shell-crimson-faint={crimsonFaint}
 >
 	{#if storesLoading}
-		<p class="cdm-shell-status">Loading knowledge stores…</p>
+		<p class="cdm-shell-status">{m.cdmeditorshell_loading_knowledge_stores()}</p>
 	{:else if storesError}
 		<p class="cdm-shell-error">{storesError}</p>
 		<button type="button" class="cdm-shell-retry" onclick={loadStores}>
-			<RefreshCwIcon size={14} /> Retry
+			<RefreshCwIcon size={14} />
+			{m.cdmeditorshell_retry()}
 		</button>
 	{:else if !activeStore}
 		<p class="cdm-shell-status">
-			No knowledge stores available. Create one under Knowledge Base first.
+			{m.cdmeditorshell_no_knowledge_stores_available_create()}
 		</p>
 	{:else}
 		<div class="cdm-shell-split" bind:this={splitEl}>
@@ -269,19 +272,21 @@
 					/>
 				{:else if editorLoadState === 'loading'}
 					<div class="cdm-shell-editor-status">
-						<p>Loading document…</p>
+						<p>{m.cdmeditorshell_loading_document()}</p>
 					</div>
 				{:else if editorLoadState === 'error'}
 					<div class="cdm-shell-editor-status">
 						<p class="cdm-shell-error">{editorLoadError}</p>
 						<button type="button" class="cdm-shell-retry" onclick={backToList}>
-							<ChevronLeftIcon size={14} /> Back to documents
+							<ChevronLeftIcon size={14} />
+							{m.cdmeditorshell_back_to_documents()}
 						</button>
 					</div>
 				{:else if editingDocument}
 					<nav class="cdm-shell-crumbs">
 						<button type="button" onclick={backToList}>
-							<ChevronLeftIcon size={14} /> All documents
+							<ChevronLeftIcon size={14} />
+							{m.cdmeditorshell_all_documents()}
 						</button>
 						{#if editingDocument.document_key}
 							<span class="cdm-shell-key">{editingDocument.document_key}</span>
@@ -300,24 +305,31 @@
 
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-			<div class="cdm-shell-divider" onmousedown={startDrag} title="Drag to resize"></div>
+			<div
+				class="cdm-shell-divider"
+				onmousedown={startDrag}
+				title={m.cdmeditorshell_drag_to_resize()}
+			></div>
 
 			<div class="cdm-shell-right">
 				{#if previewPages && previewPages.length > 0}
 					<div class="cdm-shell-preview-header">
-						<span>Preview — version {previewVersion}</span>
-						{#if previewLoading}<span class="cdm-shell-preview-updating">Updating…</span>{/if}
+						<span>{m.cdmeditorshell_preview_version({ previewVersion: previewVersion ?? '' })}</span
+						>
+						{#if previewLoading}<span class="cdm-shell-preview-updating"
+								>{m.cdmeditorshell_updating()}</span
+							>{/if}
 					</div>
 					<div class="cdm-shell-preview-pages" bind:this={previewPagesElement}></div>
 				{:else if previewLoading}
-					<div class="cdm-shell-preview-status">Rendering preview…</div>
+					<div class="cdm-shell-preview-status">{m.cdmeditorshell_rendering_preview()}</div>
 				{:else if mode === 'editor'}
 					<div class="cdm-shell-preview-status">
-						Click “Preview” above to render this document here.
+						{m.cdmeditorshell_click_preview_above_to_render()}
 					</div>
 				{:else}
 					<div class="cdm-shell-preview-status">
-						Open or create a document, then click “Preview” to see it rendered here.
+						{m.cdmeditorshell_open_or_create_a_document()}
 					</div>
 				{/if}
 			</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// The CDM Editor document list: the browsing half of CdmEditorShell's left
 	// pane (the other half is DocumentEditor, swapped in when a document is
 	// opened or created). Store selection, "New Document," and opening a
@@ -79,7 +80,7 @@
 			const res = await listDocuments({ tenantId });
 			documents = res.results;
 		} catch (err) {
-			loadError = err instanceof Error ? err.message : 'Failed to load documents.';
+			loadError = err instanceof Error ? err.message : m.documentlistview_failed_to_load_documents();
 		} finally {
 			loading = false;
 		}
@@ -147,9 +148,9 @@
 	let publishedCount = $derived(documents.length - draftCount);
 
 	const statusTabs: Array<{ id: 'all' | 'draft' | 'published'; label: string }> = [
-		{ id: 'all', label: 'All' },
-		{ id: 'draft', label: 'Drafts' },
-		{ id: 'published', label: 'Published' }
+		{ id: 'all', label: m.documentlistview_all() },
+		{ id: 'draft', label: m.documentlistview_drafts() },
+		{ id: 'published', label: m.documentlistview_published() }
 	];
 
 	function tabCount(id: 'all' | 'draft' | 'published'): number {
@@ -194,12 +195,11 @@
 		<div class="cdm-masthead-copy">
 			<div class="cdm-kicker">
 				<span class="cdm-diamond" aria-hidden="true"></span>
-				CDM Editor
+				{m.documentlistview_cdm_editor()}
 			</div>
-			<h1>Author documents SemOS understands.</h1>
+			<h1>{m.documentlistview_author_documents_semos_understands()}</h1>
 			<p>
-				A knowledge editor, not a word processor: you write meaning — headings, tables,
-				equations, callouts — and a Typst template decides how it looks.
+				{m.documentlistview_a_knowledge_editor_not_a()}
 			</p>
 		</div>
 
@@ -207,7 +207,7 @@
 			<label class="cdm-store-select">
 				<span class="cdm-store-select-label">
 					<DatabaseIcon size={12} />
-					Knowledge store
+					{m.documentlistview_knowledge_store()}
 				</span>
 				<div class="cdm-store-select-input">
 					<select value={activeStore.id} onchange={handleStoreSelect}>
@@ -220,7 +220,7 @@
 			</label>
 			<button type="button" class="cdm-btn cdm-btn--primary" onclick={onNewDocument}>
 				<FilePlusIcon size={15} />
-				New Document
+				{m.documentlistview_new_document()}
 			</button>
 		</div>
 	</header>
@@ -228,7 +228,7 @@
 	<!-- ── Documents ───────────────────────────────────────────────────── -->
 	<section class="cdm-panel cdm-docs">
 		<div class="cdm-docs-toolbar">
-			<div class="cdm-tabs" role="tablist" aria-label="Filter by status">
+			<div class="cdm-tabs" role="tablist" aria-label={m.documentlistview_filter_by_status()}>
 				{#each statusTabs as tab (tab.id)}
 					<button
 						type="button"
@@ -251,14 +251,14 @@
 					onclick={() => (searchOpen ? (searchOpen = false) : openSearch())}
 				>
 					<SearchIcon size={14} />
-					Search
+					{m.documentlistview_search()}
 					{#if titleFilter}<span class="cdm-search-dot" aria-hidden="true"></span>{/if}
 				</button>
 				{#if searchOpen}
 					<div class="cdm-search-popover">
 						<input
 							type="text"
-							placeholder="Title contains…"
+							placeholder={m.documentlistview_title_contains()}
 							bind:value={searchDraft}
 							onkeydown={(e) => {
 								if (e.key === 'Enter') applySearch();
@@ -267,10 +267,10 @@
 						/>
 						<div class="cdm-search-popover-actions">
 							<button type="button" class="cdm-btn cdm-btn--ghost" onclick={clearSearch}>
-								Clear
+								{m.documentlistview_clear()}
 							</button>
 							<button type="button" class="cdm-btn cdm-btn--primary" onclick={applySearch}>
-								Search
+								{m.documentlistview_search()}
 							</button>
 						</div>
 					</div>
@@ -279,7 +279,7 @@
 		</div>
 
 		{#if loading}
-			<p class="cdm-status-line">Loading documents…</p>
+			<p class="cdm-status-line">{m.documentlistview_loading_documents()}</p>
 		{:else if loadError}
 			<p class="cdm-error">{loadError}</p>
 			<button
@@ -287,18 +287,18 @@
 				class="cdm-btn cdm-btn--ghost"
 				onclick={() => activeStore.tenant_id && loadDocuments(activeStore.tenant_id)}
 			>
-				<RefreshCwIcon size={14} /> Retry
+				<RefreshCwIcon size={14} /> {m.documentlistview_retry()}
 			</button>
 		{:else if documents.length === 0}
 			<div class="cdm-empty">
 				<span class="cdm-diamond cdm-diamond--lg" aria-hidden="true"></span>
-				<p>No documents in this store yet.</p>
-				<p class="cdm-empty-sub">Click “New Document” above to start writing.</p>
+				<p>{m.documentlistview_no_documents_in_this_store()}</p>
+				<p class="cdm-empty-sub">{m.documentlistview_click_new_document_above_to()}</p>
 			</div>
 		{:else if visibleDocuments.length === 0}
 			<div class="cdm-empty">
 				<span class="cdm-diamond cdm-diamond--lg" aria-hidden="true"></span>
-				<p>No documents match this filter.</p>
+				<p>{m.documentlistview_no_documents_match_this_filter()}</p>
 			</div>
 		{:else}
 			<ul class="cdm-doc-list">
@@ -319,7 +319,7 @@
 								class:cdm-badge--published={doc.published}
 								class:cdm-badge--draft={!doc.published}
 							>
-								{doc.published ? 'Published' : 'Draft'}
+								{doc.published ? m.documentlistview_published() : m.documentlistview_draft()}
 							</span>
 							<span class="cdm-doc-version">v{doc.content_version}</span>
 							<span class="cdm-doc-key">{doc.document_key}</span>
@@ -327,7 +327,7 @@
 							<!-- A published document is frozen (D8), so it opens read-only --
 							     "Open" rather than "Edit" says so before the click. -->
 							<span class="cdm-doc-action">
-								{doc.published ? 'Open' : 'Edit'}
+								{doc.published ? m.documentlistview_open() : m.documentlistview_edit()}
 								<ArrowRightIcon size={13} />
 							</span>
 						</a>

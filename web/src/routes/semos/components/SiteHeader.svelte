@@ -89,7 +89,7 @@
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
 					class="flex items-center gap-1.5 rounded-full px-2.5 py-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
-					aria-label="Switch language"
+					aria-label={m.siteheader_switch_language()}
 				>
 					<Languages class="h-4 w-4" />
 					<span class="text-[0.8rem] font-medium">{localeLabels[getLocale()] ?? getLocale()}</span>
@@ -106,7 +106,7 @@
 			<button
 				type="button"
 				class="rounded-full p-2 text-[#17181c]/45 transition-colors duration-200 hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
-				aria-label="Toggle dark mode"
+				aria-label={m.siteheader_toggle_dark_mode()}
 				onclick={() => theme.toggle()}
 			>
 				{#if theme.isDark}
@@ -127,7 +127,7 @@
 			<button
 				type="button"
 				class="rounded-full p-2 text-[#17181c]/45 transition-colors hover:bg-[#17181c]/5 hover:text-[#17181c] md:hidden dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white"
-				aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+				aria-label={mobileOpen ? m.siteheader_close_menu() : m.siteheader_open_menu()}
 				aria-expanded={mobileOpen}
 				aria-controls="semos-mobile-nav"
 				onclick={() => (mobileOpen = !mobileOpen)}

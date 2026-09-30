@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { kbSearchArtifactOptions } from '$lib/components/home3/kb-search-lab-state';
 	import {
 		searchKbArtifacts,
@@ -33,7 +34,7 @@
 
 	async function runSearch() {
 		if (!query.trim()) {
-			error = 'Enter a query.';
+			error = m.kb_search_lab_enter_a_query();
 			payload = null;
 			return;
 		}
@@ -52,7 +53,7 @@
 				relationType
 			});
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Search failed';
+			error = err instanceof Error ? err.message : m.kb_search_lab_search_failed();
 			payload = null;
 		} finally {
 			loading = false;
@@ -66,15 +67,15 @@
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
 		<div class="mb-5">
-			<h1 class="text-xl font-semibold">KB Search Lab</h1>
+			<h1 class="text-xl font-semibold">{m.kb_search_lab_kb_search_lab()}</h1>
 			<p class="mt-2 text-sm" style="color:{textSecondary};">
-				Quick operator harness for artifact search endpoints and LLM-oriented result payloads.
+				{m.kb_search_lab_quick_operator_harness_for_artifact()}
 			</p>
 		</div>
 
 		<div class="grid gap-4 md:grid-cols-[220px_1fr_180px_auto]">
 			<label class="flex flex-col gap-2 text-sm">
-				<span style="color:{textSecondary};">Artifact</span>
+				<span style="color:{textSecondary};">{m.kb_search_lab_artifact()}</span>
 				<select bind:value={artifactType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};">
 					{#each kbSearchArtifactOptions as option}
 						<option value={option.value}>{option.label}</option>
@@ -83,23 +84,23 @@
 			</label>
 
 			<label class="flex flex-col gap-2 text-sm">
-				<span style="color:{textSecondary};">Query</span>
+				<span style="color:{textSecondary};">{m.kb_search_lab_query()}</span>
 				<input
 					bind:value={query}
 					class="rounded-xl px-3 py-2"
 					style="background:{surface2}; border:1px solid {borderColor};"
-					placeholder="energy intensity, safety protection, battery..."
+					placeholder={m.kb_search_lab_energy_intensity_safety_protection_battery()}
 					onkeydown={(event) => event.key === 'Enter' && runSearch()}
 				/>
 			</label>
 
 			<label class="flex flex-col gap-2 text-sm">
-				<span style="color:{textSecondary};">Record ID</span>
+				<span style="color:{textSecondary};">{m.kb_search_lab_record_id()}</span>
 				<input
 					bind:value={inputRecordId}
 					class="rounded-xl px-3 py-2"
 					style="background:{surface2}; border:1px solid {borderColor};"
-					placeholder="optional"
+					placeholder={m.kb_search_lab_optional()}
 					onkeydown={(event) => event.key === 'Enter' && runSearch()}
 				/>
 			</label>
@@ -112,56 +113,56 @@
 					onclick={runSearch}
 					disabled={loading}
 				>
-					{loading ? 'Searching...' : 'Search'}
+					{loading ? m.kb_search_lab_searching() : m.kb_search_lab_search()}
 				</button>
 			</div>
 		</div>
 
 		<div class="mt-4 grid gap-4 md:grid-cols-3">
 			<label class="flex flex-col gap-2 text-sm">
-				<span style="color:{textSecondary};">Category Path</span>
-				<input bind:value={categoryPath} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="optional" />
+				<span style="color:{textSecondary};">{m.kb_search_lab_category_path()}</span>
+				<input bind:value={categoryPath} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_optional()} />
 			</label>
 
 			{#if artifactType === 'all'}
 				<label class="flex flex-col gap-2 text-sm">
-					<span style="color:{textSecondary};">Artifact Types</span>
-					<input bind:value={artifactTypes} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="summary,provision" />
+					<span style="color:{textSecondary};">{m.kb_search_lab_artifact_types()}</span>
+					<input bind:value={artifactTypes} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_summary_provision()} />
 				</label>
 			{/if}
 
 			{#if artifactType === 'topics'}
 				<label class="flex flex-col gap-2 text-sm">
-					<span style="color:{textSecondary};">Topic Type</span>
-					<input bind:value={topicType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="requirement" />
+					<span style="color:{textSecondary};">{m.kb_search_lab_topic_type()}</span>
+					<input bind:value={topicType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_requirement()} />
 				</label>
 			{/if}
 
 			{#if artifactType === 'scene-blocks'}
 				<label class="flex flex-col gap-2 text-sm">
-					<span style="color:{textSecondary};">Scene Type</span>
-					<input bind:value={sceneType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="operation" />
+					<span style="color:{textSecondary};">{m.kb_search_lab_scene_type()}</span>
+					<input bind:value={sceneType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_operation()} />
 				</label>
 			{/if}
 
 			{#if artifactType === 'provisions'}
 				<label class="flex flex-col gap-2 text-sm">
-					<span style="color:{textSecondary};">Provision Type</span>
-					<input bind:value={provisionType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="mandatory" />
+					<span style="color:{textSecondary};">{m.kb_search_lab_provision_type()}</span>
+					<input bind:value={provisionType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_mandatory()} />
 				</label>
 			{/if}
 
 			{#if artifactType === 'all'}
 				<label class="flex flex-col gap-2 text-sm">
-					<span style="color:{textSecondary};">Product Type</span>
-					<input bind:value={productType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="equipment" />
+					<span style="color:{textSecondary};">{m.kb_search_lab_product_type()}</span>
+					<input bind:value={productType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_equipment()} />
 				</label>
 			{/if}
 
 			{#if artifactType === 'all' || artifactType === 'relations'}
 				<label class="flex flex-col gap-2 text-sm">
-					<span style="color:{textSecondary};">Relation Type</span>
-					<input bind:value={relationType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="maintenance_requirement" />
+					<span style="color:{textSecondary};">{m.kb_search_lab_relation_type()}</span>
+					<input bind:value={relationType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder={m.kb_search_lab_maintenance_requirement()} />
 				</label>
 			{/if}
 		</div>
@@ -174,8 +175,8 @@
 
 		{#if payload}
 			<div class="mt-6 flex items-center justify-between text-sm" style="color:{textSecondary};">
-				<div>Artifact type: <span style="color:{textPrimary};">{payload.artifact_type ?? artifactType}</span></div>
-				<div>Total: <span style="color:{textPrimary};">{payload.total ?? payload.results?.length ?? 0}</span></div>
+				<div>{m.kb_search_lab_artifact_type()} <span style="color:{textPrimary};">{payload.artifact_type ?? artifactType}</span></div>
+				<div>{m.kb_search_lab_total()} <span style="color:{textPrimary};">{payload.total ?? payload.results?.length ?? 0}</span></div>
 			</div>
 
 			<div class="mt-4 space-y-3">
@@ -184,7 +185,7 @@
 						<div class="flex items-start justify-between gap-4">
 							<div>
 								<div class="text-sm font-semibold">
-									{result.primary_label ?? result.metric_name ?? result.topicText ?? result.summaryText ?? `Result ${index + 1}`}
+									{result.primary_label ?? result.metric_name ?? result.topicText ?? result.summaryText ?? m.kb_search_lab_result({ value: index + 1 })}
 								</div>
 								<div class="mt-1 text-xs" style="color:{textMuted};">
 									{result.artifact_type ?? payload.artifact_type ?? artifactType}
@@ -193,12 +194,12 @@
 										· {result.secondary_label}
 									{/if}
 									{#if result.input_record_id ?? result.inputId}
-										· record {result.input_record_id ?? result.inputId}
+										{m.kb_search_lab_record({ input_record_id: result.input_record_id ?? result.inputId ?? '' })}
 									{/if}
 								</div>
 							</div>
 							<div class="text-xs" style="color:{textSecondary};">
-								score {typeof result.score === 'number' ? result.score.toFixed(4) : 'n/a'}
+								{m.kb_search_lab_score({ value: typeof result.score === 'number' ? result.score.toFixed(4) : 'n/a' })}
 							</div>
 						</div>
 						{#if result.snippet}
@@ -206,7 +207,7 @@
 						{/if}
 						{#if result.source_title ?? result.source_filename}
 							<div class="mt-3 text-xs" style="color:{textMuted};">
-								source: {result.source_title ?? result.source_filename}
+								{m.kb_search_lab_source({ source_title: result.source_title ?? result.source_filename ?? '' })}
 							</div>
 						{/if}
 					</article>
@@ -214,7 +215,7 @@
 
 				{#if !payload.results || payload.results.length === 0}
 					<div class="rounded-2xl p-6 text-sm" style="background:{surface2}; border:1px dashed {borderColor}; color:{textMuted};">
-						No results.
+						{m.kb_search_lab_no_results()}
 					</div>
 				{/if}
 			</div>

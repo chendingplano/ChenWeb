@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
@@ -90,14 +91,12 @@
 		<div class="mb-1 flex items-center gap-2">
 			<AlertTriangleIcon style="width:18px; height:18px; color:{warning};" />
 			<h1 style="font-size:20px; font-weight:600; color:{textPrimary};">
-				Database Maintenance — Resolve Orphaned Labels
+				{m.resolve_orphaned_labels_database_maintenance_resolve_orphaned_labels()}
 			</h1>
 		</div>
 		<p style="max-width:900px; font-size:13px; line-height:1.55; color:{textSecondary};">
-			An orphaned label is a row in <code>kb.ontology_term_labels</code> whose
-			<code>term_id</code> no longer matches a row in <code>kb.ontology_terms</code>.
-			These labels cannot be resolved safely and may block ontology identity updates. Search for
-			the rows you want to clean up, then use Resolve to remove the listed orphaned labels.
+			{m.resolve_orphaned_labels_an_orphaned_label_is_a()} <code>kb.ontology_term_labels</code> {m.resolve_orphaned_labels_whose()}
+			<code>term_id</code> {m.resolve_orphaned_labels_no_longer_matches_a_row()} <code>kb.ontology_terms</code>{m.resolve_orphaned_labels_these_labels_cannot_be_resolved()}
 		</p>
 	</div>
 
@@ -105,30 +104,30 @@
 		<div class="flex flex-wrap items-end gap-3 rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
 			<div class="flex min-w-[220px] flex-1 flex-col gap-1">
 				<label for="orphaned-label-query" style="font-size:12px; font-weight:500; color:{textMuted};">
-					Search term ID, label, or language
+					{m.resolve_orphaned_labels_search_term_id_label_or()}
 				</label>
-				<input id="orphaned-label-query" bind:value={searchQuery} onkeydown={(event) => event.key === 'Enter' && loadRows()} placeholder="e.g. 每户配备" style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:7px; padding:7px 10px; font-size:13px;" />
+				<input id="orphaned-label-query" bind:value={searchQuery} onkeydown={(event) => event.key === 'Enter' && loadRows()} placeholder={m.resolve_orphaned_labels_e_g()} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:7px; padding:7px 10px; font-size:13px;" />
 			</div>
 			<div class="flex w-36 flex-col gap-1">
-				<label for="orphaned-label-lang" style="font-size:12px; font-weight:500; color:{textMuted};">Language</label>
-				<input id="orphaned-label-lang" bind:value={searchLang} placeholder="zh-cn" style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:7px; padding:7px 10px; font-size:13px;" />
+				<label for="orphaned-label-lang" style="font-size:12px; font-weight:500; color:{textMuted};">{m.resolve_orphaned_labels_language()}</label>
+				<input id="orphaned-label-lang" bind:value={searchLang} placeholder={m.resolve_orphaned_labels_zh_cn()} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:7px; padding:7px 10px; font-size:13px;" />
 			</div>
 			<div class="flex w-36 flex-col gap-1">
-				<label for="orphaned-label-role" style="font-size:12px; font-weight:500; color:{textMuted};">Label role</label>
+				<label for="orphaned-label-role" style="font-size:12px; font-weight:500; color:{textMuted};">{m.resolve_orphaned_labels_label_role()}</label>
 				<select id="orphaned-label-role" bind:value={searchRole} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:7px; padding:7px 10px; font-size:13px;">
-					<option value="">All roles</option>
-					<option value="prefLabel">prefLabel</option>
-					<option value="altLabel">altLabel</option>
-					<option value="hiddenLabel">hiddenLabel</option>
+					<option value="">{m.resolve_orphaned_labels_all_roles()}</option>
+					<option value="prefLabel">{m.resolve_orphaned_labels_preflabel()}</option>
+					<option value="altLabel">{m.resolve_orphaned_labels_altlabel()}</option>
+					<option value="hiddenLabel">{m.resolve_orphaned_labels_hiddenlabel()}</option>
 				</select>
 			</div>
 			<button onclick={loadRows} disabled={loading} style="display:flex; align-items:center; gap:6px; border:0; border-radius:7px; padding:8px 14px; background:{accent}; color:white; font-size:13px; font-weight:500; opacity:{loading ? 0.6 : 1};">
 				<SearchIcon style="width:14px; height:14px;" />
-				{loading ? 'Searching…' : 'Search'}
+				{loading ? m.resolve_orphaned_labels_searching() : m.resolve_orphaned_labels_search()}
 			</button>
 			<button onclick={resolveRows} disabled={rows.length === 0 || resolving || loading} style="display:flex; align-items:center; gap:6px; border:1px solid rgba(248,113,113,0.45); border-radius:7px; padding:8px 14px; background:rgba(248,113,113,0.12); color:{danger}; font-size:13px; font-weight:600; opacity:{rows.length === 0 || resolving || loading ? 0.45 : 1};">
 				{#if resolving}<LoaderCircleIcon class="animate-spin" style="width:14px; height:14px;" />{:else}<Trash2Icon style="width:14px; height:14px;" />{/if}
-				{resolving ? 'Resolving…' : 'Resolve'}
+				{resolving ? m.resolve_orphaned_labels_resolving() : m.resolve_orphaned_labels_resolve()}
 			</button>
 		</div>
 
@@ -137,18 +136,18 @@
 
 		<div class="min-h-0 flex-1 overflow-auto rounded-xl" style="background:{cardBg}; border:1px solid {borderColor};">
 			<div class="flex items-center justify-between border-b px-4 py-3" style="border-color:{borderColor};">
-				<div style="font-size:13px; font-weight:600; color:{textPrimary};">Orphaned labels</div>
-				<div style="font-size:12px; color:{textSecondary};">{total} found · {rows.length} listed</div>
+				<div style="font-size:13px; font-weight:600; color:{textPrimary};">{m.resolve_orphaned_labels_orphaned_labels()}</div>
+				<div style="font-size:12px; color:{textSecondary};">{m.resolve_orphaned_labels_found_listed({ total, rowsCount: rows.length })}</div>
 			</div>
 			{#if loading && rows.length === 0}
-				<div class="p-6 text-center" style="font-size:13px; color:{textMuted};">Loading orphaned labels…</div>
+				<div class="p-6 text-center" style="font-size:13px; color:{textMuted};">{m.resolve_orphaned_labels_loading_orphaned_labels()}</div>
 			{:else if rows.length === 0}
-				<div class="p-6 text-center" style="font-size:13px; color:{textMuted};">No orphaned labels match the current search.</div>
+				<div class="p-6 text-center" style="font-size:13px; color:{textMuted};">{m.resolve_orphaned_labels_no_orphaned_labels_match_the()}</div>
 			{:else}
 				<table class="w-full border-collapse text-left" style="font-size:12px; color:{textSecondary};">
 					<thead style="position:sticky; top:0; background:{cardBg}; color:{textMuted};">
 						<tr>
-							<th class="px-4 py-3 font-medium">Term ID</th><th class="px-4 py-3 font-medium">Label</th><th class="px-4 py-3 font-medium">Language</th><th class="px-4 py-3 font-medium">Role</th><th class="px-4 py-3 font-medium">Status</th><th class="px-4 py-3 font-medium">Modified</th>
+							<th class="px-4 py-3 font-medium">{m.resolve_orphaned_labels_term_id()}</th><th class="px-4 py-3 font-medium">{m.resolve_orphaned_labels_label()}</th><th class="px-4 py-3 font-medium">{m.resolve_orphaned_labels_language()}</th><th class="px-4 py-3 font-medium">{m.resolve_orphaned_labels_role()}</th><th class="px-4 py-3 font-medium">{m.resolve_orphaned_labels_status()}</th><th class="px-4 py-3 font-medium">{m.resolve_orphaned_labels_modified()}</th>
 						</tr>
 					</thead>
 					<tbody>

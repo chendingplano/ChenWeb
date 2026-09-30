@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// Owns a document's top-level block structure: selection, insertion,
 	// deletion, reordering, and (for the three content-bearing types) type
 	// change. This is the "Svelte-owned block list" half of ADR 2026072603
@@ -52,7 +53,7 @@
 		blocks = $bindable(),
 		editable = true,
 		blockErrors = new Map<string, string[]>(),
-		emptyMessage = 'This document has no blocks yet.'
+		emptyMessage = m.blocklist_this_document_has_no_blocks()
 	}: {
 		blocks: Block[];
 		editable?: boolean;
@@ -130,14 +131,14 @@
 
 			{#if editable && selectedId === block.id}
 				<div class="cdm-block-toolbar">
-					<span class="cdm-block-id" title="block id">{block.id}</span>
+					<span class="cdm-block-id" title={m.blocklist_block_id()}>{block.id}</span>
 					<button type="button" onclick={() => move(block.id, 'up')} disabled={index === 0}
-						>↑ Up</button
+						>{m.blocklist_up()}</button
 					>
 					<button
 						type="button"
 						onclick={() => move(block.id, 'down')}
-						disabled={index === blocks.length - 1}>↓ Down</button
+						disabled={index === blocks.length - 1}>{m.blocklist_down()}</button
 					>
 					{#if isContentBearingType(block.type)}
 						<select
@@ -150,7 +151,7 @@
 						</select>
 					{/if}
 					<button type="button" class="cdm-block-delete" onclick={() => remove(block.id)}
-						>Delete</button
+						>{m.blocklist_delete()}</button
 					>
 				</div>
 			{/if}
@@ -161,7 +162,7 @@
 				<InsertControl
 					bind:choice={insertTypeChoice}
 					onInsert={() => insertAt(index + 1)}
-					label="Insert at bottom"
+					label={m.blocklist_insert_at_bottom()}
 				/>
 			</div>
 		{/if}
@@ -172,7 +173,7 @@
 			<InsertControl
 				bind:choice={insertTypeChoice}
 				onInsert={() => insertAt(0)}
-				label="Insert at bottom"
+				label={m.blocklist_insert_at_bottom()}
 			/>
 		</div>
 	{/if}

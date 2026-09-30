@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onDestroy } from 'svelte';
 	import BlockList from './BlockList.svelte';
 	import type { Document } from './types.js';
@@ -107,7 +108,7 @@
 			frozenMessage = e.message;
 		} else if (e instanceof CdmValidationError) {
 			attributions = attributeToBlocks(e.violations);
-			genericError = 'This document has validation problems (see below).';
+			genericError = m.documenteditor_this_document_has_validation_problems();
 		} else if (e instanceof CdmBlockConflictError) {
 			attributions = attributeToBlocks([e.message]);
 		} else if (e instanceof CdmApiError) {
@@ -127,7 +128,10 @@
 		clearSaveFeedback();
 		try {
 			const result = await saveDocument(doc);
-			adoptSavedDocument(result, `Saved current version v${result.content_version}.`);
+			adoptSavedDocument(
+				result,
+				m.documenteditor_saved_current_version_v({ content_version: result.content_version })
+			);
 		} catch (e) {
 			handleSaveError(e);
 		} finally {
@@ -141,7 +145,10 @@
 		clearSaveFeedback();
 		try {
 			const result = await saveDocumentToNewVersion(doc);
-			adoptSavedDocument(result, `Saved to new version v${result.content_version}.`);
+			adoptSavedDocument(
+				result,
+				m.documenteditor_saved_to_new_version_v({ content_version: result.content_version })
+			);
 			if (showVersionsDialog) {
 				await loadVersions();
 			}
@@ -158,7 +165,7 @@
 
 	async function confirmCreate() {
 		if (!createTarget) {
-			genericError = 'No knowledge store is active — cannot create a document.';
+			genericError = m.documenteditor_no_knowledge_store_is_active();
 			showCreateConfirm = false;
 			return;
 		}
@@ -172,7 +179,10 @@
 			});
 			adoptSavedDocument(
 				created,
-				`Created as ${created.document_key} (version ${created.content_version}).`
+				m.documenteditor_created_as_version({
+					document_key: created.document_key,
+					content_version: created.content_version
+				})
 			);
 			onCreated?.(created.document_key);
 		} catch (e) {
@@ -191,7 +201,7 @@
 
 	async function publish() {
 		if (frozenMessage || dirty || isNew) return;
-		if (!window.confirm('Publishing freezes this document: it becomes read-only. Continue?')) {
+		if (!window.confirm(m.documenteditor_publishing_freezes_this_document_it())) {
 			return;
 		}
 		publishing = true;
@@ -200,8 +210,7 @@
 			const result = await publishDocument(doc.document_key);
 			doc.content_version = result.content_version;
 			savedSnapshot = JSON.stringify(doc);
-			frozenMessage =
-				'This document is now published and read-only. Save to New Version is disabled until editable version branching is supported for published documents.';
+			frozenMessage = m.documenteditor_this_document_is_now_published();
 		} catch (e) {
 			handleSaveError(e);
 		} finally {
@@ -342,12 +351,12 @@
 			type="text"
 			bind:value={doc.title}
 			disabled={!!frozenMessage}
-			placeholder="Document title"
+			placeholder={m.documenteditor_document_title()}
 		/>
 		<div class="cdm-editor-meta">
 			<span class="cdm-version-badge">
-				{isNew ? 'not yet saved' : `v${doc.content_version}`}{dirty && !isNew
-					? ' · unsaved changes'
+				{isNew ? m.documenteditor_not_yet_saved() : `v${doc.content_version}`}{dirty && !isNew
+					? m.documenteditor_unsaved_changes()
 					: ''}
 			</span>
 		</div>
@@ -357,36 +366,44 @@
 				class="cdm-action-button"
 				onclick={preview}
 				disabled={previewLoading || isNew}
-				title={isNew ? 'Save the document first' : undefined}
+				title={isNew ? m.documenteditor_save_the_document_first() : undefined}
 			>
-				{previewLoading ? 'Rendering…' : 'Preview'}
+				{previewLoading ? m.documenteditor_rendering() : m.documenteditor_preview()}
 			</button>
 			<button
 				type="button"
 				class="cdm-action-button"
 				onclick={save}
 				disabled={saving || !!frozenMessage || (!isNew && !dirty)}
-				title={!isNew && !dirty ? 'No unsaved changes' : undefined}
+				title={!isNew && !dirty ? m.documenteditor_no_unsaved_changes() : undefined}
 			>
-				{saving ? 'Saving…' : isNew ? 'Save…' : 'Save'}
+				{saving
+					? m.documenteditor_saving()
+					: isNew
+						? m.documenteditor_save()
+						: m.documenteditor_save_2()}
 			</button>
 			<button
 				type="button"
 				class="cdm-action-button"
 				onclick={saveToNewVersion}
 				disabled={savingNewVersion || !!frozenMessage || isNew || !dirty}
-				title={isNew ? 'Save the document first' : !dirty ? 'No unsaved changes' : undefined}
+				title={isNew
+					? m.documenteditor_save_the_document_first()
+					: !dirty
+						? m.documenteditor_no_unsaved_changes()
+						: undefined}
 			>
-				{savingNewVersion ? 'Saving…' : 'Save to New Version'}
+				{savingNewVersion ? m.documenteditor_saving() : m.documenteditor_save_to_new_version()}
 			</button>
 			<button
 				type="button"
 				class="cdm-action-button"
 				onclick={openVersions}
 				disabled={isNew}
-				title={isNew ? 'Save the document first' : undefined}
+				title={isNew ? m.documenteditor_save_the_document_first() : undefined}
 			>
-				Versions
+				{m.documenteditor_versions()}
 			</button>
 			<button
 				type="button"
@@ -394,12 +411,12 @@
 				onclick={publish}
 				disabled={publishing || !!frozenMessage || dirty || isNew}
 				title={isNew
-					? 'Save the document first'
+					? m.documenteditor_save_the_document_first()
 					: dirty
-						? 'Save your changes before publishing'
+						? m.documenteditor_save_your_changes_before_publishing()
 						: undefined}
 			>
-				{publishing ? 'Publishing…' : 'Publish'}
+				{publishing ? m.documenteditor_publishing() : m.documenteditor_publish()}
 			</button>
 		</div>
 	</header>
@@ -411,11 +428,10 @@
 	{#if staleError}
 		<div class="cdm-banner cdm-banner--warn">
 			<p>
-				Someone else saved a newer edit state (revision {staleError.currentVersion}) while you were
-				editing. Your local changes have not been discarded or sent.
+				{m.documenteditor_someone_else_saved_a_newer({ currentVersion: staleError.currentVersion })}
 			</p>
 			<button type="button" class="cdm-inline-button" onclick={reloadDiscardingLocalChanges}>
-				Discard my changes and reload
+				{m.documenteditor_discard_my_changes_and_reload()}
 			</button>
 		</div>
 	{/if}
@@ -441,8 +457,8 @@
 		editable={!frozenMessage}
 		{blockErrors}
 		emptyMessage={hasGeneratedPreviewStructure
-			? 'This document has no editable blocks yet. The preview may still show generated title and outline pages.'
-			: 'This document has no blocks yet.'}
+			? m.documenteditor_this_document_has_no_editable()
+			: m.documenteditor_this_document_has_no_blocks()}
 	/>
 
 	{#if previewError}
@@ -453,19 +469,22 @@
 {#if showCreateConfirm}
 	<div class="cdm-overlay">
 		<div class="cdm-dialog">
-			<h2>Create this document?</h2>
+			<h2>{m.documenteditor_create_this_document()}</h2>
 			<p>
-				This creates a new document titled <strong>{doc.title || '(untitled)'}</strong> in the
-				knowledge store <strong>{createTarget?.ksName ?? '—'}</strong>.
+				{m.documenteditor_this_creates_a_new_document()}
+				<strong>{doc.title || m.documenteditor_untitled()}</strong>
+				{m.documenteditor_in_the_knowledge_store()} <strong>{createTarget?.ksName ?? '—'}</strong>.
 			</p>
 			<div class="cdm-dialog-actions">
-				<button type="button" class="cdm-action-button" onclick={cancelCreate}>Cancel</button>
+				<button type="button" class="cdm-action-button" onclick={cancelCreate}
+					>{m.documenteditor_cancel()}</button
+				>
 				<button
 					type="button"
 					class="cdm-action-button cdm-action-button--primary"
 					onclick={confirmCreate}
 				>
-					Create
+					{m.documenteditor_create()}
 				</button>
 			</div>
 		</div>
@@ -481,20 +500,20 @@
 		<div class="cdm-dialog cdm-dialog--versions">
 			<div class="cdm-dialog-head">
 				<div>
-					<h2>Version Tree</h2>
-					<p>Document versions for {doc.title || doc.document_key}</p>
+					<h2>{m.documenteditor_version_tree()}</h2>
+					<p>{m.documenteditor_document_versions_for({ title: doc.title || doc.document_key })}</p>
 				</div>
 				<button
 					type="button"
 					class="cdm-action-button"
 					onclick={() => (showVersionsDialog = false)}
 				>
-					Close
+					{m.documenteditor_close()}
 				</button>
 			</div>
 
 			{#if versionsLoading}
-				<div class="cdm-versions-status">Loading versions…</div>
+				<div class="cdm-versions-status">{m.documenteditor_loading_versions()}</div>
 			{:else if versionsError}
 				<div class="cdm-banner cdm-banner--error">{versionsError}</div>
 			{:else}
@@ -503,17 +522,29 @@
 						<div class="cdm-version-node-wrap">
 							<div class="cdm-version-node" class:cdm-version-node--current={version.current}>
 								<div class="cdm-version-node-head">
-									<strong>Version {version.content_version}</strong>
+									<strong
+										>{m.documenteditor_version({
+											content_version: version.content_version
+										})}</strong
+									>
 									{#if version.current}
-										<span class="cdm-version-current">Current</span>
+										<span class="cdm-version-current">{m.documenteditor_current()}</span>
 									{/if}
 								</div>
-								<div class="cdm-version-node-meta">Created: {formatDate(version.create_time)}</div>
-								<div class="cdm-version-node-meta">Modified: {formatDate(version.update_time)}</div>
-								<div class="cdm-version-node-meta">Size: {formatBytes(version.size_bytes)}</div>
+								<div class="cdm-version-node-meta">
+									{m.documenteditor_created({ create_time: formatDate(version.create_time) })}
+								</div>
+								<div class="cdm-version-node-meta">
+									{m.documenteditor_modified({ update_time: formatDate(version.update_time) })}
+								</div>
+								<div class="cdm-version-node-meta">
+									{m.documenteditor_size({ size_bytes: formatBytes(version.size_bytes) })}
+								</div>
 								{#if version.parent_content_version !== undefined}
 									<div class="cdm-version-node-parent">
-										Parent: v{version.parent_content_version}
+										{m.documenteditor_parent_v({
+											parent_content_version: version.parent_content_version
+										})}
 									</div>
 								{/if}
 							</div>

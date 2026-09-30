@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/PropertiesPanel.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import type { FlowNode, NodeType } from '$lib/types/flow';
 
   let {
@@ -38,14 +39,14 @@
 >
   {#if !node || !nodeType}
     <div class="flex-1 flex items-center justify-center" style="color:#4b5563; font-size:12px;">
-      Select a node to edit its properties
+      {m.propertiespanel_select_a_node_to_edit()}
     </div>
   {:else}
     <div style="padding:12px 12px 0; border-bottom:1px solid #1e2a3a;">
-      <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:8px;">PROPERTIES</div>
+      <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
       <!-- Node name -->
       <div style="margin-bottom:10px;">
-        <label for="prop-node-label" style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px;">Name</label>
+        <label for="prop-node-label" style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px;">{m.propertiespanel_name()}</label>
         <input
           id="prop-node-label"
           type="text"
@@ -110,12 +111,12 @@
 
       <!-- Connectors (read-only) -->
       <div style="margin-top:8px;">
-        <div style="font-size:9px; color:#6b7280; margin-bottom:6px;">CONNECTORS</div>
+        <div style="font-size:9px; color:#6b7280; margin-bottom:6px;">{m.propertiespanel_connectors()}</div>
         {#each nodeType.inputs as inp}
-          <div style="background:#1e2535; border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:#818cf8;">← in: {inp}</div>
+          <div style="background:#1e2535; border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:#818cf8;">{m.propertiespanel_in({ inp })}</div>
         {/each}
         {#each nodeType.outputs as out}
-          <div style="background:#1e2535; border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:#6366f1;">→ out: {out}</div>
+          <div style="background:#1e2535; border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:#6366f1;">{m.propertiespanel_out({ out })}</div>
         {/each}
       </div>
     </div>

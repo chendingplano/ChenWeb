@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/nodes/FileNode.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import BaseNode from './BaseNode.svelte';
   let { id, data, selected }: { id: string; data: Record<string,any>; selected?: boolean } = $props();
 </script>
@@ -8,6 +9,6 @@
   onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:#6b7280;">
-    {data.file_type ?? 'txt'} · {data.file_path ? String(data.file_path).split('/').pop() : 'no file'}
+    {data.file_type ?? 'txt'} · {data.file_path ? String(data.file_path).split('/').pop() : m.filenode_no_file()}
   </div>
 </BaseNode>

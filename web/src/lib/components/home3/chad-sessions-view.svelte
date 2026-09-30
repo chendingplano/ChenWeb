@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import Clock3Icon from '@lucide/svelte/icons/clock-3';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
@@ -85,7 +86,7 @@
 	}
 
 	function formatDate(seconds: number | undefined): string {
-		if (!seconds) return 'Unknown time';
+		if (!seconds) return m.chad_sessions_unknown_time();
 		return new Intl.DateTimeFormat(undefined, {
 			dateStyle: 'medium',
 			timeStyle: 'short'
@@ -122,9 +123,9 @@
 >
 	<header class="page-header">
 		<div>
-			<p class="eyebrow">SYSTEM ADMIN / LLM / {harnessLabel.toUpperCase()} SESSIONS</p>
-			<h1>{harnessLabel} Sessions</h1>
-			<p class="intro">Read-only request and response logs from the local {harnessLabel} session store.</p>
+			<p class="eyebrow">{m.chad_sessions_system_admin_llm_sessions({ harnessLabel: harnessLabel.toUpperCase() })}</p>
+			<h1>{m.chad_sessions_sessions({ harnessLabel })}</h1>
+			<p class="intro">{m.chad_sessions_read_only_request_and_response({ harnessLabel })}</p>
 		</div>
 		<div class="header-actions">
 			<span class="count">{sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}</span>
@@ -132,25 +133,25 @@
 				class="refresh"
 				onclick={loadSessions}
 				disabled={loading}
-				aria-label="Refresh sessions"
+				aria-label={m.chad_sessions_refresh_sessions()}
 			>
 				<RefreshCwIcon size={15} class={loading ? 'spin' : ''} />
-				Refresh
+				{m.chad_sessions_refresh()}
 			</button>
 		</div>
 	</header>
 
 	{#if error}
-		<div class="notice error">Could not load sessions: {error}</div>
+		<div class="notice error">{m.chad_sessions_could_not_load_sessions({ error })}</div>
 	{/if}
 
 	<div class="workspace">
-		<aside class="session-list" aria-label="{harnessLabel} sessions">
-			<div class="list-heading"><span>SESSION DIRECTORY</span><span>{sessions.length}</span></div>
+		<aside class="session-list" aria-label={m.chad_sessions_sessions_2({ harnessLabel })}>
+			<div class="list-heading"><span>{m.chad_sessions_session_directory()}</span><span>{sessions.length}</span></div>
 			{#if loading && !sessions.length}
-				<div class="state">Loading sessions…</div>
+				<div class="state">{m.chad_sessions_loading_sessions()}</div>
 			{:else if !sessions.length}
-				<div class="state">No {harnessLabel} sessions found.</div>
+				<div class="state">{m.chad_sessions_no_sessions_found({ harnessLabel })}</div>
 			{:else}
 				<div class="rows">
 					{#each pageSessions as session (session.id)}
@@ -161,10 +162,10 @@
 						>
 							<div class="row-top">
 								<span class="session-id">{session.id}</span><span class="message-count"
-									>{session.messageCount} msg</span
+									>{m.chad_sessions_msg({ messageCount: session.messageCount })}</span
 								>
 							</div>
-							<div class="session-title">{session.title || 'Untitled session'}</div>
+							<div class="session-title">{session.title || m.chad_sessions_untitled_session()}</div>
 							<div class="row-meta"><Clock3Icon size={12} />{formatDate(session.updated)}</div>
 							{#if session.cwd}<div class="row-meta cwd">
 									<FolderOpenIcon size={12} />{session.cwd}
@@ -175,46 +176,46 @@
 			{/if}
 			{#if sessions.length > pageSize}
 				<div class="pagination">
-					<button onclick={() => setPage(page - 1)} disabled={page === 0}>Previous</button>
-					<span>Page {page + 1} of {pageCount}</span>
-					<button onclick={() => setPage(page + 1)} disabled={page >= pageCount - 1}>Next</button>
+					<button onclick={() => setPage(page - 1)} disabled={page === 0}>{m.chad_sessions_previous()}</button>
+					<span>{m.chad_sessions_page_of({ value: page + 1, pageCount })}</span>
+					<button onclick={() => setPage(page + 1)} disabled={page >= pageCount - 1}>{m.chad_sessions_next()}</button>
 				</div>
 			{/if}
 		</aside>
 
 		<section class="detail" aria-live="polite">
 			{#if detailLoading}
-				<div class="detail-state">Loading session…</div>
+				<div class="detail-state">{m.chad_sessions_loading_session()}</div>
 			{:else if detailError}
-				<div class="detail-state error-text">Could not load this session: {detailError}</div>
+				<div class="detail-state error-text">{m.chad_sessions_could_not_load_this_session({ detailError })}</div>
 			{:else if !detail}
 				<div class="detail-state">
-					<MessageSquareIcon size={22} />Select a session to inspect its log.
+					<MessageSquareIcon size={22} />{m.chad_sessions_select_a_session_to_inspect()}
 				</div>
 			{:else}
 				<div class="detail-head">
 					<div>
-						<p class="eyebrow">SESSION LOG</p>
+						<p class="eyebrow">{m.chad_sessions_session_log()}</p>
 						<h2>{detail.title || detail.id}</h2>
 						<code>{detail.id}</code>
 					</div>
 					<div class="detail-facts">
 						<span><Clock3Icon size={13} />{formatDate(detail.updated)}</span><span
-							><MessageSquareIcon size={13} />{detail.messages.length + (systemPrompt ? 1 : 0)} messages</span
+							><MessageSquareIcon size={13} />{m.chad_sessions_messages({ value: detail.messages.length + (systemPrompt ? 1 : 0) })}</span
 						>
 					</div>
 				</div>
 				{#if detail.cwd}<div class="cwd-banner"><FolderOpenIcon size={14} />{detail.cwd}</div>{/if}
 				{#if !detail.messages.length && !systemPrompt}
-					<div class="detail-state">This session has no messages.</div>
+					<div class="detail-state">{m.chad_sessions_this_session_has_no_messages()}</div>
 				{:else}
 					<div class="messages">
 						{#if systemPrompt}
 							<article class="message-card role-system">
 								<div class="message-label">
-									<span>SYSTEM</span>
+									<span>{m.chad_sessions_system()}</span>
 									<span class="message-stats">
-										<span class="message-tokens">tokens={tokenCount(systemPrompt)}</span>
+										<span class="message-tokens">{m.chad_sessions_tokens({ systemPrompt: tokenCount(systemPrompt) })}</span>
 										<span class="message-index">#1</span>
 									</span>
 								</div>
@@ -226,13 +227,13 @@
 								<div class="message-label">
 									<span>{roleLabel(message.role)}</span>
 									<span class="message-stats">
-										<span class="message-tokens">tokens={tokenCount(message.content)}</span>
+										<span class="message-tokens">{m.chad_sessions_tokens_2({ content: tokenCount(message.content) })}</span>
 										<span class="message-index">#{index + (systemPrompt ? 2 : 1)}</span>
 									</span>
 								</div>
 								{#if message.toolCallCommand}
 									<div class="tool-call">
-										<span>TOOL CALL: {message.toolCallCommand}</span>
+										<span>{m.chad_sessions_tool_call({ toolCallCommand: message.toolCallCommand })}</span>
 										{#if message.toolCallParameters !== undefined}
 											<div class="formatted-json">
 												{@html formatSessionJson(message.toolCallParameters)}

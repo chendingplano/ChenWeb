@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// The phone-only login screen (config value "login-cell-phone-only"):
 	// Chinese mobile number + SMS code, nothing else. Sign-up is implicit —
 	// the /auth/phone/send-code backend starts a registration flow when the
@@ -45,7 +46,7 @@
 
 	async function handleSendPhoneCode() {
 		if (!cnPhonePattern.test(phone)) {
-			alert('Please enter a valid Chinese mobile number (11 digits, starting with 1).');
+			alert(m.logincellphoneonly_please_enter_a_valid_chinese());
 			return;
 		}
 		phoneSending = true;
@@ -62,10 +63,10 @@
 				phoneStep = 'enter-code';
 				startPhoneCooldown();
 			} else {
-				alert(data.message || 'Failed to send code.');
+				alert(data.message || m.logincellphoneonly_failed_to_send_code());
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.logincellphoneonly_network_error({ err: String(err) }));
 		} finally {
 			phoneSending = false;
 		}
@@ -73,11 +74,11 @@
 
 	async function handleVerifyPhoneCode() {
 		if (!phoneCode) {
-			alert('Please enter the code you received.');
+			alert(m.logincellphoneonly_please_enter_the_code_you());
 			return;
 		}
 		if (phoneFlowType === 'registration' && (!firstName || !lastName)) {
-			alert('Please enter your first and last name.');
+			alert(m.logincellphoneonly_please_enter_your_first_and());
 			return;
 		}
 		try {
@@ -98,10 +99,10 @@
 			if (res.ok) {
 				window.location.href = data.redirect_url || '/sidebar-01';
 			} else {
-				alert(data.message || 'Invalid or expired code.');
+				alert(data.message || m.logincellphoneonly_invalid_or_expired_code());
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.logincellphoneonly_network_error({ err: String(err) }));
 		}
 	}
 
@@ -116,7 +117,7 @@
 </script>
 
 <div class="form-container">
-	<p class="title">Welcome to DeepDocs</p>
+	<p class="title">{m.logincellphoneonly_welcome_to_deepdocs()}</p>
 
 	{#if phoneStep === 'enter-phone'}
 		<form
@@ -130,18 +131,18 @@
 				bind:value={phone}
 				type="tel"
 				class="input"
-				placeholder="Mobile number (e.g. 13812345678)"
+				placeholder={m.logincellphoneonly_mobile_number_e_g_13812345678()}
 				autocomplete="tel"
 				inputmode="numeric"
 				maxlength="11"
 				required
 			/>
 			<button type="submit" class="form-btn" disabled={phoneSending}>
-				{phoneSending ? 'Sending...' : 'Send code'}
+				{phoneSending ? m.logincellphoneonly_sending() : m.logincellphoneonly_send_code()}
 			</button>
 		</form>
 
-		<p class="hint">New number? Signing in creates your account automatically.</p>
+		<p class="hint">{m.logincellphoneonly_new_number_signing_in_creates()}</p>
 	{:else}
 		<form
 			class="form"
@@ -154,7 +155,7 @@
 				bind:value={phoneCode}
 				type="text"
 				class="input"
-				placeholder="Enter the code you received"
+				placeholder={m.logincellphoneonly_enter_the_code_you_received()}
 				autocomplete="one-time-code"
 				inputmode="numeric"
 				required
@@ -164,7 +165,7 @@
 					bind:value={firstName}
 					type="text"
 					class="input"
-					placeholder="First name"
+					placeholder={m.logincellphoneonly_first_name()}
 					autocomplete="given-name"
 					required
 				/>
@@ -172,12 +173,12 @@
 					bind:value={lastName}
 					type="text"
 					class="input"
-					placeholder="Last name"
+					placeholder={m.logincellphoneonly_last_name()}
 					autocomplete="family-name"
 					required
 				/>
 			{/if}
-			<button type="submit" class="form-btn">Verify code</button>
+			<button type="submit" class="form-btn">{m.logincellphoneonly_verify_code()}</button>
 			<button
 				type="button"
 				class="page-link-label"
@@ -186,17 +187,17 @@
 					void handleSendPhoneCode();
 				}}
 			>
-				{phoneCooldownSeconds > 0 ? `Resend code (${phoneCooldownSeconds}s)` : 'Resend code'}
+				{phoneCooldownSeconds > 0 ? m.logincellphoneonly_resend_code_s({ phoneCooldownSeconds }) : m.logincellphoneonly_resend_code()}
 			</button>
 		</form>
 
 		<p class="sign-up-label">
-			<button class="sign-up-link" onclick={useDifferentNumber}>Use a different number</button>
+			<button class="sign-up-link" onclick={useDifferentNumber}>{m.logincellphoneonly_use_a_different_number()}</button>
 		</p>
 	{/if}
 
 	{#if variant === 'modal' && onClose}
-		<button type="button" class="cancel-btn" onclick={onClose}>Cancel</button>
+		<button type="button" class="cancel-btn" onclick={onClose}>{m.logincellphoneonly_cancel()}</button>
 	{/if}
 </div>
 

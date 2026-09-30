@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	type RoleRow = {
 		key: string;
 		label: string;
@@ -9,10 +10,10 @@
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
 	let roles = $state<RoleRow[]>([
-		{ key: 'admin', label: 'Administrator', description: 'Full administrative access.', status: 'active' },
-		{ key: 'dev', label: 'Developer', description: 'Engineering and development workflows.', status: 'active' },
-		{ key: 'k_engineer', label: 'Knowledge Engineer', description: 'Knowledge-system and taxonomy operations.', status: 'active' },
-		{ key: 'root', label: 'Root', description: 'Reserved role; not active yet.', status: 'reserved' }
+		{ key: 'admin', label: m.role_management_administrator(), description: m.role_management_full_administrative_access(), status: 'active' },
+		{ key: 'dev', label: m.role_management_developer(), description: m.role_management_engineering_and_development_workflows(), status: 'active' },
+		{ key: 'k_engineer', label: m.role_management_knowledge_engineer(), description: m.role_management_knowledge_system_and_taxonomy_operations(), status: 'active' },
+		{ key: 'root', label: m.role_management_root(), description: 'Reserved role; not active yet.', status: 'reserved' }
 	]);
 
 	let showCreate = $state(false);
@@ -38,8 +39,8 @@
 	}
 
 	function validateDraft(key: string, label: string) {
-		if (!key.trim()) return 'Role key is required.';
-		if (!label.trim()) return 'Role label is required.';
+		if (!key.trim()) return m.role_management_role_key_is_required();
+		if (!label.trim()) return m.role_management_role_label_is_required();
 		return null;
 	}
 
@@ -48,7 +49,7 @@
 		error = validateDraft(normalizedKey, createDraft.label);
 		if (error) return;
 		if (roles.some((role) => role.key === normalizedKey)) {
-			error = `Role "${normalizedKey}" already exists.`;
+			error = m.role_management_role_already_exists({ normalizedKey });
 			return;
 		}
 		roles = [
@@ -81,7 +82,7 @@
 		error = validateDraft(normalizedKey, editDraft.label);
 		if (error) return;
 		if (normalizedKey !== key && roles.some((role) => role.key === normalizedKey)) {
-			error = `Role "${normalizedKey}" already exists.`;
+			error = m.role_management_role_already_exists({ normalizedKey });
 			return;
 		}
 		roles = roles.map((role) =>
@@ -99,7 +100,7 @@
 	}
 
 	function removeRole(role: RoleRow) {
-		if (!confirm(`Delete role "${role.key}"?`)) return;
+		if (!confirm(m.role_management_delete_role({ key: role.key }))) return;
 		roles = roles.filter((row) => row.key !== role.key);
 	}
 
@@ -128,30 +129,30 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Role Management</h2>
-			<p class="muted">Manage the shared role catalog used by Kratos-backed identities.</p>
+			<h2>{m.role_management_role_management()}</h2>
+			<p class="muted">{m.role_management_manage_the_shared_role_catalog()}</p>
 		</div>
 		<button class="primary" onclick={() => (showCreate = !showCreate)}>
-			{showCreate ? 'Cancel' : '+ Add Role'}
+			{showCreate ? m.role_management_cancel() : m.role_management_add_role()}
 		</button>
 	</header>
 
 	{#if showCreate}
 		<form class="editor" onsubmit={(event) => { event.preventDefault(); submitCreate(); }}>
 			<div class="row three">
-				<label><span>Role Key</span><input bind:value={createDraft.key} placeholder="k_engineer" /></label>
-				<label><span>Label</span><input bind:value={createDraft.label} placeholder="Knowledge Engineer" /></label>
+				<label><span>{m.role_management_role_key()}</span><input bind:value={createDraft.key} placeholder={m.role_management_k_engineer()} /></label>
+				<label><span>{m.role_management_label()}</span><input bind:value={createDraft.label} placeholder={m.role_management_knowledge_engineer()} /></label>
 				<label>
-					<span>Status</span>
+					<span>{m.role_management_status()}</span>
 					<select bind:value={createDraft.status}>
-						<option value="active">active</option>
-						<option value="reserved">reserved</option>
-						<option value="disabled">disabled</option>
+						<option value="active">{m.role_management_active()}</option>
+						<option value="reserved">{m.role_management_reserved()}</option>
+						<option value="disabled">{m.role_management_disabled()}</option>
 					</select>
 				</label>
 			</div>
-			<label><span>Description</span><input bind:value={createDraft.description} placeholder="What this role is intended for." /></label>
-			<div class="actions"><button class="primary" type="submit">Create Role</button></div>
+			<label><span>{m.role_management_description()}</span><input bind:value={createDraft.description} placeholder={m.role_management_what_this_role_is_intended()} /></label>
+			<div class="actions"><button class="primary" type="submit">{m.role_management_create_role()}</button></div>
 		</form>
 	{/if}
 
@@ -163,10 +164,10 @@
 		<table>
 			<thead>
 				<tr>
-					<th>Role</th>
-					<th>Status</th>
-					<th>Description</th>
-					<th>Actions</th>
+					<th>{m.role_management_role()}</th>
+					<th>{m.role_management_status()}</th>
+					<th>{m.role_management_description()}</th>
+					<th>{m.role_management_actions()}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -176,21 +177,21 @@
 							<td colspan="4">
 								<form class="editor compact" onsubmit={(event) => { event.preventDefault(); saveEdit(role.key); }}>
 									<div class="row three">
-										<label><span>Role Key</span><input bind:value={editDraft.key} /></label>
-										<label><span>Label</span><input bind:value={editDraft.label} /></label>
+										<label><span>{m.role_management_role_key()}</span><input bind:value={editDraft.key} /></label>
+										<label><span>{m.role_management_label()}</span><input bind:value={editDraft.label} /></label>
 										<label>
-											<span>Status</span>
+											<span>{m.role_management_status()}</span>
 											<select bind:value={editDraft.status}>
-												<option value="active">active</option>
-												<option value="reserved">reserved</option>
-												<option value="disabled">disabled</option>
+												<option value="active">{m.role_management_active()}</option>
+												<option value="reserved">{m.role_management_reserved()}</option>
+												<option value="disabled">{m.role_management_disabled()}</option>
 											</select>
 										</label>
 									</div>
-									<label><span>Description</span><input bind:value={editDraft.description} /></label>
+									<label><span>{m.role_management_description()}</span><input bind:value={editDraft.description} /></label>
 									<div class="actions">
-										<button class="primary" type="submit">Save</button>
-										<button class="ghost" type="button" onclick={cancelEdit}>Cancel</button>
+										<button class="primary" type="submit">{m.role_management_save()}</button>
+										<button class="ghost" type="button" onclick={cancelEdit}>{m.role_management_cancel()}</button>
 									</div>
 								</form>
 							</td>
@@ -205,8 +206,8 @@
 							<td class="description">{role.description}</td>
 							<td>
 								<div class="row-actions">
-									<button class="link" onclick={() => startEdit(role)}>Edit</button>
-									<button class="danger-link" onclick={() => removeRole(role)}>Delete</button>
+									<button class="link" onclick={() => startEdit(role)}>{m.role_management_edit()}</button>
+									<button class="danger-link" onclick={() => removeRole(role)}>{m.role_management_delete()}</button>
 								</div>
 							</td>
 						{/if}

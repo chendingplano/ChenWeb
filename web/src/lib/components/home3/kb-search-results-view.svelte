@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
@@ -45,7 +46,7 @@
 	const LOCALE_LABELS: Record<string, string> = { en: 'English', 'zh-cn': '中文' };
 	const artifactOptions = kbSearchArtifactOptions.map((option) => ({
 		...option,
-		label: option.value === 'all' ? 'All' : option.label
+		label: option.value === 'all' ? m.kb_search_results_all() : option.label
 	}));
 
 	let query = $state(initialQuery.trim());
@@ -95,8 +96,8 @@
 			result.provisionText ??
 			result.productName ??
 			result.artifact_id ??
-			`Result ${firstResult + index}`;
-		return String(candidate).trim() || `Result ${firstResult + index}`;
+			m.kb_search_results_result({ value: firstResult + index });
+		return String(candidate).trim() || m.kb_search_results_result({ value: firstResult + index });
 	}
 
 	function resultType(result: KbSearchResult): string {
@@ -109,7 +110,7 @@
 
 	function resultSource(result: KbSearchResult): string {
 		const source = result.source_title ?? result.source_filename ?? result.secondary_label;
-		return source ? String(source) : 'SemOS KB';
+		return source ? String(source) : m.kb_search_results_semos_kb();
 	}
 
 	function resultRecord(result: KbSearchResult): string {
@@ -235,7 +236,7 @@
 			}
 		} catch (err) {
 			if (lastRequestKey === requestKey) {
-				error = err instanceof Error ? err.message : 'Search failed';
+				error = err instanceof Error ? err.message : m.kb_search_results_search_failed();
 				payload = null;
 			}
 		} finally {
@@ -358,12 +359,12 @@
 
 {#snippet paginationControls(position: 'top' | 'bottom')}
 	{#if totalPages > 1}
-		<nav class="pagination {position}" aria-label="Search result pages">
+		<nav class="pagination {position}" aria-label={m.kb_search_results_search_result_pages()}>
 			<button type="button" onclick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1}>
 				<ChevronLeftIcon size={18} />
-				Previous
+				{m.kb_search_results_previous()}
 			</button>
-			<div class="pagination-pages" aria-label="Page numbers">
+			<div class="pagination-pages" aria-label={m.kb_search_results_page_numbers()}>
 				{#each paginationItems as item}
 					{#if item === 'ellipsis'}
 						<span class="pagination-ellipsis" aria-hidden="true">...</span>
@@ -372,7 +373,7 @@
 							type="button"
 							class:current={item === pageNumber}
 							aria-current={item === pageNumber ? 'page' : undefined}
-							aria-label={`Go to page ${item}`}
+							aria-label={m.kb_search_results_go_to_page({ item })}
 							onclick={() => goToPage(item)}
 						>
 							{item}
@@ -380,13 +381,13 @@
 					{/if}
 				{/each}
 			</div>
-			<span class="pagination-summary">Page {pageNumber} of {totalPages}</span>
+			<span class="pagination-summary">{m.kb_search_results_page_of({ pageNumber, totalPages })}</span>
 			<button
 				type="button"
 				onclick={() => goToPage(pageNumber + 1)}
 				disabled={pageNumber >= totalPages}
 			>
-				Next
+				{m.kb_search_results_next()}
 				<ChevronRightIcon size={18} />
 			</button>
 		</nav>
@@ -400,11 +401,11 @@
 	<div class="search-shell">
 		<header class="search-header">
 			<div>
-				<p class="eyebrow">SemOS knowledge index</p>
-				<h1>Search results</h1>
+				<p class="eyebrow">{m.kb_search_results_semos_knowledge_index()}</p>
+				<h1>{m.kb_search_results_search_results()}</h1>
 			</div>
 			{#if payload && hasQuery}
-				<p class="result-range">Results {firstResult} - {lastResult} of {total}</p>
+				<p class="result-range">{m.kb_search_results_results_of({ firstResult, lastResult, total })}</p>
 			{/if}
 		</header>
 
@@ -413,30 +414,30 @@
 			<input
 				type="search"
 				bind:value={query}
-				placeholder="Search the knowledge base"
-				aria-label="Search the knowledge base"
+				placeholder={m.kb_search_results_search_the_knowledge_base()}
+				aria-label={m.kb_search_results_search_the_knowledge_base()}
 				autocomplete="off"
 			/>
 			{#if query}
-				<button type="button" class="icon-button" onclick={clearSearch} aria-label="Clear search">
+				<button type="button" class="icon-button" onclick={clearSearch} aria-label={m.kb_search_results_clear_search()}>
 					<XIcon size={16} />
 				</button>
 			{/if}
 			<label class="language-select">
-				<span class="sr-only">Language</span>
-				<select value={currentLocale} onchange={changeLocale} aria-label="Select language">
+				<span class="sr-only">{m.kb_search_results_language()}</span>
+				<select value={currentLocale} onchange={changeLocale} aria-label={m.kb_search_results_select_language()}>
 					{#each supportedLanguages as code (code)}
 						<option value={code}>{LOCALE_LABELS[code] ?? code.toUpperCase()}</option>
 					{/each}
 				</select>
 			</label>
 			<button class="submit-button" type="submit" disabled={loading || !query.trim()}>
-				{loading ? 'Searching' : 'Search'}
+				{loading ? m.kb_search_results_searching() : m.kb_search_results_search()}
 			</button>
 		</form>
 
-		<div class="scope-row" aria-label="Search scope">
-			<span>Search in</span>
+		<div class="scope-row" aria-label={m.kb_search_results_search_scope()}>
+			<span>{m.kb_search_results_search_in()}</span>
 			<div class="scope-tabs">
 				{#each artifactOptions as option}
 					<button
@@ -453,7 +454,7 @@
 		{#if error}
 			<div class="status error">{error}</div>
 		{:else if loading}
-			<div class="result-list" aria-label="Loading search results">
+			<div class="result-list" aria-label={m.kb_search_results_loading_search_results()}>
 				{#each Array(5) as _, index}
 					<div class="skeleton-result" aria-hidden="true">
 						<span class="skeleton-title" style="width:{index === 0 ? '44%' : '32%'};"></span>
@@ -464,14 +465,13 @@
 			</div>
 		{:else if hasQuery && results.length > 0}
 			<div class="suggestion">
-				Showing results for <strong>{submittedQuery}</strong>. Refine by artifact type when you need
-				a narrower slice of the knowledge base.
+				{m.kb_search_results_showing_results_for()} <strong>{submittedQuery}</strong>{m.kb_search_results_refine_by_artifact_type_when()}
 			</div>
 
 			{@render paginationControls('top')}
 
-			<div class="result-scroll" aria-label="Search results page">
-				<div class="result-list" aria-label="Search results">
+			<div class="result-scroll" aria-label={m.kb_search_results_search_results_page()}>
+				<div class="result-list" aria-label={m.kb_search_results_search_results()}>
 					{#each results as result, index}
 						<article class="result-item">
 							<div class="thumb" aria-hidden="true">{resultType(result).slice(0, 1)}</div>
@@ -486,7 +486,7 @@
 									{/if}
 									<span>{resultSource(result)}</span>
 									{#if formatScore(result)}
-										<span>score {formatScore(result)}</span>
+										<span>{m.kb_search_results_score({ result: formatScore(result) })}</span>
 									{/if}
 								</div>
 								{#if resultSnippet(result)}
@@ -501,18 +501,16 @@
 			</div>
 		{:else if hasQuery}
 			<div class="empty-state">
-				<h2>No results found</h2>
+				<h2>{m.kb_search_results_no_results_found()}</h2>
 				<p>
-					No indexed artifact matched <strong>{submittedQuery}</strong>. Try a shorter phrase,
-					another artifact type, or a source document term.
+					{m.kb_search_results_no_indexed_artifact_matched()} <strong>{submittedQuery}</strong>{m.kb_search_results_try_a_shorter_phrase_another()}
 				</p>
 			</div>
 		{:else}
 			<div class="empty-state">
-				<h2>Enter a query to search SemOS</h2>
+				<h2>{m.kb_search_results_enter_a_query_to_search()}</h2>
 				<p>
-					Search across topics, metrics, summaries, content segments, semantic projections,
-					entities, relations, scenes, and provisions.
+					{m.kb_search_results_search_across_topics_metrics_summaries()}
 				</p>
 			</div>
 		{/if}

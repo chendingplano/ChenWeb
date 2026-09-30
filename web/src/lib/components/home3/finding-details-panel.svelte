@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { getDocReviewLogsFor, type FindingItem, type DocReviewLogRow } from '$lib/services/docReviewService';
 	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 	import { getLLMUsageEventsByIds, type LLMUsageEventDetail } from './llm-activities-client.js';
@@ -70,21 +71,21 @@
 	// internal fields, relabel known fields to Chinese, and surface the important
 	// ones first (the rest keep their original order).
 	const ARTIFACT_LABELS: Record<string, string> = {
-		metric_name: '指标',
-		metric_desc: '描述',
-		object_node_canonical_name: '指标实体名',
-		metric_subject: '主体',
-		metric_context: '上下文',
-		metric_keywords: '关键词',
-		metric_value: '指标值',
-		metric_unit: '指标单位',
-		value_data_type: '数值类型',
-		metric_id: '指标标识符',
-		source_line_spans: '原文行号',
-		value_range_type: '数值范围类型',
-		value_class: '数值分类',
-		threshold_or_target: '阈值',
-		confidence: '可信度'
+		metric_name: m.finding_details_panel_text_3(),
+		metric_desc: m.finding_details_panel_text(),
+		object_node_canonical_name: m.finding_details_panel_text_4(),
+		metric_subject: m.finding_details_panel_text_5(),
+		metric_context: m.finding_details_panel_text_6(),
+		metric_keywords: m.finding_details_panel_text_7(),
+		metric_value: m.finding_details_panel_text_8(),
+		metric_unit: m.finding_details_panel_text_9(),
+		value_data_type: m.finding_details_panel_text_10(),
+		metric_id: m.finding_details_panel_text_11(),
+		source_line_spans: m.finding_details_panel_text_12(),
+		value_range_type: m.finding_details_panel_text_13(),
+		value_class: m.finding_details_panel_text_14(),
+		threshold_or_target: m.finding_details_panel_text_15(),
+		confidence: m.finding_details_panel_text_16()
 	};
 	// Fields shown first, in this order. The remaining (non-hidden) fields follow
 	// in their original order.
@@ -147,7 +148,7 @@
 	>(null);
 
 	function openMetadataDialog() {
-		dialog = { kind: 'tree', title: `Metadata — Finding #${finding?.id}`, nodes: buildJsonTree(finding?.metadata) };
+		dialog = { kind: 'tree', title: m.finding_details_panel_metadata_finding({ id: finding?.id ?? ''}), nodes: buildJsonTree(finding?.metadata) };
 	}
 	// Opens the matched-units dialog drilled into unit `index`, and syncs the
 	// PDF panel to that unit's source document/lines.
@@ -160,13 +161,13 @@
 			label: matchedUnitLabel(matchedUnits[index], index),
 			focusTarget: target
 		});
-		dialog = { kind: 'matched-units', title: `Matched — Log #${logRow.id}`, units: matchedUnits, initialSelected: index };
+		dialog = { kind: 'matched-units', title: m.finding_details_panel_matched_log({ id: logRow.id }), units: matchedUnits, initialSelected: index };
 		if (target) onFocusMatchedUnit?.(target.recordId, target.lineNumbers);
 	}
 	function openLogSections(kind: 'findings' | 'detail') {
 		if (!logRow) return;
 		const value = logRow[kind];
-		const title = `${kind === 'findings' ? 'Findings' : 'LLM Call'} — Log #${logRow.id}`;
+		const title = (kind === 'findings' ? m.finding_details_panel_findings_log : m.finding_details_panel_llm_call_log)({ id: logRow.id });
 		const sections = kind === 'findings' ? buildFindingsSections(value) : buildJsonSections(value);
 		dialog = { kind: 'sections', title, sections };
 	}
@@ -259,19 +260,19 @@
 
 <div class="fd-panel" style="--fd-card:{cardBg}; --fd-border:{borderColor}; --fd-accent:{accent}; --fd-accent-tint:{accentTint}; --fd-text:{textPrimary}; --fd-text-2:{textSecondary}; --fd-text-muted:{textMuted}; --fd-scroll-thumb:{scrollThumb};">
 	{#if !finding}
-		<div class="fd-empty">Select a finding to view its details.</div>
+		<div class="fd-empty">{m.finding_details_panel_select_a_finding_to_view()}</div>
 	{:else}
 		{#if finding.artifact_id}
 			<!-- Artifact block -->
 			<div class="fd-block">
 				<button type="button" class="fd-head" aria-expanded={expanded.artifact} onclick={() => toggle('artifact')}>
 					<span class="fd-chevron" class:open={expanded.artifact}>▶</span>
-					<span class="fd-title">Artifact</span>
+					<span class="fd-title">{m.finding_details_panel_artifact()}</span>
 				</button>
 				{#if expanded.artifact}
 					<div class="fd-body">
 						{#if artifactLoading}
-							<div class="fd-note">Loading…</div>
+							<div class="fd-note">{m.finding_details_panel_loading()}</div>
 						{:else if artifactError}
 							<div class="fd-note fd-error">{artifactError}</div>
 						{:else if artifactRecord}
@@ -279,7 +280,7 @@
 								<div class="fd-row"><span class="fd-label">{row.label}</span><span class="fd-value">{row.value}</span></div>
 							{/each}
 						{:else}
-							<div class="fd-note">No artifact found for this id.</div>
+							<div class="fd-note">{m.finding_details_panel_no_artifact_found_for_this()}</div>
 						{/if}
 					</div>
 				{/if}
@@ -290,25 +291,25 @@
 		<div class="fd-block">
 			<button type="button" class="fd-head" aria-expanded={expanded.finding} onclick={() => toggle('finding')}>
 				<span class="fd-chevron" class:open={expanded.finding}>▶</span>
-				<span class="fd-title">Finding</span>
+				<span class="fd-title">{m.finding_details_panel_finding()}</span>
 			</button>
 			{#if expanded.finding}
 				<div class="fd-body">
-					<div class="fd-row"><span class="fd-label">artifact_id</span><span class="fd-value">{finding.artifact_id || '—'}</span></div>
-					<div class="fd-row"><span class="fd-label">aspect</span><span class="fd-value">{finding.aspect}</span></div>
-					<div class="fd-row"><span class="fd-label">severity</span><span class="fd-value">{finding.severity}</span></div>
-					<div class="fd-row"><span class="fd-label">finding_type</span><span class="fd-value">{finding.finding_type}</span></div>
-					<div class="fd-row"><span class="fd-label">title</span><span class="fd-value">{finding.title}</span></div>
-					<div class="fd-row"><span class="fd-label">描述</span><span class="fd-value">{finding.description || '—'}</span></div>
-					<div class="fd-row"><span class="fd-label">suggestion</span><span class="fd-value">{finding.suggestion || '—'}</span></div>
-					<div class="fd-row"><span class="fd-label">confidence</span><span class="fd-value">{formatConfidence(finding.confidence)}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_artifact_id()}</span><span class="fd-value">{finding.artifact_id || '—'}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_aspect()}</span><span class="fd-value">{finding.aspect}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_severity()}</span><span class="fd-value">{finding.severity}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_finding_type()}</span><span class="fd-value">{finding.finding_type}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_title()}</span><span class="fd-value">{finding.title}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_text()}</span><span class="fd-value">{finding.description || '—'}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_suggestion()}</span><span class="fd-value">{finding.suggestion || '—'}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_confidence()}</span><span class="fd-value">{formatConfidence(finding.confidence)}</span></div>
 					<div class="fd-row">
-						<span class="fd-label">metadata</span>
-						<button type="button" class="fd-btn" onclick={openMetadataDialog}>View metadata</button>
+						<span class="fd-label">{m.finding_details_panel_metadata()}</span>
+						<button type="button" class="fd-btn" onclick={openMetadataDialog}>{m.finding_details_panel_view_metadata()}</button>
 					</div>
 					{#if relatedArtifacts.length}
 						<div class="fd-row">
-							<span class="fd-label">关联指标</span>
+							<span class="fd-label">{m.finding_details_panel_text_2()}</span>
 							<div class="fd-related-list">
 								{#each relatedArtifacts as ra, i (i)}
 									<button
@@ -316,13 +317,13 @@
 										class="fd-related-item"
 										disabled={relatedArtifactLoadingId === ra.related_artifact_id}
 										onclick={() => openRelatedArtifact(ra)}
-										title="Jump to this related artifact's source document"
+										title={m.finding_details_panel_jump_to_this_related_artifact()}
 									>
 										<div class="fd-related-head">
 											{#if ra.relationship}
 												<span class="fd-related-rel">{ra.relationship}</span>
 											{/if}
-											<span class="fd-related-ref">record {ra.related_record_id} · {ra.related_artifact_id}</span>
+											<span class="fd-related-ref">{m.finding_details_panel_record({ related_record_id: ra.related_record_id, related_artifact_id: ra.related_artifact_id })}</span>
 										</div>
 										{#if ra.summary}
 											<p class="fd-related-summary">{ra.summary}</p>
@@ -341,8 +342,8 @@
 							</div>
 						</div>
 					{/if}
-					<div class="fd-row"><span class="fd-label">location</span><span class="fd-value">{finding.location || '—'}</span></div>
-					<div class="fd-row"><span class="fd-label">reference_doc</span><span class="fd-value">{formatCompactContent(finding.reference_doc)}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_location()}</span><span class="fd-value">{finding.location || '—'}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_reference_doc()}</span><span class="fd-value">{formatCompactContent(finding.reference_doc)}</span></div>
 				</div>
 			{/if}
 		</div>
@@ -352,19 +353,19 @@
 			<div class="fd-block">
 				<button type="button" class="fd-head" aria-expanded={expanded.log} onclick={() => toggle('log')}>
 					<span class="fd-chevron" class:open={expanded.log}>▶</span>
-					<span class="fd-title">Doc Review Log</span>
+					<span class="fd-title">{m.finding_details_panel_doc_review_log()}</span>
 				</button>
 				{#if expanded.log}
 					<div class="fd-body">
 						{#if logLoading}
-							<div class="fd-note">Loading…</div>
+							<div class="fd-note">{m.finding_details_panel_loading()}</div>
 						{:else if logError}
 							<div class="fd-note fd-error">{logError}</div>
 						{:else if logRow}
-							<div class="fd-row"><span class="fd-label">unit_key</span><span class="fd-value">{logRow.unit_key}</span></div>
-							<div class="fd-row"><span class="fd-label">outcome</span><span class="fd-value">{logRow.outcome || '—'}</span></div>
+							<div class="fd-row"><span class="fd-label">{m.finding_details_panel_unit_key()}</span><span class="fd-value">{logRow.unit_key}</span></div>
+							<div class="fd-row"><span class="fd-label">{m.finding_details_panel_outcome()}</span><span class="fd-value">{logRow.outcome || '—'}</span></div>
 							<div class="fd-row">
-								<span class="fd-label">matched_units</span>
+								<span class="fd-label">{m.finding_details_panel_matched_units()}</span>
 								{#if matchedUnits.length}
 									<div class="fd-unit-btns">
 										{#each matchedUnits as unit, i (i)}
@@ -376,15 +377,15 @@
 								{/if}
 							</div>
 							<div class="fd-row">
-								<span class="fd-label">findings</span>
-								<button type="button" class="fd-btn" onclick={() => openLogSections('findings')}>View findings</button>
+								<span class="fd-label">{m.finding_details_panel_findings()}</span>
+								<button type="button" class="fd-btn" onclick={() => openLogSections('findings')}>{m.finding_details_panel_view_findings()}</button>
 							</div>
 							<div class="fd-row">
-								<span class="fd-label">detail</span>
-								<button type="button" class="fd-btn" onclick={() => openLogSections('detail')}>View detail</button>
+								<span class="fd-label">{m.finding_details_panel_detail()}</span>
+								<button type="button" class="fd-btn" onclick={() => openLogSections('detail')}>{m.finding_details_panel_view_detail()}</button>
 							</div>
 						{:else}
-							<div class="fd-note">No matching doc review log found.</div>
+							<div class="fd-note">{m.finding_details_panel_no_matching_doc_review_log()}</div>
 						{/if}
 					</div>
 				{/if}
@@ -394,13 +395,13 @@
 			<div class="fd-block">
 				<button type="button" class="fd-head" aria-expanded={expanded.llm} onclick={() => toggle('llm')}>
 					<span class="fd-chevron" class:open={expanded.llm}>▶</span>
-					<span class="fd-title">LLM Calls</span>
+					<span class="fd-title">{m.finding_details_panel_llm_calls()}</span>
 					{#if llmEvents.length}<span class="fd-count">{llmEvents.length}</span>{/if}
 				</button>
 				{#if expanded.llm}
 					<div class="fd-body">
 						{#if llmLoading}
-							<div class="fd-note">Loading…</div>
+							<div class="fd-note">{m.finding_details_panel_loading()}</div>
 						{:else if llmError}
 							<div class="fd-note fd-error">{llmError}</div>
 						{:else if llmEvents.length}
@@ -416,7 +417,7 @@
 								{/each}
 							</ul>
 						{:else}
-							<div class="fd-note">No LLM calls recorded for this finding.</div>
+							<div class="fd-note">{m.finding_details_panel_no_llm_calls_recorded_for()}</div>
 						{/if}
 					</div>
 				{/if}

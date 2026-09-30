@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { loginPrompt } from '../loginPrompt.svelte';
 	import LoginPanel from '$lib/components/auth/LoginPanel.svelte';
 </script>
@@ -19,7 +20,7 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Login"
+			aria-label={m.logindialog_login()}
 			tabindex="0"
 		>
 			<LoginPanel variant="modal" onClose={() => loginPrompt.hide()} />

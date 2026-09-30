@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		chatterService,
@@ -25,9 +26,15 @@
 	const defaultSettings: ChatterSettings = {
 		agents: ['OpenClaw', 'Claude Code', 'Codex', 'Qwen Code', 'OpenCode', 'pi'],
 		models: ['ChatGPT 5.4', 'Claude Sonnet 4.6', 'GPT-4o', 'Gemini Pro 2.5', 'Qwen3-Coder'],
-		attachments: ['Photos and Files', 'Recent Files', '---', 'Create an image', 'Deep Research'],
-		skills: ['Create Skill', 'superpowers', 'docx', 'pptx', 'pdf'],
-		resultOptions: ['Text', 'Markdown', 'JSON', 'Web Page'],
+		attachments: [
+			m.chatter_01_photos_and_files(),
+			m.chatter_01_recent_files(),
+			'---',
+			m.chatter_01_create_an_image(),
+			m.chatter_01_deep_research()
+		],
+		skills: [m.chatter_01_create_skill(), 'superpowers', 'docx', 'pptx', 'pdf'],
+		resultOptions: [m.chatter_01_text(), 'Markdown', 'JSON', m.chatter_01_web_page()],
 		slashCommands: ['/help', '/summarize', '/translate', '/rewrite', '/table', '/extract']
 	};
 
@@ -48,7 +55,9 @@
 	let dragStartX = 0;
 	let dragStartWidth = 0;
 
-	let sessions = $state<ChatSession[]>([{ id: 'local-1', title: 'New Session', dialogs: [] }]);
+	let sessions = $state<ChatSession[]>([
+		{ id: 'local-1', title: m.chatter_01_new_session(), dialogs: [] }
+	]);
 	let activeSessionId = $state('local-1');
 	let draft = $state('');
 	let promptSearch = $state('');
@@ -138,14 +147,14 @@
 			prompts = [
 				{
 					id: 'prompt-local-1',
-					title: 'Summarize this conversation',
-					content: 'Summarize this conversation in bullet points.',
+					title: m.chatter_01_summarize_this_conversation(),
+					content: m.chatter_01_summarize_this_conversation_in_bullet(),
 					updatedAt: '2026-03-13T22:00:00Z'
 				},
 				{
 					id: 'prompt-local-2',
-					title: 'Write implementation plan',
-					content: 'Create a step-by-step implementation plan with risks.',
+					title: m.chatter_01_write_implementation_plan(),
+					content: m.chatter_01_create_a_step_by_step(),
 					updatedAt: '2026-03-13T20:00:00Z'
 				}
 			];
@@ -205,7 +214,7 @@
 			const id = `local-${Date.now()}`;
 			const next = {
 				id,
-				title: `Session ${sessions.length + 1}`,
+				title: m.chatter_01_session({ value: sessions.length + 1 }),
 				dialogs: [] as ChatterDialogItem[]
 			};
 			sessions = [...sessions, next];
@@ -255,7 +264,7 @@
 			addDialogItem({
 				id: `assistant-${Date.now()}`,
 				role: 'assistant',
-				content: `Stub response from ${selectedAgent} with ${selectedModel}.`,
+				content: m.chatter_01_stub_response_from_with({ selectedAgent, selectedModel }),
 				createdAt: new Date().toISOString()
 			});
 		}
@@ -345,7 +354,7 @@
 				</div>
 			{:else}
 				<div class="flex h-full items-center justify-center text-sm" style="color:{textMuted};">
-					Start chatting. Type `/` to use slash commands.
+					{m.chatter_01_start_chatting_type_to_use()}
 				</div>
 			{/if}
 		</div>
@@ -354,7 +363,7 @@
 			<textarea
 				bind:value={draft}
 				rows={3}
-				placeholder="Ask anything... Use '/' for commands."
+				placeholder={m.chatter_01_ask_anything_use_for_commands()}
 				class="w-full resize-none rounded-xl px-3 py-2 text-sm outline-none"
 				style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
 			></textarea>
@@ -381,7 +390,7 @@
 					<DropdownMenu.Trigger
 						class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
 						style="background:{accentTint}; color:{accent}; border:1px solid {borderColor};"
-						title="Select AI Assistant"
+						title={m.chatter_01_select_ai_assistant()}
 					>
 						<BotIcon class="mr-1 inline h-3.5 w-3.5" />
 						{selectedAgent}
@@ -398,7 +407,7 @@
 					bind:value={selectedModel}
 					class="rounded-lg px-3 py-1.5 text-xs"
 					style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
-					title="Select Model"
+					title={m.chatter_01_select_model()}
 				>
 					{#each settings.models as model}
 						<option value={model}>{model}</option>
@@ -409,9 +418,10 @@
 					<DropdownMenu.Trigger
 						class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
 						style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
-						title="Add attatchments"
+						title={m.chatter_01_add_attatchments()}
 					>
-						<PlusIcon class="mr-1 inline h-3.5 w-3.5" /> Attach
+						<PlusIcon class="mr-1 inline h-3.5 w-3.5" />
+						{m.chatter_01_attach()}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content>
 						{#each settings.attachments as item}
@@ -428,7 +438,7 @@
 					bind:value={selectedResult}
 					class="rounded-lg px-3 py-1.5 text-xs"
 					style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
-					title="Output Format"
+					title={m.chatter_01_output_format()}
 				>
 					{#each settings.resultOptions as resultOption}
 						<option value={resultOption}>{resultOption}</option>
@@ -439,17 +449,18 @@
 					class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
 					style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
 					onclick={() => (promptDialogOpen = true)}
-					title="Select Prompts"
+					title={m.chatter_01_select_prompts()}
 				>
-					Prompt
+					{m.chatter_01_prompt()}
 				</button>
 
 				<button
 					class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
 					style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
-					title="Voice"
+					title={m.chatter_01_voice()}
 				>
-					<MicIcon class="mr-1 inline h-3.5 w-3.5" /> Dictate
+					<MicIcon class="mr-1 inline h-3.5 w-3.5" />
+					{m.chatter_01_dictate()}
 				</button>
 
 				<button
@@ -459,9 +470,10 @@
 						textEditorValue = draft;
 						textEditorOpen = true;
 					}}
-					title="Use Text Editor"
+					title={m.chatter_01_use_text_editor()}
 				>
-					<FileTextIcon class="mr-1 inline h-3.5 w-3.5" /> Text
+					<FileTextIcon class="mr-1 inline h-3.5 w-3.5" />
+					{m.chatter_01_text()}
 				</button>
 
 				<button
@@ -469,7 +481,7 @@
 					style="background:{accent}; color:white; border:1px solid {accent};"
 					onclick={newSession}
 				>
-					New Session
+					{m.chatter_01_new_session()}
 				</button>
 
 				<div class="ml-auto">
@@ -478,7 +490,8 @@
 						style="background:{accent}; color:white; border:1px solid {accent};"
 						onclick={sendMessage}
 					>
-						<SendHorizontalIcon class="mr-1 inline h-3.5 w-3.5" /> Send
+						<SendHorizontalIcon class="mr-1 inline h-3.5 w-3.5" />
+						{m.chatter_01_send()}
 					</button>
 				</div>
 			</div>
@@ -507,7 +520,7 @@
 					: textSecondary};"
 				onclick={() => (infoTab = 'dialog')}
 			>
-				Dialog
+				{m.chatter_01_dialog()}
 			</button>
 			<button
 				class="ml-2 cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
@@ -517,7 +530,7 @@
 					: textSecondary};"
 				onclick={() => (infoTab = 'settings')}
 			>
-				Settings
+				{m.chatter_01_settings()}
 			</button>
 		</div>
 
@@ -538,14 +551,16 @@
 						{/each}
 					</div>
 				{:else}
-					<div class="text-xs" style="color:{textMuted};">No dialog history yet.</div>
+					<div class="text-xs" style="color:{textMuted};">
+						{m.chatter_01_no_dialog_history_yet()}
+					</div>
 				{/if}
 			</div>
 		{:else}
 			<div class="flex-1 space-y-3 overflow-y-auto p-3" style="scrollbar-width:thin;">
 				<div class="rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
 					<div class="mb-2 text-xs font-semibold" style="color:{textMuted};">
-						Agent Selector List
+						{m.chatter_01_agent_selector_list()}
 					</div>
 					<textarea
 						value={settings.agents.join('\n')}
@@ -565,7 +580,7 @@
 
 				<div class="rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
 					<div class="mb-2 text-xs font-semibold" style="color:{textMuted};">
-						Model Selector List
+						{m.chatter_01_model_selector_list()}
 					</div>
 					<textarea
 						value={settings.models.join('\n')}
@@ -585,7 +600,7 @@
 
 				<div class="rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
 					<div class="mb-2 text-xs font-semibold" style="color:{textMuted};">
-						Attachment Selector List
+						{m.chatter_01_attachment_selector_list()}
 					</div>
 					<textarea
 						value={settings.attachments.join('\n')}
@@ -605,7 +620,7 @@
 
 				<div class="rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
 					<div class="mb-2 text-xs font-semibold" style="color:{textMuted};">
-						Plugin/Skill Selector List
+						{m.chatter_01_plugin_skill_selector_list()}
 					</div>
 					<textarea
 						value={settings.skills.join('\n')}
@@ -625,7 +640,7 @@
 
 				<div class="rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
 					<div class="mb-2 text-xs font-semibold" style="color:{textMuted};">
-						Result Options List
+						{m.chatter_01_result_options_list()}
 					</div>
 					<textarea
 						value={settings.resultOptions.join('\n')}
@@ -648,7 +663,7 @@
 					style="background:{accent}; color:white; border:1px solid {accent};"
 					onclick={saveSettings}
 				>
-					Save Settings
+					{m.chatter_01_save_settings()}
 				</button>
 			</div>
 		{/if}
@@ -663,10 +678,12 @@
 				class="w-[640px] max-w-[92vw] rounded-xl p-4"
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
-				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">Prompt Selection</div>
+				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">
+					{m.chatter_01_prompt_selection()}
+				</div>
 				<input
 					type="text"
-					placeholder="Search prompts..."
+					placeholder={m.chatter_01_search_prompts()}
 					bind:value={promptSearch}
 					class="mb-3 w-full rounded-lg px-3 py-2 text-sm outline-none"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
@@ -689,7 +706,7 @@
 						style="background:{surface2}; color:{textSecondary}; border:1px solid {borderColor};"
 						onclick={() => (promptDialogOpen = false)}
 					>
-						Close
+						{m.chatter_01_close()}
 					</button>
 				</div>
 			</div>
@@ -705,7 +722,9 @@
 				class="w-[720px] max-w-[95vw] rounded-xl p-4"
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
-				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">Text Editor</div>
+				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">
+					{m.chatter_01_text_editor()}
+				</div>
 				<textarea
 					bind:value={textEditorValue}
 					rows={14}
@@ -718,7 +737,7 @@
 						style="background:{surface2}; color:{textSecondary}; border:1px solid {borderColor};"
 						onclick={() => (textEditorOpen = false)}
 					>
-						Cancel
+						{m.chatter_01_cancel()}
 					</button>
 					<button
 						class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
@@ -728,7 +747,7 @@
 							textEditorOpen = false;
 						}}
 					>
-						Apply
+						{m.chatter_01_apply()}
 					</button>
 				</div>
 			</div>

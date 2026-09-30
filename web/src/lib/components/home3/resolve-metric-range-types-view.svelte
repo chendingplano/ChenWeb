@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		listMetricRangeTypeErrors,
@@ -254,14 +255,10 @@
 <div class="p-6 flex flex-col" style="background:{pageBg}; height:100%; overflow:hidden;">
 	<div class="mb-5 flex-shrink-0">
 		<h1 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
-			Database Maintenance — Resolve Metric Range Types
+			{m.resolve_metric_range_types_database_maintenance_resolve_metric_range()}
 		</h1>
 		<p style="font-size:13px; color:{textSecondary};">
-			Triage kb.metrics rows whose value_range_type has no approved governed mapping, and correct
-			kb.metric_value_range_type_map entries (see the Value Range Type Map in the context panel on
-			the right). Approving a mapping clears the error on every metric row that shares the same raw
-			value; "Apply" on an approved entry additionally rewrites those rows' value_range_type to the
-			canonical bucket.
+			{m.resolve_metric_range_types_triage_kb_metrics_rows_whose()}
 		</p>
 	</div>
 
@@ -273,7 +270,7 @@
 				<div class="flex flex-col gap-3">
 					<div class="flex flex-col gap-1">
 						<label for="rmrt-record-id" style="font-size:12px; font-weight:500; color:{textMuted};">
-							Input Record ID
+							{m.resolve_metric_range_types_input_record_id()}
 						</label>
 						<input
 							id="rmrt-record-id"
@@ -287,7 +284,7 @@
 					</div>
 					<div class="flex gap-2">
 						<div class="flex flex-col gap-1" style="flex:1;">
-							<label for="rmrt-date-from" style="font-size:12px; font-weight:500; color:{textMuted};">From</label>
+							<label for="rmrt-date-from" style="font-size:12px; font-weight:500; color:{textMuted};">{m.resolve_metric_range_types_from()}</label>
 							<input
 								id="rmrt-date-from"
 								type="date"
@@ -297,7 +294,7 @@
 							/>
 						</div>
 						<div class="flex flex-col gap-1" style="flex:1;">
-							<label for="rmrt-date-to" style="font-size:12px; font-weight:500; color:{textMuted};">To</label>
+							<label for="rmrt-date-to" style="font-size:12px; font-weight:500; color:{textMuted};">{m.resolve_metric_range_types_to()}</label>
 							<input
 								id="rmrt-date-to"
 								type="date"
@@ -309,7 +306,7 @@
 					</div>
 					<div class="flex flex-col gap-1">
 						<label for="rmrt-error-type" style="font-size:12px; font-weight:500; color:{textMuted};">
-							Error Type (raw value_range_type)
+							{m.resolve_metric_range_types_error_type_raw_value_range()}
 						</label>
 						<select
 							id="rmrt-error-type"
@@ -317,7 +314,7 @@
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary};
 								border-radius:7px; padding:6px 10px; font-size:13px;"
 						>
-							<option value="">All error types</option>
+							<option value="">{m.resolve_metric_range_types_all_error_types()}</option>
 							{#each errorTypeOptions as opt (opt)}
 								<option value={opt}>{opt}</option>
 							{/each}
@@ -332,7 +329,7 @@
 							opacity:{listLoading ? 0.6 : 1};"
 					>
 						<SearchIcon style="width:13px; height:13px;" />
-						{listLoading ? 'Searching…' : 'Search'}
+						{listLoading ? m.resolve_metric_range_types_searching() : m.resolve_metric_range_types_search()}
 					</button>
 				</div>
 			</div>
@@ -345,7 +342,7 @@
 
 			<div class="rounded-xl flex-1" style="background:{cardBg}; border:1px solid {borderColor}; min-height:0; overflow-y:auto;">
 				{#if rows.length === 0 && !listLoading}
-					<div class="p-4" style="font-size:13px; color:{textMuted};">No errored metrics found.</div>
+					<div class="p-4" style="font-size:13px; color:{textMuted};">{m.resolve_metric_range_types_no_errored_metrics_found()}</div>
 				{/if}
 				{#each rows as row (row.id)}
 					<button
@@ -355,10 +352,10 @@
 							background:{selectedId === row.id ? accentTint : 'transparent'};"
 					>
 						<div style="font-size:13px; font-weight:600; color:{textPrimary};">
-							{row.metric_name || `Metric #${row.id}`}
+							{row.metric_name || m.resolve_metric_range_types_metric({ id: row.id })}
 						</div>
 						<div style="font-size:12px; color:{textSecondary}; margin-top:2px;">
-							record #{row.input_record_id} · value_range_type: {row.value_range_type || '—'}
+							{m.resolve_metric_range_types_record_value_range_type({ input_record_id: row.input_record_id, value_range_type: row.value_range_type || '—' })}
 						</div>
 					</button>
 				{/each}
@@ -369,45 +366,45 @@
 		<div class="flex-1 flex gap-4" style="min-width:0; min-height:0;">
 			<div class="rounded-xl p-4 overflow-y-auto" style="width:360px; flex-shrink:0; min-height:0; background:{cardBg}; border:1px solid {borderColor};">
 				{#if !selected}
-					<div style="font-size:13px; color:{textMuted};">Select a metric on the left to see its details.</div>
+					<div style="font-size:13px; color:{textMuted};">{m.resolve_metric_range_types_select_a_metric_on_the()}</div>
 				{:else}
 					<div class="flex flex-col gap-3">
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Metric ID</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_metric_id()}</div>
 							<div style="font-size:13px; color:{textPrimary}; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all;">{selected.metric_id || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Metric Name</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_metric_name()}</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.metric_name || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Description</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_description()}</div>
 							<div style="font-size:13px; color:{textPrimary}; white-space:pre-wrap;">{selected.metric_desc || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Context</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_context()}</div>
 							<div style="font-size:13px; color:{textPrimary}; white-space:pre-wrap;">{selected.metric_context || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Metric Value</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_metric_value()}</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.metric_value || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Value Data Type</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_value_data_type()}</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.value_data_type || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Value Range Type</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_value_range_type()}</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.value_range_type || '—'}</div>
 						</div>
 						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">Source Line Spans</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_source_line_spans()}</div>
 							<div style="font-size:13px; color:{textPrimary}; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-word;">{spansDisplay || '—'}</div>
 						</div>
 						<div class="rounded-lg p-3" style="background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.25);">
 							<div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
 								<AlertTriangleIcon style="width:13px; height:13px; color:{colorError};" />
-								<span style="font-size:11px; font-weight:600; color:{colorError}; text-transform:uppercase; letter-spacing:0.04em;">Error</span>
+								<span style="font-size:11px; font-weight:600; color:{colorError}; text-transform:uppercase; letter-spacing:0.04em;">{m.resolve_metric_range_types_error()}</span>
 							</div>
 							<div style="font-size:13px; color:{textPrimary};">{selected.value_range_type_error}</div>
 						</div>
@@ -424,9 +421,9 @@
 			     metric-mgmt-view.svelte's .doc-frame-wrap. -->
 			<div class="flex-1 flex flex-col rounded-xl overflow-hidden" style="min-width:0; min-height:0; background:{cardBg}; border:1px solid {borderColor};">
 				{#if !selected}
-					<div class="p-4" style="font-size:13px; color:{textMuted};">PDF source will appear here once a metric is selected.</div>
+					<div class="p-4" style="font-size:13px; color:{textMuted};">{m.resolve_metric_range_types_pdf_source_will_appear_here()}</div>
 				{:else if pdfLoading}
-					<div class="p-4" style="font-size:13px; color:{textMuted};">Loading source document…</div>
+					<div class="p-4" style="font-size:13px; color:{textMuted};">{m.resolve_metric_range_types_loading_source_document()}</div>
 				{:else if pdfError}
 					<div class="p-4" style="font-size:13px; color:{colorError};">{pdfError}</div>
 				{:else if isPdf && currentInput}
@@ -444,7 +441,7 @@
 					/>
 				{:else}
 					<div class="p-4" style="font-size:13px; color:{textMuted};">
-						Source record #{selected.input_record_id} is not a PDF; no highlight preview available.
+						{m.resolve_metric_range_types_source_record_is_not_a({ input_record_id: selected.input_record_id })}
 					</div>
 				{/if}
 			</div>

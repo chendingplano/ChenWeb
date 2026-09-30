@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import {
 		getArtifactWiki,
 		getArtifactWikiRecord,
@@ -90,7 +91,7 @@
 			{:else}
 				<ArtifactRecordInspector {artifactType} record={recordPayload?.record ?? null} {darkMode} {lang} />
 				{#if recordLoading && !recordPayload}
-					<p class="sidebar-note">{lang === 'zh-cn' ? '正在获取有据可依的记录…' : 'Fetching grounded record…'}</p>
+					<p class="sidebar-note">{lang === 'zh-cn' ? m.artifact_wiki_page_text() : m.artifact_wiki_page_fetching_grounded_record()}</p>
 				{/if}
 			{/if}
 		</div>

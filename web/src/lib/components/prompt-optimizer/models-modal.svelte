@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
@@ -36,7 +37,7 @@
 
 	const providerOptions: { value: Provider; label: string }[] = [
 		{ value: 'openai',              label: 'OpenAI' },
-		{ value: 'openai_compatible',   label: 'OpenAI-compatible' },
+		{ value: 'openai_compatible',   label: msg.models_modal_openai_compatible() },
 		{ value: 'anthropic',           label: 'Anthropic' },
 		{ value: 'gemini',              label: 'Gemini' }
 	];
@@ -120,10 +121,10 @@
 	async function save() {
 		fError = '';
 
-		if (!fName.trim()) { fError = 'Name is required'; return; }
-		if (!fModel.trim()) { fError = 'Model ID is required'; return; }
+		if (!fName.trim()) { fError = msg.models_modal_name_is_required(); return; }
+		if (!fModel.trim()) { fError = msg.models_modal_model_id_is_required(); return; }
 		if (mode === 'create' && !fApiKey.trim()) {
-			fError = 'API key is required';
+			fError = msg.models_modal_api_key_is_required();
 			return;
 		}
 
@@ -135,11 +136,11 @@
 				if (p && typeof p === 'object' && !Array.isArray(p)) {
 					parsedParams = p as Record<string, unknown>;
 				} else {
-					fError = 'Default params must be a JSON object';
+					fError = msg.models_modal_default_params_must_be_a();
 					return;
 				}
 			} catch {
-				fError = 'Default params is not valid JSON';
+				fError = msg.models_modal_default_params_is_not_valid();
 				return;
 			}
 		}
@@ -170,7 +171,7 @@
 	}
 
 	async function removeModel(m: Model) {
-		if (!confirm(`Delete model "${m.name}"? This cannot be undone.`)) return;
+		if (!confirm(msg.models_modal_delete_model_this_cannot_be({ name: m.name }))) return;
 		try {
 			await deleteModel(m.id);
 			await refresh();
@@ -199,10 +200,10 @@
 				class="flex items-center justify-between px-6 py-4"
 				style="border-bottom:1px solid {borderColor};"
 			>
-				<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">Model Registry</h2>
+				<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">{msg.models_modal_model_registry()}</h2>
 				<button
 					onclick={onClose}
-					aria-label="Close"
+					aria-label={msg.models_modal_close()}
 					class="rounded-lg p-1.5 cursor-pointer"
 					style="background:transparent; border:none; color:{textSecondary};"
 				>
@@ -223,7 +224,7 @@
 				{#if mode === 'none'}
 					<div class="flex items-center justify-between mb-3">
 						<div style="font-size:13px; color:{textSecondary};">
-							{models.length} model{models.length === 1 ? '' : 's'}
+							{msg.models_modal_model({ modelsCount: models.length, plural: models.length === 1 ? '' : 's' })}
 						</div>
 						<button
 							onclick={beginCreate}
@@ -231,18 +232,18 @@
 							style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none;"
 						>
 							<PlusIcon class="w-3.5 h-3.5" />
-							Add model
+							{msg.models_modal_add_model()}
 						</button>
 					</div>
 
 					{#if loading}
-						<div style="color:{textMuted}; font-size:13px;">Loading…</div>
+						<div style="color:{textMuted}; font-size:13px;">{msg.models_modal_loading()}</div>
 					{:else if models.length === 0}
 						<div
 							class="rounded-lg px-4 py-6 text-center"
 							style="background:{surface2}; color:{textMuted}; font-size:13px; border:1px dashed {borderColor};"
 						>
-							No models yet. Add one to start optimizing prompts.
+							{msg.models_modal_no_models_yet_add_one()}
 						</div>
 					{:else}
 						<div class="space-y-2">
@@ -265,7 +266,7 @@
 													class="rounded-full px-2"
 													style="background:{borderColor}; color:{textMuted}; font-size:11px; font-weight:600;"
 												>
-													disabled
+													{msg.models_modal_disabled()}
 												</span>
 											{/if}
 										</div>
@@ -275,7 +276,7 @@
 									</div>
 									<button
 										onclick={() => beginEdit(m)}
-										aria-label="Edit"
+										aria-label={msg.models_modal_edit()}
 										class="rounded-lg p-1.5 cursor-pointer"
 										style="background:transparent; color:{textSecondary}; border:1px solid {borderColor};"
 									>
@@ -283,7 +284,7 @@
 									</button>
 									<button
 										onclick={() => removeModel(m)}
-										aria-label="Delete"
+										aria-label={msg.models_modal_delete()}
 										class="rounded-lg p-1.5 cursor-pointer"
 										style="background:transparent; color:{danger}; border:1px solid {borderColor};"
 									>
@@ -296,12 +297,12 @@
 				{:else}
 					<div class="space-y-3">
 						<div>
-							<label for="mm-name" style="font-size:12px; color:{textSecondary}; font-weight:500;">Name</label>
+							<label for="mm-name" style="font-size:12px; color:{textSecondary}; font-weight:500;">{msg.models_modal_name()}</label>
 							<input
 								id="mm-name"
 								type="text"
 								bind:value={fName}
-								placeholder="e.g. OpenAI GPT-4o"
+								placeholder={msg.models_modal_e_g_openai_gpt_4o()}
 								class="w-full rounded-lg px-3 py-2 mt-1"
 								style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:13px;"
 							/>
@@ -309,7 +310,7 @@
 
 						<div class="grid grid-cols-2 gap-3">
 							<div>
-								<label for="mm-provider" style="font-size:12px; color:{textSecondary}; font-weight:500;">Provider</label>
+								<label for="mm-provider" style="font-size:12px; color:{textSecondary}; font-weight:500;">{msg.models_modal_provider()}</label>
 								<select
 									id="mm-provider"
 									bind:value={fProvider}
@@ -322,12 +323,12 @@
 								</select>
 							</div>
 							<div>
-								<label for="mm-model" style="font-size:12px; color:{textSecondary}; font-weight:500;">Model ID</label>
+								<label for="mm-model" style="font-size:12px; color:{textSecondary}; font-weight:500;">{msg.models_modal_model_id()}</label>
 								<input
 									id="mm-model"
 									type="text"
 									bind:value={fModel}
-									placeholder="gpt-4o, claude-opus-4-7, gemini-2.5-pro…"
+									placeholder={msg.models_modal_gpt_4o_claude_opus_4()}
 									class="w-full rounded-lg px-3 py-2 mt-1"
 									style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:13px;"
 								/>
@@ -336,13 +337,13 @@
 
 						<div>
 							<label for="mm-baseurl" style="font-size:12px; color:{textSecondary}; font-weight:500;">
-								Base URL <span style="color:{textMuted};">(optional)</span>
+								{msg.models_modal_base_url()} <span style="color:{textMuted};">{msg.models_modal_optional()}</span>
 							</label>
 							<input
 								id="mm-baseurl"
 								type="text"
 								bind:value={fBaseUrl}
-								placeholder="https://api.openai.com/v1"
+								placeholder={msg.models_modal_https_api_openai_com_v1()}
 								class="w-full rounded-lg px-3 py-2 mt-1"
 								style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:13px;"
 							/>
@@ -350,13 +351,13 @@
 
 						<div>
 							<label for="mm-apikey" style="font-size:12px; color:{textSecondary}; font-weight:500;">
-								API Key {#if mode === 'edit'}<span style="color:{textMuted};">(leave blank to keep existing)</span>{/if}
+								{msg.models_modal_api_key()} {#if mode === 'edit'}<span style="color:{textMuted};">{msg.models_modal_leave_blank_to_keep_existing()}</span>{/if}
 							</label>
 							<input
 								id="mm-apikey"
 								type="password"
 								bind:value={fApiKey}
-								placeholder={mode === 'edit' ? '•••••••• (unchanged)' : 'sk-…'}
+								placeholder={mode === 'edit' ? msg.models_modal_unchanged() : msg.models_modal_sk()}
 								autocomplete="off"
 								class="w-full rounded-lg px-3 py-2 mt-1"
 								style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:13px;"
@@ -365,7 +366,7 @@
 
 						<div>
 							<label for="mm-params" style="font-size:12px; color:{textSecondary}; font-weight:500;">
-								Default params <span style="color:{textMuted};">(JSON object)</span>
+								{msg.models_modal_default_params()} <span style="color:{textMuted};">{msg.models_modal_json_object()}</span>
 							</label>
 							<textarea
 								id="mm-params"
@@ -379,7 +380,7 @@
 
 						<label class="flex items-center gap-2 cursor-pointer">
 							<input type="checkbox" bind:checked={fEnabled} />
-							<span style="font-size:13px; color:{textPrimary};">Enabled</span>
+							<span style="font-size:13px; color:{textPrimary};">{msg.models_modal_enabled()}</span>
 						</label>
 
 						{#if fError}
@@ -404,7 +405,7 @@
 						class="rounded-lg px-4 py-2 cursor-pointer"
 						style="background:transparent; color:{textSecondary}; border:1px solid {borderColor}; font-size:13px;"
 					>
-						Close
+						{msg.models_modal_close()}
 					</button>
 				{:else}
 					<button
@@ -413,7 +414,7 @@
 						class="rounded-lg px-4 py-2 cursor-pointer"
 						style="background:transparent; color:{textSecondary}; border:1px solid {borderColor}; font-size:13px;"
 					>
-						Cancel
+						{msg.models_modal_cancel()}
 					</button>
 					<button
 						onclick={save}
@@ -421,7 +422,7 @@
 						class="rounded-lg px-4 py-2 cursor-pointer"
 						style="background:{accent}; color:white; border:none; font-size:13px; font-weight:600; opacity:{saving ? 0.6 : 1};"
 					>
-						{saving ? 'Saving…' : mode === 'create' ? 'Create' : 'Save'}
+						{saving ? msg.models_modal_saving() : mode === 'create' ? msg.models_modal_create() : msg.models_modal_save()}
 					</button>
 				{/if}
 			</div>

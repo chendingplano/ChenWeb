@@ -375,7 +375,7 @@
 			icon: FolderIcon,
 			group: 'Resources',
 			children: [
-				{ id: 'docs-users-manual', label: "User's Manual" },
+				{ id: 'docs-users-manual', label: m.nav_docs_users_manual() },
 				{ id: 'docs-development', label: m.nav_docs_development() }
 			]
 		},
@@ -624,8 +624,8 @@
 					onmouseleave={(e) => {
 						(e.currentTarget as HTMLElement).style.color = textMuted;
 					}}
-					aria-label={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Shrink navigation'}
-					title={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Shrink navigation'}
+					aria-label={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_shrink_navigation()}
+					title={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_shrink_navigation()}
 				>
 					{#if autoShrinkExpand}
 						<PanelLeftIcon class="h-4 w-4" />
@@ -645,8 +645,8 @@
 				onmouseleave={(e) => {
 					(e.currentTarget as HTMLElement).style.color = textMuted;
 				}}
-				aria-label={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Expand navigation'}
-				title={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Expand navigation'}
+				aria-label={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_expand_navigation()}
+				title={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_expand_navigation()}
 			>
 				<PanelLeftIcon class="h-5 w-5" />
 			</button>

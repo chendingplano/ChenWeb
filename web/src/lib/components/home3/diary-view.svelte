@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -72,7 +73,7 @@
 	interface MonthGroup { key: string; label: string; days: DayGroup[] }
 	interface YearGroup  { year: string; months: MonthGroup[] }
 
-	const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+	const MONTHS = [m.diary_jan(),m.diary_feb(),m.diary_mar(),m.diary_apr(),m.diary_may(),m.diary_jun(),m.diary_jul(),m.diary_aug(),m.diary_sep(),m.diary_oct(),m.diary_nov(),m.diary_dec()];
 
 	let grouped: YearGroup[] = $derived((() => {
 		const yearMap = new Map<string, Map<string, Map<string, DiaryEntry[]>>>();
@@ -117,7 +118,7 @@
 		error = '';
 		try {
 			const res = await fetch('/api/v1/diary');
-			if (!res.ok) throw new Error(`Server error: ${res.status}`);
+			if (!res.ok) throw new Error(m.diary_server_error({ status: res.status }));
 			entries = await res.json();
 		} catch (e: any) {
 			error = e.message;
@@ -169,7 +170,7 @@
 
 	async function deleteEntry() {
 		if (!selectedId || isNew) return;
-		if (!confirm('Delete this diary entry? This cannot be undone.')) return;
+		if (!confirm(m.diary_delete_this_diary_entry_this())) return;
 		try {
 			const res = await fetch(`/api/v1/diary/${selectedId}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error(await res.text());
@@ -266,7 +267,7 @@
 			style="height: 52px; border-bottom: 1px solid {borderColor};"
 		>
 			<span style="font-size: 13px; font-weight: 600; color: {accent}; letter-spacing: 0.02em;">
-				Diary
+				{m.diary_diary()}
 			</span>
 			<button
 				onclick={startNew}
@@ -274,10 +275,10 @@
 				style="background: {accent}; color: #fff; font-size: 12px; font-weight: 600; border: none;"
 				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.85'; }}
 				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-				title="New diary entry"
+				title={m.diary_new_diary_entry()}
 			>
 				<PlusIcon style="width: 13px; height: 13px;" />
-				New
+				{m.diary_new()}
 			</button>
 		</div>
 
@@ -290,8 +291,8 @@
 			{:else if entries.length === 0}
 				<div class="p-6 text-center">
 					<BookMarkedIcon style="width: 32px; height: 32px; color: {textMuted}; opacity: 0.5; margin: 0 auto 8px;" />
-					<p style="font-size: 13px; color: {textMuted};">No entries yet.</p>
-					<p style="font-size: 12px; color: {textMuted}; margin-top: 4px;">Click New to start.</p>
+					<p style="font-size: 13px; color: {textMuted};">{m.diary_no_entries_yet()}</p>
+					<p style="font-size: 12px; color: {textMuted}; margin-top: 4px;">{m.diary_click_new_to_start()}</p>
 				</div>
 			{:else}
 				{#each grouped as yearGroup (yearGroup.year)}
@@ -345,7 +346,7 @@
 											class="block truncate"
 											style="font-size: 13px; font-weight: 500; color: {selectedId === entry.id ? accent : textPrimary};"
 										>
-											{entry.topic || '(no topic)'}
+											{entry.topic || m.diary_no_topic()}
 										</span>
 										<div class="flex items-center gap-2 mt-0.5">
 											<span style="font-size: 11px; color: {textMuted};">{formatTime(entry.createdAt)}</span>
@@ -376,10 +377,10 @@
 			<div class="flex flex-col items-center justify-center flex-1 p-12">
 				<BookMarkedIcon style="width: 48px; height: 48px; color: {accent}; opacity: 0.35; margin-bottom: 16px;" />
 				<p style="font-size: 16px; font-weight: 500; color: {textSecondary}; margin-bottom: 6px;">
-					Select an entry or create a new one
+					{m.diary_select_an_entry_or_create()}
 				</p>
 				<p style="font-size: 13px; color: {textMuted}; margin-bottom: 20px;">
-					Capture topics, links, and notes as you research.
+					{m.diary_capture_topics_links_and_notes()}
 				</p>
 				<button
 					onclick={startNew}
@@ -389,7 +390,7 @@
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
 				>
 					<PlusIcon style="width: 15px; height: 15px;" />
-					New Entry
+					{m.diary_new_entry()}
 				</button>
 			</div>
 
@@ -399,7 +400,7 @@
 				<!-- Form header -->
 				<div class="flex items-center justify-between">
 					<h2 style="font-size: 17px; font-weight: 600; color: {textPrimary};">
-						{isNew ? 'New Entry' : 'Edit Entry'}
+						{isNew ? m.diary_new_entry() : m.diary_edit_entry()}
 					</h2>
 					<div class="flex items-center gap-2">
 						{#if !isNew}
@@ -411,7 +412,7 @@
 								onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
 							>
 								<XIcon style="width: 13px; height: 13px;" />
-								Cancel
+								{m.diary_cancel()}
 							</button>
 						{/if}
 						<button
@@ -424,10 +425,10 @@
 						>
 							{#if saving}
 								<LoaderIcon style="width: 13px; height: 13px; animation: spin 1s linear infinite;" />
-								Saving…
+								{m.diary_saving()}
 							{:else}
 								<CheckIcon style="width: 13px; height: 13px;" />
-								Save
+								{m.diary_save()}
 							{/if}
 						</button>
 					</div>
@@ -446,13 +447,13 @@
 				<!-- Topic -->
 				<div class="flex flex-col gap-1.5">
 					<label for="diary-topic" style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;">
-						Topic
+						{m.diary_topic()}
 					</label>
 					<input
 						id="diary-topic"
 						type="text"
 						bind:value={formTopic}
-						placeholder="What is this about?"
+						placeholder={m.diary_what_is_this_about()}
 						style="
 							background: {inputBg};
 							border: 1px solid {borderColor};
@@ -475,12 +476,12 @@
 						style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;"
 					>
 						<RadioIcon style="width: 13px; height: 13px;" />
-						Source
+						{m.diary_source()}
 					</label>
 					<input
 						type="text"
 						bind:value={formSource}
-						placeholder="Where did you hear about this? (e.g., HN, Twitter, colleague)"
+						placeholder={m.diary_where_did_you_hear_about()}
 						style="
 							background: {inputBg};
 							border: 1px solid {borderColor};
@@ -504,7 +505,7 @@
 							style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;"
 						>
 							<Link2Icon style="width: 13px; height: 13px;" />
-							URLs
+							{m.diary_urls()}
 						</label>
 						<button
 							onclick={addUrlField}
@@ -514,7 +515,7 @@
 							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
 						>
 							<PlusIcon style="width: 11px; height: 11px;" />
-							Add
+							{m.diary_add()}
 						</button>
 					</div>
 					<div class="flex flex-col gap-2">
@@ -523,7 +524,7 @@
 								<input
 									type="url"
 									bind:value={formUrls[i]}
-									placeholder="https://"
+									placeholder={m.diary_https()}
 									style="
 										flex: 1;
 										background: {inputBg};
@@ -562,7 +563,7 @@
 						style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;"
 					>
 						<TagIcon style="width: 13px; height: 13px;" />
-						Keywords
+						{m.diary_keywords()}
 					</label>
 					<!-- Chip input container -->
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -602,7 +603,7 @@
 							type="text"
 							bind:value={kwInput}
 							onkeydown={handleKwKey}
-							placeholder={formKeywords.length === 0 ? 'Type keyword, press Enter or comma' : ''}
+							placeholder={formKeywords.length === 0 ? m.diary_type_keyword_press_enter_or() : ''}
 							style="
 								flex: 1;
 								min-width: 120px;
@@ -620,12 +621,12 @@
 				<!-- Content -->
 				<div class="flex flex-col gap-1.5 flex-1">
 					<label for="diary-content" style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;">
-						Notes
+						{m.diary_notes()}
 					</label>
 					<textarea
 						id="diary-content"
 						bind:value={formContent}
-						placeholder="Write your notes here…"
+						placeholder={m.diary_write_your_notes_here()}
 						rows={12}
 						style="
 							flex: 1;
@@ -654,7 +655,7 @@
 				<div class="flex items-start justify-between gap-4">
 					<div class="flex-1 min-w-0">
 						<h2 style="font-size: 20px; font-weight: 600; color: {textPrimary}; line-height: 1.3; margin-bottom: 4px;">
-							{selectedEntry.topic || '(no topic)'}
+							{selectedEntry.topic || m.diary_no_topic()}
 						</h2>
 						<p style="font-size: 13px; color: {textMuted};">
 							{formatDate(selectedEntry.createdAt)}
@@ -673,7 +674,7 @@
 							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
 						>
 							<PencilIcon style="width: 13px; height: 13px;" />
-							Edit
+							{m.diary_edit()}
 						</button>
 						<button
 							onclick={deleteEntry}
@@ -683,7 +684,7 @@
 							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
 						>
 							<Trash2Icon style="width: 13px; height: 13px;" />
-							Delete
+							{m.diary_delete()}
 						</button>
 					</div>
 				</div>
@@ -714,7 +715,7 @@
 							style="font-size: 11px; font-weight: 700; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;"
 						>
 							<Link2Icon style="width: 12px; height: 12px;" />
-							Links
+							{m.diary_links()}
 						</div>
 						{#each selectedEntry.urls as url (url)}
 							<a
@@ -751,7 +752,7 @@
 							class="mb-3"
 							style="font-size: 11px; font-weight: 700; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;"
 						>
-							Notes
+							{m.diary_notes()}
 						</div>
 						<p
 							style="
@@ -771,12 +772,12 @@
 						style="background: {cardBg}; border: 1px solid {borderColor}; border-style: dashed;"
 					>
 						<div class="text-center">
-							<p style="font-size: 14px; color: {textMuted};">No notes written.</p>
+							<p style="font-size: 14px; color: {textMuted};">{m.diary_no_notes_written()}</p>
 							<button
 								onclick={() => { isEditing = true; }}
 								style="margin-top: 8px; font-size: 12px; color: {accent}; background: none; border: none; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;"
 							>
-								Add notes
+								{m.diary_add_notes()}
 							</button>
 						</div>
 					</div>

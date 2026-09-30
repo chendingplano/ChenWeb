@@ -47,6 +47,8 @@ export function looksLikeText(t: string): boolean {
 	if (/(^|\s)(px|rem|em|rgba?|hsla?|var\(--)|#[0-9a-f]{3,8}\b|\b\d+(px|rem|ms|s)\b/i.test(v))
 		return false;
 	if (/[;{}]/.test(v)) return false;
+	if (/^(oklch|oklab|rgba?|hsla?|lab|lch|color|calc|url|var)\(/i.test(v)) return false; // CSS functions
+	if (/\b(serif|sans-serif|monospace|system-ui|cursive)\b/.test(v) && v.includes(',')) return false; // font stacks
 	if (/^[a-z0-9_.:/@-]+$/.test(v)) return false; // ids, keys, enum codes, paths
 	if (/^[a-z][a-zA-Z0-9]*$/.test(v)) return false; // camelCase identifiers
 	if (/^[A-Z0-9_]+$/.test(v)) return false; // CONSTANTS, env names
@@ -65,10 +67,25 @@ export function looksLikeText(t: string): boolean {
 // Text-like string literals inside a markup expression. Skips comparisons
 // (`=== 'done'`), object keys, member names and call arguments (format strings,
 // keys, and the arguments of m.*() itself).
-export function textLiteralsIn(expr: unknown): JsNode[] {
+// Browser dialogs show their argument to the user: confirm('Discard changes?').
+const isDialogCall = (callee: unknown): boolean => {
+	const c = callee as JsNode;
+	if (c?.type === 'Identifier') return ['confirm', 'alert', 'prompt'].includes(String(c.name));
+	if (c?.type === 'MemberExpression' && !c.computed)
+		return (
+			(c.object as JsNode).type === 'Identifier' &&
+			(c.object as JsNode).name === 'window' &&
+			['confirm', 'alert', 'prompt'].includes(String((c.property as JsNode).name))
+		);
+	return false;
+};
+
+// With dialogsOnly, only the arguments of confirm/alert/prompt are collected
+// (used for on* event handlers, which are otherwise code).
+export function textLiteralsIn(expr: unknown, dialogsOnly = false): JsNode[] {
 	const out: JsNode[] = [];
-	const walk = (node: unknown, parent: JsNode | null, key: string): void => {
-		if (Array.isArray(node)) return node.forEach((x) => walk(x, parent, key));
+	const walk = (node: unknown, parent: JsNode | null, key: string, inDialog = false): void => {
+		if (Array.isArray(node)) return node.forEach((x) => walk(x, parent, key, inDialog));
 		if (!node || typeof node !== 'object') return;
 		const n = node as JsNode;
 		if (!n.type) return;
@@ -83,33 +100,43 @@ export function textLiteralsIn(expr: unknown): JsNode[] {
 			if (
 				(parent.type === 'CallExpression' || parent.type === 'NewExpression') &&
 				key === 'arguments'
-			)
-				return;
+			) {
+				if (!(parent.type === 'CallExpression' && isDialogCall(parent.callee))) return;
+				inDialog = true;
+			}
 			if (parent.type === 'TaggedTemplateExpression') return;
 		}
 		if (n.type === 'Literal') {
-			if (typeof n.value === 'string' && looksLikeText(n.value)) out.push(n);
+			if (typeof n.value === 'string' && looksLikeText(n.value) && (inDialog || !dialogsOnly))
+				out.push(n);
 			return;
 		}
 		if (n.type === 'TemplateLiteral') {
 			const quasiText = (n.quasis as JsNode[])
 				.map((q) => String((q.value as Record<string, unknown>).cooked ?? ''))
 				.join(' ');
-			if (looksLikeText(quasiText)) out.push(n);
-			else for (const e of n.expressions as JsNode[]) walk(e, n, 'expressions');
+			if (looksLikeText(quasiText) && (inDialog || !dialogsOnly)) out.push(n);
+			else for (const e of n.expressions as JsNode[]) walk(e, n, 'expressions', inDialog);
 			return;
 		}
 		for (const [k, v] of Object.entries(n)) {
 			if (k === 'metadata' || k === 'loc' || k === 'range') continue;
-			if (v && typeof v === 'object') walk(v, n, k);
+			if (v && typeof v === 'object') walk(v, n, k, inDialog);
 		}
 	};
 	walk(expr, null, '');
 	return out;
 }
 
-// Attributes whose expression values are never display text.
-const CODE_ATTR = (name: string) => name === 'class' || name === 'style' || name.startsWith('on');
+// Attributes whose expression values are never display text (event handlers are
+// scanned for dialog text only).
+const CODE_ATTR = (name: string) => name === 'class' || name === 'style';
+const HANDLER_ATTR = (name: string) => name.startsWith('on');
+// Component props that carry display text: itemLabelPlural="Provisions", emptyMessage="…".
+export const TEXT_PROP =
+	/(label|title|placeholder|text|message|heading|subtitle|description|caption|hint|tooltip|plural|singular)s?$/i;
+export const isTextAttr = (name: string, onComponent: boolean) =>
+	TEXT_ATTRS.has(name) || (onComponent && TEXT_PROP.test(name));
 
 export function isHardcodedText(raw: string): boolean {
 	const t = raw.replace(/&[a-z]+;|&#\d+;/gi, ' ').trim();
@@ -120,6 +147,7 @@ export function findHardcodedText(source: string): Finding[] {
 	const ast = parse(source, { modern: true }) as unknown as { fragment: unknown };
 	const out: Finding[] = [];
 	const lineOf = (pos: number) => source.slice(0, pos).split('\n').length;
+	let onComponent = false;
 
 	const visit = (node: unknown, skip: boolean): void => {
 		if (Array.isArray(node)) {
@@ -149,9 +177,12 @@ export function findHardcodedText(source: string): Finding[] {
 				Array.isArray(n.value) ? n.value : n.value && n.value !== true ? [n.value] : []
 			) as Record<string, unknown>[];
 			for (const part of parts) {
-				if (part.type === 'ExpressionTag') literals(part.expression);
-				else if (
-					TEXT_ATTRS.has(name) &&
+				if (part.type === 'ExpressionTag') {
+					if (skip) continue;
+					for (const l of textLiteralsIn(part.expression, HANDLER_ATTR(name)))
+						out.push({ line: lineOf(l.start), text: source.slice(l.start, l.end) });
+				} else if (
+					isTextAttr(name, onComponent) &&
 					part.type === 'Text' &&
 					isHardcodedText(String(part.data))
 				) {
@@ -164,11 +195,20 @@ export function findHardcodedText(source: string): Finding[] {
 			return;
 		}
 		if (n.type === 'EachBlock') literals(n.expression);
+		// style:/class:/bind: directives hold CSS values and bindings, not text.
+		if (n.type === 'StyleDirective' || n.type === 'ClassDirective' || n.type === 'BindDirective')
+			return;
 		const childSkip = skip || (n.type === 'RegularElement' && SKIP_ELEMENTS.has(String(n.name)));
 		for (const [k, v] of Object.entries(n)) {
 			// JS expressions and compiler metadata are not markup text.
 			if (k === 'expression' || k === 'metadata' || k === 'context' || k === 'key' || k === 'index')
 				continue;
+			if (k === 'attributes' && n.type === 'Component') {
+				onComponent = true;
+				visit(v, childSkip);
+				onComponent = false;
+				continue;
+			}
 			if (v && typeof v === 'object') visit(v, childSkip);
 		}
 	};

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -60,7 +61,9 @@
 			const res = await fetch('/api/v1/jetstream/nats-subjects', { credentials: 'same-origin' });
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok || !data.ok) {
-				throw new Error(data.message ?? `Failed to load subjects (${res.status})`);
+				throw new Error(
+					data.message ?? m.jetstream_subjects_failed_to_load_subjects({ status: res.status })
+				);
 			}
 			subjects = Array.isArray(data.subjects) ? data.subjects : [];
 		} catch (err) {
@@ -118,7 +121,7 @@
 		error = '';
 		success = '';
 		if (!formSubject.trim()) {
-			error = 'Subject is required';
+			error = m.jetstream_subjects_subject_is_required();
 			return;
 		}
 
@@ -137,12 +140,14 @@
 				});
 				const data = await res.json().catch(() => ({}));
 				if (!res.ok || !data.ok) {
-					throw new Error(data.message ?? `Failed to create subject (${res.status})`);
+					throw new Error(
+						data.message ?? m.jetstream_subjects_failed_to_create_subject({ status: res.status })
+					);
 				}
-				success = 'Subject created';
+				success = m.jetstream_subjects_subject_created();
 			} else {
 				if (formSubjectId == null) {
-					throw new Error('Invalid subject id');
+					throw new Error(m.jetstream_subjects_invalid_subject_id());
 				}
 				const res = await fetch(`/api/v1/jetstream/nats-subjects/${formSubjectId}`, {
 					method: 'PUT',
@@ -157,9 +162,11 @@
 				});
 				const data = await res.json().catch(() => ({}));
 				if (!res.ok || !data.ok) {
-					throw new Error(data.message ?? `Failed to update subject (${res.status})`);
+					throw new Error(
+						data.message ?? m.jetstream_subjects_failed_to_update_subject({ status: res.status })
+					);
 				}
-				success = 'Subject updated';
+				success = m.jetstream_subjects_subject_updated();
 			}
 			closeFormDialog();
 			await loadSubjects();
@@ -174,7 +181,7 @@
 		error = '';
 		success = '';
 		if (!subjectToDelete) {
-			error = 'No subject selected for deletion';
+			error = m.jetstream_subjects_no_subject_selected_for_deletion();
 			return;
 		}
 		deleting = true;
@@ -185,9 +192,11 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok || !data.ok) {
-				throw new Error(data.message ?? `Failed to delete subject (${res.status})`);
+				throw new Error(
+					data.message ?? m.jetstream_subjects_failed_to_delete_subject({ status: res.status })
+				);
 			}
-			success = 'Subject deleted';
+			success = m.jetstream_subjects_subject_deleted();
 			closeDeleteDialog();
 			await loadSubjects();
 		} catch (err) {
@@ -206,9 +215,11 @@
 	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="flex items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">Subjects</h2>
+				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">
+					{m.jetstream_subjects_subjects()}
+				</h2>
 				<p style="font-size:13px; color:{textSecondary};">
-					Manage subjects stored in `shared.nats_subjects`.
+					{m.jetstream_subjects_manage_subjects_stored_in_shared()}
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
@@ -218,7 +229,7 @@
 					style="background:{accent}; color:white; border:none;"
 				>
 					<PlusIcon class="h-4 w-4" />
-					Create
+					{m.jetstream_subjects_create()}
 				</button>
 				<button
 					onclick={loadSubjects}
@@ -227,7 +238,7 @@
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
 					<RefreshCwIcon class="h-4 w-4" />
-					Refresh
+					{m.jetstream_subjects_refresh()}
 				</button>
 			</div>
 		</div>
@@ -261,25 +272,25 @@
 			<thead>
 				<tr style="color:{textSecondary}; font-size:12px;">
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Subject</th
+						>{m.jetstream_subjects_subject()}</th
 					>
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Description</th
+						>{m.jetstream_subjects_description()}</th
 					>
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Payload Format</th
+						>{m.jetstream_subjects_payload_format()}</th
 					>
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Active</th
+						>{m.jetstream_subjects_active()}</th
 					>
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Created By</th
+						>{m.jetstream_subjects_created_by()}</th
 					>
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Created At</th
+						>{m.jetstream_subjects_created_at()}</th
 					>
 					<th style="text-align:left; padding:8px 10px; border-bottom:1px solid {borderColor};"
-						>Actions</th
+						>{m.jetstream_subjects_actions()}</th
 					>
 				</tr>
 			</thead>
@@ -287,7 +298,9 @@
 				{#if subjects.length === 0}
 					<tr>
 						<td colspan="7" style="padding:12px 10px; color:{textSecondary};">
-							{loading ? 'Loading subjects...' : 'No subjects yet'}
+							{loading
+								? m.jetstream_subjects_loading_subjects()
+								: m.jetstream_subjects_no_subjects_yet()}
 						</td>
 					</tr>
 				{:else}
@@ -324,14 +337,14 @@
 										class="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs"
 										style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 									>
-										Edit
+										{m.jetstream_subjects_edit()}
 									</button>
 									<button
 										onclick={() => openDeleteDialog(s)}
 										class="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs"
 										style="background:{danger}; color:white; border:none;"
 									>
-										Delete
+										{m.jetstream_subjects_delete()}
 									</button>
 								</div>
 							</td>
@@ -353,38 +366,46 @@
 			style="background:{cardBg}; border:1px solid {borderColor};"
 		>
 			<h3 style="font-size:18px; font-weight:600; color:{textPrimary};">
-				{formMode === 'create' ? 'Create Subject' : 'Edit Subject'}
+				{formMode === 'create'
+					? m.jetstream_subjects_create_subject()
+					: m.jetstream_subjects_edit_subject()}
 			</h3>
 			<p style="font-size:12px; color:{textSecondary}; margin-top:4px;">
 				{formMode === 'create'
-					? 'Create a new NATS subject record.'
-					: `Update subject #${formSubjectId ?? '-'}.`}
+					? m.jetstream_subjects_create_a_new_nats_subject()
+					: m.jetstream_subjects_update_subject({ formSubjectId: formSubjectId ?? '-' })}
 			</p>
 
 			<div class="mt-4 grid gap-3">
 				<label class="grid gap-1.5">
-					<span style="font-size:12px; color:{textSecondary};">Subject</span>
+					<span style="font-size:12px; color:{textSecondary};"
+						>{m.jetstream_subjects_subject()}</span
+					>
 					<input
 						bind:value={formSubject}
-						placeholder="e.g. kb.pdf.parsed"
+						placeholder={m.jetstream_subjects_e_g_kb_pdf_parsed()}
 						style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
 					/>
 				</label>
 				<label class="grid gap-1.5">
-					<span style="font-size:12px; color:{textSecondary};">Description (optional)</span>
+					<span style="font-size:12px; color:{textSecondary};"
+						>{m.jetstream_subjects_description_optional()}</span
+					>
 					<textarea
 						bind:value={formDescription}
 						rows="3"
-						placeholder="What this subject is used for"
+						placeholder={m.jetstream_subjects_what_this_subject_is_used()}
 						style="border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:10px; resize:vertical;"
 					></textarea>
 				</label>
 				<label class="grid gap-1.5">
-					<span style="font-size:12px; color:{textSecondary};">Payload Format (optional)</span>
+					<span style="font-size:12px; color:{textSecondary};"
+						>{m.jetstream_subjects_payload_format_optional()}</span
+					>
 					<textarea
 						bind:value={formPayloadFormat}
 						rows="5"
-						placeholder="e.g. record_id:int64, file_name:string"
+						placeholder={m.jetstream_subjects_e_g_record_id_int64()}
 						style="border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:10px; resize:vertical;"
 					></textarea>
 				</label>
@@ -394,7 +415,7 @@
 						style="color:{textSecondary}; font-size:13px;"
 					>
 						<input type="checkbox" bind:checked={formIsActive} />
-						Active
+						{m.jetstream_subjects_active()}
 					</label>
 				{/if}
 			</div>
@@ -405,7 +426,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary};"
 				>
 					<div style="font-size:12px;">
-						Payload format can be plain text or JSON-like examples, for example:
+						{m.jetstream_subjects_payload_format_can_be_plain()}
 					</div>
 					<pre
 						style="margin-top:8px; font-size:12px; color:{textPrimary}; white-space:pre-wrap;">record_id:int64
@@ -422,7 +443,7 @@ status:string</pre>
 					class="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
-					Help
+					{m.jetstream_subjects_help()}
 				</button>
 				<button
 					onclick={handleSave}
@@ -430,7 +451,7 @@ status:string</pre>
 					class="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2"
 					style="background:{accent}; color:white; border:none;"
 				>
-					{saving ? 'Saving...' : 'Save'}
+					{saving ? m.jetstream_subjects_saving() : m.jetstream_subjects_save()}
 				</button>
 				<button
 					onclick={closeFormDialog}
@@ -438,7 +459,7 @@ status:string</pre>
 					class="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
-					Cancel
+					{m.jetstream_subjects_cancel()}
 				</button>
 			</div>
 		</div>
@@ -454,9 +475,11 @@ status:string</pre>
 			class="w-full max-w-md rounded-xl p-5"
 			style="background:{cardBg}; border:1px solid {borderColor};"
 		>
-			<h3 style="font-size:18px; font-weight:600; color:{textPrimary};">Confirm Delete</h3>
+			<h3 style="font-size:18px; font-weight:600; color:{textPrimary};">
+				{m.jetstream_subjects_confirm_delete()}
+			</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin-top:8px;">
-				Are you sure you want to delete subject
+				{m.jetstream_subjects_are_you_sure_you_want()}
 				<span style="font-family:monospace; color:{textPrimary};">{subjectToDelete.subject}</span>?
 			</p>
 			<div class="mt-5 flex items-center justify-end gap-2">
@@ -466,7 +489,7 @@ status:string</pre>
 					class="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
-					Cancel
+					{m.jetstream_subjects_cancel()}
 				</button>
 				<button
 					onclick={confirmDelete}
@@ -474,7 +497,7 @@ status:string</pre>
 					class="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2"
 					style="background:{danger}; color:white; border:none;"
 				>
-					{deleting ? 'Deleting...' : 'Delete'}
+					{deleting ? m.jetstream_subjects_deleting() : m.jetstream_subjects_delete()}
 				</button>
 			</div>
 		</div>

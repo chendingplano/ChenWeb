@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/FlowCard.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import type { Flow } from '$lib/types/flow';
 
   let {
@@ -44,7 +45,7 @@
   style="background: {selected ? '#1e2535' : '#161b27'}; border-color: {selected ? '#6366f1' : '#1e2a3a'}; padding:0;"
   onclick={() => onOpen(flow)}
   oncontextmenu={openContextMenu}
-  aria-label="Open flow {flow.flow_name}"
+  aria-label={m.flowcard_open_flow({ flow_name: flow.flow_name })}
 >
   <!-- Thumbnail -->
   <div class="w-full flex items-center justify-center overflow-hidden"
@@ -52,18 +53,17 @@
     {#if flow.thumbnail_svg}
       {@html flow.thumbnail_svg}
     {:else}
-      <span style="font-size:11px; color:#4b5563;">No preview</span>
+      <span style="font-size:11px; color:#4b5563;">{m.flowcard_no_preview()}</span>
     {/if}
   </div>
   <!-- Meta -->
   <div style="padding:8px 10px;">
     <div style="font-size:12px; font-weight:500; color:#e2e8f0; margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
       {flow.flow_name}
-      {#if flow.is_default}<span style="font-size:9px; color:#fbbf24; margin-left:4px;">★ default</span>{/if}
+      {#if flow.is_default}<span style="font-size:9px; color:#fbbf24; margin-left:4px;">{m.flowcard_default()}</span>{/if}
     </div>
     <div style="font-size:10px; color:#6b7280;">
-      {flow.flow_data?.nodes?.length ?? 0} nodes ·
-      {flow.is_shared ? '🌐 Shared' : '🔒 Private'}
+      {m.flowcard_nodes({ nodesCount: flow.flow_data?.nodes?.length ?? 0, value: flow.is_shared ? m.flowcard_shared() : m.flowcard_private() })}
     </div>
   </div>
 </button>
@@ -75,14 +75,14 @@
     style="left:{menuX}px; top:{menuY}px; background:#1e2535; border:1px solid #374151; min-width:160px;"
     role="menu"
   >
-    <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onOpen(flow); showMenu=false; }}>Open</button>
+    <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onOpen(flow); showMenu=false; }}>{m.flowcard_open()}</button>
     {#if isOwner}
-      <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onSetDefault(flow); showMenu=false; }}>Set as default</button>
-      <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onSaveAsTemplate(flow); showMenu=false; }}>Save as template</button>
+      <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onSetDefault(flow); showMenu=false; }}>{m.flowcard_set_as_default()}</button>
+      <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onSaveAsTemplate(flow); showMenu=false; }}>{m.flowcard_save_as_template()}</button>
     {/if}
-    <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onDuplicate(flow); showMenu=false; }}>Duplicate</button>
+    <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#e2e8f0; border:none; cursor:pointer;" onclick={() => { onDuplicate(flow); showMenu=false; }}>{m.flowcard_duplicate()}</button>
     {#if isOwner}
-      <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#ef4444; border:none; cursor:pointer;" onclick={() => { onDelete(flow); showMenu=false; }}>Delete</button>
+      <button class="w-full text-left px-3 py-2 text-sm hover:bg-white/5" style="color:#ef4444; border:none; cursor:pointer;" onclick={() => { onDelete(flow); showMenu=false; }}>{m.flowcard_delete()}</button>
     {/if}
   </div>
 {/if}

@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/NodePalette.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import type { NodeType } from '$lib/types/flow';
 
   let {
@@ -31,10 +32,10 @@
   style="width:200px; background:#111827; border-right:1px solid #1e2a3a;"
 >
   <div style="padding:8px; border-bottom:1px solid #1e2a3a;">
-    <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:6px;">NODE PALETTE</div>
+    <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:6px;">{m.nodepalette_node_palette()}</div>
     <input
       bind:value={search}
-      placeholder="Search nodes..."
+      placeholder={m.nodepalette_search_nodes()}
       style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#94a3b8; box-sizing:border-box;"
     />
   </div>
@@ -51,7 +52,7 @@
             ondragstart={(e) => onDragStart(e, nodeType)}
             class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-white/5 transition-colors select-none"
             style="background:#1e2535; border:1px solid transparent; font-size:10px; color:#e2e8f0;"
-            title="Drag onto canvas"
+            title={m.nodepalette_drag_onto_canvas()}
           >
             <span style="font-size:14px; flex-shrink:0;">{getIcon(nodeType.icon)}</span>
             {nodeType.label}

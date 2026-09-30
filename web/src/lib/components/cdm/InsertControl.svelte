@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// A block-type picker plus an "insert" button, used by BlockList between
 	// (and before/after) every block. Kept as its own component only because
 	// BlockList repeats it once per gap; there is no state here beyond the
@@ -18,7 +19,7 @@
 			<option value={type}>{type}</option>
 		{/each}
 	</select>
-	<button type="button" onclick={onInsert} title={label}>+ Insert</button>
+	<button type="button" onclick={onInsert} title={label}>{m.insertcontrol_insert()}</button>
 </div>
 
 <style>

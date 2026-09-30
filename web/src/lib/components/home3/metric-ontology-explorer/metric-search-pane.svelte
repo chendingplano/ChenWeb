@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	// Search tab for the content viewer. Reuses the Metrics view's search pieces:
 	//   • KbInputRecordBrowser — RECORD ID + Retrieve + the "Find a record" filter
 	//     dialog + the kb.inputs results list.
@@ -99,7 +100,7 @@
 			gResults = [];
 			gTotal = 0;
 			gPage = KB_METRIC_SEARCH_DEFAULTS.page;
-			gError = 'Enter a query or set at least one filter before searching.';
+			gError = msg.metric_search_pane_enter_a_query_or_set();
 			return;
 		}
 		gLoading = true;
@@ -135,10 +136,19 @@
 	}
 
 	function recordTitle(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Record #${r.id}`;
+		return (
+			r.title?.trim() ||
+			r.name?.trim() ||
+			r.file_name?.trim() ||
+			msg.metric_search_pane_record_2({ id: r.id })
+		);
 	}
 	function metricName(m: KbMetricRecord): string {
-		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`;
+		return (
+			m.metric_name?.trim() ||
+			m.metric_subject?.trim() ||
+			msg.metric_search_pane_metric_2({ id: m.id })
+		);
 	}
 	function metricValueText(m: KbMetricRecord): string {
 		return [m.metric_value?.trim(), m.metric_unit?.trim()].filter(Boolean).join(' ');
@@ -165,10 +175,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="moe-search-records"
-				title="kb.inputs"
-				subtitle="Search or retrieve a document, then pick one of its metrics."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={msg.metric_search_pane_kb_inputs()}
+				subtitle={msg.metric_search_pane_search_or_retrieve_a_document()}
+				emptyTitle={msg.metric_search_pane_no_records_yet()}
+				emptySubtitle={msg.metric_search_pane_use_search_or_retrieve_to()}
 				autoSelectFirstRecord={false}
 				defaultListWidth={360}
 				selectedRecordId={selectedRecord?.id ?? null}
@@ -178,12 +188,12 @@
 		</div>
 
 		<details class="gms">
-			<summary>Global metric search</summary>
+			<summary>{msg.metric_search_pane_global_metric_search()}</summary>
 			<div class="gms-body">
 				<input
 					class="in q"
 					type="text"
-					placeholder="Search metrics, thresholds, units, keywords…"
+					placeholder={msg.metric_search_pane_search_metrics_thresholds_units_keywords()}
 					bind:value={gQuery}
 					onkeydown={(e) => {
 						if (e.key === 'Enter') void runGlobalSearch();
@@ -193,38 +203,38 @@
 					<input
 						class="in"
 						type="text"
-						placeholder="Record ID"
+						placeholder={msg.metric_search_pane_record_id()}
 						bind:value={gFilters.inputRecordId}
 					/>
 					<select class="in" bind:value={gFilters.isExplicitMetric}>
-						<option value="">Explicit metric?</option>
-						<option value="true">Explicit only</option>
-						<option value="false">Implicit only</option>
+						<option value="">{msg.metric_search_pane_explicit_metric()}</option>
+						<option value="true">{msg.metric_search_pane_explicit_only()}</option>
+						<option value="false">{msg.metric_search_pane_implicit_only()}</option>
 					</select>
 					<input
 						class="in"
 						type="text"
-						placeholder="Value class"
+						placeholder={msg.metric_search_pane_value_class()}
 						bind:value={gFilters.valueClass}
 					/>
 					<input
 						class="in"
 						type="text"
-						placeholder="Value type"
+						placeholder={msg.metric_search_pane_value_type()}
 						bind:value={gFilters.valueDataType}
 					/>
 					<input
 						class="in"
 						type="text"
-						placeholder="Metric unit"
+						placeholder={msg.metric_search_pane_metric_unit()}
 						bind:value={gFilters.metricUnit}
 					/>
 				</div>
 				<div class="row">
 					<button class="btn primary" disabled={gLoading} onclick={() => void runGlobalSearch()}>
-						{gLoading ? 'Searching…' : 'Search'}
+						{gLoading ? msg.metric_search_pane_searching() : msg.metric_search_pane_search()}
 					</button>
-					<button class="btn" onclick={clearGlobalSearch}>Clear</button>
+					<button class="btn" onclick={clearGlobalSearch}>{msg.metric_search_pane_clear()}</button>
 				</div>
 			</div>
 		</details>
@@ -234,14 +244,20 @@
 	{#if detailOpen}
 		<div class="detail">
 			<div class="detail-head">
-				<button class="back" onclick={backToBrowse}>‹ Back</button>
+				<button class="back" onclick={backToBrowse}>{msg.metric_search_pane_back()}</button>
 				<span class="ctx">
 					{#if showGlobal}
-						{gTotal} result{gTotal === 1 ? '' : 's'}{gQuery.trim() ? ` for “${gQuery.trim()}”` : ''}
+						{msg.metric_search_pane_result({
+							gTotal,
+							plural: gTotal === 1 ? '' : 's',
+							value: gQuery.trim() ? msg.metric_search_pane_for({ gQuery: gQuery.trim() }) : ''
+						})}
 					{:else if selectedRecord}
-						{recordMetrics.length} metric{recordMetrics.length === 1 ? '' : 's'} · {recordTitle(
-							selectedRecord
-						)}
+						{msg.metric_search_pane_metric({
+							recordMetricsCount: recordMetrics.length,
+							plural: recordMetrics.length === 1 ? '' : 's',
+							selectedRecord: recordTitle(selectedRecord)
+						})}
 					{/if}
 				</span>
 				{#if showGlobal && gTotalPages > 1}
@@ -267,10 +283,10 @@
 				{:else if metricsError && !showGlobal}
 					<p class="note err">{metricsError}</p>
 				{:else if gLoading || (metricsLoading && !showGlobal)}
-					<p class="note">Loading…</p>
+					<p class="note">{msg.metric_search_pane_loading()}</p>
 				{:else if showGlobal}
 					{#if gResults.length === 0}
-						<p class="note">No matches. Try broader keywords or relax a filter.</p>
+						<p class="note">{msg.metric_search_pane_no_matches_try_broader_keywords()}</p>
 					{:else}
 						{#each gResults as r, i (r.id)}
 							{@const linkId = pickableMetricId(r)}
@@ -278,9 +294,7 @@
 								class="hit"
 								class:on={linkId != null && linkId === activeMetricId}
 								disabled={linkId == null}
-								title={linkId == null
-									? 'This hit has no canonical metric id and cannot be opened here'
-									: ''}
+								title={linkId == null ? msg.metric_search_pane_this_hit_has_no_canonical() : ''}
 								onclick={() => pick(r)}
 							>
 								<div class="hit-top">
@@ -290,25 +304,31 @@
 											'0'
 										)}</span
 									>
-									<span class="score" title="Search score">{r.score.toFixed(3)}</span>
+									<span class="score" title={msg.metric_search_pane_search_score()}
+										>{r.score.toFixed(3)}</span
+									>
 								</div>
 								<div class="hit-name">{r.primary_label}</div>
 								{#if metricSearchResultSecondaryText(r)}<div class="hit-desc">
 										{metricSearchResultSecondaryText(r)}
 									</div>{/if}
 								<div class="hit-foot">
-									<span class="tag">record {r.input_record_id}</span>
+									<span class="tag"
+										>{msg.metric_search_pane_record({ input_record_id: r.input_record_id })}</span
+									>
 									{#each metricSearchResultChips(r) as c (`${r.id}-${c}`)}<span class="tag quiet"
 											>{c}</span
 										>{/each}
-									{#if linkId == null}<span class="tag warn">no metric id</span>{/if}
+									{#if linkId == null}<span class="tag warn"
+											>{msg.metric_search_pane_no_metric_id()}</span
+										>{/if}
 								</div>
 							</button>
 						{/each}
 					{/if}
 				{:else if selectedRecord}
 					{#if recordMetrics.length === 0}
-						<p class="note">This document has no extracted metrics.</p>
+						<p class="note">{msg.metric_search_pane_this_document_has_no_extracted()}</p>
 					{:else}
 						{#each recordMetrics as m, i (m.id)}
 							{@const linkId = pickableMetricId(m)}
@@ -316,21 +336,23 @@
 								class="hit"
 								class:on={linkId != null && linkId === activeMetricId}
 								disabled={linkId == null}
-								title={linkId == null
-									? 'This metric has no canonical metric id and cannot be opened here'
-									: ''}
+								title={linkId == null ? msg.metric_search_pane_this_metric_has_no_canonical() : ''}
 								onclick={() => pick(m)}
 							>
 								<div class="hit-top">
 									<span class="rank">№ {String(i + 1).padStart(3, '0')}</span>
-									<span class="score" title="Confidence">{confPct(m.confidence)}</span>
+									<span class="score" title={msg.metric_search_pane_confidence()}
+										>{confPct(m.confidence)}</span
+									>
 								</div>
 								<div class="hit-name">{metricName(m)}</div>
 								{#if metricValueText(m)}<div class="hit-desc">{metricValueText(m)}</div>{/if}
 								<div class="hit-foot">
 									{#if m.value_class}<span class="tag quiet">{m.value_class}</span>{/if}
 									{#if m.location_type}<span class="tag quiet">{m.location_type}</span>{/if}
-									{#if linkId == null}<span class="tag warn">no metric id</span>{/if}
+									{#if linkId == null}<span class="tag warn"
+											>{msg.metric_search_pane_no_metric_id()}</span
+										>{/if}
 								</div>
 							</button>
 						{/each}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import type { Agent, CreateAgentBody } from './agentplatform-client';
 	import { apStore } from './agentplatform-store.svelte';
@@ -48,7 +49,7 @@
 		localError = null;
 		const name = draft.name.trim();
 		if (!name) {
-			localError = 'Name is required';
+			localError = m.agents_name_is_required();
 			return;
 		}
 		submitting = true;
@@ -70,7 +71,7 @@
 	}
 
 	async function remove(a: Agent) {
-		if (!confirm(`Archive agent "${a.name}"? Existing issues keep this reference.`)) return;
+		if (!confirm(m.agents_archive_agent_existing_issues_keep({ name: a.name }))) return;
 		try {
 			await apStore.deleteAgent(a.id);
 		} catch (e) {
@@ -96,7 +97,7 @@
 	async function saveEdit(id: string) {
 		localError = null;
 		const name = editDraft.name.trim();
-		if (!name) { localError = 'Name is required'; return; }
+		if (!name) { localError = m.agents_name_is_required(); return; }
 		editSaving = true;
 		try {
 			await apStore.updateAgent(id, {
@@ -133,10 +134,10 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Agents</h2>
+			<h2>{m.agents_agents()}</h2>
 			<p class="muted">
-				{apStore.agents.length} agent{apStore.agents.length === 1 ? '' : 's'}
-				{apStore.active ? ` in ${apStore.active.name}` : ''}
+				{m.agents_agent({ agentsCount: apStore.agents.length, plural: apStore.agents.length === 1 ? '' : 's' })}{#if apStore.active}
+					{m.agents_in_project({ name: apStore.active.name })}{/if}
 			</p>
 		</div>
 		<button
@@ -144,7 +145,7 @@
 			onclick={() => (showCreate = !showCreate)}
 			disabled={!apStore.active}
 		>
-			{showCreate ? 'Cancel' : '+ New Agent'}
+			{showCreate ? m.agents_cancel() : m.agents_new_agent()}
 		</button>
 	</header>
 
@@ -158,15 +159,15 @@
 		>
 			<div class="row">
 				<label>
-					<span>Emoji</span>
+					<span>{m.agents_emoji()}</span>
 					<input class="emoji" bind:value={draft.avatar_emoji} maxlength="4" />
 				</label>
 				<label class="grow">
-					<span>Name</span>
-					<input bind:value={draft.name} required placeholder="e.g. Claude-Backend" />
+					<span>{m.agents_name()}</span>
+					<input bind:value={draft.name} required placeholder={m.agents_e_g_claude_backend()} />
 				</label>
 				<label>
-					<span>Runtime</span>
+					<span>{m.agents_runtime()}</span>
 					<select bind:value={draft.runtime_kind}>
 						{#each runtimeKinds as rk (rk.value)}
 							<option value={rk.value}>{rk.label}</option>
@@ -175,16 +176,16 @@
 				</label>
 			</div>
 			<label>
-				<span>Model (optional)</span>
-				<input bind:value={draft.model} placeholder="e.g. claude-opus-4-7" />
+				<span>{m.agents_model_optional()}</span>
+				<input bind:value={draft.model} placeholder={m.agents_e_g_claude_opus_4()} />
 			</label>
 			<label>
-				<span>Instructions (optional system prompt)</span>
+				<span>{m.agents_instructions_optional_system_prompt()}</span>
 				<textarea rows="4" bind:value={draft.instructions}></textarea>
 			</label>
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting || !draft.name.trim()}>
-					{submitting ? 'Creating…' : 'Create agent'}
+					{submitting ? m.agents_creating() : m.agents_create_agent()}
 				</button>
 			</div>
 		</form>
@@ -205,31 +206,31 @@
 					>
 						<div class="edit-row">
 							<label class="label-emoji">
-								<span>Emoji</span>
+								<span>{m.agents_emoji()}</span>
 								<input class="emoji" bind:value={editDraft.avatar_emoji} maxlength="4" />
 							</label>
 							<label class="grow">
-								<span>Name</span>
-								<input bind:value={editDraft.name} required placeholder="Agent name" />
+								<span>{m.agents_name()}</span>
+								<input bind:value={editDraft.name} required placeholder={m.agents_agent_name()} />
 							</label>
 						</div>
 						<label>
-							<span>Model</span>
-							<input bind:value={editDraft.model} placeholder="e.g. claude-opus-4-7" />
+							<span>{m.agents_model()}</span>
+							<input bind:value={editDraft.model} placeholder={m.agents_e_g_claude_opus_4()} />
 						</label>
 						<label>
-							<span>Instructions</span>
+							<span>{m.agents_instructions()}</span>
 							<textarea rows="3" bind:value={editDraft.instructions}></textarea>
 						</label>
 						<label class="toggle-row">
-							<span>Enabled</span>
+							<span>{m.agents_enabled()}</span>
 							<input type="checkbox" bind:checked={editDraft.enabled} />
 						</label>
 						<div class="edit-foot">
 							<button class="primary small" type="submit" disabled={editSaving || !editDraft.name.trim()}>
-								{editSaving ? 'Saving…' : 'Save'}
+								{editSaving ? m.agents_saving() : m.agents_save()}
 							</button>
-							<button class="ghost small" type="button" onclick={cancelEdit}>Cancel</button>
+							<button class="ghost small" type="button" onclick={cancelEdit}>{m.agents_cancel()}</button>
 						</div>
 					</form>
 				{:else}
@@ -240,23 +241,23 @@
 							<span class="name">{a.name}</span>
 							<span class="runtime">{runtimeLabel(a.runtime_kind)}</span>
 						</div>
-						<button class="action-link" onclick={() => startEdit(a)}>Edit</button>
-						<button class="danger-link" onclick={() => remove(a)}>Archive</button>
+						<button class="action-link" onclick={() => startEdit(a)}>{m.agents_edit()}</button>
+						<button class="danger-link" onclick={() => remove(a)}>{m.agents_archive()}</button>
 					</header>
 					{#if a.model}
-						<p class="muted small">Model: {a.model}</p>
+						<p class="muted small">{m.agents_model_2({ model: a.model })}</p>
 					{/if}
 					{#if a.instructions}
 						<p class="instructions">{a.instructions}</p>
 					{/if}
 					{#if !a.enabled}
-						<p class="muted small disabled-badge">Disabled</p>
+						<p class="muted small disabled-badge">{m.agents_disabled()}</p>
 					{/if}
 				{/if}
 			</article>
 		{/each}
 		{#if apStore.agents.length === 0}
-			<div class="empty">No agents yet. Create one to assign issues.</div>
+			<div class="empty">{m.agents_no_agents_yet_create_one()}</div>
 		{/if}
 	</div>
 </div>

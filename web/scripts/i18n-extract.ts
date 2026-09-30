@@ -14,27 +14,29 @@
 //    translated (translate the zh-cn copy of English text, or the en copy of
 //    Chinese text) and applied with --apply before committing.
 //
-// Files that use `m` as a local name are skipped and reported (rename it first).
+// A file that already uses `m` as a local name imports the messages as `msg`.
 //
 // Usage (from web/):
 //   bun scripts/i18n-extract.ts --pending out.json [--dry-run] <file.svelte>...   markup text
 //   bun scripts/i18n-extract.ts --script-candidates <file.svelte>... > cands.json  <script> strings
 //   (review cands.json: delete entries that are not displayed text)
 //   bun scripts/i18n-extract.ts --script-apply cands.json pending.json
+//   bun scripts/i18n-extract.ts --suggest pending.json > tm.json   (translation memory)
+//   bun scripts/i18n-extract.ts --fix-params   (after conversion: make message params non-null)
 //   bun scripts/i18n-extract.ts --apply translations.json
 //       translations.json: { "<key>": { "en"?: "...", "zh-cn"?: "..." } }
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'svelte/compiler';
-import { isHardcodedText, looksLikeText, textLiteralsIn } from './check-i18n.ts';
+import { isHardcodedText, isTextAttr, looksLikeText, textLiteralsIn } from './check-i18n.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const MSG = (l: string) => join(ROOT, 'messages', `${l}.json`);
-const TEXT_ATTRS = new Set(['placeholder', 'title', 'aria-label', 'alt', 'label']);
 const SKIP_ELEMENTS = new Set(['code', 'pre']);
 const CJK = /[㐀-鿿]/;
-const IMPORT_LINE = `import { m } from '$lib/paraglide/messages.js';`;
+const importLine = (alias: string) =>
+	`import { ${alias === 'm' ? 'm' : `m as ${alias}`} } from '$lib/paraglide/messages.js';`;
 
 type Node = Record<string, unknown> & { type: string; start: number; end: number };
 export type Pending = { key: string; text: string; source_lang: 'en' | 'zh-cn'; file: string };
@@ -130,6 +132,17 @@ function paramName(expr: Expr): string {
 	}
 }
 
+// Name under which a file calls the messages: its existing Paraglide import, else
+// `m`, or `msg` when the file already uses `m` as a local name (e.g. for metrics).
+export function messagesAlias(source: string): string {
+	const existing = source.match(
+		/import\s*\{\s*m(?:\s+as\s+(\w+))?\s*\}\s*from\s*['"]\$lib\/paraglide\/messages(?:\.js)?['"]/
+	);
+	if (existing) return existing[1] ?? 'm';
+	if (!usesLocalM(source)) return 'm';
+	return /\bmsg\b/.test(source) ? 'i18n' : 'msg';
+}
+
 export function usesLocalM(source: string): boolean {
 	return /(\(|,\s*)m\s*(\)|,|=>)|\bm\s*=>|\bas\s+m\b|\b(const|let|var)\s+m\b|\{@const\s+m\b|\bfunction\s*\w*\s*\(\s*m\b/.test(
 		source
@@ -137,6 +150,7 @@ export function usesLocalM(source: string): boolean {
 }
 
 type Ctx = {
+	alias: string;
 	source: string;
 	prefix: string;
 	keys: Map<string, string>;
@@ -163,8 +177,8 @@ function allocKey(ctx: Ctx, text: string): string {
 
 // Edits turning the text-like literals inside a markup expression into m.*() calls
 // (same selection as the check: comparisons, keys and call arguments are left alone).
-function literalEdits(ctx: Ctx, expr: unknown): Edit[] {
-	return textLiteralsIn(expr).map((l) => {
+function literalEdits(ctx: Ctx, expr: unknown, dialogsOnly = false): Edit[] {
+	return textLiteralsIn(expr, dialogsOnly).map((l) => {
 		const node = l as unknown as Node;
 		if (node.type === 'TemplateLiteral') {
 			const { text, params } = templateText(ctx, node);
@@ -172,10 +186,14 @@ function literalEdits(ctx: Ctx, expr: unknown): Edit[] {
 			const args = params.length
 				? `{ ${params.map(([n, sv]) => (n === sv ? n : `${n}: ${sv}`)).join(', ')} }`
 				: '';
-			return { start: node.start, end: node.end, text: `m.${allocKey(ctx, t)}(${args})` };
+			return {
+				start: node.start,
+				end: node.end,
+				text: `${ctx.alias}.${allocKey(ctx, t)}(${args})`
+			};
 		}
 		const t = String(node.value).replace(/\s+/g, ' ').trim();
-		return { start: node.start, end: node.end, text: `m.${allocKey(ctx, t)}()` };
+		return { start: node.start, end: node.end, text: `${ctx.alias}.${allocKey(ctx, t)}()` };
 	});
 }
 
@@ -215,7 +233,7 @@ function messageFor(ctx: Ctx, parts: Node[]): { call: string; key: string; text:
 	const args = params.length
 		? `{ ${params.map(([n, s]) => (n === s ? n : `${n}: ${s}`)).join(', ')} }`
 		: '';
-	return { call: `m.${key}(${args})`, key, text };
+	return { call: `${ctx.alias}.${key}(${args})`, key, text };
 }
 
 export function convert(source: string, prefix: string, existing: Record<string, string>) {
@@ -223,7 +241,14 @@ export function convert(source: string, prefix: string, existing: Record<string,
 		fragment: Node;
 		instance?: Node & { content: Node };
 	};
-	const ctx: Ctx = { source, prefix, keys: new Map(), used: new Set(), existing };
+	const ctx: Ctx = {
+		source,
+		prefix,
+		keys: new Map(),
+		used: new Set(),
+		existing,
+		alias: messagesAlias(source)
+	};
 	const edits: Edit[] = [];
 
 	const handleNodes = (nodes: Node[]) => {
@@ -253,6 +278,7 @@ export function convert(source: string, prefix: string, existing: Record<string,
 		flush();
 	};
 
+	let onComponent = false;
 	const visit = (node: unknown, skip: boolean): void => {
 		if (Array.isArray(node)) return node.forEach((n) => visit(n, skip));
 		if (!node || typeof node !== 'object') return;
@@ -261,9 +287,16 @@ export function convert(source: string, prefix: string, existing: Record<string,
 		if (n.type === 'Attribute') {
 			const name = String(n.name);
 			const val = n.value as Node[] | Node | true;
-			if (skip || name === 'class' || name === 'style' || name.startsWith('on')) return;
+			if (skip || name === 'class' || name === 'style') return;
+			if (name.startsWith('on')) {
+				// Event handlers are code; only their confirm/alert/prompt text is converted.
+				const parts = Array.isArray(val) ? val : val && val !== true ? [val] : [];
+				for (const p of parts)
+					if (p.type === 'ExpressionTag') edits.push(...literalEdits(ctx, p.expression, true));
+				return;
+			}
 			if (
-				TEXT_ATTRS.has(name) &&
+				isTextAttr(name, onComponent) &&
 				Array.isArray(val) &&
 				val.some((p) => p.type === 'Text' && isHardcodedText(String(p.data)))
 			) {
@@ -281,6 +314,12 @@ export function convert(source: string, prefix: string, existing: Record<string,
 		for (const [k, v] of Object.entries(n)) {
 			if (k === 'expression' || k === 'metadata' || k === 'context' || k === 'key' || k === 'index')
 				continue;
+			if (k === 'attributes' && n.type === 'Component') {
+				onComponent = true;
+				visit(v, childSkip);
+				onComponent = false;
+				continue;
+			}
 			if (v && typeof v === 'object') visit(v, childSkip);
 		}
 	};
@@ -290,7 +329,7 @@ export function convert(source: string, prefix: string, existing: Record<string,
 	let out = source;
 	for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
 
-	if (edits.length) out = ensureImport(out);
+	if (edits.length) out = ensureImport(out, ctx.alias);
 	const messages = [...ctx.keys.entries()].map(([text, key]) => ({ key, text }));
 	return { out, edits: edits.length, messages };
 }
@@ -425,7 +464,14 @@ export function convertScript(
 ) {
 	const lineOf = (pos: number) => source.slice(0, pos).split('\n').length;
 	const want = new Set(approved.map((a) => `${a.line}\u0000${a.text}`));
-	const ctx: Ctx = { source, prefix, keys: new Map(), used: new Set(), existing };
+	const ctx: Ctx = {
+		source,
+		prefix,
+		keys: new Map(),
+		used: new Set(),
+		existing,
+		alias: messagesAlias(source)
+	};
 	const edits: Edit[] = [];
 	for (const h of scriptStrings(source)) {
 		if (!want.has(`${lineOf(h.node.start)}\u0000${h.text}`)) continue;
@@ -433,7 +479,7 @@ export function convertScript(
 		const args = h.params.length
 			? `{ ${h.params.map(([nm, sv]) => (nm === sv ? nm : `${nm}: ${sv}`)).join(', ')} }`
 			: '';
-		edits.push({ start: h.node.start, end: h.node.end, text: `m.${key}(${args})` });
+		edits.push({ start: h.node.start, end: h.node.end, text: `${ctx.alias}.${key}(${args})` });
 	}
 	edits.sort((a, b) => b.start - a.start);
 	let out = source;
@@ -445,14 +491,14 @@ export function convertScript(
 	};
 }
 
-function ensureImport(out: string): string {
+function ensureImport(out: string, alias: string): string {
 	if (/from\s+['"]\$lib\/paraglide\/messages(\.js)?['"]/.test(out)) return out;
 	const open = out.match(/<script(?![^>]*context=["']module["'])(?![^>]*\bmodule\b)[^>]*>/);
 	if (open && open.index !== undefined) {
 		const at = open.index + open[0].length;
-		return out.slice(0, at) + `\n\t${IMPORT_LINE}` + out.slice(at);
+		return out.slice(0, at) + `\n\t${importLine(alias)}` + out.slice(at);
 	}
-	return `<script lang="ts">\n\t${IMPORT_LINE}\n</script>\n\n` + out;
+	return `<script lang="ts">\n\t${importLine(alias)}\n</script>\n\n` + out;
 }
 
 function readJSON(p: string): Record<string, string> {
@@ -477,6 +523,88 @@ function main(argv: string[]): number {
 		return 0;
 	}
 
+	if (argv[0] === '--fix-params') {
+		// Paraglide params must be non-null: wrap values svelte-check rejects, e.g.
+		// { err } -> { err: String(err) }, { id: x.id } -> { id: x.id ?? '' }.
+		const res = Bun.spawnSync(
+			['npx', 'svelte-check', '--tsconfig', './tsconfig.json', '--output', 'machine'],
+			{ cwd: ROOT }
+		);
+		const fixes = new Map<string, { line: number; col: number; unknown: boolean }[]>();
+		for (const l of res.stdout.toString().split('\n')) {
+			const mt = l.match(/^\d+ ERROR "([^"]+)" (\d+):(\d+) "(.*)"$/);
+			if (!mt || !mt[4].includes("is not assignable to type '{}'")) continue;
+			const file = join(ROOT, mt[1]);
+			fixes.set(file, [
+				...(fixes.get(file) ?? []),
+				{ line: +mt[2], col: +mt[3], unknown: mt[4].startsWith("Type 'unknown'") }
+			]);
+		}
+		let total = 0;
+		for (const [file, list] of fixes) {
+			const lines = readFileSync(file, 'utf8').split('\n');
+			for (const { line, col, unknown } of list.sort((a, b) => b.line - a.line || b.col - a.col)) {
+				const L = lines[line - 1];
+				const i = col - 1;
+				const head = L.slice(i).match(/^(\w+)(\s*:\s*)?/);
+				if (!head) continue;
+				const name = head[1];
+				if (head[2]) {
+					const start = i + head[0].length;
+					let depth = 0,
+						j = start;
+					for (; j < L.length; j++) {
+						const ch = L[j];
+						if ('([{'.includes(ch)) depth++;
+						else if (')]}'.includes(ch)) {
+							if (depth === 0) break;
+							depth--;
+						} else if (ch === ',' && depth === 0) break;
+					}
+					const expr = L.slice(start, j).trim();
+					lines[line - 1] =
+						L.slice(0, start) + (unknown ? `String(${expr})` : `${expr} ?? ''`) + L.slice(j);
+				} else {
+					lines[line - 1] =
+						L.slice(0, i) +
+						(unknown ? `${name}: String(${name})` : `${name}: ${name} ?? ''`) +
+						L.slice(i + name.length);
+				}
+				total++;
+			}
+			writeFileSync(file, lines.join('\n'));
+		}
+		console.log(`fixed ${total} message params`);
+		return 0;
+	}
+	if (argv[0] === '--suggest') {
+		// Translation memory: fill pending keys whose text already has exactly one
+		// translation elsewhere in the message files. Prints { key: { lang: text } }.
+		const pending: Pending[] = JSON.parse(readFileSync(argv[1], 'utf8'));
+		const pendingKeys = new Set(pending.map((p) => p.key));
+		const en = readJSON(MSG('en'));
+		const zh = readJSON(MSG('zh-cn'));
+		const tm = new Map<string, Set<string>>();
+		const add = (from: string, to: string) => {
+			if (!from || !to || from === to) return;
+			if (!tm.has(from)) tm.set(from, new Set());
+			tm.get(from)!.add(to);
+		};
+		for (const k of Object.keys(en)) {
+			if (k === '$schema' || pendingKeys.has(k)) continue;
+			add(`en:${en[k]}`, zh[k]);
+			add(`zh-cn:${zh[k]}`, en[k]);
+		}
+		const out: Record<string, Record<string, string>> = {};
+		for (const p of pending) {
+			const hits = tm.get(`${p.source_lang}:${p.text}`);
+			if (hits && hits.size === 1)
+				out[p.key] = { [p.source_lang === 'en' ? 'zh-cn' : 'en']: [...hits][0] };
+		}
+		console.log(JSON.stringify(out, null, '\t'));
+		console.error(`suggested ${Object.keys(out).length} of ${pending.length}`);
+		return 0;
+	}
 	if (argv[0] === '--script-candidates') {
 		const all = argv.slice(1).flatMap((f) => scriptCandidates(f, readFileSync(f, 'utf8')));
 		console.log(JSON.stringify(all, null, '\t'));
@@ -499,11 +627,6 @@ function main(argv: string[]): number {
 		let missed = 0;
 		for (const [file, list] of byFile) {
 			const source = readFileSync(file, 'utf8');
-			if (usesLocalM(source)) {
-				console.error(`SKIP ${file}: uses \`m\` as a local name`);
-				missed += list.length;
-				continue;
-			}
 			const { out, edits, messages } = convertScript(source, keyPrefix(file), en, list);
 			if (edits < list.length) {
 				console.error(
@@ -522,7 +645,7 @@ function main(argv: string[]): number {
 					file
 				});
 			}
-			writeFileSync(file, edits ? ensureImport(out) : out);
+			writeFileSync(file, edits ? ensureImport(out, messagesAlias(source)) : out);
 			console.log(`converted ${file}: ${edits} script strings`);
 		}
 		writeJSON(MSG('en'), en);
@@ -551,11 +674,6 @@ function main(argv: string[]): number {
 	let failed = 0;
 	for (const file of files) {
 		const source = readFileSync(file, 'utf8');
-		if (usesLocalM(source)) {
-			console.error(`SKIP ${file}: uses \`m\` as a local name; rename it, then rerun`);
-			failed++;
-			continue;
-		}
 		const { out, edits, messages } = convert(source, keyPrefix(file), en);
 		for (const { key, text } of messages) {
 			if (en[key] === text) continue; // same text already under this key

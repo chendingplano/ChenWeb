@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// Read-only rendering of one CDM block, dispatching on block.type (spec §2
 	// block vocabulary). Recurses into children (callout) and items (list) via
 	// self-import, matching InlineView's inline recursion.
@@ -84,7 +85,7 @@
 				{/each}
 				{#if editable}
 					<button type="button" class="cdm-list-remove-item" onclick={() => doRemoveListItem(i)}
-						>Remove item</button
+						>{m.blockview_remove_item()}</button
 					>
 				{/if}
 			</li>
@@ -97,9 +98,9 @@
 				checked={block.ordered ?? false}
 				onchange={(e) => (block.ordered = e.currentTarget.checked)}
 			/>
-			Ordered
+			{m.blockview_ordered()}
 		</label>
-		<button type="button" onclick={doAddListItem}>+ Item</button>
+		<button type="button" onclick={doAddListItem}>{m.blockview_item()}</button>
 	{/if}
 {:else if block.type === 'table'}
 	{#if editable}
@@ -138,7 +139,7 @@
 					checked={block.math.display}
 					onchange={(e) => (block.math!.display = e.currentTarget.checked)}
 				/>
-				Display (block) equation
+				{m.blockview_display_block_equation()}
 			</label>
 			<select
 				value={block.math.original?.format ?? 'typst'}
@@ -176,7 +177,7 @@
 			<input
 				type="text"
 				class="cdm-code-lang-input"
-				placeholder="language"
+				placeholder={m.blockview_language()}
 				value={block.lang ?? ''}
 				oninput={(e) => (block.lang = e.currentTarget.value)}
 			/>
@@ -197,13 +198,13 @@
 		{#if editable}
 			<input
 				type="text"
-				placeholder="Image source (path or URL)"
+				placeholder={m.blockview_image_source_path_or_url()}
 				value={block.src ?? ''}
 				oninput={(e) => (block.src = e.currentTarget.value)}
 			/>
 			<input
 				type="text"
-				placeholder="Alt text"
+				placeholder={m.blockview_alt_text()}
 				value={block.alt ?? ''}
 				oninput={(e) => (block.alt = e.currentTarget.value)}
 			/>
@@ -214,7 +215,7 @@
 			{#if block.caption}
 				<figcaption><InlineEditor bind:content={block.caption} as="plain" /></figcaption>
 			{:else}
-				<button type="button" onclick={() => (block.caption = [])}>+ Caption</button>
+				<button type="button" onclick={() => (block.caption = [])}>{m.blockview_caption()}</button>
 			{/if}
 		{:else if block.caption?.length}
 			<figcaption><InlineView inline={block.caption} /></figcaption>
@@ -231,7 +232,7 @@
 				</select>
 				<input
 					type="text"
-					placeholder="Title"
+					placeholder={m.blockview_title()}
 					value={block.title ?? ''}
 					oninput={(e) => (block.title = e.currentTarget.value)}
 				/>
@@ -244,7 +245,9 @@
 		{/each}
 	</div>
 {:else}
-	<div class="cdm-unsupported">Unsupported block type "{block.type}" (id: {block.id})</div>
+	<div class="cdm-unsupported">
+		{m.blockview_unsupported_block_type_id({ type: block.type, id: block.id })}
+	</div>
 {/if}
 
 <style>

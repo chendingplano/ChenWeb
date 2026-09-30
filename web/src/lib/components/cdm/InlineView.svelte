@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// Read-only rendering of CDM inline content (spec §2 inline vocabulary).
 	// This is the editor's own lightweight preview, not the authoritative
 	// rendering -- that is the Typst-rendered SVG a preview action fetches
@@ -18,7 +19,7 @@
 	{:else if node.type === 'link'}<a href={node.url} target="_blank" rel="noopener noreferrer"
 			><Self inline={node.content ?? []} /></a
 		>
-	{:else if node.type === 'math'}<span class="cdm-inline-math" title="equation"
+	{:else if node.type === 'math'}<span class="cdm-inline-math" title={m.inlineview_equation()}
 			>${node.math?.original?.source ?? node.math?.normalized?.op ?? '?'}$</span
 		>
 	{:else if node.type === 'citation'}<span class="cdm-inline-citation"
@@ -32,8 +33,9 @@
 			>{#if node.content?.length}<Self inline={node.content} />{:else}{node.target?.block_id ??
 					'?'}{/if}</span
 		>
-	{:else}<span class="cdm-inline-unknown" title={`unsupported inline type "${node.type}"`}
-			>[{node.type}]</span
+	{:else}<span
+			class="cdm-inline-unknown"
+			title={m.inlineview_unsupported_inline_type({ type: node.type })}>[{node.type}]</span
 		>{/if}
 {/each}
 

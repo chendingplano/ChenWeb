@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/FlowToolbar.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import type { Flow } from '$lib/types/flow';
   import Undo2Icon        from '@lucide/svelte/icons/undo-2';
   import Redo2Icon        from '@lucide/svelte/icons/redo-2';
@@ -78,15 +79,15 @@
         onclick={startRename}
         class="rounded px-2 py-1 flex items-center gap-1 hover:bg-white/5 transition-colors"
         style="background:#1e2535; color:#e2e8f0; font-size:12px; border:none; cursor:pointer; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-        title="Click to rename"
+        title={m.flowtoolbar_click_to_rename()}
       >
-        {activeFlow?.flow_name ?? 'Untitled Flow'}
+        {activeFlow?.flow_name ?? m.flowtoolbar_untitled_flow()}
         {#if isDirty}<span style="color:#f59e0b; font-size:10px;">•</span>{/if}
       </button>
     {/if}
     <button
       onclick={onPickerOpen}
-      title="Open flow picker"
+      title={m.flowtoolbar_open_flow_picker()}
       style="background:#1e2535; border:none; border-radius:4px; padding:3px 5px; cursor:pointer; color:#6b7280; display:flex; align-items:center;"
     >
       <ChevronDownIcon class="w-3 h-3" />
@@ -97,39 +98,39 @@
   <div style="width:1px; height:20px; background:#374151;"></div>
 
   <!-- Undo / Redo -->
-  <button onclick={onUndo} disabled={!canUndo} title="Undo" class="toolbar-btn" aria-label="Undo">
+  <button onclick={onUndo} disabled={!canUndo} title={m.flowtoolbar_undo()} class="toolbar-btn" aria-label={m.flowtoolbar_undo()}>
     <Undo2Icon class="w-4 h-4" />
   </button>
-  <button onclick={onRedo} disabled={!canRedo} title="Redo" class="toolbar-btn" aria-label="Redo">
+  <button onclick={onRedo} disabled={!canRedo} title={m.flowtoolbar_redo()} class="toolbar-btn" aria-label={m.flowtoolbar_redo()}>
     <Redo2Icon class="w-4 h-4" />
   </button>
 
   <div style="width:1px; height:20px; background:#374151;"></div>
 
   <!-- Zoom / Fit -->
-  <button onclick={onFitView} title="Fit view" class="toolbar-btn" aria-label="Fit view">
+  <button onclick={onFitView} title={m.flowtoolbar_fit_view()} class="toolbar-btn" aria-label={m.flowtoolbar_fit_view()}>
     <MaximizeIcon class="w-4 h-4" />
   </button>
 
   <div style="width:1px; height:20px; background:#374151;"></div>
 
   <!-- Save / Template / Run -->
-  <button onclick={onSave} title="Save" class="toolbar-btn" style="color:{isDirty ? '#fbbf24' : ''}" aria-label="Save">
+  <button onclick={onSave} title={m.flowtoolbar_save()} class="toolbar-btn" style="color:{isDirty ? '#fbbf24' : ''}" aria-label={m.flowtoolbar_save()}>
     <SaveIcon class="w-4 h-4" />
-    <span style="font-size:10px; margin-left:3px;">Save</span>
+    <span style="font-size:10px; margin-left:3px;">{m.flowtoolbar_save()}</span>
   </button>
-  <button onclick={onSaveAsTemplate} title="Save as template" class="toolbar-btn" aria-label="Save as template">
+  <button onclick={onSaveAsTemplate} title={m.flowtoolbar_save_as_template()} class="toolbar-btn" aria-label={m.flowtoolbar_save_as_template()}>
     <BookmarkPlusIcon class="w-4 h-4" />
   </button>
-  <button title="Run (not yet implemented)" class="toolbar-btn" style="background:#6366f1; color:white; border-radius:4px; padding:4px 10px;" aria-label="Run">
+  <button title={m.flowtoolbar_run_not_yet_implemented()} class="toolbar-btn" style="background:#6366f1; color:white; border-radius:4px; padding:4px 10px;" aria-label={m.flowtoolbar_run()}>
     <PlayIcon class="w-4 h-4" />
-    <span style="font-size:10px; margin-left:3px;">Run</span>
+    <span style="font-size:10px; margin-left:3px;">{m.flowtoolbar_run()}</span>
   </button>
 
   <div style="width:1px; height:20px; background:#374151;"></div>
 
   <!-- Close -->
-  <button onclick={onClose} title="Close canvas" class="toolbar-btn" aria-label="Close">
+  <button onclick={onClose} title={m.flowtoolbar_close_canvas()} class="toolbar-btn" aria-label={m.flowtoolbar_close()}>
     <XIcon class="w-4 h-4" />
   </button>
 </div>

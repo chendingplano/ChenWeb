@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import {
 		getRecordSummaries,
@@ -176,7 +177,7 @@
 				record.title?.trim() ||
 				record.name?.trim() ||
 				record.file_name?.trim() ||
-				`Record #${record.id}`,
+				m.summary_tree_record_2({ id: record.id }),
 			fileName: record.file_name?.trim() || record.name?.trim() || '—',
 			docType: record.type?.trim() || '—',
 			docNo: record.doc_no?.trim() || '—',
@@ -275,25 +276,25 @@
 			.map((t) => ({ head: `p.${t.page}`, content: formatCoords(t.coords), lineType: '' }));
 
 		const metadata: AttrDef[] = [
-			textAttr('summary_id', 'Summary ID', HashIcon, fmt(s.id), has(s.id)),
-			textAttr('record_id', 'Record ID', HashIcon, fmt(s.recordId), has(s.recordId)),
-			textAttr('input_id', 'Input ID', HashIcon, fmt(s.inputId), has(s.inputId)),
-			textAttr('page', 'Page', MapPinIcon, fmt(s.page), has(s.page)),
-			textAttr('confidence', 'Confidence', ActivityIcon, confidenceLabel(s), summaryConfidence(s) != null)
+			textAttr('summary_id', m.summary_tree_summary_id(), HashIcon, fmt(s.id), has(s.id)),
+			textAttr('record_id', m.summary_tree_record_id(), HashIcon, fmt(s.recordId), has(s.recordId)),
+			textAttr('input_id', m.summary_tree_input_id(), HashIcon, fmt(s.inputId), has(s.inputId)),
+			textAttr('page', m.summary_tree_page(), MapPinIcon, fmt(s.page), has(s.page)),
+			textAttr('confidence', m.summary_tree_confidence(), ActivityIcon, confidenceLabel(s), summaryConfidence(s) != null)
 		];
 		const content: AttrDef[] = [
-			textAttr('summary_text', 'Summary', FileTextIcon, fmt(s.summaryText), has(s.summaryText))
+			textAttr('summary_text', m.summary_tree_summary(), FileTextIcon, fmt(s.summaryText), has(s.summaryText))
 		];
-		const keywords: AttrDef[] = [chipsAttr('keywords', 'Keywords', TagIcon, kwItems)];
-		const categories: AttrDef[] = [chipsAttr('category_paths', 'Category Paths', NetworkIcon, catItems)];
-		const targets: AttrDef[] = [linesAttr('targets', 'Targets', MapPinIcon, targetEntries)];
+		const keywords: AttrDef[] = [chipsAttr('keywords', m.summary_tree_keywords(), TagIcon, kwItems)];
+		const categories: AttrDef[] = [chipsAttr('category_paths', m.summary_tree_category_paths(), NetworkIcon, catItems)];
+		const targets: AttrDef[] = [linesAttr('targets', m.summary_tree_targets(), MapPinIcon, targetEntries)];
 
 		const specs: Array<{ key: string; label: string; icon: any; attrs: AttrDef[] }> = [
-			{ key: 'g_metadata', label: 'Metadata', icon: BookOpenIcon, attrs: metadata },
-			{ key: 'g_content', label: 'Content', icon: FileTextIcon, attrs: content },
-			{ key: 'g_keywords', label: 'Keywords', icon: TagIcon, attrs: keywords },
-			{ key: 'g_categories', label: 'Categories', icon: NetworkIcon, attrs: categories },
-			{ key: 'g_targets', label: 'Targets', icon: MapPinIcon, attrs: targets }
+			{ key: 'g_metadata', label: m.summary_tree_metadata(), icon: BookOpenIcon, attrs: metadata },
+			{ key: 'g_content', label: m.summary_tree_content(), icon: FileTextIcon, attrs: content },
+			{ key: 'g_keywords', label: m.summary_tree_keywords(), icon: TagIcon, attrs: keywords },
+			{ key: 'g_categories', label: m.summary_tree_categories(), icon: NetworkIcon, attrs: categories },
+			{ key: 'g_targets', label: m.summary_tree_targets(), icon: MapPinIcon, attrs: targets }
 		];
 		return specs.map((spec) => {
 			const filled = spec.attrs.filter((a) => a.hasValue).length;
@@ -434,7 +435,7 @@
 			summaries = (response.summaries ?? []).map((s) => ({ ...s, recordId: record.id }));
 		} catch (error) {
 			errorMsg =
-				error instanceof Error ? error.message : `Failed to load summaries for record ${record.id}`;
+				error instanceof Error ? error.message : m.summary_tree_failed_to_load_summaries_for({ id: record.id });
 		} finally {
 			loading = false;
 		}
@@ -509,16 +510,16 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge System · Document Summaries</div>
-			<h1 class="display">Document&nbsp;<span class="amp">Tree</span></h1>
+			<div class="eyebrow">{m.summary_tree_knowledge_system_document_summaries()}</div>
+			<h1 class="display">{m.summary_tree_document()};<span class="amp">{m.summary_tree_tree()}</span></h1>
 			<div class="subtitle">
-				A document-centric reading room for extracted summaries — locate, verify, return to source.
+				{m.summary_tree_a_document_centric_reading_room()}
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="meta-label">RECORD</span><span class="meta-val">{currentRecord?.id ?? '—'}</span>
-			<span class="meta-label">TYPE</span><span class="meta-val">{currentRecord?.docType ?? '—'}</span>
-			<span class="meta-label">SUMMARIES</span><span class="meta-val"
+			<span class="meta-label">{m.summary_tree_record()}</span><span class="meta-val">{currentRecord?.id ?? '—'}</span>
+			<span class="meta-label">{m.summary_tree_type()}</span><span class="meta-val">{currentRecord?.docType ?? '—'}</span>
+			<span class="meta-label">{m.summary_tree_summaries()}</span><span class="meta-val"
 				>{summaries.length.toString().padStart(3, '0')}</span
 			>
 		</div>
@@ -529,10 +530,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey={browserInstanceKey}
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting their summaries."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={m.summary_tree_kb_inputs()}
+				subtitle={m.summary_tree_search_filter_and_select_input()}
+				emptyTitle={m.summary_tree_no_records_yet()}
+				emptySubtitle={m.summary_tree_use_search_or_retrieve_to()}
 				autoSelectFirstRecord={false}
 				selectedRecordId={currentRecord?.id ?? null}
 				mapRecord={mapBrowserRecord}
@@ -544,8 +545,8 @@
 
 			<aside class="summary-sidebar">
 				<div class="left-meta">
-					<div class="left-meta-title">Summaries</div>
-					<div class="left-meta-count">{summaries.length} found</div>
+					<div class="left-meta-title">{m.summary_tree_summaries_2()}</div>
+					<div class="left-meta-count">{m.summary_tree_found({ summariesCount: summaries.length })}</div>
 				</div>
 
 				<div class="summary-list">
@@ -554,20 +555,20 @@
 					{:else if loading}
 						<div class="empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">Loading summaries</div>
-							<div class="empty-sub">Reading summaries for the selected record…</div>
+							<div class="empty-title">{m.summary_tree_loading_summaries()}</div>
+							<div class="empty-sub">{m.summary_tree_reading_summaries_for_the_selected()}</div>
 						</div>
 					{:else if !currentRecord}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No record selected</div>
-							<div class="empty-sub">Select a record from kb.inputs to populate the summaries index.</div>
+							<div class="empty-title">{m.summary_tree_no_record_selected()}</div>
+							<div class="empty-sub">{m.summary_tree_select_a_record_from_kb()}</div>
 						</div>
 					{:else if summaries.length === 0}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No summaries yet</div>
-							<div class="empty-sub">This record has no extracted summaries.</div>
+							<div class="empty-title">{m.summary_tree_no_summaries_yet()}</div>
+							<div class="empty-sub">{m.summary_tree_this_record_has_no_extracted()}</div>
 						</div>
 					{:else}
 						{#each summaries as s, idx (s.id)}
@@ -581,7 +582,7 @@
 								<div class="card-body">
 									<div class="card-row-top">
 										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
-										<div class="card-conf" title="Confidence">{confidenceLabel(s)}</div>
+										<div class="card-conf" title={m.summary_tree_confidence()}>{confidenceLabel(s)}</div>
 									</div>
 									<div class="card-name">p.{s.page}</div>
 									{#if s.summaryText}
@@ -590,7 +591,7 @@
 									<div class="card-foot">
 										<span class="chip">
 											<span class="chip-dot"></span>
-											{(s.targets ?? []).length} target{(s.targets ?? []).length === 1 ? '' : 's'}
+											{m.summary_tree_target({ targetsCount: (s.targets ?? []).length, plural: (s.targets ?? []).length === 1 ? '' : 's' })}
 										</span>
 										{#each (s.keywords ?? []).slice(0, 3) as kw (kw)}
 											<span class="chip chip-quiet">{kw}</span>
@@ -609,18 +610,18 @@
 			{#if recordBrowserFolded}
 				<div class="metric-canvas-wrap">
 					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+						<button type="button" class="toolbar-back" onclick={goBack} title={m.summary_tree_back_to_record_list()}>
 							<ArrowLeftIcon class="toolbar-icon" />
-							<span>Back</span>
+							<span>{m.summary_tree_back()}</span>
 						</button>
 						<div class="toolbar-filters">
 							<select
 								class="toolbar-select"
 								value={summaryNameDropdownValue}
 								onchange={handleSummaryNameDropdown}
-								title="Jump to summary"
+								title={m.summary_tree_jump_to_summary()}
 							>
-								<option value="">— Summary by name —</option>
+								<option value="">{m.summary_tree_summary_by_name()}</option>
 								{#each summaries as s, idx (s.id)}
 									<option value={s.id}>{summaryLabel(s, idx)}</option>
 								{/each}
@@ -630,7 +631,7 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="summary-keywords-datalist-focus"
-									placeholder="Filter by keyword…"
+									placeholder={m.summary_tree_filter_by_keyword()}
 									bind:value={keywordFilter}
 								/>
 								<datalist id="summary-keywords-datalist-focus">
@@ -643,8 +644,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (keywordFilter = '')}
-										title="Clear keyword filter"
-										aria-label="Clear keyword filter"
+										title={m.summary_tree_clear_keyword_filter()}
+										aria-label={m.summary_tree_clear_keyword_filter()}
 									>×</button>
 								{/if}
 							</div>
@@ -653,8 +654,8 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="summary-confidence-options"
-									placeholder="Confidence…"
-									title="Filter by category confidence. Type a value like 0.85, or <0.50 for below-threshold."
+									placeholder={m.summary_tree_confidence_2()}
+									title={m.summary_tree_filter_by_category_confidence_type()}
 									bind:value={confidenceFilter}
 								/>
 								<datalist id="summary-confidence-options">
@@ -670,8 +671,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (confidenceFilter = '')}
-										title="Clear confidence filter"
-										aria-label="Clear confidence filter"
+										title={m.summary_tree_clear_confidence_filter()}
+										aria-label={m.summary_tree_clear_confidence_filter()}
 									>×</button>
 								{/if}
 							</div>
@@ -682,7 +683,7 @@
 								class="toolbar-nav-btn"
 								disabled={!prevSummary}
 								onclick={goToPrevSummary}
-								title="Previous summary"
+								title={m.summary_tree_previous_summary()}
 							><ChevronLeftIcon class="toolbar-icon" /></button>
 							<span class="toolbar-nav-pos">
 								{selectedSummaryInFilteredIndex >= 0
@@ -694,7 +695,7 @@
 								class="toolbar-nav-btn"
 								disabled={!nextSummary}
 								onclick={goToNextSummary}
-								title="Next summary"
+								title={m.summary_tree_next_summary()}
 							><ChevronRightIcon class="toolbar-icon" /></button>
 						</div>
 					</div>
@@ -750,8 +751,8 @@
 						{:else}
 							<div class="canvas-empty">
 								<div class="canvas-empty-mark">◎</div>
-								<div class="canvas-empty-title">Select a summary</div>
-								<div class="canvas-empty-sub">Click a summary from the list to view its attributes.</div>
+								<div class="canvas-empty-title">{m.summary_tree_select_a_summary()}</div>
+								<div class="canvas-empty-sub">{m.summary_tree_click_a_summary_from_the()}</div>
 							</div>
 						{/if}
 					</div>
@@ -760,7 +761,7 @@
 					type="button"
 					class="focus-resize-handle"
 					class:active={focusResizing}
-					aria-label="Resize the source document panel"
+					aria-label={m.summary_tree_resize_the_source_document_panel()}
 					onpointerdown={startFocusResize}
 					onkeydown={onFocusResizerKeydown}
 				>
@@ -771,10 +772,10 @@
 				{#if !currentRecord}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
-						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-title">{m.summary_tree_awaiting_selection()}</div>
 						<div class="doc-empty-sub">
-							Once you select a record, the original document appears here.<br />
-							Click any summary on the left to jump to its source page.
+							{m.summary_tree_once_you_select_a_record()}<br />
+							{m.summary_tree_click_any_summary_on_the()}
 						</div>
 					</div>
 				{:else if viewerInputId && viewerIsPdf}
@@ -795,8 +796,8 @@
 				{:else}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
-						<div class="doc-empty-title">No document</div>
-						<div class="doc-empty-sub">This record has no displayable source document.</div>
+						<div class="doc-empty-title">{m.summary_tree_no_document()}</div>
+						<div class="doc-empty-sub">{m.summary_tree_this_record_has_no_displayable()}</div>
 					</div>
 				{/if}
 			</div>

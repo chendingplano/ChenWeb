@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { tick, untrack } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -47,8 +48,8 @@
 		instanceKey,
 		title = 'kb.inputs',
 		subtitle = '',
-		emptyTitle = 'No records found.',
-		emptySubtitle = 'Use Search or Retrieve to browse kb.inputs.',
+		emptyTitle = m.kb_input_record_browser_no_records_found(),
+		emptySubtitle = m.kb_input_record_browser_use_search_or_retrieve_to(),
 		pageSize = KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE,
 		scopeToActiveStore = false,
 		selectedRecordId = null,
@@ -214,7 +215,7 @@
 				record.title?.trim() ||
 				record.name?.trim() ||
 				record.file_name?.trim() ||
-				`Record #${record.id}`,
+				m.kb_input_record_browser_record({ id: record.id }),
 			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
 			meta: [record.doc_no?.trim() || '—', record.parser_name?.trim() || '—'],
 			status: statusText(record),
@@ -286,7 +287,7 @@
 			listPage = 1;
 			listJumpInput = '1';
 			loadError =
-				error instanceof Error ? error.message : 'Failed to load kb.inputs records';
+				error instanceof Error ? error.message : m.kb_input_record_browser_failed_to_load_kb_inputs();
 			selectedRecordIdInternal = null;
 			lastEmittedRecordId = null;
 			onError(error instanceof Error ? error : new Error(loadError));
@@ -303,7 +304,7 @@
 			return;
 		}
 		if (!Number.isFinite(recordId) || recordId <= 0) {
-			loadError = 'Enter a valid Record ID';
+			loadError = m.kb_input_record_browser_enter_a_valid_record_id();
 			return;
 		}
 
@@ -322,7 +323,7 @@
 			listTotal = 0;
 			selectedRecordIdInternal = null;
 			loadError =
-				error instanceof Error ? error.message : 'Failed to retrieve kb.inputs record';
+				error instanceof Error ? error.message : m.kb_input_record_browser_failed_to_retrieve_kb_inputs();
 			onError(error instanceof Error ? error : new Error(loadError));
 		} finally {
 			loading = false;
@@ -441,7 +442,7 @@
 	<div class="panel">
 		<div class="left-controls">
 			<label class="field">
-				<span class="field-label">Record ID</span>
+				<span class="field-label">{m.kb_input_record_browser_record_id()}</span>
 				<div class="field-row">
 					<input
 						type="text"
@@ -454,24 +455,24 @@
 							}
 						}}
 					/>
-					<button type="button" class="ghost search-btn" onclick={() => (searchOpen = true)} title="Search records from kb.inputs">
+					<button type="button" class="ghost search-btn" onclick={() => (searchOpen = true)} title={m.kb_input_record_browser_search_records_from_kb_inputs()}>
 						<SearchIcon class="h-4 w-4" />
-						Search
+						{m.kb_input_record_browser_search()}
 					</button>
 				</div>
 			</label>
 
 			<div class="action-row">
 				<button type="button" class="retrieve-btn" onclick={retrieveRecord} disabled={loading}>
-					{#if loading}Loading…{:else}<span class="retrieve-arrow">→</span>Retrieve{/if}
+					{#if loading}{m.kb_input_record_browser_loading()}{:else}<span class="retrieve-arrow">→</span>{m.kb_input_record_browser_retrieve()}{/if}
 				</button>
 				<button type="button" class="ghost reset-btn" onclick={() => void resetFilters()} disabled={resetDisabled}>
 					<RotateCcwIcon class="h-4 w-4" />
-					Reset
+					{m.kb_input_record_browser_reset()}
 				</button>
 				<button type="button" class="ghost settings-btn" onclick={() => (settingsOpen = !settingsOpen)}>
 					<Settings2Icon class="h-4 w-4" />
-					Settings
+					{m.kb_input_record_browser_settings()}
 				</button>
 			</div>
 
@@ -488,16 +489,16 @@
 			<div class="left-meta-title">{title}</div>
 			<div class="left-meta-count">
 				{#if pinnedMode}
-					{results.length} pinned
+					{m.kb_input_record_browser_pinned({ resultsCount: results.length })}
 				{:else}
-					{listTotal} found
+					{m.kb_input_record_browser_found({ listTotal })}
 				{/if}
 			</div>
 		</div>
 
 		<div class="result-list" bind:this={resultListEl}>
 			{#if loading}
-				<div class="empty-state">Loading records…</div>
+				<div class="empty-state">{m.kb_input_record_browser_loading_records()}</div>
 			{:else if results.length === 0}
 				<div class="empty-state">
 					<div class="empty-title">{emptyTitle}</div>
@@ -524,7 +525,7 @@
 								<span>{meta}</span>
 							{/each}
 						</div>
-						<p>{display.description || 'Select this record to continue.'}</p>
+						<p>{display.description || m.kb_input_record_browser_select_this_record_to_continue()}</p>
 					</button>
 				{/each}
 			{:else}
@@ -541,12 +542,12 @@
 							<div class="card-row-top">
 								<div class="card-index">
 									№ {String((listPage - 1) * effectivePageSize + idx + 1).padStart(3, '0')}
-									<span class="card-id">id {record.id}</span>
+									<span class="card-id">{m.kb_input_record_browser_id({ id: record.id })}</span>
 								</div>
-								<div class="card-conf mono" title="Type">{display.badges?.[0] || '—'}</div>
+								<div class="card-conf mono" title={m.kb_input_record_browser_type()}>{display.badges?.[0] || '—'}</div>
 							</div>
 							<div class="card-name">{display.title}</div>
-							<div class="card-desc">{display.meta?.[0] ? `Doc No: ${display.meta[0]}` : 'Doc No: —'}</div>
+							<div class="card-desc">{display.meta?.[0] ? m.kb_input_record_browser_doc_no({ meta: display.meta[0] }) : m.kb_input_record_browser_doc_no_2()}</div>
 							<div class="card-foot">
 								<span class="chip chip-quiet">{display.description || formatMaybeDate(record.create_time)}</span>
 							</div>
@@ -559,13 +560,13 @@
 		{#if listTotal > effectivePageSize && !pinnedMode}
 			<div class="list-pager">
 				<button class="pager-btn" onclick={prevPage} disabled={listPage <= 1 || loading || recordIdInput.trim() !== ''}
-					>‹ Prev</button
+					>{m.kb_input_record_browser_prev()}</button
 				>
 				<div class="pager-meta">
-					<span>Page {listPage} / {listTotalPages}</span>
-					<span>{results.length} on page</span>
+					<span>{m.kb_input_record_browser_page({ listPage, listTotalPages })}</span>
+					<span>{m.kb_input_record_browser_on_page({ resultsCount: results.length })}</span>
 					<div class="pager-jump">
-						<label for={`kb-browser-jump-${instanceKey}`}>Go</label>
+						<label for={`kb-browser-jump-${instanceKey}`}>{m.kb_input_record_browser_go()}</label>
 						<input
 							id={`kb-browser-jump-${instanceKey}`}
 							type="number"
@@ -580,12 +581,12 @@
 							}}
 						/>
 						<button class="pager-btn pager-go" onclick={jumpToPage} disabled={loading || recordIdInput.trim() !== ''}>
-							Jump
+							{m.kb_input_record_browser_jump()}
 						</button>
 					</div>
 				</div>
 				<button class="pager-btn" onclick={nextPage} disabled={listPage >= listTotalPages || loading || recordIdInput.trim() !== ''}
-					>Next ›</button
+					>{m.kb_input_record_browser_next()}</button
 				>
 			</div>
 		{/if}
@@ -595,7 +596,7 @@
 		type="button"
 		class="browser-resizer"
 		class:active={resizing}
-		aria-label="Resize record browser"
+		aria-label={m.kb_input_record_browser_resize_record_browser()}
 		onpointerdown={startResize}
 		onkeydown={onResizerKeydown}
 	>
@@ -604,9 +605,9 @@
 
 	{#if settingsOpen}
 		<div class="settings-popover">
-			<div class="settings-title">Record Browser Settings</div>
+			<div class="settings-title">{m.kb_input_record_browser_record_browser_settings()}</div>
 			<label class="field settings-field">
-				<span class="field-label">Page size ({effectivePageSize})</span>
+				<span class="field-label">{m.kb_input_record_browser_page_size({ effectivePageSize })}</span>
 				<input
 					type="range"
 					min="10"
@@ -620,7 +621,7 @@
 				/>
 			</label>
 			<label class="field settings-field">
-				<span class="field-label">List width ({listWidth}px)</span>
+				<span class="field-label">{m.kb_input_record_browser_list_width_px({ listWidth })}</span>
 				<input
 					type="range"
 					min={KB_INPUT_RECORD_BROWSER_MIN_LIST_WIDTH}
@@ -633,7 +634,7 @@
 				/>
 			</label>
 			<div class="field settings-field">
-				<span class="field-label">Highlight color</span>
+				<span class="field-label">{m.kb_input_record_browser_highlight_color()}</span>
 				<div class="color-presets">
 					{#each KB_INPUT_RECORD_BROWSER_HIGHLIGHT_PRESETS as preset}
 						<button
@@ -652,12 +653,12 @@
 						value={highlightColor}
 						oninput={(e) => saveSettings({ highlightColor: (e.currentTarget as HTMLInputElement).value })}
 					/>
-					<span class="color-custom-label">Custom</span>
+					<span class="color-custom-label">{m.kb_input_record_browser_custom()}</span>
 					<span class="color-custom-hex mono">{highlightColor}</span>
 				</label>
 			</div>
 			<div class="settings-actions">
-				<button type="button" class="ghost settings-close" onclick={() => (settingsOpen = false)}>Close</button>
+				<button type="button" class="ghost settings-close" onclick={() => (settingsOpen = false)}>{m.kb_input_record_browser_close()}</button>
 			</div>
 		</div>
 	{/if}

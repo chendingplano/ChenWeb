@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 
 	let {
@@ -86,7 +87,7 @@
 				throw new Error(body?.error_msg ?? `HTTP ${res.status}`);
 			}
 			editingId = null;
-			info = `Record ${editingId} updated.`;
+			info = m.doc_facets_record_updated({ editingId: editingId ?? '' });
 			await loadRecords();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -109,7 +110,7 @@
 				throw new Error(body?.error_msg ?? `HTTP ${res.status}`);
 			}
 			deletingId = null;
-			info = `Record ${recordId} deleted.`;
+			info = m.doc_facets_record_deleted({ recordId });
 			await loadRecords();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -156,27 +157,27 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Doc Facets</h2>
-			<p class="muted">Deterministic routing facets for kb.doc_facets (keyed by record_id)</p>
+			<h2>{m.doc_facets_doc_facets()}</h2>
+			<p class="muted">{m.doc_facets_deterministic_routing_facets_for_kb()}</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadRecords} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.doc_facets_refreshing() : m.doc_facets_refresh()}
 			</button>
 		</div>
 	</header>
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Total Records</div>
+			<div class="summary-label">{m.doc_facets_total_records()}</div>
 			<div class="summary-value">{records.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Doc Types</div>
+			<div class="summary-label">{m.doc_facets_doc_types()}</div>
 			<div class="summary-value">{new Set(records.map((r) => r.input_doc_type).filter(Boolean)).size}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Languages</div>
+			<div class="summary-label">{m.doc_facets_languages()}</div>
 			<div class="summary-value">{new Set(records.map((r) => r.source_language).filter(Boolean)).size}</div>
 		</div>
 	</div>
@@ -184,13 +185,13 @@
 	<div class="search-bar">
 		<input
 			type="text"
-			placeholder="Search by record_id, store_id, binding, doc type, or language…"
+			placeholder={m.doc_facets_search_by_record_id_store()}
 			bind:value={searchQuery}
 			onkeydown={(e) => { if (e.key === 'Enter') handleSearch(); }}
 		/>
-		<button class="primary" onclick={handleSearch} disabled={loading}>Search</button>
+		<button class="primary" onclick={handleSearch} disabled={loading}>{m.doc_facets_search()}</button>
 		{#if searchQuery}
-			<button class="ghost" onclick={() => { searchQuery = ''; handleSearch(); }}>Clear</button>
+			<button class="ghost" onclick={() => { searchQuery = ''; handleSearch(); }}>{m.doc_facets_clear()}</button>
 		{/if}
 	</div>
 
@@ -203,28 +204,28 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Records</h3>
-				<p class="muted">Each row maps a kb.inputs record to its routing facets.</p>
+				<h3>{m.doc_facets_records()}</h3>
+				<p class="muted">{m.doc_facets_each_row_maps_a_kb()}</p>
 			</div>
 		</div>
 
 		{#if loading}
-			<div class="empty">Loading…</div>
+			<div class="empty">{m.doc_facets_loading()}</div>
 		{:else if records.length === 0}
-			<div class="empty">No records found.</div>
+			<div class="empty">{m.doc_facets_no_records_found()}</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Record ID</th>
-							<th>KS Store ID</th>
-							<th>Binding</th>
-							<th>Doc Type</th>
-							<th>Language</th>
-							<th>Has Doc #</th>
-							<th>Modified</th>
-							<th>Actions</th>
+							<th>{m.doc_facets_record_id()}</th>
+							<th>{m.doc_facets_ks_store_id()}</th>
+							<th>{m.doc_facets_binding()}</th>
+							<th>{m.doc_facets_doc_type()}</th>
+							<th>{m.doc_facets_language()}</th>
+							<th>{m.doc_facets_has_doc()}</th>
+							<th>{m.doc_facets_modified()}</th>
+							<th>{m.doc_facets_actions()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -235,20 +236,20 @@
 								<td>{r.knowledge_store_binding || '—'}</td>
 								<td>{r.input_doc_type || '—'}</td>
 								<td>{r.source_language || '—'}</td>
-								<td>{r.has_document_number ? 'Yes' : 'No'}</td>
+								<td>{r.has_document_number ? m.doc_facets_yes() : m.doc_facets_no()}</td>
 								<td class="date-cell">{formatDate(r.modify_time)}</td>
 								<td>
 									<div class="row-actions">
 										{#if editingId === r.record_id}
-											<button class="ghost compact-btn" onclick={() => (editingId = null)} disabled={submitting}>Cancel</button>
+											<button class="ghost compact-btn" onclick={() => (editingId = null)} disabled={submitting}>{m.doc_facets_cancel()}</button>
 										{:else if deletingId === r.record_id}
 											<button class="danger-btn compact-btn" onclick={() => confirmDelete(r.record_id)} disabled={submitting}>
-												{submitting ? 'Deleting…' : 'Confirm'}
+												{submitting ? m.doc_facets_deleting() : m.doc_facets_confirm()}
 											</button>
-											<button class="ghost compact-btn" onclick={() => (deletingId = null)}>Cancel</button>
+											<button class="ghost compact-btn" onclick={() => (deletingId = null)}>{m.doc_facets_cancel()}</button>
 										{:else}
-											<button class="ghost compact-btn" onclick={() => startEdit(r)}>Edit</button>
-											<button class="ghost compact-btn" onclick={() => (deletingId = r.record_id)}>Delete</button>
+											<button class="ghost compact-btn" onclick={() => startEdit(r)}>{m.doc_facets_edit()}</button>
+											<button class="ghost compact-btn" onclick={() => (deletingId = r.record_id)}>{m.doc_facets_delete()}</button>
 										{/if}
 									</div>
 								</td>
@@ -265,31 +266,31 @@
 										>
 											<div class="row three">
 												<label>
-													<span>KS Store ID</span>
+													<span>{m.doc_facets_ks_store_id()}</span>
 													<input type="number" bind:value={editDraft.ks_store_id} min="0" />
 												</label>
 												<label>
-													<span>Knowledge Store Binding</span>
-													<input bind:value={editDraft.knowledge_store_binding} placeholder="absent" />
+													<span>{m.doc_facets_knowledge_store_binding()}</span>
+													<input bind:value={editDraft.knowledge_store_binding} placeholder={m.doc_facets_absent()} />
 												</label>
 												<label>
-													<span>Input Doc Type</span>
-													<input bind:value={editDraft.input_doc_type} placeholder="pdf" />
+													<span>{m.doc_facets_input_doc_type()}</span>
+													<input bind:value={editDraft.input_doc_type} placeholder={m.doc_facets_pdf()} />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Source Language</span>
-													<input bind:value={editDraft.source_language} placeholder="en" />
+													<span>{m.doc_facets_source_language()}</span>
+													<input bind:value={editDraft.source_language} placeholder={m.doc_facets_en()} />
 												</label>
 												<label class="checkbox-label">
-													<span>Has Document Number</span>
+													<span>{m.doc_facets_has_document_number()}</span>
 													<input type="checkbox" bind:checked={editDraft.has_document_number} />
 												</label>
 											</div>
 											<div class="form-foot">
 												<button class="primary" type="submit" disabled={submitting}>
-													{submitting ? 'Saving…' : 'Save changes'}
+													{submitting ? m.doc_facets_saving() : m.doc_facets_save_changes()}
 												</button>
 											</div>
 										</form>

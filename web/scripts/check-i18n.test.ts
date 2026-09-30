@@ -67,7 +67,30 @@ test('flags text literals inside markup expressions, not ids, comparisons or cal
 });
 
 test('looksLikeText separates display text from code strings', () => {
-	for (const t of ['Save', 'Re-download', 'No data.', '加载中', 'browse and search topics']) assert.ok(looksLikeText(t), t);
-	for (const t of ['metric_id', 'en-US', 'zh-Hans', 'YYYY-MM-DD', 'HH:mm', '/api/v1/x', 'flex items-center gap-2', 'onClick', 'API_KEY', 'English', '中文'])
+	for (const t of ['Save', 'Re-download', 'No data.', '加载中', 'browse and search topics'])
+		assert.ok(looksLikeText(t), t);
+	for (const t of [
+		'metric_id',
+		'en-US',
+		'zh-Hans',
+		'YYYY-MM-DD',
+		'HH:mm',
+		'/api/v1/x',
+		'flex items-center gap-2',
+		'onClick',
+		'API_KEY',
+		'English',
+		'中文'
+	])
 		assert.equal(looksLikeText(t), false, t);
+});
+
+test('flags dialog text in handlers and text props on components', () => {
+	const src = `<button onclick={() => { if (!confirm('Discard your changes?')) return; save('draft-key'); }}>{m.x()}</button>
+<Pane itemLabelPlural="Provisions" heroTitle="Provision Wiki" variant="outline" rootId="provisions" />
+<div data-label="Not a component prop">{m.y()}</div>`;
+	assert.deepEqual(
+		findHardcodedText(src).map((f) => `${f.line}:${f.text}`),
+		["1:'Discard your changes?'", '2:itemLabelPlural="Provisions"', '2:heroTitle="Provision Wiki"']
+	);
 });

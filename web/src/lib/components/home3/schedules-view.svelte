@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		listJobTypes,
@@ -85,11 +86,11 @@
 		error = null;
 		info = null;
 		if (!draft.name.trim()) {
-			error = 'Name is required';
+			error = m.schedules_name_is_required();
 			return;
 		}
 		if (!draft.job_type) {
-			error = 'Job type is required';
+			error = m.schedules_job_type_is_required();
 			return;
 		}
 		submitting = true;
@@ -104,7 +105,7 @@
 			});
 			draft.name = '';
 			showCreate = false;
-			info = draft.runOnce ? 'Schedule created — will run once, then stop.' : 'Schedule created.';
+			info = draft.runOnce ? m.schedules_schedule_created_will_run_once() : m.schedules_schedule_created();
 			await loadAll();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -130,7 +131,7 @@
 	}
 
 	async function removeSchedule(id: number) {
-		if (!confirm('Delete this schedule? Its run history will be deleted too.')) return;
+		if (!confirm(m.schedules_delete_this_schedule_its_run())) return;
 		error = null;
 		try {
 			await deleteSchedule(id);
@@ -163,7 +164,7 @@
 	}
 
 	function durationLabel(run: ScheduleRun): string {
-		if (!run.finished_at) return run.status === 'running' ? 'running…' : '—';
+		if (!run.finished_at) return run.status === 'running' ? m.schedules_running() : '—';
 		const ms = new Date(run.finished_at).getTime() - new Date(run.started_at).getTime();
 		if (ms < 1000) return `${ms}ms`;
 		return `${(ms / 1000).toFixed(1)}s`;
@@ -228,19 +229,17 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Schedules</h2>
+			<h2>{m.schedules_schedules()}</h2>
 			<p class="muted">
-				Recurring backlog-drain jobs (entity object resolution, ambiguous object resolution, search
-				embedding backfill). Runs in-process on the server every 30s tick — nothing here requires an
-				external cron.
+				{m.schedules_recurring_backlog_drain_jobs_entity()}
 			</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadAll} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.schedules_refreshing() : m.schedules_refresh()}
 			</button>
 			<button class="primary" onclick={() => (showCreate = !showCreate)}>
-				{showCreate ? 'Cancel' : '+ New Schedule'}
+				{showCreate ? m.schedules_cancel() : m.schedules_new_schedule()}
 			</button>
 		</div>
 	</header>
@@ -250,15 +249,15 @@
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Schedules</div>
+			<div class="summary-label">{m.schedules_schedules()}</div>
 			<div class="summary-value">{schedules.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Enabled</div>
+			<div class="summary-label">{m.schedules_enabled()}</div>
 			<div class="summary-value">{schedules.filter((s) => s.enabled).length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Last Run Failed</div>
+			<div class="summary-label">{m.schedules_last_run_failed()}</div>
 			<div class="summary-value">{schedules.filter((s) => s.last_run_status === 'failed').length}</div>
 		</div>
 	</div>
@@ -273,11 +272,11 @@
 		>
 			<div class="row two">
 				<label>
-					<span>Name</span>
-					<input bind:value={draft.name} required placeholder="Nightly Entity Resolve" />
+					<span>{m.schedules_name()}</span>
+					<input bind:value={draft.name} required placeholder={m.schedules_nightly_entity_resolve()} />
 				</label>
 				<label>
-					<span>Job</span>
+					<span>{m.schedules_job()}</span>
 					<select bind:value={draft.job_type}>
 						{#each jobTypes as jt (jt.job_type)}
 							<option value={jt.job_type}>{jt.label}</option>
@@ -285,14 +284,14 @@
 					</select>
 				</label>
 			</div>
-			<div class="segmented" role="radiogroup" aria-label="Recurrence">
+			<div class="segmented" role="radiogroup" aria-label={m.schedules_recurrence()}>
 				<button
 					type="button"
 					class="segment"
 					class:active={!draft.runOnce}
 					onclick={() => (draft.runOnce = false)}
 				>
-					Recurring
+					{m.schedules_recurring()}
 				</button>
 				<button
 					type="button"
@@ -300,16 +299,16 @@
 					class:active={draft.runOnce}
 					onclick={() => (draft.runOnce = true)}
 				>
-					Run once
+					{m.schedules_run_once()}
 				</button>
 			</div>
 			<div class="row three">
 				<label>
-					<span>{draft.runOnce ? 'Run in' : 'Run every'}</span>
+					<span>{draft.runOnce ? m.schedules_run_in() : m.schedules_run_every()}</span>
 					<input type="number" bind:value={draft.intervalValue} min="1" />
 				</label>
 				<label>
-					<span>Unit</span>
+					<span>{m.schedules_unit()}</span>
 					<select bind:value={draft.intervalUnit}>
 						{#each intervalUnits as u (u.seconds)}
 							<option value={u.seconds}>{u.label}</option>
@@ -317,25 +316,25 @@
 					</select>
 				</label>
 				<label>
-					<span>Limit per run</span>
+					<span>{m.schedules_limit_per_run()}</span>
 					<input type="number" bind:value={draft.limit} min="1" />
 				</label>
 			</div>
 			<label class="toggle-row">
-				<span>Enabled</span>
+				<span>{m.schedules_enabled()}</span>
 				<input type="checkbox" bind:checked={draft.enabled} />
 			</label>
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting}>
-					{submitting ? 'Creating…' : 'Create schedule'}
+					{submitting ? m.schedules_creating() : m.schedules_create_schedule()}
 				</button>
 			</div>
 		</form>
 	{/if}
 
-	<h3>Active Schedules</h3>
+	<h3>{m.schedules_active_schedules()}</h3>
 	{#if schedules.length === 0}
-		<p class="empty">No schedules yet. Create one above to start draining a backlog job automatically.</p>
+		<p class="empty">{m.schedules_no_schedules_yet_create_one()}</p>
 	{:else}
 		<div class="schedule-grid">
 			{#each schedules as sched (sched.id)}
@@ -353,17 +352,17 @@
 					</div>
 					<div class="badge-row">
 						{#if sched.run_once}
-							<span class="badge">one-time</span>
+							<span class="badge">{m.schedules_one_time()}</span>
 						{/if}
 						<span class="badge">{intervalBadgeLabel(sched)}</span>
 						{#if sched.last_run_status}
 							<span class="badge" style:color={statusColor(sched.last_run_status)}>
-								last: {sched.last_run_status}
+								{m.schedules_last({ last_run_status: sched.last_run_status })}
 							</span>
 						{/if}
 					</div>
 					<div class="progress-label">
-						<span>next run</span>
+						<span>{m.schedules_next_run()}</span>
 						<span>{nextRunLabel(sched)}</span>
 					</div>
 					<div class="progress-track">
@@ -374,8 +373,8 @@
 						></div>
 					</div>
 					<div class="card-foot">
-						<button class="ghost compact-btn" onclick={() => viewHistory(sched.id)}>History</button>
-						<button class="ghost compact-btn danger" onclick={() => removeSchedule(sched.id)}>Delete</button>
+						<button class="ghost compact-btn" onclick={() => viewHistory(sched.id)}>{m.schedules_history()}</button>
+						<button class="ghost compact-btn danger" onclick={() => removeSchedule(sched.id)}>{m.schedules_delete()}</button>
 					</div>
 				</div>
 			{/each}
@@ -386,22 +385,22 @@
 		{@const activeSchedule = schedules.find((s) => s.id === historyForID)}
 		<div class="panel">
 			<div class="panel-head">
-				<h3>Run History{activeSchedule ? ` — ${activeSchedule.name}` : ''}</h3>
-				<button class="ghost compact-btn" onclick={() => (historyForID = null)}>Close</button>
+				<h3>{m.schedules_run_history({ value: activeSchedule ? ` — ${activeSchedule.name}` : '' })}</h3>
+				<button class="ghost compact-btn" onclick={() => (historyForID = null)}>{m.schedules_close()}</button>
 			</div>
 			{#if runsLoading}
-				<p class="empty">Loading…</p>
+				<p class="empty">{m.schedules_loading()}</p>
 			{:else if runs.length === 0}
-				<p class="empty">No runs yet.</p>
+				<p class="empty">{m.schedules_no_runs_yet()}</p>
 			{:else}
 				<div class="table-wrap">
 					<table>
 						<thead>
 							<tr>
-								<th>Started</th>
-								<th>Status</th>
-								<th>Duration</th>
-								<th>Result</th>
+								<th>{m.schedules_started()}</th>
+								<th>{m.schedules_status()}</th>
+								<th>{m.schedules_duration()}</th>
+								<th>{m.schedules_result()}</th>
 							</tr>
 						</thead>
 						<tbody>

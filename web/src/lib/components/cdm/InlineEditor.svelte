@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// Mounts a real ProseMirror-backed editor (via @tiptap/core's Editor) over
 	// one block's inline content, using the schema and mapping from
 	// inline-schema.ts / inline-mapping.ts. This is the "TipTap confined to
@@ -134,7 +135,7 @@
 		// task is the schema/mapping/toolbar plumbing, not a URL-input
 		// dialog. Swapping it for a proper popover later does not touch
 		// inline-schema.ts, inline-mapping.ts, or the command it calls here.
-		const url = typeof window !== 'undefined' ? window.prompt('Link URL') : null;
+		const url = typeof window !== 'undefined' ? window.prompt(m.inlineeditor_link_url()) : null;
 		if (!url) return;
 		editor.chain().focus().toggleMark('link', { url }).run();
 	}
@@ -177,7 +178,7 @@
 				type="button"
 				class:active={isLink}
 				onmousedown={(e) => e.preventDefault()}
-				onclick={toggleLink}>Link</button
+				onclick={toggleLink}>{m.inlineeditor_link()}</button
 			>
 		</div>
 	{/if}

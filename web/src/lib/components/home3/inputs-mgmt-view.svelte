@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		getKbInput,
@@ -344,7 +345,7 @@
 				}))
 			).sort((a, b) => a.label.localeCompare(b.label));
 		} catch (error) {
-			userLoadError = error instanceof Error ? error.message : 'Failed to load users.';
+			userLoadError = error instanceof Error ? error.message : m.inputs_mgmt_failed_to_load_users();
 		}
 	}
 
@@ -389,11 +390,11 @@
 			currentInput = inputRes.record;
 			selectedInputId = inputRes.record.id;
 			rawLines = rawRes?.lines ?? [];
-			rawError = rawRes ? '' : 'Failed to load raw lines';
+			rawError = rawRes ? '' : m.inputs_mgmt_failed_to_load_raw_lines();
 		} catch (err) {
 			currentInput = null;
 			selectedInputId = null;
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve record';
+			errorMsg = err instanceof Error ? err.message : m.inputs_mgmt_failed_to_retrieve_record();
 		} finally {
 			rawLoading = false;
 			loading = false;
@@ -499,7 +500,7 @@
 		const name = asTrimmedString(r.name);
 		if (name && !looksLikeFileName(name)) return name;
 
-		return `Input #${r.id}`;
+		return m.inputs_mgmt_input({ id: r.id });
 	}
 
 	function mapBrowserRecord(record: KbInputRecord) {
@@ -693,7 +694,7 @@
 					case 'publish_date': {
 						const iso = fromDateTimeLocalInput(editingDraft);
 						if (editingDraft.trim() && !iso) {
-							throw new Error('Publish date is invalid.');
+							throw new Error(m.inputs_mgmt_publish_date_is_invalid());
 						}
 						payload.publish_date = iso;
 						break;
@@ -717,7 +718,7 @@
 						payload[field] = editingDraft;
 						break;
 					default:
-						throw new Error('Unsupported editable field.');
+						throw new Error(m.inputs_mgmt_unsupported_editable_field());
 				}
 			} else if (editingFieldKey.startsWith('docmeta:')) {
 				const path = editingFieldKey.replace(/^docmeta:/, '');
@@ -738,7 +739,7 @@
 			selectedInputId = updated.record.id;
 			cancelFieldEdit();
 		} catch (err) {
-			editingError = err instanceof Error ? err.message : 'Failed to save changes.';
+			editingError = err instanceof Error ? err.message : m.inputs_mgmt_failed_to_save_changes();
 		} finally {
 			editingSaving = false;
 		}
@@ -769,16 +770,22 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge Base · Vol. III</div>
-			<h1 class="display">Inputs&nbsp;<span class="amp">&amp;</span>&nbsp;Documents</h1>
+			<div class="eyebrow">{m.inputs_mgmt_knowledge_base_vol_iii()}</div>
+			<h1 class="display">
+				{m.inputs_mgmt_inputs()};<span class="amp">&amp;</span>&{m.inputs_mgmt_documents()}
+			</h1>
 			<div class="subtitle">
-				A reading room for input records — open details, inspect source, verify documents.
+				{m.inputs_mgmt_a_reading_room_for_input()}
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="meta-label">RECORD</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
-			<span class="meta-label">TYPE</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
-			<span class="meta-label">INPUTS</span><span class="meta-val"
+			<span class="meta-label">{m.inputs_mgmt_record()}</span><span class="meta-val"
+				>{currentInput?.id ?? '—'}</span
+			>
+			<span class="meta-label">{m.inputs_mgmt_type()}</span><span class="meta-val"
+				>{currentInput?.type ?? '—'}</span
+			>
+			<span class="meta-label">{m.inputs_mgmt_inputs_2()}</span><span class="meta-val"
 				>{listTotal.toString().padStart(3, '0')}</span
 			>
 		</div>
@@ -790,10 +797,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="inputs-mgmt"
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting document details."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={m.inputs_mgmt_kb_inputs()}
+				subtitle={m.inputs_mgmt_search_filter_and_select_input()}
+				emptyTitle={m.inputs_mgmt_no_records_yet()}
+				emptySubtitle={m.inputs_mgmt_use_search_or_retrieve_to()}
 				pageSize={KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE}
 				selectedRecordId={selectedInputId}
 				mapRecord={mapBrowserRecord}
@@ -823,16 +830,16 @@
 					{#if currentInput}
 						<span class="title-glyph">¶</span>
 						<span class="title-name" title={currentInput.file_name ?? ''}
-							>{currentInput.file_name ?? '(unnamed file)'}</span
+							>{currentInput.file_name ?? m.inputs_mgmt_unnamed_file()}</span
 						>
 						<span class="title-type">{currentInput.type}</span>
 					{:else}
 						<span class="title-glyph">¶</span>
-						<span class="title-name muted">No document loaded</span>
+						<span class="title-name muted">{m.inputs_mgmt_no_document_loaded()}</span>
 					{/if}
 				</div>
 
-				<div class="tabs" role="tablist" aria-label="Right panel mode">
+				<div class="tabs" role="tablist" aria-label={m.inputs_mgmt_right_panel_mode()}>
 					<button
 						class="tab"
 						class:active={viewMode === 'document'}
@@ -840,7 +847,7 @@
 						role="tab"
 						aria-selected={viewMode === 'document'}
 					>
-						Document
+						{m.inputs_mgmt_document()}
 					</button>
 					<button
 						class="tab"
@@ -849,7 +856,7 @@
 						role="tab"
 						aria-selected={viewMode === 'source'}
 					>
-						Source&nbsp;Lines
+						{m.inputs_mgmt_source_lines()}
 					</button>
 				</div>
 
@@ -857,27 +864,28 @@
 					{#if currentInput && viewMode === 'document'}
 						<span class="stat"
 							><span class="stat-num">{String(docPage).padStart(3, '0')}</span><span
-								class="stat-label">page</span
+								class="stat-label">{m.inputs_mgmt_page()}</span
 							></span
 						>
 						<span class="stat"
 							><span class="stat-num">{highlightKeys.size}</span><span class="stat-label"
-								>marks</span
+								>{m.inputs_mgmt_marks()}</span
 							></span
 						>
 					{:else if pagesGrouped.length > 0}
 						<span class="stat"
 							><span class="stat-num">{pagesGrouped.length}</span><span class="stat-label"
-								>pages</span
+								>{m.inputs_mgmt_pages()}</span
 							></span
 						>
 						<span class="stat"
-							><span class="stat-num">{rawLines.length}</span><span class="stat-label">lines</span
+							><span class="stat-num">{rawLines.length}</span><span class="stat-label"
+								>{m.inputs_mgmt_lines()}</span
 							></span
 						>
 						<span class="stat"
 							><span class="stat-num">{highlightKeys.size}</span><span class="stat-label"
-								>marks</span
+								>{m.inputs_mgmt_marks()}</span
 							></span
 						>
 					{/if}
@@ -889,10 +897,10 @@
 					{#if !currentInput}
 						<div class="doc-empty">
 							<div class="doc-empty-mark">⌬</div>
-							<div class="doc-empty-title">Awaiting selection</div>
+							<div class="doc-empty-title">{m.inputs_mgmt_awaiting_selection()}</div>
 							<div class="doc-empty-sub">
-								Once you retrieve a record, the original document appears here.<br />
-								Click any input record on the left to open its document.
+								{m.inputs_mgmt_once_you_retrieve_a_record()}<br />
+								{m.inputs_mgmt_click_any_input_record_on()}
 							</div>
 						</div>
 					{:else}
@@ -908,15 +916,15 @@
 								sidebarMinWidth={260}
 								sidebarMaxWidth={620}
 								sidebarDefaultWidth={340}
-								sidebarTitle="Document"
+								sidebarTitle={m.inputs_mgmt_document()}
 								sidebarSettingsKey="inputs-mgmt-pdf-sidebar"
-								sidebarWidthSettingLabel="Document Panel Width"
+								sidebarWidthSettingLabel={m.inputs_mgmt_document_panel_width()}
 							>
 								{#snippet sidebar()}
 									<EditableMetadataSection
-										title="Record Fields"
+										title={m.inputs_mgmt_record_fields()}
 										rows={recordMetaRows}
-										emptyText="No record loaded."
+										emptyText={m.inputs_mgmt_no_record_loaded()}
 										canEdit={true}
 										onSave={saveInputMetadataRow}
 									/>
@@ -925,9 +933,9 @@
 									{/if}
 
 									<EditableMetadataSection
-										title="Doc Metadata"
+										title={m.inputs_mgmt_doc_metadata()}
 										rows={docMetadataRows}
-										emptyText="No doc_metadata available."
+										emptyText={m.inputs_mgmt_no_doc_metadata_available()}
 										canEdit={true}
 										onSave={saveInputMetadataRow}
 									/>
@@ -936,24 +944,26 @@
 						{:else}
 							<iframe
 								class="doc-frame"
-								title={currentInput.file_name ?? `Record ${currentInput.id}`}
+								title={currentInput.file_name ?? m.inputs_mgmt_record_2({ id: currentInput.id })}
 								src={fileUrl}
 							></iframe>
 						{/if}
 
 						{#if isText}
 							<div class="doc-foot-hint">
-								This file is rendered as text by your browser. For exact line highlighting, switch
-								to the <button class="inline-tab-btn" onclick={() => setMode('source')}
-									>Source&nbsp;Lines</button
-								> tab.
+								{m.inputs_mgmt_this_file_is_rendered_as()}
+								<button class="inline-tab-btn" onclick={() => setMode('source')}
+									>{m.inputs_mgmt_source_lines()}</button
+								>
+								{m.inputs_mgmt_tab()}
 							</div>
 						{:else if !isPdf}
 							<div class="doc-foot-hint">
-								Inline preview support varies by file type. For line-level highlights, use the <button
-									class="inline-tab-btn"
-									onclick={() => setMode('source')}>Source&nbsp;Lines</button
-								> tab.
+								{m.inputs_mgmt_inline_preview_support_varies_by()}
+								<button class="inline-tab-btn" onclick={() => setMode('source')}
+									>{m.inputs_mgmt_source_lines()}</button
+								>
+								{m.inputs_mgmt_tab()}
 							</div>
 						{/if}
 					{/if}
@@ -961,19 +971,21 @@
 			{:else}
 				<div class="document">
 					{#if rawLoading}
-						<div class="doc-status"><span class="dot-loop"></span>Reading raw_line file…</div>
+						<div class="doc-status">
+							<span class="dot-loop"></span>{m.inputs_mgmt_reading_raw_line_file()}
+						</div>
 					{:else if rawError}
 						<div class="doc-error">
-							<div class="doc-error-title">⚠ Cannot render document</div>
+							<div class="doc-error-title">{m.inputs_mgmt_cannot_render_document()}</div>
 							<div class="doc-error-msg">{rawError}</div>
 						</div>
 					{:else if pagesGrouped.length === 0}
 						<div class="doc-empty">
 							<div class="doc-empty-mark">⌬</div>
-							<div class="doc-empty-title">Awaiting selection</div>
+							<div class="doc-empty-title">{m.inputs_mgmt_awaiting_selection()}</div>
 							<div class="doc-empty-sub">
-								Once you retrieve a record, the parsed document appears here.<br />
-								Click any input record on the left to open its source lines.
+								{m.inputs_mgmt_once_you_retrieve_a_record_2()}<br />
+								{m.inputs_mgmt_click_any_input_record_on_2()}
 							</div>
 						</div>
 					{:else}
@@ -981,10 +993,12 @@
 							<article id={`page-${pg.page}`} class="page">
 								<div class="page-edge" aria-hidden="true"></div>
 								<header class="page-head">
-									<span class="page-folio">page</span>
+									<span class="page-folio">{m.inputs_mgmt_page()}</span>
 									<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
 									<span class="page-rule"></span>
-									<span class="page-count">{pg.lines.length} lines</span>
+									<span class="page-count"
+										>{m.inputs_mgmt_lines_2({ linesCount: pg.lines.length })}</span
+									>
 								</header>
 								<div class="page-body">
 									{#each pg.lines as ln (ln.line_number)}

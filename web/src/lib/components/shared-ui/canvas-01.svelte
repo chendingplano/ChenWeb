@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas-01.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		SvelteFlow,
@@ -63,10 +64,10 @@
 	// ── Canvas config ─────────────────────────────────────────────────────
 	type EdgeStyle = 'default' | 'step' | 'smoothstep' | 'straight';
 	const EDGE_STYLE_LABELS: Record<EdgeStyle, string> = {
-		default: 'Curve',
-		step: 'Step (broken lines)',
-		smoothstep: 'Round broken lines',
-		straight: 'Straight'
+		default: m.canvas_01_curve(),
+		step: m.canvas_01_step_broken_lines(),
+		smoothstep: m.canvas_01_round_broken_lines(),
+		straight: m.canvas_01_straight()
 	};
 	let edgeStyle = $state<EdgeStyle>('default');
 	let showConfig = $state(false);
@@ -195,9 +196,9 @@
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges))
 			};
-			toast('Saved');
+			toast(m.canvas_01_saved());
 		} catch {
-			toast('Failed to save — your changes are preserved');
+			toast(m.canvas_01_failed_to_save_your_changes());
 		}
 	}
 
@@ -271,11 +272,11 @@
 
 	function checkLimits() {
 		if (!warnedNodes && nodes.length > 500) {
-			toast('Warning: over 500 nodes — performance may degrade');
+			toast(m.canvas_01_warning_over_500_nodes_performance());
 			warnedNodes = true;
 		}
 		if (!warnedEdges && edges.length > 1000) {
-			toast('Warning: over 1000 edges — performance may degrade');
+			toast(m.canvas_01_warning_over_1000_edges_performance());
 			warnedEdges = true;
 		}
 	}
@@ -283,7 +284,7 @@
 	// ── Close with guard ────────────────────────────────────────────────────
 	function requestClose() {
 		if (isDirty) {
-			if (!confirm('You have unsaved changes. Discard and continue?')) return;
+			if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
 		}
 		onClose();
 	}
@@ -304,7 +305,7 @@
 		redoStack = [];
 		try {
 			const res = await flowService.create({
-				flow_name: 'Untitled Flow',
+				flow_name: m.canvas_01_untitled_flow(),
 				flow_data: { nodes: [], edges: [] },
 				is_shared: false,
 				thumbnail_svg: null
@@ -312,11 +313,11 @@
 			activeFlow = res.flow;
 			lastSavedSnapshot = { nodes: [], edges: [] };
 		} catch {
-			toast('Could not create flow on server — working offline');
+			toast(m.canvas_01_could_not_create_flow_on());
 			activeFlow = {
 				flow_id: -1,
 				user_id: 0,
-				flow_name: 'Untitled Flow',
+				flow_name: m.canvas_01_untitled_flow(),
 				flow_desc: '',
 				is_default: false,
 				is_shared: false,
@@ -342,14 +343,14 @@
 	// ── Save as template ────────────────────────────────────────────────────
 	async function saveCurrentAsTemplate() {
 		if (!activeFlow || activeFlow.flow_id < 0) {
-			toast('Save the flow first');
+			toast(m.canvas_01_save_the_flow_first());
 			return;
 		}
 		try {
 			await flowService.saveAsTemplate(activeFlow.flow_id);
-			toast('Saved as template');
+			toast(m.canvas_01_saved_as_template());
 		} catch {
-			toast('Failed to save as template');
+			toast(m.canvas_01_failed_to_save_as_template());
 		}
 	}
 
@@ -394,7 +395,7 @@
 		{darkMode}
 		onPickerOpen={() => {
 			if (isDirty) {
-				if (!confirm('You have unsaved changes. Discard and continue?')) return;
+				if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
 			}
 			showPicker = true;
 		}}
@@ -422,7 +423,7 @@
 			ondragover={(e) => e.preventDefault()}
 			ondrop={onCanvasDrop}
 			role="application"
-			aria-label="Flow canvas"
+			aria-label={m.canvas_01_flow_canvas()}
 		>
 			<SvelteFlow
 				bind:nodes
@@ -498,7 +499,7 @@
 						onclick={() => {
 							showConfig = !showConfig;
 						}}
-						title="Canvas settings"
+						title={m.canvas_01_canvas_settings()}
 						style="background:{showConfig
 							? '#6366f1'
 							: '#1e2535'}; border:1px solid #374151; border-radius:6px; width:28px; height:28px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:{showConfig
@@ -514,7 +515,7 @@
 							<p
 								style="font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin:0 0 8px;"
 							>
-								Edge Style
+								{m.canvas_01_edge_style()}
 							</p>
 							{#each Object.entries(EDGE_STYLE_LABELS) as [k, label]}
 								<button
@@ -532,14 +533,14 @@
 							<p
 								style="font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin:0 0 8px;"
 							>
-								Grid Settings
+								{m.canvas_01_grid_settings()}
 							</p>
 
 							<div style="margin-bottom:8px;">
 								<label
 									style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#94a3b8; margin-bottom:4px;"
 								>
-									<span>Resolution</span>
+									<span>{m.canvas_01_resolution()}</span>
 									<input
 										type="number"
 										min="1"
@@ -554,7 +555,7 @@
 								<label
 									style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#94a3b8;"
 								>
-									<span>Snap to grid</span>
+									<span>{m.canvas_01_snap_to_grid()}</span>
 									<input
 										type="checkbox"
 										bind:checked={snapToGrid}

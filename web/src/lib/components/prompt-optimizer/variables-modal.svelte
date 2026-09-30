@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -69,9 +70,9 @@
 	async function save() {
 		fError = '';
 		const name = fName.trim();
-		if (!name) { fError = 'Name is required'; return; }
+		if (!name) { fError = m.variables_modal_name_is_required(); return; }
 		if (!VALID_NAME.test(name)) {
-			fError = 'Name must start with a letter or underscore and contain only letters, digits, and underscores';
+			fError = m.variables_modal_name_must_start_with_a();
 			return;
 		}
 		saving = true;
@@ -88,7 +89,7 @@
 	}
 
 	async function remove(v: Variable) {
-		if (!confirm(`Delete variable "${v.name}"?`)) return;
+		if (!confirm(m.variables_modal_delete_variable({ name: v.name }))) return;
 		try {
 			await deleteVariable(v.id);
 			await refresh();
@@ -118,14 +119,14 @@
 				style="border-bottom:1px solid {borderColor};"
 			>
 				<div>
-					<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">Variables</h2>
+					<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">{m.variables_modal_variables()}</h2>
 					<p style="font-size:12px; color:{textMuted}; margin-top:2px;">
-						Reusable values referenced as <code style="color:{textSecondary};">{'{{name}}'}</code> inside prompts.
+						{m.variables_modal_reusable_values_referenced_as()} <code style="color:{textSecondary};">{'{{name}}'}</code> {m.variables_modal_inside_prompts()}
 					</p>
 				</div>
 				<button
 					onclick={onClose}
-					aria-label="Close"
+					aria-label={m.variables_modal_close()}
 					class="rounded-lg p-1.5 cursor-pointer"
 					style="background:transparent; border:none; color:{textSecondary};"
 				>
@@ -149,23 +150,23 @@
 				>
 					<div class="grid grid-cols-1 gap-2">
 						<div>
-							<label for="vm-name" style="font-size:12px; color:{textSecondary}; font-weight:500;">Name</label>
+							<label for="vm-name" style="font-size:12px; color:{textSecondary}; font-weight:500;">{m.variables_modal_name()}</label>
 							<input
 								id="vm-name"
 								type="text"
 								bind:value={fName}
-								placeholder="e.g. company_name"
+								placeholder={m.variables_modal_e_g_company_name()}
 								class="w-full rounded-lg px-3 py-2 mt-1"
 								style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; font-size:13px;"
 							/>
 						</div>
 						<div>
-							<label for="vm-value" style="font-size:12px; color:{textSecondary}; font-weight:500;">Value</label>
+							<label for="vm-value" style="font-size:12px; color:{textSecondary}; font-weight:500;">{m.variables_modal_value()}</label>
 							<textarea
 								id="vm-value"
 								bind:value={fValue}
 								rows="3"
-								placeholder="Value — can be multi-line"
+								placeholder={m.variables_modal_value_can_be_multi_line()}
 								class="w-full rounded-lg px-3 py-2 mt-1"
 								style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; font-size:13px;"
 							></textarea>
@@ -189,16 +190,16 @@
 							style="background:{accent}; color:white; border:none; font-size:13px; font-weight:600; opacity:{saving ? 0.6 : 1};"
 						>
 							<PlusIcon class="w-3.5 h-3.5" />
-							{saving ? 'Saving…' : 'Save variable'}
+							{saving ? m.variables_modal_saving() : m.variables_modal_save_variable()}
 						</button>
 					</div>
 				</div>
 
 				{#if loading}
-					<div style="color:{textMuted}; font-size:13px;">Loading…</div>
+					<div style="color:{textMuted}; font-size:13px;">{m.variables_modal_loading()}</div>
 				{:else if vars.length === 0}
 					<div style="color:{textMuted}; font-size:13px;" class="text-center py-4">
-						No variables yet.
+						{m.variables_modal_no_variables_yet()}
 					</div>
 				{:else}
 					<div class="space-y-2">
@@ -219,7 +220,7 @@
 								</div>
 								<button
 									onclick={() => remove(v)}
-									aria-label="Delete"
+									aria-label={m.variables_modal_delete()}
 									class="rounded-lg p-1.5 cursor-pointer flex-shrink-0"
 									style="background:transparent; color:{danger}; border:1px solid {borderColor};"
 								>
@@ -240,7 +241,7 @@
 					class="rounded-lg px-4 py-2 cursor-pointer"
 					style="background:transparent; color:{textSecondary}; border:1px solid {borderColor}; font-size:13px;"
 				>
-					Close
+					{m.variables_modal_close()}
 				</button>
 			</div>
 		</div>

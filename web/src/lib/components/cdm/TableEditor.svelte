@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// Editable table block (task 6.1): column add/remove/retitle/align, row
 	// add/remove, per-cell inline editing, and an optional caption.
 	//
@@ -67,7 +68,9 @@
 	{#if block.caption}
 		<div class="cdm-table-caption"><InlineEditor bind:content={block.caption} as="plain" /></div>
 	{:else}
-		<button type="button" class="cdm-table-add-caption" onclick={addCaption}>+ Caption</button>
+		<button type="button" class="cdm-table-add-caption" onclick={addCaption}
+			>{m.tableeditor_caption()}</button
+		>
 	{/if}
 
 	<table class="cdm-table">
@@ -85,20 +88,20 @@
 							value={col.align ?? ''}
 							onchange={(e) => doSetAlign(col.key, e.currentTarget.value)}
 						>
-							<option value="">left</option>
-							<option value="center">center</option>
-							<option value="right">right</option>
+							<option value="">{m.tableeditor_left()}</option>
+							<option value="center">{m.tableeditor_center()}</option>
+							<option value="right">{m.tableeditor_right()}</option>
 						</select>
 						<button
 							type="button"
-							title="Remove column"
+							title={m.tableeditor_remove_column()}
 							onclick={() => doRemoveColumn(col.key)}
 							disabled={columnCount <= 1}>×</button
 						>
 					</th>
 				{/each}
 				<th class="cdm-table-add-cell"
-					><button type="button" onclick={doAddColumn}>+ Column</button></th
+					><button type="button" onclick={doAddColumn}>{m.tableeditor_column()}</button></th
 				>
 			</tr>
 		</thead>
@@ -109,13 +112,15 @@
 						<td><InlineEditor bind:content={row.cells[col.key]} as="plain" /></td>
 					{/each}
 					<td class="cdm-table-add-cell"
-						><button type="button" title="Remove row" onclick={() => doRemoveRow(i)}>×</button></td
+						><button type="button" title={m.tableeditor_remove_row()} onclick={() => doRemoveRow(i)}
+							>×</button
+						></td
 					>
 				</tr>
 			{/each}
 			<tr>
 				<td colspan={columnCount + 1} class="cdm-table-add-cell">
-					<button type="button" onclick={doAddRow}>+ Row</button>
+					<button type="button" onclick={doAddRow}>{m.tableeditor_row()}</button>
 				</td>
 			</tr>
 		</tbody>

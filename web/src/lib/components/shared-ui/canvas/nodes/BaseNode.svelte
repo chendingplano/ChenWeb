@@ -1,5 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/nodes/BaseNode.svelte -->
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import { Handle, Position, NodeResizer } from '@xyflow/svelte';
   import CopyIcon   from '@lucide/svelte/icons/copy';
   import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -49,13 +50,13 @@
       class="absolute flex gap-1"
       style="top:-30px; left:50%; transform:translateX(-50%); background:#1e2535; border:1px solid #374151; border-radius:6px; padding:3px 6px; white-space:nowrap; z-index:10;"
     >
-      <button onclick={onConfigure} title="Configure" style="background:none; border:none; cursor:pointer; color:#94a3b8; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label="Configure">
+      <button onclick={onConfigure} title={m.basenode_configure()} style="background:none; border:none; cursor:pointer; color:#94a3b8; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label={m.basenode_configure()}>
         <SlidersIcon class="w-3 h-3" />
       </button>
-      <button onclick={onDuplicate} title="Duplicate" style="background:none; border:none; cursor:pointer; color:#94a3b8; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label="Duplicate">
+      <button onclick={onDuplicate} title={m.basenode_duplicate()} style="background:none; border:none; cursor:pointer; color:#94a3b8; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label={m.basenode_duplicate()}>
         <CopyIcon class="w-3 h-3" />
       </button>
-      <button onclick={onDelete} title="Delete" style="background:none; border:none; cursor:pointer; color:#ef4444; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label="Delete">
+      <button onclick={onDelete} title={m.basenode_delete()} style="background:none; border:none; cursor:pointer; color:#ef4444; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label={m.basenode_delete()}>
         <Trash2Icon class="w-3 h-3" />
       </button>
     </div>

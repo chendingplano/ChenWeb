@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { listAssertions, type Assertion } from './semantic-assertions-client';
@@ -156,12 +157,9 @@
 	<div class="flex-shrink-0 rounded-xl p-5" style="background:{cardBg};border:1px solid {borderColor}">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px;font-weight:600;color:{textPrimary}">Semantic Diagnostics</h2>
+				<h2 style="font-size:18px;font-weight:600;color:{textPrimary}">{m.doc_review_semantic_semantic_diagnostics()}</h2>
 				<p style="font-size:13px;color:{textSecondary};margin-top:2px;max-width:640px">
-					Every semantic assertion with active evidence in this document, including raw-preserved,
-					unresolved-mapping, ambiguous, and unsupported instances. This is a diagnostic view, not
-					a governance judgment — a non-empty list of findings below is expected output, not a
-					processing failure.
+					{m.doc_review_semantic_every_semantic_assertion_with_active()}
 				</p>
 			</div>
 			<button
@@ -170,12 +168,12 @@
 				class="inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2"
 				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 			>
-				<RefreshCwIcon class="h-4 w-4 {loading ? 'animate-spin' : ''}" />Refresh
+				<RefreshCwIcon class="h-4 w-4 {loading ? 'animate-spin' : ''}" />{m.doc_review_semantic_refresh()}
 			</button>
 		</div>
 		{#if rows.length > 0 || total > 0}
 			<div class="mt-4 flex flex-wrap items-center gap-2" style="font-size:12px;">
-				<span style="color:{textMuted}">{total} assertion{total !== 1 ? 's' : ''}</span>
+				<span style="color:{textMuted}">{m.doc_review_semantic_assertion({ total, plural: total !== 1 ? 's' : '' })}</span>
 				{#each byStatus as [status, count]}
 					{@const colors = SEVERITY_COLORS[statusSeverity(status)]}
 					<span
@@ -185,7 +183,7 @@
 				{/each}
 				{#if withProcessingErrors > 0}
 					<span style="color:{textMuted}"
-						>· {withProcessingErrors} with processing error detail</span
+						>{m.doc_review_semantic_with_processing_error_detail({ withProcessingErrors })}</span
 					>
 				{/if}
 			</div>
@@ -204,8 +202,8 @@
 	<div class="flex min-h-0 flex-1 flex-col rounded-xl" style="background:{cardBg};border:1px solid {borderColor}">
 		<div class="flex flex-shrink-0 justify-between px-5 py-3" style="border-bottom:1px solid {borderColor}">
 			<span style="font-size:13px;color:{textMuted}"
-				>{total} assertion{total !== 1 ? 's' : ''}{#if total}
-					· page {page} of {totalPages}{/if}</span
+				>{m.doc_review_semantic_assertion({ total, plural: total !== 1 ? 's' : '' })}{#if total}
+					{m.doc_review_semantic_page_of({ page, totalPages })}{/if}</span
 			>
 			<div class="flex gap-2">
 				<button
@@ -218,7 +216,7 @@
 					disabled={page <= 1 || loading}
 					class="rounded px-3 py-1 text-sm disabled:opacity-40"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
-					>‹ Prev</button
+					>{m.doc_review_semantic_prev()}</button
 				>
 				<button
 					onclick={() => {
@@ -230,15 +228,15 @@
 					disabled={page >= totalPages || loading}
 					class="rounded px-3 py-1 text-sm disabled:opacity-40"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
-					>Next ›</button
+					>{m.doc_review_semantic_next()}</button
 				>
 			</div>
 		</div>
 		{#if loading}
-			<div class="px-5 py-8 text-center" style="color:{textMuted}">Loading…</div>
+			<div class="px-5 py-8 text-center" style="color:{textMuted}">{m.doc_review_semantic_loading()}</div>
 		{:else if !rows.length}
 			<div class="px-5 py-8 text-center" style="color:{textMuted}">
-				No semantic assertions with active evidence in this document yet.
+				{m.doc_review_semantic_no_semantic_assertions_with_active()}
 			</div>
 		{:else}
 			<div class="min-h-0 flex-1 space-y-3 overflow-auto p-4">
@@ -252,7 +250,7 @@
 									{claimText(a)}
 								</div>
 								<div style="font-size:11px;color:{textMuted};margin-top:2px;font-family:monospace">
-									#{a.id} · rev {a.revision}
+									{m.doc_review_semantic_rev({ id: a.id, revision: a.revision })}
 								</div>
 							</div>
 							<div class="flex flex-wrap items-center gap-1.5">
@@ -262,7 +260,7 @@
 								>
 								{#if a.unsupported_prior_status}
 									<span style="font-size:11px;color:{textMuted}"
-										>(was {statusLabel(a.unsupported_prior_status)})</span
+										>{m.doc_review_semantic_was({ unsupported_prior_status: statusLabel(a.unsupported_prior_status) })}</span
 									>
 								{/if}
 							</div>
@@ -271,7 +269,7 @@
 						<div class="mt-3 grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
 							<div>
 								<div style="font-size:11px;color:{textMuted};text-transform:uppercase;letter-spacing:0.04em">
-									Raw value
+									{m.doc_review_semantic_raw_value()}
 								</div>
 								<div style="font-size:12.5px;color:{textPrimary};margin-top:2px;word-break:break-word">
 									{a.raw_text || '—'}
@@ -279,7 +277,7 @@
 							</div>
 							<div>
 								<div style="font-size:11px;color:{textMuted};text-transform:uppercase;letter-spacing:0.04em">
-									Normalized value
+									{m.doc_review_semantic_normalized_value()}
 								</div>
 								<div style="font-size:12.5px;color:{textPrimary};margin-top:2px">
 									{normalizedValueText(a)}
@@ -287,7 +285,7 @@
 							</div>
 							<div>
 								<div style="font-size:11px;color:{textMuted};text-transform:uppercase;letter-spacing:0.04em">
-									Class confidence
+									{m.doc_review_semantic_class_confidence()}
 								</div>
 								<div style="font-size:12.5px;color:{textPrimary};margin-top:2px">
 									{a.confidence != null ? a.confidence.toFixed(2) : '—'}
@@ -296,7 +294,7 @@
 						</div>
 
 						<div class="mt-3 flex flex-wrap gap-1.5">
-							{#each [['Class identity', a.class_identity_state_term_id], ['Mapping', a.mapping_resolution_state_term_id], ['Value', a.value_state_term_id], ['Conformance', a.conformance_state_term_id]] as [label, term]}
+							{#each [[m.doc_review_semantic_class_identity(), a.class_identity_state_term_id], [m.doc_review_semantic_mapping(), a.mapping_resolution_state_term_id], [m.doc_review_semantic_value(), a.value_state_term_id], [m.doc_review_semantic_conformance(), a.conformance_state_term_id]] as [label, term]}
 								{#if term}
 									{@const colors = SEVERITY_COLORS[stateSeverity(term)]}
 									<span
@@ -314,7 +312,7 @@
 									class="cursor-pointer rounded px-2 py-1 text-xs"
 									style="background:{danger}18;color:{danger};border:1px solid {danger}50"
 								>
-									{expandedErrors.has(a.id) ? 'Hide' : 'Show'} processing error detail
+									{m.doc_review_semantic_processing_error_detail({ value: expandedErrors.has(a.id) ? m.doc_review_semantic_hide() : m.doc_review_semantic_show() })}
 								</button>
 								{#if expandedErrors.has(a.id)}
 									<div class="mt-2 rounded p-2" style="background:{cardBg};border:1px solid {borderColor}">
@@ -327,7 +325,7 @@
 						{#if evidence.length > 0}
 							<div class="mt-3">
 								<div style="font-size:11px;color:{textMuted};text-transform:uppercase;letter-spacing:0.04em">
-									Active evidence ({evidence.length})
+									{m.doc_review_semantic_active_evidence({ evidenceCount: evidence.length })}
 								</div>
 								<div class="mt-1.5 space-y-1.5">
 									{#each evidence as e (e.id)}
@@ -344,7 +342,7 @@
 													>{e.evidence_role}</span
 												>
 												{#if e.confidence != null}
-													<span style="color:{textMuted}">conf {e.confidence.toFixed(2)}</span>
+													<span style="color:{textMuted}">{m.doc_review_semantic_conf({ confidence: e.confidence.toFixed(2) })}</span>
 												{/if}
 											</div>
 											{#if e.evidence_quote}
@@ -355,7 +353,7 @@
 								</div>
 							</div>
 						{:else}
-							<div class="mt-3" style="font-size:11.5px;color:{textMuted}">No active evidence.</div>
+							<div class="mt-3" style="font-size:11.5px;color:{textMuted}">{m.doc_review_semantic_no_active_evidence()}</div>
 						{/if}
 					</div>
 				{/each}

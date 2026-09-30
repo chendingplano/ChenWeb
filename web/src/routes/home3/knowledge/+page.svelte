@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { theme } from '$lib/stores/theme.svelte';
@@ -104,99 +105,99 @@
 	const menuItems: KbMenuItem[] = [
 		{
 			id: 'kb-search',
-			label: 'Knowledge Stores',
-			description: 'Explore indexed knowledge',
+			label: m._page_knowledge_stores(),
+			description: m._page_explore_indexed_knowledge(),
 			icon: SearchIcon
 		},
 		{
 			id: 'kb-import',
-			label: 'Injestion',
-			description: 'Ingest documents and data',
+			label: m._page_injestion(),
+			description: m._page_ingest_documents_and_data(),
 			icon: UploadIcon,
 			children: [
 				{
 					id: 'kb-import',
 					entryKey: 'kb-import-upload',
-					label: 'Upload Files',
-					description: 'Upload and import document files'
+					label: m._page_upload_files(),
+					description: m._page_upload_and_import_document_files()
 				}
 			]
 		},
 		{
 			id: 'kb-doc-wiki',
-			label: 'Wiki',
-			description: 'Browse document knowledge',
+			label: m._page_wiki(),
+			description: m._page_browse_document_knowledge(),
 			icon: BookOpenIcon,
 			children: [
 				{
 					id: 'kb-llm-wiki',
-					label: 'LLM Wiki',
-					description: 'The Deep Wiki entrance to SemOS'
+					label: m._page_llm_wiki(),
+					description: m._page_the_deep_wiki_entrance_to()
 				},
 				{
 					id: 'kb-llm-wiki-v3',
-					label: 'LLM Wiki v3',
-					description: 'Artistic wired knowledge atlas'
+					label: m._page_llm_wiki_v3(),
+					description: m._page_artistic_wired_knowledge_atlas()
 				},
 				{
 					id: 'kb-input-details',
-					label: 'Document Metadata',
-					description: 'Inspect source inputs'
+					label: m._page_document_metadata(),
+					description: m._page_inspect_source_inputs()
 				},
 				{
 					id: 'kb-doc-structure',
-					label: 'Document Structure',
-					description: 'Inspect parsed hierarchy'
+					label: m._page_document_structure(),
+					description: m._page_inspect_parsed_hierarchy()
 				},
 				{
 					id: 'kb-summary-tree',
-					label: 'Document Tree',
-					description: 'Document-centric summary browser'
+					label: m._page_document_tree(),
+					description: m._page_document_centric_summary_browser()
 				},
 				{
 					id: 'kb-summary-graph',
-					label: 'Artifact Wiki',
-					description: 'Category-first artifact exploration'
+					label: m._page_artifact_wiki(),
+					description: m._page_category_first_artifact_exploration()
 				},
 				{
 					id: 'kb-semantic-projections',
-					label: 'Semantic Projections',
-					description: 'Retrieval-optimized projection browser'
+					label: m._page_semantic_projections(),
+					description: m._page_retrieval_optimized_projection_browser()
 				},
 				{
 					id: 'kb-topic-tree',
-					label: 'Document Topic Tree',
-					description: 'Document-centric topic browser'
+					label: m._page_document_topic_tree(),
+					description: m._page_document_centric_topic_browser()
 				},
 				{
 					id: 'kb-metrics',
-					label: 'Metrics',
-					description: 'Manage extracted metrics'
+					label: m._page_metrics(),
+					description: m._page_manage_extracted_metrics()
 				},
 				{
 					id: 'kb-products',
-					label: 'Products',
-					description: 'Browse extracted product records'
+					label: m._page_products(),
+					description: m._page_browse_extracted_product_records()
 				},
 				{
 					id: 'kb-scene-blocks',
-					label: 'Scene Blocks',
-					description: 'Event-driven scene extraction'
+					label: m._page_scene_blocks(),
+					description: m._page_event_driven_scene_extraction()
 				},
 				{
 					id: 'kb-provision-tree',
-					label: 'Provisions',
-					description: 'Document-centric provision browser'
+					label: m._page_provisions(),
+					description: m._page_document_centric_provision_browser()
 				},
 				{
 					id: 'kb-inventory-items',
-					label: 'Inventory Items',
-					description: 'Document-centric inventory item browser'
+					label: m._page_inventory_items(),
+					description: m._page_document_centric_inventory_item_browser()
 				},
 				{
 					id: 'kb-object-manager',
-					label: 'Object Manager',
-					description: 'Search, inspect, relate, and reconcile artifact objects'
+					label: m._page_object_manager(),
+					description: m._page_search_inspect_relate_and_reconcile()
 				},
 				...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
 					id: section.id as KbSectionId,
@@ -207,37 +208,37 @@
 		},
 		{
 			id: 'kb-chunks',
-			label: 'Document Processing',
-			description: 'Process and analyze documents',
+			label: m._page_document_processing(),
+			description: m._page_process_and_analyze_documents(),
 			icon: LayersIcon,
 			children: [
 				{
 					id: 'kb-chunks',
-					label: 'Document Chunking',
-					description: 'Browse chunk output'
+					label: m._page_document_chunking(),
+					description: m._page_browse_chunk_output()
 				},
 				{
 					id: 'kb-category-review',
-					label: 'Category Review',
-					description: 'Curate the inventory category ontology'
+					label: m._page_category_review(),
+					description: m._page_curate_the_inventory_category_ontology()
 				}
 			]
 		},
 		{
 			id: 'kb-metric-ontology',
-			label: 'Ontology',
-			description: 'Governed vocabulary and metric diagnostics',
+			label: m._page_ontology(),
+			description: m._page_governed_vocabulary_and_metric_diagnostics(),
 			icon: NetworkIcon,
 			children: [
 				{
 					id: 'kb-metric-ontology',
-					label: 'Metric Ontology',
-					description: 'Inspect metric coverage, mappings, and findings'
+					label: m._page_metric_ontology(),
+					description: m._page_inspect_metric_coverage_mappings_and()
 				},
 				{
 					id: 'kb-metric-ontology-explorer',
-					label: 'Metric Ontology Explorer',
-					description: "Explore a metric's ontology and pipeline on a canvas"
+					label: m._page_metric_ontology_explorer(),
+					description: m._page_explore_a_metric_s_ontology()
 				}
 			]
 		}
@@ -510,7 +511,7 @@
 		>
 			{#if !menuCollapsed}
 				<div class="flex w-full items-center justify-between px-1">
-					<span style="font-size:13px; font-weight:600; color:{accent};">Knowledge</span>
+					<span style="font-size:13px; font-weight:600; color:{accent};">{m._page_knowledge()}</span>
 					<button
 						type="button"
 						onclick={() => (menuCollapsed = true)}
@@ -522,8 +523,8 @@
 						onmouseleave={(e) => {
 							(e.currentTarget as HTMLElement).style.color = textMuted;
 						}}
-						aria-label="Collapse menu"
-						title="Collapse menu"
+						aria-label={m._page_collapse_menu()}
+						title={m._page_collapse_menu()}
 					>
 						<PanelLeftCloseIcon class="h-4 w-4" />
 					</button>
@@ -540,8 +541,8 @@
 					onmouseleave={(e) => {
 						(e.currentTarget as HTMLElement).style.color = textMuted;
 					}}
-					aria-label="Expand menu"
-					title="Expand menu"
+					aria-label={m._page_expand_menu()}
+					title={m._page_expand_menu()}
 				>
 					<PanelLeftIcon class="h-5 w-5" />
 				</button>
@@ -563,10 +564,10 @@
 						: 'rgba(217,119,6,0.35)'};"
 				>
 					<div style="font-size:11px; font-weight:600; color:{darkMode ? '#FBBF24' : '#B45309'};">
-						Unrecognized menu config id(s) — ignored
+						{m._page_unrecognized_menu_config_id_s()}
 					</div>
 					<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
-						page-config home3-knowledge: {unknownMenuConfigIds.join(', ')}
+						{m._page_page_config_home3_knowledge({ unknownMenuConfigIds: unknownMenuConfigIds.join(', ') })}
 					</div>
 				</div>
 			</div>
@@ -772,21 +773,21 @@
 						<div
 							style="font-size:17px; font-weight:700; color:{textPrimary}; margin-bottom:0.5rem;"
 						>
-							No Knowledge Store Selected
+							{m._page_no_knowledge_store_selected()}
 						</div>
 						<p
 							style="font-size:13px; color:{textSecondary}; line-height:1.6; margin-bottom:1.5rem;"
 						>
-							This section operates on the active knowledge store. Go to <strong
-								style="color:{textPrimary};">Knowledge Stores</strong
-							> and click a card to select one before continuing.
+							{m._page_this_section_operates_on_the()} <strong
+								style="color:{textPrimary};">{m._page_knowledge_stores()}</strong
+							> {m._page_and_click_a_card_to()}
 						</p>
 						<button
 							type="button"
 							onclick={() => selectSection('kb-search')}
 							style="padding:10px 20px; border-radius:8px; background:{accent}; color:white; font-size:14px; font-weight:600; border:none; cursor:pointer;"
 						>
-							Go to Knowledge Stores
+							{m._page_go_to_knowledge_stores()}
 						</button>
 					</div>
 				</div>
@@ -832,7 +833,7 @@
 					/>
 				{:else}
 					<div class="flex h-full items-center justify-center p-8" style="color:{textSecondary};">
-						Artifact wiki for <code>{artifactWikiType || 'unknown'}</code> is not wired yet.
+						{m._page_artifact_wiki_for()} <code>{artifactWikiType || 'unknown'}</code> {m._page_is_not_wired_yet()}
 					</div>
 				{/if}
 			{:else if activeSection === 'kb-doc-structure'}
@@ -865,12 +866,12 @@
 				<TopicGraphView
 					{darkMode}
 					heroEyebrow="Compliance Provisions"
-					heroTitle="Provision Wiki"
-					heroDescription="Category-first workspace for browsing compliance provisions indexed from the active knowledge store."
-					rootTabLabel="Provision Wiki"
-					loadErrorLabel="Provision Wiki"
-					itemLabelPlural="Provisions"
-					showItemsLabel="Show Provisions"
+					heroTitle={m._page_provision_wiki()}
+					heroDescription={m._page_category_first_workspace_for_browsing()}
+					rootTabLabel={m._page_provision_wiki()}
+					loadErrorLabel={m._page_provision_wiki()}
+					itemLabelPlural={m._page_provisions()}
+					showItemsLabel={m._page_show_provisions()}
 					showItemNodes={true}
 					listGraph={() => listProvisionGraph(knowledgeStoreState.activeStore?.id ?? null)}
 					getCategoryItems={(categoryPath) =>
@@ -905,7 +906,7 @@
 							{getUnderConstructionLabel(activeSection)}
 						</div>
 						<p style="font-size:13px; color:{textSecondary}; line-height:1.6; margin:0;">
-							Under construction
+							{m._page_under_construction()}
 						</p>
 					</div>
 				</div>

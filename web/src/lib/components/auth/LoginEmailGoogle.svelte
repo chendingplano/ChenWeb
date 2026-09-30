@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { appAuthStore } from '@chendingplano/shared';
 
@@ -99,10 +100,10 @@
 				window.location.href = redirect_url;
 			} else {
 				const msg = await res.text();
-				alert(`Login failed: ${msg}`);
+				alert(m.loginemailgoogle_login_failed({ msg }));
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.loginemailgoogle_network_error({ err: String(err) }));
 		}
 	}
 
@@ -169,7 +170,7 @@
 				alert(await getErrorMessage(res));
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.loginemailgoogle_network_error({ err: String(err) }));
 		}
 	}
 
@@ -192,7 +193,7 @@
 				alert(await getErrorMessage(res));
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.loginemailgoogle_network_error({ err: String(err) }));
 		}
 	}
 
@@ -201,7 +202,7 @@
 			hasFlowId: Boolean(recoveryFlowId)
 		});
 		if (newPassword !== newPasswordConfirm) {
-			alert('Passwords do not match.');
+			alert(m.loginemailgoogle_passwords_do_not_match());
 			return;
 		}
 		try {
@@ -212,7 +213,7 @@
 				body: JSON.stringify({ password: newPassword })
 			});
 			if (res.ok) {
-				alert('Your password has been reset. Please log in.');
+				alert(m.loginemailgoogle_your_password_has_been_reset());
 				recoveryFlowId = '';
 				recoveryCode = '';
 				newPassword = '';
@@ -222,7 +223,7 @@
 				alert(await getErrorMessage(res));
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.loginemailgoogle_network_error({ err: String(err) }));
 		}
 	}
 
@@ -263,7 +264,7 @@
 
 	async function handleSendPhoneCode() {
 		if (!cnPhonePattern.test(phone)) {
-			alert('Please enter a valid Chinese mobile number (11 digits, starting with 1).');
+			alert(m.loginemailgoogle_please_enter_a_valid_chinese());
 			return;
 		}
 		phoneSending = true;
@@ -280,10 +281,10 @@
 				phoneStep = 'enter-code';
 				startPhoneCooldown();
 			} else {
-				alert(data.message || 'Failed to send code.');
+				alert(data.message || m.loginemailgoogle_failed_to_send_code());
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.loginemailgoogle_network_error({ err: String(err) }));
 		} finally {
 			phoneSending = false;
 		}
@@ -291,11 +292,11 @@
 
 	async function handleVerifyPhoneCode() {
 		if (!phoneCode) {
-			alert('Please enter the code you received.');
+			alert(m.loginemailgoogle_please_enter_the_code_you());
 			return;
 		}
 		if (phoneFlowType === 'registration' && (!phoneFirstName || !phoneLastName)) {
-			alert('Please enter your first and last name.');
+			alert(m.loginemailgoogle_please_enter_your_first_and());
 			return;
 		}
 		try {
@@ -316,10 +317,10 @@
 			if (res.ok) {
 				window.location.href = data.redirect_url || '/sidebar-01';
 			} else {
-				alert(data.message || 'Invalid or expired code.');
+				alert(data.message || m.loginemailgoogle_invalid_or_expired_code());
 			}
 		} catch (err) {
-			alert(`Network error: ${err}`);
+			alert(m.loginemailgoogle_network_error({ err: String(err) }));
 		}
 	}
 </script>
@@ -327,11 +328,11 @@
 <div class="form-container">
 	<p class="title">
 		{#if mode === 'login'}
-			Welcome to DeepDocs
+			{m.loginemailgoogle_welcome_to_deepdocs()}
 		{:else if mode === 'phone'}
-			Log in with Phone
+			{m.loginemailgoogle_log_in_with_phone()}
 		{:else}
-			Reset your password
+			{m.loginemailgoogle_reset_your_password()}
 		{/if}
 	</p>
 
@@ -348,7 +349,7 @@
 				bind:value={email}
 				type="email"
 				class="input"
-				placeholder="Email"
+				placeholder={m.loginemailgoogle_email()}
 				autocomplete="email"
 				required
 			/>
@@ -356,27 +357,27 @@
 				bind:value={password}
 				type="password"
 				class="input"
-				placeholder="Password"
+				placeholder={m.loginemailgoogle_password()}
 				autocomplete="current-password"
 				required
 			/>
 			<p class="page-link">
 				<button type="button" class="page-link-label" onclick={switchToForgot}
-					>Forgot Password?</button
+					>{m.loginemailgoogle_forgot_password()}</button
 				>
 			</p>
-			<button type="submit" class="form-btn">Log in</button>
+			<button type="submit" class="form-btn">{m.loginemailgoogle_log_in()}</button>
 		</form>
 
 		{#if enablePhoneLogin}
 			<p class="sign-up-label">
-				<button class="sign-up-link" onclick={switchToPhone}>Log in with Phone</button>
+				<button class="sign-up-link" onclick={switchToPhone}>{m.loginemailgoogle_log_in_with_phone()}</button>
 			</p>
 		{/if}
 
 		<p class="sign-up-label">
-			Don't have an account?
-			<button class="sign-up-link" onclick={switchToSignup}>Sign up</button>
+			{m.loginemailgoogle_don_t_have_an_account()}
+			<button class="sign-up-link" onclick={switchToSignup}>{m.loginemailgoogle_sign_up()}</button>
 		</p>
 	{:else if mode === 'signup'}
 		<!-- Sign Up Form -->
@@ -391,7 +392,7 @@
 				bind:value={first_name}
 				type="text"
 				class="input"
-				placeholder="First name"
+				placeholder={m.loginemailgoogle_first_name()}
 				autocomplete="given-name"
 				required
 			/>
@@ -399,7 +400,7 @@
 				bind:value={last_name}
 				type="text"
 				class="input"
-				placeholder="Last name"
+				placeholder={m.loginemailgoogle_last_name()}
 				autocomplete="family-name"
 				required
 			/>
@@ -407,24 +408,24 @@
 				bind:value={email}
 				type="email"
 				class="input"
-				placeholder="Email"
+				placeholder={m.loginemailgoogle_email()}
 				autocomplete="email"
 			/>
 			<input
 				bind:value={password}
 				type="password"
 				class="input"
-				placeholder="Password"
+				placeholder={m.loginemailgoogle_password()}
 				autocomplete="new-password"
 				required
 			/>
-			<button type="submit" class="form-btn">Sign up</button>
+			<button type="submit" class="form-btn">{m.loginemailgoogle_sign_up()}</button>
 		</form>
 
 		<p class="sign-up-label">
-			Already have an account?
+			{m.loginemailgoogle_already_have_an_account()}
 			<!--span class="sign-up-link" onclick={switchToLogin}>Log in</span-->
-			<button class="sign-up-link" onclick={switchToLogin}>Log in</button>
+			<button class="sign-up-link" onclick={switchToLogin}>{m.loginemailgoogle_log_in()}</button>
 		</p>
 	{:else if mode == 'forgot'}
 		<!-- Forgot Password: request a recovery code -->
@@ -439,7 +440,7 @@
 				bind:value={email}
 				type="email"
 				class="input"
-				placeholder="Enter your email"
+				placeholder={m.loginemailgoogle_enter_your_email()}
 				autocomplete="email"
 				required
 			/>
@@ -450,13 +451,13 @@
 					void handleForgotPassword();
 				}}
 			>
-				Send Recovery Code
+				{m.loginemailgoogle_send_recovery_code()}
 			</button>
 		</form>
 
 		<p class="sign-up-label">
-			Remember your password?
-			<button class="sign-up-link" onclick={switchToLogin}>Log in</button>
+			{m.loginemailgoogle_remember_your_password()}
+			<button class="sign-up-link" onclick={switchToLogin}>{m.loginemailgoogle_log_in()}</button>
 		</p>
 	{:else if mode == 'forgot-code'}
 		<!-- Forgot Password: enter the code emailed to the user -->
@@ -471,7 +472,7 @@
 				bind:value={recoveryCode}
 				type="text"
 				class="input"
-				placeholder="Enter the code from your email"
+				placeholder={m.loginemailgoogle_enter_the_code_from_your()}
 				autocomplete="one-time-code"
 				required
 			/>
@@ -482,13 +483,13 @@
 					void handleRecoveryCode();
 				}}
 			>
-				Verify Code
+				{m.loginemailgoogle_verify_code()}
 			</button>
 		</form>
 
 		<p class="sign-up-label">
-			Remember your password?
-			<button class="sign-up-link" onclick={switchToLogin}>Log in</button>
+			{m.loginemailgoogle_remember_your_password()}
+			<button class="sign-up-link" onclick={switchToLogin}>{m.loginemailgoogle_log_in()}</button>
 		</p>
 	{:else if mode == 'forgot-reset'}
 		<!-- Forgot Password: set a new password -->
@@ -503,7 +504,7 @@
 				bind:value={newPassword}
 				type="password"
 				class="input"
-				placeholder="New password"
+				placeholder={m.loginemailgoogle_new_password()}
 				autocomplete="new-password"
 				required
 			/>
@@ -511,7 +512,7 @@
 				bind:value={newPasswordConfirm}
 				type="password"
 				class="input"
-				placeholder="Confirm new password"
+				placeholder={m.loginemailgoogle_confirm_new_password()}
 				autocomplete="new-password"
 				required
 			/>
@@ -522,7 +523,7 @@
 					void handleSetNewPassword();
 				}}
 			>
-				Reset Password
+				{m.loginemailgoogle_reset_password()}
 			</button>
 		</form>
 	{:else if mode === 'phone' && enablePhoneLogin}
@@ -539,12 +540,12 @@
 					bind:value={phone}
 					type="tel"
 					class="input"
-					placeholder="Mobile number (e.g. 13812345678)"
+					placeholder={m.loginemailgoogle_mobile_number_e_g_13812345678()}
 					autocomplete="tel"
 					required
 				/>
 				<button type="submit" class="form-btn" disabled={phoneSending}>
-					{phoneSending ? 'Sending...' : 'Send code'}
+					{phoneSending ? m.loginemailgoogle_sending() : m.loginemailgoogle_send_code()}
 				</button>
 			</form>
 		{:else}
@@ -559,7 +560,7 @@
 					bind:value={phoneCode}
 					type="text"
 					class="input"
-					placeholder="Enter the code you received"
+					placeholder={m.loginemailgoogle_enter_the_code_you_received()}
 					autocomplete="one-time-code"
 					required
 				/>
@@ -568,7 +569,7 @@
 						bind:value={phoneFirstName}
 						type="text"
 						class="input"
-						placeholder="First name"
+						placeholder={m.loginemailgoogle_first_name()}
 						autocomplete="given-name"
 						required
 					/>
@@ -576,12 +577,12 @@
 						bind:value={phoneLastName}
 						type="text"
 						class="input"
-						placeholder="Last name"
+						placeholder={m.loginemailgoogle_last_name()}
 						autocomplete="family-name"
 						required
 					/>
 				{/if}
-				<button type="submit" class="form-btn">Verify code</button>
+				<button type="submit" class="form-btn">{m.loginemailgoogle_verify_code_2()}</button>
 				<button
 					type="button"
 					class="page-link-label"
@@ -590,13 +591,13 @@
 						void handleSendPhoneCode();
 					}}
 				>
-					{phoneCooldownSeconds > 0 ? `Resend code (${phoneCooldownSeconds}s)` : 'Resend code'}
+					{phoneCooldownSeconds > 0 ? m.loginemailgoogle_resend_code_s({ phoneCooldownSeconds }) : m.loginemailgoogle_resend_code()}
 				</button>
 			</form>
 		{/if}
 
 		<p class="sign-up-label">
-			<button class="sign-up-link" onclick={switchToLogin}>Back to login</button>
+			<button class="sign-up-link" onclick={switchToLogin}>{m.loginemailgoogle_back_to_login()}</button>
 		</p>
 	{/if}
 
@@ -625,7 +626,7 @@
 							d="M511.6 76.3c-240.8 0-436.2 195.4-436.2 436.2 0 192.8 125.2 356.6 298.7 414.4 21.8 4 29.8-9.5 29.8-21.1 0-10.5-.4-45.3-.6-82.1-121.5 26.4-147.2-51.4-147.2-51.4-19.8-50.3-48.4-63.7-48.4-63.7-39.6-27.1 3-26.6 3-26.6 43.8 3.1 66.8 45 66.8 45 38.9 66.7 102 47.5 126.8 36.3 4-28.2 15.2-47.5 27.6-58.4-97-11-199-48.5-199-216 0-47.7 17-86.7 44.9-117.3-4.5-11-19.5-55.5 4.2-115.7 0 0 36.7-11.8 120.2 44.8 34.9-9.7 72.3-14.6 109.5-14.8 37.1.2 74.6 5.1 109.5 14.8 83.4-56.6 120.1-44.8 120.1-44.8 23.8 60.2 8.8 104.7 4.3 115.7 27.9 30.6 44.8 69.6 44.8 117.3 0 167.9-102.1 204.9-199.3 215.7 15.6 13.5 29.5 40.1 29.5 81.1 0 58.6-.5 105.9-.5 120.4 0 11.7 7.9 25.3 30 21 173.4-57.8 298.6-221.6 298.6-414.3 0-240.8-195.4-436.2-436.2-436.2z"
 						></path>
 					</svg>
-					<span>Log in with GitHub</span>
+					<span>{m.loginemailgoogle_log_in_with_github()}</span>
 				</button>
 			{/if}
 
@@ -672,14 +673,14 @@
 	c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"
 						></path>
 					</svg>
-					<span>Log in with Google</span>
+					<span>{m.loginemailgoogle_log_in_with_google()}</span>
 				</button>
 			{/if}
 		</div>
 	{/if}
 
 	{#if variant === 'modal' && onClose}
-		<button type="button" class="cancel-btn" onclick={onClose}>Cancel</button>
+		<button type="button" class="cancel-btn" onclick={onClose}>{m.loginemailgoogle_cancel()}</button>
 	{/if}
 </div>
 
