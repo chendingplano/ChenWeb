@@ -198,7 +198,6 @@
 	"mrv_export": "导出",
 	"mrv_export_md": "导出 Markdown",
 	"mrv_export_pdf": "导出 PDF",
-	"mrv_export_popup_blocked": "浏览器阻止了打印窗口。请允许此网站弹出窗口后重试。",
 	"mrv_loading": "正在加载审查…",
 	"mrv_not_reviewed": "此文档尚未审查。点击“审查”开始。",
 	"mrv_translate_prompt": "尚无{lang}版本的审查，但已有{others}版本。是否将其翻译为{lang}？（也可点击“审查”重新生成{lang}审查。）",

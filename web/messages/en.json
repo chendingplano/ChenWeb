@@ -198,7 +198,6 @@
 	"mrv_export": "Export",
 	"mrv_export_md": "Export Markdown",
 	"mrv_export_pdf": "Export PDF",
-	"mrv_export_popup_blocked": "The browser blocked the print window. Allow pop-ups for this site and try again.",
 	"mrv_loading": "Loading review…",
 	"mrv_not_reviewed": "This document has not been reviewed yet. Press Review to run one.",
 	"mrv_translate_prompt": "There is no review in {lang} yet, but one exists in {others}. Translate it into {lang}? (Or press Review to run a new review in {lang}.)",

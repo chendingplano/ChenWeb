@@ -321,20 +321,26 @@
 
 	// PDF: a print-styled copy in a new window; the browser's "Save as PDF"
 	// renders CJK text correctly without embedding fonts (design D6).
+	// The page is a blob URL opened with noopener and prints itself on load:
+	// a scripted opener-linked window shares this tab's event loop, so its
+	// modal print dialog would freeze this tab until the print tab closed.
 	function exportPdf() {
 		exportOpen = false;
 		const md = currentMarkdown();
 		if (!md || !selected) return;
 		const title = reviewExportFilename(selected.id, review?.lang ?? lang, 'pdf').replace(/\.pdf$/, '');
-		const w = window.open('', '_blank');
-		if (!w) {
-			reviewError = m.mrv_export_popup_blocked();
-			return;
-		}
-		w.document.write(buildReviewPrintHtml(md, title, review?.lang ?? lang));
-		w.document.close();
-		w.focus();
-		setTimeout(() => w.print(), 300);
+		const html = buildReviewPrintHtml(md, title, review?.lang ?? lang).replace(
+			'</body>',
+			'<script>addEventListener("load", () => setTimeout(() => print(), 300));<\/script></body>'
+		);
+		const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+		const a = document.createElement('a');
+		a.href = url;
+		a.target = '_blank';
+		a.rel = 'noopener';
+		a.click();
+		// The new tab loads the blob asynchronously; revoke only once it has had time to.
+		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	}
 
 	// --- Report helpers ---
