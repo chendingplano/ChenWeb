@@ -480,7 +480,7 @@
 								{selected.title || selected.file_name || m.mrv_untitled()}
 							</h3>
 						</div>
-						<div class="flex items-center gap-3">
+						<div class="flex flex-col items-start gap-2">
 							<label class="flex items-center gap-2 text-sm" style="color:{textSecondary};">
 								{m.mrv_model()}
 								<select
@@ -498,54 +498,56 @@
 									{/each}
 								</select>
 							</label>
-							<label class="flex items-center gap-2 text-sm cursor-pointer" style="color:{textSecondary};">
-								<input type="checkbox" bind:checked={force} />
-								{m.mrv_force()}
-							</label>
-							<button
-								onclick={runReview}
-								disabled={starting || review?.status === 'running'}
-								class="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium cursor-pointer disabled:opacity-50"
-								style="background:{accent}; color:#fff;"
-							>
-								<SparklesIcon class="w-4 h-4" />
-								{m.mrv_review()}
-							</button>
-							<div class="relative">
+							<div class="flex items-center gap-3">
+								<label class="flex items-center gap-2 text-sm cursor-pointer whitespace-nowrap" style="color:{textSecondary};">
+									<input type="checkbox" bind:checked={force} />
+									{m.mrv_force()}
+								</label>
 								<button
-									onclick={(e) => {
-										e.stopPropagation();
-										exportOpen = !exportOpen;
-									}}
-									disabled={!report}
-									aria-haspopup="menu"
-									aria-expanded={exportOpen}
-									class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-default"
-									style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
+									onclick={runReview}
+									disabled={starting || review?.status === 'running'}
+									class="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium cursor-pointer disabled:opacity-50"
+									style="background:{accent}; color:#fff;"
 								>
-									<DownloadIcon class="w-4 h-4" />
-									{m.mrv_export()}
-									<ChevronDownIcon class="w-4 h-4" />
+									<SparklesIcon class="w-4 h-4" />
+									{m.mrv_review()}
 								</button>
-								{#if exportOpen && report}
-									<div
-										role="menu"
-										class="absolute right-0 mt-1 z-20 min-w-44 rounded-lg py-1 shadow-lg"
-										style="background:{cardBg}; border:1px solid {borderColor};"
+								<div class="relative">
+									<button
+										onclick={(e) => {
+											e.stopPropagation();
+											exportOpen = !exportOpen;
+										}}
+										disabled={!report}
+										aria-haspopup="menu"
+										aria-expanded={exportOpen}
+										class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-default"
+										style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 									>
-										{#each [{ label: m.mrv_export_md(), run: exportMarkdown }, { label: m.mrv_export_pdf(), run: exportPdf }] as item (item.label)}
-											<button
-												role="menuitem"
-												class="block w-full text-left px-3 py-2 text-sm cursor-pointer export-item"
-												style="color:{textPrimary}; --hover-bg:{surface2};"
-												onclick={(e) => {
-													e.stopPropagation();
-													item.run();
-												}}>{item.label}</button
-											>
-										{/each}
-									</div>
-								{/if}
+										<DownloadIcon class="w-4 h-4" />
+										{m.mrv_export()}
+										<ChevronDownIcon class="w-4 h-4" />
+									</button>
+									{#if exportOpen && report}
+										<div
+											role="menu"
+											class="absolute right-0 mt-1 z-20 min-w-44 rounded-lg py-1 shadow-lg"
+											style="background:{cardBg}; border:1px solid {borderColor};"
+										>
+											{#each [{ label: m.mrv_export_md(), run: exportMarkdown }, { label: m.mrv_export_pdf(), run: exportPdf }] as item (item.label)}
+												<button
+													role="menuitem"
+													class="block w-full text-left px-3 py-2 text-sm cursor-pointer export-item"
+													style="color:{textPrimary}; --hover-bg:{surface2};"
+													onclick={(e) => {
+														e.stopPropagation();
+														item.run();
+													}}>{item.label}</button
+												>
+											{/each}
+										</div>
+									{/if}
+								</div>
 							</div>
 						</div>
 					</div>
