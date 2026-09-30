@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -75,7 +76,7 @@
 	let railExpanded = $state(false);
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
-	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: 'Dashboard' });
+	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
 	// Product Review's results page uses the shelf's space for its own resizable
 	// panes instead (spec: product-review-results-layout) — hide the shelf while
 	// it's the active content, without touching the stored shelfOpen toggle so
@@ -274,7 +275,7 @@
 				onmouseleave={(e) => {
 					(e.currentTarget as HTMLElement).style.background = borderColor;
 				}}
-				title="Drag to resize rail"
+				title={m.dashboard_drag_to_resize_rail()}
 			>
 				<div
 					class="flex flex-col gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
@@ -314,7 +315,7 @@
 				onmouseleave={(e) => {
 					(e.currentTarget as HTMLElement).style.background = borderColor;
 				}}
-				title="Drag to resize shelf"
+				title={m.dashboard_drag_to_resize_shelf()}
 			>
 				<div
 					class="flex flex-col gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"

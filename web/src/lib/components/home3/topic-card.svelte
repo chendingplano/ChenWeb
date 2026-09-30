@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { TopicCard } from './topic-types';
 	import { formatTopicLineSpecs } from './topic-line-specs';
 
@@ -21,15 +22,15 @@
 	</div>
 	<div class="meta-grid">
 		<div class="meta-item">
-			<span>Record ID</span>
+			<span>{m.topic_card_record_id()}</span>
 			<strong>{topic.inputId}</strong>
 		</div>
 		<div class="meta-item">
-			<span>Type</span>
+			<span>{m.topic_card_type()}</span>
 			<strong>{topic.topicType || '—'}</strong>
 		</div>
 		<div class="meta-item meta-item-wide">
-			<span>Line Numbers</span>
+			<span>{m.topic_card_line_numbers()}</span>
 			<strong>{formatTopicLineSpecs(topic.sourceLineSpecs)}</strong>
 		</div>
 	</div>

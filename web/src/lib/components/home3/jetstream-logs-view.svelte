@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
@@ -10,9 +11,9 @@
 	type EndpointData = Record<string, any>;
 
 	const endpoints: { id: Endpoint; label: string; help: string }[] = [
-		{ id: 'jsz', label: 'JetStream', help: 'JetStream health, storage, streams and consumers.' },
-		{ id: 'varz', label: 'Server', help: 'NATS server runtime information and process stats.' },
-		{ id: 'connz', label: 'Connections', help: 'Current client connection details and auth identity.' }
+		{ id: 'jsz', label: m.jetstream_logs_jetstream(), help: m.jetstream_logs_jetstream_health_storage_streams_and() },
+		{ id: 'varz', label: m.jetstream_logs_server(), help: m.jetstream_logs_nats_server_runtime_information_and() },
+		{ id: 'connz', label: m.jetstream_logs_connections(), help: m.jetstream_logs_current_client_connection_details_and() }
 	];
 
 	let endpoint: Endpoint = $state('jsz');
@@ -47,7 +48,7 @@
 			});
 			const data = await res.json();
 			if (!res.ok || !data.ok) {
-				throw new Error(data.message ?? 'Failed to fetch JetStream monitoring data');
+				throw new Error(data.message ?? m.jetstream_logs_failed_to_fetch_jetstream_monitoring());
 			}
 			payload = data.data ?? {};
 			lastUpdated = formatNow();
@@ -93,25 +94,25 @@
 		if (!payload) return [] as { label: string; value: string | number }[];
 		if (endpoint === 'jsz') {
 			return [
-				{ label: 'Memory (bytes)', value: payload.memory ?? 'n/a' },
-				{ label: 'Stored (bytes)', value: payload.store ?? 'n/a' },
-				{ label: 'Streams', value: payload.streams ?? 'n/a' },
-				{ label: 'Consumers', value: payload.consumers ?? 'n/a' }
+				{ label: m.jetstream_logs_memory_bytes(), value: payload.memory ?? 'n/a' },
+				{ label: m.jetstream_logs_stored_bytes(), value: payload.store ?? 'n/a' },
+				{ label: m.jetstream_logs_streams(), value: payload.streams ?? 'n/a' },
+				{ label: m.jetstream_logs_consumers(), value: payload.consumers ?? 'n/a' }
 			];
 		}
 		if (endpoint === 'connz') {
 			return [
-				{ label: 'Connections', value: payload.num_connections ?? 'n/a' },
-				{ label: 'Total', value: payload.total ?? 'n/a' },
-				{ label: 'Offset', value: payload.offset ?? 'n/a' },
-				{ label: 'Limit', value: payload.limit ?? 'n/a' }
+				{ label: m.jetstream_logs_connections(), value: payload.num_connections ?? 'n/a' },
+				{ label: m.jetstream_logs_total(), value: payload.total ?? 'n/a' },
+				{ label: m.jetstream_logs_offset(), value: payload.offset ?? 'n/a' },
+				{ label: m.jetstream_logs_limit(), value: payload.limit ?? 'n/a' }
 			];
 		}
 		return [
-			{ label: 'Server ID', value: payload.server_id ?? 'n/a' },
-			{ label: 'Version', value: payload.version ?? 'n/a' },
-			{ label: 'Uptime', value: payload.uptime ?? 'n/a' },
-			{ label: 'Connections', value: payload.connections ?? 'n/a' }
+			{ label: m.jetstream_logs_server_id(), value: payload.server_id ?? 'n/a' },
+			{ label: m.jetstream_logs_version(), value: payload.version ?? 'n/a' },
+			{ label: m.jetstream_logs_uptime(), value: payload.uptime ?? 'n/a' },
+			{ label: m.jetstream_logs_connections(), value: payload.connections ?? 'n/a' }
 		];
 	});
 </script>
@@ -120,8 +121,8 @@
 	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="flex flex-wrap items-center gap-3 justify-between">
 			<div>
-				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">JetStream</h2>
-				<p style="font-size:13px; color:{textSecondary};">Live monitoring data from NATS monitoring endpoints.</p>
+				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">{m.jetstream_logs_jetstream()}</h2>
+				<p style="font-size:13px; color:{textSecondary};">{m.jetstream_logs_live_monitoring_data_from_nats()}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<button
@@ -131,7 +132,7 @@
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
 					<RefreshCwIcon class="w-4 h-4" />
-					Refresh
+					{m.jetstream_logs_refresh()}
 				</button>
 			</div>
 		</div>
@@ -156,16 +157,16 @@
 		<div class="mt-4 flex flex-wrap items-center gap-3 text-sm" style="color:{textSecondary};">
 			<label class="inline-flex items-center gap-2">
 				<input type="checkbox" bind:checked={autoRefresh} />
-				Auto refresh
+				{m.jetstream_logs_auto_refresh()}
 			</label>
 			<label class="inline-flex items-center gap-2">
-				Every
+				{m.jetstream_logs_every()}
 				<input type="number" min="1" max="60" bind:value={refreshSec} class="w-16 rounded px-2 py-1"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" />
 				s
 			</label>
 			{#if lastUpdated}
-				<span style="color:{textMuted};">Last updated: {lastUpdated}</span>
+				<span style="color:{textMuted};">{m.jetstream_logs_last_updated({ lastUpdated })}</span>
 			{/if}
 		</div>
 	</div>
@@ -174,7 +175,7 @@
 		<div class="rounded-xl p-4 flex items-start gap-2" style="background:{danger}20; border:1px solid {danger}70; color:{danger};">
 			<CircleAlertIcon class="w-4 h-4 mt-0.5" />
 			<div>
-				<div style="font-weight:600;">Unable to load JetStream data</div>
+				<div style="font-weight:600;">{m.jetstream_logs_unable_to_load_jetstream_data()}</div>
 				<div style="font-size:13px; opacity:0.95;">{error}</div>
 			</div>
 		</div>
@@ -191,13 +192,13 @@
 		<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
 			<div class="flex items-center gap-2" style="color:{success}; font-size:13px; font-weight:600;">
 				<CircleCheckBigIcon class="w-4 h-4" />
-				Endpoint reachable
+				{m.jetstream_logs_endpoint_reachable()}
 			</div>
 			<pre class="mt-3 overflow-auto p-3 rounded-lg" style="max-height:460px; background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:12px;">{JSON.stringify(payload, null, 2)}</pre>
 		</div>
 	{:else}
 		<div class="rounded-xl p-6" style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary};">
-			Loading…
+			{m.jetstream_logs_loading()}
 		</div>
 	{/if}
 </div>

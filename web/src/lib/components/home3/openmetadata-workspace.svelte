@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
@@ -102,7 +103,7 @@
 				user_id: session.user_id
 			});
 		} catch (err) {
-			loadError = err instanceof Error ? err.message : 'Failed to start OpenMetadata';
+			loadError = err instanceof Error ? err.message : m.openmetadata_workspace_failed_to_start_openmetadata();
 			session = null;
 		} finally {
 			loading = false;
@@ -112,9 +113,9 @@
 	async function readErrorMessage(res: Response) {
 		try {
 			const body = (await res.json()) as { message?: string; error_msg?: string };
-			return body.message || body.error_msg || `Request failed with status ${res.status}`;
+			return body.message || body.error_msg || m.openmetadata_workspace_request_failed_with_status({ status: res.status });
 		} catch {
-			return `Request failed with status ${res.status}`;
+			return m.openmetadata_workspace_request_failed_with_status({ status: res.status });
 		}
 	}
 
@@ -158,7 +159,7 @@
 				<div class="min-w-0">
 					<div class="flex items-center gap-2">
 						<h2 style="font-size:17px; font-weight:600; color:{textPrimary};">
-							OpenMetadata Workspace
+							{m.openmetadata_workspace_openmetadata_workspace()}
 						</h2>
 						<span
 							class="inline-flex items-center gap-1 rounded-full px-2 py-0.5"
@@ -166,18 +167,18 @@
 						>
 							{#if loadError}
 								<WifiOffIcon class="h-3 w-3" />
-								Disconnected
+								{m.openmetadata_workspace_disconnected()}
 							{:else if session?.sso_mode === 'token-bridge'}
 								<WifiIcon class="h-3 w-3" style="color:{success};" />
-								SSO active
+								{m.openmetadata_workspace_sso_active()}
 							{:else}
 								<WifiIcon class="h-3 w-3" style="color:{success};" />
-								Session ready
+								{m.openmetadata_workspace_session_ready()}
 							{/if}
 						</span>
 					</div>
 					<p style="font-size:13px; color:{textSecondary}; margin-top:4px;">
-						ChenWeb owns the shell and session bootstrap. OpenMetadata stays embedded in this panel.
+						{m.openmetadata_workspace_chenweb_owns_the_shell_and()}
 					</p>
 				</div>
 			</div>
@@ -188,7 +189,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;"
 				>
 					<input bind:checked={syncContext} type="checkbox" />
-					Sync context
+					{m.openmetadata_workspace_sync_context()}
 				</label>
 				<button
 					class="inline-flex items-center gap-2 rounded-lg px-3 py-2"
@@ -197,7 +198,7 @@
 					disabled={loading || !session}
 				>
 					<RefreshCwIcon class="h-3.5 w-3.5" />
-					Reload
+					{m.openmetadata_workspace_reload()}
 				</button>
 				<button
 					class="inline-flex items-center gap-2 rounded-lg px-3 py-2"
@@ -206,7 +207,7 @@
 					disabled={loading || !session}
 				>
 					<ExternalLinkIcon class="h-3.5 w-3.5" />
-					Open in new tab
+					{m.openmetadata_workspace_open_in_new_tab()}
 				</button>
 			</div>
 		</div>
@@ -214,16 +215,16 @@
 		{#if loading}
 			<div class="px-5 py-12" style="background:{pageBg}; color:{textSecondary};">
 				<div class="mx-auto max-w-xl rounded-xl px-5 py-6" style="background:{surface2}; border:1px solid {borderColor};">
-					<div style="font-size:14px; font-weight:600; color:{textPrimary};">Connecting to OpenMetadata</div>
+					<div style="font-size:14px; font-weight:600; color:{textPrimary};">{m.openmetadata_workspace_connecting_to_openmetadata()}</div>
 					<p style="font-size:13px; line-height:1.6; margin-top:6px;">
-						ChenWeb is verifying your identity and preparing a seamless session.
+						{m.openmetadata_workspace_chenweb_is_verifying_your_identity()}
 					</p>
 				</div>
 			</div>
 		{:else if loadError}
 			<div class="px-5 py-12" style="background:{pageBg}; color:{textSecondary};">
 				<div class="mx-auto max-w-xl rounded-xl px-5 py-6" style="background:{dangerTint}; border:1px solid {danger}44;">
-					<div style="font-size:14px; font-weight:600; color:{danger};">OpenMetadata is unavailable</div>
+					<div style="font-size:14px; font-weight:600; color:{danger};">{m.openmetadata_workspace_openmetadata_is_unavailable()}</div>
 					<p style="font-size:13px; line-height:1.6; margin-top:6px; color:{textPrimary};">
 						{loadError}
 					</p>
@@ -234,7 +235,7 @@
 							onclick={loadSession}
 						>
 							<RefreshCwIcon class="h-3.5 w-3.5" />
-							Try again
+							{m.openmetadata_workspace_try_again()}
 						</button>
 					</div>
 				</div>
@@ -246,29 +247,29 @@
 					style="border-bottom:1px solid {borderColor}; color:{textMuted}; font-size:12px;"
 				>
 					<div class="flex min-w-0 items-center gap-2">
-						<span style="color:{textSecondary};">Launch path</span>
+						<span style="color:{textSecondary};">{m.openmetadata_workspace_launch_path()}</span>
 						<code style="color:{textPrimary};">{session.proxy_base_path}</code>
 					</div>
 					{#if session.callback_url}
 						<div class="flex min-w-0 items-center gap-2">
-							<span style="color:{textSecondary};">Callback URL</span>
+							<span style="color:{textSecondary};">{m.openmetadata_workspace_callback_url()}</span>
 							<code style="color:{textPrimary};">{session.callback_url}</code>
 						</div>
 					{/if}
 					<div class="flex items-center gap-2">
-						<span style="color:{textSecondary};">SSO mode</span>
+						<span style="color:{textSecondary};">{m.openmetadata_workspace_sso_mode()}</span>
 						<code style="color:{textPrimary};">{session.sso_mode}</code>
 					</div>
 					{#if session.sso_mode === 'token-bridge' && session.provision_status}
 						<div class="flex items-center gap-2">
-							<span style="color:{textSecondary};">Identity</span>
+							<span style="color:{textSecondary};">{m.openmetadata_workspace_identity()}</span>
 							<code style="color:{session.provision_status === 'provisioned' ? success : textMuted};">
 								{session.provision_status}
 							</code>
 						</div>
 					{/if}
 					<div class="flex items-center gap-2">
-						<span style="color:{textSecondary};">Capabilities</span>
+						<span style="color:{textSecondary};">{m.openmetadata_workspace_capabilities()}</span>
 						<code style="color:{textPrimary};">{session.capabilities.join(', ')}</code>
 					</div>
 				</div>
@@ -281,7 +282,7 @@
 					</div>
 				{/if}
 				<iframe
-					title="OpenMetadata workspace"
+					title={m.openmetadata_workspace_openmetadata_workspace_2()}
 					src={iframeSrc}
 					class="block w-full"
 					style="height:calc(100vh - 370px); min-height:720px; border:0; background:white;"

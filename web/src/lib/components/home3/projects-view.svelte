@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import type { Project } from './agentplatform-client';
 	import { apStore } from './agentplatform-store.svelte';
@@ -32,7 +33,7 @@
 	async function submitCreate() {
 		localError = null;
 		const name = newName.trim();
-		if (!name) { localError = 'Name is required'; return; }
+		if (!name) { localError = m.projects_name_is_required(); return; }
 		submitting = true;
 		try {
 			await apStore.createProject({ name, description: newDesc.trim() || undefined });
@@ -59,7 +60,7 @@
 	async function saveEdit(id: string) {
 		localError = null;
 		const name = editName.trim();
-		if (!name) { localError = 'Name is required'; return; }
+		if (!name) { localError = m.projects_name_is_required(); return; }
 		editSaving = true;
 		try {
 			await apStore.updateProject(id, { name, description: editDesc.trim() || undefined });
@@ -72,7 +73,7 @@
 	}
 
 	async function remove(p: Project) {
-		if (!confirm(`Delete project "${p.name}"? Issues in this project will lose their project association.`)) return;
+		if (!confirm(m.projects_delete_project_issues_in_this({ name: p.name }))) return;
 		try {
 			await apStore.deleteProject(p.id);
 		} catch (e) {
@@ -101,10 +102,10 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Projects</h2>
+			<h2>{m.projects_projects()}</h2>
 			<p class="muted">
-				{apStore.projects.length} project{apStore.projects.length === 1 ? '' : 's'}
-				{apStore.active ? ` in ${apStore.active.name}` : ''}
+				{m.projects_project({ projectsCount: apStore.projects.length, plural: apStore.projects.length === 1 ? '' : 's' })}{#if apStore.active}
+					{m.projects_in_project({ name: apStore.active.name })}{/if}
 			</p>
 		</div>
 		<button
@@ -112,7 +113,7 @@
 			onclick={() => (showCreate = !showCreate)}
 			disabled={!apStore.active}
 		>
-			{showCreate ? 'Cancel' : '+ New Project'}
+			{showCreate ? m.projects_cancel() : m.projects_new_project()}
 		</button>
 	</header>
 
@@ -122,20 +123,20 @@
 			onsubmit={(e) => { e.preventDefault(); submitCreate(); }}
 		>
 			<label>
-				<span>Name</span>
+				<span>{m.projects_name()}</span>
 				<input
 					bind:value={newName}
 					required
-					placeholder="e.g. Backend Refactor"
+					placeholder={m.projects_e_g_backend_refactor()}
 				/>
 			</label>
 			<label>
-				<span>Description (optional)</span>
-				<textarea rows="2" bind:value={newDesc} placeholder="Short description…"></textarea>
+				<span>{m.projects_description_optional()}</span>
+				<textarea rows="2" bind:value={newDesc} placeholder={m.projects_short_description()}></textarea>
 			</label>
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting || !newName.trim()}>
-					{submitting ? 'Creating…' : 'Create project'}
+					{submitting ? m.projects_creating() : m.projects_create_project()}
 				</button>
 			</div>
 		</form>
@@ -146,7 +147,7 @@
 	{/if}
 
 	{#if apStore.projects.length === 0}
-		<div class="empty">No projects yet. Create one to group your issues.</div>
+		<div class="empty">{m.projects_no_projects_yet_create_one()}</div>
 	{:else}
 		<ul class="list">
 			{#each apStore.projects as p (p.id)}
@@ -157,14 +158,14 @@
 							onsubmit={(e) => { e.preventDefault(); saveEdit(p.id); }}
 						>
 							<div class="edit-fields">
-								<input class="edit-name" bind:value={editName} required placeholder="Project name" />
-								<input class="edit-desc" bind:value={editDesc} placeholder="Description" />
+								<input class="edit-name" bind:value={editName} required placeholder={m.projects_project_name()} />
+								<input class="edit-desc" bind:value={editDesc} placeholder={m.projects_description()} />
 							</div>
 							<div class="edit-actions">
 								<button class="primary small" type="submit" disabled={editSaving || !editName.trim()}>
-									{editSaving ? 'Saving…' : 'Save'}
+									{editSaving ? m.projects_saving() : m.projects_save()}
 								</button>
-								<button class="ghost small" type="button" onclick={cancelEdit}>Cancel</button>
+								<button class="ghost small" type="button" onclick={cancelEdit}>{m.projects_cancel()}</button>
 							</div>
 						</form>
 					{:else}
@@ -176,8 +177,8 @@
 						</div>
 						<div class="project-actions">
 							<span class="date">{new Date(p.created_at).toLocaleDateString()}</span>
-							<button class="action-link" onclick={() => startEdit(p)}>Edit</button>
-							<button class="danger-link" onclick={() => remove(p)}>Delete</button>
+							<button class="action-link" onclick={() => startEdit(p)}>{m.projects_edit()}</button>
+							<button class="danger-link" onclick={() => remove(p)}>{m.projects_delete()}</button>
 						</div>
 					{/if}
 				</li>

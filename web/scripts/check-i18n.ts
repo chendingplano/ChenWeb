@@ -4,7 +4,9 @@
 // 1. Message parity (hard failure): messages/en.json and messages/zh-cn.json must
 //    have the same keys, and no value may be empty.
 // 2. Hard-coded text (ratchet): user-visible text written directly in .svelte
-//    markup (text nodes, and placeholder/title/aria-label/alt/label attributes)
+//    markup (text nodes, and placeholder/title/aria-label/alt/label attributes),
+//    and text-like string literals inside markup expressions
+//    (`{busy ? 'Saving…' : 'Save'}`, `title={`Open ${x}`}`, `{#each ['Low', 'High']}`)
 //    instead of through m.*(). Existing files are allowed their current count,
 //    recorded in i18n-baseline.json; a new file with any hard-coded text, or an
 //    existing file whose count grows, fails. Text inside <code>/<pre> is ignored.
@@ -28,7 +30,86 @@ const SKIP_ELEMENTS = new Set(['code', 'pre']);
 // Two or more Latin letters in a row, or any CJK character.
 const WORDY = /[A-Za-z]{2,}|[㐀-鿿]/;
 
+// Language self-names are shown in their own language on purpose.
+const ALLOWED_LITERALS = new Set(['English', '中文', '简体中文']);
+
 type Finding = { line: number; text: string };
+type JsNode = Record<string, unknown> & { type: string; start: number; end: number };
+
+// Whether a string literal in code reads as display text rather than an id, key,
+// CSS, path or format string. Stricter than isHardcodedText, because code is full
+// of short identifiers.
+export function looksLikeText(t: string): boolean {
+	const v = t.trim();
+	if (ALLOWED_LITERALS.has(v)) return false;
+	if (!/[A-Za-z]{2,}|[\u3400-\u9fff]/.test(v)) return false;
+	if (/^(https?:|\/|\.\/|#|\$lib)/.test(v)) return false;
+	if (/(^|\s)(px|rem|em|rgba?|hsla?|var\(--)|#[0-9a-f]{3,8}\b|\b\d+(px|rem|ms|s)\b/i.test(v))
+		return false;
+	if (/[;{}]/.test(v)) return false;
+	if (/^[a-z0-9_.:/@-]+$/.test(v)) return false; // ids, keys, enum codes, paths
+	if (/^[a-z][a-zA-Z0-9]*$/.test(v)) return false; // camelCase identifiers
+	if (/^[A-Z0-9_]+$/.test(v)) return false; // CONSTANTS, env names
+	if (/^[a-z]{2,3}([-_][A-Za-z]{2,4})+$/.test(v)) return false; // locales: en-US, zh-Hans
+	if (/^[YMDHhmsSaAZ]+([-/:. ][YMDHhmsSaAZ]+)+$/.test(v)) return false; // YYYY-MM-DD, HH:mm
+	// CSS class lists: lowercase tokens, at least half of them with '-', ':' or a digit.
+	const toks = v.split(/\s+/);
+	if (
+		toks.every((t) => /^[a-z0-9:/_.[\]!-]+$/.test(t)) &&
+		toks.filter((t) => /[-:0-9]/.test(t)).length * 2 >= toks.length
+	)
+		return false;
+	return true;
+}
+
+// Text-like string literals inside a markup expression. Skips comparisons
+// (`=== 'done'`), object keys, member names and call arguments (format strings,
+// keys, and the arguments of m.*() itself).
+export function textLiteralsIn(expr: unknown): JsNode[] {
+	const out: JsNode[] = [];
+	const walk = (node: unknown, parent: JsNode | null, key: string): void => {
+		if (Array.isArray(node)) return node.forEach((x) => walk(x, parent, key));
+		if (!node || typeof node !== 'object') return;
+		const n = node as JsNode;
+		if (!n.type) return;
+		if (parent) {
+			if (
+				parent.type === 'BinaryExpression' &&
+				['===', '!==', '==', '!=', 'in'].includes(String(parent.operator))
+			)
+				return;
+			if (parent.type === 'Property' && key === 'key') return;
+			if (parent.type === 'MemberExpression' && key === 'property') return;
+			if (
+				(parent.type === 'CallExpression' || parent.type === 'NewExpression') &&
+				key === 'arguments'
+			)
+				return;
+			if (parent.type === 'TaggedTemplateExpression') return;
+		}
+		if (n.type === 'Literal') {
+			if (typeof n.value === 'string' && looksLikeText(n.value)) out.push(n);
+			return;
+		}
+		if (n.type === 'TemplateLiteral') {
+			const quasiText = (n.quasis as JsNode[])
+				.map((q) => String((q.value as Record<string, unknown>).cooked ?? ''))
+				.join(' ');
+			if (looksLikeText(quasiText)) out.push(n);
+			else for (const e of n.expressions as JsNode[]) walk(e, n, 'expressions');
+			return;
+		}
+		for (const [k, v] of Object.entries(n)) {
+			if (k === 'metadata' || k === 'loc' || k === 'range') continue;
+			if (v && typeof v === 'object') walk(v, n, k);
+		}
+	};
+	walk(expr, null, '');
+	return out;
+}
+
+// Attributes whose expression values are never display text.
+const CODE_ATTR = (name: string) => name === 'class' || name === 'style' || name.startsWith('on');
 
 export function isHardcodedText(raw: string): boolean {
 	const t = raw.replace(/&[a-z]+;|&#\d+;/gi, ' ').trim();
@@ -52,18 +133,37 @@ export function findHardcodedText(source: string): Finding[] {
 				out.push({ line: lineOf(n.start ?? 0), text: String(n.data).trim() });
 			return;
 		}
+		const literals = (expr: unknown) => {
+			if (skip) return;
+			for (const l of textLiteralsIn(expr))
+				out.push({ line: lineOf(l.start), text: source.slice(l.start, l.end) });
+		};
+		if (n.type === 'ExpressionTag') {
+			literals(n.expression);
+			return;
+		}
 		if (n.type === 'Attribute') {
-			if (!TEXT_ATTRS.has(String(n.name)) || !Array.isArray(n.value)) return;
-			for (const part of n.value as Record<string, unknown>[]) {
-				if (part.type === 'Text' && isHardcodedText(String(part.data))) {
+			const name = String(n.name);
+			if (CODE_ATTR(name)) return;
+			const parts = (
+				Array.isArray(n.value) ? n.value : n.value && n.value !== true ? [n.value] : []
+			) as Record<string, unknown>[];
+			for (const part of parts) {
+				if (part.type === 'ExpressionTag') literals(part.expression);
+				else if (
+					TEXT_ATTRS.has(name) &&
+					part.type === 'Text' &&
+					isHardcodedText(String(part.data))
+				) {
 					out.push({
 						line: lineOf(Number(part.start ?? 0)),
-						text: `${n.name}="${String(part.data).trim()}"`
+						text: `${name}="${String(part.data).trim()}"`
 					});
 				}
 			}
 			return;
 		}
+		if (n.type === 'EachBlock') literals(n.expression);
 		const childSkip = skip || (n.type === 'RegularElement' && SKIP_ELEMENTS.has(String(n.name)));
 		for (const [k, v] of Object.entries(n)) {
 			// JS expressions and compiler metadata are not markup text.

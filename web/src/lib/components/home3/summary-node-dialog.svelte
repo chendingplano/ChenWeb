@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { SummaryCategoryNode } from './summary-types';
 
 	type DialogMode = 'rename' | 'metadata' | 'add' | 'delete' | 'merge' | 'split' | null;
@@ -83,55 +84,55 @@
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="eyebrow">Mocked Phase 1 Action</div>
+					<div class="eyebrow">{m.summary_node_dialog_mocked_phase_1_action()}</div>
 					<h2>
-						{#if mode === 'rename'}Rename Node{/if}
-						{#if mode === 'metadata'}Edit Metadata{/if}
-						{#if mode === 'add'}Add Child Node{/if}
-						{#if mode === 'delete'}Delete Node{/if}
-						{#if mode === 'merge'}Merge Nodes{/if}
-						{#if mode === 'split'}Split Node{/if}
+						{#if mode === 'rename'}{m.summary_node_dialog_rename_node()}{/if}
+						{#if mode === 'metadata'}{m.summary_node_dialog_edit_metadata()}{/if}
+						{#if mode === 'add'}{m.summary_node_dialog_add_child_node()}{/if}
+						{#if mode === 'delete'}{m.summary_node_dialog_delete_node()}{/if}
+						{#if mode === 'merge'}{m.summary_node_dialog_merge_nodes()}{/if}
+						{#if mode === 'split'}{m.summary_node_dialog_split_node()}{/if}
 					</h2>
 					<p>{node.categoryPath}</p>
 				</div>
-				<button type="button" class="close-btn" onclick={close}>Close</button>
+				<button type="button" class="close-btn" onclick={close}>{m.summary_node_dialog_close()}</button>
 			</div>
 
 			{#if mode === 'delete'}
 				<div class="danger-copy">
-					This removes the selected category from the mocked graph and cleans it from its parent references.
+					{m.summary_node_dialog_this_removes_the_selected_category()}
 				</div>
 			{:else}
 				<div class="form-grid">
 					{#if mode === 'rename' || mode === 'add'}
 						<label>
-							<span>Label</span>
-							<input bind:value={label} placeholder="Category label" />
+							<span>{m.summary_node_dialog_label()}</span>
+							<input bind:value={label} placeholder={m.summary_node_dialog_category_label()} />
 						</label>
 					{/if}
 
 					{#if mode === 'metadata'}
 						<label class="wide">
-							<span>Description</span>
+							<span>{m.summary_node_dialog_description()}</span>
 							<textarea bind:value={desc} rows="4"></textarea>
 						</label>
 						<label>
-							<span>Category Type</span>
-							<input bind:value={categoryType} placeholder="topic" />
+							<span>{m.summary_node_dialog_category_type()}</span>
+							<input bind:value={categoryType} placeholder={m.summary_node_dialog_topic()} />
 						</label>
 						<label>
-							<span>Confidence</span>
+							<span>{m.summary_node_dialog_confidence()}</span>
 							<input bind:value={confidence} type="number" min="0" max="1" step="0.01" />
 						</label>
 						<label class="wide">
-							<span>Keywords</span>
-							<input bind:value={keywords} placeholder="filing, evidence, review" />
+							<span>{m.summary_node_dialog_keywords()}</span>
+							<input bind:value={keywords} placeholder={m.summary_node_dialog_filing_evidence_review()} />
 						</label>
 					{/if}
 
 					{#if mode === 'merge'}
 						<label class="wide">
-							<span>Merge Into</span>
+							<span>{m.summary_node_dialog_merge_into()}</span>
 							<select bind:value={mergeTargetId}>
 								{#each availableNodes.filter((candidate) => candidate.id !== node.id) as candidate}
 									<option value={candidate.id}>{candidate.categoryPath}</option>
@@ -142,7 +143,7 @@
 
 					{#if mode === 'split'}
 						<label class="wide">
-							<span>New Branch Labels</span>
+							<span>{m.summary_node_dialog_new_branch_labels()}</span>
 							<textarea bind:value={splitLabels} rows="5"></textarea>
 						</label>
 					{/if}
@@ -150,9 +151,9 @@
 			{/if}
 
 			<div class="actions">
-				<button type="button" class="secondary" onclick={close}>Cancel</button>
+				<button type="button" class="secondary" onclick={close}>{m.summary_node_dialog_cancel()}</button>
 				<button type="button" class="primary" onclick={confirm}>
-					{mode === 'delete' ? 'Delete Node' : 'Apply Mock Update'}
+					{mode === 'delete' ? m.summary_node_dialog_delete_node() : m.summary_node_dialog_apply_mock_update()}
 				</button>
 			</div>
 		</div>

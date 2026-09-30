@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, tick } from 'svelte';
 	import { getFindingLines, editFindingLines, type LineEdit } from '$lib/services/docReviewService';
 
@@ -89,10 +90,10 @@
 			lines = await getFindingLines(findingId);
 			originalLines = lines.map((l) => ({ ...l }));
 			if (lines.length === 0) {
-				errorMsg = 'No editable source line is linked to this finding.';
+				errorMsg = m.edit_tool_dialog_no_editable_source_line_is();
 			}
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Failed to load lines';
+			errorMsg = e instanceof Error ? e.message : m.edit_tool_dialog_failed_to_load_lines();
 		} finally {
 			loading = false;
 		}
@@ -183,7 +184,7 @@
 			const changed = await editFindingLines(findingId, lines);
 			onsaved(changed);
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Failed to save';
+			errorMsg = e instanceof Error ? e.message : m.edit_tool_dialog_failed_to_save();
 			saving = false;
 		}
 	}
@@ -195,7 +196,7 @@
 			const changed = await editFindingLines(findingId, lines);
 			onsavedandhide?.(changed);
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Failed to save';
+			errorMsg = e instanceof Error ? e.message : m.edit_tool_dialog_failed_to_save();
 			saving = false;
 		}
 	}
@@ -211,21 +212,21 @@
 	role="presentation"
 	onclick={onBackdrop}
 >
-	<div class="dialog" role="dialog" aria-modal="true" aria-label="Edit Tool">
-		<h2 class="title">Edit Tool</h2>
+	<div class="dialog" role="dialog" aria-modal="true" aria-label={m.edit_tool_dialog_edit_tool()}>
+		<h2 class="title">{m.edit_tool_dialog_edit_tool()}</h2>
 
 		{#if loading}
-			<div class="state">Loading source line(s)…</div>
+			<div class="state">{m.edit_tool_dialog_loading_source_line_s()}</div>
 		{:else}
 			{#if errorMsg}<div class="state error">{errorMsg}</div>{/if}
 
 			{#if reason}
-				<div class="section-label">Reason</div>
+				<div class="section-label">{m.edit_tool_dialog_reason()}</div>
 				<div class="suggestion reason-text">{reason}</div>
 			{/if}
 
 			{#if suggestion}
-				<div class="section-label">Suggestion</div>
+				<div class="section-label">{m.edit_tool_dialog_suggestion()}</div>
 				{#if parsedSuggestion}
 					{#if parsedSuggestion.intro}
 						<div class="suggestion-intro">{parsedSuggestion.intro}</div>
@@ -236,9 +237,9 @@
 							class="accept-sugg"
 							disabled={lines.length === 0}
 							onclick={acceptSuggestion}
-							title="Replace the offending line with this suggested content"
+							title={m.edit_tool_dialog_replace_the_offending_line_with()}
 						>
-							Accept
+							{m.edit_tool_dialog_accept()}
 						</button>
 					</div>
 				{:else}
@@ -246,7 +247,7 @@
 				{/if}
 			{/if}
 
-			<div class="section-label">Offending line(s)</div>
+			<div class="section-label">{m.edit_tool_dialog_offending_line_s()}</div>
 			<div class="lines">
 				{#each lines as line, i (line.line_no)}
 					<div class="line-row">
@@ -263,53 +264,53 @@
 					</div>
 				{/each}
 				{#if lines.length === 0 && !errorMsg}
-					<div class="state">No lines to edit.</div>
+					<div class="state">{m.edit_tool_dialog_no_lines_to_edit()}</div>
 				{/if}
 			</div>
 
 			<div class="find-replace">
 				<div class="fr-row">
-					<label class="fr-label" for="et-search">Find</label>
+					<label class="fr-label" for="et-search">{m.edit_tool_dialog_find()}</label>
 					<input
 						id="et-search"
 						class="fr-input"
-						placeholder="substring to search"
+						placeholder={m.edit_tool_dialog_substring_to_search()}
 						bind:value={search}
 						oninput={resetMatch}
 						spellcheck="false"
 					/>
 				</div>
 				<div class="fr-row">
-					<label class="fr-label" for="et-replace">Replace</label>
+					<label class="fr-label" for="et-replace">{m.edit_tool_dialog_replace()}</label>
 					<input
 						id="et-replace"
 						class="fr-input"
-						placeholder="replacement text"
+						placeholder={m.edit_tool_dialog_replacement_text()}
 						bind:value={replaceText}
 						spellcheck="false"
 					/>
 				</div>
 				<div class="fr-buttons">
-					<button class="btn" disabled={!canFind} onclick={findNext}>Find</button>
-					<button class="btn" disabled={!hasMatch} onclick={() => applyReplacement(false)}>Replace</button>
-					<button class="btn" disabled={!hasMatch} onclick={() => applyReplacement(true)}>Remove</button>
+					<button class="btn" disabled={!canFind} onclick={findNext}>{m.edit_tool_dialog_find()}</button>
+					<button class="btn" disabled={!hasMatch} onclick={() => applyReplacement(false)}>{m.edit_tool_dialog_replace()}</button>
+					<button class="btn" disabled={!hasMatch} onclick={() => applyReplacement(true)}>{m.edit_tool_dialog_remove()}</button>
 				</div>
 				{#if noMatchNotice}
-					<div class="fr-note">No match found.</div>
+					<div class="fr-note">{m.edit_tool_dialog_no_match_found()}</div>
 				{:else if hasMatch}
-					<div class="fr-note ok">Match on line L{lines[matchLine!].line_no}.</div>
+					<div class="fr-note ok">{m.edit_tool_dialog_match_on_line_l({ line_no: lines[matchLine!].line_no })}</div>
 				{/if}
 			</div>
 		{/if}
 
 		<div class="actions">
-			<button class="btn ghost" onclick={oncancel} disabled={saving}>Cancel</button>
+			<button class="btn ghost" onclick={oncancel} disabled={saving}>{m.edit_tool_dialog_cancel()}</button>
 			<button class="btn primary" onclick={save} disabled={saving || loading || lines.length === 0 || !hasChanges}>
-				{saving ? 'Saving…' : 'Save'}
+				{saving ? m.edit_tool_dialog_saving() : m.edit_tool_dialog_save()}
 			</button>
 			{#if onsavedandhide}
 				<button class="btn save-hide" onclick={saveAndHide} disabled={saving || loading || lines.length === 0 || !hasChanges}>
-					{saving ? 'Saving…' : 'Save & Hide'}
+					{saving ? m.edit_tool_dialog_saving() : m.edit_tool_dialog_save_hide()}
 				</button>
 			{/if}
 		</div>

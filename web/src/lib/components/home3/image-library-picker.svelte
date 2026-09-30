@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { listImages, uploadImage, imageContentUrl, type ImageMeta } from '$lib/services/imageService';
 
@@ -31,7 +32,7 @@
 		try {
 			images = await listImages();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load images';
+			error = e instanceof Error ? e.message : m.image_library_picker_failed_to_load_images();
 		} finally {
 			loading = false;
 		}
@@ -47,7 +48,7 @@
 			await refresh();
 			onPick(img); // newly uploaded image becomes the selection
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Upload failed';
+			error = e instanceof Error ? e.message : m.image_library_picker_upload_failed();
 		} finally {
 			uploading = false;
 			if (fileInput) fileInput.value = '';
@@ -70,7 +71,7 @@
 		onclick={(e) => e.stopPropagation()}
 	>
 		<div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid {borderColor};">
-			<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">Pick an Image</h2>
+			<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">{m.image_library_picker_pick_an_image()}</h2>
 			<div class="flex items-center gap-3">
 				<input bind:this={fileInput} type="file" accept="image/*" class="hidden" onchange={onUploadChosen} />
 				<button
@@ -79,7 +80,7 @@
 					class="rounded-lg px-3 py-1.5 cursor-pointer"
 					style="background:{accent}; color:#fff; font-size:13px; border:none; opacity:{uploading ? 0.6 : 1};"
 				>
-					{uploading ? 'Uploading…' : 'Upload new'}
+					{uploading ? m.image_library_picker_uploading() : m.image_library_picker_upload_new()}
 				</button>
 				<button
 					onclick={onClose}
@@ -96,10 +97,10 @@
 				<div class="mb-3" style="color:#F87171; font-size:13px;">{error}</div>
 			{/if}
 			{#if loading}
-				<div class="py-8 text-center" style="color:{textSecondary}; font-size:14px;">Loading…</div>
+				<div class="py-8 text-center" style="color:{textSecondary}; font-size:14px;">{m.image_library_picker_loading()}</div>
 			{:else if images.length === 0}
 				<div class="py-8 text-center" style="color:{textSecondary}; font-size:14px;">
-					No images yet. Upload one to start your library.
+					{m.image_library_picker_no_images_yet_upload_one()}
 				</div>
 			{:else}
 				<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(120px,1fr));">

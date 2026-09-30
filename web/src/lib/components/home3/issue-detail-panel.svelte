@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		apClient,
@@ -52,7 +53,7 @@
 		const issue = apStore.selectedIssue;
 		if (!slug || !issue) return;
 		if (!issue.assignee_agent_id) {
-			runsError = 'assign an agent to this issue before running';
+			runsError = m.issue_detail_panel_assign_an_agent_to_this();
 			return;
 		}
 		runsError = null;
@@ -296,7 +297,7 @@
 	style:--sub={sub}
 >
 	{#if !apStore.selectedIssue}
-		<p class="muted">Select an issue to see details.</p>
+		<p class="muted">{m.issue_detail_panel_select_an_issue_to_see()}</p>
 	{:else}
 		{@const iss = apStore.selectedIssue}
 		<header class="head">
@@ -305,7 +306,7 @@
 		</header>
 
 		<section>
-			<label for="issue-status">Status</label>
+			<label for="issue-status">{m.issue_detail_panel_status()}</label>
 			<select
 				id="issue-status"
 				value={iss.status}
@@ -319,13 +320,13 @@
 		</section>
 
 		<section>
-			<label for="issue-assignee">Assignee</label>
+			<label for="issue-assignee">{m.issue_detail_panel_assignee()}</label>
 			<select
 				id="issue-assignee"
 				value={iss.assignee_agent_id ?? ''}
 				onchange={(e) => assignAgent((e.currentTarget as HTMLSelectElement).value)}
 			>
-				<option value="">— unassigned —</option>
+				<option value="">{m.issue_detail_panel_unassigned()}</option>
 				{#each apStore.agents as a (a.id)}
 					<option value={a.id}>{a.avatar_emoji} {a.name}</option>
 				{/each}
@@ -334,28 +335,28 @@
 
 		{#if iss.description}
 			<section>
-				<p class="section-title">Description</p>
+				<p class="section-title">{m.issue_detail_panel_description()}</p>
 				<p class="desc">{iss.description}</p>
 			</section>
 		{/if}
 
 		<section class="runs">
 			<div class="runs-head">
-				<p class="section-title">Agent Runs</p>
+				<p class="section-title">{m.issue_detail_panel_agent_runs()}</p>
 				<button
 					class="run-btn"
 					onclick={launchRun}
 					disabled={launchingRun || !iss.assignee_agent_id}
-					title={iss.assignee_agent_id ? 'Enqueue a new run' : 'Assign an agent first'}
+					title={iss.assignee_agent_id ? m.issue_detail_panel_enqueue_a_new_run() : m.issue_detail_panel_assign_an_agent_first()}
 				>
-					{launchingRun ? 'Queuing…' : '▶ Run'}
+					{launchingRun ? m.issue_detail_panel_queuing() : m.issue_detail_panel_run()}
 				</button>
 			</div>
 			{#if runsError}
 				<p class="error-text">{runsError}</p>
 			{/if}
 			{#if runs.length === 0}
-				<p class="muted">No runs yet.</p>
+				<p class="muted">{m.issue_detail_panel_no_runs_yet()}</p>
 			{:else}
 				<ul class="runs-list">
 					{#each runs as run (run.id)}
@@ -369,7 +370,7 @@
 								<span class="run-status">{run.status}</span>
 								<time>{new Date(run.queued_at).toLocaleTimeString()}</time>
 								{#if run.exit_code !== null && run.exit_code !== undefined}
-									<span class="muted small">exit {run.exit_code}</span>
+									<span class="muted small">{m.issue_detail_panel_exit({ exit_code: run.exit_code })}</span>
 								{/if}
 							</button>
 							{#if expandedRunId === run.id}
@@ -389,7 +390,7 @@
 											>{'\n'}{/each}</pre>
 									{#if !isTerminalRun(run.status)}
 										<button class="cancel-link" onclick={() => cancelRun(run.id)}>
-											Cancel run
+											{m.issue_detail_panel_cancel_run()}
 										</button>
 									{/if}
 								</div>
@@ -401,20 +402,20 @@
 		</section>
 
 		<section class="comments">
-			<p class="section-title">Comments</p>
+			<p class="section-title">{m.issue_detail_panel_comments()}</p>
 			{#if loadingComments}
-				<p class="muted">Loading…</p>
+				<p class="muted">{m.issue_detail_panel_loading()}</p>
 			{:else if commentsError}
 				<p class="error-text">{commentsError}</p>
 			{:else if comments.length === 0}
-				<p class="muted">No comments yet.</p>
+				<p class="muted">{m.issue_detail_panel_no_comments_yet()}</p>
 			{:else}
 				<ul>
 					{#each comments as c (c.id)}
 						<li>
 							<div class="cmt-head">
 								<span class="who">
-									{c.author_agent_id ? '🤖 Agent' : '👤 User'}
+									{c.author_agent_id ? m.issue_detail_panel_agent() : m.issue_detail_panel_user()}
 								</span>
 								<time>{new Date(c.created_at).toLocaleString()}</time>
 							</div>
@@ -430,9 +431,9 @@
 					postComment();
 				}}
 			>
-				<textarea rows="2" bind:value={newBody} placeholder="Write a comment…"></textarea>
+				<textarea rows="2" bind:value={newBody} placeholder={m.issue_detail_panel_write_a_comment()}></textarea>
 				<button type="submit" disabled={posting || !newBody.trim()}>
-					{posting ? 'Posting…' : 'Post'}
+					{posting ? m.issue_detail_panel_posting() : m.issue_detail_panel_post()}
 				</button>
 			</form>
 		</section>

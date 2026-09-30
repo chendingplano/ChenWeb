@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import type { Snippet } from 'svelte';
 	import type { ExplorerTokens } from './theme';
@@ -102,17 +103,17 @@
 
 <div class="shell" style="--bg:{tokens.pageBg}; --panel:{tokens.panelBg}; --border:{tokens.border}; --border-strong:{tokens.borderStrong}; --text:{tokens.textPrimary}; --text-2:{tokens.textSecondary}; --accent:{tokens.accent}; --hover:{tokens.hoverBg};">
 	<div class="toolbar">
-		<div class="seg" role="group" aria-label="Panel arrangement">
-			<button class:on={layout.arrangement === 'lr'} onclick={() => layout.arrangement !== 'lr' && toggleArrangement()} title="Left / Right">
+		<div class="seg" role="group" aria-label={m.panel_shell_panel_arrangement()}>
+			<button class:on={layout.arrangement === 'lr'} onclick={() => layout.arrangement !== 'lr' && toggleArrangement()} title={m.panel_shell_left_right()}>
 				<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="14" rx="1" fill="none" stroke="currentColor" /><rect x="9" y="1" width="6" height="6" rx="1" fill="none" stroke="currentColor" /><rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" /></svg>
 				L·R
 			</button>
-			<button class:on={layout.arrangement === 'tb'} onclick={() => layout.arrangement !== 'tb' && toggleArrangement()} title="Top / Bottom">
+			<button class:on={layout.arrangement === 'tb'} onclick={() => layout.arrangement !== 'tb' && toggleArrangement()} title={m.panel_shell_top_bottom()}>
 				<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="6" rx="1" fill="none" stroke="currentColor" /><rect x="1" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" /><rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" /></svg>
 				T·B
 			</button>
 		</div>
-		<button class="link" onclick={resetSizes}>Reset layout</button>
+		<button class="link" onclick={resetSizes}>{m.panel_shell_reset_layout()}</button>
 	</div>
 
 	<div class="ws {layout.arrangement}" bind:this={wsEl}>

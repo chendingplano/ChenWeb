@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { BenchmarkJob } from '$lib/services/docBenchmarkAdminService';
 
 	let {
@@ -18,11 +19,11 @@
 
 <section class="jobs-card" style="background:{cardBg}; border:1px solid {border}; color:{textPrimary};">
 	<div class="jobs-head">
-		<h3>Recent Activity</h3>
-		<p style="color:{textSecondary};">Latest benchmark jobs, outputs, and failures.</p>
+		<h3>{m.benchmark_job_list_recent_activity()}</h3>
+		<p style="color:{textSecondary};">{m.benchmark_job_list_latest_benchmark_jobs_outputs_and()}</p>
 	</div>
 	{#if jobs.length === 0}
-		<p class="empty" style="color:{muted};">No benchmark jobs yet.</p>
+		<p class="empty" style="color:{muted};">{m.benchmark_job_list_no_benchmark_jobs_yet()}</p>
 	{:else}
 		<div class="job-list">
 			{#each jobs as job (job.id)}
@@ -33,13 +34,13 @@
 							<span class="job-status">{job.status}</span>
 						</div>
 						<div class="job-line muted" style="color:{textSecondary};">
-							<span>Job #{job.id}</span>
+							<span>{m.benchmark_job_list_job({ id: job.id })}</span>
 							{#if job.finished_at}
 								<span>{job.finished_at}</span>
 							{:else if job.started_at}
-								<span>Started {job.started_at}</span>
+								<span>{m.benchmark_job_list_started({ started_at: job.started_at })}</span>
 							{:else if job.created_at}
-								<span>Queued {job.created_at}</span>
+								<span>{m.benchmark_job_list_queued({ created_at: job.created_at })}</span>
 							{/if}
 						</div>
 						{#if job.message}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -35,13 +36,9 @@
 	let checks = $state<Check[]>([
 		{
 			id: 'kb-inputs-status',
-			label: 'kb.inputs.status — duplicate operation entries',
+			label: m.db_consistency_kb_inputs_status_duplicate_operation(),
 			description:
-				'Detects records where the status JSONB array contains more than one entry for the ' +
-				'same operation name. Duplicates cause the dashboard to show stale in-progress status ' +
-				'because computeStages previously took the first match instead of the last. ' +
-				'Fix deduplicates by keeping the last entry per operation (consistent with the ' +
-				'trg_sync_input_proc_status trigger), then the triggers resync kb.input_proc_status automatically.',
+				m.db_consistency_detects_records_where_the_status(),
 			status: 'idle',
 			staleCount: 0,
 			errorMsg: '',
@@ -93,10 +90,10 @@
 <div class="p-6 max-w-3xl">
 	<div class="mb-6">
 		<h1 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
-			Database Maintenance — Consistency Check
+			{m.db_consistency_database_maintenance_consistency_check()}
 		</h1>
 		<p style="font-size:13px; color:{textSecondary};">
-			Run each check to detect data inconsistencies. If issues are found, click Fix to repair them in-place.
+			{m.db_consistency_run_each_check_to_detect()}
 		</p>
 	</div>
 
@@ -142,7 +139,7 @@
 						<RefreshCwIcon
 							style="width:13px; height:13px;{check.status === 'checking' ? ' animation:spin 1s linear infinite;' : ''}"
 						/>
-						{check.status === 'checking' ? 'Checking…' : 'Check'}
+						{check.status === 'checking' ? m.db_consistency_checking() : m.db_consistency_check()}
 					</button>
 
 					{#if check.status === 'stale'}
@@ -158,7 +155,7 @@
 							"
 						>
 							<WrenchIcon style="width:13px; height:13px;" />
-							{check.fixing ? 'Fixing…' : 'Fix'}
+							{check.fixing ? m.db_consistency_fixing() : m.db_consistency_fix()}
 						</button>
 					{/if}
 				</div>
@@ -180,20 +177,19 @@
 					"
 				>
 					{#if check.status === 'checking'}
-						<span style="color:{textMuted};">Scanning…</span>
+						<span style="color:{textMuted};">{m.db_consistency_scanning()}</span>
 					{:else if check.status === 'ok' && check.fixedCount !== null}
 						<span style="color:{colorOk};">
-							Fixed {check.fixedCount} record{check.fixedCount === 1 ? '' : 's'}. All entries are now consistent.
+							{m.db_consistency_fixed_record_all_entries_are({ fixedCount: check.fixedCount, plural: check.fixedCount === 1 ? '' : 's' })}
 						</span>
 					{:else if check.status === 'ok'}
-						<span style="color:{colorOk};">All records are consistent — no duplicates found.</span>
+						<span style="color:{colorOk};">{m.db_consistency_all_records_are_consistent_no()}</span>
 					{:else if check.status === 'stale'}
 						<span style="color:{colorWarn};">
-							{check.staleCount} record{check.staleCount === 1 ? ' has' : 's have'} duplicate operation entries in <code>kb.inputs.status</code>.
-							Click <strong>Fix</strong> to deduplicate (keeps last entry per operation; triggers resync <code>kb.input_proc_status</code> automatically).
+							{m.db_consistency_record_duplicate_operation_entries_in({ staleCount: check.staleCount, plural: check.staleCount === 1 ? '' : 's' })} <code>kb.inputs.status</code>{m.db_consistency_click()} <strong>{m.db_consistency_fix()}</strong> {m.db_consistency_to_deduplicate_keeps_last_entry()} <code>kb.input_proc_status</code> {m.db_consistency_automatically()}
 						</span>
 					{:else if check.status === 'error'}
-						<span style="color:{colorError};">Error: {check.errorMsg}</span>
+						<span style="color:{colorError};">{m.db_consistency_error({ errorMsg: check.errorMsg })}</span>
 					{/if}
 				</div>
 			{/if}

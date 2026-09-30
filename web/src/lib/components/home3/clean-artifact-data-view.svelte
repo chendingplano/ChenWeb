@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -45,7 +46,7 @@
 		error = '';
 		result = null;
 		if (id <= 0) {
-			error = 'Enter a positive record ID.';
+			error = m.clean_artifact_data_enter_a_positive_record_id();
 			return;
 		}
 		pendingConfirmID = id;
@@ -82,12 +83,11 @@
 <div class="p-6 max-w-3xl">
 	<div class="mb-6">
 		<h1 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
-			Database Maintenance — Clean Artifact Data
+			{m.clean_artifact_data_database_maintenance_clean_artifact_data()}
 		</h1>
 		<p style="font-size:13px; color:{textSecondary}; line-height:1.6;">
-			Clean all data generated for a <code>kb.inputs</code> record ID. The record may already be
-			missing; the cleaner still removes orphaned ArtifactWeb index entries such as
-			<code>metrics.txt</code>, <code>topics.txt</code>, and <code>semantic_projections.txt</code>.
+			{m.clean_artifact_data_clean_all_data_generated_for()} <code>kb.inputs</code> {m.clean_artifact_data_record_id_the_record_may()}
+			<code>metrics.txt</code>, <code>topics.txt</code>{m.clean_artifact_data_and()} <code>semantic_projections.txt</code>.
 		</p>
 	</div>
 
@@ -95,14 +95,13 @@
 		<div class="flex items-start gap-3 mb-5 rounded-lg p-3" style="background:{dangerTint}; border:1px solid {danger}40;">
 			<AlertTriangleIcon style="width:18px; height:18px; color:{danger}; flex-shrink:0; margin-top:1px;" />
 			<p style="font-size:13px; color:{textSecondary}; line-height:1.55;">
-				This is a destructive clean operation. Use it for testing and orphan cleanup after verifying
-				the record ID. You will be asked to confirm before anything runs.
+				{m.clean_artifact_data_this_is_a_destructive_clean()}
 			</p>
 		</div>
 
 		<div class="flex flex-wrap items-end gap-3">
 			<div class="flex flex-col gap-1">
-				<label for="record-id" style="font-size:12px; font-weight:500; color:{textMuted};">Record ID</label>
+				<label for="record-id" style="font-size:12px; font-weight:500; color:{textMuted};">{m.clean_artifact_data_record_id()}</label>
 				<input
 					id="record-id"
 					type="number"
@@ -129,10 +128,10 @@
 			>
 				{#if cleaning}
 					<RefreshCwIcon style="width:14px; height:14px; animation:spin 1s linear infinite;" />
-					Cleaning...
+					{m.clean_artifact_data_cleaning()}
 				{:else}
 					<Trash2Icon style="width:14px; height:14px;" />
-					Clean Artifact Data
+					{m.clean_artifact_data_clean_artifact_data()}
 				{/if}
 			</button>
 		</div>
@@ -149,12 +148,10 @@
 					<AlertTriangleIcon style="width:18px; height:18px; color:{danger}; flex-shrink:0; margin-top:2px;" />
 					<div class="flex-1">
 						<div id="clean-confirm-title" style="font-size:14px; font-weight:700; color:{textPrimary}; margin-bottom:4px;">
-							Confirm clean for record #{pendingConfirmID}
+							{m.clean_artifact_data_confirm_clean_for_record({ pendingConfirmID })}
 						</div>
 						<p id="clean-confirm-desc" style="font-size:13px; color:{textSecondary}; line-height:1.55; margin-bottom:12px;">
-							This will run the same cleanup used by delete record. It may delete related DB rows,
-							input row data if present, artifact directories, and ArtifactWeb index entries.
-							This action cannot be undone.
+							{m.clean_artifact_data_this_will_run_the_same()}
 						</p>
 						<div class="flex flex-wrap gap-2">
 							<button
@@ -166,7 +163,7 @@
 									opacity:{cleaning ? 0.65 : 1};
 								"
 							>
-								Yes, clean record #{pendingConfirmID}
+								{m.clean_artifact_data_yes_clean_record({ pendingConfirmID })}
 							</button>
 							<button
 								onclick={cancelCleanConfirmation}
@@ -177,7 +174,7 @@
 									opacity:{cleaning ? 0.65 : 1};
 								"
 							>
-								Cancel
+								{m.clean_artifact_data_cancel()}
 							</button>
 						</div>
 					</div>
@@ -196,21 +193,21 @@
 				<div class="flex items-center gap-2 mb-3">
 					<CheckCircleIcon style="width:16px; height:16px; color:{ok};" />
 					<span style="font-size:14px; font-weight:600; color:{textPrimary};">
-						Clean completed for record #{result.record_id}
+						{m.clean_artifact_data_clean_completed_for_record({ record_id: result.record_id })}
 					</span>
 				</div>
 				<div class="grid gap-2" style="font-size:13px; color:{textSecondary};">
-					<div>Input row existed: <strong style="color:{textPrimary};">{result.record_found ? 'yes' : 'no'}</strong></div>
+					<div>{m.clean_artifact_data_input_row_existed()} <strong style="color:{textPrimary};">{result.record_found ? 'yes' : 'no'}</strong></div>
 					<div>
-						ArtifactWeb files scanned:
+						{m.clean_artifact_data_artifactweb_files_scanned()}
 						<strong style="color:{textPrimary};">{result.artifact_web_cleanup?.files_scanned ?? 0}</strong>
 					</div>
 					<div>
-						ArtifactWeb files changed:
+						{m.clean_artifact_data_artifactweb_files_changed()}
 						<strong style="color:{textPrimary};">{result.artifact_web_cleanup?.files_changed ?? 0}</strong>
 					</div>
 					<div>
-						ArtifactWeb lines removed:
+						{m.clean_artifact_data_artifactweb_lines_removed()}
 						<strong style="color:{textPrimary};">{result.artifact_web_cleanup?.lines_removed ?? 0}</strong>
 					</div>
 				</div>

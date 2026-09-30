@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import type { JsonTreeNode } from './doc-review-json-dialog.js';
 	import JsonTree from './json-tree.svelte';
@@ -84,7 +85,7 @@
 				onclick={onclose}
 				class="rounded p-1.5 cursor-pointer"
 				style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-				aria-label="Close"
+				aria-label={m.json_tree_dialog_close()}
 			>
 				<XIcon class="w-4 h-4" />
 			</button>

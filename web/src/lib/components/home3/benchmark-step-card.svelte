@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import type { BenchmarkStepState } from '$lib/services/docBenchmarkAdminService';
@@ -63,10 +64,10 @@
 		>
 			{#if busy || step.status === 'running'}
 				<LoaderCircleIcon size={15} style="animation:spin 1s linear infinite;" />
-				<span>Running</span>
+				<span>{m.benchmark_step_card_running()}</span>
 			{:else}
 				<PlayIcon size={15} />
-				<span>{completed ? 'Run again' : 'Run step'}</span>
+				<span>{completed ? m.benchmark_step_card_run_again() : m.benchmark_step_card_run_step()}</span>
 			{/if}
 		</button>
 	</div>
@@ -74,9 +75,9 @@
 	{#if step.completed_at || step.failed_at}
 		<div class="step-time" style="color:{muted};">
 			{#if step.completed_at}
-				<span>Completed: {step.completed_at}</span>
+				<span>{m.benchmark_step_card_completed({ completed_at: step.completed_at })}</span>
 			{:else if step.failed_at}
-				<span>Failed: {step.failed_at}</span>
+				<span>{m.benchmark_step_card_failed({ failed_at: step.failed_at })}</span>
 			{/if}
 		</div>
 	{/if}

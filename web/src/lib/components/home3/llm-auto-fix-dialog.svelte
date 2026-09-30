@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { autoFixFinding, applyAutoFix, type AutoFixResult, type LineEdit } from '$lib/services/docReviewService';
 	import type { FindingItem } from '$lib/services/docReviewService';
 
@@ -27,7 +28,7 @@
 		try {
 			result = await autoFixFinding(finding.id);
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Auto-fix failed';
+			errorMsg = e instanceof Error ? e.message : m.llm_auto_fix_dialog_auto_fix_failed();
 			phase = 'result';
 			return;
 		}
@@ -41,7 +42,7 @@
 			await applyAutoFix(finding.id, result.corrected, result.model_name ?? '');
 			onsaved();
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Failed to apply fix';
+			errorMsg = e instanceof Error ? e.message : m.llm_auto_fix_dialog_failed_to_apply_fix();
 			phase = 'result';
 		}
 	}
@@ -55,13 +56,13 @@
 </script>
 
 <div class="backdrop" class:dark role="presentation" onclick={onBackdrop}>
-	<div class="dialog" role="dialog" aria-modal="true" aria-label="LLM Auto Fix">
-		<h2 class="title">LLM Auto Fix</h2>
+	<div class="dialog" role="dialog" aria-modal="true" aria-label={m.llm_auto_fix_dialog_llm_auto_fix()}>
+		<h2 class="title">{m.llm_auto_fix_dialog_llm_auto_fix()}</h2>
 
 		{#if phase === 'loading'}
 			<div class="loading-state">
 				<div class="spinner"></div>
-				<span class="loading-text">Running model on finding…</span>
+				<span class="loading-text">{m.llm_auto_fix_dialog_running_model_on_finding()}</span>
 			</div>
 		{:else}
 			{#if errorMsg}
@@ -71,26 +72,26 @@
 			{#if result}
 				{#if result.model_name}
 					<div class="meta-row">
-						<span class="meta-label">Model</span>
+						<span class="meta-label">{m.llm_auto_fix_dialog_model()}</span>
 						<span class="meta-value">{result.model_name}</span>
 						{#if result.elapsed_ms}
 							<span class="meta-sep">·</span>
-							<span class="meta-value">{result.elapsed_ms.toLocaleString()} ms</span>
+							<span class="meta-value">{m.llm_auto_fix_dialog_ms({ elapsed_ms: result.elapsed_ms.toLocaleString() })}</span>
 						{/if}
 					</div>
 				{/if}
 
-				<div class="section-label">Reason</div>
+				<div class="section-label">{m.llm_auto_fix_dialog_reason()}</div>
 				<div class="reason-box">
 					{#if finding.description}{finding.description}{/if}
 					{#if finding.suggestion}
 						{#if finding.description}<br />{/if}
-						<em>Suggestion:</em> {finding.suggestion}
+						<em>{m.llm_auto_fix_dialog_suggestion()}</em> {finding.suggestion}
 					{/if}
 				</div>
 
 				{#if result.fixable && result.original?.length}
-					<div class="section-label">Offending lines → proposed fix</div>
+					<div class="section-label">{m.llm_auto_fix_dialog_offending_lines_proposed_fix()}</div>
 					<div class="lines-grid">
 						{#each result.original as orig, i}
 							{@const fix = result.corrected?.[i]}
@@ -106,23 +107,23 @@
 						{/each}
 					</div>
 				{:else if !result.fixable}
-					<div class="unfixable-msg">{result.message || 'This finding could not be auto-fixed.'}</div>
+					<div class="unfixable-msg">{result.message || m.llm_auto_fix_dialog_this_finding_could_not_be()}</div>
 				{/if}
 			{/if}
 		{/if}
 
 		<div class="actions">
-			<button class="btn ghost" onclick={oncancel} disabled={phase === 'saving'}>Cancel</button>
+			<button class="btn ghost" onclick={oncancel} disabled={phase === 'saving'}>{m.llm_auto_fix_dialog_cancel()}</button>
 			<button
 				class="btn"
 				onclick={runFix}
 				disabled={phase === 'loading' || phase === 'saving'}
-			>Retry</button>
+			>{m.llm_auto_fix_dialog_retry()}</button>
 			<button
 				class="btn primary"
 				onclick={save}
 				disabled={phase !== 'result' || !result?.fixable || !result.corrected?.length}
-			>{phase === 'saving' ? 'Saving…' : 'Save'}</button>
+			>{phase === 'saving' ? m.llm_auto_fix_dialog_saving() : m.llm_auto_fix_dialog_save()}</button>
 		</div>
 	</div>
 </div>

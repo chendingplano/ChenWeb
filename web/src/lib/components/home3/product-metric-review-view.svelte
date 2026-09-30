@@ -906,7 +906,7 @@
 	{#if !embedded}
 		<header class="topbar">
 			<div class="brand">
-				<span class="brand-mark">PMR</span>
+				<span class="brand-mark">{m.product_metric_review_pmr()}</span>
 				<div>
 					<p class="kicker">{m.pmr_kicker()}</p>
 					<p class="brand-name">{m.pmr_title()}</p>
@@ -917,7 +917,7 @@
 					<span>{profileName}</span><span class="slash">/</span>
 				{/if}
 				{#if run}<strong>{m.pmr_run_n({ n: run.run_number })}</strong>{/if}
-				<span class="route-badge">/home3/product-metric-review</span>
+				<span class="route-badge">{m.product_metric_review_home3_product_metric_review()}</span>
 			</div>
 		</header>
 	{/if}
@@ -1116,15 +1116,15 @@
 						<div class="filters">
 							<select bind:value={tierFilter}>
 								<option value="">{m.pmr_all_tiers()}</option>
-								<option value="direct">direct</option>
-								<option value="part">part</option>
-								<option value="aspect">aspect</option>
-								<option value="document_scope">document_scope</option>
+								<option value="direct">{m.product_metric_review_direct()}</option>
+								<option value="part">{m.product_metric_review_part()}</option>
+								<option value="aspect">{m.product_metric_review_aspect()}</option>
+								<option value="document_scope">{m.product_metric_review_document_scope()}</option>
 							</select>
 							<select bind:value={pathFilter}>
 								<option value="">{m.pmr_all_paths()}</option>
-								<option value="direct">direct</option>
-								<option value="document_first">document_first</option>
+								<option value="direct">{m.product_metric_review_direct()}</option>
+								<option value="document_first">{m.product_metric_review_document_first()}</option>
 							</select>
 							<select bind:value={docFilter}>
 								<option value={null}>{m.pmr_all_documents()}</option>
@@ -1327,7 +1327,7 @@
 			tabindex="0"
 		>
 			<div class="doc-dialog-head">
-				<h3>Record ID: {detailInput.id}</h3>
+				<h3>{m.product_metric_review_record_id({ id: detailInput.id })}</h3>
 				<button type="button" class="ghost" onclick={() => (showDocumentDialog = false)}>
 					{m.pmr_close()}
 				</button>
@@ -1510,8 +1510,8 @@
 		{#if addingUnder === node.id}
 			<div class="add-row" style="--d:{depth + 1}">
 				<select bind:value={newKind}>
-					<option value="part">part</option>
-					<option value="module">module</option>
+					<option value="part">{m.product_metric_review_part()}</option>
+					<option value="module">{m.product_metric_review_module()}</option>
 				</select>
 				<input
 					placeholder={m.pmr_new_node_label()}

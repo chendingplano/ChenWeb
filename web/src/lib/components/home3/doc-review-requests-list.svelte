@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { listReviewRuns, listTiers } from '$lib/services/docReviewService';
 	import type { ReviewRunListItem, TierInfo } from '$lib/services/docReviewService';
@@ -40,9 +41,9 @@
 
 	let tiers = $state<TierInfo[]>([]);
 	let tierLabels = $derived.by(() => {
-		const m: Record<string, string> = {};
-		for (const t of tiers) m[t.key] = t.label;
-		return m;
+		const byKey: Record<string, string> = {};
+		for (const t of tiers) byKey[t.key] = t.label;
+		return byKey;
 	});
 	let loading = $state(false);
 	let loadError = $state('');
@@ -55,7 +56,7 @@
 			requests = await listReviewRuns();
 			showingSelection = false;
 		} catch (e: any) {
-			loadError = e?.message || 'Failed to load review runs';
+			loadError = e?.message || m.doc_review_requests_list_failed_to_load_review_runs();
 		} finally {
 			loading = false;
 		}
@@ -108,7 +109,7 @@
 <div style="background:{cardBg}; border:1px solid {borderColor}; border-radius:12px; padding:16px 18px;">
 	<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
 		<div style="font-size:15px; font-weight:600; color:{textPrimary};">
-			Review Runs
+			{m.doc_review_requests_list_review_runs()}
 			<span style="color:{textMuted}; font-weight:400; font-size:13px;">({requests.length})</span>
 		</div>
 		<div style="display:flex; align-items:center; gap:8px;">
@@ -118,24 +119,24 @@
 					style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{accentTint}; border:1px solid {accent}30; border-radius:8px; color:{accent}; font-size:12px; cursor:pointer;"
 				>
 					<XIcon class="h-3 w-3" />
-					Show all
+					{m.doc_review_requests_list_show_all()}
 				</button>
 			{/if}
 			<button
 				onclick={() => load()}
 				disabled={loading}
-				title="Refresh"
+				title={m.doc_review_requests_list_refresh()}
 				style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{surface2}; border:1px solid {borderColor}; border-radius:8px; color:{textSecondary}; font-size:12px; cursor:{loading ? 'not-allowed' : 'pointer'};"
 			>
 				<RefreshCwIcon class="h-3 w-3" style={loading ? 'animation:drl-spin 1s linear infinite;' : ''} />
-				Refresh
+				{m.doc_review_requests_list_refresh()}
 			</button>
 			<button
 				onclick={() => (searchOpen = true)}
 				style="display:flex; align-items:center; gap:5px; padding:5px 12px; background:{accent}; border:none; border-radius:8px; color:#fff; font-size:12px; font-weight:600; cursor:pointer;"
 			>
 				<SearchIcon class="h-3.5 w-3.5" />
-				Search
+				{m.doc_review_requests_list_search()}
 			</button>
 		</div>
 	</div>
@@ -146,22 +147,22 @@
 
 	{#if requests.length === 0 && !loading}
 		<div style="padding:40px 16px; text-align:center; color:{textMuted}; font-size:13px;">
-			{showingSelection ? 'No runs selected.' : 'No review runs yet.'}
+			{showingSelection ? m.doc_review_requests_list_no_runs_selected() : m.doc_review_requests_list_no_review_runs_yet()}
 		</div>
 	{:else}
 		<div style="overflow-x:auto;">
 			<table style="width:100%; border-collapse:collapse; font-size:13px;">
 				<thead>
 					<tr style="text-align:left; color:{textMuted}; font-size:11px; text-transform:uppercase; letter-spacing:0.06em;">
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">ID</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Request</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Document</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Tier</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Status</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Requester</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor}; text-align:center;">Aspects</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor}; text-align:center;">Findings</th>
-						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Created</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_id()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_request()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_document()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_tier()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_status()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_requester()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor}; text-align:center;">{m.doc_review_requests_list_aspects()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor}; text-align:center;">{m.doc_review_requests_list_findings()}</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">{m.doc_review_requests_list_created()}</th>
 						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};"></th>
 					</tr>
 				</thead>
@@ -171,7 +172,7 @@
 							<td style="padding:9px 10px; font-family:monospace; color:{textSecondary};">#{req.run_id}</td>
 							<td style="padding:9px 10px; font-family:monospace; color:{textMuted};">#{req.request_id}</td>
 							<td style="padding:9px 10px; color:{textPrimary}; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-								{req.doc_title || `Document #${req.input_record_id}`}
+								{req.doc_title || m.doc_review_requests_list_document_2({ input_record_id: req.input_record_id })}
 							</td>
 							<td style="padding:9px 10px; color:{textSecondary};">{tierLabel(req.tier)}</td>
 							<td style="padding:9px 10px;">
@@ -191,7 +192,7 @@
 									style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; background:{accentTint}; border:1px solid {accent}30; border-radius:8px; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
 								>
 									<EyeIcon class="h-3 w-3" />
-									View
+									{m.doc_review_requests_list_view()}
 								</button>
 							</td>
 						</tr>

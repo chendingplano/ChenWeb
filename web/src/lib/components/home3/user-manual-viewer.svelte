@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { renderDocument } from '$lib/documents/render';
 	import type { DocumentTreeNode } from '$lib/documents/types';
@@ -41,14 +42,14 @@
 		loadError = null;
 		const doc = userManualSource.getDocument(node.id);
 		if (!doc) {
-			loadError = `No content found for "${node.label}"`;
+			loadError = m.user_manual_viewer_no_content_found_for({ label: node.label });
 			contentHtml = '';
 			return;
 		}
 		try {
 			contentHtml = await renderDocument(doc);
 		} catch (e) {
-			loadError = e instanceof Error ? e.message : 'Failed to render document';
+			loadError = e instanceof Error ? e.message : m.user_manual_viewer_failed_to_render_document();
 			contentHtml = '';
 		}
 	}
@@ -183,7 +184,7 @@
 		onmouseleave={(e) => {
 			(e.currentTarget as HTMLElement).style.background = borderColor;
 		}}
-		title="Drag to resize"
+		title={m.user_manual_viewer_drag_to_resize()}
 	>
 		<div
 			class="flex flex-col gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
@@ -203,7 +204,7 @@
 				{@html contentHtml}
 			</article>
 		{:else}
-			<p style="color:{textSecondary};">Select a page from the tree to view its content.</p>
+			<p style="color:{textSecondary};">{m.user_manual_viewer_select_a_page_from_the()}</p>
 		{/if}
 	</div>
 </div>

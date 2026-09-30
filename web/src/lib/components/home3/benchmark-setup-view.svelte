@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onDestroy, onMount } from 'svelte';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -60,180 +61,180 @@
 	const configFields: ConfigField[] = [
 		{
 			key: 'experiment_path',
-			label: 'Experiment path',
+			label: m.benchmark_setup_experiment_path(),
 			placeholder: 'benchmark/doc-processors/experiments/example-20260717-clean.toml',
 			help: {
-				purpose: 'The experiment TOML that defines processors, variants, repetitions, and compare targets.',
-				valid: 'Any readable path on the ChenWeb server. Relative paths are resolved from the ChenWeb repo root.',
-				recommended: 'Use the checked-in clean example experiment first, then switch to a dedicated experiment file when you create a new benchmark run.'
+				purpose: m.benchmark_setup_the_experiment_toml_that_defines(),
+				valid: m.benchmark_setup_any_readable_path_on_the(),
+				recommended: m.benchmark_setup_use_the_checked_in_clean()
 			}
 		},
 		{
 			key: 'dataset_root',
-			label: 'Dataset root',
+			label: m.benchmark_setup_dataset_root(),
 			placeholder: 'benchmark/doc-processors/datasets',
 			help: {
-				purpose: 'The root folder that contains benchmark datasets and versions.',
-				valid: 'A readable directory containing dataset folders such as doc-processors-synthetic-core/1.0.0.',
-				recommended: 'Keep the default benchmark/doc-processors/datasets unless you intentionally maintain an alternate dataset tree.'
+				purpose: m.benchmark_setup_the_root_folder_that_contains(),
+				valid: m.benchmark_setup_a_readable_directory_containing_dataset(),
+				recommended: m.benchmark_setup_keep_the_default_benchmark_doc()
 			}
 		},
 		{
 			key: 'artifact_root',
-			label: 'Artifact root',
+			label: m.benchmark_setup_artifact_root(),
 			placeholder: 'Data/kb/artifacts',
 			help: {
-				purpose: 'The production artifact root used by benchmarked processors during execution.',
-				valid: 'A writable directory. This should match the effective ARTIFACT_DIR used by the production runtime.',
-				recommended: 'Point it at the same artifact root your document processor already uses, then let benchmark outputs live under a doc-benchmark subdirectory.'
+				purpose: m.benchmark_setup_the_production_artifact_root_used(),
+				valid: m.benchmark_setup_a_writable_directory_this_should(),
+				recommended: m.benchmark_setup_point_it_at_the_same()
 			}
 		},
 		{
 			key: 'work_root',
-			label: 'Work root',
+			label: m.benchmark_setup_work_root(),
 			placeholder: '.benchmark/work',
 			help: {
-				purpose: 'Disposable workspace storage for temporary benchmark execution files.',
-				valid: 'A writable directory that does not overlap the evidence root.',
-				recommended: 'Use .benchmark/work under the ChenWeb repo unless your environment requires a different scratch location.'
+				purpose: m.benchmark_setup_disposable_workspace_storage_for_temporary(),
+				valid: m.benchmark_setup_a_writable_directory_that_does(),
+				recommended: m.benchmark_setup_use_benchmark_work_under_the()
 			}
 		},
 		{
 			key: 'evidence_root',
-			label: 'Evidence root',
+			label: m.benchmark_setup_evidence_root(),
 			placeholder: '.benchmark/evidence',
 			help: {
-				purpose: 'Immutable captured evidence for benchmark attempts, reports, diagnostics, and provenance.',
-				valid: 'A writable directory that does not overlap the work root.',
-				recommended: 'Use .benchmark/evidence under the ChenWeb repo for local work and keep it separate from disposable workspace files.'
+				purpose: m.benchmark_setup_immutable_captured_evidence_for_benchmark(),
+				valid: m.benchmark_setup_a_writable_directory_that_does_2(),
+				recommended: m.benchmark_setup_use_benchmark_evidence_under_the()
 			}
 		},
 		{
 			key: 'store_id',
-			label: 'Store ID',
+			label: m.benchmark_setup_store_id(),
 			type: 'number',
 			help: {
-				purpose: 'The knowledge-store ID used when seeding temporary benchmark input rows.',
-				valid: 'Any numeric store ID that exists in the target environment.',
-				recommended: 'Use 1 unless your environment has a dedicated benchmark store that should isolate these runs.'
+				purpose: m.benchmark_setup_the_knowledge_store_id_used(),
+				valid: m.benchmark_setup_any_numeric_store_id_that(),
+				recommended: m.benchmark_setup_use_1_unless_your_environment()
 			}
 		},
 		{
 			key: 'owner',
-			label: 'Owner',
+			label: m.benchmark_setup_owner(),
 			placeholder: 'benchmark-admin',
 			help: {
-				purpose: 'A label used for benchmark leases and job ownership metadata.',
-				valid: 'Any short identifier string.',
-				recommended: 'Use a stable machine or operator name so job ownership and lease recovery are easy to trace.'
+				purpose: m.benchmark_setup_a_label_used_for_benchmark(),
+				valid: m.benchmark_setup_any_short_identifier_string(),
+				recommended: m.benchmark_setup_use_a_stable_machine_or()
 			}
 		},
 		{
 			key: 'tenant_id',
-			label: 'Tenant ID',
+			label: m.benchmark_setup_tenant_id(),
 			placeholder: 'benchmark',
 			help: {
-				purpose: 'The tenant label used by the benchmark runner when creating temporary benchmark inputs.',
-				valid: 'Any non-empty tenant identifier recognized by your runtime conventions.',
-				recommended: 'Keep benchmark unless you intentionally isolate benchmark traffic under another tenant label.'
+				purpose: m.benchmark_setup_the_tenant_label_used_by(),
+				valid: m.benchmark_setup_any_non_empty_tenant_identifier(),
+				recommended: m.benchmark_setup_keep_benchmark_unless_you_intentionally()
 			}
 		},
 		{
 			key: 'metrics_model_name',
-			label: 'Metrics model name',
+			label: m.benchmark_setup_metrics_model_name(),
 			placeholder: 'deepseek-flash-chen',
 			help: {
-				purpose: 'The model reference injected into the metrics benchmark variant through DOC_BENCHMARK_METRICS_MODEL_NAME.',
-				valid: 'A model name that resolves correctly in the local .models.toml configuration.',
-				recommended: 'Use a known local model ref that already works for extract_metrics in your environment.'
+				purpose: m.benchmark_setup_the_model_reference_injected_into(),
+				valid: m.benchmark_setup_a_model_name_that_resolves(),
+				recommended: m.benchmark_setup_use_a_known_local_model()
 			}
 		},
 		{
 			key: 'report_format',
-			label: 'Report format',
+			label: m.benchmark_setup_report_format(),
 			type: 'select',
 			options: [
 				{ value: 'markdown', label: 'Markdown' },
-				{ value: 'typst', label: 'Typst (Planned)', disabled: true }
+				{ value: 'typst', label: m.benchmark_setup_typst_planned(), disabled: true }
 			],
 			help: {
-				purpose: 'The output format used when generating benchmark reports and compare outputs from stored results.',
-				valid: 'Markdown is supported today. Typst is planned but not implemented yet.',
-				recommended: 'Use Markdown for now. Typst is shown to document the intended future export option.'
+				purpose: m.benchmark_setup_the_output_format_used_when(),
+				valid: m.benchmark_setup_markdown_is_supported_today_typst(),
+				recommended: m.benchmark_setup_use_markdown_for_now_typst()
 			}
 		},
 		{
 			key: 'report_output_path',
-			label: 'Report output path',
+			label: m.benchmark_setup_report_output_path(),
 			placeholder: 'Data/kb/artifacts/doc-benchmark/report-<experiment-id>.md',
 			help: {
-				purpose: 'An optional explicit output path for the main benchmark report.',
+				purpose: m.benchmark_setup_an_optional_explicit_output_path(),
 				valid: 'Any writable file path. If empty, the server generates a default path under the artifact root.',
-				recommended: 'Leave it blank at first and let the system write to the default report path under the benchmark artifact directory.'
+				recommended: m.benchmark_setup_leave_it_blank_at_first()
 			}
 		},
 		{
 			key: 'metrics_baseline',
-			label: 'Metrics baseline',
+			label: m.benchmark_setup_metrics_baseline(),
 			type: 'select',
 			options: [
 				{ value: 'metrics-baseline', label: 'metrics-baseline' },
 				{ value: 'metrics-alt', label: 'metrics-alt' }
 			],
 			help: {
-				purpose: 'The baseline variant used when generating the metrics compare report.',
-				valid: 'A variant name that exists in the configured experiment.',
-				recommended: 'Use metrics-baseline as the stable reference variant and compare metrics-alt against it.'
+				purpose: m.benchmark_setup_the_baseline_variant_used_when(),
+				valid: m.benchmark_setup_a_variant_name_that_exists(),
+				recommended: m.benchmark_setup_use_metrics_baseline_as_the()
 			}
 		},
 		{
 			key: 'metrics_candidate',
-			label: 'Metrics candidate',
+			label: m.benchmark_setup_metrics_candidate(),
 			type: 'select',
 			options: [
 				{ value: 'metrics-baseline', label: 'metrics-baseline' },
 				{ value: 'metrics-alt', label: 'metrics-alt' }
 			],
 			help: {
-				purpose: 'The candidate variant used when generating the metrics compare report.',
-				valid: 'A variant name that exists in the configured experiment.',
-				recommended: 'Use metrics-alt as the candidate when comparing prompt or model changes against metrics-baseline.'
+				purpose: m.benchmark_setup_the_candidate_variant_used_when(),
+				valid: m.benchmark_setup_a_variant_name_that_exists(),
+				recommended: m.benchmark_setup_use_metrics_alt_as_the()
 			}
 		},
 		{
 			key: 'chunk_baseline',
-			label: 'Chunk baseline',
+			label: m.benchmark_setup_chunk_baseline(),
 			type: 'select',
 			options: [
 				{ value: 'chunk-small', label: 'chunk-small' },
 				{ value: 'chunk-large', label: 'chunk-large' }
 			],
 			help: {
-				purpose: 'The baseline variant used when generating the chunking compare report.',
-				valid: 'A variant name that exists in the configured experiment.',
-				recommended: 'Use chunk-small as the baseline if that is your current stable chunking configuration.'
+				purpose: m.benchmark_setup_the_baseline_variant_used_when_2(),
+				valid: m.benchmark_setup_a_variant_name_that_exists(),
+				recommended: m.benchmark_setup_use_chunk_small_as_the()
 			}
 		},
 		{
 			key: 'chunk_candidate',
-			label: 'Chunk candidate',
+			label: m.benchmark_setup_chunk_candidate(),
 			type: 'select',
 			options: [
 				{ value: 'chunk-small', label: 'chunk-small' },
 				{ value: 'chunk-large', label: 'chunk-large' }
 			],
 			help: {
-				purpose: 'The candidate variant used when generating the chunking compare report.',
-				valid: 'A variant name that exists in the configured experiment.',
-				recommended: 'Use chunk-large when testing whether larger chunk sizing helps or hurts quality and efficiency.'
+				purpose: m.benchmark_setup_the_candidate_variant_used_when_2(),
+				valid: m.benchmark_setup_a_variant_name_that_exists(),
+				recommended: m.benchmark_setup_use_chunk_large_when_testing()
 			}
 		}
 	];
 
 	const allowDirtyHelp = {
-		purpose: 'Controls whether the benchmark runner may proceed when the current jj working copy is dirty.',
-		valid: 'Checked or unchecked.',
-		recommended: 'Leave it unchecked for reproducible benchmark runs. Enable it only for exploratory browser testing when a dirty working copy is acceptable.'
+		purpose: m.benchmark_setup_controls_whether_the_benchmark_runner(),
+		valid: m.benchmark_setup_checked_or_unchecked(),
+		recommended: m.benchmark_setup_leave_it_unchecked_for_reproducible()
 	};
 
 	async function loadState() {
@@ -243,7 +244,7 @@
 			setupState = await getBenchmarkSetupState();
 			draft = { ...setupState.config };
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load benchmark setup state';
+			error = e instanceof Error ? e.message : m.benchmark_setup_failed_to_load_benchmark_setup();
 		} finally {
 			loading = false;
 		}
@@ -256,7 +257,7 @@
 				draft = { ...setupState.config };
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to refresh benchmark setup state';
+			error = e instanceof Error ? e.message : m.benchmark_setup_failed_to_refresh_benchmark_setup();
 		}
 	}
 
@@ -268,7 +269,7 @@
 			draft = await saveBenchmarkConfig(draft);
 			await refreshState();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to save benchmark config';
+			error = e instanceof Error ? e.message : m.benchmark_setup_failed_to_save_benchmark_config();
 		} finally {
 			saving = false;
 		}
@@ -281,7 +282,7 @@
 			await runBenchmarkStep(stepId);
 			await refreshState();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to run benchmark step';
+			error = e instanceof Error ? e.message : m.benchmark_setup_failed_to_run_benchmark_step();
 		} finally {
 			runningStepId = null;
 		}
@@ -294,7 +295,7 @@
 			await runNextBenchmarkStep();
 			await refreshState();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to run the next unfinished step';
+			error = e instanceof Error ? e.message : m.benchmark_setup_failed_to_run_the_next();
 		} finally {
 			runNextBusy = false;
 		}
@@ -326,23 +327,23 @@
 <section class="bench-page" style="background:{pageBg}; color:{textPrimary};">
 	<div class="hero">
 		<div>
-			<p class="eyebrow" style="color:{accent};">System Admin / Benchmark / Setup</p>
-			<h1>Benchmark setup and operations</h1>
+			<p class="eyebrow" style="color:{accent};">{m.benchmark_setup_system_admin_benchmark_setup()}</p>
+			<h1>{m.benchmark_setup_benchmark_setup_and_operations()}</h1>
 			<p class="lede" style="color:{textSecondary};">
-				Configure the benchmark once, inspect which steps are already done, and run the remaining setup and benchmark operations from the browser.
+				{m.benchmark_setup_configure_the_benchmark_once_inspect()}
 			</p>
 			{#if setupState?.last_experiment_id}
-				<p class="lede" style="color:{muted};">Last experiment: <code>{setupState.last_experiment_id}</code></p>
+				<p class="lede" style="color:{muted};">{m.benchmark_setup_last_experiment()} <code>{setupState.last_experiment_id}</code></p>
 			{/if}
 		</div>
 		<div class="hero-actions">
 			<button class="hero-btn" style="border:1px solid {border}; color:{accent};" onclick={refreshState}>
 				<RefreshCwIcon size={16} />
-				<span>Refresh</span>
+				<span>{m.benchmark_setup_refresh()}</span>
 			</button>
 			<button class="hero-btn" style="border:1px solid {border}; color:{accent};" disabled={runNextBusy} onclick={runNext}>
 				<PlayIcon size={16} />
-				<span>{runNextBusy ? 'Running…' : 'Run next unfinished step'}</span>
+				<span>{runNextBusy ? m.benchmark_setup_running() : m.benchmark_setup_run_next_unfinished_step()}</span>
 			</button>
 		</div>
 	</div>
@@ -352,19 +353,19 @@
 	{/if}
 
 	{#if loading || !setupState || !draft}
-		<div class="panel" style="background:{cardBg}; border:1px solid {border}; color:{textSecondary};">Loading benchmark setup state…</div>
+		<div class="panel" style="background:{cardBg}; border:1px solid {border}; color:{textSecondary};">{m.benchmark_setup_loading_benchmark_setup_state()}</div>
 	{:else}
 		<div class="layout">
 			<div class="main-column">
 				<section class="panel" style="background:{cardBg}; border:1px solid {border};">
 					<div class="panel-head">
 						<div>
-							<h2>Benchmark config</h2>
-							<p style="color:{textSecondary};">These values are persisted by the server and used by validate, run, report, and compare.</p>
+							<h2>{m.benchmark_setup_benchmark_config()}</h2>
+							<p style="color:{textSecondary};">{m.benchmark_setup_these_values_are_persisted_by()}</p>
 						</div>
 						<button class="hero-btn" style="border:1px solid {border}; color:{accent};" disabled={saving} onclick={saveConfig}>
 							<SaveIcon size={16} />
-							<span>{saving ? 'Saving…' : 'Save config'}</span>
+							<span>{saving ? m.benchmark_setup_saving() : m.benchmark_setup_save_config()}</span>
 						</button>
 					</div>
 					<div class="config-grid">
@@ -386,9 +387,9 @@
 										</button>
 										<span class="tooltip" class:open={openHelp === String(field.key)} style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
 											<strong>{field.label}</strong>
-											<span><b>Purpose:</b> {field.help.purpose}</span>
-											<span><b>Valid values:</b> {field.help.valid}</span>
-											<span><b>Recommended:</b> {field.help.recommended}</span>
+											<span><b>{m.benchmark_setup_purpose()}</b> {field.help.purpose}</span>
+											<span><b>{m.benchmark_setup_valid_values()}</b> {field.help.valid}</span>
+											<span><b>{m.benchmark_setup_recommended()}</b> {field.help.recommended}</span>
 										</span>
 									</span>
 								</span>
@@ -417,12 +418,12 @@
 						{/each}
 						<label class="field toggle">
 							<span class="field-label" style="color:{muted};">
-								<span>Allow dirty working copy</span>
+								<span>{m.benchmark_setup_allow_dirty_working_copy()}</span>
 								<span class="help-anchor">
 									<button
 										type="button"
 										class="help-tip"
-										aria-label="Allow dirty working copy help"
+										aria-label={m.benchmark_setup_allow_dirty_working_copy_help()}
 										onmouseenter={() => (openHelp = 'allow_dirty')}
 										onmouseleave={() => { if (openHelp === 'allow_dirty') openHelp = null; }}
 										onfocus={() => (openHelp = 'allow_dirty')}
@@ -431,10 +432,10 @@
 										<CircleHelpIcon size={14} />
 									</button>
 									<span class="tooltip" class:open={openHelp === 'allow_dirty'} style="background:{pageBg}; border:1px solid {border}; color:{textPrimary};">
-										<strong>Allow dirty working copy</strong>
-										<span><b>Purpose:</b> {allowDirtyHelp.purpose}</span>
-										<span><b>Valid values:</b> {allowDirtyHelp.valid}</span>
-										<span><b>Recommended:</b> {allowDirtyHelp.recommended}</span>
+										<strong>{m.benchmark_setup_allow_dirty_working_copy()}</strong>
+										<span><b>{m.benchmark_setup_purpose()}</b> {allowDirtyHelp.purpose}</span>
+										<span><b>{m.benchmark_setup_valid_values()}</b> {allowDirtyHelp.valid}</span>
+										<span><b>{m.benchmark_setup_recommended()}</b> {allowDirtyHelp.recommended}</span>
 									</span>
 								</span>
 							</span>
@@ -449,8 +450,8 @@
 
 				<section class="section-block">
 					<div class="section-head">
-						<h2>Setup progress</h2>
-						<p style="color:{textSecondary};">Section 8 setup checks and the benchmark operations flow rendered as one browser-driven sequence.</p>
+						<h2>{m.benchmark_setup_setup_progress()}</h2>
+						<p style="color:{textSecondary};">{m.benchmark_setup_section_8_setup_checks_and()}</p>
 					</div>
 					<div class="step-stack">
 							{#each setupState.steps as step (step.id)}

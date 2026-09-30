@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { goto } from '$app/navigation';
 	import { locales, getLocale, setLocale } from '$lib/paraglide/runtime';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
@@ -106,7 +107,7 @@
 					type="button"
 					onclick={() => goto('/semos')}
 					class="block cursor-pointer border-0 bg-transparent p-0 mb-2"
-					aria-label="Go to Main page"
+					aria-label={m.hero_header_go_to_main_page()}
 				>
 					<img src={cfg.branding.logo_image} alt={cfg.branding.logo_text} class="h-7 w-auto" />
 				</button>
@@ -120,8 +121,8 @@
 					</div>
 					<div>
 						<div class="flex items-center gap-2">
-							<span style="font-size:20px; font-weight:700; color:{accent}; font-family:{fontMono};">MyAI</span>
-							<span style="font-size:20px; font-weight:700; color:{textPrimary};">Assistant</span>
+							<span style="font-size:20px; font-weight:700; color:{accent}; font-family:{fontMono};">{m.hero_header_myai()}</span>
+							<span style="font-size:20px; font-weight:700; color:{textPrimary};">{m.hero_header_assistant()}</span>
 							<span
 								class="px-2 py-0.5 rounded-full"
 								style="font-size:11px; font-family:{fontMono}; background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
@@ -130,7 +131,7 @@
 					</div>
 				</div>
 				<!-- Tagline -->
-				<p style="font-size:13px; color:{textSecondary}; font-family:{fontUI};">Your intelligent AI workspace</p>
+				<p style="font-size:13px; color:{textSecondary}; font-family:{fontUI};">{m.hero_header_your_intelligent_ai_workspace()}</p>
 			</div>
 
 			<!-- Right zone (text-right) -->
@@ -142,13 +143,13 @@
 						onclick={() => goto('/semos')}
 						class="px-2.5 py-1 rounded-full text-xs cursor-pointer"
 						style="background:{accentTint}; color:{accent}; font-family:{fontMono}; border:1px solid {accent}30;"
-					>Main</button>
+					>{m.hero_header_main()}</button>
 					<button
 						type="button"
 						onclick={() => goto('/semos/workspace')}
 						class="px-2.5 py-1 rounded-full text-xs cursor-pointer"
 						style="background:{accentTint}; color:{accent}; font-family:{fontMono}; border:1px solid {accent}30;"
-					>Workspace</button>
+					>{m.hero_header_workspace()}</button>
 				</div>
 				<!-- Language + bell + toggle row -->
 				<div class="flex items-center gap-3">
@@ -158,7 +159,7 @@
 						onclick={() => setLocale(nextLocale())}
 						class="flex items-center gap-1.5 h-8 px-2.5 rounded-lg cursor-pointer"
 						style="background:{accentTint}; color:{textSecondary};"
-						aria-label="Switch language"
+						aria-label={m.hero_header_switch_language()}
 					>
 						<LanguagesIcon class="w-4 h-4" />
 						<span style="font-size:12px;">{getLocale() === 'zh-cn' ? '中文' : 'English'}</span>
@@ -168,7 +169,7 @@
 						<button
 							class="flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer"
 							style="background:{accentTint};"
-							aria-label="Notifications"
+							aria-label={m.hero_header_notifications()}
 						>
 							<BellIcon class="w-4 h-4" style="color:{textSecondary};" />
 						</button>
@@ -182,7 +183,7 @@
 						onclick={onToggleDark}
 						class="flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition-colors duration-150"
 						style="background:{accentTint}; color:{accent};"
-						aria-label="Toggle dark mode"
+						aria-label={m.hero_header_toggle_dark_mode()}
 					>
 						{#if darkMode}
 							<SunIcon class="w-4 h-4" />
@@ -202,19 +203,19 @@
 			<!-- 3 agents active -->
 			<div class="flex items-center gap-1.5" style="font-family:{fontUI};">
 				<div class="w-1.5 h-1.5 rounded-full" style="background:#10B981;"></div>
-				<span style="font-size:12px; color:{textSecondary};">3 agents active</span>
+				<span style="font-size:12px; color:{textSecondary};">{m.hero_header_3_agents_active()}</span>
 			</div>
 			<div style="color:{textSecondary}; font-size:12px;">•</div>
 			<!-- 12 tasks running -->
 			<div class="flex items-center gap-1.5" style="font-family:{fontUI};">
 				<div class="w-1.5 h-1.5 rounded-full" style="background:#F59E0B;"></div>
-				<span style="font-size:12px; color:{textSecondary};">12 tasks running</span>
+				<span style="font-size:12px; color:{textSecondary};">{m.hero_header_12_tasks_running()}</span>
 			</div>
 			<div style="color:{textSecondary}; font-size:12px;">•</div>
 			<!-- All systems nominal -->
 			<div class="flex items-center gap-1.5" style="font-family:{fontUI};">
 				<div class="w-1.5 h-1.5 rounded-full" style="background:#10B981;"></div>
-				<span style="font-size:12px; color:{textSecondary};">All systems nominal</span>
+				<span style="font-size:12px; color:{textSecondary};">{m.hero_header_all_systems_nominal()}</span>
 			</div>
 		</div>
 	</div>

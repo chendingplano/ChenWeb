@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
@@ -50,7 +51,7 @@
 		repaintVersion = 0,
 		renderHighlights,
 		floatingOverlay,
-		loadingLabel = 'Rendering page…',
+		loadingLabel = m.shared_pdf_viewer_rendering_page(),
 		respectPageRotation = true,
 		onselect,
 		ondragmove,
@@ -453,7 +454,7 @@
 			}
 		} catch (err) {
 			if ((err as { name?: string })?.name === 'RenderingCancelledException') return;
-			pdfError = err instanceof Error ? err.message : 'Failed to render PDF';
+			pdfError = err instanceof Error ? err.message : m.shared_pdf_viewer_failed_to_render_pdf();
 		} finally {
 			if (seq === pdfRenderSeq) pdfLoading = false;
 		}
@@ -476,7 +477,8 @@
 				await renderPdfPages();
 			} catch (err) {
 				if ((err as { name?: string })?.name !== 'RenderingCancelledException') {
-					pdfError = err instanceof Error ? err.message : 'Failed to render PDF';
+					pdfError =
+						err instanceof Error ? err.message : m.shared_pdf_viewer_failed_to_render_pdf();
 				}
 			}
 		})();
@@ -608,10 +610,10 @@
 					class="page-btn"
 					onclick={() => goToPage(page - 1)}
 					disabled={page <= 1}
-					aria-label="Previous page">‹</button
+					aria-label={m.shared_pdf_viewer_previous_page()}>‹</button
 				>
 				<div class="page-bar-label">
-					<span class="page-bar-folio">page</span>
+					<span class="page-bar-folio">{m.shared_pdf_viewer_page()}</span>
 					<input
 						type="number"
 						min="1"
@@ -626,21 +628,27 @@
 					class="page-btn"
 					onclick={() => goToPage(page + 1)}
 					disabled={page >= Math.max(1, numPages)}
-					aria-label="Next page">›</button
+					aria-label={m.shared_pdf_viewer_next_page()}>›</button
 				>
-				<button class="page-btn small" onclick={zoomOut} title="Zoom out" aria-label="Zoom out"
-					>−</button
+				<button
+					class="page-btn small"
+					onclick={zoomOut}
+					title={m.shared_pdf_viewer_zoom_out()}
+					aria-label={m.shared_pdf_viewer_zoom_out()}>−</button
 				>
 				<span class="zoom-label">{zoomLabel()}</span>
-				<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in"
-					>+</button
+				<button
+					class="page-btn small"
+					onclick={zoomIn}
+					title={m.shared_pdf_viewer_zoom_in()}
+					aria-label={m.shared_pdf_viewer_zoom_in()}>+</button
 				>
 				<button
 					class="page-btn small"
 					type="button"
 					onclick={openPdfInNewTab}
-					title="Open in new tab"
-					aria-label="Open in new tab">↗</button
+					title={m.shared_pdf_viewer_open_in_new_tab()}
+					aria-label={m.shared_pdf_viewer_open_in_new_tab()}>↗</button
 				>
 			</div>
 		</div>
@@ -665,7 +673,7 @@
 					{#each pdfRenderedPages as pageNo (pageNo)}
 						<div class="pdf-page" id={`${viewerId}-page-${pageNo}`} data-page={pageNo}>
 							<div class="pdf-page-head">
-								<span class="pdf-page-label">page</span>
+								<span class="pdf-page-label">{m.shared_pdf_viewer_page()}</span>
 								<span class="pdf-page-num">{String(pageNo).padStart(3, '0')}</span>
 							</div>
 							<div class="pdf-canvas-shell">
@@ -698,11 +706,11 @@
 		{/if}
 		{#if pdfError}
 			<div class="doc-error" style="padding-top:20px;">
-				<div class="doc-error-title">⚠ Cannot render this PDF</div>
+				<div class="doc-error-title">{m.shared_pdf_viewer_cannot_render_this_pdf()}</div>
 				<div class="doc-error-msg">
 					{pdfError}<br />
 					<button class="doc-error-link" type="button" onclick={openPdfInNewTab}
-						>Open in a new tab</button
+						>{m.shared_pdf_viewer_open_in_a_new_tab()}</button
 					>
 				</div>
 			</div>

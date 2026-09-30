@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
 	import { BY_ID, CHAIN_NODE_BY_ID } from './model';
 	import type { ExplorerTokens } from './theme';
@@ -39,6 +40,13 @@
 
 	const SECTIONS = ['Definition', 'Connection', 'Processing', 'Sources'] as const;
 	let activeSection = $state<(typeof SECTIONS)[number]>('Definition');
+	// SECTIONS are ids (compared below); their display text is localised here.
+	const SECTION_LABEL: Record<(typeof SECTIONS)[number], string> = {
+		Definition: m.content_viewer_section_definition(),
+		Connection: m.content_viewer_section_connection(),
+		Processing: m.content_viewer_section_processing(),
+		Sources: m.content_viewer_section_sources()
+	};
 
 	const focusNode = $derived(BY_ID[focusId] ?? BY_ID.metric);
 
@@ -129,7 +137,7 @@
 			aria-selected={activeTab === 'search'}
 			onclick={() => onselecttab('search')}
 		>
-			Search
+			{m.content_viewer_search()}
 		</button>
 		{#each openTabs as id (id)}
 			{@const node = CHAIN_NODE_BY_ID[id]}
@@ -137,7 +145,7 @@
 				<button class="tab chain" role="tab" aria-selected={activeTab === id} onclick={() => onselecttab(id)}>
 					{node?.label ?? id}
 				</button>
-				<button class="x" title="Close tab" aria-label="Close {node?.label ?? id}" onclick={() => onclosetab(id)}>×</button>
+				<button class="x" title={m.content_viewer_close_tab()} aria-label={m.content_viewer_close({ label: node?.label ?? id })} onclick={() => onclosetab(id)}>×</button>
 			</span>
 		{/each}
 	</div>
@@ -150,12 +158,12 @@
 	<div class="body">
 		{#if activeTab === 'entry'}
 			<div class="kicker">
-				{#if focusId === 'metric'}The centre{:else}Metric {focusNode.edge} {focusNode.label.toLowerCase()}{/if}
+				{#if focusId === 'metric'}{m.content_viewer_the_centre()}{:else}{m.content_viewer_metric({ edge: focusNode.edge, label: focusNode.label.toLowerCase() })}{/if}
 			</div>
 			<h1 class="title">{focusNode.label}</h1>
 			<nav class="secnav">
 				{#each SECTIONS as s}
-					<button class:on={s === activeSection} onclick={() => (activeSection = s)}>{s}</button>
+					<button class:on={s === activeSection} onclick={() => (activeSection = s)}>{SECTION_LABEL[s]}</button>
 				{/each}
 			</nav>
 			{#if activeSection === 'Definition'}
@@ -170,7 +178,7 @@
 						<blockquote class="src">“{q}”</blockquote>
 					{/each}
 				{:else}
-					<p class="prose muted">No source spans recorded for this node.</p>
+					<p class="prose muted">{m.content_viewer_no_source_spans_recorded_for()}</p>
 				{/if}
 			{/if}
 		{:else if activeNode}
@@ -183,21 +191,21 @@
 
 			{#if !metricId}
 				<p class="note">
-					Pick a metric from the
-					<button class="linklike" onclick={() => onselecttab('search')}>Search</button>
-					tab to see its records.
+					{m.content_viewer_pick_a_metric_from_the()}
+					<button class="linklike" onclick={() => onselecttab('search')}>{m.content_viewer_search()}</button>
+					{m.content_viewer_tab_to_see_its_records()}
 				</p>
 			{:else if activeNode.related}
 				{#if relatedState.loading}
-					<p class="note">Loading related metrics…</p>
+					<p class="note">{m.content_viewer_loading_related_metrics()}</p>
 				{:else if relatedState.error}
-					<p class="note err">Could not load related metrics: {relatedState.error}</p>
+					<p class="note err">{m.content_viewer_could_not_load_related_metrics({ error: relatedState.error })}</p>
 				{:else if relatedNoClass}
 					<p class="note">
-						This metric has no resolved governed class yet — no peers to show.
+						{m.content_viewer_this_metric_has_no_resolved()}
 					</p>
 				{:else if relatedRows.length === 0}
-					<p class="note">No related metrics for this metric.</p>
+					<p class="note">{m.content_viewer_no_related_metrics_for_this()}</p>
 				{:else}
 					<div class="rec-wrap">
 						<table class="rec">
@@ -210,7 +218,7 @@
 										class="row-link"
 										role="button"
 										tabindex="0"
-										title="Open {row.metricId} in the explorer"
+										title={m.content_viewer_open_in_the_explorer({ metricId: row.metricId })}
 										onclick={() => onpickmetric(row.metricId)}
 										onkeydown={(e) => {
 											if (e.key === 'Enter' || e.key === ' ') {
@@ -227,11 +235,11 @@
 					</div>
 				{/if}
 			{:else if graphError}
-				<p class="note err">Could not load this metric’s graph: {graphError}</p>
+				<p class="note err">{m.content_viewer_could_not_load_this_metric({ graphError })}</p>
 			{:else if !nodeRows}
-				<p class="note">Loading rows…</p>
+				<p class="note">{m.content_viewer_loading_rows()}</p>
 			{:else if activeRows.length === 0}
-				<p class="note">No {activeNode.table} rows for this metric.</p>
+				<p class="note">{m.content_viewer_no_rows_for_this_metric({ table: activeNode.table })}</p>
 			{:else}
 				<div class="rec-wrap">
 					<table class="rec">

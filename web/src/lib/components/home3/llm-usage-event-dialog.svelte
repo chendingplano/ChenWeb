@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import type { LLMUsageEventDetail } from './llm-activities-client.js';
@@ -58,13 +59,13 @@
 	async function openBody(type: 'input' | 'output') {
 		const ref = type === 'input' ? event.input_body_ref : event.output_body_ref;
 		if (!ref) return;
-		bodyView = { title: `${type === 'input' ? 'Input' : 'Output'} Body — ${event.id.slice(0, 12)}…`, loading: true, error: '', nodes: [], rawText: '' };
+		bodyView = { title: (type === 'input' ? m.llm_usage_event_dialog_input_body : m.llm_usage_event_dialog_output_body)({ id: event.id.slice(0, 12) }), loading: true, error: '', nodes: [], rawText: '' };
 		try {
 			const res = await fetch(`/api/v1/llm/usage-events/${event.id}/body?type=${type}`, { credentials: 'same-origin' });
 			const text = await res.text();
 			if (!res.ok) {
 				const msg = (() => { try { return JSON.parse(text).message; } catch { return text; } })();
-				throw new Error(msg || 'Failed to load body');
+				throw new Error(msg || m.llm_usage_event_dialog_failed_to_load_body());
 			}
 			try {
 				bodyView = { ...bodyView, loading: false, nodes: buildJsonTree(JSON.parse(text)) };
@@ -142,7 +143,7 @@
 		class="rounded-xl flex flex-col"
 		role="dialog"
 		aria-modal="true"
-		aria-label={bodyView ? bodyView.title : `LLM Usage Event — ${event.id}`}
+		aria-label={bodyView ? bodyView.title : m.llm_usage_event_dialog_llm_usage_event({ id: event.id })}
 		onkeydown={handleKeydown}
 		style="background:{cardBg};border:1px solid {borderColor};width:min(900px,100%);max-height:80vh"
 	>
@@ -154,13 +155,13 @@
 						onclick={() => (bodyView = null)}
 						class="rounded p-1 cursor-pointer"
 						style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-						aria-label="Back"
+						aria-label={m.llm_usage_event_dialog_back()}
 					>
 						<ChevronLeftIcon class="w-3.5 h-3.5" />
 					</button>
 				{/if}
 				<span style="font-size:14px;font-weight:600;color:{textPrimary};font-family:monospace">
-					{bodyView ? bodyView.title : `LLM Usage Event — ${event.id}`}
+					{bodyView ? bodyView.title : m.llm_usage_event_dialog_llm_usage_event({ id: event.id })}
 				</span>
 			</div>
 			<button
@@ -168,7 +169,7 @@
 				onclick={onclose}
 				class="rounded p-1.5 cursor-pointer"
 				style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-				aria-label="Close"
+				aria-label={m.llm_usage_event_dialog_close()}
 			>
 				<XIcon class="w-4 h-4" />
 			</button>
@@ -176,7 +177,7 @@
 		<div class="flex-1 overflow-auto p-5 modal-scroll" style="--modal-scroll-thumb:{scrollThumb};">
 			{#if bodyView}
 				{#if bodyView.loading}
-					<div class="text-center" style="color:{textMuted};padding:2rem">Loading…</div>
+					<div class="text-center" style="color:{textMuted};padding:2rem">{m.llm_usage_event_dialog_loading()}</div>
 				{:else if bodyView.error}
 					<div class="rounded-lg p-4" style="background:{danger}15;border:1px solid {danger}40;color:{danger}">{bodyView.error}</div>
 				{:else if bodyView.nodes.length}
@@ -191,23 +192,23 @@
 							<div style="color:{textMuted};font-family:monospace;word-break:break-word">{field.label}</div>
 							<div style="color:{textSecondary};word-break:break-word;white-space:pre-wrap">{displayValue(event[field.key])}</div>
 						{/each}
-						<div style="color:{textMuted};font-family:monospace;word-break:break-word">input_body_ref</div>
+						<div style="color:{textMuted};font-family:monospace;word-break:break-word">{m.llm_usage_event_dialog_input_body_ref()}</div>
 						<div>
 							{#if event.input_body_ref}
-								<button type="button" class="ev-btn" style="border-color:{borderColor};color:{accent}" onclick={() => openBody('input')}>View</button>
+								<button type="button" class="ev-btn" style="border-color:{borderColor};color:{accent}" onclick={() => openBody('input')}>{m.llm_usage_event_dialog_view()}</button>
 							{:else}
 								<span style="color:{textMuted}">—</span>
 							{/if}
 						</div>
-						<div style="color:{textMuted};font-family:monospace;word-break:break-word">output_body_ref</div>
+						<div style="color:{textMuted};font-family:monospace;word-break:break-word">{m.llm_usage_event_dialog_output_body_ref()}</div>
 						<div>
 							{#if event.output_body_ref}
-								<button type="button" class="ev-btn" style="border-color:{borderColor};color:{accent}" onclick={() => openBody('output')}>View</button>
+								<button type="button" class="ev-btn" style="border-color:{borderColor};color:{accent}" onclick={() => openBody('output')}>{m.llm_usage_event_dialog_view()}</button>
 							{:else}
 								<span style="color:{textMuted}">—</span>
 							{/if}
 						</div>
-						<div style="color:{textMuted};font-family:monospace;word-break:break-word">metadata_json</div>
+						<div style="color:{textMuted};font-family:monospace;word-break:break-word">{m.llm_usage_event_dialog_metadata_json()}</div>
 						<div>
 							<JsonTree nodes={metadataNodes} {dark} />
 						</div>

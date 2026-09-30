@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listTerminologyResources,
@@ -74,7 +75,10 @@
 				x.id === r.id ? { ...x, auto_promote_enabled: enabled } : x
 			);
 		} catch (e) {
-			pageError = e instanceof Error ? e.message : `Failed to update auto-promotion for ${r.name}`;
+			pageError =
+				e instanceof Error
+					? e.message
+					: m.external_terminology_resources_failed_to_update_auto_promotion({ name: r.name });
 		} finally {
 			togglingPromotion = { ...togglingPromotion, [r.id]: false };
 		}
@@ -82,12 +86,13 @@
 
 	function expectedSizeLabel(r: TerminologyResource): string {
 		if (r.expected_size_bytes > 0) return `≈ ${formatBytes(r.expected_size_bytes)}`;
-		if (r.max_bytes > 0) return `Varies (≤ ${formatBytes(r.max_bytes)})`;
+		if (r.max_bytes > 0)
+			return m.external_terminology_resources_varies({ max_bytes: formatBytes(r.max_bytes) });
 		return '—';
 	}
 
 	function cadenceLabel(r: TerminologyResource): string {
-		if (!r.update_cadence) return 'Pinned';
+		if (!r.update_cadence) return m.external_terminology_resources_pinned();
 		return r.update_cadence.charAt(0).toUpperCase() + r.update_cadence.slice(1);
 	}
 
@@ -102,7 +107,10 @@
 		try {
 			resources = await listTerminologyResources();
 		} catch (e) {
-			pageError = e instanceof Error ? e.message : 'Failed to load terminology resources';
+			pageError =
+				e instanceof Error
+					? e.message
+					: m.external_terminology_resources_failed_to_load_terminology_resources();
 		} finally {
 			loading = false;
 		}
@@ -134,7 +142,10 @@
 		try {
 			await downloadTerminologyResource(r.id);
 		} catch (e) {
-			pageError = e instanceof Error ? e.message : `Failed to download ${r.name}`;
+			pageError =
+				e instanceof Error
+					? e.message
+					: m.external_terminology_resources_failed_to_download({ name: r.name });
 		} finally {
 			clearInterval(timer);
 			downloading = { ...downloading, [r.id]: false };
@@ -146,9 +157,19 @@
 	}
 
 	function statusPill(r: TerminologyResource): { label: string; color: string; bg: string } {
-		if (r.permission_required) return { label: 'Permission required', color: amber, bg: amberTint };
-		if (r.downloaded) return { label: 'Downloaded', color: green, bg: greenTint };
-		return { label: 'Not downloaded', color: textMuted, bg: 'transparent' };
+		if (r.permission_required)
+			return {
+				label: m.external_terminology_resources_permission_required(),
+				color: amber,
+				bg: amberTint
+			};
+		if (r.downloaded)
+			return { label: m.external_terminology_resources_downloaded(), color: green, bg: greenTint };
+		return {
+			label: m.external_terminology_resources_not_downloaded(),
+			color: textMuted,
+			bg: 'transparent'
+		};
 	}
 </script>
 
@@ -160,11 +181,10 @@
 	<div class="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-6 py-4">
 		<div>
 			<h1 class="text-lg font-semibold" style="color:{textPrimary};">
-				External Terminology Resources
+				{m.external_terminology_resources_external_terminology_resources()}
 			</h1>
 			<p class="mt-0.5 text-xs" style="color:{textSecondary};">
-				Freely downloadable sources can be fetched automatically; downloads write local artifacts
-				plus an unapproved draft manifest awaiting operator license review.
+				{m.external_terminology_resources_freely_downloadable_sources_can_be()}
 			</p>
 		</div>
 		<button
@@ -172,10 +192,12 @@
 			disabled={loading}
 			class="flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 			style="background:{accentTint}; color:{accent}; border:1px solid transparent;"
-			aria-label="Refresh resource statuses"
+			aria-label={m.external_terminology_resources_refresh_resource_statuses()}
 		>
 			<RefreshCwIcon class="h-3.5 w-3.5" />
-			{loading ? 'Loading…' : 'Refresh'}
+			{loading
+				? m.external_terminology_resources_loading()
+				: m.external_terminology_resources_refresh()}
 		</button>
 	</div>
 
@@ -228,11 +250,11 @@
 				<!-- Release + license -->
 				<div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
 					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
-						<div style="color:{textMuted};">Release</div>
+						<div style="color:{textMuted};">{m.external_terminology_resources_release()}</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">{r.release || '—'}</div>
 					</div>
 					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
-						<div style="color:{textMuted};">License</div>
+						<div style="color:{textMuted};">{m.external_terminology_resources_license()}</div>
 						<!-- eslint-disable svelte/no-navigation-without-resolve -->
 						<a
 							href={r.license_url}
@@ -250,13 +272,15 @@
 				<!-- Expected size + update cadence -->
 				<div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
 					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
-						<div style="color:{textMuted};">Expected size</div>
+						<div style="color:{textMuted};">{m.external_terminology_resources_expected_size()}</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
 							{expectedSizeLabel(r)}
 						</div>
 					</div>
 					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
-						<div style="color:{textMuted};">Update cadence</div>
+						<div style="color:{textMuted};">
+							{m.external_terminology_resources_update_cadence()}
+						</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">{cadenceLabel(r)}</div>
 					</div>
 				</div>
@@ -267,9 +291,11 @@
 					style="background:{inputBg};"
 				>
 					<div>
-						<div class="font-medium" style="color:{textPrimary};">Auto-promote on approve</div>
+						<div class="font-medium" style="color:{textPrimary};">
+							{m.external_terminology_resources_auto_promote_on_approve()}
+						</div>
 						<div class="mt-0.5" style="color:{textMuted};">
-							Staged entries become keyword concepts automatically, flagged for optional review.
+							{m.external_terminology_resources_staged_entries_become_keyword_concepts()}
 						</div>
 					</div>
 					<button
@@ -277,7 +303,7 @@
 						disabled={togglingPromotion[r.id]}
 						role="switch"
 						aria-checked={r.auto_promote_enabled}
-						aria-label="Toggle auto-promote for {r.name}"
+						aria-label={m.external_terminology_resources_toggle_auto_promote_for({ name: r.name })}
 						class="relative h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 						style="background:{r.auto_promote_enabled ? accent : borderColor};"
 					>
@@ -295,26 +321,31 @@
 						style="background:{greenTint}; border:1px solid {green}33;"
 					>
 						<div class="flex justify-between gap-2">
-							<span style="color:{textMuted};">Downloaded at</span>
+							<span style="color:{textMuted};"
+								>{m.external_terminology_resources_downloaded_at()}</span
+							>
 							<span style="color:{textPrimary};">{formatDate(r.downloaded_at)}</span>
 						</div>
 						<div class="flex justify-between gap-2">
-							<span style="color:{textMuted};">Size</span>
+							<span style="color:{textMuted};">{m.external_terminology_resources_size()}</span>
 							<span style="color:{textPrimary};">{formatBytes(r.size_bytes)}</span>
 						</div>
 						<div class="flex items-center justify-between gap-2">
-							<span style="color:{textMuted};">SHA-256</span>
+							<span style="color:{textMuted};">{m.external_terminology_resources_sha_256()}</span>
 							<span class="font-mono" style="color:{mono};">{shortSha(r.sha256)}</span>
 						</div>
 						{#if r.artifact}
 							<div class="flex justify-between gap-2">
-								<span style="color:{textMuted};">Artifact</span>
+								<span style="color:{textMuted};">{m.external_terminology_resources_artifact()}</span
+								>
 								<span class="truncate" style="color:{textPrimary};">{r.artifact}</span>
 							</div>
 						{/if}
 						{#if r.manifest_draft}
 							<div class="flex justify-between gap-2">
-								<span style="color:{textMuted};">Draft manifest</span>
+								<span style="color:{textMuted};"
+									>{m.external_terminology_resources_draft_manifest()}</span
+								>
 								<span style="color:{textPrimary};">{r.manifest_draft}</span>
 							</div>
 						{/if}
@@ -341,12 +372,12 @@
 						<div class="flex items-center justify-between gap-2">
 							<span class="flex items-center gap-1.5 font-medium" style="color:{accent};">
 								<LoaderCircleIcon class="h-3.5 w-3.5" style="animation:spin 1s linear infinite;" />
-								Downloading…
+								{m.external_terminology_resources_downloading()}
 							</span>
 							<span style="color:{textSecondary};">
 								{p.total > 0
 									? `${formatBytes(p.done)} / ${formatBytes(p.total)} · ${pct}%`
-									: `${formatBytes(p.done) || '0 B'} so far`}
+									: m.external_terminology_resources_so_far({ done: formatBytes(p.done) || '0 B' })}
 								· {formatDuration(Date.now() - p.startedAt)}
 							</span>
 						</div>
@@ -390,17 +421,21 @@
 							{:else}
 								<DownloadIcon class="h-3.5 w-3.5" />
 							{/if}
-							{downloading[r.id] ? 'Downloading…' : r.downloaded ? 'Re-download' : 'Download'}
+							{downloading[r.id]
+								? m.external_terminology_resources_downloading()
+								: r.downloaded
+									? m.external_terminology_resources_re_download()
+									: m.external_terminology_resources_download()}
 						</button>
 					{:else}
 						<button
 							disabled
 							class="flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium opacity-60"
 							style="background:{inputBg}; color:{textMuted}; border:1px solid {borderColor};"
-							title="This resource is copyright-gated and requires an IEC license."
+							title={m.external_terminology_resources_this_resource_is_copyright_gated()}
 						>
 							<LockIcon class="h-3.5 w-3.5" />
-							Requires license
+							{m.external_terminology_resources_requires_license()}
 						</button>
 					{/if}
 				</div>

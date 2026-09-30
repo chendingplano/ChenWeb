@@ -15,6 +15,12 @@
 - [x] 3.3 Migration stripping the 98 duplicated labels (dry-run in a rolled-back transaction).
 - [ ] 3.4 Browser check of the menu in both languages after the next server start (migration applies then).
 
-## 4. Follow-up (separate changes)
+## 4. Conversion
 
-- [ ] 4.1 Convert baselined pages in batches by area; lower the baseline after each.
+- [x] 4.1 Converter `web/scripts/i18n-extract.ts` (markup, markup-expression literals, reviewed
+      `<script>` strings) with unit tests; check extended to markup-expression literals.
+- [x] 4.2 Batch 1 (2026-09-30): the 50 smallest `home3` components — 0 hard-coded items left;
+      ~740 messages with Chinese. Verified: svelte-check, i18n check, 46/50 components
+      server-rendered in en and zh-cn with a throwaway harness (other 4: Vite-only glob, snippet
+      prop, workspace package, `$app` inside a store — harness limits, not conversion errors).
+- [ ] 4.3 Remaining batches (baseline after batch 1 + stricter rule: 195 files / 5,664 items).

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import SummaryCard from './summary-card.svelte';
 	import type { SummaryPdfTarget, SummaryRecordCard } from './summary-types';
 
@@ -42,18 +43,17 @@
 <div class="category-shell">
 	<div class="category-head">
 		<div>
-			<div class="eyebrow">Category Path</div>
+			<div class="eyebrow">{m.summary_category_tab_category_path()}</div>
 			<h3 title={categoryPath}>{categoryPath}</h3>
 		</div>
-		<div class="meta-pill">{summaries.length} summaries</div>
+		<div class="meta-pill">{m.summary_category_tab_summaries({ summariesCount: summaries.length })}</div>
 	</div>
 
 	<div class="category-body">
 		<div class="summary-list" style={`width:${leftWidth}px;`}>
 			{#if summaries.length === 0}
 				<div class="empty-state">
-					No summaries are available for this category yet. This category may not have a
-					`summaries.txt` file yet.
+					{m.summary_category_tab_no_summaries_are_available_for()}
 				</div>
 			{:else}
 				{#each summaries as summary}
@@ -70,36 +70,36 @@
 			type="button"
 			class:active={resizing}
 			class="resizer"
-			aria-label="Resize summary list"
+			aria-label={m.summary_category_tab_resize_summary_list()}
 			onmousedown={beginResize}
 		></button>
 
 		<div class="pdf-panel">
 			<div class="pdf-head">
 				<div>
-					<div class="eyebrow">PDF Display</div>
-					<h4>{selectedTarget ? `Input #${selectedTarget.inputId}` : 'Select a summary'}</h4>
+					<div class="eyebrow">{m.summary_category_tab_pdf_display()}</div>
+					<h4>{selectedTarget ? m.summary_category_tab_input({ inputId: selectedTarget.inputId }) : m.summary_category_tab_select_a_summary()}</h4>
 				</div>
 				{#if selectedTarget}
-					<div class="meta-pill">page {selectedTarget.page}</div>
+					<div class="meta-pill">{m.summary_category_tab_page({ page: selectedTarget.page })}</div>
 				{/if}
 			</div>
 
 			{#if selectedTarget}
 				<div class="pdf-mock">
 					<div class="paper">
-						<div class="paper-title">Mock PDF Jump Target</div>
+						<div class="paper-title">{m.summary_category_tab_mock_pdf_jump_target()}</div>
 						<div class="paper-grid">
-							<div><span>Input ID</span><strong>{selectedTarget.inputId}</strong></div>
-							<div><span>Page</span><strong>{selectedTarget.page}</strong></div>
-							<div><span>Summary ID</span><strong>{selectedTarget.summaryId}</strong></div>
-							<div><span>Status</span><strong>Phase 1 Mock</strong></div>
+							<div><span>{m.summary_category_tab_input_id()}</span><strong>{selectedTarget.inputId}</strong></div>
+							<div><span>{m.summary_category_tab_page_2()}</span><strong>{selectedTarget.page}</strong></div>
+							<div><span>{m.summary_category_tab_summary_id()}</span><strong>{selectedTarget.summaryId}</strong></div>
+							<div><span>{m.summary_category_tab_status()}</span><strong>{m.summary_category_tab_phase_1_mock()}</strong></div>
 						</div>
 					</div>
 				</div>
 			{:else}
 				<div class="pdf-empty">
-					Select a summary card on the left to preview its mocked PDF target.
+					{m.summary_category_tab_select_a_summary_card_on()}
 				</div>
 			{/if}
 		</div>

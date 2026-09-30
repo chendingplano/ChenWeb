@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import type { WikiOverviewResponse } from '$lib/services/kbService';
 	import { getLocale, setLocale, locales } from '$lib/paraglide/runtime.js';
@@ -74,7 +75,7 @@
 	const ATLAS_ITEMS: AtlasItem[] = [
 		{
 			n: 1,
-			label: 'Documents',
+			label: m.semos_kb_hero_documents(),
 			keys: ['documents'],
 			icon: FilesIcon,
 			href: KNOWLEDGE + 'kb-input-details',
@@ -84,7 +85,7 @@
 		},
 		{
 			n: 2,
-			label: 'Content Segments',
+			label: m.semos_kb_hero_content_segments(),
 			keys: ['content_segments'],
 			icon: FileSearchIcon,
 			href: KNOWLEDGE + 'kb-chunks',
@@ -94,7 +95,7 @@
 		},
 		{
 			n: 3,
-			label: 'Topics',
+			label: m.semos_kb_hero_topics(),
 			keys: ['topics'],
 			icon: PresentationIcon,
 			href: KNOWLEDGE + 'kb-topic-tree',
@@ -104,7 +105,7 @@
 		},
 		{
 			n: 4,
-			label: 'Semantic Projections',
+			label: m.semos_kb_hero_semantic_projections(),
 			keys: ['semantic_projections'],
 			icon: GlobeIcon,
 			href: KNOWLEDGE + 'kb-semantic-projections',
@@ -114,7 +115,7 @@
 		},
 		{
 			n: 5,
-			label: 'Entities & Relations',
+			label: m.semos_kb_hero_entities_relations(),
 			keys: ['entities', 'relations'],
 			icon: NetworkIcon,
 			href: GRAPH_HREF,
@@ -124,7 +125,7 @@
 		},
 		{
 			n: 6,
-			label: 'Metrics',
+			label: m.semos_kb_hero_metrics(),
 			keys: ['metrics'],
 			icon: ChartBarIcon,
 			href: KNOWLEDGE + 'kb-metrics',
@@ -134,7 +135,7 @@
 		},
 		{
 			n: 7,
-			label: 'Parts & Components',
+			label: m.semos_kb_hero_parts_components(),
 			keys: ['parts_components'],
 			icon: BoxesIcon,
 			href: KNOWLEDGE + 'kb-products',
@@ -144,7 +145,7 @@
 		},
 		{
 			n: 8,
-			label: 'Provisions',
+			label: m.semos_kb_hero_provisions(),
 			keys: ['provisions'],
 			icon: ScaleIcon,
 			href: KNOWLEDGE + 'kb-provision-tree',
@@ -154,7 +155,7 @@
 		},
 		{
 			n: 9,
-			label: 'Scenes',
+			label: m.semos_kb_hero_scenes(),
 			keys: ['scenes'],
 			icon: ClapperboardIcon,
 			href: KNOWLEDGE + 'kb-scene-blocks',
@@ -239,11 +240,11 @@
 	class="kb-hero"
 	class:dark={darkMode}
 	class:light={!darkMode}
-	aria-label="Corpus overview"
+	aria-label={m.semos_kb_hero_corpus_overview()}
 	bind:clientWidth={rootWidth}
 >
-	<p class="eyebrow">The deep knowledge base</p>
-	<h1 class="wordmark">SemOS</h1>
+	<p class="eyebrow">{m.semos_kb_hero_the_deep_knowledge_base()}</p>
+	<h1 class="wordmark">{m.semos_kb_hero_semos()}</h1>
 
 	{#if !compact}
 		<div class="stage" style="aspect-ratio:{STAGE_W} / {STAGE_H};">
@@ -276,7 +277,7 @@
 					<circle cx={CX + 116} cy="282" r="9" />
 					<path d="M{CX + 96} 232l-22 44M{CX + 96} 232l20 50M{CX + 74} 276l42 6" />
 				</g>
-				<text x={CX} y="326" class="mon-label">SemOS KB</text>
+				<text x={CX} y="326" class="mon-label">{m.semos_kb_hero_semos_kb()}</text>
 				<rect x={CX - 15} y="376" width="30" height="26" class="mon-stand" />
 				<rect x={CX - 54} y="400" width="108" height="15" rx="7" class="mon-stand" />
 			</svg>
@@ -311,7 +312,7 @@
 					<path d="M134 84v44c0 5 12 10 26 10s26-5 26-10V84" />
 					<path d="M134 100c0 5 12 10 26 10s26-5 26-10" />
 				</g>
-				<text x="160" y="158" class="mon-label">SemOS KB</text>
+				<text x="160" y="158" class="mon-label">{m.semos_kb_hero_semos_kb()}</text>
 				<rect x="145" y="204" width="30" height="24" class="mon-stand" />
 				<rect x="108" y="226" width="104" height="14" rx="7" class="mon-stand" />
 			</svg>
@@ -353,20 +354,20 @@
 		<input
 			type="search"
 			name="q"
-			placeholder="Search the knowledge base"
-			aria-label="Search the knowledge base"
+			placeholder={m.semos_kb_hero_search_the_knowledge_base()}
+			aria-label={m.semos_kb_hero_search_the_knowledge_base()}
 			bind:value={query}
 			autocomplete="off"
 		/>
 		<label class="lang">
-			<span class="sr-only">Language</span>
-			<select value={currentLocale} onchange={changeLocale} aria-label="Select language">
+			<span class="sr-only">{m.semos_kb_hero_language()}</span>
+			<select value={currentLocale} onchange={changeLocale} aria-label={m.semos_kb_hero_select_language()}>
 				{#each locales as code}
 					<option value={code}>{LOCALE_LABELS[code] ?? code}</option>
 				{/each}
 			</select>
 		</label>
-		<button type="submit">Search</button>
+		<button type="submit">{m.semos_kb_hero_search()}</button>
 	</form>
 </section>
 

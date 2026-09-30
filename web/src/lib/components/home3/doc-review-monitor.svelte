@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
     import { onMount, onDestroy } from 'svelte';
     import { listActiveJobs, listAspects, stopRequest, restartRequest } from '$lib/services/docReviewService';
     import type { ActiveJob, AspectStatus } from '$lib/services/docReviewService';
@@ -86,9 +87,9 @@
         const start = new Date(startStr).getTime();
         if (Number.isNaN(start)) return '';
         const secs = Math.max(0, Math.floor((now - start) / 1000));
-        const m = Math.floor(secs / 60);
+        const mins = Math.floor(secs / 60);
         const s = secs % 60;
-        return m > 0 ? `${m}m ${s}s` : `${s}s`;
+        return mins > 0 ? `${mins}m ${s}s` : `${s}s`;
     }
 
     async function poll() {
@@ -96,7 +97,7 @@
             jobs = await listActiveJobs();
             loadError = '';
         } catch (e: any) {
-            loadError = e?.message || 'Failed to load active jobs';
+            loadError = e?.message || m.doc_review_monitor_failed_to_load_active_jobs();
         }
     }
 
@@ -107,7 +108,7 @@
             await poll();
             onStop?.();
         } catch (e: any) {
-            loadError = e?.message || 'Failed to stop review';
+            loadError = e?.message || m.doc_review_monitor_failed_to_stop_review();
         } finally {
             const n = new Set(stoppingIds); n.delete(requestId); stoppingIds = n;
         }
@@ -119,7 +120,7 @@
             await restartRequest(requestId);
             await poll();
         } catch (e: any) {
-            loadError = e?.message || 'Failed to restart review';
+            loadError = e?.message || m.doc_review_monitor_failed_to_restart_review();
         } finally {
             const n = new Set(restartingIds); n.delete(requestId); restartingIds = n;
         }
@@ -145,11 +146,11 @@
     <div style="background:{cardBg}; border:1px solid {borderColor}; border-radius:12px; padding:16px 18px; margin-bottom:1rem;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
             <div style="font-size:15px; font-weight:600; color:{textPrimary};">
-                Active Reviews <span style="color:{textMuted}; font-weight:400; font-size:13px;">({jobs.length})</span>
+                {m.doc_review_monitor_active_reviews()} <span style="color:{textMuted}; font-weight:400; font-size:13px;">({jobs.length})</span>
             </div>
             <div style="display:flex; align-items:center; gap:8px; font-size:11px; color:{textMuted};">
                 <RefreshCwIcon class="h-3 w-3" style="animation:drm-spin 2s linear infinite;" />
-                refreshes every {Math.round(pollMs / 1000)} s
+                {m.doc_review_monitor_refreshes_every_s({ seconds: Math.round(pollMs / 1000) })}
             </div>
         </div>
 
@@ -160,26 +161,26 @@
                     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
                         <div style="display:flex; align-items:center; gap:10px; min-width:0;">
                             <span style="flex-shrink:0; font-family:monospace; font-size:11px; padding:2px 8px; border-radius:6px; background:{accentTint}; color:{accent};">#{job.request_id}</span>
-                            <span style="font-weight:600; color:{textPrimary}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{job.doc_title || `Document #${job.input_record_id}`}</span>
+                            <span style="font-weight:600; color:{textPrimary}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{job.doc_title || m.doc_review_monitor_document({ input_record_id: job.input_record_id })}</span>
                             <span style="flex-shrink:0; font-size:11px; padding:2px 8px; border-radius:6px; background:{cardBg}; color:{textSecondary};">{job.tier}</span>
-                            <span style="flex-shrink:0; font-size:11px; color:{textMuted};">{finishedCount(job)}/{job.aspects.length} done</span>
+                            <span style="flex-shrink:0; font-size:11px; color:{textMuted};">{m.doc_review_monitor_done({ finished: finishedCount(job), total: job.aspects.length })}</span>
                         </div>
                         <div style="display:flex; align-items:center; gap:6px;">
                             <button onclick={() => handleRestart(job.request_id)} disabled={restartingIds.has(job.request_id)}
-                                title="Restart this review from the beginning (use when a run stalled because the backend was restarted)"
+                                title={m.doc_review_monitor_restart_this_review_from_the()}
                                 style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{cardBg}; border:1px solid {borderColor}; border-radius:8px; color:{accent}; font-size:12px; cursor:{restartingIds.has(job.request_id) ? 'not-allowed' : 'pointer'}; opacity:{restartingIds.has(job.request_id) ? 0.5 : 1};">
                                 <RotateCwIcon class="h-3 w-3" />
-                                {restartingIds.has(job.request_id) ? 'Restarting…' : 'Restart'}
+                                {restartingIds.has(job.request_id) ? m.doc_review_monitor_restarting() : m.doc_review_monitor_restart()}
                             </button>
                             <button onclick={() => handleStop(job.request_id)} disabled={stoppingIds.has(job.request_id)}
                                 style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{cardBg}; border:1px solid {borderColor}; border-radius:8px; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(job.request_id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(job.request_id) ? 0.5 : 1};">
                                 <SquareIcon class="h-3 w-3" />
-                                {stoppingIds.has(job.request_id) ? 'Stopping…' : 'Stop'}
+                                {stoppingIds.has(job.request_id) ? m.doc_review_monitor_stopping() : m.doc_review_monitor_stop()}
                             </button>
                             <button onclick={() => onView?.(job.request_id)}
                                 style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{accentTint}; border:1px solid {accent}30; border-radius:8px; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;">
                                 <EyeIcon class="h-3 w-3" />
-                                View
+                                {m.doc_review_monitor_view()}
                             </button>
                         </div>
                     </div>
@@ -210,7 +211,7 @@
                                     <div style="height:100%; width:{percent(a.progress)}%; background:{statusColor(st)}; transition:width 180ms ease;"></div>
                                 </div>
                                 <div style="margin-top:4px; font-size:9px; color:{textMuted}; text-align:center;">
-                                    {percent(a.progress)}%{#if a.finding_count > 0} · {a.finding_count} finding{a.finding_count === 1 ? '' : 's'}{/if}
+                                    {percent(a.progress)}%{#if a.finding_count > 0} {m.doc_review_monitor_finding({ finding_count: a.finding_count, plural: a.finding_count === 1 ? '' : 's' })}{/if}
                                 </div>
                             </div>
                             {#if i < job.aspects.length - 1}
@@ -221,9 +222,9 @@
 
                     <!-- Status line -->
                     <div style="margin-top:10px; border-top:1px solid {borderColor}; padding-top:8px; font-size:11px; color:{textMuted}; font-family:monospace; display:flex; gap:16px; flex-wrap:wrap;">
-                        <span>By: {job.requester_name || '—'}</span>
-                        <span>Started: {fmtClock(job.start_time || job.create_time)}</span>
-                        {#if elapsed(job)}<span>Elapsed: {elapsed(job)}</span>{/if}
+                        <span>{m.doc_review_monitor_by({ requester_name: job.requester_name || '—' })}</span>
+                        <span>{m.doc_review_monitor_started({ start_time: fmtClock(job.start_time || job.create_time) })}</span>
+                        {#if elapsed(job)}<span>{m.doc_review_monitor_elapsed({ elapsed: elapsed(job) })}</span>{/if}
                     </div>
                 </div>
             {/each}

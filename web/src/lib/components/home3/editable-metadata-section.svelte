@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { safePrettyJson } from './kb-input-metadata.js';
 
 	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json' | 'user-select';
@@ -19,7 +20,7 @@
 	let {
 		title,
 		rows = [],
-		emptyText = 'No data.',
+		emptyText = m.editable_metadata_section_no_data(),
 		canEdit = false,
 		onSave
 	}: {
@@ -78,7 +79,10 @@
 			await onSave(row, editingDraft, editingEditor);
 			cancelEdit();
 		} catch (error) {
-			editingError = error instanceof Error ? error.message : 'Failed to save changes.';
+			editingError =
+				error instanceof Error
+					? error.message
+					: m.editable_metadata_section_failed_to_save_changes();
 		} finally {
 			editingSaving = false;
 		}
@@ -101,7 +105,7 @@
 							<div class="metadata-editor">
 								{#if editingEditor === 'user-select'}
 									<select class="metadata-input" bind:value={editingDraft}>
-										<option value="">— Unassigned —</option>
+										<option value="">{m.editable_metadata_section_unassigned()}</option>
 										{#each row.options ?? [] as option}
 											<option value={option.value}>{option.label}</option>
 										{/each}
@@ -127,7 +131,9 @@
 										onclick={() => saveEdit(row)}
 										disabled={editingSaving}
 									>
-										{editingSaving ? 'Saving…' : 'Save'}
+										{editingSaving
+											? m.editable_metadata_section_saving()
+											: m.editable_metadata_section_save()}
 									</button>
 									<button
 										class="metadata-editor-btn"
@@ -135,7 +141,7 @@
 										onclick={cancelEdit}
 										disabled={editingSaving}
 									>
-										Cancel
+										{m.editable_metadata_section_cancel()}
 									</button>
 								</div>
 							</div>
@@ -144,7 +150,7 @@
 								<button
 									type="button"
 									class="metadata-edit-trigger"
-									title={`${row.value}\n(Double click to edit)`}
+									title={m.editable_metadata_section_double_click_to_edit({ value: row.value })}
 									ondblclick={() => startEdit(row)}
 								>
 									<span class="metadata-edit-text">{row.value}</span>
@@ -152,8 +158,8 @@
 								<button
 									type="button"
 									class="metadata-edit-icon-btn"
-									title="Edit field"
-									aria-label={`Edit ${row.label}`}
+									title={m.editable_metadata_section_edit_field()}
+									aria-label={m.editable_metadata_section_edit({ label: row.label })}
 									onclick={() => startEdit(row)}
 								>
 									✎

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { Agent, Issue } from './agentplatform-client';
 
 	let {
@@ -19,7 +20,7 @@
 		onDragEnd: () => void;
 	} = $props();
 
-	const priorityLabels = ['—', 'Low', 'Medium', 'High', 'Urgent'];
+	const priorityLabels = ['—', m.kanban_card_low(), m.kanban_card_medium(), m.kanban_card_high(), m.kanban_card_urgent()];
 	const priorityColor = (p: number) =>
 		p >= 4 ? '#F87171' : p === 3 ? '#FBBF24' : p === 2 ? '#60A5FA' : '#94A3B8';
 
@@ -78,7 +79,7 @@
 		</div>
 	{:else if issue.assignee_user_id}
 		<div class="foot">
-			<span class="assignee">👤 Assigned</span>
+			<span class="assignee">{m.kanban_card_assigned()}</span>
 		</div>
 	{/if}
 </div>

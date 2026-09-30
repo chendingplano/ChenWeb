@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
@@ -11,9 +12,11 @@
 
 <section class="wrap" style="background:{pageBg}; color:{heading};">
 	<div class="card" style="background:{card}; border:1px solid {border};">
-		<div class="eyebrow" style="background:{accent}20; color:{accent};">Deferred</div>
-		<h2>Access Controls</h2>
-		<p style="color:{sub};">Page under construction.</p>
+		<div class="eyebrow" style="background:{accent}20; color:{accent};">
+			{m.access_controls_deferred()}
+		</div>
+		<h2>{m.access_controls_access_controls()}</h2>
+		<p style="color:{sub};">{m.access_controls_page_under_construction()}</p>
 	</div>
 </section>
 

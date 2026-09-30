@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import TopicCard from './topic-card.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import { formatTopicLineSpecs } from './topic-line-specs';
@@ -85,17 +86,17 @@
 <div class="category-shell">
 	<div class="category-head">
 		<div>
-			<div class="eyebrow">Category Path</div>
+			<div class="eyebrow">{m.topic_category_tab_category_path()}</div>
 			<h3 title={categoryPath}>{categoryPath}</h3>
 		</div>
-		<div class="meta-pill">{topics.length} topics</div>
+		<div class="meta-pill">{m.topic_category_tab_topics({ topicsCount: topics.length })}</div>
 	</div>
 
 	<div class="category-body">
 		<div class="topic-list" style={`width:${leftWidth}px;`}>
 			{#if topics.length === 0}
 				<div class="empty-state">
-					No topics are available for this category yet.
+					{m.topic_category_tab_no_topics_are_available_for()}
 				</div>
 			{:else}
 				{#each topics as topic}
@@ -112,7 +113,7 @@
 			type="button"
 			class:active={resizing}
 			class="resizer"
-			aria-label="Resize topic list"
+			aria-label={m.topic_category_tab_resize_topic_list()}
 			onmousedown={beginResize}
 		></button>
 
@@ -139,32 +140,32 @@
 						{#if selectedTopic}
 							<div class="topic-sidebar-block">
 								<div class="topic-sidebar-row">
-									<span>Topic ID</span>
+									<span>{m.topic_category_tab_topic_id()}</span>
 									<strong>{selectedTopic.id}</strong>
 								</div>
 								<div class="topic-sidebar-row">
-									<span>Record ID</span>
+									<span>{m.topic_category_tab_record_id()}</span>
 									<strong>{selectedTopic.inputId}</strong>
 								</div>
 								<div class="topic-sidebar-row">
-									<span>Page</span>
+									<span>{m.topic_category_tab_page()}</span>
 									<strong>{selectedTopic.page}</strong>
 								</div>
 								<div class="topic-sidebar-row">
-									<span>Type</span>
+									<span>{m.topic_category_tab_type()}</span>
 									<strong>{selectedTopic.topicType || '—'}</strong>
 								</div>
 								<div class="topic-sidebar-row">
-									<span>Line Numbers</span>
+									<span>{m.topic_category_tab_line_numbers()}</span>
 									<strong>{formatTopicLineSpecs(selectedTopic.sourceLineSpecs)}</strong>
 								</div>
 							</div>
 							<div class="topic-sidebar-block">
-								<div class="topic-sidebar-label">Topic</div>
+								<div class="topic-sidebar-label">{m.topic_category_tab_topic()}</div>
 								<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
 							</div>
 							<div class="topic-sidebar-block">
-								<div class="topic-sidebar-label">Category Paths</div>
+								<div class="topic-sidebar-label">{m.topic_category_tab_category_paths()}</div>
 								{#if selectedTopic.categoryPaths && selectedTopic.categoryPaths.length > 0}
 									<div class="keyword-list">
 										{#each selectedTopic.categoryPaths as path, idx (`${path}-${idx}`)}
@@ -172,11 +173,11 @@
 										{/each}
 									</div>
 								{:else}
-									<p class="topic-sidebar-copy muted">No category paths assigned.</p>
+									<p class="topic-sidebar-copy muted">{m.topic_category_tab_no_category_paths_assigned()}</p>
 								{/if}
 							</div>
 							<div class="topic-sidebar-block">
-								<div class="topic-sidebar-label">Keywords</div>
+								<div class="topic-sidebar-label">{m.topic_category_tab_keywords()}</div>
 								{#if selectedTopic.topicKeywords.length > 0}
 									<div class="keyword-list">
 										{#each selectedTopic.topicKeywords as kw, idx (`${kw}-${idx}`)}
@@ -184,11 +185,11 @@
 										{/each}
 									</div>
 								{:else}
-									<p class="topic-sidebar-copy muted">No keywords extracted.</p>
+									<p class="topic-sidebar-copy muted">{m.topic_category_tab_no_keywords_extracted()}</p>
 								{/if}
 							</div>
 						{:else}
-							<div class="topic-sidebar-empty">Select a topic to inspect it alongside the source PDF.</div>
+							<div class="topic-sidebar-empty">{m.topic_category_tab_select_a_topic_to_inspect()}</div>
 						{/if}
 					{/snippet}
 				</PdfViewWindow>
@@ -196,7 +197,7 @@
 				<iframe class="pdf-fallback-frame" title={selectedTopic?.pdfFileName ?? categoryPath} src={viewerFileUrl}></iframe>
 			{:else}
 				<div class="pdf-empty">
-					Select a topic card on the left to display its source PDF.
+					{m.topic_category_tab_select_a_topic_card_on()}
 				</div>
 			{/if}
 		</div>

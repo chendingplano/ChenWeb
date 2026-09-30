@@ -184,13 +184,13 @@
 	function relativeTime(iso: string): string {
 		const diffMs = Date.now() - new Date(iso).getTime();
 		const mins = Math.round(diffMs / 60000);
-		if (mins < 1) return 'just now';
-		if (mins < 60) return `${mins}m ago`;
+		if (mins < 1) return m.product_review_intake_just_now();
+		if (mins < 60) return m.product_review_intake_m_ago({ mins });
 		const hours = Math.round(mins / 60);
-		if (hours < 24) return `${hours}h ago`;
+		if (hours < 24) return m.product_review_intake_h_ago({ hours });
 		const days = Math.round(hours / 24);
-		if (days < 30) return `${days}d ago`;
-		return `${Math.round(days / 30)}mo ago`;
+		if (days < 30) return m.product_review_intake_d_ago({ days });
+		return m.product_review_intake_mo_ago({ months: Math.round(days / 30) });
 	}
 
 	const canStart = $derived(name.trim().length > 0 && !submitting);
@@ -233,7 +233,7 @@
 			resume_profile_id: profileId,
 			notes: notes.trim()
 		});
-		if (!out.run) throw new Error('review did not start');
+		if (!out.run) throw new Error(m.product_review_intake_review_did_not_start());
 		return out.run.id;
 	}
 
@@ -267,7 +267,7 @@
 				duplicateLatestRunId = out.latest_run?.id;
 				return;
 			}
-			if (!out.run) throw new Error('review did not start');
+			if (!out.run) throw new Error(m.product_review_intake_review_did_not_start());
 			goToRun(out.run.id);
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -311,14 +311,14 @@
 	{#if !embedded}
 		<header class="topbar">
 			<div class="brand">
-				<span class="brand-mark">PR</span>
+				<span class="brand-mark">{m.product_review_intake_pr()}</span>
 				<div>
 					<p class="kicker">{m.pmr_intake_kicker()}</p>
 					<p class="brand-name">{m.pmr_intake_title()}</p>
 				</div>
 			</div>
 			<div class="crumbs">
-				<span class="route-badge">/home3/product-review</span>
+				<span class="route-badge">{m.product_review_intake_home3_product_review()}</span>
 			</div>
 		</header>
 	{/if}
@@ -477,18 +477,18 @@
 						>
 							<div class="history-card-drawing">
 								{#if p.drawing_id != null}
-									<img src={productDrawingContentUrl(p.drawing_id)} alt={`${displayName(p)} 3D drawing`} />
+									<img src={productDrawingContentUrl(p.drawing_id)} alt={m.product_review_intake_3d_drawing({ p: displayName(p) })} />
 								{:else}<span aria-hidden="true">⌁</span>{/if}
 							</div>
 							<div class="history-card-details">
 								<div class="history-card-name">{displayName(p)}</div>
 								<div class="history-card-attributes">
-									<div><span>Keywords</span><strong>{p.keywords?.join(', ') || '—'}</strong></div>
-									<div><span>Description</span><strong
+									<div><span>{m.product_review_intake_keywords()}</span><strong>{p.keywords?.join(', ') || '—'}</strong></div>
+									<div><span>{m.product_review_intake_description()}</span><strong
 										use:registerDescription={p.id}
 										title={truncatedDescriptions[p.id] ? p.product_description : undefined}
 									>{descriptionText(p.product_description)}</strong></div>
-									<div><span>Metrics</span><strong>{p.latest_metric_count ?? '—'}</strong></div>
+									<div><span>{m.product_review_intake_metrics()}</span><strong>{p.latest_metric_count ?? '—'}</strong></div>
 								</div>
 								<div class="history-card-status">
 									{statusWord(p)}

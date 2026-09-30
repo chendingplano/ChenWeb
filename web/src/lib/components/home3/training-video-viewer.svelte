@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { listVideos, videoStreamUrl, type VideoMeta } from '$lib/services/videoService';
 
@@ -77,7 +78,7 @@
 		try {
 			videos = await listVideos();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load videos';
+			error = e instanceof Error ? e.message : m.training_video_viewer_failed_to_load_videos();
 		} finally {
 			loading = false;
 		}
@@ -90,8 +91,8 @@
 
 <div class="tvv" style="--text:{t.pageText}; --sub:{t.subText}; --card:{t.cardBg}; --border:{t.cardBorder}; --border-h:{t.cardHoverBorder}; --cover:{t.coverBg}; --chip-bg:{t.chipBg}; --chip-text:{t.chipText}; --accent:{t.accent}; --accent-soft:{t.accentSoft}; --scrim:{t.scrim}; --shadow:{t.shadow};">
 	<header class="head">
-		<h1>Training</h1>
-		<p>A library of training videos. Select one to watch.</p>
+		<h1>{m.training_video_viewer_training()}</h1>
+		<p>{m.training_video_viewer_a_library_of_training_videos()}</p>
 	</header>
 
 	{#if loading}
@@ -107,9 +108,9 @@
 		</div>
 	{:else if error}
 		<div class="state">
-			<p class="state-title">Couldn't load videos</p>
+			<p class="state-title">{m.training_video_viewer_couldn_t_load_videos()}</p>
 			<p class="state-sub">{error}</p>
-			<button class="retry" onclick={load}>Try again</button>
+			<button class="retry" onclick={load}>{m.training_video_viewer_try_again()}</button>
 		</div>
 	{:else if videos.length === 0}
 		<div class="state">
@@ -119,13 +120,13 @@
 					<path d="M10 9.5v5l4-2.5z" fill="currentColor" stroke="none" />
 				</svg>
 			</div>
-			<p class="state-title">No training videos yet</p>
-			<p class="state-sub">Once videos are published in the admin area, they appear here as a gallery you can browse and play.</p>
+			<p class="state-title">{m.training_video_viewer_no_training_videos_yet()}</p>
+			<p class="state-sub">{m.training_video_viewer_once_videos_are_published_in()}</p>
 		</div>
 	{:else}
 		<div class="grid">
 			{#each videos as video (video.id)}
-				<button class="card" onclick={() => open(video)} aria-label={`Play ${video.name}`}>
+				<button class="card" onclick={() => open(video)} aria-label={m.training_video_viewer_play({ name: video.name })}>
 					<div class="cover">
 						{#if video.image_url}
 							<img src={video.image_url} alt="" loading="lazy" />
@@ -167,7 +168,7 @@
 		<div class="player" onclick={(e) => e.stopPropagation()}>
 			<div class="player-bar">
 				<span class="player-title">{playing.name}</span>
-				<button class="player-close" onclick={close} aria-label="Close player">✕</button>
+				<button class="player-close" onclick={close} aria-label={m.training_video_viewer_close_player()}>✕</button>
 			</div>
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video src={videoStreamUrl(playing.id)} controls autoplay></video>

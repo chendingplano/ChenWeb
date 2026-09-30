@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -42,13 +43,13 @@
 
 	function payloadHelpForSubject(selectedSubject: string): string {
 		if (selectedSubject === 'kb.pdf.start-doc-processing') {
-			return 'Required: `all` or `record_ids` or `record_id`. Optional: `doc-processors`, `failed-proc-only`. `all` may be `parsed`, `failed-procs`, or `with-failed-procs`.';
+			return m.jetstream_events_required_all_or_record_ids();
 		}
 		if (selectedSubject === 'kb.pdf.parsed' || selectedSubject === 'kb.pdf.staged') {
-			return 'Required: `record_id`, `type`, `status`. Optional: `force`.';
+			return m.jetstream_events_required_record_id_type_status();
 		}
 		if (selectedSubject === 'kb.line-file-generated') {
-			return 'Required: `record_id`.';
+			return m.jetstream_events_required_record_id();
 		}
 		return '';
 	}
@@ -74,48 +75,48 @@
 		}
 		const body = rawPayload.trim();
 		if (!body) {
-			return `Payload is required for subject ${selectedSubject}`;
+			return m.jetstream_events_payload_is_required_for_subject({ selectedSubject });
 		}
 		let parsed: Record<string, unknown>;
 		try {
 			parsed = JSON.parse(body) as Record<string, unknown>;
 		} catch {
-			return `Payload must be valid JSON for subject ${selectedSubject}`;
+			return m.jetstream_events_payload_must_be_valid_json({ selectedSubject });
 		}
 		if (selectedSubject === 'kb.pdf.start-doc-processing') {
 			const hasAll = typeof parsed.all === 'string' && parsed.all.trim() !== '';
 			const hasRecordIDs = Array.isArray(parsed.record_ids) && parsed.record_ids.length > 0;
 			const hasRecordID = parsed.record_id != null;
 			if (!hasAll && !hasRecordIDs && !hasRecordID) {
-				return `Payload field 'all', 'record_ids', or 'record_id' is required for subject ${selectedSubject}`;
+				return m.jetstream_events_payload_field_all_record_ids({ selectedSubject });
 			}
 			if (
 				hasAll &&
 				!['parsed', 'failed-procs', 'with-failed-procs'].includes(String(parsed.all).trim())
 			) {
-				return `Payload field 'all' must be parsed, failed-procs, or with-failed-procs`;
+				return m.jetstream_events_payload_field_all_must_be();
 			}
 			return null;
 		}
 		if (selectedSubject === 'kb.line-file-generated') {
 			if (!('record_id' in parsed) || parsed.record_id == null) {
-				return `Payload field 'record_id' is required for subject ${selectedSubject}`;
+				return m.jetstream_events_payload_field_record_id_is({ selectedSubject });
 			}
 			return null;
 		}
 		for (const key of ['record_id', 'type', 'status']) {
 			if (!(key in parsed) || parsed[key] == null) {
-				return `Payload field '${key}' is required for subject ${selectedSubject}`;
+				return m.jetstream_events_payload_field_is_required_for({ key, selectedSubject });
 			}
 		}
 		if (typeof parsed.type !== 'string' || parsed.type.trim() === '') {
-			return `Payload field 'type' must be a non-empty string for subject ${selectedSubject}`;
+			return m.jetstream_events_payload_field_type_must_be({ selectedSubject });
 		}
 		if (typeof parsed.status !== 'string' || parsed.status.trim() === '') {
-			return `Payload field 'status' must be a non-empty string for subject ${selectedSubject}`;
+			return m.jetstream_events_payload_field_status_must_be({ selectedSubject });
 		}
 		if ('force' in parsed && parsed.force != null && typeof parsed.force !== 'boolean') {
-			return `Payload field 'force' must be boolean for subject ${selectedSubject}`;
+			return m.jetstream_events_payload_field_force_must_be({ selectedSubject });
 		}
 		return null;
 	}
@@ -129,7 +130,9 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok || !data.ok) {
-				throw new Error(data.message ?? `Failed to load subjects (${res.status})`);
+				throw new Error(
+					data.message ?? m.jetstream_events_failed_to_load_subjects({ status: res.status })
+				);
 			}
 			const rawSubjects: unknown = data.subjects;
 			const next = Array.isArray(rawSubjects)
@@ -158,7 +161,7 @@
 
 	async function publishEvent() {
 		if (!subject.trim()) {
-			error = 'Please select a subject';
+			error = m.jetstream_events_please_select_a_subject();
 			return;
 		}
 		const validationError = validatePayloadForSubject(subject.trim(), payload);
@@ -184,9 +187,9 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok || !data.ok) {
-				throw new Error(data.message ?? `Publish failed (${res.status})`);
+				throw new Error(data.message ?? m.jetstream_events_publish_failed({ status: res.status }));
 			}
-			success = data.message ?? 'Event published';
+			success = data.message ?? m.jetstream_events_event_published();
 			lastResponse = data;
 		} catch (err) {
 			error = err instanceof Error ? err.message : String(err);
@@ -202,15 +205,17 @@
 
 <div class="space-y-4 p-6">
 	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
-		<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">JetStream Events</h2>
+		<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">
+			{m.jetstream_events_jetstream_events()}
+		</h2>
 		<p style="font-size:13px; color:{textSecondary}; margin-top:4px;">
-			Inject an event into JetStream by subject and payload.
+			{m.jetstream_events_inject_an_event_into_jetstream()}
 		</p>
 
 		<div class="mt-4 grid gap-3">
 			<label class="grid gap-1.5">
 				<div class="flex items-center justify-between gap-2">
-					<span style="font-size:12px; color:{textSecondary};">Subject</span>
+					<span style="font-size:12px; color:{textSecondary};">{m.jetstream_events_subject()}</span>
 					<button
 						type="button"
 						onclick={loadSubjects}
@@ -219,7 +224,7 @@
 						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;"
 					>
 						<RefreshCwIcon class="h-3.5 w-3.5" />
-						Refresh
+						{m.jetstream_events_refresh()}
 					</button>
 				</div>
 				<select
@@ -231,7 +236,9 @@
 				>
 					{#if subjectOptions.length === 0}
 						<option value=""
-							>{subjectsLoading ? 'Loading subjects...' : 'No subjects available'}</option
+							>{subjectsLoading
+								? m.jetstream_events_loading_subjects()
+								: m.jetstream_events_no_subjects_available()}</option
 						>
 					{:else}
 						{#each subjectOptions as s}
@@ -245,7 +252,9 @@
 			</label>
 
 			<label class="grid gap-1.5">
-				<span style="font-size:12px; color:{textSecondary};">Payload (raw string)</span>
+				<span style="font-size:12px; color:{textSecondary};"
+					>{m.jetstream_events_payload_raw_string()}</span
+				>
 				{#if payloadHelpForSubject(subject)}
 					<div style="font-size:12px; color:{textSecondary};">
 						{payloadHelpForSubject(subject)}
@@ -255,7 +264,7 @@
 							class="ml-2 inline-flex cursor-pointer items-center rounded-md px-2 py-0.5"
 							style="background:{surface2}; border:1px solid {borderColor}; color:{accent}; font-size:12px;"
 						>
-							Use example
+							{m.jetstream_events_use_example()}
 						</button>
 					</div>
 				{/if}
@@ -274,7 +283,7 @@
 					style="background:{accent}; color:white; border:none;"
 				>
 					<SendIcon class="h-4 w-4" />
-					{loading ? 'Publishing...' : 'Publish Event'}
+					{loading ? m.jetstream_events_publishing() : m.jetstream_events_publish_event()}
 				</button>
 			</div>
 		</div>
@@ -287,7 +296,7 @@
 		>
 			<CircleAlertIcon class="mt-0.5 h-4 w-4" />
 			<div>
-				<div style="font-weight:600;">Failed to publish event</div>
+				<div style="font-weight:600;">{m.jetstream_events_failed_to_publish_event()}</div>
 				<div style="font-size:13px;">{error}</div>
 			</div>
 		</div>

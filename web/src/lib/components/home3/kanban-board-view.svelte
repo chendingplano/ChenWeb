@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import KanbanColumn from './kanban-column.svelte';
 	import IssueDetailPanel from './issue-detail-panel.svelte';
@@ -109,9 +110,9 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>{apStore.active?.name ?? 'Agent Platform'}</h2>
+			<h2>{apStore.active?.name ?? m.kanban_board_agent_platform()}</h2>
 			{#if apStore.active}
-				<p class="sub">{apStore.issues.length} issue{apStore.issues.length === 1 ? '' : 's'}</p>
+				<p class="sub">{m.kanban_board_issue({ issuesCount: apStore.issues.length, plural: apStore.issues.length === 1 ? '' : 's' })}</p>
 			{/if}
 		</div>
 		<div class="toolbar-right">
@@ -137,7 +138,7 @@
 				}}
 				disabled={!apStore.active}
 			>
-				{showCreate ? 'Cancel' : '+ New Issue'}
+				{showCreate ? m.kanban_board_cancel() : m.kanban_board_new_issue()}
 			</button>
 		</div>
 	</header>
@@ -148,7 +149,7 @@
 				class="pill"
 				class:pill-active={apStore.activeProjectFilterID === null}
 				onclick={() => apStore.setProjectFilter(null)}
-			>All</button>
+			>{m.kanban_board_all()}</button>
 			{#each apStore.projects as proj (proj.id)}
 				<button
 					class="pill"
@@ -170,18 +171,18 @@
 			<input
 				id="ap-new-title"
 				bind:value={newTitle}
-				placeholder="What needs to be done?"
+				placeholder={m.kanban_board_what_needs_to_be_done()}
 				required
 			/>
 			<select bind:value={newPriority}>
-				<option value={0}>No priority</option>
-				<option value={1}>Low</option>
-				<option value={2}>Medium</option>
-				<option value={3}>High</option>
-				<option value={4}>Urgent</option>
+				<option value={0}>{m.kanban_board_no_priority()}</option>
+				<option value={1}>{m.kanban_board_low()}</option>
+				<option value={2}>{m.kanban_board_medium()}</option>
+				<option value={3}>{m.kanban_board_high()}</option>
+				<option value={4}>{m.kanban_board_urgent()}</option>
 			</select>
 			<button class="primary" type="submit" disabled={submitting || !newTitle.trim()}>
-				{submitting ? 'Creating…' : 'Create'}
+				{submitting ? m.kanban_board_creating() : m.kanban_board_create()}
 			</button>
 		</form>
 	{/if}
@@ -213,7 +214,7 @@
 			<aside class="detail-drawer">
 				<button
 					class="close"
-					aria-label="Close details"
+					aria-label={m.kanban_board_close_details()}
 					onclick={() => apStore.selectIssue(null)}
 				>✕</button>
 				<IssueDetailPanel {darkMode} />

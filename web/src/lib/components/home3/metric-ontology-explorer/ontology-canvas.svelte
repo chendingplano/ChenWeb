@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	// Hand-rolled SVG orrery. No graph library.
 	//
 	// Layout invariants:
@@ -57,8 +58,8 @@
 		return Math.min(used, CORE_LABEL_UNITS);
 	}
 	const coreName = $derived((metric?.metric_name || '').trim());
-	const coreLabel = $derived(coreName ? truncateCore(coreName) : 'Metric');
-	const coreSub = $derived(coreName ? metric!.metric_id : 'ONTOLOGY CORE');
+	const coreLabel = $derived(coreName ? truncateCore(coreName) : m.ontology_canvas_metric());
+	const coreSub = $derived(coreName ? metric!.metric_id : m.ontology_canvas_ontology_core());
 	const coreTitle = $derived(
 		coreName && metric!.metric_name_en && metric!.metric_name_en !== coreName
 			? `${coreName} · ${metric!.metric_name_en}`
@@ -381,7 +382,7 @@
 
 	{#if crumbs.length}
 		<div class="trail">
-			<b>Metric</b>
+			<b>{m.ontology_canvas_metric()}</b>
 			<span class="sep">·</span>
 			<span>{openChain ? SATELLITES[satIndex(openChain)].label : ''}</span>
 			{#each crumbs as c (c.id)}
@@ -391,9 +392,9 @@
 	{/if}
 
 	<div class="controls">
-		<button onclick={() => fitView(true)} title="Fit">⤢</button>
-		<button onclick={() => { animating = false; k = clamp(k * 1.15, 0.25, 3); }} title="Zoom in">+</button>
-		<button onclick={() => { animating = false; k = clamp(k / 1.15, 0.25, 3); }} title="Zoom out">−</button>
+		<button onclick={() => fitView(true)} title={m.ontology_canvas_fit()}>⤢</button>
+		<button onclick={() => { animating = false; k = clamp(k * 1.15, 0.25, 3); }} title={m.ontology_canvas_zoom_in()}>+</button>
+		<button onclick={() => { animating = false; k = clamp(k / 1.15, 0.25, 3); }} title={m.ontology_canvas_zoom_out()}>−</button>
 	</div>
 </div>
 

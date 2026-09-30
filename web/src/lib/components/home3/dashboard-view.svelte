@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import BotIcon from '@lucide/svelte/icons/bot';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
@@ -39,17 +40,29 @@
 
 	// KPI cards
 	const kpiCards = [
-		{ label: 'Active Agents', value: 3, icon: BotIcon, color: '#818CF8', colorDark: '#818CF8' },
 		{
-			label: 'Running Tasks',
+			label: m.dashboard_active_agents(),
+			value: 3,
+			icon: BotIcon,
+			color: '#818CF8',
+			colorDark: '#818CF8'
+		},
+		{
+			label: m.dashboard_running_tasks(),
 			value: 12,
 			icon: ActivityIcon,
 			color: '#F59E0B',
 			colorDark: '#FBBF24'
 		},
-		{ label: 'Skills Loaded', value: 47, icon: ZapIcon, color: '#10B981', colorDark: '#34D399' },
 		{
-			label: 'Knowledge Docs',
+			label: m.dashboard_skills_loaded(),
+			value: 47,
+			icon: ZapIcon,
+			color: '#10B981',
+			colorDark: '#34D399'
+		},
+		{
+			label: m.dashboard_knowledge_docs(),
 			value: 234,
 			icon: BookOpenIcon,
 			color: '#06b6d4',
@@ -115,12 +128,12 @@
 
 	// Quick Launch
 	const quickLaunch = [
-		{ label: 'New Agent', icon: BotIcon, color: '#818CF8' },
-		{ label: 'Run Skill', icon: PlayIcon, color: '#10B981' },
-		{ label: 'Import Doc', icon: FileIcon, color: '#06b6d4' },
-		{ label: 'Chat', icon: MessageSquareIcon, color: '#F59E0B' },
-		{ label: 'Review Code', icon: CodeIcon, color: '#8B5CF6' },
-		{ label: 'Schedule', icon: CalendarIcon, color: '#EC4899' }
+		{ label: m.dashboard_new_agent(), icon: BotIcon, color: '#818CF8' },
+		{ label: m.dashboard_run_skill(), icon: PlayIcon, color: '#10B981' },
+		{ label: m.dashboard_import_doc(), icon: FileIcon, color: '#06b6d4' },
+		{ label: m.dashboard_chat(), icon: MessageSquareIcon, color: '#F59E0B' },
+		{ label: m.dashboard_review_code(), icon: CodeIcon, color: '#8B5CF6' },
+		{ label: m.dashboard_schedule(), icon: CalendarIcon, color: '#EC4899' }
 	];
 
 	// Agent status mini-list
@@ -180,8 +193,10 @@
 			style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; box-shadow:{shadow}; flex:0 0 60%;"
 		>
 			<div class="mb-3 flex items-center justify-between">
-				<span style="font-size:14px; font-weight:600; color:{textPrimary};">Activity Feed</span>
-				<span style="font-size:11px; color:{textMuted};">Recent events</span>
+				<span style="font-size:14px; font-weight:600; color:{textPrimary};"
+					>{m.dashboard_activity_feed()}</span
+				>
+				<span style="font-size:11px; color:{textMuted};">{m.dashboard_recent_events()}</span>
 			</div>
 			<div class="space-y-2">
 				{#each activities as evt}
@@ -223,7 +238,9 @@
 			style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; box-shadow:{shadow}; flex:0 0 calc(40% - 1rem);"
 		>
 			<div class="mb-3">
-				<span style="font-size:14px; font-weight:600; color:{textPrimary};">Quick Launch</span>
+				<span style="font-size:14px; font-weight:600; color:{textPrimary};"
+					>{m.dashboard_quick_launch()}</span
+				>
 			</div>
 			<div class="grid grid-cols-2 gap-2">
 				{#each quickLaunch as action}
@@ -260,7 +277,7 @@
 				}}
 			>
 				<PlusIcon class="h-4 w-4" />
-				New Agent
+				{m.dashboard_new_agent()}
 			</button>
 		</div>
 	</div>
@@ -271,8 +288,10 @@
 		style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; box-shadow:{shadow};"
 	>
 		<div class="mb-3 flex items-center justify-between">
-			<span style="font-size:14px; font-weight:600; color:{textPrimary};">Agent Status</span>
-			<span style="font-size:11px; color:{accent}; cursor:pointer;">View all →</span>
+			<span style="font-size:14px; font-weight:600; color:{textPrimary};"
+				>{m.dashboard_agent_status()}</span
+			>
+			<span style="font-size:11px; color:{accent}; cursor:pointer;">{m.dashboard_view_all()}</span>
 		</div>
 		<div class="overflow-x-auto">
 			<table class="w-full" style="border-collapse:collapse;">
@@ -281,20 +300,20 @@
 						<th
 							class="pb-2 text-left"
 							style="font-size:11px; color:{textMuted}; font-weight:500; padding-right:24px;"
-							>AGENT</th
+							>{m.dashboard_agent()}</th
 						>
 						<th
 							class="pb-2 text-left"
 							style="font-size:11px; color:{textMuted}; font-weight:500; padding-right:24px;"
-							>MODEL</th
+							>{m.dashboard_model()}</th
 						>
 						<th
 							class="pb-2 text-left"
 							style="font-size:11px; color:{textMuted}; font-weight:500; padding-right:24px;"
-							>STATUS</th
+							>{m.dashboard_status()}</th
 						>
 						<th class="pb-2 text-left" style="font-size:11px; color:{textMuted}; font-weight:500;"
-							>LAST ACTIVE</th
+							>{m.dashboard_last_active()}</th
 						>
 					</tr>
 				</thead>

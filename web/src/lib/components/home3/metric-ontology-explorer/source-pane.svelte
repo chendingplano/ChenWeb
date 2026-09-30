@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import { getRawLines, listKbMetrics, type RawLine } from '$lib/services/kbService';
@@ -40,7 +41,7 @@
 
 		const recordId = recordIdFromMetricId(id);
 		if (!recordId) {
-			err = `Unrecognised metric id "${id}".`;
+			err = m.source_pane_unrecognised_metric_id({ id });
 			return;
 		}
 
@@ -60,7 +61,7 @@
 				const lines = rawRes?.lines ?? [];
 				if (rawRes?.file_name && src) src = { ...src, title: rawRes.file_name };
 
-				const metric = (metricsRes.results ?? []).find((m) => m.metric_id === id) ?? null;
+				const metric = (metricsRes.results ?? []).find((row) => row.metric_id === id) ?? null;
 				const spans = resolveMetricSpans(metric?.source_line_spans, lines);
 				spanCount = spans.length;
 
@@ -113,16 +114,20 @@
 	style="--panel:{tokens.panelBg}; --border:{tokens.border}; --text:{tokens.textPrimary}; --text-2:{tokens.textSecondary}; --accent:{tokens.accent};"
 >
 	<div class="bar">
-		<span class="lbl">Source document</span>
+		<span class="lbl">{m.source_pane_source_document()}</span>
 		{#if src}<span class="doc">{src.title}</span>{/if}
 		<span class="grow"></span>
 		{#if src && spanCount}
-			<span class="ev">{spanCount} line{spanCount > 1 ? 's' : ''} highlighted</span>
+			<span class="ev"
+				>{m.source_pane_line_highlighted({ spanCount, plural: spanCount > 1 ? 's' : '' })}</span
+			>
 		{:else if evidenceSpans.length}
 			<span class="ev"
-				>{evidenceSpans.length} evidence span{evidenceSpans.length > 1 ? 's' : ''}{evidenceLabel
-					? ` · ${evidenceLabel}`
-					: ''}</span
+				>{m.source_pane_evidence_span({
+					evidenceSpansCount: evidenceSpans.length,
+					plural: evidenceSpans.length > 1 ? 's' : ''
+				})}{#if evidenceLabel}
+					· {evidenceLabel}{/if}</span
 			>
 		{/if}
 	</div>
@@ -141,10 +146,10 @@
 			<div class="empty">{err}</div>
 		{:else}
 			<div class="empty">
-				<p>No metric selected.</p>
+				<p>{m.source_pane_no_metric_selected()}</p>
 				<p class="hint">
-					Open this page with <code>?metric_id=&lt;id&gt;</code> — from the metric list or a search result
-					— to load its source document here.
+					{m.source_pane_open_this_page_with()} <code>?metric_id=&lt;id&gt;</code>
+					{m.source_pane_from_the_metric_list_or()}
 				</p>
 			</div>
 		{/if}

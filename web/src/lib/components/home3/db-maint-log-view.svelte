@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon  from '@lucide/svelte/icons/refresh-cw';
 	import SearchIcon     from '@lucide/svelte/icons/search';
@@ -41,7 +42,7 @@
 	let filterDateTo    = $state('');
 
 	const operationOptions = [
-		{ value: '', label: 'All operations' },
+		{ value: '', label: m.db_maint_log_all_operations() },
 		{ value: 'check-kb-inputs-status', label: 'check-kb-inputs-status' },
 		{ value: 'fix-kb-inputs-status',   label: 'fix-kb-inputs-status' }
 	];
@@ -100,10 +101,10 @@
 <div class="p-6" style="background:{pageBg}; min-height:100%;">
 	<div class="mb-5">
 		<h1 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
-			Database Maintenance — Maintenance Log
+			{m.db_maint_log_database_maintenance_maintenance_log()}
 		</h1>
 		<p style="font-size:13px; color:{textSecondary};">
-			Audit log of all database maintenance operations (consistency checks and fixes).
+			{m.db_maint_log_audit_log_of_all_database()}
 		</p>
 	</div>
 
@@ -115,7 +116,7 @@
 		<div class="flex flex-wrap gap-3 items-end">
 			<!-- Operation filter -->
 			<div class="flex flex-col gap-1">
-				<label for="filter-operation" style="font-size:12px; font-weight:500; color:{textMuted};">Operation</label>
+				<label for="filter-operation" style="font-size:12px; font-weight:500; color:{textMuted};">{m.db_maint_log_operation()}</label>
 				<select
 					id="filter-operation"
 					bind:value={filterOperation}
@@ -132,7 +133,7 @@
 
 			<!-- Date from -->
 			<div class="flex flex-col gap-1">
-				<label for="filter-date-from" style="font-size:12px; font-weight:500; color:{textMuted};">From</label>
+				<label for="filter-date-from" style="font-size:12px; font-weight:500; color:{textMuted};">{m.db_maint_log_from()}</label>
 				<input
 					id="filter-date-from"
 					type="date"
@@ -146,7 +147,7 @@
 
 			<!-- Date to -->
 			<div class="flex flex-col gap-1">
-				<label for="filter-date-to" style="font-size:12px; font-weight:500; color:{textMuted};">To</label>
+				<label for="filter-date-to" style="font-size:12px; font-weight:500; color:{textMuted};">{m.db_maint_log_to()}</label>
 				<input
 					id="filter-date-to"
 					type="date"
@@ -172,12 +173,12 @@
 					"
 				>
 					<SearchIcon style="width:13px; height:13px;" />
-					Search
+					{m.db_maint_log_search()}
 				</button>
 				<button
 					onclick={load}
 					disabled={loading}
-					title="Refresh"
+					title={m.db_maint_log_refresh()}
 					style="
 						display:flex; align-items:center; justify-content:center;
 						width:34px; height:34px; border-radius:7px; border:none; cursor:pointer;
@@ -214,17 +215,17 @@
 				font-size:12px; font-weight:600; color:{textMuted};
 			"
 		>
-			<span>ID</span>
-			<span>Operation</span>
-			<span>Result</span>
-			<span>Performed At</span>
+			<span>{m.db_maint_log_id()}</span>
+			<span>{m.db_maint_log_operation()}</span>
+			<span>{m.db_maint_log_result()}</span>
+			<span>{m.db_maint_log_performed_at()}</span>
 			<span></span>
 		</div>
 
 		{#if loading && rows.length === 0}
-			<div class="p-8 text-center" style="font-size:13px; color:{textMuted};">Loading…</div>
+			<div class="p-8 text-center" style="font-size:13px; color:{textMuted};">{m.db_maint_log_loading()}</div>
 		{:else if rows.length === 0}
-			<div class="p-8 text-center" style="font-size:13px; color:{textMuted};">No records found.</div>
+			<div class="p-8 text-center" style="font-size:13px; color:{textMuted};">{m.db_maint_log_no_records_found()}</div>
 		{:else}
 			{#each rows as row (row.id)}
 				<!-- Main row -->
@@ -277,7 +278,7 @@
 						"
 					>
 						<div style="font-size:11px; font-weight:600; color:{textMuted}; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;">
-							Result Data
+							{m.db_maint_log_result_data()}
 						</div>
 						<pre style="
 							font-size:12px; color:{textPrimary}; background:{inputBg};
@@ -293,7 +294,7 @@
 	<!-- Pagination -->
 	{#if total > 0}
 		<div class="flex items-center justify-between mt-4" style="font-size:13px; color:{textSecondary};">
-			<span>{total} record{total === 1 ? '' : 's'} total</span>
+			<span>{m.db_maint_log_record_total({ total, plural: total === 1 ? '' : 's' })}</span>
 			<div class="flex items-center gap-2">
 				<button
 					onclick={() => { page = Math.max(1, page - 1); load(); }}
@@ -303,8 +304,8 @@
 						background:{surface2}; color:{textPrimary}; cursor:pointer; font-size:13px;
 						opacity:{page <= 1 || loading ? 0.4 : 1};
 					"
-				>Prev</button>
-				<span>Page {page} of {totalPages}</span>
+				>{m.db_maint_log_prev()}</button>
+				<span>{m.db_maint_log_page_of({ page, totalPages })}</span>
 				<button
 					onclick={() => { page = Math.min(totalPages, page + 1); load(); }}
 					disabled={page >= totalPages || loading}
@@ -313,7 +314,7 @@
 						background:{surface2}; color:{textPrimary}; cursor:pointer; font-size:13px;
 						opacity:{page >= totalPages || loading ? 0.4 : 1};
 					"
-				>Next</button>
+				>{m.db_maint_log_next()}</button>
 			</div>
 		</div>
 	{/if}

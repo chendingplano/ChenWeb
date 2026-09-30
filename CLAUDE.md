@@ -77,8 +77,21 @@ Every page must work in English and Chinese. Decision and rationale: ADR
 * **New menu item** in `nav-rail.svelte`: `label: m.nav_<id>()` (id with `-` → `_`) plus both keys.
 * **Verify with `bun run check`** (from `web/`). It fails when the two message files differ or when a
   `.svelte` file has more hard-coded text than `web/i18n-baseline.json` allows (new files: zero).
-  `bun scripts/check-i18n.ts --list <file>` shows what it found. After converting a page, run
-  `bun scripts/check-i18n.ts --update` to lower its baseline — never to allow new hard-coded text.
+  Hard-coded text = markup text, `placeholder`/`title`/`aria-label`/`alt`/`label` text, and text-like
+  string literals inside markup expressions (`{busy ? 'Saving…' : 'Save'}`). It cannot see strings
+  in `<script>`; those are still your responsibility. `bun scripts/check-i18n.ts --list <file>` shows
+  what it found. After converting a page, run `bun scripts/check-i18n.ts --update` to lower its
+  baseline — never to allow new hard-coded text.
+* **Converting an existing page** — use `web/scripts/i18n-extract.ts` (see its header):
+  1. `bun scripts/i18n-extract.ts --pending p.json <files>` converts markup (sentences with values
+     become one message with named params; `{n === 1 ? '' : 's'}` becomes `{plural}`).
+  2. `--script-candidates <files> > c.json`, delete entries that are not displayed text (ids, log
+     lines, sample data, values sent to the API), then `--script-apply c.json p.json`.
+  3. Write the Chinese (or English, for Chinese source text) for every key in `p.json` and apply
+     with `--apply`. Keep params identical; `{plural}` may be dropped in Chinese.
+  4. Rename a local variable called `m` first (the tool skips such files). Check for English
+     grammar passed as a param (`' has' : 's have'`) and fix by hand.
+  5. `bun run check`, then `--update` the baseline.
 * **Text generated on the server** (LLM output, reports) is not covered by Paraglide: pass
   `getLocale()` to the API and produce/store it per language (see Review Metrics, `lang`).
 * Locale in code: `getLocale()` from `$lib/paraglide/runtime` (`en` | `zh-cn`); a language switch

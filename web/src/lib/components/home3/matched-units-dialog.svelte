@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import { buildMatchedUnitRows, matchedUnitFocusTarget, matchedUnitLabel } from './doc-review-json-dialog.js';
@@ -30,7 +31,7 @@
 
 	let selected = $state<number | null>(initialSelected ?? null);
 	let selectedRows = $derived(selected != null ? buildMatchedUnitRows(units[selected]) : []);
-	let dialogTitle = $derived(selected != null ? `Matched — ${matchedUnitLabel(units[selected], selected)}` : title);
+	let dialogTitle = $derived(selected != null ? m.matched_units_dialog_matched({ units: matchedUnitLabel(units[selected], selected) }) : title);
 
 	function selectUnit(i: number) {
 		selected = i;
@@ -122,7 +123,7 @@
 					onclick={() => (selected = null)}
 					class="rounded p-1 cursor-pointer"
 					style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-					aria-label="Back to list"
+					aria-label={m.matched_units_dialog_back_to_list()}
 				>
 					<ChevronLeftIcon class="w-3.5 h-3.5" />
 				</button>
@@ -134,14 +135,14 @@
 			onclick={onclose}
 			class="rounded p-1.5 cursor-pointer"
 			style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-			aria-label="Close"
+			aria-label={m.matched_units_dialog_close()}
 		>
 			<XIcon class="w-4 h-4" />
 		</button>
 	</div>
 	<div class="flex-1 overflow-auto p-5 modal-scroll" style="--modal-scroll-thumb:{scrollThumb};">
 		{#if !units.length}
-			<div class="text-center" style="color:{textMuted};padding:2rem">No data.</div>
+			<div class="text-center" style="color:{textMuted};padding:2rem">{m.matched_units_dialog_no_data()}</div>
 		{:else if selected == null}
 			<ul class="mu-list">
 				{#each units as unit, i (i)}
@@ -165,8 +166,8 @@
 						{#if row.sourceContext}
 							<div class="sc-table" style="border:1px solid {borderColor};">
 								<div class="sc-head" style="color:{textMuted};border-bottom:1px solid {borderColor};">
-									<span>Line</span>
-									<span>Content</span>
+									<span>{m.matched_units_dialog_line()}</span>
+									<span>{m.matched_units_dialog_content()}</span>
 								</div>
 								{#each row.sourceContext as span, j (j)}
 									<div class="sc-row" style="color:{textSecondary};{j > 0 ? `border-top:1px solid ${borderColor};` : ''}">

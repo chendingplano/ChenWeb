@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import SharedPdfViewer from './shared-pdf-viewer.svelte';
@@ -20,16 +21,16 @@
 		numPages = $bindable(0),
 		highlightVersion = 0,
 		renderHighlights,
-		loadingLabel = 'Rendering page…',
+		loadingLabel = m.pdf_view_window_rendering_page(),
 		respectPageRotation = true,
 		sidebarMinWidth = 140,
 		sidebarMaxWidth = 420,
 		sidebarDefaultWidth = 270,
-		sidebarTitle = 'Metadata',
+		sidebarTitle = m.pdf_view_window_metadata(),
 		sidebarSettingsKey = null,
-		sidebarWidthSettingLabel = 'Metadata Panel Width',
+		sidebarWidthSettingLabel = m.pdf_view_window_metadata_panel_width(),
 		showSidebar = true,
-		zoomSettingLabel = 'Zoom',
+		zoomSettingLabel = m.pdf_view_window_zoom(),
 		darkMode = true,
 		showingLines = $bindable(false),
 		selectedLines = $bindable([] as number[]),
@@ -372,12 +373,12 @@
 									class="pvw-settings-btn"
 									class:active={settingsOpen}
 									aria-expanded={settingsOpen}
-									aria-label="Sidebar settings"
+									aria-label={m.pdf_view_window_sidebar_settings()}
 									onclick={() => {
 										settingsOpen = !settingsOpen;
 									}}
 								>
-									Settings
+									{m.pdf_view_window_settings()}
 								</button>
 							</div>
 							<div class="pvw-sidebar-body">
@@ -388,7 +389,7 @@
 							type="button"
 							class="pvw-resizer"
 							class:active={resizing}
-							aria-label="Resize panel"
+							aria-label={m.pdf_view_window_resize_panel()}
 							onpointerdown={startResize}
 							onkeydown={onResizerKeydown}
 						>
@@ -424,18 +425,18 @@
 			class="pvw-settings-dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label="PDF viewer settings"
+			aria-label={m.pdf_view_window_pdf_viewer_settings()}
 			tabindex="0"
 			onclick={(event) => event.stopPropagation()}
 			onkeydown={(event) => event.stopPropagation()}
 		>
 			<div class="pvw-settings-dialog-head">
-				<div class="pvw-settings-dialog-title">Settings</div>
-				<button type="button" class="pvw-settings-close-btn" onclick={closeSettings}>Close</button>
+				<div class="pvw-settings-dialog-title">{m.pdf_view_window_settings()}</div>
+				<button type="button" class="pvw-settings-close-btn" onclick={closeSettings}>{m.pdf_view_window_close()}</button>
 			</div>
 			<div class="pvw-settings-dialog-body">
 				<label class="pvw-settings-field">
-					<span class="pvw-settings-label">{sidebarWidthSettingLabel} ({panelWidth}px)</span>
+					<span class="pvw-settings-label">{m.pdf_view_window_px({ sidebarWidthSettingLabel, panelWidth })}</span>
 					<input
 						class="pvw-settings-range"
 						type="range"

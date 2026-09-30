@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import ListFilterIcon from '@lucide/svelte/icons/list-filter';
 	import FilterXIcon from '@lucide/svelte/icons/filter-x';
@@ -101,7 +102,7 @@
 		<button
 			type="button"
 			class="toolbar-btn"
-			title="Expand / Collapse All Levels"
+			title={m.view_toolbar_expand_collapse_all_levels()}
 			onclick={() => onExpandCollapseAll?.()}
 		>
 			<ChevronsUpDownIcon class="tb-icon" />
@@ -114,7 +115,7 @@
 			class="toolbar-btn"
 			disabled={filterDisabled}
 			aria-disabled={filterDisabled}
-			title="Filter Nodes in Current Level"
+			title={m.view_toolbar_filter_nodes_in_current_level()}
 			onclick={() => {
 				if (!filterDisabled) onFilter?.();
 			}}
@@ -127,7 +128,7 @@
 			class="toolbar-btn"
 			disabled={resetFilterDisabled}
 			aria-disabled={resetFilterDisabled}
-			title="Reset Current Level Filter"
+			title={m.view_toolbar_reset_current_level_filter()}
 			onclick={() => {
 				if (!resetFilterDisabled) onResetFilter?.();
 			}}
@@ -142,15 +143,15 @@
 				type="button"
 				class="toolbar-btn"
 				class:active={expandLevelOpen}
-				title="Expand Selected Node"
+				title={m.view_toolbar_expand_selected_node()}
 				onclick={handleExpandToLevel}
 			>
 				<NetworkIcon class="tb-icon" />
 			</button>
 
 			{#if expandLevelOpen}
-				<div class="level-popover" role="dialog" aria-label="Expand to level">
-					<div class="level-label">Expand to depth</div>
+				<div class="level-popover" role="dialog" aria-label={m.view_toolbar_expand_to_level()}>
+					<div class="level-label">{m.view_toolbar_expand_to_depth()}</div>
 					<div class="level-row">
 						<input
 							type="range"
@@ -162,7 +163,7 @@
 						/>
 						<span class="level-value">{expandLevel}</span>
 					</div>
-					<button type="button" class="level-apply" onclick={commitExpandToLevel}>Apply</button>
+					<button type="button" class="level-apply" onclick={commitExpandToLevel}>{m.view_toolbar_apply()}</button>
 				</div>
 			{/if}
 		</div>
@@ -172,7 +173,7 @@
 			class="toolbar-btn"
 			disabled={collapseSelectedDisabled}
 			aria-disabled={collapseSelectedDisabled}
-			title="Collapse Selected Node"
+			title={m.view_toolbar_collapse_selected_node()}
 			onclick={() => {
 				if (!collapseSelectedDisabled) onCollapseSelected?.();
 			}}
@@ -185,7 +186,7 @@
 		<button
 			type="button"
 			class="toolbar-btn"
-			title="Export to PNG"
+			title={m.view_toolbar_export_to_png()}
 			onclick={() => onExportPng?.()}
 		>
 			<ImageDownIcon class="tb-icon" />
@@ -198,7 +199,7 @@
 				type="button"
 				class="toolbar-btn"
 				class:active={nodeStyle === 'circle'}
-				title={nodeStyle === 'circle' ? 'Switch to rectangle nodes' : 'Switch to circle nodes'}
+				title={nodeStyle === 'circle' ? m.view_toolbar_switch_to_rectangle_nodes() : m.view_toolbar_switch_to_circle_nodes()}
 				onclick={() => onToggleNodeStyle?.()}
 			>
 				{#if nodeStyle === 'circle'}
@@ -216,19 +217,19 @@
 				type="button"
 				class="toolbar-btn"
 				class:active={settingsOpen}
-				title="Settings"
+				title={m.view_toolbar_settings()}
 				onclick={handleSettings}
 			>
 				<SettingsIcon class="tb-icon" />
 			</button>
 
 			{#if settingsOpen}
-				<div class="settings-popover" role="dialog" aria-label="Settings">
-					<div class="level-label">Settings</div>
+				<div class="settings-popover" role="dialog" aria-label={m.view_toolbar_settings()}>
+					<div class="level-label">{m.view_toolbar_settings()}</div>
 
 					<div class="settings-field">
 						<label class="settings-field-label" for="setting-expand-depth"
-							>Default Expand Selected Node Depth</label
+							>{m.view_toolbar_default_expand_selected_node_depth()}</label
 						>
 						<input
 							id="setting-expand-depth"
@@ -242,7 +243,7 @@
 							}}
 							class="settings-number-input"
 						/>
-						<div class="settings-help">The maximum depth of expanding the selected node.</div>
+						<div class="settings-help">{m.view_toolbar_the_maximum_depth_of_expanding()}</div>
 					</div>
 
 					<div class="settings-field">
@@ -257,11 +258,11 @@
 								class="settings-checkbox"
 							/>
 							<label class="settings-field-label" for="setting-show-info"
-								>Show Information Block</label
+								>{m.view_toolbar_show_information_block()}</label
 							>
 						</div>
 						<div class="settings-help">
-							Control whether to show the information when the mouse hovers over a node.
+							{m.view_toolbar_control_whether_to_show_the()}
 						</div>
 					</div>
 				</div>

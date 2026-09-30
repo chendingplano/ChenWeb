@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import KanbanCard from './kanban-card.svelte';
 	import type { Agent, Issue, IssueStatus } from './agentplatform-client';
 
@@ -87,7 +88,7 @@
 			/>
 		{/each}
 		{#if issues.length === 0}
-			<div class="empty">Drop here</div>
+			<div class="empty">{m.kanban_column_drop_here()}</div>
 		{/if}
 	</div>
 </section>

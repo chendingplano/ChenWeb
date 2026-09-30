@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import type { JsonDialogSection } from './doc-review-json-dialog.js';
 
@@ -84,14 +85,14 @@
 				onclick={onclose}
 				class="rounded p-1.5 cursor-pointer"
 				style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-				aria-label="Close"
+				aria-label={m.json_sections_dialog_close()}
 			>
 				<XIcon class="w-4 h-4" />
 			</button>
 		</div>
 		<div class="flex-1 overflow-auto p-5 modal-scroll" style="--modal-scroll-thumb:{scrollThumb};">
 			{#if !sections.length}
-				<div class="text-center" style="color:{textMuted};padding:2rem">No data.</div>
+				<div class="text-center" style="color:{textMuted};padding:2rem">{m.json_sections_dialog_no_data()}</div>
 			{:else}
 				<div class="space-y-4 text-xs" style="line-height:1.6;user-select:text">
 					{#each sections as section, index (index)}

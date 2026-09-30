@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { JsonTreeNode } from './doc-review-json-dialog.js';
 
 	let { nodes, dark = true }: { nodes: JsonTreeNode[]; dark?: boolean } = $props();
@@ -8,7 +9,7 @@
 </script>
 
 {#if !nodes.length}
-	<div class="text-center" style="color:{textMuted};padding:1rem">No data.</div>
+	<div class="text-center" style="color:{textMuted};padding:1rem">{m.json_tree_no_data()}</div>
 {:else}
 	<ul class="json-tree-level" style="user-select:text">
 		{#each nodes as node (node.label)}

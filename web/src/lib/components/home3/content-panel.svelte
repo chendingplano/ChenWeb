@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import DocProcessorDashboardView from '$lib/components/home3/doc-processor-dashboard-view.svelte';
@@ -147,22 +148,20 @@
 
 	// Section descriptions
 	const sectionDesc: Record<string, string> = {
-		agents: 'Manage, browse, and create AI agents for your workflows.',
-		chat: 'Chat with multiple agents and models in session tabs.',
-		skills: 'Discover and manage modular skills that extend your agents.',
-		applications: 'Connect and manage third-party app integrations.',
-		coding: 'AI-powered coding assistance: review, generate, and debug.',
+		agents: m.content_panel_manage_browse_and_create_ai(),
+		chat: m.content_panel_chat_with_multiple_agents_and(),
+		skills: m.content_panel_discover_and_manage_modular_skills(),
+		applications: m.content_panel_connect_and_manage_third_party(),
+		coding: m.content_panel_ai_powered_coding_assistance_review(),
 		personal: 'Your personal AI assistant for tasks, calendar, and email.',
-		knowledge: 'Your document library and semantic search knowledge base.',
-		settings: 'Configure your workspace, models, and integrations.',
-		about: 'Version info, credits, and system information.',
-		jetstream: 'Operational monitoring and diagnostics for JetStream services.',
-		'system-admin':
-			'System administration: JetStream monitoring, doc processor logs, and diagnostics.',
-		'my-workspace': 'Your personal workspace: diary, notes, and resources.',
-		'knowledge-engineering':
-			'Manage research topic beans: articles, thoughts, designs, specs, and readings.',
-		ontology: 'Browse and manage ontology artifacts: terms, facets, and semantic bindings.'
+		knowledge: m.content_panel_your_document_library_and_semantic(),
+		settings: m.content_panel_configure_your_workspace_models_and(),
+		about: m.content_panel_version_info_credits_and_system(),
+		jetstream: m.content_panel_operational_monitoring_and_diagnostics_for(),
+		'system-admin': m.content_panel_system_administration_jetstream_monitoring_doc(),
+		'my-workspace': m.content_panel_your_personal_workspace_diary_notes(),
+		'knowledge-engineering': m.content_panel_manage_research_topic_beans_articles(),
+		ontology: m.content_panel_browse_and_manage_ontology_artifacts()
 	};
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
@@ -211,7 +210,7 @@
 		>
 			<!-- Breadcrumb -->
 			<nav class="flex items-center gap-1.5" style="font-size:13px; color:{textMuted};">
-				<span>Home</span>
+				<span>{m.content_panel_home()}</span>
 				<ChevronRightIcon class="h-3 w-3" />
 				<span style="color:{textSecondary};">{activeMenu?.itemTitle}</span>
 				{#if activeMenu?.childTitle}
@@ -226,10 +225,12 @@
 					onclick={onToggleShelf}
 					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
 					style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
-					aria-label={shelfOpen ? 'Close context panel' : 'Open context panel'}
+					aria-label={shelfOpen
+						? m.content_panel_close_context_panel()
+						: m.content_panel_open_context_panel()}
 				>
 					<PanelRightIcon class="h-3.5 w-3.5" />
-					{shelfOpen ? 'Close panel' : 'Open panel'}
+					{shelfOpen ? m.content_panel_close_panel() : m.content_panel_open_panel()}
 				</button>
 			{/if}
 		</div>
@@ -399,10 +400,12 @@
 					onclick={onToggleShelf}
 					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
 					style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
-					aria-label={shelfOpen ? 'Close context panel' : 'Open context panel'}
+					aria-label={shelfOpen
+						? m.content_panel_close_context_panel()
+						: m.content_panel_open_context_panel()}
 				>
 					<PanelRightIcon class="h-3.5 w-3.5" />
-					{shelfOpen ? 'Close panel' : 'Open panel'}
+					{shelfOpen ? m.content_panel_close_panel() : m.content_panel_open_panel()}
 				</button>
 			</div>
 			<DashboardView {darkMode} />
@@ -432,7 +435,7 @@
 									{activeMenu?.childTitle ?? activeMenu?.itemTitle}
 								</h1>
 								<p style="font-size:14px; color:{textSecondary};">
-									{sectionDesc[sectionId] ?? 'Select a section from the navigation.'}
+									{sectionDesc[sectionId] ?? m.content_panel_select_a_section_from_the()}
 								</p>
 							</div>
 						</div>
@@ -446,7 +449,7 @@
 								(e.currentTarget as HTMLElement).style.opacity = '1';
 							}}
 						>
-							+ New
+							{m.content_panel_new()}
 						</button>
 					</div>
 				</div>
@@ -458,10 +461,10 @@
 					>
 						<div>
 							<h2 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">
-								Navigation Settings
+								{m.content_panel_navigation_settings()}
 							</h2>
 							<p style="font-size:13px; color:{textSecondary};">
-								Control how the left navigation panel expands and collapses.
+								{m.content_panel_control_how_the_left_navigation()}
 							</p>
 						</div>
 
@@ -474,18 +477,17 @@
 									<div
 										style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:4px;"
 									>
-										Auto Shrink/Expand
+										{m.content_panel_auto_shrink_expand()}
 									</div>
 									<p style="font-size:13px; color:{textSecondary}; line-height:1.5;">
-										When enabled, the left panel stays collapsed until you move over it. When
-										disabled, the panel only expands or shrinks when you use the rail button.
+										{m.content_panel_when_enabled_the_left_panel()}
 									</p>
 								</div>
 								<button
 									type="button"
 									role="switch"
 									aria-checked={autoShrinkExpand}
-									aria-label="Toggle auto shrink expand"
+									aria-label={m.content_panel_toggle_auto_shrink_expand()}
 									onclick={() => onAutoShrinkExpandChange(!autoShrinkExpand)}
 									class="relative flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200"
 									style="
@@ -515,7 +517,7 @@
 									? accent
 									: textMuted}; font-size:12px; font-weight:600;"
 							>
-								Default: Disabled
+								{m.content_panel_default_disabled()}
 							</div>
 						</div>
 					</div>
@@ -544,7 +546,7 @@
 								{activeMenu?.childTitle ?? activeMenu?.itemTitle}
 							</p>
 							<p style="font-size:13px; color:{textMuted};">
-								Content for this section will appear here.
+								{m.content_panel_content_for_this_section_will()}
 							</p>
 						</div>
 					</div>
