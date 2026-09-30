@@ -1176,11 +1176,17 @@ func TestConvertMineruFile_BasicTypes(t *testing.T) {
       "items": [
         {"type":"text","text":"Title","text_level":1,"bbox":[10,20,30,40]},
         {"type":"text","text":"Body text","bbox":[10,50,30,60]},
-        {"type":"header","text":"HEADER","bbox":[0,0,10,10]},
-        {"type":"footer","text":"FOOTER","bbox":[0,0,10,10]},
         {"type":"page_number","text":"1","bbox":[0,0,10,10]},
         {"type":"list","list_items":["item one","item two"],"bbox":[10,70,30,90]},
         {"type":"equation","text":"$$E=mc^2$$","bbox":[10,100,30,110]}
+      ]
+    },
+    {
+      "page_number": 2,
+      "items": [
+        {"type":"header","text":"HEADER","bbox":[0,0,10,10]},
+        {"type":"footer","text":"FOOTER","bbox":[0,0,10,10]},
+        {"type":"page_number","text":"2","bbox":[0,0,10,10]}
       ]
     }
   ]
@@ -1221,6 +1227,71 @@ func TestConvertMineruFile_BasicTypes(t *testing.T) {
 			if strings.Contains(line, banned) {
 				t.Fatalf("unexpected content %q in output line: %s", banned, line)
 			}
+		}
+	}
+}
+
+// A GB cover page's masthead (ICS/CCS codes, "中华人民共和国国家标准", the
+// standard number) and publisher block are tagged header/footer by MinerU.
+// On page 1 they are document content and must be kept; on later pages the
+// same types are running headers/footers and are still dropped.
+func TestConvertMineruFile_KeepsCoverPageHeaderAndFooter(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "cover_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 1,
+      "items": [
+        {"type":"text","text":"电子数显指示表的设计和计量特性","text_level":1,"bbox":[179,392,868,428]},
+        {"type":"text","text":"2023-09-07 发布","bbox":[112,864,282,883]},
+        {"type":"header","text":"ICS 17.040.30 ","bbox":[114,32,226,46]},
+        {"type":"header","text":"CCS J 42 ","bbox":[114,46,194,59]},
+        {"type":"header","text":"中华人民共和国国家标准","bbox":[115,138,929,173]},
+        {"type":"header","text":"GB/T 43150—2023/ISO 13102:2012 ","bbox":[527,206,907,223]},
+        {"type":"footer","text":"国家市场监督管理总局","bbox":[319,907,638,931]},
+        {"type":"page_number","text":"1","bbox":[0,0,10,10]}
+      ]
+    },
+    {
+      "page_number": 2,
+      "items": [
+        {"type":"header","text":"GB/T 43150—2023/ISO 13102:2012 ","bbox":[527,40,907,55]},
+        {"type":"text","text":"1 范围","text_level":1,"bbox":[100,100,300,120]},
+        {"type":"footer","text":"running footer","bbox":[0,950,10,960]}
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	want := []string{
+		"1\t1\tparagraph\tunknown-font\t12\t[114, 32, 226, 46]\tICS 17.040.30",
+		"2\t1\tparagraph\tunknown-font\t12\t[114, 46, 194, 59]\tCCS J 42",
+		"3\t1\tparagraph\tunknown-font\t12\t[115, 138, 929, 173]\t中华人民共和国国家标准",
+		"4\t1\tparagraph\tunknown-font\t12\t[527, 206, 907, 223]\tGB/T 43150—2023/ISO 13102:2012",
+		"5\t1\theading(1)\tunknown-font\t12\t[179, 392, 868, 428]\t电子数显指示表的设计和计量特性",
+		"6\t1\tparagraph\tunknown-font\t12\t[112, 864, 282, 883]\t2023-09-07 发布",
+		"7\t1\tparagraph\tunknown-font\t12\t[319, 907, 638, 931]\t国家市场监督管理总局",
+		"8\t2\theading(1)\tunknown-font\t12\t[100, 100, 300, 120]\t1 范围",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("expected %d lines, got %d:\n%s", len(want), len(lines), string(got))
+	}
+	for i := range want {
+		if !strings.Contains(lines[i], want[i]) {
+			t.Fatalf("line %d:\n got: %s\nwant: %s", i+1, lines[i], want[i])
 		}
 	}
 }

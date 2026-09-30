@@ -81,10 +81,37 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 	var items []extractedOpenDataLine
 	for _, page := range pages {
 		pageStr := strconv.Itoa(page.PageNumber)
+		// MinerU tags a cover page's masthead (ICS/CCS codes, the standard
+		// series name, the standard number) as "header" and its publisher
+		// block as "footer", and lists them after the body items. On page 1
+		// they are document content, so emit them as paragraphs: headers
+		// before the body, footers after. On later pages they are running
+		// headers/footers and are dropped.
+		var coverFooters []extractedOpenDataLine
+		if page.PageNumber == 1 {
+			for _, item := range page.Items {
+				content := strings.TrimSpace(item.Text)
+				if content == "" {
+					continue
+				}
+				line := extractedOpenDataLine{
+					Page:    pageStr,
+					Type:    "paragraph",
+					BBox:    mineruBBoxStr(item.BBox),
+					Content: content,
+				}
+				switch strings.ToLower(strings.TrimSpace(item.Type)) {
+				case "header":
+					items = append(items, line)
+				case "footer":
+					coverFooters = append(coverFooters, line)
+				}
+			}
+		}
 		for _, item := range page.Items {
 			switch strings.ToLower(strings.TrimSpace(item.Type)) {
 			case "header", "footer", "page_number":
-				// page furniture; skip
+				// page furniture (cover-page header/footer handled above); skip
 
 			case "text":
 				content := strings.TrimSpace(item.Text)
@@ -217,6 +244,7 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 				}
 			}
 		}
+		items = append(items, coverFooters...)
 	}
 	return items
 }
