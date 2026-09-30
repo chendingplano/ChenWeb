@@ -125,3 +125,9 @@ test('literal braces in text become an example param', () => {
 	assert.ok(out.includes(`{m.d_predicate_e_g({ example: "{\\"op\\":\\"eq\\"}" })}`), out);
 	assert.equal(messages[0].text, 'Predicate (e.g. {example})');
 });
+
+test('route files take their route path as key prefix', () => {
+	assert.equal(keyPrefix('src/routes/home3/knowledge/+page.svelte'), 'home3_knowledge');
+	assert.equal(keyPrefix('src/routes/semos/+layout.svelte'), 'semos_layout');
+	assert.equal(keyPrefix('src/routes/+page.svelte'), 'root');
+});

@@ -121,7 +121,7 @@
 				<input
 					type="text"
 					bind:value={formActivityType}
-					placeholder={m._page_general()}
+					placeholder={m.semos_admin_recent_activities_general()}
 					class="w-full rounded border border-[#17181c]/15 bg-transparent px-3 py-2 text-sm dark:border-white/15"
 				/>
 			</label>

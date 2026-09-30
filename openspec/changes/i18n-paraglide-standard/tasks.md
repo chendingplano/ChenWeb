@@ -23,4 +23,14 @@
       ~740 messages with Chinese. Verified: svelte-check, i18n check, 46/50 components
       server-rendered in en and zh-cn with a throwaway harness (other 4: Vite-only glob, snippet
       prop, workspace package, `$app` inside a store — harness limits, not conversion errors).
-- [ ] 4.3 Remaining batches (baseline after batch 1 + stricter rule: 195 files / 5,664 items).
+- [x] 4.3 Main routes (2026-09-30): every file reachable from /semos (incl. /semos/workspace and
+      admin pages), /home3/knowledge, /development and /resources — 110 files in 6 sub-batches,
+      ~4,900 messages with Chinese. Check and converter extended on the way: text props on
+      components, confirm/alert/prompt text in handlers, CSS functions / font stacks are not text,
+      literal braces become an {example} param, `msg` alias where `m` is a local name,
+      --suggest (translation memory), --fix-params, route files keyed by route path.
+      Verified: svelte-check, i18n check, unit tests, 51/58 of the larger views server-rendered in
+      en and zh-cn (other 7: harness cannot load svelte-echarts / the shared workspace package /
+      one regex — same failure before conversion).
+- [ ] 4.4 Files outside the main routes (85 files / 1,083 items, mostly demo/test routes): convert
+      or delete — decision pending.

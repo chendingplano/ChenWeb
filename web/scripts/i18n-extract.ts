@@ -71,7 +71,16 @@ export function decodeEntities(s: string): string {
 }
 
 export function keyPrefix(file: string): string {
-	return basename(file, '.svelte')
+	const base = basename(file, '.svelte');
+	// SvelteKit route files (+page, +layout) take their route path instead:
+	// src/routes/home3/knowledge/+page.svelte -> home3_knowledge.
+	if (base.startsWith('+')) {
+		const route =
+			file.replace(/\\/g, '/').split('/routes/')[1]?.split('/').slice(0, -1).join('_') || 'root';
+		const kind = base === '+page' ? '' : `_${base.slice(1)}`;
+		return `${route}${kind}`.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+	}
+	return base
 		.replace(/-view$/, '')
 		.replace(/[^a-z0-9]+/gi, '_')
 		.toLowerCase();

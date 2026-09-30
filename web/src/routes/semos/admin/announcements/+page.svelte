@@ -121,7 +121,7 @@
 				<input
 					type="text"
 					bind:value={formImportance}
-					placeholder={m._page_normal()}
+					placeholder={m.semos_admin_announcements_normal()}
 					class="w-full rounded border border-[#17181c]/15 bg-transparent px-3 py-2 text-sm dark:border-white/15"
 				/>
 			</label>

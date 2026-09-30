@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import DocumentMetricsAnalysis from '$lib/components/home3/document-metrics-analysis.svelte';
@@ -45,36 +46,36 @@
 		resolution: 'mixed',
 		denominator: 1284
 	});
-	let activeScope = $state('All authorized documents');
+	let activeScope = $state(m.ontology_metric_analysis_all_authorized_documents());
 	let filterOpen = $state(false);
 	let selectedMetric = $state<string | null>(null);
 	let query = $state('');
 
 	let kpis = $state([
-		{ label: 'Occurrences', sub: 'record-born rows', value: '1,284', delta: '+8.4%', direction: 'up', tone: 'bronze', href: 'Document Metrics' },
-		{ label: 'Current instances', sub: 'distinct assertions', value: '982', delta: '+3.1%', direction: 'up', tone: 'ink', href: 'Document Metrics' },
-		{ label: 'Ontology metrics', sub: 'governed definitions', value: '146', delta: '+12', direction: 'up', tone: 'olive', href: 'Ontology Metrics' },
-		{ label: 'Metric classes', sub: 'instantiated classes', value: '38', delta: '0', direction: 'flat', tone: 'slate', href: 'Ontology Metrics' },
-		{ label: 'With errors', sub: 'detected error facts', value: '84', delta: '-5.2%', direction: 'down', tone: 'red', href: 'Document Metrics' },
-		{ label: 'No detected errors', sub: 'not complete or warning-free', value: '1,200', delta: '+9.6%', direction: 'up', tone: 'blue', href: 'Document Metrics' }
+		{ label: m.home3_ontology_metric_analysis_occurrences_2(), sub: 'record-born rows', value: '1,284', delta: '+8.4%', direction: 'up', tone: 'bronze', href: 'Document Metrics' },
+		{ label: m.home3_ontology_metric_analysis_current_instances(), sub: m.home3_ontology_metric_analysis_distinct_assertions(), value: '982', delta: '+3.1%', direction: 'up', tone: 'ink', href: 'Document Metrics' },
+		{ label: m.home3_ontology_metric_analysis_ontology_metrics_2(), sub: m.home3_ontology_metric_analysis_governed_definitions(), value: '146', delta: '+12', direction: 'up', tone: 'olive', href: 'Ontology Metrics' },
+		{ label: m.home3_ontology_metric_analysis_metric_classes(), sub: m.home3_ontology_metric_analysis_instantiated_classes(), value: '38', delta: '0', direction: 'flat', tone: 'slate', href: 'Ontology Metrics' },
+		{ label: m.home3_ontology_metric_analysis_with_errors(), sub: m.home3_ontology_metric_analysis_detected_error_facts(), value: '84', delta: '-5.2%', direction: 'down', tone: 'red', href: 'Document Metrics' },
+		{ label: m.home3_ontology_metric_analysis_no_detected_errors_2(), sub: m.home3_ontology_metric_analysis_not_complete_or_warning_free(), value: '1,200', delta: '+9.6%', direction: 'up', tone: 'blue', href: 'Document Metrics' }
 	]);
 
 	let coverage = $state([
-		{ label: 'Complete', value: 684, percent: 53, color: 'var(--green)' },
-		{ label: 'Completed with findings', value: 216, percent: 17, color: 'var(--bronze)' },
-		{ label: 'Historical / not processed', value: 168, percent: 13, color: 'var(--slate)' },
-		{ label: 'Blocked claim', value: 83, percent: 6, color: 'var(--red)' },
-		{ label: 'Incomplete graph', value: 74, percent: 6, color: 'var(--violet)' },
-		{ label: 'Execution failed', value: 42, percent: 3, color: 'var(--orange)' },
-		{ label: 'Unknown coverage', value: 17, percent: 2, color: 'var(--muted)' }
+		{ label: m.home3_ontology_metric_analysis_complete(), value: 684, percent: 53, color: 'var(--green)' },
+		{ label: m.home3_ontology_metric_analysis_completed_with_findings(), value: 216, percent: 17, color: 'var(--bronze)' },
+		{ label: m.home3_ontology_metric_analysis_historical_not_processed(), value: 168, percent: 13, color: 'var(--slate)' },
+		{ label: m.home3_ontology_metric_analysis_blocked_claim(), value: 83, percent: 6, color: 'var(--red)' },
+		{ label: m.home3_ontology_metric_analysis_incomplete_graph(), value: 74, percent: 6, color: 'var(--violet)' },
+		{ label: m.home3_ontology_metric_analysis_execution_failed(), value: 42, percent: 3, color: 'var(--orange)' },
+		{ label: m.home3_ontology_metric_analysis_unknown_coverage(), value: 17, percent: 2, color: 'var(--muted)' }
 	]);
 
 	let errors = $state([
-		{ label: 'Unresolved unit', value: 31, percent: 88, severity: 'Warning' },
-		{ label: 'Missing assertion edge', value: 22, percent: 63, severity: 'Error' },
-		{ label: 'Range type fallback', value: 16, percent: 46, severity: 'Warning' },
-		{ label: 'Processor timeout', value: 9, percent: 26, severity: 'Failed' },
-		{ label: 'Unknown governed term', value: 6, percent: 17, severity: 'Warning' }
+		{ label: m.home3_ontology_metric_analysis_unresolved_unit(), value: 31, percent: 88, severity: 'Warning' },
+		{ label: m.home3_ontology_metric_analysis_missing_assertion_edge(), value: 22, percent: 63, severity: 'Error' },
+		{ label: m.home3_ontology_metric_analysis_range_type_fallback(), value: 16, percent: 46, severity: 'Warning' },
+		{ label: m.home3_ontology_metric_analysis_processor_timeout(), value: 9, percent: 26, severity: 'Failed' },
+		{ label: m.home3_ontology_metric_analysis_unknown_governed_term(), value: 6, percent: 17, severity: 'Warning' }
 	]);
 
 	let mappings = $state([
@@ -85,12 +86,12 @@
 	]);
 
 	const statusMeta: Record<Status, { label: string; className: string }> = {
-		complete: { label: 'Complete', className: 'positive' },
-		findings: { label: 'Findings · 2', className: 'warning' },
-		historical: { label: 'Historical', className: 'neutral' },
-		blocked: { label: 'Blocked claim', className: 'blocked' },
-		incomplete: { label: 'Incomplete graph', className: 'warning' },
-		failed: { label: 'Execution failed', className: 'error' }
+		complete: { label: m.home3_ontology_metric_analysis_complete(), className: 'positive' },
+		findings: { label: m.home3_ontology_metric_analysis_findings_2(), className: 'warning' },
+		historical: { label: m.home3_ontology_metric_analysis_historical(), className: 'neutral' },
+		blocked: { label: m.home3_ontology_metric_analysis_blocked_claim(), className: 'blocked' },
+		incomplete: { label: m.home3_ontology_metric_analysis_incomplete_graph(), className: 'warning' },
+		failed: { label: m.home3_ontology_metric_analysis_execution_failed(), className: 'error' }
 	};
 
 	let recentRows: { id: string; document: string; metric: string; value: string; definition: string; status: Status; updated: string }[] = $state([
@@ -122,12 +123,12 @@
 			coverageMeta = response.coverage;
 			errorFreePercent = `${errorPresence.find((item) => item.label === 'Without detected errors')?.percent ?? 0}%`;
 			kpis = [
-				{ label: 'Occurrences', sub: 'record-born rows', value: number(response.kpi.occurrences), delta: '', direction: 'flat', tone: 'bronze', href: 'Document Metrics' },
-				{ label: 'Current instances', sub: 'distinct assertions', value: number(response.kpi.current_instances), delta: '', direction: 'flat', tone: 'ink', href: 'Document Metrics' },
-				{ label: 'Ontology metrics', sub: 'governed definitions', value: number(response.kpi.ontology_metrics), delta: '', direction: 'flat', tone: 'olive', href: 'Ontology Metrics' },
-				{ label: 'Metric classes', sub: 'instantiated classes', value: number(response.kpi.metric_classes), delta: '', direction: 'flat', tone: 'slate', href: 'Ontology Metrics' },
-				{ label: 'With errors', sub: 'detected error facts', value: number(response.kpi.with_errors), delta: '', direction: 'flat', tone: 'red', href: 'Document Metrics' },
-				{ label: 'No detected errors', sub: 'not complete or warning-free', value: number(response.kpi.without_errors), delta: '', direction: 'flat', tone: 'blue', href: 'Document Metrics' }
+				{ label: m.home3_ontology_metric_analysis_occurrences_2(), sub: 'record-born rows', value: number(response.kpi.occurrences), delta: '', direction: 'flat', tone: 'bronze', href: 'Document Metrics' },
+				{ label: m.home3_ontology_metric_analysis_current_instances(), sub: m.home3_ontology_metric_analysis_distinct_assertions(), value: number(response.kpi.current_instances), delta: '', direction: 'flat', tone: 'ink', href: 'Document Metrics' },
+				{ label: m.home3_ontology_metric_analysis_ontology_metrics_2(), sub: m.home3_ontology_metric_analysis_governed_definitions(), value: number(response.kpi.ontology_metrics), delta: '', direction: 'flat', tone: 'olive', href: 'Ontology Metrics' },
+				{ label: m.home3_ontology_metric_analysis_metric_classes(), sub: m.home3_ontology_metric_analysis_instantiated_classes(), value: number(response.kpi.metric_classes), delta: '', direction: 'flat', tone: 'slate', href: 'Ontology Metrics' },
+				{ label: m.home3_ontology_metric_analysis_with_errors(), sub: m.home3_ontology_metric_analysis_detected_error_facts(), value: number(response.kpi.with_errors), delta: '', direction: 'flat', tone: 'red', href: 'Document Metrics' },
+				{ label: m.home3_ontology_metric_analysis_no_detected_errors_2(), sub: m.home3_ontology_metric_analysis_not_complete_or_warning_free(), value: number(response.kpi.without_errors), delta: '', direction: 'flat', tone: 'blue', href: 'Document Metrics' }
 			];
 			const colors = ['var(--green)', 'var(--bronze)', 'var(--slate)', 'var(--red)', 'var(--violet)', 'var(--orange)', 'var(--muted)'];
 			coverage = coverageStates.map((item, index) => ({ ...item, color: colors[index % colors.length] }));
@@ -152,14 +153,14 @@
 	}
 
 	function resetFilters() {
-		activeScope = 'All authorized documents';
+		activeScope = m.ontology_metric_analysis_all_authorized_documents();
 		query = '';
 		selectedMetric = null;
 	}
 </script>
 
 <svelte:head>
-	<title>Metric Ontology Analysis · ChenWeb</title>
+	<title>{m.home3_ontology_metric_analysis_metric_ontology_analysis_chenweb()}</title>
 	<meta name="description" content="Read-only diagnostic view for metric ontology coverage and processing outcomes." />
 </svelte:head>
 
@@ -171,58 +172,58 @@
 	{#if !embedded}
 	<header class="topbar">
 		<div class="brand-lockup">
-			<div class="brand-mark">CH</div>
+			<div class="brand-mark">{m.home3_ontology_metric_analysis_ch()}</div>
 			<div>
-				<p class="eyebrow">ChenWeb / Home3</p>
-				<p class="brand-name">Knowledge Store</p>
+				<p class="eyebrow">{m.home3_ontology_metric_analysis_chenweb_home3()}</p>
+				<p class="brand-name">{m.home3_ontology_metric_analysis_knowledge_store()}</p>
 			</div>
 		</div>
 		<div class="top-actions">
-			<button class="icon-button" aria-label="Refresh read model" title="Refresh read model"><RefreshCw size={16} /></button>
-			<button class="icon-button" aria-label="Toggle theme" title="Toggle theme" onclick={() => theme.toggle()}>
+			<button class="icon-button" aria-label={m.home3_ontology_metric_analysis_refresh_read_model()} title={m.home3_ontology_metric_analysis_refresh_read_model()}><RefreshCw size={16} /></button>
+			<button class="icon-button" aria-label={m.home3_ontology_metric_analysis_toggle_theme()} title={m.home3_ontology_metric_analysis_toggle_theme()} onclick={() => theme.toggle()}>
 				{#if darkMode}<Sun size={16} />{:else}<Moon size={16} />{/if}
 			</button>
-			<div class="avatar" aria-label="Signed in as C. Ding">CD</div>
+			<div class="avatar" aria-label={m.home3_ontology_metric_analysis_signed_in_as_c_ding()}>{m.home3_ontology_metric_analysis_cd()}</div>
 		</div>
 	</header>
 	{/if}
 
 	<main class="content">
-		<div class="breadcrumb"><span>Ontology</span><span class="slash">/</span><strong>Metrics</strong><span class="route-badge">Read-only analysis</span></div>
+		<div class="breadcrumb"><span>{m.home3_ontology_metric_analysis_ontology()}</span><span class="slash">/</span><strong>{m.home3_ontology_metric_analysis_metrics()}</strong><span class="route-badge">{m.home3_ontology_metric_analysis_read_only_analysis()}</span></div>
 		<div class="title-row">
 			<div>
-				<p class="section-kicker">Metric corpus / diagnostic view</p>
-				<h1>Metric Ontology Analysis</h1>
-				<p class="lede">Trace what the corpus knows, what the ontology governs, and where processing still needs attention.</p>
+				<p class="section-kicker">{m.home3_ontology_metric_analysis_metric_corpus_diagnostic_view()}</p>
+				<h1>{m.home3_ontology_metric_analysis_metric_ontology_analysis()}</h1>
+				<p class="lede">{m.home3_ontology_metric_analysis_trace_what_the_corpus_knows()}</p>
 			</div>
 			<div class="title-actions">
-				<button class="quiet-button" onclick={() => (filterOpen = !filterOpen)}><Database size={15} /> Inspect data</button>
-				<button class="primary-button"><Download size={15} /> Export view</button>
+				<button class="quiet-button" onclick={() => (filterOpen = !filterOpen)}><Database size={15} /> {m.home3_ontology_metric_analysis_inspect_data()}</button>
+				<button class="primary-button"><Download size={15} /> {m.home3_ontology_metric_analysis_export_view()}</button>
 			</div>
 		</div>
 
-		<nav class="mode-tabs" aria-label="Metric analysis view">
-			<a class="active" href="/home3/ontology-metric-analysis">Dashboard <span>01</span></a>
-			<a href="/home3/ontology-metric-analysis?view=document">Document Metrics <span>02</span></a>
-			<a href="/home3/ontology-metric-analysis?view=ontology">Ontology Metrics <span>03</span></a>
+		<nav class="mode-tabs" aria-label={m.home3_ontology_metric_analysis_metric_analysis_view()}>
+			<a class="active" href="/home3/ontology-metric-analysis">{m.home3_ontology_metric_analysis_dashboard()} <span>01</span></a>
+			<a href="/home3/ontology-metric-analysis?view=document">{m.home3_ontology_metric_analysis_document_metrics()} <span>02</span></a>
+			<a href="/home3/ontology-metric-analysis?view=ontology">{m.home3_ontology_metric_analysis_ontology_metrics()} <span>03</span></a>
 		</nav>
 
 		<section class="coverage-notice" class:expanded={filterOpen}>
 			<div class="notice-icon"><Check size={15} /></div>
-			<div class="notice-copy"><strong>Coverage is {coverageMeta.conformance}</strong><span>{coverageMeta.writer} · scope: {coverageMeta.scope} · {coverageMeta.read_model} · {coverageMeta.rules}</span></div>
-			<button class="notice-detail" onclick={() => (filterOpen = !filterOpen)}>{filterOpen ? 'Hide details' : 'View definition'} <ChevronDown size={14} /></button>
-			{#if filterOpen}<div class="notice-expanded"><span>Conformance <b>{coverageMeta.conformance}</b></span><span>Projection <b>{coverageMeta.projection}</b></span><span>Resolution <b>{coverageMeta.resolution}</b></span><span>Denominator <b>{number(coverageMeta.denominator)} occurrences</b></span></div>{/if}
+			<div class="notice-copy"><strong>{m.home3_ontology_metric_analysis_coverage_is({ conformance: coverageMeta.conformance })}</strong><span>{m.home3_ontology_metric_analysis_scope({ writer: coverageMeta.writer, scope: coverageMeta.scope, read_model: coverageMeta.read_model, rules: coverageMeta.rules })}</span></div>
+			<button class="notice-detail" onclick={() => (filterOpen = !filterOpen)}>{filterOpen ? m.home3_ontology_metric_analysis_hide_details() : m.home3_ontology_metric_analysis_view_definition()} <ChevronDown size={14} /></button>
+			{#if filterOpen}<div class="notice-expanded"><span>{m.home3_ontology_metric_analysis_conformance()} <b>{coverageMeta.conformance}</b></span><span>{m.home3_ontology_metric_analysis_projection()} <b>{coverageMeta.projection}</b></span><span>{m.home3_ontology_metric_analysis_resolution()} <b>{coverageMeta.resolution}</b></span><span>{m.home3_ontology_metric_analysis_denominator()} <b>{m.home3_ontology_metric_analysis_occurrences({ denominator: number(coverageMeta.denominator) })}</b></span></div>{/if}
 		</section>
 
-		{#if loading}<div class="data-note">Refreshing the composed read model…</div>{/if}
-		{#if loadError}<div class="data-note error-note">Live data unavailable: {loadError}. Showing the last safe fixture.</div>{/if}
+		{#if loading}<div class="data-note">{m.home3_ontology_metric_analysis_refreshing_the_composed_read_model()}</div>{/if}
+		{#if loadError}<div class="data-note error-note">{m.home3_ontology_metric_analysis_live_data_unavailable_showing_the({ loadError })}</div>{/if}
 
 		<section class="scope-bar">
-			<div class="scope-label"><Filter size={15} /><span>Scope</span></div>
-			<button class="scope-select" onclick={() => (activeScope = activeScope === 'All authorized documents' ? 'Standards / 2026 intake' : 'All authorized documents')}>{activeScope} <ChevronDown size={14} /></button>
-			<button class="scope-chip" onclick={() => (selectedMetric = selectedMetric ? null : 'pressure')}>Class <strong>{selectedMetric ?? 'All classes'}</strong> <ChevronDown size={13} /></button>
-			<button class="scope-chip" onclick={() => (selectedMetric = selectedMetric ? null : 'findings')}>Status <strong>{selectedMetric ? '1 active filter' : 'All statuses'}</strong> <ChevronDown size={13} /></button>
-			<button class="reset-button" onclick={resetFilters}>Reset filters</button>
+			<div class="scope-label"><Filter size={15} /><span>{m.home3_ontology_metric_analysis_scope_2()}</span></div>
+			<button class="scope-select" onclick={() => (activeScope = activeScope === m.ontology_metric_analysis_all_authorized_documents() ? m.ontology_metric_analysis_standards_2026_intake() : m.ontology_metric_analysis_all_authorized_documents())}>{activeScope} <ChevronDown size={14} /></button>
+			<button class="scope-chip" onclick={() => (selectedMetric = selectedMetric ? null : 'pressure')}>{m.home3_ontology_metric_analysis_class()} <strong>{selectedMetric ?? m.home3_ontology_metric_analysis_all_classes()}</strong> <ChevronDown size={13} /></button>
+			<button class="scope-chip" onclick={() => (selectedMetric = selectedMetric ? null : 'findings')}>{m.home3_ontology_metric_analysis_status()} <strong>{selectedMetric ? m.home3_ontology_metric_analysis_1_active_filter() : m.home3_ontology_metric_analysis_all_statuses()}</strong> <ChevronDown size={13} /></button>
+			<button class="reset-button" onclick={resetFilters}>{m.home3_ontology_metric_analysis_reset_filters()}</button>
 		</section>
 
 		<section class="model-layout">
@@ -230,20 +231,20 @@
 				<div class="model-graph-card">
 					<div class="model-head">
 						<div class="model-head-copy">
-							<p class="panel-kicker">The model · metric ontology §5</p>
-							<h2>Metric Ontology Model</h2>
-							<p class="model-lede">One metric occurrence touches three populations at once. The governed vocabulary on top is global and reused by every document. The identities in the middle are shared by every document that names the same thing. The records at the bottom belong to one document and are rewritten whenever it is processed again.</p>
+							<p class="panel-kicker">{m.home3_ontology_metric_analysis_the_model_metric_ontology_5()}</p>
+							<h2>{m.home3_ontology_metric_analysis_metric_ontology_model()}</h2>
+							<p class="model-lede">{m.home3_ontology_metric_analysis_one_metric_occurrence_touches_three()}</p>
 						</div>
 						<ul class="model-legend">
-							<li class="lg-a"><span aria-hidden="true"></span><div><strong>Ontology-born</strong><small>curated, imported, or auto-promoted · versioned, never rewritten in place</small></div></li>
-							<li class="lg-b"><span aria-hidden="true"></span><div><strong>Corpus-level identity</strong><small>resolved across documents · merged or deprecated, never deleted</small></div></li>
-							<li class="lg-c"><span aria-hidden="true"></span><div><strong>Record-born</strong><small>one extraction run over one document · replaced on reprocessing</small></div></li>
+							<li class="lg-a"><span aria-hidden="true"></span><div><strong>{m.home3_ontology_metric_analysis_ontology_born()}</strong><small>{m.home3_ontology_metric_analysis_curated_imported_or_auto_promoted()}</small></div></li>
+							<li class="lg-b"><span aria-hidden="true"></span><div><strong>{m.home3_ontology_metric_analysis_corpus_level_identity()}</strong><small>{m.home3_ontology_metric_analysis_resolved_across_documents_merged_or()}</small></div></li>
+							<li class="lg-c"><span aria-hidden="true"></span><div><strong>{m.home3_ontology_metric_analysis_record_born()}</strong><small>{m.home3_ontology_metric_analysis_one_extraction_run_over_one()}</small></div></li>
 						</ul>
 					</div>
 					<div class="model-canvas">
 						<svg viewBox="0 0 1520 740" role="img" aria-labelledby="mm-title mm-desc">
-							<title id="mm-title">The Metric Ontology model</title>
-							<desc id="mm-desc">Three horizontal lanes. The top lane, ontology-born, holds the governed vocabulary: ontology modules publish module releases of kb.ontology_terms, which group into metric identity (metric_definition, metric class), measurement science (quantity kind, dimension, unit, and the governed value range mapping), and the claim frame (assertion kinds, binding properties, and the six measurement classes); ontology candidates auto-promote into terms and term labels supply readable names. The middle lane, corpus-level identities, holds the keyword concept, the object node, and the canonical claim identity. The bottom lane, record-born, runs the pipeline left to right: document in kb.inputs, extract_metrics produces a metric row in kb.metrics and an object mention in kb.artifact_objects, normalize_assertions produces a decision candidate, associate_semantics produces a semantic assertion with its processing outcome and findings, and assertion evidence traces the stored claim back to the quote and line spans in the source document. The metric row resolves its name to a keyword concept and then to a governed metric_definition term; its subject reconciles to an object node that becomes the assertion's subject; normalization resolves value range type, unit, and quantity kind against the ontology; and the assertion points at an assertion kind, a metric class, and a canonical claim identity.</desc>
+							<title id="mm-title">{m.home3_ontology_metric_analysis_the_metric_ontology_model()}</title>
+							<desc id="mm-desc">{m.home3_ontology_metric_analysis_three_horizontal_lanes_the_top()}</desc>
 							<defs>
 								<marker id="mm-arw-a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk mk-a" /></marker>
 								<marker id="mm-arw-b" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk mk-b" /></marker>
@@ -253,79 +254,79 @@
 							<rect class="lane lane-a" x="16" y="14" width="1488" height="278" rx="12" />
 							<rect class="lane lane-b" x="16" y="320" width="1488" height="128" rx="12" />
 							<rect class="lane lane-c" x="16" y="464" width="1488" height="260" rx="12" />
-							<text class="lane-name ln-a" transform="translate(40 153) rotate(-90)">ONTOLOGY-BORN</text>
-							<text class="lane-name ln-b" transform="translate(40 384) rotate(-90)">CORPUS-LEVEL</text>
-							<text class="lane-name ln-c" transform="translate(40 594) rotate(-90)">RECORD-BORN</text>
-							<text class="lane-caption" x="74" y="42">Governed vocabulary — authored once, reused by every document, versioned rather than rewritten</text>
-							<text class="lane-caption" x="74" y="338">Identities resolved across the corpus — no governance status of their own</text>
-							<text class="lane-caption" x="74" y="486">Pipeline over one document</text>
+							<text class="lane-name ln-a" transform="translate(40 153) rotate(-90)">{m.home3_ontology_metric_analysis_ontology_born_2()}</text>
+							<text class="lane-name ln-b" transform="translate(40 384) rotate(-90)">{m.home3_ontology_metric_analysis_corpus_level()}</text>
+							<text class="lane-name ln-c" transform="translate(40 594) rotate(-90)">{m.home3_ontology_metric_analysis_record_born_2()}</text>
+							<text class="lane-caption" x="74" y="42">{m.home3_ontology_metric_analysis_governed_vocabulary_authored_once_reused()}</text>
+							<text class="lane-caption" x="74" y="338">{m.home3_ontology_metric_analysis_identities_resolved_across_the_corpus()}</text>
+							<text class="lane-caption" x="74" y="486">{m.home3_ontology_metric_analysis_pipeline_over_one_document()}</text>
 
-							<g class="mnode mnode-a"><rect x="74" y="100" width="208" height="64" rx="8" /><text class="t" x="178" y="126">ontology modules</text><text class="s" x="178" y="146">core · quantity · measurement</text></g>
-							<g class="mnode mnode-a"><rect x="74" y="190" width="208" height="64" rx="8" /><text class="t" x="178" y="216">module release</text><text class="s" x="178" y="236">one active per module</text></g>
+							<g class="mnode mnode-a"><rect x="74" y="100" width="208" height="64" rx="8" /><text class="t" x="178" y="126">{m.home3_ontology_metric_analysis_ontology_modules()}</text><text class="s" x="178" y="146">{m.home3_ontology_metric_analysis_core_quantity_measurement()}</text></g>
+							<g class="mnode mnode-a"><rect x="74" y="190" width="208" height="64" rx="8" /><text class="t" x="178" y="216">{m.home3_ontology_metric_analysis_module_release()}</text><text class="s" x="178" y="236">{m.home3_ontology_metric_analysis_one_active_per_module()}</text></g>
 							<line class="medge medge-a" x1="178" y1="164" x2="178" y2="187" marker-end="url(#mm-arw-a)" />
-							<text class="elabel" x="186" y="181">publishes</text>
+							<text class="elabel" x="186" y="181">{m.home3_ontology_metric_analysis_publishes()}</text>
 							<line class="medge medge-a" x1="282" y1="222" x2="299" y2="222" marker-end="url(#mm-arw-a)" />
 
 							<rect class="shell" x="302" y="64" width="913" height="216" rx="10" />
-							<text class="shell-title" x="318" y="90">kb.ontology_terms · kb.ontology_term_headers</text>
-							<text class="shell-sub" x="318" y="108">governed term — identifier · kind · module · version · status</text>
-							<text class="grp" x="467" y="136">METRIC IDENTITY</text>
-							<text class="grp" x="760" y="136">MEASUREMENT SCIENCE</text>
-							<text class="grp" x="1053" y="136">CLAIM FRAME</text>
-							<g class="chip"><rect x="329" y="146" width="276" height="44" rx="7" /><text class="ct" x="467" y="166">metric_definition</text><text class="cs" x="467" y="181">what the metric is, independent of any document</text></g>
-							<g class="chip"><rect x="329" y="200" width="276" height="44" rx="7" /><text class="ct" x="467" y="220">class · metric class</text><text class="cs" x="467" y="235">kb.ontology_terms - what a stored claim is an instance of</text></g>
-							<g class="chip"><rect x="622" y="146" width="276" height="44" rx="7" /><text class="ct" x="760" y="166">quantity_kind → dimension → unit</text><text class="cs" x="760" y="181">what · which units agree · how it is written</text></g>
-							<g class="chip chip-edge"><rect x="622" y="200" width="276" height="44" rx="7" /><text class="ct" x="760" y="220">kb.metric_value_range_type_map</text><text class="cs" x="760" y="235">governed mapping, not an ontology term</text></g>
-							<g class="chip"><rect x="915" y="146" width="276" height="44" rx="7" /><text class="ct" x="1053" y="166">assertion kind</text><text class="cs" x="1053" y="181">observed · exact · bounds · target · capability</text></g>
-							<g class="chip"><rect x="915" y="200" width="276" height="44" rx="7" /><text class="ct" x="1053" y="220">binding properties</text><text class="cs" x="1053" y="235">mea:measured_by · has_unit · has_quantity_kind</text></g>
-							<text class="shell-foot" x="758" y="266">measurement classes — feature_of_interest · observable_property · procedure · condition · aggregation_window · metric_assertion</text>
+							<text class="shell-title" x="318" y="90">{m.home3_ontology_metric_analysis_kb_ontology_terms_kb_ontology()}</text>
+							<text class="shell-sub" x="318" y="108">{m.home3_ontology_metric_analysis_governed_term_identifier_kind_module()}</text>
+							<text class="grp" x="467" y="136">{m.home3_ontology_metric_analysis_metric_identity()}</text>
+							<text class="grp" x="760" y="136">{m.home3_ontology_metric_analysis_measurement_science()}</text>
+							<text class="grp" x="1053" y="136">{m.home3_ontology_metric_analysis_claim_frame()}</text>
+							<g class="chip"><rect x="329" y="146" width="276" height="44" rx="7" /><text class="ct" x="467" y="166">{m.home3_ontology_metric_analysis_metric_definition()}</text><text class="cs" x="467" y="181">{m.home3_ontology_metric_analysis_what_the_metric_is_independent()}</text></g>
+							<g class="chip"><rect x="329" y="200" width="276" height="44" rx="7" /><text class="ct" x="467" y="220">{m.home3_ontology_metric_analysis_class_metric_class()}</text><text class="cs" x="467" y="235">{m.home3_ontology_metric_analysis_kb_ontology_terms_what_a()}</text></g>
+							<g class="chip"><rect x="622" y="146" width="276" height="44" rx="7" /><text class="ct" x="760" y="166">{m.home3_ontology_metric_analysis_quantity_kind_dimension_unit()}</text><text class="cs" x="760" y="181">{m.home3_ontology_metric_analysis_what_which_units_agree_how()}</text></g>
+							<g class="chip chip-edge"><rect x="622" y="200" width="276" height="44" rx="7" /><text class="ct" x="760" y="220">{m.home3_ontology_metric_analysis_kb_metric_value_range_type()}</text><text class="cs" x="760" y="235">{m.home3_ontology_metric_analysis_governed_mapping_not_an_ontology()}</text></g>
+							<g class="chip"><rect x="915" y="146" width="276" height="44" rx="7" /><text class="ct" x="1053" y="166">{m.home3_ontology_metric_analysis_assertion_kind()}</text><text class="cs" x="1053" y="181">{m.home3_ontology_metric_analysis_observed_exact_bounds_target_capability()}</text></g>
+							<g class="chip"><rect x="915" y="200" width="276" height="44" rx="7" /><text class="ct" x="1053" y="220">{m.home3_ontology_metric_analysis_binding_properties()}</text><text class="cs" x="1053" y="235">{m.home3_ontology_metric_analysis_mea_measured_by_has_unit()}</text></g>
+							<text class="shell-foot" x="758" y="266">{m.home3_ontology_metric_analysis_measurement_classes_feature_of_interest()}</text>
 
-							<g class="mnode mnode-a"><rect x="1255" y="100" width="249" height="64" rx="8" /><text class="t" x="1379" y="126">ontology candidates</text><text class="s" x="1379" y="146">discovered → auto-promoted</text></g>
+							<g class="mnode mnode-a"><rect x="1255" y="100" width="249" height="64" rx="8" /><text class="t" x="1379" y="126">{m.home3_ontology_metric_analysis_ontology_candidates()}</text><text class="s" x="1379" y="146">{m.home3_ontology_metric_analysis_discovered_auto_promoted()}</text></g>
 							<line class="medge medge-a medge-dash" x1="1254" y1="132" x2="1218" y2="132" marker-end="url(#mm-arw-a)" />
-							<g class="mnode mnode-a"><rect x="1255" y="190" width="249" height="64" rx="8" /><text class="t" x="1379" y="216">term labels</text><text class="s" x="1379" y="236">kb.ontology_term_labels</text></g>
+							<g class="mnode mnode-a"><rect x="1255" y="190" width="249" height="64" rx="8" /><text class="t" x="1379" y="216">{m.home3_ontology_metric_analysis_term_labels()}</text><text class="s" x="1379" y="236">{m.home3_ontology_metric_analysis_kb_ontology_term_labels()}</text></g>
 							<line class="medge medge-a medge-dash" x1="1254" y1="222" x2="1218" y2="222" marker-end="url(#mm-arw-a)" />
 
-							<g class="mnode mnode-b"><rect x="367" y="352" width="200" height="76" rx="8" /><text class="t" x="467" y="379">keyword concept</text><text class="s" x="467" y="398">kb.keyword_concepts</text><text class="s2" x="467" y="415">groups every spelling of one name</text></g>
-							<g class="mnode mnode-b"><rect x="870" y="352" width="180" height="76" rx="8" /><text class="t" x="960" y="379">object node</text><text class="s" x="960" y="398">kb.object_nodes</text><text class="s2" x="960" y="415">the reconciled thing measured</text></g>
-							<g class="mnode mnode-b"><rect x="1214" y="352" width="220" height="76" rx="8" /><text class="t" x="1324" y="379">canonical claim identity</text><text class="s" x="1324" y="398">kb.semantic_claim_identities</text><text class="s2" x="1324" y="415">equal claims converge, not duplicate</text></g>
+							<g class="mnode mnode-b"><rect x="367" y="352" width="200" height="76" rx="8" /><text class="t" x="467" y="379">{m.home3_ontology_metric_analysis_keyword_concept()}</text><text class="s" x="467" y="398">{m.home3_ontology_metric_analysis_kb_keyword_concepts()}</text><text class="s2" x="467" y="415">{m.home3_ontology_metric_analysis_groups_every_spelling_of_one()}</text></g>
+							<g class="mnode mnode-b"><rect x="870" y="352" width="180" height="76" rx="8" /><text class="t" x="960" y="379">{m.home3_ontology_metric_analysis_object_node()}</text><text class="s" x="960" y="398">{m.home3_ontology_metric_analysis_kb_object_nodes()}</text><text class="s2" x="960" y="415">{m.home3_ontology_metric_analysis_the_reconciled_thing_measured()}</text></g>
+							<g class="mnode mnode-b"><rect x="1214" y="352" width="220" height="76" rx="8" /><text class="t" x="1324" y="379">{m.home3_ontology_metric_analysis_canonical_claim_identity()}</text><text class="s" x="1324" y="398">{m.home3_ontology_metric_analysis_kb_semantic_claim_identities()}</text><text class="s2" x="1324" y="415">{m.home3_ontology_metric_analysis_equal_claims_converge_not_duplicate()}</text></g>
 
-							<g class="mnode mnode-c"><rect x="74" y="498" width="200" height="78" rx="8" /><text class="t" x="174" y="525">document</text><text class="s" x="174" y="544">kb.inputs</text><text class="s2" x="174" y="561">the record as the system received it</text></g>
-							<g class="mnode mnode-c mnode-center"><rect x="367" y="498" width="200" height="78" rx="8" /><text class="t" x="467" y="525">metric row</text><text class="s" x="467" y="544">kb.metrics</text><text class="s2" x="467" y="561">one metric as one document stated it</text></g>
-							<g class="mnode mnode-c"><rect x="660" y="498" width="200" height="78" rx="8" /><text class="t" x="760" y="525">decision candidate</text><text class="s" x="760" y="544">kb.semantic_decision_candidates</text><text class="s2" x="760" y="561">proposed claim awaiting adjudication</text></g>
-							<g class="mnode mnode-c"><rect x="953" y="498" width="200" height="78" rx="8" /><text class="t" x="1053" y="525">semantic assertion</text><text class="s" x="1053" y="544">kb.semantic_assertions</text><text class="s2" x="1053" y="561">the stored claim · four state axes</text></g>
-							<g class="mnode mnode-c"><rect x="1246" y="498" width="200" height="78" rx="8" /><text class="t" x="1346" y="525">assertion evidence</text><text class="s" x="1346" y="544">kb.assertion_evidence</text><text class="s2" x="1346" y="561">quote · line spans · run</text></g>
-							<g class="mnode mnode-c"><rect x="580" y="606" width="220" height="64" rx="8" /><text class="t" x="690" y="632">object mention</text><text class="s" x="690" y="652">kb.artifact_objects · reconcile status</text></g>
-							<g class="mnode mnode-c"><rect x="953" y="606" width="280" height="64" rx="8" /><text class="t" x="1093" y="632">processing outcome · findings</text><text class="s" x="1093" y="652">kb.semantic_processing_outcomes · _findings</text></g>
+							<g class="mnode mnode-c"><rect x="74" y="498" width="200" height="78" rx="8" /><text class="t" x="174" y="525">{m.home3_ontology_metric_analysis_document()}</text><text class="s" x="174" y="544">{m.home3_ontology_metric_analysis_kb_inputs()}</text><text class="s2" x="174" y="561">{m.home3_ontology_metric_analysis_the_record_as_the_system()}</text></g>
+							<g class="mnode mnode-c mnode-center"><rect x="367" y="498" width="200" height="78" rx="8" /><text class="t" x="467" y="525">{m.home3_ontology_metric_analysis_metric_row()}</text><text class="s" x="467" y="544">{m.home3_ontology_metric_analysis_kb_metrics()}</text><text class="s2" x="467" y="561">{m.home3_ontology_metric_analysis_one_metric_as_one_document()}</text></g>
+							<g class="mnode mnode-c"><rect x="660" y="498" width="200" height="78" rx="8" /><text class="t" x="760" y="525">{m.home3_ontology_metric_analysis_decision_candidate()}</text><text class="s" x="760" y="544">{m.home3_ontology_metric_analysis_kb_semantic_decision_candidates()}</text><text class="s2" x="760" y="561">{m.home3_ontology_metric_analysis_proposed_claim_awaiting_adjudication()}</text></g>
+							<g class="mnode mnode-c"><rect x="953" y="498" width="200" height="78" rx="8" /><text class="t" x="1053" y="525">{m.home3_ontology_metric_analysis_semantic_assertion()}</text><text class="s" x="1053" y="544">{m.home3_ontology_metric_analysis_kb_semantic_assertions()}</text><text class="s2" x="1053" y="561">{m.home3_ontology_metric_analysis_the_stored_claim_four_state()}</text></g>
+							<g class="mnode mnode-c"><rect x="1246" y="498" width="200" height="78" rx="8" /><text class="t" x="1346" y="525">{m.home3_ontology_metric_analysis_assertion_evidence()}</text><text class="s" x="1346" y="544">{m.home3_ontology_metric_analysis_kb_assertion_evidence()}</text><text class="s2" x="1346" y="561">{m.home3_ontology_metric_analysis_quote_line_spans_run()}</text></g>
+							<g class="mnode mnode-c"><rect x="580" y="606" width="220" height="64" rx="8" /><text class="t" x="690" y="632">{m.home3_ontology_metric_analysis_object_mention()}</text><text class="s" x="690" y="652">{m.home3_ontology_metric_analysis_kb_artifact_objects_reconcile_status()}</text></g>
+							<g class="mnode mnode-c"><rect x="953" y="606" width="280" height="64" rx="8" /><text class="t" x="1093" y="632">{m.home3_ontology_metric_analysis_processing_outcome_findings()}</text><text class="s" x="1093" y="652">{m.home3_ontology_metric_analysis_kb_semantic_processing_outcomes_findings()}</text></g>
 
 							<line class="medge medge-c" x1="274" y1="537" x2="365" y2="537" marker-end="url(#mm-arw-c)" />
 							<line class="medge medge-c" x1="567" y1="537" x2="658" y2="537" marker-end="url(#mm-arw-c)" />
 							<line class="medge medge-c" x1="860" y1="537" x2="951" y2="537" marker-end="url(#mm-arw-c)" />
 							<line class="medge medge-c" x1="1153" y1="537" x2="1244" y2="537" marker-end="url(#mm-arw-c)" />
-							<text class="stage" x="320" y="486">extract_metrics</text>
-							<text class="stage" x="613" y="486">normalize_assertions</text>
-							<text class="stage" x="906" y="486">associate_semantics</text>
-							<text class="stage" x="1199" y="486">attaches evidence</text>
+							<text class="stage" x="320" y="486">{m.home3_ontology_metric_analysis_extract_metrics()}</text>
+							<text class="stage" x="613" y="486">{m.home3_ontology_metric_analysis_normalize_assertions()}</text>
+							<text class="stage" x="906" y="486">{m.home3_ontology_metric_analysis_associate_semantics()}</text>
+							<text class="stage" x="1199" y="486">{m.home3_ontology_metric_analysis_attaches_evidence()}</text>
 
 							<path class="medge medge-c" d="M467 576 L467 592 L690 592 L690 604" marker-end="url(#mm-arw-c)" />
-							<text class="elabel" x="500" y="587">subject</text>
+							<text class="elabel" x="500" y="587">{m.home3_ontology_metric_analysis_subject()}</text>
 							<path class="medge medge-b" d="M800 638 L900 638 L900 431" marker-end="url(#mm-arw-b)" />
-							<text class="elabel elabel-mid" x="850" y="630">reconciled to</text>
+							<text class="elabel elabel-mid" x="850" y="630">{m.home3_ontology_metric_analysis_reconciled_to()}</text>
 							<line class="medge medge-b" x1="467" y1="498" x2="467" y2="431" marker-end="url(#mm-arw-b)" />
-							<text class="elabel" x="477" y="460">metric_name</text>
+							<text class="elabel" x="477" y="460">{m.home3_ontology_metric_analysis_metric_name()}</text>
 							<line class="medge medge-a" x1="467" y1="352" x2="467" y2="282" marker-end="url(#mm-arw-a)" />
-							<text class="elabel" x="477" y="314">core:aligns_to_term</text>
+							<text class="elabel" x="477" y="314">{m.home3_ontology_metric_analysis_core_aligns_to_term()}</text>
 							<line class="medge medge-a" x1="760" y1="498" x2="760" y2="282" marker-end="url(#mm-arw-a)" />
-							<text class="elabel" x="770" y="314">resolves value range type · unit · quantity kind</text>
+							<text class="elabel" x="770" y="314">{m.home3_ontology_metric_analysis_resolves_value_range_type_unit()}</text>
 							<line class="medge medge-a" x1="1075" y1="498" x2="1075" y2="282" marker-end="url(#mm-arw-a)" />
-							<text class="elabel" x="1085" y="314">instance_of · assertion kind · unit · quantity kind</text>
+							<text class="elabel" x="1085" y="314">{m.home3_ontology_metric_analysis_instance_of_assertion_kind_unit()}</text>
 							<line class="medge medge-b" x1="1000" y1="428" x2="1000" y2="496" marker-end="url(#mm-arw-b)" />
-							<text class="elabel elabel-end" x="992" y="460">subject_object_id</text>
+							<text class="elabel elabel-end" x="992" y="460">{m.home3_ontology_metric_analysis_subject_object_id()}</text>
 							<path class="medge medge-b" d="M1130 498 L1130 470 L1324 470 L1324 430" marker-end="url(#mm-arw-b)" />
-							<text class="elabel" x="1160" y="458">logical_identity_key</text>
+							<text class="elabel" x="1160" y="458">{m.home3_ontology_metric_analysis_logical_identity_key()}</text>
 							<line class="medge medge-c medge-dash" x1="1053" y1="576" x2="1053" y2="604" marker-end="url(#mm-arw-c)" />
-							<text class="elabel" x="1063" y="598">per-stage outcome</text>
+							<text class="elabel" x="1063" y="598">{m.home3_ontology_metric_analysis_per_stage_outcome()}</text>
 							<path class="medge medge-c medge-dash" d="M1346 576 L1346 690 L172 690 L172 578" marker-end="url(#mm-arw-c)" />
-							<text class="elabel elabel-mid" x="760" y="682">assertion evidence traces the stored claim back to the quote and line spans in the source document</text>
+							<text class="elabel elabel-mid" x="760" y="682">{m.home3_ontology_metric_analysis_assertion_evidence_traces_the_stored()}</text>
 						</svg>
 					</div>
 				</div>
@@ -342,9 +343,9 @@
 					{/each}
 				</div>
 				<div class="panel mapping-panel">
-					<div class="panel-head"><div><p class="panel-kicker">ontology_terms · mapping inventory</p><h2>Governed vocabulary in the corpus</h2></div><div class="segmented"><button class="selected">Global</button><button>In scope</button></div></div>
-					<p class="panel-note">Global mapping inventory · document and class filters do not apply here.</p>
-					<table class="mapping-table"><caption>Metric definition mapping inventory</caption><thead><tr><th>Definition</th><th>Module</th><th>Occurrences</th><th>Instances</th><th></th></tr></thead><tbody>{#each mappings as row}<tr class:selected-row={selectedMetric === row.term} onclick={() => selectMetric(row.term)}><td><span class="term-mark">◈</span><strong>{row.term}</strong></td><td>{row.module}</td><td>{row.occurrences}</td><td>{row.instances}</td><td><span class:warning-text={row.state === 'Warning'}>{row.state}</span><ExternalLink size={13} /></td></tr>{:else}<tr><td colspan="5" class="empty-row">(no data)</td></tr>{/each}</tbody></table>
+					<div class="panel-head"><div><p class="panel-kicker">{m.home3_ontology_metric_analysis_ontology_terms_mapping_inventory()}</p><h2>{m.home3_ontology_metric_analysis_governed_vocabulary_in_the_corpus()}</h2></div><div class="segmented"><button class="selected">{m.home3_ontology_metric_analysis_global()}</button><button>{m.home3_ontology_metric_analysis_in_scope()}</button></div></div>
+					<p class="panel-note">{m.home3_ontology_metric_analysis_global_mapping_inventory_document_and()}</p>
+					<table class="mapping-table"><caption>{m.home3_ontology_metric_analysis_metric_definition_mapping_inventory()}</caption><thead><tr><th>{m.home3_ontology_metric_analysis_definition()}</th><th>{m.home3_ontology_metric_analysis_module()}</th><th>{m.home3_ontology_metric_analysis_occurrences_2()}</th><th>{m.home3_ontology_metric_analysis_instances()}</th><th></th></tr></thead><tbody>{#each mappings as row}<tr class:selected-row={selectedMetric === row.term} onclick={() => selectMetric(row.term)}><td><span class="term-mark">◈</span><strong>{row.term}</strong></td><td>{row.module}</td><td>{row.occurrences}</td><td>{row.instances}</td><td><span class:warning-text={row.state === 'Warning'}>{row.state}</span><ExternalLink size={13} /></td></tr>{:else}<tr><td colspan="5" class="empty-row">{m.home3_ontology_metric_analysis_no_data()}</td></tr>{/each}</tbody></table>
 				</div>
 			</div>
 
@@ -357,19 +358,19 @@
 					</button>
 				</div>
 				<div class="panel coverage-panel">
-					<div class="panel-head"><div><p class="panel-kicker">semantic_assertions · coverage state</p><h2>Where the semantic graph stands</h2></div><button class="text-button">Definition <Info size={14} /></button></div>
-					<div class="coverage-bars">{#each coverage as item}<div class="bar-row"><div class="bar-label"><span>{item.label}</span><strong>{item.value}</strong></div><div class="track"><span style={`width:${item.percent}%; background:${item.color}`}></span></div></div>{:else}<div class="empty-state">(no data)</div>{/each}</div>
+					<div class="panel-head"><div><p class="panel-kicker">{m.home3_ontology_metric_analysis_semantic_assertions_coverage_state()}</p><h2>{m.home3_ontology_metric_analysis_where_the_semantic_graph_stands()}</h2></div><button class="text-button">{m.home3_ontology_metric_analysis_definition()} <Info size={14} /></button></div>
+					<div class="coverage-bars">{#each coverage as item}<div class="bar-row"><div class="bar-label"><span>{item.label}</span><strong>{item.value}</strong></div><div class="track"><span style={`width:${item.percent}%; background:${item.color}`}></span></div></div>{:else}<div class="empty-state">{m.home3_ontology_metric_analysis_no_data()}</div>{/each}</div>
 				</div>
 				<div class="panel errors-panel">
-					<div class="panel-head"><div><p class="panel-kicker">semantic_assertions · errors by type</p><h2>Canonical facts, ranked by severity</h2></div><button class="text-button">All sources <ChevronDown size={14} /></button></div>
+					<div class="panel-head"><div><p class="panel-kicker">{m.home3_ontology_metric_analysis_semantic_assertions_errors_by_type()}</p><h2>{m.home3_ontology_metric_analysis_canonical_facts_ranked_by_severity()}</h2></div><button class="text-button">{m.home3_ontology_metric_analysis_all_sources()} <ChevronDown size={14} /></button></div>
 					<div class="error-bars">
 						{#if errors.length === 0}
-							<div class="empty-state empty-state-panel">(no data)</div>
+							<div class="empty-state empty-state-panel">{m.home3_ontology_metric_analysis_no_data()}</div>
 						{:else}
-							{#each errors as error}<div class="error-bar-row"><div class="error-bar-meta"><span>{error.label}</span><span><b>{error.value}</b> affected <em>{error.severity}</em></span></div><div class="error-track"><span style={`width:${error.percent}%`}></span></div></div>{/each}
+							{#each errors as error}<div class="error-bar-row"><div class="error-bar-meta"><span>{error.label}</span><span><b>{error.value}</b> {m.home3_ontology_metric_analysis_affected()} <em>{error.severity}</em></span></div><div class="error-track"><span style={`width:${error.percent}%`}></span></div></div>{/each}
 						{/if}
 					</div>
-					<div class="source-footer"><span>Contributing sources</span><span><b>27</b> documents</span><span><b>5</b> error types</span><a href="/home3/ontology-metric-analysis?view=document">Open Document Metrics <ArrowUpRight size={14} /></a></div>
+					<div class="source-footer"><span>{m.home3_ontology_metric_analysis_contributing_sources()}</span><span><b>27</b> {m.home3_ontology_metric_analysis_documents()}</span><span><b>5</b> {m.home3_ontology_metric_analysis_error_types()}</span><a href="/home3/ontology-metric-analysis?view=document">{m.home3_ontology_metric_analysis_open_document_metrics()} <ArrowUpRight size={14} /></a></div>
 				</div>
 			</div>
 
@@ -389,23 +390,23 @@
 					{/each}
 				</div>
 				<div class="panel error-panel">
-					<div class="panel-head"><div><p class="panel-kicker">assertion_evidence · error presence</p><h2>Most metrics are clean, not necessarily complete.</h2></div><button class="more-button" aria-label="More error presence options"><MoreHorizontal size={18} /></button></div>
-					<div class="error-visual"><div class="donut"><div><strong>{errorFreePercent}</strong><span>no detected errors</span></div></div><div class="error-legend"><div><span class="dot blue"></span><strong>{kpis[5].value}</strong><span>without detected errors</span></div><div><span class="dot red"></span><strong>{kpis[4].value}</strong><span>with error facts</span></div><p><TriangleAlert size={13} /> A clean processing result can still carry warnings or silent gaps.</p></div></div>
-					<table class="exact-table"><caption>Exact error presence values</caption><tbody><tr><td>Without detected errors</td><td>{kpis[5].value}</td><td>—</td></tr><tr><td>With error facts</td><td>{kpis[4].value}</td><td>—</td></tr></tbody></table>
+					<div class="panel-head"><div><p class="panel-kicker">{m.home3_ontology_metric_analysis_assertion_evidence_error_presence()}</p><h2>{m.home3_ontology_metric_analysis_most_metrics_are_clean_not()}</h2></div><button class="more-button" aria-label={m.home3_ontology_metric_analysis_more_error_presence_options()}><MoreHorizontal size={18} /></button></div>
+					<div class="error-visual"><div class="donut"><div><strong>{errorFreePercent}</strong><span>{m.home3_ontology_metric_analysis_no_detected_errors()}</span></div></div><div class="error-legend"><div><span class="dot blue"></span><strong>{kpis[5].value}</strong><span>{m.home3_ontology_metric_analysis_without_detected_errors()}</span></div><div><span class="dot red"></span><strong>{kpis[4].value}</strong><span>{m.home3_ontology_metric_analysis_with_error_facts()}</span></div><p><TriangleAlert size={13} /> {m.home3_ontology_metric_analysis_a_clean_processing_result_can()}</p></div></div>
+					<table class="exact-table"><caption>{m.home3_ontology_metric_analysis_exact_error_presence_values()}</caption><tbody><tr><td>{m.home3_ontology_metric_analysis_without_detected_errors_2()}</td><td>{kpis[5].value}</td><td>—</td></tr><tr><td>{m.home3_ontology_metric_analysis_with_error_facts_2()}</td><td>{kpis[4].value}</td><td>—</td></tr></tbody></table>
 				</div>
 
 				<section class="recent-section">
-					<div class="section-heading"><div><p class="panel-kicker">Latest occurrences</p><h2>Recent activity worth inspecting {#if filteredRows.length === 0}<span class="empty-inline">(no data)</span>{/if}</h2></div><div class="table-tools"><label class="search-field"><Search size={15} /><input bind:value={query} placeholder="Search metric or document" aria-label="Search metric or document" /></label><button class="quiet-button">Columns <ChevronDown size={14} /></button></div></div>
+					<div class="section-heading"><div><p class="panel-kicker">{m.home3_ontology_metric_analysis_latest_occurrences()}</p><h2>{m.home3_ontology_metric_analysis_recent_activity_worth_inspecting()} {#if filteredRows.length === 0}<span class="empty-inline">{m.home3_ontology_metric_analysis_no_data()}</span>{/if}</h2></div><div class="table-tools"><label class="search-field"><Search size={15} /><input bind:value={query} placeholder={m.home3_ontology_metric_analysis_search_metric_or_document()} aria-label={m.home3_ontology_metric_analysis_search_metric_or_document()} /></label><button class="quiet-button">{m.home3_ontology_metric_analysis_columns()} <ChevronDown size={14} /></button></div></div>
 					{#if filteredRows.length === 0}
-						<div class="recent-empty empty-state-panel">(no data)</div>
+						<div class="recent-empty empty-state-panel">{m.home3_ontology_metric_analysis_no_data()}</div>
 					{:else}
-						<div class="table-wrap"><table class="recent-table"><caption>Recent metric occurrences</caption><thead><tr><th>Occurrence</th><th>Metric / document</th><th>Value</th><th>Governed definition</th><th>State</th><th>Updated</th></tr></thead><tbody>{#each filteredRows as row}<tr><td><span class="mono">{row.id}</span></td><td><strong>{row.metric}</strong><small>{row.document}</small></td><td>{row.value}</td><td><span class="definition-chip">{row.definition}</span></td><td><span class="status-badge {statusMeta[row.status].className}">{statusMeta[row.status].label}</span></td><td>{row.updated}</td></tr>{/each}</tbody></table></div>
+						<div class="table-wrap"><table class="recent-table"><caption>{m.home3_ontology_metric_analysis_recent_metric_occurrences()}</caption><thead><tr><th>{m.home3_ontology_metric_analysis_occurrence()}</th><th>{m.home3_ontology_metric_analysis_metric_document()}</th><th>{m.home3_ontology_metric_analysis_value()}</th><th>{m.home3_ontology_metric_analysis_governed_definition()}</th><th>{m.home3_ontology_metric_analysis_state()}</th><th>{m.home3_ontology_metric_analysis_updated()}</th></tr></thead><tbody>{#each filteredRows as row}<tr><td><span class="mono">{row.id}</span></td><td><strong>{row.metric}</strong><small>{row.document}</small></td><td>{row.value}</td><td><span class="definition-chip">{row.definition}</span></td><td><span class="status-badge {statusMeta[row.status].className}">{statusMeta[row.status].label}</span></td><td>{row.updated}</td></tr>{/each}</tbody></table></div>
 					{/if}
 				</section>
 			</div>
 		</section>
 
-		<footer class="page-footer"><span><Layers3 size={14} /> Metric ontology analysis · Page 1 of 3</span><span>Last updated 20 Aug 2026, 14:32 UTC <button class="footer-link">View API shape</button></span></footer>
+		<footer class="page-footer"><span><Layers3 size={14} /> {m.home3_ontology_metric_analysis_metric_ontology_analysis_page_1()}</span><span>{m.home3_ontology_metric_analysis_last_updated_20_aug_2026()} <button class="footer-link">{m.home3_ontology_metric_analysis_view_api_shape()}</button></span></footer>
 	</main>
 	</div>
 {/if}

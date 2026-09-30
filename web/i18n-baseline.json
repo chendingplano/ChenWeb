@@ -64,7 +64,6 @@
 	"src/routes/example-left-right-panes/+page.svelte": 3,
 	"src/routes/home-claude/+page.svelte": 78,
 	"src/routes/home3/agent-services/+page.svelte": 62,
-	"src/routes/home3/ontology-metric-analysis/+page.svelte": 178,
 	"src/routes/home7/+page.svelte": 52,
 	"src/routes/home8/+page.svelte": 176,
 	"src/routes/infographis/example-01/+page.svelte": 14,

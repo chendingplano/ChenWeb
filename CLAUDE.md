@@ -92,6 +92,7 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   4. `--suggest p.json > tm.json` pre-fills translations already used elsewhere; write the Chinese
      (or English, for Chinese source text) for the rest and apply with `--apply`. Keep params
      identical; `{plural}` may be dropped in Chinese.
+  Keys are prefixed by file name (`mrv_*`), route files by route path (`home3_knowledge_*`).
   5. Check for English grammar passed as a param (`' has' : 's have'`, `` ` in ${name}` ``) and fix
      by hand. A file that already uses `m` as a local name gets `import { m as msg }` instead.
   6. `bun run check`, then `--update` the baseline.

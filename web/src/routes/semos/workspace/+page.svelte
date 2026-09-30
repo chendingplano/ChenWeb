@@ -306,9 +306,9 @@
 				<div
 					class="mt-4 rounded-lg border px-3 py-2 text-xs border-amber-500/40 bg-amber-500/10 text-amber-800 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-300"
 				>
-					<div class="font-bold">{m._page_unrecognized_workspace_content_id_s()}</div>
+					<div class="font-bold">{m.semos_workspace_unrecognized_workspace_content_id_s()}</div>
 					<div class="mt-0.5">
-						{m._page_page_config_semos_workspace({ unknownContentConfigIds: unknownContentConfigIds.join(', ') })}
+						{m.semos_workspace_page_config_semos_workspace({ unknownContentConfigIds: unknownContentConfigIds.join(', ') })}
 					</div>
 				</div>
 			{/if}
