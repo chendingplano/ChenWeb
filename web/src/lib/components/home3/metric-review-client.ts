@@ -3,6 +3,7 @@
 // and openspec/changes/metric-review-i18n-export for languages and export.
 
 import { Marked } from 'marked';
+import type { TableContextWindow } from './metric-table-context.js';
 
 export type ReviewSeverity = 'high' | 'medium' | 'low';
 export type NonMetricCategory = 'not_metric' | 'duplicate' | 'formula_input';
@@ -221,9 +222,14 @@ export type ReviewExportLabels = {
 	translatedFrom: string;
 	tally: Record<keyof MetricReviewTally, string>;
 	missed: string;
-	/** Attribute labels inside each missed-metric sub-section. */
+	/** Attribute labels inside each metric sub-section. */
 	lines: string;
 	grounding: string;
+	metricId: string;
+	description: string;
+	context: string;
+	unit: string;
+	value: string;
 	nonMetrics: string;
 	attributes: string;
 	recommendations: string;
@@ -238,17 +244,50 @@ export function reviewExportFilename(recordId: number, lang: string, ext: string
 	return `review-${recordId}-${lang}.${ext}`;
 }
 
+/** A kb.metrics row as returned by GET /kb/metrics (only the fields the export shows). */
+export type StoredMetric = {
+	metric_id?: string | null;
+	metric_name?: string;
+	metric_name_en?: string;
+	metric_desc?: string;
+	metric_desc_en?: string;
+	metric_context?: string;
+	metric_context_en?: string;
+	metric_unit?: string;
+	metric_value?: string;
+	source_line_spans?: (string | number | { line_number: number })[];
+	table_context?: TableContextWindow[];
+};
+
+/** What the export quotes from: the record's line file and its current kb.metrics rows. */
+export type ReviewExportSource = {
+	lines?: { line_number: number; content: string }[];
+	metrics?: StoredMetric[];
+};
+
+/** Line spans as "116" / "12:15" strings; table-row suffixes ("116#r1") are dropped. */
+function spanStrings(spans: StoredMetric['source_line_spans']): string[] {
+	return (spans ?? [])
+		.map((x) => (typeof x === 'object' && x ? String(x.line_number) : String(x).replace(/#.*$/, '').trim()))
+		.filter(Boolean);
+}
+
 /** Renders a done review as Markdown in the review's language (the labels' language). */
 export function buildReviewMarkdown(
 	rec: InputRecordSummary,
 	review: MetricReview,
 	L: ReviewExportLabels,
 	fmtTime: (s?: string) => string,
-	/** The record's line file (line_number → content), used for each missed metric's Grounding. */
-	sourceLines: { line_number: number; content: string }[] = []
+	source: ReviewExportSource = {}
 ): string {
 	const r = review.report;
 	if (!r) return '';
+	const en = review.lang === 'en';
+	const stored = new Map((source.metrics ?? []).filter((m) => m.metric_id).map((m) => [m.metric_id as string, m]));
+	const lineText = new Map((source.lines ?? []).map((l) => [l.line_number, l.content]));
+	const flat = (s?: string | null) => (s ?? '').replace(/\s+/g, ' ').trim();
+	const pick = (a?: string, b?: string) => flat(en ? b || a : a || b);
+	const field = (label: string, v: string) => `- **${label}**: ${v || L.empty}`;
 	const snap = new Map(r.metrics.map((m) => [m.metric_id, m]));
 	const ids = (list: string[]) =>
 		list
@@ -274,22 +313,41 @@ export function buildReviewMarkdown(
 
 	out.push(`## ${L.missed} (${r.missed_metrics.length})`, '');
 	if (r.missed_metrics.length === 0) out.push(L.none, '');
-	const lineText = new Map(sourceLines.map((l) => [l.line_number, l.content]));
-	for (const m of sortBySeverity(r.missed_metrics)) {
-		const val = [m.value, m.unit].filter(Boolean).join(' ');
-		out.push(`### ${sev(m.severity)} ${m.name}${val ? ` — ${val}` : ''}`, '');
-		const spans = m.source_line_spans?.length ? m.source_line_spans : m.lines ? m.lines.split(',') : [];
+	// "Lines" and "Grounding" list items for a metric's line spans. A table line
+	// is shown as a table (a stored metric's table_context window when it has
+	// one, else the whole table); any other line as a quote.
+	const linesAndGrounding = (spans: string[], windows: TableContextWindow[] = []) => {
 		const numbers = reviewLineNumbers(spans).sort((a, b) => a - b);
-		out.push(`- **${L.lines}**: ${numbers.length ? spans.map((x) => `L${String(x).trim().replace(/^L/i, '')}`).join(', ') : L.empty}`);
+		out.push(field(L.lines, numbers.length ? spans.map((x) => `L${String(x).trim().replace(/^L/i, '')}`).join(', ') : ''));
 		const grounding = numbers.filter((n) => lineText.has(n));
 		out.push(`- **${L.grounding}**:${grounding.length ? '' : ` ${L.empty}`}`, '');
 		for (const n of grounding) {
 			const content = lineText.get(n) ?? '';
-			// A table line is shown as a table; any other line as a quote.
-			const table = isTableLine(content) ? sanitizeTableHtml(content) : '';
+			const w = windows.find((x) => x.line === n && x.rows?.length);
+			const table = w ? tableContextHtml(w) : isTableLine(content) ? sanitizeTableHtml(content) : '';
 			if (table) out.push(`  **L${n}**`, '', `  ${table}`, '');
 			else out.push(`  > **L${n}** ${groundingText(content)}`, '');
 		}
+	};
+	// A stored metric's fields; falls back to the review's snapshot when the
+	// kb.metrics row is gone (the metrics were re-extracted since the review).
+	const storedMetric = (id: string, heading: string, extra: string[] = []) => {
+		const m = stored.get(id);
+		const s = snap.get(id);
+		out.push(`${heading} ${(m ? pick(m.metric_name, m.metric_name_en) : '') || flat(s?.name) || id}`, '');
+		out.push(field(L.metricId, `\`${id}\``), ...extra);
+		out.push(field(L.description, m ? pick(m.metric_desc, m.metric_desc_en) : ''));
+		out.push(field(L.context, m ? pick(m.metric_context, m.metric_context_en) : ''));
+		out.push(field(L.unit, flat(m ? m.metric_unit : s?.unit)));
+		out.push(field(L.value, flat(m ? m.metric_value : s?.value)));
+		const spans = m ? spanStrings(m.source_line_spans) : s?.source_line_spans?.length ? s.source_line_spans : s?.lines ? s.lines.split(',') : [];
+		linesAndGrounding(spans, m?.table_context);
+	};
+
+	for (const m of sortBySeverity(r.missed_metrics)) {
+		const val = [m.value, m.unit].filter(Boolean).join(' ');
+		out.push(`### ${sev(m.severity)} ${m.name}${val ? ` — ${val}` : ''}`, '');
+		linesAndGrounding(m.source_line_spans?.length ? m.source_line_spans : m.lines ? m.lines.split(',') : []);
 		if (m.reason) out.push(m.reason, '');
 	}
 
@@ -299,20 +357,22 @@ export function buildReviewMarkdown(
 	for (const g of groupNonMetrics(r.non_metrics)) {
 		out.push(`### ${L.category[g.category]}`, '');
 		for (const e of g.entries) {
-			out.push(`- ${ids(e.metric_ids)}${e.duplicate_of ? ` — ${L.duplicateOf} ${ids([e.duplicate_of])}` : ''}`);
-			if (e.reason) out.push(`  ${e.reason}`);
+			for (const id of e.metric_ids) {
+				storedMetric(id, '####', e.duplicate_of ? [field(L.duplicateOf, ids([e.duplicate_of]))] : []);
+				if (e.reason) out.push(e.reason, '');
+			}
 		}
-		out.push('');
 	}
 
 	out.push(`## ${L.attributes} (${r.attribute_issues.length})`, '');
 	if (r.attribute_issues.length === 0) out.push(L.none, '');
 	for (const a of sortBySeverity(r.attribute_issues)) {
-		out.push(`- ${sev(a.severity)} \`${a.field}\` — ${ids(a.metric_ids)}`);
-		if (a.stored || a.suggested) out.push(`  ${a.stored || L.empty} → ${a.suggested || L.empty}`);
-		if (a.reason) out.push(`  ${a.reason}`);
+		out.push(`### ${sev(a.severity)} \`${a.field}\``, '');
+		if (a.stored || a.suggested) out.push(`${a.stored || L.empty} → ${a.suggested || L.empty}`, '');
+		if (a.reason) out.push(a.reason, '');
+		for (const id of a.metric_ids) storedMetric(id, '####');
+		out.push('');
 	}
-	out.push('');
 
 	if (r.recommendations.length > 0) {
 		out.push(`## ${L.recommendations}`, '');
@@ -322,7 +382,7 @@ export function buildReviewMarkdown(
 	return out.join('\n');
 }
 
-const TABLE_TAG = /<(\/?)(table|thead|tbody|tr|td|th)\b([^>]*)>/gi;
+const TABLE_TAG = /<(\/?)(table|thead|tbody|tr|td|th|strong)\b([^>]*)>/gi;
 
 function isTableLine(content: string): boolean {
 	return /<table[\s>]/i.test(content);
@@ -339,7 +399,7 @@ function decodeEntities(s: string): string {
 }
 
 /**
- * Rebuilds a MinerU table line keeping only table/thead/tbody/tr/td/th tags and
+ * Rebuilds a MinerU table line keeping only table/thead/tbody/tr/td/th/strong tags and
  * numeric rowspan/colspan; every other tag is dropped and all text is escaped.
  * The result is a single line, and sanitizing it again returns it unchanged.
  */
@@ -367,6 +427,28 @@ export function sanitizeTableHtml(html: string): string {
 	}
 	text(html.slice(last));
 	return out.join('');
+}
+
+/**
+ * A stored metric's table_context window (header rows, its matched rows in
+ * bold, one neighbor row either side) as table HTML in sanitizeTableHtml form.
+ */
+export function tableContextHtml(w: TableContextWindow): string {
+	const width = Math.max(1, ...w.rows.map((r) => r.cells.length));
+	const rows = w.rows.map((r) => {
+		const tag = r.header ? 'th' : 'td';
+		const cell = (c: string, span = '') => {
+			const t = escapeHtml(flatCell(c));
+			return `<${tag}${span}>${r.matched && t ? `<strong>${t}</strong>` : t}</${tag}>`;
+		};
+		const cells = r.full_width ? cell(r.cells.join(' '), width > 1 ? ` colspan="${width}"` : '') : r.cells.map((c) => cell(c)).join('');
+		return `<tr>${cells}</tr>`;
+	});
+	return sanitizeTableHtml(`<table>${rows.join('')}</table>`);
+}
+
+function flatCell(s: string): string {
+	return String(s ?? '').replace(/\s+/g, ' ').trim();
 }
 
 /** One source line as a single line of plain text. */
@@ -398,7 +480,7 @@ export function buildReviewPrintHtml(markdown: string, title: string, lang: stri
 <style>
 @page { margin: 16mm; }
 body { font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #111; font-size: 11pt; line-height: 1.5; max-width: 180mm; margin: 0 auto; }
-h1 { font-size: 16pt; margin: 0 0 8pt; } h2 { font-size: 13pt; margin: 16pt 0 6pt; border-bottom: 1px solid #ddd; padding-bottom: 2pt; } h3 { font-size: 11pt; margin: 10pt 0 4pt; color: #444; break-after: avoid; }
+h1 { font-size: 16pt; margin: 0 0 8pt; } h2 { font-size: 13pt; margin: 16pt 0 6pt; border-bottom: 1px solid #ddd; padding-bottom: 2pt; } h3 { font-size: 11pt; margin: 10pt 0 4pt; color: #444; break-after: avoid; } h4 { font-size: 10.5pt; margin: 8pt 0 3pt; color: #555; break-after: avoid; }
 ul, ol { padding-left: 18pt; } li { margin: 3pt 0; break-inside: avoid; }
 code { font-family: ui-monospace, Menlo, monospace; font-size: 9.5pt; background: #f2f2f2; padding: 0 2pt; border-radius: 2pt; }
 blockquote { margin: 4pt 0 6pt; padding: 2pt 8pt; border-left: 3px solid #ccc; color: #333; background: #fafafa; } blockquote p { margin: 2pt 0; }

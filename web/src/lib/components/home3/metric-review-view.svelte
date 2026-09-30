@@ -15,7 +15,7 @@
 	import LanguagesIcon from '@lucide/svelte/icons/languages';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
-	import { getRawLines, type RawLine } from '$lib/services/kbService';
+	import { getRawLines, listKbMetrics, type KbMetricRecord, type RawLine } from '$lib/services/kbService';
 	import {
 		buildReviewMarkdown,
 		buildReviewPrintHtml,
@@ -56,6 +56,8 @@
 	let reportWidth = $state(540);
 	let layoutEl: HTMLDivElement;
 	let rawLines = $state<RawLine[]>([]);
+	// The record's current kb.metrics rows, quoted by the export (sections 2 and 3).
+	let storedMetrics = $state<KbMetricRecord[]>([]);
 	let pdfPage = $state(1);
 	let highlightedLines = $state<number[]>([]);
 	let selectedFindingKey = $state<string | null>(null);
@@ -202,6 +204,10 @@
 			if (first) pdfPage = first.page_number;
 			highlightVersion++;
 		}).catch((e) => { if (selected?.id === rec.id) pdfError = e instanceof Error ? e.message : String(e); });
+		storedMetrics = [];
+		listKbMetrics(rec.id).then((res) => {
+			if (selected?.id === rec.id) storedMetrics = res.results ?? [];
+		}).catch(() => { /* export falls back to the review's metric snapshot */ });
 		review = null;
 		otherLangs = [];
 		reviewError = '';
@@ -280,6 +286,11 @@
 			missed: m.mrv_sec_missed(),
 			lines: m.mrv_attr_lines(),
 			grounding: m.mrv_attr_grounding(),
+			metricId: m.mrv_attr_metric_id(),
+			description: m.mrv_attr_desc(),
+			context: m.mrv_attr_context(),
+			unit: m.mrv_attr_unit(),
+			value: m.mrv_attr_value(),
 			nonMetrics: m.mrv_sec_non_metrics(),
 			attributes: m.mrv_sec_attributes(),
 			recommendations: m.mrv_sec_recommendations(),
@@ -293,7 +304,7 @@
 
 	function currentMarkdown(): string {
 		if (!selected || !review || review.status !== 'done') return '';
-		return buildReviewMarkdown(selected, review, exportLabels(review), fmtTime, rawLines);
+		return buildReviewMarkdown(selected, review, exportLabels(review), fmtTime, { lines: rawLines, metrics: storedMetrics });
 	}
 
 	function exportMarkdown() {

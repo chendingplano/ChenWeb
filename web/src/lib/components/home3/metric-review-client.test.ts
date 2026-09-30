@@ -69,6 +69,11 @@ const LABELS: ReviewExportLabels = {
 	missed: '遗漏的指标',
 	lines: '行号',
 	grounding: '原文依据',
+	metricId: '指标 ID',
+	description: '描述',
+	context: '上下文',
+	unit: '单位',
+	value: '数值',
 	nonMetrics: '不应作为指标的行',
 	attributes: '属性问题',
 	recommendations: '建议',
@@ -127,9 +132,8 @@ test('markdown export contains every section in the labels language', () => {
 		'- **行号**: L153',
 		'- **原文依据**: （空）',
 		'## 不应作为指标的行 (2)',
-		'`416_mtc_3` 发芽指数 — 重复于 `416_mtc_1` 种子发芽指数',
-		'- **[高]** `value_range_type` — `416_mtc_1` 种子发芽指数',
-		'  range → lower_bound',
+		'#### 发芽指数\n\n- **指标 ID**: `416_mtc_3`\n- **重复于**: `416_mtc_1` 种子发芽指数',
+		'### **[高]** `value_range_type`\n\nrange → lower_bound\n\n不小于\n\n#### 种子发芽指数',
 		'## 建议'
 	]) {
 		assert.ok(md.includes(want), `missing ${JSON.stringify(want)}\n---\n${md}`);
@@ -150,11 +154,13 @@ test('print html escapes raw HTML from the report', () => {
 });
 
 test('missed metric grounding quotes text lines and renders table lines as tables', () => {
-	const md = buildReviewMarkdown({ id: 416 }, { ...REVIEW, report: { ...REVIEW.report!, missed_metrics: [{ ...REVIEW.report!.missed_metrics[0], lines: '152:153' }] } }, LABELS, () => 'T', [
-		{ line_number: 151, content: 'unrelated' },
-		{ line_number: 152, content: '取 500 mL 聚乙烯瓶' },
-		{ line_number: 153, content: '<table><tr><td rowspan="2" style="x" onclick="evil()">容积</td><td>500 &amp; mL<script>x</script></td></tr><tr><td>b</td></tr></table>' }
-	]);
+	const md = buildReviewMarkdown({ id: 416 }, { ...REVIEW, report: { ...REVIEW.report!, missed_metrics: [{ ...REVIEW.report!.missed_metrics[0], lines: '152:153' }] } }, LABELS, () => 'T', {
+		lines: [
+			{ line_number: 151, content: 'unrelated' },
+			{ line_number: 152, content: '取 500 mL 聚乙烯瓶' },
+			{ line_number: 153, content: '<table><tr><td rowspan="2" style="x" onclick="evil()">容积</td><td>500 &amp; mL<script>x</script></td></tr><tr><td>b</td></tr></table>' }
+		]
+	});
 	assert.ok(md.includes('  > **L152** 取 500 mL 聚乙烯瓶'), md);
 	assert.ok(md.includes('  <table><tr><td rowspan="2">容积</td><td>500 &amp; mLx</td></tr><tr><td>b</td></tr></table>'), md);
 	assert.ok(!md.includes('unrelated'));
@@ -169,4 +175,50 @@ test('print html escapes an LLM table that is not in sanitized form', () => {
 	const html = buildReviewPrintHtml('<table><tr><td onclick="x()">a</td></tr></table>', 't', 'en');
 	assert.ok(!html.includes('<td onclick'));
 	assert.ok(html.includes('&lt;table&gt;'));
+});
+
+test('stored metrics show kb.metrics fields in the review language and table_context grounding', () => {
+	const metrics = [
+		{
+			metric_id: '416_mtc_1',
+			metric_name: '种子发芽指数',
+			metric_name_en: 'Seed germination index',
+			metric_desc: '描述',
+			metric_desc_en: 'Germination\n index',
+			metric_context: '',
+			metric_context_en: '',
+			metric_unit: '%',
+			metric_value: '70',
+			source_line_spans: ['116#r3', { line_number: 158 }],
+			table_context: [
+				{
+					line: 116,
+					columns: [],
+					rows: [
+						{ id: '116#h0', cells: ['序号', '模式'], header: true },
+						{ id: '116#r3', cells: ['1', '厌氧<产沼>'], matched: true },
+						{ id: '116#r4', cells: ['注：见 CJJ 52'], full_width: true }
+					]
+				}
+			]
+		}
+	];
+	const lines = [
+		{ line_number: 116, content: '<table><tr><td>whole table</td></tr></table>' },
+		{ line_number: 158, content: '指数大于100%' }
+	];
+	const md = buildReviewMarkdown({ id: 416 }, { ...REVIEW, lang: 'en' }, LABELS, () => 'T', { lines, metrics });
+	for (const want of [
+		'#### Seed germination index\n\n- **指标 ID**: `416_mtc_1`\n- **描述**: Germination index\n- **上下文**: （空）',
+		'- **单位**: %\n- **数值**: 70\n- **行号**: L116, L158',
+		'  <table><tr><th>序号</th><th>模式</th></tr><tr><td><strong>1</strong></td><td><strong>厌氧&lt;产沼&gt;</strong></td></tr><tr><td colspan="2">注：见 CJJ 52</td></tr></table>',
+		'  > **L158** 指数大于100%'
+	]) {
+		assert.ok(md.includes(want), `missing ${JSON.stringify(want)}\n---\n${md}`);
+	}
+	assert.ok(!md.includes('whole table'), 'table_context window replaces the whole table');
+	const html = buildReviewPrintHtml(md, 't', 'en');
+	assert.ok(html.includes('<tr><td><strong>1</strong></td>'), html);
+	// A metric with no kb.metrics row falls back to the review snapshot.
+	assert.ok(md.includes('#### 人口密度\n\n- **指标 ID**: `416_mtc_2`'), md);
 });
