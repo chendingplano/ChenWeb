@@ -278,6 +278,8 @@
 				missed: m.mrv_tally_missed()
 			},
 			missed: m.mrv_sec_missed(),
+			lines: m.mrv_attr_lines(),
+			grounding: m.mrv_attr_grounding(),
 			nonMetrics: m.mrv_sec_non_metrics(),
 			attributes: m.mrv_sec_attributes(),
 			recommendations: m.mrv_sec_recommendations(),
@@ -291,7 +293,7 @@
 
 	function currentMarkdown(): string {
 		if (!selected || !review || review.status !== 'done') return '';
-		return buildReviewMarkdown(selected, review, exportLabels(review), fmtTime);
+		return buildReviewMarkdown(selected, review, exportLabels(review), fmtTime, rawLines);
 	}
 
 	function exportMarkdown() {

@@ -67,12 +67,14 @@ const LABELS: ReviewExportLabels = {
 	translatedFrom: '译自审查 #4',
 	tally: { stored: '已存储', kept: '保留', not_metric: '非指标', duplicate: '重复', formula_input: '公式输入', missed: '遗漏' },
 	missed: '遗漏的指标',
+	lines: '行号',
+	grounding: '原文依据',
 	nonMetrics: '不应作为指标的行',
 	attributes: '属性问题',
 	recommendations: '建议',
 	none: '无。',
 	duplicateOf: '重复于',
-	empty: '(空)',
+	empty: '（空）',
 	category: { not_metric: '非指标', duplicate: '重复', formula_input: '公式输入' },
 	severity: { high: '高', medium: '中', low: '低' }
 };
@@ -121,7 +123,9 @@ test('markdown export contains every section in the labels language', () => {
 		'| 已存储 | 保留 | 非指标 | 重复 | 公式输入 | 遗漏 |',
 		'| 3 | 1 | 1 | 1 | 0 | 1 |',
 		'## 遗漏的指标 (1)',
-		'- **[中]** **浸提用聚乙烯瓶容积** — 500 mL (L153)',
+		'### **[中]** 浸提用聚乙烯瓶容积 — 500 mL',
+		'- **行号**: L153',
+		'- **原文依据**: （空）',
 		'## 不应作为指标的行 (2)',
 		'`416_mtc_3` 发芽指数 — 重复于 `416_mtc_1` 种子发芽指数',
 		'- **[高]** `value_range_type` — `416_mtc_1` 种子发芽指数',
@@ -143,4 +147,16 @@ test('print html escapes raw HTML from the report', () => {
 	assert.ok(html.includes('&lt;script&gt;'));
 	assert.ok(html.includes('<h2>遗漏的指标 (1)</h2>'));
 	assert.ok(html.includes('<title>review-416-zh-cn</title>'));
+});
+
+test('missed metric grounding quotes the line file, flattening table HTML', () => {
+	const md = buildReviewMarkdown({ id: 416 }, REVIEW, LABELS, () => 'T', [
+		{ line_number: 152, content: 'unrelated' },
+		{ line_number: 153, content: '<table><tr><td>容积</td><td>500 mL</td></tr><tr><td>a</td><td>b</td></tr></table>' }
+	]);
+	assert.ok(md.includes('- **原文依据**:\n\n  > **L153** 容积 | 500 mL ⏎ a | b'), md);
+	assert.ok(!md.includes('unrelated'));
+	const html = buildReviewPrintHtml(md, 't', 'zh-cn');
+	assert.ok(html.includes('<h3><strong>[中]</strong> 浸提用聚乙烯瓶容积 — 500 mL</h3>'), html);
+	assert.ok(html.includes('<blockquote>'));
 });

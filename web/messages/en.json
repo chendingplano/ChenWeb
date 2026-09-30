@@ -227,6 +227,8 @@
 	"mrv_cat_duplicate": "Duplicate",
 	"mrv_cat_formula_input": "Formula input",
 	"mrv_duplicate_of": "duplicate of",
+	"mrv_attr_lines": "Lines",
+	"mrv_attr_grounding": "Grounding",
 	"mrv_empty": "(empty)",
 	"mrv_sev_high": "high",
 	"mrv_sev_medium": "medium",

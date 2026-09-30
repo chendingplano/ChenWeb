@@ -221,6 +221,9 @@ export type ReviewExportLabels = {
 	translatedFrom: string;
 	tally: Record<keyof MetricReviewTally, string>;
 	missed: string;
+	/** Attribute labels inside each missed-metric sub-section. */
+	lines: string;
+	grounding: string;
 	nonMetrics: string;
 	attributes: string;
 	recommendations: string;
@@ -240,7 +243,9 @@ export function buildReviewMarkdown(
 	rec: InputRecordSummary,
 	review: MetricReview,
 	L: ReviewExportLabels,
-	fmtTime: (s?: string) => string
+	fmtTime: (s?: string) => string,
+	/** The record's line file (line_number → content), used for each missed metric's Grounding. */
+	sourceLines: { line_number: number; content: string }[] = []
 ): string {
 	const r = review.report;
 	if (!r) return '';
@@ -269,12 +274,20 @@ export function buildReviewMarkdown(
 
 	out.push(`## ${L.missed} (${r.missed_metrics.length})`, '');
 	if (r.missed_metrics.length === 0) out.push(L.none, '');
+	const lineText = new Map(sourceLines.map((l) => [l.line_number, l.content]));
 	for (const m of sortBySeverity(r.missed_metrics)) {
 		const val = [m.value, m.unit].filter(Boolean).join(' ');
-		out.push(`- ${sev(m.severity)} **${m.name}**${val ? ` — ${val}` : ''}${m.lines ? ` (L${m.lines})` : ''}`);
-		if (m.reason) out.push(`  ${m.reason}`);
+		out.push(`### ${sev(m.severity)} ${m.name}${val ? ` — ${val}` : ''}`, '');
+		const spans = m.source_line_spans?.length ? m.source_line_spans : m.lines ? m.lines.split(',') : [];
+		const numbers = reviewLineNumbers(spans).sort((a, b) => a - b);
+		out.push(`- **${L.lines}**: ${numbers.length ? spans.map((x) => `L${String(x).trim().replace(/^L/i, '')}`).join(', ') : L.empty}`);
+		const grounding = numbers.filter((n) => lineText.has(n));
+		out.push(`- **${L.grounding}**:${grounding.length ? '' : ` ${L.empty}`}`, '');
+		for (const n of grounding) out.push(`  > **L${n}** ${groundingText(lineText.get(n) ?? '')}`, '  >');
+		if (grounding.length) out.pop();
+		out.push('');
+		if (m.reason) out.push(m.reason, '');
 	}
-	out.push('');
 
 	const removed = r.tally.not_metric + r.tally.duplicate + r.tally.formula_input;
 	out.push(`## ${L.nonMetrics} (${removed})`, '');
@@ -305,6 +318,21 @@ export function buildReviewMarkdown(
 	return out.join('\n');
 }
 
+/**
+ * One source line as a single line of plain text. MinerU stores a table as one
+ * HTML line, so its markup is flattened to "cell | cell" rows split by " ⏎ ".
+ */
+export function groundingText(content: string): string {
+	let t = String(content);
+	if (/<t[rdh][\s>]/i.test(t)) {
+		t = t
+			.replace(/<\/t[dh]>\s*(?=<t[dh][\s>])/gi, ' | ')
+			.replace(/<\/tr>\s*(?=<tr[\s>])/gi, ' ⏎ ')
+			.replace(/<[^>]+>/g, '');
+	}
+	return t.replace(/\s+/g, ' ').trim();
+}
+
 function escapeHtml(s: string): string {
 	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -325,9 +353,10 @@ export function buildReviewPrintHtml(markdown: string, title: string, lang: stri
 <style>
 @page { margin: 16mm; }
 body { font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #111; font-size: 11pt; line-height: 1.5; max-width: 180mm; margin: 0 auto; }
-h1 { font-size: 16pt; margin: 0 0 8pt; } h2 { font-size: 13pt; margin: 16pt 0 6pt; border-bottom: 1px solid #ddd; padding-bottom: 2pt; } h3 { font-size: 11pt; margin: 10pt 0 4pt; color: #444; }
+h1 { font-size: 16pt; margin: 0 0 8pt; } h2 { font-size: 13pt; margin: 16pt 0 6pt; border-bottom: 1px solid #ddd; padding-bottom: 2pt; } h3 { font-size: 11pt; margin: 10pt 0 4pt; color: #444; break-after: avoid; }
 ul, ol { padding-left: 18pt; } li { margin: 3pt 0; break-inside: avoid; }
 code { font-family: ui-monospace, Menlo, monospace; font-size: 9.5pt; background: #f2f2f2; padding: 0 2pt; border-radius: 2pt; }
+blockquote { margin: 4pt 0 6pt; padding: 2pt 8pt; border-left: 3px solid #ccc; color: #333; background: #fafafa; } blockquote p { margin: 2pt 0; }
 table { border-collapse: collapse; margin: 8pt 0; } th, td { border: 1px solid #ccc; padding: 3pt 8pt; text-align: right; }
 </style></head><body>${body}</body></html>`;
 }
