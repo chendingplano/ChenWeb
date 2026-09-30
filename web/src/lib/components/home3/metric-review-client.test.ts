@@ -149,14 +149,24 @@ test('print html escapes raw HTML from the report', () => {
 	assert.ok(html.includes('<title>review-416-zh-cn</title>'));
 });
 
-test('missed metric grounding quotes the line file, flattening table HTML', () => {
-	const md = buildReviewMarkdown({ id: 416 }, REVIEW, LABELS, () => 'T', [
-		{ line_number: 152, content: 'unrelated' },
-		{ line_number: 153, content: '<table><tr><td>容积</td><td>500 mL</td></tr><tr><td>a</td><td>b</td></tr></table>' }
+test('missed metric grounding quotes text lines and renders table lines as tables', () => {
+	const md = buildReviewMarkdown({ id: 416 }, { ...REVIEW, report: { ...REVIEW.report!, missed_metrics: [{ ...REVIEW.report!.missed_metrics[0], lines: '152:153' }] } }, LABELS, () => 'T', [
+		{ line_number: 151, content: 'unrelated' },
+		{ line_number: 152, content: '取 500 mL 聚乙烯瓶' },
+		{ line_number: 153, content: '<table><tr><td rowspan="2" style="x" onclick="evil()">容积</td><td>500 &amp; mL<script>x</script></td></tr><tr><td>b</td></tr></table>' }
 	]);
-	assert.ok(md.includes('- **原文依据**:\n\n  > **L153** 容积 | 500 mL ⏎ a | b'), md);
+	assert.ok(md.includes('  > **L152** 取 500 mL 聚乙烯瓶'), md);
+	assert.ok(md.includes('  <table><tr><td rowspan="2">容积</td><td>500 &amp; mLx</td></tr><tr><td>b</td></tr></table>'), md);
 	assert.ok(!md.includes('unrelated'));
 	const html = buildReviewPrintHtml(md, 't', 'zh-cn');
 	assert.ok(html.includes('<h3><strong>[中]</strong> 浸提用聚乙烯瓶容积 — 500 mL</h3>'), html);
 	assert.ok(html.includes('<blockquote>'));
+	assert.ok(html.includes('<table><tr><td rowspan="2">容积</td>'), html);
+	assert.ok(!html.includes('onclick') && !html.includes('<script'));
+});
+
+test('print html escapes an LLM table that is not in sanitized form', () => {
+	const html = buildReviewPrintHtml('<table><tr><td onclick="x()">a</td></tr></table>', 't', 'en');
+	assert.ok(!html.includes('<td onclick'));
+	assert.ok(html.includes('&lt;table&gt;'));
 });

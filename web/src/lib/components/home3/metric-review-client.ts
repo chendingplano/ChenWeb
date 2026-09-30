@@ -283,9 +283,13 @@ export function buildReviewMarkdown(
 		out.push(`- **${L.lines}**: ${numbers.length ? spans.map((x) => `L${String(x).trim().replace(/^L/i, '')}`).join(', ') : L.empty}`);
 		const grounding = numbers.filter((n) => lineText.has(n));
 		out.push(`- **${L.grounding}**:${grounding.length ? '' : ` ${L.empty}`}`, '');
-		for (const n of grounding) out.push(`  > **L${n}** ${groundingText(lineText.get(n) ?? '')}`, '  >');
-		if (grounding.length) out.pop();
-		out.push('');
+		for (const n of grounding) {
+			const content = lineText.get(n) ?? '';
+			// A table line is shown as a table; any other line as a quote.
+			const table = isTableLine(content) ? sanitizeTableHtml(content) : '';
+			if (table) out.push(`  **L${n}**`, '', `  ${table}`, '');
+			else out.push(`  > **L${n}** ${groundingText(content)}`, '');
+		}
 		if (m.reason) out.push(m.reason, '');
 	}
 
@@ -318,19 +322,56 @@ export function buildReviewMarkdown(
 	return out.join('\n');
 }
 
+const TABLE_TAG = /<(\/?)(table|thead|tbody|tr|td|th)\b([^>]*)>/gi;
+
+function isTableLine(content: string): boolean {
+	return /<table[\s>]/i.test(content);
+}
+
+function decodeEntities(s: string): string {
+	return s
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.replace(/&nbsp;/g, ' ')
+		.replace(/&amp;/g, '&');
+}
+
 /**
- * One source line as a single line of plain text. MinerU stores a table as one
- * HTML line, so its markup is flattened to "cell | cell" rows split by " ⏎ ".
+ * Rebuilds a MinerU table line keeping only table/thead/tbody/tr/td/th tags and
+ * numeric rowspan/colspan; every other tag is dropped and all text is escaped.
+ * The result is a single line, and sanitizing it again returns it unchanged.
  */
-export function groundingText(content: string): string {
-	let t = String(content);
-	if (/<t[rdh][\s>]/i.test(t)) {
-		t = t
-			.replace(/<\/t[dh]>\s*(?=<t[dh][\s>])/gi, ' | ')
-			.replace(/<\/tr>\s*(?=<tr[\s>])/gi, ' ⏎ ')
-			.replace(/<[^>]+>/g, '');
+export function sanitizeTableHtml(html: string): string {
+	const out: string[] = [];
+	const text = (t: string) => {
+		const clean = decodeEntities(t.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ');
+		if (clean.trim()) out.push(escapeHtml(clean));
+	};
+	let last = 0;
+	for (const tag of String(html).matchAll(TABLE_TAG)) {
+		text(html.slice(last, tag.index));
+		last = tag.index + tag[0].length;
+		const [, close, name, attrs] = tag;
+		const lower = name.toLowerCase();
+		if (close) {
+			out.push(`</${lower}>`);
+			continue;
+		}
+		let keep = '';
+		if (lower === 'td' || lower === 'th') {
+			for (const a of attrs.matchAll(/\b(rowspan|colspan)\s*=\s*["']?(\d{1,3})["']?/gi)) keep += ` ${a[1].toLowerCase()}="${a[2]}"`;
+		}
+		out.push(`<${lower}${keep}>`);
 	}
-	return t.replace(/\s+/g, ' ').trim();
+	text(html.slice(last));
+	return out.join('');
+}
+
+/** One source line as a single line of plain text. */
+export function groundingText(content: string): string {
+	return String(content).replace(/\s+/g, ' ').trim();
 }
 
 function escapeHtml(s: string): string {
@@ -341,6 +382,10 @@ function escapeHtml(s: string): string {
 const safeMarked = new Marked({
 	renderer: {
 		html({ text }) {
+			// Grounding tables are emitted pre-sanitized (sanitizeTableHtml); only
+			// HTML already in that form is rendered.
+			const t = text.trim();
+			if (isTableLine(t) && sanitizeTableHtml(t) === t) return t;
 			return escapeHtml(text);
 		}
 	}
@@ -358,5 +403,6 @@ ul, ol { padding-left: 18pt; } li { margin: 3pt 0; break-inside: avoid; }
 code { font-family: ui-monospace, Menlo, monospace; font-size: 9.5pt; background: #f2f2f2; padding: 0 2pt; border-radius: 2pt; }
 blockquote { margin: 4pt 0 6pt; padding: 2pt 8pt; border-left: 3px solid #ccc; color: #333; background: #fafafa; } blockquote p { margin: 2pt 0; }
 table { border-collapse: collapse; margin: 8pt 0; } th, td { border: 1px solid #ccc; padding: 3pt 8pt; text-align: right; }
+li table { font-size: 9pt; margin: 4pt 0 6pt; } li th, li td { text-align: left; vertical-align: top; padding: 2pt 5pt; } li tr { break-inside: avoid; } li:has(table) { break-inside: auto; }
 </style></head><body>${body}</body></html>`;
 }
