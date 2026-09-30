@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
 	import type { HTMLAttributes } from "svelte/elements";
 	import { cn, type WithElementRef, type WithoutChildren } from "$lib/utils.js";
@@ -19,5 +20,5 @@
 	{...restProps}
 >
 	<EllipsisIcon class="size-4" />
-	<span class="sr-only">More</span>
+	<span class="sr-only">{m.breadcrumb_ellipsis_more()}</span>
 </span>

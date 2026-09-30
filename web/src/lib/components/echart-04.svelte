@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
   import { Chart } from 'svelte-echarts';
   import type { EChartsOption } from 'echarts';
   import type { BarSeriesOption } from 'echarts/charts';
@@ -108,7 +109,7 @@
   // Build options reactively from data
   const options = $derived<EChartsOption>({
   title: {
-    text: `Bar Chart for ${chartType}`,
+    text: m.echart_04_bar_chart_for({ chartType }),
     left: 'left'
   },
   tooltip: {
@@ -167,15 +168,15 @@
 <div class="w-full h-full pt-8" style="height: 100%">
   <div class="chart-wrapper" style="height: calc(100% - 2rem)"> <!-- account for pt-8 = 2rem -->
     {#if loading}
-      <p>Loading chart data...</p>
+      <p>{m.echart_04_loading_chart_data()}</p>
     {:else if error}
       <p style="color:red">{error}</p>
     {:else if noData}
       <h2 style="font-size: 1.4rem; font-weight: bold; margin-bottom: 0.5rem;">
-      Chart '{chartType}'
+      {m.echart_04_chart({ chartType })}
       </h2>
       <p style="font-size: 1rem; color: #666; margin-top: 0;">
-        Chart '{chartType}' has no data
+        {m.echart_04_chart_has_no_data({ chartType })}
       </p>
     {:else}
       <Chart {init} {options} style="width: 100%; height: 100%;"/>

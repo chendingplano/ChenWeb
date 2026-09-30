@@ -32,5 +32,8 @@
       Verified: svelte-check, i18n check, unit tests, 51/58 of the larger views server-rendered in
       en and zh-cn (other 7: harness cannot load svelte-echarts / the shared workspace package /
       one regex — same failure before conversion).
-- [ ] 4.4 Files outside the main routes (85 files / 1,083 items, mostly demo/test routes): convert
-      or delete — decision pending.
+- [x] 4.4 Files outside the main routes (2026-09-30): 19 unused routes + lib/form + components
+      only they used + 13 unimported files deleted (user's list); the rest converted (auth pages,
+      agent-services, deep-wiki, knowledge-graph title, home7/home8 interface text, shared ui/*).
+      Baseline is now empty. Converter pins `value` on converted value-less <option>s and skips
+      <style>/<script> nested in markup.

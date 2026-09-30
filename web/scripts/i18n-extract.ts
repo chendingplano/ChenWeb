@@ -33,7 +33,8 @@ import { isHardcodedText, isTextAttr, looksLikeText, textLiteralsIn } from './ch
 
 const ROOT = join(import.meta.dirname, '..');
 const MSG = (l: string) => join(ROOT, 'messages', `${l}.json`);
-const SKIP_ELEMENTS = new Set(['code', 'pre']);
+// code/pre hold literal text; style/script nested in markup hold CSS/JS, not display text.
+const SKIP_ELEMENTS = new Set(['code', 'pre', 'style', 'script']);
 const CJK = /[㐀-鿿]/;
 const importLine = (alias: string) =>
 	`import { ${alias === 'm' ? 'm' : `m as ${alias}`} } from '$lib/paraglide/messages.js';`;
@@ -331,6 +332,30 @@ export function convert(source: string, prefix: string, existing: Record<string,
 			return;
 		}
 		if (n.type === 'EachBlock' && !skip) edits.push(...literalEdits(ctx, n.expression));
+		// <option>Text</option> without a value submits its text: once the text is
+		// translated the bound value would change too, so pin the original as value.
+		if (n.type === 'RegularElement' && n.name === 'option' && !skip) {
+			const attrs = n.attributes as Node[];
+			const kids = ((n.fragment as Node).nodes as Node[]).filter(
+				(k) => !(k.type === 'Text' && String(k.data).trim() === '')
+			);
+			if (
+				!attrs.some((a) => a.type === 'Attribute' && a.name === 'value') &&
+				kids.length === 1 &&
+				kids[0].type === 'Text' &&
+				isHardcodedText(String(kids[0].data))
+			) {
+				const v = decodeEntities(String(kids[0].data))
+					.trim()
+					.replace(/&/g, '&amp;')
+					.replace(/"/g, '&quot;');
+				edits.push({
+					start: n.start + '<option'.length,
+					end: n.start + '<option'.length,
+					text: ` value="${v}"`
+				});
+			}
+		}
 		const childSkip = skip || (n.type === 'RegularElement' && SKIP_ELEMENTS.has(String(n.name)));
 		for (const [k, v] of Object.entries(n)) {
 			if (k === 'expression' || k === 'metadata' || k === 'context' || k === 'key' || k === 'index')
@@ -514,7 +539,11 @@ export function convertScript(
 
 function ensureImport(out: string, alias: string): string {
 	if (/from\s+['"]\$lib\/paraglide\/messages(\.js)?['"]/.test(out)) return out;
-	const open = out.match(/<script(?![^>]*context=["']module["'])(?![^>]*\bmodule\b)[^>]*>/);
+	// Top-level instance script only: not <script module>, and not a nested
+	// <script src=…> inside pasted HTML markup.
+	const open = out.match(
+		/^<script(?![^>]*context=["']module["'])(?![^>]*\bmodule\b)(?![^>]*\bsrc=)[^>]*>/m
+	);
 	if (open && open.index !== undefined) {
 		const at = open.index + open[0].length;
 		return out.slice(0, at) + `\n\t${importLine(alias)}` + out.slice(at);

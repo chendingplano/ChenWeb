@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import Heart from '@lucide/svelte/icons/heart';
 	import ShoppingBag from '@lucide/svelte/icons/shopping-bag';
 	import Search from '@lucide/svelte/icons/search';
@@ -343,7 +344,7 @@
 		if (line) cart = cart.map((c) => (c.id === id ? { ...c, qty: c.qty + n } : c));
 		else cart = [...cart, { id, qty: n }];
 		const it = items.find((i) => i.id === id);
-		showToast(`Added ${it?.name ?? 'item'} to your basket`);
+		showToast(m.home8_added_to_your_basket({ name: it?.name ?? m.home8_item_fallback() }));
 	}
 	function setLineQty(id: string, n: number) {
 		if (n <= 0) cart = cart.filter((c) => c.id !== id);
@@ -386,7 +387,7 @@
 		rvName = '';
 		rvText = '';
 		rvRating = 5;
-		showToast('Thank you, your review is posted');
+		showToast(m.home8_thank_you_your_review_is());
 	}
 
 	function ratingBreakdown(list: Review[]) {
@@ -429,13 +430,13 @@
 			hook: fHook.trim(),
 			yarnWeight: fYarn.trim(),
 			status: fStatus,
-			estTime: fTime.trim() || 'Not set',
+			estTime: fTime.trim() || m.home8_not_set(),
 			notes: fNotes.trim()
 		};
 		if (editingId) patterns = patterns.map((p) => (p.id === editingId ? data : p));
 		else patterns = [data, ...patterns];
 		showForm = false;
-		showToast(editingId ? 'Pattern updated' : 'Pattern added');
+		showToast(editingId ? m.home8_pattern_updated() : m.home8_pattern_added());
 	}
 	function deletePattern(id: string) {
 		patterns = patterns.filter((p) => p.id !== id);
@@ -445,7 +446,7 @@
 </script>
 
 <svelte:head>
-	<title>Jenny Gu — Handmade Crochet &amp; Small-batch Craft</title>
+	<title>{m.home8_jenny_gu_handmade_crochet_small()}</title>
 	<meta
 		name="description"
 		content="Crochet made one stitch at a time by Jenny Gu, plus a gallery of guest makers. Amigurumi, blankets, bags, and wearables, all handmade to order."
@@ -488,7 +489,7 @@
 	<span class="stars" style="--w:{Math.max(0, Math.min(100, (value / 5) * 100))}%; font-size:{size}px">
 		<span class="s-base" aria-hidden="true">★★★★★</span>
 		<span class="s-fill" aria-hidden="true">★★★★★</span>
-		<span class="sr-only">{value} out of 5</span>
+		<span class="sr-only">{m.home8_out_of_5({ value })}</span>
 	</span>
 {/snippet}
 
@@ -505,7 +506,7 @@
 			{#if item.badge}<span class="ribbon">{item.badge}</span>{/if}
 			<button
 				class="fav {favorites.includes(item.id) ? 'on' : ''}"
-				aria-label={favorites.includes(item.id) ? 'Remove from favorites' : 'Add to favorites'}
+				aria-label={favorites.includes(item.id) ? 'Remove from favorites' : m.home8_add_to_favorites()}
 				onclick={(e) => {
 					e.stopPropagation();
 					toggleFav(item.id);
@@ -517,7 +518,7 @@
 		<div class="card-body">
 			<div class="card-maker">
 				{item.maker}
-				{#if item.thirdParty}<span class="guest-tag">Guest maker</span>{/if}
+				{#if item.thirdParty}<span class="guest-tag">{m.home8_guest_maker()}</span>{/if}
 			</div>
 			<h3>{item.name}</h3>
 			<div class="card-foot">
@@ -531,19 +532,19 @@
 <div class="app">
 	<!-- ── Header ─────────────────────────────────────────────────────────── -->
 	<header class="topbar">
-		<button class="brand" onclick={() => go('home')} aria-label="Jenny Gu home">
+		<button class="brand" onclick={() => go('home')} aria-label={m.home8_jenny_gu_home()}>
 			<span class="brand-mark">{@render swatch(cw.marigold, 'logo')}</span>
 			<span class="brand-text">
-				<span class="brand-name">Jenny Gu</span>
-				<span class="brand-sub">handmade with yarn &amp; patience</span>
+				<span class="brand-name">{m.home8_jenny_gu()}</span>
+				<span class="brand-sub">{m.home8_handmade_with_yarn_patience()}</span>
 			</span>
 		</button>
 
 		<nav class="nav">
-			<button class:active={view === 'home'} onclick={() => go('home')}>Home</button>
-			<button class:active={view === 'shop'} onclick={() => go('shop')}>Shop</button>
-			<button class:active={view === 'gallery'} onclick={() => go('gallery')}>Gallery</button>
-			<button class:active={view === 'admin'} onclick={() => go('admin')}>Pattern Studio</button>
+			<button class:active={view === 'home'} onclick={() => go('home')}>{m.home8_home()}</button>
+			<button class:active={view === 'shop'} onclick={() => go('shop')}>{m.home8_shop()}</button>
+			<button class:active={view === 'gallery'} onclick={() => go('gallery')}>{m.home8_gallery()}</button>
+			<button class:active={view === 'admin'} onclick={() => go('admin')}>{m.home8_pattern_studio()}</button>
 		</nav>
 
 		<div class="tools">
@@ -551,16 +552,16 @@
 				<Search size={16} />
 				<input
 					type="search"
-					placeholder="Search the shop"
+					placeholder={m.home8_search_the_shop()}
 					bind:value={query}
-					aria-label="Search the shop"
+					aria-label={m.home8_search_the_shop()}
 				/>
 			</form>
-			<button class="icon-btn" onclick={() => go('shop')} aria-label="Favorites">
+			<button class="icon-btn" onclick={() => go('shop')} aria-label={m.home8_favorites()}>
 				<Heart size={19} />
 				{#if favorites.length}<span class="count">{favorites.length}</span>{/if}
 			</button>
-			<button class="icon-btn" onclick={() => (cartOpen = true)} aria-label="Open basket">
+			<button class="icon-btn" onclick={() => (cartOpen = true)} aria-label={m.home8_open_basket()}>
 				<ShoppingBag size={19} />
 				{#if cartCount}<span class="count accent">{cartCount}</span>{/if}
 			</button>
@@ -579,23 +580,21 @@
 		{#if view === 'home'}
 			<section class="hero">
 				<div class="hero-copy">
-					<span class="kicker"><Sparkles size={14} /> Small batch, made to order in Plano, TX</span>
-					<h1>Yarn, turned into things <span class="script">people keep.</span></h1>
+					<span class="kicker"><Sparkles size={14} /> {m.home8_small_batch_made_to_order()}</span>
+					<h1>{m.home8_yarn_turned_into_things()} <span class="script">{m.home8_people_keep()}</span></h1>
 					<p>
-						I am Jenny. I crochet bunnies, blankets, and beanies one evening at a time, then send
-						them off to live in other people's homes. Nothing here is mass produced, and that is
-						entirely the point.
+						{m.home8_i_am_jenny_i_crochet()}
 					</p>
 					<div class="hero-actions">
-						<button class="btn btn-primary" onclick={() => go('shop')}>Shop the collection</button>
+						<button class="btn btn-primary" onclick={() => go('shop')}>{m.home8_shop_the_collection()}</button>
 						<button class="btn btn-ghost" onclick={() => go('gallery')}>
-							Browse the gallery <ArrowRight size={16} />
+							{m.home8_browse_the_gallery()} <ArrowRight size={16} />
 						</button>
 					</div>
 					<div class="hero-trust">
-						<span><BadgeCheck size={15} /> Star Seller</span>
-						<span><Heart size={15} /> 1,300+ five-star reviews</span>
-						<span><Truck size={15} /> Ships worldwide</span>
+						<span><BadgeCheck size={15} /> {m.home8_star_seller()}</span>
+						<span><Heart size={15} /> {m.home8_1_300_five_star_reviews()}</span>
+						<span><Truck size={15} /> {m.home8_ships_worldwide()}</span>
 					</div>
 				</div>
 				<div class="hero-art">
@@ -603,14 +602,14 @@
 					<div class="hero-tile">{@render swatch(cw.raspberry, 'h2')}</div>
 					<div class="hero-tile">{@render swatch(cw.cornflower, 'h3')}</div>
 					<div class="hero-tile wide">{@render swatch(cw.sage, 'h4')}</div>
-					<span class="hero-sticker">made by hand, not by machine</span>
+					<span class="hero-sticker">{m.home8_made_by_hand_not_by()}</span>
 				</div>
 			</section>
 
 			<section class="strip">
 				<div class="strip-head">
-					<h2>This week's favorites</h2>
-					<button class="link" onclick={() => go('shop')}>See everything <ArrowRight size={15} /></button>
+					<h2>{m.home8_this_week_s_favorites()}</h2>
+					<button class="link" onclick={() => go('shop')}>{m.home8_see_everything()} <ArrowRight size={15} /></button>
 				</div>
 				<div class="grid">
 					{#each jennyItems.slice(0, 4) as item (item.id)}
@@ -620,9 +619,9 @@
 			</section>
 
 			<section class="categories">
-				<h2>Find your kind of cozy</h2>
+				<h2>{m.home8_find_your_kind_of_cozy()}</h2>
 				<div class="cat-row">
-					{#each ['Amigurumi', 'Home', 'Wearables', 'Baby'] as catName, i (catName)}
+					{#each [m.home8_amigurumi(), m.home8_home(), m.home8_wearables(), m.home8_baby()] as catName, i (catName)}
 						<button
 							class="cat"
 							onclick={() => {
@@ -645,48 +644,45 @@
 					<div class="about-fallback">{@render swatch(cw.sage, 'about')}</div>
 					<img
 						src="https://images.unsplash.com/photo-1604859469887-d75520d3b9c0?auto=format&fit=crop&w=1100&q=80"
-						alt="Jenny's hands working a crochet hook through cream-colored yarn at a sunlit table"
+						alt={m.home8_jenny_s_hands_working_a()}
 						loading="lazy"
 						onerror={onPhotoError}
 					/>
 				</div>
 				<div class="about-copy">
-					<span class="kicker"><Scissors size={14} /> Meet the maker</span>
-					<h2>Every piece starts as a tangle and a quiet hour.</h2>
+					<span class="kicker"><Scissors size={14} /> {m.home8_meet_the_maker()}</span>
+					<h2>{m.home8_every_piece_starts_as_a()}</h2>
 					<p>
-						I learned to crochet from my grandmother, mostly to keep my hands busy. Years later the
-						hobby outgrew the shelf it was supposed to fit on, so I started selling. I still make
-						everything myself, choose every colorway, and weave in every loose end by hand.
+						{m.home8_i_learned_to_crochet_from()}
 					</p>
 					<p>
-						When I am not making for the shop, I write crochet patterns so other people can make
-						these too. You can find those in the Pattern Studio.
+						{m.home8_when_i_am_not_making()}
 					</p>
 					<div class="about-stats">
-						<div><strong>2018</strong><span>first sale</span></div>
-						<div><strong>3,400+</strong><span>orders shipped</span></div>
-						<div><strong>1 pair</strong><span>of hands</span></div>
+						<div><strong>2018</strong><span>{m.home8_first_sale()}</span></div>
+						<div><strong>3,400+</strong><span>{m.home8_orders_shipped()}</span></div>
+						<div><strong>{m.home8_1_pair()}</strong><span>{m.home8_of_hands()}</span></div>
 					</div>
 				</div>
 			</section>
 
 			<section class="how">
-				<h2>How an order becomes a thing</h2>
+				<h2>{m.home8_how_an_order_becomes_a()}</h2>
 				<ol class="steps">
 					<li>
 						<span class="step-n">01</span>
-						<h3>You pick a colorway</h3>
-						<p>Choose from the shop, or message me to dream up something in your colors.</p>
+						<h3>{m.home8_you_pick_a_colorway()}</h3>
+						<p>{m.home8_choose_from_the_shop_or()}</p>
 					</li>
 					<li>
 						<span class="step-n">02</span>
-						<h3>I make it, start to finish</h3>
-						<p>One project at a time, by hand, usually with a cat supervising the process.</p>
+						<h3>{m.home8_i_make_it_start_to()}</h3>
+						<p>{m.home8_one_project_at_a_time()}</p>
 					</li>
 					<li>
 						<span class="step-n">03</span>
-						<h3>It ships, wrapped with a note</h3>
-						<p>Tissue, a care card, and a thank you, because a person made this for a person.</p>
+						<h3>{m.home8_it_ships_wrapped_with_a()}</h3>
+						<p>{m.home8_tissue_a_care_card_and()}</p>
 					</li>
 				</ol>
 			</section>
@@ -694,8 +690,8 @@
 			<section class="news">
 				<div class="news-inner">
 					<div>
-						<h2>New colorways, first dibs</h2>
-						<p>A short letter when a new batch drops or a pattern goes live. No spam, ever.</p>
+						<h2>{m.home8_new_colorways_first_dibs()}</h2>
+						<p>{m.home8_a_short_letter_when_a()}</p>
 					</div>
 					<form
 						class="news-form"
@@ -705,8 +701,8 @@
 						}}
 					>
 						<Mail size={17} />
-						<input type="email" required placeholder="you@example.com" aria-label="Email address" />
-						<button class="btn btn-primary" type="submit">Join</button>
+						<input type="email" required placeholder={m.home8_you_example_com()} aria-label={m.home8_email_address()} />
+						<button class="btn btn-primary" type="submit">{m.home8_join()}</button>
 					</form>
 				</div>
 			</section>
@@ -716,11 +712,11 @@
 		{#if view === 'shop'}
 			<section class="page-head">
 				<div>
-					<span class="kicker"><Layers size={14} /> The shop</span>
-					<h1>Everything Jenny is making right now</h1>
+					<span class="kicker"><Layers size={14} /> {m.home8_the_shop()}</span>
+					<h1>{m.home8_everything_jenny_is_making_right()}</h1>
 					<p class="lede">
-						{shopList.length} pieces, each crocheted to order. Guest makers live over in the
-						<button class="inline-link" onclick={() => go('gallery')}>gallery</button>.
+						{m.home8_pieces_each_crocheted_to_order({ shopListCount: shopList.length })}
+						<button class="inline-link" onclick={() => go('gallery')}>{m.home8_gallery_2()}</button>.
 					</p>
 				</div>
 			</section>
@@ -734,12 +730,12 @@
 					{/each}
 				</div>
 				<label class="sort">
-					Sort
+					{m.home8_sort()}
 					<select bind:value={shopSort}>
-						<option value="featured">Featured</option>
-						<option value="price-asc">Price, low to high</option>
-						<option value="price-desc">Price, high to low</option>
-						<option value="rating">Top rated</option>
+						<option value="featured">{m.home8_featured()}</option>
+						<option value="price-asc">{m.home8_price_low_to_high()}</option>
+						<option value="price-desc">{m.home8_price_high_to_low()}</option>
+						<option value="rating">{m.home8_top_rated()}</option>
 					</select>
 				</label>
 			</div>
@@ -747,14 +743,14 @@
 			{#if shopList.length === 0}
 				<div class="empty">
 					<div class="empty-art">{@render swatch(cw.oatmeal, 'empty')}</div>
-					<h3>Nothing matches that yet</h3>
-					<p>Try another category, or clear your search.</p>
+					<h3>{m.home8_nothing_matches_that_yet()}</h3>
+					<p>{m.home8_try_another_category_or_clear()}</p>
 					<button
 						class="btn btn-ghost"
 						onclick={() => {
 							query = '';
 							shopCategory = 'All';
-						}}>Clear filters</button
+						}}>{m.home8_clear_filters()}</button
 					>
 				</div>
 			{:else}
@@ -770,17 +766,16 @@
 		{#if view === 'gallery'}
 			<section class="page-head gallery-head">
 				<div>
-					<span class="kicker"><Sparkles size={14} /> The gallery</span>
-					<h1>The full table at the craft fair</h1>
+					<span class="kicker"><Sparkles size={14} /> {m.home8_the_gallery()}</span>
+					<h1>{m.home8_the_full_table_at_the()}</h1>
 					<p class="lede">
-						Jenny's crochet alongside a few guest makers she shares a booth with. Everything here is
-						handmade by someone, somewhere, slowly.
+						{m.home8_jenny_s_crochet_alongside_a()}
 					</p>
 				</div>
 				<div class="seg">
-					<button class:on={galleryFilter === 'All'} onclick={() => (galleryFilter = 'All')}>All makers</button>
-					<button class:on={galleryFilter === 'Jenny'} onclick={() => (galleryFilter = 'Jenny')}>By Jenny</button>
-					<button class:on={galleryFilter === 'Guests'} onclick={() => (galleryFilter = 'Guests')}>Guest makers</button>
+					<button class:on={galleryFilter === 'All'} onclick={() => (galleryFilter = 'All')}>{m.home8_all_makers()}</button>
+					<button class:on={galleryFilter === 'Jenny'} onclick={() => (galleryFilter = 'Jenny')}>{m.home8_by_jenny()}</button>
+					<button class:on={galleryFilter === 'Guests'} onclick={() => (galleryFilter = 'Guests')}>{m.home8_guest_makers()}</button>
 				</div>
 			</section>
 
@@ -797,7 +792,7 @@
 							{@render swatch(item.colorway, 'g' + item.id)}
 							<button
 								class="fav {favorites.includes(item.id) ? 'on' : ''}"
-								aria-label="Toggle favorite"
+								aria-label={m.home8_toggle_favorite()}
 								onclick={(e) => {
 									e.stopPropagation();
 									toggleFav(item.id);
@@ -805,7 +800,7 @@
 							>
 								<Heart size={16} fill={favorites.includes(item.id) ? 'currentColor' : 'none'} />
 							</button>
-							{#if item.thirdParty}<span class="guest-corner">Guest</span>{/if}
+							{#if item.thirdParty}<span class="guest-corner">{m.home8_guest()}</span>{/if}
 						</div>
 						<div class="tile-cap">
 							<div>
@@ -822,10 +817,10 @@
 		<!-- ── PRODUCT ──────────────────────────────────────────────────────── -->
 		{#if view === 'product' && selected}
 			<nav class="crumbs">
-				<button onclick={() => go('home')}>Home</button>
+				<button onclick={() => go('home')}>{m.home8_home()}</button>
 				<span>/</span>
 				<button onclick={() => (selected.thirdParty ? go('gallery') : go('shop'))}>
-					{selected.thirdParty ? 'Gallery' : 'Shop'}
+					{selected.thirdParty ? m.home8_gallery() : m.home8_shop()}
 				</button>
 				<span>/</span>
 				<em>{selected.name}</em>
@@ -840,7 +835,7 @@
 						)}
 						<button
 							class="fav big {favorites.includes(selected.id) ? 'on' : ''}"
-							aria-label="Toggle favorite"
+							aria-label={m.home8_toggle_favorite()}
 							onclick={() => toggleFav(selected.id)}
 						>
 							<Heart size={20} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'} />
@@ -848,7 +843,7 @@
 					</div>
 					<div class="thumbs">
 						{#each [selected.colorway, cw.oatmeal, cw.terracotta, cw.cornflower] as tc, ti}
-							<button class="thumb {activeImage === ti ? 'on' : ''}" onclick={() => (activeImage = ti)} aria-label={'View angle ' + (ti + 1)}>
+							<button class="thumb {activeImage === ti ? 'on' : ''}" onclick={() => (activeImage = ti)} aria-label={m.home8_view_angle() + (ti + 1)}>
 								{@render swatch(tc, 'thumb' + selected.id + ti)}
 							</button>
 						{/each}
@@ -858,44 +853,44 @@
 				<div class="product-info">
 					<div class="maker-line">
 						<span>{selected.maker}</span>
-						{#if !selected.thirdParty}<span class="star-seller"><BadgeCheck size={14} /> Star Seller</span>{/if}
-						{#if selected.thirdParty}<span class="guest-tag">Guest maker</span>{/if}
+						{#if !selected.thirdParty}<span class="star-seller"><BadgeCheck size={14} /> {m.home8_star_seller()}</span>{/if}
+						{#if selected.thirdParty}<span class="guest-tag">{m.home8_guest_maker()}</span>{/if}
 					</div>
 					<h1>{selected.name}</h1>
 					<div class="prod-rate">
 						{@render stars(selected.rating, 18)}
 						<strong>{selected.rating.toFixed(1)}</strong>
 						<button class="inline-link" onclick={() => { const el = document.getElementById('reviews'); el?.scrollIntoView({ behavior: 'smooth' }); }}>
-							{selected.reviewCount} reviews
+							{m.home8_reviews({ reviewCount: selected.reviewCount })}
 						</button>
 					</div>
 					<div class="price-line">
 						<span class="big-price">${selected.price}</span>
-						{#if !selected.thirdParty}<span class="vat">Made to order, just for you</span>{/if}
+						{#if !selected.thirdParty}<span class="vat">{m.home8_made_to_order_just_for()}</span>{/if}
 					</div>
 
 					<p class="prod-desc">{selected.description}</p>
 
 					<div class="buy">
 						<div class="qty">
-							<button onclick={() => (qty = Math.max(1, qty - 1))} aria-label="Decrease quantity"><Minus size={16} /></button>
+							<button onclick={() => (qty = Math.max(1, qty - 1))} aria-label={m.home8_decrease_quantity()}><Minus size={16} /></button>
 							<span>{qty}</span>
-							<button onclick={() => (qty = qty + 1)} aria-label="Increase quantity"><Plus size={16} /></button>
+							<button onclick={() => (qty = qty + 1)} aria-label={m.home8_increase_quantity()}><Plus size={16} /></button>
 						</div>
 						<button class="btn btn-primary big" onclick={() => addToCart(selected.id, qty)}>
-							<ShoppingBag size={18} /> Add to basket
+							<ShoppingBag size={18} /> {m.home8_add_to_basket()}
 						</button>
 						<button class="btn btn-outline big" onclick={() => toggleFav(selected.id)}>
 							<Heart size={18} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'} />
-							{favorites.includes(selected.id) ? 'Saved' : 'Save'}
+							{favorites.includes(selected.id) ? m.home8_saved() : m.home8_save()}
 						</button>
 					</div>
 
 					<dl class="specs">
-						<div><dt><Scissors size={15} /> Materials</dt><dd>{selected.materials.join(', ')}</dd></div>
-						<div><dt><Ruler size={15} /> Size</dt><dd>{selected.dimensions}</dd></div>
-						<div><dt><Clock size={15} /> Made to order</dt><dd>{selected.processing}</dd></div>
-						<div><dt><Truck size={15} /> Shipping</dt><dd>Tracked worldwide, carbon-offset, gift wrap on request</dd></div>
+						<div><dt><Scissors size={15} /> {m.home8_materials()}</dt><dd>{selected.materials.join(', ')}</dd></div>
+						<div><dt><Ruler size={15} /> {m.home8_size()}</dt><dd>{selected.dimensions}</dd></div>
+						<div><dt><Clock size={15} /> {m.home8_made_to_order()}</dt><dd>{selected.processing}</dd></div>
+						<div><dt><Truck size={15} /> {m.home8_shipping()}</dt><dd>{m.home8_tracked_worldwide_carbon_offset_gift()}</dd></div>
 					</dl>
 
 					<div class="meet-maker">
@@ -904,8 +899,8 @@
 							<strong>{selected.maker}</strong>
 							<p>
 								{selected.thirdParty
-									? 'A guest maker Jenny shares a booth with. Each piece is made in their own small studio.'
-									: 'Designed, hooked, and finished by Jenny. Message before you order if you would like a custom colorway.'}
+									? m.home8_a_guest_maker_jenny_shares()
+									: m.home8_designed_hooked_and_finished_by()}
 							</p>
 						</div>
 					</div>
@@ -915,14 +910,14 @@
 			<!-- reviews -->
 			<section class="reviews" id="reviews">
 				<div class="reviews-head">
-					<h2>What people say</h2>
+					<h2>{m.home8_what_people_say()}</h2>
 				</div>
 				<div class="reviews-layout">
 					<aside class="rate-summary">
 						<div class="big-rating">
 							<strong>{selected.rating.toFixed(1)}</strong>
 							{@render stars(selected.rating, 20)}
-							<span>{selected.reviewCount} reviews</span>
+							<span>{m.home8_reviews({ reviewCount: selected.reviewCount })}</span>
 						</div>
 						<div class="bars">
 							{#each ratingBreakdown(itemReviews) as b (b.star)}
@@ -937,10 +932,10 @@
 
 					<div class="reviews-body">
 						<form class="review-form" onsubmit={addReview}>
-							<h3>Leave a review</h3>
+							<h3>{m.home8_leave_a_review()}</h3>
 							<div class="rf-row">
-								<input type="text" placeholder="Your name" bind:value={rvName} aria-label="Your name" required />
-								<div class="rf-stars" role="radiogroup" aria-label="Your rating">
+								<input type="text" placeholder={m.home8_your_name()} bind:value={rvName} aria-label={m.home8_your_name()} required />
+								<div class="rf-stars" role="radiogroup" aria-label={m.home8_your_rating()}>
 									{#each [1, 2, 3, 4, 5] as n (n)}
 										<button
 											type="button"
@@ -951,12 +946,12 @@
 									{/each}
 								</div>
 							</div>
-							<textarea rows="3" placeholder="How did it arrive? How does it feel?" bind:value={rvText} aria-label="Your review" required></textarea>
-							<button class="btn btn-primary" type="submit">Post review</button>
+							<textarea rows="3" placeholder={m.home8_how_did_it_arrive_how()} bind:value={rvText} aria-label={m.home8_your_review()} required></textarea>
+							<button class="btn btn-primary" type="submit">{m.home8_post_review()}</button>
 						</form>
 
 						{#if itemReviews.length === 0}
-							<p class="no-reviews">No reviews yet. Be the first to share how yours turned out.</p>
+							<p class="no-reviews">{m.home8_no_reviews_yet_be_the()}</p>
 						{:else}
 							<ul class="review-list">
 								{#each itemReviews as r (r.id)}
@@ -979,7 +974,7 @@
 
 			{#if related.length}
 				<section class="strip">
-					<div class="strip-head"><h2>You might also like</h2></div>
+					<div class="strip-head"><h2>{m.home8_you_might_also_like()}</h2></div>
 					<div class="grid">
 						{#each related as item (item.id)}
 							{@render productCard(item)}
@@ -993,52 +988,52 @@
 		{#if view === 'admin'}
 			<section class="page-head admin-head">
 				<div>
-					<span class="kicker"><Scissors size={14} /> Behind the shop</span>
-					<h1>Pattern Studio</h1>
-					<p class="lede">Where Jenny writes, tests, and publishes the patterns behind the makes.</p>
+					<span class="kicker"><Scissors size={14} /> {m.home8_behind_the_shop()}</span>
+					<h1>{m.home8_pattern_studio()}</h1>
+					<p class="lede">{m.home8_where_jenny_writes_tests_and()}</p>
 				</div>
 				<div class="admin-summary">
-					<span class="pill st-Published">{statusCounts.Published} published</span>
-					<span class="pill st-Testing">{statusCounts.Testing} in testing</span>
-					<span class="pill st-Draft">{statusCounts.Draft} draft</span>
+					<span class="pill st-Published">{m.home8_published({ Published: statusCounts.Published })}</span>
+					<span class="pill st-Testing">{m.home8_in_testing({ Testing: statusCounts.Testing })}</span>
+					<span class="pill st-Draft">{m.home8_draft({ Draft: statusCounts.Draft })}</span>
 				</div>
 			</section>
 
 			<div class="admin-bar">
 				<form class="search admin-search" onsubmit={(e) => e.preventDefault()}>
 					<Search size={16} />
-					<input type="search" placeholder="Search patterns" bind:value={adminQuery} aria-label="Search patterns" />
+					<input type="search" placeholder={m.home8_search_patterns()} bind:value={adminQuery} aria-label={m.home8_search_patterns()} />
 				</form>
-				<button class="btn btn-primary" onclick={openNew}><Plus size={17} /> New pattern</button>
+				<button class="btn btn-primary" onclick={openNew}><Plus size={17} /> {m.home8_new_pattern()}</button>
 			</div>
 
 			<div class="form-wrap" data-open={showForm}>
 				<div class="form-inner">
 					<form class="pattern-form" onsubmit={savePattern}>
 						<div class="pf-head">
-							<h3>{editingId ? 'Edit pattern' : 'New pattern'}</h3>
-							<button type="button" class="icon-btn" onclick={() => (showForm = false)} aria-label="Close form"><X size={18} /></button>
+							<h3>{editingId ? m.home8_edit_pattern() : m.home8_new_pattern()}</h3>
+							<button type="button" class="icon-btn" onclick={() => (showForm = false)} aria-label={m.home8_close_form()}><X size={18} /></button>
 						</div>
 						<div class="pf-grid">
-							<label class="full">Pattern name<input type="text" bind:value={fName} placeholder="e.g. Cloud Bunny Amigurumi" required /></label>
-							<label>Difficulty
+							<label class="full">{m.home8_pattern_name()}<input type="text" bind:value={fName} placeholder={m.home8_e_g_cloud_bunny_amigurumi()} required /></label>
+							<label>{m.home8_difficulty()}
 								<select bind:value={fDifficulty}>
-									<option>Beginner</option><option>Intermediate</option><option>Advanced</option>
+									<option value="Beginner">{m.home8_beginner()}</option><option value="Intermediate">{m.home8_intermediate()}</option><option value="Advanced">{m.home8_advanced()}</option>
 								</select>
 							</label>
-							<label>Status
+							<label>{m.home8_status()}
 								<select bind:value={fStatus}>
-									<option>Draft</option><option>Testing</option><option>Published</option>
+									<option value="Draft">{m.home8_draft_2()}</option><option value="Testing">{m.home8_testing()}</option><option value="Published">{m.home8_published_2()}</option>
 								</select>
 							</label>
-							<label>Hook size<input type="text" bind:value={fHook} placeholder="4.0 mm" /></label>
-							<label>Yarn weight<input type="text" bind:value={fYarn} placeholder="Worsted" /></label>
-							<label>Estimated time<input type="text" bind:value={fTime} placeholder="1 evening" /></label>
-							<label class="full">Notes<textarea rows="2" bind:value={fNotes} placeholder="Testing notes, errata, ideas"></textarea></label>
+							<label>{m.home8_hook_size()}<input type="text" bind:value={fHook} placeholder={m.home8_4_0_mm()} /></label>
+							<label>{m.home8_yarn_weight()}<input type="text" bind:value={fYarn} placeholder={m.home8_worsted()} /></label>
+							<label>{m.home8_estimated_time()}<input type="text" bind:value={fTime} placeholder={m.home8_1_evening()} /></label>
+							<label class="full">{m.home8_notes()}<textarea rows="2" bind:value={fNotes} placeholder={m.home8_testing_notes_errata_ideas()}></textarea></label>
 						</div>
 						<div class="pf-actions">
-							<button type="button" class="btn btn-ghost" onclick={() => (showForm = false)}>Cancel</button>
-							<button type="submit" class="btn btn-primary">{editingId ? 'Save changes' : 'Add pattern'}</button>
+							<button type="button" class="btn btn-ghost" onclick={() => (showForm = false)}>{m.home8_cancel()}</button>
+							<button type="submit" class="btn btn-primary">{editingId ? m.home8_save_changes() : m.home8_add_pattern()}</button>
 						</div>
 					</form>
 				</div>
@@ -1047,14 +1042,14 @@
 			{#if patternList.length === 0}
 				<div class="empty">
 					<div class="empty-art">{@render swatch(cw.sage, 'aempty')}</div>
-					<h3>No patterns match</h3>
-					<p>Clear the search, or add a new pattern.</p>
+					<h3>{m.home8_no_patterns_match()}</h3>
+					<p>{m.home8_clear_the_search_or_add()}</p>
 				</div>
 			{:else}
 				<div class="table-wrap">
 					<table class="patterns">
 						<thead>
-							<tr><th>Pattern</th><th>Difficulty</th><th>Hook</th><th>Yarn</th><th>Time</th><th>Status</th><th class="ta-r">Actions</th></tr>
+							<tr><th>{m.home8_pattern()}</th><th>{m.home8_difficulty()}</th><th>{m.home8_hook()}</th><th>{m.home8_yarn()}</th><th>{m.home8_time()}</th><th>{m.home8_status()}</th><th class="ta-r">{m.home8_actions()}</th></tr>
 						</thead>
 						<tbody>
 							{#each patternList as p (p.id)}
@@ -1066,8 +1061,8 @@
 									<td>{p.estTime}</td>
 									<td><span class="pill st-{p.status}">{p.status}</span></td>
 									<td class="ta-r">
-										<button class="row-btn" onclick={() => openEdit(p)} aria-label="Edit pattern"><Pencil size={15} /></button>
-										<button class="row-btn danger" onclick={() => deletePattern(p.id)} aria-label="Delete pattern"><Trash2 size={15} /></button>
+										<button class="row-btn" onclick={() => openEdit(p)} aria-label={m.home8_edit_pattern()}><Pencil size={15} /></button>
+										<button class="row-btn danger" onclick={() => deletePattern(p.id)} aria-label={m.home8_delete_pattern()}><Trash2 size={15} /></button>
 									</td>
 								</tr>
 							{/each}
@@ -1082,8 +1077,8 @@
 	<footer class="site-foot">
 		<div class="foot-grid">
 			<div class="foot-brand">
-				<span class="brand-name">Jenny Gu</span>
-				<p>Handmade crochet and a few friends, sent from Plano, Texas, to wherever you are.</p>
+				<span class="brand-name">{m.home8_jenny_gu()}</span>
+				<p>{m.home8_handmade_crochet_and_a_few()}</p>
 				<div class="socials">
 					<span class="social"><Instagram size={17} /></span>
 					<span class="social"><Mail size={17} /></span>
@@ -1091,43 +1086,43 @@
 				</div>
 			</div>
 			<div class="foot-col">
-				<h4>Shop</h4>
-				<button onclick={() => go('shop')}>All items</button>
-				<button onclick={() => { shopCategory = 'Amigurumi'; go('shop'); }}>Amigurumi</button>
-				<button onclick={() => { shopCategory = 'Home'; go('shop'); }}>Home</button>
-				<button onclick={() => go('gallery')}>Gallery</button>
+				<h4>{m.home8_shop()}</h4>
+				<button onclick={() => go('shop')}>{m.home8_all_items()}</button>
+				<button onclick={() => { shopCategory = 'Amigurumi'; go('shop'); }}>{m.home8_amigurumi()}</button>
+				<button onclick={() => { shopCategory = 'Home'; go('shop'); }}>{m.home8_home()}</button>
+				<button onclick={() => go('gallery')}>{m.home8_gallery()}</button>
 			</div>
 			<div class="foot-col">
-				<h4>Makers</h4>
-				<button onclick={() => go('admin')}>Pattern Studio</button>
-				<button onclick={() => go('gallery')}>Guest makers</button>
+				<h4>{m.home8_makers()}</h4>
+				<button onclick={() => go('admin')}>{m.home8_pattern_studio()}</button>
+				<button onclick={() => go('gallery')}>{m.home8_guest_makers()}</button>
 			</div>
 			<div class="foot-col">
-				<h4>The fine print</h4>
-				<span>Made to order, every time</span>
-				<span>Tracked worldwide shipping</span>
-				<span>Returns within 30 days</span>
+				<h4>{m.home8_the_fine_print()}</h4>
+				<span>{m.home8_made_to_order_every_time()}</span>
+				<span>{m.home8_tracked_worldwide_shipping()}</span>
+				<span>{m.home8_returns_within_30_days()}</span>
 			</div>
 		</div>
 		<div class="foot-base">
-			<span>© 2026 Jenny Gu. Every stitch by hand.</span>
-			<span class="made">Built with yarn, coffee, and a sleeping cat.</span>
+			<span>{m.home8_2026_jenny_gu_every_stitch()}</span>
+			<span class="made">{m.home8_built_with_yarn_coffee_and()}</span>
 		</div>
 	</footer>
 
 	<!-- ── Basket drawer ──────────────────────────────────────────────────── -->
 	{#if cartOpen}
 		<div class="drawer-overlay" role="presentation" onclick={() => (cartOpen = false)}></div>
-		<aside class="drawer" aria-label="Your basket">
+		<aside class="drawer" aria-label={m.home8_your_basket()}>
 			<div class="drawer-head">
-				<h3>Your basket</h3>
-				<button class="icon-btn" onclick={() => (cartOpen = false)} aria-label="Close basket"><X size={20} /></button>
+				<h3>{m.home8_your_basket()}</h3>
+				<button class="icon-btn" onclick={() => (cartOpen = false)} aria-label={m.home8_close_basket()}><X size={20} /></button>
 			</div>
 			{#if cartLines.length === 0}
 				<div class="drawer-empty">
 					<div class="empty-art small">{@render swatch(cw.dustyrose, 'cart')}</div>
-					<p>Your basket is empty for now.</p>
-					<button class="btn btn-primary" onclick={() => go('shop')}>Start browsing</button>
+					<p>{m.home8_your_basket_is_empty_for()}</p>
+					<button class="btn btn-primary" onclick={() => go('shop')}>{m.home8_start_browsing()}</button>
 				</div>
 			{:else}
 				<ul class="drawer-list">
@@ -1138,22 +1133,22 @@
 								<strong>{line.item.name}</strong>
 								<span>{line.item.maker}</span>
 								<div class="dl-qty">
-									<button onclick={() => setLineQty(line.item.id, line.qty - 1)} aria-label="Decrease"><Minus size={14} /></button>
+									<button onclick={() => setLineQty(line.item.id, line.qty - 1)} aria-label={m.home8_decrease()}><Minus size={14} /></button>
 									<span>{line.qty}</span>
-									<button onclick={() => setLineQty(line.item.id, line.qty + 1)} aria-label="Increase"><Plus size={14} /></button>
+									<button onclick={() => setLineQty(line.item.id, line.qty + 1)} aria-label={m.home8_increase()}><Plus size={14} /></button>
 								</div>
 							</div>
 							<div class="dl-right">
 								<span class="dl-price">${line.item.price * line.qty}</span>
-								<button class="dl-remove" onclick={() => setLineQty(line.item.id, 0)} aria-label="Remove"><Trash2 size={15} /></button>
+								<button class="dl-remove" onclick={() => setLineQty(line.item.id, 0)} aria-label={m.home8_remove()}><Trash2 size={15} /></button>
 							</div>
 						</li>
 					{/each}
 				</ul>
 				<div class="drawer-foot">
-					<div class="dl-total"><span>Subtotal</span><strong>${cartTotal}</strong></div>
-					<p class="dl-note">Shipping and any custom options are confirmed at checkout.</p>
-					<button class="btn btn-primary big full-w" onclick={() => showToast('This is a demo storefront, checkout is not wired up')}>Checkout</button>
+					<div class="dl-total"><span>{m.home8_subtotal()}</span><strong>${cartTotal}</strong></div>
+					<p class="dl-note">{m.home8_shipping_and_any_custom_options()}</p>
+					<button class="btn btn-primary big full-w" onclick={() => showToast('This is a demo storefront, checkout is not wired up')}>{m.home8_checkout()}</button>
 				</div>
 			{/if}
 		</aside>

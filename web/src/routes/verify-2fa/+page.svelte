@@ -1,11 +1,12 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	let code = $state('');
 	let error = $state('');
 	let isSubmitting = $state(false);
 
 	async function handleVerify() {
 		if (!code || code.length !== 6) {
-			error = 'Please enter a 6-digit code';
+			error = m.verify_2fa_please_enter_a_6_digit();
 			return;
 		}
 
@@ -25,10 +26,10 @@
 				// 2FA successful, redirect to dashboard
 				window.location.href = data.redirect_url || '/';
 			} else {
-				error = data.message || 'Invalid verification code';
+				error = data.message || m.verify_2fa_invalid_verification_code();
 			}
 		} catch (err) {
-			error = `Network error: ${err}`;
+			error = m.verify_2fa_network_error({ err: String(err) });
 		} finally {
 			isSubmitting = false;
 		}
@@ -57,8 +58,8 @@
 			</svg>
 		</div>
 
-		<h1>Two-Factor Authentication</h1>
-		<p class="subtitle">Enter the 6-digit code from your authenticator app</p>
+		<h1>{m.verify_2fa_two_factor_authentication()}</h1>
+		<p class="subtitle">{m.verify_2fa_enter_the_6_digit_code()}</p>
 
 		<div class="form">
 			<input
@@ -84,10 +85,10 @@
 				disabled={isSubmitting || code.length !== 6}
 				class="verify-btn"
 			>
-				{isSubmitting ? 'Verifying...' : 'Verify'}
+				{isSubmitting ? m.verify_2fa_verifying() : m.verify_2fa_verify()}
 			</button>
 
-			<a href="/login" class="back-link">Back to login</a>
+			<a href="/login" class="back-link">{m.verify_2fa_back_to_login()}</a>
 		</div>
 	</div>
 </div>

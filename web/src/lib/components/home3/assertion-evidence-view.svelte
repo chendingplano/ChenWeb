@@ -269,7 +269,7 @@
 				>
 					<option value="">{m.assertion_evidence_any()}</option><option
 						>{m.assertion_evidence_supports()}</option
-					><option>{m.assertion_evidence_contradicts()}</option>
+					><option value="contradicts">{m.assertion_evidence_contradicts()}</option>
 				</select>
 			</label>
 			<label class="flex flex-col gap-1" style="color:{muted}">
@@ -281,7 +281,7 @@
 				>
 					<option value="">{m.assertion_evidence_any()}</option><option
 						>{m.assertion_evidence_processor()}</option
-					><option>{m.assertion_evidence_human()}</option>
+					><option value="human">{m.assertion_evidence_human()}</option>
 				</select>
 			</label>
 		</div>
@@ -565,7 +565,7 @@
 						bind:value={form.evidence_role}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
-						><option>{m.assertion_evidence_supports()}</option><option
+						><option value="supports">{m.assertion_evidence_supports()}</option><option
 							>{m.assertion_evidence_contradicts()}</option
 						></select
 					></label
@@ -575,7 +575,7 @@
 						bind:value={form.actor_kind}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
-						><option>{m.assertion_evidence_processor()}</option><option
+						><option value="processor">{m.assertion_evidence_processor()}</option><option
 							>{m.assertion_evidence_human()}</option
 						></select
 					></label

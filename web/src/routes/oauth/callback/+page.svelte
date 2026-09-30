@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -42,11 +43,11 @@
 			const norm_route = import.meta.env.VITE_DEFAULT_NORM_ROUTE;
 			const admin_route = import.meta.env.VITE_DEFAULT_ADMIN_ROUTE;
 			if (typeof norm_route !== 'string' || norm_route.length <= 0) {
-				alert('missing VITE_DEFAULT_NORM_ROUTE (CWB_0211130500)');
+				alert(m.oauth_callback_missing_vite_default_norm_route());
 			}
 
 			if (typeof admin_route !== 'string' || admin_route.length <= 0) {
-				alert('missing VITE_DEFAULT_ADMIN_ROUTE (CWB_0211130501)');
+				alert(m.oauth_callback_missing_vite_default_admin_route());
 			}
 
 			// Check if we have a valid session (Kratos sets cookies during OIDC flow)
@@ -76,7 +77,7 @@
 			await goto('/login?error=oauth_failed', { replaceState: true });
 		} catch (err) {
 			console.error('OAuth callback error:', err);
-			error = err instanceof Error ? err.message : 'Authentication failed';
+			error = err instanceof Error ? err.message : m.oauth_callback_authentication_failed();
 			loading = false;
 		}
 	});
@@ -88,15 +89,19 @@
 			<div
 				class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent motion-reduce:animate-[spin_1.5s_linear_infinite]"
 			></div>
-			<p class="text-lg">Completing sign in...</p>
+			<p class="text-lg">{m.oauth_callback_completing_sign_in()}</p>
 		</div>
 	</div>
 {:else if error}
 	<div class="flex min-h-screen items-center justify-center">
 		<div class="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-			<h2 class="mb-2 text-xl font-semibold text-red-800">Authentication Error</h2>
+			<h2 class="mb-2 text-xl font-semibold text-red-800">
+				{m.oauth_callback_authentication_error()}
+			</h2>
 			<p class="mb-4 text-red-600">{error}</p>
-			<a href="/login" class="text-blue-600 underline hover:text-blue-800">Return to login</a>
+			<a href="/login" class="text-blue-600 underline hover:text-blue-800"
+				>{m.oauth_callback_return_to_login()}</a
+			>
 		</div>
 	</div>
 {/if}

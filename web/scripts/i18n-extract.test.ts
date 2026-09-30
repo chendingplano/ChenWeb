@@ -131,3 +131,13 @@ test('route files take their route path as key prefix', () => {
 	assert.equal(keyPrefix('src/routes/semos/+layout.svelte'), 'semos_layout');
 	assert.equal(keyPrefix('src/routes/+page.svelte'), 'root');
 });
+
+test('a value-less option keeps its original text as value', () => {
+	const { out } = convert(
+		`<select bind:value={s}><option>Draft</option><option value="x">Other</option></select>`,
+		'o',
+		{}
+	);
+	assert.ok(out.includes('<option value="Draft">{m.o_draft()}</option>'), out);
+	assert.ok(out.includes('<option value="x">{m.o_other()}</option>'), out);
+});

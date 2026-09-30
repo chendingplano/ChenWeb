@@ -26,7 +26,8 @@ const ROOT = join(import.meta.dirname, '..');
 const BASELINE = join(ROOT, 'i18n-baseline.json');
 const LOCALES = ['en', 'zh-cn'];
 const TEXT_ATTRS = new Set(['placeholder', 'title', 'aria-label', 'alt', 'label']);
-const SKIP_ELEMENTS = new Set(['code', 'pre']);
+// code/pre hold literal text; style/script nested in markup hold CSS/JS, not display text.
+const SKIP_ELEMENTS = new Set(['code', 'pre', 'style', 'script']);
 // Two or more Latin letters in a row, or any CJK character.
 const WORDY = /[A-Za-z]{2,}|[㐀-鿿]/;
 

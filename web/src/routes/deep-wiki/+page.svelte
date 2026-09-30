@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { getWikiOverview, type WikiOverviewResponse } from '$lib/services/kbService';
 	import SemosKbHero from '$lib/components/home3/semos-kb-hero.svelte';
@@ -16,7 +17,7 @@
 		try {
 			overview = await getWikiOverview();
 		} catch (err) {
-			loadError = err instanceof Error ? err.message : 'Unable to reach SemOS.';
+			loadError = err instanceof Error ? err.message : m.deep_wiki_unable_to_reach_semos();
 		} finally {
 			loading = false;
 		}
@@ -33,25 +34,45 @@
 	// The eight portals (Panel B) — each a doorway into a browse/search surface.
 	const PORTALS: { label: string; blurb: string; href: string }[] = [
 		{
-			label: 'Documents',
-			blurb: 'documents, notes, articles',
+			label: m.deep_wiki_documents(),
+			blurb: m.deep_wiki_documents_notes_articles(),
 			href: KNOWLEDGE + 'kb-input-details'
 		},
-		{ label: 'Content Segments', blurb: 'content segments, chunks', href: KNOWLEDGE + 'kb-chunks' },
-		{ label: 'Topics', blurb: 'browse and search topics', href: KNOWLEDGE + 'kb-topic-tree' },
-		{ label: 'Metrics', blurb: 'browse and search metrics', href: KNOWLEDGE + 'kb-metrics' },
 		{
-			label: 'Parts & Components',
-			blurb: 'browse and search parts and components',
+			label: m.deep_wiki_content_segments(),
+			blurb: m.deep_wiki_content_segments_chunks(),
+			href: KNOWLEDGE + 'kb-chunks'
+		},
+		{
+			label: m.deep_wiki_topics(),
+			blurb: m.deep_wiki_browse_and_search_topics(),
+			href: KNOWLEDGE + 'kb-topic-tree'
+		},
+		{
+			label: m.deep_wiki_metrics(),
+			blurb: m.deep_wiki_browse_and_search_metrics(),
+			href: KNOWLEDGE + 'kb-metrics'
+		},
+		{
+			label: m.deep_wiki_parts_components(),
+			blurb: m.deep_wiki_browse_and_search_parts_and(),
 			href: KNOWLEDGE + 'kb-products'
 		},
-		{ label: 'Scenes', blurb: 'browse and search scenes', href: KNOWLEDGE + 'kb-scene-blocks' },
 		{
-			label: 'Provisions',
-			blurb: 'browse and search provisions',
+			label: m.deep_wiki_scenes(),
+			blurb: m.deep_wiki_browse_and_search_scenes(),
+			href: KNOWLEDGE + 'kb-scene-blocks'
+		},
+		{
+			label: m.deep_wiki_provisions(),
+			blurb: m.deep_wiki_browse_and_search_provisions(),
 			href: KNOWLEDGE + 'kb-provision-tree'
 		},
-		{ label: 'Graphs', blurb: 'browse and search entities and relations', href: GRAPH_HREF }
+		{
+			label: m.deep_wiki_graphs(),
+			blurb: m.deep_wiki_browse_and_search_entities_and(),
+			href: GRAPH_HREF
+		}
 	];
 
 	// ---------------------------------------------------------------------------
@@ -67,16 +88,16 @@
 		const then = new Date(iso).getTime();
 		if (Number.isNaN(then)) return '';
 		const secs = Math.round((Date.now() - then) / 1000);
-		if (secs < 45) return 'just now';
+		if (secs < 45) return m.deep_wiki_just_now();
 		const mins = Math.round(secs / 60);
-		if (mins < 60) return `${mins}m ago`;
+		if (mins < 60) return m.deep_wiki_m_ago({ mins });
 		const hrs = Math.round(mins / 60);
-		if (hrs < 24) return `${hrs}h ago`;
+		if (hrs < 24) return m.deep_wiki_h_ago({ hrs });
 		const days = Math.round(hrs / 24);
-		if (days < 30) return `${days}d ago`;
+		if (days < 30) return m.deep_wiki_d_ago({ days });
 		const months = Math.round(days / 30);
-		if (months < 12) return `${months}mo ago`;
-		return `${Math.round(months / 12)}y ago`;
+		if (months < 12) return m.deep_wiki_mo_ago({ months });
+		return m.deep_wiki_y_ago({ value: Math.round(months / 12) });
 	}
 	function absTime(iso: string | null): string {
 		if (!iso) return '';
@@ -88,7 +109,7 @@
 </script>
 
 <svelte:head>
-	<title>SemOS · Deep Wiki</title>
+	<title>{m.deep_wiki_semos_deep_wiki()}</title>
 	<meta
 		name="description"
 		content="The entrance to SemOS, a deep knowledge base of documents and their artifacts."
@@ -102,8 +123,8 @@
 	<SemosKbHero darkMode={false} {overview} {loading} />
 
 	<!-- ===================== PANEL B: portal directory ===================== -->
-	<section class="panel-b" aria-label="Browse by artifact type">
-		<h2 class="panel-title">Explore the wiki</h2>
+	<section class="panel-b" aria-label={m.deep_wiki_browse_by_artifact_type()}>
+		<h2 class="panel-title">{m.deep_wiki_explore_the_wiki()}</h2>
 		<nav class="portals">
 			{#each PORTALS as p (p.label)}
 				<a class="portal" href={p.href}>
@@ -114,20 +135,19 @@
 		</nav>
 		<p class="panel-foot">
 			{#if totalDocs != null}
-				Artifacts are linked through relations, forming one navigable wiki across
-				{fmt(totalDocs)} documents.
+				{m.deep_wiki_artifacts_are_linked_through_relations({ totalDocs: fmt(totalDocs) })}
 			{:else}
-				Artifacts are linked through relations, forming one navigable wiki.
+				{m.deep_wiki_artifacts_are_linked_through_relations_2()}
 			{/if}
 		</p>
 	</section>
 
 	<!-- ===================== PANEL C ===================== -->
-	<section class="panel-c" aria-label="Recent activity">
+	<section class="panel-c" aria-label={m.deep_wiki_recent_activity()}>
 		{#if loadError}
 			<div class="banner error">
 				<span>{loadError}</span>
-				<button type="button" onclick={load}>Retry</button>
+				<button type="button" onclick={load}>{m.deep_wiki_retry()}</button>
 			</div>
 		{/if}
 
@@ -135,8 +155,8 @@
 			<!-- Recent Adds -->
 			<div class="feed">
 				<header class="feed-head">
-					<h3>Recent Adds</h3>
-					<span class="feed-sub">newest documents</span>
+					<h3>{m.deep_wiki_recent_adds()}</h3>
+					<span class="feed-sub">{m.deep_wiki_newest_documents()}</span>
 				</header>
 				{#if loading}
 					{@render skeleton()}
@@ -158,8 +178,8 @@
 			<!-- Recent Edits -->
 			<div class="feed">
 				<header class="feed-head">
-					<h3>Recent Edits</h3>
-					<span class="feed-sub">most recently modified</span>
+					<h3>{m.deep_wiki_recent_edits()}</h3>
+					<span class="feed-sub">{m.deep_wiki_most_recently_modified()}</span>
 				</header>
 				{#if loading}
 					{@render skeleton()}
@@ -181,8 +201,8 @@
 			<!-- Recent Processed -->
 			<div class="feed">
 				<header class="feed-head">
-					<h3>Recent Processed</h3>
-					<span class="feed-sub">latest pipeline runs</span>
+					<h3>{m.deep_wiki_recent_processed()}</h3>
+					<span class="feed-sub">{m.deep_wiki_latest_pipeline_runs()}</span>
 				</header>
 				{#if loading}
 					{@render skeleton()}
@@ -210,8 +230,8 @@
 			<!-- Errors -->
 			<div class="feed feed-errors">
 				<header class="feed-head">
-					<h3>Errors</h3>
-					<span class="feed-sub">needs attention</span>
+					<h3>{m.deep_wiki_errors()}</h3>
+					<span class="feed-sub">{m.deep_wiki_needs_attention()}</span>
 				</header>
 				{#if loading}
 					{@render skeleton()}
@@ -243,7 +263,7 @@
 	</section>
 
 	<footer class="wiki-foot">
-		SemOS: a deep knowledge base. Documents and their artifacts, connected as one wiki.
+		{m.deep_wiki_semos_a_deep_knowledge_base()}
 	</footer>
 </div>
 

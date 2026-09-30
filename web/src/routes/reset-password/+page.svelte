@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { page } from '$app/stores';
 
 	let password = '';
@@ -14,17 +15,17 @@
 		message = '';
 
 		if (!password) {
-			message = 'Please enter a new password.';
+			message = m.reset_password_please_enter_a_new_password();
 			return;
 		}
 
 		if (password.length < 8) {
-			message = 'Password must be at least 8 characters long.';
+			message = m.reset_password_password_must_be_at_least();
 			return;
 		}
 
 		if (password !== confirmPassword) {
-			message = 'Passwords do not match.';
+			message = m.reset_password_passwords_do_not_match();
 			return;
 		}
 
@@ -37,16 +38,16 @@
 			});
 
 			if (res.ok) {
-				message = 'Your password has been reset successfully! Redirecting to login...';
+				message = m.reset_password_your_password_has_been_reset();
 				setTimeout(() => {
 					window.location.href = '/login';
 				}, 2000);
 			} else {
 				const errorMsg = await res.text();
-				message = errorMsg || 'Failed to reset password. Please try again.';
+				message = errorMsg || m.reset_password_failed_to_reset_password_please();
 			}
 		} catch (err) {
-			message = 'Network error. Please check your connection and try again.';
+			message = m.reset_password_network_error_please_check_your();
 		} finally {
 			isLoading = false;
 		}
@@ -60,8 +61,8 @@
 		class="w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg"
 	>
 		<div class="bg-indigo-600 px-6 py-6 text-center">
-			<h1 class="text-2xl font-bold text-white">Reset Your Password</h1>
-			<p class="mt-1 text-indigo-200">Enter a new secure password below</p>
+			<h1 class="text-2xl font-bold text-white">{m.reset_password_reset_your_password()}</h1>
+			<p class="mt-1 text-indigo-200">{m.reset_password_enter_a_new_secure_password()}</p>
 		</div>
 
 		<div class="p-6">
@@ -78,7 +79,7 @@
 			<form class="space-y-5" on:submit|preventDefault={handleResetPassword}>
 				<div>
 					<label for="password" class="mb-1 block text-sm font-medium text-gray-700">
-						New Password
+						{m.reset_password_new_password()}
 					</label>
 					<div class="relative">
 						<input
@@ -133,12 +134,12 @@
 							{/if}
 						</button>
 					</div>
-					<p class="mt-1 text-xs text-gray-500">Must be at least 8 characters</p>
+					<p class="mt-1 text-xs text-gray-500">{m.reset_password_must_be_at_least_8()}</p>
 				</div>
 
 				<div>
 					<label for="confirmPassword" class="mb-1 block text-sm font-medium text-gray-700">
-						Confirm New Password
+						{m.reset_password_confirm_new_password()}
 					</label>
 					<input
 						id="confirmPassword"
@@ -176,9 +177,9 @@
 								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
 							></path>
 						</svg>
-						Resetting...
+						{m.reset_password_resetting()}
 					{:else}
-						Reset Password
+						{m.reset_password_reset_password()}
 					{/if}
 				</button>
 			</form>
@@ -188,7 +189,7 @@
 					href="/login"
 					class="text-sm font-medium text-indigo-600 transition hover:text-indigo-500"
 				>
-					← Back to Login AA
+					{m.reset_password_back_to_login_aa()}
 				</a>
 			</div>
 		</div>

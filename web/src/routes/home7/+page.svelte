@@ -1,5 +1,9 @@
+<script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
+</script>
+
 <svelte:head>
-	<title>Signal Forge | AI Application and Knowledge System</title>
+	<title>{m.home7_signal_forge_ai_application_and()}</title>
 	<meta
 		name="description"
 		content="Build AI-enabled applications with a vibe-first workflow and manage your personal knowledge base in one connected system."
@@ -13,64 +17,60 @@
 
 	<header class="topbar">
 		<div class="brand">
-			<div class="brand-mark">SF</div>
-			<span>Signal Forge</span>
+			<div class="brand-mark">{m.home7_sf()}</div>
+			<span>{m.home7_signal_forge()}</span>
 		</div>
 		<nav>
-			<a href="#engines">Engines</a>
-			<a href="#workflow">Workflow</a>
-			<a href="#features">Features</a>
+			<a href="#engines">{m.home7_engines()}</a>
+			<a href="#workflow">{m.home7_workflow()}</a>
+			<a href="#features">{m.home7_features()}</a>
 		</nav>
-		<a class="btn btn-ghost" href="#cta">Start Building</a>
+		<a class="btn btn-ghost" href="#cta">{m.home7_start_building()}</a>
 	</header>
 
 	<main>
 		<section class="hero">
-			<p class="eyebrow">AI-native creator system</p>
+			<p class="eyebrow">{m.home7_ai_native_creator_system()}</p>
 			<h1>
-				Build useful AI apps with momentum.<br />
-				Grow a knowledge base that compounds.
+				{m.home7_build_useful_ai_apps_with()}<br />
+				{m.home7_grow_a_knowledge_base_that()}
 			</h1>
 			<p class="hero-copy">
-				For builders who want more than prompts: orchestrate AI, ship vibe-coded applications,
-				and keep every insight searchable, linked, and reusable.
+				{m.home7_for_builders_who_want_more()}
 			</p>
 			<div class="hero-actions">
-				<a class="btn btn-primary" href="#cta">Launch Workspace</a>
-				<a class="btn btn-outline" href="#workflow">See How It Works</a>
+				<a class="btn btn-primary" href="#cta">{m.home7_launch_workspace()}</a>
+				<a class="btn btn-outline" href="#workflow">{m.home7_see_how_it_works()}</a>
 			</div>
 			<div class="hero-metrics">
-				<div><span>4.3x</span><p>faster prototype cycles</p></div>
-				<div><span>96%</span><p>knowledge retrieval accuracy</p></div>
-				<div><span>24/7</span><p>agent-assisted ideation</p></div>
+				<div><span>4.3x</span><p>{m.home7_faster_prototype_cycles()}</p></div>
+				<div><span>96%</span><p>{m.home7_knowledge_retrieval_accuracy()}</p></div>
+				<div><span>24/7</span><p>{m.home7_agent_assisted_ideation()}</p></div>
 			</div>
 		</section>
 
 		<section id="engines" class="section">
 			<div class="section-head">
-				<p class="eyebrow">Three connected engines</p>
-				<h2>One system for app creation and knowledge mastery</h2>
+				<p class="eyebrow">{m.home7_three_connected_engines()}</p>
+				<h2>{m.home7_one_system_for_app_creation()}</h2>
 			</div>
 			<div class="engine-grid">
 				<article class="card glow-cyan">
-					<h3>AI Orchestration</h3>
+					<h3>{m.home7_ai_orchestration()}</h3>
 					<p>
-						Route tasks across models, tools, and data sources with predictable controls and
-						auditable outcomes.
+						{m.home7_route_tasks_across_models_tools()}
 					</p>
 				</article>
 				<article class="card glow-lime">
-					<h3>Vibe App Builder</h3>
+					<h3>{m.home7_vibe_app_builder()}</h3>
 					<p>
-						Translate intent into full interfaces and backend logic, then refine with real-time
-						feedback loops.
+						{m.home7_translate_intent_into_full_interfaces()}
 					</p>
 				</article>
 				<article class="card glow-amber">
-					<h3>Personal Knowledge Base</h3>
+					<h3>{m.home7_personal_knowledge_base()}</h3>
 					<p>
-						Capture notes, docs, and decisions into linked memory so every new project starts with
-						context.
+						{m.home7_capture_notes_docs_and_decisions()}
 					</p>
 				</article>
 			</div>
@@ -78,67 +78,67 @@
 
 		<section id="workflow" class="section workflow">
 			<div class="section-head">
-				<p class="eyebrow">Workflow</p>
-				<h2>From idea to deployed AI experience</h2>
+				<p class="eyebrow">{m.home7_workflow()}</p>
+				<h2>{m.home7_from_idea_to_deployed_ai()}</h2>
 			</div>
 			<div class="steps">
 				<div class="step">
 					<span>01</span>
-					<h4>Capture intent</h4>
-					<p>Define outcomes, constraints, and user signals in a structured brief.</p>
+					<h4>{m.home7_capture_intent()}</h4>
+					<p>{m.home7_define_outcomes_constraints_and_user()}</p>
 				</div>
 				<div class="step">
 					<span>02</span>
-					<h4>Compose agents</h4>
-					<p>Assemble specialized AI workers and tool chains for coding, testing, and docs.</p>
+					<h4>{m.home7_compose_agents()}</h4>
+					<p>{m.home7_assemble_specialized_ai_workers_and()}</p>
 				</div>
 				<div class="step">
 					<span>03</span>
-					<h4>Ship and learn</h4>
-					<p>Deploy, observe usage patterns, and feed insights back into your knowledge graph.</p>
+					<h4>{m.home7_ship_and_learn()}</h4>
+					<p>{m.home7_deploy_observe_usage_patterns_and()}</p>
 				</div>
 			</div>
 		</section>
 
 		<section id="features" class="section features">
 			<div class="feature-left card">
-				<p class="eyebrow">Built for serious builders</p>
-				<h3>Everything needed to build AI-enabled products without losing context</h3>
+				<p class="eyebrow">{m.home7_built_for_serious_builders()}</p>
+				<h3>{m.home7_everything_needed_to_build_ai()}</h3>
 				<ul>
-					<li>Model routing with cost and quality policies</li>
-					<li>Prompt, code, and docs unified in one workspace</li>
-					<li>Knowledge graph with semantic search and source tracing</li>
-					<li>Reusable templates for rapid app iteration</li>
+					<li>{m.home7_model_routing_with_cost_and()}</li>
+					<li>{m.home7_prompt_code_and_docs_unified()}</li>
+					<li>{m.home7_knowledge_graph_with_semantic_search()}</li>
+					<li>{m.home7_reusable_templates_for_rapid_app()}</li>
 				</ul>
 			</div>
 			<div class="feature-right">
 				<div class="mini card">
-					<h4>Context Memory</h4>
-					<p>Every project artifact indexed and linked for retrieval at build time.</p>
+					<h4>{m.home7_context_memory()}</h4>
+					<p>{m.home7_every_project_artifact_indexed_and()}</p>
 				</div>
 				<div class="mini card">
-					<h4>Vibe Loop</h4>
-					<p>Describe, generate, test, and tune with tight creative feedback cycles.</p>
+					<h4>{m.home7_vibe_loop()}</h4>
+					<p>{m.home7_describe_generate_test_and_tune()}</p>
 				</div>
 				<div class="mini card">
-					<h4>Deployment Paths</h4>
-					<p>Export to API, web app, or internal tool with one consistent pipeline.</p>
+					<h4>{m.home7_deployment_paths()}</h4>
+					<p>{m.home7_export_to_api_web_app()}</p>
 				</div>
 			</div>
 		</section>
 
 		<section class="social-proof section">
-			<p>Trusted by indie builders, product teams, and research engineers.</p>
+			<p>{m.home7_trusted_by_indie_builders_product()}</p>
 			<div class="proof-row">
-				<span>Iterative AI Studio</span><span>ContextOps Labs</span><span>Makers Guild</span
-				><span>Next Prototype Co.</span>
+				<span>{m.home7_iterative_ai_studio()}</span><span>{m.home7_contextops_labs()}</span><span>{m.home7_makers_guild()}</span
+				><span>{m.home7_next_prototype_co()}</span>
 			</div>
 		</section>
 
 		<section id="cta" class="section cta">
-			<h2>Turn scattered ideas into AI products and lasting knowledge</h2>
-			<p>Start with one workflow. End with a system that scales with your thinking.</p>
-			<a class="btn btn-primary" href="/login">Create Your AI Workspace</a>
+			<h2>{m.home7_turn_scattered_ideas_into_ai()}</h2>
+			<p>{m.home7_start_with_one_workflow_end()}</p>
+			<a class="btn btn-primary" href="/login">{m.home7_create_your_ai_workspace()}</a>
 		</section>
 	</main>
 </div>

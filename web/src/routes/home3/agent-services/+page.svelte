@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		createAgentConversation, decideAgentPermission, deleteAgentConversation, getAgentConversation,
@@ -45,7 +46,7 @@
 		finally { loading = false; }
 	}
 
-	function readableError(cause: unknown) { return cause instanceof Error ? cause.message : 'Something went wrong. Try again.'; }
+	function readableError(cause: unknown) { return cause instanceof Error ? cause.message : m.home3_agent_services_something_went_wrong_try_again(); }
 
 	async function chooseService(slug: string) {
 		if (running) return;
@@ -72,7 +73,7 @@
 		if (!selectedSlug || running || busy) return;
 		busy = true; error = '';
 		try {
-			const created = await createAgentConversation(selectedSlug, 'New conversation');
+			const created = await createAgentConversation(selectedSlug, m.home3_agent_services_new_conversation());
 			conversations = await listAgentConversations();
 			resume = await getAgentConversation(created.id); activeId = created.id; live = null;
 			history.replaceState(null, '', `${window.location.pathname}?conversation=${encodeURIComponent(created.id)}`);
@@ -81,7 +82,7 @@
 	}
 
 	async function removeConversation(id: string) {
-		if (running || busy || !confirm('Delete this conversation and its saved answers?')) return;
+		if (running || busy || !confirm(m.home3_agent_services_delete_this_conversation_and_its())) return;
 		busy = true; error = '';
 		try {
 			await deleteAgentConversation(id);
@@ -94,7 +95,7 @@
 	async function sendMessage(text = composer) {
 		const question = text.trim();
 		if (!question || running || busy || !selectedSlug) return;
-		if (question.length > 16000) { error = 'Please shorten your question.'; return; }
+		if (question.length > 16000) { error = m.home3_agent_services_please_shorten_your_question(); return; }
 		let conversationId = activeId;
 		if (!conversationId) {
 			await newConversation();
@@ -108,7 +109,7 @@
 			await streamAgentRun(conversationId, question, permissionMode,
 				(event) => { if (live) live = applyAgentEvent(live, event); },
 				(id) => { runId = id; }, currentAbort.signal);
-			if (live?.status === 'running') live = { ...live, status: 'interrupted', error: 'The connection ended before the answer was finished.' };
+			if (live?.status === 'running') live = { ...live, status: 'interrupted', error: m.home3_agent_services_the_connection_ended_before_the() };
 		} catch (cause) {
 			error = readableError(cause);
 			if (live) live = { ...live, status: 'interrupted', permission: null, sources: [] };
@@ -142,40 +143,40 @@
 		catch (cause) { error = readableError(cause); }
 	}
 
-	function sourceLabel(source: AgentSource & { document_title?: string }) { return source.document_title || source.source_title || `Document ${source.document_id}`; }
+	function sourceLabel(source: AgentSource & { document_title?: string }) { return source.document_title || source.source_title || m.home3_agent_services_document({ document_id: source.document_id }); }
 	function sourceLocation(source: AgentSource & { page_start?: number; page_end?: number }) {
 		const page = source.page_start || source.page;
-		const lines = source.line_start && source.line_end ? ` · lines ${source.line_start}–${source.line_end}` : '';
+		const lines = source.line_start && source.line_end ? m.home3_agent_services_lines({ line_start: source.line_start, line_end: source.line_end }) : '';
 		return `${page ? `page ${page}` : 'source'}${lines}`;
 	}
 	function runStatus(status: string) {
-		return ({ running: 'Working', completed: 'Completed', stopped: 'Stopped', interrupted: 'Interrupted', limit: 'Limit reached', failed: 'Could not finish' } as Record<string, string>)[status] ?? status;
+		return ({ running: m.home3_agent_services_working(), completed: m.home3_agent_services_completed(), stopped: m.home3_agent_services_stopped(), interrupted: m.home3_agent_services_interrupted(), limit: m.home3_agent_services_limit_reached(), failed: m.home3_agent_services_could_not_finish() } as Record<string, string>)[status] ?? status;
 	}
 </script>
 
 <svelte:head>
-	<title>Knowledge Desk · ChenWeb</title>
+	<title>{m.home3_agent_services_knowledge_desk_chenweb()}</title>
 	<meta name="description" content="Ask ChenWeb's evidence-guided agents about your documents and problems." />
 </svelte:head>
 
 <div class="desk">
 	<header class="masthead">
-		<a class="back" href="/home3/knowledge">← Workspace</a>
-		<div class="brand"><span class="mark">CW</span><span>CHENWEB <small>KNOWLEDGE DESK</small></span></div>
-		<div class="mast-note">AI-assisted research · evidence first</div>
+		<a class="back" href="/home3/knowledge">{m.home3_agent_services_workspace()}</a>
+		<div class="brand"><span class="mark">{m.home3_agent_services_cw()}</span><span>{m.home3_agent_services_chenweb()} <small>{m.home3_agent_services_knowledge_desk()}</small></span></div>
+		<div class="mast-note">{m.home3_agent_services_ai_assisted_research_evidence_first()}</div>
 	</header>
 
 	<section class="intro">
-		<div><p class="eyebrow">FIELD NOTES / 01</p><h1>Ask the knowledge<br /><em>behind the answer.</em></h1></div>
-		<p class="intro-copy">Choose a guide, ask your question, and see the documents it used. The guide can be useful, but it can be wrong—check important answers against the original source.</p>
+		<div><p class="eyebrow">{m.home3_agent_services_field_notes_01()}</p><h1>{m.home3_agent_services_ask_the_knowledge()}<br /><em>{m.home3_agent_services_behind_the_answer()}</em></h1></div>
+		<p class="intro-copy">{m.home3_agent_services_choose_a_guide_ask_your()}</p>
 	</section>
 
-	{#if error}<div class="notice error" role="alert">{error}<button onclick={() => error = ''} aria-label="Dismiss error">×</button></div>{/if}
-	{#if loading}<div class="loading">Opening the knowledge desk…</div>{/if}
-	{#if !loading && profiles.length === 0}<div class="notice">No guides are enabled for your account yet. Ask your ChenWeb administrator about the pilot.</div>{/if}
+	{#if error}<div class="notice error" role="alert">{error}<button onclick={() => error = ''} aria-label={m.home3_agent_services_dismiss_error()}>×</button></div>{/if}
+	{#if loading}<div class="loading">{m.home3_agent_services_opening_the_knowledge_desk()}</div>{/if}
+	{#if !loading && profiles.length === 0}<div class="notice">{m.home3_agent_services_no_guides_are_enabled_for()}</div>{/if}
 
 	{#if profiles.length > 0}
-		<div class="service-strip" role="group" aria-label="Choose a guide">
+		<div class="service-strip" role="group" aria-label={m.home3_agent_services_choose_a_guide()}>
 			{#each profiles as profile (profile.slug)}
 				<button class:chosen={selectedSlug === profile.slug} disabled={running} onclick={() => chooseService(profile.slug)}>
 					<span class="service-number">{profile.slug === 'knowledge-guide' ? '01' : '02'}</span>
@@ -186,55 +187,55 @@
 		</div>
 
 		<div class="workbench">
-			<aside class="conversations" aria-label="Conversations">
-				<div class="panel-heading"><span>CONVERSATIONS</span><button class="new" disabled={running || busy} onclick={newConversation}>+ New</button></div>
-				{#if visibleConversations.length === 0}<p class="empty-list">No conversations yet. Start with a question.</p>{/if}
+			<aside class="conversations" aria-label={m.home3_agent_services_conversations()}>
+				<div class="panel-heading"><span>{m.home3_agent_services_conversations_2()}</span><button class="new" disabled={running || busy} onclick={newConversation}>{m.home3_agent_services_new()}</button></div>
+				{#if visibleConversations.length === 0}<p class="empty-list">{m.home3_agent_services_no_conversations_yet_start_with()}</p>{/if}
 				{#each visibleConversations as conversation (conversation.id)}
 					<div class:current={activeId === conversation.id} class="conversation-row">
-						<button class="conversation-open" disabled={running || busy} onclick={() => openConversation(conversation.id)}><span>{conversation.title || 'Untitled conversation'}</span><small>{new Date(conversation.updated_at).toLocaleDateString()}</small></button>
-						<button class="delete" disabled={running || busy} onclick={() => removeConversation(conversation.id)} title="Delete conversation" aria-label={`Delete ${conversation.title}`}>×</button>
+						<button class="conversation-open" disabled={running || busy} onclick={() => openConversation(conversation.id)}><span>{conversation.title || m.home3_agent_services_untitled_conversation()}</span><small>{new Date(conversation.updated_at).toLocaleDateString()}</small></button>
+						<button class="delete" disabled={running || busy} onclick={() => removeConversation(conversation.id)} title={m.home3_agent_services_delete_conversation()} aria-label={m.home3_agent_services_delete({ title: conversation.title })}>×</button>
 					</div>
 				{/each}
 			</aside>
 
 			<main class="thread">
-				<div class="thread-head"><div><span class="eyebrow">{selectedProfile?.friendly_name ?? 'GUIDE'}</span><h2>{resume?.conversation.title || 'A new conversation'}</h2></div><span class="provider">{selectedProfile?.provider_disclosure || selectedProfile?.provider || 'AI provider'}</span></div>
+				<div class="thread-head"><div><span class="eyebrow">{selectedProfile?.friendly_name ?? 'GUIDE'}</span><h2>{resume?.conversation.title || m.home3_agent_services_a_new_conversation()}</h2></div><span class="provider">{selectedProfile?.provider_disclosure || selectedProfile?.provider || m.home3_agent_services_ai_provider()}</span></div>
 				<div class="messages" aria-live="polite">
 					{#if resume?.omission_notice}<div class="notice access">{resume.omission_notice}</div>{/if}
-					{#if !resume?.messages.length && !live}<div class="empty-thread"><span class="large-mark">?</span><h3>What would you like to understand?</h3><p>Ask about a document, product, metric, or problem. Your guide can search only knowledge you are allowed to see.</p></div>{/if}
+					{#if !resume?.messages.length && !live}<div class="empty-thread"><span class="large-mark">?</span><h3>{m.home3_agent_services_what_would_you_like_to()}</h3><p>{m.home3_agent_services_ask_about_a_document_product()}</p></div>{/if}
 					{#each resume?.messages ?? [] as message (message.id)}
 						<article class:user={message.role === 'user'} class="message">
 							<div class="message-label">{message.role === 'user' ? 'YOU' : selectedProfile?.friendly_name?.toUpperCase() || 'GUIDE'} <span>{message.status !== 'complete' ? `· ${message.status}` : ''}</span></div>
-							<p>{message.content || (message.status === 'streaming' ? 'Answer in progress…' : '')}</p>
+							<p>{message.content || (message.status === 'streaming' ? m.home3_agent_services_answer_in_progress() : '')}</p>
 							{#if message.role === 'assistant' && savedSources[message.id]?.length}
 								<div class="inline-sources">{#each savedSources[message.id] as source}<span>↗ {sourceLabel(source)} · {sourceLocation(source)}</span>{/each}</div>
 							{/if}
-							{#if message.role === 'assistant' && message.status === 'complete'}<div class="rating"><span>Was this useful?</span><button onclick={() => rate(message.id, 'helpful')}>Yes</button><button onclick={() => rate(message.id, 'unhelpful')}>No</button></div>{/if}
+							{#if message.role === 'assistant' && message.status === 'complete'}<div class="rating"><span>{m.home3_agent_services_was_this_useful()}</span><button onclick={() => rate(message.id, 'helpful')}>{m.home3_agent_services_yes()}</button><button onclick={() => rate(message.id, 'unhelpful')}>{m.home3_agent_services_no()}</button></div>{/if}
 						</article>
 					{/each}
-					{#if running && lastPrompt}<article class="message user pending"><div class="message-label">YOU · SENDING</div><p>{lastPrompt}</p></article>{/if}
+					{#if running && lastPrompt}<article class="message user pending"><div class="message-label">{m.home3_agent_services_you_sending()}</div><p>{lastPrompt}</p></article>{/if}
 					{#if live && (running || live.status !== 'completed')}
-						<article class="message live"><div class="message-label">{selectedProfile?.friendly_name?.toUpperCase() || 'GUIDE'} · {runStatus(live.status)}</div><p>{live.answer || (running ? 'Searching the knowledge base…' : 'Any partial answer is saved above.')}</p>{#if live.error}<small class="live-error">{live.error}</small>{/if}</article>
+						<article class="message live"><div class="message-label">{selectedProfile?.friendly_name?.toUpperCase() || 'GUIDE'} · {runStatus(live.status)}</div><p>{live.answer || (running ? m.home3_agent_services_searching_the_knowledge_base() : m.home3_agent_services_any_partial_answer_is_saved())}</p>{#if live.error}<small class="live-error">{live.error}</small>{/if}</article>
 					{/if}
 				</div>
 				<form class="composer" onsubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
-					<label for="question">YOUR QUESTION</label>
-					<textarea id="question" bind:value={composer} disabled={running || busy} maxlength="16000" placeholder="Describe the question or problem you are working through…" rows="3"></textarea>
-					<div class="composer-foot"><div class="mode"><span>Knowledge tools:</span><label><input type="radio" name="permission" value="auto" bind:group={permissionMode} disabled={running} />Use allowed tools automatically</label><label><input type="radio" name="permission" value="ask" bind:group={permissionMode} disabled={running} />Ask me first</label></div><div class="composer-actions">{#if running}<button type="button" class="stop" disabled={!runId} onclick={stopRun}>Stop</button>{:else if lastPrompt && live?.status !== 'completed'}<button type="button" class="retry" onclick={() => { composer = lastPrompt; }}>Try again</button>{/if}<button type="submit" class="send" disabled={!composer.trim() || running || busy}>Ask guide ↗</button></div></div>
+					<label for="question">{m.home3_agent_services_your_question()}</label>
+					<textarea id="question" bind:value={composer} disabled={running || busy} maxlength="16000" placeholder={m.home3_agent_services_describe_the_question_or_problem()} rows="3"></textarea>
+					<div class="composer-foot"><div class="mode"><span>{m.home3_agent_services_knowledge_tools()}</span><label><input type="radio" name="permission" value="auto" bind:group={permissionMode} disabled={running} />{m.home3_agent_services_use_allowed_tools_automatically()}</label><label><input type="radio" name="permission" value="ask" bind:group={permissionMode} disabled={running} />{m.home3_agent_services_ask_me_first()}</label></div><div class="composer-actions">{#if running}<button type="button" class="stop" disabled={!runId} onclick={stopRun}>{m.home3_agent_services_stop()}</button>{:else if lastPrompt && live?.status !== 'completed'}<button type="button" class="retry" onclick={() => { composer = lastPrompt; }}>{m.home3_agent_services_try_again()}</button>{/if}<button type="submit" class="send" disabled={!composer.trim() || running || busy}>{m.home3_agent_services_ask_guide()}</button></div></div>
 				</form>
 			</main>
 
-			<aside class="evidence" aria-label="Evidence and activity">
-				<div class="evidence-top"><span class="eyebrow">THE RESEARCH TRAIL</span><h2>Evidence &amp;<br /><em>activity</em></h2><p>These are documents and actions the guide used—not its private reasoning.</p></div>
-				{#if live?.permission}<div class="approval" role="alert"><strong>Approval needed</strong><p>May the guide use <code>{live.permission.tool.replaceAll('_', ' ')}</code> to look up knowledge?</p><div><button onclick={() => answerPermission(false)}>Deny</button><button class="approve" onclick={() => answerPermission(true)}>Allow this time</button></div></div>{/if}
-				<div class="evidence-section"><div class="section-title"><span>01 / SOURCES</span><span>{(live?.sources.length || latestSources.length) || '—'}</span></div>
-					{#if (live?.sources.length || latestSources.length) === 0}<p class="quiet">Document references will appear here after the answer is saved and checked.</p>{/if}
+			<aside class="evidence" aria-label={m.home3_agent_services_evidence_and_activity()}>
+				<div class="evidence-top"><span class="eyebrow">{m.home3_agent_services_the_research_trail()}</span><h2>{m.home3_agent_services_evidence()}<br /><em>{m.home3_agent_services_activity()}</em></h2><p>{m.home3_agent_services_these_are_documents_and_actions()}</p></div>
+				{#if live?.permission}<div class="approval" role="alert"><strong>{m.home3_agent_services_approval_needed()}</strong><p>{m.home3_agent_services_may_the_guide_use()} <code>{live.permission.tool.replaceAll('_', ' ')}</code> {m.home3_agent_services_to_look_up_knowledge()}</p><div><button onclick={() => answerPermission(false)}>{m.home3_agent_services_deny()}</button><button class="approve" onclick={() => answerPermission(true)}>{m.home3_agent_services_allow_this_time()}</button></div></div>{/if}
+				<div class="evidence-section"><div class="section-title"><span>{m.home3_agent_services_01_sources()}</span><span>{(live?.sources.length || latestSources.length) || '—'}</span></div>
+					{#if (live?.sources.length || latestSources.length) === 0}<p class="quiet">{m.home3_agent_services_document_references_will_appear_here()}</p>{/if}
 					{#each (live?.sources.length ? live.sources : latestSources) as source, index (`${source.document_id}-${index}`)}
-						<div class="source-card"><span class="source-index">{String(index + 1).padStart(2, '0')}</span><strong>{sourceLabel(source)}</strong><small>{sourceLocation(source)}</small>{#if source.artifact_type}<small>{source.artifact_type}{source.artifact_id ? ` · ${source.artifact_id}` : ''}</small>{/if}<a href="/home3/inputs" target="_blank" rel="noopener noreferrer">Open knowledge documents ↗</a><small>Record ID {source.document_id}</small></div>
+						<div class="source-card"><span class="source-index">{String(index + 1).padStart(2, '0')}</span><strong>{sourceLabel(source)}</strong><small>{sourceLocation(source)}</small>{#if source.artifact_type}<small>{source.artifact_type}{source.artifact_id ? ` · ${source.artifact_id}` : ''}</small>{/if}<a href="/home3/inputs" target="_blank" rel="noopener noreferrer">{m.home3_agent_services_open_knowledge_documents()}</a><small>{m.home3_agent_services_record_id({ document_id: source.document_id })}</small></div>
 					{/each}
 				</div>
-				<div class="evidence-section"><div class="section-title"><span>02 / ACTIVITY</span><span>{live?.activity.length || '—'}</span></div>{#if !live?.activity.length}<p class="quiet">Search and reading actions will appear during a run.</p>{/if}{#each live?.activity ?? [] as action, index (index)}<div class="activity-row"><span class="activity-dot" class:bad={action.error}></span><span>{action.tool ? action.tool.replaceAll('_', ' ') : 'Retrying'} · {action.status}{action.error ? ' (failed)' : ''}</span></div>{/each}</div>
-				<div class="scope-note"><strong>ABOUT THIS GUIDE</strong><p>{selectedProfile?.description}</p><p>Model: {selectedProfile?.model}. Allowed store names (subject to your access): {selectedProfile?.allowed_knowledge_stores?.join(', ') || 'none'}.</p><p>AI can misread evidence or miss context. Verify consequential decisions with the source document and a qualified person.</p></div>
+				<div class="evidence-section"><div class="section-title"><span>{m.home3_agent_services_02_activity()}</span><span>{live?.activity.length || '—'}</span></div>{#if !live?.activity.length}<p class="quiet">{m.home3_agent_services_search_and_reading_actions_will()}</p>{/if}{#each live?.activity ?? [] as action, index (index)}<div class="activity-row"><span class="activity-dot" class:bad={action.error}></span><span>{action.tool ? action.tool.replaceAll('_', ' ') : m.home3_agent_services_retrying()} · {action.status}{action.error ? m.home3_agent_services_failed() : ''}</span></div>{/each}</div>
+				<div class="scope-note"><strong>{m.home3_agent_services_about_this_guide()}</strong><p>{selectedProfile?.description}</p><p>{m.home3_agent_services_model_allowed_store_names_subject({ model: selectedProfile?.model ?? '', allowed_knowledge_stores: selectedProfile?.allowed_knowledge_stores?.join(', ') || m.home3_agent_services_none() })}</p><p>{m.home3_agent_services_ai_can_misread_evidence_or()}</p></div>
 			</aside>
 		</div>
 	{/if}
