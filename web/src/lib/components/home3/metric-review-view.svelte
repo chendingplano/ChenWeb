@@ -57,6 +57,7 @@
 	let rawLines = $state<RawLine[]>([]);
 	let pdfPage = $state(1);
 	let highlightedLines = $state<number[]>([]);
+	let selectedFindingKey = $state<string | null>(null);
 	let highlightVersion = $state(0);
 	let pdfError = $state('');
 	let pdfZoom = $state(0.5);
@@ -83,7 +84,8 @@
 		if (pane === 'menu') menuWidth = Math.max(170, Math.min(layoutEl.clientWidth - 560, menuWidth + delta));
 		else reportWidth = Math.max(300, Math.min(layoutEl.clientWidth - menuWidth - 280, reportWidth + delta));
 	}
-	function showSource(spans: string[]) {
+	function showSource(key: string, spans: string[]) {
+		selectedFindingKey = key;
 		highlightedLines = reviewLineNumbers(spans);
 		const first = rawLines.find((line) => highlightedLines.includes(line.line_number));
 		if (first) pdfPage = first.page_number;
@@ -100,6 +102,7 @@
 			if (line.page_number !== pageNo || !highlightedLines.includes(line.line_number) || !Array.isArray(line.coords) || line.coords.length < 4) continue;
 			const [x1, y1, x2, y2] = line.coords;
 			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
 			mark.style.cssText = `position:absolute;left:${Math.min(x1,x2)*viewport.width/1000}px;top:${Math.min(y1,y2)*viewport.height/1000}px;width:${Math.abs(x2-x1)*viewport.width/1000+20}px;height:${Math.max(2,Math.abs(y2-y1)*viewport.height/1000)}px;background:rgba(129,140,248,.35);pointer-events:none;`;
 			overlay.appendChild(mark);
 		}
@@ -179,6 +182,7 @@
 		rawLines = [];
 		pdfPage = 1;
 		highlightedLines = [];
+		selectedFindingKey = null;
 		pdfError = '';
 		getRawLines(rec.id).then((res) => {
 			if (selected?.id !== rec.id) return;
@@ -581,7 +585,7 @@
 								<p class="text-sm" style="color:{textMuted};">{m.mrv_none_missed()}</p>
 							{/if}
 							{#each sortBySeverity(report.missed_metrics) as mm, i (i)}
-				<div role="button" tabindex="0" class="rounded-lg p-3 space-y-1 cursor-pointer" style="border:1px solid {borderColor};" onclick={() => showSource(mm.source_line_spans ?? mm.lines.split(','))} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showSource(mm.source_line_spans ?? mm.lines.split(',')); } }}>
+				<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `missed:${i}`} class="rounded-lg p-3 space-y-1 cursor-pointer" style="background:{selectedFindingKey === `missed:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `missed:${i}` ? accent : borderColor};" onclick={() => showSource(`missed:${i}`, mm.source_line_spans ?? mm.lines.split(','))} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showSource(`missed:${i}`, mm.source_line_spans ?? mm.lines.split(',')); } }}>
 									<div class="flex flex-wrap items-center gap-2">
 										{@render severityBadge(mm.severity)}
 										<span class="font-medium" style="color:{textPrimary};">{mm.name}</span>
@@ -610,7 +614,7 @@
 										{CATEGORY_LABEL[g.category]}
 									</div>
 									{#each g.entries as e, i (i)}
-						<div role="button" tabindex="0" class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="border:1px solid {borderColor};" onclick={() => showSource(sourceForMetricIds(e.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(sourceForMetricIds(e.metric_ids)); } }}>
+						<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `non:${g.category}:${i}`} class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="background:{selectedFindingKey === `non:${g.category}:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `non:${g.category}:${i}` ? accent : borderColor};" onclick={() => showSource(`non:${g.category}:${i}`, sourceForMetricIds(e.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(`non:${g.category}:${i}`, sourceForMetricIds(e.metric_ids)); } }}>
 											<div class="flex flex-wrap items-center gap-2">
 												{@render metricChips(e.metric_ids)}
 												{#if e.duplicate_of}
@@ -634,7 +638,7 @@
 								<p class="text-sm" style="color:{textMuted};">{m.mrv_none()}</p>
 							{/if}
 							{#each sortBySeverity(report.attribute_issues) as a, i (i)}
-				<div role="button" tabindex="0" class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="border:1px solid {borderColor};" onclick={() => showSource(sourceForMetricIds(a.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(sourceForMetricIds(a.metric_ids)); } }}>
+				<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `attribute:${i}`} class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="background:{selectedFindingKey === `attribute:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `attribute:${i}` ? accent : borderColor};" onclick={() => showSource(`attribute:${i}`, sourceForMetricIds(a.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(`attribute:${i}`, sourceForMetricIds(a.metric_ids)); } }}>
 									<div class="flex flex-wrap items-center gap-2">
 										{@render severityBadge(a.severity)}
 										<code class="text-xs rounded px-1.5 py-0.5" style="background:{surface2}; color:{accent};"
@@ -670,7 +674,7 @@
 			{/if}
 		</div>
 		<button type="button" aria-label={m.mrv_resize_report()} class="pane-divider" onpointerdown={(e) => startPaneDrag(e, 'report')} onpointermove={movePaneDrag} onpointerup={stopPaneDrag} onpointercancel={stopPaneDrag} onkeydown={(e) => onPaneKeydown(e, 'report')}></button>
-		<div class="rounded-xl flex-1 min-w-0 min-h-0 overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor};">
+		<div class="rounded-xl flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor};">
 			{#if selected}
 				{#if pdfError}<p class="p-4 text-sm" style="color:{danger};">{pdfError}</p>{/if}
 				<PdfViewWindow inputId={selected.id} fileUrl={`/api/v1/kb/inputs/${selected.id}/file`} bind:page={pdfPage} bind:zoom={pdfZoom} bind:numPages={pdfPages} {darkMode} showSidebar={false} enableSelectionDialog={false} {highlightVersion} renderHighlights={renderSourceHighlights} />
