@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as i18n } from '$lib/paraglide/messages.js';
 	import { tick } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
@@ -362,49 +363,49 @@
 				.filter((s) => s !== '');
 
 		const identity: AttrDef[] = [
-			textAttr('inventory_item_id', 'Item ID', HashIcon, fmt(m.inventory_item_id), has(m.inventory_item_id)),
-			textAttr('item_name', 'Item Name', TypeIcon, fmt(m.item_name), has(m.item_name)),
+			textAttr('inventory_item_id', i18n.inventory_items_item_id(), HashIcon, fmt(m.inventory_item_id), has(m.inventory_item_id)),
+			textAttr('item_name', i18n.inventory_items_item_name(), TypeIcon, fmt(m.item_name), has(m.item_name)),
 			textAttr(
 				'canonical_name',
-				'Canonical',
+				i18n.inventory_items_canonical(),
 				TypeIcon,
 				fmt(m.canonical_name),
 				has(m.canonical_name)
 			),
-			textAttr('item_category', 'Category', TagIcon, fmt(m.item_category), has(m.item_category))
+			textAttr('item_category', i18n.inventory_items_category_2(), TagIcon, fmt(m.item_category), has(m.item_category))
 		];
 
 		const maker: AttrDef[] = [
-			textAttr('manufacturer', 'Manufacturer', FactoryIcon, fmt(m.manufacturer), has(m.manufacturer)),
-			textAttr('brand', 'Brand', TagIcon, fmt(m.brand), has(m.brand)),
-			textAttr('model_number', 'Model #', HashIcon, fmt(m.model_number), has(m.model_number)),
-			textAttr('part_number', 'Part #', HashIcon, fmt(m.part_number), has(m.part_number))
+			textAttr('manufacturer', i18n.inventory_items_manufacturer(), FactoryIcon, fmt(m.manufacturer), has(m.manufacturer)),
+			textAttr('brand', i18n.inventory_items_brand(), TagIcon, fmt(m.brand), has(m.brand)),
+			textAttr('model_number', i18n.inventory_items_model(), HashIcon, fmt(m.model_number), has(m.model_number)),
+			textAttr('part_number', i18n.inventory_items_part(), HashIcon, fmt(m.part_number), has(m.part_number))
 		];
 
 		const specs: AttrDef[] = [
-			chipsAttr('normalized_specs', 'Normalized', TrendingUpIcon, specStrs(m.normalized_specs)),
-			chipsAttr('raw_specs', 'Raw Specs', ListIcon, specStrs(m.raw_specs)),
-			chipsAttr('standards', 'Standards', ShieldCheckIcon, cleanStrs(m.standards)),
-			chipsAttr('aliases', 'Aliases', TagIcon, cleanStrs(m.aliases))
+			chipsAttr('normalized_specs', i18n.inventory_items_normalized(), TrendingUpIcon, specStrs(m.normalized_specs)),
+			chipsAttr('raw_specs', i18n.inventory_items_raw_specs(), ListIcon, specStrs(m.raw_specs)),
+			chipsAttr('standards', i18n.inventory_items_standards(), ShieldCheckIcon, cleanStrs(m.standards)),
+			chipsAttr('aliases', i18n.inventory_items_aliases(), TagIcon, cleanStrs(m.aliases))
 		];
 
 		const validation: AttrDef[] = [
-			textAttr('confidence', 'Confidence', ActivityIcon, confidencePct(m.confidence), m.confidence != null),
+			textAttr('confidence', i18n.inventory_items_confidence(), ActivityIcon, confidencePct(m.confidence), m.confidence != null),
 			textAttr(
 				'confidence_reason',
-				'Reason',
+				i18n.inventory_items_reason(),
 				FileTextIcon,
 				fmt(m.confidence_reason),
 				has(m.confidence_reason)
 			),
-			chipsAttr('validation_flags', 'Flags', ShieldCheckIcon, cleanStrs(m.validation_flags)),
+			chipsAttr('validation_flags', i18n.inventory_items_flags(), ShieldCheckIcon, cleanStrs(m.validation_flags)),
 			chipsAttr(
 				'missing_required_attrs',
-				'Missing',
+				i18n.inventory_items_missing(),
 				ListIcon,
 				cleanStrs(m.missing_required_attrs)
 			),
-			textAttr('dedupe_key', 'Dedupe Key', HashIcon, fmt(m.dedupe_key), has(m.dedupe_key))
+			textAttr('dedupe_key', i18n.inventory_items_dedupe_key(), HashIcon, fmt(m.dedupe_key), has(m.dedupe_key))
 		];
 
 		const groundingEntries: LineEntry[] = spans.flatMap((span) => {
@@ -422,11 +423,11 @@
 		});
 		const grounding: AttrDef[] = [
 			m.evidence_quote
-				? linesAttr('evidence_quote', 'Evidence', FileTextIcon, [
-						{ head: 'Quote', content: m.evidence_quote, lineType: '' }
+				? linesAttr('evidence_quote', i18n.inventory_items_evidence(), FileTextIcon, [
+						{ head: i18n.inventory_items_quote(), content: m.evidence_quote, lineType: '' }
 					])
-				: linesAttr('evidence_quote', 'Evidence', FileTextIcon, []),
-			linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries)
+				: linesAttr('evidence_quote', i18n.inventory_items_evidence(), FileTextIcon, []),
+			linesAttr('source_line_spans', i18n.inventory_items_lines_2(), FileTextIcon, groundingEntries)
 		];
 
 		return { identity, maker, specs, validation, grounding };
@@ -441,11 +442,11 @@
 
 		type GroupSpec = { key: string; label: string; icon: any; attrs: AttrDef[] };
 		const groupSpecs: GroupSpec[] = [
-			{ key: 'identity', label: 'Identity', icon: HashIcon, attrs: attrsByGroup.identity },
-			{ key: 'maker', label: 'Maker', icon: FactoryIcon, attrs: attrsByGroup.maker },
-			{ key: 'specs', label: 'Specifications', icon: TrendingUpIcon, attrs: attrsByGroup.specs },
-			{ key: 'validation', label: 'Validation', icon: ActivityIcon, attrs: attrsByGroup.validation },
-			{ key: 'grounding', label: 'Grounding', icon: MapPinIcon, attrs: attrsByGroup.grounding }
+			{ key: 'identity', label: i18n.inventory_items_identity(), icon: HashIcon, attrs: attrsByGroup.identity },
+			{ key: 'maker', label: i18n.inventory_items_maker(), icon: FactoryIcon, attrs: attrsByGroup.maker },
+			{ key: 'specs', label: i18n.inventory_items_specifications(), icon: TrendingUpIcon, attrs: attrsByGroup.specs },
+			{ key: 'validation', label: i18n.inventory_items_validation(), icon: ActivityIcon, attrs: attrsByGroup.validation },
+			{ key: 'grounding', label: i18n.inventory_items_grounding(), icon: MapPinIcon, attrs: attrsByGroup.grounding }
 		];
 
 		const groups: GroupNode[] = groupSpecs.map((gs) => {
@@ -647,9 +648,9 @@
 			items = itemRes.results ?? [];
 			currentInput = inputRes?.record ?? null;
 			rawLines = rawRes?.lines ?? [];
-			rawError = rawRes ? '' : 'Failed to load raw lines';
+			rawError = rawRes ? '' : i18n.inventory_items_failed_to_load_raw_lines();
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve inventory items';
+			errorMsg = err instanceof Error ? err.message : i18n.inventory_items_failed_to_retrieve_inventory_items();
 		} finally {
 			rawLoading = false;
 			loading = false;
@@ -683,7 +684,7 @@
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || i18n.inventory_items_input({ id: r.id });
 	}
 
 	function recordDisplayDocNo(r: KbInputRecord): string {
@@ -707,7 +708,7 @@
 			m.canonical_name?.trim() ||
 			m.item_name?.trim() ||
 			m.inventory_item_id?.trim() ||
-			`Item #${m.id}`
+			i18n.inventory_items_item({ id: m.id })
 		);
 	}
 	function confidencePct(c?: number): string {
@@ -760,16 +761,16 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge System · Vol. IV</div>
-			<h1 class="display">Inventory&nbsp;<span class="amp">&amp;</span>&nbsp;Provenance</h1>
+			<div class="eyebrow">{i18n.inventory_items_knowledge_system_vol_iv()}</div>
+			<h1 class="display">{i18n.inventory_items_inventory()};<span class="amp">&amp;</span>&{i18n.inventory_items_provenance()}</h1>
 			<div class="subtitle">
-				A reading room for extracted inventory items — locate, verify, return to source.
+				{i18n.inventory_items_a_reading_room_for_extracted()}
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="meta-label">RECORD</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
-			<span class="meta-label">TYPE</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
-			<span class="meta-label">ITEMS</span><span class="meta-val"
+			<span class="meta-label">{i18n.inventory_items_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
+			<span class="meta-label">{i18n.inventory_items_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
+			<span class="meta-label">{i18n.inventory_items_items()}</span><span class="meta-val"
 				>{items.length.toString().padStart(3, '0')}</span
 			>
 		</div>
@@ -780,10 +781,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="inventory-items-record-browser"
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting extracted inventory items."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={i18n.inventory_items_kb_inputs()}
+				subtitle={i18n.inventory_items_search_filter_and_select_input()}
+				emptyTitle={i18n.inventory_items_no_records_yet()}
+				emptySubtitle={i18n.inventory_items_use_search_or_retrieve_to()}
 				autoSelectFirstRecord={false}
 				selectedRecordId={currentInput?.id ?? null}
 				mapRecord={mapBrowserRecord}
@@ -795,8 +796,8 @@
 
 			<aside class="metric-sidebar">
 				<div class="left-meta">
-					<div class="left-meta-title">Inventory Items</div>
-					<div class="left-meta-count">{items.length} found</div>
+					<div class="left-meta-title">{i18n.inventory_items_inventory_items()}</div>
+					<div class="left-meta-count">{i18n.inventory_items_found({ itemsCount: items.length })}</div>
 				</div>
 
 				<div class="metrics-list">
@@ -805,22 +806,22 @@
 					{:else if loading}
 						<div class="empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">Loading inventory items</div>
-							<div class="empty-sub">Fetching extracted items for this record…</div>
+							<div class="empty-title">{i18n.inventory_items_loading_inventory_items()}</div>
+							<div class="empty-sub">{i18n.inventory_items_fetching_extracted_items_for_this()}</div>
 						</div>
 					{:else if items.length === 0}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No inventory items yet</div>
+							<div class="empty-title">{i18n.inventory_items_no_inventory_items_yet()}</div>
 							<div class="empty-sub">
-								Select a record from kb.inputs to populate the inventory index.
+								{i18n.inventory_items_select_a_record_from_kb()}
 							</div>
 						</div>
 					{:else if filteredItems.length === 0 && (keywordFilter || categoryFilter || confidenceFilter)}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No matches</div>
-							<div class="empty-sub">No inventory items match the current filters.</div>
+							<div class="empty-title">{i18n.inventory_items_no_matches()}</div>
+							<div class="empty-sub">{i18n.inventory_items_no_inventory_items_match_the()}</div>
 						</div>
 					{:else}
 						{#each filteredItems as m, idx (m.id)}
@@ -834,7 +835,7 @@
 								<div class="card-body">
 									<div class="card-row-top">
 										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
-										<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
+										<div class="card-conf" title={i18n.inventory_items_confidence()}>{confidencePct(m.confidence)}</div>
 									</div>
 									<div class="card-name">{itemNameOf(m)}</div>
 									{#if m.evidence_quote}
@@ -843,7 +844,7 @@
 									<div class="card-foot">
 										<span class="chip">
 											<span class="chip-dot"></span>
-											{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
+											{i18n.inventory_items_span({ count: spanCount(m), plural: spanCount(m) === 1 ? '' : 's' })}
 										</span>
 										{#if m.item_category}<span class="chip chip-mono">{m.item_category}</span>{/if}
 										{#if m.manufacturer}<span class="chip chip-quiet">{m.manufacturer}</span>{/if}
@@ -861,18 +862,18 @@
 			{#if recordBrowserFolded}
 				<div class="metric-canvas-wrap">
 					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+						<button type="button" class="toolbar-back" onclick={goBack} title={i18n.inventory_items_back_to_record_list()}>
 							<ArrowLeftIcon class="toolbar-icon" />
-							<span>Back</span>
+							<span>{i18n.inventory_items_back()}</span>
 						</button>
 						<div class="toolbar-filters">
 							<select
 								class="toolbar-select"
 								value={itemNameDropdownValue}
 								onchange={handleItemNameDropdown}
-								title="Jump to item by name"
+								title={i18n.inventory_items_jump_to_item_by_name()}
 							>
-								<option value="">— Item by name —</option>
+								<option value="">{i18n.inventory_items_item_by_name()}</option>
 								{#each items as m (m.id)}
 									<option value={m.id}>{itemNameOf(m)}</option>
 								{/each}
@@ -882,7 +883,7 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="inventory-keywords-datalist-focus"
-									placeholder="Filter by keyword…"
+									placeholder={i18n.inventory_items_filter_by_keyword()}
 									bind:value={keywordFilter}
 								/>
 								<datalist id="inventory-keywords-datalist-focus">
@@ -895,8 +896,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (keywordFilter = '')}
-										title="Clear keyword filter"
-										aria-label="Clear keyword filter">×</button
+										title={i18n.inventory_items_clear_keyword_filter()}
+										aria-label={i18n.inventory_items_clear_keyword_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -905,8 +906,8 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="inventory-category-options"
-									placeholder="Category…"
-									title="Filter by item category"
+									placeholder={i18n.inventory_items_category()}
+									title={i18n.inventory_items_filter_by_item_category()}
 									bind:value={categoryFilter}
 								/>
 								<datalist id="inventory-category-options">
@@ -919,8 +920,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (categoryFilter = '')}
-										title="Clear category filter"
-										aria-label="Clear category filter">×</button
+										title={i18n.inventory_items_clear_category_filter()}
+										aria-label={i18n.inventory_items_clear_category_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -929,8 +930,8 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="confidence-options"
-									placeholder="Confidence…"
-									title="Filter by confidence threshold. Select or type a value like 0.85, or <0.50 for below-threshold."
+									placeholder={i18n.inventory_items_confidence_2()}
+									title={i18n.inventory_items_filter_by_confidence_threshold_select()}
 									bind:value={confidenceFilter}
 								/>
 								<datalist id="confidence-options">
@@ -946,8 +947,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (confidenceFilter = '')}
-										title="Clear confidence filter"
-										aria-label="Clear confidence filter">×</button
+										title={i18n.inventory_items_clear_confidence_filter()}
+										aria-label={i18n.inventory_items_clear_confidence_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -958,7 +959,7 @@
 								class="toolbar-nav-btn"
 								disabled={!prevItem}
 								onclick={goToPrevItem}
-								title="Previous item"><ChevronLeftIcon class="toolbar-icon" /></button
+								title={i18n.inventory_items_previous_item()}><ChevronLeftIcon class="toolbar-icon" /></button
 							>
 							<span class="toolbar-nav-pos">
 								{selectedItemInFilteredIndex >= 0
@@ -970,7 +971,7 @@
 								class="toolbar-nav-btn"
 								disabled={!nextItem}
 								onclick={goToNextItem}
-								title="Next item"><ChevronRightIcon class="toolbar-icon" /></button
+								title={i18n.inventory_items_next_item()}><ChevronRightIcon class="toolbar-icon" /></button
 							>
 						</div>
 					</div>
@@ -1036,9 +1037,9 @@
 						{:else}
 							<div class="canvas-empty">
 								<div class="canvas-empty-mark">◎</div>
-								<div class="canvas-empty-title">Select an item</div>
+								<div class="canvas-empty-title">{i18n.inventory_items_select_an_item()}</div>
 								<div class="canvas-empty-sub">
-									Click an inventory item from the list to view its attribute map.
+									{i18n.inventory_items_click_an_inventory_item_from()}
 								</div>
 							</div>
 						{/if}
@@ -1048,7 +1049,7 @@
 					type="button"
 					class="focus-resize-handle"
 					class:active={focusResizing}
-					aria-label="Resize the source document panel"
+					aria-label={i18n.inventory_items_resize_the_source_document_panel()}
 					onpointerdown={startFocusResize}
 					onkeydown={onFocusResizerKeydown}
 				>
@@ -1062,10 +1063,10 @@
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
-						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-title">{i18n.inventory_items_awaiting_selection()}</div>
 						<div class="doc-empty-sub">
-							Once you retrieve a record, the original document appears here.<br />
-							Click any item on the left to jump to its source page.
+							{i18n.inventory_items_once_you_retrieve_a_record()}<br />
+							{i18n.inventory_items_click_any_item_on_the()}
 						</div>
 					</div>
 				{:else}
@@ -1088,7 +1089,7 @@
 									class="pvw-tool-btn"
 									class:active={showLines}
 									onclick={() => (showLines = !showLines)}
-									title={showLines ? 'Show PDF Document' : 'Show Lines'}
+									title={showLines ? i18n.inventory_items_show_pdf_document() : i18n.inventory_items_show_lines()}
 								>
 									{#if showLines}
 										<FileTextIcon class="pvw-tb-icon" />
@@ -1101,20 +1102,20 @@
 								<div class="lines-panel">
 									{#if rawLoading}
 										<div class="doc-status">
-											<span class="dot-loop"></span>Reading raw_line file…
+											<span class="dot-loop"></span>{i18n.inventory_items_reading_raw_line_file()}
 										</div>
 									{:else if rawError}
 										<div class="doc-error">
-											<div class="doc-error-title">⚠ Cannot render document</div>
+											<div class="doc-error-title">{i18n.inventory_items_cannot_render_document()}</div>
 											<div class="doc-error-msg">{rawError}</div>
 										</div>
 									{:else if pagesGrouped.length === 0}
 										<div class="doc-empty">
 											<div class="doc-empty-mark">⌬</div>
-											<div class="doc-empty-title">Awaiting selection</div>
+											<div class="doc-empty-title">{i18n.inventory_items_awaiting_selection()}</div>
 											<div class="doc-empty-sub">
-												Once you retrieve a record, the parsed lines appear here.<br />
-												Click any item on the left to jump to its source line.
+												{i18n.inventory_items_once_you_retrieve_a_record_2()}<br />
+												{i18n.inventory_items_click_any_item_on_the_2()}
 											</div>
 										</div>
 									{:else}
@@ -1122,10 +1123,10 @@
 											<article id={`page-${pg.page}`} class="page">
 												<div class="page-edge" aria-hidden="true"></div>
 												<header class="page-head">
-													<span class="page-folio">page</span>
+													<span class="page-folio">{i18n.inventory_items_page()}</span>
 													<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
 													<span class="page-rule"></span>
-													<span class="page-count">{pg.lines.length} lines</span>
+													<span class="page-count">{i18n.inventory_items_lines({ linesCount: pg.lines.length })}</span>
 												</header>
 												<div class="page-body">
 													{#each pg.lines as ln (ln.line_number)}
@@ -1155,24 +1156,23 @@
 					{:else}
 						<iframe
 							class="doc-frame"
-							title={currentInput.file_name ?? `Record ${currentInput.id}`}
+							title={currentInput.file_name ?? i18n.inventory_items_record_2({ id: currentInput.id })}
 							src={fileUrl}
 						></iframe>
 					{/if}
 
 					{#if isText}
 						<div class="doc-foot-hint">
-							This file is rendered as text by your browser. For exact line highlighting, switch to
-							the <button class="inline-tab-btn" onclick={() => (showLines = true)}
-								>Source&nbsp;Lines</button
-							> view.
+							{i18n.inventory_items_this_file_is_rendered_as()} <button class="inline-tab-btn" onclick={() => (showLines = true)}
+								>{i18n.inventory_items_source_lines()}</button
+							> {i18n.inventory_items_view()}
 						</div>
 					{:else if !isPdf}
 						<div class="doc-foot-hint">
-							Inline preview support varies by file type. For line-level highlights, use the <button
+							{i18n.inventory_items_inline_preview_support_varies_by()} <button
 								class="inline-tab-btn"
-								onclick={() => (showLines = true)}>Source&nbsp;Lines</button
-							> view.
+								onclick={() => (showLines = true)}>{i18n.inventory_items_source_lines()}</button
+							> {i18n.inventory_items_view()}
 						</div>
 					{/if}
 				{/if}

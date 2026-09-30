@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -17,13 +18,13 @@
 	type Tab = 'generate' | 'history' | 'queries';
 	type TabOption = { id: Tab; label: string };
 	const baseTabs: TabOption[] = [
-		{ id: 'generate', label: 'Generate' },
-		{ id: 'history', label: 'History' }
+		{ id: 'generate', label: m.doc_gen_generate() },
+		{ id: 'history', label: m.doc_gen_history() }
 	];
 	let activeTab = $state<Tab>('generate');
 	let isAdmin = $state(false);
 	let visibleTabs = $derived<TabOption[]>(
-		isAdmin ? [...baseTabs, { id: 'queries', label: 'SQL Queries' }] : baseTabs
+		isAdmin ? [...baseTabs, { id: 'queries', label: m.doc_gen_sql_queries() }] : baseTabs
 	);
 
 	// --- Generate tab state ---
@@ -149,7 +150,7 @@
 		try {
 			let converter: Record<string,string> = {};
 			try { converter = JSON.parse(converterStr); } catch {
-				submitError = 'Converter must be valid JSON.'; return;
+				submitError = m.doc_gen_converter_must_be_valid_json(); return;
 			}
 			const body: Record<string,unknown> = {
 				request_name: requestName, purpose, remarks,
@@ -165,8 +166,8 @@
 				body: JSON.stringify(body)
 			});
 			const data = await res.json();
-			if (!res.ok) { submitError = data.error_msg ?? 'Submission failed.'; return; }
-			submitSuccess = `Job created! ID: ${data.job_id}`;
+			if (!res.ok) { submitError = data.error_msg ?? m.doc_gen_submission_failed(); return; }
+			submitSuccess = m.doc_gen_job_created_id({ job_id: data.job_id });
 			requestName = ''; purpose = ''; remarks = ''; sqlStatement = '';
 			sqlQueryID = null; sqlSearch = ''; converterStr = '{}';
 		} finally { submitting = false; }
@@ -209,24 +210,24 @@
 
 	async function addQuery() {
 		addQueryError = '';
-		if (!newQueryName || !newQuerySQL) { addQueryError = 'Name and SQL are required.'; return; }
+		if (!newQueryName || !newQuerySQL) { addQueryError = m.doc_gen_name_and_sql_are_required(); return; }
 		const res = await fetch('/api/v1/docgen/queries', {
 			method: 'POST', credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name: newQueryName, description: newQueryDesc, sql_statement: newQuerySQL })
 		});
-		if (!res.ok) { const d = await res.json(); addQueryError = d.error_msg ?? 'Failed.'; return; }
+		if (!res.ok) { const d = await res.json(); addQueryError = d.error_msg ?? m.doc_gen_failed_2(); return; }
 		showAddQuery = false; newQueryName = ''; newQueryDesc = ''; newQuerySQL = '';
 		await loadQueryList();
 	}
 
 	async function deleteQuery(id: number) {
-		if (!confirm('Delete this query?')) return;
+		if (!confirm(m.doc_gen_delete_this_query())) return;
 		deleteQueryError = '';
 		const res = await fetch(`/api/v1/docgen/queries/${id}`, { method: 'DELETE', credentials: 'same-origin' });
 		if (!res.ok) {
 			const d = await res.json().catch(() => ({}));
-			deleteQueryError = d.error_msg ?? 'Failed to delete query.';
+			deleteQueryError = d.error_msg ?? m.doc_gen_failed_to_delete_query();
 			return;
 		}
 		await loadQueryList();
@@ -259,7 +260,7 @@
 	<!-- ===== GENERATE TAB ===== -->
 	{#if activeTab === 'generate'}
 		<div class="rounded-xl p-6 max-w-2xl" style="background:{cardBg}; border:1px solid {borderColor};">
-			<h2 class="text-lg font-semibold mb-5" style="color:{textPrimary};">New Document Generation Job</h2>
+			<h2 class="text-lg font-semibold mb-5" style="color:{textPrimary};">{m.doc_gen_new_document_generation_job()}</h2>
 
 			{#if submitSuccess}
 				<div class="mb-4 p-3 rounded-lg text-sm" style="background:#10B981; color:white;">{submitSuccess}</div>
@@ -271,19 +272,19 @@
 			<div class="space-y-4">
 				<!-- Request Name -->
 				<div>
-					<label for="docgen-request-name" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Request Name *</label>
-					<input id="docgen-request-name" bind:value={requestName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Unique identifier" />
+					<label for="docgen-request-name" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_request_name()}</label>
+					<input id="docgen-request-name" bind:value={requestName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_unique_identifier()} />
 				</div>
 
 				<!-- Purpose -->
 				<div>
-					<label for="docgen-purpose" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Purpose *</label>
-					<input id="docgen-purpose" bind:value={purpose} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Brief description of this doc run" />
+					<label for="docgen-purpose" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_purpose()}</label>
+					<input id="docgen-purpose" bind:value={purpose} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_brief_description_of_this_doc()} />
 				</div>
 
 				<!-- SQL Query search-and-pick -->
 				<div>
-					<label for="docgen-sql-query" class="block text-sm font-medium mb-1" style="color:{textSecondary};">SQL Query *</label>
+					<label for="docgen-sql-query" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_sql_query()}</label>
 					<div class="relative">
 						<input
 							id="docgen-sql-query"
@@ -291,7 +292,7 @@
 							oninput={searchQueries}
 							class="w-full px-3 py-2 rounded-lg text-sm"
 							style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"
-							placeholder="Search predefined queries by name…"
+							placeholder={m.doc_gen_search_predefined_queries_by_name()}
 						/>
 						{#if queryResults.length > 0}
 							<div class="absolute z-10 left-0 right-0 mt-1 rounded-lg overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 8px 24px rgba(0,0,0,0.15);">
@@ -311,23 +312,23 @@
 
 				<!-- Template Type -->
 				<div>
-					<label for="docgen-template-type" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Template Type *</label>
+					<label for="docgen-template-type" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_template_type()}</label>
 					<select id="docgen-template-type" bind:value={templateType} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
-						<option value="word">Word (.docx)</option>
-						<option value="typst">Typst (not yet supported)</option>
+						<option value="word">{m.doc_gen_word_docx()}</option>
+						<option value="typst">{m.doc_gen_typst_not_yet_supported()}</option>
 					</select>
 				</div>
 
 				<!-- Template Name -->
 				<div>
-					<label for="docgen-template-name" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Template *</label>
+					<label for="docgen-template-name" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_template()}</label>
 					<div class="flex gap-2">
 						<select id="docgen-template-name" bind:value={templateName} class="flex-1 px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
-							<option value="">Select a template…</option>
+							<option value="">{m.doc_gen_select_a_template()}</option>
 							{#each templates as t}<option value={t}>{t}</option>{/each}
 						</select>
 						<label class="flex items-center px-3 py-2 rounded-lg text-sm cursor-pointer transition-opacity hover:opacity-80" style="background:{accentTint}; color:{accent}; border:1px solid {accent}30;">
-							Upload
+							{m.doc_gen_upload()}
 							<input type="file" class="hidden" accept=".docx,.typ" onchange={handleFileUpload} />
 						</label>
 					</div>
@@ -335,28 +336,28 @@
 
 				<!-- Converter -->
 				<div>
-					<label for="docgen-converter-json" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Converter JSON * <span class="font-normal text-xs" style="color:{textMuted};">(sql_column → template_token; must include customer_id, customer_name, email as values)</span></label>
+					<label for="docgen-converter-json" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_converter_json()} <span class="font-normal text-xs" style="color:{textMuted};">{m.doc_gen_sql_column_template_token_must()}</span></label>
 					<textarea id="docgen-converter-json" bind:value={converterStr} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={'{"customer_id_col":"customer_id","name_col":"customer_name","email_col":"email"}'}></textarea>
 				</div>
 
 				<!-- Output Dir -->
 				<div>
-					<label for="docgen-output-dir" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Output Directory *</label>
-					<input id="docgen-output-dir" bind:value={outputDir} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Data/docgen/output" />
+					<label for="docgen-output-dir" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_output_directory()}</label>
+					<input id="docgen-output-dir" bind:value={outputDir} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_data_docgen_output()} />
 				</div>
 
 				<!-- Output Format -->
 				<div>
-					<label for="docgen-output-format" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Output Format *</label>
+					<label for="docgen-output-format" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_output_format()}</label>
 					<select id="docgen-output-format" bind:value={outputFormat} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
-						<option value="docx">DOCX</option>
-						<option value="pdf">PDF (not yet supported)</option>
+						<option value="docx">{m.doc_gen_docx()}</option>
+						<option value="pdf">{m.doc_gen_pdf_not_yet_supported()}</option>
 					</select>
 				</div>
 
 				<!-- Remarks -->
 				<div>
-					<label for="docgen-remarks" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Remarks</label>
+					<label for="docgen-remarks" class="block text-sm font-medium mb-1" style="color:{textSecondary};">{m.doc_gen_remarks()}</label>
 					<textarea id="docgen-remarks" bind:value={remarks} rows={2} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"></textarea>
 				</div>
 
@@ -365,7 +366,7 @@
 					disabled={submitting}
 					class="w-full py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-88 disabled:opacity-50"
 					style="background:{accent}; color:white; border:none;"
-				>{submitting ? 'Submitting…' : 'Generate Documents'}</button>
+				>{submitting ? m.doc_gen_submitting() : m.doc_gen_generate_documents()}</button>
 			</div>
 		</div>
 	{/if}
@@ -376,24 +377,24 @@
 			<!-- Filters -->
 			<div class="flex gap-3 flex-wrap">
 				<select bind:value={jobStatusFilter} onchange={loadHistory} class="px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
-					<option value="">All statuses</option>
-					<option value="pending">Pending</option>
-					<option value="processing">Processing</option>
-					<option value="completed">Completed</option>
-					<option value="failed">Failed</option>
+					<option value="">{m.doc_gen_all_statuses()}</option>
+					<option value="pending">{m.doc_gen_pending()}</option>
+					<option value="processing">{m.doc_gen_processing()}</option>
+					<option value="completed">{m.doc_gen_completed()}</option>
+					<option value="failed">{m.doc_gen_failed()}</option>
 				</select>
-				<input bind:value={jobNameFilter} oninput={loadHistory} class="px-3 py-2 rounded-lg text-sm flex-1 min-w-40" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Filter by request name…" />
+				<input bind:value={jobNameFilter} oninput={loadHistory} class="px-3 py-2 rounded-lg text-sm flex-1 min-w-40" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_filter_by_request_name()} />
 			</div>
 
 			{#if historyLoading}
-				<div class="text-sm" style="color:{textMuted};">Loading…</div>
+				<div class="text-sm" style="color:{textMuted};">{m.doc_gen_loading()}</div>
 			{:else if jobs.length === 0}
-				<div class="text-sm" style="color:{textMuted};">No jobs found.</div>
+				<div class="text-sm" style="color:{textMuted};">{m.doc_gen_no_jobs_found()}</div>
 			{:else}
 				<div class="rounded-xl overflow-hidden" style="border:1px solid {borderColor};">
 					<!-- Header -->
 					<div class="grid text-xs font-semibold px-4 py-2" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr; background:{surface2}; color:{textMuted};">
-						<span>Request Name</span><span>Status</span><span>Results</span><span>Created By</span><span>Created At</span>
+						<span>{m.doc_gen_request_name_2()}</span><span>{m.doc_gen_status()}</span><span>{m.doc_gen_results()}</span><span>{m.doc_gen_created_by()}</span><span>{m.doc_gen_created_at()}</span>
 					</div>
 					{#each jobs as job}
 						<div style="border-top:1px solid {borderColor};">
@@ -411,12 +412,12 @@
 							{#if expandedJobID === job.job_id}
 								<div class="px-4 pb-3" style="background:{surface2};">
 									{#if !jobLogs[job.job_id]}
-										<div class="text-xs py-2" style="color:{textMuted};">Loading log…</div>
+										<div class="text-xs py-2" style="color:{textMuted};">{m.doc_gen_loading_log()}</div>
 									{:else if jobLogs[job.job_id].length === 0}
-										<div class="text-xs py-2" style="color:{textMuted};">No log entries yet.</div>
+										<div class="text-xs py-2" style="color:{textMuted};">{m.doc_gen_no_log_entries_yet()}</div>
 									{:else}
 										<table class="w-full text-xs mt-2">
-											<thead><tr style="color:{textMuted};"><th class="text-left pb-1">Filename</th><th class="text-left pb-1">Customer</th><th class="text-left pb-1">Status</th><th class="text-left pb-1">Error</th></tr></thead>
+											<thead><tr style="color:{textMuted};"><th class="text-left pb-1">{m.doc_gen_filename()}</th><th class="text-left pb-1">{m.doc_gen_customer()}</th><th class="text-left pb-1">{m.doc_gen_status()}</th><th class="text-left pb-1">{m.doc_gen_error()}</th></tr></thead>
 											<tbody>
 												{#each jobLogs[job.job_id] as entry}
 													<tr style="border-top:1px solid {borderColor}; color:{textSecondary};">
@@ -437,9 +438,9 @@
 
 				<!-- Pagination -->
 				<div class="flex items-center gap-3 text-sm" style="color:{textSecondary};">
-					<button disabled={jobPage <= 1} onclick={() => { jobPage--; loadHistory(); }} class="px-3 py-1 rounded-lg disabled:opacity-40" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">Prev</button>
-					<span>Page {jobPage} · {jobTotal} total</span>
-					<button disabled={jobPage * 20 >= jobTotal} onclick={() => { jobPage++; loadHistory(); }} class="px-3 py-1 rounded-lg disabled:opacity-40" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">Next</button>
+					<button disabled={jobPage <= 1} onclick={() => { jobPage--; loadHistory(); }} class="px-3 py-1 rounded-lg disabled:opacity-40" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">{m.doc_gen_prev()}</button>
+					<span>{m.doc_gen_page_total({ jobPage, jobTotal })}</span>
+					<button disabled={jobPage * 20 >= jobTotal} onclick={() => { jobPage++; loadHistory(); }} class="px-3 py-1 rounded-lg disabled:opacity-40" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">{m.doc_gen_next()}</button>
 				</div>
 			{/if}
 		</div>
@@ -449,20 +450,20 @@
 	{#if activeTab === 'queries' && isAdmin}
 		<div class="space-y-4">
 			<div class="flex items-center gap-3">
-				<input bind:value={queryListSearch} oninput={loadQueryList} class="flex-1 px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Search queries…" />
-				<button onclick={() => showAddQuery = !showAddQuery} class="px-4 py-2 rounded-lg text-sm font-semibold" style="background:{accent}; color:white; border:none;">+ Add Query</button>
+				<input bind:value={queryListSearch} oninput={loadQueryList} class="flex-1 px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_search_queries()} />
+				<button onclick={() => showAddQuery = !showAddQuery} class="px-4 py-2 rounded-lg text-sm font-semibold" style="background:{accent}; color:white; border:none;">{m.doc_gen_add_query()}</button>
 			</div>
 
 			{#if showAddQuery}
 				<div class="rounded-xl p-4 space-y-3" style="background:{cardBg}; border:1px solid {borderColor};">
-					<h3 class="text-sm font-semibold" style="color:{textPrimary};">New Predefined Query</h3>
+					<h3 class="text-sm font-semibold" style="color:{textPrimary};">{m.doc_gen_new_predefined_query()}</h3>
 					{#if addQueryError}<div class="text-xs p-2 rounded" style="background:#EF4444; color:white;">{addQueryError}</div>{/if}
-					<input bind:value={newQueryName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Name *" />
-					<input bind:value={newQueryDesc} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Description" />
-						<textarea bind:value={newQuerySQL} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="SELECT ... *"></textarea>
+					<input bind:value={newQueryName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_name()} />
+					<input bind:value={newQueryDesc} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_description()} />
+						<textarea bind:value={newQuerySQL} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={m.doc_gen_select()}></textarea>
 					<div class="flex gap-2">
-						<button onclick={addQuery} class="px-4 py-1.5 rounded-lg text-sm font-semibold" style="background:{accent}; color:white; border:none;">Save</button>
-						<button onclick={() => showAddQuery = false} class="px-4 py-1.5 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary};">Cancel</button>
+						<button onclick={addQuery} class="px-4 py-1.5 rounded-lg text-sm font-semibold" style="background:{accent}; color:white; border:none;">{m.doc_gen_save()}</button>
+						<button onclick={() => showAddQuery = false} class="px-4 py-1.5 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary};">{m.doc_gen_cancel()}</button>
 					</div>
 				</div>
 			{/if}
@@ -470,20 +471,20 @@
 			{#if deleteQueryError}<div class="text-xs p-2 rounded mb-2" style="background:#EF4444; color:white;">{deleteQueryError}</div>{/if}
 
 			{#if queryListLoading}
-				<div class="text-sm" style="color:{textMuted};">Loading…</div>
+				<div class="text-sm" style="color:{textMuted};">{m.doc_gen_loading()}</div>
 			{:else if queryList.length === 0}
-				<div class="text-sm" style="color:{textMuted};">No queries found.</div>
+				<div class="text-sm" style="color:{textMuted};">{m.doc_gen_no_queries_found()}</div>
 			{:else}
 				<div class="rounded-xl overflow-hidden" style="border:1px solid {borderColor};">
 					<div class="grid text-xs font-semibold px-4 py-2" style="grid-template-columns:2fr 3fr 1fr 1fr; background:{surface2}; color:{textMuted};">
-						<span>Name</span><span>Description</span><span>Created By</span><span></span>
+						<span>{m.doc_gen_name_2()}</span><span>{m.doc_gen_description()}</span><span>{m.doc_gen_created_by()}</span><span></span>
 					</div>
 					{#each queryList as q}
 						<div class="grid items-center px-4 py-3 text-sm" style="grid-template-columns:2fr 3fr 1fr 1fr; border-top:1px solid {borderColor}; background:{cardBg}; color:{textPrimary};">
 							<span class="font-medium">{q.name}</span>
 							<span class="truncate" style="color:{textSecondary};">{q.description}</span>
 							<span style="color:{textMuted};">{q.created_by}</span>
-							<button onclick={() => deleteQuery(q.id)} class="text-xs px-2 py-1 rounded" style="background:#EF444420; color:#EF4444; border:none;">Delete</button>
+							<button onclick={() => deleteQuery(q.id)} class="text-xs px-2 py-1 rounded" style="background:#EF444420; color:#EF4444; border:none;">{m.doc_gen_delete()}</button>
 						</div>
 					{/each}
 				</div>

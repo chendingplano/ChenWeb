@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import PlusIcon         from '@lucide/svelte/icons/plus';
 	import SearchIcon       from '@lucide/svelte/icons/search';
@@ -39,6 +40,16 @@
 
 	const BEAN_TYPES: BeanType[] = ['Thoughts', 'Design', 'Spec', 'Implementation', 'Reading'];
 	const FILE_TYPES: FileType[] = ['Markdown', 'Typst', 'Text', 'HTML'];
+	// Bean types are stored values; only their display text is localised.
+	const BEAN_TYPE_LABEL: Record<BeanType | 'All', string> = {
+		All: m.research_topics_all(),
+		Thoughts: m.research_topics_type_thoughts(),
+		Design: m.research_topics_type_design(),
+		Spec: m.research_topics_type_spec(),
+		Implementation: m.research_topics_type_implementation(),
+		Reading: m.research_topics_type_reading()
+	};
+	const TYPE_FILTERS: (BeanType | 'All')[] = ['All', ...BEAN_TYPES];
 
 	const beanTypeColors: Record<BeanType, { bg: string; text: string }> = {
 		Thoughts:       { bg: 'rgba(251,191,36,0.15)',  text: '#FBBF24' },
@@ -105,10 +116,10 @@
 		loadError = '';
 		try {
 			const res = await fetch('/api/v1/ke/research-topics');
-			if (!res.ok) throw new Error(`Server error: ${res.status}`);
+			if (!res.ok) throw new Error(m.research_topics_server_error({ status: res.status }));
 			beans = await res.json();
 		} catch (e: any) {
-			loadError = e.message ?? 'Failed to load beans';
+			loadError = e.message ?? m.research_topics_failed_to_load_beans();
 		} finally {
 			loading = false;
 		}
@@ -193,7 +204,7 @@
 			});
 			if (!res.ok) {
 				const body = await res.json().catch(() => ({}));
-				throw new Error(body.error ?? `Server error: ${res.status}`);
+				throw new Error(body.error ?? m.research_topics_server_error({ status: res.status }));
 			}
 			const snap = selectedBean;
 			beans = beans.map(b =>
@@ -204,7 +215,7 @@
 			selectedBean = { ...snap, content: editedContent };
 			contentDirty = false;
 		} catch (e: any) {
-			saveContentError = e.message ?? 'Failed to save';
+			saveContentError = e.message ?? m.research_topics_failed_to_save();
 		} finally {
 			savingContent = false;
 		}
@@ -236,14 +247,14 @@
 
 			if (!res.ok) {
 				const body = await res.json().catch(() => ({}));
-				throw new Error(body.error ?? `Server error: ${res.status}`);
+				throw new Error(body.error ?? m.research_topics_server_error({ status: res.status }));
 			}
 
 			const created: ResearchTopicBean = await res.json();
 			beans = [created, ...beans];
 			modalOpen = false;
 		} catch (e: any) {
-			submitError = e.message ?? 'Failed to create bean';
+			submitError = e.message ?? m.research_topics_failed_to_create_bean();
 		} finally {
 			submitting = false;
 		}
@@ -258,10 +269,10 @@
 		<div class="flex items-center justify-between mb-4">
 			<div>
 				<h1 style="font-size:20px; font-weight:700; color:{textPrimary}; margin-bottom:2px;">
-					Research Topics
+					{m.research_topics_research_topics()}
 				</h1>
 				<p style="font-size:13px; color:{textSecondary};">
-					Research Topic Beans — articles, thoughts, designs, specs, and readings
+					{m.research_topics_research_topic_beans_articles_thoughts()}
 				</p>
 			</div>
 			<button
@@ -272,7 +283,7 @@
 				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
 			>
 				<PlusIcon style="width:15px; height:15px;" />
-				New RTB
+				{m.research_topics_new_rtb()}
 			</button>
 		</div>
 
@@ -285,20 +296,20 @@
 				<SearchIcon style="width:14px; height:14px; color:{textMuted}; flex-shrink:0;" />
 				<input
 					type="text"
-					placeholder="Search beans…"
+					placeholder={m.research_topics_search_beans()}
 					bind:value={searchQuery}
 					style="background:transparent; border:none; outline:none; font-size:13px; color:{textPrimary}; width:100%;"
 				/>
 			</div>
 			<div class="flex items-center gap-1.5">
-				{#each ['All', ...BEAN_TYPES] as t}
+				{#each TYPE_FILTERS as t}
 					{@const isActive = activeTypeFilter === t}
 					<button
-						onclick={() => { activeTypeFilter = t as BeanType | 'All'; }}
+						onclick={() => { activeTypeFilter = t; }}
 						class="rounded-full px-3 py-1 text-xs font-medium cursor-pointer transition-colors duration-150"
 						style="border:1px solid {isActive ? accent : borderColor}; background:{isActive ? accentTint : 'transparent'}; color:{isActive ? accent : textMuted};"
 					>
-						{t}
+						{BEAN_TYPE_LABEL[t]}
 					</button>
 				{/each}
 			</div>
@@ -328,7 +339,7 @@
 						onclick={loadBeans}
 						class="ml-auto text-xs px-3 py-1 rounded-lg cursor-pointer"
 						style="background:{dangerTint}; color:{danger}; border:1px solid {danger}40;"
-					>Retry</button>
+					>{m.research_topics_retry()}</button>
 				</div>
 			{:else if filteredBeans.length === 0}
 				<div
@@ -337,10 +348,10 @@
 				>
 					<BookOpenIcon style="width:40px; height:40px; color:{accent}; opacity:0.3; margin-bottom:12px;" />
 					<p style="font-size:15px; font-weight:500; color:{textSecondary};">
-						{beans.length === 0 ? 'No beans yet' : 'No beans found'}
+						{beans.length === 0 ? m.research_topics_no_beans_yet() : m.research_topics_no_beans_found()}
 					</p>
 					<p style="font-size:13px; color:{textMuted}; margin-top:4px;">
-						{beans.length === 0 ? 'Click "New RTB" to create your first research topic bean.' : 'Try adjusting your search or filter.'}
+						{beans.length === 0 ? m.research_topics_click_new_rtb_to_create() : m.research_topics_try_adjusting_your_search_or()}
 					</p>
 				</div>
 			{:else}
@@ -364,7 +375,7 @@
 								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2 flex-wrap mb-0.5">
 										<span style="font-size:14px; font-weight:600; color:{textPrimary};">{bean.research_title}</span>
-										<span class="rounded-full px-2 py-0.5 text-xs font-medium flex-shrink-0" style="background:{typeConf.bg}; color:{typeConf.text};">{bean.bean_type}</span>
+										<span class="rounded-full px-2 py-0.5 text-xs font-medium flex-shrink-0" style="background:{typeConf.bg}; color:{typeConf.text};">{BEAN_TYPE_LABEL[bean.bean_type] ?? bean.bean_type}</span>
 										<span class="rounded-md px-1.5 py-0.5 text-xs font-mono flex-shrink-0" style="background:{surface3}; color:{textMuted};">{fileTypeExtension[bean.file_type]}</span>
 									</div>
 									<p style="font-size:12px; color:{textSecondary}; margin-bottom:6px;">{bean.research_subtitle}</p>
@@ -420,11 +431,11 @@
 				<div class="rounded-xl p-4 mb-4" style="background:{cardBg}; border:1px solid {borderColor};">
 					<div class="grid gap-3" style="grid-template-columns:1fr 1fr;">
 						{#each [
-							{ label: 'Bean Name',  value: bean.bean_name,      mono: true },
-							{ label: 'Bean Type',  value: bean.bean_type,      mono: false },
-							{ label: 'File Type',  value: bean.file_type + ' (' + fileTypeExtension[bean.file_type] + ')', mono: false },
-							{ label: 'Category',   value: bean.bean_category,  mono: true },
-							{ label: 'Authors',    value: (bean.authors ?? []).join(', ') || '—', mono: false },
+							{ label: m.research_topics_bean_name(),  value: bean.bean_name,      mono: true },
+							{ label: m.research_topics_bean_type(),  value: bean.bean_type,      mono: false },
+							{ label: m.research_topics_file_type(),  value: bean.file_type + ' (' + fileTypeExtension[bean.file_type] + ')', mono: false },
+							{ label: m.research_topics_category(),   value: bean.bean_category,  mono: true },
+							{ label: m.research_topics_authors(),    value: (bean.authors ?? []).join(', ') || '—', mono: false },
 						] as row}
 							<div>
 								<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">{row.label}</div>
@@ -434,13 +445,13 @@
 					</div>
 					{#if bean.bean_desc}
 						<div style="border-top:1px solid {borderColor}; margin-top:12px; padding-top:12px;">
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Description</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">{m.research_topics_description()}</div>
 							<p style="font-size:13px; color:{textSecondary}; line-height:1.6;">{bean.bean_desc}</p>
 						</div>
 					{/if}
 					{#if bean.bean_keywords?.length}
 						<div style="border-top:1px solid {borderColor}; margin-top:12px; padding-top:12px;">
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">Keywords</div>
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">{m.research_topics_keywords()}</div>
 							<div class="flex flex-wrap gap-2">
 								{#each (bean.bean_keywords ?? []) as kw}
 									<span class="rounded-full px-3 py-1 text-xs" style="background:{accentTint}; color:{accent}; border:1px solid {accent}30;">{kw}</span>
@@ -454,7 +465,7 @@
 				{#each [fileTypeExtension[bean.file_type] ?? ''] as ext}
 				<div class="rounded-xl mb-4" style="background:{cardBg}; border:1px solid {borderColor}; overflow:hidden;">
 					<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
-						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em;">Content</div>
+						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em;">{m.research_topics_content()}</div>
 						{#if TEXT_EXTENSIONS.has(ext) && contentDirty}
 							<div class="flex items-center gap-2">
 								{#if saveContentError}
@@ -468,9 +479,9 @@
 								>
 									{#if savingContent}
 										<LoaderIcon style="width:11px; height:11px; animation:spin 1s linear infinite;" />
-										Saving…
+										{m.research_topics_saving()}
 									{:else}
-										Save
+										{m.research_topics_save()}
 									{/if}
 								</button>
 							</div>
@@ -491,7 +502,7 @@
 						/>
 					{:else}
 						<div class="flex items-center justify-center p-8" style="color:{textMuted}; font-size:13px;">
-							File type not supported: {bean.bean_name}{ext}
+							{m.research_topics_file_type_not_supported({ bean_name: bean.bean_name, ext })}
 						</div>
 					{/if}
 				</div>
@@ -499,7 +510,7 @@
 
 				{#if bean.related_topics?.length}
 					<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
-						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">Related Topics</div>
+						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">{m.research_topics_related_topics()}</div>
 						<div class="flex flex-col gap-1.5">
 							{#each (bean.related_topics ?? []) as rel}
 								<div class="flex items-center gap-2 rounded-lg px-3 py-2" style="background:{surface3}; font-size:13px; color:{textSecondary}; font-family:monospace;">
@@ -525,7 +536,7 @@
 		onkeydown={handleModalBackdropKeydown}
 		role="button"
 		tabindex="0"
-		aria-label="Close new research topic bean modal"
+		aria-label={m.research_topics_close_new_research_topic_bean()}
 	>
 		<div
 			class="flex flex-col rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
@@ -533,7 +544,7 @@
 		>
 			<!-- Modal header -->
 			<div class="flex items-center justify-between px-6 py-4 flex-shrink-0" style="border-bottom:1px solid {borderColor};">
-				<h2 style="font-size:16px; font-weight:700; color:{textPrimary};">New Research Topic Bean</h2>
+				<h2 style="font-size:16px; font-weight:700; color:{textPrimary};">{m.research_topics_new_research_topic_bean()}</h2>
 				<button
 					onclick={closeModal}
 					disabled={submitting}
@@ -552,13 +563,13 @@
 				<!-- Research Title -->
 				<div>
 					<label for="research-title" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-						Research Title <span style="color:{accent};">*</span>
+						{m.research_topics_research_title()} <span style="color:{accent};">*</span>
 					</label>
 					<input
 						id="research-title"
 						type="text"
 						bind:value={fResearchTitle}
-						placeholder="e.g. Document Chunking Strategy"
+						placeholder={m.research_topics_e_g_document_chunking_strategy()}
 						style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none;"
 						onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 						onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
@@ -568,13 +579,13 @@
 				<!-- Research Subtitle -->
 				<div>
 					<label for="research-subtitle" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-						Research Subtitle <span style="color:{accent};">*</span>
+						{m.research_topics_research_subtitle()} <span style="color:{accent};">*</span>
 					</label>
 					<input
 						id="research-subtitle"
 						type="text"
 						bind:value={fResearchSubtitle}
-						placeholder="e.g. Specification for Semantic and Structural Chunking Approaches"
+						placeholder={m.research_topics_e_g_specification_for_semantic()}
 						style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none;"
 						onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 						onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
@@ -585,22 +596,22 @@
 				<div class="grid gap-4" style="grid-template-columns:1fr 1fr;">
 					<div>
 						<label for="bean-name" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-							Bean Name <span style="color:{accent};">*</span>
+							{m.research_topics_bean_name()} <span style="color:{accent};">*</span>
 						</label>
 						<input
 							id="bean-name"
 							type="text"
 							bind:value={fBeanName}
-							placeholder="e.g. chunking-strategy-spec"
+							placeholder={m.research_topics_e_g_chunking_strategy_spec()}
 							style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; font-family:monospace;"
 							onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 							onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
 						/>
-						<p style="font-size:11px; color:{textMuted}; margin-top:3px;">Letters, digits, hyphens, underscores only</p>
+						<p style="font-size:11px; color:{textMuted}; margin-top:3px;">{m.research_topics_letters_digits_hyphens_underscores_only()}</p>
 					</div>
 					<div>
 						<label for="bean-type" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-							Bean Type <span style="color:{accent};">*</span>
+							{m.research_topics_bean_type()} <span style="color:{accent};">*</span>
 						</label>
 						<select
 							id="bean-type"
@@ -608,7 +619,7 @@
 							style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; cursor:pointer;"
 						>
 							{#each BEAN_TYPES as t}
-								<option value={t}>{t}</option>
+								<option value={t}>{BEAN_TYPE_LABEL[t]}</option>
 							{/each}
 						</select>
 					</div>
@@ -618,7 +629,7 @@
 				<div class="grid gap-4" style="grid-template-columns:1fr 1fr;">
 					<div>
 						<label for="file-type" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-							File Type <span style="color:{accent};">*</span>
+							{m.research_topics_file_type()} <span style="color:{accent};">*</span>
 						</label>
 						<select
 							id="file-type"
@@ -632,28 +643,28 @@
 					</div>
 					<div>
 						<label for="bean-category" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-							Bean Category <span style="color:{accent};">*</span>
+							{m.research_topics_bean_category()} <span style="color:{accent};">*</span>
 						</label>
 						<input
 							id="bean-category"
 							type="text"
 							bind:value={fBeanCategory}
-							placeholder="e.g. knowledge-engineering/ingestion"
+							placeholder={m.research_topics_e_g_knowledge_engineering_ingestion()}
 							style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; font-family:monospace;"
 							onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 							onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
 						/>
-						<p style="font-size:11px; color:{textMuted}; margin-top:3px;">Maps to directory path under Topics/</p>
+						<p style="font-size:11px; color:{textMuted}; margin-top:3px;">{m.research_topics_maps_to_directory_path_under()}</p>
 					</div>
 				</div>
 
 				<!-- Description -->
 				<div>
-					<label for="bean-description" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">Description</label>
+					<label for="bean-description" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">{m.research_topics_description()}</label>
 					<textarea
 						id="bean-description"
 						bind:value={fBeanDesc}
-						placeholder="Brief description of this research topic bean…"
+						placeholder={m.research_topics_brief_description_of_this_research()}
 						rows="2"
 						style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; resize:vertical;"
 						onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
@@ -663,13 +674,13 @@
 
 				<!-- Keywords / Authors / Related (3 compact rows) -->
 				{#each [
-					{ label: 'Keywords',       bind: 'keywords', placeholder: 'ontology, schema, RTB' },
-					{ label: 'Authors',        bind: 'authors',  placeholder: 'Chen Ding' },
-					{ label: 'Related Topics', bind: 'related',  placeholder: 'bean-name-a, bean-name-b' },
+					{ label: m.research_topics_keywords(),       bind: 'keywords', placeholder: m.research_topics_ontology_schema_rtb() },
+					{ label: m.research_topics_authors(),        bind: 'authors',  placeholder: m.research_topics_chen_ding() },
+					{ label: m.research_topics_related_topics(), bind: 'related',  placeholder: m.research_topics_bean_name_a_bean_name() },
 				] as row}
 					<div>
 						<label for={`bean-${row.bind}`} style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-							{row.label} <span style="font-weight:400;">(comma-separated)</span>
+							{row.label} <span style="font-weight:400;">{m.research_topics_comma_separated()}</span>
 						</label>
 						{#if row.bind === 'keywords'}
 							<input id={`bean-${row.bind}`} type="text" bind:value={fKeywordsRaw} placeholder={row.placeholder}
@@ -693,12 +704,12 @@
 				<!-- Content -->
 				<div>
 					<label for="bean-content" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
-						Content <span style="font-weight:400;">(written to the artifact file)</span>
+						{m.research_topics_content()} <span style="font-weight:400;">{m.research_topics_written_to_the_artifact_file()}</span>
 					</label>
 					<textarea
 						id="bean-content"
 						bind:value={fContent}
-						placeholder="Paste or write the bean's content here…"
+						placeholder={m.research_topics_paste_or_write_the_bean()}
 						rows="5"
 						style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; resize:vertical; font-family:monospace;"
 						onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
@@ -724,7 +735,7 @@
 					style="background:transparent; color:{textSecondary}; border:1px solid {borderColor};"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-				>Cancel</button>
+				>{m.research_topics_cancel()}</button>
 				<button
 					onclick={handleCreate}
 					disabled={submitting || !fBeanName.trim() || !fResearchTitle.trim() || !fResearchSubtitle.trim() || !fBeanCategory.trim()}
@@ -733,10 +744,10 @@
 				>
 					{#if submitting}
 						<LoaderIcon style="width:14px; height:14px; animation:spin 1s linear infinite;" />
-						Creating…
+						{m.research_topics_creating()}
 					{:else}
 						<PlusIcon style="width:14px; height:14px;" />
-						Create Bean
+						{m.research_topics_create_bean()}
 					{/if}
 				</button>
 			</div>

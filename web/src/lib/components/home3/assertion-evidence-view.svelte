@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -62,12 +63,12 @@
 	});
 	const pageSizeOptions = [25, 50, 100, 200];
 	const sortableHeaders: { key: EvidenceSortKey; label: string }[] = [
-		{ key: 'assertion', label: 'Assertion ID' },
-		{ key: 'input_record', label: 'Input Record ID' },
-		{ key: 'artifact', label: 'Artifact ID' },
-		{ key: 'role', label: 'Evidence Role' },
-		{ key: 'confidence', label: 'Confidence' },
-		{ key: 'created', label: 'Created' }
+		{ key: 'assertion', label: m.assertion_evidence_assertion_id() },
+		{ key: 'input_record', label: m.assertion_evidence_input_record_id() },
+		{ key: 'artifact', label: m.assertion_evidence_artifact_id() },
+		{ key: 'role', label: m.assertion_evidence_evidence_role() },
+		{ key: 'confidence', label: m.assertion_evidence_confidence() },
+		{ key: 'created', label: m.assertion_evidence_created() }
 	];
 
 	async function load() {
@@ -150,7 +151,7 @@
 				confidence: form.confidence ? Number(form.confidence) : undefined
 			});
 			showCreate = false;
-			info = 'Evidence created.';
+			info = m.assertion_evidence_evidence_created();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -169,7 +170,7 @@
 		saving = true;
 		try {
 			detailsRecord = await deleteEvidence(detailsRecord.id, { reason });
-			info = 'Evidence soft-deleted.';
+			info = m.assertion_evidence_evidence_soft_deleted();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -183,7 +184,7 @@
 		saving = true;
 		try {
 			detailsRecord = await restoreEvidence(detailsRecord.id);
-			info = 'Evidence restored.';
+			info = m.assertion_evidence_evidence_restored();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -199,10 +200,12 @@
 	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px;font-weight:600;color:{text}">Assertion Evidence</h2>
+				<h2 style="font-size:18px;font-weight:600;color:{text}">
+					{m.assertion_evidence_assertion_evidence()}
+				</h2>
 				<p style="font-size:13px;color:{muted};margin-top:2px">
-					Lifecycle-safe administration of <code style="color:{accent}">kb.assertion_evidence</code
-					>.
+					{m.assertion_evidence_lifecycle_safe_administration_of()}
+					<code style="color:{accent}">kb.assertion_evidence</code>.
 				</p>
 			</div>
 			<div class="flex gap-2">
@@ -210,13 +213,14 @@
 					onclick={() => (showCreate = true)}
 					class="cursor-pointer rounded-lg px-3 py-2 text-sm"
 					style="background:{accent};color:white"
-					><PlusIcon class="inline h-4 w-4" /> New Evidence</button
+					><PlusIcon class="inline h-4 w-4" /> {m.assertion_evidence_new_evidence()}</button
 				><button
 					onclick={load}
 					disabled={loading}
 					class="cursor-pointer rounded-lg px-3 py-2 text-sm"
 					style="background:{surface};color:{text};border:1px solid {border}"
-					><RefreshCwIcon class="inline h-4 w-4 {loading ? 'animate-spin' : ''}" /> Refresh</button
+					><RefreshCwIcon class="inline h-4 w-4 {loading ? 'animate-spin' : ''}" />
+					{m.assertion_evidence_refresh()}</button
 				>
 			</div>
 		</div>
@@ -225,7 +229,7 @@
 	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
 		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
 			<label class="flex flex-col gap-1" style="color:{muted}">
-				<span style="font-size:11px">Assertion ID</span>
+				<span style="font-size:11px">{m.assertion_evidence_assertion_id()}</span>
 				<input
 					bind:value={filters.assertion_id}
 					class="rounded px-2 py-1.5 text-sm"
@@ -233,7 +237,7 @@
 				/>
 			</label>
 			<label class="flex flex-col gap-1" style="color:{muted}">
-				<span style="font-size:11px">Input Record ID</span>
+				<span style="font-size:11px">{m.assertion_evidence_input_record_id()}</span>
 				<input
 					bind:value={filters.input_record_id}
 					class="rounded px-2 py-1.5 text-sm"
@@ -241,7 +245,7 @@
 				/>
 			</label>
 			<label class="flex flex-col gap-1" style="color:{muted}">
-				<span style="font-size:11px">Artifact Type</span>
+				<span style="font-size:11px">{m.assertion_evidence_artifact_type()}</span>
 				<input
 					bind:value={filters.artifact_type}
 					class="rounded px-2 py-1.5 text-sm"
@@ -249,7 +253,7 @@
 				/>
 			</label>
 			<label class="flex flex-col gap-1" style="color:{muted}">
-				<span style="font-size:11px">Artifact ID</span>
+				<span style="font-size:11px">{m.assertion_evidence_artifact_id()}</span>
 				<input
 					bind:value={filters.artifact_id}
 					class="rounded px-2 py-1.5 text-sm"
@@ -257,39 +261,45 @@
 				/>
 			</label>
 			<label class="flex flex-col gap-1" style="color:{muted}">
-				<span style="font-size:11px">Evidence Role</span>
+				<span style="font-size:11px">{m.assertion_evidence_evidence_role()}</span>
 				<select
 					bind:value={filters.evidence_role}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface};color:{text};border:1px solid {border}"
 				>
-					<option value="">Any</option><option>supports</option><option>contradicts</option>
+					<option value="">{m.assertion_evidence_any()}</option><option
+						>{m.assertion_evidence_supports()}</option
+					><option>{m.assertion_evidence_contradicts()}</option>
 				</select>
 			</label>
 			<label class="flex flex-col gap-1" style="color:{muted}">
-				<span style="font-size:11px">Actor</span>
+				<span style="font-size:11px">{m.assertion_evidence_actor()}</span>
 				<select
 					bind:value={filters.actor_kind}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface};color:{text};border:1px solid {border}"
 				>
-					<option value="">Any</option><option>processor</option><option>human</option>
+					<option value="">{m.assertion_evidence_any()}</option><option
+						>{m.assertion_evidence_processor()}</option
+					><option>{m.assertion_evidence_human()}</option>
 				</select>
 			</label>
 		</div>
 		<label class="mt-3 flex items-center gap-2 text-sm" style="color:{muted}">
-			<input type="checkbox" bind:checked={filters.include_deleted} onchange={apply} /> Include deleted
+			<input type="checkbox" bind:checked={filters.include_deleted} onchange={apply} />
+			{m.assertion_evidence_include_deleted()}
 		</label>
 		<div class="mt-3 flex gap-2">
 			<button
 				onclick={apply}
 				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
-				style="background:{accent};color:white">Apply Filters</button
+				style="background:{accent};color:white">{m.assertion_evidence_apply_filters()}</button
 			>
 			<button
 				onclick={clear}
 				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
-				style="background:{surface};color:{text};border:1px solid {border}">Clear</button
+				style="background:{surface};color:{text};border:1px solid {border}"
+				>{m.assertion_evidence_clear()}</button
 			>
 		</div>
 	</div>
@@ -312,7 +322,7 @@
 			class="flex justify-between px-5 py-3"
 			style="border-bottom:1px solid {border};color:{muted};font-size:13px"
 		>
-			Total: {total}
+			{m.assertion_evidence_total({ total })}
 			<div class="flex gap-2">
 				<button
 					onclick={() => {
@@ -326,7 +336,7 @@
 					style="background:{surface};color:{text};border:1px solid {border}">‹</button
 				>
 				<label class="flex items-center gap-2" style="color:{muted}">
-					<span>Page Size</span>
+					<span>{m.assertion_evidence_page_size()}</span>
 					<select
 						value={pageSize}
 						onchange={(event) => changePageSize((event.currentTarget as HTMLSelectElement).value)}
@@ -337,7 +347,12 @@
 						{#each pageSizeOptions as option}<option value={option}>{option}</option>{/each}
 					</select>
 				</label>
-				<span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+				<span
+					>{m.assertion_evidence_page_of({
+						page,
+						value: Math.max(1, Math.ceil(total / pageSize))
+					})}</span
+				>
 				<button
 					onclick={() => {
 						if (page < Math.ceil(total / pageSize)) {
@@ -352,9 +367,11 @@
 			</div>
 		</div>
 		{#if loading}
-			<div class="p-8 text-center" style="color:{muted}">Loading…</div>
+			<div class="p-8 text-center" style="color:{muted}">{m.assertion_evidence_loading()}</div>
 		{:else if !rows.length}
-			<div class="p-8 text-center" style="color:{muted}">No evidence found.</div>
+			<div class="p-8 text-center" style="color:{muted}">
+				{m.assertion_evidence_no_evidence_found()}
+			</div>
 		{:else}
 			<div class="overflow-auto">
 				<table class="w-full text-sm">
@@ -362,7 +379,8 @@
 						<tr>
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
-								style="color:{muted};font-size:12px;border-bottom:1px solid {border}">ID</th
+								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
+								>{m.assertion_evidence_id()}</th
 							>
 							{#each sortableHeaders as header}
 								<th
@@ -372,7 +390,7 @@
 									<button
 										type="button"
 										onclick={() => toggleSort(header.key)}
-										aria-label={`Sort by ${header.label}`}
+										aria-label={m.assertion_evidence_sort_by({ label: header.label })}
 										class="cursor-pointer"
 										style="color:{muted};background:none;border:0;padding:0"
 									>
@@ -385,26 +403,27 @@
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
 								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
-								>Artifact Type</th
+								>{m.assertion_evidence_artifact_type()}</th
 							>
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
 								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
-								>Artifact Object ID</th
+								>{m.assertion_evidence_artifact_object_id()}</th
 							>
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
 								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
-								>Evidence Quote</th
+								>{m.assertion_evidence_evidence_quote()}</th
 							>
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
 								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
-								>Source Line Spans</th
+								>{m.assertion_evidence_source_line_spans()}</th
 							>
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
-								style="color:{muted};font-size:12px;border-bottom:1px solid {border}">Details</th
+								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
+								>{m.assertion_evidence_details()}</th
 							>
 						</tr>
 					</thead>
@@ -465,7 +484,7 @@
 										onclick={() => openDetails(row)}
 										class="cursor-pointer rounded px-2.5 py-1 text-xs"
 										style="background:{surface};color:{accent};border:1px solid {border}"
-										>Details</button
+										>{m.assertion_evidence_details()}</button
 									></td
 								>
 							</tr>
@@ -491,47 +510,47 @@
 			style="background:{card};border:1px solid {border}"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Create assertion evidence"
+			aria-label={m.assertion_evidence_create_assertion_evidence()}
 		>
-			<h3 style="color:{text};font-weight:600">Create Evidence</h3>
+			<h3 style="color:{text};font-weight:600">{m.assertion_evidence_create_evidence()}</h3>
 			<div class="grid gap-3 md:grid-cols-2">
 				<label style="color:{muted}"
-					>Assertion ID<input
+					>{m.assertion_evidence_assertion_id()}<input
 						bind:value={form.assertion_id}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Input Record ID<input
+					>{m.assertion_evidence_input_record_id()}<input
 						bind:value={form.input_record_id}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Artifact Type<input
+					>{m.assertion_evidence_artifact_type()}<input
 						bind:value={form.artifact_type}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Artifact ID<input
+					>{m.assertion_evidence_artifact_id()}<input
 						bind:value={form.artifact_id}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Artifact Object ID<input
+					>{m.assertion_evidence_artifact_object_id()}<input
 						bind:value={form.artifact_object_id}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Confidence<input
+					>{m.assertion_evidence_confidence()}<input
 						bind:value={form.confidence}
 						type="number"
 						min="0"
@@ -542,37 +561,41 @@
 					/></label
 				>
 				<label style="color:{muted}"
-					>Evidence Role<select
+					>{m.assertion_evidence_evidence_role()}<select
 						bind:value={form.evidence_role}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
-						><option>supports</option><option>contradicts</option></select
+						><option>{m.assertion_evidence_supports()}</option><option
+							>{m.assertion_evidence_contradicts()}</option
+						></select
 					></label
 				>
 				<label style="color:{muted}"
-					>Actor<select
+					>{m.assertion_evidence_actor()}<select
 						bind:value={form.actor_kind}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
-						><option>processor</option><option>human</option></select
+						><option>{m.assertion_evidence_processor()}</option><option
+							>{m.assertion_evidence_human()}</option
+						></select
 					></label
 				>
 				<label style="color:{muted}"
-					>Extraction Run<input
+					>{m.assertion_evidence_extraction_run()}<input
 						bind:value={form.extraction_run}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Model<input
+					>{m.assertion_evidence_model()}<input
 						bind:value={form.model}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
 					/></label
 				>
 				<label style="color:{muted}"
-					>Prompt Version<input
+					>{m.assertion_evidence_prompt_version()}<input
 						bind:value={form.prompt_version}
 						class="w-full rounded px-2 py-1.5 text-sm"
 						style="background:{surface};color:{text};border:1px solid {border}"
@@ -580,7 +603,7 @@
 				>
 			</div>
 			<label class="block" style="color:{muted}"
-				>Evidence Quote<textarea
+				>{m.assertion_evidence_evidence_quote()}<textarea
 					bind:value={form.evidence_quote}
 					rows="3"
 					class="w-full rounded px-2 py-1.5 text-sm"
@@ -588,7 +611,8 @@
 				></textarea></label
 			>
 			<label class="block" style="color:{muted}"
-				>Source Line Spans <span class="text-xs">(JSON, e.g. ["12:14"])</span><textarea
+				>{m.assertion_evidence_source_line_spans()}
+				<span class="text-xs">{m.assertion_evidence_json_e_g_12_14()}</span><textarea
 					bind:value={form.source_line_spans}
 					rows="3"
 					class="w-full rounded px-2 py-1.5 font-mono text-sm"
@@ -600,13 +624,14 @@
 				<button
 					onclick={() => (showCreate = false)}
 					class="cursor-pointer rounded px-3 py-2 text-sm"
-					style="background:{surface};color:{text};border:1px solid {border}">Cancel</button
+					style="background:{surface};color:{text};border:1px solid {border}"
+					>{m.assertion_evidence_cancel()}</button
 				>
 				<button
 					onclick={create}
 					disabled={saving}
 					class="cursor-pointer rounded px-3 py-2 text-sm"
-					style="background:{accent};color:white">Save</button
+					style="background:{accent};color:white">{m.assertion_evidence_save()}</button
 				>
 			</div>
 		</div>
@@ -619,7 +644,7 @@
 		style="background:rgba(15,23,42,0.62)"
 		role="button"
 		tabindex="0"
-		aria-label="Close evidence details"
+		aria-label={m.assertion_evidence_close_evidence_details()}
 		onclick={(event) => {
 			if (event.target === event.currentTarget) detailsRecord = null;
 		}}
@@ -632,7 +657,7 @@
 			style="background:{card};border:1px solid {border}"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Assertion evidence details"
+			aria-label={m.assertion_evidence_assertion_evidence_details()}
 			tabindex="0"
 			onclick={(event) => event.stopPropagation()}
 			onkeydown={(event) => event.stopPropagation()}
@@ -642,17 +667,18 @@
 				style="border-bottom:1px solid {border}"
 			>
 				<h3 style="font-size:15px;font-weight:600;color:{text}">
-					Evidence #{detailsRecord.id} Details
+					{m.assertion_evidence_evidence_details({ id: detailsRecord.id })}
 				</h3>
 				<button
 					onclick={() => (detailsRecord = null)}
 					class="cursor-pointer rounded px-3 py-1.5 text-xs"
-					style="background:{surface};color:{muted};border:1px solid {border}">Close</button
+					style="background:{surface};color:{muted};border:1px solid {border}"
+					>{m.assertion_evidence_close()}</button
 				>
 			</div>
 			<div class="overflow-y-auto p-4">
 				<div style="font-size:12px;font-weight:600;color:{muted};margin-bottom:6px">
-					Record Fields
+					{m.assertion_evidence_record_fields()}
 				</div>
 				<div class="rounded-lg p-2" style="border:1px solid {border};background:{surface}">
 					{#each detailRows(detailsRecord) as row}
@@ -678,12 +704,12 @@
 						onclick={restore}
 						disabled={saving}
 						class="mt-4 cursor-pointer rounded px-3 py-2 text-sm"
-						style="background:{accent};color:white">Restore</button
+						style="background:{accent};color:white">{m.assertion_evidence_restore()}</button
 					>
 				{:else}
 					<div class="mt-4 flex gap-2">
 						<input
-							placeholder="Deletion reason"
+							placeholder={m.assertion_evidence_deletion_reason()}
 							bind:value={reason}
 							class="flex-1 rounded px-2 py-2 text-sm"
 							style="background:{surface};color:{text};border:1px solid {border}"
@@ -692,7 +718,7 @@
 							onclick={remove}
 							disabled={saving}
 							class="cursor-pointer rounded px-3 py-2 text-sm"
-							style="background:{danger};color:white">Soft Delete</button
+							style="background:{danger};color:white">{m.assertion_evidence_soft_delete()}</button
 						>
 					</div>
 				{/if}

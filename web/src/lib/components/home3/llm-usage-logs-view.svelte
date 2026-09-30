@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
@@ -127,7 +128,7 @@
 			}
 			const res = await fetch(`/api/v1/llm/usage-events-admin?${params}`, { credentials: 'same-origin' });
 			const data = await res.json();
-			if (!res.ok) throw new Error(data.message ?? 'Failed to load');
+			if (!res.ok) throw new Error(data.message ?? m.llm_usage_logs_failed_to_load());
 			rows  = data.events ?? [];
 			total = data.total  ?? 0;
 		} catch (err) {
@@ -160,13 +161,13 @@
 		modalLoading = true;
 		modalError   = '';
 		modalContent = '';
-		modalTitle   = `${type === 'input' ? 'Input' : 'Output'} Body — ${row.id.slice(0, 12)}…`;
+		modalTitle   = (type === 'input' ? m.llm_usage_logs_input_body_title : m.llm_usage_logs_output_body_title)({ id: row.id.slice(0, 12) });
 		try {
 			const res = await fetch(`/api/v1/llm/usage-events/${row.id}/body?type=${type}`, { credentials: 'same-origin' });
 			const text = await res.text();
 			if (!res.ok) {
 				const msg = (() => { try { return JSON.parse(text).message; } catch { return text; } })();
-				throw new Error(msg ?? 'Failed to load body');
+				throw new Error(msg ?? m.llm_usage_logs_failed_to_load_body());
 			}
 			// Pretty-print JSON
 			try { modalContent = JSON.stringify(JSON.parse(text), null, 2); }
@@ -187,7 +188,7 @@
 		modalVisible = true;
 		modalLoading = false;
 		modalError   = '';
-		modalTitle   = `Metadata — ${row.id.slice(0, 12)}…`;
+		modalTitle   = m.llm_usage_logs_metadata_2({ id: row.id.slice(0, 12) });
 		modalContent = metadataText(row);
 	}
 
@@ -195,7 +196,7 @@
 		modalVisible = true;
 		modalLoading = false;
 		modalError   = '';
-		modalTitle   = `Details — ${row.id.slice(0, 12)}…`;
+		modalTitle   = m.llm_usage_logs_details_2({ id: row.id.slice(0, 12) });
 		modalContent = JSON.stringify(row, null, 2);
 	}
 
@@ -224,8 +225,8 @@
 		} catch (err) {
 			const looksLikeJson = text.startsWith('{') || text.startsWith('[');
 			selectionError = looksLikeJson
-				? `Invalid JSON: ${err instanceof Error ? err.message : String(err)}`
-				: 'Only JSON content can be rendered in name-value format.';
+				? m.llm_usage_logs_invalid_json({ value: err instanceof Error ? err.message : String(err) })
+				: m.llm_usage_logs_only_json_content_can_be();
 		}
 		showingSelection = true;
 	}
@@ -324,9 +325,9 @@
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">LLM Usage Logs</h2>
+				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">{m.llm_usage_logs_llm_usage_logs()}</h2>
 				<p style="font-size:13px; color:{textSecondary}; margin-top:2px;">
-					All LLM call events from <code style="font-size:12px; color:{accent};">public.llm_usage_event</code>, ordered by start time. Double-click a body ref to view the archived payload.
+					{m.llm_usage_logs_all_llm_call_events_from()} <code style="font-size:12px; color:{accent};">public.llm_usage_event</code>{m.llm_usage_logs_ordered_by_start_time_double()}
 				</p>
 			</div>
 			<button
@@ -336,7 +337,7 @@
 				style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 			>
 				<RefreshCwIcon class="w-4 h-4 {loading ? 'animate-spin' : ''}" />
-				Refresh
+				{m.llm_usage_logs_refresh()}
 			</button>
 		</div>
 	</div>
@@ -345,68 +346,68 @@
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));">
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Model</span>
-				<input type="text" bind:value={filterModel} placeholder="Contains…"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_model()}</span>
+				<input type="text" bind:value={filterModel} placeholder={m.llm_usage_logs_contains()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Prompt</span>
-				<input type="text" bind:value={filterPrompt} placeholder="Contains…"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_prompt()}</span>
+				<input type="text" bind:value={filterPrompt} placeholder={m.llm_usage_logs_contains()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Call Reason</span>
-				<input type="text" bind:value={filterCallReason} placeholder="Contains…"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_call_reason()}</span>
+				<input type="text" bind:value={filterCallReason} placeholder={m.llm_usage_logs_contains()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Call LOC</span>
-				<input type="text" bind:value={filterCallLoc} placeholder="Contains…"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_call_loc()}</span>
+				<input type="text" bind:value={filterCallLoc} placeholder={m.llm_usage_logs_contains()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Run ID</span>
-				<input type="number" bind:value={filterRunID} placeholder="Exact…"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_run_id()}</span>
+				<input type="number" bind:value={filterRunID} placeholder={m.llm_usage_logs_exact()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Started From</span>
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_started_from()}</span>
 				<input type="datetime-local" bind:value={filterStartedFrom}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Started To</span>
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_started_to()}</span>
 				<input type="datetime-local" bind:value={filterStartedTo}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">In Tok Min</span>
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_in_tok_min()}</span>
 				<input type="number" bind:value={filterInTokMin}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">In Tok Max</span>
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_in_tok_max()}</span>
 				<input type="number" bind:value={filterInTokMax}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Out Tok Min</span>
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_out_tok_min()}</span>
 				<input type="number" bind:value={filterOutTokMin}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Out Tok Max</span>
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_out_tok_max()}</span>
 				<input type="number" bind:value={filterOutTokMax}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Metadata Key</span>
-				<input type="text" bind:value={filterMetaKey} placeholder="e.g. capture_source"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_metadata_key()}</span>
+				<input type="text" bind:value={filterMetaKey} placeholder={m.llm_usage_logs_e_g_capture_source()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 			<label class="flex flex-col gap-1">
-				<span style="font-size:11px; color:{textMuted};">Metadata Value</span>
-				<input type="text" bind:value={filterMetaValue} placeholder="Contains…"
+				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_metadata_value()}</span>
+				<input type="text" bind:value={filterMetaValue} placeholder={m.llm_usage_logs_contains()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
 			</label>
 		</div>
@@ -416,13 +417,13 @@
 				disabled={loading}
 				class="rounded-lg px-3 py-2 text-sm cursor-pointer"
 				style="background:{accent}; color:white;"
-			>Apply Filters</button>
+			>{m.llm_usage_logs_apply_filters()}</button>
 			<button
 				onclick={clearFilters}
 				disabled={loading}
 				class="rounded-lg px-3 py-2 text-sm cursor-pointer"
 				style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
-			>Clear</button>
+			>{m.llm_usage_logs_clear()}</button>
 		</div>
 	</div>
 
@@ -441,8 +442,8 @@
 		<div class="px-5 py-3 flex items-center justify-between flex-shrink-0"
 			style="border-bottom:1px solid {borderColor};">
 			<span style="font-size:13px; color:{textMuted};">
-				Total: {total} events
-				{#if total > 0} &middot; page {page} of {totalPages}{/if}
+				{m.llm_usage_logs_total_events({ total })}
+				{#if total > 0} {m.llm_usage_logs_page_of({ page, totalPages })}{/if}
 			</span>
 			<div class="flex items-center gap-2">
 				<button
@@ -450,41 +451,41 @@
 					disabled={page <= 1 || loading}
 					class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
-				>&lsaquo; Prev</button>
+				>{m.llm_usage_logs_prev()}</button>
 				<button
 					onclick={nextPage}
 					disabled={page >= totalPages || loading}
 					class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
-				>Next &rsaquo;</button>
+				>{m.llm_usage_logs_next()}</button>
 			</div>
 		</div>
 
 		{#if loading}
-			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">Loading…</div>
+			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">{m.llm_usage_logs_loading()}</div>
 		{:else if rows.length === 0}
-			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">No events found.</div>
+			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">{m.llm_usage_logs_no_events_found()}</div>
 		{:else}
 			<div class="flex-1 min-h-0 overflow-auto" style="user-select:text;">
 				<table class="w-full text-sm" style="border-collapse:separate; border-spacing:0;">
 					<thead>
 						<tr style="background:{surface2};">
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Started At</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Model</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Prompt</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Metadata</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call Reason</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call LOC</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Run ID</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">In Tok</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Out Tok</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Cache Hit</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Cache Miss</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Latency</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Error</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Input Body</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Output Body</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Details</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_started_at()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_model()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_prompt()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_metadata()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_call_reason()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_call_loc()}</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_run_id()}</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_in_tok()}</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_out_tok()}</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_cache_hit()}</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_cache_miss()}</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_latency()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_error()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_input_body()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_output_body()}</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_details()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -520,7 +521,7 @@
 										<span style="color:{danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
 											title={row.error_message}>{row.error_message}</span>
 									{:else}
-										<span style="color:{success}; font-size:12px;">OK</span>
+										<span style="color:{success}; font-size:12px;">{m.llm_usage_logs_ok()}</span>
 									{/if}
 								</td>
 
@@ -532,7 +533,7 @@
 											class="rounded px-2 py-1 text-xs cursor-pointer"
 											style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
 											title={row.input_body_ref}
-										>View</button>
+										>{m.llm_usage_logs_view()}</button>
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
 									{/if}
@@ -547,7 +548,7 @@
 											class="rounded px-2 py-1 text-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
 											style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
 											title={isEmbeddingCall(row) ? 'Not applicable for embedding calls' : row.output_body_ref}
-										>View</button>
+										>{m.llm_usage_logs_view()}</button>
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
 									{/if}
@@ -559,7 +560,7 @@
 										onclick={() => openDetails(row)}
 										class="rounded px-2 py-1 text-xs cursor-pointer"
 										style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
-									>Details</button>
+									>{m.llm_usage_logs_details()}</button>
 								</td>
 							</tr>
 						{/each}
@@ -588,20 +589,20 @@
 							onclick={backToFull}
 							class="inline-flex items-center rounded px-3 py-1.5 text-xs cursor-pointer"
 							style="background:{surface2}; color:{textSecondary}; border:1px solid {borderColor};"
-						>← Full</button>
+						>{m.llm_usage_logs_full()}</button>
 					{:else}
 						<button
 							onclick={showSelected}
 							disabled={!hasSelection}
 							class="inline-flex items-center rounded px-3 py-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-default"
 							style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
-						>Show Selected</button>
+						>{m.llm_usage_logs_show_selected()}</button>
 					{/if}
 					<button
 						onclick={closeModal}
 						class="rounded p-1.5 cursor-pointer"
 						style="background:{surface2}; color:{textMuted}; border:1px solid {borderColor};"
-						aria-label="Close"
+						aria-label={m.llm_usage_logs_close()}
 					><XIcon class="w-4 h-4" /></button>
 				</div>
 			</div>
@@ -609,7 +610,7 @@
 			<!-- Modal body -->
 			<div class="flex-1 overflow-auto p-5">
 				{#if modalLoading}
-					<div style="color:{textMuted}; font-size:14px; text-align:center; padding:2rem;">Loading…</div>
+					<div style="color:{textMuted}; font-size:14px; text-align:center; padding:2rem;">{m.llm_usage_logs_loading()}</div>
 				{:else if modalError}
 					<div class="rounded-lg p-4 flex items-start gap-2"
 						style="background:{danger}15; border:1px solid {danger}40; color:{danger};">

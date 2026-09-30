@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { onDestroy } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -52,9 +53,9 @@
 		darkMode = true,
 		browserInstanceKey = 'extraction',
 		scopeToActiveStore = false,
-		heroEyebrow = 'Knowledge Base',
-		heroTitle = 'Extracted Items',
-		heroDescription = 'Inspect the items an LLM extracted from each document.',
+		heroEyebrow = msg.kb_extraction_knowledge_base(),
+		heroTitle = msg.kb_extraction_extracted_items(),
+		heroDescription = msg.kb_extraction_inspect_the_items_an_llm(),
 		onFocusModeChange,
 
 		groups,
@@ -75,14 +76,14 @@
 		attrRaw,
 
 		storagePrefix = 'extraction',
-		itemsLabel = 'Items',
+		itemsLabel = msg.kb_extraction_items(),
 		itemLabelSingular = 'item',
-		canvasItemLabel = 'Item',
-		itemTypeFilterLabel = 'Type',
+		canvasItemLabel = msg.kb_extraction_item(),
+		itemTypeFilterLabel = msg.kb_extraction_type(),
 		emptyTableName = '',
-		emptySubtitle = 'Run the extraction processor to populate this list.',
-		browserSubtitle = 'Search, filter, and select a record to inspect its extracted items.',
-		canvasMapLabel = 'Attribute Map'
+		emptySubtitle = msg.kb_extraction_run_the_extraction_processor_to(),
+		browserSubtitle = msg.kb_extraction_search_filter_and_select_a(),
+		canvasMapLabel = msg.kb_extraction_attribute_map()
 	}: {
 		darkMode?: boolean;
 		browserInstanceKey?: string;
@@ -338,7 +339,7 @@
 		} catch (error) {
 			items = [];
 			loadError =
-				error instanceof Error ? error.message : `Failed to load ${itemsLabel.toLowerCase()} for this record`;
+				error instanceof Error ? error.message : msg.kb_extraction_failed_to_load_for_this({ itemsLabel: itemsLabel.toLowerCase() });
 		} finally {
 			loading = false;
 		}
@@ -712,7 +713,7 @@
 	{#snippet pdfPanel(ctxItem: any | null)}
 		<div class="pdf-card">
 			<div class="pdf-head">
-				<div class="eyebrow">Source document</div>
+				<div class="eyebrow">{msg.kb_extraction_source_document()}</div>
 				{#if ctxItem}
 					<div class="pdf-ctx" title={getItemTitle(ctxItem)}>{getItemTitle(ctxItem)}</div>
 				{/if}
@@ -730,15 +731,14 @@
 				/>
 			{:else if viewerInputId}
 				<div class="empty-state pdf-empty">
-					<div class="empty-title">Source isn't a PDF</div>
+					<div class="empty-title">{msg.kb_extraction_source_isn_t_a_pdf()}</div>
 					<div class="empty-copy">
-						This record's source file can't be previewed here. Item detail is available on
-						the canvas.
+						{msg.kb_extraction_this_record_s_source_file()}
 					</div>
 				</div>
 			{:else}
 				<div class="empty-state pdf-empty">
-					<div class="empty-copy">Select a record to preview its source document.</div>
+					<div class="empty-copy">{msg.kb_extraction_select_a_record_to_preview()}</div>
 				</div>
 			{/if}
 		</div>
@@ -753,7 +753,7 @@
 					<div class="canvas-bar-left">
 						<button type="button" class="back-btn" onclick={closeFocus}>
 							<ArrowLeftIcon class="h-4 w-4" />
-							<span>Back</span>
+							<span>{msg.kb_extraction_back()}</span>
 						</button>
 						<div class="canvas-crumb mono">
 							{#if getItemType(fb)?.trim()}<span class="crumb-type">{getItemType(fb)}</span>{/if}
@@ -764,18 +764,18 @@
 						<label class="scene-filter">
 							<span class="scene-filter-label">{itemTypeFilterLabel}</span>
 							<select bind:value={typeFilter} class="scene-filter-select">
-								<option value="__all__">All {(itemTypeFilterLabel ?? 'type').toLowerCase()}s</option>
+								<option value="__all__">{msg.kb_extraction_all_s({ itemTypeFilterLabel: (itemTypeFilterLabel ?? msg.kb_extraction_type_fallback()).toLowerCase() })}</option>
 								{#each typeOptions as typeOpt}
 									<option value={typeOpt}>{typeOpt}</option>
 								{/each}
 							</select>
 						</label>
-						<div class="scene-nav" aria-label="Item navigation">
+						<div class="scene-nav" aria-label={msg.kb_extraction_item_navigation()}>
 							<button
 								type="button"
 								class="nav-btn"
-								aria-label="Previous item"
-								title="Previous item"
+								aria-label={msg.kb_extraction_previous_item()}
+								title={msg.kb_extraction_previous_item()}
 								disabled={prevFocusedItemId == null}
 								onclick={goToPrevItem}
 							>
@@ -784,8 +784,8 @@
 							<button
 								type="button"
 								class="nav-btn"
-								aria-label="Next item"
-								title="Next item"
+								aria-label={msg.kb_extraction_next_item()}
+								title={msg.kb_extraction_next_item()}
 								disabled={nextFocusedItemId == null}
 								onclick={goToNextItem}
 							>
@@ -801,7 +801,7 @@
 						{#if getItemSummary(fb)?.trim()}
 							<p class="map-sub">{getItemSummary(fb)}</p>
 						{:else}
-							<p class="map-sub">Functional structure of the extracted item.</p>
+							<p class="map-sub">{msg.kb_extraction_functional_structure_of_the_extracted()}</p>
 						{/if}
 					</header>
 
@@ -893,21 +893,21 @@
 								{/each}
 							{/each}
 						{:else}
-							<div class="map-measuring">Laying out map…</div>
+							<div class="map-measuring">{msg.kb_extraction_laying_out_map()}</div>
 						{/if}
 
-						<aside class="map-legend" aria-label="Map legend">
-							<div class="legend-h">Map Legend</div>
+						<aside class="map-legend" aria-label={msg.kb_extraction_map_legend()}>
+							<div class="legend-h">{msg.kb_extraction_map_legend_2()}</div>
 							<div class="legend-row">
 								<span class="lg lg-scene"></span><span>{canvasItemLabel}</span>
 							</div>
 							<div class="legend-row">
-								<span class="lg lg-group"></span><span>Functional group</span>
+								<span class="lg lg-group"></span><span>{msg.kb_extraction_functional_group()}</span>
 							</div>
 							<div class="legend-row">
-								<span class="lg lg-attr"></span><span>Attribute</span>
+								<span class="lg lg-attr"></span><span>{msg.kb_extraction_attribute()}</span>
 							</div>
-							<div class="legend-hint">Hover an attribute node to inspect its values</div>
+							<div class="legend-hint">{msg.kb_extraction_hover_an_attribute_node_to()}</div>
 						</aside>
 
 						<aside
@@ -915,7 +915,7 @@
 							class="map-meta-card"
 							class:is-resizing={sceneMetaResizing}
 							style={sceneMetaCardStyle}
-							aria-label="Item metadata"
+							aria-label={msg.kb_extraction_item_metadata()}
 						>
 							<div class="meta-card-head">
 								<div class="meta-card-title">{getItemTitle(fb) || (getItemObjectId ? getItemObjectId(fb) : '') || canvasItemLabel}</div>
@@ -931,15 +931,15 @@
 									</div>
 								{/if}
 								<div class="meta-row">
-									<span class="meta-label">Confidence</span>
-									<span class="cap-conf conf-{confidenceBand(conf)}" title="Extraction confidence">
+									<span class="meta-label">{msg.kb_extraction_confidence()}</span>
+									<span class="cap-conf conf-{confidenceBand(conf)}" title={msg.kb_extraction_extraction_confidence()}>
 										<span class="cap-conf-dot"></span>
 										<span class="mono">{Math.round(conf * 100)}%</span>
 									</span>
 								</div>
 								{#if getItemObjectId && getItemObjectId(fb)}
 									<div class="meta-row">
-										<span class="meta-label">Object ID</span>
+										<span class="meta-label">{msg.kb_extraction_object_id()}</span>
 										<span class="meta-val mono">{getItemObjectId(fb)}</span>
 									</div>
 								{/if}
@@ -950,20 +950,20 @@
 									</div>
 								{/if}
 								<div class="meta-row meta-row-col">
-									<span class="meta-label">LINES</span>
+									<span class="meta-label">{msg.kb_extraction_lines()}</span>
 									{#if focusedLineSpans.length}
 										<div class="chips">
 											{#each focusedLineSpans as span}<span class="kw mono">{span}</span>{/each}
 										</div>
 									{:else}
 										<p class="meta-card-summary">
-											Evidence lines are unavailable for this item. Regenerate to enable line display and PDF highlighting.
+											{msg.kb_extraction_evidence_lines_are_unavailable_for()}
 										</p>
 									{/if}
 								</div>
 								{#if formatCreateTime(getItemCreateTime(fb))}
 									<div class="meta-row">
-										<span class="meta-label">CREATE TIME</span>
+										<span class="meta-label">{msg.kb_extraction_create_time()}</span>
 										<span class="meta-val">{formatCreateTime(getItemCreateTime(fb))}</span>
 									</div>
 								{/if}
@@ -987,8 +987,8 @@
 							<button
 								type="button"
 								class="meta-card-resizer"
-								aria-label="Resize metadata card"
-								title="Drag to resize"
+								aria-label={msg.kb_extraction_resize_metadata_card()}
+								title={msg.kb_extraction_drag_to_resize()}
 								onpointerdown={startSceneMetaResize}
 								onkeydown={onSceneMetaResizerKeydown}
 							></button>
@@ -1019,7 +1019,7 @@
 								</header>
 								<div class="insp-body">
 									{#if si.items.length === 0}
-										<p class="insp-empty">No values were extracted for this attribute.</p>
+										<p class="insp-empty">{msg.kb_extraction_no_values_were_extracted_for()}</p>
 									{:else if si.def.kind === 'kw'}
 										<div class="chips">
 											{#each si.items as kw}<span class="kw">{kw}</span>{/each}
@@ -1098,7 +1098,7 @@
 										{#if si.items.length > 0}
 											<p class="insp-text">{si.items[0]}</p>
 										{:else}
-											<p class="insp-empty">No value was extracted for this attribute.</p>
+											<p class="insp-empty">{msg.kb_extraction_no_value_was_extracted_for()}</p>
 										{/if}
 									{/if}
 								</div>
@@ -1112,7 +1112,7 @@
 				type="button"
 				class="resize-handle focus-resize-handle"
 				class:active={focusResizing}
-				aria-label="Resize the source document panel"
+				aria-label={msg.kb_extraction_resize_the_source_document_panel()}
 				onpointerdown={startFocusResize}
 				onkeydown={onFocusResizerKeydown}
 			>
@@ -1129,11 +1129,11 @@
 				<p>{heroDescription}</p>
 			</div>
 			{#if activeRecord && !loading && items.length}
-				<div class="hero-stat" aria-label="{itemsLabel} summary for the selected record">
+				<div class="hero-stat" aria-label={msg.kb_extraction_summary_for_the_selected_record({ itemsLabel })}>
 					<span class="hero-stat-count">{items.length}</span>
 					<span class="hero-stat-label">{items.length === 1 ? itemLabelSingular : itemsLabel.toLowerCase()}</span>
 					<span class="hero-stat-sep" aria-hidden="true">·</span>
-					<span class="hero-stat-conf">avg confidence {avgConfidence}%</span>
+					<span class="hero-stat-conf">{msg.kb_extraction_avg_confidence({ avgConfidence })}</span>
 				</div>
 			{/if}
 		</div>
@@ -1142,10 +1142,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey={browserInstanceKey}
-				title="kb.inputs"
+				title={msg.kb_extraction_kb_inputs()}
 				subtitle={browserSubtitle}
-				emptyTitle="No records found."
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				emptyTitle={msg.kb_extraction_no_records_found()}
+				emptySubtitle={msg.kb_extraction_use_search_or_retrieve_to()}
 				{scopeToActiveStore}
 				{selectedRecordId}
 				onSelect={handleRecordSelect}
@@ -1158,25 +1158,25 @@
 						<div class="tab passive" title={activeRecord.file_name ?? ''}>
 							{activeRecord.title?.trim() ||
 								activeRecord.file_name?.trim() ||
-								`Record #${activeRecord.id}`}
+								msg.kb_extraction_record({ id: activeRecord.id })}
 						</div>
 					{/if}
 				</div>
 
 				{#if !activeRecord}
 					<div class="empty-state">
-						<div class="empty-title">Select a record</div>
+						<div class="empty-title">{msg.kb_extraction_select_a_record()}</div>
 						<div class="empty-copy">
-							Choose a document from the left to read the {itemsLabel.toLowerCase()} extracted from it.
+							{msg.kb_extraction_choose_a_document_from_the({ itemsLabel: itemsLabel.toLowerCase() })}
 						</div>
 					</div>
 				{:else}
 					<div class="detail-grid">
 						<div class="scene-card" style="width:{listWidth}px; flex:0 0 {listWidth}px;">
 							<div class="scene-card-head">
-								<div class="eyebrow">Extracted {itemsLabel.toLowerCase()}</div>
+								<div class="eyebrow">{msg.kb_extraction_extracted({ itemsLabel: itemsLabel.toLowerCase() })}</div>
 								<div class="scene-card-count">
-									{#if loading}loading…{:else}{items.length} total{/if}
+									{#if loading}{msg.kb_extraction_loading()}{:else}{msg.kb_extraction_total({ itemsCount: items.length })}{/if}
 								</div>
 							</div>
 
@@ -1191,14 +1191,14 @@
 									{/each}
 								{:else if loadError}
 									<div class="error-card">
-										<div class="error-title">Couldn't load {itemsLabel.toLowerCase()}</div>
+										<div class="error-title">{msg.kb_extraction_couldn_t_load({ itemsLabel: itemsLabel.toLowerCase() })}</div>
 										<div class="error-copy">{loadError}</div>
 									</div>
 								{:else if items.length === 0}
 									<div class="empty-state">
-										<div class="empty-title">No {itemsLabel.toLowerCase()} yet</div>
+										<div class="empty-title">{msg.kb_extraction_no_yet({ itemsLabel: itemsLabel.toLowerCase() })}</div>
 										<div class="empty-copy">
-											This record has no entries in {#if emptyTableName}<code>{emptyTableName}</code>{:else}this record{/if}.
+											{msg.kb_extraction_this_record_has_no_entries()} {#if emptyTableName}<code>{emptyTableName}</code>{:else}{msg.kb_extraction_this_record()}{/if}.
 											{emptySubtitle}
 										</div>
 									</div>
@@ -1209,7 +1209,7 @@
 											<button
 												type="button"
 												class="scene-row"
-												title="Open this {itemLabelSingular}"
+												title={msg.kb_extraction_open_this({ itemLabelSingular })}
 												onclick={() => focusBlock(getItemId(item))}
 											>
 												<span class="row-index mono">{String(idx + 1).padStart(2, '0')}</span>
@@ -1233,7 +1233,7 @@
 														</span>
 													{/if}
 												</span>
-												<span class="row-conf" title="Extraction confidence">
+												<span class="row-conf" title={msg.kb_extraction_extraction_confidence()}>
 													<span class="conf-meter conf-{confidenceBand(conf)}">
 														<span class="conf-fill" style="width:{Math.round(conf * 100)}%"></span>
 													</span>
@@ -1253,7 +1253,7 @@
 							type="button"
 							class="resize-handle"
 							class:active={resizing}
-							aria-label="Resize the {itemLabelSingular} panel"
+							aria-label={msg.kb_extraction_resize_the_panel({ itemLabelSingular })}
 							onpointerdown={startResize}
 							onkeydown={onResizerKeydown}
 						>

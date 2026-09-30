@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		getRequest,
@@ -329,9 +330,9 @@
 	// Severity chart
 	let severityItems = $derived(
 		[
-			{ label: 'High', count: highCount, color: '#ef4444' },
-			{ label: 'Medium', count: mediumCount, color: '#f59e0b' },
-			{ label: 'Low', count: lowCount, color: '#22c55e' }
+			{ label: m.doc_review_results_high(), count: highCount, color: '#ef4444' },
+			{ label: m.doc_review_results_medium(), count: mediumCount, color: '#f59e0b' },
+			{ label: m.doc_review_results_low(), count: lowCount, color: '#22c55e' }
 		].sort((a, b) => b.count - a.count)
 	);
 	let severitySlices = $derived(
@@ -644,7 +645,7 @@
 		style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: {textSecondary};"
 	>
 		<LoaderIcon size={32} style="animation: spin 1s linear infinite; margin-bottom: 1rem;" />
-		<div>Loading review request...</div>
+		<div>{m.doc_review_results_loading_review_request()}</div>
 	</div>
 {:else}
 	<div style="padding: 1.5rem;">
@@ -656,15 +657,15 @@
 					style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 1rem; background: {accentTint}; color: {accent}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
 				>
 					<ArrowLeftIcon size={16} />
-					Back to Review Results
+					{m.doc_review_results_back_to_review_results()}
 				</button>
 			{/if}
 			<span style="color: {textMuted}; font-size: 0.85rem;"
-				>{docTitle || `Document #${request.input_record_id}`}</span
+				>{docTitle || m.doc_review_results_document({ input_record_id: request.input_record_id })}</span
 			>
 			<span
 				style="color: {textMuted}; font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid {borderColor}; border-radius: 5px; font-family: monospace;"
-				>Request #{requestId}</span
+				>{m.doc_review_results_request({ requestId })}</span
 			>
 			<span
 				style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;"
@@ -675,7 +676,7 @@
 					onclick={handleStop}
 					disabled={isStopping}
 					style="padding: 0.4rem 0.9rem; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
-					>{isStopping ? 'Stopping…' : 'Stop'}</button
+					>{isStopping ? m.doc_review_results_stopping() : m.doc_review_results_stop()}</button
 				>
 			{/if}
 		</div>
@@ -697,7 +698,7 @@
 					<div
 						style="font-size: 0.8rem; font-weight: 600; color: {textSecondary}; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;"
 					>
-						Aspects
+						{m.doc_review_results_aspects()}
 					</div>
 					<div style="display: flex; flex-direction: column; gap: 0.4rem;">
 						{#each aspectStatuses as s}
@@ -733,9 +734,9 @@
 									></div>
 								</div>
 								<div style="display:flex; align-items:center; gap:0.6rem; font-size:0.75rem; color:{textMuted};">
-									<span>{s.finding_count} finding{s.finding_count !== 1 ? 's' : ''} so far</span>
+									<span>{m.doc_review_results_finding_so_far({ finding_count: s.finding_count, plural: s.finding_count !== 1 ? 's' : '' })}</span>
 									{#if s.error_message}
-										<span style="color: #ef4444;" title={s.error_message}>error</span>
+										<span style="color: #ef4444;" title={s.error_message}>{m.doc_review_results_error()}</span>
 									{/if}
 								</div>
 							</div>
@@ -747,7 +748,7 @@
 				style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; font-size: 0.9rem; padding: 1.5rem 0.25rem;"
 			>
 				<LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
-				Reviewing the document… findings will appear here as soon as the job completes.
+				{m.doc_review_results_reviewing_the_document_findings_will()}
 			</div>
 		{:else if viewStatus === 'failed'}
 			<!-- Failed State -->
@@ -756,7 +757,7 @@
 			>
 				<AlertCircleIcon size={48} style="color: #ef4444; margin-bottom: 1rem;" />
 				<h2 style="color: {textPrimary}; font-size: 1.25rem; margin-bottom: 0.5rem;">
-					Review Failed
+					{m.doc_review_results_review_failed()}
 				</h2>
 				<p style="color: {textSecondary}; margin-bottom: 0.5rem;">{request.error_message}</p>
 			</div>
@@ -767,9 +768,9 @@
 			>
 				<XIcon size={48} style="color: #f59e0b; margin-bottom: 1rem;" />
 				<h2 style="color: {textPrimary}; font-size: 1.25rem; margin-bottom: 0.5rem;">
-					Review Stopped
+					{m.doc_review_results_review_stopped()}
 				</h2>
-				<p style="color: {textSecondary};">The review was cancelled before completion.</p>
+				<p style="color: {textSecondary};">{m.doc_review_results_the_review_was_cancelled_before()}</p>
 			</div>
 		{:else}
 			<!-- Completed State -->
@@ -796,9 +797,9 @@
 			{:else}
 				<!-- Header -->
 				<div style="margin-bottom: 1.5rem;">
-					<h1 style="font-size: 1.5rem; font-weight: 700; color: {textPrimary};">Review Results</h1>
+					<h1 style="font-size: 1.5rem; font-weight: 700; color: {textPrimary};">{m.doc_review_results_review_results()}</h1>
 					<p style="color: {textSecondary}; font-size: 0.85rem;">
-						{findings.length} findings · {request.tier}
+						{m.doc_review_results_findings({ findingsCount: findings.length, tier: request.tier })}
 					</p>
 				</div>
 
@@ -813,7 +814,7 @@
 						<div
 							style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;"
 						>
-							Severity Distribution
+							{m.doc_review_results_severity_distribution()}
 						</div>
 						<div style="display: flex; align-items: center; gap: 1.25rem;">
 							<svg viewBox="0 0 100 100" width="304" height="304" style="flex-shrink: 0;">
@@ -908,7 +909,7 @@
 						<div
 							style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;"
 						>
-							By Package
+							{m.doc_review_results_by_package()}
 						</div>
 						<div style="display: flex; align-items: center; gap: 1.25rem;">
 							<svg viewBox="0 0 100 100" width="304" height="304" style="flex-shrink: 0;">
@@ -1006,7 +1007,7 @@
 									<div
 										style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid {borderColor}; font-size: 0.72rem; color: {textMuted}; line-height: 1.5;"
 									>
-										No findings: {packageChartData.emptyLabels.join(', ')}
+										{m.doc_review_results_no_findings({ emptyLabels: packageChartData.emptyLabels.join(', ') })}
 									</div>
 								{/if}
 							</div>
@@ -1020,7 +1021,7 @@
 						<div
 							style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;"
 						>
-							By Reviewer
+							{m.doc_review_results_by_reviewer()}
 						</div>
 						<div style="display: flex; align-items: center; gap: 1.25rem;">
 							<svg viewBox="0 0 100 100" width="304" height="304" style="flex-shrink: 0;">
@@ -1118,7 +1119,7 @@
 									<div
 										style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid {borderColor}; font-size: 0.72rem; color: {textMuted}; line-height: 1.5;"
 									>
-										No findings: {reviewerChartData.emptyLabels.join(', ')}
+										{m.doc_review_results_no_findings({ emptyLabels: reviewerChartData.emptyLabels.join(', ') })}
 									</div>
 								{/if}
 							</div>
@@ -1132,13 +1133,13 @@
 						<div
 							style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;"
 						>
-							Review Metadata
+							{m.doc_review_results_review_metadata()}
 						</div>
 						<div style="display: flex; flex-direction: column; gap: 0.5rem;">
 							<div
 								style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;"
 							>
-								<span style="color: {textSecondary};">Start Time</span>
+								<span style="color: {textSecondary};">{m.doc_review_results_start_time()}</span>
 								<span
 									style="color: {textPrimary}; font-weight: 500; font-family: monospace; font-size: 0.78rem;"
 									>{request.start_time ? new Date(request.start_time).toLocaleString() : '—'}</span
@@ -1147,7 +1148,7 @@
 							<div
 								style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;"
 							>
-								<span style="color: {textSecondary};">Time Used</span>
+								<span style="color: {textSecondary};">{m.doc_review_results_time_used()}</span>
 								<span style="color: {textPrimary}; font-weight: 600; font-family: monospace;"
 									>{elapsedSeconds !== null ? `${elapsedSeconds}s` : '—'}</span
 								>
@@ -1155,7 +1156,7 @@
 							<div
 								style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;"
 							>
-								<span style="color: {textSecondary};">Total Findings</span>
+								<span style="color: {textSecondary};">{m.doc_review_results_total_findings()}</span>
 								<span style="color: {textPrimary}; font-weight: 600; font-family: monospace;"
 									>{findings.length}</span
 								>
@@ -1163,7 +1164,7 @@
 							<div
 								style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;"
 							>
-								<span style="color: {textSecondary};">Non-Empty Packages</span>
+								<span style="color: {textSecondary};">{m.doc_review_results_non_empty_packages()}</span>
 								<span style="color: {textPrimary}; font-weight: 600; font-family: monospace;"
 									>{nonEmptyPackageCount}</span
 								>
@@ -1171,7 +1172,7 @@
 							<div
 								style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;"
 							>
-								<span style="color: {textSecondary};">Non-Empty Reviewers</span>
+								<span style="color: {textSecondary};">{m.doc_review_results_non_empty_reviewers()}</span>
 								<span style="color: {textPrimary}; font-weight: 600; font-family: monospace;"
 									>{nonEmptyReviewerCount}</span
 								>
@@ -1190,17 +1191,17 @@
 						onclick={showReportPage}
 						style="padding: 0.4rem 0.85rem; background: {accent}; color: #fff; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; box-shadow: 0 0 0 2px {accentTint}, 0 2px 8px rgba(0,0,0,0.35);"
 					>
-						View Report
+						{m.doc_review_results_view_report()}
 					</button>
 					<button
 						onclick={showFindingsPage}
 						style="padding: 0.4rem 1rem; background: {accentTint}; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
-						>Findings</button
+						>{m.doc_review_results_findings_2()}</button
 					>
 					<button
 						onclick={showSemanticPage}
 						style="padding: 0.4rem 1rem; background: {accentTint}; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;"
-						>Semantic Diagnostics</button
+						>{m.doc_review_results_semantic_diagnostics()}</button
 					>
 					<!-- 2. View Full Report PDF (dropdown listing all PDFs for this document) -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1214,7 +1215,7 @@
 								? '#fff'
 								: accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;"
 						>
-							View Full Report PDF
+							{m.doc_review_results_view_full_report_pdf()}
 							<span style="font-size: 0.7rem; opacity: 0.8;">{pdfMenuOpen ? '▲' : '▼'}</span>
 						</button>
 						{#if pdfMenuOpen}
@@ -1223,17 +1224,17 @@
 							>
 								{#if pdfLoading}
 									<div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">
-										Loading…
+										{m.doc_review_results_loading()}
 									</div>
 								{:else if pdfFiles.length === 0}
 									<div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">
-										No PDF files found. Regenerate the report to produce one.
+										{m.doc_review_results_no_pdf_files_found_regenerate()}
 									</div>
 								{:else}
 									<div
 										style="padding: 0.4rem 1rem; font-size: 0.75rem; color: {textMuted}; border-bottom: 1px solid {borderColor}; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;"
 									>
-										{pdfFiles.length} Report PDF{pdfFiles.length !== 1 ? 's' : ''}
+										{m.doc_review_results_report_pdf({ pdfFilesCount: pdfFiles.length, plural: pdfFiles.length !== 1 ? 's' : '' })}
 									</div>
 									{#each pdfFiles as f (f.report_id)}
 										<a
@@ -1253,7 +1254,7 @@
 											{#if f.is_current}
 												<span
 													style="font-size: 0.7rem; font-weight: 700; color: {accent}; flex-shrink: 0;"
-													>current</span
+													>{m.doc_review_results_current()}</span
 												>
 											{/if}
 											<span style="font-size: 0.72rem; color: {textMuted}; flex-shrink: 0;"
@@ -1271,7 +1272,7 @@
 						onclick={openJsonModal}
 						style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;"
 					>
-						View Full Report JSON
+						{m.doc_review_results_view_full_report_json()}
 					</button>
 					<!-- 4. View Full Report Markdown -->
 					<button
@@ -1279,7 +1280,7 @@
 						onclick={openMdModal}
 						style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;"
 					>
-						View Full Report Markdown
+						{m.doc_review_results_view_full_report_markdown()}
 					</button>
 					<!-- 5. Download Report PDF -->
 					<a
@@ -1287,7 +1288,7 @@
 						download
 						style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;"
 					>
-						Download Report PDF
+						{m.doc_review_results_download_report_pdf()}
 					</a>
 					<!-- 6. Download Report Markdown -->
 					<a
@@ -1295,14 +1296,14 @@
 						download
 						style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;"
 					>
-						Download Report Markdown
+						{m.doc_review_results_download_report_markdown()}
 					</a>
 					<!-- 7. Review History (placeholder) -->
 					<button
 						type="button"
 						style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;"
 					>
-						Review History
+						{m.doc_review_results_review_history()}
 					</button>
 					<button
 						onclick={openRerunDialog}
@@ -1311,7 +1312,7 @@
 							? textMuted
 							: textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: {isRerunning
 							? 'default'
-							: 'pointer'}; font-size: 0.85rem;">{isRerunning ? 'Rerunning…' : 'Rerun'}</button
+							: 'pointer'}; font-size: 0.85rem;">{isRerunning ? m.doc_review_results_rerunning() : m.doc_review_results_rerun()}</button
 					>
 				</div>
 			{/if}
@@ -1340,10 +1341,10 @@
 				<h2
 					style="font-size: 1.15rem; font-weight: 700; color: {textPrimary}; margin: 0 0 0.35rem;"
 				>
-					Review Summary
+					{m.doc_review_results_review_summary()}
 				</h2>
 				<p style="color: {textSecondary}; font-size: 0.9rem; margin: 0;">
-					This will re-run the saved request with the same review setup.
+					{m.doc_review_results_this_will_re_run_the()}
 				</p>
 			</div>
 			<div style="padding: 0.5rem 1.5rem 1.25rem;">
@@ -1352,24 +1353,24 @@
 						? 'rgba(15,23,42,0.35)'
 						: '#F8FAFC'}; border: 1px solid {borderColor}; border-radius: 12px;"
 				>
-					<span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">Document:</span
+					<span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">{m.doc_review_results_document_2()}</span
 					>
 					<span style="color: {textPrimary}; font-size: 0.95rem;"
-						>{docTitle || `Document #${request.input_record_id}`}</span
+						>{docTitle || m.doc_review_results_document({ input_record_id: request.input_record_id })}</span
 					>
 					<span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;"
-						>Check Level:</span
+						>{m.doc_review_results_check_level()}</span
 					>
 					<span style="color: {textPrimary}; font-size: 0.95rem;">{request.tier}</span>
-					<span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">Aspects:</span>
+					<span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">{m.doc_review_results_aspects_2()}</span>
 					<span style="color: {textPrimary}; font-size: 0.95rem;"
-						>{request.aspects.length} selected</span
+						>{m.doc_review_results_selected({ aspectsCount: request.aspects.length })}</span
 					>
 					<span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;"
-						>Requester:</span
+						>{m.doc_review_results_requester()}</span
 					>
 					<span style="color: {textPrimary}; font-size: 0.95rem;"
-						>{request.requester_name || 'Unknown requester'}</span
+						>{request.requester_name || m.doc_review_results_unknown_requester()}</span
 					>
 				</div>
 			</div>
@@ -1380,7 +1381,7 @@
 					disabled={isRerunning}
 					style="padding: 0.75rem 1.1rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 10px; cursor: {isRerunning
 						? 'default'
-						: 'pointer'}; font-size: 0.95rem; min-width: 110px;">← Back</button
+						: 'pointer'}; font-size: 0.95rem; min-width: 110px;">{m.doc_review_results_back()}</button
 				>
 				<button
 					type="button"
@@ -1392,9 +1393,9 @@
 				>
 					{#if isRerunning}
 						<LoaderIcon size={16} style="animation: spin 1s linear infinite;" />
-						Rerunning...
+						{m.doc_review_results_rerunning_2()}
 					{:else}
-						Rerun Review
+						{m.doc_review_results_rerun_review()}
 					{/if}
 				</button>
 			</div>
@@ -1428,11 +1429,11 @@
 			>
 				<div>
 					<span style="font-weight: 600; font-size: 0.95rem; color: {textPrimary};"
-						>Full Report JSON</span
+						>{m.doc_review_results_full_report_json()}</span
 					>
 					<span
 						style="margin-left: 0.6rem; font-size: 0.75rem; color: {textMuted}; font-family: monospace;"
-						>report #{linkReportId}</span
+						>{m.doc_review_results_report({ linkReportId })}</span
 					>
 				</div>
 				<div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -1441,7 +1442,7 @@
 						target="_blank"
 						style="padding: 0.3rem 0.65rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.8rem;"
 					>
-						Raw JSON ↗
+						{m.doc_review_results_raw_json()}
 					</a>
 					<button
 						type="button"
@@ -1460,7 +1461,7 @@
 						style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; padding: 2rem; justify-content: center;"
 					>
 						<LoaderIcon size={20} style="animation: spin 1s linear infinite;" />
-						Loading…
+						{m.doc_review_results_loading()}
 					</div>
 				{:else if jsonModalData !== null}
 					<JsonTreeViewer value={jsonModalData} depth={0} {darkMode} />
@@ -1496,11 +1497,11 @@
 			>
 				<div>
 					<span style="font-weight: 600; font-size: 0.95rem; color: {textPrimary};"
-						>Full Report</span
+						>{m.doc_review_results_full_report()}</span
 					>
 					<span
 						style="margin-left: 0.6rem; font-size: 0.75rem; color: {textMuted}; font-family: monospace;"
-						>report #{linkReportId}</span
+						>{m.doc_review_results_report({ linkReportId })}</span
 					>
 				</div>
 				<div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -1509,7 +1510,7 @@
 						target="_blank"
 						style="padding: 0.3rem 0.65rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.8rem;"
 					>
-						Raw Markdown ↗
+						{m.doc_review_results_raw_markdown()}
 					</a>
 					<button
 						type="button"
@@ -1529,7 +1530,7 @@
 						style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; padding: 2rem; justify-content: center;"
 					>
 						<LoaderIcon size={20} style="animation: spin 1s linear infinite;" />
-						Loading…
+						{m.doc_review_results_loading()}
 					</div>
 				{:else}
 					{@html mdModalHtml}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as i18n } from '$lib/paraglide/messages.js';
 	import { tick } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
@@ -349,36 +350,36 @@
 					if (!chain) return null;
 					const conf =
 						typeof p?.path_confidence === 'number' ? confidencePct(p.path_confidence) : '';
-					const head = conf ? `path · ${conf}` : 'path';
+					const head = conf ? i18n.semantic_projections_path_2({ conf }) : 'path';
 					return { head, content: chain, lineType: '' } as LineEntry;
 				})
 				.filter((e): e is LineEntry => e !== null);
 
 		const identity: AttrDef[] = [
-			textAttr('semantic_proj_id', 'Projection ID', HashIcon, fmt(m.semantic_proj_id), has(m.semantic_proj_id)),
-			textAttr('descriptive_name', 'Descriptive Name', TypeIcon, fmt(m.descriptive_name), has(m.descriptive_name)),
+			textAttr('semantic_proj_id', i18n.semantic_projections_projection_id(), HashIcon, fmt(m.semantic_proj_id), has(m.semantic_proj_id)),
+			textAttr('descriptive_name', i18n.semantic_projections_descriptive_name(), TypeIcon, fmt(m.descriptive_name), has(m.descriptive_name)),
 			textAttr(
 				'descriptive_name_en',
-				'Descriptive Name (EN)',
+				i18n.semantic_projections_descriptive_name_en(),
 				TypeIcon,
 				fmt(m.descriptive_name_en),
 				has(m.descriptive_name_en)
 			),
-			textAttr('language', 'Language', LanguagesIcon, fmt(m.language), has(m.language))
+			textAttr('language', i18n.semantic_projections_language(), LanguagesIcon, fmt(m.language), has(m.language))
 		];
 
 		const summary: AttrDef[] = [
 			linesAttr(
 				'semantic_projection',
-				'Projection',
+				i18n.semantic_projections_projection(),
 				FileTextIcon,
 				m.semantic_projection?.trim()
-					? [{ head: 'Original', content: m.semantic_projection.trim(), lineType: '' }]
+					? [{ head: i18n.semantic_projections_original(), content: m.semantic_projection.trim(), lineType: '' }]
 					: []
 			),
 			linesAttr(
 				'semantic_projection_en',
-				'Projection (EN)',
+				i18n.semantic_projections_projection_en(),
 				FileTextIcon,
 				m.semantic_projection_en?.trim()
 					? [{ head: 'English', content: m.semantic_projection_en.trim(), lineType: '' }]
@@ -387,13 +388,13 @@
 		];
 
 		const keywords: AttrDef[] = [
-			chipsAttr('keywords', 'Keywords', TagIcon, cleanStrs(m.keywords)),
-			chipsAttr('keywords_en', 'Keywords (EN)', TagIcon, cleanStrs(m.keywords_en))
+			chipsAttr('keywords', i18n.semantic_projections_keywords(), TagIcon, cleanStrs(m.keywords)),
+			chipsAttr('keywords_en', i18n.semantic_projections_keywords_en(), TagIcon, cleanStrs(m.keywords_en))
 		];
 
 		const categories: AttrDef[] = [
-			linesAttr('category_paths', 'Category Paths', ListTreeIcon, pathEntries(m.category_paths)),
-			linesAttr('category_paths_en', 'Category Paths (EN)', ListTreeIcon, pathEntries(m.category_paths_en))
+			linesAttr('category_paths', i18n.semantic_projections_category_paths(), ListTreeIcon, pathEntries(m.category_paths)),
+			linesAttr('category_paths_en', i18n.semantic_projections_category_paths_en(), ListTreeIcon, pathEntries(m.category_paths_en))
 		];
 
 		const groundingEntries: LineEntry[] = normalizeItemSpans(m).flatMap((span) => {
@@ -410,14 +411,14 @@
 			}));
 		});
 		const grounding: AttrDef[] = [
-			linesAttr('line_spans', 'Lines', FileTextIcon, groundingEntries)
+			linesAttr('line_spans', i18n.semantic_projections_lines_2(), FileTextIcon, groundingEntries)
 		];
 
 		const provenance: AttrDef[] = [
-			textAttr('model_name', 'Model', ActivityIcon, fmt(m.model_name), has(m.model_name)),
-			textAttr('prompt_name', 'Prompt', FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
-			textAttr('event_id', 'Event ID', HashIcon, fmt(m.event_id), has(m.event_id)),
-			textAttr('create_time', 'Created', ActivityIcon, formatMaybeDate(m.create_time), has(m.create_time))
+			textAttr('model_name', i18n.semantic_projections_model(), ActivityIcon, fmt(m.model_name), has(m.model_name)),
+			textAttr('prompt_name', i18n.semantic_projections_prompt(), FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
+			textAttr('event_id', i18n.semantic_projections_event_id(), HashIcon, fmt(m.event_id), has(m.event_id)),
+			textAttr('create_time', i18n.semantic_projections_created(), ActivityIcon, formatMaybeDate(m.create_time), has(m.create_time))
 		];
 
 		return { identity, summary, keywords, categories, grounding, provenance };
@@ -431,12 +432,12 @@
 
 		type GroupSpec = { key: string; label: string; icon: any; attrs: AttrDef[] };
 		const groupSpecs: GroupSpec[] = [
-			{ key: 'identity', label: 'Identity', icon: HashIcon, attrs: attrsByGroup.identity },
-			{ key: 'summary', label: 'Projection', icon: FileTextIcon, attrs: attrsByGroup.summary },
-			{ key: 'keywords', label: 'Keywords', icon: TagIcon, attrs: attrsByGroup.keywords },
-			{ key: 'categories', label: 'Categories', icon: ListTreeIcon, attrs: attrsByGroup.categories },
-			{ key: 'grounding', label: 'Grounding', icon: ListIcon, attrs: attrsByGroup.grounding },
-			{ key: 'provenance', label: 'Provenance', icon: ActivityIcon, attrs: attrsByGroup.provenance }
+			{ key: 'identity', label: i18n.semantic_projections_identity(), icon: HashIcon, attrs: attrsByGroup.identity },
+			{ key: 'summary', label: i18n.semantic_projections_projection(), icon: FileTextIcon, attrs: attrsByGroup.summary },
+			{ key: 'keywords', label: i18n.semantic_projections_keywords(), icon: TagIcon, attrs: attrsByGroup.keywords },
+			{ key: 'categories', label: i18n.semantic_projections_categories(), icon: ListTreeIcon, attrs: attrsByGroup.categories },
+			{ key: 'grounding', label: i18n.semantic_projections_grounding(), icon: ListIcon, attrs: attrsByGroup.grounding },
+			{ key: 'provenance', label: i18n.semantic_projections_provenance(), icon: ActivityIcon, attrs: attrsByGroup.provenance }
 		];
 
 		const groups: GroupNode[] = groupSpecs.map((gs) => {
@@ -620,9 +621,9 @@
 			items = itemRes.results ?? [];
 			currentInput = inputRes?.record ?? null;
 			rawLines = rawRes?.lines ?? [];
-			rawError = rawRes ? '' : 'Failed to load raw lines';
+			rawError = rawRes ? '' : i18n.semantic_projections_failed_to_load_raw_lines();
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve semantic projections';
+			errorMsg = err instanceof Error ? err.message : i18n.semantic_projections_failed_to_retrieve_semantic_projections();
 		} finally {
 			rawLoading = false;
 			loading = false;
@@ -656,7 +657,7 @@
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || i18n.semantic_projections_input({ id: r.id });
 	}
 
 	function recordDisplayDocNo(r: KbInputRecord): string {
@@ -680,7 +681,7 @@
 			m.descriptive_name?.trim() ||
 			m.descriptive_name_en?.trim() ||
 			m.semantic_proj_id?.trim() ||
-			`Projection #${m.id}`
+			i18n.semantic_projections_projection_2({ id: m.id })
 		);
 	}
 	function confidencePct(c?: number): string {
@@ -723,16 +724,16 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge System · Vol. V</div>
-			<h1 class="display">Semantic&nbsp;<span class="amp">&amp;</span>&nbsp;Projections</h1>
+			<div class="eyebrow">{i18n.semantic_projections_knowledge_system_vol_v()}</div>
+			<h1 class="display">{i18n.semantic_projections_semantic()};<span class="amp">&amp;</span>&{i18n.semantic_projections_projections()}</h1>
 			<div class="subtitle">
-				A reading room for extracted semantic projections — locate, verify, return to source.
+				{i18n.semantic_projections_a_reading_room_for_extracted()}
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="meta-label">RECORD</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
-			<span class="meta-label">TYPE</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
-			<span class="meta-label">ITEMS</span><span class="meta-val"
+			<span class="meta-label">{i18n.semantic_projections_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
+			<span class="meta-label">{i18n.semantic_projections_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
+			<span class="meta-label">{i18n.semantic_projections_items()}</span><span class="meta-val"
 				>{items.length.toString().padStart(3, '0')}</span
 			>
 		</div>
@@ -743,10 +744,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="semantic-projections-record-browser"
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting extracted semantic projections."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={i18n.semantic_projections_kb_inputs()}
+				subtitle={i18n.semantic_projections_search_filter_and_select_input()}
+				emptyTitle={i18n.semantic_projections_no_records_yet()}
+				emptySubtitle={i18n.semantic_projections_use_search_or_retrieve_to()}
 				autoSelectFirstRecord={false}
 				selectedRecordId={currentInput?.id ?? null}
 				mapRecord={mapBrowserRecord}
@@ -758,8 +759,8 @@
 
 			<aside class="metric-sidebar">
 				<div class="left-meta">
-					<div class="left-meta-title">Semantic Projections</div>
-					<div class="left-meta-count">{items.length} found</div>
+					<div class="left-meta-title">{i18n.semantic_projections_semantic_projections()}</div>
+					<div class="left-meta-count">{i18n.semantic_projections_found({ itemsCount: items.length })}</div>
 				</div>
 
 				<div class="metrics-list">
@@ -768,22 +769,22 @@
 					{:else if loading}
 						<div class="empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">Loading semantic projections</div>
-							<div class="empty-sub">Fetching extracted projections for this record…</div>
+							<div class="empty-title">{i18n.semantic_projections_loading_semantic_projections()}</div>
+							<div class="empty-sub">{i18n.semantic_projections_fetching_extracted_projections_for_this()}</div>
 						</div>
 					{:else if items.length === 0}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No semantic projections yet</div>
+							<div class="empty-title">{i18n.semantic_projections_no_semantic_projections_yet()}</div>
 							<div class="empty-sub">
-								Select a record from kb.inputs to populate the projection index.
+								{i18n.semantic_projections_select_a_record_from_kb()}
 							</div>
 						</div>
 					{:else if filteredItems.length === 0 && (keywordFilter || categoryFilter || confidenceFilter)}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No matches</div>
-							<div class="empty-sub">No semantic projections match the current filters.</div>
+							<div class="empty-title">{i18n.semantic_projections_no_matches()}</div>
+							<div class="empty-sub">{i18n.semantic_projections_no_semantic_projections_match_the()}</div>
 						</div>
 					{:else}
 						{#each filteredItems as m, idx (m.id)}
@@ -797,7 +798,7 @@
 								<div class="card-body">
 									<div class="card-row-top">
 										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
-										<div class="card-conf" title="Top path confidence">
+										<div class="card-conf" title={i18n.semantic_projections_top_path_confidence()}>
 											{confidencePct(maxPathConfidence(m))}
 										</div>
 									</div>
@@ -808,7 +809,7 @@
 									<div class="card-foot">
 										<span class="chip">
 											<span class="chip-dot"></span>
-											{pathCount(m)} path{pathCount(m) === 1 ? '' : 's'}
+											{i18n.semantic_projections_path({ count: pathCount(m), plural: pathCount(m) === 1 ? '' : 's' })}
 										</span>
 										{#if topCategoryName(m)}<span class="chip chip-mono">{topCategoryName(m)}</span>{/if}
 										{#if m.language}<span class="chip chip-quiet">{m.language}</span>{/if}
@@ -826,18 +827,18 @@
 			{#if recordBrowserFolded}
 				<div class="metric-canvas-wrap">
 					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+						<button type="button" class="toolbar-back" onclick={goBack} title={i18n.semantic_projections_back_to_record_list()}>
 							<ArrowLeftIcon class="toolbar-icon" />
-							<span>Back</span>
+							<span>{i18n.semantic_projections_back()}</span>
 						</button>
 						<div class="toolbar-filters">
 							<select
 								class="toolbar-select"
 								value={itemNameDropdownValue}
 								onchange={handleItemNameDropdown}
-								title="Jump to projection by name"
+								title={i18n.semantic_projections_jump_to_projection_by_name()}
 							>
-								<option value="">— Projection by name —</option>
+								<option value="">{i18n.semantic_projections_projection_by_name()}</option>
 								{#each items as m (m.id)}
 									<option value={m.id}>{itemNameOf(m)}</option>
 								{/each}
@@ -847,7 +848,7 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="semantic-keywords-datalist-focus"
-									placeholder="Filter by keyword…"
+									placeholder={i18n.semantic_projections_filter_by_keyword()}
 									bind:value={keywordFilter}
 								/>
 								<datalist id="semantic-keywords-datalist-focus">
@@ -860,8 +861,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (keywordFilter = '')}
-										title="Clear keyword filter"
-										aria-label="Clear keyword filter">×</button
+										title={i18n.semantic_projections_clear_keyword_filter()}
+										aria-label={i18n.semantic_projections_clear_keyword_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -870,8 +871,8 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="semantic-category-options"
-									placeholder="Category…"
-									title="Filter by category path name"
+									placeholder={i18n.semantic_projections_category()}
+									title={i18n.semantic_projections_filter_by_category_path_name()}
 									bind:value={categoryFilter}
 								/>
 								<datalist id="semantic-category-options">
@@ -884,8 +885,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (categoryFilter = '')}
-										title="Clear category filter"
-										aria-label="Clear category filter">×</button
+										title={i18n.semantic_projections_clear_category_filter()}
+										aria-label={i18n.semantic_projections_clear_category_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -894,8 +895,8 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="semantic-confidence-options"
-									placeholder="Confidence…"
-									title="Filter by top path-confidence. Select or type a value like 0.85, or <0.50 for below-threshold."
+									placeholder={i18n.semantic_projections_confidence()}
+									title={i18n.semantic_projections_filter_by_top_path_confidence()}
 									bind:value={confidenceFilter}
 								/>
 								<datalist id="semantic-confidence-options">
@@ -911,8 +912,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (confidenceFilter = '')}
-										title="Clear confidence filter"
-										aria-label="Clear confidence filter">×</button
+										title={i18n.semantic_projections_clear_confidence_filter()}
+										aria-label={i18n.semantic_projections_clear_confidence_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -923,7 +924,7 @@
 								class="toolbar-nav-btn"
 								disabled={!prevItem}
 								onclick={goToPrevItem}
-								title="Previous item"><ChevronLeftIcon class="toolbar-icon" /></button
+								title={i18n.semantic_projections_previous_item()}><ChevronLeftIcon class="toolbar-icon" /></button
 							>
 							<span class="toolbar-nav-pos">
 								{selectedItemInFilteredIndex >= 0
@@ -935,7 +936,7 @@
 								class="toolbar-nav-btn"
 								disabled={!nextItem}
 								onclick={goToNextItem}
-								title="Next item"><ChevronRightIcon class="toolbar-icon" /></button
+								title={i18n.semantic_projections_next_item()}><ChevronRightIcon class="toolbar-icon" /></button
 							>
 						</div>
 					</div>
@@ -1001,9 +1002,9 @@
 						{:else}
 							<div class="canvas-empty">
 								<div class="canvas-empty-mark">◎</div>
-								<div class="canvas-empty-title">Select a projection</div>
+								<div class="canvas-empty-title">{i18n.semantic_projections_select_a_projection()}</div>
 								<div class="canvas-empty-sub">
-									Click a semantic projection from the list to view its attribute map.
+									{i18n.semantic_projections_click_a_semantic_projection_from()}
 								</div>
 							</div>
 						{/if}
@@ -1013,7 +1014,7 @@
 					type="button"
 					class="focus-resize-handle"
 					class:active={focusResizing}
-					aria-label="Resize the source document panel"
+					aria-label={i18n.semantic_projections_resize_the_source_document_panel()}
 					onpointerdown={startFocusResize}
 					onkeydown={onFocusResizerKeydown}
 				>
@@ -1027,10 +1028,10 @@
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
-						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-title">{i18n.semantic_projections_awaiting_selection()}</div>
 						<div class="doc-empty-sub">
-							Once you retrieve a record, the original document appears here.<br />
-							Click any item on the left to jump to its source page.
+							{i18n.semantic_projections_once_you_retrieve_a_record()}<br />
+							{i18n.semantic_projections_click_any_item_on_the()}
 						</div>
 					</div>
 				{:else}
@@ -1053,7 +1054,7 @@
 									class="pvw-tool-btn"
 									class:active={showLines}
 									onclick={() => (showLines = !showLines)}
-									title={showLines ? 'Show PDF Document' : 'Show Lines'}
+									title={showLines ? i18n.semantic_projections_show_pdf_document() : i18n.semantic_projections_show_lines()}
 								>
 									{#if showLines}
 										<FileTextIcon class="pvw-tb-icon" />
@@ -1066,20 +1067,20 @@
 								<div class="lines-panel">
 									{#if rawLoading}
 										<div class="doc-status">
-											<span class="dot-loop"></span>Reading raw_line file…
+											<span class="dot-loop"></span>{i18n.semantic_projections_reading_raw_line_file()}
 										</div>
 									{:else if rawError}
 										<div class="doc-error">
-											<div class="doc-error-title">⚠ Cannot render document</div>
+											<div class="doc-error-title">{i18n.semantic_projections_cannot_render_document()}</div>
 											<div class="doc-error-msg">{rawError}</div>
 										</div>
 									{:else if pagesGrouped.length === 0}
 										<div class="doc-empty">
 											<div class="doc-empty-mark">⌬</div>
-											<div class="doc-empty-title">Awaiting selection</div>
+											<div class="doc-empty-title">{i18n.semantic_projections_awaiting_selection()}</div>
 											<div class="doc-empty-sub">
-												Once you retrieve a record, the parsed lines appear here.<br />
-												Click any item on the left to jump to its source line.
+												{i18n.semantic_projections_once_you_retrieve_a_record_2()}<br />
+												{i18n.semantic_projections_click_any_item_on_the_2()}
 											</div>
 										</div>
 									{:else}
@@ -1087,10 +1088,10 @@
 											<article id={`page-${pg.page}`} class="page">
 												<div class="page-edge" aria-hidden="true"></div>
 												<header class="page-head">
-													<span class="page-folio">page</span>
+													<span class="page-folio">{i18n.semantic_projections_page()}</span>
 													<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
 													<span class="page-rule"></span>
-													<span class="page-count">{pg.lines.length} lines</span>
+													<span class="page-count">{i18n.semantic_projections_lines({ linesCount: pg.lines.length })}</span>
 												</header>
 												<div class="page-body">
 													{#each pg.lines as ln (ln.line_number)}
@@ -1120,24 +1121,23 @@
 					{:else}
 						<iframe
 							class="doc-frame"
-							title={currentInput.file_name ?? `Record ${currentInput.id}`}
+							title={currentInput.file_name ?? i18n.semantic_projections_record_2({ id: currentInput.id })}
 							src={fileUrl}
 						></iframe>
 					{/if}
 
 					{#if isText}
 						<div class="doc-foot-hint">
-							This file is rendered as text by your browser. For exact line highlighting, switch to
-							the <button class="inline-tab-btn" onclick={() => (showLines = true)}
-								>Source&nbsp;Lines</button
-							> view.
+							{i18n.semantic_projections_this_file_is_rendered_as()} <button class="inline-tab-btn" onclick={() => (showLines = true)}
+								>{i18n.semantic_projections_source_lines()}</button
+							> {i18n.semantic_projections_view()}
 						</div>
 					{:else if !isPdf}
 						<div class="doc-foot-hint">
-							Inline preview support varies by file type. For line-level highlights, use the <button
+							{i18n.semantic_projections_inline_preview_support_varies_by()} <button
 								class="inline-tab-btn"
-								onclick={() => (showLines = true)}>Source&nbsp;Lines</button
-							> view.
+								onclick={() => (showLines = true)}>{i18n.semantic_projections_source_lines()}</button
+							> {i18n.semantic_projections_view()}
 						</div>
 					{/if}
 				{/if}

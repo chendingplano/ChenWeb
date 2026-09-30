@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
 	import { createDefaultRecordBrowserFilters } from './topic-tree-record-browser.js';
@@ -79,14 +80,14 @@
 	const parserNameOptions = ['', 'mineru', 'opendata', 'paddleocr', 'docling'];
 	const procStatusOptions = ['all', 'success', 'fail'];
 	const operationOptions = [
-		{ value: '', label: 'All' },
-		{ value: 'parsed_success', label: 'Parsed' },
-		{ value: 'parse_failed', label: 'Parse Failed' },
-		{ value: 'parsed_not_started', label: 'Parsed Not Started' },
-		{ value: 'all_processors_success', label: 'All Processors Success' },
-		{ value: 'failed_processors', label: 'Failed Processors' },
-		{ value: 'with_not_started_procs', label: 'With Not Started Processors' },
-		{ value: 'with_unfinished_procs', label: 'With Unfinished Processors' }
+		{ value: '', label: m.kb_input_search_dialog_all() },
+		{ value: 'parsed_success', label: m.kb_input_search_dialog_parsed() },
+		{ value: 'parse_failed', label: m.kb_input_search_dialog_parse_failed() },
+		{ value: 'parsed_not_started', label: m.kb_input_search_dialog_parsed_not_started() },
+		{ value: 'all_processors_success', label: m.kb_input_search_dialog_all_processors_success() },
+		{ value: 'failed_processors', label: m.kb_input_search_dialog_failed_processors() },
+		{ value: 'with_not_started_procs', label: m.kb_input_search_dialog_with_not_started_processors() },
+		{ value: 'with_unfinished_procs', label: m.kb_input_search_dialog_with_unfinished_processors() }
 	];
 
 	let searchLoading = $state(false);
@@ -181,7 +182,7 @@
 			searchResults = res.results ?? [];
 			searchTotal = res.total ?? searchResults.length;
 		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
+			searchError = err instanceof Error ? err.message : m.kb_input_search_dialog_search_failed();
 		} finally {
 			searchLoading = false;
 		}
@@ -234,7 +235,7 @@
 	}
 
 	function inputDisplayName(record: KbInputRecord) {
-		return record.title?.trim() || record.name?.trim() || record.file_name?.trim() || `Record #${record.id}`;
+		return record.title?.trim() || record.name?.trim() || record.file_name?.trim() || m.kb_input_search_dialog_record({ id: record.id });
 	}
 
 	function inputDisplayDocNo(record: KbInputRecord) {
@@ -316,7 +317,7 @@
 	function openStatusDialog(record: KbInputRecord) {
 		statusDialogRecord = record;
 		statusDialogItems = record.status ?? [];
-		statusDialogTitle = `Record ID: ${record.id}`;
+		statusDialogTitle = m.kb_input_search_dialog_record_id_2({ id: record.id });
 		statusDialogOpen = true;
 	}
 
@@ -338,18 +339,18 @@
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-eyebrow">kb.inputs</div>
-					<h2 class="dialog-title">Find a record</h2>
+					<div class="dialog-eyebrow">{m.kb_input_search_dialog_kb_inputs()}</div>
+					<h2 class="dialog-title">{m.kb_input_search_dialog_find_a_record()}</h2>
 					<p class="dialog-subtitle">
-						Search by record metadata, parser pipeline state, and create or modify windows.
+						{m.kb_input_search_dialog_search_by_record_metadata_parser()}
 					</p>
 					<div class="scope-copy">
-						Store scope:
+						{m.kb_input_search_dialog_store_scope()}
 						{#if scopeToActiveStore && knowledgeStoreState.activeStore}
 							<span class="scope-store">{knowledgeStoreState.activeStore.ks_name}</span>
 							<span class="scope-id">#{knowledgeStoreState.activeStore.id}</span>
 						{:else}
-							<span class="scope-empty">All stores</span>
+							<span class="scope-empty">{m.kb_input_search_dialog_all_stores()}</span>
 						{/if}
 					</div>
 				</div>
@@ -359,18 +360,18 @@
 				<div class="dialog-controls">
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Identity</div>
-							<div class="dialog-section-copy">Match the record itself and its document metadata.</div>
+							<div class="dialog-section-title">{m.kb_input_search_dialog_identity()}</div>
+							<div class="dialog-section-copy">{m.kb_input_search_dialog_match_the_record_itself_and()}</div>
 						</div>
 						<div class="dialog-grid dialog-grid-primary">
 							<label class="field dialog-field">
-								<span class="field-label">Record ID</span>
+								<span class="field-label">{m.kb_input_search_dialog_record_id()}</span>
 								<input type="text" bind:value={searchRecordId} placeholder="84" onkeydown={(e) => {
 									if (e.key === 'Enter') void runSearch();
 								}} />
 							</label>
 							<label class="field dialog-field">
-								<span class="field-label">Type</span>
+								<span class="field-label">{m.kb_input_search_dialog_type()}</span>
 								<select bind:value={searchDocType}>
 									{#each docTypeOptions as option}
 										<option value={option}>{option}</option>
@@ -378,20 +379,20 @@
 								</select>
 							</label>
 							<label class="field dialog-field dialog-field-wide">
-								<span class="field-label">Title contains</span>
-								<input type="text" bind:value={searchTitle} placeholder="Input title, standard title…" onkeydown={(e) => {
+								<span class="field-label">{m.kb_input_search_dialog_title_contains()}</span>
+								<input type="text" bind:value={searchTitle} placeholder={m.kb_input_search_dialog_input_title_standard_title()} onkeydown={(e) => {
 									if (e.key === 'Enter') void runSearch();
 								}} />
 							</label>
 							<label class="field dialog-field">
-								<span class="field-label">Doc No contains</span>
-								<input type="text" bind:value={searchDocNo} placeholder="GB/T 123…" onkeydown={(e) => {
+								<span class="field-label">{m.kb_input_search_dialog_doc_no_contains()}</span>
+								<input type="text" bind:value={searchDocNo} placeholder={m.kb_input_search_dialog_gb_t_123()} onkeydown={(e) => {
 									if (e.key === 'Enter') void runSearch();
 								}} />
 							</label>
 							<label class="field dialog-field dialog-field-wide">
-								<span class="field-label">File name contains</span>
-								<input type="text" bind:value={searchFileName} placeholder="report, spec, drawing…" onkeydown={(e) => {
+								<span class="field-label">{m.kb_input_search_dialog_file_name_contains()}</span>
+								<input type="text" bind:value={searchFileName} placeholder={m.kb_input_search_dialog_report_spec_drawing()} onkeydown={(e) => {
 									if (e.key === 'Enter') void runSearch();
 								}} />
 							</label>
@@ -400,22 +401,22 @@
 
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Processing Status</div>
+							<div class="dialog-section-title">{m.kb_input_search_dialog_processing_status()}</div>
 							<div class="dialog-section-copy">
-								Filter the pipeline entry by parser, operation, and final `proc_status`.
+								{m.kb_input_search_dialog_filter_the_pipeline_entry_by()}
 							</div>
 						</div>
 						<div class="dialog-grid dialog-grid-time">
 							<label class="field dialog-field">
-								<span class="field-label">Parser name</span>
+								<span class="field-label">{m.kb_input_search_dialog_parser_name()}</span>
 								<select bind:value={searchParserName}>
 									{#each parserNameOptions as opt}
-										<option value={opt}>{opt === '' ? 'All' : opt}</option>
+										<option value={opt}>{opt === '' ? m.kb_input_search_dialog_all() : opt}</option>
 									{/each}
 								</select>
 							</label>
 							<label class="field dialog-field">
-								<span class="field-label">Operation</span>
+								<span class="field-label">{m.kb_input_search_dialog_operation()}</span>
 								<select bind:value={searchOperation} onchange={() => { if (searchOperation) searchProcStatus = 'all'; }}>
 									{#each operationOptions as opt}
 										<option value={opt.value}>{opt.label}</option>
@@ -424,7 +425,7 @@
 							</label>
 							{#if !searchOperation}
 								<label class="field dialog-field">
-									<span class="field-label">Proc status</span>
+									<span class="field-label">{m.kb_input_search_dialog_proc_status()}</span>
 									<select bind:value={searchProcStatus}>
 										{#each procStatusOptions as option}
 											<option value={option}>{option}</option>
@@ -437,30 +438,30 @@
 
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Time Windows</div>
+							<div class="dialog-section-title">{m.kb_input_search_dialog_time_windows()}</div>
 							<div class="dialog-section-copy">
-								Search by create and modify timestamps using local date-time ranges.
+								{m.kb_input_search_dialog_search_by_create_and_modify()}
 							</div>
 						</div>
 						<div class="dialog-grid">
-							<label class="field dialog-field"><span class="field-label">Create time from</span><input type="datetime-local" bind:value={searchCreateStart} /></label>
-							<label class="field dialog-field"><span class="field-label">Create time to</span><input type="datetime-local" bind:value={searchCreateEnd} /></label>
-							<label class="field dialog-field"><span class="field-label">Modify time from</span><input type="datetime-local" bind:value={searchModifyStart} /></label>
-							<label class="field dialog-field"><span class="field-label">Modify time to</span><input type="datetime-local" bind:value={searchModifyEnd} /></label>
+							<label class="field dialog-field"><span class="field-label">{m.kb_input_search_dialog_create_time_from()}</span><input type="datetime-local" bind:value={searchCreateStart} /></label>
+							<label class="field dialog-field"><span class="field-label">{m.kb_input_search_dialog_create_time_to()}</span><input type="datetime-local" bind:value={searchCreateEnd} /></label>
+							<label class="field dialog-field"><span class="field-label">{m.kb_input_search_dialog_modify_time_from()}</span><input type="datetime-local" bind:value={searchModifyStart} /></label>
+							<label class="field dialog-field"><span class="field-label">{m.kb_input_search_dialog_modify_time_to()}</span><input type="datetime-local" bind:value={searchModifyEnd} /></label>
 						</div>
 					</div>
 
 					<div class="dialog-toolbar">
 						<div class="dialog-toolbar-copy">
-							<div class="dialog-toolbar-title">Search Scope</div>
+							<div class="dialog-toolbar-title">{m.kb_input_search_dialog_search_scope()}</div>
 							<div class="dialog-toolbar-text">
-								Leave fields empty to broaden the search. Results are capped to the newest 50 records.
+								{m.kb_input_search_dialog_leave_fields_empty_to_broaden()}
 							</div>
 						</div>
 						<div class="dialog-toolbar-actions">
-							<button class="btn btn-ghost" type="button" onclick={resetSearch}>Reset</button>
+							<button class="btn btn-ghost" type="button" onclick={resetSearch}>{m.kb_input_search_dialog_reset()}</button>
 							<button class="btn btn-primary dialog-search-btn" type="button" onclick={runSearch} disabled={searchLoading}>
-								{searchLoading ? 'Searching…' : 'Search'}
+								{searchLoading ? m.kb_input_search_dialog_searching() : m.kb_input_search_dialog_search()}
 							</button>
 						</div>
 					</div>
@@ -473,11 +474,11 @@
 				{#if searchTotal !== null && !searchLoading}
 					<div class="results-count">
 						{#if searchTotal === 0}
-							No records matched.
+							{m.kb_input_search_dialog_no_records_matched()}
 						{:else if searchResults.length < searchTotal}
-							Showing <strong>{searchResults.length}</strong> of <strong>{searchTotal}</strong> records
+							{m.kb_input_search_dialog_showing()} <strong>{searchResults.length}</strong> {m.kb_input_search_dialog_of()} <strong>{searchTotal}</strong> {m.kb_input_search_dialog_records()}
 						{:else}
-							<strong>{searchTotal}</strong> {searchTotal === 1 ? 'record' : 'records'} matched
+							<strong>{searchTotal}</strong> {m.kb_input_search_dialog_matched({ plural: searchTotal === 1 ? '' : 's' })}
 						{/if}
 					</div>
 				{/if}
@@ -486,9 +487,9 @@
 					{#if searchResults.length === 0 && !searchLoading}
 						<div class="dialog-empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="dialog-empty-title">Run a search to see records.</div>
+							<div class="dialog-empty-title">{m.kb_input_search_dialog_run_a_search_to_see()}</div>
 							<div class="dialog-empty-copy">
-								Use any combination of metadata, parser, and time filters to narrow the archive.
+								{m.kb_input_search_dialog_use_any_combination_of_metadata()}
 							</div>
 						</div>
 					{:else}
@@ -502,17 +503,17 @@
 											checked={searchSelected.size === searchResults.length && searchResults.length > 0}
 											indeterminate={searchSelected.size > 0 && searchSelected.size < searchResults.length}
 											onchange={toggleSelectAll}
-											title="Select all"
+											title={m.kb_input_search_dialog_select_all()}
 										/>
 									</th>
-									<th>ID</th>
-									<th>Type</th>
-									<th>Title / Doc No</th>
-									<th>File name</th>
-									<th>Status</th>
-									<th>Created</th>
-									<th>Updated</th>
-									<th>Detail</th>
+									<th>{m.kb_input_search_dialog_id()}</th>
+									<th>{m.kb_input_search_dialog_type()}</th>
+									<th>{m.kb_input_search_dialog_title_doc_no()}</th>
+									<th>{m.kb_input_search_dialog_file_name()}</th>
+									<th>{m.kb_input_search_dialog_status()}</th>
+									<th>{m.kb_input_search_dialog_created()}</th>
+									<th>{m.kb_input_search_dialog_updated()}</th>
+									<th>{m.kb_input_search_dialog_detail()}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -559,7 +560,7 @@
 												class="view-btn"
 												onclick={(e) => { e.stopPropagation(); openStatusDialog(record); }}
 											>
-												View
+												{m.kb_input_search_dialog_view()}
 											</button>
 										</td>
 									</tr>
@@ -571,11 +572,11 @@
 			</div>
 
 			<div class="dialog-foot">
-				<div class="dialog-foot-hint">Click to toggle, double-click to pick one. Header checkbox selects all.</div>
+				<div class="dialog-foot-hint">{m.kb_input_search_dialog_click_to_toggle_double_click()}</div>
 				<div class="dialog-foot-buttons">
-					<button class="btn btn-ghost" type="button" onclick={closeSearch}>Cancel</button>
+					<button class="btn btn-ghost" type="button" onclick={closeSearch}>{m.kb_input_search_dialog_cancel()}</button>
 					<button class="btn btn-primary dialog-select-btn" type="button" onclick={confirmSearchSelection} disabled={searchSelected.size === 0}>
-						{searchSelected.size > 0 ? `Select (${searchSelected.size})` : 'Select'}
+						{searchSelected.size > 0 ? m.kb_input_search_dialog_select({ searchSelectedCount: searchSelected.size }) : m.kb_input_search_dialog_select_2()}
 					</button>
 				</div>
 			</div>
@@ -599,17 +600,17 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Record details"
+			aria-label={m.kb_input_search_dialog_record_details()}
 			tabindex="0"
 		>
 			<div class="view-dialog-head">
 				<h3 class="view-dialog-title">{statusDialogTitle}</h3>
-				<button class="btn btn-ghost view-close-btn" onclick={closeStatusDialog}>Close</button>
+				<button class="btn btn-ghost view-close-btn" onclick={closeStatusDialog}>{m.kb_input_search_dialog_close()}</button>
 			</div>
 			<div class="view-dialog-body">
 				{#if statusDialogRecord}
 					<div class="view-section">
-						<div class="view-section-label">Record Fields</div>
+						<div class="view-section-label">{m.kb_input_search_dialog_record_fields()}</div>
 						<div class="view-rows-box">
 							{#each statusDialogRecordRows as row}
 								<div class="view-row" style="padding-left:{row.depth * 16}px;">
@@ -624,10 +625,10 @@
 
 					<div class="view-section">
 						<div class="view-section-label">
-							Doc Metadata ({statusDialogDocMeta.filter(r => r.depth === 0).length} {statusDialogDocMeta.filter(r => r.depth === 0).length === 1 ? 'field' : 'fields'})
+							{m.kb_input_search_dialog_doc_metadata({ count: statusDialogDocMeta.filter(r => r.depth === 0).length, plural: statusDialogDocMeta.filter(r => r.depth === 0).length === 1 ? '' : 's' })}
 						</div>
 						{#if statusDialogDocMeta.length === 0}
-							<div class="view-empty">No doc_metadata available.</div>
+							<div class="view-empty">{m.kb_input_search_dialog_no_doc_metadata_available()}</div>
 						{:else}
 							<div class="view-rows-box">
 								{#each statusDialogDocMeta as row}
@@ -644,15 +645,15 @@
 
 					<div class="view-section">
 						<div class="view-section-label">
-							Status ({statusDialogItems.length} {statusDialogItems.length === 1 ? 'entry' : 'entries'})
+							{(statusDialogItems.length === 1 ? m.kb_input_search_dialog_status_one : m.kb_input_search_dialog_status_many)({ count: statusDialogItems.length })}
 						</div>
 						{#if statusDialogItems.length === 0}
-							<div class="view-empty">No status entries.</div>
+							<div class="view-empty">{m.kb_input_search_dialog_no_status_entries()}</div>
 						{:else}
 							<div class="view-entries">
 								{#each statusDialogItems as item, idx}
 									<div class="view-entry">
-										<div class="view-entry-head">Entry #{idx + 1}</div>
+										<div class="view-entry-head">{m.kb_input_search_dialog_entry({ value: idx + 1 })}</div>
 										<div class="view-entry-grid">
 											{#each Object.entries(item as Record<string, unknown>) as [key, val]}
 												<span class="view-key">{key}</span>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import PanelsTopLeftIcon from '@lucide/svelte/icons/panels-top-left';
 	import Rows3Icon from '@lucide/svelte/icons/rows-3';
 	import {
@@ -29,11 +30,11 @@
 
 	let {
 		darkMode = true,
-		heroEyebrow = 'Semantic Web',
-		heroTitle = 'Document Semantic Tree',
-		heroDescription = 'Document-centric browser over topics extracted from chunks.',
-		sidebarTitle = 'Selected Topic',
-		loadErrorTitle = 'Topic Tree',
+		heroEyebrow = m.topic_tree_semantic_web(),
+		heroTitle = m.topic_tree_document_semantic_tree(),
+		heroDescription = m.topic_tree_document_centric_browser_over_topics(),
+		sidebarTitle = m.topic_tree_selected_topic(),
+		loadErrorTitle = m.topic_tree_topic_tree(),
 		itemSingular = 'topic',
 		itemPlural = 'topics',
 		getRecordItems = getRecordTopics,
@@ -160,7 +161,7 @@
 				record.title?.trim() ||
 				record.name?.trim() ||
 				record.file_name?.trim() ||
-				`Record #${record.id}`,
+				m.topic_tree_record({ id: record.id }),
 			fileName: record.file_name?.trim() || record.name?.trim() || '—',
 			docType: record.type?.trim() || '—',
 			docNo: record.doc_no?.trim() || '—',
@@ -251,7 +252,7 @@
 			loadError =
 				error instanceof Error
 					? error.message
-					: `Failed to load ${itemPlural} for record ${recordId}`;
+					: m.topic_tree_failed_to_load_for_record({ itemPlural, recordId });
 			errorDialogOpen = true;
 		} finally {
 			topicLoadingByRecordId = { ...topicLoadingByRecordId, [recordId]: false };
@@ -420,7 +421,7 @@
 			}
 			editingTopic = false;
 		} catch (err) {
-			editError = err instanceof Error ? err.message : 'Failed to save topic';
+			editError = err instanceof Error ? err.message : m.topic_tree_failed_to_save_topic();
 		} finally {
 			editSaving = false;
 		}
@@ -466,17 +467,17 @@
 				class="error-dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Topic Tree Load Error"
+				aria-label={m.topic_tree_topic_tree_load_error()}
 				tabindex="0"
 				onclick={(event) => event.stopPropagation()}
 				onkeydown={(event) => event.stopPropagation()}
 			>
-				<div class="eyebrow">Load Error</div>
-				<h3>Could not load {loadErrorTitle} data</h3>
+				<div class="eyebrow">{m.topic_tree_load_error()}</div>
+				<h3>{m.topic_tree_could_not_load_data({ loadErrorTitle })}</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
 					<button type="button" class="ghost" onclick={() => (errorDialogOpen = false)}
-						>Close</button
+						>{m.topic_tree_close()}</button
 					>
 				</div>
 			</div>
@@ -497,10 +498,10 @@
 			>
 				{#if treeState.listMode === 'compact'}
 					<PanelsTopLeftIcon class="h-4 w-4" />
-					Expanded View
+					{m.topic_tree_expanded_view()}
 				{:else}
 					<Rows3Icon class="h-4 w-4" />
-					Compact View
+					{m.topic_tree_compact_view()}
 				{/if}
 			</button>
 		</div>
@@ -510,10 +511,10 @@
 		<KbInputRecordBrowser
 			{darkMode}
 			instanceKey={browserInstanceKey}
-			title="kb.inputs"
-			subtitle={`Search, filter, and select records before inspecting their ${itemPlural}.`}
-			emptyTitle="No records found."
-			emptySubtitle={`Use Search or Retrieve to browse kb.inputs for ${itemPlural}.`}
+			title={m.topic_tree_kb_inputs()}
+			subtitle={m.topic_tree_search_filter_and_select_records({ itemPlural })}
+			emptyTitle={m.topic_tree_no_records_found()}
+			emptySubtitle={m.topic_tree_use_search_or_retrieve_to({ itemPlural })}
 			{scopeToActiveStore}
 			selectedRecordId={treeState.selectedRecordId}
 			renderMode={treeState.listMode === 'cards' ? 'cards' : 'compact'}
@@ -523,7 +524,7 @@
 
 		<div class="right-panel">
 			<div class="right-tabs">
-				<div class="tab active">PDF Display</div>
+				<div class="tab active">{m.topic_tree_pdf_display()}</div>
 				{#if activeRecord}
 					<div class="tab passive" title={activeRecord.fileName}>{activeRecord.fileName}</div>
 				{/if}
@@ -535,7 +536,7 @@
 						class="detail-card"
 						style="width:{detailCardWidth}px; flex: 0 0 {detailCardWidth}px;"
 					>
-						<div class="eyebrow">Selected Record</div>
+						<div class="eyebrow">{m.topic_tree_selected_record()}</div>
 						<h3>{activeRecord.title}</h3>
 						<div class="detail-meta">
 							<span>{activeRecord.docNo}</span>
@@ -568,7 +569,7 @@
 									{/if}
 									{#if topic.sourceLineSpecs && topic.sourceLineSpecs.length > 0}
 										<div class="snippet-info-row">
-											<span class="snippet-info-label">Lines</span>
+											<span class="snippet-info-label">{m.topic_tree_lines()}</span>
 											<span class="snippet-info-val"
 												>{formatTopicLineSpecs(topic.sourceLineSpecs)}</span
 											>
@@ -576,7 +577,7 @@
 									{/if}
 									{#if topic.categoryPaths && topic.categoryPaths.length > 0}
 										<div class="snippet-info-row">
-											<span class="snippet-info-label">Category</span>
+											<span class="snippet-info-label">{m.topic_tree_category()}</span>
 											<span class="snippet-info-val snippet-cat-val"
 												>{topic.categoryPaths.join(' · ')}</span
 											>
@@ -592,14 +593,14 @@
 						type="button"
 						class="resize-handle"
 						class:active={resizing}
-						aria-label="Resize selected record panel"
+						aria-label={m.topic_tree_resize_selected_record_panel()}
 						onpointerdown={startResize}
 					>
 						<span class="resize-grip" aria-hidden="true"></span>
 					</button>
 
 					<div class="pdf-card">
-						<div class="eyebrow">PDF Display</div>
+						<div class="eyebrow">{m.topic_tree_pdf_display()}</div>
 						{#if viewerInputId && treeState.selectedPdfTarget && viewerIsPdf}
 							<PdfViewWindow
 								inputId={viewerInputId}
@@ -616,21 +617,21 @@
 								sidebarDefaultWidth={320}
 								{sidebarTitle}
 								sidebarSettingsKey="topic-tree-pdf-sidebar"
-								sidebarWidthSettingLabel="Panel Width"
+								sidebarWidthSettingLabel={m.topic_tree_panel_width()}
 							>
 								{#snippet sidebar()}
 									{#if selectedTopic}
 										{#if editingTopic}
 											<div class="topic-sidebar-edit">
 												<div class="topic-edit-field">
-													<label class="topic-sidebar-label" for="edit-topic-type">TYPE</label>
+													<label class="topic-sidebar-label" for="edit-topic-type">{m.topic_tree_type()}</label>
 													<input
 														id="edit-topic-type"
 														class="topic-edit-input"
 														type="text"
 														list="topic-type-options"
 														bind:value={editTopicType}
-														placeholder="select or type…"
+														placeholder={m.topic_tree_select_or_type()}
 														autocomplete="off"
 													/>
 													<datalist id="topic-type-options">
@@ -641,80 +642,80 @@
 												</div>
 												<div class="topic-edit-field">
 													<label class="topic-sidebar-label" for="edit-topic-desc"
-														>{(
+														>{m.topic_tree_description({ value: (
 															itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1)
-														).toUpperCase()} DESCRIPTION</label
+														).toUpperCase() })}</label
 													>
 													<textarea
 														id="edit-topic-desc"
 														class="topic-edit-textarea"
 														bind:value={editTopicText}
 														rows={4}
-														placeholder="topic description (CN)"
+														placeholder={m.topic_tree_topic_description_cn()}
 													></textarea>
 												</div>
 												<div class="topic-edit-field">
 													<label class="topic-sidebar-label" for="edit-topic-desc-en"
-														>{(
+														>{m.topic_tree_description_en({ value: (
 															itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1)
-														).toUpperCase()} DESCRIPTION (EN)</label
+														).toUpperCase() })}</label
 													>
 													<textarea
 														id="edit-topic-desc-en"
 														class="topic-edit-textarea"
 														bind:value={editTopicDescEn}
 														rows={4}
-														placeholder="topic description (EN)"
+														placeholder={m.topic_tree_topic_description_en()}
 													></textarea>
 												</div>
 												<div class="topic-edit-field">
 													<label class="topic-sidebar-label" for="edit-category-paths"
-														>CATEGORY PATHS</label
+														>{m.topic_tree_category_paths()}</label
 													>
-													<p class="topic-edit-hint">One path per line (e.g. Root/Sub/Child)</p>
+													<p class="topic-edit-hint">{m.topic_tree_one_path_per_line_e()}</p>
 													<textarea
 														id="edit-category-paths"
 														class="topic-edit-textarea"
 														bind:value={editCategoryPathsRaw}
 														rows={3}
-														placeholder="Root/Category/Subcategory"
+														placeholder={m.topic_tree_root_category_subcategory()}
 													></textarea>
 												</div>
 												<div class="topic-edit-field">
 													<label class="topic-sidebar-label" for="edit-category-paths-en"
-														>CATEGORY PATHS (EN)</label
+														>{m.topic_tree_category_paths_en()}</label
 													>
-													<p class="topic-edit-hint">One path per line</p>
+													<p class="topic-edit-hint">{m.topic_tree_one_path_per_line()}</p>
 													<textarea
 														id="edit-category-paths-en"
 														class="topic-edit-textarea"
 														bind:value={editCategoryPathsEnRaw}
 														rows={3}
-														placeholder="Root/Category/Subcategory (EN)"
+														placeholder={m.topic_tree_root_category_subcategory_en()}
 													></textarea>
 												</div>
 												<div class="topic-edit-field">
-													<label class="topic-sidebar-label" for="edit-keywords">KEYWORDS</label>
-													<p class="topic-edit-hint">One keyword per line</p>
+													<label class="topic-sidebar-label" for="edit-keywords">{m.topic_tree_keywords()}</label>
+													<p class="topic-edit-hint">{m.topic_tree_one_keyword_per_line()}</p>
 													<textarea
 														id="edit-keywords"
 														class="topic-edit-textarea"
 														bind:value={editKeywordsRaw}
 														rows={3}
-														placeholder="keyword (CN)"
+														placeholder={m.topic_tree_keyword_cn()}
 													></textarea>
 												</div>
 												<div class="topic-edit-field">
 													<label class="topic-sidebar-label" for="edit-keywords-en"
-														>KEYWORDS (EN)</label
+														>{m.topic_tree_keywords_en()}</label
 													>
-													<p class="topic-edit-hint">One keyword per line</p>
+													<p class="topic-edit-hint">{m.topic_tree_one_keyword_per_line()}</p>
 													<textarea
 														id="edit-keywords-en"
 														class="topic-edit-textarea"
 														bind:value={editKeywordsEnRaw}
 														rows={3}
-														placeholder="keyword (EN)"
+														placeholder={m.topic_tree_keyword_en()}
 													></textarea>
 												</div>
 												{#if editError}
@@ -727,32 +728,32 @@
 														disabled={editSaving}
 														onclick={saveTopicEdit}
 													>
-														{editSaving ? 'Saving…' : 'Save'}
+														{editSaving ? m.topic_tree_saving() : m.topic_tree_save()}
 													</button>
 													<button
 														type="button"
 														class="topic-edit-btn topic-edit-btn-cancel"
 														disabled={editSaving}
-														onclick={cancelTopicEdit}>Cancel</button
+														onclick={cancelTopicEdit}>{m.topic_tree_cancel()}</button
 													>
 												</div>
 											</div>
 										{:else}
 											<div class="topic-sidebar-block">
 												<div class="topic-sidebar-row">
-													<span>{itemSingular} ID</span>
+													<span>{m.topic_tree_id({ itemSingular })}</span>
 													<strong>{selectedTopic.id}</strong>
 												</div>
 												<div class="topic-sidebar-row">
-													<span>Record ID</span>
+													<span>{m.topic_tree_record_id()}</span>
 													<strong>{selectedTopic.recordId}</strong>
 												</div>
 												<div class="topic-sidebar-row">
-													<span>Page</span>
+													<span>{m.topic_tree_page()}</span>
 													<strong>{selectedTopic.page}</strong>
 												</div>
 												<div class="topic-sidebar-row">
-													<span>Type</span>
+													<span>{m.topic_tree_type_2()}</span>
 													<span class="topic-type-display">
 														<strong>{selectedTopic.topicType || '—'}</strong>
 														{#if hasNonAscii(selectedTopic.topicType)}
@@ -764,17 +765,17 @@
 													</span>
 												</div>
 												<div class="topic-sidebar-row">
-													<span>Line Numbers</span>
+													<span>{m.topic_tree_line_numbers()}</span>
 													<strong>{formatTopicLineSpecs(selectedTopic.sourceLineSpecs)}</strong>
 												</div>
 											</div>
 											<div class="topic-sidebar-block">
 												<div class="topic-sidebar-label-row">
 													<div class="topic-sidebar-label">
-														{itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1)} Description
+														{m.topic_tree_description_2({ value: itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1) })}
 													</div>
 													<button type="button" class="topic-edit-trigger" onclick={startTopicEdit}
-														>Edit</button
+														>{m.topic_tree_edit()}</button
 													>
 												</div>
 												<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
@@ -785,7 +786,7 @@
 												{/if}
 											</div>
 											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-label">Category Paths</div>
+												<div class="topic-sidebar-label">{m.topic_tree_category_paths_2()}</div>
 												{#if selectedTopicCategoryPaths.length > 0}
 													<div class="category-path-list">
 														{#each selectedTopicCategoryPaths as categoryPath, idx (`${categoryPath.path}-${idx}`)}
@@ -820,13 +821,13 @@
 														{/each}
 													</div>
 												{:else}
-													<p class="topic-sidebar-copy muted">No category paths assigned.</p>
+													<p class="topic-sidebar-copy muted">{m.topic_tree_no_category_paths_assigned()}</p>
 												{/if}
 											</div>
 											{@const catPathsEn = selectedTopic.categoryPathsEn ?? []}
 											{#if catPathsEn.length > 0 && !arraysEqual(selectedTopic.categoryPaths ?? [], catPathsEn)}
 												<div class="topic-sidebar-block">
-													<div class="topic-sidebar-label">Category Paths (English)</div>
+													<div class="topic-sidebar-label">{m.topic_tree_category_paths_english()}</div>
 													<div class="category-path-list">
 														{#each catPathsEn as enPath, idx (`en-cat-${enPath}-${idx}`)}
 															{@const enSegments = enPath.split('/').filter(Boolean)}
@@ -847,7 +848,7 @@
 												</div>
 											{/if}
 											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-label">Keywords</div>
+												<div class="topic-sidebar-label">{m.topic_tree_keywords_2()}</div>
 												{#if selectedTopic.topicKeywords.length > 0}
 													<div class="keyword-list">
 														{#each selectedTopic.topicKeywords as kw, idx (`${kw}-${idx}`)}
@@ -855,13 +856,13 @@
 														{/each}
 													</div>
 												{:else}
-													<p class="topic-sidebar-copy muted">No keywords extracted.</p>
+													<p class="topic-sidebar-copy muted">{m.topic_tree_no_keywords_extracted()}</p>
 												{/if}
 											</div>
 											{@const kwEn = selectedTopic.topicKeywordsEn ?? []}
 											{#if kwEn.length > 0 && !arraysEqual(selectedTopic.topicKeywords, kwEn)}
 												<div class="topic-sidebar-block">
-													<div class="topic-sidebar-label">Keywords (English)</div>
+													<div class="topic-sidebar-label">{m.topic_tree_keywords_english()}</div>
 													<div class="keyword-list">
 														{#each kwEn as kw, idx (`en-kw-${kw}-${idx}`)}
 															<span class="keyword-chip keyword-chip-en">{kw}</span>
@@ -872,7 +873,7 @@
 										{/if}
 									{:else}
 										<div class="topic-sidebar-empty">
-											Select a {itemSingular} to inspect it alongside the source PDF.
+											{m.topic_tree_select_a_to_inspect_it({ itemSingular })}
 										</div>
 									{/if}
 								{/snippet}
@@ -881,21 +882,21 @@
 							<iframe class="pdf-fallback-frame" title={activeRecord.fileName} src={viewerFileUrl}
 							></iframe>
 						{:else if topicLoadingByRecordId[activeRecord.id]}
-							<div class="empty-state pdf-empty">Loading {itemPlural} for the selected record…</div>
+							<div class="empty-state pdf-empty">{m.topic_tree_loading_for_the_selected_record({ itemPlural })}</div>
 						{:else if activeRecord.topics.length === 0}
 							<div class="empty-state pdf-empty">
-								No {itemPlural} are available for this record yet.
+								{m.topic_tree_no_are_available_for_this({ itemPlural })}
 							</div>
 						{:else}
 							<div class="empty-state pdf-empty">
-								Select a {itemSingular} to move the PDF display to the relevant page.
+								{m.topic_tree_select_a_to_move_the({ itemSingular })}
 							</div>
 						{/if}
 					</div>
 				</div>
 			{:else}
 				<div class="empty-state">
-					Select a record from the left panel to inspect its {itemPlural}.
+					{m.topic_tree_select_a_record_from_the({ itemPlural })}
 				</div>
 			{/if}
 		</div>

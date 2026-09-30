@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { Chart } from 'svelte-echarts';
@@ -72,13 +73,13 @@
 	);
 
 	const timeOptions = [
-		{ value: 'today', label: 'Today' },
-		{ value: 'yesterday', label: 'Yesterday' },
-		{ value: 'last_7_days', label: 'Last 7 Days' },
-		{ value: 'last_30_days', label: 'Last 30 Days' },
-		{ value: 'this_month', label: 'This Month' },
-		{ value: 'last_month', label: 'Last Month' },
-		{ value: 'custom', label: 'Custom' }
+		{ value: 'today', label: m.llm_activities_today() },
+		{ value: 'yesterday', label: m.llm_activities_yesterday() },
+		{ value: 'last_7_days', label: m.llm_activities_last_7_days() },
+		{ value: 'last_30_days', label: m.llm_activities_last_30_days() },
+		{ value: 'this_month', label: m.llm_activities_this_month() },
+		{ value: 'last_month', label: m.llm_activities_last_month() },
+		{ value: 'custom', label: m.llm_activities_custom() }
 	];
 
 	onMount(() => {
@@ -170,10 +171,10 @@
 				break;
 			case 'custom':
 				if (!fromDate || !toDate) {
-					throw new Error('Choose both a custom start date and end date.');
+					throw new Error(m.llm_activities_choose_both_a_custom_start());
 				}
 				if (fromDate > toDate) {
-					throw new Error('Custom start date must not be after the end date.');
+					throw new Error(m.llm_activities_custom_start_date_must_not());
 				}
 				from = fromDate;
 				to = toDate;
@@ -243,7 +244,7 @@
 		notice = null;
 		try {
 			const response = await runLLMReconciliationNow();
-			notice = response.message ?? 'Reconciliation finished. Daily reports have been refreshed.';
+			notice = response.message ?? m.llm_activities_reconciliation_finished_daily_reports_have();
 			await load({ preserveNotice: true });
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -297,9 +298,9 @@
 
 	function tokenSummary(event: LLMUsageEvent): string {
 		if (isEmbeddingModel(event.model_name)) {
-			return `${fmtNum(event.input_tokens)} input / ${fmtNum(event.output_tokens)} completion`;
+			return m.llm_activities_input_completion({ input_tokens: fmtNum(event.input_tokens), output_tokens: fmtNum(event.output_tokens) });
 		}
-		return `${fmtNum(event.input_tokens)} in / ${fmtNum(event.output_tokens)} out`;
+		return m.llm_activities_in_out({ input_tokens: fmtNum(event.input_tokens), output_tokens: fmtNum(event.output_tokens) });
 	}
 
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
@@ -398,7 +399,7 @@
 			yAxis: [
 				{
 					type: 'value',
-					name: 'Tokens',
+					name: m.llm_activities_tokens(),
 					nameTextStyle: { color: sub },
 					axisLabel: {
 						color: sub,
@@ -408,7 +409,7 @@
 				},
 				{
 					type: 'value',
-					name: `Local estimate (${group.currencyCode || 'CNY'})`,
+					name: m.llm_activities_local_estimate({ currencyCode: group.currencyCode || 'CNY' }),
 					position: 'right',
 					offset: 64,
 					nameTextStyle: { color: sub },
@@ -421,28 +422,28 @@
 			],
 			series: [
 				{
-					name: 'Input (Cache Hit)',
+					name: m.llm_activities_input_cache_hit(),
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 18,
 					data: group.rows.map((row) => row.prompt_cache_hit_tokens)
 				},
 				{
-					name: 'Input (Cache Miss)',
+					name: m.llm_activities_input_cache_miss(),
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 18,
 					data: group.rows.map((row) => row.prompt_cache_miss_tokens)
 				},
 				{
-					name: 'Output',
+					name: m.llm_activities_output(),
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 18,
 					data: group.rows.map((row) => row.output_tokens)
 				},
 				{
-					name: 'Local estimate',
+					name: m.llm_activities_local_estimate_2(),
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 18,
@@ -510,35 +511,35 @@
 			],
 			series: [
 				{
-					name: 'Current balance (USD)',
+					name: m.llm_activities_current_balance_usd(),
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 20,
 					data: group.rows.map((row) => row.balance_usd)
 				},
 				{
-					name: 'Current balance (CNY)',
+					name: m.llm_activities_current_balance_cny(),
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 20,
 					data: group.rows.map((row) => row.balance_cny)
 				},
 				{
-					name: 'Spending (CNY)',
+					name: m.llm_activities_spending_cny(),
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 20,
 					data: group.rows.map((row) => row.spending_cny)
 				},
 				{
-					name: 'Total Spending (CNY)',
+					name: m.llm_activities_total_spending_cny(),
 					type: 'bar',
 					yAxisIndex: 1,
 					barMaxWidth: 20,
 					data: group.rows.map((row) => row.total_spending_cny)
 				},
 				{
-					name: 'Total Spending (USD)',
+					name: m.llm_activities_total_spending_usd(),
 					type: 'bar',
 					yAxisIndex: 0,
 					barMaxWidth: 20,
@@ -582,51 +583,49 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>LLM Activities</h2>
+			<h2>{m.llm_activities_llm_activities()}</h2>
 			<p class="muted">
-				Provider-side daily spend reconciliation plus per-call usage telemetry for debugging and
-				optimization.
+				{m.llm_activities_provider_side_daily_spend_reconciliation()}
 			</p>
 			<p class="muted">
-				`Refresh` reloads stored activity data. `Run Reconciliation` fetches fresh provider balances
-				and updates spend rows.
+				{m.llm_activities_refresh_reloads_stored_activity_data()}
 			</p>
 		</div>
 		<div class="toolbar-actions">
 			<label>
-				<span>Reports</span>
+				<span>{m.llm_activities_reports()}</span>
 				<input type="number" min="1" bind:value={reportLimit} />
 			</label>
 			<label>
-				<span>Events</span>
+				<span>{m.llm_activities_events()}</span>
 				<input type="number" min="1" bind:value={eventLimit} />
 			</label>
 			<button class="primary" onclick={() => load()} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.llm_activities_refreshing() : m.llm_activities_refresh()}
 			</button>
 			<button class="secondary" onclick={runReconciliation} disabled={loading || reconciling}>
-				{reconciling ? 'Reconciling…' : 'Run Reconciliation'}
+				{reconciling ? m.llm_activities_reconciling() : m.llm_activities_run_reconciliation()}
 			</button>
 		</div>
 	</header>
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Today's provider delta</div>
+			<div class="summary-label">{m.llm_activities_today_s_provider_delta()}</div>
 			<div class="summary-value">
 				{fmtMoney(todaySummary.spend_amount, todaySummary.currency_code || 'USD')}
 			</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Today's Requests</div>
+			<div class="summary-label">{m.llm_activities_today_s_requests()}</div>
 			<div class="summary-value">{fmtNum(todaySummary.request_count)}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Today's Tokens</div>
+			<div class="summary-label">{m.llm_activities_today_s_tokens()}</div>
 			<div class="summary-value">{fmtNum(todaySummary.total_tokens)}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Today's Errors</div>
+			<div class="summary-label">{m.llm_activities_today_s_errors()}</div>
 			<div class="summary-value">{fmtNum(todaySummary.error_count)}</div>
 		</div>
 	</div>
@@ -642,29 +641,28 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Current Balances</h3>
+				<h3>{m.llm_activities_current_balances()}</h3>
 				<p class="muted">
-					Latest stored provider-side balance snapshot per account. Use `Run Reconciliation` to
-					fetch a fresh balance.
+					{m.llm_activities_latest_stored_provider_side_balance()}
 				</p>
 			</div>
 		</div>
 		{#if loading && balances.length === 0}
-			<div class="empty">Loading current balances…</div>
+			<div class="empty">{m.llm_activities_loading_current_balances()}</div>
 		{:else if balances.length === 0}
 			<div class="empty">
-				No balance snapshots yet. Run reconciliation to capture the latest provider balance.
+				{m.llm_activities_no_balance_snapshots_yet_run()}
 			</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Account</th>
-							<th>Provider</th>
-							<th>Balance</th>
-							<th>Captured</th>
-							<th>Workspace Day</th>
+							<th>{m.llm_activities_account()}</th>
+							<th>{m.llm_activities_provider()}</th>
+							<th>{m.llm_activities_balance()}</th>
+							<th>{m.llm_activities_captured()}</th>
+							<th>{m.llm_activities_workspace_day()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -686,15 +684,14 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Official Account Balance and Spending</h3>
+				<h3>{m.llm_activities_official_account_balance_and_spending()}</h3>
 				<p class="muted">
-					Provider-reported DeepSeek balance by API key. Spending is the CNY balance decrease from
-					the preceding snapshot; balance increases are shown as zero spending.
+					{m.llm_activities_provider_reported_deepseek_balance_by()}
 				</p>
 			</div>
 			<div class="report-filters">
 				<label>
-					<span>Time</span>
+					<span>{m.llm_activities_time()}</span>
 					<select bind:value={balanceTimePreset} onchange={handleBalanceFilterChange}>
 						{#each timeOptions as option (option.value)}
 							<option value={option.value}>{option.label}</option>
@@ -702,9 +699,9 @@
 					</select>
 				</label>
 				<label>
-					<span>API Key</span>
+					<span>{m.llm_activities_api_key()}</span>
 					<select bind:value={balanceSelectedAPIKey} onchange={handleBalanceFilterChange}>
-						<option value="">All API Keys</option>
+						<option value="">{m.llm_activities_all_api_keys()}</option>
 						{#each apiKeyOptions as option (option.name)}
 							<option value={option.name}>{option.name}</option>
 						{/each}
@@ -712,7 +709,7 @@
 				</label>
 				{#if balanceTimePreset === 'custom'}
 					<label>
-						<span>Start date</span>
+						<span>{m.llm_activities_start_date()}</span>
 						<input
 							type="date"
 							bind:value={balanceCustomFrom}
@@ -720,7 +717,7 @@
 						/>
 					</label>
 					<label>
-						<span>End date</span>
+						<span>{m.llm_activities_end_date()}</span>
 						<input type="date" bind:value={balanceCustomTo} onchange={handleBalanceFilterChange} />
 					</label>
 				{/if}
@@ -730,10 +727,10 @@
 			<div class="filter-error" role="alert">{balanceFilterError}</div>
 		{/if}
 		{#if (loading || balanceLoading) && hourlyBalanceReports.length === 0}
-			<div class="empty">Loading official balance history…</div>
+			<div class="empty">{m.llm_activities_loading_official_balance_history()}</div>
 		{:else if balanceChartGroups.length === 0}
 			<div class="empty">
-				No official balance history yet. Hourly snapshots will appear here after the next capture.
+				{m.llm_activities_no_official_balance_history_yet()}
 			</div>
 		{:else}
 			<div class="model-chart-grid">
@@ -743,7 +740,7 @@
 							<div>
 								<div class="cell-primary">{group.accountName}</div>
 								<div class="cell-secondary">
-									Official provider balance and {balanceFrequency} spending
+									{m.llm_activities_official_provider_balance_and_spending({ balanceFrequency })}
 								</div>
 							</div>
 						</div>
@@ -765,15 +762,14 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Spend Reports</h3>
+				<h3>{m.llm_activities_spend_reports()}</h3>
 				<p class="muted">
-					Per-model activity aggregated by workspace day. Local estimates use the configured
-					DeepSeek CNY token prices and remain separate from provider balances.
+					{m.llm_activities_per_model_activity_aggregated_by()}
 				</p>
 			</div>
 			<div class="report-filters">
 				<label>
-					<span>Time</span>
+					<span>{m.llm_activities_time()}</span>
 					<select bind:value={timePreset} onchange={handleReportFilterChange}>
 						{#each timeOptions as option (option.value)}
 							<option value={option.value}>{option.label}</option>
@@ -781,9 +777,9 @@
 					</select>
 				</label>
 				<label>
-					<span>API Key</span>
+					<span>{m.llm_activities_api_key()}</span>
 					<select bind:value={selectedAPIKey} onchange={handleReportFilterChange}>
-						<option value="">All API Keys</option>
+						<option value="">{m.llm_activities_all_api_keys()}</option>
 						{#each apiKeyOptions as option (option.name)}
 							<option value={option.name}>{option.name}</option>
 						{/each}
@@ -791,11 +787,11 @@
 				</label>
 				{#if timePreset === 'custom'}
 					<label>
-						<span>Start date</span>
+						<span>{m.llm_activities_start_date()}</span>
 						<input type="date" bind:value={customFrom} onchange={handleReportFilterChange} />
 					</label>
 					<label>
-						<span>End date</span>
+						<span>{m.llm_activities_end_date()}</span>
 						<input type="date" bind:value={customTo} onchange={handleReportFilterChange} />
 					</label>
 				{/if}
@@ -805,11 +801,10 @@
 			<div class="filter-error" role="alert">{reportFilterError}</div>
 		{/if}
 		{#if (loading || reportLoading) && modelReports.length === 0}
-			<div class="empty">Loading model activity reports…</div>
+			<div class="empty">{m.llm_activities_loading_model_activity_reports()}</div>
 		{:else if modelReports.length === 0}
 			<div class="empty">
-				No model activity reports yet. Reconciliation plus captured usage events will populate this
-				section.
+				{m.llm_activities_no_model_activity_reports_yet()}
 			</div>
 		{:else}
 			<div class="model-chart-grid">
@@ -819,17 +814,16 @@
 							<div>
 								<div class="cell-primary">{group.modelName}</div>
 								<div class="cell-secondary">
-									{group.provider} · {group.rows[0].api_key_name || 'API key unavailable'} · {fmtNum(
+									{m.llm_activities_grouped_by({ provider: group.provider, api_key_name: group.rows[0].api_key_name || m.llm_activities_api_key_unavailable(), rowsCount: fmtNum(
 										group.rows.length
-									)}
-									{reportFrequency === 'hourly' ? 'hour(s)' : 'day(s)'} · grouped by {reportFrequency ===
+									), value: reportFrequency === 'hourly' ? m.llm_activities_hour_s() : m.llm_activities_day_s(), value2: reportFrequency ===
 									'hourly'
 										? 'hour'
-										: 'workspace day'}
+										: m.llm_activities_workspace_day_2() })}
 								</div>
 								{#if isEmbeddingModel(group.modelName)}
 									<div class="cell-secondary">
-										Embedding vectors are returned data and usually do not count as output tokens.
+										{m.llm_activities_embedding_vectors_are_returned_data()}
 									</div>
 								{/if}
 							</div>
@@ -850,33 +844,32 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Recent Usage Events</h3>
+				<h3>{m.llm_activities_recent_usage_events()}</h3>
 				<p class="muted">
-					Per-request capture from `shared/go/api/llm`, including prompt names, token counts, and
-					failures.
+					{m.llm_activities_per_request_capture_from_shared()}
 				</p>
 			</div>
 		</div>
 		{#if loading && usageEvents.length === 0}
-			<div class="empty">Loading usage events…</div>
+			<div class="empty">{m.llm_activities_loading_usage_events()}</div>
 		{:else if usageEvents.length === 0}
 			<div class="empty">
-				No usage events yet. This view will fill in once call logging is persisted.
+				{m.llm_activities_no_usage_events_yet_this()}
 			</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Time</th>
-							<th>Record ID</th>
-							<th>Call Reason</th>
-							<th>Prompt</th>
-							<th>Model</th>
-							<th>Tokens</th>
-							<th>Latency</th>
-							<th>Status</th>
-							<th>Call Loc</th>
+							<th>{m.llm_activities_time()}</th>
+							<th>{m.llm_activities_record_id()}</th>
+							<th>{m.llm_activities_call_reason()}</th>
+							<th>{m.llm_activities_prompt()}</th>
+							<th>{m.llm_activities_model()}</th>
+							<th>{m.llm_activities_tokens()}</th>
+							<th>{m.llm_activities_latency()}</th>
+							<th>{m.llm_activities_status()}</th>
+							<th>{m.llm_activities_call_loc()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -899,11 +892,11 @@
 									<div class="cell-primary">{tokenSummary(event)}</div>
 									{#if isEmbeddingModel(event.model_name)}
 										<div class="cell-secondary">
-											Vectors returned separately; not counted as output tokens.
+											{m.llm_activities_vectors_returned_separately_not_counted()}
 										</div>
 									{/if}
 								</td>
-								<td>{fmtNum(event.latency_ms)} ms</td>
+								<td>{m.llm_activities_ms({ latency_ms: fmtNum(event.latency_ms) })}</td>
 								<td class:error-cell={!!event.error_message}>
 									{event.error_message ? event.error_message : 'OK'}
 								</td>

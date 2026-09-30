@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		createPrice,
@@ -19,7 +20,10 @@
 		muted: darkMode ? '#94A3B8' : '#64748B',
 		border: darkMode ? '#2D3348' : '#DCE2EA'
 	});
-	const typeLabels: Record<PriceType, string> = { service: 'Service Prices', llm: 'LLM Prices' };
+	const typeLabels: Record<PriceType, string> = {
+		service: m.prices_service_prices(),
+		llm: m.prices_llm_prices()
+	};
 	const empty = (price_type: PriceType = 'llm'): PriceDefInput => ({
 		price_def_name: '',
 		price_type,
@@ -54,7 +58,7 @@
 		try {
 			defs = await listPrices();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Unable to load prices.';
+			error = e instanceof Error ? e.message : m.prices_unable_to_load_prices();
 		} finally {
 			loading = false;
 		}
@@ -79,24 +83,24 @@
 
 	async function save() {
 		if (!draft.price_def_name.trim()) {
-			formError = 'Price definition name is required.';
+			formError = m.prices_price_definition_name_is_required();
 			return;
 		}
 		if (draft.items.length === 0) {
-			formError = 'Add at least one price item.';
+			formError = m.prices_add_at_least_one_price();
 			return;
 		}
 		if (draft.items.some((i) => !i.item_name.trim() || !i.unit.trim() || !i.currency.trim())) {
-			formError = 'Every price item needs a name, a unit, and a currency.';
+			formError = m.prices_every_price_item_needs_a();
 			return;
 		}
 		if (draft.items.some((i) => !/^[0-9]+(\.[0-9]+)?$/.test(String(i.value).trim()))) {
-			formError = 'Every price item needs a non-negative decimal value, such as 0.04.';
+			formError = m.prices_every_price_item_needs_a_2();
 			return;
 		}
 		const names = draft.items.map((i) => i.item_name.trim());
 		if (new Set(names).size !== names.length) {
-			formError = 'Item names must be unique within a price definition.';
+			formError = m.prices_item_names_must_be_unique();
 			return;
 		}
 		saving = true;
@@ -112,20 +116,21 @@
 			newDef();
 			await load();
 		} catch (e) {
-			formError = e instanceof Error ? e.message : 'Unable to save price definition.';
+			formError = e instanceof Error ? e.message : m.prices_unable_to_save_price_definition();
 		} finally {
 			saving = false;
 		}
 	}
 
 	async function remove(d: PriceDef) {
-		if (!confirm(`Delete price definition "${d.price_def_name}" and all of its items?`)) return;
+		if (!confirm(m.prices_delete_price_definition_and_all({ price_def_name: d.price_def_name })))
+			return;
 		try {
 			await deletePrice(d.id);
 			if (editingID === d.id) newDef();
 			await load();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Unable to delete price definition.';
+			error = e instanceof Error ? e.message : m.prices_unable_to_delete_price_definition();
 		}
 	}
 
@@ -136,34 +141,44 @@
 	<section class="panel" style={`background:${colors.card};border-color:${colors.border};`}>
 		<div class="heading">
 			<div>
-				<span class="eyebrow" style={`color:${colors.muted}`}>SYSTEM ADMIN / SYSTEM</span>
-				<h1>Price Management</h1>
+				<span class="eyebrow" style={`color:${colors.muted}`}>{m.prices_system_admin_system()}</span
+				>
+				<h1>{m.prices_price_management()}</h1>
 				<p style={`color:${colors.muted}`}>
-					Define service prices offered to customers and the LLM prices the system pays.
+					{m.prices_define_service_prices_offered_to()}
 				</p>
 			</div>
-			<button class="secondary" onclick={newDef}>New price definition</button>
+			<button class="secondary" onclick={newDef}>{m.prices_new_price_definition()}</button>
 		</div>
-		<h2>{editingID === null ? 'Create price definition' : 'Modify price definition'}</h2>
+		<h2>
+			{editingID === null ? m.prices_create_price_definition() : m.prices_modify_price_definition()}
+		</h2>
 		<div class="fields head-fields">
-			<label>Name<input bind:value={draft.price_def_name} placeholder="deepseek-pricing" /></label>
 			<label
-				>Price type<select bind:value={draft.price_type}
-					><option value="llm">LLM</option><option value="service">Service</option></select
+				>{m.prices_name()}<input
+					bind:value={draft.price_def_name}
+					placeholder={m.prices_deepseek_pricing()}
+				/></label
+			>
+			<label
+				>{m.prices_price_type()}<select bind:value={draft.price_type}
+					><option value="llm">{m.prices_llm()}</option><option value="service"
+						>{m.prices_service()}</option
+					></select
 				></label
 			>
 		</div>
 		<label class="full"
-			>Description<textarea
+			>{m.prices_description()}<textarea
 				bind:value={draft.description}
 				rows="2"
-				placeholder="Optional notes, e.g. source or effective date"
+				placeholder={m.prices_optional_notes_e_g_source()}
 			></textarea></label
 		>
 		<div class="item-heading">
-			<h3>Price items</h3>
+			<h3>{m.prices_price_items()}</h3>
 			<button class="secondary" onclick={() => (draft.items = [...draft.items, emptyItem()])}
-				>Add item</button
+				>{m.prices_add_item()}</button
 			>
 		</div>
 		{#if draft.items.length > 0}
@@ -171,9 +186,10 @@
 				<table class="item-table">
 					<thead
 						><tr
-							><th>Item name</th><th>Type</th><th>Cache</th><th>Time span</th><th>Unit</th><th
-								>Currency</th
-							><th>Value</th><th></th></tr
+							><th>{m.prices_item_name()}</th><th>{m.prices_type()}</th><th>{m.prices_cache()}</th
+							><th>{m.prices_time_span()}</th><th>{m.prices_unit()}</th><th
+								>{m.prices_currency()}</th
+							><th>{m.prices_value()}</th><th></th></tr
 						></thead
 					><tbody>
 						{#each draft.items as item, i (item)}
@@ -182,34 +198,40 @@
 									><input
 										class="name-input"
 										bind:value={item.item_name}
-										aria-label={`Item ${i + 1} name`}
-										placeholder="input-cache-hit-peak"
+										aria-label={m.prices_item_name_2({ value: i + 1 })}
+										placeholder={m.prices_input_cache_hit_peak()}
 									/></td
 								>
 								<td
-									><select bind:value={item.item_type} aria-label={`Item ${i + 1} type`}
-										><option value="input">input</option><option value="output">output</option
+									><select
+										bind:value={item.item_type}
+										aria-label={m.prices_item_type({ value: i + 1 })}
+										><option value="input">{m.prices_input()}</option><option value="output"
+											>{m.prices_output()}</option
 										></select
 									></td
 								>
 								<td
-									><select bind:value={item.cache} aria-label={`Item ${i + 1} cache`}
-										><option value="">-</option><option value="hit">hit</option><option value="miss"
-											>miss</option
+									><select
+										bind:value={item.cache}
+										aria-label={m.prices_item_cache({ value: i + 1 })}
+										><option value="">-</option><option value="hit">{m.prices_hit()}</option><option
+											value="miss">{m.prices_miss()}</option
 										></select
 									></td
 								>
 								<td
-									><select bind:value={item.time_span} aria-label={`Item ${i + 1} time span`}
-										><option value="">-</option><option value="peak">peak</option><option
-											value="off-peak">off-peak</option
-										></select
+									><select
+										bind:value={item.time_span}
+										aria-label={m.prices_item_time_span({ value: i + 1 })}
+										><option value="">-</option><option value="peak">{m.prices_peak()}</option
+										><option value="off-peak">{m.prices_off_peak()}</option></select
 									></td
 								>
 								<td
 									><input
 										bind:value={item.unit}
-										aria-label={`Item ${i + 1} unit`}
+										aria-label={m.prices_item_unit({ value: i + 1 })}
 										list="price-units"
 									/></td
 								>
@@ -217,7 +239,7 @@
 									><input
 										class="short"
 										bind:value={item.currency}
-										aria-label={`Item ${i + 1} currency`}
+										aria-label={m.prices_item_currency({ value: i + 1 })}
 										list="price-currencies"
 									/></td
 								>
@@ -225,7 +247,7 @@
 									><input
 										class="short num"
 										bind:value={item.value}
-										aria-label={`Item ${i + 1} value`}
+										aria-label={m.prices_item_value({ value: i + 1 })}
 										inputmode="decimal"
 										placeholder="0.00"
 									/></td
@@ -234,7 +256,7 @@
 									><button
 										class="text danger"
 										onclick={() => (draft.items = draft.items.filter((_, index) => index !== i))}
-										>Remove</button
+										>{m.prices_remove()}</button
 									></td
 								>
 							</tr>
@@ -246,25 +268,27 @@
 			<datalist id="price-currencies"
 				><option value="CN"></option><option value="US"></option></datalist
 			>
-		{:else}<p class="muted" style={`color:${colors.muted}`}>No price items yet.</p>{/if}
+		{:else}<p class="muted" style={`color:${colors.muted}`}>{m.prices_no_price_items_yet()}</p>{/if}
 		{#if formError}<p class="error" role="alert">{formError}</p>{/if}
 		<div class="form-actions">
 			<button onclick={save} disabled={saving}
 				>{saving
-					? 'Saving…'
+					? m.prices_saving()
 					: editingID === null
-						? 'Create price definition'
-						: 'Save changes'}</button
-			>{#if editingID !== null}<button class="secondary" onclick={newDef}>Cancel</button>{/if}
+						? m.prices_create_price_definition()
+						: m.prices_save_changes()}</button
+			>{#if editingID !== null}<button class="secondary" onclick={newDef}
+					>{m.prices_cancel()}</button
+				>{/if}
 		</div>
 	</section>
 
 	<section class="panel" style={`background:${colors.card};border-color:${colors.border};`}>
 		<div class="heading">
 			<div>
-				<h2>All price definitions</h2>
+				<h2>{m.prices_all_price_definitions()}</h2>
 				<div class="tabs" role="tablist">
-					{#each [['all', 'All'], ['service', typeLabels.service], ['llm', typeLabels.llm]] as [key, label] (key)}
+					{#each [['all', m.prices_all()], ['service', typeLabels.service], ['llm', typeLabels.llm]] as [key, label] (key)}
 						<button
 							role="tab"
 							class="tab"
@@ -275,17 +299,22 @@
 					{/each}
 				</div>
 			</div>
-			<button class="secondary" onclick={load}>Refresh</button>
+			<button class="secondary" onclick={load}>{m.prices_refresh()}</button>
 		</div>
-		{#if loading}<p class="muted">Loading prices…</p>{:else if error}<p class="error" role="alert">
+		{#if loading}<p class="muted">{m.prices_loading_prices()}</p>{:else if error}<p
+				class="error"
+				role="alert"
+			>
 				{error}
 			</p>{:else if shown.length === 0}<p class="muted">
-				No price definitions have been created.
+				{m.prices_no_price_definitions_have_been()}
 			</p>{:else}
 			<div class="table-wrap">
 				<table>
 					<thead
-						><tr><th>Name</th><th>Type</th><th>Description</th><th>Items</th><th>Actions</th></tr
+						><tr
+							><th>{m.prices_name()}</th><th>{m.prices_type()}</th><th>{m.prices_description()}</th
+							><th>{m.prices_items()}</th><th>{m.prices_actions()}</th></tr
 						></thead
 					><tbody>
 						{#each shown as d (d.id)}
@@ -299,9 +328,9 @@
 								><td>{typeLabels[d.price_type]}</td><td class="notes-preview"
 									>{d.description || '—'}</td
 								><td>{d.items.length}</td><td class="actions"
-									><button class="text" onclick={() => edit(d)}>Edit</button><button
+									><button class="text" onclick={() => edit(d)}>{m.prices_edit()}</button><button
 										class="text danger"
-										onclick={() => remove(d)}>Delete</button
+										onclick={() => remove(d)}>{m.prices_delete()}</button
 									></td
 								></tr
 							>
@@ -311,9 +340,11 @@
 											<table class="item-table">
 												<thead
 													><tr
-														><th>Item name</th><th>Type</th><th>Cache</th><th>Time span</th><th
-															>Unit</th
-														><th>Currency</th><th class="num">Value</th></tr
+														><th>{m.prices_item_name()}</th><th>{m.prices_type()}</th><th
+															>{m.prices_cache()}</th
+														><th>{m.prices_time_span()}</th><th>{m.prices_unit()}</th><th
+															>{m.prices_currency()}</th
+														><th class="num">{m.prices_value()}</th></tr
 													></thead
 												><tbody>
 													{#each d.items as item (item.id)}<tr

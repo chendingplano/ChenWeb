@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import {
 		extractKbMetrics,
@@ -80,27 +81,27 @@
 			case 'extract-metrics':
 				return {
 					eyebrow: 'KB.Metrics',
-					title: 'Add Metric',
+					title: msg.pdf_line_selection_dialog_add_metric_2(),
 					subtitle:
 						'Review selected lines, extract candidate metrics, remove any you do not want, then save the remaining metrics to the database.'
 				};
 			case 'extract-provisions':
 				return {
 					eyebrow: 'KB.Provisions',
-					title: 'Extract Provision',
-					subtitle: 'Review selected lines and extract a compliance provision.'
+					title: msg.pdf_line_selection_dialog_extract_provision(),
+					subtitle: msg.pdf_line_selection_dialog_review_selected_lines_and_extract()
 				};
 			case 'write-comments':
 				return {
 					eyebrow: 'KB.Comments',
-					title: 'Write Comment',
-					subtitle: 'Review the selected lines and write a comment about the selected content.'
+					title: msg.pdf_line_selection_dialog_write_comment(),
+					subtitle: msg.pdf_line_selection_dialog_review_the_selected_lines_and()
 				};
 			case 'ask-ai':
 				return {
 					eyebrow: 'KB.AI',
-					title: 'Ask AI',
-					subtitle: 'Ask AI about the selected content. Coming soon.'
+					title: msg.pdf_line_selection_dialog_ask_ai(),
+					subtitle: msg.pdf_line_selection_dialog_ask_ai_about_the_selected()
 				};
 		}
 	});
@@ -175,7 +176,7 @@
 
 	async function saveEditLine(pageNo: number, lineNo: number) {
 		if (!inputId || !editKey) return;
-		const confirmed = window.confirm('Save changes to the original file?');
+		const confirmed = window.confirm(msg.pdf_line_selection_dialog_save_changes_to_the_original());
 		if (!confirmed) return;
 		busyAction = 'line';
 		try {
@@ -191,7 +192,7 @@
 			bufferLines = [];
 			extractedPreview = [];
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save line');
+			alert(err instanceof Error ? err.message : msg.pdf_line_selection_dialog_failed_to_save_line());
 		} finally {
 			busyAction = null;
 		}
@@ -246,7 +247,7 @@
 			const result = await extractKbMetrics({ record_id: inputId, lines: lineSpecs });
 			extractedPreview = result.metrics ?? [];
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to extract metrics');
+			alert(err instanceof Error ? err.message : msg.pdf_line_selection_dialog_failed_to_extract_metrics());
 		} finally {
 			busyAction = null;
 		}
@@ -259,7 +260,7 @@
 			await saveExtractedKbMetrics({ record_id: inputId, metrics: extractedPreview });
 			close();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save metrics');
+			alert(err instanceof Error ? err.message : msg.pdf_line_selection_dialog_failed_to_save_metrics());
 		} finally {
 			busyAction = null;
 		}
@@ -276,7 +277,7 @@
 			const result = await extractKbProvisions({ record_id: inputId, source_line_spans: spans });
 			provisionPreview = result.provisions ?? [];
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to extract provisions');
+			alert(err instanceof Error ? err.message : msg.pdf_line_selection_dialog_failed_to_extract_provisions());
 		} finally {
 			busyAction = null;
 		}
@@ -289,7 +290,7 @@
 			await saveExtractedKbProvisions({ record_id: inputId, provisions: provisionPreview });
 			close();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save provisions');
+			alert(err instanceof Error ? err.message : msg.pdf_line_selection_dialog_failed_to_save_provisions());
 		} finally {
 			busyAction = null;
 		}
@@ -300,12 +301,12 @@
 	}
 
 	function provisionDisplayName(p: ExtractedKbProvision, index: number): string {
-		return p.prov_name?.trim() || p.provision_subject?.trim() || `Provision ${index + 1}`;
+		return p.prov_name?.trim() || p.provision_subject?.trim() || msg.pdf_line_selection_dialog_provision({ value: index + 1 });
 	}
 
 	function saveComment() {
 		// TODO: connect to backend
-		alert('Write Comments is not yet connected to the backend.');
+		alert(msg.pdf_line_selection_dialog_write_comments_is_not_yet());
 	}
 
 	function runOperation() {
@@ -318,7 +319,7 @@
 	}
 
 	function previewName(m: ExtractedKbMetric, index: number): string {
-		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric ${index + 1}`;
+		return m.metric_name?.trim() || m.metric_subject?.trim() || msg.pdf_line_selection_dialog_metric({ value: index + 1 });
 	}
 
 	function confidencePct(c?: number): string {
@@ -333,7 +334,7 @@
 			class="dialog am-dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Add metric"
+			aria-label={msg.pdf_line_selection_dialog_add_metric()}
 			tabindex="0"
 			onkeydown={(e) => {
 				if (e.key === 'Escape') close();
@@ -359,33 +360,33 @@
 				{#if dialogLines.length === 0}
 					<div class="dialog-section am-empty-section">
 						<div class="empty-glyph">§</div>
-						<div class="empty-title">No lines selected</div>
+						<div class="empty-title">{msg.pdf_line_selection_dialog_no_lines_selected()}</div>
 						<div class="empty-sub">
-							Drag to select lines on the PDF, then open this dialog again.
+							{msg.pdf_line_selection_dialog_drag_to_select_lines_on()}
 						</div>
 					</div>
 				{:else}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Selected Lines</span>
+							<span class="dialog-section-title">{msg.pdf_line_selection_dialog_selected_lines()}</span>
 							<span class="dialog-section-copy"
-								>{dialogLines.length} line{dialogLines.length === 1 ? '' : 's'} selected</span
+								>{msg.pdf_line_selection_dialog_line_selected({ dialogLinesCount: dialogLines.length, plural: dialogLines.length === 1 ? '' : 's' })}</span
 							>
 							<button
 								type="button"
 								class="am-btn am-btn-head-add"
 								disabled={!canAddPrevious}
-								onclick={addPreviousLine}>+ Add</button
+								onclick={addPreviousLine}>{msg.pdf_line_selection_dialog_add()}</button
 							>
 						</div>
 						<div class="am-table-wrap">
 							<table class="am-table">
 								<thead>
 									<tr>
-										<th class="am-col-line">Line #</th>
-										<th class="am-col-page">Page</th>
-										<th class="am-col-type">Type</th>
-										<th class="am-col-content">Content</th>
+										<th class="am-col-line">{msg.pdf_line_selection_dialog_line()}</th>
+										<th class="am-col-page">{msg.pdf_line_selection_dialog_page()}</th>
+										<th class="am-col-type">{msg.pdf_line_selection_dialog_type()}</th>
+										<th class="am-col-content">{msg.pdf_line_selection_dialog_content()}</th>
 										<th class="am-col-actions"></th>
 									</tr>
 								</thead>
@@ -418,23 +419,23 @@
 														class="am-btn am-btn-save"
 														disabled={busy}
 														onclick={() => saveEditLine(line.page_number, line.line_number)}
-														>Save</button
+														>{msg.pdf_line_selection_dialog_save()}</button
 													>
 													<button
 														type="button"
 														class="am-btn am-btn-cancel-row"
-														onclick={cancelEditLine}>Cancel</button
+														onclick={cancelEditLine}>{msg.pdf_line_selection_dialog_cancel()}</button
 													>
 												{:else}
 													<button
 														type="button"
 														class="am-btn am-btn-edit"
-														onclick={() => startEditLine(line.key, line.content)}>Edit</button
+														onclick={() => startEditLine(line.key, line.content)}>{msg.pdf_line_selection_dialog_edit()}</button
 													>
 													<button
 														type="button"
 														class="am-btn am-btn-delete"
-														onclick={() => deleteLine(line.key)}>Remove</button
+														onclick={() => deleteLine(line.key)}>{msg.pdf_line_selection_dialog_remove()}</button
 													>
 												{/if}
 											</td>
@@ -447,7 +448,7 @@
 									type="button"
 									class="am-btn am-btn-foot-add"
 									disabled={!canAddNext}
-									onclick={addNextLine}>+ Add</button
+									onclick={addNextLine}>{msg.pdf_line_selection_dialog_add()}</button
 								>
 							</div>
 						</div>
@@ -456,21 +457,21 @@
 					{#if selectedOperation === 'extract-metrics'}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Extracted Metrics</span>
+							<span class="dialog-section-title">{msg.pdf_line_selection_dialog_extracted_metrics()}</span>
 							<span class="dialog-section-copy"
-								>{extractedPreview.length} metric{extractedPreview.length === 1
+								>{msg.pdf_line_selection_dialog_metric_ready({ extractedPreviewCount: extractedPreview.length, plural: extractedPreview.length === 1
 									? ''
-									: 's'} ready</span
+									: 's' })}</span
 							>
 						</div>
 						{#if busyAction === 'extract'}
 							<div class="am-status-row" aria-live="polite">
 								<span class="am-spinner" aria-hidden="true"></span>
-								<span>Extracting metrics from the selected lines…</span>
+								<span>{msg.pdf_line_selection_dialog_extracting_metrics_from_the_selected()}</span>
 							</div>
 						{:else if extractedPreview.length === 0}
 							<div class="metadata-empty">
-								Press <strong>Extract Metric</strong> to preview the metrics returned by the backend.
+								{msg.pdf_line_selection_dialog_press()} <strong>{msg.pdf_line_selection_dialog_extract_metric()}</strong> {msg.pdf_line_selection_dialog_to_preview_the_metrics_returned()}
 							</div>
 						{:else}
 							<div class="am-preview-list">
@@ -489,7 +490,7 @@
 												type="button"
 												class="am-btn am-btn-delete"
 												disabled={busy}
-												onclick={() => removePreview(idx)}>Remove</button
+												onclick={() => removePreview(idx)}>{msg.pdf_line_selection_dialog_remove()}</button
 											>
 										</div>
 										{#if metric.metric_desc}
@@ -515,21 +516,21 @@
 					{#if selectedOperation === 'extract-provisions'}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Extracted Provisions</span>
+							<span class="dialog-section-title">{msg.pdf_line_selection_dialog_extracted_provisions()}</span>
 							<span class="dialog-section-copy"
-								>{provisionPreview.length} provision{provisionPreview.length === 1
+								>{msg.pdf_line_selection_dialog_provision_ready({ provisionPreviewCount: provisionPreview.length, plural: provisionPreview.length === 1
 									? ''
-									: 's'} ready</span
+									: 's' })}</span
 							>
 						</div>
 						{#if busyAction === 'extract'}
 							<div class="am-status-row" aria-live="polite">
 								<span class="am-spinner" aria-hidden="true"></span>
-								<span>Extracting provisions from the selected lines…</span>
+								<span>{msg.pdf_line_selection_dialog_extracting_provisions_from_the_selected()}</span>
 							</div>
 						{:else if provisionPreview.length === 0}
 							<div class="metadata-empty">
-								Press <strong>Run</strong> to preview the provisions returned by the AI.
+								{msg.pdf_line_selection_dialog_press()} <strong>{msg.pdf_line_selection_dialog_run()}</strong> {msg.pdf_line_selection_dialog_to_preview_the_provisions_returned()}
 							</div>
 						{:else}
 							<div class="am-preview-list">
@@ -548,7 +549,7 @@
 												type="button"
 												class="am-btn am-btn-delete"
 												disabled={busy}
-												onclick={() => removeProvisionPreview(idx)}>Remove</button
+												onclick={() => removeProvisionPreview(idx)}>{msg.pdf_line_selection_dialog_remove()}</button
 											>
 										</div>
 										{#if prov.prov_desc || prov.provision_en}
@@ -563,11 +564,11 @@
 					{#if selectedOperation === 'write-comments'}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Comment</span>
+							<span class="dialog-section-title">{msg.pdf_line_selection_dialog_comment()}</span>
 						</div>
 						<textarea
 							class="am-comment-textarea"
-							placeholder="Write your comment about the selected lines…"
+							placeholder={msg.pdf_line_selection_dialog_write_your_comment_about_the()}
 							bind:value={commentText}
 						></textarea>
 					</div>
@@ -582,18 +583,18 @@
 						class="am-btn-foot am-btn-help"
 						onclick={() => {
 							alert(
-								'Select PDF lines and choose an operation.\n\n' +
-									'• Drag on the PDF to select lines\n' +
-									'• Edit: modify line content (saves to the original file)\n' +
+								msg.pdf_line_selection_dialog_select_pdf_lines_and_choose() +
+									msg.pdf_line_selection_dialog_drag_on_the_pdf_to() +
+									msg.pdf_line_selection_dialog_edit_modify_line_content_saves() +
 									'• Remove: remove a line from this selection\n' +
 									'• Extract Provisions: create a new provision from the remaining lines\n' +
-									'• Extract Metrics: preview metrics returned from the backend, then Save\n' +
-									'• Write Comments: write a comment about the selected content'
+									msg.pdf_line_selection_dialog_extract_metrics_preview_metrics_returned() +
+									msg.pdf_line_selection_dialog_write_comments_write_a_comment()
 							);
-						}}>Help</button
+						}}>{msg.pdf_line_selection_dialog_help()}</button
 					>
 					<div class="dialog-operation-select">
-						<label class="dialog-operation-label" for="op-select">Operation</label>
+						<label class="dialog-operation-label" for="op-select">{msg.pdf_line_selection_dialog_operation()}</label>
 						<select
 							id="op-select"
 							class="dialog-operation-dropdown"
@@ -604,10 +605,10 @@
 								commentText = '';
 							}}
 						>
-							<option value="extract-metrics">Extract Metrics</option>
-							<option value="extract-provisions">Extract Provisions</option>
-							<option value="write-comments">Write Comments</option>
-							<option value="ask-ai" disabled>Ask AI (coming soon)</option>
+							<option value="extract-metrics">{msg.pdf_line_selection_dialog_extract_metrics()}</option>
+							<option value="extract-provisions">{msg.pdf_line_selection_dialog_extract_provisions()}</option>
+							<option value="write-comments">{msg.pdf_line_selection_dialog_write_comments()}</option>
+							<option value="ask-ai" disabled>{msg.pdf_line_selection_dialog_ask_ai_coming_soon()}</option>
 						</select>
 					</div>
 					<button
@@ -619,16 +620,16 @@
 					>
 						{#if busyAction === 'extract'}
 							<span class="am-btn-inline"
-								><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>Running…</span
+								><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>{msg.pdf_line_selection_dialog_running()}</span
 							>
 						{:else}
-							Run
+							{msg.pdf_line_selection_dialog_run()}
 						{/if}
 					</button>
 				</div>
 				<div class="dialog-foot-buttons">
 					<button type="button" class="am-btn-foot am-btn-foot-cancel" onclick={close}
-						>Close</button
+						>{msg.pdf_line_selection_dialog_close()}</button
 					>
 					{#if selectedOperation === 'extract-metrics'}
 						<button
@@ -639,10 +640,10 @@
 						>
 							{#if busyAction === 'save'}
 								<span class="am-btn-inline"
-									><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>Saving…</span
+									><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>{msg.pdf_line_selection_dialog_saving()}</span
 								>
 							{:else}
-								Save
+								{msg.pdf_line_selection_dialog_save()}
 							{/if}
 						</button>
 					{:else if selectedOperation === 'extract-provisions'}
@@ -654,10 +655,10 @@
 						>
 							{#if busyAction === 'save'}
 								<span class="am-btn-inline"
-									><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>Saving…</span
+									><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>{msg.pdf_line_selection_dialog_saving()}</span
 								>
 							{:else}
-								Save
+								{msg.pdf_line_selection_dialog_save()}
 							{/if}
 						</button>
 					{:else if selectedOperation === 'write-comments'}
@@ -665,7 +666,7 @@
 							type="button"
 							class="am-btn-foot am-btn-foot-save dialog-search-btn"
 							disabled={commentText.trim().length === 0 || busy}
-							onclick={saveComment}>Save Comment</button
+							onclick={saveComment}>{msg.pdf_line_selection_dialog_save_comment()}</button
 						>
 					{/if}
 				</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
 	import BotIcon         from '@lucide/svelte/icons/bot';
 	import ZapIcon         from '@lucide/svelte/icons/zap';
@@ -131,7 +132,7 @@
 	async function applyMapEntry(rawValue: string) {
 		const bucket = (mapBucketDraft[rawValue] ?? '').trim();
 		if (!bucket) {
-			mapApplyError = { ...mapApplyError, [rawValue]: 'Enter a canonical bucket first.' };
+			mapApplyError = { ...mapApplyError, [rawValue]: msg.context_shelf_enter_a_canonical_bucket_first() };
 			return;
 		}
 		mapApplying = { ...mapApplying, [rawValue]: true };
@@ -140,7 +141,7 @@
 		mapNotice = '';
 		try {
 			const res = await applyRangeTypeMapEntry(rawValue, bucket);
-			const summary = `Approved. ${res.corrected_count} row${res.corrected_count === 1 ? '' : 's'} corrected.`;
+			const summary = msg.context_shelf_approved_row_corrected({ corrected_count: res.corrected_count, plural: res.corrected_count === 1 ? '' : 's' });
 			mapApplyResult = { ...mapApplyResult, [rawValue]: summary };
 			mapNotice = `${rawValue} → ${bucket}. ${summary}`;
 		} catch (e) {
@@ -161,7 +162,7 @@
 			const res = await applyRangeTypeMapEntryToMetrics(rawValue);
 			metricsApplyResult = {
 				...metricsApplyResult,
-				[rawValue]: `${res.applied_count} metric row${res.applied_count === 1 ? '' : 's'} updated.`
+				[rawValue]: msg.context_shelf_metric_row_updated({ applied_count: res.applied_count, plural: res.applied_count === 1 ? '' : 's' })
 			};
 		} catch (e) {
 			metricsApplyError = {
@@ -177,7 +178,7 @@
 		const rawValue = newEntryRawValue.trim();
 		const bucket = newEntryBucket.trim();
 		if (!rawValue || !bucket) {
-			addEntryError = 'raw_value and canonical_bucket are both required.';
+			addEntryError = msg.context_shelf_raw_value_and_canonical_bucket();
 			return;
 		}
 		addingEntry = true;
@@ -185,7 +186,7 @@
 		addEntryResult = '';
 		try {
 			const res = await applyRangeTypeMapEntry(rawValue, bucket);
-			addEntryResult = `Added "${res.entry.raw_value}" as approved.`;
+			addEntryResult = msg.context_shelf_added_as_approved({ raw_value: res.entry.raw_value });
 			newEntryRawValue = '';
 			newEntryBucket = '';
 		} catch (e) {
@@ -204,8 +205,8 @@
 
 	const systemMetrics = [
 		{ label: 'CPU',       value: 23, unit: '%', color: '#34D399' },
-		{ label: 'Memory',    value: 61, unit: '%', color: '#818CF8' },
-		{ label: 'API Quota', value: 34, unit: '%', color: '#FBBF24' }
+		{ label: msg.context_shelf_memory(),    value: 61, unit: '%', color: '#818CF8' },
+		{ label: msg.context_shelf_api_quota(), value: 34, unit: '%', color: '#FBBF24' }
 	];
 
 	function modelStatusColor(status: string): string {
@@ -233,16 +234,16 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
-				{#if findingShelf.active}Finding
-				{:else if rangeTypeMapShelf.active}Value Range Type Map
-				{:else if sectionId === 'dashboard'}System Status
-				{:else if sectionId === 'agents'}Agent Insights
-				{:else if sectionId === 'skills'}Skill Analytics
-				{:else if sectionId === 'applications'}App Status
-				{:else if sectionId === 'coding'}Code Stats
-				{:else if sectionId === 'personal'}Today's Plan
-				{:else if sectionId === 'knowledge'}KB Insights
-				{:else}Context Info
+				{#if findingShelf.active}{msg.context_shelf_finding()}
+				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
+				{:else if sectionId === 'dashboard'}{msg.context_shelf_system_status()}
+				{:else if sectionId === 'agents'}{msg.context_shelf_agent_insights()}
+				{:else if sectionId === 'skills'}{msg.context_shelf_skill_analytics()}
+				{:else if sectionId === 'applications'}{msg.context_shelf_app_status()}
+				{:else if sectionId === 'coding'}{msg.context_shelf_code_stats()}
+				{:else if sectionId === 'personal'}{msg.context_shelf_today_s_plan()}
+				{:else if sectionId === 'knowledge'}{msg.context_shelf_kb_insights()}
+				{:else}{msg.context_shelf_context_info()}
 				{/if}
 			</span>
 			<button
@@ -251,7 +252,7 @@
 				style="color:{textMuted};"
 				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; (e.currentTarget as HTMLElement).style.background = borderColor; }}
 				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-				aria-label="Close context panel"
+				aria-label={msg.context_shelf_close_context_panel()}
 			>
 				<XIcon class="w-3.5 h-3.5" />
 			</button>
@@ -273,8 +274,8 @@
 			<div class="flex items-center justify-between gap-2">
 				<div class="flex items-center gap-0.5 rounded-md p-0.5 min-w-0" style="background:{surface2};">
 					{#each [
-						{ id: 'pending'  as const, label: 'Needs Triage', count: splitMapEntries.pending.length },
-						{ id: 'approved' as const, label: 'Approved',     count: splitMapEntries.approved.length }
+						{ id: 'pending'  as const, label: msg.context_shelf_needs_triage(), count: splitMapEntries.pending.length },
+						{ id: 'approved' as const, label: msg.context_shelf_approved(),     count: splitMapEntries.approved.length }
 					] as tab (tab.id)}
 						<button
 							onclick={() => (mapTab = tab.id)}
@@ -290,7 +291,7 @@
 				<button
 					onclick={loadRangeTypeMapEntries}
 					disabled={rangeTypeMapShelf.loading}
-					title="Refresh"
+					title={msg.context_shelf_refresh()}
 					class="flex items-center justify-center w-6 h-6 rounded-md cursor-pointer flex-shrink-0"
 					style="color:{textMuted}; background:transparent; border:none;"
 				>
@@ -315,11 +316,11 @@
 			</datalist>
 
 			<div class="rounded-lg p-2.5" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="text-[11px] font-semibold mb-1.5" style="color:{textMuted};">Add New Entry</div>
+				<div class="text-[11px] font-semibold mb-1.5" style="color:{textMuted};">{msg.context_shelf_add_new_entry()}</div>
 				<div class="flex flex-col gap-1.5">
 					<input
 						type="text"
-						placeholder="raw_value"
+						placeholder={msg.context_shelf_raw_value()}
 						bind:value={newEntryRawValue}
 						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 							border-radius:5px; padding:5px 8px; font-size:12px;"
@@ -327,7 +328,7 @@
 					<input
 						type="text"
 						list="rmrt-shelf-canonical-bucket-options"
-						placeholder="canonical_bucket"
+						placeholder={msg.context_shelf_canonical_bucket()}
 						bind:value={newEntryBucket}
 						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 							border-radius:5px; padding:5px 8px; font-size:12px;"
@@ -340,7 +341,7 @@
 							font-size:12px; font-weight:500; opacity:{addingEntry ? 0.6 : 1};"
 					>
 						<PlusIcon class="w-3.5 h-3.5" />
-						{addingEntry ? 'Adding…' : 'Add'}
+						{addingEntry ? msg.context_shelf_adding() : msg.context_shelf_add()}
 					</button>
 					{#if addEntryError}
 						<span class="text-[11px]" style="color:#F87171;">{addEntryError}</span>
@@ -351,10 +352,10 @@
 			</div>
 
 			<div class="flex items-center gap-1.5">
-				<span class="text-[10px] font-semibold uppercase flex-shrink-0" style="color:{textMuted};">Sort:</span>
+				<span class="text-[10px] font-semibold uppercase flex-shrink-0" style="color:{textMuted};">{msg.context_shelf_sort()}</span>
 				{#each [
-					{ id: 'raw_value' as const, label: 'Sort by Raw Values' },
-					{ id: 'canonical_bucket' as const, label: 'Sort by Mapped Values' }
+					{ id: 'raw_value' as const, label: msg.context_shelf_sort_by_raw_values() },
+					{ id: 'canonical_bucket' as const, label: msg.context_shelf_sort_by_mapped_values() }
 				] as opt (opt.id)}
 					<button
 						onclick={() => (mapSortKey = mapSortKey === opt.id ? null : opt.id)}
@@ -372,14 +373,14 @@
 			<div class="flex flex-col gap-1.5">
 				<input
 					type="text"
-					placeholder="Search Raw Values"
+					placeholder={msg.context_shelf_search_raw_values()}
 					bind:value={mapSearchRaw}
 					style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 						border-radius:5px; padding:5px 8px; font-size:12px;"
 				/>
 				<input
 					type="text"
-					placeholder="Search Mapped Values"
+					placeholder={msg.context_shelf_search_mapped_values()}
 					bind:value={mapSearchMapped}
 					style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 						border-radius:5px; padding:5px 8px; font-size:12px;"
@@ -389,7 +390,7 @@
 			<div class="space-y-2">
 				{#if visibleMapEntries.length === 0 && !rangeTypeMapShelf.loading}
 					<div class="text-xs" style="color:{textMuted};">
-						{mapTab === 'pending' ? 'No entries need triage.' : 'No approved entries yet.'}
+						{mapTab === 'pending' ? msg.context_shelf_no_entries_need_triage() : msg.context_shelf_no_approved_entries_yet()}
 					</div>
 				{/if}
 				{#each visibleMapEntries as entry (entry.raw_value)}
@@ -409,7 +410,7 @@
 								type="text"
 								list="rmrt-shelf-canonical-bucket-options"
 								bind:value={mapBucketDraft[entry.raw_value]}
-								placeholder="bucket…"
+								placeholder={msg.context_shelf_bucket()}
 								class="flex-1 min-w-0"
 								style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 									border-radius:5px; padding:4px 6px; font-size:11px;"
@@ -417,7 +418,7 @@
 							<button
 								onclick={() => applyMapEntry(entry.raw_value)}
 								disabled={mapApplying[entry.raw_value]}
-								title="Save this bucket and approve the mapping"
+								title={msg.context_shelf_save_this_bucket_and_approve()}
 								class="flex items-center justify-center flex-shrink-0 cursor-pointer"
 								style="width:24px; height:24px; border-radius:5px; border:none; background:{accent}; color:white;
 									opacity:{mapApplying[entry.raw_value] ? 0.6 : 1};"
@@ -434,14 +435,14 @@
 							<button
 								onclick={() => applyEntryToMetrics(entry.raw_value)}
 								disabled={metricsApplying[entry.raw_value]}
-								title="Rewrite value_range_type to '{entry.canonical_bucket ?? ''}' on every metric row with this raw value, and clear its error"
+								title={msg.context_shelf_rewrite_value_range_type_to({ canonical_bucket: entry.canonical_bucket ?? '' })}
 								class="w-full flex items-center justify-center gap-1.5 cursor-pointer mt-1.5"
 								style="padding:4px 8px; border-radius:5px; border:1px solid {accent}; background:transparent;
 									color:{accent}; font-size:11px; font-weight:500;
 									opacity:{metricsApplying[entry.raw_value] ? 0.6 : 1};"
 							>
 								<WrenchIcon class="w-3 h-3" />
-								{metricsApplying[entry.raw_value] ? 'Applying…' : 'Apply'}
+								{metricsApplying[entry.raw_value] ? msg.context_shelf_applying() : msg.context_shelf_apply()}
 							</button>
 							{#if metricsApplyError[entry.raw_value]}
 								<div class="text-[11px] mt-1" style="color:#F87171;">{metricsApplyError[entry.raw_value]}</div>
@@ -458,7 +459,7 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">
 					<CpuIcon class="w-4 h-4" style="color:{accent};" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">System Health</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_system_health()}</span>
 				</div>
 				<div class="space-y-3">
 					{#each systemMetrics as m}
@@ -482,7 +483,7 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">
 					<DatabaseIcon class="w-4 h-4" style="color:{accent};" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">AI Models</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_ai_models()}</span>
 				</div>
 				<div class="space-y-3">
 					{#each models as m}
@@ -505,13 +506,13 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">
 					<ClockIcon class="w-4 h-4" style="color:#06b6d4;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">Upcoming</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_upcoming()}</span>
 				</div>
 				<div class="space-y-1">
 					{#each [
-						{ time: '10:00', label: 'Team standup' },
+						{ time: '10:00', label: msg.context_shelf_team_standup() },
 						{ time: '14:00', label: 'Code review PR #142' },
-						{ time: '16:30', label: 'Daily briefing digest' }
+						{ time: '16:30', label: msg.context_shelf_daily_briefing_digest() }
 					] as event}
 						<div class="flex items-center gap-3 py-1.5">
 							<span class="text-xs w-10 flex-shrink-0" style="color:{textMuted}; font-family:{fontMono};">{event.time}</span>
@@ -527,14 +528,14 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-4">
 					<BotIcon class="w-4 h-4" style="color:{accent};" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">Agent Overview</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_agent_overview()}</span>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					{#each [
-						{ label: 'Total',        value: '4',   color: accent },
-						{ label: 'Active',       value: '2',   color: '#34D399' },
-						{ label: 'Tasks Today',  value: '37',  color: '#FBBF24' },
-						{ label: 'Success Rate', value: '98%', color: '#06b6d4' }
+						{ label: msg.context_shelf_total(),        value: '4',   color: accent },
+						{ label: msg.context_shelf_active(),       value: '2',   color: '#34D399' },
+						{ label: msg.context_shelf_tasks_today(),  value: '37',  color: '#FBBF24' },
+						{ label: msg.context_shelf_success_rate(), value: '98%', color: '#06b6d4' }
 					] as stat}
 						<div class="rounded-lg p-3 text-center" style="background:{darkMode ? '#1F2333' : '#FFFFFF'}; border:1px solid {borderColor};">
 							<div class="text-lg font-bold" style="color:{stat.color}; font-family:{fontMono};">{stat.value}</div>
@@ -547,15 +548,15 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">
 					<TrendingUpIcon class="w-4 h-4" style="color:#FBBF24;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">Suggested Agents</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_suggested_agents()}</span>
 				</div>
-				{#each ['DataAnalystBot', 'EmailCopilot', 'MeetingScribe'] as name}
+				{#each [msg.context_shelf_dataanalystbot(), 'EmailCopilot', msg.context_shelf_meetingscribe()] as name}
 					<div class="flex items-center gap-3 py-2" style="border-bottom:1px solid {borderColor};">
 						<div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:{accent}20;">
 							<BotIcon class="w-3.5 h-3.5" style="color:{accent};" />
 						</div>
 						<span class="text-sm flex-1" style="color:{textPrimary};">{name}</span>
-						<button class="text-xs px-2 py-0.5 rounded-md cursor-pointer" style="background:{accent}15; color:{accent}; border:none;">Add</button>
+						<button class="text-xs px-2 py-0.5 rounded-md cursor-pointer" style="background:{accent}15; color:{accent}; border:none;">{msg.context_shelf_add()}</button>
 					</div>
 				{/each}
 			</div>
@@ -564,14 +565,14 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-4">
 					<ZapIcon class="w-4 h-4" style="color:#FBBF24;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">Usage This Month</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_usage_this_month()}</span>
 				</div>
 				<div class="space-y-3">
 					{#each [
-						{ name: 'Summarizer',      pct: 85 },
-						{ name: 'Code Formatter',  pct: 64 },
-						{ name: 'PDF Extractor',   pct: 45 },
-						{ name: 'Web Scraper',     pct: 28 }
+						{ name: msg.context_shelf_summarizer(),      pct: 85 },
+						{ name: msg.context_shelf_code_formatter(),  pct: 64 },
+						{ name: msg.context_shelf_pdf_extractor(),   pct: 45 },
+						{ name: msg.context_shelf_web_scraper(),     pct: 28 }
 					] as s}
 						<div>
 							<div class="flex justify-between mb-1">
@@ -590,12 +591,12 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">
 					<ActivityIcon class="w-4 h-4" style="color:#FBBF24;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">Code Stats</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_code_stats()}</span>
 				</div>
 				{#each [
-					{ label: 'Reviews completed', value: '14', icon: CircleCheckIcon, color: '#34D399' },
-					{ label: 'Issues flagged',    value: '38', icon: AlertCircleIcon, color: '#FBBF24' },
-					{ label: 'Lines generated',   value: '2.4k', icon: ZapIcon,        color: accent }
+					{ label: msg.context_shelf_reviews_completed(), value: '14', icon: CircleCheckIcon, color: '#34D399' },
+					{ label: msg.context_shelf_issues_flagged(),    value: '38', icon: AlertCircleIcon, color: '#FBBF24' },
+					{ label: msg.context_shelf_lines_generated(),   value: '2.4k', icon: ZapIcon,        color: accent }
 				] as s}
 					<div class="flex items-center gap-3 py-2.5" style="border-bottom:1px solid {borderColor};">
 						<s.icon class="w-4 h-4" style="color:{s.color};" />
@@ -609,13 +610,13 @@
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="flex items-center gap-2 mb-3">
 					<DatabaseIcon class="w-4 h-4" style="color:#06b6d4;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">KB Stats</span>
+					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_kb_stats()}</span>
 				</div>
 				{#each [
-					{ label: 'Total documents', value: '234' },
-					{ label: 'Indexed chunks',  value: '8.7k' },
-					{ label: 'Searches today',  value: '42' },
-					{ label: 'Avg relevance',   value: '94%' }
+					{ label: msg.context_shelf_total_documents(), value: '234' },
+					{ label: msg.context_shelf_indexed_chunks(),  value: '8.7k' },
+					{ label: msg.context_shelf_searches_today(),  value: '42' },
+					{ label: msg.context_shelf_avg_relevance(),   value: '94%' }
 				] as s}
 					<div class="flex justify-between py-2" style="border-bottom:1px solid {borderColor};">
 						<span class="text-sm" style="color:{textMuted};">{s.label}</span>
@@ -628,10 +629,10 @@
 			<!-- Generic context -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="text-sm font-semibold mb-2" style="color:{textPrimary};">
-					{activeMenu?.itemTitle ?? 'Information'}
+					{activeMenu?.itemTitle ?? msg.context_shelf_information()}
 				</div>
 				<p class="text-sm" style="color:{textMuted};">
-					Select an item from the navigation to see contextual information here.
+					{msg.context_shelf_select_an_item_from_the()}
 				</p>
 			</div>
 		{/if}

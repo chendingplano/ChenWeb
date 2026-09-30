@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listModelProfiles,
@@ -72,11 +73,11 @@
 		error = null;
 		info = null;
 		if (!draft.profile_name.trim()) {
-			error = 'Profile name is required';
+			error = m.llm_model_profiles_profile_name_is_required();
 			return;
 		}
 		if (!draft.account_id) {
-			error = 'Account is required';
+			error = m.llm_model_profiles_account_is_required();
 			return;
 		}
 		submitting = true;
@@ -85,7 +86,7 @@
 			draft.profile_name = '';
 			draft.model_name = '';
 			showCreate = false;
-			info = 'Model profile created.';
+			info = m.llm_model_profiles_model_profile_created();
 			await loadAll();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -119,7 +120,7 @@
 		try {
 			await updateModelProfile(id, editDraft);
 			editingID = null;
-			info = 'Profile updated.';
+			info = m.llm_model_profiles_profile_updated();
 			await loadAll();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -155,30 +156,30 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Model Profiles</h2>
-			<p class="muted">Named model configurations linked to LLM accounts.</p>
+			<h2>{m.llm_model_profiles_model_profiles()}</h2>
+			<p class="muted">{m.llm_model_profiles_named_model_configurations_linked_to()}</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadAll} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.llm_model_profiles_refreshing() : m.llm_model_profiles_refresh()}
 			</button>
 			<button class="primary" onclick={() => (showCreate = !showCreate)}>
-				{showCreate ? 'Cancel' : '+ New Profile'}
+				{showCreate ? m.llm_model_profiles_cancel() : m.llm_model_profiles_new_profile()}
 			</button>
 		</div>
 	</header>
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Profiles</div>
+			<div class="summary-label">{m.llm_model_profiles_profiles()}</div>
 			<div class="summary-value">{profiles.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Active</div>
+			<div class="summary-label">{m.llm_model_profiles_active()}</div>
 			<div class="summary-value">{profiles.filter((p) => p.is_active).length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Accounts</div>
+			<div class="summary-label">{m.llm_model_profiles_accounts()}</div>
 			<div class="summary-value">{new Set(profiles.map((p) => p.account_id)).size}</div>
 		</div>
 	</div>
@@ -193,60 +194,60 @@
 		>
 			<div class="row two">
 				<label>
-					<span>Profile Name</span>
-					<input bind:value={draft.profile_name} required placeholder="deepseek-v4-pro" />
+					<span>{m.llm_model_profiles_profile_name()}</span>
+					<input bind:value={draft.profile_name} required placeholder={m.llm_model_profiles_deepseek_v4_pro()} />
 				</label>
 				<label>
-					<span>Model Name</span>
-					<input bind:value={draft.model_name} placeholder="deepseek-chat" />
+					<span>{m.llm_model_profiles_model_name()}</span>
+					<input bind:value={draft.model_name} placeholder={m.llm_model_profiles_deepseek_chat()} />
 				</label>
 			</div>
 			<div class="row two">
 				<label>
-					<span>Account</span>
+					<span>{m.llm_model_profiles_account()}</span>
 					<select bind:value={draft.account_id}>
-						<option value="">Select account…</option>
+						<option value="">{m.llm_model_profiles_select_account()}</option>
 						{#each accounts as acct (acct.id)}
 							<option value={acct.id}>{acct.account_name} ({acct.provider})</option>
 						{/each}
 					</select>
 				</label>
 				<label>
-					<span>Thinking Type</span>
-					<input bind:value={draft.thinking_type} placeholder="disabled" />
+					<span>{m.llm_model_profiles_thinking_type()}</span>
+					<input bind:value={draft.thinking_type} placeholder={m.llm_model_profiles_disabled()} />
 				</label>
 			</div>
 			<div class="row three">
 				<label>
-					<span>Timeout (sec)</span>
+					<span>{m.llm_model_profiles_timeout_sec()}</span>
 					<input type="number" bind:value={draft.timeout_sec} min="0" />
 				</label>
 				<label>
-					<span>Max Inflight</span>
+					<span>{m.llm_model_profiles_max_inflight()}</span>
 					<input type="number" bind:value={draft.max_inflight} min="0" />
 				</label>
 				<label>
-					<span>Token Reserve</span>
+					<span>{m.llm_model_profiles_token_reserve()}</span>
 					<input type="number" bind:value={draft.token_reserve_per_call} min="0" />
 				</label>
 			</div>
 			<div class="row two">
 				<label>
-					<span>Max Req/Min</span>
+					<span>{m.llm_model_profiles_max_req_min()}</span>
 					<input type="number" bind:value={draft.max_requests_per_minute} min="0" />
 				</label>
 				<label>
-					<span>Max Tokens/Min</span>
+					<span>{m.llm_model_profiles_max_tokens_min()}</span>
 					<input type="number" bind:value={draft.max_tokens_per_minute} min="0" />
 				</label>
 			</div>
 			<label class="toggle-row">
-				<span>Active</span>
+				<span>{m.llm_model_profiles_active()}</span>
 				<input type="checkbox" bind:checked={draft.is_active} />
 			</label>
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting || !draft.profile_name.trim() || !draft.account_id}>
-					{submitting ? 'Creating…' : 'Create profile'}
+					{submitting ? m.llm_model_profiles_creating() : m.llm_model_profiles_create_profile()}
 				</button>
 			</div>
 		</form>
@@ -261,28 +262,28 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Registered Profiles</h3>
-				<p class="muted">Each profile maps a name to a model + account pair used at call time.</p>
+				<h3>{m.llm_model_profiles_registered_profiles()}</h3>
+				<p class="muted">{m.llm_model_profiles_each_profile_maps_a_name()}</p>
 			</div>
 		</div>
 
 		{#if loading}
-			<div class="empty">Loading profiles…</div>
+			<div class="empty">{m.llm_model_profiles_loading_profiles()}</div>
 		{:else if profiles.length === 0}
-			<div class="empty">No model profiles yet. Create one or import from .models.toml via LLM Accounts.</div>
+			<div class="empty">{m.llm_model_profiles_no_model_profiles_yet_create()}</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Profile</th>
-							<th>Account</th>
-							<th>Model</th>
-							<th>Timeout</th>
-							<th>Inflight</th>
-							<th>Active</th>
-							<th>Updated</th>
-							<th>Action</th>
+							<th>{m.llm_model_profiles_profile()}</th>
+							<th>{m.llm_model_profiles_account()}</th>
+							<th>{m.llm_model_profiles_model()}</th>
+							<th>{m.llm_model_profiles_timeout()}</th>
+							<th>{m.llm_model_profiles_inflight()}</th>
+							<th>{m.llm_model_profiles_active()}</th>
+							<th>{m.llm_model_profiles_updated()}</th>
+							<th>{m.llm_model_profiles_action()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -291,20 +292,20 @@
 								<td>
 									<div class="cell-primary">{profile.profile_name}</div>
 									{#if profile.thinking_type}
-										<div class="cell-secondary">thinking: {profile.thinking_type}</div>
+										<div class="cell-secondary">{m.llm_model_profiles_thinking({ thinking_type: profile.thinking_type })}</div>
 									{/if}
 								</td>
 								<td>{profile.account_name}</td>
 								<td>{profile.model_name || '—'}</td>
 								<td>{profile.timeout_sec || '—'}</td>
 								<td>{profile.max_inflight || '—'}</td>
-								<td>{profile.is_active ? 'Yes' : 'No'}</td>
+								<td>{profile.is_active ? m.llm_model_profiles_yes() : m.llm_model_profiles_no()}</td>
 								<td>{fmtDate(profile.updated_at)}</td>
 								<td>
 									{#if editingID === profile.id}
-										<button class="ghost compact-btn" onclick={() => (editingID = null)} disabled={submitting}>Cancel</button>
+										<button class="ghost compact-btn" onclick={() => (editingID = null)} disabled={submitting}>{m.llm_model_profiles_cancel()}</button>
 									{:else}
-										<button class="ghost compact-btn" onclick={() => startEdit(profile)}>Edit</button>
+										<button class="ghost compact-btn" onclick={() => startEdit(profile)}>{m.llm_model_profiles_edit()}</button>
 									{/if}
 								</td>
 							</tr>
@@ -320,17 +321,17 @@
 										>
 											<div class="row two">
 												<label>
-													<span>Profile Name</span>
+													<span>{m.llm_model_profiles_profile_name()}</span>
 													<input bind:value={editDraft.profile_name} required />
 												</label>
 												<label>
-													<span>Model Name</span>
+													<span>{m.llm_model_profiles_model_name()}</span>
 													<input bind:value={editDraft.model_name} />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Account</span>
+													<span>{m.llm_model_profiles_account()}</span>
 													<select bind:value={editDraft.account_id}>
 														{#each accounts as acct (acct.id)}
 															<option value={acct.id}>{acct.account_name} ({acct.provider})</option>
@@ -338,41 +339,41 @@
 													</select>
 												</label>
 												<label>
-													<span>Thinking Type</span>
+													<span>{m.llm_model_profiles_thinking_type()}</span>
 													<input bind:value={editDraft.thinking_type} />
 												</label>
 											</div>
 											<div class="row three">
 												<label>
-													<span>Timeout (sec)</span>
+													<span>{m.llm_model_profiles_timeout_sec()}</span>
 													<input type="number" bind:value={editDraft.timeout_sec} min="0" />
 												</label>
 												<label>
-													<span>Max Inflight</span>
+													<span>{m.llm_model_profiles_max_inflight()}</span>
 													<input type="number" bind:value={editDraft.max_inflight} min="0" />
 												</label>
 												<label>
-													<span>Token Reserve</span>
+													<span>{m.llm_model_profiles_token_reserve()}</span>
 													<input type="number" bind:value={editDraft.token_reserve_per_call} min="0" />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Max Req/Min</span>
+													<span>{m.llm_model_profiles_max_req_min()}</span>
 													<input type="number" bind:value={editDraft.max_requests_per_minute} min="0" />
 												</label>
 												<label>
-													<span>Max Tokens/Min</span>
+													<span>{m.llm_model_profiles_max_tokens_min()}</span>
 													<input type="number" bind:value={editDraft.max_tokens_per_minute} min="0" />
 												</label>
 											</div>
 											<label class="toggle-row">
-												<span>Active</span>
+												<span>{m.llm_model_profiles_active()}</span>
 												<input type="checkbox" bind:checked={editDraft.is_active} />
 											</label>
 											<div class="form-foot">
 												<button class="primary" type="submit" disabled={submitting}>
-													{submitting ? 'Saving…' : 'Save profile'}
+													{submitting ? m.llm_model_profiles_saving() : m.llm_model_profiles_save_profile()}
 												</button>
 											</div>
 										</form>
