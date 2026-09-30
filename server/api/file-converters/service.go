@@ -35,6 +35,11 @@ type ConvertRequest struct {
 	Type           string `json:"type"`
 	Status         string `json:"status"`
 	Force          *bool  `json:"force,omitempty"`
+	// Operations is the doc-processor list a manual re-convert (Restart
+	// dialog) selected. nil = field absent (the parser's own event): doc
+	// processing runs its full plan. Empty = convert only, no doc processing.
+	// Non-empty = forwarded to doc-service as the event's "operation".
+	Operations *[]string `json:"operation,omitempty"`
 }
 
 type InputRecord struct {
@@ -63,13 +68,14 @@ type LineFileGeneratedEvent struct {
 	// UserID attributes this automatic run's LLM usage for billing -- see
 	// emitLineFileGeneratedEvent, which derives it from the requester's ID
 	// stored in kb.inputs.user_id and refuses to publish when that's unset.
-	UserID           string `json:"user_id,omitempty"`
-	Type             string `json:"type"`
-	Status           string `json:"status"`
-	FileFormat       string `json:"file_format"`
-	ResultFilename   string `json:"result_filename"`
-	LineFileFilename string `json:"line_file_filename"`
-	Error            string `json:"error,omitempty"`
+	UserID           string   `json:"user_id,omitempty"`
+	Type             string   `json:"type"`
+	Status           string   `json:"status"`
+	FileFormat       string   `json:"file_format"`
+	ResultFilename   string   `json:"result_filename"`
+	LineFileFilename string   `json:"line_file_filename"`
+	Operations       []string `json:"operation,omitempty"`
+	Error            string   `json:"error,omitempty"`
 }
 
 type Service struct {
@@ -109,6 +115,7 @@ func ParseRequest(payload []byte) (ConvertRequest, error) {
 		Type           string          `json:"type"`
 		Status         string          `json:"status"`
 		Force          *bool           `json:"force,omitempty"`
+		Operations     *[]string       `json:"operation,omitempty"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return ConvertRequest{}, fmt.Errorf("(MID_26041101) decode request: %w", err)
@@ -126,6 +133,7 @@ func ParseRequest(payload []byte) (ConvertRequest, error) {
 		Type:           raw.Type,
 		Status:         raw.Status,
 		Force:          raw.Force,
+		Operations:     raw.Operations,
 	}, nil
 }
 
@@ -211,12 +219,25 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 	}
 
 	lineFilePaths, procErr = s.convert(ctx, rec)
+	var operations []string
+	convertOnly := false
+	if req.Operations != nil {
+		operations = *req.Operations
+		convertOnly = len(operations) == 0
+	}
+	if convertOnly {
+		s.Logger.Info("skip line-file-generated publish because the request selected no doc processors (convert only)",
+			"record_id", req.RecordID)
+	}
 	for _, lineFilePath := range lineFilePaths {
+		if convertOnly {
+			break
+		}
 		userID := strings.TrimSpace(req.UserID)
 		if userID == "" {
 			userID = rec.UserID
 		}
-		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath, userID); emitErr != nil {
+		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath, userID, operations); emitErr != nil {
 			procErr = errors.Join(procErr, emitErr)
 		}
 	}
@@ -510,7 +531,7 @@ func preferredOpenDataJSONName(path string) string {
 }
 */
 
-func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string, userID string) error {
+func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string, userID string, operations []string) error {
 	if s.Publisher == nil {
 		return nil
 	}
@@ -546,6 +567,7 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 		Status:           "success",
 		FileFormat:       "txt",
 		LineFileFilename: strings.TrimSpace(lineFilePath),
+		Operations:       operations,
 	}
 
 	payload, err := json.Marshal(ev)

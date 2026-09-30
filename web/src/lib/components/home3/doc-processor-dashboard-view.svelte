@@ -464,14 +464,12 @@
 		reConvert: boolean
 	) {
 		// Re-parse triggers the whole downstream chain automatically (in auto mode).
-		// Re-convert triggers convert + downstream doc processing.
+		// Re-convert triggers convert + only the selected doc processors: the
+		// converter forwards `operation` to doc processing, and an empty list
+		// means convert only.
 		// Both supersede a standalone doc-processor publish to avoid double-processing.
 		if (reParse) {
 			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true });
-			return;
-		}
-		if (reConvert) {
-			await publishEvent('kb.pdf.parsed', { record_id: String(record.id), type: 'pdf', status: 'success', force: true });
 			return;
 		}
 		// extract_relation links its endpoints against extract_entity's entities. If
@@ -479,6 +477,12 @@
 		// (ADR 2026061702). Done per record so a record that already has entities is not
 		// re-run unnecessarily.
 		const chosen = buildManualLaunchOperations(selectableProcessorIds, procs, entityExtractionSucceeded(record));
+		if (reConvert) {
+			const payload: Record<string, unknown> = { record_id: String(record.id), type: 'pdf', status: 'success', force: true };
+			if (chosen.length !== selectableProcessorIds.length) payload.operation = chosen;
+			await publishEvent('kb.pdf.parsed', payload);
+			return;
+		}
 		const payload = buildManualLaunchPayload(record.id, selectedProcessorPackage, chosen, runMode === 'force', forceClear);
 		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}

@@ -1692,3 +1692,92 @@ func TestConvertMineruFile_RemovesRepeatedContent(t *testing.T) {
 		t.Fatalf("expected page body lines to remain, got: %s", text)
 	}
 }
+
+// A manual re-convert from the Restart dialog carries the processors the user
+// selected. The list must reach doc-service; an explicitly empty list means
+// "convert only" and must not trigger doc processing at all. An absent list
+// (the parser's own kb.pdf.parsed event) keeps the full downstream chain.
+func TestParseRequestOperations(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		want    []string
+	}{
+		{"absent", `{"record_id":"642"}`, nil},
+		{"empty", `{"record_id":"642","operation":[]}`, []string{}},
+		{"list", `{"record_id":"642","operation":["extract_metrics"]}`, []string{"extract_metrics"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := ParseRequest([]byte(tc.payload))
+			if err != nil {
+				t.Fatalf("ParseRequest: %v", err)
+			}
+			if (req.Operations == nil) != (tc.want == nil) {
+				t.Fatalf("Operations nil=%v, want nil=%v", req.Operations == nil, tc.want == nil)
+			}
+			if tc.want != nil && strings.Join(*req.Operations, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("Operations=%v, want %v", *req.Operations, tc.want)
+			}
+		})
+	}
+}
+
+func TestHandleRequestMineruOperations(t *testing.T) {
+	run := func(t *testing.T, ops *[]string) *fakePublisher {
+		tmp := t.TempDir()
+		jsonPath := filepath.Join(tmp, "doc_mineru.json")
+		if err := os.WriteFile(jsonPath, []byte(`{"pages":[{"page_number":1,"items":[{"type":"text","text":"Hello","bbox":[1,2,3,4]}]}]}`), 0o644); err != nil {
+			t.Fatalf("write json: %v", err)
+		}
+		st := &fakeStore{rec: InputRecord{
+			ID:             642,
+			Type:           "pdf",
+			ParserName:     "mineru",
+			StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
+			FileName:       filepath.Join(tmp, "doc.pdf"),
+			ResultFilename: filepath.Base(jsonPath),
+			UserID:         "test-tenant",
+		}}
+		svc := NewService(st, slog.Default())
+		pub := &fakePublisher{}
+		svc.Publisher = pub
+		if err := svc.HandleRequest(context.Background(), ConvertRequest{RecordID: 642, Operations: ops}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		if st.updateCalls != 1 {
+			t.Fatalf("expected converted status update, got %d", st.updateCalls)
+		}
+		return pub
+	}
+
+	t.Run("empty list converts only", func(t *testing.T) {
+		pub := run(t, &[]string{})
+		if pub.calls != 0 {
+			t.Fatalf("expected no doc-processing event, got %d publishes: %s", pub.calls, pub.payload)
+		}
+	})
+	t.Run("list is forwarded", func(t *testing.T) {
+		pub := run(t, &[]string{"extract_metrics"})
+		if pub.calls != 1 {
+			t.Fatalf("expected 1 publish, got %d", pub.calls)
+		}
+		var ev map[string]any
+		if err := json.Unmarshal(pub.payload, &ev); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		ops, _ := ev["operation"].([]any)
+		if len(ops) != 1 || ops[0] != "extract_metrics" {
+			t.Fatalf("expected operation=[extract_metrics], got %s", pub.payload)
+		}
+	})
+	t.Run("absent list omits operation", func(t *testing.T) {
+		pub := run(t, nil)
+		if pub.calls != 1 {
+			t.Fatalf("expected 1 publish, got %d", pub.calls)
+		}
+		if strings.Contains(string(pub.payload), `"operation"`) {
+			t.Fatalf("expected no operation field, got %s", pub.payload)
+		}
+	})
+}
