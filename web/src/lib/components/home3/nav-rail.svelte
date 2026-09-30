@@ -29,6 +29,7 @@
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import VideoIcon from '@lucide/svelte/icons/video';
 	import LayersIcon from '@lucide/svelte/icons/layers';
+	import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -38,8 +39,9 @@
 	};
 
 	type NavGreatGrandchild = { id: string; label: string };
-	type NavGrandchild = { id: string; label: string; children?: NavGreatGrandchild[] };
-	type NavChild = { id: string; label: string; children?: NavGrandchild[] };
+	// `href` on a leaf opens that route in a new tab instead of selecting a view.
+	type NavGrandchild = { id: string; label: string; href?: string; children?: NavGreatGrandchild[] };
+	type NavChild = { id: string; label: string; href?: string; children?: NavGrandchild[] };
 	type NavItem = {
 		id: string;
 		label: string;
@@ -109,7 +111,8 @@
 		Workspace: m.nav_group_workspace(),
 		'System Admin': m.nav_group_system_admin(),
 		Personal: m.nav_group_personal(),
-		Resources: m.nav_group_resources()
+		Resources: m.nav_group_resources(),
+		Development: m.nav_group_development()
 	};
 
 	// Nav item definitions. Labels are Paraglide messages (nav_<id>) in en and
@@ -388,8 +391,36 @@
 		}
 	];
 
-	// The workspace tree is the default; `resources` swaps in its own tree.
-	const activeMainNav = $derived(pageKey === 'resources' ? resourcesNav : mainNav);
+	// Development page (pageKey='development') appends its own section to the
+	// workspace tree, kept off /home3 for the same reason as `resourcesNav`.
+	const developmentNav: NavItem[] = [
+		{
+			id: 'development',
+			label: m.nav_development(),
+			icon: FlaskConicalIcon,
+			group: 'Development',
+			children: [
+				{
+					id: 'dev-demos',
+					label: m.nav_dev_demos(),
+					children: [
+						{ id: 'dev-demos-main-page', label: m.nav_dev_demos_main_page(), href: '/home7' },
+						{ id: 'dev-demos-jenny-main-page', label: m.nav_dev_demos_jenny_main_page(), href: '/home8' }
+					]
+				}
+			]
+		}
+	];
+
+	// The workspace tree is the default; `resources` swaps in its own tree and
+	// `development` extends it.
+	const activeMainNav = $derived(
+		pageKey === 'resources'
+			? resourcesNav
+			: pageKey === 'development'
+				? [...mainNav, ...developmentNav]
+				: mainNav
+	);
 
 	// ── DB-backed page config (overlay model, spec 2026072001 §11) ───────────
 	// The menu tree, ids, icons, and routes stay page-owned above. When `pageKey`
@@ -546,9 +577,10 @@
 		return !!activeMenu && activeMenu.childId === child.id;
 	}
 
-	function selectItem(item: NavItem, child?: NavChild) {
-		if (!child && item.href) {
-			window.open(`${item.href}?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
+	function selectItem(item: NavItem, child?: NavChild | NavGrandchild) {
+		const href = child ? child.href : item.href;
+		if (href) {
+			window.open(`${href}?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
 			return;
 		}
 		if (child?.id === 'kb-metrics') {
