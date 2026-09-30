@@ -106,7 +106,7 @@ func (r ambiguousObjectLLMJSONResolver) ResolveAmbiguousObject(ctx context.Conte
 		r.modelName,
 		string(input),
 		"resolve_ambiguous_object",
-		"MID-CWB-OBJECT-AMBIGUOUS-LLM",
+		"MID-2026092901",
 	)
 	var payload map[string]any
 	if structured, ok := r.client.(LLMStructuredJSONExtractor); ok {

@@ -3613,8 +3613,8 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 		"record_id", p.batchRecordID,
 		"chunk", chunkIdx,
 		"total", len(p.batchChunks),
-		"model name", p.MentionModelName,
-		"prompt name", p.MentionPromptRef,
+		// "model name", p.MentionModelName,
+		// "prompt name", p.MentionPromptRef,
 	)
 	payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, inputText, taskPrompt)
 	annotateMetricCandidatePayload(payload, block.Index)
@@ -3633,6 +3633,7 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 	}
 	raw, _ := payload["candidates"].([]any)
 	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	outputTokens := outputTokenCount(p.Extractor)
 	p.batchMu.Lock()
 	if lang != "" && p.batchLang == "unknown" {
 		p.batchLang = lang
@@ -3645,11 +3646,12 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 
 	p.Logger.Info("extract metrics end  (batch)",
 		"record_id", p.batchRecordID,
-		"extracted metrics", len(raw),
+		"extracted", len(raw),
 		"chunk", chunkIdx,
-		"cache_hit", cacheHit,
-		"cache_miss", cacheMiss,
-		"total_extracted", len(p.batchMentions),
+		"hit", cacheHit,
+		"miss", cacheMiss,
+		"output", outputTokens,
+		"total", len(p.batchMentions),
 		"ms_used", time.Since(callStart).Milliseconds(),
 	)
 

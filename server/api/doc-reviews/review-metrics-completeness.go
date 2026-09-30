@@ -187,7 +187,7 @@ func (r *metricsCompletenessReviewer) reviewObject(
 		}
 		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
-			"review_metrics_completeness", "MID-CWB-REVIEW-METRICS-COMPLETENESS"))
+			"review_metrics_completeness", "MID-20260929-03"))
 		if err != nil {
 			r.logger.Warn("metrics_completeness object failed; skipping",
 				"record_id", recordID, "object_index", index, "error", err)

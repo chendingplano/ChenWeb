@@ -262,7 +262,7 @@ func (r *metricsReviewer) reviewMetric(
 		}
 		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
-			"review_metrics", "MID-CWB-REVIEW-METRICS"))
+			"review_metrics", "MID-20260920-02"))
 		if err != nil {
 			r.logger.Warn("metrics review metric failed; skipping",
 				"record_id", recordID, "metric_index", index, "error", err)
