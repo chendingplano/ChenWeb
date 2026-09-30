@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listAmbiguousObjects,
@@ -358,7 +359,7 @@
 		if (!currentObject || selectedId === null || saving || creatingNode) return;
 		const objectName = currentObject.object_name.trim();
 		if (!objectName) {
-			createNodeError = 'Object Name is required to create a new object node.';
+			createNodeError = m.resolve_ambiguous_objects_object_name_is_required_to();
 			return;
 		}
 		creatingNode = true;
@@ -388,8 +389,8 @@
 					addedAny = true;
 				}
 				existsNotice = addedAny
-					? 'An object node with this name already exists. It has been added to the candidates list.'
-					: 'An object node with this name already exists in the candidates list.';
+					? m.resolve_ambiguous_objects_an_object_node_with_this()
+					: m.resolve_ambiguous_objects_an_object_node_with_this_2();
 			}
 		} catch (e) {
 			createNodeError = e instanceof Error ? e.message : String(e);
@@ -451,11 +452,11 @@
 		if (!findContext || rebinding || findRows.length === 0) return;
 		const survivorObjectID = masterNodeId ?? findContext.masterObjectID;
 		if (!survivorObjectID) {
-			rebindNotice = 'Please select one Related Object Node as Master before rebinding.';
+			rebindNotice = m.resolve_ambiguous_objects_please_select_one_related_object();
 			return;
 		}
 		if (survivorObjectID === findContext.sourceObjectID) {
-			rebindNotice = 'The selected Master is already the same object node as these linked artifact objects.';
+			rebindNotice = m.resolve_ambiguous_objects_the_selected_master_is_already();
 			return;
 		}
 		rebinding = true;
@@ -465,7 +466,7 @@
 				findRows.map((row) => row.id),
 				survivorObjectID
 			);
-			rebindNotice = `Rebound ${findRows.length} artifact object${findRows.length === 1 ? '' : 's'} to ${survivorObjectID}.`;
+			rebindNotice = m.resolve_ambiguous_objects_rebound_artifact_object_to({ findRowsCount: findRows.length, plural: findRows.length === 1 ? '' : 's', survivorObjectID });
 			clearFindMode();
 			await loadList();
 		} catch (e) {
@@ -513,7 +514,7 @@
 
 	function leftRowMeta(row: AmbiguousObjectSummary | LinkedArtifactObjectSummary): string {
 		if ('confidence' in row) {
-			return `${row.artifact_type} · confidence ${row.confidence.toFixed(2)}`;
+			return m.resolve_ambiguous_objects_confidence({ artifact_type: row.artifact_type, confidence: row.confidence.toFixed(2) });
 		}
 		return `${row.artifact_type} · ${row.reconcile_status}${row.object_id ? ` · ${row.object_id}` : ''}`;
 	}
@@ -540,13 +541,13 @@
 			<div class="flex items-start justify-between gap-3">
 				<div>
 					<h1 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:2px;">
-						{findContext ? 'Linked Artifact Objects' : 'Resolve Ambiguous Objects'}
+						{findContext ? m.resolve_ambiguous_objects_linked_artifact_objects() : m.resolve_ambiguous_objects_resolve_ambiguous_objects()}
 					</h1>
 					<p style="font-size:12px; color:{textSecondary};">
 						{#if findContext}
-							{findRows.length} row{findRows.length === 1 ? '' : 's'} linked to {findContext.sourceLabel}
+							{m.resolve_ambiguous_objects_row_linked_to({ findRowsCount: findRows.length, plural: findRows.length === 1 ? '' : 's', sourceLabel: findContext.sourceLabel })}
 						{:else}
-							{rows.length} row{rows.length === 1 ? '' : 's'} at reconcile_status = ambiguous
+							{m.resolve_ambiguous_objects_row_at_reconcile_status_ambiguous({ rowsCount: rows.length, plural: rows.length === 1 ? '' : 's' })}
 						{/if}
 					</p>
 				</div>
@@ -558,7 +559,7 @@
 							disabled={prevId === null || detailLoading}
 							style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{prevId === null || detailLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null || detailLoading ? 0.5 : 1};"
 						>
-							Prev
+							{m.resolve_ambiguous_objects_prev()}
 						</button>
 						<button
 							type="button"
@@ -566,7 +567,7 @@
 							disabled={nextId === null || detailLoading}
 							style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{nextId === null || detailLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{nextId === null || detailLoading ? 0.5 : 1};"
 						>
-							Next
+							{m.resolve_ambiguous_objects_next()}
 						</button>
 						<button
 							type="button"
@@ -574,7 +575,7 @@
 							disabled={rebinding || findLoading || findRows.length === 0}
 							style="font-size:12px; font-weight:600; padding:6px 10px; border-radius:6px; border:none; cursor:{rebinding || findLoading || findRows.length === 0 ? 'not-allowed' : 'pointer'}; background:{accent}; color:white; opacity:{rebinding || findLoading || findRows.length === 0 ? 0.5 : 1};"
 						>
-							{rebinding ? 'Rebinding…' : 'Rebind'}
+							{rebinding ? m.resolve_ambiguous_objects_rebinding() : m.resolve_ambiguous_objects_rebind()}
 						</button>
 					{/if}
 					<button
@@ -583,7 +584,7 @@
 						disabled={listLoading}
 						style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{listLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{listLoading ? 0.5 : 1};"
 					>
-						{findContext ? 'Back' : listLoading ? 'Refreshing…' : 'Refresh'}
+						{findContext ? m.resolve_ambiguous_objects_back() : listLoading ? m.resolve_ambiguous_objects_refreshing() : m.resolve_ambiguous_objects_refresh()}
 					</button>
 				</div>
 			</div>
@@ -591,20 +592,20 @@
 
 		<div class="flex-1 overflow-y-auto" style="min-height:0;">
 		{#if listLoading}
-			<div class="p-4" style="color:{textMuted}; font-size:13px;">Loading…</div>
+			<div class="p-4" style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_loading()}</div>
 		{:else if findLoading}
-			<div class="p-4" style="color:{textMuted}; font-size:13px;">Finding linked artifact objects…</div>
+			<div class="p-4" style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_finding_linked_artifact_objects()}</div>
 		{:else if listError}
-			<div class="p-4" style="color:#F87171; font-size:13px;">Error: {listError}</div>
+			<div class="p-4" style="color:#F87171; font-size:13px;">{m.resolve_ambiguous_objects_error({ listError })}</div>
 		{:else if findError}
-			<div class="p-4" style="color:#F87171; font-size:13px;">Error: {findError}</div>
+			<div class="p-4" style="color:#F87171; font-size:13px;">{m.resolve_ambiguous_objects_error_2({ findError })}</div>
 		{:else if findContext && findRows.length === 0}
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">
-				No artifact objects are currently linked to this object node.
+				{m.resolve_ambiguous_objects_no_artifact_objects_are_currently()}
 			</div>
 		{:else if !findContext && rows.length === 0}
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">
-				No ambiguous objects — the queue is empty.
+				{m.resolve_ambiguous_objects_no_ambiguous_objects_the_queue()}
 			</div>
 		{:else}
 			{#each (findContext ? findRows : rows) as row (row.id)}
@@ -638,7 +639,7 @@
 				disabled={prevId === null || saving}
 				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null || saving ? 0.5 : 1}; margin-left:auto;"
 			>
-				Prev
+				{m.resolve_ambiguous_objects_prev()}
 			</button>
 			<button
 				type="button"
@@ -646,7 +647,7 @@
 				disabled={nextId === null || saving}
 				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{nextId === null || saving ? 0.5 : 1};"
 			>
-				Next
+				{m.resolve_ambiguous_objects_next()}
 			</button>
 			<button
 				type="button"
@@ -654,7 +655,7 @@
 				disabled={!isDirty || saving}
 				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{isDirty && !saving ? 1 : 0.5};"
 			>
-				Cancel
+				{m.resolve_ambiguous_objects_cancel()}
 			</button>
 			<button
 				type="button"
@@ -662,65 +663,65 @@
 				disabled={!isDirty || saving}
 				style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white; opacity:{!isDirty || saving ? 0.5 : 1};"
 			>
-				{saving ? 'Saving…' : 'Save'}
+				{saving ? m.resolve_ambiguous_objects_saving() : m.resolve_ambiguous_objects_save()}
 			</button>
 			<button
 				type="button"
 				onclick={() => (helpOpen = true)}
 				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textSecondary};"
 			>
-				Help
+				{m.resolve_ambiguous_objects_help()}
 			</button>
 		</div>
 		{#if saveError}
-			<div class="mb-4" style="font-size:12px; color:#F87171;">Save failed: {saveError}</div>
+			<div class="mb-4" style="font-size:12px; color:#F87171;">{m.resolve_ambiguous_objects_save_failed({ saveError })}</div>
 		{/if}
 		{#if createNodeError}
-			<div class="mb-4" style="font-size:12px; color:#F87171;">Create New failed: {createNodeError}</div>
+			<div class="mb-4" style="font-size:12px; color:#F87171;">{m.resolve_ambiguous_objects_create_new_failed({ createNodeError })}</div>
 		{/if}
 		{#if detailLoading}
-			<div style="color:{textMuted}; font-size:13px;">Loading…</div>
+			<div style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_loading()}</div>
 		{:else if detailError}
-			<div style="color:#F87171; font-size:13px;">Error: {detailError}</div>
+			<div style="color:#F87171; font-size:13px;">{m.resolve_ambiguous_objects_error_3({ detailError })}</div>
 		{:else if !currentObject}
-			<div style="color:{textMuted}; font-size:13px;">Select a record on the left to resolve it.</div>
+			<div style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_select_a_record_on_the()}</div>
 		{:else}
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1" style="align-items:stretch; min-height:0; grid-auto-rows:minmax(0, 1fr);">
 				<!-- Left column: Artifact Object -->
 				<div class="rounded-xl p-5 min-h-0 overflow-y-auto" style="background:{cardBg}; border:1px solid {borderColor};">
 					<div class="flex items-center justify-between mb-4">
-						<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">Artifact Object</h2>
+						<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">{m.resolve_ambiguous_objects_artifact_object()}</h2>
 						<span style="font-size:11px; color:{textMuted};">
-							id {currentObject.id} · {currentObject.artifact_type} · {currentObject.artifact_id}
+							{m.resolve_ambiguous_objects_id({ id: currentObject.id, artifact_type: currentObject.artifact_type, artifact_id: currentObject.artifact_id })}
 						</span>
 					</div>
 					<div class="grid grid-cols-2 gap-3">
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Object Name</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_name()}</span>
 							<input bind:value={currentObject.object_name} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_name'))}" />
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Object Name (EN)</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_name_en()}</span>
 							<input bind:value={currentObject.object_name_en} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_name_en'))}" />
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Object Name (ZH)</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_name_zh()}</span>
 							<input bind:value={currentObject.object_name_zh} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_name_zh'))}" />
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Language</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_language()}</span>
 							<input bind:value={currentObject.language} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('language'))}" />
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Object Type</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_type()}</span>
 							<input bind:value={currentObject.object_type} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_type'))}" />
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Object Role</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_role()}</span>
 							<input bind:value={currentObject.object_role} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_role'))}" />
 						</label>
 						<label class="flex flex-col gap-1 col-span-2">
-							<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_aliases_comma_separated()}</span>
 							<input
 								value={aliasesText(currentObject.aliases)}
 								oninput={(e) => { if (currentObject) currentObject.aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
@@ -728,7 +729,7 @@
 							/>
 						</label>
 						<label class="flex flex-col gap-1 col-span-2">
-							<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_acronyms_comma_separated()}</span>
 							<input
 								value={aliasesText(currentObject.acronyms)}
 								oninput={(e) => { if (currentObject) currentObject.acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
@@ -736,19 +737,19 @@
 							/>
 						</label>
 						<label class="flex flex-col gap-1 col-span-2">
-							<span style="font-size:11px; color:{textMuted};">Description</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_description()}</span>
 							<textarea bind:value={currentObject.description} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('description'))}"></textarea>
 						</label>
 						<label class="flex flex-col gap-1 col-span-2">
-							<span style="font-size:11px; color:{textMuted};">Evidence Quote</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_evidence_quote()}</span>
 							<textarea bind:value={currentObject.evidence_quote} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('evidence_quote'))}"></textarea>
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Object ID</span>
-							<input bind:value={currentObject.object_id} placeholder="(unresolved)" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_id'))}" />
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_id()}</span>
+							<input bind:value={currentObject.object_id} placeholder={m.resolve_ambiguous_objects_unresolved()} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_id'))}" />
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Reconcile Status</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_reconcile_status()}</span>
 							<select bind:value={currentObject.reconcile_status} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('reconcile_status'))}">
 								{#each RECONCILE_STATUS_OPTIONS as opt}
 									<option value={opt}>{opt}</option>
@@ -756,7 +757,7 @@
 							</select>
 						</label>
 						<label class="flex flex-col gap-1">
-							<span style="font-size:11px; color:{textMuted};">Reconcile Confidence</span>
+							<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_reconcile_confidence()}</span>
 							<input type="number" min="0" max="1" step="0.01" bind:value={currentObject.reconcile_confidence} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('reconcile_confidence'))}" />
 						</label>
 						<div class="flex items-end justify-end">
@@ -766,7 +767,7 @@
 								disabled={saving || creatingNode}
 								style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{saving || creatingNode ? 0.5 : 1};"
 							>
-								{creatingNode ? 'Creating…' : 'Create New'}
+								{creatingNode ? m.resolve_ambiguous_objects_creating() : m.resolve_ambiguous_objects_create_new()}
 							</button>
 						</div>
 					</div>
@@ -775,16 +776,16 @@
 				<!-- Right column: Top Region (quick reference) + Bottom Region (editable candidates) -->
 				<div class="flex flex-col gap-5 min-h-0">
 					<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
-						<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">Candidates</h2>
+						<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">{m.resolve_ambiguous_objects_candidates()}</h2>
 						{#if currentNodes.length === 0}
-							<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
+							<div style="font-size:13px; color:{textMuted};">{m.resolve_ambiguous_objects_no_candidate_object_nodes_found()}</div>
 						{:else}
 							<table style="width:100%; border-collapse:collapse; font-size:12px;">
 								<thead>
 									<tr>
-										<th style="text-align:left; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">Canonical Name</th>
-										<th style="text-align:left; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">Description</th>
-										<th style="text-align:right; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">Action</th>
+										<th style="text-align:left; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">{m.resolve_ambiguous_objects_canonical_name()}</th>
+										<th style="text-align:left; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">{m.resolve_ambiguous_objects_description()}</th>
+										<th style="text-align:right; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">{m.resolve_ambiguous_objects_action()}</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -793,7 +794,7 @@
 											<td style="padding:6px 8px; color:{textPrimary}; border-bottom:1px solid {borderColor}; vertical-align:top;">
 												{node.canonical_name}
 												{#if node.recommended}
-													<span style="display:inline-block; margin-left:6px; font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
+													<span style="display:inline-block; margin-left:6px; font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">{m.resolve_ambiguous_objects_recommended()}</span>
 												{/if}
 											</td>
 											<td style="padding:6px 8px; color:{textSecondary}; border-bottom:1px solid {borderColor}; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:top;">
@@ -805,7 +806,7 @@
 													onclick={() => useCandidate(node)}
 													style="font-size:11px; font-weight:500; padding:4px 10px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;"
 												>
-													Use this
+													{m.resolve_ambiguous_objects_use_this()}
 												</button>
 											</td>
 										</tr>
@@ -818,23 +819,23 @@
 					<div class="rounded-xl p-5 flex flex-col flex-1 min-h-0" style="background:{cardBg}; border:1px solid {borderColor};">
 						<div class="flex items-center justify-between flex-shrink-0" style="margin-bottom:12px;">
 							<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">
-								Related Object Nodes
+								{m.resolve_ambiguous_objects_related_object_nodes()}
 							</h2>
 							<button
 								type="button"
 								onclick={requestMerge}
 								disabled={!canMerge}
-								title="Merge the selected nodes into the master node"
+								title={m.resolve_ambiguous_objects_merge_the_selected_nodes_into()}
 								style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:{canMerge ? 'pointer' : 'not-allowed'}; background:{accent}; color:white; opacity:{canMerge ? 1 : 0.5};"
 							>
-								{merging ? 'Merging…' : 'Merge'}
+								{merging ? m.resolve_ambiguous_objects_merging() : m.resolve_ambiguous_objects_merge()}
 							</button>
 						</div>
 						{#if mergeError}
-							<div class="mb-3" style="font-size:12px; color:#F87171;">Merge failed: {mergeError}</div>
+							<div class="mb-3" style="font-size:12px; color:#F87171;">{m.resolve_ambiguous_objects_merge_failed({ mergeError })}</div>
 						{/if}
 						{#if currentNodes.length === 0}
-							<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
+							<div style="font-size:13px; color:{textMuted};">{m.resolve_ambiguous_objects_no_candidate_object_nodes_found()}</div>
 						{:else}
 						<div class="related-nodes-scroll" style="flex:1 1 0; min-height:0; overflow-y:auto; padding-right:4px;">
 						{#each currentNodes as node, i (node.object_id)}
@@ -842,10 +843,10 @@
 							<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
 								<div class="flex items-center justify-between mb-3">
 									<div class="flex items-center gap-2">
-										<span style="font-size:12px; color:{textMuted};">id: {node.id}</span>
+										<span style="font-size:12px; color:{textMuted};">{m.resolve_ambiguous_objects_id_2({ id: node.id })}</span>
 										<span style="font-size:12px; font-family:monospace; color:{textSecondary};">{node.object_id}</span>
 										{#if node.recommended}
-											<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
+											<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">{m.resolve_ambiguous_objects_recommended()}</span>
 										{/if}
 									</div>
 								<div class="flex items-center gap-3">
@@ -855,7 +856,7 @@
 										disabled={findLoading || rebinding}
 										style="font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{findLoading || rebinding ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{findLoading || rebinding ? 0.5 : 1};"
 									>
-										Find
+										{m.resolve_ambiguous_objects_find()}
 									</button>
 										<label class="flex items-center gap-1" style="font-size:11px; color:{textSecondary}; cursor:pointer;">
 											<input
@@ -863,7 +864,7 @@
 												checked={masterNodeId === node.object_id}
 												onchange={(e) => setMaster(node.object_id, (e.currentTarget as HTMLInputElement).checked)}
 											/>
-											Master
+											{m.resolve_ambiguous_objects_master()}
 										</label>
 										<label class="flex items-center gap-1" style="font-size:11px; color:{masterNodeId === node.object_id ? textMuted : textSecondary}; cursor:{masterNodeId === node.object_id ? 'not-allowed' : 'pointer'};">
 											<input
@@ -872,41 +873,41 @@
 												disabled={masterNodeId === node.object_id}
 												onchange={(e) => setSelected(node.object_id, (e.currentTarget as HTMLInputElement).checked)}
 											/>
-											Select
+											{m.resolve_ambiguous_objects_select()}
 										</label>
-										<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_score({ score: node.score.toFixed(2), method: node.method })}</span>
 									</div>
 								</div>
 								<div class="mb-3" style="font-size:11px; color:{matches.hasMatch ? '#34D399' : textMuted};">
 									{#if matches.hasMatch}
-										Matches: {matchesSummaryText(matches)}
+										{m.resolve_ambiguous_objects_matches({ matches: matchesSummaryText(matches) })}
 									{:else}
-										Matches: none
+										{m.resolve_ambiguous_objects_matches_none()}
 									{/if}
 								</div>
 								<div class="grid grid-cols-2 gap-3">
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Canonical Name</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_canonical_name()}</span>
 										<input bind:value={currentNodes[i].canonical_name} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'canonical_name'), matches, 'canonical_name')}" />
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Object Type</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_object_type()}</span>
 										<input bind:value={currentNodes[i].object_type} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'object_type'), matches, 'object_type')}" />
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Canonical Name (EN)</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_canonical_name_en()}</span>
 										<input bind:value={currentNodes[i].canonical_name_en} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'canonical_name_en'), matches, 'canonical_name_en')}" />
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Canonical Name (ZH)</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_canonical_name_zh()}</span>
 										<input bind:value={currentNodes[i].canonical_name_zh} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'canonical_name_zh'), matches, 'canonical_name_zh')}" />
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Primary Language</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_primary_language()}</span>
 										<input bind:value={currentNodes[i].primary_language} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'primary_language'))}" />
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_aliases_comma_separated()}</span>
 										<input
 											value={aliasesText(node.aliases)}
 											oninput={(e) => { currentNodes[i].aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
@@ -914,7 +915,7 @@
 										/>
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_acronyms_comma_separated()}</span>
 										<input
 											value={aliasesText(node.acronyms)}
 											oninput={(e) => { currentNodes[i].acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
@@ -922,7 +923,7 @@
 										/>
 									</label>
 									<label class="flex flex-col gap-1">
-										<span style="font-size:11px; color:{textMuted};">Normalized Names (derived)</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_normalized_names_derived()}</span>
 										<input
 											value={aliasesText(node.normalized_names)}
 											readonly
@@ -930,7 +931,7 @@
 										/>
 									</label>
 									<label class="flex flex-col gap-1 col-span-2">
-										<span style="font-size:11px; color:{textMuted};">Description</span>
+										<span style="font-size:11px; color:{textMuted};">{m.resolve_ambiguous_objects_description()}</span>
 										<textarea bind:value={currentNodes[i].description} rows="2" style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'description'))}"></textarea>
 									</label>
 								</div>
@@ -955,15 +956,15 @@
 			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">
 					{navConfirm.kind === 'prev'
-						? 'Save changes before moving to the previous record?'
+						? m.resolve_ambiguous_objects_save_changes_before_moving_to()
 						: navConfirm.kind === 'next'
-							? 'Save changes before moving to the next record?'
-							: 'Save changes before switching records?'}
+							? m.resolve_ambiguous_objects_save_changes_before_moving_to_2()
+							: m.resolve_ambiguous_objects_save_changes_before_switching_records()}
 				</p>
 				<div class="flex justify-end gap-2">
-					<button type="button" onclick={stayOnNav} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Stay</button>
-					<button type="button" onclick={confirmNavDiscard} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Discard &amp; Continue</button>
-					<button type="button" onclick={confirmNavSave} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">Save &amp; Continue</button>
+					<button type="button" onclick={stayOnNav} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">{m.resolve_ambiguous_objects_stay()}</button>
+					<button type="button" onclick={confirmNavDiscard} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">{m.resolve_ambiguous_objects_discard_continue()}</button>
+					<button type="button" onclick={confirmNavSave} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">{m.resolve_ambiguous_objects_save_continue()}</button>
 				</div>
 			</div>
 		</div>
@@ -978,10 +979,10 @@
 			onkeydown={(e) => { if (e.key === 'Escape') dismissCancel(); }}
 		>
 			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
-				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">Discard your edits to this record?</p>
+				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">{m.resolve_ambiguous_objects_discard_your_edits_to_this()}</p>
 				<div class="flex justify-end gap-2">
-					<button type="button" onclick={dismissCancel} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Keep Editing</button>
-					<button type="button" onclick={confirmCancel} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:#DC2626; color:white;">Discard</button>
+					<button type="button" onclick={dismissCancel} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">{m.resolve_ambiguous_objects_keep_editing()}</button>
+					<button type="button" onclick={confirmCancel} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:#DC2626; color:white;">{m.resolve_ambiguous_objects_discard()}</button>
 				</div>
 			</div>
 		</div>
@@ -997,16 +998,15 @@
 		>
 			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 				<p style="font-size:13px; color:{textPrimary}; margin-bottom:8px;">
-					Merge {selectedNodeIds.size} selected object node{selectedNodeIds.size === 1 ? '' : 's'} into the master node?
+					{m.resolve_ambiguous_objects_merge_selected_object_node_into({ selectedNodeIdsCount: selectedNodeIds.size, plural: selectedNodeIds.size === 1 ? '' : 's' })}
 				</p>
 				<p style="font-size:12px; color:{textSecondary}; margin-bottom:16px;">
-					Their artifact-object mentions will be repointed to
-					<span style="font-family:monospace;">{masterNodeId}</span>, and the merged nodes will
-					no longer be considered when resolving artifact objects.
+					{m.resolve_ambiguous_objects_their_artifact_object_mentions_will()}
+					<span style="font-family:monospace;">{masterNodeId}</span>{m.resolve_ambiguous_objects_and_the_merged_nodes_will()}
 				</p>
 				<div class="flex justify-end gap-2">
-					<button type="button" onclick={() => (mergeConfirm = false)} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Cancel</button>
-					<button type="button" onclick={confirmMerge} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">Merge</button>
+					<button type="button" onclick={() => (mergeConfirm = false)} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">{m.resolve_ambiguous_objects_cancel()}</button>
+					<button type="button" onclick={confirmMerge} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">{m.resolve_ambiguous_objects_merge()}</button>
 				</div>
 			</div>
 		</div>
@@ -1023,7 +1023,7 @@
 			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">{existsNotice}</p>
 				<div class="flex justify-end">
-					<button type="button" onclick={() => (existsNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">OK</button>
+					<button type="button" onclick={() => (existsNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">{m.resolve_ambiguous_objects_ok()}</button>
 				</div>
 			</div>
 		</div>
@@ -1040,7 +1040,7 @@
 			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">{rebindNotice}</p>
 				<div class="flex justify-end">
-					<button type="button" onclick={() => (rebindNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">OK</button>
+					<button type="button" onclick={() => (rebindNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">{m.resolve_ambiguous_objects_ok()}</button>
 				</div>
 			</div>
 		</div>
@@ -1055,34 +1055,25 @@
 			onkeydown={(e) => { if (e.key === 'Escape') helpOpen = false; }}
 		>
 			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} style="width:min(560px, 100%);">
-				<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:10px;">About This Page</h3>
+				<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:10px;">{m.resolve_ambiguous_objects_about_this_page()}</h3>
 				<div style="font-size:12px; color:{textSecondary}; line-height:1.7;">
 					<p style="margin-bottom:10px;">
-						A row is <strong>ambiguous</strong> when reconciliation found two or more equally-scored
-						candidate object nodes and could not pick one automatically. This page lets you review
-						the artifact object and its candidates side by side and resolve the tie by hand.
+						{m.resolve_ambiguous_objects_a_row_is()} <strong>{m.resolve_ambiguous_objects_ambiguous()}</strong> {m.resolve_ambiguous_objects_when_reconciliation_found_two_or()}
 					</p>
 					<p style="margin-bottom:10px;">
-						The <strong>Recommended</strong> badge marks the same deterministic tie-break pick used by
-						the automated backfill (most shared normalized names, falling back to the
-						lexicographically smallest object_id). Click <strong>Use this</strong> on any candidate to
-						copy its object_id into the Object ID field above and set the reconcile status to <code>ambiguous_resolved</code>.
+						{m.resolve_ambiguous_objects_the()} <strong>{m.resolve_ambiguous_objects_recommended()}</strong> {m.resolve_ambiguous_objects_badge_marks_the_same_deterministic()} <strong>{m.resolve_ambiguous_objects_use_this()}</strong> {m.resolve_ambiguous_objects_on_any_candidate_to_copy()} <code>ambiguous_resolved</code>.
 					</p>
 					<p style="margin-bottom:10px;">
-						<strong>reconcile_status</strong> values: <code>pending</code> (not yet attempted),
-						<code>ambiguous</code> (still tied), <code>ambiguous_resolved</code> (tie broken by a
-						human or the automated tie-break), <code>matched</code> (confident automatic match),
-						<code>new</code> (a new object node was created), <code>rejected</code> (no valid object
-						— leave object_id empty).
+						<strong>{m.resolve_ambiguous_objects_reconcile_status_2()}</strong> {m.resolve_ambiguous_objects_values()} <code>pending</code> {m.resolve_ambiguous_objects_not_yet_attempted()}
+						<code>ambiguous</code> {m.resolve_ambiguous_objects_still_tied()} <code>ambiguous_resolved</code> {m.resolve_ambiguous_objects_tie_broken_by_a_human()} <code>matched</code> {m.resolve_ambiguous_objects_confident_automatic_match()}
+						<code>new</code> {m.resolve_ambiguous_objects_a_new_object_node_was()} <code>rejected</code> {m.resolve_ambiguous_objects_no_valid_object_leave_object()}
 					</p>
 					<p>
-						<strong>Save</strong> writes your edits to both the artifact object and any edited
-						candidate nodes. Once you set an object_id and a non-<code>ambiguous</code> status, the
-						row leaves this queue.
+						<strong>{m.resolve_ambiguous_objects_save()}</strong> {m.resolve_ambiguous_objects_writes_your_edits_to_both()}<code>ambiguous</code> {m.resolve_ambiguous_objects_status_the_row_leaves_this()}
 					</p>
 				</div>
 				<div class="flex justify-end mt-4">
-					<button type="button" onclick={() => (helpOpen = false)} style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">Close</button>
+					<button type="button" onclick={() => (helpOpen = false)} style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">{m.resolve_ambiguous_objects_close()}</button>
 				</div>
 			</div>
 		</div>

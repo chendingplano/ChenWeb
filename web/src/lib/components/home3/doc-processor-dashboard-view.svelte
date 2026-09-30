@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, tick } from 'svelte';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
@@ -113,10 +114,10 @@
 
 	// Pie chart segments (parsed-success / parsed-failed / active / waiting)
 	let pieData = $derived([
-		{ key: 'success', label: 'Parsed Success', value: pdfStats.success, color: colorSuccess },
-		{ key: 'failed', label: 'Parsed Failed', value: pdfStats.failed, color: colorError },
-		{ key: 'active', label: 'Active', value: pdfStats.active, color: accent },
-		{ key: 'waiting', label: 'Waiting', value: pdfStats.waiting, color: textMuted }
+		{ key: 'success', label: m.doc_processor_dashboard_parsed_success(), value: pdfStats.success, color: colorSuccess },
+		{ key: 'failed', label: m.doc_processor_dashboard_parsed_failed(), value: pdfStats.failed, color: colorError },
+		{ key: 'active', label: m.doc_processor_dashboard_active(), value: pdfStats.active, color: accent },
+		{ key: 'waiting', label: m.doc_processor_dashboard_waiting(), value: pdfStats.waiting, color: textMuted }
 	]);
 	let pieTotal = $derived(pieData.reduce((sum, d) => sum + d.value, 0));
 
@@ -135,10 +136,10 @@
 
 	// Bar chart series (new records / parsed-success / parsed-failed / wait)
 	let barData = $derived([
-		{ label: 'New Records', value: pdfStats.total, color: accent },
-		{ label: 'Parsed Success', value: pdfStats.success, color: colorSuccess },
-		{ label: 'Parsed Failed', value: pdfStats.failed, color: colorError },
-		{ label: 'Wait', value: pdfStats.waiting, color: textMuted }
+		{ label: m.doc_processor_dashboard_new_records(), value: pdfStats.total, color: accent },
+		{ label: m.doc_processor_dashboard_parsed_success(), value: pdfStats.success, color: colorSuccess },
+		{ label: m.doc_processor_dashboard_parsed_failed(), value: pdfStats.failed, color: colorError },
+		{ label: m.doc_processor_dashboard_wait(), value: pdfStats.waiting, color: textMuted }
 	]);
 	let barMax = $derived(Math.max(1, ...barData.map((b) => b.value)));
 
@@ -225,7 +226,7 @@
 			};
 			pdfParsingError = '';
 		} catch (err) {
-			pdfParsingError = err instanceof Error ? err.message : 'Failed to load PDF parsing status';
+			pdfParsingError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pdf_parsing();
 		} finally {
 			pdfParsingLoading = false;
 		}
@@ -278,10 +279,10 @@
 		stoppingIds = new Set([...stoppingIds, record.id]);
 		try {
 			await stopKbInput(record.id);
-			launchToast = { kind: 'success', msg: `Stop requested for record #${record.id}` };
+			launchToast = { kind: 'success', msg: m.doc_processor_dashboard_stop_requested_for_record({ id: record.id }) };
 			setTimeout(() => { launchToast = null; }, 4000);
 		} catch (err) {
-			launchToast = { kind: 'error', msg: err instanceof Error ? err.message : 'Stop failed' };
+			launchToast = { kind: 'error', msg: err instanceof Error ? err.message : m.doc_processor_dashboard_stop_failed() };
 			setTimeout(() => { launchToast = null; }, 4000);
 		} finally {
 			stoppingIds = new Set([...stoppingIds].filter((id) => id !== record.id));
@@ -349,7 +350,7 @@
 	}
 
 	function recordTitle(record: KbInputRecord): string {
-		return record.title?.trim() || record.name?.trim() || record.file_name?.trim() || `Record #${record.id}`;
+		return record.title?.trim() || record.name?.trim() || record.file_name?.trim() || m.doc_processor_dashboard_record_2({ id: record.id });
 	}
 
 	function formatTime(s?: string): string {
@@ -436,7 +437,7 @@
 				emptyPollCount = 0;
 			}
 		} catch (err) {
-			pipelinesError = err instanceof Error ? err.message : 'Failed to load pipelines';
+			pipelinesError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pipelines();
 		} finally {
 			pipelinesLoading = false;
 		}
@@ -452,7 +453,7 @@
 		});
 		if (!res.ok) {
 			const body = await res.json().catch(() => null);
-			throw new Error(body?.error_msg ?? body?.message ?? `Request failed (${res.status})`);
+			throw new Error(body?.error_msg ?? body?.message ?? m.doc_processor_dashboard_request_failed({ status: res.status }));
 		}
 	}
 
@@ -531,9 +532,9 @@
 			const eligible = filterByRunMode(fetchedRecords, runMode, selectedStageIds).slice(0, maxRecords);
 
 			if (eligible.length === 0) {
-				const modeLabel = runMode === 'unfinished' ? 'unfinished'
-					: runMode === 'failed' ? 'failed'
-					: 'unfinished or failed';
+				const modeLabel = runMode === 'unfinished' ? m.doc_processor_dashboard_mode_unfinished()
+					: runMode === 'failed' ? m.doc_processor_dashboard_mode_failed()
+					: m.doc_processor_dashboard_mode_unfinished_or_failed();
 				noEligibleDialog = { recordCount: fetchedRecords.length, modeLabel, fromSearch: true };
 				return;
 			}
@@ -541,7 +542,7 @@
 			selectedRecords = eligible;
 			showConfirm = true;
 		} catch (err) {
-			launchError = err instanceof Error ? err.message : 'Search failed';
+			launchError = err instanceof Error ? err.message : m.doc_processor_dashboard_search_failed();
 		} finally {
 			searchingRecords = false;
 		}
@@ -569,9 +570,9 @@
 			const eligible = filterByRunMode(selectedRecords, runMode, selectedStageIds).slice(0, maxRecords);
 			showConfirm = false;
 			if (eligible.length === 0) {
-				const modeLabel = runMode === 'unfinished' ? 'unfinished'
-					: runMode === 'failed' ? 'failed'
-					: 'unfinished or failed';
+				const modeLabel = runMode === 'unfinished' ? m.doc_processor_dashboard_mode_unfinished()
+					: runMode === 'failed' ? m.doc_processor_dashboard_mode_failed()
+					: m.doc_processor_dashboard_mode_unfinished_or_failed();
 				noEligibleDialog = { recordCount: selectedRecords.length, modeLabel };
 				return;
 			}
@@ -582,14 +583,14 @@
 			if (failures.length === 0) {
 				const n = eligible.length;
 				if (!autoSync) startAutoSync();
-				launchToast = { kind: 'success', msg: `Launched ${n} record${n !== 1 ? 's' : ''}` };
+				launchToast = { kind: 'success', msg: m.doc_processor_dashboard_launched_record({ n, plural: n !== 1 ? 's' : '' }) };
 			} else {
-				const firstMsg = failures[0].reason instanceof Error ? failures[0].reason.message : 'unknown error';
+				const firstMsg = failures[0].reason instanceof Error ? failures[0].reason.message : m.doc_processor_dashboard_unknown_error();
 				launchToast = { kind: 'error', msg: `${failures.length}/${eligible.length} failed: ${firstMsg}` };
 			}
 			setTimeout(() => { launchToast = null; }, 4000);
 		} catch (err) {
-			launchError = err instanceof Error ? err.message : 'Launch failed';
+			launchError = err instanceof Error ? err.message : m.doc_processor_dashboard_launch_failed();
 		} finally {
 			launching = false;
 		}
@@ -603,12 +604,12 @@
 			await doLaunch(restartTarget, restartProcessors, restartParseFile, restartConvert);
 			showRestartDialog = false;
 			restartTarget = null;
-			launchToast = { kind: 'success', msg: `Restart triggered` };
+			launchToast = { kind: 'success', msg: m.doc_processor_dashboard_restart_triggered() };
 			setTimeout(() => {
 				launchToast = null;
 			}, 4000);
 		} catch (err) {
-			restartError = err instanceof Error ? err.message : 'Restart failed';
+			restartError = err instanceof Error ? err.message : m.doc_processor_dashboard_restart_failed();
 		} finally {
 			restarting = false;
 		}
@@ -671,7 +672,7 @@
 			failedTotal = res.total ?? 0;
 			failedLoaded = true;
 		} catch (err) {
-			failedError = err instanceof Error ? err.message : 'Failed to load failed pipelines';
+			failedError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_failed_pipelines();
 		} finally {
 			failedLoading = false;
 		}
@@ -877,9 +878,9 @@
 			</div>
 			{#if tooltipState.entry}
 				{#if tooltipState.progress}
-					<div style="font-size:12px; color:{textSecondary};">Progress: {tooltipState.progress}</div>
+					<div style="font-size:12px; color:{textSecondary};">{m.doc_processor_dashboard_progress({ progress: tooltipState.progress })}</div>
 				{:else if tooltipState.progressLoading}
-					<div style="font-size:12px; color:{textMuted};">Loading progress…</div>
+					<div style="font-size:12px; color:{textMuted};">{m.doc_processor_dashboard_loading_progress()}</div>
 				{/if}
 				{#if tooltipState.entry.time || tooltipState.entry.start_time}
 					<div style="font-size:11px; color:{textMuted}; font-family:monospace; margin-top:2px;">
@@ -892,7 +893,7 @@
 					</div>
 				{/if}
 			{:else}
-				<div style="font-size:12px; color:{textMuted};">Not yet started</div>
+				<div style="font-size:12px; color:{textMuted};">{m.doc_processor_dashboard_not_yet_started()}</div>
 			{/if}
 		</div>
 	{/if}
@@ -905,14 +906,14 @@
 		<!-- Section header -->
 		<div class="mb-4 flex items-start justify-between">
 			<div>
-				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Active Pipelines</h2>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_active_pipelines()}</h2>
 				<p style="font-size:12px; color:{textMuted}; margin:0;">
-				{autoSync ? 'Live processing threads — refreshes every 5 s' : 'Live processing threads — auto-sync paused'}
+				{autoSync ? m.doc_processor_dashboard_live_processing_threads_refreshes_every() : m.doc_processor_dashboard_live_processing_threads_auto_sync()}
 			</p>
 			</div>
 			<div class="flex items-center gap-3">
 				{#if lastPoll}
-					<span style="font-size:11px; color:{textMuted}; font-family:monospace;">Updated {lastPoll}</span>
+					<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{m.doc_processor_dashboard_updated({ lastPoll })}</span>
 				{/if}
 				<!-- Stop Sync / Start Sync toggle -->
 				<button
@@ -930,10 +931,10 @@
 				>
 					{#if autoSync}
 						<PauseIcon class="h-3 w-3" />
-						Stop Sync
+						{m.doc_processor_dashboard_stop_sync()}
 					{:else}
 						<PlayIcon class="h-3 w-3" />
-						Start Sync
+						{m.doc_processor_dashboard_start_sync()}
 					{/if}
 				</button>
 				<button
@@ -950,7 +951,7 @@
 					}}
 				>
 					<RefreshCwIcon class="h-3 w-3" />
-					Refresh
+					{m.doc_processor_dashboard_refresh()}
 				</button>
 			</div>
 		</div>
@@ -983,9 +984,9 @@
 				style="background:{surface2}; border:1px solid {borderColor};"
 			>
 				<ActivityIcon class="mb-3 h-10 w-10" style="color:{textMuted}; opacity:0.4;" />
-				<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 6px;">No active pipelines</p>
+				<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 6px;">{m.doc_processor_dashboard_no_active_pipelines()}</p>
 				<p style="font-size:12px; color:{textMuted}; margin:0; max-width:320px; text-align:center; line-height:1.5;">
-					Processing threads appear here while documents are being processed. Use Manual Launch below to start one.
+					{m.doc_processor_dashboard_processing_threads_appear_here_while()}
 				</p>
 			</div>
 
@@ -1020,27 +1021,27 @@
 								<!-- Detail button -->
 								<button
 									onclick={() => openDetail(record)}
-									title="View status details"
+									title={m.doc_processor_dashboard_view_status_details()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
 									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; (e.currentTarget as HTMLElement).style.color = accent; }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
 								>
 									<FileTextIcon class="h-3 w-3" />
-									Detail
+									{m.doc_processor_dashboard_detail()}
 								</button>
 								<!-- Stop button -->
 								<button
 									onclick={() => doStop(record)}
 									disabled={stoppingIds.has(record.id)}
-									title="Request pipeline stop"
+									title={m.doc_processor_dashboard_request_pipeline_stop()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(record.id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
 									onmouseenter={(e) => { if (!stoppingIds.has(record.id)) (e.currentTarget as HTMLElement).style.background = colorErrorTint; }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
 								>
 									<SquareIcon class="h-3 w-3" />
-									{stoppingIds.has(record.id) ? 'Stopping…' : 'Stop'}
+									{stoppingIds.has(record.id) ? m.doc_processor_dashboard_stopping() : m.doc_processor_dashboard_stop()}
 								</button>
 								<!-- Restart button -->
 								<button
@@ -1055,7 +1056,7 @@
 									}}
 								>
 									<PlayIcon class="h-3 w-3" />
-									Restart
+									{m.doc_processor_dashboard_restart()}
 								</button>
 							</div>
 						</div>
@@ -1104,7 +1105,7 @@
 
 						<!-- Status line -->
 						<div class="mt-3" style="font-size:11px; color:{textMuted}; font-family:monospace; border-top:1px solid {borderColor}; padding-top:8px;">
-							Last: {lastStatusText(record)}
+							{m.doc_processor_dashboard_last({ record: lastStatusText(record) })}
 						</div>
 					</div>
 				{/each}
@@ -1123,8 +1124,8 @@
 		<!-- Section header -->
 		<div class="mb-4 flex items-start justify-between">
 			<div>
-				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">PDF Parsing</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">Live PDF parse status, throughput and queue health</p>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_pdf_parsing()}</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_live_pdf_parse_status_throughput()}</p>
 			</div>
 			<button
 				onclick={pollPdfParsing}
@@ -1140,7 +1141,7 @@
 				}}
 			>
 				<RefreshCwIcon class="h-3 w-3" />
-				Refresh
+				{m.doc_processor_dashboard_refresh()}
 			</button>
 		</div>
 
@@ -1159,7 +1160,7 @@
 
 			<!-- Pie / donut chart -->
 			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
-				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">Parse State Distribution</div>
+				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">{m.doc_processor_dashboard_parse_state_distribution()}</div>
 				<div class="flex items-center gap-5">
 					<div class="relative flex-shrink-0" style="width:120px; height:120px;">
 						<svg viewBox="0 0 120 120" style="width:120px; height:120px; transform:rotate(-90deg);">
@@ -1177,7 +1178,7 @@
 						</svg>
 						<div class="absolute inset-0 flex flex-col items-center justify-center">
 							<span style="font-size:20px; font-weight:700; color:{textPrimary}; line-height:1;">{pieTotal}</span>
-							<span style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.06em;">total</span>
+							<span style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.06em;">{m.doc_processor_dashboard_total()}</span>
 						</div>
 					</div>
 					<div class="flex-1 space-y-1.5">
@@ -1201,7 +1202,7 @@
 
 			<!-- Bar chart -->
 			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
-				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">Throughput</div>
+				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">{m.doc_processor_dashboard_throughput()}</div>
 				<div class="flex items-end justify-around gap-3" style="height:120px;">
 					{#each barData as b (b.label)}
 						<div class="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
@@ -1219,7 +1220,7 @@
 
 		<!-- Active PDF parsing list -->
 		<div class="mb-2" style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
-			Active PDF Parsing
+			{m.doc_processor_dashboard_active_pdf_parsing()}
 			<span style="color:{accent}; margin-left:4px;">({pdfStats.active})</span>
 		</div>
 
@@ -1235,8 +1236,8 @@
 				style="background:{surface2}; border:1px solid {borderColor};"
 			>
 				<FileTextIcon class="mb-3 h-8 w-8" style="color:{textMuted}; opacity:0.4;" />
-				<p style="font-size:13px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">No PDFs parsing right now</p>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">Records currently in the PDF parser appear here.</p>
+				<p style="font-size:13px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">{m.doc_processor_dashboard_no_pdfs_parsing_right_now()}</p>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_records_currently_in_the_pdf()}</p>
 			</div>
 		{:else}
 			<div class="space-y-2">
@@ -1268,39 +1269,39 @@
 								<!-- Detail -->
 								<button
 									onclick={() => openDetail(record)}
-									title="View status details"
+									title={m.doc_processor_dashboard_view_status_details()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
 									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; (e.currentTarget as HTMLElement).style.color = accent; }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
 								>
 									<FileTextIcon class="h-3 w-3" />
-									Detail
+									{m.doc_processor_dashboard_detail()}
 								</button>
 								<!-- Restart -->
 								<button
 									onclick={() => openRestart(record)}
-									title="Restart parsing"
+									title={m.doc_processor_dashboard_restart_parsing()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 									style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
 									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
 								>
 									<PlayIcon class="h-3 w-3" />
-									Restart
+									{m.doc_processor_dashboard_restart()}
 								</button>
 								<!-- Abort -->
 								<button
 									onclick={() => doStop(record)}
 									disabled={stoppingIds.has(record.id)}
-									title="Abort parsing"
+									title={m.doc_processor_dashboard_abort_parsing()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(record.id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
 									onmouseenter={(e) => { if (!stoppingIds.has(record.id)) { (e.currentTarget as HTMLElement).style.background = colorErrorTint; (e.currentTarget as HTMLElement).style.color = colorError; } }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
 								>
 									<XCircleIcon class="h-3 w-3" />
-									{stoppingIds.has(record.id) ? 'Aborting…' : 'Abort'}
+									{stoppingIds.has(record.id) ? m.doc_processor_dashboard_aborting() : m.doc_processor_dashboard_abort()}
 								</button>
 							</div>
 						</div>
@@ -1309,7 +1310,7 @@
 							<div class="pdf-phase-grid mt-3">
 								{#each phases as phase, index}
 									{@const phaseColor = phase.status === 'complete' ? colorSuccess : phase.status === 'active' ? accent : textMuted}
-									<div class="pdf-phase" style="background:{surface2}; border:1px solid {phase.status === 'active' ? accent : borderColor};" aria-label={`${phase.name}: ${phase.progress}%${phase.status === 'complete' && phase.elapsed_seconds !== undefined ? `, ${phase.elapsed_seconds.toFixed(2)} seconds` : ''}`}>
+									<div class="pdf-phase" style="background:{surface2}; border:1px solid {phase.status === 'active' ? accent : borderColor};" aria-label={`${phase.name}: ${phase.progress}%${phase.status === 'complete' && phase.elapsed_seconds !== undefined ? m.doc_processor_dashboard_seconds({ elapsed_seconds: phase.elapsed_seconds.toFixed(2) }) : ''}`}>
 										<div class="flex items-center justify-between gap-2">
 											<span class="truncate" style="color:{phaseColor}; font-size:11px; font-weight:600;" title={phase.name}>{index + 1}. {phase.name}</span>
 											<span style="color:{phaseColor}; font-size:11px; font-family:monospace; flex-shrink:0;">{phase.progress}%</span>
@@ -1318,7 +1319,7 @@
 											<div class="h-full rounded-full" style="width:{phase.progress}%; background:{phaseColor}; transition:width 0.3s ease;"></div>
 										</div>
 										<div class="mt-1" style="color:{textMuted}; font-size:10px; min-height:14px;">
-											{phase.status === 'complete' && phase.elapsed_seconds !== undefined ? `${phase.elapsed_seconds.toFixed(2)} s` : phase.status === 'active' ? 'In progress' : 'Waiting'}
+											{phase.status === 'complete' && phase.elapsed_seconds !== undefined ? `${phase.elapsed_seconds.toFixed(2)} s` : phase.status === 'active' ? m.doc_processor_dashboard_in_progress() : m.doc_processor_dashboard_waiting()}
 										</div>
 									</div>
 								{/each}
@@ -1344,7 +1345,7 @@
 								{/if}
 							</div>
 							<span style="font-size:11px; color:{textSecondary}; font-family:monospace; min-width:48px; text-align:right;">
-								{pct !== null ? `${Math.round(pct)}%` : (progressText || 'parsing…')}
+								{pct !== null ? `${Math.round(pct)}%` : (progressText || m.doc_processor_dashboard_parsing())}
 							</span>
 						</div>
 						{/if}
@@ -1371,17 +1372,17 @@
 
 		<div class="mb-4 flex items-start justify-between gap-4">
 			<div class="flex-shrink-0">
-				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Manual Launch</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">Select run mode and click Launch, or Search to pick specific records</p>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_manual_launch()}</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_select_run_mode_and_click()}</p>
 			</div>
 			<div class="flex flex-col items-end gap-2">
 				<!-- Run mode radio group + max records -->
 				<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
 					{#each ([
-						{ value: 'unfinished', label: 'Run Unfinished Only' },
-						{ value: 'failed', label: 'Run Failed Only' },
-						{ value: 'unfinished_failed', label: 'Run Unfinished & Failed' },
-						{ value: 'force', label: 'Force Run' }
+						{ value: 'unfinished', label: m.doc_processor_dashboard_run_unfinished_only() },
+						{ value: 'failed', label: m.doc_processor_dashboard_run_failed_only() },
+						{ value: 'unfinished_failed', label: m.doc_processor_dashboard_run_unfinished_failed() },
+						{ value: 'force', label: m.doc_processor_dashboard_force_run() }
 					] as const) as opt (opt.value)}
 						{@const isForceDisabled = opt.value === 'force' && selectedRecords.length === 0}
 						<label
@@ -1403,7 +1404,7 @@
 						<label
 							class="flex items-center gap-1.5"
 							style="cursor:pointer; font-size:12px; color:{textSecondary}; user-select:none;"
-							title="When re-running extract_metrics, clear and re-extract from scratch instead of merging with existing metrics. Ignored by other processors until their own merge-rule ADR lands."
+							title={m.doc_processor_dashboard_when_re_running_extract_metrics()}
 						>
 							<input
 								type="checkbox"
@@ -1411,10 +1412,10 @@
 								onchange={(e) => { forceClear = (e.target as HTMLInputElement).checked; }}
 								style="accent-color:{accent};"
 							/>
-							Force Clear (metrics only, wipes instead of merging)
+							{m.doc_processor_dashboard_force_clear_metrics_only_wipes()}
 						</label>
 					<div class="flex items-center gap-1.5" style="margin-left:8px;">
-						<span style="font-size:12px; color:{textSecondary}; white-space:nowrap;">Max</span>
+						<span style="font-size:12px; color:{textSecondary}; white-space:nowrap;">{m.doc_processor_dashboard_max()}</span>
 						<input
 							type="number"
 							min="1"
@@ -1436,7 +1437,7 @@
 						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? '1' : '0.5'; }}
 					>
 						<PlayIcon class="h-4 w-4" />
-						{searchingRecords ? 'Searching…' : 'Launch'}
+						{searchingRecords ? m.doc_processor_dashboard_searching() : m.doc_processor_dashboard_launch()}
 					</button>
 					<button
 						onclick={() => { searchDialogOpen = true; }}
@@ -1446,7 +1447,7 @@
 						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
 					>
 						<SearchIcon class="h-4 w-4" />
-						Search
+						{m.doc_processor_dashboard_search()}
 					</button>
 				</div>
 				{#if launchError}
@@ -1460,14 +1461,14 @@
 			<div class="mb-4 rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="mb-2 flex items-center justify-between">
 					<span style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
-						{selectedRecords.length} record{selectedRecords.length !== 1 ? 's' : ''} selected
+						{m.doc_processor_dashboard_record_selected({ selectedRecordsCount: selectedRecords.length, plural: selectedRecords.length !== 1 ? 's' : '' })}
 					</span>
 					<button
 						onclick={() => { selectedRecords = []; }}
 						style="font-size:11px; color:{textMuted}; background:none; border:none; cursor:pointer; padding:0;"
 						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = colorError; }}
 						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
-					>Clear all</button>
+					>{m.doc_processor_dashboard_clear_all()}</button>
 				</div>
 				<div class="flex flex-wrap gap-1.5">
 					{#each selectedRecords as rec (rec.id)}
@@ -1482,7 +1483,7 @@
 								style="background:none; border:none; cursor:pointer; color:{textMuted}; padding:0; line-height:1; font-size:14px; margin-left:2px;"
 								onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = colorError; }}
 								onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
-								title="Remove"
+								title={m.doc_processor_dashboard_remove()}
 							>×</button>
 						</span>
 					{/each}
@@ -1497,10 +1498,10 @@
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
 				<div class="mb-3 flex items-center justify-between gap-4">
-					<div style="font-size:12px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
+					<div style="font-size:12px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">{m.doc_processor_dashboard_processors_to_run()}</div>
 					{#if Object.keys(processorPackages).length > 0}
 						<label class="flex items-center gap-2" style="font-size:12px; color:{textSecondary};">
-							<span style="white-space:nowrap;">Select Processors</span>
+							<span style="white-space:nowrap;">{m.doc_processor_dashboard_select_processors()}</span>
 							<select
 								bind:value={selectedProcessorPackage}
 								onchange={() => {
@@ -1531,8 +1532,8 @@
 						{:else}
 							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 						{/if}
-						<span style="font-size:13px; color:{parseFileChecked ? textPrimary : textSecondary}; font-family:monospace;">parse_file</span>
-						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Parse File</span>
+						<span style="font-size:13px; color:{parseFileChecked ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_parse_file()}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_parse_file_2()}</span>
 					</label>
 
 					<!-- Optional pre-processor: Convert Parse Result -->
@@ -1548,8 +1549,8 @@
 						{:else}
 							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 						{/if}
-						<span style="font-size:13px; color:{convertChecked ? textPrimary : textSecondary}; font-family:monospace;">convert_parse_result</span>
-						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Convert Parse Result</span>
+						<span style="font-size:13px; color:{convertChecked ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_convert_parse_result()}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_convert_parse_result_2()}</span>
 					</label>
 
 					<!-- Mandatory (always-on) processors -->
@@ -1561,7 +1562,7 @@
 							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
 							<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
 							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
-							<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
+							<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">{m.doc_processor_dashboard_mandatory()}</span>
 						</label>
 					{/each}
 
@@ -1602,7 +1603,7 @@
 						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
 					>
-						{allProcessorsSelected() ? 'Deselect all' : 'Select all'}
+						{allProcessorsSelected() ? m.doc_processor_dashboard_deselect_all() : m.doc_processor_dashboard_select_all()}
 					</button>
 					<button
 						onclick={selectFailedProcessors}
@@ -1611,7 +1612,7 @@
 						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '60'; }}
 						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '30'; }}
 					>
-						Select Failed
+						{m.doc_processor_dashboard_select_failed()}
 					</button>
 					<button
 						onclick={selectIncompletedProcessors}
@@ -1620,7 +1621,7 @@
 						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
 						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '30'; }}
 					>
-						Select Incompleted
+						{m.doc_processor_dashboard_select_incompleted()}
 					</button>
 				</div>
 			</div>
@@ -1653,12 +1654,12 @@
 				{/if}
 				<div>
 					<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 2px;">
-						Failed Pipelines
+						{m.doc_processor_dashboard_failed_pipelines()}
 						{#if failedLoaded}
 							<span style="font-size:12px; font-weight:400; color:{colorError}; margin-left:6px;">({failedTotal})</span>
 						{/if}
 					</h2>
-					<p style="font-size:12px; color:{textMuted}; margin:0;">Records with at least one failed processing step</p>
+					<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_records_with_at_least_one()}</p>
 				</div>
 			</div>
 			{#if failedExpanded}
@@ -1677,7 +1678,7 @@
 					}}
 				>
 					<RefreshCwIcon class="h-3 w-3" />
-					Refresh
+					{m.doc_processor_dashboard_refresh()}
 				</button>
 			{/if}
 		</div>
@@ -1713,8 +1714,8 @@
 						style="background:{surface2}; border:1px solid {borderColor};"
 					>
 						<CircleCheckIcon class="mb-3 h-8 w-8" style="color:{colorSuccess}; opacity:0.5;" />
-						<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">No failed pipelines</p>
-						<p style="font-size:12px; color:{textMuted}; margin:0;">All processed records completed without failures.</p>
+						<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">{m.doc_processor_dashboard_no_failed_pipelines()}</p>
+						<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_all_processed_records_completed_without()}</p>
 					</div>
 
 				<!-- Table -->
@@ -1723,7 +1724,7 @@
 						<table style="width:100%; border-collapse:collapse; font-size:13px;">
 							<thead>
 								<tr style="background:{surface2}; border-bottom:1px solid {borderColor};">
-									{#each ['ID', 'Title', 'Failed Steps', 'Created', ''] as col}
+									{#each ['ID', m.doc_processor_dashboard_title(), m.doc_processor_dashboard_failed_steps(), m.doc_processor_dashboard_created(), ''] as col}
 										<th
 											class="px-3 py-2 text-left"
 											style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap;"
@@ -1745,13 +1746,13 @@
 												{#each failedSteps as step}
 													<span
 														title={step.isMappingTriage
-															? 'Routine vocabulary-triage backlog, not a processing failure. Restart will not resolve this -- go to System Admin → Database Maintenance → Resolve Metric Range Types.'
+															? m.doc_processor_dashboard_routine_vocabulary_triage_backlog_not()
 															: undefined}
 														style="font-family:monospace; font-size:10px; padding:1px 6px; border-radius:999px; white-space:nowrap;
 														       {step.isMappingTriage
 															? `background:${colorWarningTint}; color:${colorWarning}; border:1px solid ${colorWarning}30;`
 															: `background:${colorErrorTint}; color:${colorError}; border:1px solid ${colorError}30;`}"
-													>{step.operation}{step.isMappingTriage ? ' (mapping triage)' : ''}</span>
+													>{step.operation}{step.isMappingTriage ? m.doc_processor_dashboard_mapping_triage() : ''}</span>
 												{/each}
 											</div>
 										</td>
@@ -1760,8 +1761,8 @@
 											{#if triageOnly}
 												<span
 													style="font-size:11px; color:{textMuted}; white-space:nowrap;"
-													title="Restart will reproduce this identically. Resolve the mapping via System Admin → Database Maintenance → Resolve Metric Range Types, then this record will pick it up on its next ordinary reprocess."
-												>Needs mapping triage, not restart</span>
+													title={m.doc_processor_dashboard_restart_will_reproduce_this_identically()}
+												>{m.doc_processor_dashboard_needs_mapping_triage_not_restart()}</span>
 											{:else}
 												<button
 													onclick={() => openRestart(rec)}
@@ -1771,7 +1772,7 @@
 													onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
 												>
 													<PlayIcon class="h-3 w-3" />
-													Restart
+													{m.doc_processor_dashboard_restart()}
 												</button>
 											{/if}
 										</td>
@@ -1785,7 +1786,7 @@
 					{#if failedTotalPages > 1}
 						<div class="mt-3 flex items-center justify-between">
 							<span style="font-size:12px; color:{textMuted};">
-								{(failedPage - 1) * FAILED_PAGE_SIZE + 1}–{Math.min(failedPage * FAILED_PAGE_SIZE, failedTotal)} of {failedTotal}
+								{m.doc_processor_dashboard_of({ value: (failedPage - 1) * FAILED_PAGE_SIZE + 1, value2: Math.min(failedPage * FAILED_PAGE_SIZE, failedTotal), failedTotal })}
 							</span>
 							<div class="flex items-center gap-1.5">
 								<button
@@ -1795,7 +1796,7 @@
 									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage <= 1 ? textMuted : textSecondary}; font-size:12px; cursor:{failedPage <= 1 ? 'not-allowed' : 'pointer'}; opacity:{failedPage <= 1 ? '0.45' : '1'};"
 									onmouseenter={(e) => { if (failedPage > 1) (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = failedPage <= 1 ? textMuted : textSecondary; }}
-								>← Prev</button>
+								>{m.doc_processor_dashboard_prev()}</button>
 								<span style="font-size:12px; color:{textSecondary}; font-family:monospace; padding:0 6px;">
 									{failedPage} / {failedTotalPages}
 								</span>
@@ -1806,7 +1807,7 @@
 									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage >= failedTotalPages ? textMuted : textSecondary}; font-size:12px; cursor:{failedPage >= failedTotalPages ? 'not-allowed' : 'pointer'}; opacity:{failedPage >= failedTotalPages ? '0.45' : '1'};"
 									onmouseenter={(e) => { if (failedPage < failedTotalPages) (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = failedPage >= failedTotalPages ? textMuted : textSecondary; }}
-								>Next →</button>
+								>{m.doc_processor_dashboard_next()}</button>
 							</div>
 						</div>
 					{/if}
@@ -1830,9 +1831,9 @@
 			class="mx-4 w-full max-w-md rounded-2xl p-6"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
-			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 8px;">Confirm launch</h3>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 8px;">{m.doc_processor_dashboard_confirm_launch()}</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 12px; line-height:1.5;">
-				Launch processing for {selectedRecords.length} record{selectedRecords.length !== 1 ? 's' : ''}:
+				{m.doc_processor_dashboard_launch_processing_for_record({ selectedRecordsCount: selectedRecords.length, plural: selectedRecords.length !== 1 ? 's' : '' })}
 			</p>
 			<div class="mb-4 flex flex-wrap gap-1.5">
 				{#each selectedRecords as rec (rec.id)}
@@ -1849,13 +1850,13 @@
 				class="mb-4 rounded-lg px-3 py-2.5"
 				style="background:{surface2}; border:1px solid {borderColor}; font-size:12px; color:{textSecondary};"
 			>
-				<div style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;">Processors</div>
+				<div style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;">{m.doc_processor_dashboard_processors()}</div>
 				<div class="flex flex-wrap gap-1.5">
 					{#if parseFileChecked}
-						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">parse_file</span>
+						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{m.doc_processor_dashboard_parse_file()}</span>
 					{/if}
 					{#if convertChecked}
-						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">convert_parse_result</span>
+						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{m.doc_processor_dashboard_convert_parse_result()}</span>
 					{/if}
 					{#each MANDATORY_DISPLAY_STAGES as stage}
 						<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{stage.id}</span>
@@ -1865,9 +1866,9 @@
 					{/each}
 				</div>
 				{#if parseFileChecked}
-					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers parse → convert → all doc processors (auto chain).</div>
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_triggers_parse_convert_all_doc()}</div>
 				{:else if convertChecked}
-					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers convert → all doc processors (auto chain).</div>
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_triggers_convert_all_doc_processors()}</div>
 				{/if}
 			</div>
 
@@ -1882,7 +1883,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>Cancel</button>
+				>{m.doc_processor_dashboard_cancel()}</button>
 				<button
 					onclick={confirmLaunch}
 					disabled={launching}
@@ -1892,7 +1893,7 @@
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = launching ? '0.7' : '1'; }}
 				>
 					<PlayIcon class="h-4 w-4" />
-					{launching ? 'Launching…' : 'Confirm Launch'}
+					{launching ? m.doc_processor_dashboard_launching() : m.doc_processor_dashboard_confirm_launch_2()}
 				</button>
 			</div>
 		</div>
@@ -1915,18 +1916,15 @@
 		>
 			<div class="mb-3 flex items-center gap-2">
 				<XCircleIcon class="h-5 w-5 flex-shrink-0" style="color:{colorError};" />
-				<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0;">Nothing to launch</h3>
+				<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0;">{m.doc_processor_dashboard_nothing_to_launch()}</h3>
 			</div>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 20px; line-height:1.6;">
 				{#if noEligibleDialog.fromSearch}
-					No <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> records found to launch.
-					Try a different run mode or use Search to pick records manually.
+					{m.doc_processor_dashboard_no()} <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> {m.doc_processor_dashboard_records_found_to_launch_try()}
 				{:else}
-					{noEligibleDialog.recordCount === 1
-						? 'The selected record has'
-						: `All ${noEligibleDialog.recordCount} selected records have`}
-					no <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> processors.
-					Switch to <em>Force Run</em> to re-run regardless of status, or select a different run mode.
+					{m.doc_processor_dashboard_no_2({ value: noEligibleDialog.recordCount === 1
+						? m.doc_processor_dashboard_the_selected_record_has()
+						: m.doc_processor_dashboard_all_selected_records_have({ recordCount: noEligibleDialog.recordCount }) })} <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> {m.doc_processor_dashboard_processors_switch_to()} <em>{m.doc_processor_dashboard_force_run()}</em> {m.doc_processor_dashboard_to_re_run_regardless_of()}
 				{/if}
 			</p>
 			<div class="flex justify-end">
@@ -1936,7 +1934,7 @@
 					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-				>OK</button>
+				>{m.doc_processor_dashboard_ok()}</button>
 			</div>
 		</div>
 	</div>
@@ -1956,10 +1954,10 @@
 			class="mx-4 w-full max-w-md rounded-2xl p-6"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
-			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">Restart pipeline</h3>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">{m.doc_processor_dashboard_restart_pipeline()}</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px;">
-				Record <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
-				— select processors to re-run:
+				{m.doc_processor_dashboard_record()} <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
+				{m.doc_processor_dashboard_select_processors_to_re_run()}
 			</p>
 
 			<div class="mb-4 space-y-1.5">
@@ -1976,8 +1974,8 @@
 					{:else}
 						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 					{/if}
-					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">parse_file</span>
-					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Parse File</span>
+					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_parse_file()}</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_parse_file_2()}</span>
 				</label>
 
 				<!-- Optional pre-processor: Convert Parse Result -->
@@ -1993,8 +1991,8 @@
 					{:else}
 						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 					{/if}
-					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">convert_parse_result</span>
-					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Convert Parse Result</span>
+					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_convert_parse_result()}</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_convert_parse_result_2()}</span>
 				</label>
 
 				<!-- Mandatory (always-on) processors -->
@@ -2003,7 +2001,7 @@
 						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
 						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
-						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
+						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">{m.doc_processor_dashboard_mandatory()}</span>
 					</label>
 				{/each}
 
@@ -2034,7 +2032,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>{allRestartSelected() ? 'Deselect all' : 'Select all'}</button>
+				>{allRestartSelected() ? m.doc_processor_dashboard_deselect_all() : m.doc_processor_dashboard_select_all()}</button>
 			</div>
 
 			{#if restartError}
@@ -2048,7 +2046,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>Cancel</button>
+				>{m.doc_processor_dashboard_cancel()}</button>
 				<button
 					onclick={confirmRestart}
 					disabled={restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p]))}
@@ -2064,7 +2062,7 @@
 					}}
 				>
 					<RefreshCwIcon class="h-4 w-4" />
-					{restarting ? 'Restarting…' : 'Restart'}
+					{restarting ? m.doc_processor_dashboard_restarting() : m.doc_processor_dashboard_restart()}
 				</button>
 			</div>
 		</div>
@@ -2094,47 +2092,47 @@
 			<div class="flex items-center justify-between px-5 py-3.5 flex-shrink-0" style="border-bottom:1px solid {borderColor};">
 				<div class="flex items-center gap-2">
 					<span style="font-family:monospace; font-size:11px; font-weight:600; color:{accent}; background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 7px;">#{detailRecord.id}</span>
-					<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin:0;">{recordTitle(detailRecord)} — Status</h3>
+					<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin:0;">{m.doc_processor_dashboard_status({ detailRecord: recordTitle(detailRecord) })}</h3>
 				</div>
 				<button
 					onclick={closeDetail}
 					style="height:30px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>Close</button>
+				>{m.doc_processor_dashboard_close()}</button>
 			</div>
 
 			<!-- Body -->
 			<div class="grid gap-4 p-5 overflow-auto flex-1" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items:start;">
 				<!-- Readable -->
 				<div class="rounded-xl p-3" style="border:1px solid {borderColor}; background:{surface2};">
-					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">Readable</div>
+					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">{m.doc_processor_dashboard_readable()}</div>
 					{#if !detailRecord.status?.length}
-						<div style="font-size:12px; color:{textMuted};">No status entries.</div>
+						<div style="font-size:12px; color:{textMuted};">{m.doc_processor_dashboard_no_status_entries()}</div>
 					{:else}
 						<div class="space-y-2">
 							{#each detailRecord.status as item, idx}
 								{@const ps = (item.proc_status ?? item['proc-status'] ?? item.status ?? '').toLowerCase()}
 								<div class="rounded-lg p-2.5" style="border:1px solid {borderColor}; background:{cardBg};">
 									<div style="font-size:11px; font-weight:600; color:{textSecondary}; margin-bottom:7px; text-transform:uppercase; letter-spacing:0.08em;">
-										Entry #{idx + 1}
+										{m.doc_processor_dashboard_entry({ value: idx + 1 })}
 									</div>
 									<div class="grid gap-y-1 gap-x-3" style="grid-template-columns: 110px 1fr;">
-										<span style="font-size:11px; color:{textMuted};">operation</span>
+										<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_operation()}</span>
 										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.operation ?? '—'}</span>
-										<span style="font-size:11px; color:{textMuted};">proc_status</span>
+										<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_proc_status()}</span>
 										<span style="font-size:12px; font-family:monospace; font-weight:600;
 											color:{ps === 'success' ? colorSuccess : ps === 'failed' || ps === 'fail' ? colorError : textPrimary};">
 											{item.proc_status ?? item['proc-status'] ?? '—'}
 										</span>
-										<span style="font-size:11px; color:{textMuted};">start_time</span>
+										<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_start_time()}</span>
 										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.start_time ?? '—'}</span>
 										{#if item.doc_processor_name}
-											<span style="font-size:11px; color:{textMuted};">processor</span>
+											<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_processor()}</span>
 											<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.doc_processor_name}</span>
 										{/if}
 										{#if item.error}
-											<span style="font-size:11px; color:{textMuted};">error</span>
+											<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_error()}</span>
 											<span style="font-size:12px; color:{colorError}; word-break:break-word;">{item.error}</span>
 										{/if}
 									</div>
@@ -2146,7 +2144,7 @@
 
 				<!-- Raw JSON -->
 				<div class="rounded-xl p-3 flex flex-col" style="border:1px solid {borderColor}; background:{surface2}; min-height:0;">
-					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">Raw JSON</div>
+					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">{m.doc_processor_dashboard_raw_json()}</div>
 					<pre
 						bind:this={detailRawJsonEl}
 						style="margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; color:{textPrimary}; overflow-y:{detailHasOverflow ? 'auto' : 'visible'}; max-height:420px;"

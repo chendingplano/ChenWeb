@@ -1,4 +1,5 @@
 	<script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import { onMount, untrack, tick, type Snippet } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -141,14 +142,14 @@
 			highlightSelectionVersion += 1;
 			return;
 		}
-		const docLabel = currentInput ? recordDisplayName(currentInput) : 'Reviewed document';
+		const docLabel = currentInput ? recordDisplayName(currentInput) : msg.doc_structure_reviewed_document();
 		findingTargets = items.map((f) => ({
 			id: `finding:${f.id}`,
 			recordId: reviewedId,
 			docLabel,
 			lines: parseFindingLocation(f.location ?? ''),
 			kind: 'finding' as const,
-			title: `Finding #${f.id}`,
+			title: msg.doc_structure_finding({ id: f.id }),
 			body: f.description ?? ''
 		}));
 		await showTargetDoc(reviewedId, token);
@@ -551,7 +552,7 @@
 		for (const ln of findingHighlightLines) {
 			if (ln.page_number !== pageNo) continue;
 			if (lineKey(ln) === selectedLineKey) continue; // already drawn as primary target
-			drawMark(ln.coords, `page ${ln.page_number}, line ${ln.line_number}`);
+			drawMark(ln.coords, msg.doc_structure_page_line_2({ page_number: ln.page_number, line_number: ln.line_number }));
 		}
 
 		// Report Finding targets: highlight every target on the active document
@@ -765,14 +766,14 @@
 
 		const saveBtn = document.createElement('button');
 		saveBtn.type = 'button';
-		saveBtn.textContent = 'Save';
+		saveBtn.textContent = msg.doc_structure_save();
 		saveBtn.style.cssText =
 			'height:26px;padding:0 12px;background:#d4a24c;color:#15110a;border:1px solid #e0b768;' +
 			'border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;pointer-events:auto;';
 
 		const cancelBtn = document.createElement('button');
 		cancelBtn.type = 'button';
-		cancelBtn.textContent = 'Cancel';
+		cancelBtn.textContent = msg.doc_structure_cancel();
 		cancelBtn.style.cssText =
 			'height:26px;padding:0 12px;background:rgba(255,255,255,0.08);color:#94a3b8;' +
 			'border:1px solid rgba(148,163,184,0.2);border-radius:8px;font-size:12px;font-weight:600;' +
@@ -957,7 +958,7 @@
 			const updatedLine = lines.find((l) => lineKey(l) === selectedLineKey);
 			if (updatedLine) await selectLine(updatedLine);
 		} catch (err) {
-			editCoordsError = err instanceof Error ? err.message : 'Failed to save coordinates.';
+			editCoordsError = err instanceof Error ? err.message : msg.doc_structure_failed_to_save_coordinates();
 		} finally {
 			editCoordsSaving = false;
 		}
@@ -989,7 +990,7 @@
 				await selectLine(first);
 			}
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve document structure';
+			errorMsg = err instanceof Error ? err.message : msg.doc_structure_failed_to_retrieve_document_structure();
 		} finally {
 			loading = false;
 		}
@@ -1006,7 +1007,7 @@
 				? {
 						page: line.page_number,
 						coords: line.coords.slice(0, 4),
-						label: `page ${line.page_number}, line ${line.line_number}`,
+						label: msg.doc_structure_page_line_2({ page_number: line.page_number, line_number: line.line_number }),
 						version: highlightSelectionVersion
 					}
 				: null;
@@ -1203,12 +1204,12 @@
 		if (!editingLineKey || editingSaving) return;
 		const recordId = Number(currentInput?.id ?? 0);
 		if (!recordId || recordId <= 0) {
-			editingError = 'No record loaded.';
+			editingError = msg.doc_structure_no_record_loaded();
 			return;
 		}
 		const line = lines.find((ln) => lineKey(ln) === editingLineKey);
 		if (!line) {
-			editingError = 'Line not found.';
+			editingError = msg.doc_structure_line_not_found();
 			return;
 		}
 		const correctedType = editingCorrectedType.trim();
@@ -1229,7 +1230,7 @@
 			lines = res.lines ?? [];
 			editingLineKey = null;
 		} catch (err) {
-			editingError = err instanceof Error ? err.message : 'Failed to save.';
+			editingError = err instanceof Error ? err.message : msg.doc_structure_failed_to_save();
 		} finally {
 			editingSaving = false;
 		}
@@ -1250,7 +1251,7 @@
 			const res = await renumberKbDocStructureLines(currentInput.id);
 			lines = res.lines ?? [];
 		} catch (err) {
-			renumberError = err instanceof Error ? err.message : 'Renumber failed.';
+			renumberError = err instanceof Error ? err.message : msg.doc_structure_renumber_failed();
 		} finally {
 			renumbering = false;
 		}
@@ -1313,7 +1314,7 @@
 			lines = res.lines ?? [];
 			sidebarTypeEditing = false;
 		} catch (err) {
-			sidebarTypeError = err instanceof Error ? err.message : 'Failed to save.';
+			sidebarTypeError = err instanceof Error ? err.message : msg.doc_structure_failed_to_save();
 		} finally {
 			sidebarTypeSaving = false;
 		}
@@ -1364,14 +1365,14 @@
 			lines = res.lines ?? [];
 			sidebarContentDialogOpen = false;
 		} catch (err) {
-			sidebarContentError = err instanceof Error ? err.message : 'Failed to save.';
+			sidebarContentError = err instanceof Error ? err.message : msg.doc_structure_failed_to_save();
 		} finally {
 			sidebarContentSaving = false;
 		}
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || msg.doc_structure_input({ id: r.id });
 	}
 
 	function recordDisplayDocNo(r: KbInputRecord): string {
@@ -1485,9 +1486,9 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge System · Vol. IV</div>
-			<h1 class="display">Document Structure</h1>
-			<div class="subtitle">Inspect corrected structure labels and highlight their source region in the PDF.</div>
+			<div class="eyebrow">{msg.doc_structure_knowledge_system_vol_iv()}</div>
+			<h1 class="display">{msg.doc_structure_document_structure()}</h1>
+			<div class="subtitle">{msg.doc_structure_inspect_corrected_structure_labels_and()}</div>
 		</div>
 	</header>
 
@@ -1496,10 +1497,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="doc-structure-record-browser"
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting corrected structure lines."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={msg.doc_structure_kb_inputs()}
+				subtitle={msg.doc_structure_search_filter_and_select_input()}
+				emptyTitle={msg.doc_structure_no_records_yet()}
+				emptySubtitle={msg.doc_structure_use_search_or_retrieve_to()}
 				selectedRecordId={currentInput?.id ?? null}
 				mapRecord={mapBrowserRecord}
 				onSelect={(record) => void loadStructureForRecord(record.id)}
@@ -1520,8 +1521,8 @@
 						class="browser-collapse-btn"
 						type="button"
 						onclick={() => (browserCollapsed = !browserCollapsed)}
-						title={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
-						aria-label={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
+						title={browserCollapsed ? msg.doc_structure_expand_records_panel() : msg.doc_structure_collapse_records_panel()}
+						aria-label={browserCollapsed ? msg.doc_structure_expand_records_panel() : msg.doc_structure_collapse_records_panel()}
 					>
 						{#if browserCollapsed}
 							<ChevronRightIcon style="width:13px; height:13px;" />
@@ -1531,14 +1532,14 @@
 					</button>
 				{/if}
 				<div class="left-meta-copy">
-					<div class="left-meta-title">Lines</div>
+					<div class="left-meta-title">{msg.doc_structure_lines()}</div>
 					<div class="left-meta-count">
-						{filteredLines.length} shown / {lines.length} total · {getDocStructureFilterLabel(lineFilter)}
+						{msg.doc_structure_shown_total({ filteredLinesCount: filteredLines.length, linesCount: lines.length, lineFilter: getDocStructureFilterLabel(lineFilter) })}
 					</div>
 				</div>
 				<div class="left-meta-actions">
 					<label class="filter-field">
-						<span class="sr-only">Filter lines by type</span>
+						<span class="sr-only">{msg.doc_structure_filter_lines_by_type()}</span>
 						<select class="filter-select" value={lineFilter} onchange={handleLineFilterChange}>
 							{#each DOC_STRUCTURE_FILTER_OPTIONS as option (option.value)}
 								<option value={option.value}>{option.label}</option>
@@ -1550,10 +1551,10 @@
 							class="btn btn-renumber"
 							type="button"
 							disabled={renumbering}
-							title="Assign sequential line numbers to all 'new' lines"
+							title={msg.doc_structure_assign_sequential_line_numbers_to()}
 							onclick={() => void renumberLines()}
 						>
-							{renumbering ? '…' : 'Renumber'}
+							{renumbering ? '…' : msg.doc_structure_renumber()}
 						</button>
 					{/if}
 					{#if renumberError}
@@ -1561,7 +1562,7 @@
 					{/if}
 					<button class="btn btn-ghost settings-btn" type="button" onclick={openLineListSettings}>
 						<SettingsIcon style="width:14px; height:14px;" />
-						Settings
+						{msg.doc_structure_settings()}
 					</button>
 				</div>
 			</div>
@@ -1569,24 +1570,24 @@
 			<div class="search-bar">
 				<div
 					class="search-row"
-					title="Search tips: plain text → case-insensitive substring · /pattern/ → regex · /pattern/i → case-insensitive regex · /pattern/g → global"
+					title={msg.doc_structure_search_tips_plain_text_case()}
 				>
 					<SearchIcon style="width:13px;height:13px;flex-shrink:0;color:var(--text-muted);" />
 					<input
 						class="search-input"
 						type="search"
-						placeholder="Search lines…"
+						placeholder={msg.doc_structure_search_lines()}
 						bind:value={lineSearch}
 						spellcheck="false"
-						aria-label="Search line content"
+						aria-label={msg.doc_structure_search_line_content()}
 					/>
 					{#if lineSearch}
-						<span class="search-count">{filteredLines.length} of {filterDocStructureLines(lines, lineFilter).length}</span>
+						<span class="search-count">{msg.doc_structure_of({ filteredLinesCount: filteredLines.length, linesCount: filterDocStructureLines(lines, lineFilter).length })}</span>
 						<button
 							class="search-clear"
 							type="button"
 							onclick={() => (lineSearch = '')}
-							aria-label="Clear search"
+							aria-label={msg.doc_structure_clear_search()}
 						>&times;</button>
 					{/if}
 				</div>
@@ -1597,19 +1598,19 @@
 					<div class="error">{errorMsg}</div>
 				{:else if !loading && filteredLines.length === 0}
 					<div class="empty">
-						<div class="empty-title">No lines loaded</div>
+						<div class="empty-title">{msg.doc_structure_no_lines_loaded()}</div>
 						<div class="empty-sub">
-							Select a record to load a `.txt` file.
+							{msg.doc_structure_select_a_record_to_load()}
 							{#if lineFilter !== 'all'}
-								No {getDocStructureFilterLabel(lineFilter).toLowerCase()} found in current result.
+								{msg.doc_structure_no_found_in_current_result({ lineFilter: getDocStructureFilterLabel(lineFilter).toLowerCase() })}
 							{/if}
 						</div>
 					</div>
 				{:else}
 					<div class="line-list-head" aria-hidden="true">
-						<span>Line</span>
-						<span>Line Type</span>
-						<span>Content</span>
+						<span>{msg.doc_structure_line()}</span>
+						<span>{msg.doc_structure_line_type()}</span>
+						<span>{msg.doc_structure_content()}</span>
 					</div>
 					{#each filteredLineViews as { line, lineKey: viewLineKey, uiKey } (uiKey)}
 						{#if editingLineKey === viewLineKey}
@@ -1625,7 +1626,7 @@
 									}}
 								>
 									<div class="line-edit-field">
-										<span class="line-edit-label">Line Type</span>
+										<span class="line-edit-label">{msg.doc_structure_line_type()}</span>
 										<div class="line-type-edit-row">
 											<input
 												class="line-edit-input"
@@ -1642,7 +1643,7 @@
 													editingCorrectedType = (e.currentTarget as HTMLSelectElement).value;
 												}}
 											>
-												<option value="" disabled>pick type</option>
+												<option value="" disabled>{msg.doc_structure_pick_type()}</option>
 												{#each LINE_TYPE_OPTIONS as opt}
 													<option value={opt}>{opt}</option>
 												{/each}
@@ -1650,7 +1651,7 @@
 										</div>
 									</div>
 									<div class="line-edit-field">
-										<span class="line-edit-label">Content</span>
+										<span class="line-edit-label">{msg.doc_structure_content()}</span>
 										<div class="content-edit-wrap">
 											<div
 												class="content-backdrop line-edit-textarea"
@@ -1671,13 +1672,13 @@
 									<div class="line-edit-field">
 										<span
 											class="line-edit-label"
-											title="Find supports plain text (case-insensitive) or /regex/flags. Replace fills every match; cleared when you Cancel."
-										>Find &amp; Replace in content</span>
+											title={msg.doc_structure_find_supports_plain_text_case()}
+										>{msg.doc_structure_find_replace_in_content()}</span>
 										<div class="find-replace-row">
 											<input
 												class="line-edit-input"
 												type="text"
-												placeholder="Find — text or /regex/"
+												placeholder={msg.doc_structure_find_text_or_regex()}
 												bind:value={editFind}
 												spellcheck="false"
 												onkeydown={(e) => {
@@ -1687,7 +1688,7 @@
 											<input
 												class="line-edit-input"
 												type="text"
-												placeholder="Replace with"
+												placeholder={msg.doc_structure_replace_with()}
 												bind:value={editReplace}
 												spellcheck="false"
 												onkeydown={(e) => {
@@ -1701,9 +1702,9 @@
 												class="btn btn-ghost line-edit-action-btn find-replace-btn"
 												type="button"
 												disabled={!editFind.trim() || editMatchCount === 0}
-												title={editFind.trim() ? `Replace ${editMatchCount} match(es) of '${editFind}' with '${editReplace}'` : 'Enter a Find pattern to enable replace'}
+												title={editFind.trim() ? msg.doc_structure_replace_match_es_of_with({ editMatchCount, editFind, editReplace }) : msg.doc_structure_enter_a_find_pattern_to()}
 												onclick={applyEditReplace}
-											>Replace{editFind.trim() ? ` (${editMatchCount})` : ''}</button>
+											>{msg.doc_structure_replace({ value: editFind.trim() ? ` (${editMatchCount})` : '' })}</button>
 										</div>
 									</div>
 									{#if editingError}<div class="line-edit-error">{editingError}</div>{/if}
@@ -1713,14 +1714,14 @@
 											type="submit"
 											disabled={editingSaving || !editingHasChanges}
 										>
-											{editingSaving ? 'Saving…' : 'Save'}
+											{editingSaving ? msg.doc_structure_saving() : msg.doc_structure_save()}
 										</button>
 										<button
 											class="btn btn-ghost line-edit-action-btn"
 											type="button"
 											onclick={cancelLineEdit}
 											disabled={editingSaving}
-										>Cancel</button>
+										>{msg.doc_structure_cancel()}</button>
 									</div>
 								</form>
 							</div>
@@ -1738,7 +1739,7 @@
 										selectLine(line);
 									}
 								}}
-								title={`Page ${line.page_number}, line ${line.line_number}`}
+								title={msg.doc_structure_page_line({ page_number: line.page_number, line_number: line.line_number })}
 							>
 								<span class="line-number-cell" class:line-new={line.line_number < 0}>
 									{line.line_number < 0 ? 'new' : `L${line.line_number}`}
@@ -1755,8 +1756,8 @@
 									<button
 										type="button"
 										class="line-edit-btn"
-										title="Edit line"
-										aria-label={`Edit line ${line.line_number}`}
+										title={msg.doc_structure_edit_line()}
+										aria-label={msg.doc_structure_edit_line_2({ line_number: line.line_number })}
 										onclick={(e) => {
 											e.stopPropagation();
 											startLineEdit(line);
@@ -1765,8 +1766,8 @@
 									<button
 										type="button"
 										class="line-delete-btn"
-										title="Delete line"
-										aria-label={`Delete line ${line.line_number}`}
+										title={msg.doc_structure_delete_line()}
+										aria-label={msg.doc_structure_delete_line_2({ line_number: line.line_number })}
 										disabled={deletingLineKey === lineKey(line)}
 										onclick={(e) => requestDeleteConfirm(line, e)}
 									><Trash2Icon class="line-action-icon" /></button>
@@ -1781,7 +1782,7 @@
 				type="button"
 				class="line-list-resizer"
 				class:active={lineListResizing}
-				aria-label="Resize lines list"
+				aria-label={msg.doc_structure_resize_lines_list()}
 				onpointerdown={startLineListResize}
 				onkeydown={onLineListResizerKeydown}
 			>
@@ -1792,20 +1793,20 @@
 
 		<section class="right">
 			{#if !currentInput}
-				<div class="doc-empty">Retrieve a record to display document and structure highlights.</div>
+				<div class="doc-empty">{msg.doc_structure_retrieve_a_record_to_display()}</div>
 			{:else}
 				{#if viewingExternalRecord && !(findingShelf.active && findingShelf.finding)}
 					<div class="external-record-banner">
 						<button type="button" class="external-record-back" onclick={backToLockedRecord}>
 							<ChevronLeftIcon style="width:13px; height:13px;" />
-							Back to reviewed document
+							{msg.doc_structure_back_to_reviewed_document()}
 						</button>
-						<span class="external-record-label">Viewing matched document: {recordDisplayName(currentInput)}</span>
+						<span class="external-record-label">{msg.doc_structure_viewing_matched_document({ currentInput: recordDisplayName(currentInput) })}</span>
 					</div>
 				{/if}
 				{#if findingShelf.active && findingDocChips.length > 1}
 					<div class="finding-doc-chips">
-						<span class="finding-doc-chips-label">Documents</span>
+						<span class="finding-doc-chips-label">{msg.doc_structure_documents()}</span>
 						{#each findingDocChips as chip (chip.recordId)}
 							<button
 								type="button"
@@ -1839,9 +1840,9 @@
 						sidebarMinWidth={140}
 						sidebarMaxWidth={420}
 						sidebarDefaultWidth={270}
-						sidebarTitle="Selected Line"
+						sidebarTitle={msg.doc_structure_selected_line()}
 						sidebarSettingsKey="doc-structure-pdf-sidebar"
-						sidebarWidthSettingLabel="Panel Width"
+						sidebarWidthSettingLabel={msg.doc_structure_panel_width()}
 						showSidebar={lockedRecordId == null}
 					>
 						{#snippet toolbar()}
@@ -1851,14 +1852,14 @@
 									class="pvw-tool-btn"
 									disabled={findingBoxHang <= 0}
 									onclick={() => nudgeFindingBoxes(-1)}
-									title="Move FINDING boxes left (onto the page)"
+									title={msg.doc_structure_move_finding_boxes_left_onto()}
 								><ChevronLeftIcon class="pvw-tb-icon" /></button>
 								<button
 									type="button"
 									class="pvw-tool-btn"
 									disabled={findingBoxHang >= 1}
 									onclick={() => nudgeFindingBoxes(1)}
-									title="Move FINDING boxes right (off the page)"
+									title={msg.doc_structure_move_finding_boxes_right_off()}
 								><ChevronRightIcon class="pvw-tb-icon" /></button>
 								<div class="pvw-tool-sep"></div>
 							{/if}
@@ -1867,7 +1868,7 @@
 								class="pvw-tool-btn"
 								disabled={!selectedLine}
 								onclick={openSidebarTypeEdit}
-								title="Edit Line Type"
+								title={msg.doc_structure_edit_line_type()}
 							><SquarePenIcon class="pvw-tb-icon" /></button>
 							<div class="pvw-tool-sep"></div>
 							<button
@@ -1876,7 +1877,7 @@
 								class:active={editingCoordsMode}
 								disabled={!selectedLine}
 								onclick={editingCoordsMode ? cancelEditCoords : startEditCoords}
-								title={editingCoordsMode ? 'Cancel coordinate edit' : 'Edit Coordinates'}
+								title={editingCoordsMode ? msg.doc_structure_cancel_coordinate_edit() : msg.doc_structure_edit_coordinates()}
 							><CrosshairIcon class="pvw-tb-icon" /></button>
 							<div class="pvw-tool-sep"></div>
 							<button
@@ -1884,19 +1885,19 @@
 								class="pvw-tool-btn"
 								disabled={!selectedLine || !!deletingLineKey}
 								onclick={(e) => { if (selectedLine) requestDeleteConfirm(selectedLine, e); }}
-								title="Delete Line"
+								title={msg.doc_structure_delete_line_3()}
 							><Trash2Icon class="pvw-tb-icon" /></button>
 						{/snippet}
 						{#snippet sidebar()}
 							{#if !selectedLine}
-								<div class="meta-empty">Select a line from the left panel.</div>
+								<div class="meta-empty">{msg.doc_structure_select_a_line_from_the()}</div>
 							{:else}
-								<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
-								<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
+								<div class="meta-row"><span>{msg.doc_structure_page()}</span><strong>{selectedLine.page_number}</strong></div>
+								<div class="meta-row"><span>{msg.doc_structure_line()}</span><strong>{selectedLine.line_number}</strong></div>
 
 								<!-- Line Type: hover shows edit icon, click opens inline dropdown -->
 								<div class="meta-row sidebar-editable-row">
-									<span>Line Type</span>
+									<span>{msg.doc_structure_line_type()}</span>
 									{#if sidebarTypeEditing}
 										<div
 											class="sidebar-type-edit-wrap"
@@ -1940,7 +1941,7 @@
 											<button
 												class="sidebar-edit-icon-btn"
 												type="button"
-												title="Edit line type"
+												title={msg.doc_structure_edit_line_type_2()}
 												onclick={openSidebarTypeEdit}
 											>✎</button>
 										</div>
@@ -1950,11 +1951,11 @@
 								<!-- Content: hover shows edit icon, click opens dialog -->
 								<div class="meta-row sidebar-editable-row sidebar-content-row">
 									<div class="sidebar-content-label-row">
-										<span>Content</span>
+										<span>{msg.doc_structure_content()}</span>
 										<button
 											class="sidebar-edit-icon-btn"
 											type="button"
-											title="Edit content"
+											title={msg.doc_structure_edit_content()}
 											onclick={openSidebarContentEdit}
 										>✎</button>
 									</div>
@@ -1962,17 +1963,17 @@
 								</div>
 
 								<div class="meta-row mono">
-									<span>Coordinate</span>[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
+									<span>{msg.doc_structure_coordinate()}</span>[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
 								</div>
 							{/if}
 							{#if correctedFile}
-								<div class="meta-title corrected-title">File</div>
+								<div class="meta-title corrected-title">{msg.doc_structure_file()}</div>
 								<div class="meta-file">{correctedFile.replace('/Users/cding/Apps/SemOS/', '')}</div>
 							{/if}
 						{/snippet}
 					</PdfViewWindow>
 				{:else}
-					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
+					<iframe class="doc-iframe" src={fileUrl} title={msg.doc_structure_document_viewer()}></iframe>
 				{/if}
 				</div>
 				</div>
@@ -1995,15 +1996,15 @@
 			onkeydown={(e) => { if (e.key === 'Escape') closeSidebarContentEdit(); e.stopPropagation(); }}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Edit content"
+			aria-label={msg.doc_structure_edit_content()}
 			tabindex="0"
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-eyebrow">Edit</div>
-					<h2 class="dialog-title">Edit Content</h2>
+					<div class="dialog-eyebrow">{msg.doc_structure_edit()}</div>
+					<h2 class="dialog-title">{msg.doc_structure_edit_content_2()}</h2>
 					<p class="dialog-subtitle">
-						Each non-empty line becomes a separate document line. Use newlines to split into multiple paragraphs — all will share the same coordinates and line type.
+						{msg.doc_structure_each_non_empty_line_becomes()}
 					</p>
 				</div>
 			</div>
@@ -2015,7 +2016,7 @@
 						bind:value={sidebarContentDraftText}
 						disabled={sidebarContentSaving}
 						rows="10"
-						placeholder="Enter content…"
+						placeholder={msg.doc_structure_enter_content()}
 						spellcheck="false"
 					></textarea>
 					{#if sidebarContentError}
@@ -2026,7 +2027,7 @@
 
 			<div class="dialog-foot">
 				<div class="dialog-foot-hint">
-					{sidebarContentParagraphCount} line{sidebarContentParagraphCount === 1 ? '' : 's'} after save
+					{msg.doc_structure_line_after_save({ sidebarContentParagraphCount, plural: sidebarContentParagraphCount === 1 ? '' : 's' })}
 				</div>
 				<div class="dialog-foot-buttons">
 					<button
@@ -2034,13 +2035,13 @@
 						type="button"
 						disabled={sidebarContentSaving}
 						onclick={closeSidebarContentEdit}
-					>Cancel</button>
+					>{msg.doc_structure_cancel()}</button>
 					<button
 						class="btn btn-primary dialog-select-btn"
 						type="button"
 						disabled={sidebarContentSaving || sidebarContentParagraphCount === 0}
 						onclick={() => void saveSidebarContent()}
-					>{sidebarContentSaving ? 'Saving…' : 'Save'}</button>
+					>{sidebarContentSaving ? msg.doc_structure_saving() : msg.doc_structure_save()}</button>
 				</div>
 			</div>
 		</div>
@@ -2070,10 +2071,10 @@
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-eyebrow">Preferences</div>
-					<h2 class="dialog-title">Lines View Settings</h2>
+					<div class="dialog-eyebrow">{msg.doc_structure_preferences()}</div>
+					<h2 class="dialog-title">{msg.doc_structure_lines_view_settings()}</h2>
 					<p class="dialog-subtitle">
-						Adjust the list card color and spacing. These preferences are saved automatically.
+						{msg.doc_structure_adjust_the_list_card_color()}
 					</p>
 				</div>
 			</div>
@@ -2082,12 +2083,12 @@
 				<div class="dialog-controls">
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Appearance</div>
-							<div class="dialog-section-copy">Tune the record rows in the lines list.</div>
+							<div class="dialog-section-title">{msg.doc_structure_appearance()}</div>
+							<div class="dialog-section-copy">{msg.doc_structure_tune_the_record_rows_in()}</div>
 						</div>
 						<div class="settings-grid">
 							<label class="field dialog-field settings-field">
-								<span class="field-label">Record background color</span>
+								<span class="field-label">{msg.doc_structure_record_background_color()}</span>
 								<div class="settings-color-row">
 									<input
 										class="settings-color-input"
@@ -2107,12 +2108,12 @@
 												recordBackground: DOC_STRUCTURE_RECORD_THEME_BACKGROUND
 											})}
 									>
-										Follow theme
+										{msg.doc_structure_follow_theme()}
 									</button>
 								</div>
 							</label>
 							<label class="field dialog-field settings-field settings-field-wide">
-								<span class="field-label">Record height ({recordHeight}px)</span>
+								<span class="field-label">{msg.doc_structure_record_height_px({ recordHeight })}</span>
 								<div class="settings-width-row">
 									<span class="settings-width-bound">{DOC_STRUCTURE_RECORD_MIN_HEIGHT}</span>
 									<input
@@ -2131,7 +2132,7 @@
 								</div>
 							</label>
 							<label class="field dialog-field settings-field settings-field-wide">
-								<span class="field-label">Gap between records ({recordGap}px)</span>
+								<span class="field-label">{msg.doc_structure_gap_between_records_px({ recordGap })}</span>
 								<div class="settings-width-row">
 									<span class="settings-width-bound">{DOC_STRUCTURE_RECORD_GAP_MIN}</span>
 									<input
@@ -2150,7 +2151,7 @@
 								</div>
 							</label>
 							<label class="field dialog-field settings-field settings-field-wide">
-								<span class="field-label">List width ({lineListWidth}px)</span>
+								<span class="field-label">{msg.doc_structure_list_width_px({ lineListWidth })}</span>
 								<div class="settings-width-row">
 									<span class="settings-width-bound">{DOC_STRUCTURE_LINE_LIST_MIN_WIDTH}</span>
 									<input
@@ -2168,7 +2169,7 @@
 									<span class="settings-width-bound">{DOC_STRUCTURE_LINE_LIST_MAX_WIDTH}</span>
 								</div>
 								<div class="dialog-section-copy" style="margin-top:6px;">
-									You can also drag the divider beside the list to resize it.
+									{msg.doc_structure_you_can_also_drag_the()}
 								</div>
 							</label>
 						</div>
@@ -2177,13 +2178,13 @@
 			</div>
 
 			<div class="dialog-foot">
-				<div class="dialog-foot-hint">Updates are saved automatically.</div>
+				<div class="dialog-foot-hint">{msg.doc_structure_updates_are_saved_automatically()}</div>
 				<div class="dialog-foot-buttons">
 					<button class="btn btn-primary dialog-select-btn" type="button" onclick={resetLineListSettings}>
-						Reset
+						{msg.doc_structure_reset()}
 					</button>
 					<button class="btn btn-primary dialog-select-btn" type="button" onclick={closeLineListSettings}>
-						Close
+						{msg.doc_structure_close()}
 					</button>
 				</div>
 			</div>
@@ -2208,18 +2209,17 @@
 			tabindex="0"
 		>
 			<div class="delete-dialog-icon">⚠</div>
-			<div class="delete-dialog-title">Delete Line?</div>
+			<div class="delete-dialog-title">{msg.doc_structure_delete_line_4()}</div>
 			<div class="delete-dialog-body">
 				<span class="delete-dialog-type">{deleteConfirmLine.line_type}</span>
-				<span class="delete-dialog-content">{deleteConfirmLine.content || '(no content)'}</span>
+				<span class="delete-dialog-content">{deleteConfirmLine.content || msg.doc_structure_no_content()}</span>
 			</div>
 			<p class="delete-dialog-sub">
-				Page {deleteConfirmLine.page_number}, line {deleteConfirmLine.line_number}.
-				This will remove it from the <code>.txt</code> file and record it in <code>.manual</code>.
+				{msg.doc_structure_page_line_this_will_remove({ page_number: deleteConfirmLine.page_number, line_number: deleteConfirmLine.line_number })} <code>.txt</code> {msg.doc_structure_file_and_record_it_in()} <code>.manual</code>.
 			</p>
 			<div class="delete-dialog-actions">
-				<button class="btn btn-ghost" type="button" onclick={cancelDeleteConfirm}>Cancel</button>
-				<button class="btn delete-confirm-btn" type="button" onclick={confirmDeleteLine}>Delete</button>
+				<button class="btn btn-ghost" type="button" onclick={cancelDeleteConfirm}>{msg.doc_structure_cancel()}</button>
+				<button class="btn delete-confirm-btn" type="button" onclick={confirmDeleteLine}>{msg.doc_structure_delete()}</button>
 			</div>
 		</div>
 	</div>

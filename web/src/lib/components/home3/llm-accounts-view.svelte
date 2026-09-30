@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 
 	import {
@@ -105,7 +106,7 @@
 
 	async function submitDeposit() {
 		submitting = true; error = null;
-		try { const payload = { ...deposit, balance_amount: manualMode === 'deposit' ? deposit.balance_amount : 0, captured_at: deposit.captured_at ? new Date(deposit.captured_at).toISOString() : '' }; if (manualMode === 'deposit') await addLLMDeposit(payload); else await setLLMTotalSpending(payload); info = manualMode === 'deposit' ? 'Deposit recorded.' : 'Total spending recorded.'; await loadManualRecords(); showDeposit = false; }
+		try { const payload = { ...deposit, balance_amount: manualMode === 'deposit' ? deposit.balance_amount : 0, captured_at: deposit.captured_at ? new Date(deposit.captured_at).toISOString() : '' }; if (manualMode === 'deposit') await addLLMDeposit(payload); else await setLLMTotalSpending(payload); info = manualMode === 'deposit' ? m.llm_accounts_deposit_recorded() : m.llm_accounts_total_spending_recorded(); await loadManualRecords(); showDeposit = false; }
 		catch (err) { error = String((err as Error).message ?? err); }
 		finally { submitting = false; }
 	}
@@ -137,7 +138,7 @@
 		info = null;
 		const accountName = draft.account_name.trim();
 		if (!accountName) {
-			error = 'Account name is required';
+			error = m.llm_accounts_account_name_is_required();
 			return;
 		}
 		submitting = true;
@@ -160,7 +161,7 @@
 				default_model_name: draft.default_model_name
 			};
 			showCreate = false;
-			info = 'LLM account created.';
+			info = m.llm_accounts_llm_account_created();
 			await loadAccounts();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -181,7 +182,7 @@
 		info = null;
 		try {
 			preview = await importLLMAccountsPreview();
-			info = `Loaded ${preview.accounts.length} account candidates and ${preview.profiles.length} model profiles from .models.toml.`;
+			info = m.llm_accounts_loaded_account_candidates_and_model({ accountsCount: preview.accounts.length, profilesCount: preview.profiles.length });
 		} catch (err) {
 			error = String((err as Error).message ?? err);
 		} finally {
@@ -225,7 +226,7 @@
 				default_model_name: editDraft.default_model_name.trim()
 			});
 			editingAccountID = null;
-			info = 'LLM account updated.';
+			info = m.llm_accounts_llm_account_updated();
 			await loadAccounts();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -240,7 +241,7 @@
 		info = null;
 		try {
 			lastImportResult = await applyLLMAccountsImport();
-			info = `Imported ${lastImportResult.accounts_imported} accounts and ${lastImportResult.profiles_imported} profiles from .models.toml.`;
+			info = m.llm_accounts_imported_accounts_and_profiles_from({ accounts_imported: lastImportResult.accounts_imported, profiles_imported: lastImportResult.profiles_imported });
 			await loadAccounts();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -253,7 +254,7 @@
 		error = null;
 		info = null;
 		if (!addModelDraft.profile_name.trim()) {
-			error = 'Profile name is required';
+			error = m.llm_accounts_profile_name_is_required();
 			return;
 		}
 		addingModel = true;
@@ -280,7 +281,7 @@
 			addModelDraft.model_type = 'llm';
 			addModelDraft.api_key = '';
 			showAddModel = false;
-			info = `Model "${profileName}" added to .models.toml and registered in the database.`;
+			info = m.llm_accounts_model_added_to_models_toml({ profileName });
 			await loadAccounts();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -322,17 +323,17 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>LLM Accounts</h2>
+			<h2>{m.llm_accounts_llm_accounts()}</h2>
 			<p class="muted">
-				Provider-agnostic account registry for reconciliation and runtime usage capture.
+				{m.llm_accounts_provider_agnostic_account_registry_for()}
 			</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadAccounts} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.llm_accounts_refreshing() : m.llm_accounts_refresh()}
 			</button>
 			<button class="ghost" onclick={loadPreview} disabled={importing}>
-				{importing ? 'Inspecting…' : preview ? 'Hide Preview' : 'Preview .models.toml'}
+				{importing ? m.llm_accounts_inspecting() : preview ? m.llm_accounts_hide_preview() : m.llm_accounts_preview_models_toml()}
 			</button>
 			<button
 				class="alt-btn"
@@ -342,7 +343,7 @@
 					showCreate = false;
 				}}
 			>
-				+ Add a Model
+				{m.llm_accounts_add_a_model()}
 			</button>
 			<button
 				class="primary"
@@ -352,37 +353,37 @@
 					showAddModel = false;
 				}}
 			>
-				+ New Account
+				{m.llm_accounts_new_account()}
 			</button>
-			<button class="alt-btn" onclick={() => { manualMode = 'deposit'; showDeposit = !showDeposit; showCreate = false; showAddModel = false; }}> {showDeposit && manualMode === 'deposit' ? 'Cancel' : 'Add Deposit'} </button>
-			<button class="ghost" onclick={() => { manualMode = 'set-total-spending'; showDeposit = true; showCreate = false; showAddModel = false; }}>Set Total Spend</button>
+			<button class="alt-btn" onclick={() => { manualMode = 'deposit'; showDeposit = !showDeposit; showCreate = false; showAddModel = false; }}> {showDeposit && manualMode === 'deposit' ? m.llm_accounts_cancel() : m.llm_accounts_add_deposit()} </button>
+			<button class="ghost" onclick={() => { manualMode = 'set-total-spending'; showDeposit = true; showCreate = false; showAddModel = false; }}>{m.llm_accounts_set_total_spend()}</button>
 		</div>
 	</header>
 
 	{#if showDeposit}
 		<form class="create-form" onsubmit={(e) => { e.preventDefault(); void submitDeposit(); }}>
-			<h3>{manualMode === 'deposit' ? 'Add Deposit' : 'Set Total Spend'}</h3>
-			<div class="row two"><label><span>API Key</span><select bind:value={deposit.api_key_name} required><option value="">Select an API key</option>{#each depositAPIKeys as apiKey (apiKey)}<option value={apiKey}>{apiKey}</option>{/each}</select></label><label><span>Currency</span><select bind:value={deposit.currency_code}><option value="CNY">CNY</option><option value="USD">USD</option></select></label></div>
-			<div class="row two"><label><span>{manualMode === 'deposit' ? 'Deposit Amount' : 'Total Spending'}</span><input type="number" min="1" step={manualMode === 'deposit' ? '1' : '0.01'} bind:value={deposit.deposit_amount} required /></label>{#if manualMode === 'deposit'}<label><span>Balance After Deposit</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label>{/if}</div>
-			<div class="row two"><label><span>Timestamp</span><input type="datetime-local" bind:value={deposit.captured_at} /><small class="field-help">Leave blank to use the current time; use this to backdate a deposit.</small></label><label><span>Note</span><input bind:value={deposit.note} placeholder="Optional reference" /></label></div>
-			<div class="row form-foot"><button class="primary" disabled={submitting}>{submitting ? 'Saving…' : manualMode === 'deposit' ? 'Save Deposit' : 'Save Total Spend'}</button></div>
+			<h3>{manualMode === 'deposit' ? m.llm_accounts_add_deposit() : m.llm_accounts_set_total_spend()}</h3>
+			<div class="row two"><label><span>{m.llm_accounts_api_key()}</span><select bind:value={deposit.api_key_name} required><option value="">{m.llm_accounts_select_an_api_key()}</option>{#each depositAPIKeys as apiKey (apiKey)}<option value={apiKey}>{apiKey}</option>{/each}</select></label><label><span>{m.llm_accounts_currency()}</span><select bind:value={deposit.currency_code}><option value="CNY">{m.llm_accounts_cny()}</option><option value="USD">{m.llm_accounts_usd()}</option></select></label></div>
+			<div class="row two"><label><span>{manualMode === 'deposit' ? m.llm_accounts_deposit_amount() : m.llm_accounts_total_spending()}</span><input type="number" min="1" step={manualMode === 'deposit' ? '1' : '0.01'} bind:value={deposit.deposit_amount} required /></label>{#if manualMode === 'deposit'}<label><span>{m.llm_accounts_balance_after_deposit()}</span><input type="number" step="0.01" bind:value={deposit.balance_amount} required /></label>{/if}</div>
+			<div class="row two"><label><span>{m.llm_accounts_timestamp()}</span><input type="datetime-local" bind:value={deposit.captured_at} /><small class="field-help">{m.llm_accounts_leave_blank_to_use_the()}</small></label><label><span>{m.llm_accounts_note()}</span><input bind:value={deposit.note} placeholder={m.llm_accounts_optional_reference()} /></label></div>
+			<div class="row form-foot"><button class="primary" disabled={submitting}>{submitting ? m.llm_accounts_saving() : manualMode === 'deposit' ? m.llm_accounts_save_deposit() : m.llm_accounts_save_total_spend()}</button></div>
 		</form>
 	{/if}
-	<div class="panel"><div class="panel-head"><h3>Manual Records</h3></div>{#if manualRecords.length === 0}<div class="empty compact">No deposits or total-spending records yet.</div>{:else}<div class="table-wrap"><table><thead><tr><th>Timestamp</th><th>API Key</th><th>Type</th><th>Currency</th><th>Amount</th><th>Note</th></tr></thead><tbody>{#each manualRecords as record}<tr><td>{fmtDate(record.captured_at)}</td><td>{record.api_key_name}</td><td>{record.entry_kind === 'deposit' ? 'Deposit' : 'Total Spending'}</td><td>{record.currency_code}</td><td>{record.amount}</td><td>{record.note}</td></tr>{/each}</tbody></table></div>{/if}</div>
+	<div class="panel"><div class="panel-head"><h3>{m.llm_accounts_manual_records()}</h3></div>{#if manualRecords.length === 0}<div class="empty compact">{m.llm_accounts_no_deposits_or_total_spending()}</div>{:else}<div class="table-wrap"><table><thead><tr><th>{m.llm_accounts_timestamp()}</th><th>{m.llm_accounts_api_key()}</th><th>{m.llm_accounts_type()}</th><th>{m.llm_accounts_currency()}</th><th>{m.llm_accounts_amount()}</th><th>{m.llm_accounts_note()}</th></tr></thead><tbody>{#each manualRecords as record}<tr><td>{fmtDate(record.captured_at)}</td><td>{record.api_key_name}</td><td>{record.entry_kind === 'deposit' ? m.llm_accounts_deposit() : m.llm_accounts_total_spending()}</td><td>{record.currency_code}</td><td>{record.amount}</td><td>{record.note}</td></tr>{/each}</tbody></table></div>{/if}</div>
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Accounts</div>
+			<div class="summary-label">{m.llm_accounts_accounts()}</div>
 			<div class="summary-value">{accounts.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Reconciliation Enabled</div>
+			<div class="summary-label">{m.llm_accounts_reconciliation_enabled()}</div>
 			<div class="summary-value">
 				{accounts.filter((row) => row.is_reconciliation_enabled).length}
 			</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Providers</div>
+			<div class="summary-label">{m.llm_accounts_providers()}</div>
 			<div class="summary-value">{new Set(accounts.map((row) => row.provider)).size}</div>
 		</div>
 	</div>
@@ -397,46 +398,46 @@
 		>
 			<div class="row two">
 				<label>
-					<span>Account Name</span>
-					<input bind:value={draft.account_name} required placeholder="DeepSeek Prod" />
+					<span>{m.llm_accounts_account_name()}</span>
+					<input bind:value={draft.account_name} required placeholder={m.llm_accounts_deepseek_prod()} />
 				</label>
 				<label>
-					<span>Provider</span>
-					<input bind:value={draft.provider} required placeholder="deepseek" />
-				</label>
-			</div>
-			<div class="row two">
-				<label>
-					<span>Base URL</span>
-					<input bind:value={draft.base_url} placeholder="https://api.deepseek.com" />
-				</label>
-				<label>
-					<span>Default Model</span>
-					<input bind:value={draft.default_model_name} placeholder="deepseek-chat" />
+					<span>{m.llm_accounts_provider()}</span>
+					<input bind:value={draft.provider} required placeholder={m.llm_accounts_deepseek()} />
 				</label>
 			</div>
 			<div class="row two">
 				<label>
-					<span>Status</span>
-					<input bind:value={draft.status} placeholder="active" />
+					<span>{m.llm_accounts_base_url()}</span>
+					<input bind:value={draft.base_url} placeholder={m.llm_accounts_https_api_deepseek_com()} />
 				</label>
 				<label>
-					<span>Reconciliation Kind</span>
-					<input bind:value={draft.reconciliation_kind} placeholder="provider_balance" />
+					<span>{m.llm_accounts_default_model()}</span>
+					<input bind:value={draft.default_model_name} placeholder={m.llm_accounts_deepseek_chat()} />
+				</label>
+			</div>
+			<div class="row two">
+				<label>
+					<span>{m.llm_accounts_status()}</span>
+					<input bind:value={draft.status} placeholder={m.llm_accounts_active()} />
+				</label>
+				<label>
+					<span>{m.llm_accounts_reconciliation_kind()}</span>
+					<input bind:value={draft.reconciliation_kind} placeholder={m.llm_accounts_provider_balance()} />
 				</label>
 			</div>
 			<label>
-				<span>API Key</span>
-				<input bind:value={draft.api_key} type="password" placeholder="Stored server-side" />
+				<span>{m.llm_accounts_api_key()}</span>
+				<input bind:value={draft.api_key} type="password" placeholder={m.llm_accounts_stored_server_side()} />
 			</label>
 			<label class="toggle-row">
-				<span>Enable provider-side reconciliation</span>
+				<span>{m.llm_accounts_enable_provider_side_reconciliation()}</span>
 				<input type="checkbox" bind:checked={draft.is_reconciliation_enabled} />
 			</label>
 			<div class="form-foot">
-				<button class="ghost" type="button" onclick={() => (showCreate = false)}>Cancel</button>
+				<button class="ghost" type="button" onclick={() => (showCreate = false)}>{m.llm_accounts_cancel()}</button>
 				<button class="primary" type="submit" disabled={submitting || !draft.account_name.trim()}>
-					{submitting ? 'Creating…' : 'Create account'}
+					{submitting ? m.llm_accounts_creating() : m.llm_accounts_create_account()}
 				</button>
 			</div>
 		</form>
@@ -451,73 +452,72 @@
 			}}
 		>
 			<div class="add-model-notice">
-				Adds the model to <strong>.models.toml</strong> and registers it in the database (creates or
-				reuses an account, then creates a profile). See ADR 2026070501 §"Adding a new model".
+				{m.llm_accounts_adds_the_model_to()} <strong>{m.llm_accounts_models_toml()}</strong> {m.llm_accounts_and_registers_it_in_the()}
 			</div>
 			<div class="row two">
 				<label>
-					<span>Profile Name <span class="req">*</span></span>
-					<input bind:value={addModelDraft.profile_name} required placeholder="my-new-model" />
+					<span>{m.llm_accounts_profile_name()} <span class="req">*</span></span>
+					<input bind:value={addModelDraft.profile_name} required placeholder={m.llm_accounts_my_new_model()} />
 				</label>
 				<label>
-					<span>Model Name</span>
-					<input bind:value={addModelDraft.model_name} placeholder="deepseek-chat" />
-				</label>
-			</div>
-			<label>
-				<span>Model Type</span>
-				<input bind:value={addModelDraft.model_type} placeholder="llm" />
-			</label>
-			<div class="row two">
-				<label>
-					<span>Provider</span>
-					<input bind:value={addModelDraft.provider} placeholder="deepseek" />
-				</label>
-				<label>
-					<span>Base URL</span>
-					<input bind:value={addModelDraft.base_url} placeholder="https://api.deepseek.com" />
-				</label>
-			</div>
-			<div class="row two">
-				<label>
-					<span>Account Name (DB label)</span>
-					<input bind:value={addModelDraft.account_name} placeholder="Auto-generated if blank" />
-				</label>
-				<label>
-					<span>Host</span>
-					<input bind:value={addModelDraft.host} placeholder="cloud" />
+					<span>{m.llm_accounts_model_name()}</span>
+					<input bind:value={addModelDraft.model_name} placeholder={m.llm_accounts_deepseek_chat()} />
 				</label>
 			</div>
 			<label>
-				<span>API Key</span>
-				<input type="password" bind:value={addModelDraft.api_key} placeholder="sk-…" />
+				<span>{m.llm_accounts_model_type()}</span>
+				<input bind:value={addModelDraft.model_type} placeholder={m.llm_accounts_llm()} />
 			</label>
 			<div class="row two">
 				<label>
-					<span>Thinking Type</span>
-					<input bind:value={addModelDraft.thinking_type} placeholder="disabled" />
+					<span>{m.llm_accounts_provider()}</span>
+					<input bind:value={addModelDraft.provider} placeholder={m.llm_accounts_deepseek()} />
 				</label>
 				<label>
-					<span>Timeout (sec)</span>
+					<span>{m.llm_accounts_base_url()}</span>
+					<input bind:value={addModelDraft.base_url} placeholder={m.llm_accounts_https_api_deepseek_com()} />
+				</label>
+			</div>
+			<div class="row two">
+				<label>
+					<span>{m.llm_accounts_account_name_db_label()}</span>
+					<input bind:value={addModelDraft.account_name} placeholder={m.llm_accounts_auto_generated_if_blank()} />
+				</label>
+				<label>
+					<span>{m.llm_accounts_host()}</span>
+					<input bind:value={addModelDraft.host} placeholder={m.llm_accounts_cloud()} />
+				</label>
+			</div>
+			<label>
+				<span>{m.llm_accounts_api_key()}</span>
+				<input type="password" bind:value={addModelDraft.api_key} placeholder={m.llm_accounts_sk()} />
+			</label>
+			<div class="row two">
+				<label>
+					<span>{m.llm_accounts_thinking_type()}</span>
+					<input bind:value={addModelDraft.thinking_type} placeholder={m.llm_accounts_disabled()} />
+				</label>
+				<label>
+					<span>{m.llm_accounts_timeout_sec()}</span>
 					<input type="number" bind:value={addModelDraft.timeout_sec} min="0" />
 				</label>
 			</div>
 			<div class="row three">
 				<label>
-					<span>Max Inflight</span>
+					<span>{m.llm_accounts_max_inflight()}</span>
 					<input type="number" bind:value={addModelDraft.max_inflight} min="0" />
 				</label>
 				<label>
-					<span>Max Req/Min</span>
+					<span>{m.llm_accounts_max_req_min()}</span>
 					<input type="number" bind:value={addModelDraft.max_requests_per_minute} min="0" />
 				</label>
 				<label>
-					<span>Max Tokens/Min</span>
+					<span>{m.llm_accounts_max_tokens_min()}</span>
 					<input type="number" bind:value={addModelDraft.max_tokens_per_minute} min="0" />
 				</label>
 			</div>
 			<label>
-				<span>Token Reserve/Call</span>
+				<span>{m.llm_accounts_token_reserve_call()}</span>
 				<input
 					type="number"
 					bind:value={addModelDraft.token_reserve_per_call}
@@ -526,13 +526,13 @@
 				/>
 			</label>
 			<div class="form-foot">
-				<button class="ghost" type="button" onclick={() => (showAddModel = false)}>Cancel</button>
+				<button class="ghost" type="button" onclick={() => (showAddModel = false)}>{m.llm_accounts_cancel()}</button>
 				<button
 					class="alt-btn"
 					type="submit"
 					disabled={addingModel || !addModelDraft.profile_name.trim()}
 				>
-					{addingModel ? 'Adding…' : 'Add Model'}
+					{addingModel ? m.llm_accounts_adding() : m.llm_accounts_add_model()}
 				</button>
 			</div>
 		</form>
@@ -547,31 +547,31 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Registered Accounts</h3>
+				<h3>{m.llm_accounts_registered_accounts()}</h3>
 				<p class="muted">
-					Daily reports roll up by account. You can now edit account settings from the table.
+					{m.llm_accounts_daily_reports_roll_up_by()}
 				</p>
 			</div>
 		</div>
 
 		{#if loading}
-			<div class="empty">Loading accounts…</div>
+			<div class="empty">{m.llm_accounts_loading_accounts()}</div>
 		{:else if accounts.length === 0}
 			<div class="empty">
-				No LLM accounts yet. Create one or preview `.models.toml` to prepare the migration.
+				{m.llm_accounts_no_llm_accounts_yet_create()}
 			</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Account</th>
-							<th>Provider</th>
-							<th>Default Model</th>
-							<th>Profiles</th>
-							<th>Reconciliation</th>
-							<th>Updated</th>
-							<th>Action</th>
+							<th>{m.llm_accounts_account()}</th>
+							<th>{m.llm_accounts_provider()}</th>
+							<th>{m.llm_accounts_default_model()}</th>
+							<th>{m.llm_accounts_profiles()}</th>
+							<th>{m.llm_accounts_reconciliation()}</th>
+							<th>{m.llm_accounts_updated()}</th>
+							<th>{m.llm_accounts_action()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -579,23 +579,23 @@
 							<tr>
 								<td>
 									<div class="cell-primary">{account.account_name}</div>
-									<div class="cell-secondary">{account.base_url || 'No base URL'}</div>
+									<div class="cell-secondary">{account.base_url || m.llm_accounts_no_base_url()}</div>
 								</td>
 								<td>{account.provider}</td>
-								<td>{account.default_model_name || 'Not set'}</td>
+								<td>{account.default_model_name || m.llm_accounts_not_set()}</td>
 								<td>{account.profile_count}</td>
-								<td>{account.is_reconciliation_enabled ? 'Enabled' : 'Disabled'}</td>
+								<td>{account.is_reconciliation_enabled ? m.llm_accounts_enabled() : m.llm_accounts_disabled_2()}</td>
 								<td>{fmtDate(account.updated_at)}</td>
 								<td>
 									{#if editingAccountID === account.id}
 										<div class="row-actions">
 											<button class="ghost compact-btn" onclick={cancelEdit} disabled={submitting}
-												>Cancel</button
+												>{m.llm_accounts_cancel()}</button
 											>
 										</div>
 									{:else}
 										<button class="ghost compact-btn" onclick={() => startEdit(account)}
-											>Edit</button
+											>{m.llm_accounts_edit()}</button
 										>
 									{/if}
 								</td>
@@ -612,44 +612,44 @@
 										>
 											<div class="row two">
 												<label>
-													<span>Account Name</span>
+													<span>{m.llm_accounts_account_name()}</span>
 													<input bind:value={editDraft.account_name} required />
 												</label>
 												<label>
-													<span>Provider</span>
+													<span>{m.llm_accounts_provider()}</span>
 													<input bind:value={editDraft.provider} required />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Base URL</span>
+													<span>{m.llm_accounts_base_url()}</span>
 													<input bind:value={editDraft.base_url} />
 												</label>
 												<label>
-													<span>Default Model</span>
+													<span>{m.llm_accounts_default_model()}</span>
 													<input bind:value={editDraft.default_model_name} />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Status</span>
+													<span>{m.llm_accounts_status()}</span>
 													<input bind:value={editDraft.status} />
 												</label>
 												<label>
-													<span>Reconciliation Kind</span>
+													<span>{m.llm_accounts_reconciliation_kind()}</span>
 													<input bind:value={editDraft.reconciliation_kind} />
 												</label>
 											</div>
 											<label>
-												<span>API Key</span>
+												<span>{m.llm_accounts_api_key()}</span>
 												<input
 													bind:value={editDraft.api_key}
 													type="password"
-													placeholder="Leave blank to keep current key"
+													placeholder={m.llm_accounts_leave_blank_to_keep_current()}
 												/>
 											</label>
 											<label class="toggle-row">
-												<span>Enable provider-side reconciliation</span>
+												<span>{m.llm_accounts_enable_provider_side_reconciliation()}</span>
 												<input type="checkbox" bind:checked={editDraft.is_reconciliation_enabled} />
 											</label>
 											<div class="form-foot">
@@ -658,7 +658,7 @@
 													type="submit"
 													disabled={submitting || !editDraft.account_name.trim()}
 												>
-													{submitting ? 'Saving…' : 'Save account'}
+													{submitting ? m.llm_accounts_saving() : m.llm_accounts_save_account()}
 												</button>
 											</div>
 										</form>
@@ -676,37 +676,36 @@
 		<div class="panel">
 			<div class="panel-head">
 				<div>
-					<h3>Bootstrap Preview</h3>
+					<h3>{m.llm_accounts_bootstrap_preview()}</h3>
 					<p class="muted">{preview.path}</p>
 				</div>
-				<button class="ghost compact-btn" onclick={() => (preview = null)}>Close</button>
+				<button class="ghost compact-btn" onclick={() => (preview = null)}>{m.llm_accounts_close()}</button>
 			</div>
 			<div class="preview-grid">
 				<div class="preview-card">
-					<div class="summary-label">Account Candidates</div>
+					<div class="summary-label">{m.llm_accounts_account_candidates()}</div>
 					<div class="summary-value">{preview.accounts.length}</div>
 				</div>
 				<div class="preview-card">
-					<div class="summary-label">Model Profiles</div>
+					<div class="summary-label">{m.llm_accounts_model_profiles()}</div>
 					<div class="summary-value">{preview.profiles.length}</div>
 				</div>
 			</div>
 			<div class="preview-actions">
 				<button class="primary" onclick={applyImport} disabled={applyingImport}>
-					{applyingImport ? 'Importing…' : 'Import Into Accounts'}
+					{applyingImport ? m.llm_accounts_importing() : m.llm_accounts_import_into_accounts()}
 				</button>
 				{#if lastImportResult}
 					<div class="muted inline-status">
-						Last import: {lastImportResult.accounts_imported} accounts, {lastImportResult.profiles_imported}
-						profiles
+						{m.llm_accounts_last_import_accounts_profiles({ accounts_imported: lastImportResult.accounts_imported, profiles_imported: lastImportResult.profiles_imported })}
 					</div>
 				{/if}
 			</div>
 			<div class="preview-columns">
 				<div class="preview-list">
-					<h4>Accounts</h4>
+					<h4>{m.llm_accounts_accounts()}</h4>
 					{#if preview.accounts.length === 0}
-						<div class="empty compact">No accounts discovered.</div>
+						<div class="empty compact">{m.llm_accounts_no_accounts_discovered()}</div>
 					{:else}
 						<ul>
 							{#each preview.accounts as item, index (index)}
@@ -716,9 +715,9 @@
 					{/if}
 				</div>
 				<div class="preview-list">
-					<h4>Profiles</h4>
+					<h4>{m.llm_accounts_profiles()}</h4>
 					{#if preview.profiles.length === 0}
-						<div class="empty compact">No profiles discovered.</div>
+						<div class="empty compact">{m.llm_accounts_no_profiles_discovered()}</div>
 					{:else}
 						<ul>
 							{#each preview.profiles as item, index (index)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as i18n } from '$lib/paraglide/messages.js';
 	import { onDestroy, tick } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
@@ -532,35 +533,35 @@
 		const groupSpecs: GroupSpec[] = [
 			{
 				key: 'g_metric',
-				label: 'Metric',
+				label: i18n.metric_mgmt_metric_2(),
 				icon: TrendingUpIcon,
 				angleDeg: -90,
 				attrs: attrsByGroup.metric
 			},
 			{
 				key: 'g_metadata',
-				label: 'Metadata',
+				label: i18n.metric_mgmt_metadata(),
 				icon: BookOpenIcon,
 				angleDeg: -18,
 				attrs: attrsByGroup.metadata
 			},
 			{
 				key: 'g_context',
-				label: 'Context',
+				label: i18n.metric_mgmt_context(),
 				icon: TagIcon,
 				angleDeg: 54,
 				attrs: attrsByGroup.context
 			},
 			{
 				key: 'g_grounding',
-				label: 'Grounding',
+				label: i18n.metric_mgmt_grounding(),
 				icon: MapPinIcon,
 				angleDeg: 126,
 				attrs: attrsByGroup.grounding
 			},
 			{
 				key: 'g_reasoning',
-				label: 'Reasoning',
+				label: i18n.metric_mgmt_reasoning(),
 				icon: ActivityIcon,
 				angleDeg: 198,
 				attrs: attrsByGroup.reasoning
@@ -611,7 +612,7 @@
 			Rsn,
 			cx,
 			cy,
-			metricLabel: m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`,
+			metricLabel: m.metric_name?.trim() || m.metric_subject?.trim() || i18n.metric_mgmt_metric_3({ id: m.id }),
 			metricSubLabel: m.metric_name_en?.trim() || m.metric_subject_en?.trim() || '',
 			groups
 		};
@@ -931,7 +932,7 @@
 		if (m) {
 			void selectMetric(m);
 		} else if (reportMiss) {
-			metricIdError = `No metric "${q}" in the current record.`;
+			metricIdError = i18n.metric_mgmt_no_metric_in_the_current({ q });
 		}
 	}
 
@@ -983,9 +984,9 @@
 			metrics = metricRes.results ?? [];
 			currentInput = inputRes?.record ?? null;
 			rawLines = rawRes?.lines ?? [];
-			rawError = rawRes ? '' : 'Failed to load raw lines';
+			rawError = rawRes ? '' : i18n.metric_mgmt_failed_to_load_raw_lines();
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve metrics';
+			errorMsg = err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_retrieve_metrics();
 		} finally {
 			rawLoading = false;
 			loading = false;
@@ -1007,7 +1008,7 @@
 			searchResults = [];
 			searchTotal = 0;
 			searchPage = KB_METRIC_SEARCH_DEFAULTS.page;
-			searchError = 'Enter a query or set at least one filter before searching metrics.';
+			searchError = i18n.metric_mgmt_enter_a_query_or_set_2();
 			return;
 		}
 		searchLoading = true;
@@ -1029,7 +1030,7 @@
 		} catch (err) {
 			searchResults = [];
 			searchTotal = 0;
-			searchError = err instanceof Error ? err.message : 'Failed to search metrics';
+			searchError = err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_search_metrics();
 		} finally {
 			searchLoading = false;
 		}
@@ -1078,7 +1079,7 @@
 		}
 		const target = metrics.find((metric) => metric.id === result.id);
 		if (!target) {
-			errorMsg = `Metric ${result.id} was not found in input ${result.input_record_id}.`;
+			errorMsg = i18n.metric_mgmt_metric_was_not_found_in({ id: result.id, input_record_id: result.input_record_id });
 			return;
 		}
 		await selectMetric(target);
@@ -1117,7 +1118,7 @@
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || i18n.metric_mgmt_input({ id: r.id });
 	}
 
 	function recordDisplayDocNo(r: KbInputRecord): string {
@@ -1137,10 +1138,10 @@
 	}
 
 	function metricNameOf(m: KbMetricRecord): string {
-		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`;
+		return m.metric_name?.trim() || m.metric_subject?.trim() || i18n.metric_mgmt_metric_3({ id: m.id });
 	}
 	function previewMetricNameOf(m: ExtractedKbMetric, index: number): string {
-		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric ${index + 1}`;
+		return m.metric_name?.trim() || m.metric_subject?.trim() || i18n.metric_mgmt_metric_4({ value: index + 1 });
 	}
 	function resetAddMetricPreview() {
 		extractedMetricsPreview = [];
@@ -1204,7 +1205,7 @@
 
 	async function saveEditDialogLine(pageNo: number, lineNo: number) {
 		if (!currentInput || !addMetricEditKey) return;
-		const confirmed = window.confirm('Save changes to the original file?');
+		const confirmed = window.confirm(i18n.metric_mgmt_save_changes_to_the_original());
 		if (!confirmed) return;
 		addMetricBusyAction = 'line';
 		try {
@@ -1224,7 +1225,7 @@
 			addMetricBufferLines = [];
 			resetAddMetricPreview();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save line');
+			alert(err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_save_line());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1296,7 +1297,7 @@
 			});
 			extractedMetricsPreview = result.metrics ?? [];
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to extract metrics');
+			alert(err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_extract_metrics());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1314,7 +1315,7 @@
 			metrics = refreshed.results ?? [];
 			closeAddMetricDialog();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save metrics');
+			alert(err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_save_metrics());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1330,12 +1331,12 @@
 			}));
 			await createKbProvision({
 				input_record_id: currentInput.id,
-				provision_name: `Provision from ${currentInput.id}`,
+				provision_name: i18n.metric_mgmt_provision_from({ id: currentInput.id }),
 				source_line_spans: spans
 			});
 			closeAddMetricDialog();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to create provision');
+			alert(err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_create_provision());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1376,16 +1377,16 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge System · Vol. III</div>
-			<h1 class="display">Metrics&nbsp;<span class="amp">&amp;</span>&nbsp;Provenance</h1>
+			<div class="eyebrow">{i18n.metric_mgmt_knowledge_system_vol_iii()}</div>
+			<h1 class="display">{i18n.metric_mgmt_metrics()};<span class="amp">&amp;</span>&{i18n.metric_mgmt_provenance()}</h1>
 			<div class="subtitle">
-				A reading room for extracted metrics — locate, verify, return to source.
+				{i18n.metric_mgmt_a_reading_room_for_extracted()}
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="meta-label">RECORD</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
-			<span class="meta-label">TYPE</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
-			<span class="meta-label">METRICS</span><span class="meta-val"
+			<span class="meta-label">{i18n.metric_mgmt_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
+			<span class="meta-label">{i18n.metric_mgmt_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
+			<span class="meta-label">{i18n.metric_mgmt_metrics_2()}</span><span class="meta-val"
 				>{metrics.length.toString().padStart(3, '0')}</span
 			>
 		</div>
@@ -1398,18 +1399,18 @@
 					type="button"
 					class="record-fold-toggle"
 					onclick={() => (recordBrowserFolded = true)}
-					title="Fold record list"
-					aria-label="Fold record list"
+					title={i18n.metric_mgmt_fold_record_list()}
+					aria-label={i18n.metric_mgmt_fold_record_list()}
 				>
 					<PanelLeftCloseIcon class="toolbar-icon" />
 				</button>
 				<KbInputRecordBrowser
 					{darkMode}
 					instanceKey="metrics-record-browser"
-					title="kb.inputs"
-					subtitle="Search, filter, and select input records before inspecting extracted metrics."
-					emptyTitle="No records yet"
-					emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+					title={i18n.metric_mgmt_kb_inputs()}
+					subtitle={i18n.metric_mgmt_search_filter_and_select_input()}
+					emptyTitle={i18n.metric_mgmt_no_records_yet()}
+					emptySubtitle={i18n.metric_mgmt_use_search_or_retrieve_to()}
 					autoSelectFirstRecord={false}
 					selectedRecordId={currentInput?.id ?? null}
 					mapRecord={mapBrowserRecord}
@@ -1425,28 +1426,28 @@
 					type="button"
 					class="record-fold-toggle rail-toggle"
 					onclick={() => (recordBrowserFolded = false)}
-					title="Unfold record list"
-					aria-label="Unfold record list"
+					title={i18n.metric_mgmt_unfold_record_list()}
+					aria-label={i18n.metric_mgmt_unfold_record_list()}
 				>
 					<PanelLeftOpenIcon class="toolbar-icon" />
 				</button>
-				<span>Record</span>
+				<span>{i18n.metric_mgmt_record_2()}</span>
 			</div>
 		{/if}
 
 		<aside class="metric-sidebar">
 			<div class="left-meta">
-				<div class="left-meta-title">Metrics</div>
+				<div class="left-meta-title">{i18n.metric_mgmt_metrics()}</div>
 				<div class="left-meta-count">
 					{#if globalPicks.length > 0}
-						{globalPicks.length} global pick{globalPicks.length === 1 ? '' : 's'}
+						{i18n.metric_mgmt_global_pick({ globalPicksCount: globalPicks.length, plural: globalPicks.length === 1 ? '' : 's' })}
 					{:else}
-						{metrics.length} found
+						{i18n.metric_mgmt_found({ metricsCount: metrics.length })}
 					{/if}
 				</div>
 			</div>
 			<div class="debug-badge" aria-live="polite">
-				Debug: last selected metric = {lastSelectedMetricDebug}
+				{i18n.metric_mgmt_debug_last_selected_metric({ lastSelectedMetricDebug })}
 			</div>
 
 			<div class="metric-local-filters">
@@ -1454,9 +1455,9 @@
 					class="toolbar-select"
 					value={metricNameDropdownValue}
 					onchange={handleMetricNameDropdown}
-					title="Jump to metric by name"
+					title={i18n.metric_mgmt_jump_to_metric_by_name()}
 				>
-					<option value="">— Metric by name —</option>
+					<option value="">{i18n.metric_mgmt_metric_by_name()}</option>
 					{#each metrics as m (m.id)}
 						<option value={m.id}>{metricNameOf(m)}</option>
 					{/each}
@@ -1466,8 +1467,8 @@
 						class="toolbar-kw-input"
 						type="text"
 						list="metric-ids-datalist"
-						placeholder="Search by Metric ID…"
-						title="Jump to a metric of the current record by metric ID (e.g. 28_mtc_213) or row ID. Press Enter to search."
+						placeholder={i18n.metric_mgmt_search_by_metric_id()}
+						title={i18n.metric_mgmt_jump_to_a_metric_of()}
 						bind:value={metricIdQuery}
 						oninput={() => jumpToMetricId(false)}
 						onkeydown={(e) => {
@@ -1487,8 +1488,8 @@
 								metricIdQuery = '';
 								metricIdError = '';
 							}}
-							title="Clear metric ID"
-							aria-label="Clear metric ID">×</button
+							title={i18n.metric_mgmt_clear_metric_id()}
+							aria-label={i18n.metric_mgmt_clear_metric_id()}>×</button
 						>
 					{/if}
 				</div>
@@ -1500,7 +1501,7 @@
 						class="toolbar-kw-input"
 						type="text"
 						list="metric-keywords-datalist-focus"
-						placeholder="Filter by keyword…"
+						placeholder={i18n.metric_mgmt_filter_by_keyword()}
 						bind:value={keywordFilter}
 					/>
 					<datalist id="metric-keywords-datalist-focus">
@@ -1513,8 +1514,8 @@
 							type="button"
 							class="toolbar-kw-clear"
 							onclick={() => (keywordFilter = '')}
-							title="Clear keyword filter"
-							aria-label="Clear keyword filter">×</button
+							title={i18n.metric_mgmt_clear_keyword_filter()}
+							aria-label={i18n.metric_mgmt_clear_keyword_filter()}>×</button
 						>
 					{/if}
 				</div>
@@ -1523,8 +1524,8 @@
 						class="toolbar-kw-input"
 						type="text"
 						list="confidence-options"
-						placeholder="Confidence…"
-						title="Filter by confidence threshold. Select or type a value like 0.85, or <0.50 for below-threshold."
+						placeholder={i18n.metric_mgmt_confidence()}
+						title={i18n.metric_mgmt_filter_by_confidence_threshold_select()}
 						bind:value={confidenceFilter}
 					/>
 					<datalist id="confidence-options">
@@ -1540,22 +1541,22 @@
 							type="button"
 							class="toolbar-kw-clear"
 							onclick={() => (confidenceFilter = '')}
-							title="Clear confidence filter"
-							aria-label="Clear confidence filter">×</button
+							title={i18n.metric_mgmt_clear_confidence_filter()}
+							aria-label={i18n.metric_mgmt_clear_confidence_filter()}>×</button
 						>
 					{/if}
 				</div>
 				<select
 					class="toolbar-select"
 					bind:value={metricOrderBy}
-					title="Order the metric list"
-					aria-label="Order by"
+					title={i18n.metric_mgmt_order_the_metric_list()}
+					aria-label={i18n.metric_mgmt_order_by()}
 				>
-					<option value="source">Order by: source order</option>
-					<option value="id_asc">Order by: metric ID ASC</option>
-					<option value="id_desc">Order by: metric ID DESC</option>
-					<option value="name_asc">Order by: metric name ASC</option>
-					<option value="name_desc">Order by: metric name DESC</option>
+					<option value="source">{i18n.metric_mgmt_order_by_source_order()}</option>
+					<option value="id_asc">{i18n.metric_mgmt_order_by_metric_id_asc()}</option>
+					<option value="id_desc">{i18n.metric_mgmt_order_by_metric_id_desc()}</option>
+					<option value="name_asc">{i18n.metric_mgmt_order_by_metric_name_asc()}</option>
+					<option value="name_desc">{i18n.metric_mgmt_order_by_metric_name_desc()}</option>
 				</select>
 			</div>
 
@@ -1564,16 +1565,16 @@
 					type="button"
 					class="search-btn primary global-search-btn"
 					onclick={() => (globalSearchOpen = true)}
-					title="Search the whole kb.metrics corpus and pick metrics to list here"
+					title={i18n.metric_mgmt_search_the_whole_kb_metrics()}
 				>
-					Global Metric Search
+					{i18n.metric_mgmt_global_metric_search()}
 				</button>
 				{#if globalPicks.length > 0}
 					<button
 						type="button"
 						class="search-btn"
 						onclick={() => (globalPicks = [])}
-						title="Return to the current record's metrics">Back to record</button
+						title={i18n.metric_mgmt_return_to_the_current_record()}>{i18n.metric_mgmt_back_to_record()}</button
 					>
 				{/if}
 			</div>
@@ -1596,14 +1597,14 @@
 										⌕ {String(idx + 1).padStart(3, '0')}
 										{#if result.metric_id}<span class="card-metric-id">· {result.metric_id}</span>{/if}
 									</div>
-									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+									<div class="card-conf" title={i18n.metric_mgmt_search_score()}>{result.score.toFixed(3)}</div>
 								</div>
 								<div class="card-name">{result.primary_label}</div>
 								<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
 								<div class="card-foot">
 									<span class="chip">
 										<span class="chip-dot"></span>
-										record {result.input_record_id}
+										{i18n.metric_mgmt_record_3({ input_record_id: result.input_record_id })}
 									</span>
 									{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
 										<span class="chip chip-quiet">{chip}</span>
@@ -1615,22 +1616,22 @@
 				{:else if !loading && metrics.length === 0}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
-						<div class="empty-title">No metrics yet</div>
+						<div class="empty-title">{i18n.metric_mgmt_no_metrics_yet()}</div>
 						<div class="empty-sub">
-							Select a record from kb.inputs to populate the metrics index.
+							{i18n.metric_mgmt_select_a_record_from_kb()}
 						</div>
 					</div>
 				{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
-						<div class="empty-title">No matches</div>
+						<div class="empty-title">{i18n.metric_mgmt_no_matches()}</div>
 						<div class="empty-sub">
 							{#if keywordFilter && confidenceFilter}
-								No metrics match keyword "{keywordFilter}" and confidence {confidenceFilter}.
+								{i18n.metric_mgmt_no_metrics_match_keyword_and({ keywordFilter, confidenceFilter })}
 							{:else if keywordFilter}
-								No metrics match the keyword "{keywordFilter}".
+								{i18n.metric_mgmt_no_metrics_match_the_keyword({ keywordFilter })}
 							{:else}
-								No metrics match confidence {confidenceFilter}.
+								{i18n.metric_mgmt_no_metrics_match_confidence({ confidenceFilter })}
 							{/if}
 						</div>
 					</div>
@@ -1649,7 +1650,7 @@
 										№ {String(idx + 1).padStart(3, '0')}
 										{#if m.metric_id}<span class="card-metric-id">· {m.metric_id}</span>{/if}
 									</div>
-									<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
+									<div class="card-conf" title={i18n.metric_mgmt_confidence_2()}>{confidencePct(m.confidence)}</div>
 								</div>
 								<div class="card-name">{metricNameOf(m)}</div>
 								{#if m.metric_desc}
@@ -1658,7 +1659,7 @@
 								<div class="card-foot">
 									<span class="chip">
 										<span class="chip-dot"></span>
-										{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
+										{i18n.metric_mgmt_span({ count: spanCount(m), plural: spanCount(m) === 1 ? '' : 's' })}
 									</span>
 									{#if m.metric_unit}<span class="chip chip-mono">{m.metric_unit}</span>{/if}
 									{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
@@ -1677,7 +1678,7 @@
 					type="button"
 					class="gip-resize-handle gip-resize-left"
 					class:active={sidebarResizing}
-					aria-label="Resize the metrics list panel"
+					aria-label={i18n.metric_mgmt_resize_the_metrics_list_panel()}
 					onpointerdown={startSidebarResize}
 					onkeydown={onSidebarResizerKeydown}
 				>
@@ -1688,9 +1689,9 @@
 					style:flex-basis={`${gipWidth ?? GIP_WIDTH_DEFAULT}px`}
 				>
 					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title="Close metric info">
+						<button type="button" class="toolbar-back" onclick={goBack} title={i18n.metric_mgmt_close_metric_info()}>
 							<ArrowLeftIcon class="toolbar-icon" />
-							<span>Close</span>
+							<span>{i18n.metric_mgmt_close()}</span>
 						</button>
 						<div class="toolbar-nav">
 							<button
@@ -1698,7 +1699,7 @@
 								class="toolbar-nav-btn"
 								disabled={!prevMetric}
 								onclick={goToPrevMetric}
-								title="Previous metric"><ChevronLeftIcon class="toolbar-icon" /></button
+								title={i18n.metric_mgmt_previous_metric()}><ChevronLeftIcon class="toolbar-icon" /></button
 							>
 							<span class="toolbar-nav-pos">
 								{selectedMetricInFilteredIndex >= 0
@@ -1710,7 +1711,7 @@
 								class="toolbar-nav-btn"
 								disabled={!nextMetric}
 								onclick={goToNextMetric}
-								title="Next metric"><ChevronRightIcon class="toolbar-icon" /></button
+								title={i18n.metric_mgmt_next_metric()}><ChevronRightIcon class="toolbar-icon" /></button
 							>
 						</div>
 					</div>
@@ -1776,9 +1777,9 @@
 						{:else}
 							<div class="canvas-empty">
 								<div class="canvas-empty-mark">◎</div>
-								<div class="canvas-empty-title">Select a metric</div>
+								<div class="canvas-empty-title">{i18n.metric_mgmt_select_a_metric()}</div>
 								<div class="canvas-empty-sub">
-									Click a metric from the list to view its attribute map.
+									{i18n.metric_mgmt_click_a_metric_from_the()}
 								</div>
 							</div>
 						{/if}
@@ -1788,7 +1789,7 @@
 					type="button"
 					class="gip-resize-handle gip-resize-right"
 					class:active={gipResizing}
-					aria-label="Resize the metric info panel from the right edge"
+					aria-label={i18n.metric_mgmt_resize_the_metric_info_panel()}
 					onpointerdown={startGipResize}
 					onkeydown={onGipResizerKeydown}
 				>
@@ -1799,10 +1800,10 @@
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
-						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-title">{i18n.metric_mgmt_awaiting_selection()}</div>
 						<div class="doc-empty-sub">
-							Once you retrieve a record, the original document appears here.<br />
-							Click any metric on the left to jump to its source page.
+							{i18n.metric_mgmt_once_you_retrieve_a_record()}<br />
+							{i18n.metric_mgmt_click_any_metric_on_the()}
 						</div>
 					</div>
 				{:else}
@@ -1832,7 +1833,7 @@
 										if (editLineMode) deleteLineMode = false;
 										editingLineKey = null;
 									}}
-									title="Edit Lines"><SquarePenIcon class="pvw-tb-icon" /></button
+									title={i18n.metric_mgmt_edit_lines()}><SquarePenIcon class="pvw-tb-icon" /></button
 								>
 								<button
 									type="button"
@@ -1844,14 +1845,14 @@
 										if (deleteLineMode) editLineMode = false;
 										editingLineKey = null;
 									}}
-									title="Delete Lines"><Trash2Icon class="pvw-tb-icon" /></button
+									title={i18n.metric_mgmt_delete_lines()}><Trash2Icon class="pvw-tb-icon" /></button
 								>
 								<button
 									type="button"
 									class="pvw-tool-btn"
 									class:active={addLineOpen}
 									onclick={() => (addLineOpen = !addLineOpen)}
-									title="Add Line"><ListPlusIcon class="pvw-tb-icon" /></button
+									title={i18n.metric_mgmt_add_line()}><ListPlusIcon class="pvw-tb-icon" /></button
 								>
 								<div class="pvw-tool-sep"></div>
 								<button
@@ -1859,7 +1860,7 @@
 									class="pvw-tool-btn"
 									class:active={showLines}
 									onclick={() => (showLines = !showLines)}
-									title={showLines ? 'Show PDF Document' : 'Show Lines'}
+									title={showLines ? i18n.metric_mgmt_show_pdf_document() : i18n.metric_mgmt_show_lines()}
 								>
 									{#if showLines}
 										<FileTextIcon class="pvw-tb-icon" />
@@ -1884,7 +1885,7 @@
 											{/if}
 										</div>
 										<div class="metric-floating-name">
-											{metric.metric_name || metric.metric_subject || `Metric ${metric.id}`}
+											{metric.metric_name || metric.metric_subject || i18n.metric_mgmt_metric({ id: metric.id })}
 										</div>
 										{#if metric.metric_desc}
 											<div class="metric-floating-desc">{metric.metric_desc}</div>
@@ -1925,7 +1926,7 @@
 											{#if metric.metric_value}<span>{metric.metric_value}</span>{/if}
 											{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
 											{#if metric.location_type}<span>{metric.location_type}</span>{/if}
-											<span>{spanCount(metric)} span{spanCount(metric) === 1 ? '' : 's'}</span>
+											<span>{i18n.metric_mgmt_span_2({ metric: spanCount(metric), plural: spanCount(metric) === 1 ? '' : 's' })}</span>
 										</div>
 									</div>
 								{/if}
@@ -1934,37 +1935,37 @@
 								<div class="lines-panel">
 									{#if rawLoading}
 										<div class="doc-status">
-											<span class="dot-loop"></span>Reading raw_line file…
+											<span class="dot-loop"></span>{i18n.metric_mgmt_reading_raw_line_file()}
 										</div>
 									{:else if rawError}
 										<div class="doc-error">
-											<div class="doc-error-title">⚠ Cannot render document</div>
+											<div class="doc-error-title">{i18n.metric_mgmt_cannot_render_document()}</div>
 											<div class="doc-error-msg">{rawError}</div>
 										</div>
 									{:else if pagesGrouped.length === 0}
 										<div class="doc-empty">
 											<div class="doc-empty-mark">⌬</div>
-											<div class="doc-empty-title">Awaiting selection</div>
+											<div class="doc-empty-title">{i18n.metric_mgmt_awaiting_selection()}</div>
 											<div class="doc-empty-sub">
-												Once you retrieve a record, the parsed lines appear here.<br />
-												Click any metric on the left to jump to its source line.
+												{i18n.metric_mgmt_once_you_retrieve_a_record_2()}<br />
+												{i18n.metric_mgmt_click_any_metric_on_the_2()}
 											</div>
 										</div>
 									{:else}
 										{#if addLineOpen}
 											<div class="add-line-form">
-												<span class="add-line-title">Insert Line</span>
+												<span class="add-line-title">{i18n.metric_mgmt_insert_line()}</span>
 												<select class="add-line-type-select" bind:value={newLineType}>
-													<option value="text">text</option>
-													<option value="title">title</option>
-													<option value="header">header</option>
-													<option value="list-item">list-item</option>
-													<option value="footer">footer</option>
+													<option value="text">{i18n.metric_mgmt_text()}</option>
+													<option value="title">{i18n.metric_mgmt_title()}</option>
+													<option value="header">{i18n.metric_mgmt_header()}</option>
+													<option value="list-item">{i18n.metric_mgmt_list_item()}</option>
+													<option value="footer">{i18n.metric_mgmt_footer()}</option>
 												</select>
 												<input
 													class="add-line-input"
 													type="text"
-													placeholder="Line content…"
+													placeholder={i18n.metric_mgmt_line_content()}
 													bind:value={newLineContent}
 												/>
 												<button
@@ -1974,7 +1975,7 @@
 														/* TODO: POST /kb/raw-lines when API is available */
 														newLineContent = '';
 														addLineOpen = false;
-													}}>Add</button
+													}}>{i18n.metric_mgmt_add()}</button
 												>
 												<button
 													type="button"
@@ -1982,7 +1983,7 @@
 													onclick={() => {
 														addLineOpen = false;
 														newLineContent = '';
-													}}>Cancel</button
+													}}>{i18n.metric_mgmt_cancel()}</button
 												>
 											</div>
 										{/if}
@@ -1990,10 +1991,10 @@
 											<article id={`page-${pg.page}`} class="page">
 												<div class="page-edge" aria-hidden="true"></div>
 												<header class="page-head">
-													<span class="page-folio">page</span>
+													<span class="page-folio">{i18n.metric_mgmt_page()}</span>
 													<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
 													<span class="page-rule"></span>
-													<span class="page-count">{pg.lines.length} lines</span>
+													<span class="page-count">{i18n.metric_mgmt_lines({ linesCount: pg.lines.length })}</span>
 												</header>
 												<div class="page-body">
 													{#each pg.lines as ln (ln.line_number)}
@@ -2066,7 +2067,7 @@
 																<button
 																	type="button"
 																	class="line-delete-btn"
-																	title="Delete line {ln.line_number}"
+																	title={i18n.metric_mgmt_delete_line({ line_number: ln.line_number })}
 																	onclick={() => {
 																		/* TODO: DELETE /kb/raw-lines when API is available */
 																		rawLines = rawLines.filter(
@@ -2091,24 +2092,23 @@
 					{:else}
 						<iframe
 							class="doc-frame"
-							title={currentInput.file_name ?? `Record ${currentInput.id}`}
+							title={currentInput.file_name ?? i18n.metric_mgmt_record_4({ id: currentInput.id })}
 							src={fileUrl}
 						></iframe>
 					{/if}
 
 					{#if isText}
 						<div class="doc-foot-hint">
-							This file is rendered as text by your browser. For exact line highlighting, switch to
-							the <button class="inline-tab-btn" onclick={() => (showLines = true)}
-								>Source&nbsp;Lines</button
-							> view.
+							{i18n.metric_mgmt_this_file_is_rendered_as()} <button class="inline-tab-btn" onclick={() => (showLines = true)}
+								>{i18n.metric_mgmt_source_lines()}</button
+							> {i18n.metric_mgmt_view()}
 						</div>
 					{:else if !isPdf}
 						<div class="doc-foot-hint">
-							Inline preview support varies by file type. For line-level highlights, use the <button
+							{i18n.metric_mgmt_inline_preview_support_varies_by()} <button
 								class="inline-tab-btn"
-								onclick={() => (showLines = true)}>Source&nbsp;Lines</button
-							> view.
+								onclick={() => (showLines = true)}>{i18n.metric_mgmt_source_lines()}</button
+							> {i18n.metric_mgmt_view()}
 						</div>
 					{/if}
 				{/if}
@@ -2125,7 +2125,7 @@
 				class="dialog gs-dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Global metric search"
+				aria-label={i18n.metric_mgmt_global_metric_search_2()}
 				tabindex="0"
 				onclick={(e) => e.stopPropagation()}
 				onkeydown={(e) => {
@@ -2135,12 +2135,10 @@
 			>
 				<div class="dialog-head">
 					<div>
-						<div class="dialog-eyebrow">KB.Metrics</div>
-						<h2 class="dialog-title">Global Metric Search</h2>
+						<div class="dialog-eyebrow">{i18n.metric_mgmt_kb_metrics()}</div>
+						<h2 class="dialog-title">{i18n.metric_mgmt_global_metric_search()}</h2>
 						<p class="dialog-subtitle">
-							Search the whole `kb.metrics` corpus with agent-friendly filters. Results start
-							checked — uncheck any you do not want, then press Select to list them in the Metrics
-							panel.
+							{i18n.metric_mgmt_search_the_whole_kb_metrics_2()}
 						</p>
 					</div>
 				</div>
@@ -2151,7 +2149,7 @@
 							<input
 								class="search-input search-query"
 								type="text"
-								placeholder="Search metrics, thresholds, units, keywords…"
+								placeholder={i18n.metric_mgmt_search_metrics_thresholds_units_keywords()}
 								bind:value={searchQuery}
 								onkeydown={(event) => {
 									if (event.key === 'Enter') startMetricSearch();
@@ -2160,30 +2158,30 @@
 							<input
 								class="search-input"
 								type="text"
-								placeholder="Record ID"
+								placeholder={i18n.metric_mgmt_record_id()}
 								bind:value={searchFilters.inputRecordId}
 							/>
 							<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
-								<option value="">Explicit metric?</option>
-								<option value="true">Explicit only</option>
-								<option value="false">Implicit only</option>
+								<option value="">{i18n.metric_mgmt_explicit_metric()}</option>
+								<option value="true">{i18n.metric_mgmt_explicit_only()}</option>
+								<option value="false">{i18n.metric_mgmt_implicit_only()}</option>
 							</select>
 							<input
 								class="search-input"
 								type="text"
-								placeholder="Value class"
+								placeholder={i18n.metric_mgmt_value_class()}
 								bind:value={searchFilters.valueClass}
 							/>
 							<input
 								class="search-input"
 								type="text"
-								placeholder="Value type"
+								placeholder={i18n.metric_mgmt_value_type()}
 								bind:value={searchFilters.valueDataType}
 							/>
 							<input
 								class="search-input"
 								type="text"
-								placeholder="Metric unit"
+								placeholder={i18n.metric_mgmt_metric_unit()}
 								bind:value={searchFilters.metricUnit}
 							/>
 						</div>
@@ -2194,9 +2192,9 @@
 								disabled={searchLoading}
 								onclick={startMetricSearch}
 							>
-								{searchLoading ? 'Searching…' : 'Search'}
+								{searchLoading ? i18n.metric_mgmt_searching() : i18n.metric_mgmt_search()}
 							</button>
-							<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
+							<button type="button" class="search-btn" onclick={clearMetricSearch}>{i18n.metric_mgmt_clear()}</button>
 							<button
 								type="button"
 								class="search-btn"
@@ -2206,7 +2204,7 @@
 										...searchFilters,
 										inputRecordId: currentInput ? String(currentInput.id) : ''
 									};
-								}}>Use Current</button
+								}}>{i18n.metric_mgmt_use_current()}</button
 							>
 						</div>
 					</div>
@@ -2218,43 +2216,43 @@
 							{#if searchError}
 								{searchError}
 							{:else if metricSearchActive && searchHasRun}
-								{searchTotal} result{searchTotal === 1 ? '' : 's'}
-								{#if searchQuery.trim()}for "{searchQuery.trim()}"{/if}
+								{i18n.metric_mgmt_result({ searchTotal, plural: searchTotal === 1 ? '' : 's' })}
+								{#if searchQuery.trim()}{i18n.metric_mgmt_for({ searchQuery: searchQuery.trim() })}{/if}
 								{#if searchTotalPages > 1}
-									· page {searchPage} / {searchTotalPages}
+									{i18n.metric_mgmt_page_2({ searchPage, searchTotalPages })}
 									<button
 										type="button"
 										class="search-page-btn"
 										disabled={searchLoading || searchPage <= 1}
-										onclick={() => void runMetricSearch(searchPage - 1)}>Prev</button
+										onclick={() => void runMetricSearch(searchPage - 1)}>{i18n.metric_mgmt_prev()}</button
 									>
 									<button
 										type="button"
 										class="search-page-btn"
 										disabled={searchLoading || searchPage >= searchTotalPages}
-										onclick={() => void runMetricSearch(searchPage + 1)}>Next</button
+										onclick={() => void runMetricSearch(searchPage + 1)}>{i18n.metric_mgmt_next()}</button
 									>
 								{/if}
 							{:else}
-								Enter a query or set a filter, then press Search.
+								{i18n.metric_mgmt_enter_a_query_or_set()}
 							{/if}
 						</div>
 						{#if searchSeen.size > 0}
 							<div class="gs-bulk">
 								<span class="search-status"
-									>{searchCheckedIds.size} of {searchSeen.size} selected</span
+									>{i18n.metric_mgmt_of_selected({ searchCheckedIdsCount: searchCheckedIds.size, searchSeenCount: searchSeen.size })}</span
 								>
 								<button
 									type="button"
 									class="search-page-btn"
 									disabled={searchCheckedIds.size === searchSeen.size}
-									onclick={() => setAllSearchChecked(true)}>Select all</button
+									onclick={() => setAllSearchChecked(true)}>{i18n.metric_mgmt_select_all()}</button
 								>
 								<button
 									type="button"
 									class="search-page-btn"
 									disabled={searchCheckedIds.size === 0}
-									onclick={() => setAllSearchChecked(false)}>Deselect all</button
+									onclick={() => setAllSearchChecked(false)}>{i18n.metric_mgmt_deselect_all()}</button
 								>
 							</div>
 						{/if}
@@ -2263,14 +2261,14 @@
 					{#if searchLoading}
 						<div class="empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">Searching metrics</div>
-							<div class="empty-sub">Ranking results across the full metrics corpus…</div>
+							<div class="empty-title">{i18n.metric_mgmt_searching_metrics()}</div>
+							<div class="empty-sub">{i18n.metric_mgmt_ranking_results_across_the_full()}</div>
 						</div>
 					{:else if searchHasRun && !searchError && searchResults.length === 0}
 						<div class="empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">No global matches</div>
-							<div class="empty-sub">Try broader keywords or relax one of the semantic filters.</div>
+							<div class="empty-title">{i18n.metric_mgmt_no_global_matches()}</div>
+							<div class="empty-sub">{i18n.metric_mgmt_try_broader_keywords_or_relax()}</div>
 						</div>
 					{:else}
 						<div class="gs-results">
@@ -2290,14 +2288,14 @@
 												).padStart(3, '0')}
 												{#if result.metric_id}· {result.metric_id}{/if}
 											</div>
-											<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+											<div class="card-conf" title={i18n.metric_mgmt_search_score()}>{result.score.toFixed(3)}</div>
 										</div>
 										<div class="card-name">{result.primary_label}</div>
 										<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
 										<div class="card-foot">
 											<span class="chip">
 												<span class="chip-dot"></span>
-												record {result.input_record_id}
+												{i18n.metric_mgmt_record_3({ input_record_id: result.input_record_id })}
 											</span>
 											{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
 												<span class="chip chip-quiet">{chip}</span>
@@ -2312,19 +2310,19 @@
 
 				<div class="dialog-foot">
 					<div class="dialog-foot-hint">
-						Selections are kept while paging; a new search starts over.
+						{i18n.metric_mgmt_selections_are_kept_while_paging()}
 					</div>
 					<div class="dialog-foot-buttons">
 						<button
 							type="button"
 							class="am-btn-foot am-btn-foot-cancel"
-							onclick={() => (globalSearchOpen = false)}>Cancel</button
+							onclick={() => (globalSearchOpen = false)}>{i18n.metric_mgmt_cancel()}</button
 						>
 						<button
 							type="button"
 							class="am-btn-foot dialog-search-btn"
 							disabled={searchCheckedIds.size === 0}
-							onclick={confirmGlobalSearchSelection}>Select ({searchCheckedIds.size})</button
+							onclick={confirmGlobalSearchSelection}>{i18n.metric_mgmt_select({ searchCheckedIdsCount: searchCheckedIds.size })}</button
 						>
 					</div>
 				</div>
@@ -2346,18 +2344,17 @@
 			class="dialog am-dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Add metric"
+			aria-label={i18n.metric_mgmt_add_metric()}
 			tabindex="0"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-eyebrow">KB.Metrics</div>
-					<h2 class="dialog-title">Add Metric</h2>
+					<div class="dialog-eyebrow">{i18n.metric_mgmt_kb_metrics()}</div>
+					<h2 class="dialog-title">{i18n.metric_mgmt_add_metric_2()}</h2>
 					<p class="dialog-subtitle">
-						Review selected lines, extract candidate metrics, remove any you do not want, then save
-						the remaining metrics to the database.
+						{i18n.metric_mgmt_review_selected_lines_extract_candidate()}
 					</p>
 				</div>
 			</div>
@@ -2366,33 +2363,33 @@
 				{#if addMetricDialogLines.length === 0}
 					<div class="dialog-section am-empty-section">
 						<div class="empty-glyph">§</div>
-						<div class="empty-title">No lines selected</div>
+						<div class="empty-title">{i18n.metric_mgmt_no_lines_selected()}</div>
 						<div class="empty-sub">
-							Drag to select lines on the PDF, then open this dialog again.
+							{i18n.metric_mgmt_drag_to_select_lines_on()}
 						</div>
 					</div>
 				{:else}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Selected Lines</span>
+							<span class="dialog-section-title">{i18n.metric_mgmt_selected_lines()}</span>
 							<span class="dialog-section-copy"
-								>{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</span
+								>{i18n.metric_mgmt_line_selected({ addMetricDialogLinesCount: addMetricDialogLines.length, plural: addMetricDialogLines.length === 1 ? '' : 's' })}</span
 							>
 							<button
 								type="button"
 								class="am-btn am-btn-head-add"
 								disabled={!canAddPrevious}
-								onclick={addPreviousLine}>+ Add</button
+								onclick={addPreviousLine}>{i18n.metric_mgmt_add_2()}</button
 							>
 						</div>
 						<div class="am-table-wrap">
 							<table class="am-table">
 								<thead>
 									<tr>
-										<th class="am-col-line">Line #</th>
-										<th class="am-col-page">Page</th>
-										<th class="am-col-type">Type</th>
-										<th class="am-col-content">Content</th>
+										<th class="am-col-line">{i18n.metric_mgmt_line()}</th>
+										<th class="am-col-page">{i18n.metric_mgmt_page_3()}</th>
+										<th class="am-col-type">{i18n.metric_mgmt_type_2()}</th>
+										<th class="am-col-content">{i18n.metric_mgmt_content()}</th>
 										<th class="am-col-actions"></th>
 									</tr>
 								</thead>
@@ -2425,23 +2422,23 @@
 														class="am-btn am-btn-save"
 														disabled={addMetricBusy}
 														onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
-														>Save</button
+														>{i18n.metric_mgmt_save()}</button
 													>
 													<button
 														type="button"
 														class="am-btn am-btn-cancel-row"
-														onclick={cancelEditDialogLine}>Cancel</button
+														onclick={cancelEditDialogLine}>{i18n.metric_mgmt_cancel()}</button
 													>
 												{:else}
 													<button
 														type="button"
 														class="am-btn am-btn-edit"
-														onclick={() => startEditDialogLine(line.key, line.content)}>Edit</button
+														onclick={() => startEditDialogLine(line.key, line.content)}>{i18n.metric_mgmt_edit()}</button
 													>
 													<button
 														type="button"
 														class="am-btn am-btn-delete"
-														onclick={() => deleteDialogLine(line.key)}>Remove</button
+														onclick={() => deleteDialogLine(line.key)}>{i18n.metric_mgmt_remove()}</button
 													>
 												{/if}
 											</td>
@@ -2454,7 +2451,7 @@
 									type="button"
 									class="am-btn am-btn-foot-add"
 									disabled={!canAddNext}
-									onclick={addNextLine}>+ Add</button
+									onclick={addNextLine}>{i18n.metric_mgmt_add_2()}</button
 								>
 							</div>
 						</div>
@@ -2462,21 +2459,21 @@
 
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Extracted Metrics</span>
+							<span class="dialog-section-title">{i18n.metric_mgmt_extracted_metrics()}</span>
 							<span class="dialog-section-copy"
-								>{extractedMetricsPreview.length} metric{extractedMetricsPreview.length === 1
+								>{i18n.metric_mgmt_metric_ready({ extractedMetricsPreviewCount: extractedMetricsPreview.length, plural: extractedMetricsPreview.length === 1
 									? ''
-									: 's'} ready</span
+									: 's' })}</span
 							>
 						</div>
 						{#if addMetricBusyAction === 'extract'}
 							<div class="am-status-row" aria-live="polite">
 								<span class="am-spinner" aria-hidden="true"></span>
-								<span>Extracting metrics from the selected lines…</span>
+								<span>{i18n.metric_mgmt_extracting_metrics_from_the_selected()}</span>
 							</div>
 						{:else if extractedMetricsPreview.length === 0}
 							<div class="metadata-empty">
-								Press <strong>Extract Metric</strong> to preview the metrics returned by the backend.
+								{i18n.metric_mgmt_press()} <strong>{i18n.metric_mgmt_extract_metric()}</strong> {i18n.metric_mgmt_to_preview_the_metrics_returned()}
 							</div>
 						{:else}
 							<div class="am-preview-list">
@@ -2495,7 +2492,7 @@
 												type="button"
 												class="am-btn am-btn-delete"
 												disabled={addMetricBusy}
-												onclick={() => removeExtractedMetricPreview(idx)}>Remove</button
+												onclick={() => removeExtractedMetricPreview(idx)}>{i18n.metric_mgmt_remove()}</button
 											>
 										</div>
 										{#if metric.metric_desc}
@@ -2527,29 +2524,29 @@
 						class="am-btn-foot am-btn-help"
 						onclick={() => {
 							alert(
-								'Select PDF lines to extract a metric or provision.\n\n' +
-									'• Drag on the PDF to select lines\n' +
-									'• Edit: modify line content (saves to the original file)\n' +
+								i18n.metric_mgmt_select_pdf_lines_to_extract() +
+									i18n.metric_mgmt_drag_on_the_pdf_to() +
+									i18n.metric_mgmt_edit_modify_line_content_saves() +
 									'• Remove: remove a line from this selection\n' +
 									'• Extract Provision: create a new provision from the remaining lines\n' +
-									'• Extract Metric: preview metrics returned from the backend\n' +
+									i18n.metric_mgmt_extract_metric_preview_metrics_returned() +
 									'• Save: persist the remaining preview metrics to kb.metrics'
 							);
-						}}>Help</button
+						}}>{i18n.metric_mgmt_help()}</button
 					>
 				</div>
 				<div class="dialog-foot-buttons">
 					<button
 						type="button"
 						class="am-btn-foot am-btn-foot-cancel"
-						onclick={closeAddMetricDialog}>Close</button
+						onclick={closeAddMetricDialog}>{i18n.metric_mgmt_close()}</button
 					>
 					<button
 						type="button"
 						class="am-btn-foot am-btn-foot-extract dialog-search-btn"
 						disabled={addMetricDialogLines.length === 0 || addMetricBusy}
 						onclick={extractProvision}
-						>{addMetricBusyAction === 'provision' ? 'Saving…' : 'Extract Provision'}</button
+						>{addMetricBusyAction === 'provision' ? i18n.metric_mgmt_saving() : i18n.metric_mgmt_extract_provision()}</button
 					>
 					<button
 						type="button"
@@ -2559,10 +2556,10 @@
 					>
 						{#if addMetricBusyAction === 'extract'}
 							<span class="am-btn-inline"
-								><span class="am-spinner" aria-hidden="true"></span>Extracting…</span
+								><span class="am-spinner" aria-hidden="true"></span>{i18n.metric_mgmt_extracting()}</span
 							>
 						{:else}
-							Extract Metric
+							{i18n.metric_mgmt_extract_metric()}
 						{/if}
 					</button>
 					<button
@@ -2573,10 +2570,10 @@
 					>
 						{#if addMetricBusyAction === 'save'}
 							<span class="am-btn-inline"
-								><span class="am-spinner" aria-hidden="true"></span>Saving…</span
+								><span class="am-spinner" aria-hidden="true"></span>{i18n.metric_mgmt_saving()}</span
 							>
 						{:else}
-							Save
+							{i18n.metric_mgmt_save()}
 						{/if}
 					</button>
 				</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as i18n } from '$lib/paraglide/messages.js';
 	import { tick } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
@@ -558,25 +559,25 @@
 
 		const metadata: AttrDef[] = [
 			textAttr('provision_id', 'ID', HashIcon, String(m.id), true),
-			textAttr('name', 'Name', TypeIcon, fmt(m.prov_name), has(m.prov_name)),
-			textAttr('type', 'Type', ListIcon, fmt(m.provision_type), has(m.provision_type)),
+			textAttr('name', i18n.provision_mgmt_name(), TypeIcon, fmt(m.prov_name), has(m.prov_name)),
+			textAttr('type', i18n.provision_mgmt_type_2(), ListIcon, fmt(m.provision_type), has(m.provision_type)),
 			textAttr(
 				'confidence',
-				'Confidence',
+				i18n.provision_mgmt_confidence(),
 				ActivityIcon,
 				confidencePct(m.confidence),
 				m.confidence != null
 			),
 			textAttr(
 				'explicit',
-				'Explicit',
+				i18n.provision_mgmt_explicit(),
 				CalendarIcon,
 				m.is_explicit == null ? '' : m.is_explicit ? 'true' : 'false',
 				m.is_explicit != null
 			),
 			textAttr(
 				'need_verify',
-				'Verify',
+				i18n.provision_mgmt_verify(),
 				ActivityIcon,
 				m.need_verify == null ? '' : m.need_verify ? 'true' : 'false',
 				m.need_verify != null
@@ -584,15 +585,15 @@
 		];
 
 		const statement: AttrDef[] = [
-			textAttr('provision', 'Provision', FileTextIcon, fmt(m.provision), has(m.provision)),
-			textAttr('subject', 'Subject', TypeIcon, fmt(m.provision_subject), has(m.provision_subject)),
-			textAttr('desc', 'Desc', BookOpenIcon, fmt(m.prov_desc), has(m.prov_desc))
+			textAttr('provision', i18n.provision_mgmt_provision(), FileTextIcon, fmt(m.provision), has(m.provision)),
+			textAttr('subject', i18n.provision_mgmt_subject(), TypeIcon, fmt(m.provision_subject), has(m.provision_subject)),
+			textAttr('desc', i18n.provision_mgmt_desc(), BookOpenIcon, fmt(m.prov_desc), has(m.prov_desc))
 		];
 
 		const context: AttrDef[] = [
-			textAttr('context', 'Context', BookOpenIcon, fmt(m.prov_context), has(m.prov_context)),
-			chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', ')),
-			chipsAttr('categories', 'Categories', MapPinIcon, categoryItems, categoryItems.join(', '))
+			textAttr('context', i18n.provision_mgmt_context(), BookOpenIcon, fmt(m.prov_context), has(m.prov_context)),
+			chipsAttr('keywords', i18n.provision_mgmt_keywords(), TagIcon, kwItems, kwItems.join(', ')),
+			chipsAttr('categories', i18n.provision_mgmt_categories(), MapPinIcon, categoryItems, categoryItems.join(', '))
 		];
 
 		// kb.artifact_objects rows extracted for this provision (joined on
@@ -608,18 +609,18 @@
 		const objects: AttrDef[] = [
 			chipsAttr(
 				'artifact_object',
-				'Artifact Object',
+				i18n.provision_mgmt_artifact_object(),
 				BoxIcon,
 				artifactObjectItems,
 				artifactObjectItems.join(', ')
 			),
-			chipsAttr('object_nodes', 'Object Nodes', BoxIcon, objectNodeItems, objectNodeItems.join(', '))
+			chipsAttr('object_nodes', i18n.provision_mgmt_object_nodes(), BoxIcon, objectNodeItems, objectNodeItems.join(', '))
 		];
 
 		const provenance: AttrDef[] = [
-			textAttr('model', 'Model', HashIcon, fmt(m.model_name), has(m.model_name)),
-			textAttr('prompt', 'Prompt', FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
-			textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type))
+			textAttr('model', i18n.provision_mgmt_model(), HashIcon, fmt(m.model_name), has(m.model_name)),
+			textAttr('prompt', i18n.provision_mgmt_prompt(), FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
+			textAttr('location_type', i18n.provision_mgmt_location(), MapPinIcon, fmt(m.location_type), has(m.location_type))
 		];
 
 		const groundingEntries: LineEntry[] = spans.flatMap((span) => {
@@ -636,7 +637,7 @@
 			}));
 		});
 		const grounding: AttrDef[] = [
-			linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries)
+			linesAttr('source_line_spans', i18n.provision_mgmt_lines_2(), FileTextIcon, groundingEntries)
 		];
 
 		return { metadata, statement, context, objects, provenance, grounding };
@@ -687,42 +688,42 @@
 		const groupSpecs: GroupSpec[] = [
 			{
 				key: 'g_metadata',
-				label: 'Metadata',
+				label: i18n.provision_mgmt_metadata(),
 				icon: BookOpenIcon,
 				angleDeg: -90,
 				attrs: attrsByGroup.metadata
 			},
 			{
 				key: 'g_statement',
-				label: 'Statement',
+				label: i18n.provision_mgmt_statement(),
 				icon: FileTextIcon,
 				angleDeg: -30,
 				attrs: attrsByGroup.statement
 			},
 			{
 				key: 'g_context',
-				label: 'Context',
+				label: i18n.provision_mgmt_context(),
 				icon: TagIcon,
 				angleDeg: 30,
 				attrs: attrsByGroup.context
 			},
 			{
 				key: 'g_objects',
-				label: 'Objects',
+				label: i18n.provision_mgmt_objects(),
 				icon: BoxIcon,
 				angleDeg: 90,
 				attrs: attrsByGroup.objects
 			},
 			{
 				key: 'g_grounding',
-				label: 'Grounding',
+				label: i18n.provision_mgmt_grounding(),
 				icon: MapPinIcon,
 				angleDeg: 150,
 				attrs: attrsByGroup.grounding
 			},
 			{
 				key: 'g_provenance',
-				label: 'Provenance',
+				label: i18n.provision_mgmt_provenance(),
 				icon: HashIcon,
 				angleDeg: 210,
 				attrs: attrsByGroup.provenance
@@ -773,7 +774,7 @@
 			Rsn,
 			cx,
 			cy,
-			metricLabel: m.prov_name?.trim() || m.provision_subject?.trim() || `Provision #${m.id}`,
+			metricLabel: m.prov_name?.trim() || m.provision_subject?.trim() || i18n.provision_mgmt_provision_2({ id: m.id }),
 			metricSubLabel: m.prov_name_en?.trim() || m.provision_subject_en?.trim() || '',
 			groups
 		};
@@ -1080,9 +1081,9 @@
 			metrics = metricRes.results ?? [];
 			currentInput = inputRes?.record ?? null;
 			rawLines = rawRes?.lines ?? [];
-			rawError = rawRes ? '' : 'Failed to load raw lines';
+			rawError = rawRes ? '' : i18n.provision_mgmt_failed_to_load_raw_lines();
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve metrics';
+			errorMsg = err instanceof Error ? err.message : i18n.provision_mgmt_failed_to_retrieve_metrics();
 		} finally {
 			rawLoading = false;
 			loading = false;
@@ -1121,7 +1122,7 @@
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || i18n.provision_mgmt_input({ id: r.id });
 	}
 
 	function recordDisplayDocNo(r: KbInputRecord): string {
@@ -1141,10 +1142,10 @@
 	}
 
 	function metricNameOf(m: KbProvisionRecord): string {
-		return m.prov_name?.trim() || m.provision_subject?.trim() || `Provision #${m.id}`;
+		return m.prov_name?.trim() || m.provision_subject?.trim() || i18n.provision_mgmt_provision_2({ id: m.id });
 	}
 	function previewMetricNameOf(m: ExtractedKbProvision, index: number): string {
-		return m.prov_name?.trim() || m.provision_subject?.trim() || `Provision ${index + 1}`;
+		return m.prov_name?.trim() || m.provision_subject?.trim() || i18n.provision_mgmt_provision_3({ value: index + 1 });
 	}
 	function confidencePct(c?: number): string {
 		if (c == null) return '—';
@@ -1205,7 +1206,7 @@
 
 	async function saveEditDialogLine(pageNo: number, lineNo: number) {
 		if (!currentInput || !addMetricEditKey) return;
-		const confirmed = window.confirm('Save changes to the original file?');
+		const confirmed = window.confirm(i18n.provision_mgmt_save_changes_to_the_original());
 		if (!confirmed) return;
 		addMetricBusyAction = 'line';
 		try {
@@ -1225,7 +1226,7 @@
 			addMetricBufferLines = [];
 			resetAddMetricPreview();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save line');
+			alert(err instanceof Error ? err.message : i18n.provision_mgmt_failed_to_save_line());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1295,7 +1296,7 @@
 			});
 			extractedMetricsPreview = result.provisions ?? [];
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to extract provisions');
+			alert(err instanceof Error ? err.message : i18n.provision_mgmt_failed_to_extract_provisions());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1313,7 +1314,7 @@
 			metrics = refreshed.results ?? [];
 			closeAddMetricDialog();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to save provisions');
+			alert(err instanceof Error ? err.message : i18n.provision_mgmt_failed_to_save_provisions());
 		} finally {
 			addMetricBusyAction = null;
 		}
@@ -1354,16 +1355,16 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge System · Vol. III</div>
-			<h1 class="display">Provisions&nbsp;<span class="amp">&amp;</span>&nbsp;Provenance</h1>
+			<div class="eyebrow">{i18n.provision_mgmt_knowledge_system_vol_iii()}</div>
+			<h1 class="display">{i18n.provision_mgmt_provisions()};<span class="amp">&amp;</span>&{i18n.provision_mgmt_provenance()}</h1>
 			<div class="subtitle">
-				A reading room for extracted provisions — locate, verify, return to source.
+				{i18n.provision_mgmt_a_reading_room_for_extracted()}
 			</div>
 		</div>
 		<div class="header-right">
-			<span class="meta-label">RECORD</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
-			<span class="meta-label">TYPE</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
-			<span class="meta-label">PROVISIONS</span><span class="meta-val"
+			<span class="meta-label">{i18n.provision_mgmt_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
+			<span class="meta-label">{i18n.provision_mgmt_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
+			<span class="meta-label">{i18n.provision_mgmt_provisions_2()}</span><span class="meta-val"
 				>{metrics.length.toString().padStart(3, '0')}</span
 			>
 		</div>
@@ -1379,10 +1380,10 @@
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="provisions-record-browser"
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting extracted provisions."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				title={i18n.provision_mgmt_kb_inputs()}
+				subtitle={i18n.provision_mgmt_search_filter_and_select_input()}
+				emptyTitle={i18n.provision_mgmt_no_records_yet()}
+				emptySubtitle={i18n.provision_mgmt_use_search_or_retrieve_to()}
 				autoSelectFirstRecord={false}
 				selectedRecordId={currentInput?.id ?? null}
 				mapRecord={mapBrowserRecord}
@@ -1394,8 +1395,8 @@
 
 			<aside class="metric-sidebar">
 				<div class="left-meta">
-					<div class="left-meta-title">Provisions</div>
-					<div class="left-meta-count">{metrics.length} found</div>
+					<div class="left-meta-title">{i18n.provision_mgmt_provisions()}</div>
+					<div class="left-meta-count">{i18n.provision_mgmt_found({ metricsCount: metrics.length })}</div>
 				</div>
 
 				<div class="metrics-list">
@@ -1404,22 +1405,22 @@
 					{:else if !loading && metrics.length === 0}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No provisions yet</div>
+							<div class="empty-title">{i18n.provision_mgmt_no_provisions_yet()}</div>
 							<div class="empty-sub">
-								Select a record from kb.inputs to populate the provisions index.
+								{i18n.provision_mgmt_select_a_record_from_kb()}
 							</div>
 						</div>
 					{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
-							<div class="empty-title">No matches</div>
+							<div class="empty-title">{i18n.provision_mgmt_no_matches()}</div>
 							<div class="empty-sub">
 								{#if keywordFilter && confidenceFilter}
-									No provisions match keyword "{keywordFilter}" and confidence {confidenceFilter}.
+									{i18n.provision_mgmt_no_provisions_match_keyword_and({ keywordFilter, confidenceFilter })}
 								{:else if keywordFilter}
-									No provisions match the keyword "{keywordFilter}".
+									{i18n.provision_mgmt_no_provisions_match_the_keyword({ keywordFilter })}
 								{:else}
-									No provisions match confidence {confidenceFilter}.
+									{i18n.provision_mgmt_no_provisions_match_confidence({ confidenceFilter })}
 								{/if}
 							</div>
 						</div>
@@ -1436,9 +1437,9 @@
 									<div class="card-row-top">
 										<div class="card-index">
 											№ {String(idx + 1).padStart(3, '0')}
-											<span class="card-prov-id" title="Provision ID">ID {m.prov_id}</span>
+											<span class="card-prov-id" title={i18n.provision_mgmt_provision_id()}>{i18n.provision_mgmt_id({ prov_id: m.prov_id })}</span>
 										</div>
-										<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
+										<div class="card-conf" title={i18n.provision_mgmt_confidence()}>{confidencePct(m.confidence)}</div>
 									</div>
 									<div class="card-name">{metricNameOf(m)}</div>
 									{#if m.prov_desc || m.provision}
@@ -1447,7 +1448,7 @@
 									<div class="card-foot">
 										<span class="chip">
 											<span class="chip-dot"></span>
-											{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
+											{i18n.provision_mgmt_span({ count: spanCount(m), plural: spanCount(m) === 1 ? '' : 's' })}
 										</span>
 										{#if m.provision_type}<span class="chip chip-mono">{m.provision_type}</span>{/if}
 										{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
@@ -1462,7 +1463,7 @@
 					type="button"
 					class="prov-list-resizer"
 					class:active={provListResizing}
-					aria-label="Resize provisions list"
+					aria-label={i18n.provision_mgmt_resize_provisions_list()}
 					onpointerdown={startProvListResize}
 					onkeydown={onProvListResizerKeydown}
 				>
@@ -1476,18 +1477,18 @@
 			{#if recordBrowserFolded}
 				<div class="metric-canvas-wrap">
 					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+						<button type="button" class="toolbar-back" onclick={goBack} title={i18n.provision_mgmt_back_to_record_list()}>
 							<ArrowLeftIcon class="toolbar-icon" />
-							<span>Back</span>
+							<span>{i18n.provision_mgmt_back()}</span>
 						</button>
 						<div class="toolbar-filters">
 							<select
 								class="toolbar-select"
 								value={metricNameDropdownValue}
 								onchange={handleMetricNameDropdown}
-								title="Jump to provision by name"
+								title={i18n.provision_mgmt_jump_to_provision_by_name()}
 							>
-								<option value="">— Provision by name —</option>
+								<option value="">{i18n.provision_mgmt_provision_by_name()}</option>
 								{#each metrics as m (m.id)}
 									<option value={m.id}>{metricNameOf(m)}</option>
 								{/each}
@@ -1497,7 +1498,7 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="metric-keywords-datalist-focus"
-									placeholder="Filter by keyword…"
+									placeholder={i18n.provision_mgmt_filter_by_keyword()}
 									bind:value={keywordFilter}
 								/>
 								<datalist id="metric-keywords-datalist-focus">
@@ -1510,8 +1511,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (keywordFilter = '')}
-										title="Clear keyword filter"
-										aria-label="Clear keyword filter">×</button
+										title={i18n.provision_mgmt_clear_keyword_filter()}
+										aria-label={i18n.provision_mgmt_clear_keyword_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -1520,8 +1521,8 @@
 									class="toolbar-kw-input"
 									type="text"
 									list="confidence-options"
-									placeholder="Confidence…"
-									title="Filter by confidence threshold. Select or type a value like 0.85, or <0.50 for below-threshold."
+									placeholder={i18n.provision_mgmt_confidence_2()}
+									title={i18n.provision_mgmt_filter_by_confidence_threshold_select()}
 									bind:value={confidenceFilter}
 								/>
 								<datalist id="confidence-options">
@@ -1537,8 +1538,8 @@
 										type="button"
 										class="toolbar-kw-clear"
 										onclick={() => (confidenceFilter = '')}
-										title="Clear confidence filter"
-										aria-label="Clear confidence filter">×</button
+										title={i18n.provision_mgmt_clear_confidence_filter()}
+										aria-label={i18n.provision_mgmt_clear_confidence_filter()}>×</button
 									>
 								{/if}
 							</div>
@@ -1549,7 +1550,7 @@
 								class="toolbar-nav-btn"
 								disabled={!prevMetric}
 								onclick={goToPrevMetric}
-								title="Previous provision"><ChevronLeftIcon class="toolbar-icon" /></button
+								title={i18n.provision_mgmt_previous_provision()}><ChevronLeftIcon class="toolbar-icon" /></button
 							>
 							<span class="toolbar-nav-pos">
 								{selectedMetricInFilteredIndex >= 0
@@ -1561,7 +1562,7 @@
 								class="toolbar-nav-btn"
 								disabled={!nextMetric}
 								onclick={goToNextMetric}
-								title="Next provision"><ChevronRightIcon class="toolbar-icon" /></button
+								title={i18n.provision_mgmt_next_provision()}><ChevronRightIcon class="toolbar-icon" /></button
 							>
 						</div>
 					</div>
@@ -1627,9 +1628,9 @@
 						{:else}
 							<div class="canvas-empty">
 								<div class="canvas-empty-mark">◎</div>
-								<div class="canvas-empty-title">Select a provision</div>
+								<div class="canvas-empty-title">{i18n.provision_mgmt_select_a_provision()}</div>
 								<div class="canvas-empty-sub">
-									Click a provision from the list to view its attribute map.
+									{i18n.provision_mgmt_click_a_provision_from_the()}
 								</div>
 							</div>
 						{/if}
@@ -1639,7 +1640,7 @@
 					type="button"
 					class="focus-resize-handle"
 					class:active={focusResizing}
-					aria-label="Resize the source document panel"
+					aria-label={i18n.provision_mgmt_resize_the_source_document_panel()}
 					onpointerdown={startFocusResize}
 					onkeydown={onFocusResizerKeydown}
 				>
@@ -1653,10 +1654,10 @@
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
-						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-title">{i18n.provision_mgmt_awaiting_selection()}</div>
 						<div class="doc-empty-sub">
-							Once you retrieve a record, the original document appears here.<br />
-							Click any provision on the left to jump to its source page.
+							{i18n.provision_mgmt_once_you_retrieve_a_record()}<br />
+							{i18n.provision_mgmt_click_any_provision_on_the()}
 						</div>
 					</div>
 				{:else}
@@ -1686,7 +1687,7 @@
 										if (editLineMode) deleteLineMode = false;
 										editingLineKey = null;
 									}}
-									title="Edit Lines"><SquarePenIcon class="pvw-tb-icon" /></button
+									title={i18n.provision_mgmt_edit_lines()}><SquarePenIcon class="pvw-tb-icon" /></button
 								>
 								<button
 									type="button"
@@ -1698,14 +1699,14 @@
 										if (deleteLineMode) editLineMode = false;
 										editingLineKey = null;
 									}}
-									title="Delete Lines"><Trash2Icon class="pvw-tb-icon" /></button
+									title={i18n.provision_mgmt_delete_lines()}><Trash2Icon class="pvw-tb-icon" /></button
 								>
 								<button
 									type="button"
 									class="pvw-tool-btn"
 									class:active={addLineOpen}
 									onclick={() => (addLineOpen = !addLineOpen)}
-									title="Add Line"><ListPlusIcon class="pvw-tb-icon" /></button
+									title={i18n.provision_mgmt_add_line()}><ListPlusIcon class="pvw-tb-icon" /></button
 								>
 								<div class="pvw-tool-sep"></div>
 								<button
@@ -1713,7 +1714,7 @@
 									class="pvw-tool-btn"
 									class:active={showLines}
 									onclick={() => (showLines = !showLines)}
-									title={showLines ? 'Show PDF Document' : 'Show Lines'}
+									title={showLines ? i18n.provision_mgmt_show_pdf_document() : i18n.provision_mgmt_show_lines()}
 								>
 									{#if showLines}
 										<FileTextIcon class="pvw-tb-icon" />
@@ -1726,37 +1727,37 @@
 								<div class="lines-panel">
 									{#if rawLoading}
 										<div class="doc-status">
-											<span class="dot-loop"></span>Reading raw_line file…
+											<span class="dot-loop"></span>{i18n.provision_mgmt_reading_raw_line_file()}
 										</div>
 									{:else if rawError}
 										<div class="doc-error">
-											<div class="doc-error-title">⚠ Cannot render document</div>
+											<div class="doc-error-title">{i18n.provision_mgmt_cannot_render_document()}</div>
 											<div class="doc-error-msg">{rawError}</div>
 										</div>
 									{:else if pagesGrouped.length === 0}
 										<div class="doc-empty">
 											<div class="doc-empty-mark">⌬</div>
-											<div class="doc-empty-title">Awaiting selection</div>
+											<div class="doc-empty-title">{i18n.provision_mgmt_awaiting_selection()}</div>
 											<div class="doc-empty-sub">
-												Once you retrieve a record, the parsed lines appear here.<br />
-												Click any provision on the left to jump to its source line.
+												{i18n.provision_mgmt_once_you_retrieve_a_record_2()}<br />
+												{i18n.provision_mgmt_click_any_provision_on_the_2()}
 											</div>
 										</div>
 									{:else}
 										{#if addLineOpen}
 											<div class="add-line-form">
-												<span class="add-line-title">Insert Line</span>
+												<span class="add-line-title">{i18n.provision_mgmt_insert_line()}</span>
 												<select class="add-line-type-select" bind:value={newLineType}>
-													<option value="text">text</option>
-													<option value="title">title</option>
-													<option value="header">header</option>
-													<option value="list-item">list-item</option>
-													<option value="footer">footer</option>
+													<option value="text">{i18n.provision_mgmt_text()}</option>
+													<option value="title">{i18n.provision_mgmt_title()}</option>
+													<option value="header">{i18n.provision_mgmt_header()}</option>
+													<option value="list-item">{i18n.provision_mgmt_list_item()}</option>
+													<option value="footer">{i18n.provision_mgmt_footer()}</option>
 												</select>
 												<input
 													class="add-line-input"
 													type="text"
-													placeholder="Line content…"
+													placeholder={i18n.provision_mgmt_line_content()}
 													bind:value={newLineContent}
 												/>
 												<button
@@ -1766,7 +1767,7 @@
 														/* TODO: POST /kb/raw-lines when API is available */
 														newLineContent = '';
 														addLineOpen = false;
-													}}>Add</button
+													}}>{i18n.provision_mgmt_add()}</button
 												>
 												<button
 													type="button"
@@ -1774,7 +1775,7 @@
 													onclick={() => {
 														addLineOpen = false;
 														newLineContent = '';
-													}}>Cancel</button
+													}}>{i18n.provision_mgmt_cancel()}</button
 												>
 											</div>
 										{/if}
@@ -1782,10 +1783,10 @@
 											<article id={`page-${pg.page}`} class="page">
 												<div class="page-edge" aria-hidden="true"></div>
 												<header class="page-head">
-													<span class="page-folio">page</span>
+													<span class="page-folio">{i18n.provision_mgmt_page()}</span>
 													<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
 													<span class="page-rule"></span>
-													<span class="page-count">{pg.lines.length} lines</span>
+													<span class="page-count">{i18n.provision_mgmt_lines({ linesCount: pg.lines.length })}</span>
 												</header>
 												<div class="page-body">
 													{#each pg.lines as ln (ln.line_number)}
@@ -1858,7 +1859,7 @@
 																<button
 																	type="button"
 																	class="line-delete-btn"
-																	title="Delete line {ln.line_number}"
+																	title={i18n.provision_mgmt_delete_line({ line_number: ln.line_number })}
 																	onclick={() => {
 																		/* TODO: DELETE /kb/raw-lines when API is available */
 																		rawLines = rawLines.filter(
@@ -1883,24 +1884,23 @@
 					{:else}
 						<iframe
 							class="doc-frame"
-							title={currentInput.file_name ?? `Record ${currentInput.id}`}
+							title={currentInput.file_name ?? i18n.provision_mgmt_record_2({ id: currentInput.id })}
 							src={fileUrl}
 						></iframe>
 					{/if}
 
 					{#if isText}
 						<div class="doc-foot-hint">
-							This file is rendered as text by your browser. For exact line highlighting, switch to
-							the <button class="inline-tab-btn" onclick={() => (showLines = true)}
-								>Source&nbsp;Lines</button
-							> view.
+							{i18n.provision_mgmt_this_file_is_rendered_as()} <button class="inline-tab-btn" onclick={() => (showLines = true)}
+								>{i18n.provision_mgmt_source_lines()}</button
+							> {i18n.provision_mgmt_view()}
 						</div>
 					{:else if !isPdf}
 						<div class="doc-foot-hint">
-							Inline preview support varies by file type. For line-level highlights, use the <button
+							{i18n.provision_mgmt_inline_preview_support_varies_by()} <button
 								class="inline-tab-btn"
-								onclick={() => (showLines = true)}>Source&nbsp;Lines</button
-							> view.
+								onclick={() => (showLines = true)}>{i18n.provision_mgmt_source_lines()}</button
+							> {i18n.provision_mgmt_view()}
 						</div>
 					{/if}
 				{/if}
@@ -1922,18 +1922,17 @@
 			class="dialog am-dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Add provision"
+			aria-label={i18n.provision_mgmt_add_provision()}
 			tabindex="0"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-eyebrow">KB.Provisions</div>
-					<h2 class="dialog-title">Add Provision</h2>
+					<div class="dialog-eyebrow">{i18n.provision_mgmt_kb_provisions()}</div>
+					<h2 class="dialog-title">{i18n.provision_mgmt_add_provision_2()}</h2>
 					<p class="dialog-subtitle">
-						Review selected lines, extract candidate provisions, remove any you do not want, then
-						save the remaining provisions to the database.
+						{i18n.provision_mgmt_review_selected_lines_extract_candidate()}
 					</p>
 				</div>
 			</div>
@@ -1942,33 +1941,33 @@
 				{#if addMetricDialogLines.length === 0}
 					<div class="dialog-section am-empty-section">
 						<div class="empty-glyph">§</div>
-						<div class="empty-title">No lines selected</div>
+						<div class="empty-title">{i18n.provision_mgmt_no_lines_selected()}</div>
 						<div class="empty-sub">
-							Drag to select lines on the PDF, then open this dialog again.
+							{i18n.provision_mgmt_drag_to_select_lines_on()}
 						</div>
 					</div>
 				{:else}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Selected Lines</span>
+							<span class="dialog-section-title">{i18n.provision_mgmt_selected_lines()}</span>
 							<span class="dialog-section-copy"
-								>{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</span
+								>{i18n.provision_mgmt_line_selected({ addMetricDialogLinesCount: addMetricDialogLines.length, plural: addMetricDialogLines.length === 1 ? '' : 's' })}</span
 							>
 							<button
 								type="button"
 								class="am-btn am-btn-head-add"
 								disabled={!canAddPrevious}
-								onclick={addPreviousLine}>+ Add</button
+								onclick={addPreviousLine}>{i18n.provision_mgmt_add_2()}</button
 							>
 						</div>
 						<div class="am-table-wrap">
 							<table class="am-table">
 								<thead>
 									<tr>
-										<th class="am-col-line">Line #</th>
-										<th class="am-col-page">Page</th>
-										<th class="am-col-type">Type</th>
-										<th class="am-col-content">Content</th>
+										<th class="am-col-line">{i18n.provision_mgmt_line()}</th>
+										<th class="am-col-page">{i18n.provision_mgmt_page_2()}</th>
+										<th class="am-col-type">{i18n.provision_mgmt_type_2()}</th>
+										<th class="am-col-content">{i18n.provision_mgmt_content()}</th>
 										<th class="am-col-actions"></th>
 									</tr>
 								</thead>
@@ -2001,23 +2000,23 @@
 														class="am-btn am-btn-save"
 														disabled={addMetricBusy}
 														onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
-														>Save</button
+														>{i18n.provision_mgmt_save()}</button
 													>
 													<button
 														type="button"
 														class="am-btn am-btn-cancel-row"
-														onclick={cancelEditDialogLine}>Cancel</button
+														onclick={cancelEditDialogLine}>{i18n.provision_mgmt_cancel()}</button
 													>
 												{:else}
 													<button
 														type="button"
 														class="am-btn am-btn-edit"
-														onclick={() => startEditDialogLine(line.key, line.content)}>Edit</button
+														onclick={() => startEditDialogLine(line.key, line.content)}>{i18n.provision_mgmt_edit()}</button
 													>
 													<button
 														type="button"
 														class="am-btn am-btn-delete"
-														onclick={() => deleteDialogLine(line.key)}>Remove</button
+														onclick={() => deleteDialogLine(line.key)}>{i18n.provision_mgmt_remove()}</button
 													>
 												{/if}
 											</td>
@@ -2030,7 +2029,7 @@
 									type="button"
 									class="am-btn am-btn-foot-add"
 									disabled={!canAddNext}
-									onclick={addNextLine}>+ Add</button
+									onclick={addNextLine}>{i18n.provision_mgmt_add_2()}</button
 								>
 							</div>
 						</div>
@@ -2038,22 +2037,21 @@
 
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<span class="dialog-section-title">Extracted Provisions</span>
+							<span class="dialog-section-title">{i18n.provision_mgmt_extracted_provisions()}</span>
 							<span class="dialog-section-copy"
-								>{extractedMetricsPreview.length} provision{extractedMetricsPreview.length === 1
+								>{i18n.provision_mgmt_provision_ready({ extractedMetricsPreviewCount: extractedMetricsPreview.length, plural: extractedMetricsPreview.length === 1
 									? ''
-									: 's'} ready</span
+									: 's' })}</span
 							>
 						</div>
 						{#if addMetricBusyAction === 'extract'}
 							<div class="am-status-row" aria-live="polite">
 								<span class="am-spinner" aria-hidden="true"></span>
-								<span>Extracting provisions from the selected lines…</span>
+								<span>{i18n.provision_mgmt_extracting_provisions_from_the_selected()}</span>
 							</div>
 						{:else if extractedMetricsPreview.length === 0}
 							<div class="metadata-empty">
-								Press <strong>Extract Provision</strong> to preview the provisions returned by the
-								backend.
+								{i18n.provision_mgmt_press()} <strong>{i18n.provision_mgmt_extract_provision()}</strong> {i18n.provision_mgmt_to_preview_the_provisions_returned()}
 							</div>
 						{:else}
 							<div class="am-preview-list">
@@ -2072,7 +2070,7 @@
 												type="button"
 												class="am-btn am-btn-delete"
 												disabled={addMetricBusy}
-												onclick={() => removeExtractedMetricPreview(idx)}>Remove</button
+												onclick={() => removeExtractedMetricPreview(idx)}>{i18n.provision_mgmt_remove()}</button
 											>
 										</div>
 										{#if metric.prov_desc || metric.provision}
@@ -2101,21 +2099,21 @@
 						class="am-btn-foot am-btn-help"
 						onclick={() => {
 							alert(
-								'Select PDF lines to extract a provision.\n\n' +
-									'• Drag on the PDF to select lines\n' +
-									'• Edit: modify line content (saves to the original file)\n' +
+								i18n.provision_mgmt_select_pdf_lines_to_extract() +
+									i18n.provision_mgmt_drag_on_the_pdf_to() +
+									i18n.provision_mgmt_edit_modify_line_content_saves() +
 									'• Remove: remove a line from this selection\n' +
-									'• Extract Provision: preview provisions returned from the backend\n' +
+									i18n.provision_mgmt_extract_provision_preview_provisions_returned() +
 									'• Save: persist the remaining preview provisions to kb.provisions'
 							);
-						}}>Help</button
+						}}>{i18n.provision_mgmt_help()}</button
 					>
 				</div>
 				<div class="dialog-foot-buttons">
 					<button
 						type="button"
 						class="am-btn-foot am-btn-foot-cancel"
-						onclick={closeAddMetricDialog}>Close</button
+						onclick={closeAddMetricDialog}>{i18n.provision_mgmt_close()}</button
 					>
 					<button
 						type="button"
@@ -2125,10 +2123,10 @@
 					>
 						{#if addMetricBusyAction === 'extract'}
 							<span class="am-btn-inline"
-								><span class="am-spinner" aria-hidden="true"></span>Extracting…</span
+								><span class="am-spinner" aria-hidden="true"></span>{i18n.provision_mgmt_extracting()}</span
 							>
 						{:else}
-							Extract Provision
+							{i18n.provision_mgmt_extract_provision()}
 						{/if}
 					</button>
 					<button
@@ -2139,10 +2137,10 @@
 					>
 						{#if addMetricBusyAction === 'save'}
 							<span class="am-btn-inline"
-								><span class="am-spinner" aria-hidden="true"></span>Saving…</span
+								><span class="am-spinner" aria-hidden="true"></span>{i18n.provision_mgmt_saving()}</span
 							>
 						{:else}
-							Save
+							{i18n.provision_mgmt_save()}
 						{/if}
 					</button>
 				</div>

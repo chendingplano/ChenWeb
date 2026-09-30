@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, tick } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SquareIcon from '@lucide/svelte/icons/square';
@@ -36,10 +37,10 @@
 		'typst'
 	];
 	const parseStateOptions: Array<{ value: ParseState; label: string }> = [
-		{ value: 'all', label: 'All' },
-		{ value: 'pending', label: 'Pending' },
-		{ value: 'parsed_success', label: 'Parsed Success' },
-		{ value: 'parsed_failed', label: 'Parsed Failed' }
+		{ value: 'all', label: m.kb_import_all() },
+		{ value: 'pending', label: m.kb_import_pending() },
+		{ value: 'parsed_success', label: m.kb_import_parsed_success() },
+		{ value: 'parsed_failed', label: m.kb_import_parsed_failed() }
 	];
 	const uploadParserOptions = ['paddleocr', 'opendata', 'mineru', 'docling'] as const;
 	const procStatusOptions = ['all', 'success', 'fail'];
@@ -71,10 +72,10 @@
 	let loading = $state(false);
 	let error = $state('');
 	const autoRefreshOptions = [
-		{ value: 0, label: 'Auto Refresh Off' },
-		{ value: 5000, label: 'Auto Refresh - 5 seconds' },
-		{ value: 10000, label: 'Auto Refresh - 10 seconds' },
-		{ value: 60000, label: 'Auto Refresh - 60 seconds' }
+		{ value: 0, label: m.kb_import_auto_refresh_off() },
+		{ value: 5000, label: m.kb_import_auto_refresh_5_seconds() },
+		{ value: 10000, label: m.kb_import_auto_refresh_10_seconds() },
+		{ value: 60000, label: m.kb_import_auto_refresh_60_seconds() }
 	];
 	let autoRefreshMs = $state(0);
 	let statusDialogOpen = $state(false);
@@ -259,7 +260,7 @@
 	async function openStatusDialog(record: KbInputRecord) {
 		statusDialogRecord = record;
 		statusDialogItems = record.status ?? [];
-		statusDialogTitle = `Record ID: ${record.id}`;
+		statusDialogTitle = m.kb_import_record_id({ id: record.id });
 		statusDialogRawJson = JSON.stringify(record, null, 2);
 		statusDialogOpen = true;
 		await tick();
@@ -313,7 +314,7 @@
 	function openUploadDialog() {
 		uploadLaunchError = '';
 		if (!knowledgeStoreState.activeStore) {
-			uploadLaunchError = 'Select an active knowledge store before uploading files.';
+			uploadLaunchError = m.kb_import_select_an_active_knowledge_store();
 			return;
 		}
 		resetUploadDialog();
@@ -362,7 +363,7 @@
 		if (candidates.length === 0) {
 			selectedFiles = [];
 			uploadSkippedCount = 0;
-			uploadError = 'No files with recognized extensions found in the selected directory.';
+			uploadError = m.kb_import_no_files_with_recognized_extensions();
 			return;
 		}
 
@@ -396,11 +397,11 @@
 		uploadError = '';
 		const activeStore = knowledgeStoreState.activeStore;
 		if (!activeStore) {
-			uploadError = 'No active knowledge store is selected.';
+			uploadError = m.kb_import_no_active_knowledge_store_is();
 			return;
 		}
 		if (selectedFiles.length === 0) {
-			uploadError = 'Pick at least one file to upload.';
+			uploadError = m.kb_import_pick_at_least_one_file();
 			return;
 		}
 
@@ -421,7 +422,7 @@
 		try {
 			if (selectedFiles.length === 1) {
 				if (!uploadType) {
-					uploadError = 'Please select a file type from the Type dropdown.';
+					uploadError = m.kb_import_please_select_a_file_type();
 					uploadSubmitting = false;
 					return;
 				}
@@ -436,7 +437,7 @@
 					groups.get(t)!.push(file);
 				}
 				if (groups.size === 0) {
-					uploadError = 'No files with recognized extensions to upload.';
+					uploadError = m.kb_import_no_files_with_recognized_extensions_2();
 					uploadSubmitting = false;
 					return;
 				}
@@ -449,7 +450,7 @@
 			page = 1;
 			await loadRecords();
 		} catch (err) {
-			uploadError = err instanceof Error ? err.message : 'Failed to upload files';
+			uploadError = err instanceof Error ? err.message : m.kb_import_failed_to_upload_files();
 		} finally {
 			uploadSubmitting = false;
 		}
@@ -490,7 +491,7 @@
 			records = result.results ?? [];
 			total = result.total ?? 0;
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to load records';
+			error = err instanceof Error ? err.message : m.kb_import_failed_to_load_records();
 		} finally {
 			loading = false;
 		}
@@ -640,7 +641,7 @@
 			editRecord = null;
 			editError = '';
 		} catch (err) {
-			editError = err instanceof Error ? err.message : 'Failed to save input changes.';
+			editError = err instanceof Error ? err.message : m.kb_import_failed_to_save_input_changes();
 		} finally {
 			editSubmitting = false;
 		}
@@ -665,7 +666,7 @@
 			closeDeleteConfirm();
 			await loadRecords();
 		} catch (err) {
-			deleteError = err instanceof Error ? err.message : 'Failed to delete record';
+			deleteError = err instanceof Error ? err.message : m.kb_import_failed_to_delete_record();
 		} finally {
 			deleteSubmitting = false;
 		}
@@ -700,7 +701,7 @@
 		});
 		if (!res.ok) {
 			const body = await res.json().catch(() => null);
-			throw new Error(body?.error_msg ?? body?.message ?? `Request failed (${res.status})`);
+			throw new Error(body?.error_msg ?? body?.message ?? m.kb_import_request_failed({ status: res.status }));
 		}
 	}
 
@@ -742,7 +743,7 @@
 					const query = `?ids=${encodeURIComponent(ids.join(','))}`;
 					const response = await fetch(`/api/v1/kb/inputs/process-parsed${query}`, { credentials: 'same-origin' });
 					const result = await response.json().catch(() => null);
-					if (!response.ok) throw new Error(result?.error_msg ?? `Request failed (${response.status})`);
+					if (!response.ok) throw new Error(result?.error_msg ?? m.kb_import_request_failed({ status: response.status }));
 					inputs.push(...(result?.inputs ?? []));
 				}
 			}
@@ -773,17 +774,17 @@
 			processParsedMessage = {
 				kind: failed > 0 ? 'error' : 'success',
 				text: failedOnly
-					? (targetIDs.length === 0 ? 'No failed doc processor operations match the current filters' : `Queued failed processor retries for ${queued} of ${targetIDs.length} inputs${failed > 0 ? `; ${failed} failed` : ''}`)
+					? (targetIDs.length === 0 ? m.kb_import_no_failed_operations_match() : m.kb_import_queued_failed_retries({ queued, total: targetIDs.length }) + (failed > 0 ? m.kb_import_failed_suffix({ failed }) : ''))
 					: (inputs.length === 0
-						? 'No parsed inputs are ready to process'
-						: `Queued ${queued} of ${inputs.length} parsed inputs: ${conversionQueued} for conversion and ${processingQueued} for document processing${failed > 0 ? `; ${failed} failed` : ''}`)
+						? m.kb_import_no_parsed_inputs_are_ready()
+						: m.kb_import_queued_parsed_inputs({ queued, total: inputs.length, conversionQueued, processingQueued }) + (failed > 0 ? m.kb_import_failed_suffix({ failed }) : ''))
 			};
 		} catch (err) {
 			processParsedMessage = {
 				kind: 'error',
 				text: err instanceof Error
-					? `${err.message}${queued > 0 ? ` (${queued} already queued)` : ''}`
-					: 'Failed to process parsed inputs'
+					? err.message + (queued > 0 ? m.kb_import_already_queued_suffix({ queued }) : '')
+					: m.kb_import_failed_to_process_parsed_inputs()
 			};
 		} finally {
 			processingParsed = false;
@@ -843,10 +844,10 @@
 			await doLaunch(restartTarget, restartProcessors, restartParseFile, restartConvert);
 			showRestartDialog = false;
 			restartTarget = null;
-			restartToast = { kind: 'success', msg: 'Restart triggered' };
+			restartToast = { kind: 'success', msg: m.kb_import_restart_triggered() };
 			setTimeout(() => { restartToast = null; }, 4000);
 		} catch (err) {
-			restartError = err instanceof Error ? err.message : 'Restart failed';
+			restartError = err instanceof Error ? err.message : m.kb_import_restart_failed();
 		} finally {
 			restarting = false;
 		}
@@ -1020,7 +1021,7 @@
 			pendingFilesResults = [];
 			pendingFilesDialogOpen = true;
 		} catch (err) {
-			pendingFilesLaunchError = err instanceof Error ? err.message : 'Failed to list pending files';
+			pendingFilesLaunchError = err instanceof Error ? err.message : m.kb_import_failed_to_list_pending_files();
 		} finally {
 			pendingFilesLoading = false;
 		}
@@ -1057,11 +1058,11 @@
 		pendingFilesError = '';
 		const activeStore = knowledgeStoreState.activeStore;
 		if (!activeStore) {
-			pendingFilesError = 'No active knowledge store is selected.';
+			pendingFilesError = m.kb_import_no_active_knowledge_store_is();
 			return;
 		}
 		if (pendingFilesSelected.size === 0) {
-			pendingFilesError = 'Pick at least one pending file.';
+			pendingFilesError = m.kb_import_pick_at_least_one_pending();
 			return;
 		}
 
@@ -1084,7 +1085,7 @@
 				await loadRecords();
 			}
 		} catch (err) {
-			pendingFilesError = err instanceof Error ? err.message : 'Failed to claim pending files';
+			pendingFilesError = err instanceof Error ? err.message : m.kb_import_failed_to_claim_pending_files();
 		} finally {
 			pendingFilesSubmitting = false;
 		}
@@ -1119,9 +1120,9 @@
 	>
 		<div class="flex items-start justify-between gap-4">
 			<div>
-				<h2 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">Import Inputs</h2>
+				<h2 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">{m.kb_import_import_inputs()}</h2>
 				<p style="font-size:14px; color:{textSecondary};">
-					Browse and filter Knowledge System import records.
+					{m.kb_import_browse_and_filter_knowledge_system()}
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
@@ -1131,7 +1132,7 @@
 						disabled={loading}
 						style="height:38px; padding:0 14px; border:1px solid rgba(239,68,68,0.4); border-radius:10px; background:rgba(239,68,68,0.1); color:#ef4444; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
 					>
-						Delete ({selectedRecordIds.size})
+						{m.kb_import_delete({ selectedRecordIdsCount: selectedRecordIds.size })}
 					</button>
 				{/if}
 				<button
@@ -1140,7 +1141,7 @@
 					style="display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
 				>
 					<RefreshCwIcon class="h-3.5 w-3.5" />
-					Refresh
+					{m.kb_import_refresh()}
 				</button>
 				<div style="position:relative;">
 					<button
@@ -1151,7 +1152,7 @@
 						aria-expanded={showProcessParsedMenu}
 						style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{processingParsed ? 0.6 : 1};"
 					>
-						{processingParsed ? 'Processing…' : 'Continue Process'} ▾
+						{processingParsed ? m.kb_import_processing() : m.kb_import_continue_process()} ▾
 					</button>
 					{#if showProcessParsedMenu}
 						<div role="menu" style="position:absolute; z-index:30; top:calc(100% + 6px); right:0; min-width:210px; padding:4px; border:1px solid {borderColor}; border-radius:8px; background:{cardBg}; box-shadow:0 12px 28px rgba(0,0,0,0.28);">
@@ -1160,8 +1161,8 @@
 								role="menuitem"
 								onclick={() => processInputs(false, false)}
 								style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;"
-							>Process Parsed - All</button>
-							<span title={selectedRecordIds.size === 0 ? 'Select the records you want to process first.' : ''} style="display:block;">
+							>{m.kb_import_process_parsed_all()}</button>
+							<span title={selectedRecordIds.size === 0 ? m.kb_import_select_the_records_you_want() : ''} style="display:block;">
 								<button
 									type="button"
 									role="menuitem"
@@ -1169,15 +1170,15 @@
 									disabled={selectedRecordIds.size === 0 || processingParsed}
 									aria-disabled={selectedRecordIds.size === 0 || processingParsed}
 									style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{selectedRecordIds.size === 0 ? textMuted : textPrimary}; text-align:left; font-size:13px; cursor:{selectedRecordIds.size === 0 ? 'not-allowed' : 'pointer'}; white-space:nowrap; opacity:{selectedRecordIds.size === 0 ? 0.55 : 1};"
-								>Process Parsed - Selected</button>
+								>{m.kb_import_process_parsed_selected()}</button>
 							</span>
 							<button
 								type="button"
 								role="menuitem"
 								onclick={() => processInputs(false, true)}
 								style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;"
-							>Process Failed - All</button>
-							<span title={selectedRecordIds.size === 0 ? 'Select the records you want to process first.' : ''} style="display:block;">
+							>{m.kb_import_process_failed_all()}</button>
+							<span title={selectedRecordIds.size === 0 ? m.kb_import_select_the_records_you_want() : ''} style="display:block;">
 								<button
 									type="button"
 									role="menuitem"
@@ -1185,7 +1186,7 @@
 									disabled={selectedRecordIds.size === 0 || processingParsed}
 									aria-disabled={selectedRecordIds.size === 0 || processingParsed}
 									style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{selectedRecordIds.size === 0 ? textMuted : textPrimary}; text-align:left; font-size:13px; cursor:{selectedRecordIds.size === 0 ? 'not-allowed' : 'pointer'}; white-space:nowrap; opacity:{selectedRecordIds.size === 0 ? 0.55 : 1};"
-								>Process Failed - Selected</button>
+								>{m.kb_import_process_failed_selected()}</button>
 							</span>
 						</div>
 					{/if}
@@ -1201,27 +1202,27 @@
 				</select>
 				<select
 					bind:value={uploadProcessingMode}
-					aria-label="Auto Process"
-					title="Auto Process"
+					aria-label={m.kb_import_auto_process()}
+					title={m.kb_import_auto_process()}
 					style="height:38px; padding:0 10px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer;"
 				>
-					<option value="auto_offpeak">Auto - off-peak only</option>
-					<option value="auto">Auto</option>
-					<option value="upload_only">Upload Files Only</option>
-					<option value="pdf_parsing">PDF Parsing</option>
+					<option value="auto_offpeak">{m.kb_import_auto_off_peak_only()}</option>
+					<option value="auto">{m.kb_import_auto()}</option>
+					<option value="upload_only">{m.kb_import_upload_files_only()}</option>
+					<option value="pdf_parsing">{m.kb_import_pdf_parsing()}</option>
 				</select>
 				<button
 					onclick={() => { searchOpen = true; }}
 					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
 				>
-					Search
+					{m.kb_import_search()}
 				</button>
 				<button
 					onclick={resetSearch}
 					disabled={loading}
 					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
 				>
-					Reset Search
+					{m.kb_import_reset_search()}
 				</button>
 				<div style="position:relative;">
 					<button
@@ -1232,14 +1233,14 @@
 						aria-expanded={showQuickFiltersMenu}
 						style="height:38px; padding:0 14px; border:1px solid {quickFilter !== 'none' ? accent + '40' : borderColor}; border-radius:10px; background:{quickFilter !== 'none' ? accentTint : surface2}; color:{quickFilter !== 'none' ? accent : textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{loading ? 0.6 : 1};"
 					>
-						Quick Filters ▾
+						{m.kb_import_quick_filters()}
 					</button>
 					{#if showQuickFiltersMenu}
 						<div role="menu" style="position:absolute; z-index:30; top:calc(100% + 6px); right:0; min-width:210px; padding:4px; border:1px solid {borderColor}; border-radius:8px; background:{cardBg}; box-shadow:0 12px 28px rgba(0,0,0,0.28);">
-							<button type="button" role="menuitem" onclick={() => setQuickFilter('failed')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:{quickFilter === 'failed' ? accentTint : 'transparent'}; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">Show Failed</button>
-							<button type="button" role="menuitem" onclick={() => setQuickFilter('no_doc_processors')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:{quickFilter === 'no_doc_processors' ? accentTint : 'transparent'}; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">Show no doc processors</button>
+							<button type="button" role="menuitem" onclick={() => setQuickFilter('failed')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:{quickFilter === 'failed' ? accentTint : 'transparent'}; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">{m.kb_import_show_failed()}</button>
+							<button type="button" role="menuitem" onclick={() => setQuickFilter('no_doc_processors')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:{quickFilter === 'no_doc_processors' ? accentTint : 'transparent'}; color:{textPrimary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">{m.kb_import_show_no_doc_processors()}</button>
 							{#if quickFilter !== 'none'}
-								<button type="button" role="menuitem" onclick={() => setQuickFilter('none')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textSecondary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">Clear Quick Filter</button>
+								<button type="button" role="menuitem" onclick={() => setQuickFilter('none')} style="display:block; width:100%; padding:9px 10px; border:0; border-radius:5px; background:transparent; color:{textSecondary}; text-align:left; font-size:13px; cursor:pointer; white-space:nowrap;">{m.kb_import_clear_quick_filter()}</button>
 							{/if}
 						</div>
 					{/if}
@@ -1248,7 +1249,7 @@
 					onclick={openUploadDialog}
 					style="height:38px; padding:0 14px; border:none; border-radius:10px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
 				>
-					Upload Files
+					{m.kb_import_upload_files()}
 				</button>
 				{#if pendingFilesVisible}
 					<button
@@ -1256,7 +1257,7 @@
 						disabled={pendingFilesLoading}
 						style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; opacity:{pendingFilesLoading ? 0.65 : 1};"
 					>
-						{pendingFilesLoading ? 'Checking…' : 'Pending Files'}
+						{pendingFilesLoading ? m.kb_import_checking() : m.kb_import_pending_files()}
 					</button>
 				{/if}
 			</div>
@@ -1268,7 +1269,7 @@
 			<div style="margin-top:10px; font-size:12px; color:#ef4444;">{pendingFilesLaunchError}</div>
 		{/if}
 		{#if loading}
-			<div style="margin-top:10px; font-size:12px; color:{textMuted};">Loading...</div>
+			<div style="margin-top:10px; font-size:12px; color:{textMuted};">{m.kb_import_loading()}</div>
 		{/if}
 		{#if error}
 			<div style="margin-top:10px; font-size:12px; color:#ef4444;">{error}</div>
@@ -1285,7 +1286,7 @@
 					<button
 						type="button"
 						onclick={() => toggleSort(field)}
-						title="Sort by {label}"
+						title={m.kb_import_sort_by({ label })}
 						style="display:inline-flex; align-items:center; gap:4px; background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; cursor:pointer; white-space:nowrap;"
 					>
 						<span>{label}</span>
@@ -1318,27 +1319,27 @@
 								checked={allVisibleSelected}
 								disabled={records.length === 0 || loading}
 								onchange={(event) => toggleAllVisibleRecords((event.currentTarget as HTMLInputElement).checked)}
-								aria-label="Select all records on this page"
+								aria-label={m.kb_import_select_all_records_on_this()}
 								style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;"
 							/>
 						</th>
 						{@render sortHead('ID', 'id')}
-						<th class="cell head">User</th>
+						<th class="cell head">{m.kb_import_user()}</th>
 						{@render sortHead('Title', 'title')}
 						{@render sortHead('Doc No', 'doc_no')}
 						{@render sortHead('Type', 'type')}
 						{@render sortHead('File Name', 'file_name')}
-						<th class="cell head">Status</th>
-						<th class="cell head">Process Mode</th>
+						<th class="cell head">{m.kb_import_status()}</th>
+						<th class="cell head">{m.kb_import_process_mode()}</th>
 						{@render sortHead('Create Time', 'create_time')}
 						{@render sortHead('Modify Time', 'modify_time')}
-						<th class="cell head">Actions</th>
+						<th class="cell head">{m.kb_import_actions()}</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if !loading && records.length === 0}
 						<tr>
-						<td class="cell" colspan={12} style="text-align:center; color:{textMuted};">No records</td>
+						<td class="cell" colspan={12} style="text-align:center; color:{textMuted};">{m.kb_import_no_records()}</td>
 						</tr>
 					{:else}
 						{#each records as record (record.id)}
@@ -1349,7 +1350,7 @@
 										type="checkbox"
 										checked={selectedRecordIds.has(record.id)}
 										onchange={() => toggleRecordSelection(record.id)}
-										aria-label="Select record {record.id}"
+										aria-label={m.kb_import_select_record({ id: record.id })}
 										style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;"
 									/>
 								</td>
@@ -1377,26 +1378,26 @@
 											onclick={() => openStatusDialog(record)}
 											style="height:28px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 										>
-											View
+											{m.kb_import_view()}
 										</button>
 										<button
 											onclick={() => openEditDialog(record)}
 											style="height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
 										>
-											Edit
+											{m.kb_import_edit()}
 										</button>
 										<button
 											onclick={() => openRestart(record)}
 											style="display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
 										>
 											<RefreshCwIcon class="h-3.5 w-3.5" />
-											Restart
+											{m.kb_import_restart()}
 										</button>
 										<button
 											onclick={() => openDeleteConfirm(record)}
 											style="height:28px; padding:0 10px; border:1px solid rgba(239,68,68,0.4); border-radius:8px; background:rgba(239,68,68,0.1); color:#ef4444; font-size:12px; cursor:pointer;"
 										>
-											Delete
+											{m.kb_import_delete_2()}
 										</button>
 									</div>
 								</td>
@@ -1415,13 +1416,13 @@
 			<div class="flex items-center gap-3" style="font-size:12px; color:{textMuted};">
 				{#if total > 0}
 					<span>
-						{recordRangeStart}–{recordRangeEnd} of {total}
+						{m.kb_import_of({ recordRangeStart, recordRangeEnd, total })}
 					</span>
 				{:else}
-					<span>0 records</span>
+					<span>{m.kb_import_0_records()}</span>
 				{/if}
 				<label class="flex items-center gap-1">
-					<span>Per page:</span>
+					<span>{m.kb_import_per_page()}</span>
 					<select
 						value={pageSize}
 						onchange={(e) => changePageSize(Number((e.currentTarget as HTMLSelectElement).value))}
@@ -1463,7 +1464,7 @@
 
 			<!-- Right: jump to page -->
 			<div class="flex items-center gap-1" style="font-size:12px; color:{textMuted};">
-				<span>Go to</span>
+				<span>{m.kb_import_go_to()}</span>
 				<input
 					type="number"
 					min="1"
@@ -1476,7 +1477,7 @@
 					onclick={jumpToPage}
 					disabled={loading}
 					style="height:26px; padding:0 10px; border:1px solid {borderColor}; border-radius:6px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer; opacity:{loading ? 0.5 : 1};"
-				>Go</button>
+				>{m.kb_import_go()}</button>
 			</div>
 		</div>
 	</div>
@@ -1504,45 +1505,45 @@
 			onkeydown={(event) => event.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Edit input"
+			aria-label={m.kb_import_edit_input()}
 			tabindex="0"
 		>
 			<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
 				<div>
-					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Edit Input #{editRecord.id}</h3>
-					<div style="margin-top:4px; font-size:12px; color:{textMuted};">Update input metadata.</div>
+					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">{m.kb_import_edit_input_2({ id: editRecord.id })}</h3>
+					<div style="margin-top:4px; font-size:12px; color:{textMuted};">{m.kb_import_update_input_metadata()}</div>
 				</div>
 				<button
 					type="button"
 					onclick={closeEditDialog}
 					disabled={editSubmitting}
 					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-				>Close</button>
+				>{m.kb_import_close()}</button>
 			</div>
 
 			<div class="edit-input-form">
 				<label>
-					<span>Title</span>
+					<span>{m.kb_import_title()}</span>
 					<input bind:value={editTitle} />
 				</label>
 				<label>
-					<span>Doc No</span>
+					<span>{m.kb_import_doc_no()}</span>
 					<input bind:value={editDocNo} />
 				</label>
 				<label>
-					<span>Authors</span>
-					<textarea rows="3" bind:value={editAuthors} placeholder="One author per line"></textarea>
+					<span>{m.kb_import_authors()}</span>
+					<textarea rows="3" bind:value={editAuthors} placeholder={m.kb_import_one_author_per_line()}></textarea>
 				</label>
 				<label>
-					<span>Owner</span>
-					<input type="number" min="0" step="1" bind:value={editOwner} placeholder="Unassigned" />
+					<span>{m.kb_import_owner()}</span>
+					<input type="number" min="0" step="1" bind:value={editOwner} placeholder={m.kb_import_unassigned()} />
 				</label>
 				<label>
-					<span>Notes</span>
+					<span>{m.kb_import_notes()}</span>
 					<textarea rows="3" bind:value={editNotes}></textarea>
 				</label>
 				<label>
-					<span>Error Message</span>
+					<span>{m.kb_import_error_message()}</span>
 					<textarea rows="3" bind:value={editErrorMsg}></textarea>
 				</label>
 				{#if editError}
@@ -1554,13 +1555,13 @@
 						onclick={closeEditDialog}
 						disabled={editSubmitting}
 						style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-					>Cancel</button>
+					>{m.kb_import_cancel()}</button>
 					<button
 						type="button"
 						onclick={saveEditDialog}
 						disabled={editSubmitting}
 						style="height:34px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:12px; font-weight:600; cursor:pointer; opacity:{editSubmitting ? 0.6 : 1};"
-					>{editSubmitting ? 'Saving…' : 'Save Changes'}</button>
+					>{editSubmitting ? m.kb_import_saving() : m.kb_import_save_changes()}</button>
 				</div>
 			</div>
 		</div>
@@ -1585,16 +1586,16 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Pending files"
+			aria-label={m.kb_import_pending_files_2()}
 			tabindex="0"
 		>
-			<p style="margin:0; color:{textPrimary}; font-size:14px;">No pending files found.</p>
+			<p style="margin:0; color:{textPrimary}; font-size:14px;">{m.kb_import_no_pending_files_found()}</p>
 			<div class="mt-5 flex justify-end">
 				<button
 					onclick={() => (pendingFilesEmptyDialogOpen = false)}
 					style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:12px; cursor:pointer;"
 				>
-					OK
+					{m.kb_import_ok()}
 				</button>
 			</div>
 		</div>
@@ -1619,19 +1620,19 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Upload files dialog"
+			aria-label={m.kb_import_upload_files_dialog()}
 			tabindex="0"
 		>
 			<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
 				<div>
-					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Upload File Dialog</h3>
+					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">{m.kb_import_upload_file_dialog()}</h3>
 					<div style="margin-top:4px; font-size:12px; color:{textMuted};">
-						Active Knowledge Store:
+						{m.kb_import_active_knowledge_store()}
 						{#if knowledgeStoreState.activeStore}
 							<span style="color:{textPrimary};">{knowledgeStoreState.activeStore.ks_name}</span>
-							<span class="mono" style="margin-left:8px;">ID {knowledgeStoreState.activeStore.id}</span>
+							<span class="mono" style="margin-left:8px;">{m.kb_import_id({ id: knowledgeStoreState.activeStore.id })}</span>
 						{:else}
-							<span style="color:#ef4444;">None selected</span>
+							<span style="color:#ef4444;">{m.kb_import_none_selected()}</span>
 						{/if}
 					</div>
 				</div>
@@ -1639,65 +1640,65 @@
 					onclick={closeUploadDialog}
 					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 				>
-					Close
+					{m.kb_import_close()}
 				</button>
 			</div>
 
 			<div class="p-4">
 				<div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Type</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_type()}</span>
 						<select
 							bind:value={uploadType}
 							disabled={selectedFiles.length > 1}
 							style="height:36px; border:1px solid {uploadType === '' && selectedFiles.length === 1 ? '#ef4444' : borderColor}; background:{surface2}; color:{uploadType ? textPrimary : textMuted}; border-radius:8px; padding:0 10px; opacity:{selectedFiles.length > 1 ? 0.5 : 1};"
 						>
-							<option value="" disabled>-- select type --</option>
+							<option value="" disabled>{m.kb_import_select_type()}</option>
 							{#each docTypeOptions.filter((option) => option !== 'all') as option}
 								<option value={option}>{option}</option>
 							{/each}
 						</select>
 						{#if selectedFiles.length > 1}
-							<span style="font-size:11px; color:{textMuted};">Determined by each file's extension</span>
+							<span style="font-size:11px; color:{textMuted};">{m.kb_import_determined_by_each_file_s()}</span>
 						{/if}
 					</label>
 
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Title</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_title()}</span>
 						<input bind:value={uploadTitle} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
 					</label>
 
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Doc No</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_doc_no()}</span>
 						<input bind:value={uploadDocNo} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
 					</label>
 
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Authors</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_authors()}</span>
 						<input bind:value={uploadAuthors} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
 					</label>
 
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Public Info</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_public_info()}</span>
 						<input bind:value={uploadPublicInfo} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
 					</label>
 
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Private Info</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_private_info()}</span>
 						<input bind:value={uploadPrivateInfo} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
 					</label>
 
 					<div class="rounded-lg p-3" style="border:1px solid {borderColor}; background:{surface2};">
 						<div class="flex items-center justify-between" style="margin-bottom:6px;">
-							<span style="font-size:12px; color:{textMuted};">Selected Files</span>
+							<span style="font-size:12px; color:{textMuted};">{m.kb_import_selected_files()}</span>
 							{#if uploadSkippedCount > 0}
-								<span style="font-size:11px; color:#f59e0b;">{uploadSkippedCount} skipped (duplicate MD5)</span>
+								<span style="font-size:11px; color:#f59e0b;">{m.kb_import_skipped_duplicate_md5({ uploadSkippedCount })}</span>
 							{/if}
 						</div>
 						{#if uploadDirProcessing}
-							<div style="font-size:12px; color:{textSecondary};">Checking for duplicates…</div>
+							<div style="font-size:12px; color:{textSecondary};">{m.kb_import_checking_for_duplicates()}</div>
 						{:else if selectedFiles.length === 0}
-							<div style="font-size:12px; color:{textSecondary};">No files selected yet.</div>
+							<div style="font-size:12px; color:{textSecondary};">{m.kb_import_no_files_selected_yet()}</div>
 						{:else}
 							<div class="space-y-1" style="max-height:90px; overflow:auto;">
 								{#each selectedFiles as file}
@@ -1708,12 +1709,12 @@
 					</div>
 
 					<label class="flex flex-col gap-1.5" style="grid-column: 1 / -1;">
-						<span style="font-size:12px; color:{textMuted};">Notes</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_notes()}</span>
 						<textarea bind:value={uploadNotes} rows="3" style="border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:10px;"></textarea>
 					</label>
 
 					<label class="flex flex-col gap-1.5" style="grid-column: 1 / -1;">
-						<span style="font-size:12px; color:{textMuted};">ks_desc</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_ks_desc()}</span>
 						<textarea bind:value={uploadKsDesc} rows="3" style="border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:10px;"></textarea>
 					</label>
 				</div>
@@ -1727,7 +1728,7 @@
 						type="button"
 						style="height:36px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:13px; cursor:pointer;"
 					>
-						Browse and Pick Files
+						{m.kb_import_browse_and_pick_files()}
 					</button>
 					<button
 						onclick={triggerDirPicker}
@@ -1735,11 +1736,11 @@
 						disabled={uploadDirProcessing}
 						style="height:36px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:13px; cursor:pointer; opacity:{uploadDirProcessing ? 0.6 : 1};"
 					>
-						Browse Directory
+						{m.kb_import_browse_directory()}
 					</button>
 					<label class="flex items-center gap-1.5" style="font-size:13px; color:{textSecondary}; cursor:pointer; user-select:none;">
 						<input type="checkbox" bind:checked={uploadRecursive} style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;" />
-						Recursive
+						{m.kb_import_recursive()}
 					</label>
 					<button
 						onclick={submitUpload}
@@ -1747,7 +1748,7 @@
 						type="button"
 						style="height:36px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{uploadSubmitting ? 0.65 : 1};"
 					>
-						{uploadSubmitting ? 'Uploading…' : 'Upload Files'}
+						{uploadSubmitting ? m.kb_import_uploading() : m.kb_import_upload_files()}
 					</button>
 					{#if uploadError}
 						<span style="font-size:12px; color:#ef4444;">{uploadError}</span>
@@ -1776,19 +1777,19 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Pending files dialog"
+			aria-label={m.kb_import_pending_files_dialog()}
 			tabindex="0"
 		>
 			<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
 				<div>
-					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Pending Files</h3>
+					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">{m.kb_import_pending_files()}</h3>
 					<div style="margin-top:4px; font-size:12px; color:{textMuted};">
-						Active Knowledge Store:
+						{m.kb_import_active_knowledge_store()}
 						{#if knowledgeStoreState.activeStore}
 							<span style="color:{textPrimary};">{knowledgeStoreState.activeStore.ks_name}</span>
-							<span class="mono" style="margin-left:8px;">ID {knowledgeStoreState.activeStore.id}</span>
+							<span class="mono" style="margin-left:8px;">{m.kb_import_id({ id: knowledgeStoreState.activeStore.id })}</span>
 						{:else}
-							<span style="color:#ef4444;">None selected</span>
+							<span style="color:#ef4444;">{m.kb_import_none_selected()}</span>
 						{/if}
 					</div>
 				</div>
@@ -1796,26 +1797,26 @@
 					onclick={closePendingFilesDialog}
 					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 				>
-					Close
+					{m.kb_import_close()}
 				</button>
 			</div>
 
 			<div class="p-4">
 				<div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Auto Process</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_auto_process()}</span>
 						<select
 							bind:value={pendingFilesProcessingMode}
 							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
 						>
-							<option value="auto_offpeak">Auto - off-peak only</option>
-							<option value="auto">Auto</option>
-							<option value="upload_only">Upload Files Only</option>
-							<option value="pdf_parsing">PDF Parsing</option>
+							<option value="auto_offpeak">{m.kb_import_auto_off_peak_only()}</option>
+							<option value="auto">{m.kb_import_auto()}</option>
+							<option value="upload_only">{m.kb_import_upload_files_only()}</option>
+							<option value="pdf_parsing">{m.kb_import_pdf_parsing()}</option>
 						</select>
 					</label>
 					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">PDF Parser</span>
+						<span style="font-size:12px; color:{textMuted};">{m.kb_import_pdf_parser()}</span>
 						<select
 							bind:value={pendingFilesParserName}
 							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
@@ -1862,7 +1863,7 @@
 						type="button"
 						style="height:36px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{pendingFilesSubmitting ? 0.65 : 1};"
 					>
-						{pendingFilesSubmitting ? 'Uploading…' : 'Upload Files'}
+						{pendingFilesSubmitting ? m.kb_import_uploading() : m.kb_import_upload_files()}
 					</button>
 					{#if pendingFilesError}
 						<span style="font-size:12px; color:#ef4444;">{pendingFilesError}</span>
@@ -1889,27 +1890,27 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Delete confirmation"
+			aria-label={m.kb_import_delete_confirmation()}
 			tabindex="0"
 		>
 			<div class="px-5 py-4" style="border-bottom:1px solid {borderColor};">
-				<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Delete Record</h3>
+				<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">{m.kb_import_delete_record()}</h3>
 			</div>
 			<div class="px-5 py-4">
 				{#if deleteConfirmRecords.length === 1}
 					<p style="font-size:14px; color:{textSecondary}; margin-bottom:8px;">
-						Are you sure you want to delete record <span style="color:{textPrimary}; font-weight:600;">#{deleteConfirmRecord.id}</span>
+						{m.kb_import_are_you_sure_you_want()} <span style="color:{textPrimary}; font-weight:600;">#{deleteConfirmRecord.id}</span>
 						{#if deleteConfirmRecord.file_name}— <span style="color:{textPrimary};">{deleteConfirmRecord.file_name}</span>{/if}?
 					</p>
 				{:else}
 					<p style="font-size:14px; color:{textSecondary}; margin-bottom:8px;">
-						Are you sure you want to delete <span style="color:{textPrimary}; font-weight:600;">{deleteConfirmRecords.length} records</span>?
+						{m.kb_import_are_you_sure_you_want_2()} <span style="color:{textPrimary}; font-weight:600;">{m.kb_import_records({ deleteConfirmRecordsCount: deleteConfirmRecords.length })}</span>?
 					</p>
 				{/if}
-				<p style="font-size:12px; color:#ef4444;">This action cannot be undone.</p>
+				<p style="font-size:12px; color:#ef4444;">{m.kb_import_this_action_cannot_be_undone()}</p>
 				<label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:{textSecondary}; cursor:pointer;">
 					<input type="checkbox" bind:checked={deleteFileToo} style="width:14px; height:14px; accent-color:#ef4444; cursor:pointer;" />
-					Also delete the physical file and generated artifacts
+					{m.kb_import_also_delete_the_physical_file()}
 				</label>
 				{#if deleteError}
 					<div style="margin-top:10px; font-size:12px; color:#ef4444;">{deleteError}</div>
@@ -1919,12 +1920,12 @@
 				<button
 					onclick={closeDeleteConfirm}
 					style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:13px; cursor:pointer;"
-				>Cancel</button>
+				>{m.kb_import_cancel()}</button>
 				<button
 					onclick={confirmDelete}
 					disabled={deleteSubmitting}
 					style="height:34px; padding:0 16px; border:none; border-radius:8px; background:#ef4444; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{deleteSubmitting ? 0.6 : 1};"
-				>{deleteSubmitting ? 'Deleting…' : 'Delete'}</button>
+				>{deleteSubmitting ? m.kb_import_deleting() : m.kb_import_delete_2()}</button>
 			</div>
 		</div>
 	</div>
@@ -1953,14 +1954,14 @@
 			aria-modal="true"
 			aria-labelledby="process-parsed-error-title"
 		>
-			<h3 id="process-parsed-error-title" style="font-size:16px; font-weight:600; color:{processParsedMessage.kind === 'error' ? colorError : textPrimary}; margin:0 0 10px;">Process Parsed</h3>
+			<h3 id="process-parsed-error-title" style="font-size:16px; font-weight:600; color:{processParsedMessage.kind === 'error' ? colorError : textPrimary}; margin:0 0 10px;">{m.kb_import_process_parsed()}</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 18px;">{processParsedMessage.text}</p>
 			<div style="display:flex; justify-content:flex-end;">
 				<button
 					type="button"
 					onclick={() => { processParsedMessage = null; }}
 					style="height:36px; padding:0 14px; border:0; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer;"
-				>OK</button>
+				>{m.kb_import_ok()}</button>
 			</div>
 		</div>
 	</div>
@@ -1977,10 +1978,10 @@
 			class="mx-4 w-full max-w-md rounded-2xl p-6"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
-			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">Restart pipeline</h3>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">{m.kb_import_restart_pipeline()}</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px;">
-				Record <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
-				— select processors to re-run:
+				{m.kb_import_record()} <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
+				{m.kb_import_select_processors_to_re_run()}
 			</p>
 
 			<div class="mb-4 space-y-1.5">
@@ -1997,8 +1998,8 @@
 					{:else}
 						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 					{/if}
-					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">parse_file</span>
-					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Parse File</span>
+					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">{m.kb_import_parse_file()}</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.kb_import_parse_file_2()}</span>
 				</label>
 
 				<!-- Optional pre-processor: Convert Parse Result -->
@@ -2014,8 +2015,8 @@
 					{:else}
 						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 					{/if}
-					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">convert_parse_result</span>
-					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Convert Parse Result</span>
+					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">{m.kb_import_convert_parse_result()}</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.kb_import_convert_parse_result_2()}</span>
 				</label>
 
 				<!-- Mandatory (always-on) processors -->
@@ -2024,7 +2025,7 @@
 						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
 						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
-						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
+						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">{m.kb_import_mandatory()}</span>
 					</label>
 				{/each}
 
@@ -2055,7 +2056,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>{allRestartSelected() ? 'Deselect all' : 'Select all'}</button>
+				>{allRestartSelected() ? m.kb_import_deselect_all() : m.kb_import_select_all()}</button>
 			</div>
 
 			{#if restartError}
@@ -2069,7 +2070,7 @@
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>Cancel</button>
+				>{m.kb_import_cancel()}</button>
 				<button
 					onclick={confirmRestart}
 					disabled={restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p]))}
@@ -2085,7 +2086,7 @@
 					}}
 				>
 					<RefreshCwIcon class="h-4 w-4" />
-					{restarting ? 'Restarting…' : 'Restart'}
+					{restarting ? m.kb_import_restarting() : m.kb_import_restart()}
 				</button>
 			</div>
 		</div>
@@ -2110,7 +2111,7 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Status details dialog"
+			aria-label={m.kb_import_status_details_dialog()}
 			tabindex="0"
 		>
 			<div
@@ -2122,7 +2123,7 @@
 					onclick={closeStatusDialog}
 					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 				>
-					Close
+					{m.kb_import_close()}
 				</button>
 			</div>
 
@@ -2130,7 +2131,7 @@
 				{#if statusDialogRecord}
 					<!-- Record Fields -->
 					<div>
-						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">Record Fields</div>
+						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">{m.kb_import_record_fields()}</div>
 						<div class="rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2};">
 							{#each statusDialogRecordRows as row}
 								<div style="display:flex; align-items:baseline; padding-left:{row.depth * 16}px; min-height:20px; gap:8px; padding-top:2px; padding-bottom:2px;">
@@ -2146,10 +2147,10 @@
 					<!-- Doc Metadata -->
 					<div>
 						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">
-							Doc Metadata ({statusDialogDocMeta.filter(r => r.depth === 0).length} {statusDialogDocMeta.filter(r => r.depth === 0).length === 1 ? 'field' : 'fields'})
+							{m.kb_import_doc_metadata({ count: statusDialogDocMeta.filter(r => r.depth === 0).length, plural: statusDialogDocMeta.filter(r => r.depth === 0).length === 1 ? '' : 's' })}
 						</div>
 						{#if statusDialogDocMeta.length === 0}
-							<div style="font-size:12px; color:{textMuted};">No doc_metadata available.</div>
+							<div style="font-size:12px; color:{textMuted};">{m.kb_import_no_doc_metadata_available()}</div>
 						{:else}
 							<div class="rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2};">
 								{#each statusDialogDocMeta as row}
@@ -2167,16 +2168,16 @@
 					<!-- Status entries -->
 					<div>
 						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">
-							Status ({statusDialogItems.length} {statusDialogItems.length === 1 ? 'entry' : 'entries'})
+							{(statusDialogItems.length === 1 ? m.kb_import_status_one : m.kb_import_status_many)({ count: statusDialogItems.length })}
 						</div>
 						{#if statusDialogItems.length === 0}
-							<div style="font-size:12px; color:{textMuted};">No status entries.</div>
+							<div style="font-size:12px; color:{textMuted};">{m.kb_import_no_status_entries()}</div>
 						{:else}
 							<div class="space-y-2">
 								{#each statusDialogItems as item, idx}
 									<div class="rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2};">
 										<div style="font-size:12px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">
-											Entry #{idx + 1}
+											{m.kb_import_entry({ value: idx + 1 })}
 										</div>
 										<div class="grid gap-1" style="grid-template-columns: 160px 1fr;">
 											{#each Object.entries(item as Record<string, unknown>) as [key, val]}
