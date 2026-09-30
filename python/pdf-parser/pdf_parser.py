@@ -54,6 +54,7 @@ from shared import (
     relativize_to_data_home,
     relativize_to_backup_root,
     resolve_repo_path,
+    resolve_backup_path,
 )
 from parser_base import ParserBackend
 from parser_docling import DoclingParser
@@ -410,7 +411,7 @@ def make_throttled_progress(
 # ---------------------------------------------------------------------------
 
 def _resolve_input_file(
-    rec: dict, staging_dir: str, repo_dirs: list[str],
+    rec: dict, staging_dir: str, repo_dirs: list[str], backup_dir: str = "",
 ) -> tuple[str, bool]:
     """Locate the PDF to parse, following the Handle Input File workflow.
 
@@ -419,7 +420,11 @@ def _resolve_input_file(
         be copied to result/backup dirs then removed from staging after parsing.
       - from_staging=False → file already lives in the result directory (re-process).
 
-    Raises ValueError when the file cannot be located.
+    When the file is gone from its working directory, it is restored from the
+    backup copy (``backup_filename`` or ``backup_dir/<pdf name>``), creating
+    the working directory if needed.
+
+    Raises ValueError when neither the file nor a backup can be located.
     """
     rec_id = rec["id"]
     staging_filename = (rec.get("name") or "").strip()
@@ -466,11 +471,43 @@ def _resolve_input_file(
             if os.path.isfile(candidate):
                 return candidate, False
 
+    # 4. Not in the working directory.  Restore it from the backup copy: create
+    #    the working directory if it is missing, then copy the backup into it.
     tried = ", ".join(names_to_try) if names_to_try else "(none)"
-    raise ValueError(
-        f"record id={rec_id}: file not in staging dir and not found in result dirs "
-        f"(tried: {tried})"
+    pdf_name = os.path.basename(file_name) or staging_filename
+    backup_candidates: list[str] = []
+    backup_filename = (rec.get("backup_filename") or "").strip()
+    if backup_filename:
+        backup_candidates.append(resolve_backup_path(backup_filename, backup_dir or None))
+    if backup_dir and pdf_name:
+        backup_candidates.append(os.path.join(backup_dir, pdf_name))
+    backup_src = next((p for p in backup_candidates if p and os.path.isfile(p)), "")
+    if not backup_src:
+        checked = ", ".join(p for p in backup_candidates if p) or "(no backup path known)"
+        raise ValueError(
+            f"record id={rec_id}: file not in staging dir, not found in result dirs "
+            f"(tried: {tried}), and no backup found (checked: {checked})"
+        )
+
+    if file_name:
+        working_dir = str(Path(resolve_repo_path(file_name, repo_dirs)).parent)
+    else:
+        working_dir = os.path.join(
+            choose_repo_dir(repo_dirs), "Artifacts", str(rec_id // 1000), str(rec_id),
+        )
+    if not os.path.isdir(working_dir):
+        log.warning(
+            "(MID_2026093001) record id=%s: working dir missing, creating %s",
+            rec_id, working_dir,
+        )
+        Path(working_dir).mkdir(parents=True, exist_ok=True)
+    restored = os.path.join(working_dir, pdf_name or os.path.basename(backup_src))
+    copy_file(backup_src, restored)
+    log.warning(
+        "(MID_2026093002) record id=%s: restored %s from backup %s",
+        rec_id, restored, backup_src,
     )
+    return restored, False
 
 
 def _process_record(
@@ -492,7 +529,7 @@ def _process_record(
 
     # --- Resolve input file ---------------------------------------------------
     try:
-        source_file, from_staging = _resolve_input_file(rec, staging_dir, repo_dirs)
+        source_file, from_staging = _resolve_input_file(rec, staging_dir, repo_dirs, backup_dir)
     except ValueError as exc:
         parse_start = datetime.now().strftime(TIME_FORMAT)
         record_parsed_failure(conn, rec_id, raw_status, parse_start, 0, str(exc), parser_name)

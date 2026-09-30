@@ -1,3 +1,4 @@
+import pytest
 import asyncio
 import time
 from unittest.mock import MagicMock, patch
@@ -218,6 +219,70 @@ class TestRepoFileProcessing:
 
         assert source_path == str(repo_pdf)
         assert from_staging is False
+
+    def test_resolve_input_file_restores_from_backup_and_creates_working_dir(self, tmp_path):
+        repo_root = tmp_path / "SemOS"
+        backup_dir = tmp_path / "Backup"
+        backup_dir.mkdir()
+        (backup_dir / "GB_43150_2023.pdf").write_bytes(b"%PDF-1.4\n")
+
+        source_path, from_staging = _resolve_input_file(
+            {
+                "id": 637,
+                "name": "",
+                "file_name": "Artifacts/0/637/GB_43150_2023.pdf",
+                "result_filename": "Artifacts/0/637/GB_43150_2023_mineru.json",
+                "backup_filename": "Backup/GB_43150_2023.pdf",
+            },
+            staging_dir=str(tmp_path / "staging"),
+            repo_dirs=[str(repo_root)],
+            backup_dir=str(backup_dir),
+        )
+
+        expected = repo_root / "Artifacts" / "0" / "637" / "GB_43150_2023.pdf"
+        assert source_path == str(expected)
+        assert expected.read_bytes() == b"%PDF-1.4\n"
+        assert from_staging is False
+
+    def test_resolve_input_file_falls_back_to_backup_dir_by_name(self, tmp_path):
+        repo_root = tmp_path / "SemOS"
+        (repo_root / "Artifacts" / "0" / "637").mkdir(parents=True)
+        backup_dir = tmp_path / "Backup"
+        backup_dir.mkdir()
+        (backup_dir / "GB_43150_2023.pdf").write_bytes(b"%PDF-1.4\n")
+
+        source_path, _ = _resolve_input_file(
+            {
+                "id": 637,
+                "name": "",
+                "file_name": "Artifacts/0/637/GB_43150_2023.pdf",
+                "result_filename": "",
+                "backup_filename": "",
+            },
+            staging_dir=str(tmp_path / "staging"),
+            repo_dirs=[str(repo_root)],
+            backup_dir=str(backup_dir),
+        )
+
+        assert source_path == str(repo_root / "Artifacts" / "0" / "637" / "GB_43150_2023.pdf")
+
+    def test_resolve_input_file_reports_missing_backup(self, tmp_path):
+        backup_dir = tmp_path / "Backup"
+        backup_dir.mkdir()
+
+        with pytest.raises(ValueError, match="no backup found"):
+            _resolve_input_file(
+                {
+                    "id": 637,
+                    "name": "",
+                    "file_name": "Artifacts/0/637/GB_43150_2023.pdf",
+                    "result_filename": "",
+                    "backup_filename": "Backup/GB_43150_2023.pdf",
+                },
+                staging_dir=str(tmp_path / "staging"),
+                repo_dirs=[str(tmp_path / "SemOS")],
+                backup_dir=str(backup_dir),
+            )
 
     def test_process_record_outputs_next_to_repo_pdf_without_moving_it(self, tmp_path, monkeypatch):
         repo_pdf = tmp_path / "SemOS" / "Artifacts" / "0" / "76" / "stdGk_517071.pdf"
