@@ -86,6 +86,9 @@ Built server-side as one text block:
 1. Document header: record ID, title, doc_no.
 2. Source lines as `L<n>\t<type>\t<text>` — line number, block type
    (heading/paragraph/table…), text. Bounding boxes and fonts are dropped.
+   A table line is sent as `L<n>\ttable` followed by its numbered rows
+   (`<n>#<row id>: cell | cell`, the table-row-context rendering) so the model
+   can cite rows (prompt v3).
 3. Metrics as a JSON array with the review-relevant columns: `metric_id`,
    `source_line_spans`, `metric_name`, `metric_subject`, `metric_value`,
    `metric_unit`, `threshold_or_target`, `value_min`, `value_max`,
@@ -103,8 +106,8 @@ are ~45 KB and p90 ~340 KB including bbox columns, so most documents fit.
 ```json
 {
   "summary": "string",
-  "missed_metrics": [{"lines": "123", "name": "", "value": "", "unit": "",
-                      "reason": "", "severity": "high|medium|low"}],
+  "missed_metrics": [{"lines": "123", "table_rows": ["116#r3"], "name": "", "value": "",
+                      "unit": "", "reason": "", "severity": "high|medium|low"}],
   "non_metrics": [{"metric_ids": ["416_mtc_2"], "category": "not_metric|duplicate|formula_input",
                    "duplicate_of": "", "reason": ""}],
   "attribute_issues": [{"metric_ids": [""], "field": "", "stored": "", "suggested": "",
@@ -117,6 +120,9 @@ Server-side post-processing before storing:
 - normalise unknown `category`/`severity` values to `not_metric` / `medium`;
 - compute the **tally** itself (stored, keep, not_metric, duplicate, formula_input,
   missed) from the lists — counts are not trusted from the model;
+- turn a missed metric's `table_rows` (and any `116#r3` in `lines`) into
+  `source_table_rows` (kb.metrics shape); GET adds a read-time `table_context`
+  window (header + cited rows ± 1) so the export can bold the cited rows;
 - attach a **metrics snapshot** (`metric_id`, name, value, unit, spans) of the rows
   reviewed, so the report stays readable after later re-extraction changes
   `kb.metrics`.

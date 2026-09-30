@@ -27,6 +27,10 @@ export type MetricReviewTally = {
 export type MissedMetric = {
 	lines: string;
 	source_line_spans?: string[];
+	/** Table rows the review cited (same shape as kb.metrics.source_table_rows). */
+	source_table_rows?: { line: number; rows: string[] }[];
+	/** Built by the server on GET from source_table_rows: header + cited rows ± 1. */
+	table_context?: TableContextWindow[];
 	name: string;
 	value: string;
 	unit: string;
@@ -314,8 +318,8 @@ export function buildReviewMarkdown(
 	out.push(`## ${L.missed} (${r.missed_metrics.length})`, '');
 	if (r.missed_metrics.length === 0) out.push(L.none, '');
 	// "Lines" and "Grounding" list items for a metric's line spans. A table line
-	// is shown as a table (a stored metric's table_context window when it has
-	// one, else the whole table); any other line as a quote.
+	// is shown as a table (the metric's table_context window, with its cited rows
+	// in bold, when it has one, else the whole table); any other line as a quote.
 	const linesAndGrounding = (spans: string[], windows: TableContextWindow[] = []) => {
 		const numbers = reviewLineNumbers(spans).sort((a, b) => a - b);
 		out.push(field(L.lines, numbers.length ? spans.map((x) => `L${String(x).trim().replace(/^L/i, '')}`).join(', ') : ''));
@@ -347,7 +351,7 @@ export function buildReviewMarkdown(
 	for (const m of sortBySeverity(r.missed_metrics)) {
 		const val = [m.value, m.unit].filter(Boolean).join(' ');
 		out.push(`### ${sev(m.severity)} ${m.name}${val ? ` — ${val}` : ''}`, '');
-		linesAndGrounding(m.source_line_spans?.length ? m.source_line_spans : m.lines ? m.lines.split(',') : []);
+		linesAndGrounding(m.source_line_spans?.length ? m.source_line_spans : m.lines ? m.lines.split(',') : [], m.table_context);
 		if (m.reason) out.push(m.reason, '');
 	}
 

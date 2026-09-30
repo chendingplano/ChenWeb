@@ -16,11 +16,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -121,6 +123,13 @@ type metricReviewMissed struct {
 	Unit            flexString `json:"unit"`
 	Reason          flexString `json:"reason"`
 	Severity        string     `json:"severity"`
+	// TableRows is the LLM's row citations for a table source, e.g. ["116#r3"]
+	// (prompt v3+); finalize turns them into SourceTableRows and clears it.
+	TableRows []string `json:"table_rows,omitempty"`
+	// SourceTableRows has the same shape as kb.metrics.source_table_rows.
+	SourceTableRows []docprocessing.TableRowRef `json:"source_table_rows,omitempty"`
+	// TableContext is built at read time (GET) from SourceTableRows; never stored.
+	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
 }
 
 type metricReviewNonMetric struct {
@@ -235,6 +244,9 @@ func GetMetricReview(c echo.Context) error {
 	}
 	if row != nil {
 		applyStaleRunningStatus(row, time.Now())
+	}
+	if row != nil && len(row.Report) > 0 {
+		row.Report = attachMissedMetricTableContexts(ctx, db, recordID, row.Report, logger)
 	}
 	resp := metricReviewResponse{Status: true, Review: row}
 	// Offer a translation when there is no usable review in lang: none, or the
@@ -710,6 +722,12 @@ func buildMetricReviewInput(h metricReviewDocHeader, lang string, lines []rawLin
 	b.WriteString("DOCUMENT\n")
 	fmt.Fprintf(&b, "record_id: %d\ntitle: %s\ndoc_no: %s\noutput_language: %s\n\n", h.RecordID, h.Title, h.DocNo, metricReviewLangLabel(lang))
 	for _, ln := range lines {
+		// A table line is sent as numbered rows ("116#r3: a | b"), one per line
+		// below its "L<n>\ttable" row, so the LLM can cite the rows.
+		if content := docprocessing.LLMLineContent(ln.LineType, ln.LineNumber, ln.Content); content != ln.Content {
+			fmt.Fprintf(&b, "L%d\t%s\n%s\n", ln.LineNumber, ln.LineType, content)
+			continue
+		}
 		fmt.Fprintf(&b, "L%d\t%s\t%s\n", ln.LineNumber, ln.LineType, ln.Content)
 	}
 	metricsJSON, err := json.MarshalIndent(metrics, "", " ")
@@ -781,6 +799,14 @@ func finalizeMetricReview(payload map[string]any, metrics []metricReviewInputMet
 	for _, m := range out.MissedMetrics {
 		m.Severity = normalizeMetricReviewSeverity(m.Severity)
 		m.SourceLineSpans = metricReviewSpansFromText(string(m.Lines))
+		m.SourceTableRows = missedMetricTableRows(m.TableRows, string(m.Lines))
+		m.TableRows, m.TableContext = nil, nil
+		// A cited table line is a source line even when "lines" omits it.
+		for _, ref := range m.SourceTableRows {
+			if !slices.Contains(m.SourceLineSpans, strconv.Itoa(ref.Line)) {
+				m.SourceLineSpans = append(m.SourceLineSpans, strconv.Itoa(ref.Line))
+			}
+		}
 		report.MissedMetrics = append(report.MissedMetrics, m)
 	}
 
@@ -907,6 +933,64 @@ func metricReviewSpansFromJSON(raw json.RawMessage) []string {
 		parts = append(parts, fmt.Sprint(value))
 	}
 	return metricReviewSpansFromText(strings.Join(parts, ","))
+}
+
+// missedMetricTableRows collects a missed metric's table-row citations
+// ("116#r3") from table_rows and from any "#"-suffixed part of lines, as merged
+// source_table_rows refs. Rows that do not exist in the table are dropped at read
+// time (TableContextWindows).
+func missedMetricTableRows(tableRows []string, lines string) []docprocessing.TableRowRef {
+	cites := make([]string, 0, len(tableRows))
+	for _, c := range tableRows {
+		cites = append(cites, strings.TrimPrefix(strings.TrimSpace(c), "L"))
+	}
+	for _, part := range strings.FieldsFunc(lines, func(r rune) bool { return r == ',' || r == ';' }) {
+		if p := strings.TrimPrefix(strings.TrimSpace(part), "L"); strings.Contains(p, "#") {
+			cites = append(cites, p)
+		}
+	}
+	if len(cites) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(cites)
+	if err != nil {
+		return nil
+	}
+	return docprocessing.ParseTableRowRefs(string(raw))
+}
+
+// attachMissedMetricTableContexts adds table_context windows (header rows, the
+// cited rows, one neighbor either side) to missed metrics that cite table rows,
+// reading the record's line file only when one does. Any failure returns the
+// report unchanged; the page then shows the whole table.
+func attachMissedMetricTableContexts(ctx context.Context, db *sql.DB, recordID int64, report json.RawMessage, logger ApiTypes.JimoLogger) json.RawMessage {
+	var r metricReviewReport
+	if err := json.Unmarshal(report, &r); err != nil {
+		return report
+	}
+	need := false
+	for _, m := range r.MissedMetrics {
+		if len(m.SourceTableRows) > 0 {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return report
+	}
+	lines, err := docprocessing.LoadRecordLinesByID(ctx, db, recordID)
+	if err != nil {
+		logger.Warn("metric review table context: record lines unavailable", "record_id", recordID, "err", err)
+		return report
+	}
+	for i := range r.MissedMetrics {
+		r.MissedMetrics[i].TableContext = docprocessing.TableContextWindows(lines, r.MissedMetrics[i].SourceTableRows)
+	}
+	out, err := json.Marshal(r)
+	if err != nil {
+		return report
+	}
+	return out
 }
 
 // metricReviewLangLabel renders a language for the LLM, e.g. "zh-cn (Simplified Chinese)".

@@ -272,3 +272,50 @@ api_key = 'k'
 		t.Fatalf("models = %v, want %v", got, want)
 	}
 }
+
+func TestBuildMetricReviewInput_TableAsNumberedRows(t *testing.T) {
+	lines := []rawLine{{LineNumber: 116, LineType: "table", Content: `<table><tr><td>序号</td><td>处理模式</td></tr><tr><td>1</td><td>机器成肥</td></tr><tr><td>2</td><td>厌氧产沼发酵</td></tr></table>`}}
+	text, err := buildMetricReviewInput(metricReviewDocHeader{RecordID: 416}, "en", lines, []metricReviewInputMetric{{MetricID: "416_mtc_1"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "L116\ttable\n116#h0: 序号 | 处理模式\n116#r1: 1 | 机器成肥\n116#r2: 2 | 厌氧产沼发酵\n"
+	if !strings.Contains(text, want) {
+		t.Errorf("input missing %q\n---\n%s", want, text)
+	}
+}
+
+func TestFinalizeMetricReview_MissedMetricTableRows(t *testing.T) {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(`{
+		"summary": "ok",
+		"missed_metrics": [
+			{"lines": "116", "table_rows": ["116#r3", "116#r1", "bad", "116#x2"], "name": "a"},
+			{"lines": "L120#r2, 130", "name": "b"},
+			{"lines": "140", "name": "c"}
+		]
+	}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+	report, _, err := finalizeMetricReview(payload, []metricReviewInputMetric{{MetricID: "m1"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a, b, c := report.MissedMetrics[0], report.MissedMetrics[1], report.MissedMetrics[2]
+	if len(a.SourceTableRows) != 1 || a.SourceTableRows[0].Line != 116 || strings.Join(a.SourceTableRows[0].Rows, ",") != "r1,r3" {
+		t.Errorf("a refs = %+v", a.SourceTableRows)
+	}
+	if a.TableRows != nil {
+		t.Errorf("table_rows must not be stored: %v", a.TableRows)
+	}
+	if len(b.SourceTableRows) != 1 || b.SourceTableRows[0].Line != 120 || strings.Join(b.SourceLineSpans, ",") != "130,120" {
+		t.Errorf("b refs = %+v spans = %v", b.SourceTableRows, b.SourceLineSpans)
+	}
+	if c.SourceTableRows != nil {
+		t.Errorf("c refs = %+v", c.SourceTableRows)
+	}
+	raw, _ := json.Marshal(report)
+	if strings.Contains(string(raw), "\"table_rows\"") || strings.Contains(string(raw), "table_context") {
+		t.Errorf("stored report carries LLM/read-time fields: %s", raw)
+	}
+}

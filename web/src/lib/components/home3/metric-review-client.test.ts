@@ -222,3 +222,20 @@ test('stored metrics show kb.metrics fields in the review language and table_con
 	// A metric with no kb.metrics row falls back to the review snapshot.
 	assert.ok(md.includes('#### 人口密度\n\n- **指标 ID**: `416_mtc_2`'), md);
 });
+
+test('missed metric with table_context highlights its cited rows', () => {
+	const missed = {
+		...REVIEW.report!.missed_metrics[0],
+		lines: '116',
+		source_line_spans: ['116'],
+		table_context: [{ line: 116, columns: [], rows: [
+			{ id: 'h0', cells: ['序号', '模式'], header: true },
+			{ id: 'r3', cells: ['1', '厌氧产沼发酵'], matched: true }
+		] }]
+	};
+	const md = buildReviewMarkdown({ id: 416 }, { ...REVIEW, report: { ...REVIEW.report!, missed_metrics: [missed] } }, LABELS, () => 'T', {
+		lines: [{ line_number: 116, content: '<table><tr><td>whole table</td></tr></table>' }]
+	});
+	assert.ok(md.includes('<table><tr><th>序号</th><th>模式</th></tr><tr><td><strong>1</strong></td><td><strong>厌氧产沼发酵</strong></td></tr></table>'), md);
+	assert.ok(!md.includes('whole table'));
+});
