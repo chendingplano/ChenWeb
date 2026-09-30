@@ -18,7 +18,7 @@ import (
 type RunStore interface {
 	LoadResumeState(context.Context, string, string) (ResumeState, error)
 	LoadSourceDependencies(context.Context, string, string) (map[string][]SourceRecord, error)
-	ListGrantedStoreIDs(context.Context, string, []string) ([]string, error)
+	ListGrantedStores(context.Context, string, []string) ([]GrantedKnowledgeStore, error)
 	CreateRunAttempt(context.Context, string, string, string) (ResponseAttempt, bool, error)
 	CreateMessage(context.Context, string, CreateMessageInput) (Message, error)
 	AppendMessageDelta(context.Context, string, string, string, string) (Message, error)
@@ -44,10 +44,20 @@ type RunHandler struct {
 	sources  RunSourceChecker
 	gateway  GatewayBridge
 	signer   *CapabilitySigner
+	// defaultStoreName returns [frontend].default_knowledge_store; nil means
+	// no default.
+	defaultStoreName func() string
 }
 
 func NewRunHandler(store RunStore, profiles *ProfileRegistry, sources RunSourceChecker, gateway GatewayBridge, signer *CapabilitySigner) *RunHandler {
 	return &RunHandler{store: store, profiles: profiles, sources: sources, gateway: gateway, signer: signer}
+}
+
+// SetDefaultKnowledgeStoreName supplies the configured default knowledge store
+// name. The default is offered to Pi only when the user is granted that store.
+func (h *RunHandler) SetDefaultKnowledgeStoreName(name func() string) *RunHandler {
+	h.defaultStoreName = name
+	return h
 }
 
 func RegisterRunRoutes(group *echo.Group, handler *RunHandler) {
@@ -112,15 +122,32 @@ func (h *RunHandler) Start(c echo.Context) error {
 		}
 		return h.sources.CheckSourceWithGroups(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, source)
 	})
-	storeIDs, err := h.store.ListGrantedStoreIDs(ctx, userID, profile.AllowedKnowledgeStores)
+	stores, err := h.store.ListGrantedStores(ctx, userID, profile.AllowedKnowledgeStores)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not check knowledge access"})
 	}
-	if len(storeIDs) == 0 {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "no granted knowledge store for this service"})
-	}
-	if len(storeIDs) > 32 {
+	if len(stores) > 32 {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "knowledge scope is too broad"})
+	}
+	// Not every conversation needs the knowledge base. Without a granted store
+	// the run proceeds with no knowledge tools, and the knowledge context tells
+	// Pi so.
+	storeIDs := make([]string, 0, len(stores))
+	for _, store := range stores {
+		storeIDs = append(storeIDs, store.ID)
+	}
+	allowedTools := []string{}
+	if len(stores) > 0 {
+		allowedTools = append(allowedTools, profile.AllowedTools...)
+	}
+	defaultStoreID := ""
+	if h.defaultStoreName != nil {
+		defaultStoreID = selectDefaultKnowledgeStore(stores, h.defaultStoreName())
+	}
+	knowledge, err := h.profiles.BuildKnowledgeContext(stores, defaultStoreID)
+	if err != nil {
+		logger.Error("build agent knowledge context failed", "service", profile.Slug, "error", err)
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
 	}
 	attempt, created, err := h.store.CreateRunAttempt(ctx, userID, state.Conversation.ID, body.IdempotencyKey)
 	if errors.Is(err, ErrRunAlreadyActive) || (!created && err == nil) {
@@ -171,7 +198,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not start answer"})
 	}
 	claims := RunCapabilityClaims{UserID: userID, ProfileSlug: profile.Slug, ProfileVersion: profile.Version, RunID: attempt.ID,
-		AllowedTools: append([]string(nil), profile.AllowedTools...), KnowledgeStoreIDs: storeIDs,
+		AllowedTools: allowedTools, KnowledgeStoreIDs: storeIDs,
 		DocumentGroups: append([]string(nil), profile.AllowedDocumentGroups...), MaxEvidenceBytes: profile.Limits.MaxEvidenceBytes}
 	capability, err := h.signer.Mint(claims, min(profile.Limits.MaxElapsed+30*time.Second, maxCapabilityLifetime))
 	if err != nil {
@@ -191,8 +218,10 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if len(history) > 100 {
 		history = history[len(history)-100:]
 	}
+	gatewayProfile := MapGatewayProfile(profile, permission)
+	gatewayProfile.AllowedTools = allowedTools
 	request := GatewayRunRequest{RunID: attempt.ID, ConversationID: state.Conversation.ID, UserID: userID,
-		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: MapGatewayProfile(profile, permission), History: history}
+		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: gatewayProfile, History: history, Knowledge: &knowledge}
 	stream, err := h.gateway.Start(ctx, request)
 	if err != nil {
 		logger.Error("Pi gateway start failed", "run_id", attempt.ID, "error", err)
@@ -321,12 +350,18 @@ func mapRunOutcome(status string) (string, string) {
 
 func publicRunMessage(outcome AttemptOutcome) string {
 	switch outcome.Status {
-	case "completed": return ""
-	case "stopped": return "Run stopped. Any partial answer was saved."
-	case "limit": return "The answer reached its limit. Please ask a narrower question."
-	case "interrupted": return "The connection was interrupted. Any partial answer was saved."
+	case "completed":
+		return ""
+	case "stopped":
+		return "Run stopped. Any partial answer was saved."
+	case "limit":
+		return "The answer reached its limit. Please ask a narrower question."
+	case "interrupted":
+		return "The connection was interrupted. Any partial answer was saved."
 	default:
-		if outcome.ErrorCode == "source_access_changed" { return "A source changed or access was revoked. Please try again." }
+		if outcome.ErrorCode == "source_access_changed" {
+			return "A source changed or access was revoked. Please try again."
+		}
 		return "The answer could not be completed. Please try again."
 	}
 }

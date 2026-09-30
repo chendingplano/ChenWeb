@@ -95,7 +95,9 @@ func (s *CapabilitySigner) sign(payload string) []byte {
 func validClaims(c RunCapabilityClaims) bool {
 	return strings.TrimSpace(c.UserID) != "" && strings.TrimSpace(c.ProfileSlug) != "" &&
 		strings.TrimSpace(c.ProfileVersion) != "" && strings.TrimSpace(c.RunID) != "" &&
-		len(c.AllowedTools) > 0 && len(c.KnowledgeStoreIDs) > 0 &&
+		// Every tool reads a knowledge store, so tools require a store. A run
+		// with no granted store carries neither and can call nothing.
+		(len(c.KnowledgeStoreIDs) > 0 || len(c.AllowedTools) == 0) &&
 		c.MaxEvidenceBytes > 0 && c.MaxEvidenceBytes <= MaxToolResponseBytes
 }
 

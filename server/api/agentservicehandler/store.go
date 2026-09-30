@@ -299,8 +299,10 @@ RETURNING id, conversation_id, idempotency_key, status, error_code, error_messag
 	return scanAttempt(s.db.QueryRowContext(ctx, query, conversationID, ownerUserID, idempotencyKey))
 }
 
-func (s *Store) ListGrantedStoreIDs(ctx context.Context, userID string, allowedStoreNames []string) ([]string, error) {
-	const query = `SELECT DISTINCT ks.id::text
+// ListGrantedStores returns the active knowledge stores, among the profile's
+// allowed store names, that userID holds an unexpired grant for.
+func (s *Store) ListGrantedStores(ctx context.Context, userID string, allowedStoreNames []string) ([]GrantedKnowledgeStore, error) {
+	const query = `SELECT DISTINCT ks.id::text, ks.ks_name
 FROM kb.agentic_knowledge_grants g
 JOIN kb.knowledge_store ks ON ks.id=g.knowledge_store_id
 WHERE g.user_id=$1 AND ks.ks_name=ANY($2) AND ks.status='active'
@@ -311,15 +313,15 @@ ORDER BY ks.id::text`
 		return nil, err
 	}
 	defer rows.Close()
-	ids := make([]string, 0)
+	stores := make([]GrantedKnowledgeStore, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var store GrantedKnowledgeStore
+		if err := rows.Scan(&store.ID, &store.Name); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		stores = append(stores, store)
 	}
-	return ids, rows.Err()
+	return stores, rows.Err()
 }
 
 func (s *Store) CreateRunAttempt(ctx context.Context, ownerUserID, conversationID, idempotencyKey string) (ResponseAttempt, bool, error) {

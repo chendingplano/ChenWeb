@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -50,8 +51,9 @@ type PiProfile struct {
 }
 
 type ProfileRegistry struct {
-	versions map[string]map[string]PiProfile
-	active   map[string]string
+	versions         map[string]map[string]PiProfile
+	active           map[string]string
+	knowledgeContext *template.Template
 }
 
 type profileDefinition struct {
@@ -93,9 +95,14 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 		},
 	}
 
+	knowledgeContext, err := loadKnowledgeContextTemplate(promptDir)
+	if err != nil {
+		return nil, err
+	}
 	registry := &ProfileRegistry{
-		versions: make(map[string]map[string]PiProfile, len(definitions)),
-		active:   make(map[string]string, len(definitions)),
+		versions:         make(map[string]map[string]PiProfile, len(definitions)),
+		active:           make(map[string]string, len(definitions)),
+		knowledgeContext: knowledgeContext,
 	}
 	for _, definition := range definitions {
 		profile, err := loadProfile(promptDir, definition)

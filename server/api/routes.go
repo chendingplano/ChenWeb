@@ -48,17 +48,18 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
 	"github.com/chendingplano/deepdoc/server/api/priceshandler"
-	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	productreviews "github.com/chendingplano/deepdoc/server/api/product-reviews"
 	"github.com/chendingplano/deepdoc/server/api/productdrawings"
 	"github.com/chendingplano/deepdoc/server/api/productnameimporthandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
+	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
 	"github.com/chendingplano/deepdoc/server/api/terminologyresourcehandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -309,7 +310,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
 	agentservicehandler.RegisterRunRoutes(agentServiceGroup,
 		agentservicehandler.NewRunHandler(agentStore, profileRegistry, agentSources,
-			agentservicehandler.NewPiGatewayClient(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner))
+			agentservicehandler.NewPiGatewayClient(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner).
+			SetDefaultKnowledgeStoreName(appconfig.GetDefaultKnowledgeStoreName))
 	chadSessionsHandler, err := chadsessionshandler.NewDefault()
 	if err != nil {
 		return fmt.Errorf("initialize Chad sessions handler: %w", err)

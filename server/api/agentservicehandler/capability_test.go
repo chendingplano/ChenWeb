@@ -61,3 +61,23 @@ func TestRunCapabilityRequiresBoundedLifetimeAndIdentity(t *testing.T) {
 		t.Fatalf("missing identity error = %v", err)
 	}
 }
+
+func TestRunCapabilityToolsRequireAKnowledgeStore(t *testing.T) {
+	signer, err := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := RunCapabilityClaims{UserID: "u", ProfileSlug: "p", ProfileVersion: "v1", RunID: "r", MaxEvidenceBytes: 65536}
+	toolsWithoutStore := base
+	toolsWithoutStore.AllowedTools = []string{"search_knowledge"}
+	if _, err := signer.Mint(toolsWithoutStore, time.Minute); !errors.Is(err, ErrCapabilityInvalid) {
+		t.Fatalf("tools without a store error = %v", err)
+	}
+	token, err := signer.Mint(base, time.Minute)
+	if err != nil {
+		t.Fatalf("tool-less capability error = %v", err)
+	}
+	if _, err := signer.Verify(token, "r", "search_knowledge"); !errors.Is(err, ErrCapabilityToolDenied) {
+		t.Fatalf("tool-less capability verify error = %v", err)
+	}
+}

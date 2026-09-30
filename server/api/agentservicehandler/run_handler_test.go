@@ -127,6 +127,7 @@ type fakeRunStore struct {
 	userTexts     []string
 	finalizeErr   error
 	attemptStatus string
+	noStores      bool
 }
 
 func (f *fakeRunStore) LoadResumeState(context.Context, string, string) (ResumeState, error) {
@@ -135,8 +136,11 @@ func (f *fakeRunStore) LoadResumeState(context.Context, string, string) (ResumeS
 func (f *fakeRunStore) LoadSourceDependencies(context.Context, string, string) (map[string][]SourceRecord, error) {
 	return map[string][]SourceRecord{}, nil
 }
-func (f *fakeRunStore) ListGrantedStoreIDs(context.Context, string, []string) ([]string, error) {
-	return []string{"7"}, nil
+func (f *fakeRunStore) ListGrantedStores(context.Context, string, []string) ([]GrantedKnowledgeStore, error) {
+	if f.noStores {
+		return nil, nil
+	}
+	return []GrantedKnowledgeStore{{ID: "7", Name: "Research"}}, nil
 }
 func (f *fakeRunStore) CreateRunAttempt(context.Context, string, string, string) (ResponseAttempt, bool, error) {
 	return ResponseAttempt{ID: "run-1", ConversationID: "conversation-1", Status: "running"}, f.created, nil
@@ -220,7 +224,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewRunHandler(store, profile, allowRunSources{}, gateway, signer)
+	handler := NewRunHandler(store, profile, allowRunSources{}, gateway, signer).SetDefaultKnowledgeStoreName(func() string { return "Research" })
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), handler)
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Why is flow low?","idempotency_key":"key-1","permission_mode":"auto"}`)
@@ -233,6 +237,36 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	}
 	if gateway.request.Message != "Why is flow low?" || len(gateway.request.History) != 2 || len(store.settled) != 1 || store.settled[0].Status != "completed" || store.answer != "Flow is low." || len(store.sources) != 1 || store.sources[0].ToolCallID != "db-tool-1" {
 		t.Fatalf("run request=%+v settled=%+v answer=%q sources=%+v", gateway.request, store.settled, store.answer, store.sources)
+	}
+	knowledge := gateway.request.Knowledge
+	if knowledge == nil || knowledge.DefaultStoreID != "7" || len(knowledge.Stores) != 1 || !strings.Contains(knowledge.PromptContext, "`7`: Research (default)") {
+		t.Fatalf("knowledge context %+v", knowledge)
+	}
+	if len(gateway.request.Profile.AllowedTools) != 1 || gateway.request.Profile.AllowedTools[0] != "search_knowledge" {
+		t.Fatalf("gateway tools %v", gateway.request.Profile.AllowedTools)
+	}
+}
+
+func TestRunWithoutGrantedStoreProceedsWithoutKnowledgeTools(t *testing.T) {
+	withAgentUser(t, "user-1")
+	store := &fakeRunStore{created: true, noStores: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", OwnerUserID: "user-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
+	gateway := &fakeGatewayBridge{stream: `{"type":"answer_delta","text":"I can explain what this service does."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
+	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
+	e := echo.New()
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer).SetDefaultKnowledgeStoreName(func() string { return "Research" }))
+	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"What can you do?","idempotency_key":"key-1"}`)
+	if rec.Code != http.StatusOK || len(store.settled) != 1 || store.settled[0].Status != "completed" {
+		t.Fatalf("status=%d settled=%+v body=%s", rec.Code, store.settled, rec.Body.String())
+	}
+	if gateway.request.Profile.AllowedTools == nil || len(gateway.request.Profile.AllowedTools) != 0 {
+		t.Fatalf("gateway tools %#v, want empty non-nil list", gateway.request.Profile.AllowedTools)
+	}
+	knowledge := gateway.request.Knowledge
+	if knowledge == nil || len(knowledge.Stores) != 0 || knowledge.DefaultStoreID != "" || !strings.Contains(knowledge.PromptContext, "No ChenWeb knowledge store is available") {
+		t.Fatalf("knowledge context %+v", knowledge)
+	}
+	if _, err := signer.Verify(gateway.request.Capability, "run-1", "search_knowledge"); !errors.Is(err, ErrCapabilityToolDenied) {
+		t.Fatalf("tool-less capability allowed a knowledge tool: %v", err)
 	}
 }
 
@@ -257,10 +291,10 @@ func TestGrantedStoreScopeUsesCurrentUserGrantsAndStableIDs(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(`(?s)FROM kb.agentic_knowledge_grants g.*g.user_id=\$1.*ks.ks_name=ANY\(\$2\)`).
 		WithArgs("user-1", sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"store_id"}).AddRow("7").AddRow("9"))
-	ids, err := NewStore(db).ListGrantedStoreIDs(context.Background(), "user-1", []string{"Research"})
-	if err != nil || len(ids) != 2 || ids[0] != "7" || ids[1] != "9" {
-		t.Fatalf("ids=%v err=%v", ids, err)
+		WillReturnRows(sqlmock.NewRows([]string{"store_id", "ks_name"}).AddRow("7", "Research").AddRow("9", "Research"))
+	stores, err := NewStore(db).ListGrantedStores(context.Background(), "user-1", []string{"Research"})
+	if err != nil || len(stores) != 2 || stores[0] != (GrantedKnowledgeStore{ID: "7", Name: "Research"}) || stores[1].ID != "9" {
+		t.Fatalf("stores=%v err=%v", stores, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

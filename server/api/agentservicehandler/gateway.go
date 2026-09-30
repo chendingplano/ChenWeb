@@ -34,13 +34,14 @@ type GatewayHistoryMessage struct {
 	Content string `json:"content"`
 }
 type GatewayRunRequest struct {
-	RunID          string                  `json:"runId"`
-	ConversationID string                  `json:"conversationId"`
-	UserID         string                  `json:"userId"`
-	Message        string                  `json:"message"`
-	Capability     string                  `json:"capability"`
-	Profile        GatewayRunProfile       `json:"profile"`
-	History        []GatewayHistoryMessage `json:"history"`
+	RunID          string                   `json:"runId"`
+	ConversationID string                   `json:"conversationId"`
+	UserID         string                   `json:"userId"`
+	Message        string                   `json:"message"`
+	Capability     string                   `json:"capability"`
+	Profile        GatewayRunProfile        `json:"profile"`
+	History        []GatewayHistoryMessage  `json:"history"`
+	Knowledge      *GatewayKnowledgeContext `json:"knowledge,omitempty"`
 }
 type PiGatewayClient struct{ client *sharedllm.PiGatewayClient }
 
@@ -64,7 +65,12 @@ func (g *PiGatewayClient) endpoint(path string) string {
 	return u.String()
 }
 func (g *PiGatewayClient) Start(ctx context.Context, run GatewayRunRequest) (io.ReadCloser, error) {
-	return g.client.Start(ctx, sharedllm.PiGatewayRun{RunID: run.RunID, ConversationID: run.ConversationID, UserID: run.UserID, Message: run.Message, Capability: run.Capability, Profile: run.Profile, History: run.History, Capture: &sharedllm.RequestCapture{UserID: run.UserID}})
+	gatewayRun := sharedllm.PiGatewayRun{RunID: run.RunID, ConversationID: run.ConversationID, UserID: run.UserID, Message: run.Message, Capability: run.Capability, Profile: run.Profile, History: run.History, Capture: &sharedllm.RequestCapture{UserID: run.UserID}}
+	if run.Knowledge != nil {
+		// A nil pointer inside the interface would still be sent as null.
+		gatewayRun.Knowledge = run.Knowledge
+	}
+	return g.client.Start(ctx, gatewayRun)
 }
 func (g *PiGatewayClient) Cancel(ctx context.Context, runID string) error {
 	return g.client.Cancel(ctx, runID)
