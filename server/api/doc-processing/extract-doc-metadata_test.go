@@ -669,3 +669,45 @@ func TestExtractDocMetadata_FallbackEmptyJSONIsWarning(t *testing.T) {
 		t.Fatalf("docMetadata=%v, want empty", st.updateReq.DocMetadata)
 	}
 }
+
+// TestExtractDocMetaReasoningFromEnv pins the default to false: an unset or
+// unparseable value must never silently enable reasoning.
+func TestExtractDocMetaReasoningFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{{"", false}, {"false", false}, {"true", true}, {"1", true}, {"nonsense", false}} {
+		t.Run("raw="+tc.raw, func(t *testing.T) {
+			t.Setenv("EXTRACT_DOCMETA_REASONING", tc.raw)
+			if got := ExtractDocMetaReasoningFromEnv(); got != tc.want {
+				t.Fatalf("ExtractDocMetaReasoningFromEnv()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyDocMetaReasoning checks that disabling forces thinking off on the
+// primary and fallback models, and enabling leaves the configured values alone.
+func TestApplyDocMetaReasoning(t *testing.T) {
+	newProc := func(reasoning bool) *ExtractDocMetadataProcessor {
+		return &ExtractDocMetadataProcessor{
+			Reasoning:        reasoning,
+			ModelCfg:         structureModelConfig{ThinkingType: ""},
+			FallbackModelCfg: structureModelConfig{ThinkingType: "enabled"},
+		}
+	}
+
+	off := newProc(false)
+	off.applyDocMetaReasoning()
+	if off.ModelCfg.ThinkingType != "disabled" || off.FallbackModelCfg.ThinkingType != "disabled" {
+		t.Fatalf("reasoning=false: got primary=%q fallback=%q, want both disabled",
+			off.ModelCfg.ThinkingType, off.FallbackModelCfg.ThinkingType)
+	}
+
+	on := newProc(true)
+	on.applyDocMetaReasoning()
+	if on.ModelCfg.ThinkingType != "" || on.FallbackModelCfg.ThinkingType != "enabled" {
+		t.Fatalf("reasoning=true: got primary=%q fallback=%q, want unchanged",
+			on.ModelCfg.ThinkingType, on.FallbackModelCfg.ThinkingType)
+	}
+}

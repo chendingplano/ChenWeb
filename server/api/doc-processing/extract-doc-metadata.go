@@ -52,6 +52,11 @@ type ExtractDocMetadataProcessor struct {
 	FallbackModelErr     error
 	FallbackModelName    string
 	FallbackModelCfg     structureModelConfig
+
+	// Reasoning (EXTRACT_DOCMETA_REASONING) is false when the extraction
+	// must run with provider-side reasoning turned off; see
+	// ExtractDocMetaReasoningFromEnv.
+	Reasoning bool
 }
 
 type LLMJSONExtractor interface {
@@ -70,8 +75,7 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_FALLBACK", "EXTRACT_DOCMETA_MODELS_FILE")
-	applyStructureModelConfigToExtractor(client, modelCfg)
-	return &ExtractDocMetadataProcessor{
+	proc := &ExtractDocMetadataProcessor{
 		Store:        store,
 		Facets:       SQLStore{DB: ApiTypes.ProjectDBHandle},
 		Client:       client,
@@ -94,7 +98,41 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		FallbackModelErr:     fallbackModelErr,
 		FallbackModelName:    fallbackModelCfg.ModelName,
 		FallbackModelCfg:     fallbackModelCfg,
+
+		Reasoning: ExtractDocMetaReasoningFromEnv(),
 	}
+	proc.applyDocMetaReasoning()
+	applyStructureModelConfigToExtractor(client, proc.ModelCfg)
+	return proc
+}
+
+// ExtractDocMetaReasoningFromEnv reports whether doc-metadata extraction may
+// use provider-side reasoning. It reads EXTRACT_DOCMETA_REASONING ("true" or
+// "false"); unset, empty, or unparseable resolves to false, since pulling a
+// title, doc number and dates off the first pages needs no reasoning trace
+// and hybrid-reasoning models would otherwise spend most output tokens on it.
+func ExtractDocMetaReasoningFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_REASONING"))
+	if raw == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+// applyDocMetaReasoning forces thinking off on the primary and fallback
+// models when reasoning is disabled. When enabled the configs are left
+// exactly as .models.toml declared them -- this knob never *turns on* a
+// thinking field the model definition did not ask for.
+func (p *ExtractDocMetadataProcessor) applyDocMetaReasoning() {
+	if p.Reasoning {
+		return
+	}
+	p.ModelCfg = forceDisableThinking(p.ModelCfg)
+	p.FallbackModelCfg = forceDisableThinking(p.FallbackModelCfg)
 }
 
 func (p *ExtractDocMetadataProcessor) Name() string { return "extract_doc_metadata" }
