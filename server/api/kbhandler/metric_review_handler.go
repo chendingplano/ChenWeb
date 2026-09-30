@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,12 +114,13 @@ type metricReviewTally struct {
 }
 
 type metricReviewMissed struct {
-	Lines    flexString `json:"lines"`
-	Name     flexString `json:"name"`
-	Value    flexString `json:"value"`
-	Unit     flexString `json:"unit"`
-	Reason   flexString `json:"reason"`
-	Severity string     `json:"severity"`
+	Lines           flexString `json:"lines"`
+	SourceLineSpans []string   `json:"source_line_spans,omitempty"`
+	Name            flexString `json:"name"`
+	Value           flexString `json:"value"`
+	Unit            flexString `json:"unit"`
+	Reason          flexString `json:"reason"`
+	Severity        string     `json:"severity"`
 }
 
 type metricReviewNonMetric struct {
@@ -140,11 +142,12 @@ type metricReviewAttributeIssue struct {
 // metricReviewSnapshot records the reviewed metric as it was at review time, so
 // the report stays readable after later re-extraction changes kb.metrics.
 type metricReviewSnapshot struct {
-	MetricID string `json:"metric_id"`
-	Name     string `json:"name"`
-	Value    string `json:"value,omitempty"`
-	Unit     string `json:"unit,omitempty"`
-	Lines    string `json:"lines,omitempty"`
+	MetricID        string   `json:"metric_id"`
+	Name            string   `json:"name"`
+	Value           string   `json:"value,omitempty"`
+	Unit            string   `json:"unit,omitempty"`
+	Lines           string   `json:"lines,omitempty"`
+	SourceLineSpans []string `json:"source_line_spans,omitempty"`
 }
 
 // metricReviewLLMOutput is the raw model output shape (prompt schema).
@@ -672,7 +675,8 @@ func finalizeMetricReview(payload map[string]any, metrics []metricReviewInputMet
 		known[m.MetricID] = true
 		snapshot = append(snapshot, metricReviewSnapshot{
 			MetricID: m.MetricID, Name: m.MetricName, Value: m.MetricValue, Unit: m.MetricUnit,
-			Lines: formatMetricReviewSpans(m.SourceLineSpans),
+			Lines:           formatMetricReviewSpans(m.SourceLineSpans),
+			SourceLineSpans: metricReviewSpansFromJSON(m.SourceLineSpans),
 		})
 	}
 	droppedSet := map[string]bool{}
@@ -704,6 +708,7 @@ func finalizeMetricReview(payload map[string]any, metrics []metricReviewInputMet
 	}
 	for _, m := range out.MissedMetrics {
 		m.Severity = normalizeMetricReviewSeverity(m.Severity)
+		m.SourceLineSpans = metricReviewSpansFromText(string(m.Lines))
 		report.MissedMetrics = append(report.MissedMetrics, m)
 	}
 
@@ -793,6 +798,43 @@ func formatMetricReviewSpans(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+var metricReviewLineSpanPattern = regexp.MustCompile(`^(?:L)?(\d+)(?:\s*[:\-]\s*(\d+))?$`)
+
+func metricReviewSpansFromText(text string) []string {
+	var spans []string
+	for _, part := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ';' }) {
+		match := metricReviewLineSpanPattern.FindStringSubmatch(strings.TrimSpace(part))
+		if match == nil {
+			continue
+		}
+		start, _ := strconv.Atoi(match[1])
+		if start < 1 {
+			continue
+		}
+		if match[2] == "" {
+			spans = append(spans, strconv.Itoa(start))
+			continue
+		}
+		end, _ := strconv.Atoi(match[2])
+		if end >= start {
+			spans = append(spans, fmt.Sprintf("%d:%d", start, end))
+		}
+	}
+	return spans
+}
+
+func metricReviewSpansFromJSON(raw json.RawMessage) []string {
+	var values []any
+	if json.Unmarshal(raw, &values) != nil {
+		return nil
+	}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, fmt.Sprint(value))
+	}
+	return metricReviewSpansFromText(strings.Join(parts, ","))
 }
 
 // metricReviewLangLabel renders a language for the LLM, e.g. "zh-cn (Simplified Chinese)".

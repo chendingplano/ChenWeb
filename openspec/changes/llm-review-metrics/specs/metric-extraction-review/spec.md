@@ -28,6 +28,17 @@ select that record.
 - **THEN** it becomes the selected record and its latest stored review, if any, is shown
 
 ### Requirement: Stored Review Retrieval
+The page SHALL provide draggable dividers between the document menu and review,
+and between the review and source PDF. Selecting a finding SHALL navigate the PDF
+to its source page and highlight the source lines. New reports SHALL store
+`source_line_spans` for missed findings and reviewed metric snapshots using the
+extractor's `"n"` and `"n:m"` span format. Older reports SHALL remain navigable
+through their existing `lines` fields.
+
+#### Scenario: Navigate to a reviewed finding
+- **WHEN** the user selects a missed metric, non-metric row, or attribute issue
+- **THEN** the PDF moves to the first cited page and highlights its cited lines
+
 Selecting a record SHALL show that record's most recent stored review without
 calling the LLM. When no review exists, the page SHALL say so and offer the Review
 action.

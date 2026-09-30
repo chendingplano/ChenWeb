@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildInputSearchQuery, groupNonMetrics, sortBySeverity, type NonMetricEntry } from './metric-review-client.js';
+import { buildInputSearchQuery, groupNonMetrics, reviewLineNumbers, sortBySeverity, type NonMetricEntry } from './metric-review-client.js';
+
+test('review source spans expand ranges and ignore invalid spans', () => {
+	assert.deepEqual(reviewLineNumbers(['L12', '13:15', '14', '0', '17:16', 'text']), [12, 13, 14, 15]);
+});
 
 test('numeric query searches by record_id', () => {
 	const p = new URLSearchParams(buildInputSearchQuery(' 416 '));

@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+func TestMetricReviewSpansFromText(t *testing.T) {
+	got := metricReviewSpansFromText("L12, 13:15; 20-21, invalid, 25:22")
+	want := []string{"12", "13:15", "20:21"}
+	if len(got) != len(want) {
+		t.Fatalf("spans = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("spans = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestBuildMetricReviewInput_FormatsLinesAndMetrics(t *testing.T) {
 	h := metricReviewDocHeader{RecordID: 416, Title: "农村生活垃圾分类处理规范", DocNo: "DB33/T"}
 	lines := []rawLine{
@@ -84,6 +97,12 @@ func TestFinalizeMetricReview_TallyAndFiltering(t *testing.T) {
 	want := metricReviewTally{Stored: 5, Kept: 1, NotMetric: 2, Duplicate: 1, FormulaInput: 1, Missed: 1}
 	if report.Tally != want {
 		t.Errorf("tally = %+v, want %+v", report.Tally, want)
+	}
+	if got := report.MissedMetrics[0].SourceLineSpans; len(got) != 1 || got[0] != "123" {
+		t.Errorf("missed source spans = %v", got)
+	}
+	if got := report.Metrics[0].SourceLineSpans; len(got) != 1 || got[0] != "50" {
+		t.Errorf("metric snapshot source spans = %v", got)
 	}
 	if strings.Join(dropped, ",") != "ghost,ghost2,ghost3" {
 		t.Errorf("dropped = %v", dropped)

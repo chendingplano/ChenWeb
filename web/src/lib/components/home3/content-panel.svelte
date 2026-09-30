@@ -218,9 +218,8 @@
 					<span style="color:{textPrimary}; font-weight:500;">{activeMenu.childTitle}</span>
 				{/if}
 			</nav>
-			<!-- Shelf toggle — hidden for Product Review, whose results page uses the
-			     space for its own resizable panes instead (spec: product-review-results-layout) -->
-			{#if activeMenu?.childId !== 'apps-product-review'}
+			<!-- Pages with their own multi-pane layout use the shelf's space. -->
+			{#if activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics'}
 				<button
 					onclick={onToggleShelf}
 					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"

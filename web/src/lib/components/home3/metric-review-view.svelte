@@ -13,12 +13,16 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import LanguagesIcon from '@lucide/svelte/icons/languages';
+	import PdfViewWindow from './pdf-view-window.svelte';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
+	import { getRawLines, type RawLine } from '$lib/services/kbService';
 	import {
 		buildReviewMarkdown,
 		buildReviewPrintHtml,
 		getMetricReview,
 		groupNonMetrics,
 		reviewExportFilename,
+		reviewLineNumbers,
 		searchInputs,
 		sortBySeverity,
 		startMetricReview,
@@ -47,6 +51,59 @@
 	let danger = $derived(darkMode ? '#F87171' : '#DC2626');
 
 	const POLL_MS = 4000;
+	let menuWidth = $state(228);
+	let reportWidth = $state(540);
+	let layoutEl: HTMLDivElement;
+	let rawLines = $state<RawLine[]>([]);
+	let pdfPage = $state(1);
+	let highlightedLines = $state<number[]>([]);
+	let highlightVersion = $state(0);
+	let pdfError = $state('');
+	let pdfZoom = $state(0.5);
+	let pdfPages = $state(0);
+	let dragPane: 'menu' | 'report' | null = null;
+
+	function startPaneDrag(event: PointerEvent, pane: 'menu' | 'report') {
+		dragPane = pane;
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+	function movePaneDrag(event: PointerEvent) {
+		if (!dragPane || !layoutEl) return;
+		const width = layoutEl.clientWidth;
+		const x = event.clientX - layoutEl.getBoundingClientRect().left;
+		if (dragPane === 'menu') menuWidth = Math.max(170, Math.min(width - 560, x));
+		else reportWidth = Math.max(300, Math.min(width - menuWidth - 280, x - menuWidth - 20));
+	}
+	function stopPaneDrag() { dragPane = null; }
+	function onPaneKeydown(event: KeyboardEvent, pane: 'menu' | 'report') {
+		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+		event.preventDefault();
+		const delta = event.key === 'ArrowLeft' ? -16 : 16;
+		if (pane === 'menu') menuWidth = Math.max(170, Math.min(layoutEl.clientWidth - 560, menuWidth + delta));
+		else reportWidth = Math.max(300, Math.min(layoutEl.clientWidth - menuWidth - 280, reportWidth + delta));
+	}
+	function showSource(spans: string[]) {
+		highlightedLines = reviewLineNumbers(spans);
+		const first = rawLines.find((line) => highlightedLines.includes(line.line_number));
+		if (first) pdfPage = first.page_number;
+		highlightVersion++;
+	}
+	function sourceForMetricIds(ids: string[]): string[] {
+		return ids.flatMap((id) => {
+			const snap = snapshotById.get(id);
+			return snap?.source_line_spans ?? (snap?.lines ? snap.lines.split(',') : []);
+		});
+	}
+	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		for (const line of rawLines) {
+			if (line.page_number !== pageNo || !highlightedLines.includes(line.line_number) || !Array.isArray(line.coords) || line.coords.length < 4) continue;
+			const [x1, y1, x2, y2] = line.coords;
+			const mark = document.createElement('div');
+			mark.style.cssText = `position:absolute;left:${Math.min(x1,x2)*viewport.width/1000}px;top:${Math.min(y1,y2)*viewport.height/1000}px;width:${Math.abs(x2-x1)*viewport.width/1000+20}px;height:${Math.max(2,Math.abs(y2-y1)*viewport.height/1000)}px;background:rgba(129,140,248,.35);pointer-events:none;`;
+			overlay.appendChild(mark);
+		}
+	}
 
 	// Paraglide reloads the page on a locale switch, so the locale is fixed here.
 	const lang = getLocale();
@@ -119,6 +176,17 @@
 	async function selectRecord(rec: InputRecordSummary) {
 		stopPolling();
 		selected = rec;
+		rawLines = [];
+		pdfPage = 1;
+		highlightedLines = [];
+		pdfError = '';
+		getRawLines(rec.id).then((res) => {
+			if (selected?.id !== rec.id) return;
+			rawLines = res.lines ?? [];
+			const first = rawLines.find((line) => highlightedLines.includes(line.line_number));
+			if (first) pdfPage = first.page_number;
+			highlightVersion++;
+		}).catch((e) => { if (selected?.id === rec.id) pdfError = e instanceof Error ? e.message : String(e); });
 		review = null;
 		otherLangs = [];
 		reviewError = '';
@@ -319,11 +387,11 @@
 		<p style="font-size:13px; color:{textSecondary}; margin-top:2px;">{m.mrv_intro()}</p>
 	</div>
 
-	<div class="flex flex-1 min-h-0 gap-4">
+	<div class="flex flex-1 min-h-0 gap-2" bind:this={layoutEl}>
 		<!-- Left: search -->
 		<div
-			class="rounded-xl flex flex-col w-80 flex-shrink-0 min-h-0"
-			style="background:{cardBg}; border:1px solid {borderColor};"
+			class="rounded-xl flex flex-col flex-shrink-0 min-h-0"
+			style="width:{menuWidth}px; background:{cardBg}; border:1px solid {borderColor};"
 		>
 			<form
 				class="p-4 flex gap-2 flex-shrink-0"
@@ -374,18 +442,19 @@
 				{/each}
 			</div>
 		</div>
+		<button type="button" aria-label={m.mrv_resize_menu()} class="pane-divider" onpointerdown={(e) => startPaneDrag(e, 'menu')} onpointermove={movePaneDrag} onpointerup={stopPaneDrag} onpointercancel={stopPaneDrag} onkeydown={(e) => onPaneKeydown(e, 'menu')}></button>
 
-		<!-- Right: review -->
+		<!-- Middle left: review -->
 		<div
-			class="rounded-xl flex-1 min-w-0 min-h-0 overflow-y-auto"
-			style="background:{cardBg}; border:1px solid {borderColor};"
+			class="rounded-xl flex-shrink-0 min-w-0 min-h-0 overflow-y-auto"
+			style="width:{reportWidth}px; background:{cardBg}; border:1px solid {borderColor};"
 		>
 			{#if !selected}
 				<div class="h-full flex items-center justify-center text-sm" style="color:{textMuted};">
 					{m.mrv_select_hint()}
 				</div>
 			{:else}
-				<div class="p-6 space-y-6 max-w-5xl">
+				<div class="p-5 space-y-6">
 					<!-- Record header + actions -->
 					<div class="flex flex-wrap items-start justify-between gap-4">
 						<div class="min-w-0">
@@ -512,7 +581,7 @@
 								<p class="text-sm" style="color:{textMuted};">{m.mrv_none_missed()}</p>
 							{/if}
 							{#each sortBySeverity(report.missed_metrics) as mm, i (i)}
-								<div class="rounded-lg p-3 space-y-1" style="border:1px solid {borderColor};">
+				<div role="button" tabindex="0" class="rounded-lg p-3 space-y-1 cursor-pointer" style="border:1px solid {borderColor};" onclick={() => showSource(mm.source_line_spans ?? mm.lines.split(','))} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showSource(mm.source_line_spans ?? mm.lines.split(',')); } }}>
 									<div class="flex flex-wrap items-center gap-2">
 										{@render severityBadge(mm.severity)}
 										<span class="font-medium" style="color:{textPrimary};">{mm.name}</span>
@@ -541,7 +610,7 @@
 										{CATEGORY_LABEL[g.category]}
 									</div>
 									{#each g.entries as e, i (i)}
-										<div class="rounded-lg p-3 space-y-1.5" style="border:1px solid {borderColor};">
+						<div role="button" tabindex="0" class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="border:1px solid {borderColor};" onclick={() => showSource(sourceForMetricIds(e.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(sourceForMetricIds(e.metric_ids)); } }}>
 											<div class="flex flex-wrap items-center gap-2">
 												{@render metricChips(e.metric_ids)}
 												{#if e.duplicate_of}
@@ -565,7 +634,7 @@
 								<p class="text-sm" style="color:{textMuted};">{m.mrv_none()}</p>
 							{/if}
 							{#each sortBySeverity(report.attribute_issues) as a, i (i)}
-								<div class="rounded-lg p-3 space-y-1.5" style="border:1px solid {borderColor};">
+				<div role="button" tabindex="0" class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="border:1px solid {borderColor};" onclick={() => showSource(sourceForMetricIds(a.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(sourceForMetricIds(a.metric_ids)); } }}>
 									<div class="flex flex-wrap items-center gap-2">
 										{@render severityBadge(a.severity)}
 										<code class="text-xs rounded px-1.5 py-0.5" style="background:{surface2}; color:{accent};"
@@ -600,10 +669,21 @@
 				</div>
 			{/if}
 		</div>
+		<button type="button" aria-label={m.mrv_resize_report()} class="pane-divider" onpointerdown={(e) => startPaneDrag(e, 'report')} onpointermove={movePaneDrag} onpointerup={stopPaneDrag} onpointercancel={stopPaneDrag} onkeydown={(e) => onPaneKeydown(e, 'report')}></button>
+		<div class="rounded-xl flex-1 min-w-0 min-h-0 overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor};">
+			{#if selected}
+				{#if pdfError}<p class="p-4 text-sm" style="color:{danger};">{pdfError}</p>{/if}
+				<PdfViewWindow inputId={selected.id} fileUrl={`/api/v1/kb/inputs/${selected.id}/file`} bind:page={pdfPage} bind:zoom={pdfZoom} bind:numPages={pdfPages} {darkMode} showSidebar={false} enableSelectionDialog={false} {highlightVersion} renderHighlights={renderSourceHighlights} />
+			{:else}
+				<div class="h-full flex items-center justify-center text-sm" style="color:{textMuted};">{m.mrv_pdf_hint()}</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
 <style>
+	.pane-divider { width: 10px; flex: none; padding: 0; border: 0; cursor: col-resize; border-radius: 5px; background: transparent; touch-action: none; }
+	.pane-divider:hover, .pane-divider:focus-visible { background: rgba(129, 140, 248, .4); outline: none; }
 	.export-item:hover {
 		background: var(--hover-bg);
 	}

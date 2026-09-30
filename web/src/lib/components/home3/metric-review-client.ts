@@ -25,6 +25,7 @@ export type MetricReviewTally = {
 
 export type MissedMetric = {
 	lines: string;
+	source_line_spans?: string[];
 	name: string;
 	value: string;
 	unit: string;
@@ -54,7 +55,22 @@ export type MetricSnapshot = {
 	value?: string;
 	unit?: string;
 	lines?: string;
+	source_line_spans?: string[];
 };
+
+/** Expand the extractor's one-based source spans into raw line numbers. */
+export function reviewLineNumbers(spans: string[]): number[] {
+	const numbers = new Set<number>();
+	for (const span of spans) {
+		const match = String(span).trim().match(/^(?:L)?(\d+)(?:\s*[:\-]\s*(\d+))?$/i);
+		if (!match) continue;
+		const start = Number(match[1]);
+		const end = match[2] ? Number(match[2]) : start;
+		if (start < 1 || end < start || end - start > 1000) continue;
+		for (let line = start; line <= end; line++) numbers.add(line);
+	}
+	return [...numbers];
+}
 
 export type MetricReviewReport = {
 	summary: string;

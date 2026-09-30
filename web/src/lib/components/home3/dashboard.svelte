@@ -77,11 +77,10 @@
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
-	// Product Review's results page uses the shelf's space for its own resizable
-	// panes instead (spec: product-review-results-layout) — hide the shelf while
+	// Product Review and Review Metrics use the shelf's space for their own panes — hide it while
 	// it's the active content, without touching the stored shelfOpen toggle so
 	// other pages keep whatever open/closed state the user last left them in.
-	let shelfVisible = $derived(shelfOpen && activeMenu?.childId !== 'apps-product-review');
+	let shelfVisible = $derived(shelfOpen && activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics');
 	let docReviewKey = $state(0);
 	let settingsHydrated = $state(false);
 	let railExpandedBeforeFocus = false;
