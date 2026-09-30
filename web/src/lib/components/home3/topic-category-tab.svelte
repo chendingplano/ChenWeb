@@ -132,9 +132,9 @@
 					sidebarMinWidth={240}
 					sidebarMaxWidth={520}
 					sidebarDefaultWidth={320}
-					sidebarTitle="Topic Details"
+					sidebarTitle={m.topic_category_tab_topic_details()}
 					sidebarSettingsKey="topic-category-pdf-sidebar"
-					sidebarWidthSettingLabel="Panel Width"
+					sidebarWidthSettingLabel={m.topic_category_tab_panel_width()}
 				>
 					{#snippet sidebar()}
 						{#if selectedTopic}

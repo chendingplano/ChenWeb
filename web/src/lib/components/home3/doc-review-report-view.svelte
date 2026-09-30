@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		getReport,
@@ -163,7 +164,7 @@
 				aspect,
 				error: e
 			});
-			showToast('error', e instanceof Error ? e.message : 'Lazy translation failed', 8000);
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_lazy_translation_failed(), 8000);
 		}
 	}
 	let busyId = $state<number | null>(null);
@@ -177,12 +178,12 @@
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const fallbackPackages: ReviewPackageInfo[] = [
-		{ key: 'P1', label: 'Language & Style' },
-		{ key: 'P2', label: 'Structure & Organization' },
-		{ key: 'P3', label: 'Content Quality' },
-		{ key: 'P4', label: 'Consistency' },
-		{ key: 'P5', label: 'Technical & Compliance' },
-		{ key: 'P6', label: 'Meta & Process' }
+		{ key: 'P1', label: msg.doc_review_report_language_style() },
+		{ key: 'P2', label: msg.doc_review_report_structure_organization() },
+		{ key: 'P3', label: msg.doc_review_report_content_quality() },
+		{ key: 'P4', label: msg.doc_review_report_consistency() },
+		{ key: 'P5', label: msg.doc_review_report_technical_compliance() },
+		{ key: 'P6', label: msg.doc_review_report_meta_process() }
 	];
 
 	function showToast(kind: 'info' | 'warn' | 'error', text: string, ms = 5000) {
@@ -501,11 +502,11 @@
 					findings = cloneFindings(baseFindings);
 					packages = reqData.packages ?? [];
 				} catch (e) {
-					showToast('warn', 'Could not load editable findings: ' + (e instanceof Error ? e.message : String(e)));
+					showToast('warn', msg.doc_review_report_could_not_load_editable_findings() + (e instanceof Error ? e.message : String(e)));
 				}
 			}
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Failed to load report';
+			errorMsg = e instanceof Error ? e.message : msg.doc_review_report_failed_to_load_report();
 		} finally {
 			loading = false;
 		}
@@ -544,7 +545,7 @@
 				selectedLanguage,
 				error: e
 			});
-			showToast('error', e instanceof Error ? e.message : 'Language change failed', 8000);
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_language_change_failed(), 8000);
 		} finally {
 			languageLoading = false;
 		}
@@ -575,7 +576,7 @@
 			}
 			applyTranslatedFinding(f.id, resp.finding, newLanguage);
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Translation failed');
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_translation_failed());
 			findingLanguage = { ...findingLanguage, [f.id]: previous };
 		} finally {
 			translatingId = null;
@@ -590,7 +591,7 @@
 			const resp = await translateFinding(f.id, language, true);
 			applyTranslatedFinding(f.id, resp.finding, language);
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Translation failed');
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_translation_failed());
 		} finally {
 			translatingId = null;
 			pendingConfirm = null;
@@ -606,9 +607,9 @@
 		try {
 			await updateFinding(f.id, 'accepted');
 			setFindingStatus(f.id, 'accepted');
-			showToast('info', 'Finding accepted.');
+			showToast('info', msg.doc_review_report_finding_accepted());
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Accept failed');
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_accept_failed());
 		} finally {
 			busyId = null;
 		}
@@ -620,9 +621,9 @@
 			await updateFinding(f.id, 'deleted');
 			setFindingStatus(f.id, 'deleted');
 			dirty = true;
-			showToast('info', 'Finding deleted from the report.');
+			showToast('info', msg.doc_review_report_finding_deleted_from_the_report());
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Delete failed');
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_delete_failed());
 		} finally {
 			busyId = null;
 		}
@@ -640,9 +641,9 @@
 			await updateFinding(f.id, 'corrected');
 			setFindingStatus(f.id, 'corrected');
 			dirty = true;
-			showToast('info', 'Auto-fix applied and hidden.');
+			showToast('info', msg.doc_review_report_auto_fix_applied_and_hidden());
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Failed to mark as corrected');
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_failed_to_mark_as_corrected());
 		}
 	}
 
@@ -652,7 +653,7 @@
 		if (id != null && changed > 0) {
 			setFindingStatus(id, 'fixed');
 			dirty = true;
-			showToast('info', `Saved ${changed} edited line${changed === 1 ? '' : 's'}.`);
+			showToast('info', msg.doc_review_report_saved_edited_line({ changed, plural: changed === 1 ? '' : 's' }));
 		}
 	}
 
@@ -664,9 +665,9 @@
 			await updateFinding(id, 'corrected');
 			setFindingStatus(id, 'corrected');
 			if (changed > 0) dirty = true;
-			showToast('info', `Saved and hidden${changed > 0 ? ` (${changed} line${changed === 1 ? '' : 's'} changed)` : ''}.`);
+			showToast('info', changed > 0 ? msg.doc_review_report_saved_and_hidden_lines({ changed, plural: changed === 1 ? '' : 's' }) : msg.doc_review_report_saved_and_hidden());
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Failed to mark as corrected');
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_failed_to_mark_as_corrected());
 		}
 	}
 
@@ -675,10 +676,10 @@
 		try {
 			await regenerateReport(reportId);
 			dirty = false;
-			showToast('info', 'Report PDF regenerated.');
+			showToast('info', msg.doc_review_report_report_pdf_regenerated());
 			await load();
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Regenerate failed', 8000);
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_regenerate_failed(), 8000);
 		} finally {
 			regenerating = false;
 		}
@@ -688,9 +689,9 @@
 		correcting = true;
 		try {
 			const file = await generateCorrectionReport(reportId);
-			showToast('info', file ? `Correction report generated: ${file}` : 'Correction report generated.');
+			showToast('info', file ? msg.doc_review_report_correction_report_generated({ file }) : msg.doc_review_report_correction_report_generated_2());
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Correction report failed', 8000);
+			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_correction_report_failed(), 8000);
 		} finally {
 			correcting = false;
 		}
@@ -739,7 +740,7 @@
 
 <svelte:head>
 	{#if !embedded}
-		<title>{skeleton?.meta?.document_title || 'Document Review'} — Report</title>
+		<title>{msg.doc_review_report_report({ document_title: skeleton?.meta?.document_title || msg.doc_review_report_document_review() })}</title>
 	{/if}
 </svelte:head>
 
@@ -751,15 +752,15 @@
 	<!-- LEFT: report -->
 	<section class="left-panel" style="width:{leftPct}%;">
 		{#if loading}
-			<div class="state">Loading report…</div>
+			<div class="state">{msg.doc_review_report_loading_report()}</div>
 		{:else if errorMsg}
 			<div class="state error">{errorMsg}</div>
 		{:else if skeleton}
 			<div class="left-header">
 			<div class="title-row">
-				<h1 class="report-title">Document Review Report</h1>
+				<h1 class="report-title">{msg.doc_review_report_document_review_report()}</h1>
 				<label class="language-picker">
-					<span>Language</span>
+					<span>{msg.doc_review_report_language()}</span>
 					<select bind:value={selectedLanguage} onchange={reloadFindingsForLanguage} disabled={languageLoading}>
 						{#each supportedLanguages as lang (lang)}
 							<option value={lang}>{lang}</option>
@@ -768,30 +769,30 @@
 				</label>
 			</div>
 			<p class="meta">
-				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />
-				Generated: {skeleton.meta?.generated_at || '—'}<br />
-				Review Request ID: {requestId ?? '—'}<br />
-				Run ID: {reportRunId ?? '—'}
+				{msg.doc_review_report_document_id({ document_title: skeleton.meta?.document_title || '—', inputRecordId: inputRecordId ?? '—' })}<br />
+				{msg.doc_review_report_generated({ generated_at: skeleton.meta?.generated_at || '—' })}<br />
+				{msg.doc_review_report_review_request_id({ requestId: requestId ?? '—' })}<br />
+				{msg.doc_review_report_run_id({ reportRunId: reportRunId ?? '—' })}
 			</p>
 
 			<div class="summary-cards">
-				<div class="summary-card"><div class="count">{totals.total}</div><div class="label">Total</div></div>
-				<div class="summary-card"><div class="count" style="color:#dc2626;">{totals.high}</div><div class="label">High</div></div>
-				<div class="summary-card"><div class="count" style="color:#f59e0b;">{totals.medium}</div><div class="label">Medium</div></div>
-				<div class="summary-card"><div class="count" style="color:#10b981;">{totals.low}</div><div class="label">Low</div></div>
+				<div class="summary-card"><div class="count">{totals.total}</div><div class="label">{msg.doc_review_report_total()}</div></div>
+				<div class="summary-card"><div class="count" style="color:#dc2626;">{totals.high}</div><div class="label">{msg.doc_review_report_high()}</div></div>
+				<div class="summary-card"><div class="count" style="color:#f59e0b;">{totals.medium}</div><div class="label">{msg.doc_review_report_medium()}</div></div>
+				<div class="summary-card"><div class="count" style="color:#10b981;">{totals.low}</div><div class="label">{msg.doc_review_report_low()}</div></div>
 			</div>
 
 			{#if skeleton.executive_summary}
-				<h2>Executive Summary</h2>
+				<h2>{msg.doc_review_report_executive_summary()}</h2>
 				<p class="body-text">{skeleton.executive_summary.text}</p>
 				{#if skeleton.executive_summary.overall_assessment}
 					<p class="body-text">
-						Assessment:
+						{msg.doc_review_report_assessment()}
 						<span class="assessment">{skeleton.executive_summary.overall_assessment}</span>
 					</p>
 				{/if}
 				{#if skeleton.executive_summary.top_findings?.length}
-					<h3>Top Findings</h3>
+					<h3>{msg.doc_review_report_top_findings()}</h3>
 					<ul class="top-findings">
 						{#each skeleton.executive_summary.top_findings as t}<li>{t}</li>{/each}
 					</ul>
@@ -805,41 +806,41 @@
 					class:active={showMode === 'active'}
 					onclick={() => (showMode = showMode === 'active' ? 'all' : 'active')}
 					title={showMode === 'active'
-						? 'Showing active findings only — click to show all'
-						: 'Showing all findings — click to show active only'}
-				>Show Active</button>
+						? msg.doc_review_report_showing_active_findings_only_click()
+						: msg.doc_review_report_showing_all_findings_click_to()}
+				>{msg.doc_review_report_show_active()}</button>
 				<div class="show-mode-sep"></div>
 				<button
 					type="button"
 					class="show-mode-btn"
 					class:active={viewMode === 'all'}
 					onclick={onShowAll}
-				>Show All</button>
+				>{msg.doc_review_report_show_all()}</button>
 				<button
 					type="button"
 					class="show-mode-btn"
 					class:active={viewMode === 'packages'}
 					onclick={() => (viewMode = 'packages')}
-				>By Packages</button>
+				>{msg.doc_review_report_by_packages()}</button>
 				<button
 					type="button"
 					class="show-mode-btn"
 					class:active={viewMode === 'severity'}
 					onclick={() => (viewMode = 'severity')}
-				>By Severity</button>
+				>{msg.doc_review_report_by_severity()}</button>
 				<div class="show-mode-sep"></div>
 				<button
 					type="button"
 					class="show-mode-btn action-btn"
 					disabled={correcting}
 					onclick={onCorrectionReport}
-				>{correcting ? 'Generating…' : 'Generate Change Report'}</button>
+				>{correcting ? msg.doc_review_report_generating() : msg.doc_review_report_generate_change_report()}</button>
 				<button
 					type="button"
 					class="show-mode-btn action-btn"
 					disabled={regenerating}
 					onclick={onRegenerate}
-				>{regenerating ? 'Regenerating…' : 'Re-Generate Review Report'}</button>
+				>{regenerating ? msg.doc_review_report_regenerating() : msg.doc_review_report_re_generate_review_report()}</button>
 			</div>
 			</div>
 
@@ -857,7 +858,7 @@
 						type="button"
 						class="finding-body"
 						onclick={() => onFocusFinding(f)}
-						title={f.location ? `Jump to line ${f.location}` : ''}
+						title={f.location ? msg.doc_review_report_jump_to_line({ location: f.location }) : ''}
 					>
 						<div class="finding-head">
 							<span class="finding-id">#{f.id}</span>
@@ -865,27 +866,27 @@
 							<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
 							<span class="badge">{f.aspect}</span>
 							{#if f.review_status === 'fixed'}
-								<span class="status-chip chip-fixed">Fixed</span>
+								<span class="status-chip chip-fixed">{msg.doc_review_report_fixed()}</span>
 							{:else if f.review_status === 'accepted'}
-								<span class="status-chip accepted">Accepted</span>
+								<span class="status-chip accepted">{msg.doc_review_report_accepted()}</span>
 							{:else if f.review_status === 'corrected'}
-								<span class="status-chip corrected">Corrected</span>
+								<span class="status-chip corrected">{msg.doc_review_report_corrected()}</span>
 							{/if}
 						</div>
 						{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
-						{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
-						<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
-						{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
+						{#if f.suggestion}<p class="finding-sug"><em>{msg.doc_review_report_suggestion()}</em> {f.suggestion}</p>{/if}
+						<p class="finding-loc">{msg.doc_review_report_confidence({ value: Math.round(f.confidence * 100) })}</p>
+						{#if f.location}<p class="finding-loc">{msg.doc_review_report_location({ location: f.location })}</p>{/if}
 					</button>
 
 					<div class="finding-actions">
-						<button class="act" disabled={busyId === f.id} onclick={() => onAutoFix(f)} title="Fix the offending line(s) automatically with the configured model">LLM Auto Fix</button>
-						<button class="act" disabled={busyId === f.id} onclick={() => (editFindingId = f.id)} title="Open the find/replace editor for the offending line(s)">Edit Tool</button>
-						<button class="act danger" disabled={busyId === f.id} onclick={() => onDelete(f)} title="Remove this finding from the report">Delete</button>
+						<button class="act" disabled={busyId === f.id} onclick={() => onAutoFix(f)} title={msg.doc_review_report_fix_the_offending_line_s()}>{msg.doc_review_report_llm_auto_fix()}</button>
+						<button class="act" disabled={busyId === f.id} onclick={() => (editFindingId = f.id)} title={msg.doc_review_report_open_the_find_replace_editor()}>{msg.doc_review_report_edit_tool()}</button>
+						<button class="act danger" disabled={busyId === f.id} onclick={() => onDelete(f)} title={msg.doc_review_report_remove_this_finding_from_the()}>{msg.doc_review_report_delete()}</button>
 						{#if pendingConfirm?.id === f.id}
-							<span class="finding-loc">Translate to {pendingConfirm.language}?</span>
-							<button class="act" onclick={() => confirmFindingTranslate(f)}>Translate</button>
-							<button class="act" onclick={cancelFindingTranslate}>Cancel</button>
+							<span class="finding-loc">{msg.doc_review_report_translate_to({ language: pendingConfirm.language })}</span>
+							<button class="act" onclick={() => confirmFindingTranslate(f)}>{msg.doc_review_report_translate()}</button>
+							<button class="act" onclick={cancelFindingTranslate}>{msg.doc_review_report_cancel()}</button>
 						{:else}
 							<label class="language-picker">
 								<select
@@ -899,7 +900,7 @@
 								</select>
 							</label>
 						{/if}
-						<button class="act" disabled={busyId === f.id} onclick={() => onAccept(f)} title="Keep as is — take no action">Accept</button>
+						<button class="act" disabled={busyId === f.id} onclick={() => onAccept(f)} title={msg.doc_review_report_keep_as_is_take_no()}>{msg.doc_review_report_accept()}</button>
 					</div>
 				</div>
 			{/snippet}
@@ -932,7 +933,7 @@
 											class="reviewer-head"
 											aria-expanded={isReviewerExpanded(rkey)}
 											onclick={() => onFocusReviewer(group.pass, rv.aspect, rv.items)}
-											title="Highlight all {rv.items.length} findings in this group"
+											title={msg.doc_review_report_highlight_all_findings_in_this({ itemsCount: rv.items.length })}
 										>
 											<span class="chevron sub" class:open={isReviewerExpanded(rkey)}>▶</span>
 											<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>
@@ -960,7 +961,7 @@
 							class="package-head"
 							aria-expanded={isSeverityExpanded(sevGroup.severity)}
 							onclick={() => onFocusSeverity(sevGroup)}
-							title="Highlight all {sevGroup.findings.length} findings in this group"
+							title={msg.doc_review_report_highlight_all_findings_in_this_2({ findingsCount: sevGroup.findings.length })}
 						>
 							<span class="chevron" class:open={isSeverityExpanded(sevGroup.severity)}>▶</span>
 							<span class="sev-dot" style="color:{sevColor(sevGroup.severity)};">●</span>
@@ -980,7 +981,7 @@
 			{/if}
 
 			{#if ((viewMode === 'packages' && livePassGroups.length === 0) || (viewMode === 'severity' && severityGroups.length === 0) || (viewMode === 'all' && flatFindings.length === 0)) && findings.length > 0}
-				<p class="body-text">All findings have been deleted.</p>
+				<p class="body-text">{msg.doc_review_report_all_findings_have_been_deleted()}</p>
 			{/if}
 			</div>
 		{/if}
@@ -1003,7 +1004,7 @@
 		{#if inputRecordId != null}
 			<DocStructureView bind:this={structureView} darkMode={dark} lockedRecordId={inputRecordId} hideSidebar />
 		{:else if !loading}
-			<div class="state">No source document linked to this report.</div>
+			<div class="state">{msg.doc_review_report_no_source_document_linked_to()}</div>
 		{/if}
 	</section>
 </div>

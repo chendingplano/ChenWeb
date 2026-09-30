@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listTerminologyResources,
@@ -88,7 +89,10 @@
 		try {
 			resources = await listTerminologyResources();
 		} catch (e) {
-			pageError = e instanceof Error ? e.message : 'Failed to load terminology resources';
+			pageError =
+				e instanceof Error
+					? e.message
+					: m.review_external_resources_failed_to_load_terminology_resources();
 		} finally {
 			loading = false;
 		}
@@ -107,10 +111,16 @@
 			const { import: outcome } = await approveTerminologyResource(r.id);
 			await refresh();
 			if (!outcome.ok) {
-				pageError = `"${r.name}" was approved, but the import did not run: ${outcome.error ?? 'unknown error'}`;
+				pageError = m.review_external_resources_was_approved_but_the_import({
+					name: r.name,
+					error: outcome.error ?? m.review_external_resources_unknown_error()
+				});
 			}
 		} catch (e) {
-			pageError = e instanceof Error ? e.message : `Failed to approve ${r.name}`;
+			pageError =
+				e instanceof Error
+					? e.message
+					: m.review_external_resources_failed_to_approve({ name: r.name });
 		} finally {
 			approving = { ...approving, [r.id]: false };
 		}
@@ -140,11 +150,7 @@
 	async function approveFromDialog() {
 		const r = reviewTarget;
 		if (!r) return;
-		if (
-			!confirm(
-				`Approve "${r.name}" and start importing it? This marks the resource as reviewed and approved, saves your review comments, and runs the offline import of the local manifest.`
-			)
-		) {
+		if (!confirm(m.review_external_resources_approve_and_start_importing_it({ name: r.name }))) {
 			return;
 		}
 		reviewBusy = true;
@@ -156,10 +162,16 @@
 			reviewTarget = null;
 			await refresh();
 			if (!outcome.ok) {
-				pageError = `"${r.name}" was approved, but the import did not run: ${outcome.error ?? 'unknown error'}`;
+				pageError = m.review_external_resources_was_approved_but_the_import({
+					name: r.name,
+					error: outcome.error ?? m.review_external_resources_unknown_error()
+				});
 			}
 		} catch (e) {
-			dialogError = e instanceof Error ? e.message : `Failed to approve ${r.name}`;
+			dialogError =
+				e instanceof Error
+					? e.message
+					: m.review_external_resources_failed_to_approve({ name: r.name });
 		} finally {
 			reviewBusy = false;
 		}
@@ -182,7 +194,10 @@
 			reviewTarget = null;
 			await refresh();
 		} catch (e) {
-			dialogError = e instanceof Error ? e.message : `Failed to disapprove ${r.name}`;
+			dialogError =
+				e instanceof Error
+					? e.message
+					: m.review_external_resources_failed_to_disapprove({ name: r.name });
 		} finally {
 			reviewBusy = false;
 		}
@@ -196,9 +211,11 @@
 	<!-- Header -->
 	<div class="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-6 py-4">
 		<div>
-			<h1 class="text-lg font-semibold" style="color:{textPrimary};">Review External Resources</h1>
+			<h1 class="text-lg font-semibold" style="color:{textPrimary};">
+				{m.review_external_resources_review_external_resources()}
+			</h1>
 			<p class="mt-0.5 text-xs" style="color:{textSecondary};">
-				Downloaded resources whose draft manifests still await operator license review and approval.
+				{m.review_external_resources_downloaded_resources_whose_draft_manifests()}
 			</p>
 		</div>
 		<button
@@ -206,10 +223,10 @@
 			disabled={loading}
 			class="flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 			style="background:{accentTint}; color:{accent}; border:1px solid transparent;"
-			aria-label="Refresh pending review statuses"
+			aria-label={m.review_external_resources_refresh_pending_review_statuses()}
 		>
 			<RefreshCwIcon class="h-3.5 w-3.5" />
-			{loading ? 'Loading…' : 'Refresh'}
+			{loading ? m.review_external_resources_loading() : m.review_external_resources_refresh()}
 		</button>
 	</div>
 
@@ -231,11 +248,10 @@
 			>
 				<ClipboardCheckIcon class="mx-auto h-8 w-8" style="color:{textMuted};" />
 				<h2 class="mt-3 text-sm font-semibold" style="color:{textPrimary};">
-					No resources awaiting review
+					{m.review_external_resources_no_resources_awaiting_review()}
 				</h2>
 				<p class="mt-1.5 text-xs leading-relaxed" style="color:{textSecondary};">
-					Downloaded resources with approved drafts (or no downloads yet) do not appear here.
-					Download sources from External Terminology Resources and they will show up for review.
+					{m.review_external_resources_downloaded_resources_with_approved_drafts()}
 				</p>
 			</div>
 		</div>
@@ -255,7 +271,7 @@
 						class="flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
 						style="background:{amberTint}; color:{amber}; border:1px solid {amber}40;"
 					>
-						Pending review
+						{m.review_external_resources_pending_review()}
 					</span>
 				</div>
 
@@ -280,11 +296,11 @@
 				<!-- Release + license -->
 				<div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
 					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
-						<div style="color:{textMuted};">Release</div>
+						<div style="color:{textMuted};">{m.review_external_resources_release()}</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">{r.release || '—'}</div>
 					</div>
 					<div class="rounded-lg px-2 py-1.5" style="background:{inputBg};">
-						<div style="color:{textMuted};">License</div>
+						<div style="color:{textMuted};">{m.review_external_resources_license()}</div>
 						<!-- eslint-disable svelte/no-navigation-without-resolve -->
 						<a
 							href={r.license_url}
@@ -305,26 +321,26 @@
 					style="background:{amberTint}; border:1px solid {amber}33;"
 				>
 					<div class="flex justify-between gap-2">
-						<span style="color:{textMuted};">Downloaded at</span>
+						<span style="color:{textMuted};">{m.review_external_resources_downloaded_at()}</span>
 						<span style="color:{textPrimary};">{formatDate(r.downloaded_at)}</span>
 					</div>
 					<div class="flex justify-between gap-2">
-						<span style="color:{textMuted};">Size</span>
+						<span style="color:{textMuted};">{m.review_external_resources_size()}</span>
 						<span style="color:{textPrimary};">{formatBytes(r.size_bytes)}</span>
 					</div>
 					<div class="flex items-center justify-between gap-2">
-						<span style="color:{textMuted};">SHA-256</span>
+						<span style="color:{textMuted};">{m.review_external_resources_sha_256()}</span>
 						<span class="font-mono" style="color:{mono};">{shortSha(r.sha256)}</span>
 					</div>
 					{#if r.artifact}
 						<div class="flex justify-between gap-2">
-							<span style="color:{textMuted};">Artifact</span>
+							<span style="color:{textMuted};">{m.review_external_resources_artifact()}</span>
 							<span class="truncate" style="color:{textPrimary};">{r.artifact}</span>
 						</div>
 					{/if}
 					{#if r.manifest_draft}
 						<div class="flex justify-between gap-2">
-							<span style="color:{textMuted};">Draft manifest</span>
+							<span style="color:{textMuted};">{m.review_external_resources_draft_manifest()}</span>
 							<span style="color:{textPrimary};">{r.manifest_draft}</span>
 						</div>
 					{/if}
@@ -344,12 +360,21 @@
 					class="mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-relaxed"
 					style="background:{inputBg};"
 				>
-					<div class="font-medium" style="color:{textPrimary};">What review requires</div>
+					<div class="font-medium" style="color:{textPrimary};">
+						{m.review_external_resources_what_review_requires()}
+					</div>
 					<ul class="mt-1 list-disc pl-4" style="color:{textSecondary};">
-						<li>Confirm license, role, scopes, relations, and checksum in {r.manifest_draft}.</li>
 						<li>
-							Open <span class="font-medium" style="color:{textPrimary};">Review</span> to inspect the
-							resource, add comments, then approve (starts import) or disapprove.
+							{m.review_external_resources_confirm_license_role_scopes_relations({
+								manifest_draft: r.manifest_draft
+							})}
+						</li>
+						<li>
+							{m.review_external_resources_open()}
+							<span class="font-medium" style="color:{textPrimary};"
+								>{m.review_external_resources_review()}</span
+							>
+							{m.review_external_resources_to_inspect_the_resource_add()}
 						</li>
 					</ul>
 				</div>
@@ -362,7 +387,7 @@
 						style="background:{accentTint}; color:{accent}; border:1px solid {accent}55;"
 					>
 						<ClipboardListIcon class="h-3.5 w-3.5" />
-						Review
+						{m.review_external_resources_review()}
 					</button>
 					<button
 						onclick={() => approve(r)}
@@ -371,7 +396,9 @@
 						style="background:{green}; color:#FFFFFF; border:none;"
 					>
 						<CheckCircle2Icon class="h-3.5 w-3.5" />
-						{approving[r.id] ? 'Approving…' : 'Mark approved'}
+						{approving[r.id]
+							? m.review_external_resources_approving()
+							: m.review_external_resources_mark_approved()}
 					</button>
 				</div>
 
@@ -401,7 +428,7 @@
 			class="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Review {reviewTarget.name}"
+			aria-label={m.review_external_resources_review_2({ name: reviewTarget.name })}
 			onkeydown={handleDialogKeydown}
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 20px 50px rgba(0,0,0,0.35);"
 		>
@@ -413,7 +440,7 @@
 				<div class="flex min-w-0 items-center gap-2">
 					<ClipboardListIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
 					<h2 class="truncate text-sm font-semibold" style="color:{textPrimary};">
-						Review — {reviewTarget.name}
+						{m.review_external_resources_review_3({ name: reviewTarget.name })}
 					</h2>
 				</div>
 				<button
@@ -422,7 +449,7 @@
 					disabled={reviewBusy}
 					class="cursor-pointer rounded p-1.5 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 					style="background:{inputBg}; color:{textMuted}; border:1px solid {borderColor};"
-					aria-label="Close review dialog"
+					aria-label={m.review_external_resources_close_review_dialog()}
 				>
 					<XIcon class="h-4 w-4" />
 				</button>
@@ -436,7 +463,7 @@
 
 				<div class="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
 					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">URL</div>
+						<div style="color:{textMuted};">{m.review_external_resources_url()}</div>
 						<!-- eslint-disable svelte/no-navigation-without-resolve -->
 						<a
 							href={reviewTarget.url}
@@ -450,13 +477,13 @@
 						<!-- eslint-enable svelte/no-navigation-without-resolve -->
 					</div>
 					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">Release</div>
+						<div style="color:{textMuted};">{m.review_external_resources_release()}</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
 							{reviewTarget.release || '—'}
 						</div>
 					</div>
 					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">License</div>
+						<div style="color:{textMuted};">{m.review_external_resources_license()}</div>
 						<!-- eslint-disable svelte/no-navigation-without-resolve -->
 						<a
 							href={reviewTarget.license_url}
@@ -470,32 +497,32 @@
 						<!-- eslint-enable svelte/no-navigation-without-resolve -->
 					</div>
 					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">Review status</div>
+						<div style="color:{textMuted};">{m.review_external_resources_review_status()}</div>
 						<div class="mt-0.5 font-medium" style="color:{amber};">
 							{reviewTarget.review_status || '—'}
 						</div>
 					</div>
 					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">Downloaded at</div>
+						<div style="color:{textMuted};">{m.review_external_resources_downloaded_at()}</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
 							{formatDate(reviewTarget.downloaded_at)}
 						</div>
 					</div>
 					<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">Size</div>
+						<div style="color:{textMuted};">{m.review_external_resources_size()}</div>
 						<div class="mt-0.5 font-medium" style="color:{textPrimary};">
 							{formatBytes(reviewTarget.size_bytes) || '—'}
 						</div>
 					</div>
 					<div class="rounded-lg px-2.5 py-2 sm:col-span-2" style="background:{inputBg};">
-						<div style="color:{textMuted};">SHA-256</div>
+						<div style="color:{textMuted};">{m.review_external_resources_sha_256()}</div>
 						<div class="mt-0.5 font-mono font-medium break-all" style="color:{mono};">
 							{reviewTarget.sha256 || '—'}
 						</div>
 					</div>
 					{#if reviewTarget.artifact}
 						<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-							<div style="color:{textMuted};">Artifact</div>
+							<div style="color:{textMuted};">{m.review_external_resources_artifact()}</div>
 							<div class="mt-0.5 font-medium break-all" style="color:{textPrimary};">
 								{reviewTarget.artifact}
 							</div>
@@ -503,7 +530,7 @@
 					{/if}
 					{#if reviewTarget.manifest_draft}
 						<div class="rounded-lg px-2.5 py-2" style="background:{inputBg};">
-							<div style="color:{textMuted};">Draft manifest</div>
+							<div style="color:{textMuted};">{m.review_external_resources_draft_manifest()}</div>
 							<div class="mt-0.5 font-medium break-all" style="color:{textPrimary};">
 								{reviewTarget.manifest_draft}
 							</div>
@@ -518,14 +545,14 @@
 						class="block text-[11px] font-medium"
 						style="color:{textPrimary};"
 					>
-						Review comments
+						{m.review_external_resources_review_comments()}
 					</label>
 					<textarea
 						id="review-comments"
 						bind:value={reviewComments}
 						rows={5}
 						disabled={reviewBusy}
-						placeholder="License, scope, role, relations, checksum — anything the operator considered during review."
+						placeholder={m.review_external_resources_license_scope_role_relations_checksum()}
 						class="mt-1 w-full resize-y rounded-lg px-3 py-2 text-xs leading-relaxed transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 						style="background:{inputBg}; color:{textPrimary}; border:1px solid {borderColor}; outline:none;"
 					></textarea>
@@ -552,7 +579,7 @@
 					class="cursor-pointer rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
 					style="background:{inputBg}; color:{textSecondary}; border:1px solid {borderColor};"
 				>
-					Cancel
+					{m.review_external_resources_cancel()}
 				</button>
 				<button
 					onclick={disapproveFromDialog}
@@ -561,7 +588,9 @@
 					style="background:{dangerColor}; color:#FFFFFF; border:none;"
 				>
 					<CircleXIcon class="h-3.5 w-3.5" />
-					{reviewBusy ? 'Working…' : 'Disapprove'}
+					{reviewBusy
+						? m.review_external_resources_working()
+						: m.review_external_resources_disapprove()}
 				</button>
 				<button
 					onclick={approveFromDialog}
@@ -570,7 +599,9 @@
 					style="background:{green}; color:#FFFFFF; border:none;"
 				>
 					<CheckCircle2Icon class="h-3.5 w-3.5" />
-					{reviewBusy ? 'Working…' : 'Approve'}
+					{reviewBusy
+						? m.review_external_resources_working()
+						: m.review_external_resources_approve()}
 				</button>
 			</div>
 		</div>

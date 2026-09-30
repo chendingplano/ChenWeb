@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
@@ -105,12 +106,12 @@
 			} catch {
 				throw new Error(
 					response.ok
-						? 'Findings response was not valid JSON'
-						: body || 'Failed to load document review findings'
+						? m.doc_review_findings_findings_response_was_not_valid()
+						: body || m.doc_review_findings_failed_to_load_document_review()
 				);
 			}
 			if (!response.ok || !data.status)
-				throw new Error(String(data.error_msg ?? 'Failed to load document review findings'));
+				throw new Error(String(data.error_msg ?? m.doc_review_findings_failed_to_load_document_review()));
 			rows = Array.isArray(data.results) ? (data.results as FindingRow[]) : [];
 			total = typeof data.total === 'number' ? data.total : 0;
 		} catch (err) {
@@ -191,11 +192,11 @@
 	}
 
 	function openMetadata(row: FindingRow) {
-		openModal(`Metadata — Finding #${row.id}`, buildMetadataSections(row.metadata));
+		openModal(m.doc_review_findings_metadata_finding({ id: row.id }), buildMetadataSections(row.metadata));
 	}
 
 	function openReferenceDoc(row: FindingRow) {
-		openModal(`Reference Doc — Finding #${row.id}`, buildJsonSections(row.reference_doc));
+		openModal(m.doc_review_findings_reference_doc_finding({ id: row.id }), buildJsonSections(row.reference_doc));
 	}
 
 	onMount(load);
@@ -211,9 +212,9 @@
 	>
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px;font-weight:600;color:{textPrimary}">Doc Review Findings</h2>
+				<h2 style="font-size:18px;font-weight:600;color:{textPrimary}">{m.doc_review_findings_doc_review_findings()}</h2>
 				<p style="font-size:13px;color:{textSecondary};margin-top:2px">
-					Search persisted findings from <code style="color:{accent}">kb.doc_review_findings</code>.
+					{m.doc_review_findings_search_persisted_findings_from()} <code style="color:{accent}">kb.doc_review_findings</code>.
 				</p>
 			</div>
 			<button
@@ -222,7 +223,7 @@
 				class="inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2"
 				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 			>
-				<RefreshCwIcon class="h-4 w-4 {loading ? 'animate-spin' : ''}" />Refresh
+				<RefreshCwIcon class="h-4 w-4 {loading ? 'animate-spin' : ''}" />{m.doc_review_findings_refresh()}
 			</button>
 		</div>
 	</div>
@@ -233,7 +234,7 @@
 	>
 		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Input Record ID</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_input_record_id()}</span><input
 					type="number"
 					bind:value={filterInputRecordId}
 					class="rounded px-2 py-1.5 text-sm"
@@ -241,7 +242,7 @@
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Run ID</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_run_id()}</span><input
 					type="number"
 					bind:value={filterRunId}
 					class="rounded px-2 py-1.5 text-sm"
@@ -249,53 +250,53 @@
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Pass</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_pass()}</span><input
 					bind:value={filterPass}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Aspect</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_aspect()}</span><input
 					bind:value={filterAspect}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Severity</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_severity()}</span><input
 					bind:value={filterSeverity}
-					placeholder="high / medium / low"
+					placeholder={m.doc_review_findings_high_medium_low()}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Review Status</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_review_status()}</span><input
 					bind:value={filterReviewStatus}
-					placeholder="pending / accepted…"
+					placeholder={m.doc_review_findings_pending_accepted()}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Finding Type</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_finding_type()}</span><input
 					bind:value={filterFindingType}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Artifact ID</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_artifact_id()}</span><input
 					bind:value={filterArtifactId}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
 			>
 			<label class="flex flex-col gap-1"
-				><span style="font-size:11px;color:{textMuted}">Title</span><input
+				><span style="font-size:11px;color:{textMuted}">{m.doc_review_findings_title()}</span><input
 					bind:value={filterTitle}
-					placeholder="ILIKE search…"
+					placeholder={m.doc_review_findings_ilike_search()}
 					class="rounded px-2 py-1.5 text-sm"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
 				/></label
@@ -306,14 +307,14 @@
 				onclick={applyFilters}
 				disabled={loading}
 				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
-				style="background:{accent};color:white">Apply Filters</button
+				style="background:{accent};color:white">{m.doc_review_findings_apply_filters()}</button
 			>
 			<button
 				onclick={clearFilters}
 				disabled={loading}
 				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
 				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
-				>Clear</button
+				>{m.doc_review_findings_clear()}</button
 			>
 		</div>
 	</div>
@@ -336,8 +337,8 @@
 			style="border-bottom:1px solid {borderColor}"
 		>
 			<span style="font-size:13px;color:{textMuted}"
-				>Total: {total} findings{#if total}
-					· page {page} of {totalPages}{/if}</span
+				>{m.doc_review_findings_total_findings({ total })}{#if total}
+					{m.doc_review_findings_page_of({ page, totalPages })}{/if}</span
 			>
 			<div class="flex gap-2">
 				<button
@@ -350,7 +351,7 @@
 					disabled={page <= 1 || loading}
 					class="rounded px-3 py-1 text-sm disabled:opacity-40"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
-					>‹ Prev</button
+					>{m.doc_review_findings_prev()}</button
 				>
 				<button
 					onclick={() => {
@@ -362,22 +363,22 @@
 					disabled={page >= totalPages || loading}
 					class="rounded px-3 py-1 text-sm disabled:opacity-40"
 					style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
-					>Next ›</button
+					>{m.doc_review_findings_next()}</button
 				>
 			</div>
 		</div>
 		{#if loading}
-			<div class="px-5 py-8 text-center" style="color:{textMuted}">Loading…</div>
+			<div class="px-5 py-8 text-center" style="color:{textMuted}">{m.doc_review_findings_loading()}</div>
 		{:else if !rows.length}
 			<div class="px-5 py-8 text-center" style="color:{textMuted}">
-				No document review findings found.
+				{m.doc_review_findings_no_document_review_findings_found()}
 			</div>
 		{:else}
 			<div class="min-h-0 flex-1 overflow-auto">
 				<table class="w-full text-sm" style="border-collapse:separate;border-spacing:0">
 					<thead>
 						<tr style="background:{surface2}">
-							{#each ['ID', 'Run ID', 'Input Record ID', 'Pass', 'Aspect', 'Severity', 'Type', 'Title', 'Artifact ID', 'Confidence', 'Review Status', 'Evidence', 'Location', 'Suggestion', 'Metadata', 'Reference Doc'] as heading}
+							{#each ['ID', m.doc_review_findings_run_id(), m.doc_review_findings_input_record_id(), m.doc_review_findings_pass(), m.doc_review_findings_aspect(), m.doc_review_findings_severity(), m.doc_review_findings_type(), m.doc_review_findings_title(), m.doc_review_findings_artifact_id(), m.doc_review_findings_confidence(), m.doc_review_findings_review_status(), m.doc_review_findings_evidence(), m.doc_review_findings_location(), m.doc_review_findings_suggestion(), m.doc_review_findings_metadata(), m.doc_review_findings_reference_doc()] as heading}
 								<th
 									class="sticky top-0 z-10 px-4 py-3 text-left"
 									style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}"
@@ -470,7 +471,7 @@
 										onclick={() => openMetadata(row)}
 										class="cursor-pointer rounded px-2 py-1 text-xs"
 										style="background:{surface2};color:{accent};border:1px solid {borderColor}"
-										>Metadata</button
+										>{m.doc_review_findings_metadata()}</button
 									></td
 								>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}"
@@ -478,7 +479,7 @@
 										onclick={() => openReferenceDoc(row)}
 										class="cursor-pointer rounded px-2 py-1 text-xs"
 										style="background:{surface2};color:{accent};border:1px solid {borderColor}"
-										>Reference</button
+										>{m.doc_review_findings_reference()}</button
 									></td
 								>
 							</tr>
@@ -518,12 +519,12 @@
 					onclick={closeModal}
 					class="cursor-pointer rounded p-1.5"
 					style="background:{surface2};color:{textMuted};border:1px solid {borderColor}"
-					aria-label="Close"><XIcon class="h-4 w-4" /></button
+					aria-label={m.doc_review_findings_close()}><XIcon class="h-4 w-4" /></button
 				>
 			</div>
 			<div class="flex-1 overflow-auto p-5">
 				{#if !modalSections.length}
-					<div class="text-center" style="color:{textMuted};padding:2rem">No data.</div>
+					<div class="text-center" style="color:{textMuted};padding:2rem">{m.doc_review_findings_no_data()}</div>
 				{:else}
 					<div class="space-y-4 text-xs" style="line-height:1.6;user-select:text">
 						{#each modalSections as section, index (index)}

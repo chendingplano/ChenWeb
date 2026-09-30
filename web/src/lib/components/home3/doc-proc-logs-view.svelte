@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
@@ -72,25 +73,25 @@
 	let detailDialogOpen = $state(false);
 	let detailRow = $state<LogRow | null>(null);
 	let entryTypeOptions = $state<Array<{ value: string; label: string }>>([
-		{ value: '', label: 'All types' }
+		{ value: '', label: m.doc_proc_logs_all_types() }
 	]);
 	let processorOptions = $state<Array<{ value: string; label: string }>>([
-		{ value: '', label: 'All processors' }
+		{ value: '', label: m.doc_proc_logs_all_processors() }
 	]);
 	let activityOptions = $state<Array<{ value: string; label: string }>>([
-		{ value: '', label: 'All activities' }
+		{ value: '', label: m.doc_proc_logs_all_activities() }
 	]);
 
 	const sortableColumns = [
-		{ field: 'entry_type', label: 'Type' },
-		{ field: 'doc_proc_name', label: 'Processor' },
-		{ field: 'activity_name', label: 'Activity' },
-		{ field: 'model_names', label: 'Model(s)' },
-		{ field: 'pass', label: 'Pass' },
-		{ field: 'ms_used', label: 'Duration' },
-		{ field: 'run_id', label: 'Run ID' },
-		{ field: 'create_time', label: 'Create Time' },
-		{ field: 'errors', label: 'Errors' }
+		{ field: 'entry_type', label: m.doc_proc_logs_type() },
+		{ field: 'doc_proc_name', label: m.doc_proc_logs_processor() },
+		{ field: 'activity_name', label: m.doc_proc_logs_activity() },
+		{ field: 'model_names', label: m.doc_proc_logs_model_s() },
+		{ field: 'pass', label: m.doc_proc_logs_pass_2() },
+		{ field: 'ms_used', label: m.doc_proc_logs_duration_2() },
+		{ field: 'run_id', label: m.doc_proc_logs_run_id() },
+		{ field: 'create_time', label: m.doc_proc_logs_create_time_2() },
+		{ field: 'errors', label: m.doc_proc_logs_errors() }
 	];
 
 	// --- Data loading ---
@@ -124,15 +125,15 @@
 			});
 			const data = await res.json();
 			if (!res.ok || !data.status) {
-				throw new Error(data.error_msg ?? 'Failed to load filter options');
+				throw new Error(data.error_msg ?? m.doc_proc_logs_failed_to_load_filter_options());
 			}
-			entryTypeOptions = buildOptions(data.entry_types ?? [], 'All types');
-			processorOptions = buildOptions(data.doc_proc_names ?? [], 'All processors');
-			activityOptions = buildOptions(data.activity_names ?? [], 'All activities');
+			entryTypeOptions = buildOptions(data.entry_types ?? [], m.doc_proc_logs_all_types());
+			processorOptions = buildOptions(data.doc_proc_names ?? [], m.doc_proc_logs_all_processors());
+			activityOptions = buildOptions(data.activity_names ?? [], m.doc_proc_logs_all_activities());
 		} catch {
-			entryTypeOptions = buildOptions([], 'All types');
-			processorOptions = buildOptions([], 'All processors');
-			activityOptions = buildOptions([], 'All activities');
+			entryTypeOptions = buildOptions([], m.doc_proc_logs_all_types());
+			processorOptions = buildOptions([], m.doc_proc_logs_all_processors());
+			activityOptions = buildOptions([], m.doc_proc_logs_all_activities());
 		}
 	}
 
@@ -158,7 +159,7 @@
 			});
 			const data = await res.json();
 			if (!res.ok || !data.status) {
-				throw new Error(data.error_msg ?? 'Failed to load logs');
+				throw new Error(data.error_msg ?? m.doc_proc_logs_failed_to_load_logs());
 			}
 			logs  = data.results ?? [];
 			total = data.total  ?? 0;
@@ -207,9 +208,9 @@
 			});
 			const data = await res.json();
 			if (!res.ok || !data.status) {
-				throw new Error(data.error_msg ?? 'Failed to apply retention');
+				throw new Error(data.error_msg ?? m.doc_proc_logs_failed_to_apply_retention());
 			}
-			retentionSuccess = data.message ?? 'Retention applied.';
+			retentionSuccess = data.message ?? m.doc_proc_logs_retention_applied();
 			load();
 		} catch (err) {
 			retentionError = err instanceof Error ? err.message : String(err);
@@ -291,9 +292,9 @@
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">Doc Processor Logs</h2>
+				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">{m.doc_proc_logs_doc_processor_logs()}</h2>
 				<p style="font-size:13px; color:{textSecondary}; margin-top:2px;">
-					LLM call traces and processor-level summaries for all doc pipeline runs.
+					{m.doc_proc_logs_llm_call_traces_and_processor()}
 				</p>
 			</div>
 			<button
@@ -303,14 +304,14 @@
 				style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 			>
 				<RefreshCwIcon class="w-4 h-4 {loading ? 'animate-spin' : ''}" />
-				Refresh
+				{m.doc_proc_logs_refresh()}
 			</button>
 		</div>
 
 		<!-- Filters row -->
 		<div class="mt-4 flex flex-wrap items-end gap-3">
 			<div>
-				<label for="doc-proc-log-entry-type" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Entry Type</label>
+				<label for="doc-proc-log-entry-type" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">{m.doc_proc_logs_entry_type()}</label>
 				<select
 					id="doc-proc-log-entry-type"
 					bind:value={filterEntryType}
@@ -323,7 +324,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="doc-proc-log-processor-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Processor</label>
+				<label for="doc-proc-log-processor-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">{m.doc_proc_logs_processor()}</label>
 				<select
 					id="doc-proc-log-processor-name"
 					bind:value={filterDocProcName}
@@ -336,7 +337,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="doc-proc-log-activity-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Activity</label>
+				<label for="doc-proc-log-activity-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">{m.doc_proc_logs_activity()}</label>
 				<select
 					id="doc-proc-log-activity-name"
 					bind:value={filterActivityName}
@@ -349,7 +350,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="doc-proc-log-run-id" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Run ID</label>
+				<label for="doc-proc-log-run-id" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">{m.doc_proc_logs_run_id()}</label>
 				<input
 					id="doc-proc-log-run-id"
 					type="number"
@@ -361,7 +362,7 @@
 				/>
 			</div>
 			<div>
-				<label for="doc-proc-log-create-start" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Start Time From</label>
+				<label for="doc-proc-log-create-start" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">{m.doc_proc_logs_start_time_from()}</label>
 				<input
 					id="doc-proc-log-create-start"
 					type="datetime-local"
@@ -371,7 +372,7 @@
 				/>
 			</div>
 			<div>
-				<label for="doc-proc-log-create-end" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Start Time To</label>
+				<label for="doc-proc-log-create-end" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">{m.doc_proc_logs_start_time_to()}</label>
 				<input
 					id="doc-proc-log-create-end"
 					type="datetime-local"
@@ -386,7 +387,7 @@
 				style="background:{accent}; color:#fff; border:none;"
 			>
 				<SearchIcon class="w-4 h-4" />
-				Search
+				{m.doc_proc_logs_search()}
 			</button>
 		</div>
 	</div>
@@ -406,8 +407,8 @@
 		<div class="px-5 py-3 flex items-center justify-between flex-shrink-0"
 			style="border-bottom:1px solid {borderColor};">
 			<span style="font-size:13px; color:{textMuted};">
-				{total} entries
-				{#if total > 0} &middot; page {page} of {totalPages}{/if}
+				{m.doc_proc_logs_entries({ total })}
+				{#if total > 0} {m.doc_proc_logs_page_of({ page, totalPages })}{/if}
 			</span>
 			<div class="flex items-center gap-2">
 				<button
@@ -416,7 +417,7 @@
 					class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
-					&lsaquo; Prev
+					{m.doc_proc_logs_prev()}
 				</button>
 				<button
 					onclick={nextPage}
@@ -424,15 +425,15 @@
 					class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				>
-					Next &rsaquo;
+					{m.doc_proc_logs_next()}
 				</button>
 			</div>
 		</div>
 
 		{#if loading}
-			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">Loading…</div>
+			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">{m.doc_proc_logs_loading()}</div>
 		{:else if logs.length === 0}
-			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">No log entries found.</div>
+			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">{m.doc_proc_logs_no_log_entries_found()}</div>
 		{:else}
 			<div class="flex-1 min-h-0 overflow-auto">
 				<table class="w-full text-sm border-collapse">
@@ -449,8 +450,8 @@
 											border:1px solid {orderBy === column.field ? accent + '55' : 'transparent'};
 											font-weight:500;
 										"
-										title={`Order by ${column.label}`}
-										aria-label={`Order by ${column.label}`}
+										title={m.doc_proc_logs_order_by({ label: column.label })}
+										aria-label={m.doc_proc_logs_order_by({ label: column.label })}
 									>
 										<span>{column.label}</span>
 										{#if orderBy === column.field && orderDir === 'asc'}
@@ -463,7 +464,7 @@
 									</button>
 								</th>
 							{/each}
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; background:{surface2};">Actions</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; background:{surface2};">{m.doc_proc_logs_actions()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -512,7 +513,7 @@
 											{row.errors}
 										</span>
 									{:else}
-										<span style="color:{success}; font-size:12px;">OK</span>
+										<span style="color:{success}; font-size:12px;">{m.doc_proc_logs_ok()}</span>
 									{/if}
 								</td>
 								<td class="px-4 py-3">
@@ -521,10 +522,10 @@
 										class="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs cursor-pointer"
 										style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 										aria-expanded={detailDialogOpen && detailRow?.id === row.id}
-										aria-label={`Show details for log ${row.id}`}
+										aria-label={m.doc_proc_logs_show_details_for_log({ id: row.id })}
 									>
 										<EyeIcon class="w-3.5 h-3.5" />
-										Details
+										{m.doc_proc_logs_details()}
 									</button>
 								</td>
 							</tr>
@@ -537,15 +538,15 @@
 
 	<!-- Retention configuration card -->
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
-		<h3 style="font-size:15px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">Retention Policy</h3>
+		<h3 style="font-size:15px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">{m.doc_proc_logs_retention_policy()}</h3>
 		<p style="font-size:13px; color:{textSecondary}; margin-bottom:16px;">
-			Remove log entries older than the specified number of days. This action is permanent.
+			{m.doc_proc_logs_remove_log_entries_older_than()}
 		</p>
 
 		<div class="flex flex-wrap items-end gap-3">
 			<div>
 				<label for="doc-proc-log-retention-days" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">
-					Retain logs for (days)
+					{m.doc_proc_logs_retain_logs_for_days()}
 				</label>
 				<input
 					id="doc-proc-log-retention-days"
@@ -563,7 +564,7 @@
 				style="background:{danger}; color:#fff; border:none;"
 			>
 				<TrashIcon class="w-4 h-4" />
-				{retentionLoading ? 'Deleting…' : 'Apply Retention'}
+				{retentionLoading ? m.doc_proc_logs_deleting() : m.doc_proc_logs_apply_retention()}
 			</button>
 		</div>
 
@@ -597,65 +598,65 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Doc processor log details"
+			aria-label={m.doc_proc_logs_doc_processor_log_details()}
 			tabindex="0"
 		>
 			<div class="doc-proc-view-dialog-head">
 				<h3 class="doc-proc-view-dialog-title">
-					Log Entry #{detailRow.id}
+					{m.doc_proc_logs_log_entry({ id: detailRow.id })}
 				</h3>
-				<button class="doc-proc-view-close-btn" onclick={closeDetails}>Close</button>
+				<button class="doc-proc-view-close-btn" onclick={closeDetails}>{m.doc_proc_logs_close()}</button>
 			</div>
 			<div class="doc-proc-view-dialog-body">
 				<div class="doc-proc-view-section">
-					<div class="doc-proc-view-section-label">Summary</div>
+					<div class="doc-proc-view-section-label">{m.doc_proc_logs_summary()}</div>
 					<div class="doc-proc-view-rows-box">
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">entry_type</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_entry_type_2()}</span>
 							<span class="doc-proc-view-val">{detailRow.entry_type || '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">doc_proc_name</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_doc_proc_name()}</span>
 							<span class="doc-proc-view-val">{detailRow.doc_proc_name || '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">activity_name</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_activity_name()}</span>
 							<span class="doc-proc-view-val">{detailRow.activity_name || '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">call_reason</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_call_reason()}</span>
 							<span class="doc-proc-view-val">{detailRow.call_reason || '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">prompt_name</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_prompt_name()}</span>
 							<span class="doc-proc-view-val">{detailRow.prompt_name || '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">model_names</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_model_names()}</span>
 							<span class="doc-proc-view-val">{detailRow.model_names.length ? detailRow.model_names.join(', ') : '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">pass</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_pass()}</span>
 							<span class="doc-proc-view-val">{detailRow.pass != null ? detailRow.pass : '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">duration</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_duration()}</span>
 							<span class="doc-proc-view-val">{formatDuration(detailRow.ms_used)}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">create_time</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_create_time()}</span>
 							<span class="doc-proc-view-val">{formatTime(detailRow.create_time)}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">run_id</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_run_id_2()}</span>
 							<span class="doc-proc-view-val doc-proc-view-val-mono">{detailRow.run_id != null ? detailRow.run_id : '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">proc_progress</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_proc_progress()}</span>
 							<span class="doc-proc-view-val">{detailRow.proc_progress || '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
-							<span class="doc-proc-view-key">llm_call_id</span>
+							<span class="doc-proc-view-key">{m.doc_proc_logs_llm_call_id()}</span>
 							<span class="doc-proc-view-val doc-proc-view-val-mono">{detailRow.llm_call_id || '—'}</span>
 						</div>
 					</div>
@@ -663,7 +664,7 @@
 
 				{#if detailRow.extra_info}
 					<div class="doc-proc-view-section">
-						<div class="doc-proc-view-section-label">Extra Info</div>
+						<div class="doc-proc-view-section-label">{m.doc_proc_logs_extra_info()}</div>
 						{#if detailExtraInfoEntries.length > 0}
 							<div class="doc-proc-view-rows-box">
 								{#each detailExtraInfoEntries as entry (entry.key)}
@@ -681,17 +682,17 @@
 
 				{#if detailRow.artifact}
 					<div class="doc-proc-view-section">
-						<div class="doc-proc-view-section-label">Artifact</div>
+						<div class="doc-proc-view-section-label">{m.doc_proc_logs_artifact()}</div>
 						<pre class="doc-proc-view-pre">{prettyJSON(detailRow.artifact)}</pre>
 					</div>
 				{/if}
 
 				<div class="doc-proc-view-section">
-					<div class="doc-proc-view-section-label">Errors</div>
+					<div class="doc-proc-view-section-label">{m.doc_proc_logs_errors()}</div>
 					{#if hasErrors(detailRow)}
 						<div class="doc-proc-view-error-box">{detailRow.errors}</div>
 					{:else}
-						<div class="doc-proc-view-empty">No errors recorded for this entry.</div>
+						<div class="doc-proc-view-empty">{m.doc_proc_logs_no_errors_recorded_for_this()}</div>
 					{/if}
 				</div>
 			</div>

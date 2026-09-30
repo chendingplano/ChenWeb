@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listDocProcessors,
@@ -135,11 +136,11 @@
 	async function submitEditor() {
 		errorMsg = '';
 		if (!edName.trim() && !editing) {
-			errorMsg = 'name_as_id is required';
+			errorMsg = m.doc_processors_name_as_id_is_required();
 			return;
 		}
 		if (!edDisplay.trim()) {
-			errorMsg = 'display_name is required';
+			errorMsg = m.doc_processors_display_name_is_required();
 			return;
 		}
 		const requires = parseRequiresList(edRequires);
@@ -155,7 +156,7 @@
 					notes: edNotes ? edNotes : null,
 					requires
 				});
-				infoMsg = `Updated ${editingOriginalName}`;
+				infoMsg = m.doc_processors_updated({ editingOriginalName });
 			} else {
 				await createProcessor({
 					name_as_id: edName,
@@ -167,7 +168,7 @@
 					notes: edNotes ? edNotes : undefined,
 					requires
 				});
-				infoMsg = `Created ${edName}`;
+				infoMsg = m.doc_processors_created({ edName });
 			}
 			showEditor = false;
 			await loadAll();
@@ -179,7 +180,7 @@
 	}
 
 	async function onDelete(p: DocProcessor) {
-		if (!confirm(`Delete doc processor "${p.name_as_id}"? This cannot be undone.`)) return;
+		if (!confirm(m.doc_processors_delete_doc_processor_this_cannot({ name_as_id: p.name_as_id }))) return;
 		deleting = true;
 		errorMsg = '';
 		try {
@@ -210,10 +211,10 @@
 >
 	<div class="header">
 		<div class="header-left">
-			<h1>Doc Processors</h1>
-			<p class="sub">Admin catalog of the pipeline's processing units. Create, edit, search, and delete processors.</p>
+			<h1>{m.doc_processors_doc_processors()}</h1>
+			<p class="sub">{m.doc_processors_admin_catalog_of_the_pipeline()}</p>
 		</div>
-		<button class="btn primary" onclick={openCreate}>+ New Processor</button>
+		<button class="btn primary" onclick={openCreate}>{m.doc_processors_new_processor()}</button>
 	</div>
 
 	{#if errorMsg}
@@ -223,7 +224,7 @@
 		<div class="banner info" role="status">{infoMsg}</div>
 	{/if}
 	{#if deleted}
-		<div class="banner info" role="status">Deleted {deleted}</div>
+		<div class="banner info" role="status">{m.doc_processors_deleted({ deleted })}</div>
 	{/if}
 
 	<div class="card">
@@ -231,31 +232,31 @@
 			<input
 				type="text"
 				class="search"
-				placeholder="Search name or display name…"
+				placeholder={m.doc_processors_search_name_or_display_name()}
 				bind:value={searchInput}
 				oninput={onSearchInput}
 			/>
-			<span class="count">{processors.length} processor{processors.length === 1 ? '' : 's'}</span>
+			<span class="count">{m.doc_processors_processor({ processorsCount: processors.length, plural: processors.length === 1 ? '' : 's' })}</span>
 		</div>
 
 		{#if loading}
-			<div class="loading">Loading…</div>
+			<div class="loading">{m.doc_processors_loading()}</div>
 		{:else if processors.length === 0}
-			<div class="empty">No doc processors found.</div>
+			<div class="empty">{m.doc_processors_no_doc_processors_found()}</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Name (ID)</th>
-							<th>Display Name</th>
-							<th>Type</th>
-							<th>LLM</th>
-							<th>Status</th>
-							<th>Requires</th>
-							<th>Notes</th>
-							<th>Modified</th>
-							<th class="actions-col">Actions</th>
+							<th>{m.doc_processors_name_id()}</th>
+							<th>{m.doc_processors_display_name()}</th>
+							<th>{m.doc_processors_type()}</th>
+							<th>{m.doc_processors_llm()}</th>
+							<th>{m.doc_processors_status()}</th>
+							<th>{m.doc_processors_requires()}</th>
+							<th>{m.doc_processors_notes()}</th>
+							<th>{m.doc_processors_modified()}</th>
+							<th class="actions-col">{m.doc_processors_actions()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -273,7 +274,7 @@
 								</td>
 								<td>
 									{#if p.require_llm}
-										<span class="badge llm">LLM</span>
+										<span class="badge llm">{m.doc_processors_llm()}</span>
 									{:else}
 										<span class="muted">—</span>
 									{/if}
@@ -307,12 +308,12 @@
 								</td>
 								<td class="muted">{formatTime(p.modify_time)}</td>
 								<td class="actions-col">
-									<button class="btn small" onclick={() => openEdit(p)}>Edit</button>
+									<button class="btn small" onclick={() => openEdit(p)}>{m.doc_processors_edit()}</button>
 									<button
 										class="btn small danger"
 										onclick={() => onDelete(p)}
 										disabled={deleting}
-									>Delete</button
+									>{m.doc_processors_delete()}</button
 									>
 								</td>
 							</tr>
@@ -337,30 +338,30 @@
 	>
 		<div class="modal">
 			<div class="modal-header">
-				<h2>{editing ? `Edit ${editingOriginalName}` : 'New Processor'}</h2>
-				<button class="btn ghost" onclick={closeEditor} aria-label="Close">✕</button>
+				<h2>{editing ? m.doc_processors_edit_2({ editingOriginalName }) : m.doc_processors_new_processor_2()}</h2>
+				<button class="btn ghost" onclick={closeEditor} aria-label={m.doc_processors_close()}>✕</button>
 			</div>
 			<form onsubmit={(e) => { e.preventDefault(); submitEditor(); }}>
 				<div class="form-grid">
 					<label>
-						<span>Name (ID){editing ? '' : ' *'}</span>
+						<span>{m.doc_processors_name_id_2({ value: editing ? '' : ' *' })}</span>
 						<input
 							type="text"
 							bind:value={edName}
 							disabled={editing}
-							placeholder="e.g. extract_metrics"
+							placeholder={m.doc_processors_e_g_extract_metrics()}
 							class:input-disabled={editing}
 						/>
 						{#if editing}
-							<small class="hint">name_as_id is immutable — create a new processor to rename.</small>
+							<small class="hint">{m.doc_processors_name_as_id_is_immutable()}</small>
 						{/if}
 					</label>
 					<label>
-						<span>Display Name *</span>
-						<input type="text" bind:value={edDisplay} placeholder="e.g. Extract Metrics" />
+						<span>{m.doc_processors_display_name_2()}</span>
+						<input type="text" bind:value={edDisplay} placeholder={m.doc_processors_e_g_extract_metrics_2()} />
 					</label>
 					<label>
-						<span>Type</span>
+						<span>{m.doc_processors_type()}</span>
 						<select bind:value={edType}>
 							{#each DOC_PROCESSOR_TYPES as t}
 								<option value={t}>{t}</option>
@@ -368,7 +369,7 @@
 						</select>
 					</label>
 					<label>
-						<span>Status</span>
+						<span>{m.doc_processors_status()}</span>
 						<select bind:value={edStatus}>
 							{#each DOC_PROCESSOR_STATUSES as s}
 								<option value={s}>{s}</option>
@@ -376,31 +377,31 @@
 						</select>
 					</label>
 					<label class="toggle-label">
-						<span>Requires LLM</span>
+						<span>{m.doc_processors_requires_llm()}</span>
 						<input type="checkbox" bind:checked={edRequireLLM} />
 					</label>
 					<label class="wide">
-						<span>Requires (comma-separated name_as_ids)</span>
+						<span>{m.doc_processors_requires_comma_separated_name_as()}</span>
 						<input
 							type="text"
 							bind:value={edRequires}
-							placeholder="e.g. chunking, extract_metadata"
+							placeholder={m.doc_processors_e_g_chunking_extract_metadata()}
 						/>
-						<small class="hint">Processors this processor depends on.</small>
+						<small class="hint">{m.doc_processors_processors_this_processor_depends_on()}</small>
 					</label>
 					<label class="wide">
-						<span>Description</span>
+						<span>{m.doc_processors_description()}</span>
 						<textarea
 							bind:value={edDescription}
-							placeholder="Describe the processor and its purpose"
+							placeholder={m.doc_processors_describe_the_processor_and_its()}
 							rows="3"
 						></textarea>
 					</label>
 					<label class="wide">
-						<span>Notes</span>
+						<span>{m.doc_processors_notes()}</span>
 						<textarea
 							bind:value={edNotes}
-							placeholder="Free-form notes"
+							placeholder={m.doc_processors_free_form_notes()}
 							rows="3"
 						></textarea>
 					</label>
@@ -409,9 +410,9 @@
 					<div class="banner error modal-error" role="alert">{errorMsg}</div>
 				{/if}
 				<div class="modal-footer">
-					<button type="button" class="btn ghost" onclick={closeEditor}>Cancel</button>
+					<button type="button" class="btn ghost" onclick={closeEditor}>{m.doc_processors_cancel()}</button>
 					<button type="submit" class="btn primary" disabled={saving}>
-						{saving ? 'Saving…' : editing ? 'Save Changes' : 'Create'}
+						{saving ? m.doc_processors_saving() : editing ? m.doc_processors_save_changes() : m.doc_processors_create()}
 					</button>
 				</div>
 			</form>

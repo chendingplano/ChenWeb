@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
     import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem, ReviewPackageInfo, ReviewerPackageInfo } from '$lib/services/docReviewService';
@@ -93,7 +94,7 @@
             const res = await listKnowledgeStores();
             storeOptions = res.results ?? [];
         } catch (err) {
-            storeError = err instanceof Error ? err.message : 'Failed to load knowledge stores.';
+            storeError = err instanceof Error ? err.message : m.document_review_failed_to_load_knowledge_stores();
         } finally {
             loadingStores = false;
         }
@@ -132,7 +133,7 @@
         const exact = tiers.find(t => t.aspect_names.length > 0 && t.aspect_names.length === selectedAspects.size && t.aspect_names.every(n => selectedAspects.has(n)));
         if (exact) return exact.label;
         const on = tiers.filter(t => t.aspect_names.some(n => selectedAspects.has(n))).map(t => t.label);
-        return on.length ? `Custom (${on.join(', ')})` : '—';
+        return on.length ? m.document_review_custom({ on: on.join(', ') }) : '—';
     });
 
     // Tier key persisted with the request (one of the built-in keys, or "custom").
@@ -145,9 +146,9 @@
     // (localized server-side, keyed by group P1..P6); the hardcoded English map
     // is the fallback when the config has no entry for a group.
     const groupLabelDefaults: Record<string, string> = {
-        P1: 'Language & Style', P2: 'Structure & Organization',
-        P3: 'Content Quality', P4: 'Consistency',
-        P5: 'Technical & Compliance', P6: 'Meta & Process',
+        P1: m.document_review_language_style(), P2: m.document_review_structure_organization(),
+        P3: m.document_review_content_quality(), P4: m.document_review_consistency(),
+        P5: m.document_review_technical_compliance(), P6: m.document_review_meta_process(),
     };
     let groupLabels = $derived.by(() => {
         const map: Record<string, string> = { ...groupLabelDefaults };
@@ -208,7 +209,7 @@
         const byGroup: Record<string, Array<{ name: string; label: string; description: string }>> = {};
         for (const name of names) {
             const info = aspectByName[name];
-            const group = info?.group ?? '其他';
+            const group = info?.group ?? m.document_review_text();
             if (!byGroup[group]) byGroup[group] = [];
             byGroup[group].push({ name, label: info?.label ?? name, description: info?.description ?? '' });
         }
@@ -308,7 +309,7 @@
             // Initial selection driven by [reviewers.<aspect>].checked in doc-review.local.toml.
             selectedAspects = new Set(aspects.filter(a => a.checked).map(a => a.name));
         } catch (e) {
-            submitError = 'Failed to load aspects';
+            submitError = m.document_review_failed_to_load_aspects();
         }
 
         // Auto-fill requester name from auth if available
@@ -327,7 +328,7 @@
     function onSearchSelect(records: KbInputRecord[]) {
         const record = records[0];
         if (!record) return;
-        const title = record.title?.trim() || record.file_name?.trim() || `Document ${record.id}`;
+        const title = record.title?.trim() || record.file_name?.trim() || m.document_review_document({ id: record.id });
         selectDoc({ id: record.id, title });
     }
 
@@ -355,12 +356,12 @@
     }
 
     async function handleUpload() {
-        if (!uploadFile) { uploadError = 'Pick a file to upload.'; return; }
+        if (!uploadFile) { uploadError = m.document_review_pick_a_file_to_upload(); return; }
         const type = typeFromExtension(uploadFile.name);
-        if (!type) { uploadError = 'Unsupported file type.'; return; }
+        if (!type) { uploadError = m.document_review_unsupported_file_type(); return; }
         const activeStore = knowledgeStoreState.activeStore;
         if (!activeStore) {
-            uploadError = 'Select an active knowledge store before uploading.';
+            uploadError = m.document_review_select_an_active_knowledge_store();
             return;
         }
 
@@ -375,10 +376,10 @@
                 files: [uploadFile],
             });
             const newId = result.ids?.[0];
-            if (!newId) throw new Error('Upload succeeded but no record id was returned.');
+            if (!newId) throw new Error(m.document_review_upload_succeeded_but_no_record());
             selectDoc({ id: newId, title: uploadFile.name });
         } catch (err) {
-            uploadError = err instanceof Error ? err.message : 'Failed to upload file.';
+            uploadError = err instanceof Error ? err.message : m.document_review_failed_to_upload_file();
         } finally {
             isUploading = false;
         }
@@ -393,7 +394,7 @@
             const results = (data.inputs || data.records || data.data || []).slice(0, 5);
             for (const r of results) {
                 if (!referenceDocs.some(d => d.record_id === r.id)) {
-                    referenceDocs = [...referenceDocs, { record_id: r.id, doc_no: r.doc_no || '', title: r.title || r.file_name || `Document ${r.id}` }];
+                    referenceDocs = [...referenceDocs, { record_id: r.id, doc_no: r.doc_no || '', title: r.title || r.file_name || m.document_review_document({ id: r.id }) }];
                 }
             }
         } catch {}
@@ -402,9 +403,9 @@
     async function handleSubmit() {
         // Validation failures surface as a confirm dialog; confirming jumps back to the
         // step that needs fixing (no aspects → Step 2, which also blocks "Next" up front).
-        if (!selectedDocId) { showValidationDialog('Please select a document to review.', 1); return; }
-        if (effectiveAspects.length === 0) { showValidationDialog('Select at least one aspect to review.', 2); return; }
-        if (!requesterName.trim()) { showValidationDialog('Please enter your name.', 4); return; }
+        if (!selectedDocId) { showValidationDialog(m.document_review_please_select_a_document_to(), 1); return; }
+        if (effectiveAspects.length === 0) { showValidationDialog(m.document_review_select_at_least_one_aspect_2(), 2); return; }
+        if (!requesterName.trim()) { showValidationDialog(m.document_review_please_enter_your_name(), 4); return; }
 
         isSubmitting = true;
         submitError = '';
@@ -427,7 +428,7 @@
             requestsShowingSelection = false;
             requestsRefreshKey += 1;
         } catch (e: any) {
-            submitError = e.message || 'Submission failed';
+            submitError = e.message || m.document_review_submission_failed();
         } finally {
             isSubmitting = false;
         }
@@ -473,7 +474,7 @@
 
         <!-- Step indicators -->
         <div style="display: flex; gap: 0.5rem; margin-bottom: 2rem; font-size: 0.8rem;">
-            {#each [['dr-step-select-document', 'Select Document'], ['dr-step-check-level', 'Check Level'], ['dr-step-references', 'References'], ['dr-step-submit', 'Submit']] as [stepId, step], i}
+            {#each [['dr-step-select-document', m.document_review_select_document()], ['dr-step-check-level', m.document_review_check_level()], ['dr-step-references', m.document_review_references()], ['dr-step-submit', m.document_review_submit()]] as [stepId, step], i}
                 <div style="display: flex; align-items: center; gap: 0.25rem;">
                     <div style="width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
                         background: {i + 1 <= currentStep ? accent : borderColor}; color: {i + 1 <= currentStep ? '#fff' : textMuted};
@@ -508,15 +509,15 @@
                     <!-- No active knowledge store: prompt the user to pick one before uploading -->
                     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                         <div style="padding: 0.75rem; background: {accentTint}; border: 1px solid {borderColor}; border-radius: 8px; font-size: 0.85rem; color: {textSecondary};">
-                            No active knowledge store selected. Pick one below to upload the document into.
+                            {m.document_review_no_active_knowledge_store_selected()}
                         </div>
                         {#if loadingStores}
                             <div style="display: flex; align-items: center; gap: 0.5rem; color: {textMuted}; font-size: 0.85rem;">
-                                <LoaderIcon size={14} style="animation: spin 1s linear infinite;" /> Loading knowledge stores…
+                                <LoaderIcon size={14} style="animation: spin 1s linear infinite;" /> {m.document_review_loading_knowledge_stores()}
                             </div>
                         {:else if storeOptions.length === 0}
                             <div style="font-size: 0.85rem; color: {textSecondary};">
-                                No knowledge stores found. Create one under Knowledge → Knowledge Stores first.
+                                {m.document_review_no_knowledge_stores_found_create()}
                             </div>
                         {:else}
                             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
@@ -524,7 +525,7 @@
                                     <button onclick={() => pickStore(store)} type="button"
                                         style="display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; padding: 0.65rem 0.85rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; min-width: 160px; text-align: left;">
                                         <span style="color: {textPrimary}; font-weight: 600; font-size: 0.9rem;">{store.ks_name}</span>
-                                        <span style="color: {textMuted}; font-size: 0.75rem;">ID {store.id}{store.ks_desc ? ` · ${store.ks_desc}` : ''}</span>
+                                        <span style="color: {textMuted}; font-size: 0.75rem;">{m.document_review_id({ id: store.id, value: store.ks_desc ? ` · ${store.ks_desc}` : '' })}</span>
                                     </button>
                                 {/each}
                             </div>
@@ -534,23 +535,23 @@
                         {/if}
                         <button onclick={loadStoreOptions} type="button"
                             style="align-self: flex-start; padding: 0.35rem 0.85rem; background: transparent; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; color: {textSecondary}; font-size: 0.8rem;">
-                            Refresh
+                            {m.document_review_refresh()}
                         </button>
                     </div>
                 {:else}
                     <!-- Upload a new document to review -->
                     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                         <div style="font-size: 0.8rem; color: {textMuted};">
-                            Uploads land in knowledge store: <span style="color: {textSecondary};">{knowledgeStoreState.activeStore.ks_name}</span>
+                            {m.document_review_uploads_land_in_knowledge_store()} <span style="color: {textSecondary};">{knowledgeStoreState.activeStore.ks_name}</span>
                             <button onclick={changeStore} type="button"
-                                style="margin-left: 0.5rem; background: none; border: none; color: {accent}; cursor: pointer; font-size: 0.8rem; text-decoration: underline;">change</button>
+                                style="margin-left: 0.5rem; background: none; border: none; color: {accent}; cursor: pointer; font-size: 0.8rem; text-decoration: underline;">{m.document_review_change()}</button>
                         </div>
                         <input bind:this={filePicker} type="file" onchange={onUploadFileSelect}
                             style="display: none;" />
                         <button onclick={triggerFilePicker} type="button"
                             style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 1.25rem; background: {inputBg}; border: 1px dashed {borderColor}; border-radius: 8px; cursor: pointer; color: {textSecondary}; font-size: 0.9rem;">
                             <UploadIcon size={18} />
-                            {uploadFile ? uploadFile.name : 'Browse and pick a file…'}
+                            {uploadFile ? uploadFile.name : m.document_review_browse_and_pick_a_file()}
                         </button>
                         <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
                             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: {textSecondary};">
@@ -568,7 +569,7 @@
                                 background: {!uploadFile || isUploading ? borderColor : accent}; color: {!uploadFile || isUploading ? textMuted : '#fff'};">
                                 {#if isUploading}
                                     <LoaderIcon size={14} style="animation: spin 1s linear infinite;" />
-                                    Uploading…
+                                    {m.document_review_uploading()}
                                 {:else}
                                     {labelFor('dr-s1-upload-btn', 'Upload & Select')}
                                 {/if}
@@ -582,7 +583,7 @@
                 {#if selectedDocTitle}
                     <div style="margin-top: 1rem; padding: 0.75rem; background: {accentTint}; border-radius: 8px; display: flex; align-items: center; gap: 0.5rem;">
                         <CheckIcon size={16} style="color: {accent};" />
-                        <span style="color: {accent};">Selected: {selectedDocTitle}</span>
+                        <span style="color: {accent};">{m.document_review_selected({ selectedDocTitle })}</span>
                     </div>
                 {/if}
             </div>
@@ -598,18 +599,18 @@
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.35rem;">{labelFor('dr-s2-heading', 'Step 2: Choose Check Level')}</h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
-                    Toggle a level On to review its aspects, then expand it to fine-tune. {effectiveAspects.length} aspect{effectiveAspects.length === 1 ? '' : 's'} selected.
+                    {m.document_review_toggle_a_level_on_to({ effectiveAspectsCount: effectiveAspects.length, plural: effectiveAspects.length === 1 ? '' : 's' })}
                 </p>
                 <fieldset style="margin: 0 0 1rem 0; padding: 0; border: none;">
-                    <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">Package</legend>
-                    <select aria-label="Package" bind:value={selectedReviewerPackage} onchange={(event) => selectReviewerPackage((event.currentTarget as HTMLSelectElement).value)}
+                    <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">{m.document_review_package()}</legend>
+                    <select aria-label={m.document_review_package()} bind:value={selectedReviewerPackage} onchange={(event) => selectReviewerPackage((event.currentTarget as HTMLSelectElement).value)}
                         style="display: block; min-width: 15rem; margin-bottom: 1rem; padding: 0.45rem 0.7rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; color: {textPrimary}; font-size: 0.85rem;">
                         {#each reviewerPackages as reviewerPackage}
                             <option value={reviewerPackage.key}>{reviewerPackage.label}</option>
                         {/each}
                     </select>
                     <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">{labelFor('dr-s2-depth-label', 'Review depth')}</legend>
-                    <div role="radiogroup" aria-label="Review depth" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <div role="radiogroup" aria-label={m.document_review_review_depth()} style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         {#each [1, 2, 3] as depth}
                             <button
                                 type="button"
@@ -618,7 +619,7 @@
                                 onclick={() => (reviewDepth = depth as 1 | 2 | 3)}
                                 style="padding: 0.45rem 0.9rem; border-radius: 8px; border: 1px solid {reviewDepth === depth ? accent : borderColor}; background: {reviewDepth === depth ? accentTint : inputBg}; color: {reviewDepth === depth ? textPrimary : textSecondary}; cursor: pointer; font-size: 0.85rem; font-weight: 600;"
                             >
-                                Depth {depth}
+                                {m.document_review_depth({ depth })}
                             </button>
                         {/each}
                     </div>
@@ -630,14 +631,14 @@
                             <div style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem;">
                                 <div style="flex: 1;">
                                     <div style="font-weight: 600; color: {textPrimary};">{tier.label}</div>
-                                    <div style="font-size: 0.85rem; color: {textSecondary};">{tier.description} — {tierSelectedCount(tier)} of {tier.aspect_names.length} aspects selected</div>
+                                    <div style="font-size: 0.85rem; color: {textSecondary};">{m.document_review_of_aspects_selected({ description: tier.description, tier: tierSelectedCount(tier), aspect_namesCount: tier.aspect_names.length })}</div>
                                 </div>
                                 <!-- On/Off toggle: On iff ≥1 of the tier's aspects is selected -->
                                 <button type="button" role="switch" aria-checked={on} onclick={() => toggleTier(tier)}
                                     disabled={tier.aspect_names.length === 0}
-                                    title={on ? 'On — click to remove this level’s aspects' : 'Off — click to add this level’s aspects'}
+                                    title={on ? 'On — click to remove this level’s aspects' : m.document_review_off_click_to_add_this()}
                                     style="display: inline-flex; align-items: center; gap: 0.45rem; background: none; border: none; cursor: {tier.aspect_names.length === 0 ? 'not-allowed' : 'pointer'}; opacity: {tier.aspect_names.length === 0 ? 0.4 : 1};">
-                                    <span style="font-size: 0.72rem; font-weight: 700; width: 22px; text-align: right; color: {on ? accent : textMuted};">{on ? 'On' : 'Off'}</span>
+                                    <span style="font-size: 0.72rem; font-weight: 700; width: 22px; text-align: right; color: {on ? accent : textMuted};">{on ? m.document_review_on() : m.document_review_off()}</span>
                                     <span style="position: relative; width: 38px; height: 20px; border-radius: 10px; background: {on ? accent : borderColor}; transition: background 0.15s;">
                                         <span style="position: absolute; top: 2px; left: {on ? '20px' : '2px'}; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 0.15s;"></span>
                                     </span>
@@ -651,7 +652,7 @@
                                     {:else}
                                         <ChevronRightIcon size={14} />
                                     {/if}
-                                    {expandedTiers.has(tier.key) ? 'Hide' : 'View'} {tierSelectedCount(tier)}/{tier.aspect_names.length} selected aspects
+                                    {m.document_review_selected_aspects({ value: expandedTiers.has(tier.key) ? m.document_review_hide() : m.document_review_view(), tier: tierSelectedCount(tier), aspect_namesCount: tier.aspect_names.length })}
                                 </button>
                                 {#if expandedTiers.has(tier.key)}
                                     <div style="padding: 0.25rem 1rem 0.85rem 2rem; display: flex; flex-direction: column; gap: 0.6rem;">
@@ -659,9 +660,9 @@
                                         <div style="display: flex; align-items: center; gap: 0.6rem;">
                                             <button type="button" onclick={() => setAllInTier(tier, !allAspectsChecked(tier))}
                                                 style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.7rem; background: {inputBg}; border: 1px solid {accent}; border-radius: 6px; cursor: pointer; color: {accent}; font-size: 0.78rem; font-weight: 600;">
-                                                {allAspectsChecked(tier) ? 'Deselect all' : 'Select all'}
+                                                {allAspectsChecked(tier) ? m.document_review_deselect_all() : m.document_review_select_all()}
                                             </button>
-                                            <span style="font-size: 0.75rem; color: {textMuted};">{tierSelectedCount(tier)} of {tier.aspect_names.length} selected</span>
+                                            <span style="font-size: 0.75rem; color: {textMuted};">{m.document_review_of_selected({ tier: tierSelectedCount(tier), aspect_namesCount: tier.aspect_names.length })}</span>
                                         </div>
                                         {#each groupAspectNames(tier.aspect_names) as cat}
                                             <div>
@@ -673,7 +674,7 @@
                                                     {#each cat.items as item}
                                                         {@const checked = aspectChecked(item.name)}
                                                         <button type="button" onclick={() => toggleAspect(item.name)}
-                                                            title={item.description || (checked ? 'Click to deselect' : 'Click to select')}
+                                                            title={item.description || (checked ? m.document_review_click_to_deselect() : m.document_review_click_to_select())}
                                                             style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
                                                             background: {checked ? accentTint : 'transparent'}; border: 1px solid {checked ? accent : borderColor}; color: {checked ? textPrimary : textMuted};">
                                                             {#if checked}
@@ -698,7 +699,7 @@
                 <button onclick={() => currentStep = 1}
                     style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">{labelFor('dr-btn-back', '← Back')}</button>
                 <!-- Wrap in a span so the help tooltip shows even while the button is disabled -->
-                <span title={effectiveAspects.length === 0 ? 'Select at least one aspect to review before continuing.' : ''} style="display: inline-flex;">
+                <span title={effectiveAspects.length === 0 ? m.document_review_select_at_least_one_aspect() : ''} style="display: inline-flex;">
                     <button onclick={() => currentStep = 3}
                         disabled={effectiveAspects.length === 0}
                         style="padding: 0.6rem 1.5rem; background: {effectiveAspects.length > 0 ? accent : borderColor}; color: {effectiveAspects.length > 0 ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {effectiveAspects.length > 0 ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">{labelFor('dr-btn-next', 'Next →')}</button>
@@ -709,9 +710,9 @@
         <!-- Step 3: Supporting Documents -->
         {#if currentStep === 3}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s3-heading', 'Step 3: Supporting Documents')} <span style="font-weight: 400; color: {textMuted};">(optional)</span></h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s3-heading', 'Step 3: Supporting Documents')} <span style="font-weight: 400; color: {textMuted};">{m.document_review_optional()}</span></h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
-                    Add reference standards or supporting documents for compliance checking.
+                    {m.document_review_add_reference_standards_or_supporting()}
                 </p>
                 {#each referenceDocs as doc, i}
                     <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; margin-bottom: 0.5rem;">
@@ -743,26 +744,26 @@
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s4-heading', 'Step 4: Review Details')}</h2>
                 <div style="margin-bottom: 1rem;">
                     <label for="review-requester-name" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-name-label', 'Your Name *')}</label>
-                    <input id="review-requester-name" type="text" bind:value={requesterName} placeholder="Enter your name"
+                    <input id="review-requester-name" type="text" bind:value={requesterName} placeholder={m.document_review_enter_your_name()}
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label for="review-notes" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-notes-label', 'Notes (optional)')}</label>
-                    <textarea id="review-notes" bind:value={notes} placeholder="e.g., Focus on sterilization validation sections..."
+                    <textarea id="review-notes" bind:value={notes} placeholder={m.document_review_e_g_focus_on_sterilization()}
                         rows={4}
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem; resize: vertical;"></textarea>
                 </div>
                 {#if isVisible('dr-s4-report-label')}
                     <div style="margin-bottom: 1rem;">
                         <label for="review-report-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-report-label', 'Report Template (optional)')}</label>
-                        <input id="review-report-template" type="text" bind:value={reportTemplate} placeholder="Template name or path"
+                        <input id="review-report-template" type="text" bind:value={reportTemplate} placeholder={m.document_review_template_name_or_path()}
                             style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                     </div>
                 {/if}
                 {#if isVisible('dr-s4-doctpl-label')}
                     <div style="margin-bottom: 1rem;">
                         <label for="review-doc-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-doctpl-label', 'Doc Template (optional)')}</label>
-                        <input id="review-doc-template" type="text" bind:value={docTemplate} placeholder="Template name or path"
+                        <input id="review-doc-template" type="text" bind:value={docTemplate} placeholder={m.document_review_template_name_or_path()}
                             style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                     </div>
                 {/if}
@@ -777,9 +778,9 @@
                     <div style="color: {textSecondary};">{labelFor('dr-summary-checklevel', 'Check Level:')}</div>
                     <div style="color: {textPrimary};">{checkLevelLabel}</div>
                     <div style="color: {textSecondary};">{labelFor('dr-summary-aspects', 'Aspects:')}</div>
-                    <div style="color: {textPrimary};">{effectiveAspects.length} selected</div>
+                    <div style="color: {textPrimary};">{m.document_review_selected_2({ effectiveAspectsCount: effectiveAspects.length })}</div>
                     <div style="color: {textSecondary};">{labelFor('dr-summary-depth', 'Review Depth:')}</div>
-                    <div style="color: {textPrimary};">Depth {reviewDepth}</div>
+                    <div style="color: {textPrimary};">{m.document_review_depth_2({ reviewDepth })}</div>
                     <div style="color: {textSecondary};">{labelFor('dr-summary-requester', 'Requester:')}</div>
                     <div style="color: {textPrimary};">{requesterName}</div>
                 </div>
@@ -800,7 +801,7 @@
                     style="flex: 1; padding: 0.75rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
                     {#if isSubmitting}
                         <LoaderIcon size={16} style="animation: spin 1s linear infinite;" />
-                        Submitting...
+                        {m.document_review_submitting()}
                     {:else}
                         {labelFor('dr-btn-start', 'Start Review')}
                     {/if}
@@ -829,11 +830,11 @@
     <div role="dialog" aria-modal="true"
         style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5);">
         <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; max-width: 380px; width: calc(100% - 2rem); box-shadow: 0 10px 40px rgba(0,0,0,0.35);">
-            <h3 style="font-size: 1.05rem; font-weight: 700; color: {textPrimary}; margin-bottom: 0.5rem;">Cannot start review</h3>
+            <h3 style="font-size: 1.05rem; font-weight: 700; color: {textPrimary}; margin-bottom: 0.5rem;">{m.document_review_cannot_start_review()}</h3>
             <p style="color: {textSecondary}; font-size: 0.9rem; margin-bottom: 1.25rem;">{dialogMessage}</p>
             <div style="display: flex; justify-content: flex-end;">
                 <button onclick={confirmValidationDialog}
-                    style="padding: 0.55rem 1.4rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">OK</button>
+                    style="padding: 0.55rem 1.4rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">{m.document_review_ok()}</button>
             </div>
         </div>
     </div>

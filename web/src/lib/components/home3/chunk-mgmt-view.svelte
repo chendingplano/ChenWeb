@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -238,7 +239,7 @@
 				await selectChunk(chunks[0]);
 			}
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve chunks';
+			errorMsg = err instanceof Error ? err.message : m.chunk_mgmt_failed_to_retrieve_chunks();
 		} finally {
 			loading = false;
 		}
@@ -303,7 +304,7 @@
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || m.chunk_mgmt_input({ id: r.id });
 	}
 
 	function recordDisplayDocNo(r: KbInputRecord): string {
@@ -317,7 +318,7 @@
 			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
 			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
 			status: record.type?.trim() || '—',
-			description: 'Select a record to inspect semantic chunks.',
+			description: m.chunk_mgmt_select_a_record_to_inspect(),
 			badges: [record.type?.trim() || '—']
 		};
 	}
@@ -430,14 +431,14 @@
 >
 	<header class="header">
 			<div class="header-left">
-				<div class="eyebrow">Knowledge System· Vol. IV</div>
-				<h1 class="display">Chunks</h1>
-				<div class="subtitle">Review fixed-size chunks and map each chunk back to source PDF regions.</div>
+				<div class="eyebrow">{m.chunk_mgmt_knowledge_system_vol_iv()}</div>
+				<h1 class="display">{m.chunk_mgmt_chunks()}</h1>
+				<div class="subtitle">{m.chunk_mgmt_review_fixed_size_chunks_and()}</div>
 			</div>
 		<div class="header-actions">
 			<button class="btn btn-ghost header-settings-btn" type="button" onclick={openChunkSettings}>
 				<SettingsIcon size={15} />
-				Settings
+				{m.chunk_mgmt_settings()}
 			</button>
 		</div>
 	</header>
@@ -446,10 +447,10 @@
 		<KbInputRecordBrowser
 			{darkMode}
 			instanceKey="chunks-record-browser"
-			title="kb.inputs"
-			subtitle="Search, filter, and select input records before inspecting chunks."
-			emptyTitle="No records yet"
-			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+			title={m.chunk_mgmt_kb_inputs()}
+			subtitle={m.chunk_mgmt_search_filter_and_select_input()}
+			emptyTitle={m.chunk_mgmt_no_records_yet()}
+			emptySubtitle={m.chunk_mgmt_use_search_or_retrieve_to()}
 			selectedRecordId={currentInput?.id ?? null}
 			mapRecord={mapBrowserRecord}
 			onSelect={(record) => void loadChunksForRecord(record.id)}
@@ -461,8 +462,8 @@
 		<aside class="chunk-sidebar">
 			<div class="left-meta">
 				<div class="left-meta-copy">
-					<div class="left-meta-title">Chunks</div>
-					<div class="left-meta-count">{chunks.length} found</div>
+					<div class="left-meta-title">{m.chunk_mgmt_chunks()}</div>
+					<div class="left-meta-count">{m.chunk_mgmt_found({ chunksCount: chunks.length })}</div>
 				</div>
 			</div>
 
@@ -471,8 +472,8 @@
 					<div class="error">{errorMsg}</div>
 				{:else if !loading && chunks.length === 0}
 					<div class="empty">
-						<div class="empty-title">No chunks loaded</div>
-						<div class="empty-sub">Select a record to retrieve `.chunks` entries.</div>
+						<div class="empty-title">{m.chunk_mgmt_no_chunks_loaded()}</div>
+						<div class="empty-sub">{m.chunk_mgmt_select_a_record_to_retrieve()}</div>
 					</div>
 				{:else}
 					{#each chunks as chunk (chunk.seqno)}
@@ -483,7 +484,7 @@
 							onclick={() => selectChunk(chunk)}
 						>
 							<div class="chunk-summary">
-								<div class="chunk-section-label">Summary</div>
+								<div class="chunk-section-label">{m.chunk_mgmt_summary()}</div>
 								<div class="chunk-line1">
 									<span class="seq">#{chunk.seqno}</span>
 									<span class="type">{chunk.topic_type}</span>
@@ -492,9 +493,9 @@
 								<div class="chunk-keywords">{(chunk.keywords ?? []).join(', ') || '—'}</div>
 							</div>
 							<div class="chunk-content">
-								<div class="chunk-section-label">Content</div>
+								<div class="chunk-section-label">{m.chunk_mgmt_content()}</div>
 								{#if (chunk.content_lines ?? []).length === 0}
-									<div class="chunk-content-line muted">No source lines found.</div>
+									<div class="chunk-content-line muted">{m.chunk_mgmt_no_source_lines_found()}</div>
 								{:else}
 									{#each chunk.content_lines as ln (`${chunk.seqno}-${ln.page_number}-${ln.line_number}`)}
 										<div class="chunk-content-line">
@@ -512,7 +513,7 @@
 			type="button"
 			class="chunk-list-resizer"
 			class:active={chunkListResizing}
-			aria-label="Resize chunks list"
+			aria-label={m.chunk_mgmt_resize_chunks_list()}
 			onpointerdown={startChunkListResize}
 			onkeydown={onChunkListResizerKeydown}
 		>
@@ -522,17 +523,17 @@
 		<section class="right">
 			<div class="right-toolbar">
 				<div class="title">
-					<span class="name">{currentInput?.file_name ?? 'No document loaded'}</span>
+					<span class="name">{currentInput?.file_name ?? m.chunk_mgmt_no_document_loaded()}</span>
 					{#if currentInput}<span class="type">{currentInput.type}</span>{/if}
 				</div>
 				<div class="stats">
-					<span>{highlightCount} marks</span>
-					<span>{selectedBBoxes.length} bbox{selectedBBoxes.length === 1 ? '' : 'es'}</span>
+					<span>{m.chunk_mgmt_marks({ highlightCount })}</span>
+					<span>{m.chunk_mgmt_bbox({ selectedBBoxesCount: selectedBBoxes.length, plural: selectedBBoxes.length === 1 ? '' : 'es' })}</span>
 				</div>
 			</div>
 
 			{#if !currentInput}
-				<div class="doc-empty">Retrieve a record to display document and chunk highlights.</div>
+				<div class="doc-empty">{m.chunk_mgmt_retrieve_a_record_to_display()}</div>
 			{:else}
 				{#if isPdf}
 					<PdfViewWindow
@@ -546,15 +547,15 @@
 						sidebarMinWidth={140}
 						sidebarMaxWidth={420}
 						sidebarDefaultWidth={270}
-						sidebarTitle="Chunk Details"
+						sidebarTitle={m.chunk_mgmt_chunk_details()}
 						sidebarSettingsKey="chunk-mgmt-pdf-sidebar"
-						sidebarWidthSettingLabel="Panel Width"
+						sidebarWidthSettingLabel={m.chunk_mgmt_panel_width()}
 					>
 						{#snippet sidebar()}
 							{#if selectedChunk}
 								<div class="info-block">
 									<div class="info-section">
-										<div class="info-section-title">Chunk</div>
+										<div class="info-section-title">{m.chunk_mgmt_chunk()}</div>
 										<div class="info-row">
 											<span class="info-label">#{selectedChunk.seqno}</span>
 											<span class="info-type">{selectedChunk.topic_type}</span>
@@ -564,7 +565,7 @@
 
 									{#if (selectedChunk.keywords ?? []).length > 0}
 										<div class="info-section">
-											<div class="info-section-title">Keywords</div>
+											<div class="info-section-title">{m.chunk_mgmt_keywords()}</div>
 											<div class="info-keywords">
 												{selectedChunk.keywords.join(', ')}
 											</div>
@@ -573,7 +574,7 @@
 
 									{#if (selectedChunk.source_line_spans ?? []).length > 0}
 										<div class="info-section">
-											<div class="info-section-title">Source Lines</div>
+											<div class="info-section-title">{m.chunk_mgmt_source_lines()}</div>
 											<div class="info-spans">
 												{#each formatSourceLineRanges(selectedChunk.source_line_spans) as spanLabel (spanLabel)}
 													<span class="info-span-chip">{spanLabel}</span>
@@ -584,11 +585,11 @@
 
 									{#if selectedBBoxes.length > 0}
 										<div class="info-section">
-											<div class="info-section-title">Bounding Boxes ({selectedBBoxes.length})</div>
+											<div class="info-section-title">{m.chunk_mgmt_bounding_boxes({ selectedBBoxesCount: selectedBBoxes.length })}</div>
 											<div class="info-bbox-list">
 												{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
 													<div class="info-bbox-row">
-														<span class="info-bbox-page">Page {box.page_number}</span>
+														<span class="info-bbox-page">{m.chunk_mgmt_page({ page_number: box.page_number })}</span>
 														<span class="info-bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</span>
 													</div>
 												{/each}
@@ -598,7 +599,7 @@
 
 									{#if (selectedChunk.content_lines ?? []).length > 0}
 										<div class="info-section info-section-content">
-											<div class="info-section-title">Content Lines ({selectedChunk.content_lines.length})</div>
+											<div class="info-section-title">{m.chunk_mgmt_content_lines({ content_linesCount: selectedChunk.content_lines.length })}</div>
 											<div class="info-content-list">
 												{#each selectedChunk.content_lines as ln (`${ln.page_number}-${ln.line_number}`)}
 													<div class="info-content-item">
@@ -614,12 +615,12 @@
 									{/if}
 								</div>
 							{:else}
-								<div class="meta-empty">Select a chunk to view details.</div>
+								<div class="meta-empty">{m.chunk_mgmt_select_a_chunk_to_view()}</div>
 							{/if}
 						{/snippet}
 					</PdfViewWindow>
 				{:else}
-					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
+					<iframe class="doc-iframe" src={fileUrl} title={m.chunk_mgmt_document_viewer()}></iframe>
 				{/if}
 			{/if}
 		</section>
@@ -646,10 +647,10 @@
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-eyebrow">Preferences</div>
-					<h2 class="dialog-title">Chunk View Settings</h2>
+					<div class="dialog-eyebrow">{m.chunk_mgmt_preferences()}</div>
+					<h2 class="dialog-title">{m.chunk_mgmt_chunk_view_settings()}</h2>
 					<p class="dialog-subtitle">
-						Adjust the chunk list layout and colors. These preferences are saved for the current user.
+						{m.chunk_mgmt_adjust_the_chunk_list_layout()}
 					</p>
 				</div>
 			</div>
@@ -658,12 +659,12 @@
 				<div class="dialog-controls">
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Appearance</div>
-							<div class="dialog-section-copy">Set the saved defaults used by this chunk viewer.</div>
+							<div class="dialog-section-title">{m.chunk_mgmt_appearance()}</div>
+							<div class="dialog-section-copy">{m.chunk_mgmt_set_the_saved_defaults_used()}</div>
 						</div>
 						<div class="settings-grid">
 							<label class="field dialog-field settings-field">
-								<span class="field-label">Chunk background color</span>
+								<span class="field-label">{m.chunk_mgmt_chunk_background_color()}</span>
 								<div class="settings-color-row">
 									<input
 										class="settings-color-input"
@@ -681,12 +682,12 @@
 										onclick={() =>
 											applyChunkPanelSettings({ chunkCardBackground: CHUNK_THEME_BACKGROUND })}
 									>
-										Follow theme
+										{m.chunk_mgmt_follow_theme()}
 									</button>
 								</div>
 							</label>
 							<label class="field dialog-field settings-field">
-								<span class="field-label">Summary block background color</span>
+								<span class="field-label">{m.chunk_mgmt_summary_block_background_color()}</span>
 								<div class="settings-color-row">
 									<input
 										class="settings-color-input"
@@ -704,12 +705,12 @@
 										onclick={() =>
 											applyChunkPanelSettings({ summaryBackground: CHUNK_THEME_BACKGROUND })}
 									>
-										Follow theme
+										{m.chunk_mgmt_follow_theme()}
 									</button>
 								</div>
 							</label>
 							<label class="field dialog-field settings-field">
-								<span class="field-label">Content block background color</span>
+								<span class="field-label">{m.chunk_mgmt_content_block_background_color()}</span>
 								<div class="settings-color-row">
 									<input
 										class="settings-color-input"
@@ -727,12 +728,12 @@
 										onclick={() =>
 											applyChunkPanelSettings({ contentBackground: CHUNK_THEME_BACKGROUND })}
 									>
-										Follow theme
+										{m.chunk_mgmt_follow_theme()}
 									</button>
 								</div>
 							</label>
 							<div class="field dialog-field settings-field settings-field-wide">
-								<span class="field-label">CHUNKS list width ({chunkPanelSettings.chunkListWidth}px)</span>
+								<span class="field-label">{m.chunk_mgmt_chunks_list_width_px({ chunkListWidth: chunkPanelSettings.chunkListWidth })}</span>
 								<div class="settings-width-row">
 									<span class="settings-width-bound">{CHUNK_LIST_MIN_WIDTH}</span>
 									<input
@@ -750,11 +751,11 @@
 									<span class="settings-width-bound">{CHUNK_LIST_MAX_WIDTH}</span>
 								</div>
 								<div class="dialog-section-copy" style="margin-top:6px;">
-									You can also drag the divider beside the list to resize.
+									{m.chunk_mgmt_you_can_also_drag_the()}
 								</div>
 							</div>
 							<label class="field dialog-field settings-field settings-field-wide">
-								<span class="field-label">Zoom percent ({Math.round(pdfZoom * 100)}%)</span>
+								<span class="field-label">{m.chunk_mgmt_zoom_percent({ value: Math.round(pdfZoom * 100) })}</span>
 								<div class="settings-width-row">
 									<span class="settings-width-bound">{Math.round(ZOOM_MIN * 100)}%</span>
 									<input
@@ -779,11 +780,11 @@
 			</div>
 
 			<div class="dialog-foot">
-				<div class="dialog-foot-hint">Updates are saved automatically.</div>
+				<div class="dialog-foot-hint">{m.chunk_mgmt_updates_are_saved_automatically()}</div>
 				<div class="dialog-foot-buttons">
-					<button class="btn btn-primary dialog-select-btn" type="button" onclick={resetChunkSettings}>Reset</button>
+					<button class="btn btn-primary dialog-select-btn" type="button" onclick={resetChunkSettings}>{m.chunk_mgmt_reset()}</button>
 					<button class="btn btn-primary dialog-select-btn" type="button" onclick={closeChunkSettings}>
-						Close
+						{m.chunk_mgmt_close()}
 					</button>
 				</div>
 			</div>

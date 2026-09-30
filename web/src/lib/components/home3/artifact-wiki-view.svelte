@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import TreeGraphView from './tree-graph-view.svelte';
 	import ArtifactCategoryPanel from './artifact-category-panel.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
@@ -17,7 +18,7 @@
 	};
 
 	let tabs = $state<ArtifactTab[]>([
-		{ id: 'artifact-graph', label: 'Artifact Graph', categoryPath: null, closable: false }
+		{ id: 'artifact-graph', label: m.artifact_wiki_artifact_graph(), categoryPath: null, closable: false }
 	]);
 	let activeTabId = $state('artifact-graph');
 
@@ -93,10 +94,10 @@
 					mode="summary"
 					{darkMode}
 					heroEyebrow="Artifact Wiki"
-					heroTitle="Artifact Graph"
-					heroDescription="Browse and explore all artifacts — summaries, topics, metrics, scenes, provisions, and products — organized by category."
-					rootTabLabel="Artifact Graph"
-					loadErrorLabel="Artifact Graph"
+					heroTitle={m.artifact_wiki_artifact_graph()}
+					heroDescription={m.artifact_wiki_browse_and_explore_all_artifacts()}
+					rootTabLabel={m.artifact_wiki_artifact_graph()}
+					loadErrorLabel={m.artifact_wiki_artifact_graph()}
 					hideTabStrip={true}
 					onOpenCategoryTab={openCategoryTab}
 				/>

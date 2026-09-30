@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
  import { onMount } from 'svelte';
  import { COUNTRIES } from './country-list';
  import { listPeakHours, createPeakHours, updatePeakHours, deletePeakHours, validatePeakHoursDraft, type PeakHours, type PeakHoursInput, type ApplicableDaysMode } from './peak-hours-client';
@@ -26,7 +27,7 @@
  let holidaysNeedCountry = $derived(excludeHolidays && !draft.country.trim());
  let timezoneOptions = $derived(draft.timezone && !timezones.includes(draft.timezone) ? [draft.timezone, ...timezones] : timezones);
 
- async function load() { loading = true; error = ''; try { records = await listPeakHours(); } catch (e) { error = e instanceof Error ? e.message : 'Unable to load peak hours.'; } finally { loading = false; } }
+ async function load() { loading = true; error = ''; try { records = await listPeakHours(); } catch (e) { error = e instanceof Error ? e.message : m.peak_hours_unable_to_load_peak_hours(); } finally { loading = false; } }
 
  function openNew() { editing = false; formError = ''; draft = emptyDraft(); hourInput = ''; weekdaysInput = ''; monthDaysInput = ''; excludeSpecificInput = ''; modal = true; }
  function openEdit(r: PeakHours) {
@@ -66,18 +67,18 @@
    else await createPeakHours(draft);
    modal = false;
    await load();
-  } catch (e) { formError = e instanceof Error ? e.message : 'Unable to save peak hours.'; } finally { saving = false; }
+  } catch (e) { formError = e instanceof Error ? e.message : m.peak_hours_unable_to_save_peak_hours(); } finally { saving = false; }
  }
 
  async function remove(r: PeakHours) {
-  if (!confirm(`Delete peak hours "${r.name}"?`)) return;
-  try { await deletePeakHours(r.name); await load(); } catch (e) { error = e instanceof Error ? e.message : 'Unable to delete peak hours.'; }
+  if (!confirm(m.peak_hours_delete_peak_hours({ name: r.name }))) return;
+  try { await deletePeakHours(r.name); await load(); } catch (e) { error = e instanceof Error ? e.message : m.peak_hours_unable_to_delete_peak_hours(); }
  }
 
  function describeDays(r: PeakHours): string {
-  if (r.applicable_days.mode === 'workdays') return 'Workdays';
+  if (r.applicable_days.mode === 'workdays') return m.peak_hours_workdays();
   if (r.applicable_days.mode === 'weekdays') return (r.applicable_days.days ?? []).join(', ') || 'weekdays';
-  return `Day ${(r.applicable_days.days ?? []).join(', ')} of month`;
+  return m.peak_hours_day_of_month({ days: (r.applicable_days.days ?? []).join(', ') });
  }
 
  onMount(load);
@@ -85,47 +86,47 @@
 
 <div class="page" style={`background:${colors.bg};color:${colors.text};user-select:text`}>
  <section class="card intro" style={`background:${colors.card};border-color:${colors.border}`}>
-  <div><h1>Peak Hours</h1><p>Named, timezone-aware windows of active hours with applicable-day and exclusion rules.</p></div>
-  <div class="actions"><button onclick={openNew}>New Peak Hours</button><button class="secondary" onclick={load}>Refresh</button></div>
+  <div><h1>{m.peak_hours_peak_hours()}</h1><p>{m.peak_hours_named_timezone_aware_windows_of()}</p></div>
+  <div class="actions"><button onclick={openNew}>{m.peak_hours_new_peak_hours()}</button><button class="secondary" onclick={load}>{m.peak_hours_refresh()}</button></div>
  </section>
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
-  <div class="filters"><input aria-label="Search peak hours" bind:value={query} placeholder="Search name, timezone, country" /></div>
-  {#if loading}<div class="state">Loading peak hours…</div>{:else if error}<div class="state error">{error}</div>{:else}<div class="table-wrap"><table><thead><tr><th>Name</th><th>Hours</th><th>Timezone</th><th>Applicable Days</th><th>Exclude</th><th>Country</th><th></th></tr></thead><tbody>{#each filtered as r}<tr><td>{r.name}</td><td class="literal">{r.hours.join(', ')}</td><td>{r.timezone}</td><td>{describeDays(r)}</td><td>{r.exclude_days.join(', ') || '—'}</td><td>{r.country || '—'}</td><td><button class="link" onclick={() => openEdit(r)}>Edit</button><button class="link danger" onclick={() => remove(r)}>Delete</button></td></tr>{:else}<tr><td colspan="7" class="state">No peak hours definitions match these filters.</td></tr>{/each}</tbody></table></div>{/if}
+  <div class="filters"><input aria-label={m.peak_hours_search_peak_hours()} bind:value={query} placeholder={m.peak_hours_search_name_timezone_country()} /></div>
+  {#if loading}<div class="state">{m.peak_hours_loading_peak_hours()}</div>{:else if error}<div class="state error">{error}</div>{:else}<div class="table-wrap"><table><thead><tr><th>{m.peak_hours_name()}</th><th>{m.peak_hours_hours()}</th><th>{m.peak_hours_timezone()}</th><th>{m.peak_hours_applicable_days()}</th><th>{m.peak_hours_exclude()}</th><th>{m.peak_hours_country()}</th><th></th></tr></thead><tbody>{#each filtered as r}<tr><td>{r.name}</td><td class="literal">{r.hours.join(', ')}</td><td>{r.timezone}</td><td>{describeDays(r)}</td><td>{r.exclude_days.join(', ') || '—'}</td><td>{r.country || '—'}</td><td><button class="link" onclick={() => openEdit(r)}>{m.peak_hours_edit()}</button><button class="link danger" onclick={() => remove(r)}>{m.peak_hours_delete()}</button></td></tr>{:else}<tr><td colspan="7" class="state">{m.peak_hours_no_peak_hours_definitions_match()}</td></tr>{/each}</tbody></table></div>{/if}
  </section>
 </div>
 
-{#if modal}<div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (modal = false)}><div class="modal" role="dialog" aria-modal="true" aria-label={editing ? 'Edit peak hours' : 'New peak hours'} style={`background:${colors.card};color:${colors.text};border-color:${colors.border};user-select:text`}>
- <div class="modal-head"><h2>{editing ? 'Edit Peak Hours' : 'New Peak Hours'}</h2><button class="link" onclick={() => (modal = false)}>Close</button></div>
+{#if modal}<div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (modal = false)}><div class="modal" role="dialog" aria-modal="true" aria-label={editing ? m.peak_hours_edit_peak_hours() : m.peak_hours_new_peak_hours_2()} style={`background:${colors.card};color:${colors.text};border-color:${colors.border};user-select:text`}>
+ <div class="modal-head"><h2>{editing ? m.peak_hours_edit_peak_hours_2() : m.peak_hours_new_peak_hours()}</h2><button class="link" onclick={() => (modal = false)}>{m.peak_hours_close()}</button></div>
  <div class="form">
-  <label>Name{#if editing}<input bind:value={draft.name} disabled />{:else}<input bind:value={draft.name} />{/if}</label>
-  <label>Timezone (IANA)<select bind:value={draft.timezone}><option value="" disabled>Select a timezone…</option>{#each timezoneOptions as tz}<option value={tz}>{tz}</option>{/each}</select></label>
+  <label>{m.peak_hours_name()}{#if editing}<input bind:value={draft.name} disabled />{:else}<input bind:value={draft.name} />{/if}</label>
+  <label>{m.peak_hours_timezone_iana()}<select bind:value={draft.timezone}><option value="" disabled>{m.peak_hours_select_a_timezone()}</option>{#each timezoneOptions as tz}<option value={tz}>{tz}</option>{/each}</select></label>
 
   <div class="group">
-   <span class="group-label">Hours</span>
+   <span class="group-label">{m.peak_hours_hours()}</span>
    <div class="chip-row">{#each draft.hours as h, i}<span class="chip">{h}<button class="chip-x" onclick={() => removeHour(i)} aria-label={`Remove ${h}`}>×</button></span>{/each}</div>
-   <div class="inline"><input bind:value={hourInput} placeholder="09:00-12:00" /><button class="secondary" onclick={addHour}>Add</button></div>
-   <small>24-hour HH:MM, two digits each, start and end joined by a hyphen (e.g. 09:00-12:00, not 9am-12pm)</small>
+   <div class="inline"><input bind:value={hourInput} placeholder="09:00-12:00" /><button class="secondary" onclick={addHour}>{m.peak_hours_add()}</button></div>
+   <small>{m.peak_hours_24_hour_hh_mm_two()}</small>
   </div>
 
   <div class="group">
-   <span class="group-label">Applicable Days</span>
-   <div class="inline"><label class="radio"><input type="radio" name="mode" checked={draft.applicable_days.mode === 'workdays'} onchange={() => setMode('workdays')} /> Workdays</label><label class="radio"><input type="radio" name="mode" checked={draft.applicable_days.mode === 'weekdays'} onchange={() => { setMode('weekdays'); syncWeekdays(); }} /> Weekdays</label><label class="radio"><input type="radio" name="mode" checked={draft.applicable_days.mode === 'days_of_month'} onchange={() => { setMode('days_of_month'); syncMonthDays(); }} /> Days of month</label></div>
-   {#if draft.applicable_days.mode === 'weekdays'}<input bind:value={weekdaysInput} oninput={syncWeekdays} placeholder="mon, tue, wed" /><small>Any of: {weekdayOptions.join(', ')}</small>{/if}
-   {#if draft.applicable_days.mode === 'days_of_month'}<input bind:value={monthDaysInput} oninput={syncMonthDays} placeholder="1, 15" /><small>Comma-separated day numbers 1-31</small>{/if}
+   <span class="group-label">{m.peak_hours_applicable_days()}</span>
+   <div class="inline"><label class="radio"><input type="radio" name="mode" checked={draft.applicable_days.mode === 'workdays'} onchange={() => setMode('workdays')} /> {m.peak_hours_workdays()}</label><label class="radio"><input type="radio" name="mode" checked={draft.applicable_days.mode === 'weekdays'} onchange={() => { setMode('weekdays'); syncWeekdays(); }} /> {m.peak_hours_weekdays()}</label><label class="radio"><input type="radio" name="mode" checked={draft.applicable_days.mode === 'days_of_month'} onchange={() => { setMode('days_of_month'); syncMonthDays(); }} /> {m.peak_hours_days_of_month()}</label></div>
+   {#if draft.applicable_days.mode === 'weekdays'}<input bind:value={weekdaysInput} oninput={syncWeekdays} placeholder={m.peak_hours_mon_tue_wed()} /><small>{m.peak_hours_any_of({ weekdayOptions: weekdayOptions.join(', ') })}</small>{/if}
+   {#if draft.applicable_days.mode === 'days_of_month'}<input bind:value={monthDaysInput} oninput={syncMonthDays} placeholder="1, 15" /><small>{m.peak_hours_comma_separated_day_numbers_1()}</small>{/if}
   </div>
 
   <div class="group">
-   <span class="group-label">Exclude Days (any match excludes)</span>
-   <div class="inline"><label class="check"><input type="checkbox" checked={excludeWeekends} onchange={(e) => toggleExcludeKeyword('weekends', (e.target as HTMLInputElement).checked)} /> Weekends</label><label class="check"><input type="checkbox" checked={excludeHolidays} onchange={(e) => toggleExcludeKeyword('holidays', (e.target as HTMLInputElement).checked)} /> Holidays</label></div>
-   {#if holidaysNeedCountry}<small class="hint">Set a country below to resolve holiday dates — otherwise "Holidays" excludes nothing.</small>{/if}
+   <span class="group-label">{m.peak_hours_exclude_days_any_match_excludes()}</span>
+   <div class="inline"><label class="check"><input type="checkbox" checked={excludeWeekends} onchange={(e) => toggleExcludeKeyword('weekends', (e.target as HTMLInputElement).checked)} /> {m.peak_hours_weekends()}</label><label class="check"><input type="checkbox" checked={excludeHolidays} onchange={(e) => toggleExcludeKeyword('holidays', (e.target as HTMLInputElement).checked)} /> {m.peak_hours_holidays()}</label></div>
+   {#if holidaysNeedCountry}<small class="hint">{m.peak_hours_set_a_country_below_to()}</small>{/if}
    <input bind:value={excludeSpecificInput} oninput={syncExcludeSpecific} placeholder="2026-12-25, 2026-12-24..2026-12-31" />
-   <small>Comma-separated ISO dates or ranges (start..end)</small>
+   <small>{m.peak_hours_comma_separated_iso_dates_or()}</small>
   </div>
 
-  <label>Country (for holiday exclusion)<select bind:value={draft.country}><option value="">— none —</option>{#each COUNTRIES as c}<option value={c.code}>{c.name}</option>{/each}</select></label>
+  <label>{m.peak_hours_country_for_holiday_exclusion()}<select bind:value={draft.country}><option value="">{m.peak_hours_none()}</option>{#each COUNTRIES as c}<option value={c.code}>{c.name}</option>{/each}</select></label>
  </div>
  {#if formError}<div class="error">{formError}</div>{/if}
- <div class="modal-actions"><button class="secondary" onclick={() => (modal = false)}>Cancel</button><button onclick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>
+ <div class="modal-actions"><button class="secondary" onclick={() => (modal = false)}>{m.peak_hours_cancel()}</button><button onclick={save} disabled={saving}>{saving ? m.peak_hours_saving() : m.peak_hours_save()}</button></div>
 </div></div>{/if}
 
 <style>

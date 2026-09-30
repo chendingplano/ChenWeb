@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import TagIcon from '@lucide/svelte/icons/tag';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import LogInIcon from '@lucide/svelte/icons/log-in';
@@ -18,9 +19,9 @@
 		darkMode = true,
 		browserInstanceKey = 'products',
 		scopeToActiveStore = false,
-		heroEyebrow = 'Knowledge System · Vol. III',
-		heroTitle = 'Products & Provenance',
-		heroDescription = 'Browse product records extracted from source documents, then return to the evidence that grounded each record.',
+		heroEyebrow = m.products_knowledge_system_vol_iii(),
+		heroTitle = m.products_products_provenance(),
+		heroDescription = m.products_browse_product_records_extracted_from(),
 		onFocusModeChange
 	}: {
 		darkMode?: boolean;
@@ -35,55 +36,55 @@
 	const PRODUCT_GROUPS: GroupDef[] = [
 		{
 			id: 'metadata',
-			label: 'Metadata',
+			label: m.products_metadata(),
 			icon: TagIcon,
 			attrs: [
-				{ key: 'product_type', label: 'Product Type', icon: TagIcon, kind: 'text', field: 'product_type' },
-				{ key: 'canonical_name', label: 'Canonical Name', icon: FileTextIcon, kind: 'text', field: 'canonical_name' }
+				{ key: 'product_type', label: m.products_product_type(), icon: TagIcon, kind: 'text', field: 'product_type' },
+				{ key: 'canonical_name', label: m.products_canonical_name(), icon: FileTextIcon, kind: 'text', field: 'canonical_name' }
 			]
 		},
 		{
 			id: 'grounding',
-			label: 'Grounding',
+			label: m.products_grounding(),
 			icon: InfoIcon,
 			attrs: [
-				{ key: 'evidence_quote', label: 'Evidence Quote', icon: FileTextIcon, kind: 'text', field: 'evidence_quote' },
-				{ key: 'confidence_reason', label: 'Confidence Reason', icon: InfoIcon, kind: 'text', field: 'confidence_reason' }
+				{ key: 'evidence_quote', label: m.products_evidence_quote(), icon: FileTextIcon, kind: 'text', field: 'evidence_quote' },
+				{ key: 'confidence_reason', label: m.products_confidence_reason(), icon: InfoIcon, kind: 'text', field: 'confidence_reason' }
 			]
 		},
 		{
 			id: 'inputs',
-			label: 'Inputs',
+			label: m.products_inputs(),
 			icon: LogInIcon,
 			attrs: [
-				{ key: 'conditions', label: 'Conditions', icon: CircleCheckIcon, kind: 'str', field: 'conditions' },
-				{ key: 'parameters', label: 'Parameters', icon: SettingsIcon, kind: 'str', field: 'parameters' }
+				{ key: 'conditions', label: m.products_conditions(), icon: CircleCheckIcon, kind: 'str', field: 'conditions' },
+				{ key: 'parameters', label: m.products_parameters(), icon: SettingsIcon, kind: 'str', field: 'parameters' }
 			]
 		},
 		{
 			id: 'actors',
-			label: 'Actors',
+			label: m.products_actors(),
 			icon: UsersIcon,
 			attrs: [
-				{ key: 'responsible_actor', label: 'Responsible Actor', icon: UsersIcon, kind: 'text', field: 'responsible_actor' }
+				{ key: 'responsible_actor', label: m.products_responsible_actor(), icon: UsersIcon, kind: 'text', field: 'responsible_actor' }
 			]
 		},
 		{
 			id: 'requirements',
-			label: 'Requirements',
+			label: m.products_requirements(),
 			icon: ClipboardListIcon,
 			attrs: [
-				{ key: 'obligation_level', label: 'Obligation Level', icon: CircleCheckIcon, kind: 'text', field: 'obligation_level' },
-				{ key: 'exceptions', label: 'Exceptions', icon: TriangleAlertIcon, kind: 'str', field: 'exceptions' },
-				{ key: 'requirement_text', label: 'Requirement Text', icon: FileTextIcon, kind: 'text', field: 'requirement_text' }
+				{ key: 'obligation_level', label: m.products_obligation_level(), icon: CircleCheckIcon, kind: 'text', field: 'obligation_level' },
+				{ key: 'exceptions', label: m.products_exceptions(), icon: TriangleAlertIcon, kind: 'str', field: 'exceptions' },
+				{ key: 'requirement_text', label: m.products_requirement_text(), icon: FileTextIcon, kind: 'text', field: 'requirement_text' }
 			]
 		},
 		{
 			id: 'relations',
-			label: 'Relations',
+			label: m.products_relations(),
 			icon: Share2Icon,
 			attrs: [
-				{ key: 'relation_type', label: 'Relation Type', icon: GitBranchIcon, kind: 'text', field: 'relation_type' }
+				{ key: 'relation_type', label: m.products_relation_type(), icon: GitBranchIcon, kind: 'text', field: 'relation_type' }
 			]
 		}
 	];
@@ -134,12 +135,12 @@
 	getItemEvidenceLines={(p) => p.evidence_lines ?? []}
 	getItemCreateTime={(p) => p.create_time ?? ''}
 	storagePrefix="products"
-	itemsLabel="Products"
-	itemLabelSingular="product"
-	canvasItemLabel="Product"
-	itemTypeFilterLabel="Product Type"
+	itemsLabel={m.products_products()}
+	itemLabelSingular={m.products_product()}
+	canvasItemLabel={m.products_product_2()}
+	itemTypeFilterLabel={m.products_product_type()}
 	emptyTableName="kb.products"
-	emptySubtitle="Products are produced by the extract-products processor once the document is processed."
-	browserSubtitle="Search, filter, and select a source document to inspect its extracted product records."
-	canvasMapLabel="Product Map"
+	emptySubtitle={m.products_products_are_produced_by_the()}
+	browserSubtitle={m.products_search_filter_and_select_a()}
+	canvasMapLabel={m.products_product_map()}
 />

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { getModelsTOML, type LLMModelEntry } from './llm-models-client';
 	import {
@@ -115,7 +116,7 @@
 	function toggleRecord(record: EmbeddingRecord, checked: boolean) {
 		if (checked) {
 			if (selectedIds.length >= 5) {
-				error = 'Select no more than five records.';
+				error = m.embedding_select_no_more_than_five();
 				return;
 			}
 			selectedIds = [...selectedIds, record.id];
@@ -144,7 +145,7 @@
 			await updateEmbeddingRecord(record.id, record.model_key, editContent);
 			editingID = null;
 			await loadRecords();
-			notice = 'Record updated and re-embedded.';
+			notice = m.embedding_record_updated_and_re_embedded();
 		} catch (err) {
 			error = message(err);
 		} finally {
@@ -181,7 +182,7 @@
 		if (
 			!model ||
 			!confirm(
-				`Delete all records for ${model.model_name} from testbed.embedding_${model.dimension}?`
+				m.embedding_delete_all_records_for_from({ model_name: model.model_name, dimension: model.dimension })
 			)
 		)
 			return;
@@ -190,7 +191,7 @@
 			selectedIds = [];
 			comparison = [];
 			await loadRecords();
-			notice = 'Records cleared.';
+			notice = m.embedding_records_cleared();
 		} catch (err) {
 			error = message(err);
 		}
@@ -212,91 +213,91 @@
 
 <section class:dark class="embedding-admin">
 	<header>
-		<p class="eyebrow">System Admin / LLM</p>
-		<h2>Embedding</h2>
-		<p>Generate embeddings and compare records from the same model.</p>
+		<p class="eyebrow">{m.embedding_system_admin_llm()}</p>
+		<h2>{m.embedding_embedding()}</h2>
+		<p>{m.embedding_generate_embeddings_and_compare_records()}</p>
 	</header>
 	{#if error}<div class="message error">{error}</div>{/if}
 	{#if notice}<div class="message success">{notice}</div>{/if}
 	<section class="card">
-		<h3>Test embedding</h3>
+		<h3>{m.embedding_test_embedding()}</h3>
 		<div class="controls">
 			<label
-				>Embedding model<select bind:value={modelKey} onchange={changeModel}
+				>{m.embedding_embedding_model()}<select bind:value={modelKey} onchange={changeModel}
 					>{#each models as entry}<option value={entry.key}
 							>{entry.key} — {entry.model_name} ({entry.dimension})</option
 						>{/each}</select
 				></label
 			>
 			<span class="dimension"
-				>Dimension: {model?.dimension ?? '—'} · Table: {model
+				>{m.embedding_dimension_table({ dimension: model?.dimension ?? '—', value: model
 					? `testbed.embedding_${model.dimension}`
-					: '—'}</span
+					: '—' })}</span
 			>
 		</div>
 		<label
-			>Content<textarea bind:value={content} rows="5" placeholder="Enter text to embed"
+			>{m.embedding_content()}<textarea bind:value={content} rows="5" placeholder={m.embedding_enter_text_to_embed()}
 			></textarea></label
 		>
 		<div class="actions generate-actions">
 			<label class="check"
-				><input type="checkbox" bind:checked={saveToDatabase} /> Save embedding to database</label
-			><span class:over-limit={remainingBytes < 0} class="remaining-bytes">Remaining Bytes: {remainingBytes}</span>
+				><input type="checkbox" bind:checked={saveToDatabase} /> {m.embedding_save_embedding_to_database()}</label
+			><span class:over-limit={remainingBytes < 0} class="remaining-bytes">{m.embedding_remaining_bytes({ remainingBytes })}</span>
 			><button onclick={runEmbedding} disabled={busy || !content.trim() || remainingBytes < 0}
-				>{busy ? 'Working…' : 'Generate embedding'}</button
+				>{busy ? m.embedding_working() : 'Generate embedding'}</button
 			>
 		</div>
 		{#if vectorPreview}<p class="muted">
-				Vector dimension {model?.dimension}. First values: {vectorPreview
+				{m.embedding_vector_dimension_first_values({ dimension: model?.dimension ?? '', value: vectorPreview
 					.map((n) => n.toFixed(5))
-					.join(', ')}…
+					.join(', ') })}
 			</p>{/if}
 		<div class="similarity-form">
-			<h4>Similarity search</h4>
-			<label>Top N<input type="number" min="1" max="100" bind:value={topN} /></label><button
+			<h4>{m.embedding_similarity_search()}</h4>
+			<label>{m.embedding_top_n()}<input type="number" min="1" max="100" bind:value={topN} /></label><button
 				class="secondary"
 				onclick={runSimilarity}
-				disabled={busy || !content.trim()}>Search selected model’s records</button
+				disabled={busy || !content.trim()}>{m.embedding_search_selected_model_s_records()}</button
 			>
 		</div>
 		{#if matches.length}<div class="results">
-				<h4>Most similar records</h4>
+				<h4>{m.embedding_most_similar_records()}</h4>
 				{#each matches as match}<article>
 						<strong>#{match.id}</strong><span
-							>{(match.similarity * 100).toFixed(2)}% similarity</span
+							>{m.embedding_similarity({ value: (match.similarity * 100).toFixed(2) })}</span
 						>
 						<p>{match.content}</p>
 					</article>{/each}
-			</div>{:else if searched}<p class="muted">No matching records for this model.</p>{/if}
+			</div>{:else if searched}<p class="muted">{m.embedding_no_matching_records_for_this()}</p>{/if}
 	</section>
 
 	<section class="card">
 		<div class="list-heading">
 			<div>
-				<h3>Embedding records</h3>
-				<p class="muted">{total} records · {model ? `testbed.embedding_${model.dimension}` : ''}</p>
+				<h3>{m.embedding_embedding_records()}</h3>
+				<p class="muted">{m.embedding_records({ total, value: model ? `testbed.embedding_${model.dimension}` : '' })}</p>
 			</div>
 			<div class="actions">
 				<label
-					>Filter by model<select
+					>{m.embedding_filter_by_model()}<select
 						bind:value={recordModelKey}
 						onchange={() => {
 							page = 1;
 							selectedIds = [];
 							void loadRecords();
 						}}
-						><option value="">All models</option>{#each dimensionModels as entry}<option
+						><option value="">{m.embedding_all_models()}</option>{#each dimensionModels as entry}<option
 								value={entry.key}>{entry.key} — {entry.model_name}</option
 							>{/each}</select
 					></label
-				><button class="danger" onclick={clearTable} disabled={!model}>Clear records</button>
+				><button class="danger" onclick={clearTable} disabled={!model}>{m.embedding_clear_records()}</button>
 			</div>
 		</div>
 		<div class="actions compare">
-			<span>{selectedIds.length}/5 selected</span><button
+			<span>{m.embedding_5_selected({ selectedIdsCount: selectedIds.length })}</span><button
 				class="secondary"
 				onclick={compareSelected}
-				disabled={busy || selectedIds.length < 2}>Compare selected pairwise</button
+				disabled={busy || selectedIds.length < 2}>{m.embedding_compare_selected_pairwise()}</button
 			>
 		</div>
 		{#if comparison.length}<div class="pairs">
@@ -304,15 +305,15 @@
 						#{pair.id_a} ↔ #{pair.id_b}: <strong>{(pair.similarity * 100).toFixed(2)}%</strong>
 					</div>{/each}
 			</div>{/if}
-		{#if loading}<p>Loading records…</p>{:else if records.length === 0}<p class="muted">
-				No embedding records found.
+		{#if loading}<p>{m.embedding_loading_records()}</p>{:else if records.length === 0}<p class="muted">
+				{m.embedding_no_embedding_records_found()}
 			</p>{:else}
 			<div class="table-wrap">
 				<table>
 					<thead
 						><tr
-							><th>Select</th><th>ID</th><th>Model</th><th>Content</th><th>Time (ms)</th><th>Chars</th><th>Tokens</th><th>Updated</th><th
-								>Actions</th
+							><th>{m.embedding_select()}</th><th>{m.embedding_id()}</th><th>{m.embedding_model()}</th><th>{m.embedding_content()}</th><th>{m.embedding_time_ms()}</th><th>{m.embedding_chars()}</th><th>{m.embedding_tokens()}</th><th>{m.embedding_updated()}</th><th
+								>{m.embedding_actions()}</th
 							></tr
 						></thead
 					><tbody>
@@ -320,7 +321,7 @@
 							<tr
 								><td
 									><input
-										aria-label="Select record {record.id}"
+										aria-label={m.embedding_select_record({ id: record.id })}
 										type="checkbox"
 										checked={selectedIds.includes(record.id)}
 										disabled={(record.model_key !== modelKey && !selectedIds.includes(record.id)) ||
@@ -330,8 +331,8 @@
 								><td>{record.id}</td><td>{record.model_name}</td><td class="content-cell"
 									>{#if editingID === record.id}<textarea bind:value={editContent} rows="3"
 										></textarea><button onclick={() => saveEdit(record)} disabled={busy}
-											>Save</button
-										><button class="secondary" onclick={() => (editingID = null)}>Cancel</button
+											>{m.embedding_save()}</button
+										><button class="secondary" onclick={() => (editingID = null)}>{m.embedding_cancel()}</button
 										>{:else}{record.content}{/if}</td
 								><td>{record.time_ms}</td><td>{record.num_chars}</td><td>{record.num_tokens}</td><td>{new Date(record.updated_at).toLocaleString()}</td><td class="row-actions"
 									><button
@@ -339,10 +340,10 @@
 										onclick={() => {
 											editingID = record.id;
 											editContent = record.content;
-										}}>Edit</button
+										}}>{m.embedding_edit()}</button
 									><button class="secondary" onclick={() => regenerate(record)} disabled={busy}
-										>Regenerate</button
-									><button class="danger" onclick={() => remove(record)}>Delete</button></td
+										>{m.embedding_regenerate()}</button
+									><button class="danger" onclick={() => remove(record)}>{m.embedding_delete()}</button></td
 								></tr
 							>
 						{/each}
@@ -357,14 +358,14 @@
 					page = Math.max(1, page - 1);
 					void loadRecords();
 				}}
-				disabled={page <= 1 || loading}>Previous</button
-			><span>Page {page} of {pageCount}</span><button
+				disabled={page <= 1 || loading}>{m.embedding_previous()}</button
+			><span>{m.embedding_page_of({ page, pageCount })}</span><button
 				class="secondary"
 				onclick={() => {
 					page = Math.min(pageCount, page + 1);
 					void loadRecords();
 				}}
-				disabled={page >= pageCount || loading}>Next</button
+				disabled={page >= pageCount || loading}>{m.embedding_next()}</button
 			>
 		</div>
 	</section>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import LogInIcon from '@lucide/svelte/icons/log-in';
 	import ZapIcon from '@lucide/svelte/icons/zap';
@@ -26,9 +27,9 @@
 		darkMode = true,
 		browserInstanceKey = 'scene-blocks',
 		scopeToActiveStore = false,
-		heroEyebrow = 'Subject Wiki',
-		heroTitle = 'Scene Blocks',
-		heroDescription = 'Inspect the event-driven scenes an LLM extracted from each document: who acts, what triggers the scene, how it unfolds, and how it resolves.',
+		heroEyebrow = m.scene_blocks_subject_wiki(),
+		heroTitle = m.scene_blocks_scene_blocks(),
+		heroDescription = m.scene_blocks_inspect_the_event_driven_scenes(),
 		onFocusModeChange
 	}: {
 		darkMode?: boolean;
@@ -45,54 +46,54 @@
 	const SCENE_GROUPS: GroupDef[] = [
 		{
 			id: 'metadata',
-			label: 'Metadata',
+			label: m.scene_blocks_metadata(),
 			icon: InfoIcon,
 			ux: -D,
 			uy: -D,
 			attrs: [
-				{ key: 'keywords', label: 'Keywords', icon: TagIcon, kind: 'kw', field: 'keywords' },
-				{ key: 'states', label: 'States', icon: ActivityIcon, kind: 'str', field: 'states' }
+				{ key: 'keywords', label: m.scene_blocks_keywords(), icon: TagIcon, kind: 'kw', field: 'keywords' },
+				{ key: 'states', label: m.scene_blocks_states(), icon: ActivityIcon, kind: 'str', field: 'states' }
 			]
 		},
 		{
 			id: 'inputs',
-			label: 'Inputs & Resources',
+			label: m.scene_blocks_inputs_resources(),
 			icon: LogInIcon,
 			ux: D,
 			uy: -D,
 			attrs: [
-				{ key: 'triggers', label: 'Triggers', icon: ZapIcon, kind: 'str', field: 'triggers' },
-				{ key: 'preconditions', label: 'Preconditions', icon: CircleCheckIcon, kind: 'str', field: 'preconditions' },
-				{ key: 'constraints', label: 'Constraints', icon: LockIcon, kind: 'str', field: 'constraints' },
-				{ key: 'resources', label: 'Resources', icon: DatabaseIcon, kind: 'entity', field: 'resources' },
-				{ key: 'source_refs', label: 'Source Refs', icon: FileTextIcon, kind: 'srcrefs', field: 'source_refs' }
+				{ key: 'triggers', label: m.scene_blocks_triggers(), icon: ZapIcon, kind: 'str', field: 'triggers' },
+				{ key: 'preconditions', label: m.scene_blocks_preconditions(), icon: CircleCheckIcon, kind: 'str', field: 'preconditions' },
+				{ key: 'constraints', label: m.scene_blocks_constraints(), icon: LockIcon, kind: 'str', field: 'constraints' },
+				{ key: 'resources', label: m.scene_blocks_resources(), icon: DatabaseIcon, kind: 'entity', field: 'resources' },
+				{ key: 'source_refs', label: m.scene_blocks_source_refs(), icon: FileTextIcon, kind: 'srcrefs', field: 'source_refs' }
 			]
 		},
 		{
 			id: 'actions',
-			label: 'System Actions',
+			label: m.scene_blocks_system_actions(),
 			icon: ZapIcon,
 			ux: D,
 			uy: D,
 			attrs: [
-				{ key: 'actors', label: 'Actors', icon: UsersIcon, kind: 'entity', field: 'actors' },
-				{ key: 'actions', label: 'Actions', icon: PlayIcon, kind: 'actions', field: 'actions' },
-				{ key: 'decisions', label: 'Decisions', icon: GitBranchIcon, kind: 'str', field: 'decisions' },
-				{ key: 'resolutions', label: 'Resolutions', icon: FlagIcon, kind: 'str', field: 'resolutions' }
+				{ key: 'actors', label: m.scene_blocks_actors(), icon: UsersIcon, kind: 'entity', field: 'actors' },
+				{ key: 'actions', label: m.scene_blocks_actions(), icon: PlayIcon, kind: 'actions', field: 'actions' },
+				{ key: 'decisions', label: m.scene_blocks_decisions(), icon: GitBranchIcon, kind: 'str', field: 'decisions' },
+				{ key: 'resolutions', label: m.scene_blocks_resolutions(), icon: FlagIcon, kind: 'str', field: 'resolutions' }
 			]
 		},
 		{
 			id: 'reasoning',
-			label: 'Reasoning Logs',
+			label: m.scene_blocks_reasoning_logs(),
 			icon: BrainIcon,
 			ux: -D,
 			uy: D,
 			attrs: [
-				{ key: 'outcomes', label: 'Outcomes', icon: TargetIcon, kind: 'str', field: 'outcomes' },
-				{ key: 'root_causes', label: 'Root Causes', icon: GitForkIcon, kind: 'str', field: 'root_causes' },
-				{ key: 'failure_modes', label: 'Failure Modes', icon: TriangleAlertIcon, kind: 'str', field: 'failure_modes' },
-				{ key: 'relationships', label: 'Relationships', icon: Share2Icon, kind: 'rels', field: 'relationships' },
-				{ key: 'discriminators', label: 'Discriminators', icon: LayersIcon, kind: 'disc', field: 'discriminators' }
+				{ key: 'outcomes', label: m.scene_blocks_outcomes(), icon: TargetIcon, kind: 'str', field: 'outcomes' },
+				{ key: 'root_causes', label: m.scene_blocks_root_causes(), icon: GitForkIcon, kind: 'str', field: 'root_causes' },
+				{ key: 'failure_modes', label: m.scene_blocks_failure_modes(), icon: TriangleAlertIcon, kind: 'str', field: 'failure_modes' },
+				{ key: 'relationships', label: m.scene_blocks_relationships(), icon: Share2Icon, kind: 'rels', field: 'relationships' },
+				{ key: 'discriminators', label: m.scene_blocks_discriminators(), icon: LayersIcon, kind: 'disc', field: 'discriminators' }
 			]
 		}
 	];
@@ -142,16 +143,16 @@
 	getItemConfidence={(b) => Number(b.confidence) || 0}
 	getItemObjectId={(b) => b.object_id ?? ''}
 	getItemSecondaryId={(b) => b.scene_id ?? ''}
-	getItemSecondaryIdLabel="Scene ID"
+	getItemSecondaryIdLabel={m.scene_blocks_scene_id()}
 	getItemEvidenceLines={(b) => b.line_spans ?? []}
 	getItemCreateTime={(b) => b.create_time ?? ''}
 	storagePrefix="scene-blocks"
-	itemsLabel="Scene Blocks"
-	itemLabelSingular="scene block"
-	canvasItemLabel="Scene Block"
-	itemTypeFilterLabel="Scene Type"
+	itemsLabel={m.scene_blocks_scene_blocks()}
+	itemLabelSingular={m.scene_blocks_scene_block()}
+	canvasItemLabel={m.scene_blocks_scene_block_2()}
+	itemTypeFilterLabel={m.scene_blocks_scene_type()}
 	emptyTableName="kb.scene_objects"
-	emptySubtitle="Scene blocks are produced by the generate-scene-blocks processor once the document is processed."
-	browserSubtitle="Search, filter, and select a record to inspect its extracted scene blocks."
-	canvasMapLabel="Scene Map"
+	emptySubtitle={m.scene_blocks_scene_blocks_are_produced_by()}
+	browserSubtitle={m.scene_blocks_search_filter_and_select_a()}
+	canvasMapLabel={m.scene_blocks_scene_map()}
 />

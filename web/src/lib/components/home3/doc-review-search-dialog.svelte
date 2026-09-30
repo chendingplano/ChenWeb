@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import { listReviewRuns } from '$lib/services/docReviewService';
 	import type { ReviewRunListFilter, ReviewRunListItem, TierInfo } from '$lib/services/docReviewService';
 
@@ -14,12 +15,12 @@
 	} = $props();
 
 	const statusOptions = [
-		{ value: 'all', label: 'All' },
-		{ value: 'accepted', label: 'Accepted' },
-		{ value: 'running', label: 'Running' },
-		{ value: 'completed', label: 'Completed' },
-		{ value: 'failed', label: 'Failed' },
-		{ value: 'stopped', label: 'Stopped' }
+		{ value: 'all', label: msg.doc_review_search_dialog_all() },
+		{ value: 'accepted', label: msg.doc_review_search_dialog_accepted() },
+		{ value: 'running', label: msg.doc_review_search_dialog_running() },
+		{ value: 'completed', label: msg.doc_review_search_dialog_completed() },
+		{ value: 'failed', label: msg.doc_review_search_dialog_failed() },
+		{ value: 'stopped', label: msg.doc_review_search_dialog_stopped() }
 	];
 
 	let runId = $state('');
@@ -62,7 +63,7 @@
 			searchResults = await listReviewRuns(currentFilter());
 			searchTotal = searchResults.length;
 		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
+			searchError = err instanceof Error ? err.message : msg.doc_review_search_dialog_search_failed();
 		} finally {
 			searchLoading = false;
 		}
@@ -148,10 +149,10 @@
 			tabindex="0"
 		>
 			<div class="dialog-head">
-				<div class="dialog-eyebrow">kb.doc_review_runs</div>
-				<h2 class="dialog-title">Search review runs</h2>
+				<div class="dialog-eyebrow">{msg.doc_review_search_dialog_kb_doc_review_runs()}</div>
+				<h2 class="dialog-title">{msg.doc_review_search_dialog_search_review_runs()}</h2>
 				<p class="dialog-subtitle">
-					Filter by run, document, requester, tier, status, and create window.
+					{msg.doc_review_search_dialog_filter_by_run_document_requester()}
 				</p>
 			</div>
 
@@ -159,42 +160,42 @@
 				<div class="dialog-controls">
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Identity</div>
-							<div class="dialog-section-copy">Match the run, its document, and who submitted it.</div>
+							<div class="dialog-section-title">{msg.doc_review_search_dialog_identity()}</div>
+							<div class="dialog-section-copy">{msg.doc_review_search_dialog_match_the_run_its_document()}</div>
 						</div>
 						<div class="dialog-grid dialog-grid-primary">
 							<label class="field dialog-field">
-								<span class="field-label">Run ID</span>
+								<span class="field-label">{msg.doc_review_search_dialog_run_id()}</span>
 								<input type="text" bind:value={runId} placeholder="42" onkeydown={onKeydown} />
 							</label>
 							<label class="field dialog-field dialog-field-wide">
-								<span class="field-label">Document title contains</span>
-								<input type="text" bind:value={title} placeholder="标准名称, spec…" onkeydown={onKeydown} />
+								<span class="field-label">{msg.doc_review_search_dialog_document_title_contains()}</span>
+								<input type="text" bind:value={title} placeholder={msg.doc_review_search_dialog_spec()} onkeydown={onKeydown} />
 							</label>
 							<label class="field dialog-field dialog-field-wide">
-								<span class="field-label">Requester contains</span>
-								<input type="text" bind:value={requester} placeholder="Alex Johnson…" onkeydown={onKeydown} />
+								<span class="field-label">{msg.doc_review_search_dialog_requester_contains()}</span>
+								<input type="text" bind:value={requester} placeholder={msg.doc_review_search_dialog_alex_johnson()} onkeydown={onKeydown} />
 							</label>
 						</div>
 					</div>
 
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Classification</div>
-							<div class="dialog-section-copy">Narrow by review tier and lifecycle status.</div>
+							<div class="dialog-section-title">{msg.doc_review_search_dialog_classification()}</div>
+							<div class="dialog-section-copy">{msg.doc_review_search_dialog_narrow_by_review_tier_and()}</div>
 						</div>
 						<div class="dialog-grid">
 							<label class="field dialog-field">
-								<span class="field-label">Tier</span>
+								<span class="field-label">{msg.doc_review_search_dialog_tier()}</span>
 								<select bind:value={tier}>
-									<option value="all">All</option>
+									<option value="all">{msg.doc_review_search_dialog_all()}</option>
 									{#each tiers as t}
 										<option value={t.key}>{t.label}</option>
 									{/each}
 								</select>
 							</label>
 							<label class="field dialog-field">
-								<span class="field-label">Status</span>
+								<span class="field-label">{msg.doc_review_search_dialog_status()}</span>
 								<select bind:value={status}>
 									{#each statusOptions as opt}
 										<option value={opt.value}>{opt.label}</option>
@@ -206,18 +207,18 @@
 
 					<div class="dialog-section">
 						<div class="dialog-section-head">
-							<div class="dialog-section-title">Time Window</div>
-							<div class="dialog-section-copy">Search by create timestamp using a local date-time range.</div>
+							<div class="dialog-section-title">{msg.doc_review_search_dialog_time_window()}</div>
+							<div class="dialog-section-copy">{msg.doc_review_search_dialog_search_by_create_timestamp_using()}</div>
 						</div>
 						<div class="dialog-grid">
 							<label class="field dialog-field"
-								><span class="field-label">Created from</span><input
+								><span class="field-label">{msg.doc_review_search_dialog_created_from()}</span><input
 									type="datetime-local"
 									bind:value={createStart}
 								/></label
 							>
 							<label class="field dialog-field"
-								><span class="field-label">Created to</span><input
+								><span class="field-label">{msg.doc_review_search_dialog_created_to()}</span><input
 									type="datetime-local"
 									bind:value={createEnd}
 								/></label
@@ -227,20 +228,20 @@
 
 					<div class="dialog-toolbar">
 						<div class="dialog-toolbar-copy">
-							<div class="dialog-toolbar-title">Search Scope</div>
+							<div class="dialog-toolbar-title">{msg.doc_review_search_dialog_search_scope()}</div>
 							<div class="dialog-toolbar-text">
-								Leave fields empty to broaden the search. Results are capped to the newest 100 runs.
+								{msg.doc_review_search_dialog_leave_fields_empty_to_broaden()}
 							</div>
 						</div>
 						<div class="dialog-toolbar-actions">
-							<button class="btn btn-ghost" type="button" onclick={resetSearch}>Reset</button>
+							<button class="btn btn-ghost" type="button" onclick={resetSearch}>{msg.doc_review_search_dialog_reset()}</button>
 							<button
 								class="btn btn-primary dialog-search-btn"
 								type="button"
 								onclick={runSearch}
 								disabled={searchLoading}
 							>
-								{searchLoading ? 'Searching…' : 'Search'}
+								{searchLoading ? msg.doc_review_search_dialog_searching() : msg.doc_review_search_dialog_search()}
 							</button>
 						</div>
 					</div>
@@ -253,9 +254,9 @@
 				{#if searchTotal !== null && !searchLoading}
 					<div class="results-count">
 						{#if searchTotal === 0}
-							No runs matched.
+							{msg.doc_review_search_dialog_no_runs_matched()}
 						{:else}
-							<strong>{searchTotal}</strong> {searchTotal === 1 ? 'run' : 'runs'} matched
+							<strong>{searchTotal}</strong> {msg.doc_review_search_dialog_matched({ plural: searchTotal === 1 ? '' : 's' })}
 						{/if}
 					</div>
 				{/if}
@@ -264,9 +265,9 @@
 					{#if searchResults.length === 0 && !searchLoading}
 						<div class="dialog-empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="dialog-empty-title">Run a search to see review runs.</div>
+							<div class="dialog-empty-title">{msg.doc_review_search_dialog_run_a_search_to_see()}</div>
 							<div class="dialog-empty-copy">
-								Use any combination of identity, classification, and time filters to narrow the list.
+								{msg.doc_review_search_dialog_use_any_combination_of_identity()}
 							</div>
 						</div>
 					{:else}
@@ -280,16 +281,16 @@
 											checked={searchSelected.size === searchResults.length && searchResults.length > 0}
 											indeterminate={searchSelected.size > 0 && searchSelected.size < searchResults.length}
 											onchange={toggleSelectAll}
-											title="Select all"
+											title={msg.doc_review_search_dialog_select_all()}
 										/>
 									</th>
-									<th>ID</th>
-									<th>Request</th>
-									<th>Document</th>
-									<th>Tier</th>
-									<th>Status</th>
-									<th>Requester</th>
-									<th>Created</th>
+									<th>{msg.doc_review_search_dialog_id()}</th>
+									<th>{msg.doc_review_search_dialog_request()}</th>
+									<th>{msg.doc_review_search_dialog_document()}</th>
+									<th>{msg.doc_review_search_dialog_tier()}</th>
+									<th>{msg.doc_review_search_dialog_status()}</th>
+									<th>{msg.doc_review_search_dialog_requester()}</th>
+									<th>{msg.doc_review_search_dialog_created()}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -310,7 +311,7 @@
 										</td>
 										<td class="mono">#{record.run_id}</td>
 										<td class="mono muted">#{record.request_id}</td>
-										<td class="ellipsis">{record.doc_title || `Document #${record.input_record_id}`}</td>
+										<td class="ellipsis">{record.doc_title || msg.doc_review_search_dialog_document_2({ input_record_id: record.input_record_id })}</td>
 										<td>{tierLabel(record.tier)}</td>
 										<td><span class="status-pill">{record.status}</span></td>
 										<td>{record.requester_name || '—'}</td>
@@ -324,16 +325,16 @@
 			</div>
 
 			<div class="dialog-foot">
-				<div class="dialog-foot-hint">Click to toggle, double-click to pick one. Header checkbox selects all.</div>
+				<div class="dialog-foot-hint">{msg.doc_review_search_dialog_click_to_toggle_double_click()}</div>
 				<div class="dialog-foot-buttons">
-					<button class="btn btn-ghost" type="button" onclick={closeDialog}>Cancel</button>
+					<button class="btn btn-ghost" type="button" onclick={closeDialog}>{msg.doc_review_search_dialog_cancel()}</button>
 					<button
 						class="btn btn-primary dialog-select-btn"
 						type="button"
 						onclick={confirmSelection}
 						disabled={searchSelected.size === 0}
 					>
-						{searchSelected.size > 0 ? `Select (${searchSelected.size})` : 'Select'}
+						{searchSelected.size > 0 ? msg.doc_review_search_dialog_select({ searchSelectedCount: searchSelected.size }) : msg.doc_review_search_dialog_select_2()}
 					</button>
 				</div>
 			</div>

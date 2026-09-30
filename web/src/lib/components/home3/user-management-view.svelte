@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		deleteManagedUser,
@@ -133,7 +134,7 @@
 			userScope = result.scope;
 			syncUsers();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to load users.';
+			error = err instanceof Error ? err.message : m.user_management_failed_to_load_users();
 		} finally {
 			loading = false;
 		}
@@ -145,7 +146,7 @@
 			const roles = await listManagedRoles();
 			roleOptions = roles;
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to load roles.';
+			error = err instanceof Error ? err.message : m.user_management_failed_to_load_roles();
 		} finally {
 			rolesLoading = false;
 		}
@@ -225,16 +226,16 @@
 			managedUsers = managedUsers.map((user) => (user.id === updated.id ? updated : user));
 			syncUsers();
 			editDialogOpen = false;
-			success = `Updated account ${updated.email}.`;
+			success = m.user_management_updated_account({ email: updated.email });
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to update user.';
+			error = err instanceof Error ? err.message : m.user_management_failed_to_update_user();
 		} finally {
 			saving = false;
 		}
 	}
 
 	async function removeUser(user: UserRow) {
-		if (!confirm(`Delete user "${user.email}"?`)) return;
+		if (!confirm(m.user_management_delete_user({ email: user.email }))) return;
 		deletingId = user.id;
 		success = null;
 		error = null;
@@ -242,9 +243,9 @@
 			await deleteManagedUser(user.id);
 			managedUsers = managedUsers.filter((entry) => entry.id !== user.id);
 			syncUsers();
-			success = `Deleted account ${user.email}.`;
+			success = m.user_management_deleted_account({ email: user.email });
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to delete user.';
+			error = err instanceof Error ? err.message : m.user_management_failed_to_delete_user();
 		} finally {
 			deletingId = null;
 		}
@@ -282,16 +283,16 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>User Management</h2>
+			<h2>{m.user_management_user_management()}</h2>
 			<p class="muted">
 				{canManageAll
-					? 'View live Kratos-backed users and their current role assignments.'
-					: 'View your Kratos-backed account. Role and access-control changes require admin or root access.'}
+					? m.user_management_view_live_kratos_backed_users()
+					: m.user_management_view_your_kratos_backed_account()}
 			</p>
 		</div>
 		{#if canManageAll}
 			<button class="primary" onclick={() => notImplemented('Create user is not wired to Kratos yet.')}>
-				+ Add User
+				{m.user_management_add_user()}
 			</button>
 		{/if}
 	</header>
@@ -302,15 +303,15 @@
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">{userScope === 'self' ? 'Visible Users' : 'Total Users'}</div>
+			<div class="summary-label">{userScope === 'self' ? m.user_management_visible_users() : m.user_management_total_users()}</div>
 			<div class="summary-value">{users.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Admins</div>
+			<div class="summary-label">{m.user_management_admins()}</div>
 			<div class="summary-value">{users.filter((user) => user.admin).length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Trial Users</div>
+			<div class="summary-label">{m.user_management_trial_users()}</div>
 			<div class="summary-value">{users.filter((user) => user.status === 'trial').length}</div>
 		</div>
 	</div>
@@ -323,23 +324,23 @@
 		<table>
 			<thead>
 				<tr>
-					<th>First Name</th>
-					<th>Last Name</th>
-					<th>Email</th>
-					<th>Phone</th>
-					<th>Status</th>
-					<th>Roles</th>
-					<th>Actions</th>
+					<th>{m.user_management_first_name()}</th>
+					<th>{m.user_management_last_name()}</th>
+					<th>{m.user_management_email()}</th>
+					<th>{m.user_management_phone()}</th>
+					<th>{m.user_management_status()}</th>
+					<th>{m.user_management_roles()}</th>
+					<th>{m.user_management_actions()}</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#if loading}
 					<tr>
-						<td colspan="7" class="empty-state">Loading users from Kratos...</td>
+						<td colspan="7" class="empty-state">{m.user_management_loading_users_from_kratos()}</td>
 					</tr>
 				{:else if users.length === 0}
 					<tr>
-						<td colspan="7" class="empty-state">No Kratos users were returned.</td>
+						<td colspan="7" class="empty-state">{m.user_management_no_kratos_users_were_returned()}</td>
 					</tr>
 				{:else}
 				{#each users as user (user.id)}
@@ -355,16 +356,16 @@
 									<span class="chip">{role}</span>
 								{/each}
 								{#if user.roles.length === 0}
-									<span class="chip chip-muted">no roles</span>
+									<span class="chip chip-muted">{m.user_management_no_roles()}</span>
 								{/if}
 							</div>
 						</td>
 						<td>
 							<div class="row-actions">
-								<button class="link" onclick={() => startEdit(user)}>Edit</button>
+								<button class="link" onclick={() => startEdit(user)}>{m.user_management_edit()}</button>
 								{#if canManageAll}
 									<button class="danger-link" onclick={() => removeUser(user)} disabled={deletingId === user.id}>
-										{deletingId === user.id ? 'Deleting…' : 'Delete'}
+										{deletingId === user.id ? m.user_management_deleting() : m.user_management_delete()}
 									</button>
 								{/if}
 							</div>
@@ -389,48 +390,48 @@
 			class="dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Edit user"
+			aria-label={m.user_management_edit_user()}
 			tabindex="-1"
 			onclick={(event) => event.stopPropagation()}
 			onkeydown={(event) => event.stopPropagation()}
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-title">Edit Account</div>
-					<div class="dialog-subtitle">Use the email or phone below to confirm the exact account.</div>
+					<div class="dialog-title">{m.user_management_edit_account()}</div>
+					<div class="dialog-subtitle">{m.user_management_use_the_email_or_phone()}</div>
 				</div>
-				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>Close</button>
+				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>{m.user_management_close()}</button>
 			</div>
 			{#if error}
 				<div class="dialog-error" role="alert">{error}</div>
 			{/if}
 			<div class="dialog-body">
 				<label>
-					<span>Email Address</span>
+					<span>{m.user_management_email_address()}</span>
 					<input value={editDraft.email || 'No email on file'} readonly />
 				</label>
 				<label>
-					<span>Phone</span>
-					<input value={editDraft.phone || 'No phone on file'} readonly />
+					<span>{m.user_management_phone()}</span>
+					<input value={editDraft.phone || m.user_management_no_phone_on_file()} readonly />
 				</label>
 				<label>
-					<span>First Name</span>
-					<input bind:value={editDraft.firstName} placeholder="Chen" />
+					<span>{m.user_management_first_name()}</span>
+					<input bind:value={editDraft.firstName} placeholder={m.user_management_chen()} />
 				</label>
 				<label>
-					<span>Last Name</span>
-					<input bind:value={editDraft.lastName} placeholder="Ding" />
+					<span>{m.user_management_last_name()}</span>
+					<input bind:value={editDraft.lastName} placeholder={m.user_management_ding()} />
 				</label>
 				<label>
-					<span>Status</span>
+					<span>{m.user_management_status()}</span>
 					<select bind:value={editDraft.status} disabled={!canEditRolesAndStatus()}>
-						<option value="active">active</option>
-						<option value="inactive">inactive</option>
-						<option value="trial">trial</option>
+						<option value="active">{m.user_management_active()}</option>
+						<option value="inactive">{m.user_management_inactive()}</option>
+						<option value="trial">{m.user_management_trial()}</option>
 					</select>
 				</label>
 				<label class="toggle">
-					<span>Admin</span>
+					<span>{m.user_management_admin()}</span>
 					<input
 						type="checkbox"
 						checked={editDraft.admin}
@@ -439,7 +440,7 @@
 					/>
 				</label>
 				<div class="wide role-picker">
-					<span>Roles</span>
+					<span>{m.user_management_roles()}</span>
 					<div class="role-picker-shell">
 						<div class="role-chip-list">
 							{#each selectedRoleKeys() as roleKey (roleKey)}
@@ -454,7 +455,7 @@
 								</button>
 							{/each}
 							{#if selectedRoleKeys().length === 0}
-								<span class="role-placeholder">No explicit roles selected.</span>
+								<span class="role-placeholder">{m.user_management_no_explicit_roles_selected()}</span>
 							{/if}
 						</div>
 						<div class="role-menu-wrap">
@@ -464,7 +465,7 @@
 								onclick={() => (roleMenuOpen = !roleMenuOpen)}
 								disabled={rolesLoading || !canEditRolesAndStatus()}
 							>
-								{rolesLoading ? 'Loading roles…' : roleMenuOpen ? 'Close roles' : 'Add role'}
+								{rolesLoading ? m.user_management_loading_roles() : roleMenuOpen ? m.user_management_close_roles() : m.user_management_add_role()}
 							</button>
 							{#if roleMenuOpen}
 								<div class="role-menu">
@@ -474,7 +475,7 @@
 											<span>{role.key}</span>
 										</button>
 									{:else}
-										<div class="role-menu-empty">No additional roles available.</div>
+										<div class="role-menu-empty">{m.user_management_no_additional_roles_available()}</div>
 									{/each}
 								</div>
 							{/if}
@@ -483,9 +484,9 @@
 				</div>
 			</div>
 			<div class="dialog-foot">
-				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>Cancel</button>
+				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>{m.user_management_cancel()}</button>
 				<button type="button" class="primary" onclick={submitEdit} disabled={saving}>
-					{saving ? 'Saving…' : 'Save Changes'}
+					{saving ? m.user_management_saving() : m.user_management_save_changes()}
 				</button>
 			</div>
 		</div>

@@ -112,7 +112,10 @@ function paramName(expr: Expr): string {
 			const args = expr.arguments as Expr[];
 			if (args.length && args[0].type !== 'Literal') return paramName(args[0]);
 			const callee = expr.callee as Expr;
-			if (callee.type === 'MemberExpression') return paramName(callee.object as Expr);
+			if (callee.type === 'MemberExpression') {
+				const obj = paramName(callee.object as Expr);
+				return obj === 'Math' ? 'value' : obj;
+			}
 			return 'value';
 		}
 		case 'ConditionalExpression':

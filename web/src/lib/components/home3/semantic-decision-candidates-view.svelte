@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -57,14 +58,14 @@
 	let pageSize = $state(50);
 	const pageSizeOptions = [25, 50, 100, 200];
 	const sortableHeaders: { key: CandidateSortKey; label: string }[] = [
-		{ key: 'identity', label: 'Identity' },
-		{ key: 'kind', label: 'Kind' },
-		{ key: 'method', label: 'Method' },
-		{ key: 'source', label: 'Source' },
-		{ key: 'confidence', label: 'Confidence' },
-		{ key: 'status', label: 'Status' },
-		{ key: 'resolution', label: 'Resolution' },
-		{ key: 'modified', label: 'Modified' }
+		{ key: 'identity', label: m.semantic_decision_candidates_identity() },
+		{ key: 'kind', label: m.semantic_decision_candidates_kind() },
+		{ key: 'method', label: m.semantic_decision_candidates_method() },
+		{ key: 'source', label: m.semantic_decision_candidates_source() },
+		{ key: 'confidence', label: m.semantic_decision_candidates_confidence() },
+		{ key: 'status', label: m.semantic_decision_candidates_status() },
+		{ key: 'resolution', label: m.semantic_decision_candidates_resolution() },
+		{ key: 'modified', label: m.semantic_decision_candidates_modified() }
 	];
 	const kinds = ['referent', 'term_association', 'assertion', 'occurrence', 'profile_selection'];
 	const methods = [
@@ -164,7 +165,7 @@
 		saving = true;
 		try {
 			selected = await transitionCandidate(selected.id, { to, reason: actionReason });
-			info = `Candidate #${selected.id} moved to ${to}.`;
+			info = m.semantic_decision_candidates_candidate_moved_to({ id: selected.id, to });
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -177,7 +178,7 @@
 		saving = true;
 		try {
 			selected = await resolveCandidate(selected.id, { outcome, reason: actionReason });
-			info = 'Resolution updated.';
+			info = m.semantic_decision_candidates_resolution_updated();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -193,7 +194,7 @@
 				dependency_fingerprint: dependency,
 				reason: actionReason
 			});
-			info = 'Candidate deferred.';
+			info = m.semantic_decision_candidates_candidate_deferred();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -206,7 +207,7 @@
 		saving = true;
 		try {
 			selected = await retryCandidate(selected.id, { dependency_fingerprint: dependency });
-			info = 'Deferred candidate retried.';
+			info = m.semantic_decision_candidates_deferred_candidate_retried();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -230,7 +231,7 @@
 				confidence
 			});
 			showCreate = false;
-			info = 'Candidate created or reused.';
+			info = m.semantic_decision_candidates_candidate_created_or_reused();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -245,11 +246,12 @@
 	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 style="font-size:18px;font-weight:600;color:{text}">Semantic Decision Candidates</h2>
+				<h2 style="font-size:18px;font-weight:600;color:{text}">
+					{m.semantic_decision_candidates_semantic_decision_candidates()}
+				</h2>
 				<p style="font-size:13px;color:{muted};margin-top:2px">
-					Lifecycle-safe administration of <code style="color:{accent}"
-						>kb.semantic_decision_candidates</code
-					>.
+					{m.semantic_decision_candidates_lifecycle_safe_administration_of()}
+					<code style="color:{accent}">kb.semantic_decision_candidates</code>.
 				</p>
 			</div>
 			<div class="flex gap-2">
@@ -259,27 +261,29 @@
 					}}
 					class="cursor-pointer rounded-lg px-3 py-2 text-sm"
 					style="background:{accent};color:white"
-					><PlusIcon class="inline h-4 w-4" /> New Candidate</button
+					><PlusIcon class="inline h-4 w-4" />
+					{m.semantic_decision_candidates_new_candidate()}</button
 				><button
 					onclick={load}
 					disabled={loading}
 					class="cursor-pointer rounded-lg px-3 py-2 text-sm"
 					style="background:{surface};color:{text};border:1px solid {border}"
-					><RefreshCwIcon class="inline h-4 w-4 {loading ? 'animate-spin' : ''}" /> Refresh</button
+					><RefreshCwIcon class="inline h-4 w-4 {loading ? 'animate-spin' : ''}" />
+					{m.semantic_decision_candidates_refresh()}</button
 				>
 			</div>
 		</div>
 	</div>
 	<div class="rounded-xl p-5" style="background:{card};border:1px solid {border}">
 		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
-			{#each [['status', 'Status'], ['candidate_kind', 'Kind'], ['method', 'Method'], ['logical_identity', 'Logical Identity'], ['source_artifact_type', 'Source Type'], ['source_artifact_id', 'Source ID'], ['input_record_id', 'Input Record ID']] as item}<label
+			{#each [['status', m.semantic_decision_candidates_status()], ['candidate_kind', m.semantic_decision_candidates_kind()], ['method', m.semantic_decision_candidates_method()], ['logical_identity', m.semantic_decision_candidates_logical_identity()], ['source_artifact_type', m.semantic_decision_candidates_source_type()], ['source_artifact_id', m.semantic_decision_candidates_source_id()], ['input_record_id', m.semantic_decision_candidates_input_record_id()]] as item}<label
 					class="flex flex-col gap-1"
 					><span style="font-size:11px;color:{muted}">{item[1]}</span
 					>{#if ['status', 'candidate_kind', 'method'].includes(item[0])}<select
 							bind:value={filters[item[0] as keyof typeof filters]}
 							class="rounded px-2 py-1.5 text-sm"
 							style="background:{surface};color:{text};border:1px solid {border}"
-							><option value="">Any</option
+							><option value="">{m.semantic_decision_candidates_any()}</option
 							>{#each item[0] === 'status' ? statuses : item[0] === 'candidate_kind' ? kinds : methods as option}<option
 									value={option}>{option}</option
 								>{/each}</select
@@ -294,11 +298,13 @@
 			<button
 				onclick={apply}
 				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
-				style="background:{accent};color:white">Apply Filters</button
+				style="background:{accent};color:white"
+				>{m.semantic_decision_candidates_apply_filters()}</button
 			><button
 				onclick={clear}
 				class="cursor-pointer rounded-lg px-3 py-2 text-sm"
-				style="background:{surface};color:{text};border:1px solid {border}">Clear</button
+				style="background:{surface};color:{text};border:1px solid {border}"
+				>{m.semantic_decision_candidates_clear()}</button
 			>
 		</div>
 	</div>
@@ -318,7 +324,7 @@
 			class="flex justify-between px-5 py-3"
 			style="border-bottom:1px solid {border};color:{muted};font-size:13px"
 		>
-			Total: {total}
+			{m.semantic_decision_candidates_total({ total })}
 			<div class="flex gap-2">
 				<button
 					onclick={() => {
@@ -331,7 +337,7 @@
 					class="rounded px-2 py-1 disabled:opacity-40"
 					style="background:{surface};color:{text};border:1px solid {border}">‹</button
 				><label class="flex items-center gap-2" style="color:{muted}">
-					<span>Page Size</span>
+					<span>{m.semantic_decision_candidates_page_size()}</span>
 					<select
 						value={pageSize}
 						onchange={(event) => changePageSize((event.currentTarget as HTMLSelectElement).value)}
@@ -341,7 +347,12 @@
 					>
 						{#each pageSizeOptions as option}<option value={option}>{option}</option>{/each}
 					</select>
-				</label><span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span><button
+				</label><span
+					>{m.semantic_decision_candidates_page_of({
+						page,
+						totalPages: Math.max(1, Math.ceil(total / pageSize))
+					})}</span
+				><button
 					onclick={() => {
 						if (page < Math.ceil(total / pageSize)) {
 							page++;
@@ -355,14 +366,14 @@
 			</div>
 		</div>
 		{#if loading}<div class="p-8 text-center" style="color:{muted}">
-				Loading…
+				{m.semantic_decision_candidates_loading()}
 			</div>{:else if !rows.length}<div class="p-8 text-center" style="color:{muted}">
-				No candidates found.
+				{m.semantic_decision_candidates_no_candidates_found()}
 			</div>{:else}<div class="overflow-auto">
 				<table class="w-full text-sm">
 					<thead class="sticky top-0 z-10" style="background:{surface}"
 						><tr style="background:{surface}">
-							{#each ['ID / Revision', 'Input Record ID'] as h}<th
+							{#each [m.semantic_decision_candidates_id_revision(), m.semantic_decision_candidates_input_record_id()] as h}<th
 									class="px-4 py-3 text-left whitespace-nowrap"
 									style="color:{muted};font-size:12px;border-bottom:1px solid {border}">{h}</th
 								>{/each}
@@ -374,7 +385,7 @@
 									<button
 										type="button"
 										onclick={() => toggleSort(header.key)}
-										aria-label={`Sort by ${header.label}`}
+										aria-label={m.semantic_decision_candidates_sort_by({ label: header.label })}
 										class="cursor-pointer"
 										style="color:{muted};background:none;border:0;padding:0"
 									>
@@ -386,7 +397,8 @@
 							{/each}
 							<th
 								class="px-4 py-3 text-left whitespace-nowrap"
-								style="color:{muted};font-size:12px;border-bottom:1px solid {border}">Details</th
+								style="color:{muted};font-size:12px;border-bottom:1px solid {border}"
+								>{m.semantic_decision_candidates_details()}</th
 							>
 						</tr></thead
 					><tbody
@@ -434,7 +446,7 @@
 										}}
 										class="rounded px-2.5 py-1 text-xs"
 										style="background:{surface};color:{accent};border:1px solid {border}"
-										>Details</button
+										>{m.semantic_decision_candidates_details()}</button
 									></td
 								></tr
 							>{/each}</tbody
@@ -459,30 +471,32 @@
 			class="max-h-[90vh] w-full max-w-4xl space-y-4 overflow-auto rounded-xl p-5"
 			style="background:{card};border:1px solid {border}"
 		>
-			{#if showCreate}<h3 style="color:{text};font-weight:600">New Semantic Decision Candidate</h3>
+			{#if showCreate}<h3 style="color:{text};font-weight:600">
+					{m.semantic_decision_candidates_new_semantic_decision_candidate()}
+				</h3>
 				<div class="grid gap-3 md:grid-cols-2">
 					<label style="color:{muted}"
-						>Logical identity<input
+						>{m.semantic_decision_candidates_logical_identity_2()}<input
 							bind:value={newIdentity}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
 						/></label
 					><label style="color:{muted}"
-						>Kind<select
+						>{m.semantic_decision_candidates_kind()}<select
 							bind:value={newKind}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
 							>{#each kinds as option}<option>{option}</option>{/each}</select
 						></label
 					><label style="color:{muted}"
-						>Method<select
+						>{m.semantic_decision_candidates_method()}<select
 							bind:value={newMethod}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
 							>{#each methods as option}<option>{option}</option>{/each}</select
 						></label
 					><label style="color:{muted}"
-						>Confidence<input
+						>{m.semantic_decision_candidates_confidence()}<input
 							bind:value={newConfidence}
 							type="number"
 							min="0"
@@ -492,13 +506,13 @@
 							style="background:{surface};color:{text};border:1px solid {border}"
 						/></label
 					><label style="color:{muted}"
-						>Source type<input
+						>{m.semantic_decision_candidates_source_type_2()}<input
 							bind:value={newSourceType}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
 						/></label
 					><label style="color:{muted}"
-						>Source ID<input
+						>{m.semantic_decision_candidates_source_id()}<input
 							bind:value={newSourceID}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
@@ -506,7 +520,7 @@
 					>
 				</div>
 				<label style="color:{muted}"
-					>Proposed payload<textarea
+					>{m.semantic_decision_candidates_proposed_payload()}<textarea
 						bind:value={newPayload}
 						rows="10"
 						class="w-full rounded px-2 py-1.5 font-mono text-xs"
@@ -519,30 +533,36 @@
 							showCreate = false;
 						}}
 						class="rounded px-3 py-2"
-						style="background:{surface};color:{text};border:1px solid {border}">Cancel</button
+						style="background:{surface};color:{text};border:1px solid {border}"
+						>{m.semantic_decision_candidates_cancel()}</button
 					><button
 						onclick={create}
 						disabled={saving}
 						class="rounded px-3 py-2"
-						style="background:{accent};color:white">Create</button
+						style="background:{accent};color:white"
+						>{m.semantic_decision_candidates_create()}</button
 					>
 				</div>{:else if selected}<div class="flex justify-between">
 					<h3 style="color:{text};font-weight:600">
-						Candidate #{selected.id} · Revision {selected.revision}
+						{m.semantic_decision_candidates_candidate_revision({
+							id: selected.id,
+							revision: selected.revision
+						})}
 					</h3>
 					<button
 						onclick={() => {
 							selected = null;
 						}}
 						class="rounded px-3 py-1"
-						style="background:{surface};color:{text};border:1px solid {border}">Close</button
+						style="background:{surface};color:{text};border:1px solid {border}"
+						>{m.semantic_decision_candidates_close()}</button
 					>
 				</div>
 				<pre
 					class="max-h-64 overflow-auto rounded p-3 text-xs"
 					style="background:{surface};color:{muted}">{json(selected)}</pre>
 				<label style="color:{muted}"
-					>Reason<textarea
+					>{m.semantic_decision_candidates_reason()}<textarea
 						bind:value={actionReason}
 						rows="2"
 						class="w-full rounded px-2 py-1.5"
@@ -554,12 +574,13 @@
 								onclick={() => transition(next)}
 								disabled={saving}
 								class="rounded px-3 py-2 text-sm"
-								style="background:{accent};color:white">Move to {next}</button
+								style="background:{accent};color:white"
+								>{m.semantic_decision_candidates_move_to({ next })}</button
 							>{/if}{/each}
 				</div>
 				<div class="grid gap-3 md:grid-cols-3">
 					<label style="color:{muted}"
-						>Resolution<select
+						>{m.semantic_decision_candidates_resolution()}<select
 							bind:value={outcome}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
@@ -573,9 +594,9 @@
 						disabled={saving || !outcome}
 						class="self-end rounded px-3 py-2"
 						style="background:{surface};color:{text};border:1px solid {border}"
-						>Save Resolution</button
+						>{m.semantic_decision_candidates_save_resolution()}</button
 					><label style="color:{muted}"
-						>Dependency fingerprint<input
+						>{m.semantic_decision_candidates_dependency_fingerprint()}<input
 							bind:value={dependency}
 							class="w-full rounded px-2 py-1.5"
 							style="background:{surface};color:{text};border:1px solid {border}"
@@ -587,7 +608,7 @@
 						disabled={saving || !dependency.trim()}
 						class="rounded px-3 py-2"
 						style="background:{surface};color:{text};border:1px solid {border}"
-						>Retry Deferred</button
+						>{m.semantic_decision_candidates_retry_deferred()}</button
 					>{/if}{/if}
 		</div>
 	</div>{/if}
@@ -597,7 +618,7 @@
 		style="background:rgba(15,23,42,0.62)"
 		role="button"
 		tabindex="0"
-		aria-label="Close candidate details"
+		aria-label={m.semantic_decision_candidates_close_candidate_details()}
 		onclick={(e) => {
 			if (e.target === e.currentTarget) detailsRecord = null;
 		}}
@@ -610,7 +631,7 @@
 			style="background:{card};border:1px solid {border};width:min(1046px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:hidden;resize:both;min-width:480px;min-height:200px"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Semantic decision candidate details"
+			aria-label={m.semantic_decision_candidates_semantic_decision_candidate_details()}
 			tabindex="0"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
@@ -620,19 +641,20 @@
 				style="border-bottom:1px solid {border}"
 			>
 				<h3 style="font-size:15px;font-weight:600;color:{text}">
-					Candidate #{detailsRecord.id} Details
+					{m.semantic_decision_candidates_candidate_details({ id: detailsRecord.id })}
 				</h3>
 				<button
 					onclick={() => {
 						detailsRecord = null;
 					}}
 					class="rounded px-3 py-1.5 text-xs"
-					style="background:{surface};color:{muted};border:1px solid {border}">Close</button
+					style="background:{surface};color:{muted};border:1px solid {border}"
+					>{m.semantic_decision_candidates_close()}</button
 				>
 			</div>
 			<div class="overflow-y-auto p-4">
 				<div style="font-size:12px;font-weight:600;color:{muted};margin-bottom:6px">
-					Record Fields
+					{m.semantic_decision_candidates_record_fields()}
 				</div>
 				<div class="rounded-lg p-2" style="border:1px solid {border};background:{surface}">
 					{#each detailRows(detailsRecord) as row}<div

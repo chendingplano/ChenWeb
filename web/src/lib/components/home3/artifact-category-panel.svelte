@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		getSummaryCategory,
@@ -44,12 +45,12 @@
 	};
 
 	const GROUP_DEFS: Array<{ key: ArtifactGroupKey; label: string; color: string }> = [
-		{ key: 'summaries', label: 'Summaries', color: '#6366f1' },
-		{ key: 'topics', label: 'Topics', color: '#22c55e' },
-		{ key: 'metrics', label: 'Metrics', color: '#f59e0b' },
-		{ key: 'scenes', label: 'Scenes', color: '#a855f7' },
-		{ key: 'provisions', label: 'Provisions', color: '#14b8a6' },
-		{ key: 'products', label: 'Products', color: '#f43f5e' }
+		{ key: 'summaries', label: m.artifact_category_panel_summaries(), color: '#6366f1' },
+		{ key: 'topics', label: m.artifact_category_panel_topics(), color: '#22c55e' },
+		{ key: 'metrics', label: m.artifact_category_panel_metrics(), color: '#f59e0b' },
+		{ key: 'scenes', label: m.artifact_category_panel_scenes(), color: '#a855f7' },
+		{ key: 'provisions', label: m.artifact_category_panel_provisions(), color: '#14b8a6' },
+		{ key: 'products', label: m.artifact_category_panel_products(), color: '#f43f5e' }
 	];
 
 	let groups = $state<ArtifactGroup[]>(
@@ -140,7 +141,7 @@
 		} catch (err) {
 			groups = groups.map((g) =>
 				g.key === key
-					? { ...g, loaded: true, loading: false, error: err instanceof Error ? err.message : 'Failed' }
+					? { ...g, loaded: true, loading: false, error: err instanceof Error ? err.message : m.artifact_category_panel_failed() }
 					: g
 			);
 		}
@@ -350,7 +351,7 @@
 	<!-- Header -->
 	<div class="panel-head">
 		<div>
-			<div class="eyebrow">Artifact Wiki</div>
+			<div class="eyebrow">{m.artifact_category_panel_artifact_wiki()}</div>
 			<h3 title={categoryPath}>{categoryPath}</h3>
 		</div>
 		<div class="head-pills">
@@ -388,11 +389,11 @@
 
 						{#if group.expanded}
 							{#if group.loading}
-								<div class="section-empty">Loading…</div>
+								<div class="section-empty">{m.artifact_category_panel_loading()}</div>
 							{:else if group.error}
 								<div class="section-error">{group.error}</div>
 							{:else if group.items.length === 0}
-								<div class="section-empty">No artifacts in this category.</div>
+								<div class="section-empty">{m.artifact_category_panel_no_artifacts_in_this_category()}</div>
 							{:else}
 								<div class="section-rows">
 									{#each group.items as item}
@@ -426,13 +427,13 @@
 			class:resizing={activeResize === 'left'}
 			onpointerdown={startResizeLeft}
 			role="separator"
-			aria-label="Resize chart and information panels"
+			aria-label={m.artifact_category_panel_resize_chart_and_information_panels()}
 		></div>
 
 		<!-- Middle: Information Panel -->
 		<div class="info-pane" style="width:{midWidth}px; flex: 0 0 {midWidth}px;">
 			<div class="info-pane-head">
-				<div class="eyebrow">Information</div>
+				<div class="eyebrow">{m.artifact_category_panel_information()}</div>
 				{#if selectedItem}
 					<span class="info-group-badge" style="--c:{selectedGroupColor};">{selectedGroupKey}</span>
 				{/if}
@@ -440,111 +441,111 @@
 			{#if selectedItem}
 				<div class="info-detail" style="--c:{selectedGroupColor};">
 					<dl class="info-attrs">
-						<dt>ID</dt>
+						<dt>{m.artifact_category_panel_id()}</dt>
 						<dd>{selectedItem.id}</dd>
-						<dt>Label</dt>
+						<dt>{m.artifact_category_panel_label()}</dt>
 						<dd class="info-wrap">{selectedItem.label}</dd>
 						{#if selectedItem.sublabel}
-							<dt>Sublabel</dt>
+							<dt>{m.artifact_category_panel_sublabel()}</dt>
 							<dd class="info-wrap">{selectedItem.sublabel}</dd>
 						{/if}
-						<dt>Input</dt>
+						<dt>{m.artifact_category_panel_input()}</dt>
 						<dd>#{selectedItem.inputId}</dd>
-						<dt>Page</dt>
+						<dt>{m.artifact_category_panel_page()}</dt>
 						<dd>{resolvedPage}</dd>
 						{#if selectedItem.value}
-							<dt>Value</dt>
+							<dt>{m.artifact_category_panel_value()}</dt>
 							<dd class="info-wrap">{selectedItem.value}</dd>
 						{/if}
 						{#if selectedItem.category_paths?.length}
-							<dt>Categories</dt>
+							<dt>{m.artifact_category_panel_categories()}</dt>
 							<dd class="info-wrap info-paths">{selectedItem.category_paths.join('\n')}</dd>
 						{/if}
 						{#if selectedItem.category_paths_en?.length}
-							<dt>Categories EN</dt>
+							<dt>{m.artifact_category_panel_categories_en()}</dt>
 							<dd class="info-wrap info-paths">{selectedItem.category_paths_en.join('\n')}</dd>
 						{/if}
 						{#if selectedItem.subject || selectedItem.subject_en}
-							<dt>Subject</dt>
+							<dt>{m.artifact_category_panel_subject()}</dt>
 							<dd class="info-wrap">{[selectedItem.subject, selectedItem.subject_en].filter(Boolean).join(' / ')}</dd>
 						{/if}
 						{#if selectedItem.desc}
-							<dt>Desc</dt>
+							<dt>{m.artifact_category_panel_desc()}</dt>
 							<dd class="info-wrap">{selectedItem.desc}</dd>
 						{/if}
 						{#if selectedItem.desc_en}
-							<dt>Desc EN</dt>
+							<dt>{m.artifact_category_panel_desc_en()}</dt>
 							<dd class="info-wrap">{selectedItem.desc_en}</dd>
 						{/if}
 						{#if selectedItem.context}
-							<dt>Context</dt>
+							<dt>{m.artifact_category_panel_context()}</dt>
 							<dd class="info-wrap">{selectedItem.context}</dd>
 						{/if}
 						{#if selectedItem.context_en}
-							<dt>Context EN</dt>
+							<dt>{m.artifact_category_panel_context_en()}</dt>
 							<dd class="info-wrap">{selectedItem.context_en}</dd>
 						{/if}
 						{#if selectedItem.keywords?.length}
-							<dt>Keywords</dt>
+							<dt>{m.artifact_category_panel_keywords()}</dt>
 							<dd class="info-wrap">{(selectedItem.keywords as string[]).join(', ')}</dd>
 						{/if}
 						{#if selectedItem.keywords_en?.length}
-							<dt>Keywords EN</dt>
+							<dt>{m.artifact_category_panel_keywords_en()}</dt>
 							<dd class="info-wrap">{(selectedItem.keywords_en as string[]).join(', ')}</dd>
 						{/if}
 						{#if selectedItem.confidence !== undefined && selectedItem.confidence !== null}
-							<dt>Confidence</dt>
+							<dt>{m.artifact_category_panel_confidence()}</dt>
 							<dd>{(selectedItem.confidence as number).toFixed(3)}</dd>
 						{/if}
 						{#if selectedItem.is_explicit_metric !== undefined && selectedItem.is_explicit_metric !== null}
-							<dt>Explicit</dt>
-							<dd>{selectedItem.is_explicit_metric ? 'Yes' : 'No'}</dd>
+							<dt>{m.artifact_category_panel_explicit()}</dt>
+							<dd>{selectedItem.is_explicit_metric ? m.artifact_category_panel_yes() : m.artifact_category_panel_no()}</dd>
 						{/if}
 						{#if selectedItem.location_type}
-							<dt>Location</dt>
+							<dt>{m.artifact_category_panel_location()}</dt>
 							<dd>{selectedItem.location_type}</dd>
 						{/if}
 						{#if selectedItem.measurement_frequency}
-							<dt>Frequency</dt>
+							<dt>{m.artifact_category_panel_frequency()}</dt>
 							<dd>{selectedItem.measurement_frequency}</dd>
 						{/if}
 						{#if selectedItem.unit || selectedItem.unit_en}
-							<dt>Unit</dt>
+							<dt>{m.artifact_category_panel_unit()}</dt>
 							<dd>{[selectedItem.unit, selectedItem.unit_en].filter(Boolean).join(' / ')}</dd>
 						{/if}
 						{#if selectedItem.value_class || selectedItem.value_class_en}
-							<dt>Value Class</dt>
+							<dt>{m.artifact_category_panel_value_class()}</dt>
 							<dd>{[selectedItem.value_class, selectedItem.value_class_en].filter(Boolean).join(' / ')}</dd>
 						{/if}
 						{#if selectedItem.value_data_type}
-							<dt>Data Type</dt>
+							<dt>{m.artifact_category_panel_data_type()}</dt>
 							<dd>{selectedItem.value_data_type}</dd>
 						{/if}
 						{#if selectedItem.value_range_type}
-							<dt>Range Type</dt>
+							<dt>{m.artifact_category_panel_range_type()}</dt>
 							<dd>{selectedItem.value_range_type}</dd>
 						{/if}
 						{#if selectedItem.threshold}
-							<dt>Threshold</dt>
+							<dt>{m.artifact_category_panel_threshold()}</dt>
 							<dd class="info-wrap">{selectedItem.threshold}</dd>
 						{/if}
 						{#if selectedItem.source}
-							<dt>Source</dt>
+							<dt>{m.artifact_category_panel_source()}</dt>
 							<dd class="info-wrap">{selectedItem.source}</dd>
 						{/if}
 						{#if selectedItem.reasoning_tags?.length}
-							<dt>Tags</dt>
+							<dt>{m.artifact_category_panel_tags()}</dt>
 							<dd class="info-wrap">{(selectedItem.reasoning_tags as string[]).join(', ')}</dd>
 						{/if}
 						{#if selectedItem.source_line_spans?.length}
-							<dt>Line Spans</dt>
+							<dt>{m.artifact_category_panel_line_spans()}</dt>
 							<dd class="info-wrap info-mono">{JSON.stringify(selectedItem.source_line_spans)}</dd>
 						{/if}
 					</dl>
 				</div>
 			{:else}
 				<div class="info-hint">
-					Click an artifact row on the left to view its details.
+					{m.artifact_category_panel_click_an_artifact_row_on()}
 				</div>
 			{/if}
 		</div>
@@ -556,24 +557,24 @@
 			class:resizing={activeResize === 'mid'}
 			onpointerdown={startResizeMid}
 			role="separator"
-			aria-label="Resize information and PDF panels"
+			aria-label={m.artifact_category_panel_resize_information_and_pdf_panels()}
 		></div>
 
 		<!-- Right: PDF Display -->
 		<div class="pdf-pane">
 			<div class="pdf-head">
 				<div>
-					<div class="eyebrow">PDF Display</div>
+					<div class="eyebrow">{m.artifact_category_panel_pdf_display()}</div>
 					<h4>
 						{#if selectedItem}
-							Input #{selectedItem.inputId} · {selectedGroupKey}
+							{m.artifact_category_panel_input_2({ inputId: selectedItem.inputId, selectedGroupKey: selectedGroupKey ?? '' })}
 						{:else}
-							Select an artifact
+							{m.artifact_category_panel_select_an_artifact()}
 						{/if}
 					</h4>
 				</div>
 				{#if selectedItem}
-					<span class="page-pill">page {resolvedPage}</span>
+					<span class="page-pill">{m.artifact_category_panel_page_2({ resolvedPage })}</span>
 				{/if}
 			</div>
 
@@ -587,13 +588,13 @@
 					{highlightVersion}
 					renderHighlights={renderArtifactHighlights}
 					sidebarSettingsKey="artifact-wiki-pdf-sidebar"
-					sidebarTitle="Artifact Info"
+					sidebarTitle={m.artifact_category_panel_artifact_info()}
 					darkMode={darkMode}
 				/>
 			{:else}
 				<div class="pdf-empty">
 					<div class="pdf-empty-icon">⬡</div>
-					<p>Expand a group, then click an instance to view its source document.</p>
+					<p>{m.artifact_category_panel_expand_a_group_then_click()}</p>
 				</div>
 			{/if}
 		</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		createRelease,
@@ -51,7 +52,7 @@
 		try {
 			releases = await listReleases();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Unable to load releases.';
+			error = e instanceof Error ? e.message : m.releases_unable_to_load_releases();
 		} finally {
 			loading = false;
 		}
@@ -77,11 +78,11 @@
 
 	async function save() {
 		if (!draft.major_version.trim() || !draft.minor_version.trim() || !draft.release_date) {
-			formError = 'Major version, minor version, and release date are required.';
+			formError = m.releases_major_version_minor_version_and();
 			return;
 		}
 		if (draft.items.some((item) => !item.description.trim())) {
-			formError = 'Every released item needs a description.';
+			formError = m.releases_every_released_item_needs_a();
 			return;
 		}
 		saving = true;
@@ -97,21 +98,28 @@
 			newRelease();
 			await load();
 		} catch (e) {
-			formError = e instanceof Error ? e.message : 'Unable to save release.';
+			formError = e instanceof Error ? e.message : m.releases_unable_to_save_release();
 		} finally {
 			saving = false;
 		}
 	}
 
 	async function remove(r: Release) {
-		if (!confirm(`Delete release ${r.major_version}.${r.minor_version} and all of its items?`))
+		if (
+			!confirm(
+				m.releases_delete_release_and_all_of({
+					major_version: r.major_version,
+					minor_version: r.minor_version
+				})
+			)
+		)
 			return;
 		try {
 			await deleteRelease(r.id);
 			if (editingID === r.id) newRelease();
 			await load();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Unable to delete release.';
+			error = e instanceof Error ? e.message : m.releases_unable_to_delete_release();
 		}
 	}
 
@@ -122,89 +130,116 @@
 	<section class="panel" style={`background:${colors.card};border-color:${colors.border};`}>
 		<div class="heading">
 			<div>
-				<span class="eyebrow" style={`color:${colors.muted}`}>SYSTEM ADMIN / SYSTEM</span>
-				<h1>Releases</h1>
+				<span class="eyebrow" style={`color:${colors.muted}`}
+					>{m.releases_system_admin_system()}</span
+				>
+				<h1>{m.releases_releases()}</h1>
 				<p style={`color:${colors.muted}`}>
-					Record a version, release date, notes, and the work included in it.
+					{m.releases_record_a_version_release_date()}
 				</p>
 			</div>
-			<button class="secondary" onclick={newRelease}>New release</button>
+			<button class="secondary" onclick={newRelease}>{m.releases_new_release()}</button>
 		</div>
-		<h2>{editingID === null ? 'Create release' : 'Modify release'}</h2>
+		<h2>{editingID === null ? m.releases_create_release() : m.releases_modify_release()}</h2>
 		<div class="fields version-fields">
-			<label>Major version<input bind:value={draft.major_version} placeholder="12" /></label>
-			<label>Minor version<input bind:value={draft.minor_version} placeholder="2" /></label>
-			<label>Release date<input type="date" bind:value={draft.release_date} /></label>
+			<label
+				>{m.releases_major_version()}<input
+					bind:value={draft.major_version}
+					placeholder="12"
+				/></label
+			>
+			<label
+				>{m.releases_minor_version()}<input
+					bind:value={draft.minor_version}
+					placeholder="2"
+				/></label
+			>
+			<label>{m.releases_release_date()}<input type="date" bind:value={draft.release_date} /></label
+			>
 		</div>
 		<label class="full"
-			>Release notes<textarea
+			>{m.releases_release_notes()}<textarea
 				bind:value={draft.release_notes}
 				rows="3"
-				placeholder="Summary of this release"
+				placeholder={m.releases_summary_of_this_release()}
 			></textarea></label
 		>
 		<div class="item-heading">
-			<h3>Released items</h3>
+			<h3>{m.releases_released_items()}</h3>
 			<button class="secondary" onclick={() => (draft.items = [...draft.items, emptyItem()])}
-				>Add item</button
+				>{m.releases_add_item()}</button
 			>
 		</div>
 		{#each draft.items as item, i (item)}
 			<div class="item-form" style={`border-color:${colors.border}`}>
 				<div class="item-title">
-					<strong>Item {i + 1}</strong><button
+					<strong>{m.releases_item({ value: i + 1 })}</strong><button
 						class="text danger"
 						onclick={() => (draft.items = draft.items.filter((_, index) => index !== i))}
-						>Remove</button
+						>{m.releases_remove()}</button
 					>
 				</div>
 				<div class="fields">
 					<label
-						>Type<select bind:value={item.item_type}
-							><option value="bug fix">Bug fix</option><option value="improvement"
-								>Improvement</option
-							><option value="new feature">New feature</option></select
+						>{m.releases_type()}<select bind:value={item.item_type}
+							><option value="bug fix">{m.releases_bug_fix()}</option><option value="improvement"
+								>{m.releases_improvement()}</option
+							><option value="new feature">{m.releases_new_feature()}</option></select
 						></label
-					><label>Ticket number<input bind:value={item.ticket_num} /></label><label
-						>Pull request<input bind:value={item.pull_request} placeholder="Number or URL" /></label
+					><label>{m.releases_ticket_number()}<input bind:value={item.ticket_num} /></label><label
+						>{m.releases_pull_request()}<input
+							bind:value={item.pull_request}
+							placeholder={m.releases_number_or_url()}
+						/></label
 					>
 				</div>
-				<label class="full">Description<input bind:value={item.description} /></label>
-				<label class="full">Notes<textarea bind:value={item.notes} rows="2"></textarea></label>
+				<label class="full">{m.releases_description()}<input bind:value={item.description} /></label
+				>
+				<label class="full"
+					>{m.releases_notes()}<textarea bind:value={item.notes} rows="2"></textarea></label
+				>
 			</div>
 		{/each}
 		{#if draft.items.length === 0}<p class="muted" style={`color:${colors.muted}`}>
-				No released items yet.
+				{m.releases_no_released_items_yet()}
 			</p>{/if}
 		{#if formError}<p class="error" role="alert">{formError}</p>{/if}
 		<div class="form-actions">
 			<button onclick={save} disabled={saving}
-				>{saving ? 'Saving…' : editingID === null ? 'Create release' : 'Save changes'}</button
-			>{#if editingID !== null}<button class="secondary" onclick={newRelease}>Cancel</button>{/if}
+				>{saving
+					? m.releases_saving()
+					: editingID === null
+						? m.releases_create_release()
+						: m.releases_save_changes()}</button
+			>{#if editingID !== null}<button class="secondary" onclick={newRelease}
+					>{m.releases_cancel()}</button
+				>{/if}
 		</div>
 	</section>
 
 	<section class="panel" style={`background:${colors.card};border-color:${colors.border};`}>
 		<div class="heading">
 			<div>
-				<h2>All releases</h2>
-				<p style={`color:${colors.muted}`}>Newest major and minor versions first</p>
+				<h2>{m.releases_all_releases()}</h2>
+				<p style={`color:${colors.muted}`}>{m.releases_newest_major_and_minor_versions()}</p>
 			</div>
-			<button class="secondary" onclick={load}>Refresh</button>
+			<button class="secondary" onclick={load}>{m.releases_refresh()}</button>
 		</div>
-		{#if loading}<p class="muted">Loading releases…</p>{:else if error}<p
+		{#if loading}<p class="muted">{m.releases_loading_releases()}</p>{:else if error}<p
 				class="error"
 				role="alert"
 			>
 				{error}
-			</p>{:else if releases.length === 0}<p class="muted">No releases have been created.</p>{:else}
+			</p>{:else if releases.length === 0}<p class="muted">
+				{m.releases_no_releases_have_been_created()}
+			</p>{:else}
 			<div class="table-wrap">
 				<table>
 					<thead
 						><tr
-							><th>Version</th><th>Release date</th><th>Release notes</th><th>Items</th><th
-								>Actions</th
-							></tr
+							><th>{m.releases_version()}</th><th>{m.releases_release_date()}</th><th
+								>{m.releases_release_notes()}</th
+							><th>{m.releases_items()}</th><th>{m.releases_actions()}</th></tr
 						></thead
 					><tbody>
 						{#each releases as r (r.id)}
@@ -218,17 +253,24 @@
 								><td>{r.release_date}</td><td class="notes-preview">{r.release_notes || '—'}</td><td
 									>{r.items.length}</td
 								><td class="actions"
-									><button class="text" onclick={() => edit(r)}>Edit</button><button
+									><button class="text" onclick={() => edit(r)}>{m.releases_edit()}</button><button
 										class="text danger"
-										onclick={() => remove(r)}>Delete</button
+										onclick={() => remove(r)}>{m.releases_delete()}</button
 									></td
 								></tr
 							>
 							{#if expandedID === r.id}<tr
 									><td colspan="5"
 										><div class="details">
-											<h3>Release {r.major_version}.{r.minor_version}</h3>
-											<p class="release-notes">{r.release_notes || 'No release notes.'}</p>
+											<h3>
+												{m.releases_release({
+													major_version: r.major_version,
+													minor_version: r.minor_version
+												})}
+											</h3>
+											<p class="release-notes">
+												{r.release_notes || m.releases_no_release_notes()}
+											</p>
 											{#each r.items as item (item.id)}<div
 													class="detail-item"
 													style={`border-color:${colors.border}`}
@@ -237,14 +279,14 @@
 													<p>{item.description}</p>
 													{#if item.notes}<p class="muted">{item.notes}</p>{/if}<small
 														>{item.ticket_num
-															? `Ticket: ${item.ticket_num}`
+															? m.releases_ticket({ ticket_num: item.ticket_num })
 															: ''}{item.ticket_num && item.pull_request
 															? ' · '
 															: ''}{item.pull_request
-															? `Pull request: ${item.pull_request}`
+															? m.releases_pull_request_2({ pull_request: item.pull_request })
 															: ''}</small
 													>
-												</div>{:else}<p class="muted">No released items.</p>{/each}
+												</div>{:else}<p class="muted">{m.releases_no_released_items()}</p>{/each}
 										</div></td
 									></tr
 								>{/if}
