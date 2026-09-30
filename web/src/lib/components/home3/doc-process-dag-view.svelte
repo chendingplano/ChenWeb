@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listDags,
@@ -213,7 +214,9 @@
 				try {
 					input.predicate = JSON.parse(predicateText) as Record<string, unknown>;
 				} catch {
-					throw new Error(`Invalid predicate JSON for gate "${input.name}": ${predicateText}`);
+					throw new Error(
+						m.doc_process_dag_invalid_predicate_json_for_gate({ name: input.name, predicateText })
+					);
 				}
 			}
 			rules.push(input);
@@ -225,11 +228,11 @@
 		error = null;
 		info = null;
 		if (!editing && !draft.name.trim()) {
-			error = 'Name is required.';
+			error = m.doc_process_dag_name_is_required();
 			return;
 		}
 		if (draft.processors.length === 0) {
-			error = 'A Doc Process DAG must have at least one doc processor.';
+			error = m.doc_process_dag_a_doc_process_dag_must();
 			return;
 		}
 		let rules: RuleInput[];
@@ -249,7 +252,7 @@
 					is_system_default: draft.is_system_default,
 					rules
 				});
-				info = 'Doc Process DAG updated.';
+				info = m.doc_process_dag_doc_process_dag_updated();
 			} else {
 				await createDag({
 					name: draft.name.trim(),
@@ -259,7 +262,7 @@
 					is_system_default: draft.is_system_default,
 					rules
 				});
-				info = 'Doc Process DAG created.';
+				info = m.doc_process_dag_doc_process_dag_created();
 			}
 			editorOpen = false;
 			editing = null;
@@ -275,7 +278,7 @@
 		if (
 			!confirm(
 				dag.is_system_default
-					? 'This DAG is the system default. The system will refuse to delete it — promote another DAG first. Continue?'
+					? m.doc_process_dag_this_dag_is_the_system()
 					: `Delete Doc Process DAG "${dag.name}"? Every version, rule, and binding is removed permanently.`
 			)
 		) {
@@ -285,7 +288,7 @@
 		try {
 			await deleteDag(dag.name);
 			if (detail?.name === dag.name) detail = null;
-			info = `Deleted Doc Process DAG "${dag.name}".`;
+			info = m.doc_process_dag_deleted_doc_process_dag({ name: dag.name });
 			await loadAll();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -322,18 +325,18 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Doc Process DAG</h2>
+			<h2>{m.doc_process_dag_doc_process_dag()}</h2>
 			<p class="muted">
-				A Doc Process DAG is a named doc process pipeline: a processor set, per-processor gates and
-				depends_on_processors edges, and knowledge-store bindings. Names are unique; every DAG has
-				at least one processor; one DAG is always the system default.
+				{m.doc_process_dag_a_doc_process_dag_is()}
 			</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadAll} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.doc_process_dag_refreshing() : m.doc_process_dag_refresh()}
 			</button>
-			<button class="primary" onclick={openCreate}>{editorOpen ? 'Cancel' : '+ New DAG'}</button>
+			<button class="primary" onclick={openCreate}
+				>{editorOpen ? m.doc_process_dag_cancel() : m.doc_process_dag_new_dag()}</button
+			>
 		</div>
 	</header>
 
@@ -342,25 +345,27 @@
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Doc Process DAGs</div>
+			<div class="summary-label">{m.doc_process_dag_doc_process_dags()}</div>
 			<div class="summary-value">{dags.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">System Default</div>
-			<div class="summary-value small">{defaultDag ? defaultDag.name : '— none —'}</div>
+			<div class="summary-label">{m.doc_process_dag_system_default()}</div>
+			<div class="summary-value small">
+				{defaultDag ? defaultDag.name : m.doc_process_dag_none()}
+			</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Processors in Use</div>
+			<div class="summary-label">{m.doc_process_dag_processors_in_use()}</div>
 			<div class="summary-value">{totalProcessors}</div>
 		</div>
 	</div>
 
 	<label class="search-row">
-		<span class="search-label">Search</span>
+		<span class="search-label">{m.doc_process_dag_search()}</span>
 		<input
 			bind:value={search}
 			oninput={onSearchInput}
-			placeholder="Search by name or display name…"
+			placeholder={m.doc_process_dag_search_by_name_or_display()}
 		/>
 	</label>
 
@@ -373,39 +378,54 @@
 			}}
 		>
 			<div class="editor-head">
-				<h3>{editing ? `Modify: ${editing.name}` : 'New Doc Process DAG'}</h3>
-				<button type="button" class="ghost compact-btn" onclick={closeEditor}>Close</button>
+				<h3>
+					{editing
+						? m.doc_process_dag_modify({ name: editing.name })
+						: m.doc_process_dag_new_doc_process_dag()}
+				</h3>
+				<button type="button" class="ghost compact-btn" onclick={closeEditor}
+					>{m.doc_process_dag_close()}</button
+				>
 			</div>
 			<div class="row two">
 				<label>
-					<span>Name</span>
+					<span>{m.doc_process_dag_name()}</span>
 					{#if editing}
 						<input value={editing.name} disabled />
 					{:else}
-						<input bind:value={draft.name} required placeholder="e.g. financial-invoice-pipeline" />
+						<input
+							bind:value={draft.name}
+							required
+							placeholder={m.doc_process_dag_e_g_financial_invoice_pipeline()}
+						/>
 					{/if}
 				</label>
 				<label>
-					<span>Display name</span>
-					<input bind:value={draft.display_name} placeholder="Financial Invoice Pipeline" />
+					<span>{m.doc_process_dag_display_name()}</span>
+					<input
+						bind:value={draft.display_name}
+						placeholder={m.doc_process_dag_financial_invoice_pipeline()}
+					/>
 				</label>
 			</div>
 			<label>
-				<span>Description</span>
-				<input bind:value={draft.description} placeholder="What this DAG is for…" />
+				<span>{m.doc_process_dag_description()}</span>
+				<input
+					bind:value={draft.description}
+					placeholder={m.doc_process_dag_what_this_dag_is_for()}
+				/>
 			</label>
 
 			<div class="toggle-row">
 				<div>
-					<span>System default</span>
+					<span>{m.doc_process_dag_system_default_2()}</span>
 					{#if editing && editing.is_system_default}
 						<p class="muted inline-note">
-							This is currently the system default. To change it, mark another DAG as default — the
-							system keeps exactly one.
+							{m.doc_process_dag_this_is_currently_the_system()}
 						</p>
 					{:else if !editing && !defaultDag}
 						<p class="muted inline-note">
-							No DAG is the system default yet — this one will become the default automatically.
+							{m.doc_process_dag_no_dag_is_the_system()}
 						</p>
 					{/if}
 				</div>
@@ -419,11 +439,11 @@
 
 			<div class="section">
 				<div class="section-head">
-					<span class="section-title">Processors</span>
-					<span class="muted">At least one is required.</span>
+					<span class="section-title">{m.doc_process_dag_processors()}</span>
+					<span class="muted">{m.doc_process_dag_at_least_one_is_required()}</span>
 				</div>
 				{#if processors.length === 0}
-					<p class="empty">No registered processors available.</p>
+					<p class="empty">{m.doc_process_dag_no_registered_processors_available()}</p>
 				{:else}
 					<div class="processor-grid">
 						{#each processors as spec (spec.name)}
@@ -446,9 +466,9 @@
 			{#if draft.processors.length > 0}
 				<div class="section">
 					<div class="section-head">
-						<span class="section-title">Gates &amp; DAG edges</span>
+						<span class="section-title">{m.doc_process_dag_gates_dag_edges()}</span>
 						<span class="muted">
-							depends_on_processors means the target runs only after those processors.
+							{m.doc_process_dag_depends_on_processors_means_the()}
 						</span>
 					</div>
 					<div class="rules-list">
@@ -456,25 +476,25 @@
 							<div class="rule-card">
 								<div class="rule-head">
 									<div class="rule-target">
-										<span>Gate for</span>
+										<span>{m.doc_process_dag_gate_for()}</span>
 										<span class="rule-target-name">{processorLabel(rule.target_processor)}</span>
 									</div>
 									<label class="rule-effect">
-										<span>Effect</span>
+										<span>{m.doc_process_dag_effect()}</span>
 										<select bind:value={rule.effect}>
-											<option value="require">require</option>
-											<option value="enable">enable</option>
-											<option value="skip">skip</option>
+											<option value="require">{m.doc_process_dag_require()}</option>
+											<option value="enable">{m.doc_process_dag_enable()}</option>
+											<option value="skip">{m.doc_process_dag_skip()}</option>
 										</select>
 									</label>
 								</div>
 								<label>
-									<span>Rule name</span>
+									<span>{m.doc_process_dag_rule_name()}</span>
 									<input bind:value={rule.name} placeholder={`gate-${rule.target_processor}`} />
 								</label>
 								{#if draft.processors.length > 1}
 									<div class="depends-row">
-										<span class="depends-label">Depends on</span>
+										<span class="depends-label">{m.doc_process_dag_depends_on()}</span>
 										<div class="depends-chips">
 											{#each draft.processors.filter((p) => p !== rule.target_processor) as dep (dep)}
 												<label class="depends-chip">
@@ -497,12 +517,14 @@
 								{/if}
 								<label>
 									<span
-										>Predicate (optional JSON, e.g.
-										&#123;"kind":"fact","path":"document.doc_kind","op":"eq","value":"invoice"&#125;)</span
+										>{m.doc_process_dag_predicate_optional_json_e_g({
+											example:
+												'{"kind":"fact","path":"document.doc_kind","op":"eq","value":"invoice"}'
+										})}</span
 									>
 									<input
 										bind:value={rule.predicate}
-										placeholder="Leave empty for an unconditional gate."
+										placeholder={m.doc_process_dag_leave_empty_for_an_unconditional()}
 									/>
 								</label>
 							</div>
@@ -514,20 +536,20 @@
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting}>
 					{submitting
-						? 'Saving…'
+						? m.doc_process_dag_saving()
 						: editing
-							? 'Save (new version if processors/rules changed)'
-							: 'Create DAG'}
+							? m.doc_process_dag_save_new_version_if_processors()
+							: m.doc_process_dag_create_dag()}
 				</button>
 			</div>
 		</form>
 	{/if}
 
-	<h3>Doc Process DAGs</h3>
+	<h3>{m.doc_process_dag_doc_process_dags()}</h3>
 	{#if loading && dags.length === 0}
-		<p class="empty">Loading…</p>
+		<p class="empty">{m.doc_process_dag_loading()}</p>
 	{:else if dags.length === 0}
-		<p class="empty">No Doc Process DAGs yet. Create one above.</p>
+		<p class="empty">{m.doc_process_dag_no_doc_process_dags_yet()}</p>
 	{:else}
 		<div class="dag-grid">
 			{#each dags as dag (dag.name)}
@@ -537,7 +559,7 @@
 							<div class="dag-name">
 								{dag.display_name || dag.name}
 								{#if dag.is_system_default}
-									<span class="default-badge">default</span>
+									<span class="default-badge">{m.doc_process_dag_default()}</span>
 								{/if}
 							</div>
 							<div class="cell-secondary">
@@ -551,20 +573,34 @@
 					{#if dag.description}<p class="dag-desc">{dag.description}</p>{/if}
 					<div class="badge-row">
 						<span class="badge"
-							>{dag.processors.length} processor{dag.processors.length === 1 ? '' : 's'}</span
+							>{m.doc_process_dag_processor({
+								processorsCount: dag.processors.length,
+								plural: dag.processors.length === 1 ? '' : 's'
+							})}</span
 						>
-						<span class="badge">{dag.rule_count} gate{dag.rule_count === 1 ? '' : 's'}</span>
-						<span class="badge">updated {fmtDate(dag.modify_time)}</span>
+						<span class="badge"
+							>{m.doc_process_dag_gate({
+								rule_count: dag.rule_count,
+								plural: dag.rule_count === 1 ? '' : 's'
+							})}</span
+						>
+						<span class="badge"
+							>{m.doc_process_dag_updated({ modify_time: fmtDate(dag.modify_time) })}</span
+						>
 					</div>
 					<div class="dag-processors">
 						{#each dag.processors as p (p)}<span class="proc-chip">{p}</span>{/each}
 					</div>
 					<div class="card-foot">
 						<button class="ghost compact-btn" onclick={() => viewDetail(dag)}>
-							{detail?.name === dag.name ? 'Close' : 'View'}
+							{detail?.name === dag.name ? m.doc_process_dag_close() : m.doc_process_dag_view()}
 						</button>
-						<button class="ghost compact-btn" onclick={() => openEdit(dag)}>Modify</button>
-						<button class="ghost compact-btn danger" onclick={() => removeDag(dag)}>Delete</button>
+						<button class="ghost compact-btn" onclick={() => openEdit(dag)}
+							>{m.doc_process_dag_modify_2()}</button
+						>
+						<button class="ghost compact-btn danger" onclick={() => removeDag(dag)}
+							>{m.doc_process_dag_delete()}</button
+						>
 					</div>
 				</div>
 			{/each}
@@ -572,37 +608,42 @@
 	{/if}
 
 	{#if detailLoading}
-		<p class="empty">Loading detail…</p>
+		<p class="empty">{m.doc_process_dag_loading_detail()}</p>
 	{:else if detail}
 		<div class="panel">
 			<div class="panel-head">
-				<h3>{detail.display_name || detail.name} — detail</h3>
-				<button class="ghost compact-btn" onclick={() => (detail = null)}>Close</button>
+				<h3>{m.doc_process_dag_detail({ display_name: detail.display_name || detail.name })}</h3>
+				<button class="ghost compact-btn" onclick={() => (detail = null)}
+					>{m.doc_process_dag_close()}</button
+				>
 			</div>
 			<div class="detail-meta">
-				<span><b>Name:</b> {detail.name}</span>
-				<span><b>Version:</b> v{detail.version} ({detail.status})</span>
-				<span><b>System default:</b> {detail.is_system_default ? 'yes' : 'no'}</span>
+				<span><b>{m.doc_process_dag_name_2()}</b> {detail.name}</span>
+				<span><b>{m.doc_process_dag_version()}</b> v{detail.version} ({detail.status})</span>
+				<span
+					><b>{m.doc_process_dag_system_default_3()}</b>
+					{detail.is_system_default ? 'yes' : 'no'}</span
+				>
 			</div>
 			<div class="section">
-				<div class="section-title">Processors</div>
+				<div class="section-title">{m.doc_process_dag_processors()}</div>
 				<div class="dag-processors">
 					{#each detail.processors as p (p)}<span class="proc-chip">{p}</span>{/each}
 				</div>
 			</div>
 			<div class="section">
-				<div class="section-title">Gates &amp; DAG edges</div>
+				<div class="section-title">{m.doc_process_dag_gates_dag_edges()}</div>
 				{#if detail.rules.length === 0}
-					<p class="empty">No gates defined.</p>
+					<p class="empty">{m.doc_process_dag_no_gates_defined()}</p>
 				{:else}
 					<div class="table-wrap">
 						<table>
 							<thead>
 								<tr>
-									<th>Gate</th>
-									<th>Target</th>
-									<th>Effect</th>
-									<th>Depends on</th>
+									<th>{m.doc_process_dag_gate_2()}</th>
+									<th>{m.doc_process_dag_target()}</th>
+									<th>{m.doc_process_dag_effect()}</th>
+									<th>{m.doc_process_dag_depends_on()}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -635,19 +676,19 @@
 				{/if}
 			</div>
 			<div class="section">
-				<div class="section-title">Knowledge-store bindings</div>
+				<div class="section-title">{m.doc_process_dag_knowledge_store_bindings()}</div>
 				{#if detail.bindings.length === 0}
-					<p class="empty">No bindings reference this DAG.</p>
+					<p class="empty">{m.doc_process_dag_no_bindings_reference_this_dag()}</p>
 				{:else}
 					<div class="table-wrap">
 						<table>
 							<thead>
 								<tr>
-									<th>Name</th>
-									<th>Kind</th>
-									<th>Store</th>
-									<th>Active</th>
-									<th>Created</th>
+									<th>{m.doc_process_dag_name()}</th>
+									<th>{m.doc_process_dag_kind()}</th>
+									<th>{m.doc_process_dag_store()}</th>
+									<th>{m.doc_process_dag_active()}</th>
+									<th>{m.doc_process_dag_created()}</th>
 								</tr>
 							</thead>
 							<tbody>

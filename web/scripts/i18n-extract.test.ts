@@ -119,3 +119,9 @@ test('converts dialog text in handlers and text props on components', () => {
 	assert.ok(out.includes("onclick={() => confirm(m.p_discard_your_changes()) && reset('k')}"));
 	assert.ok(out.includes('<Pane itemLabelPlural={m.p_provisions()} variant="outline" />'));
 });
+
+test('literal braces in text become an example param', () => {
+	const { out, messages } = convert(`<p>Predicate (e.g. &#123;"op":"eq"&#125;)</p>`, 'd', {});
+	assert.ok(out.includes(`{m.d_predicate_e_g({ example: "{\\"op\\":\\"eq\\"}" })}`), out);
+	assert.equal(messages[0].text, 'Predicate (e.g. {example})');
+});

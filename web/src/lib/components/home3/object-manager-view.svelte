@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { Chart } from 'svelte-echarts';
@@ -362,17 +363,17 @@
 		if (!s) return {};
 		return {
 			tooltip: { trigger: 'item' },
-			title: { text: `Total ${s.total}`, left: 'center', top: 'center', textStyle: { color: textCol, fontSize: 14 } },
+			title: { text: m.object_manager_total({ total: s.total }), left: 'center', top: 'center', textStyle: { color: textCol, fontSize: 14 } },
 			series: [
 				{
 					type: 'pie',
 					radius: ['45%', '70%'],
 					label: { color: textCol },
 					data: [
-						{ name: 'Provisions', value: s.provisions },
-						{ name: 'Metrics', value: s.metrics },
-						{ name: 'Inventory Items', value: s.inventory_items },
-						{ name: 'Other', value: s.other }
+						{ name: m.object_manager_provisions(), value: s.provisions },
+						{ name: m.object_manager_metrics(), value: s.metrics },
+						{ name: m.object_manager_inventory_items(), value: s.inventory_items },
+						{ name: m.object_manager_other(), value: s.other }
 					]
 				}
 			]
@@ -388,7 +389,7 @@
 			xAxis: { type: 'value', axisLabel: { color: mutedCol } },
 			yAxis: {
 				type: 'category',
-				data: ['Provisions', 'Metrics', 'Inventory Items'],
+				data: [m.object_manager_provisions(), m.object_manager_metrics(), m.object_manager_inventory_items()],
 				axisLabel: { color: mutedCol }
 			},
 			series: [
@@ -670,7 +671,7 @@
 				reconcile_status: 'ambiguous_resolved',
 				reconcile_confidence: c.score
 			});
-			resolutionMessage = `Linked to ${c.canonical_name || c.object_id}.`;
+			resolutionMessage = m.object_manager_linked_to({ canonical_name: c.canonical_name || c.object_id });
 			await afterResolutionChange(c.object_id, 'ambiguous_resolved');
 		} catch (err) {
 			resolutionError = err instanceof Error ? err.message : String(err);
@@ -701,12 +702,12 @@
 					reconcile_status: 'new',
 					reconcile_confidence: 1
 				});
-				resolutionMessage = `Created ${res.node.canonical_name || res.node.object_id} and linked.`;
+				resolutionMessage = m.object_manager_created_and_linked({ canonical_name: res.node.canonical_name || res.node.object_id });
 				await afterResolutionChange(res.node.object_id, 'new');
 			} else {
 				// A node with this name already exists — offer them to link instead.
 				resolutionCandidates = res.nodes;
-				resolutionMessage = 'A node with this name already exists — pick one to link.';
+				resolutionMessage = m.object_manager_a_node_with_this_name();
 			}
 		} catch (err) {
 			resolutionError = err instanceof Error ? err.message : String(err);
@@ -721,7 +722,7 @@
 		resolutionError = '';
 		try {
 			await updateArtifactObject(selectedArtifact.id, { reconcile_status: 'rejected' });
-			resolutionMessage = 'Marked rejected.';
+			resolutionMessage = m.object_manager_marked_rejected();
 			selectedArtifact = { ...selectedArtifact, reconcile_status: 'rejected' };
 			if (resolutionLoadedId > 0) await loadResolution(resolutionLoadedId);
 		} catch (err) {
@@ -749,14 +750,14 @@
 	}
 
 	const WIDGET_TITLES: Record<WidgetId, string> = {
-		'relation-chart': 'Object Relation Chart',
-		'node-info': 'Object Node Info',
-		'artifact-info': 'Artifact Object Info',
-		resolution: 'Object Resolution',
-		'stats-artifact': 'Artifact Object Statistics',
-		'stats-nodes': 'Object Nodes Statistics',
-		connectivity: 'Object Node Connectivity',
-		log: 'Log'
+		'relation-chart': m.object_manager_object_relation_chart(),
+		'node-info': m.object_manager_object_node_info(),
+		'artifact-info': m.object_manager_artifact_object_info(),
+		resolution: m.object_manager_object_resolution(),
+		'stats-artifact': m.object_manager_artifact_object_statistics(),
+		'stats-nodes': m.object_manager_object_nodes_statistics(),
+		connectivity: m.object_manager_object_node_connectivity(),
+		log: m.object_manager_log()
 	};
 
 	const DEFAULT_LAYOUT: WidgetLayout[] = [
@@ -878,17 +879,17 @@
 	<!-- Left Panel -->
 	<aside class="left">
 		<div class="left-header">
-			<select class="table-select" bind:value={table} onchange={reloadList} aria-label="Table">
-				<option value="object_nodes">kb.object_nodes</option>
-				<option value="artifact_objects">kb.artifact_objects</option>
+			<select class="table-select" bind:value={table} onchange={reloadList} aria-label={m.object_manager_table()}>
+				<option value="object_nodes">{m.object_manager_kb_object_nodes()}</option>
+				<option value="artifact_objects">{m.object_manager_kb_artifact_objects()}</option>
 			</select>
-			<button type="button" class="search-btn" onclick={openSearchDialog}>Search…</button>
+			<button type="button" class="search-btn" onclick={openSearchDialog}>{m.object_manager_search()}</button>
 		</div>
 		<div class="left-count">
 			{rows.length}
 			{selectionMode ? 'selected' : 'shown'}
 			{#if selectionMode}
-				· <button type="button" class="link-btn" onclick={reloadList}>show all</button>
+				· <button type="button" class="link-btn" onclick={reloadList}>{m.object_manager_show_all()}</button>
 			{/if}
 		</div>
 		{#if searchError}<p class="error">{searchError}</p>{/if}
@@ -915,11 +916,11 @@
 		{#if !selectionMode}
 			<div class="pager">
 				<button type="button" onclick={() => loadPage(page - 1)} disabled={page <= 1 || loadingList}>
-					Prev
+					{m.object_manager_prev()}
 				</button>
-				<span class="pager-label">Page {page}</span>
+				<span class="pager-label">{m.object_manager_page({ page })}</span>
 				<button type="button" onclick={() => loadPage(page + 1)} disabled={!hasMore || loadingList}>
-					Next
+					{m.object_manager_next()}
 				</button>
 			</div>
 		{/if}
@@ -937,8 +938,8 @@
 	<!-- Middle Panel -->
 	<main class="middle">
 		<div class="middle-toolbar">
-			<span class="crumb">{selectedObjectId ? `object: ${selectedObjectId}` : 'No selection'}</span>
-			<button type="button" class="link-btn" onclick={resetLayout}>Reset layout</button>
+			<span class="crumb">{selectedObjectId ? `object: ${selectedObjectId}` : m.object_manager_no_selection()}</span>
+			<button type="button" class="link-btn" onclick={resetLayout}>{m.object_manager_reset_layout()}</button>
 		</div>
 		<div class="grid">
 			{#each layout as w, i (w.id)}
@@ -960,89 +961,89 @@
 					>
 						<span class="widget-title">{WIDGET_TITLES[w.id]}</span>
 						<span class="widget-actions">
-							<button type="button" title="Narrower" onclick={() => setColSpan(i, -1)}>−</button>
+							<button type="button" title={m.object_manager_narrower()} onclick={() => setColSpan(i, -1)}>−</button>
 							<span class="span-badge">{w.colSpan}</span>
-							<button type="button" title="Wider" onclick={() => setColSpan(i, 1)}>+</button>
+							<button type="button" title={m.object_manager_wider()} onclick={() => setColSpan(i, 1)}>+</button>
 						</span>
 					</header>
 					<div class="widget-body">
 						{#if w.id === 'relation-chart'}
 							{#if graphLoading}
-								<p class="muted">Loading graph…</p>
+								<p class="muted">{m.object_manager_loading_graph()}</p>
 							{:else if graphError}
 								<p class="error">{graphError}</p>
 							{:else if graph && graph.nodes.length > 0}
-								{#if graph.truncated}<p class="muted small">Graph truncated at node cap.</p>{/if}
+								{#if graph.truncated}<p class="muted small">{m.object_manager_graph_truncated_at_node_cap()}</p>{/if}
 								<Chart bind:chart={chartApi} {init} options={graphOption} style="width:100%;height:100%;" onclick={onChartClick} />
 							{:else}
-								<p class="muted">Select a record to view its relation graph.</p>
+								<p class="muted">{m.object_manager_select_a_record_to_view()}</p>
 							{/if}
 						{:else if w.id === 'node-info'}
 							{#if selectedNode}
 								<dl class="kv">
-									<dt>object_id</dt><dd>{selectedNode.object_id}</dd>
-									<dt>canonical_name</dt><dd>{selectedNode.canonical_name}</dd>
-									<dt>object_type</dt><dd>{selectedNode.object_type}</dd>
-									<dt>reconcile_status</dt><dd>{selectedNode.reconcile_status}</dd>
+									<dt>{m.object_manager_object_id()}</dt><dd>{selectedNode.object_id}</dd>
+									<dt>{m.object_manager_canonical_name()}</dt><dd>{selectedNode.canonical_name}</dd>
+									<dt>{m.object_manager_object_type()}</dt><dd>{selectedNode.object_type}</dd>
+									<dt>{m.object_manager_reconcile_status()}</dt><dd>{selectedNode.reconcile_status}</dd>
 								</dl>
 								<div class="merge-row">
-									<input type="text" placeholder="Merge into object_id…" bind:value={mergeSurvivorId} />
-									<button type="button" onclick={runMerge} disabled={!mergeSurvivorId.trim()}>Merge</button>
+									<input type="text" placeholder={m.object_manager_merge_into_object_id()} bind:value={mergeSurvivorId} />
+									<button type="button" onclick={runMerge} disabled={!mergeSurvivorId.trim()}>{m.object_manager_merge()}</button>
 								</div>
 								{#if mergeMessage}<p class="muted small">{mergeMessage}</p>{/if}
 							{:else}
-								<p class="muted">No object node selected.</p>
+								<p class="muted">{m.object_manager_no_object_node_selected()}</p>
 							{/if}
 						{:else if w.id === 'artifact-info'}
 							{#if selectedArtifact}
 								<dl class="kv">
-									<dt>id</dt><dd>{selectedArtifact.id}</dd>
-									<dt>artifact</dt><dd>{selectedArtifact.artifact_type} / {selectedArtifact.artifact_id}</dd>
-									<dt>object_name</dt><dd>{selectedArtifact.object_name}</dd>
-									<dt>object_id</dt><dd>{selectedArtifact.object_id || '(unresolved)'}</dd>
-									<dt>reconcile_status</dt><dd>{selectedArtifact.reconcile_status}</dd>
+									<dt>{m.object_manager_id()}</dt><dd>{selectedArtifact.id}</dd>
+									<dt>{m.object_manager_artifact()}</dt><dd>{selectedArtifact.artifact_type} / {selectedArtifact.artifact_id}</dd>
+									<dt>{m.object_manager_object_name()}</dt><dd>{selectedArtifact.object_name}</dd>
+									<dt>{m.object_manager_object_id()}</dt><dd>{selectedArtifact.object_id || m.object_manager_unresolved()}</dd>
+									<dt>{m.object_manager_reconcile_status()}</dt><dd>{selectedArtifact.reconcile_status}</dd>
 								</dl>
 							{:else}
-								<p class="muted">No artifact object selected.</p>
+								<p class="muted">{m.object_manager_no_artifact_object_selected()}</p>
 							{/if}
 						{:else if w.id === 'resolution'}
 							{#if !selectedArtifact}
-								<p class="muted">Select an artifact object (mention) to resolve.</p>
+								<p class="muted">{m.object_manager_select_an_artifact_object_mention()}</p>
 							{:else}
 								<div class="res-status">
-									status:
+									{m.object_manager_status()}
 									<strong>{resolutionDetail?.reconcile_status ?? selectedArtifact.reconcile_status}</strong>
-									· object_id:
-									<strong>{resolutionDetail?.object_id || '(unresolved)'}</strong>
+									{m.object_manager_object_id_2()}
+									<strong>{resolutionDetail?.object_id || m.object_manager_unresolved()}</strong>
 								</div>
 								<div class="res-actions">
 									<button type="button" onclick={createNewNode} disabled={resolutionBusy}>
-										Create New
+										{m.object_manager_create_new()}
 									</button>
 									<button type="button" onclick={rejectMention} disabled={resolutionBusy}>
-										Reject
+										{m.object_manager_reject()}
 									</button>
 								</div>
 								{#if resolutionError}<p class="error">{resolutionError}</p>{/if}
 								{#if resolutionMessage}<p class="muted small">{resolutionMessage}</p>{/if}
 								<div class="res-cands">
 									{#if resolutionLoading}
-										<p class="muted small">Loading candidates…</p>
+										<p class="muted small">{m.object_manager_loading_candidates()}</p>
 									{:else if resolutionCandidates.length === 0}
-										<p class="muted small">No candidate nodes.</p>
+										<p class="muted small">{m.object_manager_no_candidate_nodes()}</p>
 									{:else}
 										{#each resolutionCandidates as c (c.object_id)}
 											<div class="res-cand" class:recommended={c.recommended}>
 												<span class="res-cand-main">
 													<span class="record-title">{c.canonical_name || c.object_id}</span>
 													<span class="record-sub">
-														{c.object_type} · score {c.score.toFixed(2)} · {c.method}{c.recommended
-															? ' · recommended'
-															: ''}
+														{m.object_manager_score({ object_type: c.object_type, score: c.score.toFixed(2), method: c.method, value: c.recommended
+															? m.object_manager_recommended()
+															: '' })}
 													</span>
 												</span>
 												<button type="button" onclick={() => linkCandidate(c)} disabled={resolutionBusy}>
-													Link
+													{m.object_manager_link()}
 												</button>
 											</div>
 										{/each}
@@ -1053,19 +1054,19 @@
 							{#if statsError}<p class="error">{statsError}</p>{/if}
 							{#if artifactStats}
 								<Chart {init} options={artifactStatsOption} style="width:100%;height:calc(100% - 24px);" />
-								<p class="muted small">Unresolved: {artifactStats.unresolved} / {artifactStats.total}</p>
+								<p class="muted small">{m.object_manager_unresolved_2({ unresolved: artifactStats.unresolved, total: artifactStats.total })}</p>
 							{:else}
-								<p class="muted">Loading…</p>
+								<p class="muted">{m.object_manager_loading()}</p>
 							{/if}
 						{:else if w.id === 'stats-nodes'}
 							{#if nodeStats}
 								<Chart {init} options={nodeStatsOption} style="width:100%;height:100%;" />
 							{:else}
-								<p class="muted">Loading…</p>
+								<p class="muted">{m.object_manager_loading()}</p>
 							{/if}
 						{:else if w.id === 'connectivity'}
 							<div class="conn-controls">
-								<label>Top N
+								<label>{m.object_manager_top_n()}
 									<select bind:value={connectivityTopN} onchange={loadConnectivity}>
 										{#each topNChoices as n (n)}<option value={n}>{n}</option>{/each}
 									</select>
@@ -1075,10 +1076,10 @@
 							{#if connectivity.length > 0}
 								<Chart {init} options={connectivityOption} style="width:100%;height:calc(100% - 32px);" />
 							{:else}
-								<p class="muted">No connectivity data.</p>
+								<p class="muted">{m.object_manager_no_connectivity_data()}</p>
 							{/if}
 						{:else if w.id === 'log'}
-							<p class="muted">Log entries for the selected object appear here (kb.object_audit_log).</p>
+							<p class="muted">{m.object_manager_log_entries_for_the_selected()}</p>
 						{/if}
 					</div>
 				</section>
@@ -1098,12 +1099,12 @@
 	<!-- Right Panel -->
 	<aside class="right">
 		<div class="right-head">
-			<span class="widget-title">PDF</span>
+			<span class="widget-title">{m.object_manager_pdf()}</span>
 			{#if locator}<span class="muted small">{locator.document}</span>{/if}
 		</div>
 		{#if locatorError}<p class="error">{locatorError}</p>{/if}
 		{#if locator && pdfFileUrl}
-			<p class="muted small">Spans: {locator.source_line_spans.join(', ') || '—'}</p>
+			<p class="muted small">{m.object_manager_spans({ source_line_spans: locator.source_line_spans.join(', ') || '—' })}</p>
 			{#if isPdfDoc}
 				<div class="pdf-host">
 					<PdfViewWindow
@@ -1123,7 +1124,7 @@
 				<iframe class="pdf-frame" src={pdfFileUrl} title={locator.document}></iframe>
 			{/if}
 		{:else}
-			<p class="muted">Click a chart node or record to open its source PDF.</p>
+			<p class="muted">{m.object_manager_click_a_chart_node_or()}</p>
 		{/if}
 	</aside>
 
@@ -1140,18 +1141,18 @@
 				class="dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Search objects"
+				aria-label={m.object_manager_search_objects()}
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
 				onkeydown={(e) => e.stopPropagation()}
 			>
 				<div class="dialog-head">
-					<span class="dialog-title">Search &amp; Select</span>
-					<button type="button" class="ghost" onclick={() => (searchDialogOpen = false)}>Close</button>
+					<span class="dialog-title">{m.object_manager_search_select()}</span>
+					<button type="button" class="ghost" onclick={() => (searchDialogOpen = false)}>{m.object_manager_close()}</button>
 				</div>
 				<div class="dialog-conditions">
 					<label>
-						Table
+						{m.object_manager_table()}
 						<select
 							bind:value={table}
 							onchange={() => {
@@ -1159,30 +1160,30 @@
 								checkedIds = new Set();
 							}}
 						>
-							<option value="object_nodes">kb.object_nodes</option>
-							<option value="artifact_objects">kb.artifact_objects</option>
+							<option value="object_nodes">{m.object_manager_kb_object_nodes()}</option>
+							<option value="artifact_objects">{m.object_manager_kb_artifact_objects()}</option>
 						</select>
 					</label>
 					<label>
-						Name contains
+						{m.object_manager_name_contains()}
 						<input
 							type="text"
-							placeholder="Search text…"
+							placeholder={m.object_manager_search_text()}
 							bind:value={searchQuery}
 							onkeydown={(e) => e.key === 'Enter' && runSearch()}
 						/>
 					</label>
 					<label>
-						Record ID
+						{m.object_manager_record_id()}
 						<input
 							type="text"
-							placeholder="Exact id…"
+							placeholder={m.object_manager_exact_id()}
 							bind:value={recordIdInput}
 							onkeydown={(e) => e.key === 'Enter' && runSearch()}
 						/>
 					</label>
 					<button type="button" class="primary" onclick={runSearch} disabled={searching}>
-						{searching ? 'Searching…' : 'Search'}
+						{searching ? m.object_manager_searching() : m.object_manager_search_2()}
 					</button>
 				</div>
 				{#if searchError}<p class="error">{searchError}</p>{/if}
@@ -1207,18 +1208,18 @@
 							</label>
 						</li>
 					{:else}
-						<li class="muted small dialog-empty">No results yet. Enter conditions and Search.</li>
+						<li class="muted small dialog-empty">{m.object_manager_no_results_yet_enter_conditions()}</li>
 					{/each}
 				</ul>
 				<div class="dialog-footer">
-					<span class="muted small">{checkedIds.size} selected</span>
+					<span class="muted small">{m.object_manager_selected({ checkedIdsCount: checkedIds.size })}</span>
 					<button
 						type="button"
 						class="primary select-btn"
 						onclick={applySelection}
 						disabled={checkedIds.size === 0}
 					>
-						Select
+						{m.object_manager_select()}
 					</button>
 				</div>
 			</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
@@ -81,8 +82,7 @@
 			: 'linear-gradient(180deg, rgba(215, 222, 232, 0.55), rgba(215, 222, 232, 0.28))'
 	);
 
-	const emptyText =
-		'No active knowledge store selected yet. Click a card to make it the active knowledge store for this page.';
+	const emptyText = m.knowledge_store_no_active_knowledge_store_selected();
 	const CARD_STYLE_STORAGE_KEY = 'knowledge-store-card-style';
 	const CARD_COLOR_STORAGE_KEY = 'knowledge-store-card-bg-color';
 
@@ -94,20 +94,20 @@
 	}> = [
 		{
 			id: 'blush',
-			name: 'Blush Gradient',
-			description: 'Soft pastel card with a bright top glow.',
+			name: m.knowledge_store_blush_gradient(),
+			description: m.knowledge_store_soft_pastel_card_with_a(),
 			defaultColor: '#ff8fb1'
 		},
 		{
 			id: 'graphite',
-			name: 'Graphite',
-			description: 'Minimal dark slab with a subtle industrial rim.',
+			name: m.knowledge_store_graphite(),
+			description: m.knowledge_store_minimal_dark_slab_with_a(),
 			defaultColor: '#5d6675'
 		},
 		{
 			id: 'neon',
-			name: 'Neon Glow',
-			description: 'High-contrast panel with an electric halo edge.',
+			name: m.knowledge_store_neon_glow(),
+			description: m.knowledge_store_high_contrast_panel_with_an(),
 			defaultColor: '#7c4dff'
 		}
 	];
@@ -118,7 +118,7 @@
 	}
 
 	function formatDate(value?: string): string {
-		if (!value) return 'No timestamp';
+		if (!value) return m.knowledge_store_no_timestamp();
 		const date = new Date(value);
 		if (Number.isNaN(date.getTime())) return value;
 		return date.toLocaleString();
@@ -126,9 +126,9 @@
 
 	function sourceSummary(store: KnowledgeStoreRecord): string {
 		const count = normalizeSources(store.ks_sources).length;
-		if (count === 0) return 'No sources configured';
-		if (count === 1) return '1 source configured';
-		return `${count} sources configured`;
+		if (count === 0) return m.knowledge_store_no_sources_configured();
+		if (count === 1) return m.knowledge_store_1_source_configured();
+		return m.knowledge_store_sources_configured({ count });
 	}
 
 	function sourcePreview(store: KnowledgeStoreRecord): string[] {
@@ -239,7 +239,7 @@
 			const result = await listManagedUsers();
 			userOptions = buildKnowledgeStoreUserOptions(result.users);
 		} catch (err) {
-			userLoadError = err instanceof Error ? err.message : 'Failed to load users';
+			userLoadError = err instanceof Error ? err.message : m.knowledge_store_failed_to_load_users();
 		}
 	}
 
@@ -252,7 +252,8 @@
 			knowledgeStoreState.syncActiveStore(stores);
 			await applyDefaultStore();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to load knowledge stores';
+			error =
+				err instanceof Error ? err.message : m.knowledge_store_failed_to_load_knowledge_stores();
 		} finally {
 			loading = false;
 		}
@@ -277,7 +278,7 @@
 
 	async function saveDialog() {
 		if (!formName.trim()) {
-			dialogError = 'Knowledge store name is required.';
+			dialogError = m.knowledge_store_knowledge_store_name_is_required();
 			return;
 		}
 		saving = true;
@@ -296,7 +297,8 @@
 			knowledgeStoreState.syncActiveStore(stores);
 			closeDialog();
 		} catch (err) {
-			dialogError = err instanceof Error ? err.message : 'Failed to save knowledge store';
+			dialogError =
+				err instanceof Error ? err.message : m.knowledge_store_failed_to_save_knowledge_store();
 		} finally {
 			saving = false;
 		}
@@ -315,7 +317,8 @@
 			}
 			closeDialog();
 		} catch (err) {
-			dialogError = err instanceof Error ? err.message : 'Failed to delete knowledge store';
+			dialogError =
+				err instanceof Error ? err.message : m.knowledge_store_failed_to_delete_knowledge_store();
 		} finally {
 			saving = false;
 		}
@@ -344,12 +347,10 @@
 >
 	<section class="hero-shell">
 		<div class="hero-copy">
-			<div class="eyebrow">Knowledge Stores</div>
-			<h2>Choose a Knowledge Store to Explore</h2>
+			<div class="eyebrow">{m.knowledge_store_knowledge_stores()}</div>
+			<h2>{m.knowledge_store_choose_a_knowledge_store_to()}</h2>
 			<p>
-				This page is the control surface for what the rest of the Knowledge System operates on.
-				Cards are selection-first, but they also expose the configuration you need to edit with
-				confidence.
+				{m.knowledge_store_this_page_is_the_control()}
 			</p>
 			<div class="hero-active-strip">
 				<div class="active-banner-icon">
@@ -360,17 +361,18 @@
 					{/if}
 				</div>
 				<div class="active-banner-copy">
-					<div class="active-banner-label">Active Knowledge Store</div>
+					<div class="active-banner-label">{m.knowledge_store_active_knowledge_store()}</div>
 					<div class="active-banner-title">
 						{knowledgeStoreState.activeStore
 							? knowledgeStoreState.activeStore.ks_name
-							: 'Nothing selected'}
+							: m.knowledge_store_nothing_selected()}
 					</div>
 					<div class="active-banner-text">
 						{#if knowledgeStoreState.activeStore}
-							<span class="mono">{knowledgeStoreState.activeStore.ks_name}</span> is currently
-							selected. Most sections in <span class="mono">/home3/knowledge</span> should assume this
-							store.
+							<span class="mono">{knowledgeStoreState.activeStore.ks_name}</span>
+							{m.knowledge_store_is_currently_selected_most_sections()}
+							<span class="mono">{m.knowledge_store_home3_knowledge()}</span>
+							{m.knowledge_store_should_assume_this_store()}
 						{:else}
 							{emptyText}
 						{/if}
@@ -381,11 +383,11 @@
 		<div class="hero-actions">
 			<button class="ghost-button" type="button" onclick={openStyleDialog}>
 				<PaletteIcon class="h-4 w-4" />
-				Card Style
+				{m.knowledge_store_card_style()}
 			</button>
 			<button class="add-button" type="button" onclick={openCreateDialog}>
 				<PlusIcon class="h-4 w-4" />
-				Add Knowledge Store
+				{m.knowledge_store_add_knowledge_store()}
 			</button>
 		</div>
 	</section>
@@ -393,12 +395,12 @@
 	{#if error}
 		<div class="notice notice-error">
 			<div>
-				<div class="notice-title">Could not load knowledge stores</div>
+				<div class="notice-title">{m.knowledge_store_could_not_load_knowledge_stores()}</div>
 				<div class="notice-copy">{error}</div>
 			</div>
 			<button class="ghost-button" type="button" onclick={loadStores}>
 				<RefreshCwIcon class="h-4 w-4" />
-				Try Again
+				{m.knowledge_store_try_again()}
 			</button>
 		</div>
 	{/if}
@@ -406,19 +408,19 @@
 	{#if loading}
 		<div class="state-panel">
 			<div class="state-glyph">⋯</div>
-			<div class="state-title">Loading knowledge stores</div>
-			<div class="state-copy">Pulling the catalog and active-store context now.</div>
+			<div class="state-title">{m.knowledge_store_loading_knowledge_stores()}</div>
+			<div class="state-copy">{m.knowledge_store_pulling_the_catalog_and_active()}</div>
 		</div>
 	{:else if !error && stores.length === 0}
 		<div class="state-panel">
 			<div class="state-glyph">◎</div>
-			<div class="state-title">No knowledge stores yet</div>
+			<div class="state-title">{m.knowledge_store_no_knowledge_stores_yet()}</div>
 			<div class="state-copy">
-				Create the first store to define what this knowledge workspace should contain.
+				{m.knowledge_store_create_the_first_store_to()}
 			</div>
 			<button class="add-button" type="button" onclick={openCreateDialog}>
 				<PlusIcon class="h-4 w-4" />
-				Create First Store
+				{m.knowledge_store_create_first_store()}
 			</button>
 		</div>
 	{:else}
@@ -443,30 +445,31 @@
 				>
 					<div class="store-card-head">
 						<div>
-							<div class="store-type">{store.ks_type || 'Unclassified store'}</div>
+							<div class="store-type">
+								{store.ks_type || m.knowledge_store_unclassified_store()}
+							</div>
 							<h3>{store.ks_name}</h3>
 						</div>
 						{#if knowledgeStoreState.activeStoreId === store.id}
-							<span class="active-pill">Selected</span>
+							<span class="active-pill">{m.knowledge_store_selected()}</span>
 						{/if}
 					</div>
 
 					<p class="store-description">
-						{store.ks_desc?.trim() ||
-							'No description yet. Use Modify to explain the scope and intended contents of this store.'}
+						{store.ks_desc?.trim() || m.knowledge_store_no_description_yet_use_modify()}
 					</p>
 
 					<div class="badge-row">
 						<span class="badge accent">{syncModeLabel(store)}</span>
 						<span class="badge">{statusLabel(store)}</span>
 						{#if store.error_msg}
-							<span class="badge danger">Needs attention</span>
+							<span class="badge danger">{m.knowledge_store_needs_attention()}</span>
 						{/if}
 					</div>
 
 					<div class="source-panel">
 						<div class="source-header">
-							<div class="source-label">Sources</div>
+							<div class="source-label">{m.knowledge_store_sources()}</div>
 							<div class="source-summary">{sourceSummary(store)}</div>
 						</div>
 						{#if sourcePreview(store).length > 0}
@@ -477,18 +480,18 @@
 							</ul>
 						{:else}
 							<div class="source-empty">
-								Add directories, URLs, or tables to give this store a knowledge scope.
+								{m.knowledge_store_add_directories_urls_or_tables()}
 							</div>
 						{/if}
 					</div>
 
 					<div class="meta-row">
 						<div>
-							<span class="meta-label">Updated</span>
+							<span class="meta-label">{m.knowledge_store_updated()}</span>
 							<span class="meta-value">{formatDate(store.modify_time || store.create_time)}</span>
 						</div>
 						<div>
-							<span class="meta-label">ID</span>
+							<span class="meta-label">{m.knowledge_store_id()}</span>
 							<span class="meta-value mono">{store.id}</span>
 						</div>
 					</div>
@@ -510,7 +513,7 @@
 							}}
 						>
 							<PencilIcon class="h-4 w-4" />
-							Modify
+							{m.knowledge_store_modify()}
 						</button>
 						<button
 							type="button"
@@ -521,7 +524,7 @@
 							}}
 						>
 							<Trash2Icon class="h-4 w-4" />
-							Delete
+							{m.knowledge_store_delete()}
 						</button>
 					</div>
 				</div>
@@ -541,14 +544,13 @@
 			>
 				{#if dialogMode === 'delete'}
 					<div class="dialog-header">
-						<div class="dialog-eyebrow">Delete Knowledge Store</div>
-						<h3>Remove <span class="mono">{editingStore?.ks_name}</span>?</h3>
+						<div class="dialog-eyebrow">{m.knowledge_store_delete_knowledge_store()}</div>
+						<h3>{m.knowledge_store_remove()} <span class="mono">{editingStore?.ks_name}</span>?</h3>
 						<p>
 							{#if editingStore && knowledgeStoreState.activeStoreId === editingStore.id}
-								This store is currently active. Deleting it will clear the active knowledge store
-								for this page.
+								{m.knowledge_store_this_store_is_currently_active()}
 							{:else}
-								This action removes the knowledge store from the management catalog.
+								{m.knowledge_store_this_action_removes_the_knowledge()}
 							{/if}
 						</p>
 					</div>
@@ -556,18 +558,19 @@
 						<div class="notice notice-error compact">{dialogError}</div>
 					{/if}
 					<div class="dialog-actions">
-						<button class="ghost-button" type="button" onclick={closeDialog}>Cancel</button>
+						<button class="ghost-button" type="button" onclick={closeDialog}
+							>{m.knowledge_store_cancel()}</button
+						>
 						<button class="danger-button" type="button" onclick={confirmDelete} disabled={saving}>
-							{saving ? 'Deleting…' : 'Delete'}
+							{saving ? m.knowledge_store_deleting() : m.knowledge_store_delete()}
 						</button>
 					</div>
 				{:else if dialogMode === 'style'}
 					<div class="dialog-header">
-						<div class="dialog-eyebrow">Card Style</div>
-						<h3>Pick the card look for your knowledge stores</h3>
+						<div class="dialog-eyebrow">{m.knowledge_store_card_style()}</div>
+						<h3>{m.knowledge_store_pick_the_card_look_for()}</h3>
 						<p>
-							Choose one of the three presets, then tune the background color. Your selection is
-							remembered on this browser.
+							{m.knowledge_store_choose_one_of_the_three()}
 						</p>
 					</div>
 
@@ -592,7 +595,7 @@
 					</div>
 
 					<div class="field field-wide style-color-field">
-						<span>Background Color</span>
+						<span>{m.knowledge_store_background_color()}</span>
 						<div class="color-row">
 							<input
 								bind:value={draftCardBackgroundColor}
@@ -611,38 +614,43 @@
 					</div>
 
 					<div class="dialog-actions">
-						<button class="ghost-button" type="button" onclick={closeDialog}>Cancel</button>
-						<button class="add-button" type="button" onclick={confirmStyleDialog}>Confirm</button>
+						<button class="ghost-button" type="button" onclick={closeDialog}
+							>{m.knowledge_store_cancel()}</button
+						>
+						<button class="add-button" type="button" onclick={confirmStyleDialog}
+							>{m.knowledge_store_confirm()}</button
+						>
 					</div>
 				{:else}
 					<div class="dialog-header">
 						<div class="dialog-eyebrow">
-							{dialogMode === 'create' ? 'Create Knowledge Store' : 'Modify Knowledge Store'}
+							{dialogMode === 'create'
+								? m.knowledge_store_create_knowledge_store()
+								: m.knowledge_store_modify_knowledge_store()}
 						</div>
 						<h3>
 							{dialogMode === 'create'
-								? 'Add a new knowledge store'
-								: `Edit ${editingStore?.ks_name}`}
+								? m.knowledge_store_add_a_new_knowledge_store()
+								: m.knowledge_store_edit({ ks_name: editingStore?.ks_name ?? '' })}
 						</h3>
 						<p>
-							Describe what this store contains first, then layer on status and sync behavior as
-							supporting details.
+							{m.knowledge_store_describe_what_this_store_contains()}
 						</p>
 					</div>
 
 					<div class="dialog-grid">
 						<label class="field field-wide">
-							<span>Name</span>
+							<span>{m.knowledge_store_name()}</span>
 							<input
 								bind:value={formName}
 								type="text"
-								placeholder="Semiconductor Standards Library"
+								placeholder={m.knowledge_store_semiconductor_standards_library()}
 							/>
 						</label>
 						<label class="field field-wide">
-							<span>tenant_id (user)</span>
+							<span>{m.knowledge_store_tenant_id_user()}</span>
 							<select bind:value={formTenantId} disabled={userOptions.length === 0}>
-								<option value="">— Unassigned —</option>
+								<option value="">{m.knowledge_store_unassigned()}</option>
 								{#each userOptions as option}
 									<option value={option.value}>{option.label}</option>
 								{/each}
@@ -652,46 +660,50 @@
 							{/if}
 						</label>
 						<label class="field">
-							<span>Type</span>
-							<input bind:value={formType} type="text" placeholder="Reference, Research, Spec…" />
+							<span>{m.knowledge_store_type()}</span>
+							<input
+								bind:value={formType}
+								type="text"
+								placeholder={m.knowledge_store_reference_research_spec()}
+							/>
 						</label>
 						<label class="field">
-							<span>Sync Mode</span>
+							<span>{m.knowledge_store_sync_mode()}</span>
 							<select bind:value={formSyncMode}>
-								<option value="manual">manual</option>
-								<option value="auto">auto</option>
+								<option value="manual">{m.knowledge_store_manual()}</option>
+								<option value="auto">{m.knowledge_store_auto()}</option>
 							</select>
 						</label>
 						<label class="field field-wide">
-							<span>Description</span>
+							<span>{m.knowledge_store_description()}</span>
 							<textarea
 								bind:value={formDescription}
 								rows="3"
-								placeholder="What does this store cover, and why would someone choose it as the active store?"
+								placeholder={m.knowledge_store_what_does_this_store_cover()}
 							></textarea>
 						</label>
 						<label class="field field-wide">
-							<span>Sources</span>
+							<span>{m.knowledge_store_sources()}</span>
 							<textarea
 								bind:value={formSources}
 								rows="5"
-								placeholder="/data/specs&#10;https://example.com/reference&#10;kb.table_name"
+								placeholder={m.knowledge_store_data_specs_https_example_com()}
 							></textarea>
 						</label>
 						<label class="field">
-							<span>Status</span>
+							<span>{m.knowledge_store_status()}</span>
 							<select bind:value={formStatus}>
-								<option value="active">active</option>
-								<option value="suspended">suspended</option>
-								<option value="inactive">inactive</option>
+								<option value="active">{m.knowledge_store_active()}</option>
+								<option value="suspended">{m.knowledge_store_suspended()}</option>
+								<option value="inactive">{m.knowledge_store_inactive()}</option>
 							</select>
 						</label>
 						<label class="field field-wide">
-							<span>Notes</span>
+							<span>{m.knowledge_store_notes()}</span>
 							<textarea
 								bind:value={formNotes}
 								rows="3"
-								placeholder="Optional operational notes or handoff context"
+								placeholder={m.knowledge_store_optional_operational_notes_or_handoff()}
 							></textarea>
 						</label>
 					</div>
@@ -701,9 +713,15 @@
 					{/if}
 
 					<div class="dialog-actions">
-						<button class="ghost-button" type="button" onclick={closeDialog}>Cancel</button>
+						<button class="ghost-button" type="button" onclick={closeDialog}
+							>{m.knowledge_store_cancel()}</button
+						>
 						<button class="add-button" type="button" onclick={saveDialog} disabled={saving}>
-							{saving ? 'Saving…' : dialogMode === 'create' ? 'Create Store' : 'Save Changes'}
+							{saving
+								? m.knowledge_store_saving()
+								: dialogMode === 'create'
+									? m.knowledge_store_create_store()
+									: m.knowledge_store_save_changes()}
 						</button>
 					</div>
 				{/if}

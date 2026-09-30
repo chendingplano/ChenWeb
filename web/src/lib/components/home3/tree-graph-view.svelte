@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import { Chart } from 'svelte-echarts';
 	import type { EChartsOption } from 'echarts';
@@ -360,11 +361,18 @@
 
 	function makeInitialTabs(): GraphTab[] {
 		return mode === 'summary'
-			? [{ id: 'summary-graph', label: 'Summary Graph', categoryPath: null, closable: false }]
+			? [
+					{
+						id: 'summary-graph',
+						label: m.tree_graph_summary_graph(),
+						categoryPath: null,
+						closable: false
+					}
+				]
 			: [
 					{
 						id: 'topic-graph',
-						label: rootTabLabel ?? 'Semantic Web',
+						label: rootTabLabel ?? m.tree_graph_semantic_web(),
 						categoryPath: null,
 						closable: false
 					}
@@ -465,7 +473,8 @@
 			filterDialogOpen = false;
 			if (filterMatchNodeIds[0]) selectedNodeId = filterMatchNodeIds[0];
 		} catch (error) {
-			filterError = error instanceof Error ? error.message : 'Failed to filter graph nodes';
+			filterError =
+				error instanceof Error ? error.message : m.tree_graph_failed_to_filter_graph_nodes();
 		} finally {
 			filterApplying = false;
 		}
@@ -532,7 +541,7 @@
 			categoryPath: `${target.categoryPath}/${label.toLowerCase().replace(/\s+/g, '-')}`,
 			label,
 			metadata: {
-				desc: `Split from ${target.label}`,
+				desc: m.tree_graph_split_from({ label: target.label }),
 				confidence: target.metadata.confidence,
 				keywords: [...target.metadata.keywords],
 				create_time: target.metadata.create_time,
@@ -558,7 +567,7 @@
 	// ---- Data loading ----
 
 	function createItemNode(parent: GraphCategoryNode, topic: TopicCard): GraphCategoryNode {
-		const label = String(topic.topicName || topic.id || 'Provision').trim();
+		const label = String(topic.topicName || topic.id || m.tree_graph_provision()).trim();
 		return {
 			id: `${parent.id}::item::${topic.id}`,
 			label,
@@ -684,7 +693,9 @@
 			loadError =
 				error instanceof Error
 					? error.message
-					: `Failed to load ${mode === 'summary' ? 'summary' : 'topic'} graph`;
+					: (mode === 'summary'
+							? m.tree_graph_failed_to_load_summary_graph
+							: m.tree_graph_failed_to_load_topic_graph)();
 			errorDialogOpen = true;
 		} finally {
 			loading = false;
@@ -739,7 +750,7 @@
 				loadError =
 					error instanceof Error
 						? error.message
-						: `Failed to load summaries for ${node.categoryPath}`;
+						: m.tree_graph_failed_to_load_summaries_for({ categoryPath: node.categoryPath });
 				errorDialogOpen = true;
 			} finally {
 				categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: false };
@@ -774,7 +785,9 @@
 				}
 			} catch (error) {
 				loadError =
-					error instanceof Error ? error.message : `Failed to load topics for ${node.categoryPath}`;
+					error instanceof Error
+						? error.message
+						: m.tree_graph_failed_to_load_topics_for({ categoryPath: node.categoryPath });
 				errorDialogOpen = true;
 			} finally {
 				categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: false };
@@ -1659,7 +1672,7 @@
 	function buildNextVirtualNode(parentId: string, pageNum: number): Record<string, unknown> {
 		return {
 			id: nextVirtualId(parentId, pageNum),
-			name: 'next …',
+			name: m.tree_graph_next(),
 			collapsed: false,
 			symbol: PILL_SYMBOL,
 			symbolSize: PILL_SIZE,
@@ -1689,7 +1702,7 @@
 	): Record<string, unknown> {
 		return {
 			id: pageVirtualId(parentId, pageNum),
-			name: `page ${pageNum} of ${totalPages}`,
+			name: m.tree_graph_page_of({ pageNum, totalPages }),
 			collapsed: false,
 			symbol: PILL_SYMBOL,
 			symbolSize: PILL_SIZE,
@@ -1731,7 +1744,9 @@
 		const isSelected = node.id === selectedNodeId;
 		const isFilterMatch = hasActiveFilter && filterMatchNodeIdSet.has(node.id);
 		if (nodeStyle === 'rect') {
-			const conf = node.metadata.confidence ? `Conf: ${node.metadata.confidence.toFixed(2)}` : '—';
+			const conf = node.metadata.confidence
+				? m.tree_graph_conf({ confidence: node.metadata.confidence.toFixed(2) })
+				: '—';
 
 			// Split keywords across up to 2 lines. L2_MAX: chars for the keywords portion on the conf line.
 			// L3_MAX: chars for the second keywords-only line before truncation.
@@ -1961,19 +1976,24 @@
 				class="error-dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Graph Load Error"
+				aria-label={m.tree_graph_graph_load_error()}
 				tabindex="0"
 				onclick={(event) => event.stopPropagation()}
 				onkeydown={(event) => event.stopPropagation()}
 			>
-				<div class="eyebrow">Load Error</div>
+				<div class="eyebrow">{m.tree_graph_load_error()}</div>
 				<h3>
-					Could not load {mode === 'summary' ? 'Summary Graph' : (loadErrorLabel ?? 'Semantic Web')}
+					{m.tree_graph_could_not_load({
+						value:
+							mode === 'summary'
+								? m.tree_graph_summary_graph()
+								: (loadErrorLabel ?? m.tree_graph_semantic_web())
+					})}
 				</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
 					<button type="button" class="secondary-btn" onclick={() => (errorDialogOpen = false)}>
-						Close
+						{m.tree_graph_close()}
 					</button>
 					<button
 						type="button"
@@ -1983,7 +2003,7 @@
 							await loadGraph();
 						}}
 					>
-						Try Again
+						{m.tree_graph_try_again()}
 					</button>
 				</div>
 			</div>
@@ -2006,7 +2026,7 @@
 				class="filter-dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Filter Nodes in Current Level"
+				aria-label={m.tree_graph_filter_nodes_in_current_level()}
 				tabindex="0"
 				onclick={(event) => event.stopPropagation()}
 				onkeydown={(event) => event.stopPropagation()}
@@ -2017,43 +2037,56 @@
 						void applyLevelFilter();
 					}}
 				>
-					<div class="eyebrow">Current Level</div>
-					<h3>Filter Nodes</h3>
+					<div class="eyebrow">{m.tree_graph_current_level()}</div>
+					<h3>{m.tree_graph_filter_nodes()}</h3>
 					<p class="dialog-copy">
-						Level {getNodeLevel(selectedNode) + 1} from <strong>{selectedNode.categoryPath}</strong>
-						contains {selectedLevelNodes.length} nodes.
+						{m.tree_graph_level_from({ value: getNodeLevel(selectedNode) + 1 })}
+						<strong>{selectedNode.categoryPath}</strong>
+						{m.tree_graph_contains_nodes({ selectedLevelNodesCount: selectedLevelNodes.length })}
 					</p>
 					{#if filterError}
 						<div class="filter-error" role="alert">{filterError}</div>
 					{/if}
 					<label class="field">
-						<span>Keywords</span>
+						<span>{m.tree_graph_keywords()}</span>
 						<input
 							type="text"
 							bind:value={filterDraft.keywords}
-							placeholder="keyword, phrase, another"
+							placeholder={m.tree_graph_keyword_phrase_another()}
 						/>
 					</label>
 					<div class="filter-grid">
 						<label class="field">
-							<span>Created After</span>
-							<input type="text" bind:value={filterDraft.startTime} placeholder="YYYYMMDD-HHMMSS" />
+							<span>{m.tree_graph_created_after()}</span>
+							<input
+								type="text"
+								bind:value={filterDraft.startTime}
+								placeholder={m.tree_graph_yyyymmdd_hhmmss()}
+							/>
 						</label>
 						<label class="field">
-							<span>Created Before</span>
-							<input type="text" bind:value={filterDraft.endTime} placeholder="YYYYMMDD-HHMMSS" />
+							<span>{m.tree_graph_created_before()}</span>
+							<input
+								type="text"
+								bind:value={filterDraft.endTime}
+								placeholder={m.tree_graph_yyyymmdd_hhmmss()}
+							/>
 						</label>
 					</div>
 					<label class="field">
-						<span>Semantic Text</span>
+						<span>{m.tree_graph_semantic_text()}</span>
 						<textarea
 							rows="3"
 							bind:value={filterDraft.semanticText}
-							placeholder="Text to embed and compare against current-level node vectors"
+							placeholder={m.tree_graph_text_to_embed_and_compare()}
 						></textarea>
 					</label>
 					<label class="field">
-						<span>Semantic Threshold {filterDraft.threshold.toFixed(2)}</span>
+						<span
+							>{m.tree_graph_semantic_threshold({
+								threshold: filterDraft.threshold.toFixed(2)
+							})}</span
+						>
 						<input type="range" min="0" max="1" step="0.01" bind:value={filterDraft.threshold} />
 					</label>
 					<div class="dialog-actions">
@@ -2063,10 +2096,10 @@
 							disabled={filterApplying}
 							onclick={() => (filterDialogOpen = false)}
 						>
-							Cancel
+							{m.tree_graph_cancel()}
 						</button>
 						<button type="submit" class="primary-btn" disabled={filterApplying}>
-							{filterApplying ? 'Filtering…' : 'Apply Filter'}
+							{filterApplying ? m.tree_graph_filtering() : m.tree_graph_apply_filter()}
 						</button>
 					</div>
 				</form>
@@ -2077,23 +2110,27 @@
 	<div class="hero">
 		<div>
 			<div class="eyebrow">
-				{heroEyebrow ?? (mode === 'summary' ? 'Document Summaries' : 'Semantic Web')}
+				{heroEyebrow ??
+					(mode === 'summary' ? m.tree_graph_document_summaries() : m.tree_graph_semantic_web())}
 			</div>
-			<h2>{heroTitle ?? (mode === 'summary' ? 'Summary Graph' : 'Topic Graph')}</h2>
+			<h2>
+				{heroTitle ??
+					(mode === 'summary' ? m.tree_graph_summary_graph() : m.tree_graph_topic_graph())}
+			</h2>
 			<p>
 				{heroDescription ??
 					(mode === 'summary'
-						? 'Category-first workspace for browsing, editing, and opening category-path summary tabs.'
-						: 'Category-first workspace for browsing topics indexed in the Semantic Web.')}
+						? m.tree_graph_category_first_workspace_for_browsing()
+						: m.tree_graph_category_first_workspace_for_browsing_2())}
 			</p>
 		</div>
 		<div class="hero-stats">
-			<div><span>Nodes</span><strong>{nodes.length}</strong></div>
-			<div><span>Tabs</span><strong>{tabs.length}</strong></div>
+			<div><span>{m.tree_graph_nodes()}</span><strong>{nodes.length}</strong></div>
+			<div><span>{m.tree_graph_tabs()}</span><strong>{tabs.length}</strong></div>
 			<div>
-				<span>{mode === 'summary' ? 'Mode' : 'Topics'}</span>
+				<span>{mode === 'summary' ? m.tree_graph_mode() : m.tree_graph_topics()}</span>
 				<strong>
-					{mode === 'summary' ? 'Phase 1 Mock' : totalItemCount}
+					{mode === 'summary' ? m.tree_graph_phase_1_mock() : totalItemCount}
 				</strong>
 			</div>
 		</div>
@@ -2121,16 +2158,22 @@
 	{#if hasActiveFilter}
 		<div class="filter-status" role="status">
 			<span>
-				Filtered level {activeFilterLevel !== null ? activeFilterLevel + 1 : '—'} from
-				<strong>{activeFilterSelectedPath}</strong>: {filterMatchNodeIds.length} match{filterMatchNodeIds.length ===
-				1
-					? ''
-					: 'es'}
+				{m.tree_graph_filtered_level_from({
+					value: activeFilterLevel !== null ? activeFilterLevel + 1 : '—'
+				})}
+				<strong>{activeFilterSelectedPath}</strong>{m.tree_graph_match({
+					filterMatchNodeIdsCount: filterMatchNodeIds.length,
+					plural: filterMatchNodeIds.length === 1 ? '' : 'es'
+				})}
 				{#if bestFilterSemanticScore !== null}
-					, best semantic score {bestFilterSemanticScore.toFixed(2)}
+					{m.tree_graph_best_semantic_score({
+						bestFilterSemanticScore: bestFilterSemanticScore.toFixed(2)
+					})}
 				{/if}
 			</span>
-			<button type="button" class="text-btn" onclick={clearLevelFilter}>Clear</button>
+			<button type="button" class="text-btn" onclick={clearLevelFilter}
+				>{m.tree_graph_clear()}</button
+			>
 		</div>
 	{/if}
 
@@ -2224,12 +2267,18 @@
 					>
 						{#if loading}
 							<div class="empty-state">
-								Loading {mode === 'summary' ? 'summary' : 'topic'} categories…
+								{(mode === 'summary'
+									? m.tree_graph_loading_summary_categories
+									: m.tree_graph_loading_topic_categories)()}
 							</div>
 						{:else if loadError}
 							<div class="empty-state">
-								{mode === 'summary' ? 'Summary Graph' : (loadErrorLabel ?? 'Semantic Web')} could not
-								be loaded. Open the error dialog for details or try again.
+								{m.tree_graph_could_not_be_loaded_open({
+									value:
+										mode === 'summary'
+											? m.tree_graph_summary_graph()
+											: (loadErrorLabel ?? m.tree_graph_semantic_web())
+								})}
 							</div>
 						{:else}
 							<div class="chart-cursor-host">
@@ -2280,35 +2329,41 @@
 								>
 									<div class="hover-card-head">
 										<div>
-											<div class="hover-card-title">Name</div>
+											<div class="hover-card-title">{m.tree_graph_name()}</div>
 											<div class="hover-card-value strong">{hoveredNode.label}</div>
 										</div>
 										<div
 											class:active={hoveredNode.id === selectedNodeId}
 											class="hover-selected-pill"
 										>
-											{hoveredNode.id === selectedNodeId ? 'Selected' : 'Hover'}
+											{hoveredNode.id === selectedNodeId
+												? m.tree_graph_selected()
+												: m.tree_graph_hover()}
 										</div>
 									</div>
 									<div class="hover-card-row">
-										<span>Path</span>
+										<span>{m.tree_graph_path()}</span>
 										<strong>{hoveredNode.categoryPath}</strong>
 									</div>
 									<div class="hover-card-row">
-										<span>Description</span>
+										<span>{m.tree_graph_description()}</span>
 										<strong>{hoveredNode.metadata.desc || '—'}</strong>
 									</div>
 									<div class="hover-card-row">
-										<span>Keywords</span>
+										<span>{m.tree_graph_keywords()}</span>
 										<strong>{keywordText(hoveredNode.metadata.keywords)}</strong>
 									</div>
 									<div class="hover-card-row compact">
 										<div>
-											<span>{mode === 'summary' ? 'Summaries' : 'Topics'}</span>
+											<span
+												>{mode === 'summary'
+													? m.tree_graph_summaries()
+													: m.tree_graph_topics()}</span
+											>
 											<strong>{hoveredNode.itemIds.length}</strong>
 										</div>
 										<div>
-											<span>Children</span>
+											<span>{m.tree_graph_children()}</span>
 											<strong>{hoveredNode.childIds.length}</strong>
 										</div>
 									</div>
@@ -2319,47 +2374,57 @@
 											disabled={!hoveredNode.hasItemsFile}
 											title={hoveredNode.hasItemsFile
 												? undefined
-												: `No ${mode === 'summary' ? 'summaries' : 'topics'}.txt file for this category`}
+												: m.tree_graph_no_txt_file_for_this({
+														value: mode === 'summary' ? 'summaries' : 'topics'
+													})}
 											onclick={() => runHoverAction('show-items', hoveredNode)}
 										>
-											{mode === 'summary' ? 'Show Summaries' : (showItemsLabel ?? 'Show Topics')}
+											{mode === 'summary'
+												? m.tree_graph_show_summaries()
+												: (showItemsLabel ?? m.tree_graph_show_topics())}
 										</button>
 										<button
 											type="button"
 											class="toolbar-btn"
 											onclick={() => runHoverAction('toggle-expand', hoveredNode)}
 										>
-											{hoveredNode.expanded ? 'Collapse' : 'Expand'}
+											{hoveredNode.expanded ? m.tree_graph_collapse() : m.tree_graph_expand()}
 										</button>
 										<button
 											type="button"
 											class="toolbar-btn"
-											onclick={() => runHoverAction('rename', hoveredNode)}>Rename</button
+											onclick={() => runHoverAction('rename', hoveredNode)}
+											>{m.tree_graph_rename()}</button
 										>
 										<button
 											type="button"
 											class="toolbar-btn"
-											onclick={() => runHoverAction('metadata', hoveredNode)}>Metadata</button
+											onclick={() => runHoverAction('metadata', hoveredNode)}
+											>{m.tree_graph_metadata()}</button
 										>
 										<button
 											type="button"
 											class="toolbar-btn"
-											onclick={() => runHoverAction('add', hoveredNode)}>Add</button
+											onclick={() => runHoverAction('add', hoveredNode)}
+											>{m.tree_graph_add()}</button
 										>
 										<button
 											type="button"
 											class="toolbar-btn"
-											onclick={() => runHoverAction('merge', hoveredNode)}>Merge</button
+											onclick={() => runHoverAction('merge', hoveredNode)}
+											>{m.tree_graph_merge()}</button
 										>
 										<button
 											type="button"
 											class="toolbar-btn"
-											onclick={() => runHoverAction('split', hoveredNode)}>Split</button
+											onclick={() => runHoverAction('split', hoveredNode)}
+											>{m.tree_graph_split()}</button
 										>
 										<button
 											type="button"
 											class="toolbar-btn danger"
-											onclick={() => runHoverAction('delete', hoveredNode)}>Delete</button
+											onclick={() => runHoverAction('delete', hoveredNode)}
+											>{m.tree_graph_delete()}</button
 										>
 									</div>
 								</div>
@@ -2367,7 +2432,7 @@
 
 							<div class="mini-map">
 								<div class="mini-map-head">
-									<span>Zoom Window</span>
+									<span>{m.tree_graph_zoom_window()}</span>
 									<strong>{miniViewport.scale.toFixed(2)}x</strong>
 								</div>
 								<svg
@@ -2454,59 +2519,63 @@
 					></div>
 
 					<div class="inspector" style="width:{inspectorWidth}px; flex-shrink:0;">
-						<div class="eyebrow">Node Inspector</div>
+						<div class="eyebrow">{m.tree_graph_node_inspector()}</div>
 						{#if selectedNode}
 							<div class="inspector-card">
 								<div class="hover-card-head inspector-card-head">
 									<div>
-										<div class="hover-card-title">Name</div>
+										<div class="hover-card-title">{m.tree_graph_name()}</div>
 										<div class="hover-card-value strong">{selectedNode.label}</div>
 									</div>
-									<div class="hover-selected-pill active">Selected</div>
+									<div class="hover-selected-pill active">{m.tree_graph_selected()}</div>
 								</div>
 								<div class="hover-card-row">
-									<span>Path</span>
+									<span>{m.tree_graph_path()}</span>
 									<strong>{selectedNode.categoryPath}</strong>
 								</div>
 								<div class="hover-card-row">
-									<span>Description</span>
+									<span>{m.tree_graph_description()}</span>
 									<strong>{selectedNode.metadata.desc || '—'}</strong>
 								</div>
 								<div class="hover-card-row">
-									<span>Keywords</span>
+									<span>{m.tree_graph_keywords()}</span>
 									<strong>{keywordText(selectedNode.metadata.keywords)}</strong>
 								</div>
 								<div class="inspector-grid">
 									<div class="inspector-stat">
-										<span>Confidence</span>
+										<span>{m.tree_graph_confidence()}</span>
 										<strong>{selectedNode.metadata.confidence}</strong>
 									</div>
 									<div class="inspector-stat">
-										<span>Children</span>
+										<span>{m.tree_graph_children()}</span>
 										<strong>{selectedNode.childIds.length}</strong>
 									</div>
 									<div class="inspector-stat">
-										<span>{mode === 'summary' ? 'Summaries' : (itemLabelPlural ?? 'Topics')}</span>
+										<span
+											>{mode === 'summary'
+												? m.tree_graph_summaries()
+												: (itemLabelPlural ?? m.tree_graph_topics())}</span
+										>
 										<strong>{selectedNode.itemIds.length}</strong>
 									</div>
 									{#if mode === 'summary' && selectedNode.metadata.category_type}
 										<div class="inspector-stat">
-											<span>Category Type</span>
+											<span>{m.tree_graph_category_type()}</span>
 											<strong>{selectedNode.metadata.category_type}</strong>
 										</div>
 									{/if}
 									<div class="inspector-stat inspector-stat-wide">
-										<span>Category Path</span>
+										<span>{m.tree_graph_category_path()}</span>
 										<strong>{selectedNode.categoryPath}</strong>
 									</div>
 									<div class="inspector-stat inspector-stat-wide">
-										<span>Create Time</span>
+										<span>{m.tree_graph_create_time()}</span>
 										<strong>{selectedNode.metadata.create_time || '—'}</strong>
 									</div>
 								</div>
 								<div class="action-grid action-grid-top">
 									<button type="button" onclick={() => toggleNodeAndMaybeReveal(selectedNode.id)}>
-										{selectedNode.expanded ? 'Collapse' : 'Expand'}
+										{selectedNode.expanded ? m.tree_graph_collapse() : m.tree_graph_expand()}
 									</button>
 									<button
 										type="button"
@@ -2514,37 +2583,42 @@
 										disabled={!selectedNode.hasItemsFile}
 										title={selectedNode.hasItemsFile
 											? undefined
-											: `No ${mode === 'summary' ? 'summaries' : 'topics'}.txt file for this category`}
+											: m.tree_graph_no_txt_file_for_this({
+													value: mode === 'summary' ? 'summaries' : 'topics'
+												})}
 										onclick={() => showItems(selectedNode)}
 									>
-										{mode === 'summary' ? 'Show Summaries' : (showItemsLabel ?? 'Show Topics')}
+										{mode === 'summary'
+											? m.tree_graph_show_summaries()
+											: (showItemsLabel ?? m.tree_graph_show_topics())}
 									</button>
 								</div>
 								<div class="action-grid">
 									<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>
-										Rename
+										{m.tree_graph_rename()}
 									</button>
 									<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}>
-										Edit Metadata
+										{m.tree_graph_edit_metadata()}
 									</button>
 									<button type="button" onclick={() => openDialog('add', selectedNode.id)}>
-										Add Node
+										{m.tree_graph_add_node()}
 									</button>
 									<button type="button" onclick={() => openDialog('merge', selectedNode.id)}>
-										Merge
+										{m.tree_graph_merge()}
 									</button>
 									<button type="button" onclick={() => openDialog('split', selectedNode.id)}>
-										Split
+										{m.tree_graph_split()}
 									</button>
 									<button
 										type="button"
 										class="danger"
-										onclick={() => openDialog('delete', selectedNode.id)}>Delete</button
+										onclick={() => openDialog('delete', selectedNode.id)}
+										>{m.tree_graph_delete()}</button
 									>
 								</div>
 							</div>
 						{:else}
-							<div class="empty-state">Select a category node to inspect and edit it.</div>
+							<div class="empty-state">{m.tree_graph_select_a_category_node_to()}</div>
 						{/if}
 					</div>
 				</div>

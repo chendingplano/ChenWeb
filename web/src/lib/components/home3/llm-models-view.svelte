@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		getModelsTOML,
@@ -66,7 +67,7 @@
 		error = null;
 		info = null;
 		if (!draft.key.trim()) {
-			error = 'Key is required';
+			error = msg.llm_models_key_is_required();
 			return;
 		}
 		submitting = true;
@@ -75,7 +76,7 @@
 			await upsertModelTOML(key.trim(), entry);
 			draft = emptyDraft();
 			showCreate = false;
-			info = `Model "${key.trim()}" saved to .models.toml.`;
+			info = msg.llm_models_model_saved_to_models_toml({ key: key.trim() });
 			await loadModels();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -100,7 +101,7 @@
 			const { key, ...entry } = editDraft;
 			await upsertModelTOML(key, entry);
 			editingKey = null;
-			info = `Model "${key}" updated.`;
+			info = msg.llm_models_model_updated({ key });
 			await loadModels();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -150,26 +151,26 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>LLM Models</h2>
-			<p class="muted">{tomlPath ? `Editing ${tomlPath}` : 'Runtime model configuration file (.models.toml)'}</p>
+			<h2>{msg.llm_models_llm_models()}</h2>
+			<p class="muted">{tomlPath ? msg.llm_models_editing({ tomlPath }) : msg.llm_models_runtime_model_configuration_file_models()}</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadModels} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? msg.llm_models_refreshing() : msg.llm_models_refresh()}
 			</button>
 			<button class="primary" onclick={() => (showCreate = !showCreate)}>
-				{showCreate ? 'Cancel' : '+ Add Model'}
+				{showCreate ? msg.llm_models_cancel() : msg.llm_models_add_model()}
 			</button>
 		</div>
 	</header>
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Models</div>
+			<div class="summary-label">{msg.llm_models_models()}</div>
 			<div class="summary-value">{models.length}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Providers</div>
+			<div class="summary-label">{msg.llm_models_providers()}</div>
 			<div class="summary-value">{new Set(models.map((m) => new URL(m.base_url || 'http://x').hostname).filter(Boolean)).size}</div>
 		</div>
 	</div>
@@ -184,71 +185,71 @@
 		>
 			<div class="row two">
 				<label>
-					<span>Key (TOML section name)</span>
-					<input bind:value={draft.key} required placeholder="deepseek-v4-pro" />
+					<span>{msg.llm_models_key_toml_section_name()}</span>
+					<input bind:value={draft.key} required placeholder={msg.llm_models_deepseek_v4_pro()} />
 				</label>
 				<label>
-					<span>Model Name</span>
-					<input bind:value={draft.model_name} placeholder="deepseek-chat" />
+					<span>{msg.llm_models_model_name()}</span>
+					<input bind:value={draft.model_name} placeholder={msg.llm_models_deepseek_chat()} />
 				</label>
 				<label>
-					<span>Model Type</span>
-					<input bind:value={draft.model_type} placeholder="llm" />
+					<span>{msg.llm_models_model_type()}</span>
+					<input bind:value={draft.model_type} placeholder={msg.llm_models_llm()} />
 				</label>
 				<label>
-					<span>Embedding Dimension</span>
+					<span>{msg.llm_models_embedding_dimension()}</span>
 					<input type="number" bind:value={draft.dimension} min="0" step="1" />
 				</label>
 				<label>
-					<span>Maximum Characters</span>
+					<span>{msg.llm_models_maximum_characters()}</span>
 					<input type="number" bind:value={draft.max_chars} min="0" step="1" />
 				</label>
 			</div>
 			<div class="row two">
 				<label>
-					<span>Base URL</span>
-					<input bind:value={draft.base_url} placeholder="https://api.deepseek.com" />
+					<span>{msg.llm_models_base_url()}</span>
+					<input bind:value={draft.base_url} placeholder={msg.llm_models_https_api_deepseek_com()} />
 				</label>
 				<label>
-					<span>Host</span>
-					<input bind:value={draft.host} placeholder="cloud" />
+					<span>{msg.llm_models_host()}</span>
+					<input bind:value={draft.host} placeholder={msg.llm_models_cloud()} />
 				</label>
 			</div>
 			<label>
-				<span>API Key</span>
-				<input type="password" bind:value={(draft as any).api_key} placeholder="sk-…" />
+				<span>{msg.llm_models_api_key()}</span>
+				<input type="password" bind:value={(draft as any).api_key} placeholder={msg.llm_models_sk()} />
 			</label>
 			<div class="row two">
 				<label>
-					<span>Thinking Type</span>
-					<input bind:value={draft.thinking_type} placeholder="disabled" />
+					<span>{msg.llm_models_thinking_type()}</span>
+					<input bind:value={draft.thinking_type} placeholder={msg.llm_models_disabled()} />
 				</label>
 				<label>
-					<span>Timeout (sec)</span>
+					<span>{msg.llm_models_timeout_sec()}</span>
 					<input type="number" bind:value={draft.timeout_sec} min="0" />
 				</label>
 			</div>
 			<div class="row three">
 				<label>
-					<span>Max Inflight</span>
+					<span>{msg.llm_models_max_inflight()}</span>
 					<input type="number" bind:value={draft.max_inflight} min="0" />
 				</label>
 				<label>
-					<span>Max Req/Min</span>
+					<span>{msg.llm_models_max_req_min()}</span>
 					<input type="number" bind:value={draft.max_requests_per_minute} min="0" />
 				</label>
 				<label>
-					<span>Max Tokens/Min</span>
+					<span>{msg.llm_models_max_tokens_min()}</span>
 					<input type="number" bind:value={draft.max_tokens_per_minute} min="0" />
 				</label>
 			</div>
 			<label>
-				<span>Token Reserve/Call</span>
+				<span>{msg.llm_models_token_reserve_call()}</span>
 				<input type="number" bind:value={draft.token_reserve_per_call} min="0" style="max-width:200px;" />
 			</label>
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting || !draft.key.trim()}>
-					{submitting ? 'Saving…' : 'Save to .models.toml'}
+					{submitting ? msg.llm_models_saving() : msg.llm_models_save_to_models_toml()}
 				</button>
 			</div>
 		</form>
@@ -263,26 +264,26 @@
 	<div class="panel">
 		<div class="panel-head">
 			<div>
-				<h3>Current Entries</h3>
-				<p class="muted">All model definitions in .models.toml. Changes take effect on next server restart.</p>
+				<h3>{msg.llm_models_current_entries()}</h3>
+				<p class="muted">{msg.llm_models_all_model_definitions_in_models()}</p>
 			</div>
 		</div>
 
 		{#if loading}
-			<div class="empty">Loading…</div>
+			<div class="empty">{msg.llm_models_loading()}</div>
 		{:else if models.length === 0}
-			<div class="empty">No models in .models.toml yet. Add one above.</div>
+			<div class="empty">{msg.llm_models_no_models_in_models_toml()}</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Key</th>
-							<th>Model</th>
-							<th>Base URL</th>
-							<th>Timeout</th>
-							<th>Inflight</th>
-							<th>Action</th>
+							<th>{msg.llm_models_key()}</th>
+							<th>{msg.llm_models_model()}</th>
+							<th>{msg.llm_models_base_url()}</th>
+							<th>{msg.llm_models_timeout()}</th>
+							<th>{msg.llm_models_inflight()}</th>
+							<th>{msg.llm_models_action()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -291,10 +292,10 @@
 								<td>
 									<div class="cell-primary">{m.key}</div>
 									{#if m.model_type}
-										<div class="cell-secondary">type: {m.model_type}</div>
+										<div class="cell-secondary">{msg.llm_models_type({ model_type: m.model_type })}</div>
 									{/if}
 									{#if m.thinking_type}
-										<div class="cell-secondary">thinking: {m.thinking_type}</div>
+										<div class="cell-secondary">{msg.llm_models_thinking({ thinking_type: m.thinking_type })}</div>
 									{/if}
 								</td>
 								<td>{m.model_name || '—'}</td>
@@ -304,15 +305,15 @@
 								<td>
 									<div class="row-actions">
 										{#if editingKey === m.key}
-											<button class="ghost compact-btn" onclick={() => (editingKey = null)} disabled={submitting}>Cancel</button>
+											<button class="ghost compact-btn" onclick={() => (editingKey = null)} disabled={submitting}>{msg.llm_models_cancel()}</button>
 										{:else if deletingKey === m.key}
 											<button class="danger-btn compact-btn" onclick={() => confirmDelete(m.key)} disabled={submitting}>
-												{submitting ? 'Deleting…' : 'Confirm'}
+												{submitting ? msg.llm_models_deleting() : msg.llm_models_confirm()}
 											</button>
-											<button class="ghost compact-btn" onclick={() => (deletingKey = null)}>Cancel</button>
+											<button class="ghost compact-btn" onclick={() => (deletingKey = null)}>{msg.llm_models_cancel()}</button>
 										{:else}
-											<button class="ghost compact-btn" onclick={() => startEdit(m)}>Edit</button>
-											<button class="ghost compact-btn" onclick={() => (deletingKey = m.key)}>Delete</button>
+											<button class="ghost compact-btn" onclick={() => startEdit(m)}>{msg.llm_models_edit()}</button>
+											<button class="ghost compact-btn" onclick={() => (deletingKey = m.key)}>{msg.llm_models_delete()}</button>
 										{/if}
 									</div>
 								</td>
@@ -329,63 +330,63 @@
 										>
 											<div class="row two">
 												<label>
-													<span>Key</span>
+													<span>{msg.llm_models_key()}</span>
 													<input bind:value={editDraft.key} required />
 												</label>
 												<label>
-													<span>Model Name</span>
+													<span>{msg.llm_models_model_name()}</span>
 													<input bind:value={editDraft.model_name} />
 												</label>
 												<label>
-													<span>Model Type</span>
-													<input bind:value={editDraft.model_type} placeholder="llm" />
+													<span>{msg.llm_models_model_type()}</span>
+													<input bind:value={editDraft.model_type} placeholder={msg.llm_models_llm()} />
 												</label>
 												<label>
-													<span>Embedding Dimension</span>
+													<span>{msg.llm_models_embedding_dimension()}</span>
 													<input type="number" bind:value={editDraft.dimension} min="0" step="1" />
 												</label>
 												<label>
-													<span>Maximum Characters</span>
+													<span>{msg.llm_models_maximum_characters()}</span>
 													<input type="number" bind:value={editDraft.max_chars} min="0" step="1" />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Base URL</span>
+													<span>{msg.llm_models_base_url()}</span>
 													<input bind:value={editDraft.base_url} />
 												</label>
 												<label>
-													<span>Host</span>
+													<span>{msg.llm_models_host()}</span>
 													<input bind:value={editDraft.host} />
 												</label>
 											</div>
 											<div class="row two">
 												<label>
-													<span>Thinking Type</span>
+													<span>{msg.llm_models_thinking_type()}</span>
 													<input bind:value={editDraft.thinking_type} />
 												</label>
 												<label>
-													<span>Timeout (sec)</span>
+													<span>{msg.llm_models_timeout_sec()}</span>
 													<input type="number" bind:value={editDraft.timeout_sec} min="0" />
 												</label>
 											</div>
 											<div class="row three">
 												<label>
-													<span>Max Inflight</span>
+													<span>{msg.llm_models_max_inflight()}</span>
 													<input type="number" bind:value={editDraft.max_inflight} min="0" />
 												</label>
 												<label>
-													<span>Max Req/Min</span>
+													<span>{msg.llm_models_max_req_min()}</span>
 													<input type="number" bind:value={editDraft.max_requests_per_minute} min="0" />
 												</label>
 												<label>
-													<span>Max Tokens/Min</span>
+													<span>{msg.llm_models_max_tokens_min()}</span>
 													<input type="number" bind:value={editDraft.max_tokens_per_minute} min="0" />
 												</label>
 											</div>
 											<div class="form-foot">
 												<button class="primary" type="submit" disabled={submitting}>
-													{submitting ? 'Saving…' : 'Save changes'}
+													{submitting ? msg.llm_models_saving() : msg.llm_models_save_changes()}
 												</button>
 											</div>
 										</form>

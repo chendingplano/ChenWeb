@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 
 	import {
@@ -196,7 +197,7 @@
 		try {
 			const result = await previewSync(itemID);
 			previewCounts = { ...previewCounts, [itemID]: result.changed_row_count };
-			info = `${itemID}: ${result.changed_row_count} row(s) changed since the last sync.`;
+			info = m.sync_data_row_s_changed_since_the({ itemID, changed_row_count: result.changed_row_count });
 		} catch (err) {
 			error = String((err as Error).message ?? err);
 		} finally {
@@ -212,7 +213,7 @@
 			const result = await applySync(itemID);
 			const { [itemID]: _discard, ...rest } = previewCounts;
 			previewCounts = rest;
-			info = `${itemID}: synced ${result.synced_row_count} row(s).`;
+			info = m.sync_data_synced_row_s({ itemID, synced_row_count: result.synced_row_count });
 			await loadItems();
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -272,7 +273,7 @@
 			const payload = draftToPayload();
 			if (editingID) {
 				await updateSyncItem(editingID, payload);
-				info = `${editingID}: updated. Its sync state was reset -- the next sync starts fresh.`;
+				info = m.sync_data_updated_its_sync_state_was({ editingID });
 			} else {
 				await createSyncItem(payload);
 				info = `${payload.id}: created.`;
@@ -287,8 +288,8 @@
 	}
 
 	async function runDelete(item: SyncItem) {
-		const noun = item.origin === 'learned' ? 'cached copy of' : '';
-		if (!confirm(`Delete the ${noun} sync item "${item.item_id}"? This cannot be undone.`.replace('  ', ' '))) {
+		const question = item.origin === 'learned' ? m.sync_data_delete_cached_sync_item_confirm : m.sync_data_delete_sync_item_confirm;
+		if (!confirm(question({ item_id: item.item_id }))) {
 			return;
 		}
 		deletingID = item.item_id;
@@ -306,7 +307,7 @@
 	}
 
 	function fmtDate(raw?: string): string {
-		if (!raw) return 'Never';
+		if (!raw) return m.sync_data_never();
 		return new Date(raw).toLocaleString();
 	}
 
@@ -335,21 +336,20 @@
 >
 	<header class="toolbar">
 		<div>
-			<h2>Sync Data</h2>
+			<h2>{m.sync_data_sync_data()}</h2>
 			<p class="muted">
-				Pull registered reference data from the dev source into this deployment. Preview shows
-				what would change; Sync applies it and never deletes rows.
+				{m.sync_data_pull_registered_reference_data_from()}
 			</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadItems} disabled={loading}>
-				{loading ? 'Refreshing…' : 'Refresh'}
+				{loading ? m.sync_data_refreshing() : m.sync_data_refresh()}
 			</button>
 			<button
 				class="primary"
 				onclick={() => (showForm ? closeForm() : openCreateForm())}
 			>
-				{showForm ? 'Cancel' : '+ New Data Syncher'}
+				{showForm ? m.sync_data_cancel() : m.sync_data_new_data_syncher()}
 			</button>
 		</div>
 	</header>
@@ -368,84 +368,81 @@
 				submitForm();
 			}}
 		>
-			<h3>{editingID ? `Edit ${editingID}` : 'New Data Syncher'}</h3>
+			<h3>{editingID ? m.sync_data_edit({ editingID }) : m.sync_data_new_data_syncher_2()}</h3>
 			<p class="form-intro">
-				Every column of the selected table is always copied. None of the fields below (except
-				the optional Filter, under Advanced) select which records to sync — every row is
-				synced. Pick from the table's real columns and constraints instead of typing names.
+				{m.sync_data_every_column_of_the_selected()}
 			</p>
 			<div class="row two">
 				<label>
-					<span>ID</span>
+					<span>{m.sync_data_id()}</span>
 					<input
 						bind:value={formDraft.id}
 						required
 						disabled={editingID !== null}
-						placeholder="e.g. kb_videos"
+						placeholder={m.sync_data_e_g_kb_videos()}
 					/>
-					<span class="hint">A short unique name for this syncher. Used in URLs; can't be changed later.</span>
+					<span class="hint">{m.sync_data_a_short_unique_name_for()}</span>
 				</label>
 				<label>
-					<span>Kind</span>
+					<span>{m.sync_data_kind()}</span>
 					<select bind:value={formDraft.kind}>
-						<option value="table">table</option>
-						<option value="table_with_files">table_with_files</option>
+						<option value="table">{m.sync_data_table()}</option>
+						<option value="table_with_files">{m.sync_data_table_with_files()}</option>
 					</select>
-					<span class="hint">table_with_files also copies a file referenced by each row — see below.</span>
+					<span class="hint">{m.sync_data_table_with_files_also_copies()}</span>
 				</label>
 			</div>
 			<div class="row two">
 				<label>
-					<span>Schema</span>
+					<span>{m.sync_data_schema()}</span>
 					<select bind:value={formDraft.schema} onchange={onSchemaChange} required>
 						<option value="" disabled>
-							{tablesLoading ? 'Loading…' : 'Select a schema…'}
+							{tablesLoading ? m.sync_data_loading() : m.sync_data_select_a_schema()}
 						</option>
 						{#each schemaOptions as schema}
 							<option value={schema}>{schema}</option>
 						{/each}
 					</select>
-					<span class="hint">The database schema the table lives in.</span>
+					<span class="hint">{m.sync_data_the_database_schema_the_table()}</span>
 				</label>
 				<label>
-					<span>Table</span>
+					<span>{m.sync_data_table_2()}</span>
 					<select
 						bind:value={formDraft.table}
 						onchange={onTableChange}
 						required
 						disabled={!formDraft.schema}
 					>
-						<option value="" disabled>Select a table…</option>
+						<option value="" disabled>{m.sync_data_select_a_table()}</option>
 						{#each tablesForSchema(formDraft.schema) as table}
 							<option value={table}>{table}</option>
 						{/each}
 					</select>
-					<span class="hint">Schema-qualified table name, identical on source and target.</span>
+					<span class="hint">{m.sync_data_schema_qualified_table_name_identical()}</span>
 				</label>
 			</div>
 			{#if tableInfoLoading}
-				<p class="hint">Loading table columns…</p>
+				<p class="hint">{m.sync_data_loading_table_columns()}</p>
 			{:else if tableInfoError}
 				<div class="error" role="alert">{tableInfoError}</div>
 			{/if}
 			<div class="row two">
 				<label>
-					<span>Cursor Column</span>
+					<span>{m.sync_data_cursor_column()}</span>
 					<select bind:value={formDraft.cursor_col} required disabled={tableColumns.length === 0}>
 						<option value="" disabled>
-							{tableColumns.length ? 'Select a column…' : 'Select a table first'}
+							{tableColumns.length ? m.sync_data_select_a_column() : m.sync_data_select_a_table_first()}
 						</option>
 						{#each tableColumns as col}
 							<option value={col.name}>{col.name} ({col.data_type})</option>
 						{/each}
 					</select>
 					<span class="hint"
-						>Required. A timestamp column bumped on every UPDATE — the engine uses it to find
-						"rows changed since last sync." Not a filter.</span
+						>{m.sync_data_required_a_timestamp_column_bumped()}</span
 					>
 				</label>
 				<label>
-					<span>Natural Key</span>
+					<span>{m.sync_data_natural_key()}</span>
 					<select
 						bind:value={formDraft.natural_key}
 						required
@@ -453,11 +450,11 @@
 					>
 						<option value="" disabled>
 							{#if tableColumns.length === 0}
-								Select a table first
+								{m.sync_data_select_a_table_first()}
 							{:else if naturalKeyCandidates.length === 0}
-								No eligible unique constraint on this table
+								{m.sync_data_no_eligible_unique_constraint_on()}
 							{:else}
-								Select…
+								{m.sync_data_select()}
 							{/if}
 						</option>
 						{#each naturalKeyCandidates as cand}
@@ -466,12 +463,9 @@
 					</select>
 					<span class="hint">
 						{#if tableColumns.length > 0 && naturalKeyCandidates.length === 0}
-							This table has no unique constraint other than its primary key — add one via a
-							migration first.
+							{m.sync_data_this_table_has_no_unique()}
 						{:else}
-							Required. Auto-selected when there's exactly one option. Never the primary key —
-							since the target's own id won't match the source's, this is how the engine
-							recognizes "I already have this row" vs. "this is new."
+							{m.sync_data_required_auto_selected_when_there()}
 						{/if}
 					</span>
 				</label>
@@ -479,34 +473,34 @@
 			{#if formDraft.kind === 'table_with_files'}
 				<div class="file-fields">
 					<label>
-						<span>File Column</span>
+						<span>{m.sync_data_file_column()}</span>
 						<select
 							bind:value={formDraft.file_column}
 							required
 							disabled={tableColumns.length === 0}
 						>
 							<option value="" disabled>
-								{tableColumns.length ? 'Select a column…' : 'Select a table first'}
+								{tableColumns.length ? m.sync_data_select_a_column() : m.sync_data_select_a_table_first()}
 							</option>
 							{#each tableColumns as col}
 								<option value={col.name}>{col.name} ({col.data_type})</option>
 							{/each}
 						</select>
-						<span class="hint">Required for this kind. The column holding each row's file path.</span>
+						<span class="hint">{m.sync_data_required_for_this_kind_the()}</span>
 					</label>
 					<div class="row two">
 						<label>
-							<span>File Dir Env Var</span>
-							<input bind:value={formDraft.file_dir_env} placeholder="e.g. VIDEO_DIR" />
-							<span class="hint">Where this instance stores synced files — env var name.</span>
+							<span>{m.sync_data_file_dir_env_var()}</span>
+							<input bind:value={formDraft.file_dir_env} placeholder={m.sync_data_e_g_video_dir()} />
+							<span class="hint">{m.sync_data_where_this_instance_stores_synced()}</span>
 						</label>
 						<label>
-							<span>File Dir Default Subdir</span>
-							<input bind:value={formDraft.file_dir_default_subdir} placeholder="e.g. Videos" />
-							<span class="hint">Fallback subdirectory if the env var above is unset.</span>
+							<span>{m.sync_data_file_dir_default_subdir()}</span>
+							<input bind:value={formDraft.file_dir_default_subdir} placeholder={m.sync_data_e_g_videos()} />
+							<span class="hint">{m.sync_data_fallback_subdirectory_if_the_env()}</span>
 						</label>
 					</div>
-					<p class="hint">At least one of the two directory fields above is required.</p>
+					<p class="hint">{m.sync_data_at_least_one_of_the()}</p>
 				</div>
 			{/if}
 
@@ -515,16 +509,15 @@
 				class="advanced-toggle"
 				onclick={() => (showAdvanced = !showAdvanced)}
 			>
-				{showAdvanced ? '▾' : '▸'} Advanced (optional — most syncers don't need this)
+				{m.sync_data_advanced_optional_most_syncers_don({ value: showAdvanced ? '▾' : '▸' })}
 			</button>
 			{#if showAdvanced}
 				<div class="file-fields">
 					<label>
-						<span>Filter (raw SQL WHERE fragment)</span>
-						<input bind:value={formDraft.filter} placeholder="e.g. status = 'approved'" />
+						<span>{m.sync_data_filter_raw_sql_where_fragment()}</span>
+						<input bind:value={formDraft.filter} placeholder={m.sync_data_e_g_status_approved()} />
 						<span class="hint"
-							>This is the one field that actually selects which records sync — a raw SQL
-							condition scoping which rows are ever touched. Leave empty to sync every row.</span
+							>{m.sync_data_this_is_the_one_field()}</span
 						>
 					</label>
 				</div>
@@ -532,7 +525,7 @@
 
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting}>
-					{submitting ? 'Saving…' : editingID ? 'Save changes' : 'Create'}
+					{submitting ? m.sync_data_saving() : editingID ? m.sync_data_save_changes() : m.sync_data_create()}
 				</button>
 			</div>
 		</form>
@@ -540,22 +533,22 @@
 
 	<div class="panel">
 		{#if loading}
-			<div class="empty">Loading sync items…</div>
+			<div class="empty">{m.sync_data_loading_sync_items()}</div>
 		{:else if items.length === 0}
-			<div class="empty">No sync items registered.</div>
+			<div class="empty">{m.sync_data_no_sync_items_registered()}</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Item</th>
-							<th>Table</th>
-							<th>Kind</th>
-							<th>Origin</th>
-							<th>Last Synced</th>
-							<th>Last Row Count</th>
-							<th>Status</th>
-							<th>Action</th>
+							<th>{m.sync_data_item()}</th>
+							<th>{m.sync_data_table_2()}</th>
+							<th>{m.sync_data_kind()}</th>
+							<th>{m.sync_data_origin()}</th>
+							<th>{m.sync_data_last_synced()}</th>
+							<th>{m.sync_data_last_row_count()}</th>
+							<th>{m.sync_data_status()}</th>
+							<th>{m.sync_data_action()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -572,10 +565,10 @@
 										<span class="status-error">{item.last_error}</span>
 									{:else if item.item_id in previewCounts}
 										<span class="cell-secondary"
-											>{previewCounts[item.item_id]} row(s) pending</span
+											>{m.sync_data_row_s_pending({ previewCounts: previewCounts[item.item_id] })}</span
 										>
 									{:else}
-										<span class="cell-secondary">OK</span>
+										<span class="cell-secondary">{m.sync_data_ok()}</span>
 									{/if}
 								</td>
 								<td>
@@ -585,18 +578,18 @@
 											onclick={() => runPreview(item.item_id)}
 											disabled={previewingID === item.item_id || applyingID === item.item_id}
 										>
-											{previewingID === item.item_id ? 'Previewing…' : 'Preview'}
+											{previewingID === item.item_id ? m.sync_data_previewing() : m.sync_data_preview()}
 										</button>
 										<button
 											class="alt-btn compact-btn"
 											onclick={() => runApply(item.item_id)}
 											disabled={previewingID === item.item_id || applyingID === item.item_id}
 										>
-											{applyingID === item.item_id ? 'Syncing…' : 'Sync'}
+											{applyingID === item.item_id ? m.sync_data_syncing() : m.sync_data_sync()}
 										</button>
 										{#if item.origin === 'local'}
 											<button class="ghost compact-btn" onclick={() => openEditForm(item)}>
-												Edit
+												{m.sync_data_edit_2()}
 											</button>
 										{/if}
 										{#if item.origin === 'local' || item.origin === 'learned'}
@@ -605,7 +598,7 @@
 												onclick={() => runDelete(item)}
 												disabled={deletingID === item.item_id}
 											>
-												{deletingID === item.item_id ? 'Deleting…' : 'Delete'}
+												{deletingID === item.item_id ? m.sync_data_deleting() : m.sync_data_delete()}
 											</button>
 										{/if}
 									</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -72,15 +73,15 @@
 	};
 
 	const allColumns: { key: ColumnKey; label: string }[] = [
-		{ key: 'name', label: 'Name' },
-		{ key: 'description', label: 'Description' },
-		{ key: 'category', label: 'Category' },
-		{ key: 'status', label: 'Status' },
-		{ key: 'tags', label: 'Tags' },
-		{ key: 'version', label: 'Version' },
-		{ key: 'notes', label: 'Notes' },
-		{ key: 'create_time', label: 'Created' },
-		{ key: 'modify_time', label: 'Modified' }
+		{ key: 'name', label: m.skill_mgmt_name() },
+		{ key: 'description', label: m.skill_mgmt_description() },
+		{ key: 'category', label: m.skill_mgmt_category() },
+		{ key: 'status', label: m.skill_mgmt_status() },
+		{ key: 'tags', label: m.skill_mgmt_tags() },
+		{ key: 'version', label: m.skill_mgmt_version() },
+		{ key: 'notes', label: m.skill_mgmt_notes() },
+		{ key: 'create_time', label: m.skill_mgmt_created() },
+		{ key: 'modify_time', label: m.skill_mgmt_modified() }
 	];
 
 	let listSettings = $state<ListSettings>(defaultSettings);
@@ -139,6 +140,12 @@
 
 	// active filter
 	let statusFilter = $state<'all' | 'candidate' | 'installed' | 'activated'>('all');
+	const SKILL_HEADING: Record<'all' | 'candidate' | 'installed' | 'activated', string> = {
+		all: m.skill_mgmt_heading_all(),
+		candidate: m.skill_mgmt_heading_candidate(),
+		installed: m.skill_mgmt_heading_installed(),
+		activated: m.skill_mgmt_heading_activated()
+	};
 
 	// --- edit state ---
 	let editingId = $state<number | null>(null);
@@ -173,7 +180,7 @@
 			skills = res.results ?? [];
 			skillTotal = res.total ?? 0;
 		} catch (e) {
-			skillError = e instanceof Error ? e.message : 'Failed to load skills';
+			skillError = e instanceof Error ? e.message : m.skill_mgmt_failed_to_load_skills();
 		} finally {
 			skillLoading = false;
 		}
@@ -201,7 +208,7 @@
 	async function saveEdit(id: number) {
 		const name = (editDraft.name ?? '').trim();
 		if (!name) {
-			editError = 'Name is required';
+			editError = m.skill_mgmt_name_is_required();
 			return;
 		}
 		editSaving = true;
@@ -231,7 +238,7 @@
 			}
 			editingId = null;
 		} catch (e) {
-			editError = e instanceof Error ? e.message : 'Failed to save';
+			editError = e instanceof Error ? e.message : m.skill_mgmt_failed_to_save();
 		} finally {
 			editSaving = false;
 		}
@@ -260,7 +267,7 @@
 			deleteConfirmOpen = false;
 			deletingId = null;
 		} catch (e) {
-			deleteError = e instanceof Error ? e.message : 'Failed to delete';
+			deleteError = e instanceof Error ? e.message : m.skill_mgmt_failed_to_delete();
 		} finally {
 			deleteSaving = false;
 		}
@@ -275,7 +282,7 @@
 	async function confirmAdd() {
 		const name = addDraft.name.trim();
 		if (!name) {
-			addError = 'Name is required';
+			addError = m.skill_mgmt_name_is_required();
 			return;
 		}
 		addSaving = true;
@@ -294,7 +301,7 @@
 			skillTotal += 1;
 			addDialogOpen = false;
 		} catch (e) {
-			addError = e instanceof Error ? e.message : 'Failed to create skill';
+			addError = e instanceof Error ? e.message : m.skill_mgmt_failed_to_create_skill();
 		} finally {
 			addSaving = false;
 		}
@@ -334,25 +341,25 @@
 		<div class="list-toolbar">
 			<div class="list-title-row">
 				<h2 class="list-title">
-					{statusFilter === 'all' ? 'All Skills' : `${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)} Skills`}
+					{statusFilter === 'all' ? m.skill_mgmt_all_skills() : SKILL_HEADING[statusFilter]}
 				</h2>
-				<span class="list-count">{skillTotal} skill{skillTotal === 1 ? '' : 's'}</span>
+				<span class="list-count">{m.skill_mgmt_skill({ skillTotal, plural: skillTotal === 1 ? '' : 's' })}</span>
 			</div>
 			<div class="toolbar-actions">
 				<button
 					class="btn-ghost"
 					onclick={() => { skillPage = 1; loadSkills(); }}
-					title="Refresh"
+					title={m.skill_mgmt_refresh()}
 				>
 					<RefreshCwIcon class="w-4 h-4" />
 				</button>
 				<button class="btn-ghost settings-btn" onclick={openSettingsDialog}>
 					<Settings2Icon class="w-4 h-4" />
-					Settings
+					{m.skill_mgmt_settings()}
 				</button>
 				<button class="btn-primary" onclick={openAddSkillDialog}>
 					<PlusIcon class="w-4 h-4" />
-					Add Skill
+					{m.skill_mgmt_add_skill()}
 				</button>
 			</div>
 		</div>
@@ -366,15 +373,15 @@
 			{#if skillLoading}
 				<div class="table-state">
 					<div class="state-glyph">⋯</div>
-					<div>Loading skills</div>
+					<div>{m.skill_mgmt_loading_skills()}</div>
 				</div>
 			{:else if skills.length === 0}
 				<div class="table-state">
 					<span class="state-icon">
 						<ZapIcon class="w-8 h-8" />
 					</span>
-					<div class="state-title">No skills found</div>
-					<div class="state-copy">No skills in this workspace yet</div>
+					<div class="state-title">{m.skill_mgmt_no_skills_found()}</div>
+					<div class="state-copy">{m.skill_mgmt_no_skills_in_this_workspace()}</div>
 				</div>
 			{:else}
 				<table class="skill-table">
@@ -384,7 +391,7 @@
 								<th class="th" class:th-name={col.key === 'name'}>{col.label}</th>
 							{/each}
 							{#if listSettings.showEdit || listSettings.showDelete}
-								<th class="th th-actions">Actions</th>
+								<th class="th th-actions">{m.skill_mgmt_actions()}</th>
 							{/if}
 						</tr>
 					</thead>
@@ -400,23 +407,23 @@
 										>
 											<div class="edit-grid">
 												<label class="field">
-													<span>Name</span>
-													<input bind:value={editDraft.name} placeholder="Skill name" required />
+													<span>{m.skill_mgmt_name()}</span>
+													<input bind:value={editDraft.name} placeholder={m.skill_mgmt_skill_name()} required />
 												</label>
 												<label class="field">
-													<span>Status</span>
+													<span>{m.skill_mgmt_status()}</span>
 													<select bind:value={editDraft.status}>
-														<option value="candidate">candidate</option>
-														<option value="installed">installed</option>
-														<option value="activated">activated</option>
+														<option value="candidate">{m.skill_mgmt_candidate()}</option>
+														<option value="installed">{m.skill_mgmt_installed()}</option>
+														<option value="activated">{m.skill_mgmt_activated()}</option>
 													</select>
 												</label>
 												<label class="field field-wide">
-													<span>Description</span>
-													<input bind:value={editDraft.description} placeholder="Brief description" />
+													<span>{m.skill_mgmt_description()}</span>
+													<input bind:value={editDraft.description} placeholder={m.skill_mgmt_brief_description()} />
 												</label>
 												<label class="field field-wide">
-													<span>Category Path <span class="field-hint">(comma-separated)</span></span>
+													<span>{m.skill_mgmt_category_path()} <span class="field-hint">{m.skill_mgmt_comma_separated()}</span></span>
 													<input
 														value={editDraft.category?.join(', ') ?? ''}
 														oninput={(e) => {
@@ -425,11 +432,11 @@
 																.map((s) => s.trim())
 																.filter(Boolean);
 														}}
-														placeholder="e.g. AI, NLP, Text Processing"
+														placeholder={m.skill_mgmt_e_g_ai_nlp_text()}
 													/>
 												</label>
 												<label class="field field-wide">
-													<span>Pick from existing <span class="field-hint">(optional)</span></span>
+													<span>{m.skill_mgmt_pick_from_existing()} <span class="field-hint">{m.skill_mgmt_optional()}</span></span>
 													<select
 														value=""
 														onchange={(e) => {
@@ -439,14 +446,14 @@
 															el.value = '';
 														}}
 													>
-														<option value="">— select from existing —</option>
+														<option value="">{m.skill_mgmt_select_from_existing()}</option>
 														{#each categories as cat (cat.id)}
 															<option value={String(cat.id)}>{cat.path.join(' / ')}</option>
 														{/each}
 													</select>
 												</label>
 												<label class="field field-wide">
-													<span>Tags (comma-separated)</span>
+													<span>{m.skill_mgmt_tags_comma_separated()}</span>
 													<input
 														value={editDraft.tags?.join(', ') ?? ''}
 														oninput={(e) => {
@@ -455,16 +462,16 @@
 																.map((s) => s.trim())
 																.filter(Boolean);
 														}}
-														placeholder="e.g. nlp, extraction"
+														placeholder={m.skill_mgmt_e_g_nlp_extraction()}
 													/>
 												</label>
 												<label class="field">
-													<span>Version</span>
+													<span>{m.skill_mgmt_version()}</span>
 													<input bind:value={editDraft.version} placeholder="e.g. 1.0.0" />
 												</label>
 												<label class="field field-wide">
-													<span>Notes</span>
-													<input bind:value={editDraft.notes} placeholder="Optional notes" />
+													<span>{m.skill_mgmt_notes()}</span>
+													<input bind:value={editDraft.notes} placeholder={m.skill_mgmt_optional_notes()} />
 												</label>
 											</div>
 											{#if editError}
@@ -473,11 +480,11 @@
 											<div class="edit-foot">
 												<button class="btn-primary small" type="submit" disabled={editSaving}>
 													<CheckIcon class="w-3.5 h-3.5" />
-													{editSaving ? 'Saving…' : 'Save'}
+													{editSaving ? m.skill_mgmt_saving() : m.skill_mgmt_save()}
 												</button>
 												<button class="btn-ghost small" type="button" onclick={cancelEdit}>
 													<XIcon class="w-3.5 h-3.5" />
-													Cancel
+													{m.skill_mgmt_cancel()}
 												</button>
 											</div>
 										</form>
@@ -527,12 +534,12 @@
 									{#if listSettings.showEdit || listSettings.showDelete}
 										<td class="td td-actions">
 											{#if listSettings.showEdit}
-												<button class="action-btn" onclick={() => startEdit(skill)} title="Edit">
+												<button class="action-btn" onclick={() => startEdit(skill)} title={m.skill_mgmt_edit()}>
 													<PencilIcon class="w-3.5 h-3.5" />
 												</button>
 											{/if}
 											{#if listSettings.showDelete}
-												<button class="action-btn danger-btn" onclick={() => openDeleteConfirm(skill)} title="Delete">
+												<button class="action-btn danger-btn" onclick={() => openDeleteConfirm(skill)} title={m.skill_mgmt_delete()}>
 													<Trash2Icon class="w-3.5 h-3.5" />
 												</button>
 											{/if}
@@ -548,7 +555,7 @@
 				{#if skillTotal > skillPageSize}
 					<div class="pagination">
 						<span class="page-info">
-							{(skillPage - 1) * skillPageSize + 1}–{Math.min(skillPage * skillPageSize, skillTotal)} of {skillTotal}
+							{m.skill_mgmt_of({ value: (skillPage - 1) * skillPageSize + 1, value2: Math.min(skillPage * skillPageSize, skillTotal), skillTotal })}
 						</span>
 						<div class="page-btns">
 							<button
@@ -556,14 +563,14 @@
 								disabled={skillPage === 1}
 								onclick={() => { skillPage--; loadSkills(); }}
 							>
-								Previous
+								{m.skill_mgmt_previous()}
 							</button>
 							<button
 								class="btn-ghost small"
 								disabled={skillPage * skillPageSize >= skillTotal}
 								onclick={() => { skillPage++; loadSkills(); }}
 							>
-								Next
+								{m.skill_mgmt_next()}
 							</button>
 						</div>
 					</div>
@@ -574,15 +581,15 @@
 
 	<!-- Settings dialog -->
 	{#if settingsDialogOpen}
-		<div class="dialog-overlay" role="dialog" aria-modal="true" aria-label="List Settings">
+		<div class="dialog-overlay" role="dialog" aria-modal="true" aria-label={m.skill_mgmt_list_settings()}>
 			<div class="dialog-panel" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="presentation">
 				<div class="dialog-header">
-					<h3>List Settings</h3>
-					<p>Configure which columns and actions are visible in the skills list.</p>
+					<h3>{m.skill_mgmt_list_settings()}</h3>
+					<p>{m.skill_mgmt_configure_which_columns_and_actions()}</p>
 				</div>
 
 				<div class="settings-section">
-					<div class="settings-section-title">Columns</div>
+					<div class="settings-section-title">{m.skill_mgmt_columns()}</div>
 					<div class="col-grid">
 						{#each allColumns as col (col.key)}
 							<label class="col-toggle">
@@ -597,18 +604,18 @@
 				</div>
 
 				<div class="settings-section">
-					<div class="settings-section-title">Operation Columns</div>
+					<div class="settings-section-title">{m.skill_mgmt_operation_columns()}</div>
 					<div class="op-toggles">
 						<label class="op-toggle">
 							<div>
-								<div class="op-label">Delete column</div>
-								<div class="op-desc">Show a delete button for each row</div>
+								<div class="op-label">{m.skill_mgmt_delete_column()}</div>
+								<div class="op-desc">{m.skill_mgmt_show_a_delete_button_for()}</div>
 							</div>
 							<button
 								type="button"
 								role="switch"
 								aria-checked={draftSettings.showDelete}
-								aria-label="Toggle delete column visibility"
+								aria-label={m.skill_mgmt_toggle_delete_column_visibility()}
 								onclick={() => (draftSettings.showDelete = !draftSettings.showDelete)}
 								class="toggle-switch"
 								style="background:{draftSettings.showDelete ? accent : border};"
@@ -618,14 +625,14 @@
 						</label>
 						<label class="op-toggle">
 							<div>
-								<div class="op-label">Edit column</div>
-								<div class="op-desc">Show an edit button for each row</div>
+								<div class="op-label">{m.skill_mgmt_edit_column()}</div>
+								<div class="op-desc">{m.skill_mgmt_show_an_edit_button_for()}</div>
 							</div>
 							<button
 								type="button"
 								role="switch"
 								aria-checked={draftSettings.showEdit}
-								aria-label="Toggle edit column visibility"
+								aria-label={m.skill_mgmt_toggle_edit_column_visibility()}
 								onclick={() => (draftSettings.showEdit = !draftSettings.showEdit)}
 								class="toggle-switch"
 								style="background:{draftSettings.showEdit ? accent : border};"
@@ -637,8 +644,8 @@
 				</div>
 
 				<div class="dialog-foot">
-					<button class="btn-ghost" onclick={() => (settingsDialogOpen = false)}>Cancel</button>
-					<button class="btn-primary" onclick={confirmSettings}>Save Settings</button>
+					<button class="btn-ghost" onclick={() => (settingsDialogOpen = false)}>{m.skill_mgmt_cancel()}</button>
+					<button class="btn-primary" onclick={confirmSettings}>{m.skill_mgmt_save_settings()}</button>
 				</div>
 			</div>
 		</div>
@@ -646,37 +653,37 @@
 
 	<!-- Add Skill dialog -->
 	{#if addDialogOpen}
-		<div class="dialog-overlay" role="dialog" aria-modal="true" aria-label="Add Skill">
+		<div class="dialog-overlay" role="dialog" aria-modal="true" aria-label={m.skill_mgmt_add_skill()}>
 			<div class="dialog-panel" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="presentation">
 				<div class="dialog-header">
-					<h3>Add Skill</h3>
-					<p>Create a new skill in this workspace.</p>
+					<h3>{m.skill_mgmt_add_skill()}</h3>
+					<p>{m.skill_mgmt_create_a_new_skill_in()}</p>
 				</div>
 
 				<form onsubmit={(e) => { e.preventDefault(); confirmAdd(); }}>
 					<div class="add-grid">
 						<label class="add-field">
-							<span class="add-label">Name <span class="required-star">*</span></span>
-							<input class="add-input" bind:value={addDraft.name} placeholder="Skill name" required />
+							<span class="add-label">{m.skill_mgmt_name()} <span class="required-star">*</span></span>
+							<input class="add-input" bind:value={addDraft.name} placeholder={m.skill_mgmt_skill_name()} required />
 						</label>
 						<label class="add-field">
-							<span class="add-label">Status</span>
+							<span class="add-label">{m.skill_mgmt_status()}</span>
 							<select class="add-input" bind:value={addDraft.status}>
-								<option value="candidate">candidate</option>
-								<option value="installed">installed</option>
-								<option value="activated">activated</option>
+								<option value="candidate">{m.skill_mgmt_candidate()}</option>
+								<option value="installed">{m.skill_mgmt_installed()}</option>
+								<option value="activated">{m.skill_mgmt_activated()}</option>
 							</select>
 						</label>
 						<label class="add-field add-field-wide">
-							<span class="add-label">Description</span>
-							<input class="add-input" bind:value={addDraft.description} placeholder="Brief description" />
+							<span class="add-label">{m.skill_mgmt_description()}</span>
+							<input class="add-input" bind:value={addDraft.description} placeholder={m.skill_mgmt_brief_description()} />
 						</label>
 						<label class="add-field add-field-wide">
-							<span class="add-label">Category Path <span class="add-hint">(comma-separated, e.g. AI, NLP, Text Processing)</span></span>
-							<input class="add-input" bind:value={addDraft.category} placeholder="e.g. AI, NLP, Text Processing" />
+							<span class="add-label">{m.skill_mgmt_category_path()} <span class="add-hint">{m.skill_mgmt_comma_separated_e_g_ai()}</span></span>
+							<input class="add-input" bind:value={addDraft.category} placeholder={m.skill_mgmt_e_g_ai_nlp_text()} />
 						</label>
 						<label class="add-field add-field-wide">
-							<span class="add-label">Pick from existing <span class="add-hint">(optional — fills Category Path above)</span></span>
+							<span class="add-label">{m.skill_mgmt_pick_from_existing()} <span class="add-hint">{m.skill_mgmt_optional_fills_category_path_above()}</span></span>
 							<select
 								class="add-input"
 								value=""
@@ -687,23 +694,23 @@
 									el.value = '';
 								}}
 							>
-								<option value="">— select from existing —</option>
+								<option value="">{m.skill_mgmt_select_from_existing()}</option>
 								{#each categories as cat (cat.id)}
 									<option value={String(cat.id)}>{cat.path.join(' / ')}</option>
 								{/each}
 							</select>
 						</label>
 						<label class="add-field add-field-wide">
-							<span class="add-label">Tags <span class="add-hint">(comma-separated)</span></span>
-							<input class="add-input" bind:value={addDraft.tags} placeholder="e.g. nlp, extraction" />
+							<span class="add-label">{m.skill_mgmt_tags()} <span class="add-hint">{m.skill_mgmt_comma_separated()}</span></span>
+							<input class="add-input" bind:value={addDraft.tags} placeholder={m.skill_mgmt_e_g_nlp_extraction()} />
 						</label>
 						<label class="add-field">
-							<span class="add-label">Version</span>
+							<span class="add-label">{m.skill_mgmt_version()}</span>
 							<input class="add-input" bind:value={addDraft.version} placeholder="e.g. 1.0.0" />
 						</label>
 						<label class="add-field add-field-wide">
-							<span class="add-label">Notes</span>
-							<input class="add-input" bind:value={addDraft.notes} placeholder="Optional notes" />
+							<span class="add-label">{m.skill_mgmt_notes()}</span>
+							<input class="add-input" bind:value={addDraft.notes} placeholder={m.skill_mgmt_optional_notes()} />
 						</label>
 					</div>
 
@@ -712,10 +719,10 @@
 					{/if}
 
 					<div class="dialog-foot">
-						<button class="btn-ghost" type="button" onclick={() => (addDialogOpen = false)}>Cancel</button>
+						<button class="btn-ghost" type="button" onclick={() => (addDialogOpen = false)}>{m.skill_mgmt_cancel()}</button>
 						<button class="btn-primary" type="submit" disabled={addSaving}>
 							<PlusIcon class="w-3.5 h-3.5" />
-							{addSaving ? 'Creating…' : 'Create Skill'}
+							{addSaving ? m.skill_mgmt_creating() : m.skill_mgmt_create_skill()}
 						</button>
 					</div>
 				</form>
@@ -726,21 +733,21 @@
 	<!-- Delete confirm dialog -->
 	{#if deleteConfirmOpen}
 		{@const target = skills.find((s) => s.id === deletingId)}
-		<div class="dialog-overlay" role="dialog" aria-modal="true" aria-label="Confirm Delete">
+		<div class="dialog-overlay" role="dialog" aria-modal="true" aria-label={m.skill_mgmt_confirm_delete()}>
 			<div class="dialog-panel dialog-sm" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="presentation">
 				<div class="dialog-header">
-					<h3>Delete skill?</h3>
+					<h3>{m.skill_mgmt_delete_skill()}</h3>
 					<p>
-						Remove <strong>{target?.name}</strong>? This cannot be undone.
+						{m.skill_mgmt_remove()} <strong>{target?.name}</strong>{m.skill_mgmt_this_cannot_be_undone()}
 					</p>
 				</div>
 				{#if deleteError}
 					<div class="notice-error">{deleteError}</div>
 				{/if}
 				<div class="dialog-foot">
-					<button class="btn-ghost" onclick={cancelDelete}>Cancel</button>
+					<button class="btn-ghost" onclick={cancelDelete}>{m.skill_mgmt_cancel()}</button>
 					<button class="btn-danger" onclick={confirmDelete} disabled={deleteSaving}>
-						{deleteSaving ? 'Deleting…' : 'Delete'}
+						{deleteSaving ? m.skill_mgmt_deleting() : m.skill_mgmt_delete()}
 					</button>
 				</div>
 			</div>

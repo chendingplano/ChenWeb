@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import {
 		AlertTriangle,
 		ArrowLeft,
@@ -42,8 +43,8 @@
 	let filterOpen = $state(false);
 	let columnsOpen = $state(false);
 	let query = $state('');
-	let scope = $state('All authorized documents');
-	let selectedStatus = $state('All statuses');
+	let scope = $state(m.document_metrics_analysis_all_authorized_documents());
+	let selectedStatus = $state(m.document_metrics_analysis_all_statuses());
 	let selectedRow = $state<string | null>(null);
 
 	const rows: MetricRow[] = [
@@ -56,134 +57,134 @@
 	];
 
 	const visibleColumns = [
-		{ id: 'value', label: 'Raw + normalized value', checked: true },
-		{ id: 'definition', label: 'Definition / vocabulary', checked: true },
-		{ id: 'subject', label: 'Subject', checked: true },
-		{ id: 'assertion', label: 'Assertion + class', checked: true },
-		{ id: 'processed', label: 'Last processed', checked: true },
-		{ id: 'identity', label: 'Stable occurrence ID', checked: false },
-		{ id: 'evidence', label: 'Evidence span', checked: false }
+		{ id: 'value', label: m.document_metrics_analysis_raw_normalized_value_2(), checked: true },
+		{ id: 'definition', label: m.document_metrics_analysis_definition_vocabulary(), checked: true },
+		{ id: 'subject', label: m.document_metrics_analysis_subject(), checked: true },
+		{ id: 'assertion', label: m.document_metrics_analysis_assertion_class_2(), checked: true },
+		{ id: 'processed', label: m.document_metrics_analysis_last_processed(), checked: true },
+		{ id: 'identity', label: m.document_metrics_analysis_stable_occurrence_id(), checked: false },
+		{ id: 'evidence', label: m.document_metrics_analysis_evidence_span(), checked: false }
 	];
 
 	const stateMeta: Record<RowState, { label: string; className: string; icon: typeof Check }> = {
-		complete: { label: 'Complete', className: 'positive', icon: Check },
-		findings: { label: 'Findings · 2', className: 'warning', icon: AlertTriangle },
-		historical: { label: 'Historical', className: 'neutral', icon: Clock3 },
-		blocked: { label: 'Blocked claim', className: 'blocked', icon: AlertTriangle },
-		incomplete: { label: 'Incomplete graph', className: 'warning', icon: AlertTriangle },
-		failed: { label: 'Execution failed', className: 'error', icon: AlertTriangle }
+		complete: { label: m.document_metrics_analysis_complete_2(), className: 'positive', icon: Check },
+		findings: { label: m.document_metrics_analysis_findings_2(), className: 'warning', icon: AlertTriangle },
+		historical: { label: m.document_metrics_analysis_historical_2(), className: 'neutral', icon: Clock3 },
+		blocked: { label: m.document_metrics_analysis_blocked_claim(), className: 'blocked', icon: AlertTriangle },
+		incomplete: { label: m.document_metrics_analysis_incomplete_graph(), className: 'warning', icon: AlertTriangle },
+		failed: { label: m.document_metrics_analysis_execution_failed(), className: 'error', icon: AlertTriangle }
 	};
 
 	let filteredRows = $derived(rows.filter((row) => {
 		const haystack = `${row.document} ${row.section} ${row.metric} ${row.definition ?? ''} ${row.subject}`.toLowerCase();
 		const matchesQuery = haystack.includes(query.toLowerCase());
-		const matchesStatus = selectedStatus === 'All statuses' || stateMeta[row.state].label.startsWith(selectedStatus);
+		const matchesStatus = selectedStatus === m.document_metrics_analysis_all_statuses() || stateMeta[row.state].label.startsWith(selectedStatus);
 		return matchesQuery && matchesStatus;
 	}));
 
 	function resetFilters() {
 		query = '';
-		scope = 'All authorized documents';
-		selectedStatus = 'All statuses';
+		scope = m.document_metrics_analysis_all_authorized_documents();
+		selectedStatus = m.document_metrics_analysis_all_statuses();
 	}
 </script>
 
 <svelte:head>
-	<title>Document Metrics · Metric Ontology Analysis</title>
+	<title>{m.document_metrics_analysis_document_metrics_metric_ontology_analysis()}</title>
 	<meta name="description" content="Occurrence-first document metric analysis." />
 </svelte:head>
 
 <div class:dark={darkMode} class="analysis-page">
 	<header class="topbar">
 		<div class="brand-lockup">
-			<div class="brand-mark">CH</div>
-			<div><p class="eyebrow">ChenWeb / Home3</p><p class="brand-name">Knowledge Store</p></div>
+			<div class="brand-mark">{m.document_metrics_analysis_ch()}</div>
+			<div><p class="eyebrow">{m.document_metrics_analysis_chenweb_home3()}</p><p class="brand-name">{m.document_metrics_analysis_knowledge_store()}</p></div>
 		</div>
 		<div class="top-actions">
-			<span class="read-only"><Database size={13} /> Read-only analysis</span>
-			<button class="icon-button" aria-label="Toggle theme" onclick={() => (darkMode = !darkMode)}>{darkMode ? '☼' : '☾'}</button>
-			<div class="avatar">CD</div>
+			<span class="read-only"><Database size={13} /> {m.document_metrics_analysis_read_only_analysis()}</span>
+			<button class="icon-button" aria-label={m.document_metrics_analysis_toggle_theme()} onclick={() => (darkMode = !darkMode)}>{darkMode ? '☼' : '☾'}</button>
+			<div class="avatar">{m.document_metrics_analysis_cd()}</div>
 		</div>
 	</header>
 
 	<main class="content">
-		<div class="breadcrumb"><a href="/home3/ontology-metric-analysis"><ArrowLeft size={13} /> Metric analysis</a><span>/</span><strong>Document Metrics</strong></div>
+		<div class="breadcrumb"><a href="/home3/ontology-metric-analysis"><ArrowLeft size={13} /> {m.document_metrics_analysis_metric_analysis()}</a><span>/</span><strong>{m.document_metrics_analysis_document_metrics()}</strong></div>
 		<div class="title-row">
-			<div><p class="section-kicker">02 / occurrence-first view</p><h1>Document Metrics</h1><p class="lede">Every authorized metric occurrence, including the ones that have not yet found a governed definition or assertion.</p></div>
-			<div class="title-actions"><button class="quiet-button"><Database size={15} /> Inspect data</button><button class="quiet-button"><Info size={15} /> Read the grain</button></div>
+			<div><p class="section-kicker">{m.document_metrics_analysis_02_occurrence_first_view()}</p><h1>{m.document_metrics_analysis_document_metrics()}</h1><p class="lede">{m.document_metrics_analysis_every_authorized_metric_occurrence_including()}</p></div>
+			<div class="title-actions"><button class="quiet-button"><Database size={15} /> {m.document_metrics_analysis_inspect_data()}</button><button class="quiet-button"><Info size={15} /> {m.document_metrics_analysis_read_the_grain()}</button></div>
 		</div>
 
-		<nav class="mode-tabs" aria-label="Metric analysis view">
-			<a href="/home3/ontology-metric-analysis">Dashboard <span>01</span></a>
-			<a class="active" href="/home3/ontology-metric-analysis?view=document">Document Metrics <span>02</span></a>
-			<a href="/home3/ontology-metric-analysis?view=ontology">Ontology Metrics <span>03</span></a>
+		<nav class="mode-tabs" aria-label={m.document_metrics_analysis_metric_analysis_view()}>
+			<a href="/home3/ontology-metric-analysis">{m.document_metrics_analysis_dashboard()} <span>01</span></a>
+			<a class="active" href="/home3/ontology-metric-analysis?view=document">{m.document_metrics_analysis_document_metrics()} <span>02</span></a>
+			<a href="/home3/ontology-metric-analysis?view=ontology">{m.document_metrics_analysis_ontology_metrics()} <span>03</span></a>
 		</nav>
 
 		<section class="coverage-notice">
 			<div class="notice-icon"><Check size={15} /></div>
-			<div class="notice-copy"><strong>Coverage is current</strong><span>writer v3.8.2 · authorized corpus · read-model 2026.08.20 · rules v1.4</span></div>
-			<button class="notice-detail">View definition <ChevronDown size={14} /></button>
+			<div class="notice-copy"><strong>{m.document_metrics_analysis_coverage_is_current()}</strong><span>{m.document_metrics_analysis_writer_v3_8_2_authorized()}</span></div>
+			<button class="notice-detail">{m.document_metrics_analysis_view_definition()} <ChevronDown size={14} /></button>
 		</section>
 
-		<section class="scope-bar" aria-label="Active scope">
-			<div class="scope-label"><Filter size={15} /><span>Scope</span></div>
-			<button class="scope-select" onclick={() => (scope = scope === 'All authorized documents' ? 'Standards / 2026 intake' : 'All authorized documents')}>{scope} <ChevronDown size={14} /></button>
-			<span class="scope-chip"><BookOpen size={13} /> Document <strong>All</strong></span>
-			<span class="scope-chip"><Layers3 size={13} /> Definition <strong>All terms</strong></span>
-			<span class="filter-count"><ListFilter size={13} /> 0 filters</span>
-			<button class="reset-button" onclick={resetFilters}>Reset filters</button>
+		<section class="scope-bar" aria-label={m.document_metrics_analysis_active_scope()}>
+			<div class="scope-label"><Filter size={15} /><span>{m.document_metrics_analysis_scope()}</span></div>
+			<button class="scope-select" onclick={() => (scope = scope === m.document_metrics_analysis_all_authorized_documents() ? m.document_metrics_analysis_standards_2026_intake() : m.document_metrics_analysis_all_authorized_documents())}>{scope} <ChevronDown size={14} /></button>
+			<span class="scope-chip"><BookOpen size={13} /> {m.document_metrics_analysis_document()} <strong>{m.document_metrics_analysis_all()}</strong></span>
+			<span class="scope-chip"><Layers3 size={13} /> {m.document_metrics_analysis_definition()} <strong>{m.document_metrics_analysis_all_terms()}</strong></span>
+			<span class="filter-count"><ListFilter size={13} /> {m.document_metrics_analysis_0_filters()}</span>
+			<button class="reset-button" onclick={resetFilters}>{m.document_metrics_analysis_reset_filters()}</button>
 		</section>
 
-		<section class="coverage-strip" aria-label="Document metric coverage summary">
-			<div class="coverage-title"><p class="panel-kicker">Coverage strip</p><strong>1,245</strong><span>authorized occurrences</span></div>
-			<div class="coverage-item"><span class="coverage-dot green"></span><strong>684</strong><span>complete</span></div>
-			<div class="coverage-item"><span class="coverage-dot bronze"></span><strong>216</strong><span>with findings</span></div>
-			<div class="coverage-item"><span class="coverage-dot slate"></span><strong>168</strong><span>historical</span></div>
-			<div class="coverage-item"><span class="coverage-dot red"></span><strong>177</strong><span>needs attention</span></div>
-			<div class="coverage-tail"><span>Coverage denominator</span><b>1,245 occurrences</b><CircleHelp size={13} /></div>
+		<section class="coverage-strip" aria-label={m.document_metrics_analysis_document_metric_coverage_summary()}>
+			<div class="coverage-title"><p class="panel-kicker">{m.document_metrics_analysis_coverage_strip()}</p><strong>1,245</strong><span>{m.document_metrics_analysis_authorized_occurrences()}</span></div>
+			<div class="coverage-item"><span class="coverage-dot green"></span><strong>684</strong><span>{m.document_metrics_analysis_complete()}</span></div>
+			<div class="coverage-item"><span class="coverage-dot bronze"></span><strong>216</strong><span>{m.document_metrics_analysis_with_findings()}</span></div>
+			<div class="coverage-item"><span class="coverage-dot slate"></span><strong>168</strong><span>{m.document_metrics_analysis_historical()}</span></div>
+			<div class="coverage-item"><span class="coverage-dot red"></span><strong>177</strong><span>{m.document_metrics_analysis_needs_attention()}</span></div>
+			<div class="coverage-tail"><span>{m.document_metrics_analysis_coverage_denominator()}</span><b>{m.document_metrics_analysis_1_245_occurrences()}</b><CircleHelp size={13} /></div>
 		</section>
 
 		<section class="table-section">
 			<div class="section-heading">
-				<div><p class="panel-kicker">Current occurrence inventory</p><h2>Document Metrics <span>1,245 occurrences · page 1</span></h2></div>
-			<div class="table-tools"><label class="search-field"><Search size={15} /><input bind:value={query} placeholder="Search document, metric, subject" aria-label="Search document, metric, subject" /></label><button class="tool-button" class:active={filterOpen} onclick={() => (filterOpen = !filterOpen)}><SlidersHorizontal size={15} /> Filters</button><button class="tool-button" class:active={columnsOpen} onclick={() => (columnsOpen = !columnsOpen)}><Columns3 size={15} /> Columns</button></div>
+				<div><p class="panel-kicker">{m.document_metrics_analysis_current_occurrence_inventory()}</p><h2>{m.document_metrics_analysis_document_metrics()} <span>{m.document_metrics_analysis_1_245_occurrences_page_1()}</span></h2></div>
+			<div class="table-tools"><label class="search-field"><Search size={15} /><input bind:value={query} placeholder={m.document_metrics_analysis_search_document_metric_subject()} aria-label={m.document_metrics_analysis_search_document_metric_subject()} /></label><button class="tool-button" class:active={filterOpen} onclick={() => (filterOpen = !filterOpen)}><SlidersHorizontal size={15} /> {m.document_metrics_analysis_filters()}</button><button class="tool-button" class:active={columnsOpen} onclick={() => (columnsOpen = !columnsOpen)}><Columns3 size={15} /> {m.document_metrics_analysis_columns()}</button></div>
 			</div>
 
 			{#if filterOpen}
 				<div class="filter-drawer">
-					<div class="drawer-head"><div><p class="panel-kicker">Server-recognized filters</p><strong>Refine the occurrence set</strong></div><button class="close-button" aria-label="Close filters" onclick={() => (filterOpen = false)}><X size={16} /></button></div>
+					<div class="drawer-head"><div><p class="panel-kicker">{m.document_metrics_analysis_server_recognized_filters()}</p><strong>{m.document_metrics_analysis_refine_the_occurrence_set()}</strong></div><button class="close-button" aria-label={m.document_metrics_analysis_close_filters()} onclick={() => (filterOpen = false)}><X size={16} /></button></div>
 					<div class="filter-grid">
-						<label><span>Source / document</span><select><option>All documents</option><option>Standards / 2026 intake</option></select></label>
-						<label><span>Governed-term status</span><select><option>All definitions</option><option>Missing definition</option><option>Current definition</option></select></label>
-						<label><span>Coverage / execution</span><select bind:value={selectedStatus}><option>All statuses</option><option>Complete</option><option>Findings</option><option>Historical</option><option>Blocked claim</option><option>Incomplete graph</option><option>Execution failed</option></select></label>
-						<label><span>Failed check</span><select><option>All checks</option><option>Silent gap</option><option>Missing assertion edge</option></select></label>
+						<label><span>{m.document_metrics_analysis_source_document()}</span><select><option>{m.document_metrics_analysis_all_documents()}</option><option>{m.document_metrics_analysis_standards_2026_intake()}</option></select></label>
+						<label><span>{m.document_metrics_analysis_governed_term_status()}</span><select><option>{m.document_metrics_analysis_all_definitions()}</option><option>{m.document_metrics_analysis_missing_definition()}</option><option>{m.document_metrics_analysis_current_definition()}</option></select></label>
+						<label><span>{m.document_metrics_analysis_coverage_execution()}</span><select bind:value={selectedStatus}><option>{m.document_metrics_analysis_all_statuses()}</option><option>{m.document_metrics_analysis_complete_2()}</option><option>{m.document_metrics_analysis_findings()}</option><option>{m.document_metrics_analysis_historical_2()}</option><option>{m.document_metrics_analysis_blocked_claim()}</option><option>{m.document_metrics_analysis_incomplete_graph()}</option><option>{m.document_metrics_analysis_execution_failed()}</option></select></label>
+						<label><span>{m.document_metrics_analysis_failed_check()}</span><select><option>{m.document_metrics_analysis_all_checks()}</option><option>{m.document_metrics_analysis_silent_gap()}</option><option>{m.document_metrics_analysis_missing_assertion_edge()}</option></select></label>
 					</div>
-					<div class="drawer-foot"><span><Info size={14} /> Filters apply to the server table, not only the loaded page.</span><button class="reset-button" onclick={resetFilters}>Clear filters</button></div>
+					<div class="drawer-foot"><span><Info size={14} /> {m.document_metrics_analysis_filters_apply_to_the_server()}</span><button class="reset-button" onclick={resetFilters}>{m.document_metrics_analysis_clear_filters()}</button></div>
 				</div>
 			{/if}
 
 			{#if columnsOpen}
-				<div class="columns-popover"><div class="drawer-head"><strong>Visible columns</strong><button class="close-button" onclick={() => (columnsOpen = false)}><X size={15} /></button></div>{#each visibleColumns as column}<label><input type="checkbox" checked={column.checked} /> <span>{column.label}</span></label>{/each}</div>
+				<div class="columns-popover"><div class="drawer-head"><strong>{m.document_metrics_analysis_visible_columns()}</strong><button class="close-button" onclick={() => (columnsOpen = false)}><X size={15} /></button></div>{#each visibleColumns as column}<label><input type="checkbox" checked={column.checked} /> <span>{column.label}</span></label>{/each}</div>
 			{/if}
 
-			<div class="table-meta"><span><strong>{filteredRows.length}</strong> visible in this design preview</span><span>Page size <select><option>50</option><option>100</option><option>200</option></select><button class="meta-link">Save view</button></span></div>
+			<div class="table-meta"><span><strong>{filteredRows.length}</strong> {m.document_metrics_analysis_visible_in_this_design_preview()}</span><span>{m.document_metrics_analysis_page_size()} <select><option>50</option><option>100</option><option>200</option></select><button class="meta-link">{m.document_metrics_analysis_save_view()}</button></span></div>
 			<div class="table-wrap">
-				<table class="metric-table"><caption>Document metric occurrences</caption><thead><tr><th class="identity-head">Document + metric</th><th>Raw / normalized value</th><th>Definition</th><th>Subject</th><th>Assertion / class</th><th>Health</th><th>Last processed</th><th class="action-head"></th></tr></thead>
+				<table class="metric-table"><caption>{m.document_metrics_analysis_document_metric_occurrences()}</caption><thead><tr><th class="identity-head">{m.document_metrics_analysis_document_metric()}</th><th>{m.document_metrics_analysis_raw_normalized_value()}</th><th>{m.document_metrics_analysis_definition()}</th><th>{m.document_metrics_analysis_subject()}</th><th>{m.document_metrics_analysis_assertion_class()}</th><th>{m.document_metrics_analysis_health()}</th><th>{m.document_metrics_analysis_last_processed()}</th><th class="action-head"></th></tr></thead>
 				<tbody>{#each filteredRows as row}{@const StateIcon = stateMeta[row.state].icon}<tr class:selected={selectedRow === row.id} onclick={() => (selectedRow = selectedRow === row.id ? null : row.id)} onkeydown={(event) => event.key === 'Enter' && (selectedRow = row.id)} tabindex="0">
 					<td class="identity-cell"><div class="doc-name"><FileText size={15} /><div><strong>{row.metric}</strong><span>{row.document} <i>{row.section}</i></span></div></div><code>{row.id}</code></td>
 					<td class="value-cell"><strong>{row.value}</strong><span>{row.normalized}</span></td>
-					<td>{#if row.definition}<div class="definition"><strong>{row.definition}</strong><span>{row.definitionMeta}</span></div>{:else}<span class="not-present">Not present</span><small class="reason">No governed term</small>{/if}</td>
-					<td><strong class="subject">{row.subject}</strong><span class="muted">Record data</span></td>
+					<td>{#if row.definition}<div class="definition"><strong>{row.definition}</strong><span>{row.definitionMeta}</span></div>{:else}<span class="not-present">{m.document_metrics_analysis_not_present()}</span><small class="reason">{m.document_metrics_analysis_no_governed_term()}</small>{/if}</td>
+					<td><strong class="subject">{row.subject}</strong><span class="muted">{m.document_metrics_analysis_record_data()}</span></td>
 					<td><div class="assertion"><strong class:blocked-text={row.assertion === 'Blocked claim'}>{row.assertion}</strong><span>{row.className}</span></div></td>
 					<td><div class="health"><span class="status-badge {stateMeta[row.state].className}"><StateIcon size={12} />{stateMeta[row.state].label}</span><span class="finding {row.finding === 'No findings' ? 'quiet' : ''}">{row.finding}</span></div></td>
 					<td class="processed"><Clock3 size={13} />{row.processed}</td><td class="row-action"><ChevronRight size={17} /></td>
-				</tr>{:else}<tr><td colspan="8" class="empty-row"><Search size={22} /><strong>No occurrences match these filters.</strong><span>Clear filters or choose a wider authorized scope.</span><button class="reset-button" onclick={resetFilters}>Clear filters</button></td></tr>{/each}</tbody></table>
+				</tr>{:else}<tr><td colspan="8" class="empty-row"><Search size={22} /><strong>{m.document_metrics_analysis_no_occurrences_match_these_filters()}</strong><span>{m.document_metrics_analysis_clear_filters_or_choose_a()}</span><button class="reset-button" onclick={resetFilters}>{m.document_metrics_analysis_clear_filters()}</button></td></tr>{/each}</tbody></table>
 			</div>
-			<div class="table-foot"><span><Info size={13} /> Each row is one <strong>kb.metrics</strong> occurrence. A missing assertion remains a valid row.</span><div class="pagination"><button disabled><ChevronRight size={15} style="transform:rotate(180deg)" /></button><span>1 / 25</span><button><ChevronRight size={15} /></button></div></div>
+			<div class="table-foot"><span><Info size={13} /> {m.document_metrics_analysis_each_row_is_one()} <strong>{m.document_metrics_analysis_kb_metrics()}</strong> {m.document_metrics_analysis_occurrence_a_missing_assertion_remains()}</span><div class="pagination"><button disabled><ChevronRight size={15} style="transform:rotate(180deg)" /></button><span>1 / 25</span><button><ChevronRight size={15} /></button></div></div>
 		</section>
 
-		{#if selectedRow}<aside class="selection-note"><div><p class="panel-kicker">Selected occurrence</p><strong>{selectedRow}</strong><span>Detail route will open with (input_record_id, metric_id) once the read API is connected.</span></div><button onclick={() => (selectedRow = null)}><X size={15} /></button></aside>{/if}
-		<footer class="page-footer"><span><Layers3 size={14} /> Metric ontology analysis · Page 2 of 3</span><span>Frontend design preview · backend connection pending</span></footer>
+		{#if selectedRow}<aside class="selection-note"><div><p class="panel-kicker">{m.document_metrics_analysis_selected_occurrence()}</p><strong>{selectedRow}</strong><span>{m.document_metrics_analysis_detail_route_will_open_with()}</span></div><button onclick={() => (selectedRow = null)}><X size={15} /></button></aside>{/if}
+		<footer class="page-footer"><span><Layers3 size={14} /> {m.document_metrics_analysis_metric_ontology_analysis_page_2()}</span><span>{m.document_metrics_analysis_frontend_design_preview_backend_connection()}</span></footer>
 	</main>
 </div>
 

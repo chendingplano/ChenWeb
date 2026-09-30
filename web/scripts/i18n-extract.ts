@@ -119,11 +119,12 @@ function paramName(expr: Expr): string {
 			return 'value';
 		}
 		case 'ConditionalExpression':
-			if (
-				(isStr(expr.consequent, '') && isStr(expr.alternate, 's')) ||
-				(isStr(expr.consequent, 's') && isStr(expr.alternate, ''))
-			)
-				return 'plural';
+			for (const suffix of ['s', 'es'])
+				if (
+					(isStr(expr.consequent, '') && isStr(expr.alternate, suffix)) ||
+					(isStr(expr.consequent, suffix) && isStr(expr.alternate, ''))
+				)
+					return 'plural';
 			return 'value';
 		case 'LogicalExpression':
 			return paramName(expr.left as Expr);
@@ -214,8 +215,16 @@ function messageFor(ctx: Ctx, parts: Node[]): { call: string; key: string; text:
 	const params: [string, string][] = [];
 	let text = '';
 	for (const p of parts) {
-		if (p.type === 'Text') text += decodeEntities(String(p.data));
-		else {
+		if (p.type === 'Text') {
+			// Literal braces would be read as a Paraglide placeholder: pass such a
+			// snippet (e.g. a JSON example) as an {example} param instead.
+			text += decodeEntities(String(p.data)).replace(/\{[^]*\}|[{}]/g, (lit) => {
+				let name = 'example';
+				for (let i = 2; params.some(([pn]) => pn === name); i++) name = `example${i}`;
+				params.push([name, JSON.stringify(lit)]);
+				return `{${name}}`;
+			});
+		} else {
 			const expr = p.expression as Node;
 			const src = exprSource(ctx, expr);
 			let name = paramName(expr);

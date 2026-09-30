@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m as msg } from '$lib/paraglide/messages.js';
  import { onMount } from 'svelte';
  import { COUNTRIES } from './country-list';
  import { CALENDAR_TYPES } from './calendar-types';
@@ -12,8 +13,8 @@
  let { darkMode = true }: { darkMode?: boolean } = $props();
  const colors = $derived({ bg: darkMode ? '#171B26' : '#F2F4F7', card: darkMode ? '#1F2333' : '#fff', text: darkMode ? '#E2E8F0' : '#111827', muted: darkMode ? '#94A3B8' : '#6B7280', border: darkMode ? '#2D3348' : '#E4E6EB', accent: darkMode ? '#A5B4FC' : '#4F46E5' });
 
- const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
- const weekdayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+ const monthNames = [msg.calendar_admin_january(),msg.calendar_admin_february(),msg.calendar_admin_march(),msg.calendar_admin_april(),msg.calendar_admin_may(),msg.calendar_admin_june(),msg.calendar_admin_july(),msg.calendar_admin_august(),msg.calendar_admin_september(),msg.calendar_admin_october(),msg.calendar_admin_november(),msg.calendar_admin_december()];
+ const weekdayNames = [msg.calendar_admin_su(),msg.calendar_admin_mo(),msg.calendar_admin_tu(),msg.calendar_admin_we(),msg.calendar_admin_th(),msg.calendar_admin_fr(),msg.calendar_admin_sa()];
 
  let year = $state(new Date().getFullYear());
  let country = $state(COUNTRIES[0].code);
@@ -82,7 +83,7 @@
    calendar = await getCalendar(year, country, calendarType.trim());
    clearSelection();
   } catch (e) {
-   error = e instanceof Error ? e.message : 'Unable to load calendar.';
+   error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_load_calendar();
   } finally {
    loading = false;
   }
@@ -95,7 +96,7 @@
    calendar = await createCalendar(year, country, calendarType.trim());
    clearSelection();
   } catch (e) {
-   error = e instanceof Error ? e.message : 'Unable to create calendar.';
+   error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_create_calendar();
   } finally {
    creating = false;
   }
@@ -104,7 +105,7 @@
  async function loadHolidayInfos() {
   if (!infoKeyValid) { holidayInfos = []; return; }
   infosLoaded = false;
-  try { holidayInfos = await listHolidayInfo(country, calendarType); } catch (e) { error = e instanceof Error ? e.message : 'Unable to load holiday info.'; }
+  try { holidayInfos = await listHolidayInfo(country, calendarType); } catch (e) { error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_load_holiday_info(); }
   finally { infosLoaded = true; }
  }
 
@@ -113,7 +114,7 @@
    defaultCountry = await getDefaultCountry();
    if (defaultCountry) country = defaultCountry;
   } catch (e) {
-   error = e instanceof Error ? e.message : 'Unable to load default country.';
+   error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_load_default_country();
   }
  }
 
@@ -123,7 +124,7 @@
    if (isDefaultCountry) { await clearDefaultCountry(); defaultCountry = null; }
    else { await setDefaultCountry(country); defaultCountry = country; }
   } catch (e) {
-   error = e instanceof Error ? e.message : 'Unable to update default country.';
+   error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_update_default_country();
   } finally {
    defaultCountryBusy = false;
   }
@@ -178,7 +179,7 @@
    for (const [holidayInfoId, g] of byHoliday) await upsertCalendarDates(year, country, calendarType, g.holidays, holidayInfoId, g.adjusted);
    for (const date of removals) await deleteCalendarDate(calendar.id, date);
   } catch (e) {
-   error = e instanceof Error ? e.message : 'Unable to save changes.';
+   error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_save_changes();
   } finally {
    modifying = false;
    await loadCalendar();
@@ -206,33 +207,33 @@
   attaching = true;
   try {
    if (attachNew) {
-    if (!newHoliday.name.trim()) { attachError = 'Holiday name is required.'; attaching = false; return; }
+    if (!newHoliday.name.trim()) { attachError = msg.calendar_admin_holiday_name_is_required(); attaching = false; return; }
     const created = await createHolidayInfo({ country, calendar_type: calendarType, name: newHoliday.name.trim(), description: newHoliday.description.trim(), note: newHoliday.note.trim() });
     holidayInfoId = created.id;
     holidayInfos = [...holidayInfos, created];
    }
-   if (!holidayInfoId || Number.isNaN(holidayInfoId)) { attachError = 'Select or create a holiday.'; attaching = false; return; }
+   if (!holidayInfoId || Number.isNaN(holidayInfoId)) { attachError = msg.calendar_admin_select_or_create_a_holiday(); attaching = false; return; }
    calendar = await upsertCalendarDates(year, country, calendarType, Array.from(selectedHolidays), holidayInfoId, Array.from(selectedAdjusted));
    clearSelection();
    attachModal = false;
   } catch (e) {
-   attachError = e instanceof Error ? e.message : 'Unable to attach holiday.';
+   attachError = e instanceof Error ? e.message : msg.calendar_admin_unable_to_attach_holiday();
   } finally {
    attaching = false;
   }
  }
 
  async function removeCalendar() {
-  if (!calendar?.id || !confirm(`Delete the entire ${calendarType} calendar for ${country} ${year}?`)) return;
-  try { await deleteCalendar(calendar.id); await loadCalendar(); } catch (e) { error = e instanceof Error ? e.message : 'Unable to delete calendar.'; }
+  if (!calendar?.id || !confirm(msg.calendar_admin_delete_the_entire_calendar_for({ calendarType, country, year }))) return;
+  try { await deleteCalendar(calendar.id); await loadCalendar(); } catch (e) { error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_delete_calendar(); }
  }
 
  function openNewInfo() { infoEditing = null; infoError = ''; infoDraft = { country, calendar_type: calendarType, name: '', display_seqno: 1, description: '', note: '' }; infoModal = true; }
  function openEditInfo(h: HolidayInfo) { infoEditing = h; infoError = ''; infoDraft = { country: h.country, calendar_type: h.calendar_type, name: h.name, display_seqno: h.display_seqno, description: h.description, note: h.note }; infoModal = true; }
 
  async function saveInfo() {
-   if (!infoDraft.country.trim() || !infoDraft.name.trim()) { infoError = 'Country and name are required.'; return; }
-   if (infoEditing && (!Number.isInteger(infoDraft.display_seqno) || infoDraft.display_seqno < 1)) { infoError = 'Display sequence must be a positive integer.'; return; }
+   if (!infoDraft.country.trim() || !infoDraft.name.trim()) { infoError = msg.calendar_admin_country_and_name_are_required(); return; }
+   if (infoEditing && (!Number.isInteger(infoDraft.display_seqno) || infoDraft.display_seqno < 1)) { infoError = msg.calendar_admin_display_sequence_must_be_a(); return; }
   infoSaving = true; infoError = '';
   try {
    if (infoEditing) await updateHolidayInfo(infoEditing.id, infoDraft);
@@ -240,26 +241,26 @@
    infoModal = false;
    await loadHolidayInfos();
   } catch (e) {
-   infoError = e instanceof Error ? e.message : 'Unable to save holiday info.';
+   infoError = e instanceof Error ? e.message : msg.calendar_admin_unable_to_save_holiday_info();
   } finally {
    infoSaving = false;
   }
  }
 
  async function removeInfo(h: HolidayInfo) {
-  if (!confirm(`Delete holiday "${h.name}"?`)) return;
-  try { await deleteHolidayInfo(h.id); await loadHolidayInfos(); } catch (e) { error = e instanceof Error ? e.message : 'Unable to delete holiday info.'; }
+  if (!confirm(msg.calendar_admin_delete_holiday({ name: h.name }))) return;
+  try { await deleteHolidayInfo(h.id); await loadHolidayInfos(); } catch (e) { error = e instanceof Error ? e.message : msg.calendar_admin_unable_to_delete_holiday_info(); }
  }
 </script>
 
 <div class="page" style={`background:${colors.bg};color:${colors.text}`}>
  <section class="card intro" style={`background:${colors.card};border-color:${colors.border}`}>
-  <div><h1>Holiday Calendar</h1><p>Country and calendar type identify a holiday info, the list of holidays shared across years (lower panel). Adding a year gives that year's holidays: select holiday days and adjusted working days and attach a holiday.</p></div>
+  <div><h1>{msg.calendar_admin_holiday_calendar()}</h1><p>{msg.calendar_admin_country_and_calendar_type_identify()}</p></div>
   <div class="controls">
-   <label>Year<input type="number" bind:value={year} onchange={loadCalendar} /></label>
-   <label>Country<select bind:value={country} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
-   <label>Calendar Type<select bind:value={calendarType} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each CALENDAR_TYPES as t}<option value={t.code}>{t.name}</option>{/each}</select></label>
-   <button disabled={!keyValid} onclick={loadCalendar}>Refresh</button>
+   <label>{msg.calendar_admin_year()}<input type="number" bind:value={year} onchange={loadCalendar} /></label>
+   <label>{msg.calendar_admin_country()}<select bind:value={country} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
+   <label>{msg.calendar_admin_calendar_type()}<select bind:value={calendarType} onchange={() => { loadCalendar(); loadHolidayInfos(); }}>{#each CALENDAR_TYPES as t}<option value={t.code}>{t.name}</option>{/each}</select></label>
+   <button disabled={!keyValid} onclick={loadCalendar}>{msg.calendar_admin_refresh()}</button>
   </div>
  </section>
 
@@ -267,31 +268,31 @@
 
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
-   <span>{selectedHolidays.size} holiday day(s), {selectedAdjusted.size} adjusted day(s) selected{#if pendingEdits.size}, {pendingEdits.size} saved day(s) changed{/if}</span>
-   <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} disabled={!calendarExists} onclick={() => (selectMode = 'holiday')}>Set Holidays</button>
-   <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} disabled={!calendarExists} onclick={() => (selectMode = 'adjusted')}>Set Adjusted Days</button>
-   <button disabled={!calendarExists || selectedCount === 0} onclick={openAttach}>Attach Holiday</button>
-   <button disabled={!canModify} onclick={saveModifications}>{modifying ? 'Saving…' : 'Modify'}</button>
-   <button class="secondary" disabled={selectedCount === 0 && pendingEdits.size === 0} onclick={clearSelection}>Clear Selection</button>
-   {#if calendar?.id}<button class="danger" onclick={removeCalendar}>Delete Calendar</button>{/if}
+   <span>{msg.calendar_admin_holiday_day_s_adjusted_day({ selectedHolidaysCount: selectedHolidays.size, selectedAdjustedCount: selectedAdjusted.size })}{#if pendingEdits.size}{msg.calendar_admin_saved_day_s_changed({ pendingEditsCount: pendingEdits.size })}{/if}</span>
+   <button class="mode" class:active={selectMode === 'holiday'} aria-pressed={selectMode === 'holiday'} disabled={!calendarExists} onclick={() => (selectMode = 'holiday')}>{msg.calendar_admin_set_holidays()}</button>
+   <button class="mode adjusted" class:active={selectMode === 'adjusted'} aria-pressed={selectMode === 'adjusted'} disabled={!calendarExists} onclick={() => (selectMode = 'adjusted')}>{msg.calendar_admin_set_adjusted_days()}</button>
+   <button disabled={!calendarExists || selectedCount === 0} onclick={openAttach}>{msg.calendar_admin_attach_holiday()}</button>
+   <button disabled={!canModify} onclick={saveModifications}>{modifying ? msg.calendar_admin_saving() : msg.calendar_admin_modify()}</button>
+   <button class="secondary" disabled={selectedCount === 0 && pendingEdits.size === 0} onclick={clearSelection}>{msg.calendar_admin_clear_selection()}</button>
+   {#if calendar?.id}<button class="danger" onclick={removeCalendar}>{msg.calendar_admin_delete_calendar()}</button>{/if}
   </div>
   <div class="legend">
-   <span><i class="swatch selected"></i>Selected holiday</span>
-   <span><i class="swatch selected-adjusted"></i>Selected adjusted day</span>
-   <span><i class="swatch bound"></i>Holiday</span>
-   <span><i class="swatch bound-adjusted"></i>Adjusted working day</span>
-   <span><i class="swatch changed"></i>Unsaved change</span>
+   <span><i class="swatch selected"></i>{msg.calendar_admin_selected_holiday()}</span>
+   <span><i class="swatch selected-adjusted"></i>{msg.calendar_admin_selected_adjusted_day()}</span>
+   <span><i class="swatch bound"></i>{msg.calendar_admin_holiday()}</span>
+   <span><i class="swatch bound-adjusted"></i>{msg.calendar_admin_adjusted_working_day()}</span>
+   <span><i class="swatch changed"></i>{msg.calendar_admin_unsaved_change()}</span>
   </div>
-  {#if !keyValid}<div class="state">Enter a year, country and calendar type to choose the holidays of a year.</div>
-  {:else if loading}<div class="state">Loading calendar…</div>
+  {#if !keyValid}<div class="state">{msg.calendar_admin_enter_a_year_country_and()}</div>
+  {:else if loading}<div class="state">{msg.calendar_admin_loading_calendar()}</div>
   {:else}
    {#if !calendarExists}
     <div class="state create">
      {#if holidayInfoExists}
-      <p>No <strong>{calendarType.trim()}</strong> holidays exist for {country} {year}.</p>
-      <button disabled={creating} onclick={createCurrentCalendar}>{creating ? 'Creating…' : 'Create'}</button>
+      <p>{msg.calendar_admin_no()} <strong>{calendarType.trim()}</strong> {msg.calendar_admin_holidays_exist_for({ country, year })}</p>
+      <button disabled={creating} onclick={createCurrentCalendar}>{creating ? msg.calendar_admin_creating() : msg.calendar_admin_create()}</button>
      {:else}
-      <p>Create the holiday info for {country} · {calendarType.trim()} below first, then create the {year} holidays.</p>
+      <p>{msg.calendar_admin_create_the_holiday_info_for({ country, calendarType: calendarType.trim(), year })}</p>
      {/if}
     </div>
    {/if}
@@ -315,7 +316,7 @@
           class:bound={kind === 'holiday'}
           class:bound-adjusted={kind === 'adjusted'}
           class:changed={pendingEdits.has(key)}
-          title={bound ? `${bound.holiday_info_name}${kind === 'adjusted' ? ' (adjusted working day)' : kind === null ? ' (will be removed)' : ''}` : ''}
+          title={bound ? `${bound.holiday_info_name}${kind === 'adjusted' ? msg.calendar_admin_adjusted_working_day_2() : kind === null ? ' (will be removed)' : ''}` : ''}
           onclick={() => (bound ? toggleBound(key, bound.day_kind) : toggleDay(key))}
          >{day}</button>
         {/if}
@@ -329,19 +330,19 @@
 
  <section class="card" style={`background:${colors.card};border-color:${colors.border}`}>
   <div class="toolbar">
-   <h2>Holiday Info ({country} · {calendarType})</h2>
-   <label class="check inline"><input type="checkbox" checked={isDefaultCountry} disabled={defaultCountryBusy} onchange={toggleDefaultCountry} /> Set as default country</label>
-   {#if holidayInfoExists}<button onclick={openNewInfo}>New Holiday</button>{/if}
+   <h2>{msg.calendar_admin_holiday_info({ country, calendarType })}</h2>
+   <label class="check inline"><input type="checkbox" checked={isDefaultCountry} disabled={defaultCountryBusy} onchange={toggleDefaultCountry} /> {msg.calendar_admin_set_as_default_country()}</label>
+   {#if holidayInfoExists}<button onclick={openNewInfo}>{msg.calendar_admin_new_holiday()}</button>{/if}
   </div>
-  {#if !infoKeyValid}<div class="state">Choose a country and calendar type to see their holiday info.</div>
+  {#if !infoKeyValid}<div class="state">{msg.calendar_admin_choose_a_country_and_calendar()}</div>
   {:else if holidayInfoExists}
-   <div class="table-wrap"><table><thead><tr><th>Order</th><th>Name</th><th>Description</th><th>Note</th><th></th></tr></thead><tbody>
-    {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>Edit</button><button class="link danger" onclick={() => removeInfo(h)}>Delete</button></td></tr>{/each}
+   <div class="table-wrap"><table><thead><tr><th>{msg.calendar_admin_order()}</th><th>{msg.calendar_admin_name()}</th><th>{msg.calendar_admin_description()}</th><th>{msg.calendar_admin_note()}</th><th></th></tr></thead><tbody>
+    {#each holidayInfos as h}<tr><td>{h.display_seqno}</td><td>{h.name}</td><td>{h.description}</td><td>{h.note}</td><td><button class="link" onclick={() => openEditInfo(h)}>{msg.calendar_admin_edit()}</button><button class="link danger" onclick={() => removeInfo(h)}>{msg.calendar_admin_delete()}</button></td></tr>{/each}
    </tbody></table></div>
   {:else if infosLoaded}
    <div class="state create">
-    <p>No holiday info exists for {country} · {calendarType.trim()}. Create it by adding its first holiday.</p>
-    <button onclick={openNewInfo}>Create</button>
+    <p>{msg.calendar_admin_no_holiday_info_exists_for({ country, calendarType: calendarType.trim() })}</p>
+    <button onclick={openNewInfo}>{msg.calendar_admin_create()}</button>
    </div>
   {/if}
  </section>
@@ -349,38 +350,38 @@
 
 {#if attachModal}
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (attachModal = false)}>
- <div class="modal" role="dialog" aria-modal="true" aria-label="Attach holiday" style={`background:${colors.card};color:${colors.text};border-color:${colors.border}`}>
-  <div class="modal-head"><h2>Attach Holiday to {selectedHolidays.size} Holiday Day(s), {selectedAdjusted.size} Adjusted Day(s)</h2><button class="link" onclick={() => (attachModal = false)}>Close</button></div>
+ <div class="modal" role="dialog" aria-modal="true" aria-label={msg.calendar_admin_attach_holiday_2()} style={`background:${colors.card};color:${colors.text};border-color:${colors.border}`}>
+  <div class="modal-head"><h2>{msg.calendar_admin_attach_holiday_to_holiday_day({ selectedHolidaysCount: selectedHolidays.size, selectedAdjustedCount: selectedAdjusted.size })}</h2><button class="link" onclick={() => (attachModal = false)}>{msg.calendar_admin_close()}</button></div>
   <div class="form">
-   <label class="check"><input type="checkbox" bind:checked={attachNew} /> Create a new holiday</label>
+   <label class="check"><input type="checkbox" bind:checked={attachNew} /> {msg.calendar_admin_create_a_new_holiday()}</label>
    {#if attachNew}
-    <label>Name<input bind:value={newHoliday.name} /></label>
-    <label>Description<input bind:value={newHoliday.description} /></label>
-    <label>Note<input bind:value={newHoliday.note} /></label>
+    <label>{msg.calendar_admin_name()}<input bind:value={newHoliday.name} /></label>
+    <label>{msg.calendar_admin_description()}<input bind:value={newHoliday.description} /></label>
+    <label>{msg.calendar_admin_note()}<input bind:value={newHoliday.note} /></label>
    {:else}
-    <label>Existing Holiday<select bind:value={attachHolidayId}><option value="">Select…</option>{#each holidayInfos as h}<option value={h.id}>{h.name}</option>{/each}</select></label>
+    <label>{msg.calendar_admin_existing_holiday()}<select bind:value={attachHolidayId}><option value="">{msg.calendar_admin_select()}</option>{#each holidayInfos as h}<option value={h.id}>{h.name}</option>{/each}</select></label>
    {/if}
   </div>
   {#if attachError}<div class="error">{attachError}</div>{/if}
-  <div class="modal-actions"><button class="secondary" onclick={() => (attachModal = false)}>Cancel</button><button onclick={confirmAttach} disabled={attaching}>{attaching ? 'Saving…' : 'Attach'}</button></div>
+  <div class="modal-actions"><button class="secondary" onclick={() => (attachModal = false)}>{msg.calendar_admin_cancel()}</button><button onclick={confirmAttach} disabled={attaching}>{attaching ? msg.calendar_admin_saving() : msg.calendar_admin_attach()}</button></div>
  </div>
 </div>
 {/if}
 
 {#if infoModal}
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (infoModal = false)}>
- <div class="modal" role="dialog" aria-modal="true" aria-label={infoEditing ? 'Edit holiday' : 'New holiday'} style={`background:${colors.card};color:${colors.text};border-color:${colors.border}`}>
-  <div class="modal-head"><h2>{infoEditing ? 'Edit Holiday' : 'New Holiday'}</h2><button class="link" onclick={() => (infoModal = false)}>Close</button></div>
+ <div class="modal" role="dialog" aria-modal="true" aria-label={infoEditing ? msg.calendar_admin_edit_holiday() : msg.calendar_admin_new_holiday_2()} style={`background:${colors.card};color:${colors.text};border-color:${colors.border}`}>
+  <div class="modal-head"><h2>{infoEditing ? msg.calendar_admin_edit_holiday_2() : msg.calendar_admin_new_holiday()}</h2><button class="link" onclick={() => (infoModal = false)}>{msg.calendar_admin_close()}</button></div>
   <div class="form">
-   <label>Country<select bind:value={infoDraft.country}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
-   <label>Calendar Type<select bind:value={infoDraft.calendar_type}>{#each CALENDAR_TYPES as t}<option value={t.code}>{t.name}</option>{/each}</select></label>
-   <label>Name<input bind:value={infoDraft.name} /></label>
-   {#if infoEditing}<label>Display order<input type="number" min="1" step="1" bind:value={infoDraft.display_seqno} /></label>{/if}
-   <label>Description<input bind:value={infoDraft.description} /></label>
-   <label>Note<input bind:value={infoDraft.note} /></label>
+   <label>{msg.calendar_admin_country()}<select bind:value={infoDraft.country}>{#each COUNTRIES as c}<option value={c.code}>{c.name} ({c.code})</option>{/each}</select></label>
+   <label>{msg.calendar_admin_calendar_type()}<select bind:value={infoDraft.calendar_type}>{#each CALENDAR_TYPES as t}<option value={t.code}>{t.name}</option>{/each}</select></label>
+   <label>{msg.calendar_admin_name()}<input bind:value={infoDraft.name} /></label>
+   {#if infoEditing}<label>{msg.calendar_admin_display_order()}<input type="number" min="1" step="1" bind:value={infoDraft.display_seqno} /></label>{/if}
+   <label>{msg.calendar_admin_description()}<input bind:value={infoDraft.description} /></label>
+   <label>{msg.calendar_admin_note()}<input bind:value={infoDraft.note} /></label>
   </div>
   {#if infoError}<div class="error">{infoError}</div>{/if}
-  <div class="modal-actions"><button class="secondary" onclick={() => (infoModal = false)}>Cancel</button><button onclick={saveInfo} disabled={infoSaving}>{infoSaving ? 'Saving…' : 'Save'}</button></div>
+  <div class="modal-actions"><button class="secondary" onclick={() => (infoModal = false)}>{msg.calendar_admin_cancel()}</button><button onclick={saveInfo} disabled={infoSaving}>{infoSaving ? msg.calendar_admin_saving() : msg.calendar_admin_save()}</button></div>
  </div>
 </div>
 {/if}

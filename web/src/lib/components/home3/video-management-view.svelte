@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
 		listVideos,
@@ -37,9 +38,9 @@
 	type SortField = 'name' | 'created_at' | 'size_bytes';
 	type SortDirection = 'asc' | 'desc';
 	const sortableColumns: { field: SortField; label: string }[] = [
-		{ field: 'name', label: 'Name' },
-		{ field: 'size_bytes', label: 'Size' },
-		{ field: 'created_at', label: 'Uploaded' }
+		{ field: 'name', label: m.video_management_name() },
+		{ field: 'size_bytes', label: m.video_management_size() },
+		{ field: 'created_at', label: m.video_management_uploaded() }
 	];
 	let sorts = $state<{ field: SortField; direction: SortDirection }[]>([]);
 	let filterName = $state('');
@@ -111,7 +112,7 @@
 			});
 			if (selected && !videos.some((v) => v.id === selected!.id)) selected = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load videos';
+			error = e instanceof Error ? e.message : m.video_management_failed_to_load_videos();
 		} finally {
 			loading = false;
 		}
@@ -200,7 +201,7 @@
 
 	async function onAutoGenerate() {
 		if (!name.trim() || !description.trim()) {
-			dialogError = 'Enter a name and description first — the cover is generated from them.';
+			dialogError = m.video_management_enter_a_name_and_description();
 			return;
 		}
 		generating = true;
@@ -211,7 +212,7 @@
 			const prompt = `Cover image for a training video titled "${name.trim()}". ${description.trim()}`;
 			coverImage = await generateImage(prompt); // each click yields a new image
 		} catch (e) {
-			dialogError = e instanceof Error ? e.message : 'Auto-generate failed';
+			dialogError = e instanceof Error ? e.message : m.video_management_auto_generate_failed();
 		} finally {
 			generating = false;
 		}
@@ -219,19 +220,19 @@
 
 	async function submitDialog() {
 		if (editingId === null && !file) {
-			dialogError = 'Please choose a video file.';
+			dialogError = m.video_management_please_choose_a_video_file();
 			return;
 		}
 		if (!name.trim()) {
-			dialogError = 'Name is required.';
+			dialogError = m.video_management_name_is_required();
 			return;
 		}
 		if (!description.trim()) {
-			dialogError = 'Description is required.';
+			dialogError = m.video_management_description_is_required();
 			return;
 		}
 		if (source === 'Web' && !url.trim()) {
-			dialogError = 'A URL is required when source is Web.';
+			dialogError = m.video_management_a_url_is_required_when();
 			return;
 		}
 		uploading = true;
@@ -256,12 +257,12 @@
 				editingId === null
 					? await uploadVideo(file!, fields, (f) => (uploadProgress = f))
 					: await updateVideo(editingId, fields, file, (f) => (uploadProgress = f));
-			info = editingId === null ? `Uploaded "${meta.name}"` : `Updated "${meta.name}"`;
+			info = editingId === null ? m.video_management_uploaded_2({ name: meta.name }) : m.video_management_updated({ name: meta.name });
 			error = null;
 			dialogOpen = false;
 			await refresh();
 		} catch (e) {
-			dialogError = e instanceof Error ? e.message : (editingId === null ? 'Upload failed' : 'Update failed');
+			dialogError = e instanceof Error ? e.message : (editingId === null ? m.video_management_upload_failed() : m.video_management_update_failed());
 		} finally {
 			uploading = false;
 			uploadProgress = 0;
@@ -269,16 +270,16 @@
 	}
 
 	async function onDelete(video: VideoMeta) {
-		if (!confirm(`Delete "${video.name}"? This cannot be undone.`)) return;
+		if (!confirm(m.video_management_delete_this_cannot_be_undone({ name: video.name }))) return;
 		error = null;
 		info = null;
 		try {
 			await deleteVideo(video.id);
 			if (selected?.id === video.id) selected = null;
-			info = `Deleted "${video.name}"`;
+			info = m.video_management_deleted({ name: video.name });
 			await refresh();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Delete failed';
+			error = e instanceof Error ? e.message : m.video_management_delete_failed();
 		}
 	}
 
@@ -289,9 +290,9 @@
 	<!-- Header -->
 	<div class="flex items-start justify-between gap-4 mb-5 flex-wrap">
 		<div>
-			<h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">Videos</h1>
+			<h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">{m.video_management_videos()}</h1>
 			<p style="font-size:14px; color:{textSecondary};">
-				Manage training videos — upload with metadata and a cover image, view, download, and delete.
+				{m.video_management_manage_training_videos_upload_with()}
 			</p>
 		</div>
 		<button
@@ -299,7 +300,7 @@
 			class="rounded-lg px-4 py-2 cursor-pointer"
 			style="background:{accent}; color:#fff; font-size:14px; font-weight:500; border:none;"
 		>
-			Upload video
+			{m.video_management_upload_video()}
 		</button>
 	</div>
 
@@ -315,7 +316,7 @@
 		<div class="mb-6 rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
 			<div class="flex items-center justify-between mb-3">
 				<span style="font-size:14px; font-weight:500;">{selected.name}</span>
-				<button onclick={() => (selected = null)} class="cursor-pointer" style="background:none; border:none; color:{textSecondary}; font-size:13px;">Close</button>
+				<button onclick={() => (selected = null)} class="cursor-pointer" style="background:none; border:none; color:{textSecondary}; font-size:13px;">{m.video_management_close()}</button>
 			</div>
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video src={videoStreamUrl(selected.id)} controls style="width:100%; max-height:60vh; border-radius:8px; background:#000;"></video>
@@ -325,17 +326,17 @@
 	<!-- Sort / filter controls -->
 	<div class="flex items-end gap-3 mb-4 flex-wrap">
 		<div class="flex flex-col gap-1.5">
-			<label for="v-filter-name" style="color:{textSecondary}; font-size:12px;">Filter by Name</label>
+			<label for="v-filter-name" style="color:{textSecondary}; font-size:12px;">{m.video_management_filter_by_name()}</label>
 			<input
 				id="v-filter-name"
 				bind:value={filterName}
 				onkeydown={(e) => e.key === 'Enter' && refresh()}
-				placeholder="Search name…"
+				placeholder={m.video_management_search_name()}
 				style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; font-size:13px; min-width:180px;"
 			/>
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<label for="v-filter-from" style="color:{textSecondary}; font-size:12px;">Filter by Time</label>
+			<label for="v-filter-from" style="color:{textSecondary}; font-size:12px;">{m.video_management_filter_by_time()}</label>
 			<div class="flex items-center gap-2">
 				<input
 					id="v-filter-from"
@@ -357,51 +358,51 @@
 			class="rounded-lg px-4 py-2 cursor-pointer"
 			style="background:{accentTint}; color:{accent}; font-size:13px; font-weight:500; border:none;"
 		>
-			Apply
+			{m.video_management_apply()}
 		</button>
 	</div>
 
 	<!-- Video list -->
 	<div class="rounded-xl overflow-hidden" style="border:1px solid {borderColor}; background:{surface};">
 		{#if loading}
-			<div class="p-6 text-center" style="color:{textSecondary}; font-size:14px;">Loading…</div>
+			<div class="p-6 text-center" style="color:{textSecondary}; font-size:14px;">{m.video_management_loading()}</div>
 		{:else if videos.length === 0}
-			<div class="p-8 text-center" style="color:{textSecondary}; font-size:14px;">No videos yet. Upload one to get started.</div>
+			<div class="p-8 text-center" style="color:{textSecondary}; font-size:14px;">{m.video_management_no_videos_yet_upload_one()}</div>
 		{:else}
 			<table style="width:100%; border-collapse:collapse; font-size:13px;">
 				<thead>
 					<tr style="text-align:left; color:{textSecondary};">
-						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Cover</th>
+						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">{m.video_management_cover()}</th>
 						<th style="padding:6px 10px; border-bottom:1px solid {borderColor}; font-weight:500;">
 							<label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
-								<span>Name</span>
+								<span>{m.video_management_name()}</span>
 								{#if sortArrow('name')}
-									<span aria-label={sortDirection('name') === 'asc' ? 'Sorted ascending' : 'Sorted descending'} style="color:{accent}; font-size:16px; font-weight:700;">{sortArrow('name')}</span>
+									<span aria-label={sortDirection('name') === 'asc' ? m.video_management_sorted_ascending() : m.video_management_sorted_descending()} style="color:{accent}; font-size:16px; font-weight:700;">{sortArrow('name')}</span>
 								{/if}
-								<select aria-label="Sort Name" value={sortDirection('name')} onchange={(event) => setSort('name', event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
-									<option value="none">No Sort</option>
-									<option value="asc">↑ Ascending</option>
-									<option value="desc">↓ Descending</option>
+								<select aria-label={m.video_management_sort_name()} value={sortDirection('name')} onchange={(event) => setSort('name', event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
+									<option value="none">{m.video_management_no_sort()}</option>
+									<option value="asc">{m.video_management_ascending()}</option>
+									<option value="desc">{m.video_management_descending()}</option>
 								</select>
 							</label>
 						</th>
-						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">Source</th>
+						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500;">{m.video_management_source()}</th>
 						{#each sortableColumns.slice(1) as column (column.field)}
 							<th style="padding:6px 10px; border-bottom:1px solid {borderColor}; font-weight:500;">
 								<label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
 									<span>{column.label}</span>
 									{#if sortArrow(column.field)}
-										<span aria-label={sortDirection(column.field) === 'asc' ? 'Sorted ascending' : 'Sorted descending'} style="color:{accent}; font-size:16px; font-weight:700;">{sortArrow(column.field)}</span>
+										<span aria-label={sortDirection(column.field) === 'asc' ? m.video_management_sorted_ascending() : m.video_management_sorted_descending()} style="color:{accent}; font-size:16px; font-weight:700;">{sortArrow(column.field)}</span>
 									{/if}
-									<select aria-label="Sort {column.label}" value={sortDirection(column.field)} onchange={(event) => setSort(column.field, event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
-										<option value="none">No Sort</option>
-										<option value="asc">↑ Ascending</option>
-										<option value="desc">↓ Descending</option>
+									<select aria-label={m.video_management_sort({ label: column.label })} value={sortDirection(column.field)} onchange={(event) => setSort(column.field, event.currentTarget.value as SortDirection | 'none')} style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:4px 6px; font-size:12px;">
+										<option value="none">{m.video_management_no_sort()}</option>
+										<option value="asc">{m.video_management_ascending()}</option>
+										<option value="desc">{m.video_management_descending()}</option>
 									</select>
 								</label>
 							</th>
 						{/each}
-						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500; text-align:right;">Actions</th>
+						<th style="padding:10px 14px; border-bottom:1px solid {borderColor}; font-weight:500; text-align:right;">{m.video_management_actions()}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -424,10 +425,10 @@
 							<td style="padding:8px 14px; border-bottom:1px solid {borderColor}; color:{textSecondary};">{formatBytes(video.size_bytes)}</td>
 							<td style="padding:8px 14px; border-bottom:1px solid {borderColor}; color:{textSecondary};">{formatDate(video.created_at)}</td>
 							<td style="padding:8px 14px; border-bottom:1px solid {borderColor}; text-align:right; white-space:nowrap;">
-								<button onclick={() => (selected = video)} class="cursor-pointer" style="background:none; border:none; color:{accent}; font-size:13px; margin-left:8px;">View</button>
-								<button onclick={() => openEditDialog(video)} class="cursor-pointer" style="background:none; border:none; color:{accent}; font-size:13px; margin-left:12px;">Edit</button>
-								<a href={videoDownloadUrl(video.id)} style="color:{accent}; font-size:13px; margin-left:12px; text-decoration:none;">Download</a>
-								<button onclick={() => onDelete(video)} class="cursor-pointer" style="background:none; border:none; color:{dangerColor}; font-size:13px; margin-left:12px;">Delete</button>
+								<button onclick={() => (selected = video)} class="cursor-pointer" style="background:none; border:none; color:{accent}; font-size:13px; margin-left:8px;">{m.video_management_view()}</button>
+								<button onclick={() => openEditDialog(video)} class="cursor-pointer" style="background:none; border:none; color:{accent}; font-size:13px; margin-left:12px;">{m.video_management_edit()}</button>
+								<a href={videoDownloadUrl(video.id)} style="color:{accent}; font-size:13px; margin-left:12px; text-decoration:none;">{m.video_management_download()}</a>
+								<button onclick={() => onDelete(video)} class="cursor-pointer" style="background:none; border:none; color:{dangerColor}; font-size:13px; margin-left:12px;">{m.video_management_delete()}</button>
 							</td>
 						</tr>
 					{/each}
@@ -448,7 +449,7 @@
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid {borderColor};">
-				<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">{editingId === null ? 'Upload video' : 'Edit video'}</h2>
+				<h2 style="font-size:16px; font-weight:600; color:{textPrimary};">{editingId === null ? m.video_management_upload_video() : m.video_management_edit_video()}</h2>
 				<button onclick={() => !uploading && (dialogOpen = false)} class="cursor-pointer" style="background:none; border:none; color:{textSecondary}; font-size:16px;">✕</button>
 			</div>
 
@@ -460,13 +461,13 @@
 				<!-- Video file (optional when editing — leave empty to keep the current file) -->
 				<div class="flex flex-col gap-1.5">
 					<label for="v-file-display" style="color:{textSecondary};">
-						Video File Name{#if editingId === null}<span style="color:{dangerColor};"> *</span>{/if}
+						{m.video_management_video_file_name()}{#if editingId === null}<span style="color:{dangerColor};"> *</span>{/if}
 					</label>
 					<div class="flex items-center gap-2">
-						<input id="v-file-display" type="text" readonly value={file ? file.name : currentFilename} placeholder="No file chosen"
+						<input id="v-file-display" type="text" readonly value={file ? file.name : currentFilename} placeholder={m.video_management_no_file_chosen()}
 							style="flex:1; background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 						<button type="button" onclick={() => dialogFileInput?.click()} class="cursor-pointer rounded-lg px-3 py-2"
-							style="background:{accentTint}; color:{accent}; border:none; font-size:13px; white-space:nowrap;">Pick File</button>
+							style="background:{accentTint}; color:{accent}; border:none; font-size:13px; white-space:nowrap;">{m.video_management_pick_file()}</button>
 					</div>
 					<input bind:this={dialogFileInput} id="v-file" type="file" accept="video/*" onchange={onDialogFileChosen}
 						style="display:none;" />
@@ -474,32 +475,32 @@
 
 				<!-- Name -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-name" style="color:{textSecondary};">Name <span style="color:{dangerColor};">*</span></label>
-					<input id="v-name" bind:value={name} placeholder="Video name" required
+					<label for="v-name" style="color:{textSecondary};">{m.video_management_name()} <span style="color:{dangerColor};">*</span></label>
+					<input id="v-name" bind:value={name} placeholder={m.video_management_video_name()} required
 						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 				</div>
 
 				<!-- Description -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-desc" style="color:{textSecondary};">Description <span style="color:{dangerColor};">*</span></label>
-					<textarea id="v-desc" bind:value={description} rows="2" placeholder="Short description" required
+					<label for="v-desc" style="color:{textSecondary};">{m.video_management_description()} <span style="color:{dangerColor};">*</span></label>
+					<textarea id="v-desc" bind:value={description} rows="2" placeholder={m.video_management_short_description()} required
 						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; resize:vertical;"></textarea>
 				</div>
 
 				<!-- Source + URL -->
 				<div class="flex gap-3 flex-wrap">
 					<div class="flex flex-col gap-1.5" style="min-width:140px;">
-						<label for="v-source" style="color:{textSecondary};">Source</label>
+						<label for="v-source" style="color:{textSecondary};">{m.video_management_source()}</label>
 						<select id="v-source" bind:value={source}
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;">
-							<option value="Recording">Recording</option>
-							<option value="Web">Web</option>
+							<option value="Recording">{m.video_management_recording()}</option>
+							<option value="Web">{m.video_management_web()}</option>
 						</select>
 					</div>
 					{#if source === 'Web'}
 						<div class="flex flex-col gap-1.5 flex-1" style="min-width:200px;">
-							<label for="v-url" style="color:{textSecondary};">URL</label>
-							<input id="v-url" bind:value={url} placeholder="https://…"
+							<label for="v-url" style="color:{textSecondary};">{m.video_management_url()}</label>
+							<input id="v-url" bind:value={url} placeholder={m.video_management_https()}
 								style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 						</div>
 					{/if}
@@ -507,24 +508,24 @@
 
 				<!-- Keywords -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-keywords" style="color:{textSecondary};">Keywords</label>
-					<input id="v-keywords" bind:value={keywords} placeholder="Comma-separated tags"
+					<label for="v-keywords" style="color:{textSecondary};">{m.video_management_keywords()}</label>
+					<input id="v-keywords" bind:value={keywords} placeholder={m.video_management_comma_separated_tags()}
 						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 				</div>
 
 				<!-- Category + Subcategory (editable comboboxes) -->
 				<div class="flex gap-3 flex-wrap">
 					<div class="flex flex-col gap-1.5 flex-1" style="min-width:160px;">
-						<label for="v-category" style="color:{textSecondary};">Category</label>
-						<input id="v-category" list="v-category-options" bind:value={category} placeholder="Pick or type…"
+						<label for="v-category" style="color:{textSecondary};">{m.video_management_category()}</label>
+						<input id="v-category" list="v-category-options" bind:value={category} placeholder={m.video_management_pick_or_type()}
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 						<datalist id="v-category-options">
 							{#each categoryOptions as opt (opt)}<option value={opt}></option>{/each}
 						</datalist>
 					</div>
 					<div class="flex flex-col gap-1.5 flex-1" style="min-width:160px;">
-						<label for="v-subcategory" style="color:{textSecondary};">Subcategory</label>
-						<input id="v-subcategory" list="v-subcategory-options" bind:value={subcategory} placeholder="Pick or type…"
+						<label for="v-subcategory" style="color:{textSecondary};">{m.video_management_subcategory()}</label>
+						<input id="v-subcategory" list="v-subcategory-options" bind:value={subcategory} placeholder={m.video_management_pick_or_type()}
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 						<datalist id="v-subcategory-options">
 							{#each subcategoryOptions as opt (opt)}<option value={opt}></option>{/each}
@@ -535,48 +536,48 @@
 				<!-- Container + Status + Video type -->
 				<div class="flex gap-3 flex-wrap">
 					<div class="flex flex-col gap-1.5 flex-1" style="min-width:160px;">
-						<label for="v-container" style="color:{textSecondary};">Container</label>
-						<input id="v-container" bind:value={container} placeholder="Collection / group"
+						<label for="v-container" style="color:{textSecondary};">{m.video_management_container()}</label>
+						<input id="v-container" bind:value={container} placeholder={m.video_management_collection_group()}
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 					</div>
 					<div class="flex flex-col gap-1.5" style="min-width:140px;">
-						<label for="v-status" style="color:{textSecondary};">Status</label>
+						<label for="v-status" style="color:{textSecondary};">{m.video_management_status()}</label>
 						<select id="v-status" bind:value={status}
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;">
-							<option value="draft">Draft</option>
-							<option value="published">Published</option>
-							<option value="archived">Archived</option>
+							<option value="draft">{m.video_management_draft()}</option>
+							<option value="published">{m.video_management_published()}</option>
+							<option value="archived">{m.video_management_archived()}</option>
 						</select>
 					</div>
 					<div class="flex flex-col gap-1.5" style="min-width:120px;">
-						<label for="v-video-type" style="color:{textSecondary};">Video type</label>
-						<input id="v-video-type" bind:value={videoType} placeholder="e.g. mp4"
+						<label for="v-video-type" style="color:{textSecondary};">{m.video_management_video_type()}</label>
+						<input id="v-video-type" bind:value={videoType} placeholder={m.video_management_e_g_mp4()}
 							style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px;" />
 					</div>
 				</div>
 
 				<!-- Notes -->
 				<div class="flex flex-col gap-1.5">
-					<label for="v-notes" style="color:{textSecondary};">Notes</label>
-					<textarea id="v-notes" bind:value={notes} rows="2" placeholder="Internal notes"
+					<label for="v-notes" style="color:{textSecondary};">{m.video_management_notes()}</label>
+					<textarea id="v-notes" bind:value={notes} rows="2" placeholder={m.video_management_internal_notes()}
 						style="background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:8px; padding:8px 10px; resize:vertical;"></textarea>
 				</div>
 
 				<!-- Cover image -->
 				<div class="flex flex-col gap-1.5">
-					<span style="color:{textSecondary};">Cover image</span>
+					<span style="color:{textSecondary};">{m.video_management_cover_image()}</span>
 					<div class="flex items-center gap-3">
 						<div style="width:96px; height:60px; border-radius:8px; border:1px solid {borderColor}; background:{accentTint}; overflow:hidden; flex-shrink:0;">
 							{#if coverImage}
-								<img src={coverImage.content_url} alt="cover" style="width:100%; height:100%; object-fit:cover; display:block;" />
+								<img src={coverImage.content_url} alt={m.video_management_cover_2()} style="width:100%; height:100%; object-fit:cover; display:block;" />
 							{/if}
 						</div>
 						<div class="flex flex-col gap-2">
 							<button onclick={() => (showPicker = true)} class="cursor-pointer rounded-lg px-3 py-1.5"
-								style="background:{accentTint}; color:{accent}; border:none; font-size:13px;">Pick an Image</button>
+								style="background:{accentTint}; color:{accent}; border:none; font-size:13px;">{m.video_management_pick_an_image()}</button>
 							<button onclick={onAutoGenerate} disabled={generating} class="cursor-pointer rounded-lg px-3 py-1.5"
 								style="background:{accentTint}; color:{accent}; border:none; font-size:13px; opacity:{generating ? 0.6 : 1};">
-								{generating ? 'Generating…' : 'Auto-Generate'}
+								{generating ? m.video_management_generating() : m.video_management_auto_generate()}
 							</button>
 						</div>
 					</div>
@@ -591,13 +592,13 @@
 
 			<div class="flex items-center justify-end gap-3 px-5 py-4" style="border-top:1px solid {borderColor};">
 				<button onclick={() => !uploading && (dialogOpen = false)} class="cursor-pointer rounded-lg px-4 py-2"
-					style="background:none; border:1px solid {borderColor}; color:{textSecondary}; font-size:14px;">Cancel</button>
+					style="background:none; border:1px solid {borderColor}; color:{textSecondary}; font-size:14px;">{m.video_management_cancel()}</button>
 				<button onclick={submitDialog} disabled={uploading} class="cursor-pointer rounded-lg px-4 py-2"
 					style="background:{accent}; color:#fff; border:none; font-size:14px; opacity:{uploading ? 0.6 : 1};">
 					{#if editingId === null}
-						{uploading ? `Uploading… ${Math.round(uploadProgress * 100)}%` : 'Upload'}
+						{uploading ? m.video_management_uploading({ value: Math.round(uploadProgress * 100) }) : m.video_management_upload()}
 					{:else}
-						{uploading ? (file ? `Saving… ${Math.round(uploadProgress * 100)}%` : 'Saving…') : 'Save'}
+						{uploading ? (file ? m.video_management_saving({ value: Math.round(uploadProgress * 100) }) : m.video_management_saving_2()) : m.video_management_save()}
 					{/if}
 				</button>
 			</div>

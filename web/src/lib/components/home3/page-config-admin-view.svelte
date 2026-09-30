@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
 	import { locales } from '$lib/paraglide/runtime';
 	import {
@@ -353,7 +354,7 @@
 	async function submitForm() {
 		const entryKey = formEntryKey.trim();
 		if (!entryKey) {
-			formError = 'entry_key is required';
+			formError = m.page_config_admin_entry_key_is_required();
 			return;
 		}
 		saving = true;
@@ -390,12 +391,7 @@
 	}
 
 	async function remove(entry: AdminEntry) {
-		const msg =
-			`Delete configuration for "${entry.entry_key}"?\n\n` +
-			`This removes the entry for all languages. The item will revert to the ` +
-			`page's built-in default text and become visible to all users (its label/` +
-			`description overrides and role restrictions are removed).\n\n` +
-			`To hide the item instead, edit it and turn off "Enabled".`;
+		const msg = m.page_config_admin_delete_configuration_confirm({ entry_key: entry.entry_key });
 		if (!confirm(msg)) return;
 		try {
 			await deleteEntry(selectedPageKey, entry.entry_key);
@@ -406,9 +402,9 @@
 	}
 
 	function status(entry: AdminEntry): string {
-		if (!entry.enabled) return 'disabled (hidden)';
-		if (!entry.accessible) return 'suspended (hidden)';
-		if (!entry.access_role || entry.access_role.length === 0) return 'no roles (hidden)';
+		if (!entry.enabled) return m.page_config_admin_disabled_hidden();
+		if (!entry.accessible) return m.page_config_admin_suspended_hidden();
+		if (!entry.access_role || entry.access_role.length === 0) return m.page_config_admin_no_roles_hidden();
 		return 'active';
 	}
 
@@ -439,18 +435,17 @@
 >
 	<header class="head">
 		<div>
-			<h1>Page Content Configuration</h1>
+			<h1>{m.page_config_admin_page_content_configuration()}</h1>
 			<p class="sub">
-				DB-backed, language-aware content for configurable pages. Entries are keyed by
-				<code>page_key + entry_key</code>. Disable, suspend, or clear roles to hide an entry;
-				delete to revert it to the page's built-in default.
+				{m.page_config_admin_db_backed_language_aware_content()}
+				<code>page_key + entry_key</code>{m.page_config_admin_disable_suspend_or_clear_roles()}
 			</p>
 		</div>
 	</header>
 
 	<div class="controls">
 		<label class="field">
-			<span>Page</span>
+			<span>{m.page_config_admin_page()}</span>
 			<select bind:value={selectedPageKey} onchange={onSelectPage}>
 				{#each pages as p (p.page_key)}
 					<option value={p.page_key}>{p.title || p.page_key} ({p.route})</option>
@@ -460,33 +455,33 @@
 		{#if selectedPage}
 			<span class="route-hint"><code>{selectedPage.route}</code></span>
 		{/if}
-		<button type="button" class="primary" onclick={openNew}>+ New entry</button>
+		<button type="button" class="primary" onclick={openNew}>{m.page_config_admin_new_entry()}</button>
 		<button
 			type="button"
 			class="toggle"
 			aria-pressed={previewOpen}
 			onclick={() => (previewOpen = !previewOpen)}
 		>
-			{previewOpen ? 'Hide preview' : 'Show preview'}
+			{previewOpen ? m.page_config_admin_hide_preview() : m.page_config_admin_show_preview()}
 		</button>
 		<label class="filter-field">
-			<span>ZH-CN LABEL</span>
-			<input aria-label="Filter by ZH-CN LABEL" placeholder="LIKE…" bind:value={zhCnLabelFilter} oninput={onFilterInput} />
+			<span>{m.page_config_admin_zh_cn_label()}</span>
+			<input aria-label={m.page_config_admin_filter_by_zh_cn_label()} placeholder={m.page_config_admin_like()} bind:value={zhCnLabelFilter} oninput={onFilterInput} />
 		</label>
 		<label class="filter-field">
-			<span>EN LABEL</span>
-			<input aria-label="Filter by EN LABEL" placeholder="LIKE…" bind:value={enLabelFilter} oninput={onFilterInput} />
+			<span>{m.page_config_admin_en_label()}</span>
+			<input aria-label={m.page_config_admin_filter_by_en_label()} placeholder={m.page_config_admin_like()} bind:value={enLabelFilter} oninput={onFilterInput} />
 		</label>
 		<label class="filter-field">
-			<span>ENTRY_KEY</span>
-			<input aria-label="Filter by ENTRY_KEY" placeholder="LIKE…" bind:value={entryKeyFilter} oninput={onFilterInput} />
+			<span>{m.page_config_admin_entry_key()}</span>
+			<input aria-label={m.page_config_admin_filter_by_entry_key()} placeholder={m.page_config_admin_like()} bind:value={entryKeyFilter} oninput={onFilterInput} />
 		</label>
 	</div>
 
 	<div class="split" class:preview-open={previewOpen} class:dragging bind:this={splitEl}>
 		<div class="left-pane" style:flex={previewOpen ? `0 0 ${leftPct}%` : '1 1 auto'}>
 	{#if loading}
-		<p class="muted">Loading…</p>
+		<p class="muted">{m.page_config_admin_loading()}</p>
 	{:else if loadError}
 		<p class="error">{loadError}</p>
 	{:else}
@@ -494,12 +489,12 @@
 			<table>
 				<thead>
 					<tr>
-						<th>entry_key</th>
-						<th>description</th>
-						<th>status</th>
-						<th>access_role</th>
+						<th>{m.page_config_admin_entry_key_2()}</th>
+						<th>{m.page_config_admin_description()}</th>
+						<th>{m.page_config_admin_status()}</th>
+						<th>{m.page_config_admin_access_role()}</th>
 						{#each locales as lang (lang)}
-							<th>{lang} label</th>
+							<th>{m.page_config_admin_label({ lang })}</th>
 						{/each}
 						<th></th>
 					</tr>
@@ -521,19 +516,19 @@
 									disabled={savingKey === entry.entry_key}
 									onchange={(e) => onStatusChange(entry, (e.currentTarget as HTMLSelectElement).value)}
 								>
-									<option value="active">active</option>
-									<option value="disabled">disabled</option>
-									<option value="suspended">suspended</option>
+									<option value="active">{m.page_config_admin_active()}</option>
+									<option value="disabled">{m.page_config_admin_disabled()}</option>
+									<option value="suspended">{m.page_config_admin_suspended()}</option>
 								</select>
 								{#if (entry.access_role ?? []).length === 0}
-									<span class="hint-noroles">hidden: no roles</span>
+									<span class="hint-noroles">{m.page_config_admin_hidden_no_roles()}</span>
 								{/if}
 							</td>
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<td
 								class="roles-cell"
 								ondblclick={() => startRolesEdit(entry)}
-								title="Double-click to edit roles"
+								title={m.page_config_admin_double_click_to_edit_roles()}
 							>
 								{#if editingRolesKey === entry.entry_key}
 									<div class="role-chip-list">
@@ -547,7 +542,7 @@
 											</button>
 										{/each}
 										{#if (entry.access_role ?? []).length === 0}
-											<span class="role-placeholder">No roles</span>
+											<span class="role-placeholder">{m.page_config_admin_no_roles()}</span>
 										{/if}
 									</div>
 									<div class="role-menu-wrap">
@@ -557,9 +552,9 @@
 											onclick={() =>
 												(roleMenuOpenKey = roleMenuOpenKey === entry.entry_key ? null : entry.entry_key)}
 										>
-											{roleMenuOpenKey === entry.entry_key ? 'Close' : '+ Add role'}
+											{roleMenuOpenKey === entry.entry_key ? m.page_config_admin_close() : m.page_config_admin_add_role()}
 										</button>
-										<button type="button" class="mini" onclick={stopRolesEdit}>Done</button>
+										<button type="button" class="mini" onclick={stopRolesEdit}>{m.page_config_admin_done()}</button>
 										{#if roleMenuOpenKey === entry.entry_key}
 											<div class="role-menu">
 												{#each availableRolesFor(entry) as role (role.key)}
@@ -571,7 +566,7 @@
 														<strong>{role.label}</strong><span>{role.key}</span>
 													</button>
 												{:else}
-													<div class="role-menu-empty">No additional roles.</div>
+													<div class="role-menu-empty">{m.page_config_admin_no_additional_roles()}</div>
 												{/each}
 											</div>
 										{/if}
@@ -588,7 +583,7 @@
 							</td>
 							{#each locales as lang (lang)}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<td class="label-cell" ondblclick={() => startLabelEdit(entry, lang)} title="Double-click to edit">
+								<td class="label-cell" ondblclick={() => startLabelEdit(entry, lang)} title={m.page_config_admin_double_click_to_edit()}>
 									{#if editingLabel?.key === entry.entry_key && editingLabel?.lang === lang}
 										<!-- svelte-ignore a11y_autofocus -->
 										<input
@@ -607,13 +602,13 @@
 								</td>
 							{/each}
 							<td class="row-actions">
-								<button type="button" onclick={() => startEdit(entry)}>Edit</button>
-								<button type="button" class="link-danger" onclick={() => remove(entry)}>Delete</button>
+								<button type="button" onclick={() => startEdit(entry)}>{m.page_config_admin_edit()}</button>
+								<button type="button" class="link-danger" onclick={() => remove(entry)}>{m.page_config_admin_delete()}</button>
 							</td>
 						</tr>
 					{/each}
 					{#if entries.length === 0}
-						<tr><td colspan={locales.length + 5} class="muted">No entries for this page.</td></tr>
+						<tr><td colspan={locales.length + 5} class="muted">{m.page_config_admin_no_entries_for_this_page()}</td></tr>
 					{/if}
 				</tbody>
 			</table>
@@ -627,7 +622,7 @@
 				class="divider"
 				role="separator"
 				aria-orientation="vertical"
-				aria-label="Resize preview"
+				aria-label={m.page_config_admin_resize_preview()}
 				onpointerdown={startDrag}
 				onpointermove={onDrag}
 				onpointerup={endDrag}
@@ -641,32 +636,31 @@
 					<div class="preview-bar">
 						<code>{selectedPage.route}</code>
 						<div class="preview-bar-actions">
-							<button type="button" class="mini" onclick={refreshPreview}>↻ Refresh</button>
+							<button type="button" class="mini" onclick={refreshPreview}>{m.page_config_admin_refresh()}</button>
 							<a href={selectedPage.route} target="_blank" rel="noopener" class="open-link">
-								Open ↗
+								{m.page_config_admin_open()}
 							</a>
 						</div>
 					</div>
 					<div class="preview-body">
 						<iframe
 							bind:this={previewEl}
-							title="Live preview of {selectedPage.route}"
+							title={m.page_config_admin_live_preview_of({ route: selectedPage.route })}
 							src={selectedPage.route}
 							onload={onPreviewLoad}
 						></iframe>
 						{#if !previewReadable}
 							<div class="preview-hint">
-								<p>Preview couldn't be displayed inline.</p>
+								<p>{m.page_config_admin_preview_couldn_t_be_displayed()}</p>
 								<p class="muted">
-									The page likely refused to load in a frame (auth or frame policy). Use
-									<a href={selectedPage.route} target="_blank" rel="noopener">Open ↗</a> to view it in a
-									new tab. Highlighting works only when the preview renders inline.
+									{m.page_config_admin_the_page_likely_refused_to()}
+									<a href={selectedPage.route} target="_blank" rel="noopener">{m.page_config_admin_open()}</a> {m.page_config_admin_to_view_it_in_a()}
 								</p>
 							</div>
 						{/if}
 					</div>
 				{:else}
-					<p class="muted preview-empty">Select a page to preview.</p>
+					<p class="muted preview-empty">{m.page_config_admin_select_a_page_to_preview()}</p>
 				{/if}
 			</div>
 		{/if}
@@ -692,50 +686,50 @@
 			class="dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Edit page content entry"
+			aria-label={m.page_config_admin_edit_page_content_entry()}
 			tabindex="-1"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 		>
 			<div class="dialog-head">
-				<div class="dialog-title">{editingEntryKey ? `Edit "${editingEntryKey}"` : 'New entry'}</div>
-				<button type="button" class="ghost" onclick={closeEditor} disabled={saving}>Close</button>
+				<div class="dialog-title">{editingEntryKey ? m.page_config_admin_edit_2({ editingEntryKey }) : m.page_config_admin_new_entry_2()}</div>
+				<button type="button" class="ghost" onclick={closeEditor} disabled={saving}>{m.page_config_admin_close()}</button>
 			</div>
 			<form class="dialog-body" onsubmit={(e) => (e.preventDefault(), submitForm())}>
 				<label class="wide">
-					<span>entry_key</span>
-					<input bind:value={formEntryKey} disabled={!!editingEntryKey} placeholder="stable id" />
+					<span>{m.page_config_admin_entry_key_2()}</span>
+					<input bind:value={formEntryKey} disabled={!!editingEntryKey} placeholder={m.page_config_admin_stable_id()} />
 				</label>
 				<label class="wide">
-					<span>Description (what this entry is)</span>
-					<input bind:value={formEntryDesc} placeholder="e.g. Wiki sidebar menu item" />
+					<span>{m.page_config_admin_description_what_this_entry_is()}</span>
+					<input bind:value={formEntryDesc} placeholder={m.page_config_admin_e_g_wiki_sidebar_menu()} />
 				</label>
 
 				{#each locales as lang (lang)}
 					<label>
-						<span>{lang} label</span>
-						<input bind:value={formLabels[lang]} placeholder="(built-in default)" />
+						<span>{m.page_config_admin_label({ lang })}</span>
+						<input bind:value={formLabels[lang]} placeholder={m.page_config_admin_built_in_default()} />
 					</label>
 					<label>
-						<span>{lang} description</span>
-						<input bind:value={formDescriptions[lang]} placeholder="(built-in default)" />
+						<span>{m.page_config_admin_description_2({ lang })}</span>
+						<input bind:value={formDescriptions[lang]} placeholder={m.page_config_admin_built_in_default()} />
 					</label>
 				{/each}
 
 				<label class="wide">
-					<span>access_role (comma-separated role keys)</span>
-					<input bind:value={formAccessRoles} placeholder="admin, dev, guest" />
+					<span>{m.page_config_admin_access_role_comma_separated_role()}</span>
+					<input bind:value={formAccessRoles} placeholder={m.page_config_admin_admin_dev_guest()} />
 				</label>
-				<label class="check"><input type="checkbox" bind:checked={formEnabled} /> Enabled</label>
+				<label class="check"><input type="checkbox" bind:checked={formEnabled} /> {m.page_config_admin_enabled()}</label>
 				<label class="check"
-					><input type="checkbox" bind:checked={formAccessible} /> Accessible</label
+					><input type="checkbox" bind:checked={formAccessible} /> {m.page_config_admin_accessible()}</label
 				>
 
 				{#if formError}<p class="error wide">{formError}</p>{/if}
 
 				<div class="dialog-foot wide">
-					<button type="button" class="ghost" onclick={closeEditor} disabled={saving}>Cancel</button>
-					<button type="submit" class="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+					<button type="button" class="ghost" onclick={closeEditor} disabled={saving}>{m.page_config_admin_cancel()}</button>
+					<button type="submit" class="primary" disabled={saving}>{saving ? m.page_config_admin_saving() : m.page_config_admin_save()}</button>
 				</div>
 			</form>
 		</div>
