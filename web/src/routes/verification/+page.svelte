@@ -128,7 +128,7 @@
 		{:else if status === 'success'}
 			<h1>Email Verified</h1>
 			<p>Your email has been verified successfully.</p>
-			<button type="button" onclick={() => goto('/dashboard')}>Continue</button>
+			<button type="button" onclick={() => goto('/')}>Continue</button>
 		{:else}
 			<h1>Verification Failed</h1>
 			<p>{errorMessage}</p>

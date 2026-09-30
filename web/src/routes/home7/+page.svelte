@@ -138,7 +138,7 @@
 		<section id="cta" class="section cta">
 			<h2>Turn scattered ideas into AI products and lasting knowledge</h2>
 			<p>Start with one workflow. End with a system that scales with your thinking.</p>
-			<a class="btn btn-primary" href="/registration-page-app">Create Your AI Workspace</a>
+			<a class="btn btn-primary" href="/login">Create Your AI Workspace</a>
 		</section>
 	</main>
 </div>

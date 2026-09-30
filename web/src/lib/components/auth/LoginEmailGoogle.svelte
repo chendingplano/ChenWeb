@@ -93,7 +93,7 @@
 					return;
 				}
 
-				let redirect_url = data.redirect_url || '/sidebar-01';
+				let redirect_url = data.redirect_url || '/';
 				if (data.name) {
 					redirect_url += `?name=${encodeURIComponent(data.name)}`;
 				}
@@ -315,7 +315,7 @@
 			});
 			const data = await res.json();
 			if (res.ok) {
-				window.location.href = data.redirect_url || '/sidebar-01';
+				window.location.href = data.redirect_url || '/';
 			} else {
 				alert(data.message || m.loginemailgoogle_invalid_or_expired_code());
 			}

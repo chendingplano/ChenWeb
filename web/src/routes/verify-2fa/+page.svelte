@@ -23,7 +23,7 @@
 
 			if (res.ok && data.status === 'ok') {
 				// 2FA successful, redirect to dashboard
-				window.location.href = data.redirect_url || '/dashboard';
+				window.location.href = data.redirect_url || '/';
 			} else {
 				error = data.message || 'Invalid verification code';
 			}

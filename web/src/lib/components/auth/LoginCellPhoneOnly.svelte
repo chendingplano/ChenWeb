@@ -97,7 +97,7 @@
 			});
 			const data = await res.json();
 			if (res.ok) {
-				window.location.href = data.redirect_url || '/sidebar-01';
+				window.location.href = data.redirect_url || '/';
 			} else {
 				alert(data.message || m.logincellphoneonly_invalid_or_expired_code());
 			}
