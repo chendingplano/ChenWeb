@@ -2,6 +2,8 @@ package kbhandler
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -231,5 +233,42 @@ func TestMetricReviewTranslationStrings_CollectAndApply(t *testing.T) {
 	}
 	if r.Tally.Stored != 3 || r.AttributeIssues[0].Stored != "range" || r.AttributeIssues[0].Suggested != "lower_bound" || r.AttributeIssues[1].Suggested != "30" || r.MissedMetrics[0].Lines != "153" || r.AttributeIssues[0].Severity != "high" {
 		t.Errorf("non-prose fields must be unchanged: %+v", r)
+	}
+}
+
+func TestListMetricReviewModels_OnlyLLM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	content := `
+[zeta-llm]
+model_type = 'llm'
+model_name = 'z'
+
+[bge-embed]
+model_type = 'embedding'
+model_name = 'bge'
+
+[alpha-llm]
+model_type = 'llm'
+model_name = 'a'
+
+[jev]
+model_type = 'decision-model'
+model_name = 'jev'
+
+[model-api-keys]
+[[model-api-keys.x]]
+api_key = 'k'
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MODEL_DEF_FILE", path)
+	got, err := listMetricReviewModels()
+	if err != nil {
+		t.Fatalf("listMetricReviewModels: %v", err)
+	}
+	want := []string{"alpha-llm", "zeta-llm"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("models = %v, want %v", got, want)
 	}
 }

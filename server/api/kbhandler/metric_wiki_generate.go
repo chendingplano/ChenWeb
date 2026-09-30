@@ -317,21 +317,37 @@ func loadWikiModelDef(modelRefEnv string) (string, ApiTypes.LLMModelDef, error) 
 	if modelRef == "" {
 		return "", ApiTypes.LLMModelDef{}, nil
 	}
+	modelDef, err := loadModelDefByRef(modelRef)
+	return modelRef, modelDef, err
+}
+
+// loadKBModelsFile reads and parses the .models.toml named by MODEL_DEF_FILE
+// (or found in the working tree). It returns the file path for error messages.
+func loadKBModelsFile() (ApiTypes.LLMModelsFile, string, error) {
 	modelPath, err := resolveModelsFilePathForKBHandler("MODEL_DEF_FILE")
 	if err != nil {
-		return modelRef, ApiTypes.LLMModelDef{}, err
+		return nil, "", err
 	}
 	raw, err := os.ReadFile(modelPath)
 	if err != nil {
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("read %s failed: %w", modelPath, err)
+		return nil, modelPath, fmt.Errorf("read %s failed: %w", modelPath, err)
 	}
 	parsed := ApiTypes.LLMModelsFile{}
 	if err := toml.Unmarshal(raw, &parsed); err != nil {
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("parse %s failed: %w", modelPath, err)
+		return nil, modelPath, fmt.Errorf("parse %s failed: %w", modelPath, err)
+	}
+	return parsed, modelPath, nil
+}
+
+// loadModelDefByRef resolves and validates one .models.toml entry by its key.
+func loadModelDefByRef(modelRef string) (ApiTypes.LLMModelDef, error) {
+	parsed, modelPath, err := loadKBModelsFile()
+	if err != nil {
+		return ApiTypes.LLMModelDef{}, err
 	}
 	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("model %q not found in %s", modelRef, modelPath)
+		return ApiTypes.LLMModelDef{}, fmt.Errorf("model %q not found in %s", modelRef, modelPath)
 	}
 	modelDef.ModelName = strings.TrimSpace(modelDef.ModelName)
 	modelDef.APIKey = strings.TrimSpace(modelDef.APIKey)
@@ -339,16 +355,16 @@ func loadWikiModelDef(modelRefEnv string) (string, ApiTypes.LLMModelDef, error) 
 	modelDef.ThinkingType = strings.TrimSpace(modelDef.ThinkingType)
 	switch {
 	case modelDef.ModelName == "":
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing model_name", modelRef)
+		return ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing model_name", modelRef)
 	case modelDef.APIKey == "":
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing api_key", modelRef)
+		return ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing api_key", modelRef)
 	case modelDef.BaseURL == "":
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing base_url", modelRef)
+		return ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing base_url", modelRef)
 	case modelDef.TimeoutSec <= 0:
-		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing or invalid timeout_sec", modelRef)
+		return ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing or invalid timeout_sec", modelRef)
 	}
 	llmclients.RegisterModelBudget(modelDef)
-	return modelRef, modelDef, nil
+	return modelDef, nil
 }
 
 // --- small helpers ---

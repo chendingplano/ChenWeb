@@ -248,13 +248,65 @@ func GetMetricReview(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// metricReviewModelType is the .models.toml model_type offered on the page;
+// embedding and decision models cannot produce a review.
+const metricReviewModelType = "llm"
+
+type metricReviewModelsResponse struct {
+	Status bool `json:"status"`
+	// Models are the .models.toml keys whose model_type is "llm", sorted.
+	Models []string `json:"models"`
+	// Default is REVIEW_METRICS_MODEL_NAME, used when the page sends no model.
+	Default string `json:"default"`
+}
+
+// ListMetricReviewModels handles GET /api/v1/kb/metric-reviews/models. It lists
+// the LLM models the Review Metrics page may choose from (keys only, no
+// credentials).
+func ListMetricReviewModels(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_MRV_500")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	models, err := listMetricReviewModels()
+	if err != nil {
+		logger.Error("list metric review models failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load models (CWB_KB_MRV_510)"})
+	}
+	return c.JSON(http.StatusOK, metricReviewModelsResponse{
+		Status:  true,
+		Models:  models,
+		Default: strings.TrimSpace(os.Getenv("REVIEW_METRICS_MODEL_NAME")),
+	})
+}
+
+// listMetricReviewModels returns the sorted .models.toml keys with model_type "llm".
+func listMetricReviewModels() ([]string, error) {
+	parsed, _, err := loadKBModelsFile()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(parsed))
+	for key, def := range parsed {
+		if strings.EqualFold(strings.TrimSpace(def.ModelType), metricReviewModelType) {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 type startMetricReviewRequest struct {
 	Force bool   `json:"force"`
 	Lang  string `json:"lang"`
+	// Model is a .models.toml key with model_type "llm"; empty means
+	// REVIEW_METRICS_MODEL_NAME.
+	Model string `json:"model"`
 }
 
 // StartMetricReview handles POST /api/v1/kb/metric-reviews/:record_id with body
-// {"force": bool, "lang": "en"|"zh-cn"}. Within that language it returns an existing review when design D3's cache rules
+// {"force": bool, "lang": "en"|"zh-cn", "model": "<models.toml key>"}. Within
+// that language it returns an existing review when design D3's cache rules
 // allow it; otherwise it inserts a 'running' row and starts the LLM review in
 // the background.
 func StartMetricReview(c echo.Context) error {
@@ -277,6 +329,17 @@ func StartMetricReview(c echo.Context) error {
 	lang, ok := normalizeMetricReviewLang(req.Lang)
 	if !ok {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "unsupported lang (CWB_KB_MRV_212)"})
+	}
+	modelRef := strings.TrimSpace(req.Model)
+	if modelRef != "" {
+		models, err := listMetricReviewModels()
+		if err != nil {
+			logger.Error("list metric review models failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load models (CWB_KB_MRV_213)"})
+		}
+		if i := sort.SearchStrings(models, modelRef); i >= len(models) || models[i] != modelRef {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: fmt.Sprintf("unknown LLM model %q (CWB_KB_MRV_214)", modelRef)})
+		}
 	}
 
 	latest, err := loadLatestMetricReview(ctx, db, recordID, lang)
@@ -314,9 +377,9 @@ RETURNING id, created_at`, recordID, lang, metricReviewStatusRunning, metricsCou
 		logger.Error("insert metric review failed", "record_id", recordID, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create review (CWB_KB_MRV_240)"})
 	}
-	logger.Info("starting metric review", "record_id", recordID, "lang", lang, "review_id", row.ID, "metrics_count", metricsCount, "force", req.Force)
+	logger.Info("starting metric review", "record_id", recordID, "lang", lang, "review_id", row.ID, "metrics_count", metricsCount, "force", req.Force, "model", modelRef)
 
-	go runMetricReview(db, row.ID, recordID, lang, userID)
+	go runMetricReview(db, row.ID, recordID, lang, modelRef, userID)
 
 	return c.JSON(http.StatusOK, metricReviewResponse{Status: true, Review: row, Started: true})
 }
@@ -421,12 +484,12 @@ func scanMetricReviewRow(sc *sql.Row) (*metricReviewRow, error) {
 
 // runMetricReview is the background run. It owns its context and logger
 // because the HTTP request that started it has already returned.
-func runMetricReview(db *sql.DB, reviewID, recordID int64, lang, userID string) {
+func runMetricReview(db *sql.DB, reviewID, recordID int64, lang, modelRef, userID string) {
 	logger := loggerutil.CreateDefaultLogger("20260929-714")
 	ctx, cancel := context.WithTimeout(context.Background(), metricReviewRunTimeout)
 	defer cancel()
 
-	report, modelName, promptName, err := executeMetricReview(ctx, db, logger, recordID, lang, userID)
+	report, modelName, promptName, err := executeMetricReview(ctx, db, logger, recordID, lang, modelRef, userID)
 	finishMetricReview(db, logger, reviewID, recordID, report, modelName, promptName, err)
 }
 
@@ -457,15 +520,24 @@ WHERE id = $1`, reviewID, metricReviewStatusDone, reportJSON, modelName, promptN
 		"stored", report.Tally.Stored, "kept", report.Tally.Kept, "missed", report.Tally.Missed)
 }
 
-// newMetricReviewLLMClient builds the client for the model named by
-// REVIEW_METRICS_MODEL_NAME (used by both reviews and translations).
-func newMetricReviewLLMClient(logger ApiTypes.JimoLogger) (ApiTypes.LLMModelDef, *llmclients.OpenAIJSONClient, error) {
-	modelRef, cfg, err := loadWikiModelDef("REVIEW_METRICS_MODEL_NAME")
-	if err != nil {
-		return cfg, nil, fmt.Errorf("load model named by REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_302): %w", err)
-	}
-	if modelRef == "" {
-		return cfg, nil, fmt.Errorf("missing env var REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_303)")
+// newMetricReviewLLMClient builds the client for the .models.toml entry
+// modelRef, or for the model named by REVIEW_METRICS_MODEL_NAME when modelRef
+// is empty (translations always use the latter).
+func newMetricReviewLLMClient(logger ApiTypes.JimoLogger, modelRef string) (ApiTypes.LLMModelDef, *llmclients.OpenAIJSONClient, error) {
+	var cfg ApiTypes.LLMModelDef
+	var err error
+	if modelRef != "" {
+		if cfg, err = loadModelDefByRef(modelRef); err != nil {
+			return cfg, nil, fmt.Errorf("load model %q (CWB_KB_MRV_304): %w", modelRef, err)
+		}
+	} else {
+		modelRef, cfg, err = loadWikiModelDef("REVIEW_METRICS_MODEL_NAME")
+		if err != nil {
+			return cfg, nil, fmt.Errorf("load model named by REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_302): %w", err)
+		}
+		if modelRef == "" {
+			return cfg, nil, fmt.Errorf("missing env var REVIEW_METRICS_MODEL_NAME (CWB_KB_MRV_303)")
+		}
 	}
 	client, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
 		ModelName:            cfg.ModelName,
@@ -502,12 +574,12 @@ func loadMetricReviewPrompt(envVar, missingLoc, unreadableLoc string) (string, s
 
 // executeMetricReview loads the prompt, model, document and metrics, calls the
 // LLM, and returns the post-processed report.
-func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, lang, userID string) (metricReviewReport, string, string, error) {
+func executeMetricReview(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, lang, modelRef, userID string) (metricReviewReport, string, string, error) {
 	promptText, promptName, err := loadMetricReviewPrompt("REVIEW_METRICS_PROMPT", "CWB_KB_MRV_300", "CWB_KB_MRV_301")
 	if err != nil {
 		return metricReviewReport{}, "", promptName, err
 	}
-	cfg, client, err := newMetricReviewLLMClient(logger)
+	cfg, client, err := newMetricReviewLLMClient(logger, modelRef)
 	if err != nil {
 		return metricReviewReport{}, cfg.ModelName, promptName, err
 	}
@@ -931,7 +1003,7 @@ func executeMetricReviewTranslation(ctx context.Context, logger ApiTypes.JimoLog
 	if err != nil {
 		return report, "", promptName, err
 	}
-	cfg, client, err := newMetricReviewLLMClient(logger)
+	cfg, client, err := newMetricReviewLLMClient(logger, "")
 	if err != nil {
 		return report, cfg.ModelName, promptName, err
 	}

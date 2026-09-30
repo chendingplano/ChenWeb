@@ -118,10 +118,24 @@ store a snapshot of the reviewed metrics and the model and prompt names used.
 
 ### Requirement: Prompt and Model Configuration
 The review prompt SHALL be read from the file under `prompts/` named by the
-`REVIEW_METRICS_PROMPT` environment variable, and the model SHALL be the
-`.models.toml` entry named by `REVIEW_METRICS_MODEL_NAME`. The prompt SHALL NOT be
-hard-coded. If either variable is unset or unresolvable, a review run SHALL fail
-with an error naming the missing variable.
+`REVIEW_METRICS_PROMPT` environment variable. The model SHALL be the one picked
+in the page's Model menu, which lists only the `.models.toml` entries with
+`model_type = 'llm'` (served by `GET /api/v1/kb/metric-reviews/models`, keys only,
+never credentials) and preselects `REVIEW_METRICS_MODEL_NAME`. A start request
+naming a model that is not such an entry SHALL be rejected with HTTP 400; a request
+naming no model SHALL use `REVIEW_METRICS_MODEL_NAME`. Choosing a model does not
+bypass the cache rule: a done review is reused unless Force to Review is ticked.
+Translations always use `REVIEW_METRICS_MODEL_NAME`. The prompt SHALL NOT be
+hard-coded. If a required variable is unset or unresolvable, a review run SHALL
+fail with an error naming the missing variable.
+
+#### Scenario: Reviewer picks a model
+- **WHEN** the reviewer selects `qwen-plus` in the Model menu and presses Review with Force ticked
+- **THEN** the run uses the `qwen-plus` entry and the stored review's model name is `qwen-plus`
+
+#### Scenario: Non-LLM model requested
+- **WHEN** a start request names an embedding model such as `bge-m3-llama-cpp`
+- **THEN** the request is rejected with HTTP 400 and no run starts
 
 #### Scenario: Prompt env var missing
 - **WHEN** `REVIEW_METRICS_PROMPT` is unset and a review is started

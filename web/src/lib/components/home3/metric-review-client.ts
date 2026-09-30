@@ -179,11 +179,23 @@ export async function getMetricReview(
 	return { review: res.review, otherLangs: res.other_langs ?? [] };
 }
 
-export async function startMetricReview(recordId: number, force: boolean, lang: string): Promise<MetricReviewResponse> {
+/** LLM models (.models.toml keys with model_type "llm") and the server default. */
+export async function listMetricReviewModels(): Promise<{ models: string[]; defaultModel: string }> {
+	const res = await req<{ models?: string[]; default?: string }>('/api/v1/kb/metric-reviews/models');
+	return { models: res.models ?? [], defaultModel: res.default ?? '' };
+}
+
+/** `model` is a .models.toml key; empty uses the server default. */
+export async function startMetricReview(
+	recordId: number,
+	force: boolean,
+	lang: string,
+	model: string
+): Promise<MetricReviewResponse> {
 	return req<MetricReviewResponse>(`/api/v1/kb/metric-reviews/${recordId}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ force, lang })
+		body: JSON.stringify({ force, lang, model })
 	});
 }
 

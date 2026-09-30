@@ -21,6 +21,7 @@
 		buildReviewPrintHtml,
 		getMetricReview,
 		groupNonMetrics,
+		listMetricReviewModels,
 		reviewExportFilename,
 		reviewLineNumbers,
 		searchInputs,
@@ -151,6 +152,16 @@
 	let reviewError = $state('');
 	let force = $state(false);
 	let starting = $state(false);
+	// LLM models from .models.toml; '' until loaded (the server then uses its default).
+	let models = $state<string[]>([]);
+	let model = $state('');
+	let modelsError = $state('');
+	listMetricReviewModels()
+		.then((res) => {
+			models = res.models;
+			model = res.models.includes(res.defaultModel) ? res.defaultModel : (res.models[0] ?? '');
+		})
+		.catch((e) => (modelsError = e instanceof Error ? e.message : String(e)));
 	// Languages with a finished review when the current language has none.
 	let otherLangs = $state<string[]>([]);
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -215,7 +226,7 @@
 		starting = true;
 		reviewError = '';
 		try {
-			const res = await startMetricReview(recordId, force, lang);
+			const res = await startMetricReview(recordId, force, lang, model);
 			if (selected?.id !== recordId) return;
 			review = res.review;
 			otherLangs = [];
@@ -470,6 +481,23 @@
 							</h3>
 						</div>
 						<div class="flex items-center gap-3">
+							<label class="flex items-center gap-2 text-sm" style="color:{textSecondary};">
+								{m.mrv_model()}
+								<select
+									bind:value={model}
+									disabled={models.length === 0}
+									title={modelsError || m.mrv_model_hint()}
+									class="rounded-lg px-2 py-1.5 text-sm cursor-pointer disabled:opacity-50"
+									style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
+								>
+									{#if models.length === 0}
+										<option value="">{modelsError ? m.mrv_models_error() : m.mrv_models_loading()}</option>
+									{/if}
+									{#each models as name (name)}
+										<option value={name}>{name}</option>
+									{/each}
+								</select>
+							</label>
 							<label class="flex items-center gap-2 text-sm cursor-pointer" style="color:{textSecondary};">
 								<input type="checkbox" bind:checked={force} />
 								{m.mrv_force()}
