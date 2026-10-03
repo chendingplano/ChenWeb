@@ -4775,7 +4775,7 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 * JetStream: cd shared/go/cmd/nets-server; sh start.sh 
 * Start Docker: cd ChenWeb; mise run docker-start
 * Start Clickhouse: cd ChenWeb; mise obs-up
-* Start doc parser service: cd ChenWeb/server/cmd/doc-parser; sh start.sh
+* Start doc service: cd ChenWeb/server/cmd/doc-service; sh start.sh
 * PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh; source .venv/bin/activate
 * Start cc-switch: cd ThirdParty/cc-switch; 
 * Start Caddy: ch ChenWeb; sh start_caddy.sh
