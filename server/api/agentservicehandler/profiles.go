@@ -27,7 +27,13 @@ type ProfileLimits struct {
 	MaxElapsed       time.Duration `json:"max_elapsed"`
 	MaxOutputTokens  int           `json:"max_output_tokens"`
 	MaxEvidenceBytes int           `json:"max_evidence_bytes"`
+	// MaxHistoryTokens caps the estimated tokens of earlier turns sent per run.
+	MaxHistoryTokens int `json:"max_history_tokens"`
 }
+
+// defaultMaxHistoryTokens keeps history affordable on models whose context
+// window is very large.
+const defaultMaxHistoryTokens = 32000
 
 type PiProfile struct {
 	Slug                       string        `json:"slug"`
@@ -54,6 +60,8 @@ type ProfileRegistry struct {
 	versions         map[string]map[string]PiProfile
 	active           map[string]string
 	knowledgeContext *template.Template
+	// historySummaryPrompt is the system prompt for folding earlier turns.
+	historySummaryPrompt string
 }
 
 type profileDefinition struct {
@@ -99,7 +107,12 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 	if err != nil {
 		return nil, err
 	}
+	historySummaryPrompt, err := loadHistorySummaryPrompt(promptDir)
+	if err != nil {
+		return nil, err
+	}
 	registry := &ProfileRegistry{
+		historySummaryPrompt: historySummaryPrompt,
 		versions:         make(map[string]map[string]PiProfile, len(definitions)),
 		active:           make(map[string]string, len(definitions)),
 		knowledgeContext: knowledgeContext,
@@ -153,6 +166,10 @@ func loadProfile(promptDir string, definition profileDefinition) (PiProfile, err
 	if err != nil {
 		return PiProfile{}, err
 	}
+	maxHistoryTokens, err := envPositiveInt(definition.envPrefix+"_MAX_HISTORY_TOKENS", defaultMaxHistoryTokens)
+	if err != nil {
+		return PiProfile{}, err
+	}
 
 	provider := envDefault(definition.envPrefix+"_PROVIDER", definition.provider)
 	model := envDefault(definition.envPrefix+"_MODEL", definition.model)
@@ -169,7 +186,7 @@ func loadProfile(promptDir string, definition profileDefinition) (PiProfile, err
 		AllowedTools: append([]string(nil), knowledgeToolNames...), AllowedKnowledgeStores: stores,
 		AllowedDocumentGroups: envCSV(definition.envPrefix+"_ALLOWED_DOCUMENT_GROUPS", nil),
 		PermissionDefault:     permission,
-		Limits:                ProfileLimits{MaxToolCalls: maxToolCalls, MaxElapsed: time.Duration(maxElapsedSeconds) * time.Second, MaxOutputTokens: maxOutputTokens, MaxEvidenceBytes: maxEvidenceBytes},
+		Limits:                ProfileLimits{MaxToolCalls: maxToolCalls, MaxElapsed: time.Duration(maxElapsedSeconds) * time.Second, MaxOutputTokens: maxOutputTokens, MaxEvidenceBytes: maxEvidenceBytes, MaxHistoryTokens: maxHistoryTokens},
 		Enabled:               enabled, PilotUsers: envCSV(definition.envPrefix+"_PILOT_USERS", nil),
 		SaveAndResumeConversations: true,
 	}, nil

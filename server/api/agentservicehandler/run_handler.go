@@ -26,12 +26,18 @@ type RunStore interface {
 	FinalizeAssistantMessage(context.Context, string, string, bool, []SourceInput) (Message, error)
 	SetAttemptOutcome(context.Context, string, string, AttemptOutcome) (ResponseAttempt, error)
 	GetRunAttempt(context.Context, string, string, string) (ResponseAttempt, error)
+	LoadHistorySummary(context.Context, string, string) (HistorySummary, error)
+	SaveHistorySummary(context.Context, string, string, int, HistorySummary) (bool, error)
+	ClearHistorySummary(context.Context, string, string, int) error
+	SetConversationTitleIfEmpty(context.Context, string, string, string) error
 }
 
 type GatewayBridge interface {
 	Start(context.Context, GatewayRunRequest) (io.ReadCloser, error)
 	Cancel(context.Context, string) error
 	Decide(context.Context, string, string, bool) error
+	ModelContextWindow(context.Context, string, string) (int, error)
+	Summarize(context.Context, GatewaySummaryRequest) (string, error)
 }
 
 type RunSourceChecker interface {
@@ -48,6 +54,10 @@ type RunHandler struct {
 	// no default.
 	defaultStoreName func() string
 }
+
+// runInBackground runs post-turn work (history folding) after the response
+// has finished; tests replace it to run synchronously.
+var runInBackground = func(f func()) { go f() }
 
 func NewRunHandler(store RunStore, profiles *ProfileRegistry, sources RunSourceChecker, gateway GatewayBridge, signer *CapabilitySigner) *RunHandler {
 	return &RunHandler{store: store, profiles: profiles, sources: sources, gateway: gateway, signer: signer}
@@ -116,12 +126,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not check saved sources"})
 	}
-	visible := FilterResumeState(ctx, state, dependencies, func(ctx context.Context, source SourceRecord) error {
-		if h.sources == nil {
-			return ErrKnowledgeAccessDenied
-		}
-		return h.sources.CheckSourceWithGroups(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, source)
-	})
+	visible := FilterResumeState(ctx, state, dependencies, h.sourceCheck(userID, profile))
 	stores, err := h.store.ListGrantedStores(ctx, userID, profile.AllowedKnowledgeStores)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not check knowledge access"})
@@ -192,6 +197,11 @@ func (h *RunHandler) Start(c echo.Context) error {
 		logger.Error("create agent user message failed", "run_id", attempt.ID, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not save user message"})
 	}
+	if state.Conversation.Title == "" {
+		if err := h.store.SetConversationTitleIfEmpty(ctx, userID, state.Conversation.ID, titleFromMessage(body.Message)); err != nil {
+			logger.Warn("set agent conversation title failed", "run_id", attempt.ID, "error", err)
+		}
+	}
 	assistant, err := h.store.CreateMessage(ctx, userID, CreateMessageInput{ConversationID: state.Conversation.ID, AttemptID: &attemptID, SequenceNo: nextSequence + 1, Role: "assistant", Status: "streaming"})
 	if err != nil {
 		logger.Error("create agent answer failed", "run_id", attempt.ID, "error", err)
@@ -205,23 +215,36 @@ func (h *RunHandler) Start(c echo.Context) error {
 		logger.Error("mint agent capability failed", "run_id", attempt.ID, "error", err)
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "run authorization unavailable"})
 	}
-	history := make([]GatewayHistoryMessage, 0, min(100, len(visible.Messages)))
-	for _, message := range visible.Messages {
-		if message.Status != "complete" || (message.Role != "user" && message.Role != "assistant") {
-			continue
-		}
-		if len(message.Content) > 16000 {
-			continue
-		}
-		history = append(history, GatewayHistoryMessage{Role: message.Role, Content: message.Content})
+	summary, err := h.store.LoadHistorySummary(ctx, userID, state.Conversation.ID)
+	if err != nil {
+		logger.Warn("load agent history summary failed", "run_id", attempt.ID, "error", err)
+		summary = HistorySummary{}
 	}
-	if len(history) > 100 {
-		history = history[len(history)-100:]
+	if summaryCoversHidden(state.Messages, visible.HiddenMessageIDs, summary.ThroughSeq) {
+		// The summary may repeat an answer the user can no longer see.
+		logger.Info("agent history summary covers a hidden answer; not used", "run_id", attempt.ID)
+		if err := h.store.ClearHistorySummary(ctx, userID, state.Conversation.ID, summary.ThroughSeq); err != nil {
+			logger.Warn("clear agent history summary failed", "run_id", attempt.ID, "error", err)
+		}
+		summary = HistorySummary{}
 	}
+	budget := h.historyBudget(ctx, profile, logger)
+	turns := completeTurns(visible.Messages, visible.SourcesByMessage, summary.ThroughSeq)
+	selected := selectHistory(turns, budget, estimateTokens(summary.Text))
 	gatewayProfile := MapGatewayProfile(profile, permission)
 	gatewayProfile.AllowedTools = allowedTools
 	request := GatewayRunRequest{RunID: attempt.ID, ConversationID: state.Conversation.ID, UserID: userID,
-		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: gatewayProfile, History: history, Knowledge: &knowledge}
+		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: gatewayProfile, History: historyMessages(selected), Knowledge: &knowledge, HistorySummary: summary.Text}
+	for len(selected) > 0 {
+		if raw, err := json.Marshal(request); err == nil && len(raw) <= maxRunRequestBytes {
+			break
+		}
+		selected = selected[1:]
+		request.History = historyMessages(selected)
+	}
+	if len(selected) < len(turns) {
+		logger.Info("agent history trimmed", "run_id", attempt.ID, "turns", len(turns), "sent", len(selected), "budget", budget)
+	}
 	stream, err := h.gateway.Start(ctx, request)
 	if err != nil {
 		logger.Error("Pi gateway start failed", "run_id", attempt.ID, "error", err)
@@ -332,7 +355,79 @@ func (h *RunHandler) Start(c echo.Context) error {
 	}
 	verifiedSources = result.Sources
 	outcome.Status, outcome.ErrorCode, outcome.ErrorMessage = "completed", "", ""
+	conversationID := state.Conversation.ID
+	runInBackground(func() { h.foldHistory(userID, conversationID, profile, budget) })
 	return nil
+}
+
+// maxRunRequestBytes leaves headroom under the gateway's 512 KiB body limit.
+const maxRunRequestBytes = 480 * 1024
+
+func (h *RunHandler) sourceCheck(userID string, profile PiProfile) func(context.Context, SourceRecord) error {
+	return func(ctx context.Context, source SourceRecord) error {
+		if h.sources == nil {
+			return ErrKnowledgeAccessDenied
+		}
+		return h.sources.CheckSourceWithGroups(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, source)
+	}
+}
+
+func (h *RunHandler) historyBudget(ctx context.Context, profile PiProfile, logger interface{ Warn(string, ...any) }) int {
+	contextWindow, err := h.gateway.ModelContextWindow(ctx, profile.Provider, profile.Model)
+	if err != nil {
+		logger.Warn("model context window unavailable; using fallback history budget", "provider", profile.Provider, "model", profile.Model, "error", err)
+		contextWindow = 0
+	}
+	return historyBudget(contextWindow, profile.Limits.MaxHistoryTokens)
+}
+
+// foldHistory folds the oldest unsummarized turns into the conversation's
+// rolling summary once they no longer fit the history budget. It runs after
+// the turn has finished; a failure only means the next turn trims instead.
+func (h *RunHandler) foldHistory(userID, conversationID string, profile PiProfile, budget int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	logger := loggerutil.CreateDefaultLogger("20261004-582")
+	state, err := h.store.LoadResumeState(ctx, userID, conversationID)
+	if err != nil {
+		logger.Warn("history fold: load conversation failed", "conversation_id", conversationID, "error", err)
+		return
+	}
+	dependencies, err := h.store.LoadSourceDependencies(ctx, userID, conversationID)
+	if err != nil {
+		logger.Warn("history fold: load sources failed", "conversation_id", conversationID, "error", err)
+		return
+	}
+	visible := FilterResumeState(ctx, state, dependencies, h.sourceCheck(userID, profile))
+	summary, err := h.store.LoadHistorySummary(ctx, userID, conversationID)
+	if err != nil {
+		logger.Warn("history fold: load summary failed", "conversation_id", conversationID, "error", err)
+		return
+	}
+	if summaryCoversHidden(state.Messages, visible.HiddenMessageIDs, summary.ThroughSeq) {
+		if err := h.store.ClearHistorySummary(ctx, userID, conversationID, summary.ThroughSeq); err != nil {
+			logger.Warn("history fold: clear summary failed", "conversation_id", conversationID, "error", err)
+			return
+		}
+		summary = HistorySummary{}
+	}
+	fold := planFold(completeTurns(visible.Messages, visible.SourcesByMessage, summary.ThroughSeq), budget)
+	if len(fold) == 0 {
+		return
+	}
+	text, err := h.gateway.Summarize(ctx, GatewaySummaryRequest{UserID: userID, Provider: profile.Provider, Model: profile.Model,
+		SystemPrompt: h.profiles.HistorySummaryPrompt(), PreviousSummary: summary.Text, Messages: historyMessages(fold), MaxTokens: min(1024, budget/4)})
+	if err != nil {
+		logger.Warn("history fold: summarize failed", "conversation_id", conversationID, "turns", len(fold), "error", err)
+		return
+	}
+	next := HistorySummary{Text: shortenForHistory(text, maxHistoryContentUnits), ThroughSeq: fold[len(fold)-1].AssistantSeq}
+	stored, err := h.store.SaveHistorySummary(ctx, userID, conversationID, summary.ThroughSeq, next)
+	if err != nil {
+		logger.Warn("history fold: save summary failed", "conversation_id", conversationID, "error", err)
+		return
+	}
+	logger.Info("history fold finished", "conversation_id", conversationID, "turns", len(fold), "through_seq", next.ThroughSeq, "stored", stored)
 }
 
 func mapRunOutcome(status string) (string, string) {

@@ -6349,7 +6349,6 @@
 	"deep_wiki_mo_ago": "{months}mo ago",
 	"deep_wiki_y_ago": "{value}y ago",
 	"home3_agent_services_something_went_wrong_try_again": "Something went wrong. Try again.",
-	"home3_agent_services_new_conversation": "New conversation",
 	"home3_agent_services_delete_this_conversation_and_its": "Delete this conversation and its saved answers?",
 	"home3_agent_services_please_shorten_your_question": "Please shorten your question.",
 	"home3_agent_services_the_connection_ended_before_the": "The connection ended before the answer was finished.",

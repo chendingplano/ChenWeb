@@ -539,3 +539,50 @@ func (s *Store) DeleteConversation(ctx context.Context, ownerUserID, conversatio
 	}
 	return nil
 }
+
+// HistorySummary is a conversation's rolling summary of earlier turns. It
+// covers every complete turn whose user message has SequenceNo <= ThroughSeq.
+type HistorySummary struct {
+	Text       string
+	ThroughSeq int
+}
+
+func (s *Store) LoadHistorySummary(ctx context.Context, ownerUserID, conversationID string) (HistorySummary, error) {
+	const query = `SELECT history_summary, history_summary_through_seq
+FROM kb.agentic_conversations
+WHERE id = $1 AND owner_user_id = $2`
+	var out HistorySummary
+	err := s.db.QueryRowContext(ctx, query, conversationID, ownerUserID).Scan(&out.Text, &out.ThroughSeq)
+	return out, err
+}
+
+// SaveHistorySummary stores a new summary only if the stored one still covers
+// through previousThroughSeq, so a stale concurrent fold is discarded. It
+// reports whether the summary was stored.
+func (s *Store) SaveHistorySummary(ctx context.Context, ownerUserID, conversationID string, previousThroughSeq int, summary HistorySummary) (bool, error) {
+	const query = `UPDATE kb.agentic_conversations
+SET history_summary = $1, history_summary_through_seq = $2, history_summary_updated_at = NOW()
+WHERE id = $3 AND owner_user_id = $4 AND history_summary_through_seq = $5`
+	result, err := s.db.ExecContext(ctx, query, summary.Text, summary.ThroughSeq, conversationID, ownerUserID, previousThroughSeq)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected == 1, err
+}
+
+// ClearHistorySummary drops a summary that may contain hidden answers, unless
+// another fold has already replaced it.
+func (s *Store) ClearHistorySummary(ctx context.Context, ownerUserID, conversationID string, previousThroughSeq int) error {
+	_, err := s.SaveHistorySummary(ctx, ownerUserID, conversationID, previousThroughSeq, HistorySummary{})
+	return err
+}
+
+// SetConversationTitleIfEmpty never overwrites an existing title.
+func (s *Store) SetConversationTitleIfEmpty(ctx context.Context, ownerUserID, conversationID, title string) error {
+	const query = `UPDATE kb.agentic_conversations
+SET title = $1
+WHERE id = $2 AND owner_user_id = $3 AND title = ''`
+	_, err := s.db.ExecContext(ctx, query, title, conversationID, ownerUserID)
+	return err
+}

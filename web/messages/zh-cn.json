@@ -6349,7 +6349,6 @@
 	"deep_wiki_mo_ago": "{months} 个月前",
 	"deep_wiki_y_ago": "{value} 年前",
 	"home3_agent_services_something_went_wrong_try_again": "出错了，请重试。",
-	"home3_agent_services_new_conversation": "新对话",
 	"home3_agent_services_delete_this_conversation_and_its": "删除此对话及其保存的回答？",
 	"home3_agent_services_please_shorten_your_question": "请缩短你的问题。",
 	"home3_agent_services_the_connection_ended_before_the": "回答完成前连接已断开。",

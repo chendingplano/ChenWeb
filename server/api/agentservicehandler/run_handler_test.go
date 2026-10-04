@@ -128,12 +128,43 @@ type fakeRunStore struct {
 	finalizeErr   error
 	attemptStatus string
 	noStores      bool
+	summary       HistorySummary
+	savedSummary  *HistorySummary
+	cleared       bool
+	title         string
+	titleSets     int
+	sourceDeps    map[string][]SourceRecord
+}
+
+func (f *fakeRunStore) LoadHistorySummary(context.Context, string, string) (HistorySummary, error) {
+	return f.summary, nil
+}
+func (f *fakeRunStore) SaveHistorySummary(_ context.Context, _, _ string, previous int, summary HistorySummary) (bool, error) {
+	if previous != f.summary.ThroughSeq {
+		return false, nil
+	}
+	f.summary, f.savedSummary = summary, &summary
+	return true, nil
+}
+func (f *fakeRunStore) ClearHistorySummary(context.Context, string, string, int) error {
+	f.cleared, f.summary = true, HistorySummary{}
+	return nil
+}
+func (f *fakeRunStore) SetConversationTitleIfEmpty(_ context.Context, _, _ string, title string) error {
+	f.titleSets++
+	if f.title == "" {
+		f.title = title
+	}
+	return nil
 }
 
 func (f *fakeRunStore) LoadResumeState(context.Context, string, string) (ResumeState, error) {
 	return f.state, nil
 }
 func (f *fakeRunStore) LoadSourceDependencies(context.Context, string, string) (map[string][]SourceRecord, error) {
+	if f.sourceDeps != nil {
+		return f.sourceDeps, nil
+	}
 	return map[string][]SourceRecord{}, nil
 }
 func (f *fakeRunStore) ListGrantedStores(context.Context, string, []string) ([]GrantedKnowledgeStore, error) {
@@ -186,6 +217,21 @@ type fakeGatewayBridge struct {
 	startErr     error
 	cancelled    bool
 	decision     bool
+	window       int
+	windowErr    error
+	summarized   []GatewaySummaryRequest
+	summaryText  string
+}
+
+func (g *fakeGatewayBridge) ModelContextWindow(context.Context, string, string) (int, error) {
+	return g.window, g.windowErr
+}
+func (g *fakeGatewayBridge) Summarize(_ context.Context, in GatewaySummaryRequest) (string, error) {
+	g.summarized = append(g.summarized, in)
+	if g.summaryText == "" {
+		return "", errors.New("summary unavailable")
+	}
+	return g.summaryText, nil
 }
 type allowRunSources struct{}
 
@@ -212,7 +258,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	withAgentUser(t, "user-1")
 	profile := testAgentProfileRegistry()
 	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", OwnerUserID: "user-1", ServiceSlug: "knowledge-guide", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"},
-		Messages: []Message{{ID: "old-user", Role: "user", Content: "Old question", Status: "complete"}, {ID: "old-answer", Role: "assistant", Content: "Old answer", Status: "complete"}}}}
+		Messages: []Message{{ID: "old-user", AttemptID: strPtr("old-run"), SequenceNo: 1, Role: "user", Content: "Old question", Status: "complete"}, {ID: "old-answer", AttemptID: strPtr("old-run"), SequenceNo: 2, Role: "assistant", Content: "Old answer", Status: "complete"}}}}
 	gateway := &fakeGatewayBridge{stream: strings.Join([]string{
 		`{"type":"answer_delta","text":"Flow is low."}`,
 		`{"type":"sources","toolCallId":"call-1","toolName":"search_knowledge","sources":[{"knowledge_store_id":"7","document_id":"42","source_title":"Guide","source_version":"v1","source_fingerprint":"abc","line_start":10,"line_end":11}]}`,

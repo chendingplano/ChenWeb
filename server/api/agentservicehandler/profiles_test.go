@@ -78,6 +78,7 @@ func TestLoadProfileRegistryAppliesEnvironmentOverridesPerProfile(t *testing.T) 
 	t.Setenv("PI_KNOWLEDGE_GUIDE_MAX_TOOL_CALLS", "7")
 	t.Setenv("PI_KNOWLEDGE_GUIDE_MAX_ELAPSED_SECONDS", "45")
 	t.Setenv("PI_KNOWLEDGE_GUIDE_MAX_OUTPUT_TOKENS", "900")
+	t.Setenv("PI_KNOWLEDGE_GUIDE_MAX_HISTORY_TOKENS", "4000")
 	t.Setenv("PI_KNOWLEDGE_GUIDE_PILOT_USERS", "user-1,user-2")
 
 	registry, err := LoadProfileRegistry(repositoryPromptDir(t))
@@ -105,6 +106,12 @@ func TestLoadProfileRegistryAppliesEnvironmentOverridesPerProfile(t *testing.T) 
 	}
 	if knowledge.Limits.MaxToolCalls != 7 || knowledge.Limits.MaxElapsed != 45*time.Second || knowledge.Limits.MaxOutputTokens != 900 {
 		t.Fatalf("limit overrides not applied: %+v", knowledge.Limits)
+	}
+	if knowledge.Limits.MaxHistoryTokens != 4000 || diagnostics.Limits.MaxHistoryTokens != defaultMaxHistoryTokens {
+		t.Fatalf("history token limits: knowledge=%d diagnostics=%d", knowledge.Limits.MaxHistoryTokens, diagnostics.Limits.MaxHistoryTokens)
+	}
+	if registry.HistorySummaryPrompt() == "" {
+		t.Fatal("history summary prompt not loaded")
 	}
 	if diagnostics.Provider == "openai" || diagnostics.Model == "gpt-test" {
 		t.Fatal("knowledge-guide overrides leaked into problem-diagnostics")

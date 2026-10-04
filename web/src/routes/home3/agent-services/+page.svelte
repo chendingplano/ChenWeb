@@ -73,7 +73,7 @@
 		if (!selectedSlug || running || busy) return;
 		busy = true; error = '';
 		try {
-			const created = await createAgentConversation(selectedSlug, m.home3_agent_services_new_conversation());
+			const created = await createAgentConversation(selectedSlug, '');
 			conversations = await listAgentConversations();
 			resume = await getAgentConversation(created.id); activeId = created.id; live = null;
 			history.replaceState(null, '', `${window.location.pathname}?conversation=${encodeURIComponent(created.id)}`);
