@@ -296,15 +296,16 @@ func RegisterRoutes(e *echo.Echo) error {
 	}
 	toolService := agentservicehandler.NewKnowledgeToolService(
 		agentservicehandler.NewSQLKnowledgeToolBackend(ApiTypes.ProjectDBHandle), toolAccess)
+	agentStore := agentservicehandler.NewStore(ApiTypes.ProjectDBHandle)
+	agentSources := &agentservicehandler.CurrentSourceAccessChecker{DB: ApiTypes.ProjectDBHandle}
 	agentservicehandler.RegisterInternalToolRoutes(e,
-		agentservicehandler.NewInternalToolHandler(os.Getenv("PI_GATEWAY_SECRET"), capabilitySigner, toolService))
+		agentservicehandler.NewInternalToolHandler(os.Getenv("PI_GATEWAY_SECRET"), capabilitySigner, toolService).
+			WithToolResults(agentStore, profileRegistry, agentSources))
 
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
 	agentServiceGroup := apiGroup.Group("/agent-services")
-	agentStore := agentservicehandler.NewStore(ApiTypes.ProjectDBHandle)
-	agentSources := &agentservicehandler.CurrentSourceAccessChecker{DB: ApiTypes.ProjectDBHandle}
 	agentservicehandler.RegisterConversationRoutes(agentServiceGroup,
 		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources))
 	piGatewayURL := os.Getenv("PI_GATEWAY_URL")

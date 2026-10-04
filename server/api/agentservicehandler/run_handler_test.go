@@ -130,7 +130,7 @@ type fakeRunStore struct {
 	noStores      bool
 	summary       HistorySummary
 	savedSummary  *HistorySummary
-	cleared       bool
+	toolResults   map[string][]ToolResultRecord
 	title         string
 	titleSets     int
 	sourceDeps    map[string][]SourceRecord
@@ -146,9 +146,8 @@ func (f *fakeRunStore) SaveHistorySummary(_ context.Context, _, _ string, previo
 	f.summary, f.savedSummary = summary, &summary
 	return true, nil
 }
-func (f *fakeRunStore) ClearHistorySummary(context.Context, string, string, int) error {
-	f.cleared, f.summary = true, HistorySummary{}
-	return nil
+func (f *fakeRunStore) LoadToolResults(context.Context, string, string) (map[string][]ToolResultRecord, error) {
+	return f.toolResults, nil
 }
 func (f *fakeRunStore) SetConversationTitleIfEmpty(_ context.Context, _, _ string, title string) error {
 	f.titleSets++
@@ -233,9 +232,13 @@ func (g *fakeGatewayBridge) Summarize(_ context.Context, in GatewaySummaryReques
 	}
 	return g.summaryText, nil
 }
+
 type allowRunSources struct{}
 
 func (allowRunSources) CheckSourceWithGroups(context.Context, string, []string, []string, SourceRecord) error {
+	return nil
+}
+func (allowRunSources) CheckDocumentAccess(context.Context, string, []string, []string, string) error {
 	return nil
 }
 func (g *fakeGatewayBridge) Start(_ context.Context, run GatewayRunRequest) (io.ReadCloser, error) {
@@ -288,7 +291,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	if knowledge == nil || knowledge.DefaultStoreID != "7" || len(knowledge.Stores) != 1 || !strings.Contains(knowledge.PromptContext, "`7`: Research (default)") {
 		t.Fatalf("knowledge context %+v", knowledge)
 	}
-	if len(gateway.request.Profile.AllowedTools) != 1 || gateway.request.Profile.AllowedTools[0] != "search_knowledge" {
+	if strings.Join(gateway.request.Profile.AllowedTools, ",") != "search_knowledge,"+savedToolResultTool {
 		t.Fatalf("gateway tools %v", gateway.request.Profile.AllowedTools)
 	}
 }

@@ -6053,6 +6053,8 @@
 	"home3_agent_services_new": "+ New",
 	"home3_agent_services_no_conversations_yet_start_with": "No conversations yet. Start with a question.",
 	"home3_agent_services_untitled_conversation": "Untitled conversation",
+	"home3_agent_services_snapshot_notice": "This conversation is a snapshot of the knowledge base as it was at each turn. The knowledge base may have changed since then. Turns older than {hours} hours are rechecked for your current access.",
+	"home3_agent_services_access_removed_notice": "Part of this conversation is unavailable because your access changed: {sources} source reference(s) and {results} saved tool result(s) were removed.",
 	"home3_agent_services_delete_conversation": "Delete conversation",
 	"home3_agent_services_delete": "Delete {title}",
 	"home3_agent_services_a_new_conversation": "A new conversation",

@@ -2,7 +2,6 @@ package agentservicehandler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -159,62 +158,87 @@ func TestCurrentSourceAccessRejectsReprocessedDocumentWithSameMD5(t *testing.T) 
 	}
 }
 
-func TestFilterResumeStateHidesDependentAnswerAfterRevocation(t *testing.T) {
-	state := ResumeState{Messages: []Message{{ID: "u1", Role: "user", Content: "question", Status: "complete"}, {ID: "a1", Role: "assistant", Content: "protected answer", Status: "complete"}}}
+func TestFilterResumeStateKeepsRecentHistoryAsSaved(t *testing.T) {
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	saved := now.Add(-time.Hour)
+	state := ResumeState{Messages: []Message{{ID: "u1", Role: "user", Content: "question", Status: "complete", CreatedAt: saved}, {ID: "a1", Role: "assistant", Content: "answer", Status: "complete", CreatedAt: saved}}}
 	sources := map[string][]SourceRecord{"a1": {{DocumentID: "42", Fingerprint: "f"}}}
-	filtered := FilterResumeState(context.Background(), state, sources, func(context.Context, SourceRecord) error { return sql.ErrNoRows })
-	if len(filtered.Messages) != 1 || filtered.Messages[0].ID != "u1" || len(filtered.HiddenMessageIDs) != 1 || filtered.HiddenMessageIDs[0] != "a1" {
-		t.Fatalf("filtered %+v", filtered)
-	}
-	if strings.Contains(filtered.OmissionNotice, "protected answer") {
-		t.Fatalf("notice leaked answer: %s", filtered.OmissionNotice)
+	results := map[string][]ToolResultRecord{"attempt-1": {{ToolCallID: "t1", DocumentIDs: []string{"42"}, CreatedAt: saved}}}
+	filtered := FilterResumeState(context.Background(), state, sources, results, now, 48*time.Hour, func(context.Context, string) error { return ErrKnowledgeAccessDenied })
+	if len(filtered.Messages) != 2 || len(filtered.SourcesByMessage["a1"]) != 1 || len(filtered.ToolResults["attempt-1"]) != 1 ||
+		filtered.RemovedSources != 0 || filtered.RemovedToolResults != 0 || filtered.SnapshotHours != 48 {
+		t.Fatalf("recent history changed: %+v", filtered)
 	}
 }
 
-func TestFilterResumeStateReturnsOnlyAccessibleSourceCards(t *testing.T) {
-	state := ResumeState{Messages: []Message{{ID: "a1", Role: "assistant", Content: "answer", Status: "complete"}, {ID: "a2", Role: "assistant", Content: "hidden", Status: "complete"}}}
-	sources := map[string][]SourceRecord{"a1": {{DocumentID: "42", Fingerprint: "current", DocumentTitle: "Guide", LineStart: 3, LineEnd: 5}}, "a2": {{DocumentID: "43", Fingerprint: "revoked", DocumentTitle: "Private"}}}
-	visible := FilterResumeState(context.Background(), state, sources, func(_ context.Context, source SourceRecord) error {
-		if source.Fingerprint == "revoked" {
+func TestFilterResumeStateRemovesOnlyInaccessibleOldRecords(t *testing.T) {
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	old := now.Add(-72 * time.Hour)
+	state := ResumeState{Messages: []Message{{ID: "a1", Role: "assistant", Content: "answer citing a revoked document", Status: "complete", CreatedAt: old}}}
+	sources := map[string][]SourceRecord{"a1": {{DocumentID: "42", DocumentTitle: "Guide"}, {DocumentID: "43", DocumentTitle: "Private"}}}
+	results := map[string][]ToolResultRecord{"attempt-1": {
+		{ToolCallID: "t1", DocumentIDs: []string{"42"}, CreatedAt: old},
+		{ToolCallID: "t2", DocumentIDs: []string{"42", "43"}, CreatedAt: old},
+		{ToolCallID: "t3", CreatedAt: old},
+	}}
+	checks := 0
+	visible := FilterResumeState(context.Background(), state, sources, results, now, 48*time.Hour, func(_ context.Context, documentID string) error {
+		checks++
+		if documentID == "43" {
 			return ErrKnowledgeAccessDenied
 		}
 		return nil
 	})
-	if len(visible.SourcesByMessage["a1"]) != 1 || visible.SourcesByMessage["a1"][0].DocumentTitle != "Guide" || len(visible.SourcesByMessage["a2"]) != 0 {
-		t.Fatalf("unsafe source cards %+v", visible)
+	if len(visible.Messages) != 1 || visible.Messages[0].Content != "answer citing a revoked document" {
+		t.Fatalf("answer was removed: %+v", visible.Messages)
+	}
+	if len(visible.SourcesByMessage["a1"]) != 1 || visible.SourcesByMessage["a1"][0].DocumentTitle != "Guide" || visible.RemovedSources != 1 {
+		t.Fatalf("sources %+v removed=%d", visible.SourcesByMessage, visible.RemovedSources)
+	}
+	kept := visible.ToolResults["attempt-1"]
+	if len(kept) != 2 || kept[0].ToolCallID != "t1" || kept[1].ToolCallID != "t3" || visible.RemovedToolResults != 1 {
+		t.Fatalf("tool results %+v removed=%d", kept, visible.RemovedToolResults)
+	}
+	if checks != 2 {
+		t.Fatalf("access checked %d times, want one per document", checks)
 	}
 }
 
-func TestGetConversationHidesSavedAnswerWhenGrantIsRevoked(t *testing.T) {
+func TestGetConversationRemovesOldInaccessibleSourceButKeepsAnswer(t *testing.T) {
 	withAgentUser(t, "user-1")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	now := time.Date(2026, 9, 15, 1, 0, 0, 0, time.UTC)
+	saved := time.Now().Add(-72 * time.Hour)
 	mock.ExpectQuery(`SELECT id, owner_user_id, service_slug`).
 		WithArgs("conversation-1", "user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_user_id", "service_slug", "profile_slug", "profile_version", "model_name", "title", "status", "created_at", "updated_at"}).
-			AddRow("conversation-1", "user-1", "knowledge-guide", "knowledge-guide", "v1", "model-1", "Question", "active", now, now))
+			AddRow("conversation-1", "user-1", "knowledge-guide", "knowledge-guide", "v1", "model-1", "Question", "active", saved, saved))
 	mock.ExpectQuery(`(?s)FROM kb.agentic_messages m.*owner_user_id`).
 		WithArgs("conversation-1", "user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "conversation_id", "attempt_id", "sequence_no", "role", "content", "status", "created_at", "updated_at"}).
-			AddRow("user-message", "conversation-1", nil, 1, "user", "What happened?", "complete", now, now).
-			AddRow("answer-message", "conversation-1", "attempt-1", 2, "assistant", "Private answer", "complete", now, now))
+			AddRow("user-message", "conversation-1", "attempt-1", 1, "user", "What happened?", "complete", saved, saved).
+			AddRow("answer-message", "conversation-1", "attempt-1", 2, "assistant", "Saved answer", "complete", saved, saved))
 	mock.ExpectQuery(`(?s)FROM kb.agentic_sources src.*owner_user_id`).
 		WithArgs("conversation-1", "user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"message_id", "document_id", "fingerprint", "version", "title", "artifact_type", "artifact_id", "line_start", "line_end", "page_start", "page_end"}).
 			AddRow("answer-message", "42", "old-fingerprint", "v1", "Private guide", "", "", 1, 2, 0, 0))
+	mock.ExpectQuery(`(?s)FROM kb.agentic_tool_results r.*owner_user_id`).
+		WithArgs("conversation-1", "user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"attempt_id", "gateway_tool_call_id", "tool_name", "arguments", "result", "is_error", "document_ids", "created_at"}))
 	mock.ExpectQuery(`(?s)FROM kb.agentic_knowledge_grants g.*JOIN kb.inputs i`).
-		WithArgs("user-1", sqlmock.AnyArg(), "42", "old-fingerprint", sqlmock.AnyArg(), "v1").
+		WithArgs("user-1", sqlmock.AnyArg(), "42", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	e := echo.New()
 	checker := &CurrentSourceAccessChecker{DB: db}
 	RegisterConversationRoutes(e.Group("/api/v1/agent-services"), NewConversationHandler(NewStore(db), testAgentProfileRegistry(), checker))
 	rec := callAgentHandler(t, e, http.MethodGet, "/api/v1/agent-services/conversations/conversation-1", "")
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "Private answer") || !strings.Contains(rec.Body.String(), "hidden_message_ids") {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Saved answer") || strings.Contains(body, "Private guide") ||
+		!strings.Contains(body, `"removed_sources":1`) || !strings.Contains(body, `"snapshot_hours":48`) {
+		t.Fatalf("status=%d body=%s", rec.Code, body)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

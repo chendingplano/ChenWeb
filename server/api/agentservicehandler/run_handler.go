@@ -28,7 +28,7 @@ type RunStore interface {
 	GetRunAttempt(context.Context, string, string, string) (ResponseAttempt, error)
 	LoadHistorySummary(context.Context, string, string) (HistorySummary, error)
 	SaveHistorySummary(context.Context, string, string, int, HistorySummary) (bool, error)
-	ClearHistorySummary(context.Context, string, string, int) error
+	LoadToolResults(context.Context, string, string) (map[string][]ToolResultRecord, error)
 	SetConversationTitleIfEmpty(context.Context, string, string, string) error
 }
 
@@ -42,6 +42,7 @@ type GatewayBridge interface {
 
 type RunSourceChecker interface {
 	CheckSourceWithGroups(context.Context, string, []string, []string, SourceRecord) error
+	CheckDocumentAccess(context.Context, string, []string, []string, string) error
 }
 
 type RunHandler struct {
@@ -126,7 +127,11 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not check saved sources"})
 	}
-	visible := FilterResumeState(ctx, state, dependencies, h.sourceCheck(userID, profile))
+	toolResults, err := h.store.LoadToolResults(ctx, userID, state.Conversation.ID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load saved tool calls"})
+	}
+	visible := FilterResumeState(ctx, state, dependencies, toolResults, time.Now(), h.profiles.SnapshotWindow(), h.documentAccess(userID, profile))
 	stores, err := h.store.ListGrantedStores(ctx, userID, profile.AllowedKnowledgeStores)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not check knowledge access"})
@@ -144,6 +149,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	allowedTools := []string{}
 	if len(stores) > 0 {
 		allowedTools = append(allowedTools, profile.AllowedTools...)
+		allowedTools = append(allowedTools, savedToolResultTool)
 	}
 	defaultStoreID := ""
 	if h.defaultStoreName != nil {
@@ -220,16 +226,8 @@ func (h *RunHandler) Start(c echo.Context) error {
 		logger.Warn("load agent history summary failed", "run_id", attempt.ID, "error", err)
 		summary = HistorySummary{}
 	}
-	if summaryCoversHidden(state.Messages, visible.HiddenMessageIDs, summary.ThroughSeq) {
-		// The summary may repeat an answer the user can no longer see.
-		logger.Info("agent history summary covers a hidden answer; not used", "run_id", attempt.ID)
-		if err := h.store.ClearHistorySummary(ctx, userID, state.Conversation.ID, summary.ThroughSeq); err != nil {
-			logger.Warn("clear agent history summary failed", "run_id", attempt.ID, "error", err)
-		}
-		summary = HistorySummary{}
-	}
 	budget := h.historyBudget(ctx, profile, logger)
-	turns := completeTurns(visible.Messages, visible.SourcesByMessage, summary.ThroughSeq)
+	turns := completeTurns(visible.Messages, visible.SourcesByMessage, visible.ToolResults, summary.ThroughSeq, profile.Limits.MaxHistoryToolResultBytes)
 	selected := selectHistory(turns, budget, estimateTokens(summary.Text))
 	gatewayProfile := MapGatewayProfile(profile, permission)
 	gatewayProfile.AllowedTools = allowedTools
@@ -363,12 +361,14 @@ func (h *RunHandler) Start(c echo.Context) error {
 // maxRunRequestBytes leaves headroom under the gateway's 512 KiB body limit.
 const maxRunRequestBytes = 480 * 1024
 
-func (h *RunHandler) sourceCheck(userID string, profile PiProfile) func(context.Context, SourceRecord) error {
-	return func(ctx context.Context, source SourceRecord) error {
+// documentAccess is the snapshot rule's access-only check for history older
+// than the snapshot period.
+func (h *RunHandler) documentAccess(userID string, profile PiProfile) func(context.Context, string) error {
+	return func(ctx context.Context, documentID string) error {
 		if h.sources == nil {
 			return ErrKnowledgeAccessDenied
 		}
-		return h.sources.CheckSourceWithGroups(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, source)
+		return h.sources.CheckDocumentAccess(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, documentID)
 	}
 }
 
@@ -398,20 +398,20 @@ func (h *RunHandler) foldHistory(userID, conversationID string, profile PiProfil
 		logger.Warn("history fold: load sources failed", "conversation_id", conversationID, "error", err)
 		return
 	}
-	visible := FilterResumeState(ctx, state, dependencies, h.sourceCheck(userID, profile))
+	toolResults, err := h.store.LoadToolResults(ctx, userID, conversationID)
+	if err != nil {
+		logger.Warn("history fold: load tool calls failed", "conversation_id", conversationID, "error", err)
+		return
+	}
+	visible := FilterResumeState(ctx, state, dependencies, toolResults, time.Now(), h.profiles.SnapshotWindow(), h.documentAccess(userID, profile))
 	summary, err := h.store.LoadHistorySummary(ctx, userID, conversationID)
 	if err != nil {
 		logger.Warn("history fold: load summary failed", "conversation_id", conversationID, "error", err)
 		return
 	}
-	if summaryCoversHidden(state.Messages, visible.HiddenMessageIDs, summary.ThroughSeq) {
-		if err := h.store.ClearHistorySummary(ctx, userID, conversationID, summary.ThroughSeq); err != nil {
-			logger.Warn("history fold: clear summary failed", "conversation_id", conversationID, "error", err)
-			return
-		}
-		summary = HistorySummary{}
-	}
-	fold := planFold(completeTurns(visible.Messages, visible.SourcesByMessage, summary.ThroughSeq), budget)
+	// The fold sees tool calls only through their token cost: the summary
+	// request carries each turn's question and answer text.
+	fold := planFold(completeTurns(visible.Messages, visible.SourcesByMessage, visible.ToolResults, summary.ThroughSeq, profile.Limits.MaxHistoryToolResultBytes), budget)
 	if len(fold) == 0 {
 		return
 	}

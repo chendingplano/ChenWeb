@@ -29,11 +29,22 @@ type ProfileLimits struct {
 	MaxEvidenceBytes int           `json:"max_evidence_bytes"`
 	// MaxHistoryTokens caps the estimated tokens of earlier turns sent per run.
 	MaxHistoryTokens int `json:"max_history_tokens"`
+	// MaxHistoryToolResultBytes is the largest tool result carried unshortened
+	// in later turns' history.
+	MaxHistoryToolResultBytes int `json:"max_history_tool_result_bytes"`
 }
 
 // defaultMaxHistoryTokens keeps history affordable on models whose context
 // window is very large.
 const defaultMaxHistoryTokens = 32000
+
+const (
+	defaultMaxHistoryToolResultBytes = 4096
+	maxHistoryToolResultBytesCeiling = 32768
+	// defaultSnapshotHours is how long saved history is shown as saved,
+	// regardless of later access or content changes.
+	defaultSnapshotHours = 48
+)
 
 type PiProfile struct {
 	Slug                       string        `json:"slug"`
@@ -62,6 +73,9 @@ type ProfileRegistry struct {
 	knowledgeContext *template.Template
 	// historySummaryPrompt is the system prompt for folding earlier turns.
 	historySummaryPrompt string
+	// snapshotWindow is PI_HISTORY_SNAPSHOT_DUR: history younger than this is
+	// shown and resent as saved.
+	snapshotWindow time.Duration
 }
 
 type profileDefinition struct {
@@ -84,6 +98,13 @@ var knowledgeToolNames = []string{
 	"get_document_context",
 	"find_related_knowledge",
 }
+
+// savedToolResultTool returns the full stored result of an earlier tool call
+// in the same conversation. It reads the conversation, not a knowledge store.
+const savedToolResultTool = "get_saved_tool_result"
+
+// agentToolNames is every tool a run may offer Pi.
+var agentToolNames = append(append([]string(nil), knowledgeToolNames...), savedToolResultTool)
 
 func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 	definitions := []profileDefinition{
@@ -111,11 +132,16 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 	if err != nil {
 		return nil, err
 	}
+	snapshotHours, err := envPositiveInt("PI_HISTORY_SNAPSHOT_DUR", defaultSnapshotHours)
+	if err != nil {
+		return nil, err
+	}
 	registry := &ProfileRegistry{
 		historySummaryPrompt: historySummaryPrompt,
-		versions:         make(map[string]map[string]PiProfile, len(definitions)),
-		active:           make(map[string]string, len(definitions)),
-		knowledgeContext: knowledgeContext,
+		snapshotWindow:       time.Duration(snapshotHours) * time.Hour,
+		versions:             make(map[string]map[string]PiProfile, len(definitions)),
+		active:               make(map[string]string, len(definitions)),
+		knowledgeContext:     knowledgeContext,
 	}
 	for _, definition := range definitions {
 		profile, err := loadProfile(promptDir, definition)
@@ -170,6 +196,13 @@ func loadProfile(promptDir string, definition profileDefinition) (PiProfile, err
 	if err != nil {
 		return PiProfile{}, err
 	}
+	maxHistoryToolResultBytes, err := envPositiveInt(definition.envPrefix+"_MAX_HISTORY_TOOL_RESULT_BYTES", defaultMaxHistoryToolResultBytes)
+	if err != nil {
+		return PiProfile{}, err
+	}
+	if maxHistoryToolResultBytes > maxHistoryToolResultBytesCeiling {
+		return PiProfile{}, fmt.Errorf("%s_MAX_HISTORY_TOOL_RESULT_BYTES must be %d or less", definition.envPrefix, maxHistoryToolResultBytesCeiling)
+	}
 
 	provider := envDefault(definition.envPrefix+"_PROVIDER", definition.provider)
 	model := envDefault(definition.envPrefix+"_MODEL", definition.model)
@@ -186,7 +219,7 @@ func loadProfile(promptDir string, definition profileDefinition) (PiProfile, err
 		AllowedTools: append([]string(nil), knowledgeToolNames...), AllowedKnowledgeStores: stores,
 		AllowedDocumentGroups: envCSV(definition.envPrefix+"_ALLOWED_DOCUMENT_GROUPS", nil),
 		PermissionDefault:     permission,
-		Limits:                ProfileLimits{MaxToolCalls: maxToolCalls, MaxElapsed: time.Duration(maxElapsedSeconds) * time.Second, MaxOutputTokens: maxOutputTokens, MaxEvidenceBytes: maxEvidenceBytes, MaxHistoryTokens: maxHistoryTokens},
+		Limits:                ProfileLimits{MaxToolCalls: maxToolCalls, MaxElapsed: time.Duration(maxElapsedSeconds) * time.Second, MaxOutputTokens: maxOutputTokens, MaxEvidenceBytes: maxEvidenceBytes, MaxHistoryTokens: maxHistoryTokens, MaxHistoryToolResultBytes: maxHistoryToolResultBytes},
 		Enabled:               enabled, PilotUsers: envCSV(definition.envPrefix+"_PILOT_USERS", nil),
 		SaveAndResumeConversations: true,
 	}, nil

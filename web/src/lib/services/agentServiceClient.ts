@@ -25,8 +25,9 @@ export type AgentResumeState = {
 	conversation: AgentConversation;
 	messages: AgentMessage[];
 	sources_by_message?: Record<string, Array<AgentSource & { document_title?: string; page_start?: number; page_end?: number }>>;
-	hidden_message_ids?: string[];
-	omission_notice?: string;
+	removed_sources: number;
+	removed_tool_results: number;
+	snapshot_hours: number;
 };
 
 async function jsonRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

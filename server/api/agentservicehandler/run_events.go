@@ -104,7 +104,7 @@ func (c *RunEventCollector) Accept(line []byte) (AgentPublicEvent, error) {
 		if event.Status == "retrying" && event.Attempt >= 0 && event.Attempt <= 5 && event.Tool == "" && event.ToolCallID == "" {
 			return event, nil
 		}
-		if !stringIn(knowledgeToolNames, event.Tool) || event.ToolCallID == "" || (event.Status != "started" && event.Status != "completed") {
+		if !stringIn(agentToolNames, event.Tool) || event.ToolCallID == "" || (event.Status != "started" && event.Status != "completed") {
 			return AgentPublicEvent{}, errors.New("unsafe tool activity")
 		}
 		if event.Status == "completed" {
@@ -129,7 +129,7 @@ func (c *RunEventCollector) Accept(line []byte) (AgentPublicEvent, error) {
 		c.result.InputTokens += event.InputTokens
 		c.result.OutputTokens += event.OutputTokens
 	case "permission_request":
-		if event.RequestID == "" || !stringIn(knowledgeToolNames, event.Tool) {
+		if event.RequestID == "" || !stringIn(agentToolNames, event.Tool) {
 			return AgentPublicEvent{}, errors.New("unsafe permission request")
 		}
 	case "error":

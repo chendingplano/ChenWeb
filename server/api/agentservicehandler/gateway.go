@@ -2,6 +2,7 @@ package agentservicehandler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -34,6 +35,17 @@ func MapGatewayProfile(profile PiProfile, permission string) GatewayRunProfile {
 type GatewayHistoryMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	// ToolCalls are an assistant turn's earlier tool calls, replayed by the
+	// gateway as tool-call and tool-result messages before the answer.
+	ToolCalls []GatewayHistoryToolCall `json:"toolCalls,omitempty"`
+}
+
+type GatewayHistoryToolCall struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+	Result    string          `json:"result"`
+	IsError   bool            `json:"isError"`
 }
 type GatewayRunRequest struct {
 	RunID          string                   `json:"runId"`

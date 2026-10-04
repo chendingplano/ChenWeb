@@ -571,13 +571,6 @@ WHERE id = $3 AND owner_user_id = $4 AND history_summary_through_seq = $5`
 	return affected == 1, err
 }
 
-// ClearHistorySummary drops a summary that may contain hidden answers, unless
-// another fold has already replaced it.
-func (s *Store) ClearHistorySummary(ctx context.Context, ownerUserID, conversationID string, previousThroughSeq int) error {
-	_, err := s.SaveHistorySummary(ctx, ownerUserID, conversationID, previousThroughSeq, HistorySummary{})
-	return err
-}
-
 // SetConversationTitleIfEmpty never overwrites an existing title.
 func (s *Store) SetConversationTitleIfEmpty(ctx context.Context, ownerUserID, conversationID, title string) error {
 	const query = `UPDATE kb.agentic_conversations
@@ -585,4 +578,94 @@ SET title = $1
 WHERE id = $2 AND owner_user_id = $3 AND title = ''`
 	_, err := s.db.ExecContext(ctx, query, title, conversationID, ownerUserID)
 	return err
+}
+
+// ToolResultRecord is one tool call as ChenWeb answered it: the arguments and
+// the exact response body returned to Pi.
+type ToolResultRecord struct {
+	AttemptID   string
+	ToolCallID  string
+	ToolName    string
+	Arguments   json.RawMessage
+	Result      string
+	IsError     bool
+	DocumentIDs []string
+	CreatedAt   time.Time
+}
+
+// SaveToolResult stores a tool call for an attempt owned by ownerUserID. A
+// repeated tool-call ID is ignored.
+func (s *Store) SaveToolResult(ctx context.Context, ownerUserID string, in ToolResultRecord) error {
+	const query = `INSERT INTO kb.agentic_tool_results (attempt_id, gateway_tool_call_id, tool_name, arguments, result, is_error, document_ids)
+SELECT a.id, $3, $4, $5, $6, $7, $8
+FROM kb.agentic_response_attempts a
+JOIN kb.agentic_conversations c ON c.id = a.conversation_id
+WHERE a.id = $1 AND c.owner_user_id = $2
+ON CONFLICT (attempt_id, gateway_tool_call_id) DO NOTHING`
+	arguments := in.Arguments
+	if len(arguments) == 0 {
+		arguments = json.RawMessage(`{}`)
+	}
+	documentIDs := in.DocumentIDs
+	if documentIDs == nil {
+		documentIDs = []string{}
+	}
+	_, err := s.db.ExecContext(ctx, query, in.AttemptID, ownerUserID, in.ToolCallID, in.ToolName, []byte(arguments), in.Result, in.IsError, pq.Array(documentIDs))
+	return err
+}
+
+const toolResultColumns = `r.attempt_id, r.gateway_tool_call_id, r.tool_name, r.arguments, r.result, r.is_error, r.document_ids, r.created_at`
+
+func scanToolResult(row interface{ Scan(...any) error }) (ToolResultRecord, error) {
+	var out ToolResultRecord
+	var arguments []byte
+	err := row.Scan(&out.AttemptID, &out.ToolCallID, &out.ToolName, &arguments, &out.Result, &out.IsError, pq.Array(&out.DocumentIDs), &out.CreatedAt)
+	out.Arguments = json.RawMessage(arguments)
+	return out, err
+}
+
+// LoadToolResults returns a conversation's stored tool calls by attempt, in
+// the order they were made.
+func (s *Store) LoadToolResults(ctx context.Context, ownerUserID, conversationID string) (map[string][]ToolResultRecord, error) {
+	const query = `SELECT ` + toolResultColumns + `
+FROM kb.agentic_tool_results r
+JOIN kb.agentic_response_attempts a ON a.id = r.attempt_id
+JOIN kb.agentic_conversations c ON c.id = a.conversation_id
+WHERE c.id = $1 AND c.owner_user_id = $2
+ORDER BY r.id ASC`
+	rows, err := s.db.QueryContext(ctx, query, conversationID, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]ToolResultRecord)
+	for rows.Next() {
+		item, scanErr := scanToolResult(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out[item.AttemptID] = append(out[item.AttemptID], item)
+	}
+	return out, rows.Err()
+}
+
+// LoadSavedToolResult finds a stored tool call in the same conversation as
+// attemptID, which must be owned by ownerUserID. It also returns the
+// conversation's ID.
+func (s *Store) LoadSavedToolResult(ctx context.Context, ownerUserID, attemptID, toolCallID string) (ToolResultRecord, string, error) {
+	const query = `SELECT ` + toolResultColumns + `, c.id
+FROM kb.agentic_response_attempts cur
+JOIN kb.agentic_conversations c ON c.id = cur.conversation_id
+JOIN kb.agentic_response_attempts a ON a.conversation_id = c.id
+JOIN kb.agentic_tool_results r ON r.attempt_id = a.id
+WHERE cur.id = $1 AND c.owner_user_id = $2 AND r.gateway_tool_call_id = $3
+ORDER BY r.id ASC
+LIMIT 1`
+	var conversationID string
+	var out ToolResultRecord
+	var arguments []byte
+	err := s.db.QueryRowContext(ctx, query, attemptID, ownerUserID, toolCallID).Scan(&out.AttemptID, &out.ToolCallID, &out.ToolName, &arguments,
+		&out.Result, &out.IsError, pq.Array(&out.DocumentIDs), &out.CreatedAt, &conversationID)
+	out.Arguments = json.RawMessage(arguments)
+	return out, conversationID, err
 }

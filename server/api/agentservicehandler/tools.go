@@ -14,9 +14,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
 )
@@ -29,6 +31,9 @@ const (
 	MaxToolResponseBytes = 128 * 1024
 	HeaderRunID          = "X-ChenWeb-Run-ID"
 	HeaderRunCapability  = "X-ChenWeb-Run-Capability"
+	// HeaderToolCallID names the gateway's tool call, under which ChenWeb
+	// stores the call's arguments and result.
+	HeaderToolCallID = "X-ChenWeb-Tool-Call-ID"
 )
 
 var (
@@ -47,10 +52,33 @@ type InternalToolHandler struct {
 	gatewaySecret string
 	signer        *CapabilitySigner
 	service       *KnowledgeToolService
+	// results, profiles and documents are optional: without them tool calls
+	// are not stored and get_saved_tool_result is unavailable.
+	results   ToolResultStore
+	profiles  *ProfileRegistry
+	documents DocumentAccessChecker
+	now       func() time.Time
+}
+
+// ToolResultStore keeps each tool call's arguments and full result.
+type ToolResultStore interface {
+	SaveToolResult(context.Context, string, ToolResultRecord) error
+	LoadSavedToolResult(context.Context, string, string, string) (ToolResultRecord, string, error)
+}
+
+// DocumentAccessChecker checks only current access to a document.
+type DocumentAccessChecker interface {
+	CheckDocumentAccess(context.Context, string, []string, []string, string) error
 }
 
 func NewInternalToolHandler(gatewaySecret string, signer *CapabilitySigner, service *KnowledgeToolService) *InternalToolHandler {
-	return &InternalToolHandler{gatewaySecret: gatewaySecret, signer: signer, service: service}
+	return &InternalToolHandler{gatewaySecret: gatewaySecret, signer: signer, service: service, now: time.Now}
+}
+
+// WithToolResults stores tool calls and enables get_saved_tool_result.
+func (h *InternalToolHandler) WithToolResults(results ToolResultStore, profiles *ProfileRegistry, documents DocumentAccessChecker) *InternalToolHandler {
+	h.results, h.profiles, h.documents = results, profiles, documents
+	return h
 }
 
 func RegisterInternalToolRoutes(e *echo.Echo, handler *InternalToolHandler) {
@@ -59,44 +87,129 @@ func RegisterInternalToolRoutes(e *echo.Echo, handler *InternalToolHandler) {
 		tool := tool
 		group.POST("/"+tool, func(c echo.Context) error { return handler.execute(c, tool) })
 	}
+	group.POST("/"+savedToolResultTool, handler.executeSavedResult)
+}
+
+// authorize checks the gateway secret and the run capability for tool.
+func (h *InternalToolHandler) authorize(c echo.Context, tool string) (RunCapabilityClaims, int, string) {
+	authorization := c.Request().Header.Get(echo.HeaderAuthorization)
+	if !strings.HasPrefix(authorization, "Bearer ") || strings.Count(authorization, " ") != 1 ||
+		!constantTimeStringEqual(strings.TrimPrefix(authorization, "Bearer "), h.gatewaySecret) {
+		return RunCapabilityClaims{}, http.StatusUnauthorized, "unauthorized"
+	}
+	claims, err := h.signer.Verify(c.Request().Header.Get(HeaderRunCapability), c.Request().Header.Get(HeaderRunID), tool)
+	if err != nil {
+		return RunCapabilityClaims{}, http.StatusUnauthorized, "invalid run authorization"
+	}
+	return claims, 0, ""
+}
+
+// respond returns body to Pi and stores the call under the gateway's
+// tool-call ID. A storage failure is logged; Pi still gets its result.
+func (h *InternalToolHandler) respond(c echo.Context, claims RunCapabilityClaims, tool string, arguments any, status int, body []byte, documentIDs []string) error {
+	toolCallID := strings.TrimSpace(c.Request().Header.Get(HeaderToolCallID))
+	if h.results != nil && toolCallID != "" && len(toolCallID) <= 128 {
+		encodedArguments, _ := json.Marshal(arguments)
+		record := ToolResultRecord{AttemptID: claims.RunID, ToolCallID: toolCallID, ToolName: tool, Arguments: encodedArguments,
+			Result: string(body), IsError: status != http.StatusOK, DocumentIDs: documentIDs}
+		if err := h.results.SaveToolResult(c.Request().Context(), claims.UserID, record); err != nil {
+			loggerutil.CreateDefaultLogger("20261004-731").Warn("store agent tool result failed", "run_id", claims.RunID, "tool", tool, "error", err)
+		}
+	}
+	return c.JSONBlob(status, body)
+}
+
+func errorBody(message string) []byte {
+	body, _ := json.Marshal(map[string]string{"error": message})
+	return body
 }
 
 func (h *InternalToolHandler) execute(c echo.Context, tool string) error {
 	if h == nil || h.signer == nil || h.service == nil || h.gatewaySecret == "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "internal knowledge tools unavailable"})
 	}
-	authorization := c.Request().Header.Get(echo.HeaderAuthorization)
-	if !strings.HasPrefix(authorization, "Bearer ") || strings.Count(authorization, " ") != 1 ||
-		!constantTimeStringEqual(strings.TrimPrefix(authorization, "Bearer "), h.gatewaySecret) {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-	}
-	claims, err := h.signer.Verify(c.Request().Header.Get(HeaderRunCapability), c.Request().Header.Get(HeaderRunID), tool)
-	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid run authorization"})
+	claims, status, message := h.authorize(c, tool)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
 	}
 	var input ToolInput
 	decoder := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 16*1024))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid tool request"})
+		return h.respond(c, claims, tool, struct{}{}, http.StatusBadRequest, errorBody("invalid tool request"), nil)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid tool request"})
+		return h.respond(c, claims, tool, input, http.StatusBadRequest, errorBody("invalid tool request"), nil)
 	}
+	documentIDs := appendDocumentID(nil, input.DocumentID)
 	out, err := h.service.Execute(c.Request().Context(), claims, tool, input)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidToolInput):
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return h.respond(c, claims, tool, input, http.StatusBadRequest, errorBody(err.Error()), documentIDs)
 		case errors.Is(err, ErrKnowledgeAccessDenied):
-			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+			return h.respond(c, claims, tool, input, http.StatusForbidden, errorBody(err.Error()), documentIDs)
 		case errors.Is(err, ErrToolResponseTooLarge):
-			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error()})
+			return h.respond(c, claims, tool, input, http.StatusRequestEntityTooLarge, errorBody(err.Error()), documentIDs)
 		default:
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "knowledge tool failed"})
+			return h.respond(c, claims, tool, input, http.StatusInternalServerError, errorBody("knowledge tool failed"), documentIDs)
 		}
 	}
-	return c.JSON(http.StatusOK, out)
+	body, err := json.Marshal(out)
+	if err != nil {
+		return h.respond(c, claims, tool, input, http.StatusInternalServerError, errorBody("knowledge tool failed"), documentIDs)
+	}
+	for _, item := range out.Items {
+		documentIDs = appendDocumentID(documentIDs, item.DocumentID)
+	}
+	return h.respond(c, claims, tool, input, http.StatusOK, body, documentIDs)
+}
+
+// executeSavedResult returns the stored result of an earlier tool call in the
+// same conversation, under the snapshot rule: a result older than the
+// snapshot period is withheld if it references a document the user can no
+// longer access.
+func (h *InternalToolHandler) executeSavedResult(c echo.Context) error {
+	if h == nil || h.signer == nil || h.gatewaySecret == "" || h.results == nil || h.profiles == nil || h.documents == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "saved tool results unavailable"})
+	}
+	claims, status, message := h.authorize(c, savedToolResultTool)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
+	}
+	var input struct {
+		ToolCallID string `json:"tool_call_id"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.ToolCallID) == "" || len(input.ToolCallID) > 128 {
+		return h.respond(c, claims, savedToolResultTool, input, http.StatusBadRequest, errorBody("tool_call_id is required"), nil)
+	}
+	ctx := c.Request().Context()
+	notFound := errorBody("saved tool result not found")
+	record, _, err := h.results.LoadSavedToolResult(ctx, claims.UserID, claims.RunID, input.ToolCallID)
+	if err != nil {
+		return h.respond(c, claims, savedToolResultTool, input, http.StatusNotFound, notFound, nil)
+	}
+	if h.now().Sub(record.CreatedAt) > h.profiles.SnapshotWindow() {
+		profile, err := h.profiles.ResolveVersion(claims.ProfileSlug, claims.ProfileVersion, claims.UserID)
+		if err != nil {
+			return h.respond(c, claims, savedToolResultTool, input, http.StatusNotFound, notFound, nil)
+		}
+		for _, documentID := range record.DocumentIDs {
+			if h.documents.CheckDocumentAccess(ctx, claims.UserID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, documentID) != nil {
+				return h.respond(c, claims, savedToolResultTool, input, http.StatusNotFound, notFound, nil)
+			}
+		}
+	}
+	return h.respond(c, claims, savedToolResultTool, input, http.StatusOK, []byte(record.Result), record.DocumentIDs)
+}
+
+func appendDocumentID(ids []string, id string) []string {
+	if id == "" || stringIn(ids, id) {
+		return ids
+	}
+	return append(ids, id)
 }
 
 func constantTimeStringEqual(a, b string) bool {

@@ -2,6 +2,7 @@ package agentservicehandler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -79,21 +80,21 @@ func TestCompleteTurnsDropsUnansweredQuestions(t *testing.T) {
 	messages = append(messages, turnMessages("a4", 6, "Q4", "A4", "complete")...)
 	sources := map[string][]SourceRecord{"a4-a": {{DocumentID: "9", DocumentTitle: "Pump manual", PageStart: 2}}}
 
-	turns := completeTurns(messages, sources, 0)
+	turns := completeTurns(messages, sources, nil, 0, 0)
 	if len(turns) != 2 || turns[0].User != "Q1" || turns[1].User != "Q4" {
 		t.Fatalf("turns = %+v", turns)
 	}
 	if !strings.HasPrefix(turns[1].Assistant, "A4\n\n[Sources cited in this answer]\n- Pump manual (p. 2)") {
 		t.Fatalf("answer with footer = %q", turns[1].Assistant)
 	}
-	if after := completeTurns(messages, sources, 2); len(after) != 1 || after[0].User != "Q4" {
+	if after := completeTurns(messages, sources, nil, 2, 0); len(after) != 1 || after[0].User != "Q4" {
 		t.Fatalf("turns after summary = %+v", after)
 	}
 }
 
 func TestCompleteTurnsShortensLongAnswerWithFooter(t *testing.T) {
 	messages := turnMessages("a1", 1, "Q", strings.Repeat("x", 20000), "complete")
-	turns := completeTurns(messages, map[string][]SourceRecord{"a1-a": {{DocumentID: "1", DocumentTitle: "Doc"}}}, 0)
+	turns := completeTurns(messages, map[string][]SourceRecord{"a1-a": {{DocumentID: "1", DocumentTitle: "Doc"}}}, nil, 0, 0)
 	if len(turns) != 1 || utf16Len(turns[0].Assistant) > maxHistoryContentUnits || !strings.Contains(turns[0].Assistant, truncatedMark+"\n\n[Sources cited") {
 		t.Fatalf("long answer = %d units", utf16Len(turns[0].Assistant))
 	}
@@ -138,13 +139,35 @@ func TestPlanFoldFoldsOldestUntilHalfBudget(t *testing.T) {
 	}
 }
 
-func TestSummaryCoversHidden(t *testing.T) {
+func TestCompleteTurnsAttachToolCallsAndShortenLongResults(t *testing.T) {
 	messages := turnMessages("a1", 1, "Q1", "A1", "complete")
-	if !summaryCoversHidden(messages, []string{"a1-a"}, 2) {
-		t.Fatal("hidden answer inside summary not detected")
+	long := `{"items":[{"content":"` + strings.Repeat("x", 300) + `"}]}`
+	results := map[string][]ToolResultRecord{"a1": {
+		{ToolCallID: "t1", ToolName: "search_knowledge", Arguments: json.RawMessage(`{"query":"pump"}`), Result: `{"items":[]}`},
+		{ToolCallID: "t2", ToolName: "read_source_passages", Arguments: json.RawMessage(`{"document_id":"4"}`), Result: long},
+		{ToolCallID: "t3", ToolName: "get_artifact_details", Result: `{"error":"knowledge access denied"}`, IsError: true},
+	}}
+	turns := completeTurns(messages, nil, results, 0, 100)
+	if len(turns) != 1 || len(turns[0].ToolCalls) != 3 {
+		t.Fatalf("turns = %+v", turns)
 	}
-	if summaryCoversHidden(messages, []string{"a1-a"}, 0) || summaryCoversHidden(messages, nil, 2) {
-		t.Fatal("false positive")
+	calls := turns[0].ToolCalls
+	if calls[0].Result != `{"untrusted_evidence":true,"evidence":{"items":[]}}` || string(calls[0].Arguments) != `{"query":"pump"}` {
+		t.Fatalf("short result = %+v", calls[0])
+	}
+	var truncated map[string]any
+	if err := json.Unmarshal([]byte(calls[1].Result), &truncated); err != nil {
+		t.Fatalf("truncated result is not JSON: %v", err)
+	}
+	if truncated["truncated"] != true || truncated["tool_call_id"] != "t2" || truncated["retrieve_with"] != savedToolResultTool ||
+		int(truncated["full_bytes"].(float64)) != len(long) || len(truncated["evidence_prefix"].(string)) != 100 {
+		t.Fatalf("truncated = %+v", truncated)
+	}
+	if !calls[2].IsError || string(calls[2].Arguments) != `{}` {
+		t.Fatalf("error call = %+v", calls[2])
+	}
+	if withoutCalls := completeTurns(messages, nil, nil, 0, 100); turns[0].Tokens <= withoutCalls[0].Tokens {
+		t.Fatal("tool calls not counted toward the budget")
 	}
 }
 
@@ -221,42 +244,54 @@ func TestRunSendsStoredSummaryWithLaterTurnsOnly(t *testing.T) {
 	if gateway.request.HistorySummary != "Earlier: pumps." || len(gateway.request.History) != 2 || gateway.request.History[0].Content != "Q2" {
 		t.Fatalf("summary=%q history=%+v", gateway.request.HistorySummary, gateway.request.History)
 	}
-	if store.cleared || len(gateway.summarized) != 0 {
-		t.Fatalf("cleared=%v summarized=%d", store.cleared, len(gateway.summarized))
+	if len(gateway.summarized) != 0 {
+		t.Fatalf("summarized=%d", len(gateway.summarized))
 	}
 }
 
-type hideAnswerSources struct{}
+type revokedDocumentSources struct{}
 
-func (hideAnswerSources) CheckSourceWithGroups(_ context.Context, _ string, _ []string, _ []string, source SourceRecord) error {
-	if source.DocumentID == "revoked" {
+func (revokedDocumentSources) CheckSourceWithGroups(context.Context, string, []string, []string, SourceRecord) error {
+	return nil
+}
+func (revokedDocumentSources) CheckDocumentAccess(_ context.Context, _ string, _ []string, _ []string, documentID string) error {
+	if documentID == "revoked" {
 		return ErrKnowledgeAccessDenied
 	}
 	return nil
 }
 
-func TestRunDropsSummaryCoveringHiddenAnswer(t *testing.T) {
+func TestRunKeepsSummaryAndAnswersAfterOldRevocation(t *testing.T) {
 	withAgentUser(t, "user-1")
-	store := &fakeRunStore{created: true, summary: HistorySummary{Text: "Mentions the revoked answer.", ThroughSeq: 2}, state: historyConversation("t",
+	store := &fakeRunStore{created: true, summary: HistorySummary{Text: "Mentions the revoked document.", ThroughSeq: 2}, state: historyConversation("t",
 		turnMessages("a1", 1, "Q1", "A1", "complete"),
 		turnMessages("a2", 3, "Q2", "A2", "complete"))}
-	store.sourceDeps = map[string][]SourceRecord{"a1-a": {{MessageID: "a1-a", DocumentID: "revoked"}}}
+	// Zero CreatedAt makes every record older than the snapshot period.
+	store.sourceDeps = map[string][]SourceRecord{"a2-a": {{MessageID: "a2-a", DocumentID: "revoked", DocumentTitle: "Revoked doc"}, {MessageID: "a2-a", DocumentID: "ok", DocumentTitle: "Open doc"}}}
+	store.toolResults = map[string][]ToolResultRecord{"a2": {
+		{AttemptID: "a2", ToolCallID: "t1", ToolName: "search_knowledge", Result: `{"items":[]}`, DocumentIDs: []string{"revoked"}},
+		{AttemptID: "a2", ToolCallID: "t2", ToolName: "search_knowledge", Result: `{"items":[]}`, DocumentIDs: []string{"ok"}},
+	}}
 	gateway := &fakeGatewayBridge{window: 200000, stream: `{"type":"answer_delta","text":"Answer."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
-	registry := testAgentProfileRegistry()
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, registry, hideAnswerSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), revokedDocumentSources{}, gateway, signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"New question","idempotency_key":"key-1","permission_mode":"auto"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run status=%d", rec.Code)
 	}
-	if gateway.request.HistorySummary != "" || !store.cleared {
-		t.Fatalf("summary=%q cleared=%v", gateway.request.HistorySummary, store.cleared)
+	history := gateway.request.History
+	if gateway.request.HistorySummary != "Mentions the revoked document." || len(history) != 2 || history[1].Content == "" {
+		t.Fatalf("summary=%q history=%+v", gateway.request.HistorySummary, history)
 	}
-	for _, message := range gateway.request.History {
-		if message.Content == "Q1" || message.Content == "A1" {
-			t.Fatalf("hidden turn sent: %+v", gateway.request.History)
-		}
+	if !strings.HasPrefix(history[1].Content, "A2") || strings.Contains(history[1].Content, "Revoked doc") || !strings.Contains(history[1].Content, "Open doc") {
+		t.Fatalf("answer = %q", history[1].Content)
+	}
+	if len(history[1].ToolCalls) != 1 || history[1].ToolCalls[0].ID != "t2" {
+		t.Fatalf("tool calls = %+v", history[1].ToolCalls)
+	}
+	if !stringIn(gateway.request.Profile.AllowedTools, savedToolResultTool) {
+		t.Fatalf("allowed tools = %v", gateway.request.Profile.AllowedTools)
 	}
 }
 

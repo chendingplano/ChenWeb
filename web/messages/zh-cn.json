@@ -6053,6 +6053,8 @@
 	"home3_agent_services_new": "+ 新建",
 	"home3_agent_services_no_conversations_yet_start_with": "还没有对话。先提一个问题吧。",
 	"home3_agent_services_untitled_conversation": "未命名对话",
+	"home3_agent_services_snapshot_notice": "本对话是每轮对话发生时知识库的快照，知识库此后可能已有变化。超过 {hours} 小时的对话轮次会按你当前的访问权限重新检查。",
+	"home3_agent_services_access_removed_notice": "由于你的访问权限已变更，本对话的部分内容不可用：已移除 {sources} 条来源引用和 {results} 条已保存的工具结果。",
 	"home3_agent_services_delete_conversation": "删除对话",
 	"home3_agent_services_delete": "删除 {title}",
 	"home3_agent_services_a_new_conversation": "新对话",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -136,8 +137,12 @@ func (h *ConversationHandler) GetConversation(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not check saved sources"})
 	}
-	visible := FilterResumeState(c.Request().Context(), state, sources, func(ctx context.Context, source SourceRecord) error {
-		return h.sources.CheckSourceWithGroups(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, source)
+	toolResults, err := h.store.LoadToolResults(c.Request().Context(), userID, state.Conversation.ID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load saved tool calls"})
+	}
+	visible := FilterResumeState(c.Request().Context(), state, sources, toolResults, time.Now(), h.profiles.SnapshotWindow(), func(ctx context.Context, documentID string) error {
+		return h.sources.CheckDocumentAccess(ctx, userID, profile.AllowedKnowledgeStores, profile.AllowedDocumentGroups, documentID)
 	})
 	return c.JSON(http.StatusOK, visible)
 }

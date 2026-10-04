@@ -201,7 +201,8 @@
 			<main class="thread">
 				<div class="thread-head"><div><span class="eyebrow">{selectedProfile?.friendly_name ?? 'GUIDE'}</span><h2>{resume?.conversation.title || m.home3_agent_services_a_new_conversation()}</h2></div><span class="provider">{selectedProfile?.provider_disclosure || selectedProfile?.provider || m.home3_agent_services_ai_provider()}</span></div>
 				<div class="messages" aria-live="polite">
-					{#if resume?.omission_notice}<div class="notice access">{resume.omission_notice}</div>{/if}
+					{#if resume?.messages.length}<div class="notice">{m.home3_agent_services_snapshot_notice({ hours: resume.snapshot_hours })}</div>{/if}
+					{#if resume && (resume.removed_sources > 0 || resume.removed_tool_results > 0)}<div class="notice access">{m.home3_agent_services_access_removed_notice({ sources: resume.removed_sources, results: resume.removed_tool_results })}</div>{/if}
 					{#if !resume?.messages.length && !live}<div class="empty-thread"><span class="large-mark">?</span><h3>{m.home3_agent_services_what_would_you_like_to()}</h3><p>{m.home3_agent_services_ask_about_a_document_product()}</p></div>{/if}
 					{#each resume?.messages ?? [] as message (message.id)}
 						<article class:user={message.role === 'user'} class="message">

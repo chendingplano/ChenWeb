@@ -1,11 +1,13 @@
 package agentservicehandler
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -57,6 +59,7 @@ type historyTurn struct {
 	AssistantSeq int
 	User         string
 	Assistant    string
+	ToolCalls    []GatewayHistoryToolCall
 	Tokens       int
 }
 
@@ -136,11 +139,49 @@ func sourceFooter(sources []SourceRecord) string {
 	return "\n\n[Sources cited in this answer]\n" + strings.Join(lines, "\n")
 }
 
-// completeTurns pairs each visible complete answer with the question of the
-// same attempt. A question without such an answer is left out, so the model
-// never sees two user messages in a row. Only turns after throughSeq (already
-// summarized) are returned, oldest first.
-func completeTurns(messages []Message, sourcesByMessage map[string][]SourceRecord, throughSeq int) []historyTurn {
+// historyToolResult is a stored tool result as carried in later turns'
+// history: wrapped like the live result, or, when longer than limit bytes,
+// replaced by a truncated JSON object that says how to get the full result.
+func historyToolResult(record ToolResultRecord, limit int) string {
+	if len(record.Result) <= limit && json.Valid([]byte(record.Result)) {
+		return `{"untrusted_evidence":true,"evidence":` + record.Result + `}`
+	}
+	prefix := record.Result
+	if len(prefix) > limit {
+		prefix = prefix[:limit]
+		for len(prefix) > 0 && !utf8.ValidString(prefix) {
+			prefix = prefix[:len(prefix)-1]
+		}
+	}
+	encoded, _ := json.Marshal(map[string]any{"untrusted_evidence": true, "truncated": true, "full_bytes": len(record.Result),
+		"retrieve_with": savedToolResultTool, "tool_call_id": record.ToolCallID, "evidence_prefix": prefix})
+	return string(encoded)
+}
+
+func historyToolCalls(records []ToolResultRecord, limit int) []GatewayHistoryToolCall {
+	if len(records) == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = defaultMaxHistoryToolResultBytes
+	}
+	out := make([]GatewayHistoryToolCall, 0, len(records))
+	for _, record := range records {
+		arguments := record.Arguments
+		if len(arguments) == 0 || !json.Valid(arguments) || arguments[0] != '{' {
+			arguments = json.RawMessage(`{}`)
+		}
+		out = append(out, GatewayHistoryToolCall{ID: record.ToolCallID, Name: record.ToolName, Arguments: arguments,
+			Result: historyToolResult(record, limit), IsError: record.IsError})
+	}
+	return out
+}
+
+// completeTurns pairs each complete answer with the question of the same
+// attempt, and attaches that attempt's tool calls. A question without such an
+// answer is left out, so the model never sees two user messages in a row.
+// Only turns after throughSeq (already summarized) are returned, oldest first.
+func completeTurns(messages []Message, sourcesByMessage map[string][]SourceRecord, toolResults map[string][]ToolResultRecord, throughSeq, maxToolResultBytes int) []historyTurn {
 	questions := make(map[string]Message)
 	for _, message := range messages {
 		if message.Role == "user" && message.Status == "complete" && message.AttemptID != nil {
@@ -161,8 +202,12 @@ func completeTurns(messages []Message, sourcesByMessage map[string][]SourceRecor
 			UserSeq: question.SequenceNo, AssistantSeq: answer.SequenceNo,
 			User:      shortenForHistory(question.Content, maxHistoryContentUnits),
 			Assistant: shortenForHistory(answer.Content, maxHistoryContentUnits-utf16Len(footer)) + footer,
+			ToolCalls: historyToolCalls(toolResults[*answer.AttemptID], maxToolResultBytes),
 		}
 		turn.Tokens = estimateTokens(turn.User) + estimateTokens(turn.Assistant)
+		for _, call := range turn.ToolCalls {
+			turn.Tokens += estimateTokens(call.Name) + estimateTokens(string(call.Arguments)) + estimateTokens(call.Result)
+		}
 		turns = append(turns, turn)
 	}
 	sort.Slice(turns, func(i, j int) bool { return turns[i].UserSeq < turns[j].UserSeq })
@@ -201,7 +246,7 @@ func historyMessages(turns []historyTurn) []GatewayHistoryMessage {
 	for _, turn := range turns {
 		out = append(out,
 			GatewayHistoryMessage{Role: "user", Content: turn.User},
-			GatewayHistoryMessage{Role: "assistant", Content: turn.Assistant})
+			GatewayHistoryMessage{Role: "assistant", Content: turn.Assistant, ToolCalls: turn.ToolCalls})
 	}
 	return out
 }
@@ -230,24 +275,6 @@ func planFold(turns []historyTurn, budget int) []historyTurn {
 	return turns[:count]
 }
 
-// summaryCoversHidden reports whether a hidden answer was folded into the
-// summary, in which case the summary must not be used.
-func summaryCoversHidden(messages []Message, hiddenIDs []string, throughSeq int) bool {
-	if throughSeq == 0 || len(hiddenIDs) == 0 {
-		return false
-	}
-	hidden := make(map[string]bool, len(hiddenIDs))
-	for _, id := range hiddenIDs {
-		hidden[id] = true
-	}
-	for _, message := range messages {
-		if hidden[message.ID] && message.SequenceNo <= throughSeq {
-			return true
-		}
-	}
-	return false
-}
-
 // titleFromMessage is the first non-empty line of the first question, with
 // whitespace collapsed, cut at maxTitleRunes.
 func titleFromMessage(message string) string {
@@ -262,4 +289,12 @@ func titleFromMessage(message string) string {
 		return strings.TrimSpace(string([]rune(title)[:maxTitleRunes])) + "…"
 	}
 	return ""
+}
+
+// SnapshotWindow is PI_HISTORY_SNAPSHOT_DUR as a duration.
+func (r *ProfileRegistry) SnapshotWindow() time.Duration {
+	if r == nil || r.snapshotWindow <= 0 {
+		return defaultSnapshotHours * time.Hour
+	}
+	return r.snapshotWindow
 }
