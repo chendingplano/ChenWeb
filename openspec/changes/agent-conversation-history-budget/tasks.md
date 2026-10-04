@@ -40,4 +40,4 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 Update devdoc `2026093001-devdoc-pi-agentic-services.md` (§2.3.2, §2.4 gateway routes, §2.8 new suffix, finding 7, §3) and `docs/pi-agentic-services-operations.md` if it lists env vars; commit in KnowledgeStore
+- [x] 6.1 Update devdoc `2026093001-devdoc-pi-agentic-services.md` (§2.3.2, §2.4 gateway routes, §2.8 new suffix, finding 7, §3) and `docs/pi-agentic-services-operations.md` if it lists env vars; commit in KnowledgeStore
