@@ -1,3 +1,8 @@
+# How to Configure Local Domain Names
+Domain names can be configured in two places:
+- Service provider (such as GoDaddy)
+- in '/etc/hosts'
+
 1. Packages and Directories
 ---------------------------
   - Each sub-directory under server/api defines a package
@@ -5006,3 +5011,13 @@ Or just click a tab / drag pane borders (mouse is back on)
 ```text
 Command + Shift T
 ```
+
+# Not able to resolve domain names in China
+Some service providers use their own DNS resolver, which may not work
+for domain names in China. Do the following (assuming this is on MacMini):
+```text
+sudo networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1
+sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
+dig +short onto.bzton.cn        # should print 210.5.158.91
+```
+
