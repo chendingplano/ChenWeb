@@ -26,6 +26,7 @@
 	import EmbeddingView from '$lib/components/home3/embedding-view.svelte';
 	import LLMModelProfilesView from '$lib/components/home3/llm-model-profiles-view.svelte';
 	import LLMModelsView from '$lib/components/home3/llm-models-view.svelte';
+	import DecisionPlaygroundView from '$lib/components/home3/decision-playground-view.svelte';
 	import ChadSessionsView from '$lib/components/home3/chad-sessions-view.svelte';
 	import MetricReviewView from '$lib/components/home3/metric-review-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
@@ -306,6 +307,8 @@
 			<ChadSessionsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-pi-sessions'}
 			<ChadSessionsView {darkMode} harness="pi" />
+		{:else if activeMenu?.childId === 'sysadmin-llm-decision-models-playground'}
+			<DecisionPlaygroundView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}

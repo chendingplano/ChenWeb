@@ -268,7 +268,14 @@
 						{ id: 'sysadmin-llm-models', label: m.nav_sysadmin_llm_models() },
 						{ id: 'sysadmin-llm-chat-sessions', label: m.nav_sysadmin_llm_chat_sessions() },
 						{ id: 'sysadmin-llm-pi-sessions', label: m.nav_sysadmin_llm_pi_sessions() },
-						{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() }
+						{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
+						{
+							id: 'sysadmin-llm-decision-models',
+							label: m.nav_sysadmin_llm_decision_models(),
+							children: [
+								{ id: 'sysadmin-llm-decision-models-playground', label: m.nav_sysadmin_llm_decision_models_playground() }
+							]
+						}
 					]
 				},
 				{
