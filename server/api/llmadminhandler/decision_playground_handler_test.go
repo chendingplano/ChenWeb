@@ -27,6 +27,11 @@ func TestPlaygroundProviderConfig(t *testing.T) {
 		t.Fatalf("profile name = %q", pc.ProfileName)
 	}
 
+	pc, err = playgroundProviderConfig("deepseek-flash-4-1", ApiTypes.LLMModelDef{ModelType: "llm", BaseURL: "https://api.deepseek.com"})
+	if err != nil || !reflect.DeepEqual(pc.Extra, map[string]string{"thinking": "disabled", "temperature": "1"}) {
+		t.Fatalf("deepseek: got %+v, %v", pc, err)
+	}
+
 	if _, err := playgroundProviderConfig("emb", ApiTypes.LLMModelDef{ModelType: "embedding"}); err == nil {
 		t.Fatal("embedding model must be rejected")
 	}
