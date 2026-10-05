@@ -2,6 +2,9 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
+		ApiError,
+		createPolicy,
+		createPolicyVersion,
 		getPlaygroundOptions,
 		getPolicyCurrentVersion,
 		parseCriteria,
@@ -35,6 +38,15 @@
 	let loading = $state(false);
 	let running = $state(false);
 	let error = $state('');
+	let notice = $state('');
+	let failedRunID = $state(0);
+	// Policy save form: 'policy' creates a policy, 'version' a new version of the selected one.
+	let saveMode = $state<'' | 'policy' | 'version'>('');
+	let saveName = $state('');
+	let saveDescription = $state('');
+	let saveNote = $state('');
+	let saveMakeCurrent = $state(true);
+	let saving = $state(false);
 
 	const typeLabels: Record<QuestionType, () => string> = {
 		noul: m.dmp_type_noul,
@@ -64,6 +76,7 @@
 
 	async function changePolicy() {
 		error = '';
+		saveMode = '';
 		if (!policyID) {
 			policyVersion = 0;
 			loadedPolicy = '';
@@ -77,6 +90,37 @@
 			policy = ver.content;
 		} catch (err) {
 			error = message(err);
+		}
+	}
+
+	function openSave(mode: 'policy' | 'version') {
+		saveMode = mode;
+		saveName = '';
+		saveDescription = '';
+		saveNote = '';
+		saveMakeCurrent = true;
+	}
+
+	async function savePolicy() {
+		saving = true;
+		error = '';
+		notice = '';
+		try {
+			const ver =
+				saveMode === 'version'
+					? await createPolicyVersion(policyID, { content: policy, note: saveNote, make_current: saveMakeCurrent })
+					: await createPolicy({ name: saveName.trim(), description: saveDescription, content: policy, note: saveNote });
+			await load();
+			policyID = ver.policy_id;
+			policyVersion = ver.version;
+			loadedPolicy = ver.content;
+			policy = ver.content;
+			saveMode = '';
+			notice = m.dmp_policy_saved({ name: ver.policy_name, version: ver.version });
+		} catch (err) {
+			error = message(err);
+		} finally {
+			saving = false;
 		}
 	}
 
@@ -102,6 +146,8 @@
 	async function run() {
 		running = true;
 		error = '';
+		notice = '';
+		failedRunID = 0;
 		result = null;
 		const snapshot = $state.snapshot(questions) as PlaygroundQuestion[];
 		try {
@@ -116,6 +162,7 @@
 			ranQuestions = snapshot;
 		} catch (err) {
 			error = message(err);
+			if (err instanceof ApiError) failedRunID = Number(err.body.run_id ?? 0);
 		} finally {
 			running = false;
 		}
@@ -155,7 +202,8 @@
 		<h2>{m.dmp_title()}</h2>
 		<p>{m.dmp_subtitle()}</p>
 	</header>
-	{#if error}<div class="message error">{error}</div>{/if}
+	{#if error}<div class="message error">{error}{#if failedRunID}<br />{m.dmp_failed_run_saved({ id: failedRunID })}{/if}</div>{/if}
+	{#if notice}<div class="message success">{notice}</div>{/if}
 
 	<section class="card">
 		<h3>{m.dmp_run_heading()}</h3>
@@ -192,6 +240,34 @@
 				>{m.dmp_policy_text()}{#if policyEdited}<span class="edited">{m.dmp_policy_edited({ version: policyVersion })}</span>{/if}</span
 			><textarea bind:value={policy} rows="6" placeholder={m.dmp_policy_placeholder()}></textarea></label
 		>
+		<div class="actions policy-actions">
+			<button class="secondary" onclick={() => openSave('version')} disabled={!policyEdited || !policy.trim() || saving}
+				>{m.dmp_save_version()}</button
+			>
+			<button class="secondary" onclick={() => openSave('policy')} disabled={!policy.trim() || saving}
+				>{m.dmp_save_new_policy()}</button
+			>
+		</div>
+		{#if saveMode}
+			<div class="save-form">
+				{#if saveMode === 'policy'}
+					<label>{m.dmp_policy_name()}<input bind:value={saveName} placeholder={m.dmp_policy_name_placeholder()} /></label>
+					<label>{m.dmp_policy_description()}<input bind:value={saveDescription} /></label>
+				{/if}
+				<label>{m.dmp_version_note()}<input bind:value={saveNote} placeholder={m.dmp_version_note_placeholder()} /></label>
+				{#if saveMode === 'version'}
+					<label class="check"
+						><input type="checkbox" bind:checked={saveMakeCurrent} />{m.dmp_make_current()}</label
+					>
+				{/if}
+				<div class="actions">
+					<button onclick={savePolicy} disabled={saving || (saveMode === 'policy' && !saveName.trim())}
+						>{saving ? m.dmp_saving() : m.dmp_save()}</button
+					>
+					<button class="secondary" onclick={() => (saveMode = '')} disabled={saving}>{m.dmp_cancel()}</button>
+				</div>
+			</div>
+		{/if}
 		<label>{m.dmp_text()}<textarea bind:value={text} rows="5" placeholder={m.dmp_text_placeholder()}></textarea></label>
 
 		<div class="question-editor">
@@ -256,6 +332,11 @@
 					input: result.usage?.input_tokens ?? 0,
 					output: result.usage?.output_tokens ?? 0
 				})}
+			</p>
+			<p class="muted">
+				{result.run_id
+					? m.dmp_run_saved({ id: result.run_id })
+					: m.dmp_run_not_saved({ reason: result.save_error ?? '' })}
 			</p>
 			<div class="answers">
 				{#each ranQuestions as q (q.id)}
@@ -376,7 +457,8 @@
 		font-size: 0.8rem;
 	}
 	select,
-	textarea {
+	textarea,
+	input:not([type='checkbox']) {
 		color: inherit;
 		background: color-mix(in srgb, currentColor 5%, transparent);
 		border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
@@ -404,6 +486,26 @@
 	button.secondary {
 		color: inherit;
 		background: color-mix(in srgb, currentColor 13%, transparent);
+	}
+	.policy-actions {
+		margin-top: 0.5rem;
+	}
+	.save-form {
+		display: grid;
+		gap: 0.6rem;
+		margin-top: 0.6rem;
+		padding: 0.8rem;
+		border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+		border-radius: 0.45rem;
+	}
+	.check {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.success {
+		color: #59b98c;
+		background: #29956a22;
 	}
 	.run-actions {
 		margin-top: 1rem;

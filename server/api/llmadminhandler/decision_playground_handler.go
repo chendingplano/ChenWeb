@@ -218,7 +218,161 @@ func GetDecisionPlaygroundPolicy(c echo.Context) error {
 	return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to load policy", "error": err.Error()})
 }
 
+type playgroundPolicySaveRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"`
+	Note        string `json:"note"`
+	MakeCurrent *bool  `json:"make_current"`
+}
+
+// policySaveStatus maps store errors to HTTP statuses for the save endpoints.
+func policySaveStatus(err error) int {
+	switch {
+	case errors.Is(err, decisionpolicy.ErrInvalidInput):
+		return http.StatusBadRequest
+	case errors.Is(err, decisionpolicy.ErrNameTaken):
+		return http.StatusConflict
+	case errors.Is(err, decisionpolicy.ErrNotFound), errors.Is(err, decisionpolicy.ErrDeleted):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// CreateDecisionPlaygroundPolicy handles POST /api/v1/llm/decision-playground/policies
+// and returns the new policy's version 1.
+func CreateDecisionPlaygroundPolicy(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DMP_105")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	userID := strings.TrimSpace(rc.GetUserID())
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
+	}
+	var req playgroundPolicySaveRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid policy request"})
+	}
+	store, err := playgroundPolicyStore(logger)
+	if err != nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": err.Error()})
+	}
+	ctx := c.Request().Context()
+	pol, err := store.Create(ctx, decisionpolicy.CreateInput{
+		Name:        strings.TrimSpace(req.Name),
+		Description: strings.TrimSpace(req.Description),
+		Content:     req.Content,
+		Note:        strings.TrimSpace(req.Note),
+		Actor:       userID,
+	})
+	if err == nil {
+		var ver *decisionpolicy.PolicyVersion
+		if ver, err = store.GetVersion(ctx, pol.ID, pol.CurrentVersion); err == nil {
+			return c.JSON(http.StatusOK, ver)
+		}
+	}
+	// The store logs the failure itself.
+	return c.JSON(policySaveStatus(err), map[string]any{"message": "failed to create policy", "error": err.Error()})
+}
+
+// CreateDecisionPlaygroundPolicyVersion handles
+// POST /api/v1/llm/decision-playground/policies/:id/versions.
+func CreateDecisionPlaygroundPolicyVersion(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DMP_106")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	userID := strings.TrimSpace(rc.GetUserID())
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"message": "authenticated user is required"})
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid policy id"})
+	}
+	var req playgroundPolicySaveRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid policy request"})
+	}
+	store, err := playgroundPolicyStore(logger)
+	if err != nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": err.Error()})
+	}
+	ver, err := store.CreateVersion(c.Request().Context(), id, decisionpolicy.VersionInput{
+		Content:     req.Content,
+		Note:        strings.TrimSpace(req.Note),
+		Actor:       userID,
+		MakeCurrent: req.MakeCurrent,
+	})
+	if err != nil {
+		return c.JSON(policySaveStatus(err), map[string]any{"message": "failed to save policy version", "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, ver)
+}
+
+// playgroundRun is one row of testbed.decision_runs.
+type playgroundRun struct {
+	modelKey, modelName, provider string
+	policyID                      int64
+	policyVersion                 int
+	policyEdited                  bool
+	policy, text                  string
+	questions                     llmclients.JevQuestions
+	answers                       string // Response.Content, empty on failure
+	raw                           json.RawMessage
+	errMsg                        string
+	usage                         *llmclients.Usage
+	elapsedMS                     int64
+	userID                        string
+}
+
+func saveDecisionRun(c echo.Context, run playgroundRun) (int64, error) {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return 0, errors.New("project database is not initialized")
+	}
+	questions, err := json.Marshal(run.questions)
+	if err != nil {
+		return 0, err
+	}
+	var policyID, policyVersion, answers, raw any
+	if run.policyID > 0 {
+		policyID, policyVersion = run.policyID, run.policyVersion
+	}
+	status := "error"
+	if run.errMsg == "" {
+		status = "ok"
+		answers = run.answers
+	}
+	if len(run.raw) > 0 {
+		raw = string(run.raw)
+	}
+	var inTok, outTok int
+	eventIDs := []string{}
+	if run.usage != nil {
+		inTok, outTok = run.usage.InputTokens, run.usage.OutputTokens
+		eventIDs = append(eventIDs, run.usage.EventIDs...)
+	}
+	events, _ := json.Marshal(eventIDs)
+	var id int64
+	err = db.QueryRowContext(c.Request().Context(),
+		`INSERT INTO testbed.decision_runs
+		   (model_key, model_name, provider, policy_id, policy_version, policy_edited, policy_content,
+		    input_text, questions, run_status, answers, raw_response, error_message,
+		    input_tokens, output_tokens, elapsed_ms, usage_event_ids, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18)
+		 RETURNING id`,
+		run.modelKey, run.modelName, run.provider, policyID, policyVersion, run.policyEdited, run.policy,
+		run.text, string(questions), status, answers, raw, run.errMsg,
+		inTok, outTok, run.elapsedMS, string(events), run.userID).Scan(&id)
+	return id, err
+}
+
 // RunDecisionPlayground handles POST /api/v1/llm/decision-playground/run.
+// Every run that reaches the provider is saved to testbed.decision_runs,
+// including failed ones.
 func RunDecisionPlayground(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_DMP_103")
 	defer rc.Close()
@@ -231,6 +385,20 @@ func RunDecisionPlayground(c echo.Context) error {
 	var req playgroundRunRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid decision request"})
+	}
+	// Record whether the policy text sent differs from the stored version it
+	// started from, so a saved run says exactly which text it used.
+	policyEdited := false
+	if req.PolicyID > 0 {
+		store, err := playgroundPolicyStore(logger)
+		if err != nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": err.Error()})
+		}
+		ver, err := store.GetVersion(c.Request().Context(), req.PolicyID, req.PolicyVersion)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{"message": "selected policy version not found", "error": err.Error()})
+		}
+		policyEdited = ver.Content != req.Policy
 	}
 	models, err := readModelsTOML(modelsTOMLPath())
 	if err != nil {
@@ -279,24 +447,46 @@ func RunDecisionPlayground(c echo.Context) error {
 		Messages:     []llmclients.Message{{Role: llmclients.RoleUser, Content: state}},
 		JevQuestions: questions,
 	})
-	elapsedMS := time.Since(started).Milliseconds()
-	if err != nil {
-		logger.Error("decision playground run failed", "model_key", key, "provider", pc.ID, "questions", len(questions), "err", err)
-		return c.JSON(http.StatusBadGateway, map[string]any{"message": "decision request failed", "error": err.Error(), "elapsed_ms": elapsedMS})
+	run := playgroundRun{
+		modelKey: key, modelName: strings.TrimSpace(cfg.ModelName), provider: string(pc.ID),
+		policyID: req.PolicyID, policyVersion: req.PolicyVersion, policyEdited: policyEdited,
+		policy: req.Policy, text: req.Text, questions: questions,
+		elapsedMS: time.Since(started).Milliseconds(), userID: userID,
 	}
-	answers, err := llmclients.ParseJevAnswers(resp.Content)
-	if err != nil {
-		logger.Error("decision playground answers unreadable", "model_key", key, "err", err)
-		return c.JSON(http.StatusBadGateway, map[string]any{"message": "decision answers could not be read", "error": err.Error(), "content": resp.Content})
+	var answers map[string]llmclients.JevAnswer
+	if err == nil {
+		run.answers, run.raw, run.usage = resp.Content, resp.Raw, resp.Usage
+		answers, err = llmclients.ParseJevAnswers(resp.Content)
 	}
-	logger.Info("decision playground run", "model_key", key, "provider", pc.ID, "questions", len(questions), "elapsed_ms", elapsedMS)
+	if err != nil {
+		run.errMsg = err.Error()
+	}
+	runID, saveErr := saveDecisionRun(c, run)
+	if saveErr != nil {
+		logger.Error("save decision run failed", "model_key", key, "err", saveErr)
+	}
+
+	if err != nil {
+		logger.Error("decision playground run failed", "model_key", key, "provider", pc.ID, "questions", len(questions), "run_id", runID, "err", err)
+		body := map[string]any{"message": "decision request failed", "error": err.Error(), "elapsed_ms": run.elapsedMS}
+		if runID > 0 {
+			body["run_id"] = runID
+		}
+		return c.JSON(http.StatusBadGateway, body)
+	}
+	logger.Info("decision playground run", "model_key", key, "provider", pc.ID, "questions", len(questions), "elapsed_ms", run.elapsedMS, "run_id", runID)
 
 	result := map[string]any{
 		"model_key":  key,
 		"provider":   string(pc.ID),
 		"answers":    answers,
 		"raw":        resp.Raw,
-		"elapsed_ms": elapsedMS,
+		"elapsed_ms": run.elapsedMS,
+	}
+	if runID > 0 {
+		result["run_id"] = runID
+	} else {
+		result["save_error"] = saveErr.Error()
 	}
 	if resp.Usage != nil {
 		result["usage"] = map[string]any{"input_tokens": resp.Usage.InputTokens, "output_tokens": resp.Usage.OutputTokens}

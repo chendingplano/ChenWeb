@@ -6429,5 +6429,20 @@
 	"dmp_answer_choice": "Answer: {choice}",
 	"dmp_answer_score": "Score: {score}",
 	"dmp_confidence": "Confidence {p}",
-	"dmp_raw_response": "Raw response"
+	"dmp_raw_response": "Raw response",
+	"dmp_save_version": "Save as New Version",
+	"dmp_save_new_policy": "Save as New Policy",
+	"dmp_policy_name": "Policy name",
+	"dmp_policy_name_placeholder": "e.g. doc_type_classification (letters, digits, _ . -)",
+	"dmp_policy_description": "Description",
+	"dmp_version_note": "Version note",
+	"dmp_version_note_placeholder": "What changed and why",
+	"dmp_make_current": "Make this the current version",
+	"dmp_save": "Save",
+	"dmp_saving": "Saving…",
+	"dmp_cancel": "Cancel",
+	"dmp_policy_saved": "Saved policy {name} as v{version}.",
+	"dmp_run_saved": "Saved as decision #{id}.",
+	"dmp_run_not_saved": "This decision was not saved: {reason}",
+	"dmp_failed_run_saved": "The failed run was saved as decision #{id}."
 }

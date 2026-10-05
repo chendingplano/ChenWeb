@@ -524,6 +524,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/llm/decision-playground/options", llmadminhandler.GetDecisionPlaygroundOptions)
 	apiGroup.GET("/llm/decision-playground/policies/:id", llmadminhandler.GetDecisionPlaygroundPolicy)
 	apiGroup.POST("/llm/decision-playground/run", llmadminhandler.RunDecisionPlayground)
+	apiGroup.POST("/llm/decision-playground/policies", llmadminhandler.CreateDecisionPlaygroundPolicy)
+	apiGroup.POST("/llm/decision-playground/policies/:id/versions", llmadminhandler.CreateDecisionPlaygroundPolicyVersion)
 	apiGroup.POST("/llm/embeddings", llmadminhandler.CreateEmbedding)
 	apiGroup.POST("/llm/embeddings/similarity", llmadminhandler.SearchEmbeddingSimilarity)
 	apiGroup.POST("/llm/embeddings/compare", llmadminhandler.CompareEmbeddings)

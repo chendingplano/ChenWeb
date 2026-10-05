@@ -6429,5 +6429,20 @@
 	"dmp_answer_choice": "答案：{choice}",
 	"dmp_answer_score": "评分：{score}",
 	"dmp_confidence": "置信度 {p}",
-	"dmp_raw_response": "原始响应"
+	"dmp_raw_response": "原始响应",
+	"dmp_save_version": "另存为新版本",
+	"dmp_save_new_policy": "另存为新策略",
+	"dmp_policy_name": "策略名称",
+	"dmp_policy_name_placeholder": "例如 doc_type_classification（字母、数字、_ . -）",
+	"dmp_policy_description": "说明",
+	"dmp_version_note": "版本备注",
+	"dmp_version_note_placeholder": "修改了什么，为什么修改",
+	"dmp_make_current": "设为当前版本",
+	"dmp_save": "保存",
+	"dmp_saving": "保存中…",
+	"dmp_cancel": "取消",
+	"dmp_policy_saved": "已将策略 {name} 保存为 v{version}。",
+	"dmp_run_saved": "已保存为决策 #{id}。",
+	"dmp_run_not_saved": "本次决策未保存：{reason}",
+	"dmp_failed_run_saved": "失败的运行已保存为决策 #{id}。"
 }

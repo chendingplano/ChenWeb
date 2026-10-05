@@ -63,7 +63,27 @@ export type PlaygroundRunResult = {
 	raw: unknown;
 	elapsed_ms: number;
 	usage?: { input_tokens: number; output_tokens: number };
+	run_id?: number;
+	save_error?: string;
 };
+
+export type PolicySaveRequest = {
+	name?: string;
+	description?: string;
+	content: string;
+	note: string;
+	make_current?: boolean;
+};
+
+// ApiError carries the response body, e.g. the run_id of a failed run.
+export class ApiError extends Error {
+	constructor(
+		message: string,
+		public body: Record<string, unknown>
+	) {
+		super(message);
+	}
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, { credentials: 'same-origin', ...init });
@@ -77,9 +97,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		}
 	}
 	if (!res.ok) {
-		const body = (parsed ?? {}) as { message?: unknown; error?: unknown };
+		const body = (parsed ?? {}) as Record<string, unknown>;
 		const msg = body.message ? String(body.message) : `HTTP ${res.status}`;
-		throw new Error(body.error ? `${msg}: ${String(body.error)}` : msg);
+		throw new ApiError(body.error ? `${msg}: ${String(body.error)}` : msg, body);
 	}
 	return parsed as T;
 }
@@ -90,6 +110,22 @@ export function getPlaygroundOptions(): Promise<PlaygroundOptions> {
 
 export function getPolicyCurrentVersion(id: number): Promise<DecisionPolicyVersion> {
 	return req<DecisionPolicyVersion>(`/api/v1/llm/decision-playground/policies/${id}`);
+}
+
+export function createPolicy(body: PolicySaveRequest): Promise<DecisionPolicyVersion> {
+	return req<DecisionPolicyVersion>('/api/v1/llm/decision-playground/policies', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+}
+
+export function createPolicyVersion(id: number, body: PolicySaveRequest): Promise<DecisionPolicyVersion> {
+	return req<DecisionPolicyVersion>(`/api/v1/llm/decision-playground/policies/${id}/versions`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
 }
 
 export function runDecision(body: PlaygroundRunRequest): Promise<PlaygroundRunResult> {
