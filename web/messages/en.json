@@ -6444,5 +6444,8 @@
 	"dmp_policy_saved": "Saved policy {name} as v{version}.",
 	"dmp_run_saved": "Saved as decision #{id}.",
 	"dmp_run_not_saved": "This decision was not saved: {reason}",
-	"dmp_failed_run_saved": "The failed run was saved as decision #{id}."
+	"dmp_failed_run_saved": "The failed run was saved as decision #{id}.",
+	"dmp_questions_per_line": "Questions (Yes / No) — one per line; each line becomes its own question",
+	"dmp_questions_per_line_placeholder": "`text` belongs to the category [api] as defined in `policy`\n`text` belongs to the category [test] as defined in `policy`",
+	"dmp_failed_run_not_saved": "The failed run could not be saved."
 }

@@ -40,6 +40,7 @@
 	let error = $state('');
 	let notice = $state('');
 	let failedRunID = $state(0);
+	let runError = $state('');
 	// Policy save form: 'policy' creates a policy, 'version' a new version of the selected one.
 	let saveMode = $state<'' | 'policy' | 'version'>('');
 	let saveName = $state('');
@@ -126,15 +127,26 @@
 
 	function addQuestion() {
 		error = '';
-		const instructions = questionText.trim();
-		if (!instructions) return;
+		if (!questionText.trim()) return;
 		const criteria = parseCriteria(questionType, criteriaText);
 		const count = Array.isArray(criteria) ? criteria.length : Object.keys(criteria ?? {}).length;
 		if (questionType !== 'noul' && count < 2) {
 			error = questionType === 'choice' ? m.dmp_error_choice_options() : m.dmp_error_score_levels();
 			return;
 		}
-		questions = [...questions, { id: `q${nextQuestion++}`, type: questionType, instructions, criteria }];
+		// Yes/No questions take one question per line; choice and score
+		// questions are one question each, whose options come from criteria.
+		const lines =
+			questionType === 'noul'
+				? questionText
+						.split('\n')
+						.map((l) => l.trim())
+						.filter(Boolean)
+				: [questionText.trim()];
+		questions = [
+			...questions,
+			...lines.map((instructions) => ({ id: `q${nextQuestion++}`, type: questionType, instructions, criteria }))
+		];
 		questionText = '';
 		criteriaText = '';
 	}
@@ -148,6 +160,7 @@
 		error = '';
 		notice = '';
 		failedRunID = 0;
+		runError = '';
 		result = null;
 		const snapshot = $state.snapshot(questions) as PlaygroundQuestion[];
 		try {
@@ -161,7 +174,7 @@
 			});
 			ranQuestions = snapshot;
 		} catch (err) {
-			error = message(err);
+			runError = message(err);
 			if (err instanceof ApiError) failedRunID = Number(err.body.run_id ?? 0);
 		} finally {
 			running = false;
@@ -202,7 +215,7 @@
 		<h2>{m.dmp_title()}</h2>
 		<p>{m.dmp_subtitle()}</p>
 	</header>
-	{#if error}<div class="message error">{error}{#if failedRunID}<br />{m.dmp_failed_run_saved({ id: failedRunID })}{/if}</div>{/if}
+	{#if error}<div class="message error">{error}</div>{/if}
 	{#if notice}<div class="message success">{notice}</div>{/if}
 
 	<section class="card">
@@ -272,10 +285,10 @@
 
 		<div class="question-editor">
 			<label
-				>{m.dmp_question({ type: typeLabels[questionType]() })}<textarea
+				>{questionType === 'noul' ? m.dmp_questions_per_line() : m.dmp_question({ type: typeLabels[questionType]() })}<textarea
 					bind:value={questionText}
-					rows="2"
-					placeholder={m.dmp_question_placeholder()}
+					rows={questionType === 'noul' ? 5 : 2}
+					placeholder={questionType === 'noul' ? m.dmp_questions_per_line_placeholder() : m.dmp_question_placeholder()}
 				></textarea></label
 			>
 			{#if questionType !== 'noul'}
@@ -321,6 +334,10 @@
 		<h3>{m.dmp_results_heading()}</h3>
 		{#if running}
 			<p class="muted">{m.dmp_running()}</p>
+		{:else if runError}
+			<div class="message error">
+				{runError}<br />{failedRunID ? m.dmp_failed_run_saved({ id: failedRunID }) : m.dmp_failed_run_not_saved()}
+			</div>
 		{:else if !result}
 			<p class="muted">{m.dmp_no_results()}</p>
 		{:else}

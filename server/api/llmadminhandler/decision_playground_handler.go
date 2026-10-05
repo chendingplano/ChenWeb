@@ -6,6 +6,7 @@ package llmadminhandler
 // questions (2026100502-devdoc).
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +34,7 @@ type playgroundQuestion struct {
 	ID           string          `json:"id"`
 	Type         string          `json:"type"`
 	Instructions string          `json:"instructions"`
-	Criteria     json.RawMessage `json:"criteria"`
+	Criteria     json.RawMessage `json:"criteria,omitempty"`
 }
 
 type playgroundRunRequest struct {
@@ -101,11 +102,8 @@ func playgroundJevQuestions(in []playgroundQuestion) (llmclients.JevQuestions, e
 		return nil, errors.New("add at least one question")
 	}
 	out := make(llmclients.JevQuestions, len(in))
-	for i, q := range in {
-		id := strings.TrimSpace(q.ID)
-		if id == "" {
-			id = "q" + strconv.Itoa(i+1)
-		}
+	for _, q := range playgroundQuestionsWithIDs(in) {
+		id := q.ID
 		if _, dup := out[id]; dup {
 			return nil, fmt.Errorf("duplicate question id %q", id)
 		}
@@ -134,6 +132,20 @@ func playgroundJevQuestions(in []playgroundQuestion) (llmclients.JevQuestions, e
 		out[id] = jq
 	}
 	return out, nil
+}
+
+// playgroundQuestionsWithIDs returns the questions with blank IDs set to
+// q<position>, the IDs their answers are keyed by.
+func playgroundQuestionsWithIDs(in []playgroundQuestion) []playgroundQuestion {
+	out := make([]playgroundQuestion, len(in))
+	for i, q := range in {
+		q.ID = strings.TrimSpace(q.ID)
+		if q.ID == "" {
+			q.ID = "q" + strconv.Itoa(i+1)
+		}
+		out[i] = q
+	}
+	return out
 }
 
 // playgroundState builds the state message: the judged text and the policy,
@@ -328,13 +340,14 @@ type playgroundRun struct {
 	policyVersion                 int
 	policyEdited                  bool
 	policy, text                  string
-	questions                     llmclients.JevQuestions
+	questions                     []playgroundQuestion // as entered, IDs filled in
 	answers                       string // Response.Content, empty on failure
 	raw                           json.RawMessage
 	errMsg                        string
 	usage                         *llmclients.Usage
 	elapsedMS                     int64
 	userID                        string
+	saveErr                       string
 }
 
 func saveDecisionRun(c echo.Context, run playgroundRun) (int64, error) {
@@ -366,7 +379,8 @@ func saveDecisionRun(c echo.Context, run playgroundRun) (int64, error) {
 	}
 	events, _ := json.Marshal(eventIDs)
 	var id int64
-	err = db.QueryRowContext(c.Request().Context(),
+	// Save even if the browser has disconnected during a long run.
+	err = db.QueryRowContext(context.WithoutCancel(c.Request().Context()),
 		`INSERT INTO testbed.decision_runs
 		   (model_key, model_name, provider, policy_id, policy_version, policy_edited, policy_content,
 		    input_text, questions, run_status, answers, raw_response, error_message,
@@ -380,8 +394,8 @@ func saveDecisionRun(c echo.Context, run playgroundRun) (int64, error) {
 }
 
 // RunDecisionPlayground handles POST /api/v1/llm/decision-playground/run.
-// Every run that reaches the provider is saved to testbed.decision_runs,
-// including failed ones.
+// Every run is logged and saved to testbed.decision_runs, including runs
+// rejected before reaching the provider and runs the provider failed.
 func RunDecisionPlayground(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_DMP_103")
 	defer rc.Close()
@@ -393,49 +407,60 @@ func RunDecisionPlayground(c echo.Context) error {
 	}
 	var req playgroundRunRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid decision request"})
+		logger.Warn("decision playground run rejected: unreadable request", "user_id", userID, "err", err)
+		return c.JSON(http.StatusBadRequest, map[string]any{"message": "invalid decision request", "error": err.Error()})
 	}
+	key := strings.TrimSpace(req.ModelKey)
+	run := playgroundRun{
+		modelKey: key, policyID: req.PolicyID, policyVersion: req.PolicyVersion,
+		policy: req.Policy, text: req.Text, questions: playgroundQuestionsWithIDs(req.Questions), userID: userID,
+	}
+	// reject saves and logs a run that never reached the provider.
+	reject := func(status int, msg string) error {
+		run.errMsg = msg
+		runID := saveAndLogRun(c, logger, &run)
+		logger.Warn("decision playground run rejected", "model_key", key, "user_id", userID, "run_id", runID, "reason", msg)
+		return c.JSON(status, runBody(map[string]any{"message": "decision request rejected", "error": msg}, runID))
+	}
+
 	// Record whether the policy text sent differs from the stored version it
 	// started from, so a saved run says exactly which text it used.
-	policyEdited := false
 	if req.PolicyID > 0 {
 		store, err := playgroundPolicyStore(logger)
 		if err != nil {
-			return c.JSON(http.StatusServiceUnavailable, map[string]any{"message": err.Error()})
+			return reject(http.StatusServiceUnavailable, err.Error())
 		}
 		ver, err := store.GetVersion(c.Request().Context(), req.PolicyID, req.PolicyVersion)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]any{"message": "selected policy version not found", "error": err.Error()})
+			return reject(http.StatusBadRequest, fmt.Sprintf("selected policy version not found: %v", err))
 		}
-		policyEdited = ver.Content != req.Policy
+		run.policyEdited = ver.Content != req.Policy
 	}
 	models, err := readModelsTOML(modelsTOMLPath())
 	if err != nil {
-		logger.Error("read .models.toml failed", "err", err)
-		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to read .models.toml", "error": err.Error()})
+		return reject(http.StatusInternalServerError, fmt.Sprintf("failed to read .models.toml: %v", err))
 	}
-	key := strings.TrimSpace(req.ModelKey)
 	cfg, ok := models[key]
 	if !ok {
-		return c.JSON(http.StatusBadRequest, map[string]any{"message": fmt.Sprintf("model %q not found in .models.toml", key)})
+		return reject(http.StatusBadRequest, fmt.Sprintf("model %q not found in .models.toml", key))
 	}
+	run.modelName = strings.TrimSpace(cfg.ModelName)
 	pc, err := playgroundProviderConfig(key, cfg)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"message": err.Error()})
+		return reject(http.StatusBadRequest, err.Error())
 	}
+	run.provider = string(pc.ID)
 	questions, err := playgroundJevQuestions(req.Questions)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"message": err.Error()})
+		return reject(http.StatusBadRequest, err.Error())
 	}
 	state, err := playgroundState(req.Text, req.Policy)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"message": err.Error()})
+		return reject(http.StatusBadRequest, err.Error())
 	}
-
 	client, err := llmclients.NewClient(pc, logger)
 	if err != nil {
-		logger.Error("build decision client failed", "model_key", key, "provider", pc.ID, "err", err)
-		return c.JSON(http.StatusInternalServerError, map[string]any{"message": "failed to initialize provider", "error": err.Error()})
+		return reject(http.StatusInternalServerError, fmt.Sprintf("failed to initialize provider: %v", err))
 	}
 	metadata := map[string]any{"model_key": key}
 	if req.PolicyID > 0 {
@@ -448,7 +473,7 @@ func RunDecisionPlayground(c echo.Context) error {
 	started := time.Now()
 	resp, err := client.Complete(c.Request().Context(), llmclients.Request{
 		UserID:       userID,
-		Model:        strings.TrimSpace(cfg.ModelName),
+		Model:        run.modelName,
 		PromptName:   "decision_playground",
 		CallReason:   "decision_playground",
 		CallLoc:      "CWB_DMP_104",
@@ -456,12 +481,7 @@ func RunDecisionPlayground(c echo.Context) error {
 		Messages:     []llmclients.Message{{Role: llmclients.RoleUser, Content: state}},
 		JevQuestions: questions,
 	})
-	run := playgroundRun{
-		modelKey: key, modelName: strings.TrimSpace(cfg.ModelName), provider: string(pc.ID),
-		policyID: req.PolicyID, policyVersion: req.PolicyVersion, policyEdited: policyEdited,
-		policy: req.Policy, text: req.Text, questions: questions,
-		elapsedMS: time.Since(started).Milliseconds(), userID: userID,
-	}
+	run.elapsedMS = time.Since(started).Milliseconds()
 	var answers map[string]llmclients.JevAnswer
 	if err == nil {
 		run.answers, run.raw, run.usage = resp.Content, resp.Raw, resp.Usage
@@ -470,18 +490,11 @@ func RunDecisionPlayground(c echo.Context) error {
 	if err != nil {
 		run.errMsg = err.Error()
 	}
-	runID, saveErr := saveDecisionRun(c, run)
-	if saveErr != nil {
-		logger.Error("save decision run failed", "model_key", key, "err", saveErr)
-	}
+	runID := saveAndLogRun(c, logger, &run)
 
 	if err != nil {
 		logger.Error("decision playground run failed", "model_key", key, "provider", pc.ID, "questions", len(questions), "run_id", runID, "err", err)
-		body := map[string]any{"message": "decision request failed", "error": err.Error(), "elapsed_ms": run.elapsedMS}
-		if runID > 0 {
-			body["run_id"] = runID
-		}
-		return c.JSON(http.StatusBadGateway, body)
+		return c.JSON(http.StatusBadGateway, runBody(map[string]any{"message": "decision request failed", "error": err.Error(), "elapsed_ms": run.elapsedMS}, runID))
 	}
 	logger.Info("decision playground run", "model_key", key, "provider", pc.ID, "questions", len(questions), "elapsed_ms", run.elapsedMS, "run_id", runID)
 
@@ -492,13 +505,29 @@ func RunDecisionPlayground(c echo.Context) error {
 		"raw":        resp.Raw,
 		"elapsed_ms": run.elapsedMS,
 	}
-	if runID > 0 {
-		result["run_id"] = runID
-	} else {
-		result["save_error"] = saveErr.Error()
+	if runID == 0 {
+		result["save_error"] = run.saveErr
 	}
 	if resp.Usage != nil {
 		result["usage"] = map[string]any{"input_tokens": resp.Usage.InputTokens, "output_tokens": resp.Usage.OutputTokens}
 	}
-	return c.JSON(http.StatusOK, result)
+	return c.JSON(http.StatusOK, runBody(result, runID))
+}
+
+// saveAndLogRun saves the run, logging (not returning) a save failure so the
+// caller still answers the page; it returns 0 when nothing was saved.
+func saveAndLogRun(c echo.Context, logger ApiTypes.JimoLogger, run *playgroundRun) int64 {
+	runID, err := saveDecisionRun(c, *run)
+	if err != nil {
+		run.saveErr = err.Error()
+		logger.Error("save decision run failed", "model_key", run.modelKey, "user_id", run.userID, "err", err)
+	}
+	return runID
+}
+
+func runBody(body map[string]any, runID int64) map[string]any {
+	if runID > 0 {
+		body["run_id"] = runID
+	}
+	return body
 }

@@ -6444,5 +6444,8 @@
 	"dmp_policy_saved": "已将策略 {name} 保存为 v{version}。",
 	"dmp_run_saved": "已保存为决策 #{id}。",
 	"dmp_run_not_saved": "本次决策未保存：{reason}",
-	"dmp_failed_run_saved": "失败的运行已保存为决策 #{id}。"
+	"dmp_failed_run_saved": "失败的运行已保存为决策 #{id}。",
+	"dmp_questions_per_line": "问题（是 / 否）：每行一个，每行都会成为一个独立的问题",
+	"dmp_questions_per_line_placeholder": "`text` 属于 `policy` 中定义的类别 [api]\n`text` 属于 `policy` 中定义的类别 [test]",
+	"dmp_failed_run_not_saved": "失败的运行未能保存。"
 }
