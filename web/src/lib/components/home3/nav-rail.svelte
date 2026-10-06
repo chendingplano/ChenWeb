@@ -269,6 +269,16 @@
 						{ id: 'sysadmin-llm-chat-sessions', label: m.nav_sysadmin_llm_chat_sessions() },
 						{ id: 'sysadmin-llm-pi-sessions', label: m.nav_sysadmin_llm_pi_sessions() },
 						{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
+						// Gold metrics (testbed.metrics) are a development tool: /development only.
+						...(pageKey === 'development'
+							? [
+									{
+										id: 'sysadmin-llm-metrics',
+										label: m.nav_sysadmin_llm_metrics(),
+										children: [{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() }]
+									}
+								]
+							: []),
 						{
 							id: 'sysadmin-llm-decision-models',
 							label: m.nav_sysadmin_llm_decision_models(),

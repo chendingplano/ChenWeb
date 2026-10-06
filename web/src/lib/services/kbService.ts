@@ -268,9 +268,16 @@ async function fetchOrThrow<T>(url: string, fallback: string): Promise<T> {
 	return response.json() as Promise<T>;
 }
 
-export async function listKbMetrics(inputRecordId: number): Promise<ListKbMetricsResponse> {
+// 'kb' reads kb.metrics; 'testbed' reads gold metrics (latest benchmark run in testbed.metrics).
+export type KbMetricSource = 'kb' | 'testbed';
+
+export async function listKbMetrics(
+	inputRecordId: number,
+	source: KbMetricSource = 'kb'
+): Promise<ListKbMetricsResponse> {
+	const sourceParam = source === 'kb' ? '' : `&source=${source}`;
 	return fetchOrThrow<ListKbMetricsResponse>(
-		`${BASE}/metrics?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		`${BASE}/metrics?input_record_id=${encodeURIComponent(String(inputRecordId))}${sourceParam}`,
 		'Failed to list kb metrics'
 	);
 }

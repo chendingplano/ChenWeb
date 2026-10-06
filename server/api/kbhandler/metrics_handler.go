@@ -134,7 +134,39 @@ func firstMetricSourceLine(spans json.RawMessage) int {
 	return int(^uint(0) >> 1)
 }
 
-// ListMetrics handles GET /api/v1/kb/metrics?input_record_id=N
+// testbedMetricsQuery reads the latest benchmark run of testbed.metrics (gold
+// metrics, see the extract-metrics-benchmark skill) in the same column order as
+// the kb.metrics query in ListMetrics; columns testbed lacks are NULL.
+const testbedMetricsQuery = `
+SELECT
+    m.id, m.input_record_id, m.metric_id, NULL::text AS event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
+    m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
+    m.metric_keywords, m.metric_keywords_en, NULL::text AS model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
+    m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
+    m.confidence, m.is_explicit_metric,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'title', i.title, '')), '') AS document_title,
+    NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
+    NULL::text AS object_name,
+    m.table_name_or_section, m.reasoning_tags,
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
+    NULL::text AS keyword_concept_id, NULL::text AS metric_definition_term_id, NULL::text AS value_range_type_error,
+    m.source_table_rows
+FROM testbed.metrics m
+LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+WHERE m.input_record_id = $1
+  AND m.benchmark_run_id = (
+    SELECT t.benchmark_run_id FROM testbed.metrics t
+    WHERE t.input_record_id = $1
+    ORDER BY t.created_at DESC, t.id DESC
+    LIMIT 1
+  )
+ORDER BY m.id ASC
+`
+
+// ListMetrics handles GET /api/v1/kb/metrics?input_record_id=N[&source=testbed].
+// source=testbed reads gold metrics from testbed.metrics instead of kb.metrics.
 func ListMetrics(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_001")
 	defer rc.Close()
@@ -155,8 +187,16 @@ func ListMetrics(c echo.Context) error {
 		})
 	}
 
+	source := strings.TrimSpace(c.QueryParam("source"))
+	if source != "" && source != "kb" && source != "testbed" {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid source, expected kb or testbed (CWB_KB_M_012)",
+		})
+	}
+
 	db := ApiTypes.ProjectDBHandle
-	const query = `
+	query := `
 SELECT
     m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
@@ -188,9 +228,12 @@ LEFT JOIN LATERAL (
 WHERE m.input_record_id = $1
 ORDER BY m.id ASC
 `
+	if source == "testbed" {
+		query = testbedMetricsQuery
+	}
 	rows, err := db.Query(query, inputID)
 	if err != nil {
-		logger.Error("query kb.metrics failed", "err", err)
+		logger.Error("query metrics failed", "source", source, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
 			ErrorMsg: "failed to retrieve kb metrics (CWB_KB_M_020)",

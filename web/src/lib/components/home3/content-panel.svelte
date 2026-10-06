@@ -256,6 +256,8 @@
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}
 			<MetricMgmtView {darkMode} {onFocusModeChange} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-gold'}
+			<MetricMgmtView {darkMode} {onFocusModeChange} source="testbed" />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}

@@ -6387,6 +6387,8 @@
 	"home8_item_fallback": "item",
 	"nav_sysadmin_llm_decision_models": "Decision Models",
 	"nav_sysadmin_llm_decision_models_playground": "Playground",
+	"nav_sysadmin_llm_metrics": "Metrics",
+	"nav_sysadmin_llm_metrics_gold": "Gold Metrics",
 	"dmp_eyebrow": "System Admin · LLM · Decision Models",
 	"dmp_title": "Decision Model Playground",
 	"dmp_subtitle": "Run a real decision request against a model, with an optional policy and typed questions.",

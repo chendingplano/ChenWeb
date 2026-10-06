@@ -6387,6 +6387,8 @@
 	"home8_item_fallback": "商品",
 	"nav_sysadmin_llm_decision_models": "决策模型",
 	"nav_sysadmin_llm_decision_models_playground": "试验场",
+	"nav_sysadmin_llm_metrics": "指标",
+	"nav_sysadmin_llm_metrics_gold": "黄金指标",
 	"dmp_eyebrow": "系统管理 · LLM · 决策模型",
 	"dmp_title": "决策模型试验场",
 	"dmp_subtitle": "使用可选的策略和类型化问题，对模型发起真实的决策请求。",

@@ -12,6 +12,7 @@
 		updateRawLine,
 		type KbInputRecord,
 		type KbMetricRecord,
+		type KbMetricSource,
 		type ExtractedKbMetric,
 		type RawLine,
 		type SourceLineSpan
@@ -62,11 +63,17 @@
 
 	let {
 		darkMode = true,
-		onFocusModeChange
+		onFocusModeChange,
+		source = 'kb'
 	}: {
 		darkMode: boolean;
 		onFocusModeChange?: (focused: boolean) => void;
+		// 'testbed' shows gold metrics (testbed.metrics) read-only: they are written
+		// only by the extract-metrics-benchmark skill, so Add Metric and the
+		// kb.metrics-only Global Metric Search are hidden.
+		source?: KbMetricSource;
 	} = $props();
+	const metricsEditable = $derived(source === 'kb');
 
 	// ---------- Aesthetic tokens: "archival reading room" ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
@@ -832,7 +839,7 @@
 		}
 		pdfSelectedLines = selected;
 		addMetricBufferLines = selected;
-		if (selected.length > 0) {
+		if (selected.length > 0 && metricsEditable) {
 			resetAddMetricPreview();
 			addMetricOpen = true;
 		}
@@ -977,7 +984,7 @@
 		try {
 			rawLoading = true;
 			const [metricRes, inputRes, rawRes] = await Promise.all([
-				listKbMetrics(id),
+				listKbMetrics(id, source),
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
 			]);
@@ -1311,7 +1318,7 @@
 				record_id: currentInput.id,
 				metrics: extractedMetricsPreview
 			});
-			const refreshed = await listKbMetrics(currentInput.id);
+			const refreshed = await listKbMetrics(currentInput.id, source);
 			metrics = refreshed.results ?? [];
 			closeAddMetricDialog();
 		} catch (err) {
@@ -1406,7 +1413,7 @@
 				</button>
 				<KbInputRecordBrowser
 					{darkMode}
-					instanceKey="metrics-record-browser"
+					instanceKey={source === 'kb' ? 'metrics-record-browser' : 'gold-metrics-record-browser'}
 					title={i18n.metric_mgmt_kb_inputs()}
 					subtitle={i18n.metric_mgmt_search_filter_and_select_input()}
 					emptyTitle={i18n.metric_mgmt_no_records_yet()}
@@ -1560,6 +1567,7 @@
 				</select>
 			</div>
 
+			{#if metricsEditable}
 			<div class="global-search-launch">
 				<button
 					type="button"
@@ -1578,6 +1586,7 @@
 					>
 				{/if}
 			</div>
+			{/if}
 
 			<div class="metrics-list">
 				{#if errorMsg}
