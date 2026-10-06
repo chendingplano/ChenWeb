@@ -84,6 +84,11 @@ export type ListKbInputsParams = {
 	modifyEndTime?: string;
 	orderBy?: string;
 	orderDir?: 'asc' | 'desc';
+	// Keep only inputs that have gold metrics (testbed.metrics), optionally for
+	// one skill version and/or model.
+	hasGoldMetrics?: boolean;
+	goldSkillVersion?: string;
+	goldModelName?: string;
 };
 
 export type ListKbInputsResponse = {
@@ -118,6 +123,9 @@ function buildQuery(params: ListKbInputsParams): string {
 	if (params.modifyEndTime?.trim()) query.set('modify_end_time', params.modifyEndTime.trim());
 	if (params.orderBy?.trim()) query.set('order_by', params.orderBy.trim());
 	if (params.orderDir?.trim()) query.set('order_dir', params.orderDir.trim());
+	if (params.hasGoldMetrics) query.set('has_gold_metrics', 'true');
+	if (params.goldSkillVersion?.trim()) query.set('gold_skill_version', params.goldSkillVersion.trim());
+	if (params.goldModelName?.trim()) query.set('gold_model_name', params.goldModelName.trim());
 	query.set('page', String(params.page));
 	query.set('page_size', String(params.pageSize));
 	return query.toString();

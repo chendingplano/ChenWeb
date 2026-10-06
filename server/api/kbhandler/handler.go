@@ -100,6 +100,12 @@ type listInputsFilters struct {
 	CreateTimeEnd        *time.Time
 	ModifyTimeStart      *time.Time
 	ModifyTimeEnd        *time.Time
+
+	// HasGoldMetrics keeps only inputs with rows in testbed.metrics, narrowed by
+	// GoldSkillVersion and GoldModelName when they are non-empty.
+	HasGoldMetrics   bool
+	GoldSkillVersion string
+	GoldModelName    string
 }
 
 // ListInputs handles GET /api/v1/kb/inputs.
@@ -176,6 +182,9 @@ func ListInputs(c echo.Context) error {
 		NoDocProcessors:      strings.EqualFold(strings.TrimSpace(c.QueryParam("no_doc_processors")), "true"),
 		PipelineFilter:       c.QueryParam("pipeline_filter"),
 		ExcludeDocType:       c.QueryParam("exclude_doc_type"),
+		HasGoldMetrics:       strings.EqualFold(strings.TrimSpace(c.QueryParam("has_gold_metrics")), "true"),
+		GoldSkillVersion:     c.QueryParam("gold_skill_version"),
+		GoldModelName:        c.QueryParam("gold_model_name"),
 		CreateTimeStart:      createStartTime,
 		CreateTimeEnd:        createEndTime,
 		ModifyTimeStart:      modifyStartTime,
@@ -906,6 +915,17 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	}
 	if filters.FailedProcessorsOnly {
 		whereParts = append(whereParts, "i.has_failed_proc")
+	}
+	if filters.HasGoldMetrics {
+		goldParts := []string{"t.input_record_id = i.id"}
+		if v := strings.TrimSpace(filters.GoldSkillVersion); v != "" {
+			goldParts = append(goldParts, fmt.Sprintf("t.skill_version = %s", nextArg(v)))
+		}
+		if v := strings.TrimSpace(filters.GoldModelName); v != "" {
+			goldParts = append(goldParts, fmt.Sprintf("t.model_name = %s", nextArg(v)))
+		}
+		whereParts = append(whereParts, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM testbed.metrics t WHERE %s)", strings.Join(goldParts, " AND ")))
 	}
 	if filters.NoDocProcessors {
 		aliasList := getAllProcessorAliases()

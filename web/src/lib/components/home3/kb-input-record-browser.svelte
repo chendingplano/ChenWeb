@@ -9,7 +9,8 @@
 	import {
 		getKbInput,
 		listKbInputs,
-		type KbInputRecord
+		type KbInputRecord,
+		type ListKbInputsParams
 	} from '$lib/services/kbService';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
@@ -62,7 +63,8 @@
 		onResultsChange = () => {},
 		onError = () => {},
 		onFiltersChange = () => {},
-		extraControls
+		extraControls,
+		listParams
 	}: {
 		darkMode?: boolean;
 		instanceKey: string;
@@ -83,6 +85,8 @@
 		onFiltersChange?: (filters: RecordBrowserFilters) => void;
 		// Host-specific filters rendered in the search block, below the record id field.
 		extraControls?: Snippet;
+		// Host-specific list filters merged into every list request; a change reloads page 1.
+		listParams?: Partial<ListKbInputsParams>;
 	} = $props();
 
 	// Fallbacks only. The host view supplies the real tokens (--panel-bg, --ink-line,
@@ -170,6 +174,21 @@
 		if (settingsHydrated) {
 			untrack(() => void loadRecords(1, selectedRecordIdInternal));
 		}
+	});
+
+	// Reload when the host's listParams change. The first run only records the
+	// key: the initial-load effect above already fetched with these params.
+	let listParamsKey = $derived(JSON.stringify(listParams ?? {}));
+	let lastListParamsKey: string | null = null;
+	$effect(() => {
+		const key = listParamsKey;
+		if (!settingsHydrated) return;
+		if (lastListParamsKey === null || key === lastListParamsKey) {
+			lastListParamsKey = key;
+			return;
+		}
+		lastListParamsKey = key;
+		untrack(() => void loadRecords(1, selectedRecordIdInternal));
 	});
 
 	function saveSettings(next: Partial<{ listWidth: number; pageSize: number; highlightColor: string }>) {
@@ -262,15 +281,16 @@
 		loading = true;
 		loadError = '';
 		try {
-			const response = await listKbInputs(
-				buildTopicTreeListParams({
+			const response = await listKbInputs({
+				...buildTopicTreeListParams({
 					page,
 					pageSize: effectivePageSize,
 					activeStoreId: knowledgeStoreState.activeStore?.id ?? null,
 					scopeToActiveStore,
 					filters
-				})
-			);
+				}),
+				...listParams
+			});
 			results = response.results ?? [];
 			listTotal = Math.max(0, response.total ?? 0);
 			listPage = Math.max(1, response.page ?? page);

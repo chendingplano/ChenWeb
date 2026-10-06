@@ -1470,6 +1470,9 @@
 					onError={(error) => {
 						errorMsg = error.message;
 					}}
+					listParams={source === 'testbed'
+						? { hasGoldMetrics: true, goldSkillVersion: goldSkillVersion, goldModelName: goldModelName }
+						: undefined}
 				>
 					{#snippet extraControls()}
 						{#if source === 'testbed'}

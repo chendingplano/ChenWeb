@@ -719,3 +719,31 @@ FROM kb.inputs i
 		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
+
+func TestBuildWhereClauseGoldMetrics(t *testing.T) {
+	whereSQL, args, err := buildWhereClause(listInputsFilters{
+		ParseState:       "all",
+		HasGoldMetrics:   true,
+		GoldSkillVersion: "1.2.0",
+		GoldModelName:    "claude-opus-5-5",
+	})
+	if err != nil {
+		t.Fatalf("buildWhereClause returned error: %v", err)
+	}
+	want := "EXISTS (SELECT 1 FROM testbed.metrics t WHERE t.input_record_id = i.id AND t.skill_version = $1 AND t.model_name = $2)"
+	if !strings.Contains(whereSQL, want) {
+		t.Fatalf("expected gold metrics filter in whereSQL, got: %s", whereSQL)
+	}
+	if len(args) != 2 || args[0] != "1.2.0" || args[1] != "claude-opus-5-5" {
+		t.Fatalf("unexpected args: %v", args)
+	}
+
+	// Without a model, any model with the version qualifies.
+	whereSQL, args, err = buildWhereClause(listInputsFilters{ParseState: "all", HasGoldMetrics: true, GoldSkillVersion: "1.2.0"})
+	if err != nil {
+		t.Fatalf("buildWhereClause returned error: %v", err)
+	}
+	if !strings.Contains(whereSQL, "t.skill_version = $1)") || strings.Contains(whereSQL, "t.model_name") || len(args) != 1 {
+		t.Fatalf("unexpected version-only filter: %s %v", whereSQL, args)
+	}
+}
