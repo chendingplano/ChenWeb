@@ -26,31 +26,32 @@ type artifactCategoryItem struct {
 	Page     int    `json:"page"`
 
 	// Metric-specific extended fields
-	CategoryPaths    []string `json:"category_paths,omitempty"`
-	CategoryPathsEn  []string `json:"category_paths_en,omitempty"`
-	Value            *string  `json:"value,omitempty"`
-	Desc             *string  `json:"desc,omitempty"`
-	DescEn           *string         `json:"desc_en,omitempty"`
-	Confidence       *float64        `json:"confidence,omitempty"`
-	Context          *string         `json:"context,omitempty"`
-	ContextEn        *string         `json:"context_en,omitempty"`
-	Keywords         json.RawMessage `json:"keywords,omitempty"`
-	KeywordsEn       json.RawMessage `json:"keywords_en,omitempty"`
-	IsExplicitMetric *bool           `json:"is_explicit_metric,omitempty"`
-	LocationType     *string         `json:"location_type,omitempty"`
-	MeasurementFreq  *string         `json:"measurement_frequency,omitempty"`
-	ReasoningTags    json.RawMessage `json:"reasoning_tags,omitempty"`
-	SourceLineSpans  json.RawMessage `json:"source_line_spans,omitempty"`
-	Subject          *string         `json:"subject,omitempty"`
-	SubjectEn        *string         `json:"subject_en,omitempty"`
-	Source           *string         `json:"source,omitempty"`
-	Threshold        *string         `json:"threshold,omitempty"`
-	Unit             *string         `json:"unit,omitempty"`
-	UnitEn           *string         `json:"unit_en,omitempty"`
-	ValueClass       *string         `json:"value_class,omitempty"`
-	ValueClassEn     *string         `json:"value_class_en,omitempty"`
-	ValueDataType    *string         `json:"value_data_type,omitempty"`
-	ValueRangeType   *string         `json:"value_range_type,omitempty"`
+	CategoryPaths       []string        `json:"category_paths,omitempty"`
+	CategoryPathsEn     []string        `json:"category_paths_en,omitempty"`
+	Value               *string         `json:"value,omitempty"`
+	Desc                *string         `json:"desc,omitempty"`
+	DescEn              *string         `json:"desc_en,omitempty"`
+	Confidence          *float64        `json:"confidence,omitempty"`
+	Context             *string         `json:"context,omitempty"`
+	ContextEn           *string         `json:"context_en,omitempty"`
+	Keywords            json.RawMessage `json:"keywords,omitempty"`
+	KeywordsEn          json.RawMessage `json:"keywords_en,omitempty"`
+	IsExplicitMetric    *bool           `json:"is_explicit_metric,omitempty"`
+	LocationType        *string         `json:"location_type,omitempty"`
+	MeasurementFreq     *string         `json:"measurement_frequency,omitempty"`
+	ReasoningTags       json.RawMessage `json:"reasoning_tags,omitempty"`
+	SourceLineSpans     json.RawMessage `json:"source_line_spans,omitempty"`
+	Subject             *string         `json:"subject,omitempty"`
+	SubjectEn           *string         `json:"subject_en,omitempty"`
+	Source              *string         `json:"source,omitempty"`
+	Threshold           *string         `json:"threshold,omitempty"`
+	Unit                *string         `json:"unit,omitempty"`
+	UnitEn              *string         `json:"unit_en,omitempty"`
+	ValueClass          *string         `json:"value_class,omitempty"`
+	ValueClassEn        *string         `json:"value_class_en,omitempty"`
+	ValueDataType       *string         `json:"value_data_type,omitempty"`
+	ValueRangeType      *string         `json:"value_range_type,omitempty"`
+	FormulaOrDefinition *string         `json:"formula_or_definition,omitempty"`
 }
 
 type getArtifactCategoryResponse struct {
@@ -257,7 +258,8 @@ SELECT m.metric_id, m.input_record_id,
        m.value_class, m.value_class_en,
        m.value_data_type,
        m.value_range_type,
-       m.metric_value
+       m.metric_value,
+       m.formula_or_definition
 FROM kb.metrics m
 WHERE m.metric_id IN (%s)
 ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
@@ -291,6 +293,7 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 			valueDataType            sql.NullString
 			valueRangeType           sql.NullString
 			metricValue              sql.NullString
+			formulaOrDefinition      sql.NullString
 		)
 		if scanErr := rows.Scan(
 			&metricID, &inputID, &name, &nameEn,
@@ -312,6 +315,7 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 			&valueDataType,
 			&valueRangeType,
 			&metricValue,
+			&formulaOrDefinition,
 		); scanErr != nil {
 			return nil, scanErr
 		}
@@ -406,6 +410,9 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 		}
 		if valueDataType.Valid {
 			item.ValueDataType = &valueDataType.String
+		}
+		if formulaOrDefinition.Valid {
+			item.FormulaOrDefinition = &formulaOrDefinition.String
 		}
 		if valueRangeType.Valid {
 			item.ValueRangeType = &valueRangeType.String

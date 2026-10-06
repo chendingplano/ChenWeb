@@ -6456,5 +6456,21 @@
 	"dmp_failed_run_saved": "失败的运行已保存为决策 #{id}。",
 	"dmp_questions_per_line": "问题（是 / 否）：每行一个，每行都会成为一个独立的问题",
 	"dmp_questions_per_line_placeholder": "`text` 属于 `policy` 中定义的类别 [api]\n`text` 属于 `policy` 中定义的类别 [test]",
-	"dmp_failed_run_not_saved": "失败的运行未能保存。"
+	"dmp_failed_run_not_saved": "失败的运行未能保存。",
+	"metric_statement_kind_label": "陈述类型",
+	"metric_statement_group_requirement": "要求",
+	"metric_statement_group_metric": "指标",
+	"metric_statement_group_test": "试验参数",
+	"metric_statement_group_definition": "定义",
+	"metric_statement_group_unclassified": "未分类",
+	"metric_statement_kind_requirement_with_criterion": "带可测判据的要求",
+	"metric_statement_kind_requirement_value_open": "指明指标、数值另行规定的要求",
+	"metric_statement_kind_inspection_requirement": "检查性要求（无可测量值）",
+	"metric_statement_kind_delegated_requirement": "引用其他标准的要求",
+	"metric_statement_kind_test_parameter": "试验方法参数",
+	"metric_statement_kind_metric_definition": "指标定义（公式）",
+	"metric_statement_kind_definition": "定义",
+	"metric_statement_kind_metric_value": "指标值",
+	"metric_statement_kind_observation": "观测描述",
+	"metric_statement_kind_unclassified": "未分类"
 }

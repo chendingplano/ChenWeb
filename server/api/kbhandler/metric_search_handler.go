@@ -32,29 +32,34 @@ func (f metricSearchFilters) hasAny() bool {
 }
 
 type metricSearchResult struct {
-	ArtifactID         string          `json:"artifact_id"`
-	ID                 int64           `json:"id"`
-	MetricID           string          `json:"metric_id,omitempty"`
-	InputRecordID      int64           `json:"input_record_id"`
-	InputFilename      string          `json:"input_filename,omitempty"`
-	MetricName         string          `json:"metric_name,omitempty"`
-	MetricNameEn       string          `json:"metric_name_en,omitempty"`
-	MetricSubject      string          `json:"metric_subject,omitempty"`
-	MetricSubjectEn    string          `json:"metric_subject_en,omitempty"`
-	MetricValue        string          `json:"metric_value,omitempty"`
-	MetricUnit         string          `json:"metric_unit,omitempty"`
-	MetricUnitEn       string          `json:"metric_unit_en,omitempty"`
-	ValueClass         string          `json:"value_class,omitempty"`
-	ValueClassEn       string          `json:"value_class_en,omitempty"`
-	ValueDataType      string          `json:"value_data_type,omitempty"`
-	IsExplicitMetric   *bool           `json:"is_explicit_metric,omitempty"`
-	TableNameOrSection string          `json:"table_name_or_section,omitempty"`
-	MetricKeywords     json.RawMessage `json:"metric_keywords,omitempty"`
-	MetricKeywordsEn   json.RawMessage `json:"metric_keywords_en,omitempty"`
-	SourceLineSpans    json.RawMessage `json:"source_line_spans,omitempty"`
-	Score              float64         `json:"score"`
-	Snippet            string          `json:"snippet"`
-	PrimaryLabel       string          `json:"primary_label"`
+	ArtifactID      string `json:"artifact_id"`
+	ID              int64  `json:"id"`
+	MetricID        string `json:"metric_id,omitempty"`
+	InputRecordID   int64  `json:"input_record_id"`
+	InputFilename   string `json:"input_filename,omitempty"`
+	MetricName      string `json:"metric_name,omitempty"`
+	MetricNameEn    string `json:"metric_name_en,omitempty"`
+	MetricSubject   string `json:"metric_subject,omitempty"`
+	MetricSubjectEn string `json:"metric_subject_en,omitempty"`
+	MetricValue     string `json:"metric_value,omitempty"`
+	MetricUnit      string `json:"metric_unit,omitempty"`
+	MetricUnitEn    string `json:"metric_unit_en,omitempty"`
+	ValueClass      string `json:"value_class,omitempty"`
+	ValueClassEn    string `json:"value_class_en,omitempty"`
+	ValueDataType   string `json:"value_data_type,omitempty"`
+	// ValueRangeType, FormulaOrDefinition and ReasoningTags let clients classify
+	// the row's statement kind (ADR 2026100603 DR3).
+	ValueRangeType      string          `json:"value_range_type,omitempty"`
+	FormulaOrDefinition string          `json:"formula_or_definition,omitempty"`
+	ReasoningTags       json.RawMessage `json:"reasoning_tags,omitempty"`
+	IsExplicitMetric    *bool           `json:"is_explicit_metric,omitempty"`
+	TableNameOrSection  string          `json:"table_name_or_section,omitempty"`
+	MetricKeywords      json.RawMessage `json:"metric_keywords,omitempty"`
+	MetricKeywordsEn    json.RawMessage `json:"metric_keywords_en,omitempty"`
+	SourceLineSpans     json.RawMessage `json:"source_line_spans,omitempty"`
+	Score               float64         `json:"score"`
+	Snippet             string          `json:"snippet"`
+	PrimaryLabel        string          `json:"primary_label"`
 }
 
 type metricSearchResponse struct {
@@ -286,6 +291,9 @@ ranked AS (
         COALESCE(m.metric_keywords, '[]'::jsonb) AS metric_keywords,
         COALESCE(m.metric_keywords_en, '[]'::jsonb) AS metric_keywords_en,
         COALESCE(m.source_line_spans, '[]'::jsonb) AS source_line_spans,
+        COALESCE(m.value_range_type, '') AS value_range_type,
+        COALESCE(m.formula_or_definition, '') AS formula_or_definition,
+        COALESCE(m.reasoning_tags, '[]'::jsonb) AS reasoning_tags,
         %s AS score,
         ts_headline(
             '%s',
@@ -306,7 +314,8 @@ SELECT
     id, metric_id, input_record_id, input_filename, metric_name, metric_name_en,
     metric_subject, metric_subject_en, metric_value, metric_unit, metric_unit_en,
     value_class, value_class_en, value_data_type, is_explicit_metric, table_name_or_section,
-    metric_keywords, metric_keywords_en, source_line_spans, score, snippet
+    metric_keywords, metric_keywords_en, source_line_spans, score, snippet,
+    value_range_type, formula_or_definition, reasoning_tags
 FROM scored
 ORDER BY score DESC, id ASC
 LIMIT $%d OFFSET $%d
@@ -325,6 +334,7 @@ LIMIT $%d OFFSET $%d
 			metricKeywords   []byte
 			metricKeywordsEn []byte
 			sourceLineSpans  []byte
+			reasoningTags    []byte
 			isExplicitMetric sql.NullBool
 		)
 		if err := rows.Scan(
@@ -334,6 +344,7 @@ LIMIT $%d OFFSET $%d
 			&record.ValueClass, &record.ValueClassEn, &record.ValueDataType,
 			&isExplicitMetric, &record.TableNameOrSection, &metricKeywords, &metricKeywordsEn,
 			&sourceLineSpans, &record.Score, &record.Snippet,
+			&record.ValueRangeType, &record.FormulaOrDefinition, &reasoningTags,
 		); err != nil {
 			return nil, err
 		}
@@ -349,6 +360,9 @@ LIMIT $%d OFFSET $%d
 		}
 		if len(sourceLineSpans) > 0 {
 			record.SourceLineSpans = json.RawMessage(sourceLineSpans)
+		}
+		if len(reasoningTags) > 0 {
+			record.ReasoningTags = json.RawMessage(reasoningTags)
 		}
 		seq := strings.TrimSpace(firstNonEmptyString(lastMetricSequence(record.MetricID), strconv.FormatInt(record.ID, 10)))
 		record.ArtifactID = kbsearch.BuildArtifactID(record.InputRecordID, "metric", seq)

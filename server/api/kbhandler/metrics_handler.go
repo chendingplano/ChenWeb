@@ -71,6 +71,9 @@ type metricRecord struct {
 	// SourceTableRows is kb.metrics.source_table_rows: the table rows this metric
 	// came from (openspec change table-row-context).
 	SourceTableRows json.RawMessage `json:"source_table_rows,omitempty"`
+	// ProvisionID is kb.metrics.provision_id: the provision clause this row is a
+	// criterion of (ADR 2026100603 DR2). Always serialized; null until linked.
+	ProvisionID *int64 `json:"provision_id"`
 	// TableContext is built at read time from SourceTableRows: header + matched rows
 	// + one neighbor data row either side. Never stored.
 	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
@@ -154,7 +157,7 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     NULL::text AS keyword_concept_id, NULL::text AS metric_definition_term_id, NULL::text AS value_range_type_error,
-    m.source_table_rows
+    m.source_table_rows, NULL::bigint AS provision_id
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
@@ -217,7 +220,7 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
-    m.source_table_rows
+    m.source_table_rows, m.provision_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -284,7 +287,7 @@ ORDER BY m.id ASC
 			&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
 			&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
-			&tableRowsBytes,
+			&tableRowsBytes, &r.ProvisionID,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -385,7 +388,7 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
-    m.source_table_rows
+    m.source_table_rows, m.provision_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -421,7 +424,7 @@ WHERE m.id = $1
 		&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
 		&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
-		&tableRowsBytes,
+		&tableRowsBytes, &r.ProvisionID,
 	)
 	if err != nil {
 		return metricRecord{}, err

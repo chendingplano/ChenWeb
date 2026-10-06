@@ -2828,6 +2828,7 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
 
 ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories TEXT NOT NULL DEFAULT '';
 ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories_en TEXT;
+ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS provision_id BIGINT;
 `
 	_, err := s.DB.ExecContext(ctx, ddl)
 	return err
@@ -2852,6 +2853,16 @@ func (s MetricsSQLStore) MetricsExist(ctx context.Context, inputRecordID int64) 
 func (s MetricsSQLStore) DeleteMetricsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error) {
 	if err := s.ensureMetricsTable(ctx); err != nil {
 		return 0, err
+	}
+	// Retire evidence first: re-extraction reuses metric_id values (ADR 2026100603).
+	evStore := assertions.EvidenceStore{DB: s.DB, Assertions: assertions.AssertionStore{DB: s.DB}}
+	retired, err := evStore.RetireMetricEvidenceForRecord(ctx, inputRecordID, "extract_metrics", "metric rows deleted for re-extraction")
+	if err != nil {
+		return 0, fmt.Errorf("(MID_26100601) retire metric evidence for record_id=%d: %w", inputRecordID, err)
+	}
+	if retired > 0 {
+		loggerutil.CreateDefaultLogger("MID_26100602").Info("retired metric evidence before metric delete",
+			"record_id", inputRecordID, "retired_evidence", retired)
 	}
 	res, err := s.DB.ExecContext(ctx, `DELETE FROM kb.metrics WHERE input_record_id = $1`, inputRecordID)
 	if err != nil {

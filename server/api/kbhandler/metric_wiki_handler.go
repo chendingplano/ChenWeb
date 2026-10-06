@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,6 +40,40 @@ type metricWikiResponse struct {
 	Status    bool            `json:"status"`
 	Generated bool            `json:"generated"`
 	Page      json.RawMessage `json:"page"`
+	// Statement carries the row fields clients need to label the metric's
+	// statement kind (ADR 2026100603 DR5). Read live, never cached in Page.
+	Statement *metricStatementFields `json:"statement,omitempty"`
+}
+
+type metricStatementFields struct {
+	ValueClass          string          `json:"value_class"`
+	ValueRangeType      string          `json:"value_range_type"`
+	FormulaOrDefinition string          `json:"formula_or_definition"`
+	ReasoningTags       json.RawMessage `json:"reasoning_tags,omitempty"`
+}
+
+// lookupMetricStatementFn is best-effort: a failed lookup leaves the wiki
+// response unchanged rather than failing it. Replaceable in tests.
+var lookupMetricStatementFn = func(db *sql.DB, metricID string) *metricStatementFields {
+	if db == nil {
+		return nil
+	}
+	var (
+		f    metricStatementFields
+		tags []byte
+	)
+	err := db.QueryRow(`
+SELECT COALESCE(value_class, ''), COALESCE(value_range_type, ''),
+       COALESCE(formula_or_definition, ''), reasoning_tags
+FROM kb.metrics WHERE metric_id = $1
+ORDER BY id DESC LIMIT 1`, metricID).Scan(&f.ValueClass, &f.ValueRangeType, &f.FormulaOrDefinition, &tags)
+	if err != nil {
+		return nil
+	}
+	if len(tags) > 0 {
+		f.ReasoningTags = json.RawMessage(tags)
+	}
+	return &f
 }
 
 // GetMetricWiki handles GET /api/v1/kb/metrics/:metric_id/wiki?lang=<lang>.
@@ -92,6 +127,7 @@ func GetMetricWiki(c echo.Context) error {
 				Status:    true,
 				Generated: false,
 				Page:      json.RawMessage(data),
+				Statement: lookupMetricStatementFn(ApiTypes.ProjectDBHandle, metricID),
 			})
 		}
 	} else if !os.IsNotExist(err) {
@@ -113,7 +149,8 @@ func GetMetricWiki(c echo.Context) error {
 	// Double-check: another request may have generated the page while we waited.
 	if !needsRefresh {
 		if data, err := os.ReadFile(pagePath); err == nil {
-			return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: false, Page: json.RawMessage(data)})
+			return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: false, Page: json.RawMessage(data),
+				Statement: lookupMetricStatementFn(ApiTypes.ProjectDBHandle, metricID)})
 		}
 	}
 
@@ -135,7 +172,8 @@ func GetMetricWiki(c echo.Context) error {
 	}
 
 	logger.Info("metric wiki page generated", "metric_id", metricID, "lang", lang, "path", pagePath)
-	return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: true, Page: page})
+	return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: true, Page: page,
+		Statement: lookupMetricStatementFn(ApiTypes.ProjectDBHandle, metricID)})
 }
 
 // metricWikiLangs is the set of page languages supported for now. English is

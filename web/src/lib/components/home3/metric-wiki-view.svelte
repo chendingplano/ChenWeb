@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getMetricWiki, type MetricWikiPage } from '$lib/services/metricWikiService';
 	import ArtifactWikiArticleView from './artifact-wiki-article-view.svelte';
+	import StatementKindBadge from './statement-kind-badge.svelte';
+	import type { MetricStatementFields } from '$lib/metric-statement-kind';
 
 	let {
 		metricId,
@@ -10,6 +12,7 @@
 	}: { metricId: string; darkMode?: boolean; lang?: string; showInfobox?: boolean } = $props();
 
 	let page = $state<MetricWikiPage | null>(null);
+	let statement = $state<MetricStatementFields | null>(null);
 	let loading = $state(true);
 	let generated = $state(false);
 	let error = $state('');
@@ -20,6 +23,7 @@
 		try {
 			const resp = await getMetricWiki(metricId, lang);
 			page = resp.page;
+			statement = resp.statement ?? null;
 			generated = resp.generated;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -51,4 +55,8 @@
 	{error}
 	{generated}
 	retry={load}
-/>
+>
+	{#snippet titleAside()}
+		{#if statement?.value_class}<StatementKindBadge row={statement} />{/if}
+	{/snippet}
+</ArtifactWikiArticleView>

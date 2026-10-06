@@ -249,6 +249,8 @@ export type KbMetricRecord = {
 	metric_definition_term_id?: string | null;
 	value_range_type_error?: string | null;
 	source_table_rows?: { line: number; rows: string[]; row_hash?: Record<string, string> }[] | null;
+	/** kb.metrics.provision_id (ADR 2026100603 DR2); null until linked. */
+	provision_id?: number | null;
 	table_context?: TableContextWindow[];
 };
 
@@ -1574,6 +1576,7 @@ export type ArtifactCategoryItem = {
 	value_class_en?: string;
 	value_data_type?: string;
 	value_range_type?: string;
+	formula_or_definition?: string;
 };
 
 export type GetArtifactCategoryResponse = {

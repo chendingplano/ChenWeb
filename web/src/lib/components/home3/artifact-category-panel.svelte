@@ -12,6 +12,7 @@
 	} from '$lib/services/kbService';
 	import type { ArtifactCategoryItem, RawLine } from '$lib/services/kbService';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import StatementKindBadge from './statement-kind-badge.svelte';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
 	let {
@@ -512,6 +513,10 @@
 						{#if selectedItem.unit || selectedItem.unit_en}
 							<dt>{m.artifact_category_panel_unit()}</dt>
 							<dd>{[selectedItem.unit, selectedItem.unit_en].filter(Boolean).join(' / ')}</dd>
+						{/if}
+						{#if selectedItem.value_class}
+							<dt>{m.metric_statement_kind_label()}</dt>
+							<dd><StatementKindBadge row={selectedItem} /></dd>
 						{/if}
 						{#if selectedItem.value_class || selectedItem.value_class_en}
 							<dt>{m.artifact_category_panel_value_class()}</dt>

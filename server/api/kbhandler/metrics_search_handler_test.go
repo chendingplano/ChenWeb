@@ -54,11 +54,13 @@ func TestSearchMetricsReturnsRankedHybridResults(t *testing.T) {
 			"metric_subject", "metric_subject_en", "metric_value", "metric_unit", "metric_unit_en",
 			"value_class", "value_class_en", "value_data_type", "is_explicit_metric", "table_name_or_section",
 			"metric_keywords", "metric_keywords_en", "source_line_spans", "score", "snippet",
+			"value_range_type", "formula_or_definition", "reasoning_tags",
 		}).AddRow(
 				int64(22), "7_mtc_1", int64(7), "input_7.pdf", "Energy intensity", "Energy intensity",
 			"Building envelope", "Building envelope", "12", "kWh/m2", "kWh/m2",
 			"performance", "performance", "number", true, "Table 2",
 			`["energy","intensity"]`, `["energy","intensity"]`, `["10:11"]`, 0.9132, "Energy intensity target is 12 kWh/m2",
+			"upper_bound", "", `[]`,
 		))
 
 	c, rec := newMetricSearchContext(t, "q=energy&input_record_id=7&is_explicit_metric=true&value_class=performance&value_data_type=number&metric_unit=kWh%2Fm2")
@@ -194,6 +196,7 @@ func TestQueryMetricSearchResultsListsFilterOnlyMatches(t *testing.T) {
 			"metric_subject", "metric_subject_en", "metric_value", "metric_unit", "metric_unit_en",
 			"value_class", "value_class_en", "value_data_type", "is_explicit_metric", "table_name_or_section",
 			"metric_keywords", "metric_keywords_en", "source_line_spans", "score", "snippet",
+			"value_range_type", "formula_or_definition", "reasoning_tags",
 		}))
 
 	_, err = queryMetricSearchResults(db, "", metricSearchFilters{InputRecordID: &recordID}, 1, 20, cfg)
@@ -229,6 +232,7 @@ func TestQueryMetricSearchResultsEscapesHeadlineOptions(t *testing.T) {
 			"metric_subject", "metric_subject_en", "metric_value", "metric_unit", "metric_unit_en",
 			"value_class", "value_class_en", "value_data_type", "is_explicit_metric", "table_name_or_section",
 			"metric_keywords", "metric_keywords_en", "source_line_spans", "score", "snippet",
+			"value_range_type", "formula_or_definition", "reasoning_tags",
 		}))
 
 	_, err = queryMetricSearchResults(db, "energy", metricSearchFilters{}, 1, 20, cfg)

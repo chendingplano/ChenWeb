@@ -71,7 +71,8 @@ SELECT
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
-    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
+    m.provision_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.metric_id = $1
@@ -94,6 +95,7 @@ WHERE m.metric_id = $1
 		&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 		&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
+		&r.ProvisionID,
 	)
 		if err != nil {
 			return metricRecord{}, err

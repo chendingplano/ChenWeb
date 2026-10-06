@@ -4,6 +4,9 @@
 // Review "Full Details" dialog (product-metric-review-view.svelte). Keeping
 // this in one place means both views show the same fields for the same metric.
 import type { KbMetricRecord, RawLine } from '$lib/services/kbService';
+import { m as msg } from '$lib/paraglide/messages.js';
+import { classifyMetricStatement } from '$lib/metric-statement-kind';
+import { STATEMENT_KIND_LABEL } from '$lib/metric-statement-kind-labels';
 import ActivityIcon from '@lucide/svelte/icons/activity';
 import BookOpenIcon from '@lucide/svelte/icons/book-open';
 import CalendarIcon from '@lucide/svelte/icons/calendar';
@@ -250,6 +253,13 @@ export function buildMetricGroupAttrs(
 		),
 		textAttr('unit', 'Unit', HashIcon, fmt(m.metric_unit), has(m.metric_unit)),
 		textAttr('value_class', 'Class', TagIcon, fmt(m.value_class), has(m.value_class)),
+		textAttr(
+			'statement_kind',
+			msg.metric_statement_kind_label(),
+			TagIcon,
+			STATEMENT_KIND_LABEL[classifyMetricStatement(m).kind](),
+			true
+		),
 		textAttr(
 			'value_data_type',
 			'Data Type',

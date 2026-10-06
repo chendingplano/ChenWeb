@@ -21,6 +21,7 @@
 		metricSearchResultSecondaryText
 	} from '../kb-metric-search-result.js';
 	import { pickableMetricId } from './metric-search-pick';
+	import StatementKindBadge from '$lib/components/home3/statement-kind-badge.svelte';
 	import type { ExplorerTokens } from './theme';
 
 	let {
@@ -348,6 +349,7 @@
 								<div class="hit-name">{metricName(m)}</div>
 								{#if metricValueText(m)}<div class="hit-desc">{metricValueText(m)}</div>{/if}
 								<div class="hit-foot">
+									{#if m.value_class}<StatementKindBadge row={m} />{/if}
 									{#if m.value_class}<span class="tag quiet">{m.value_class}</span>{/if}
 									{#if m.location_type}<span class="tag quiet">{m.location_type}</span>{/if}
 									{#if linkId == null}<span class="tag warn"

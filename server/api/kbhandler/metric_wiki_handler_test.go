@@ -322,3 +322,41 @@ func TestMetricWikiPath(t *testing.T) {
 		t.Error("metricWikiPath(artifactDir=\"\") = nil error, want error")
 	}
 }
+
+func TestGetMetricWikiCacheHitCarriesStatementFields(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	recordDir := filepath.Join(artifactDir, "0", "5")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pageJSON := `{"metric_id":"5_mtc_3","title":"Enclosed vehicles"}`
+	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_metric_5_mtc_3.en.json"), []byte(pageJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := lookupMetricStatementFn
+	t.Cleanup(func() { lookupMetricStatementFn = orig })
+	var gotID string
+	lookupMetricStatementFn = func(_ *sql.DB, metricID string) *metricStatementFields {
+		gotID = metricID
+		return &metricStatementFields{ValueClass: "requirement", ValueRangeType: "qualitative"}
+	}
+
+	c, rec := newMetricWikiContext(t, "5_mtc_3", "")
+	if err := GetMetricWiki(c); err != nil {
+		t.Fatalf("GetMetricWiki err = %v", err)
+	}
+	var resp metricWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if gotID != "5_mtc_3" {
+		t.Errorf("lookup metric_id = %q, want 5_mtc_3", gotID)
+	}
+	if resp.Statement == nil || resp.Statement.ValueClass != "requirement" || resp.Statement.ValueRangeType != "qualitative" {
+		t.Errorf("statement = %+v, want requirement/qualitative", resp.Statement)
+	}
+	if string(resp.Page) != pageJSON {
+		t.Errorf("cached page altered: %s", resp.Page)
+	}
+}

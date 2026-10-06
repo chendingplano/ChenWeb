@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -339,6 +340,44 @@ WHERE id = $1`
 	}
 	_, err = s.Assertions.TransitionToUnsupportedForEvidenceLoss(ctx, assertionID, transitionReason, actor)
 	return err
+}
+
+// RetireMetricEvidenceForRecord soft-deletes every active metric evidence row
+// of one input record. Callers run it before deleting that record's kb.metrics
+// rows: re-extraction renumbers metric_id from <record>_mtc_1, so evidence left
+// active would attach old assertions to unrelated new metrics (ADR 2026100603).
+// Each row goes through DeleteEvidence so the last-support -> unsupported
+// transition is recorded. Returns the number of rows retired.
+func (s EvidenceStore) RetireMetricEvidenceForRecord(ctx context.Context, inputRecordID int64, actor, reason string) (int, error) {
+	if s.DB == nil {
+		return 0, errors.New("db is nil")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT id FROM kb.assertion_evidence
+WHERE artifact_type = 'metric' AND input_record_id = $1 AND NOT deleted
+ORDER BY id`, inputRecordID)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for i, id := range ids {
+		if err := s.DeleteEvidence(ctx, id, actor, reason); err != nil {
+			return i, fmt.Errorf("retire metric evidence %d for record %d: %w", id, inputRecordID, err)
+		}
+	}
+	return len(ids), nil
 }
 
 func (s EvidenceStore) RestoreEvidence(ctx context.Context, id int64) (Evidence, error) {

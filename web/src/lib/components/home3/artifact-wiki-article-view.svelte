@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { metricWikiCopyForLang } from './metric-wiki-i18n';
 
 	type ArticleMap = Record<string, unknown>;
@@ -13,7 +14,8 @@
 		loading = false,
 		error = '',
 		generated = false,
-		retry = undefined
+		retry = undefined,
+		titleAside = undefined
 	}: {
 		article?: ArticleMap | null;
 		artifactType: string;
@@ -25,6 +27,7 @@
 		error?: string;
 		generated?: boolean;
 		retry?: (() => void) | undefined;
+		titleAside?: Snippet;
 	} = $props();
 
 	let pageBg = $derived(darkMode ? 'oklch(16% 0.013 250)' : 'oklch(96% 0.012 84)');
@@ -139,6 +142,7 @@
 			<header class="head">
 				<p class="eyebrow">{artifactLabel}</p>
 				<h1>{title}</h1>
+				{@render titleAside?.()}
 				{#if sourceTitle}
 					<p class="source">{copy.sourcePrefix} {sourceTitle}</p>
 				{/if}

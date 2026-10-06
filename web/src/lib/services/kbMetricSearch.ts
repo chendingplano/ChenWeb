@@ -34,6 +34,9 @@ export type KbMetricSearchResult = {
 	value_class?: string;
 	value_class_en?: string;
 	value_data_type?: string;
+	value_range_type?: string;
+	formula_or_definition?: string;
+	reasoning_tags?: unknown;
 	is_explicit_metric?: boolean;
 	table_name_or_section?: string;
 	metric_keywords?: string[];

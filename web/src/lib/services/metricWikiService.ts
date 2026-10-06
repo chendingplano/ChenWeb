@@ -50,6 +50,13 @@ export type MetricWikiResponse = {
 	status: boolean;
 	generated: boolean;
 	page: MetricWikiPage;
+	/** Live row fields for the statement-kind label (ADR 2026100603 DR5). */
+	statement?: {
+		value_class: string;
+		value_range_type: string;
+		formula_or_definition: string;
+		reasoning_tags?: unknown;
+	};
 	error?: string;
 	error_msg?: string;
 };
