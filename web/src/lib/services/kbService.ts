@@ -271,14 +271,46 @@ async function fetchOrThrow<T>(url: string, fallback: string): Promise<T> {
 // 'kb' reads kb.metrics; 'testbed' reads gold metrics (latest benchmark run in testbed.metrics).
 export type KbMetricSource = 'kb' | 'testbed';
 
+// Gold-metrics filters (source 'testbed' only). An empty skillVersion means the
+// newest version; an empty modelName means any model.
+export type GoldMetricFilters = { skillVersion?: string; modelName?: string };
+
 export async function listKbMetrics(
 	inputRecordId: number,
-	source: KbMetricSource = 'kb'
+	source: KbMetricSource = 'kb',
+	gold: GoldMetricFilters = {}
 ): Promise<ListKbMetricsResponse> {
-	const sourceParam = source === 'kb' ? '' : `&source=${source}`;
+	const params = new URLSearchParams({ input_record_id: String(inputRecordId) });
+	if (source !== 'kb') params.set('source', source);
+	if (source === 'testbed') {
+		if (gold.skillVersion) params.set('skill_version', gold.skillVersion);
+		if (gold.modelName) params.set('model_name', gold.modelName);
+	}
 	return fetchOrThrow<ListKbMetricsResponse>(
-		`${BASE}/metrics?input_record_id=${encodeURIComponent(String(inputRecordId))}${sourceParam}`,
+		`${BASE}/metrics?${params.toString()}`,
 		'Failed to list kb metrics'
+	);
+}
+
+export type GoldMetricOption = {
+	skill_version: string;
+	model_name: string;
+	record_count: number;
+	run_count: number;
+};
+
+export type GoldMetricOptionsResponse = {
+	status: boolean;
+	// Newest first.
+	skill_versions: string[];
+	options: GoldMetricOption[];
+};
+
+// Skill versions and models present in testbed.metrics, for the Gold Metrics filters.
+export async function listGoldMetricOptions(): Promise<GoldMetricOptionsResponse> {
+	return fetchOrThrow<GoldMetricOptionsResponse>(
+		`${BASE}/metrics/gold-options`,
+		'Failed to list gold metric options'
 	);
 }
 

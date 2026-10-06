@@ -135,14 +135,15 @@ func firstMetricSourceLine(spans json.RawMessage) int {
 }
 
 // testbedMetricsQuery reads the latest benchmark run of testbed.metrics (gold
-// metrics, see the extract-metrics-benchmark skill) in the same column order as
-// the kb.metrics query in ListMetrics; columns testbed lacks are NULL.
+// metrics, see the extract-metrics-benchmark skill) for one skill version ($2) and,
+// when $3 is non-empty, one model, in the same column order as the kb.metrics query
+// in ListMetrics; columns testbed lacks are NULL.
 const testbedMetricsQuery = `
 SELECT
     m.id, m.input_record_id, m.metric_id, NULL::text AS event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
-    m.metric_keywords, m.metric_keywords_en, NULL::text AS model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric,
@@ -159,6 +160,8 @@ WHERE m.input_record_id = $1
   AND m.benchmark_run_id = (
     SELECT t.benchmark_run_id FROM testbed.metrics t
     WHERE t.input_record_id = $1
+      AND t.skill_version = $2
+      AND ($3 = '' OR t.model_name = $3)
     ORDER BY t.created_at DESC, t.id DESC
     LIMIT 1
   )
@@ -166,7 +169,9 @@ ORDER BY m.id ASC
 `
 
 // ListMetrics handles GET /api/v1/kb/metrics?input_record_id=N[&source=testbed].
-// source=testbed reads gold metrics from testbed.metrics instead of kb.metrics.
+// source=testbed reads gold metrics from testbed.metrics instead of kb.metrics,
+// narrowed by optional skill_version (default: the newest version) and model_name
+// (default: any model).
 func ListMetrics(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_001")
 	defer rc.Close()
@@ -228,10 +233,25 @@ LEFT JOIN LATERAL (
 WHERE m.input_record_id = $1
 ORDER BY m.id ASC
 `
+	args := []any{inputID}
 	if source == "testbed" {
+		skillVersion := strings.TrimSpace(c.QueryParam("skill_version"))
+		modelName := strings.TrimSpace(c.QueryParam("model_name"))
+		if skillVersion == "" {
+			skillVersion, err = newestGoldSkillVersion(db)
+			if err != nil {
+				logger.Error("resolve newest gold skill version failed", "err", err)
+				return c.JSON(http.StatusInternalServerError, errorResponse{
+					Status:   false,
+					ErrorMsg: "failed to resolve gold metrics skill version (CWB_KB_M_023)",
+				})
+			}
+		}
+		logger.Info("list gold metrics", "input_record_id", inputID, "skill_version", skillVersion, "model_name", modelName)
 		query = testbedMetricsQuery
+		args = append(args, skillVersion, modelName)
 	}
-	rows, err := db.Query(query, inputID)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		logger.Error("query metrics failed", "source", source, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{

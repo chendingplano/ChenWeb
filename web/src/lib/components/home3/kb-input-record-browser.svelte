@@ -2,6 +2,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { tick, untrack } from 'svelte';
+	import type { Snippet } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -60,7 +61,8 @@
 		onSelect = () => {},
 		onResultsChange = () => {},
 		onError = () => {},
-		onFiltersChange = () => {}
+		onFiltersChange = () => {},
+		extraControls
 	}: {
 		darkMode?: boolean;
 		instanceKey: string;
@@ -79,6 +81,8 @@
 		onResultsChange?: (payload: { results: KbInputRecord[]; total: number; page: number }) => void;
 		onError?: (error: Error) => void;
 		onFiltersChange?: (filters: RecordBrowserFilters) => void;
+		// Host-specific filters rendered in the search block, below the record id field.
+		extraControls?: Snippet;
 	} = $props();
 
 	// Fallbacks only. The host view supplies the real tokens (--panel-bg, --ink-line,
@@ -461,6 +465,10 @@
 					</button>
 				</div>
 			</label>
+
+			{#if extraControls}
+				{@render extraControls()}
+			{/if}
 
 			<div class="action-row">
 				<button type="button" class="retrieve-btn" onclick={retrieveRecord} disabled={loading}>

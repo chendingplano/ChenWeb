@@ -4,6 +4,7 @@
 	import { browser } from '$app/environment';
 	import {
 		listKbMetrics,
+		listGoldMetricOptions,
 		getKbInput,
 		getRawLines,
 		extractKbMetrics,
@@ -13,6 +14,7 @@
 		type KbInputRecord,
 		type KbMetricRecord,
 		type KbMetricSource,
+		type GoldMetricOption,
 		type ExtractedKbMetric,
 		type RawLine,
 		type SourceLineSpan
@@ -74,6 +76,47 @@
 		source?: KbMetricSource;
 	} = $props();
 	const metricsEditable = $derived(source === 'kb');
+
+	// Gold-metrics filters (source 'testbed'): which skill version and model's
+	// benchmark run to show. The version defaults to the newest; no model is
+	// picked by default, and the user is prompted to choose one.
+	let goldSkillVersions = $state<string[]>([]);
+	let goldOptions = $state<GoldMetricOption[]>([]);
+	let goldSkillVersion = $state('');
+	let goldModelName = $state('');
+	let goldOptionsError = $state('');
+	const goldModelNames = $derived(
+		goldOptions.filter((o) => o.skill_version === goldSkillVersion).map((o) => o.model_name)
+	);
+	const goldModelMissing = $derived(source === 'testbed' && goldModelName === '');
+
+	async function loadGoldOptions() {
+		goldOptionsError = '';
+		try {
+			const res = await listGoldMetricOptions();
+			goldSkillVersions = res.skill_versions ?? [];
+			goldOptions = res.options ?? [];
+			if (!goldSkillVersions.includes(goldSkillVersion)) goldSkillVersion = goldSkillVersions[0] ?? '';
+		} catch (err) {
+			goldOptionsError = err instanceof Error ? err.message : i18n.metric_mgmt_gold_options_failed();
+		}
+	}
+
+	$effect(() => {
+		if (source === 'testbed') void loadGoldOptions();
+	});
+
+	function handleGoldSkillVersionChange(event: Event) {
+		goldSkillVersion = (event.currentTarget as HTMLSelectElement).value;
+		// A model with no run under the new version would show nothing; make the user pick again.
+		if (!goldModelNames.includes(goldModelName)) goldModelName = '';
+		if (currentInput) void loadMetricsForRecord(currentInput.id);
+	}
+
+	function handleGoldModelChange(event: Event) {
+		goldModelName = (event.currentTarget as HTMLSelectElement).value;
+		if (currentInput) void loadMetricsForRecord(currentInput.id);
+	}
 
 	// ---------- Aesthetic tokens: "archival reading room" ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
@@ -984,7 +1027,9 @@
 		try {
 			rawLoading = true;
 			const [metricRes, inputRes, rawRes] = await Promise.all([
-				listKbMetrics(id, source),
+				goldModelMissing
+					? Promise.resolve({ results: [] as KbMetricRecord[] })
+					: listKbMetrics(id, source, { skillVersion: goldSkillVersion, modelName: goldModelName }),
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
 			]);
@@ -1425,7 +1470,41 @@
 					onError={(error) => {
 						errorMsg = error.message;
 					}}
-				/>
+				>
+					{#snippet extraControls()}
+						{#if source === 'testbed'}
+							<div class="gold-filters">
+								<label class="gold-filter">
+									<span class="gold-filter-label">{i18n.metric_mgmt_gold_skill_version()}</span>
+									<select class="toolbar-select" value={goldSkillVersion} onchange={handleGoldSkillVersionChange}>
+										{#each goldSkillVersions as v, idx (v)}
+											<option value={v}>{idx === 0 ? i18n.metric_mgmt_gold_version_newest({ version: v }) : v}</option>
+										{/each}
+									</select>
+								</label>
+								<label class="gold-filter">
+									<span class="gold-filter-label">{i18n.metric_mgmt_gold_model_name()}</span>
+									<select
+										class="toolbar-select"
+										class:gold-filter-required={goldModelName === ''}
+										value={goldModelName}
+										onchange={handleGoldModelChange}
+									>
+										<option value="" disabled>{i18n.metric_mgmt_gold_select_model_option()}</option>
+										{#each goldModelNames as name (name)}
+											<option value={name}>{name}</option>
+										{/each}
+									</select>
+								</label>
+								{#if goldOptionsError}
+									<div class="gold-filter-hint error">{goldOptionsError}</div>
+								{:else if goldModelName === ''}
+									<div class="gold-filter-hint">{i18n.metric_mgmt_gold_select_model_prompt()}</div>
+								{/if}
+							</div>
+						{/if}
+					{/snippet}
+				</KbInputRecordBrowser>
 			</div>
 		{:else}
 			<div class="record-browser-rail">
@@ -1622,6 +1701,12 @@
 							</div>
 						</button>
 					{/each}
+				{:else if !loading && currentInput && goldModelMissing}
+					<div class="empty">
+						<div class="empty-glyph">§</div>
+						<div class="empty-title">{i18n.metric_mgmt_gold_select_model_title()}</div>
+						<div class="empty-sub">{i18n.metric_mgmt_gold_select_model_prompt()}</div>
+					</div>
 				{:else if !loading && metrics.length === 0}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
@@ -4245,6 +4330,37 @@
 	.toolbar-select:focus {
 		outline: none;
 		border-color: var(--brass);
+	}
+	.gold-filters {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 0.5rem 0.75rem;
+		margin-top: 0.75rem;
+	}
+	.gold-filter {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		min-width: 0;
+	}
+	.gold-filter-label {
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+	.gold-filter .toolbar-select {
+		max-width: none;
+		width: 100%;
+	}
+	.gold-filter-required {
+		border-color: var(--brass);
+	}
+	.gold-filter-hint {
+		grid-column: 1 / -1;
+		font-size: 12px;
+		color: var(--brass);
 	}
 	.toolbar-kw-wrap {
 		position: relative;
