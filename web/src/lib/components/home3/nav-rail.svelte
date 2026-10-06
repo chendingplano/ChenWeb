@@ -268,17 +268,20 @@
 						{ id: 'sysadmin-llm-models', label: m.nav_sysadmin_llm_models() },
 						{ id: 'sysadmin-llm-chat-sessions', label: m.nav_sysadmin_llm_chat_sessions() },
 						{ id: 'sysadmin-llm-pi-sessions', label: m.nav_sysadmin_llm_pi_sessions() },
-						{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
-						// Gold metrics (testbed.metrics) are a development tool: /development only.
+						// /development groups Review Metrics with Gold Metrics (testbed.metrics,
+						// a development tool) under Metrics; other pages keep Review Metrics here.
 						...(pageKey === 'development'
 							? [
 									{
 										id: 'sysadmin-llm-metrics',
 										label: m.nav_sysadmin_llm_metrics(),
-										children: [{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() }]
+										children: [
+											{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
+											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() }
+										]
 									}
 								]
-							: []),
+							: [{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() }]),
 						{
 							id: 'sysadmin-llm-decision-models',
 							label: m.nav_sysadmin_llm_decision_models(),
