@@ -137,7 +137,8 @@ func firstMetricSourceLine(spans json.RawMessage) int {
 // testbedMetricsQuery reads the latest benchmark run of testbed.metrics (gold
 // metrics, see the extract-metrics-benchmark skill) for one skill version ($2) and,
 // when $3 is non-empty, one model, in the same column order as the kb.metrics query
-// in ListMetrics; columns testbed lacks are NULL.
+// in ListMetrics; columns testbed lacks are NULL. A run is identified by
+// (skill_name, skill_version, model_name, benchmark_run_id), not the run ID alone.
 const testbedMetricsQuery = `
 SELECT
     m.id, m.input_record_id, m.metric_id, NULL::text AS event_id, COALESCE(i.staging_filename, '') AS input_filename,
@@ -157,8 +158,8 @@ SELECT
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
-  AND m.benchmark_run_id = (
-    SELECT t.benchmark_run_id FROM testbed.metrics t
+  AND (m.skill_name, m.skill_version, m.model_name, m.benchmark_run_id) = (
+    SELECT t.skill_name, t.skill_version, t.model_name, t.benchmark_run_id FROM testbed.metrics t
     WHERE t.input_record_id = $1
       AND t.skill_version = $2
       AND ($3 = '' OR t.model_name = $3)
