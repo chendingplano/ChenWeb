@@ -188,6 +188,7 @@
 			activeMenu?.childId !== 'sysadmin-db-resolve-orphaned-labels' &&
 			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
 			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
+			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
