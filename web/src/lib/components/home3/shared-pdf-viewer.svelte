@@ -246,8 +246,14 @@
 		paintHighlights();
 	}
 
+	function loadedPageCount(): number {
+		return pdfDoc && pdfLoadedInputId === inputId ? Math.max(1, pdfDoc.numPages || 1) : 0;
+	}
+
 	function clampPage(nextPage: number): number {
-		const max = Math.max(1, numPages || 1);
+		// Prefer the loaded document's own count: parents reset the bound numPages
+		// on re-retrieve of the same record, which does not reload the document.
+		const max = Math.max(1, loadedPageCount() || numPages || 1);
 		if (!Number.isFinite(nextPage)) return 1;
 		return Math.max(1, Math.min(Math.trunc(nextPage), max));
 	}
@@ -485,6 +491,14 @@
 		return () => {
 			cancelled = true;
 		};
+	});
+
+	$effect(() => {
+		// Restore the bound page count if a parent clears it while the same document
+		// stays loaded (e.g. metric-mgmt-view re-retrieving the current record).
+		const current = numPages;
+		const loaded = loadedPageCount();
+		if (loaded > 0 && current !== loaded) numPages = loaded;
 	});
 
 	$effect(() => {
