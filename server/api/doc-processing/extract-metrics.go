@@ -1986,14 +1986,18 @@ var metricDropReasonTags = map[string]bool{
 	"qualitative_requirement": true,
 }
 
-// dropRowsTaggedWithDropReason removes rows whose reasoning_tags carry a drop reason.
+// dropRowsTaggedWithDropReason removes rows whose reasoning_tags carry a drop reason, and
+// rows that are an agreed or announced activity schedule even when the LLM left them untagged
+// (isAgreedActivitySchedule).
 func dropRowsTaggedWithDropReason(metrics []map[string]any) (kept, dropped []map[string]any) {
 	for _, m := range metrics {
-		drop := false
+		drop := isAgreedActivitySchedule(m)
 		for _, tag := range toStringSlice(m["reasoning_tags"]) {
+			if drop {
+				break
+			}
 			if metricDropReasonTags[strings.ToLower(strings.TrimSpace(tag))] {
 				drop = true
-				break
 			}
 		}
 		if drop {
@@ -2003,6 +2007,47 @@ func dropRowsTaggedWithDropReason(metrics []map[string]any) (kept, dropped []map
 		}
 	}
 	return kept, dropped
+}
+
+var (
+	// activityScheduleNameWords name when or how often something happens.
+	activityScheduleNameWords = []string{"时间", "频次", "频率", "次数", "时段", "time", "frequency", "schedule"}
+	// activityScheduleOpenWords say the value is agreed or announced instead of stated.
+	activityScheduleOpenWords = []string{"约定", "商定", "协商", "协定", "公告", "公示", "agree", "negotiat", "announce"}
+)
+
+// isAgreedActivitySchedule reports whether a row is a duty to agree or announce when or how
+// often an activity happens, with no value ("收运单位应与集中供餐单位约定餐厨垃圾收运的时间和频次").
+// Gold rule X2 and the enrich prompt's activity_schedule drop reason exclude these; the LLM
+// sometimes emits them as requirement + limit_absent instead (416_mtc_3, 2026-10-08). A
+// property agreed for an object ("抗压强度由供需双方商定", A4) is kept: its name is not a time or
+// frequency.
+func isAgreedActivitySchedule(m map[string]any) bool {
+	valueClass := strings.ToLower(strings.TrimSpace(asString(m["value_class"])))
+	if valueClass != "requirement" && valueClass != "target" {
+		return false
+	}
+	if statementNumericRangeTypes[strings.ToLower(strings.TrimSpace(asString(m["value_range_type"])))] {
+		return false
+	}
+	if strings.TrimSpace(asString(m["metric_value"])) != "" || strings.TrimSpace(asString(m["unit"])) != "" {
+		return false
+	}
+	name := strings.ToLower(asString(m["metric_name"]) + " " + asString(m["metric_name_en"]))
+	if !containsAny(name, activityScheduleNameWords) {
+		return false
+	}
+	open := strings.ToLower(asString(m["threshold_or_target"]) + " " + asString(m["desc"]) + " " + asString(m["desc_en"]))
+	return containsAny(open, activityScheduleOpenWords)
+}
+
+func containsAny(s string, words []string) bool {
+	for _, w := range words {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
 }
 
 func candidateSourceLineSpans(candidate metricCandidate) []string {
@@ -3575,7 +3620,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		var selfDropped []map[string]any
 		result.metrics, selfDropped = dropRowsTaggedWithDropReason(result.metrics)
 		for _, m := range selfDropped {
-			p.Logger.Info("pass2: dropped row the LLM tagged with a drop reason",
+			p.Logger.Info("pass2: dropped row with a drop-reason tag or an agreed activity schedule",
 				"record_id", recordID,
 				"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
 				"candidate_id", m["candidate_id"],
