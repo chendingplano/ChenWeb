@@ -13,6 +13,7 @@ func TestMetricStatementKind(t *testing.T) {
 		{"numeric requirement keeps its criterion", map[string]any{"value_class": "requirement", "value_range_type": "upper_bound"}, statementKindRequirementWithCriterion},
 		{"target counts as a requirement", map[string]any{"value_class": "target", "value_range_type": "exact"}, statementKindRequirementWithCriterion},
 		{"limit_absent leaves the value open", map[string]any{"value_class": "requirement", "value_range_type": "limit_absent"}, statementKindRequirementValueOpen},
+		{"gold metric with no value", map[string]any{"value_class": "metric-with-no-value", "value_range_type": "limit_absent"}, statementKindRequirementValueOpen},
 		{"delegated requirement", map[string]any{"value_class": "reference", "value_range_type": "qualitative", "reasoning_tags": []string{"cited_doc:CJJ 52"}}, statementKindDelegatedRequirement},
 		{"citation tag alone delegates", map[string]any{"value_class": "requirement", "value_range_type": "qualitative", "reasoning_tags": []any{"external_reference"}}, statementKindDelegatedRequirement},
 		{"test setting wins over requirement", map[string]any{"value_class": "requirement", "value_range_type": "exact", "reasoning_tags": []string{"test_condition"}}, statementKindTestParameter},

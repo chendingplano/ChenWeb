@@ -25,6 +25,13 @@ test('limit_absent requirement leaves the value open', () => {
 	assert.equal(classifyMetricStatement({ value_class: 'requirement', value_range_type: 'limit_absent' }).kind, 'requirement_value_open');
 });
 
+test('gold metric-with-no-value rows classify like requirement + limit_absent', () => {
+	assert.equal(
+		classifyMetricStatement({ value_class: 'metric-with-no-value', value_range_type: 'limit_absent' }).kind,
+		'requirement_value_open'
+	);
+});
+
 test('delegated requirement', () => {
 	assert.equal(
 		classifyMetricStatement({ value_class: 'reference', value_range_type: 'qualitative', reasoning_tags: ['cited_doc:CJJ 52'] }).kind,

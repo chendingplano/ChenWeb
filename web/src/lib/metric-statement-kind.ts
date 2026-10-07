@@ -68,7 +68,10 @@ export function classifyMetricStatement(row: MetricStatementFields): {
 }
 
 function statementKind(row: MetricStatementFields): StatementKind {
-	const valueClass = norm(row.value_class);
+	// 'metric-with-no-value' exists only in gold rows (testbed.metrics, benchmark rules 4.1.0+):
+	// the same assertion extract_metrics stores as requirement + limit_absent.
+	const rawClass = norm(row.value_class);
+	const valueClass = rawClass === 'metric-with-no-value' ? 'requirement' : rawClass;
 	const rangeType = norm(row.value_range_type);
 	const numeric = NUMERIC_RANGE_TYPES.has(rangeType);
 	const tags = parseTags(row.reasoning_tags);

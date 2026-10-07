@@ -30,6 +30,11 @@ var statementNumericRangeTypes = map[string]bool{
 // value_range_type, formula_or_definition and reasoning_tags.
 func metricStatementKind(row map[string]any) string {
 	valueClass := strings.ToLower(strings.TrimSpace(asString(row["value_class"])))
+	// "metric-with-no-value" exists only in gold rows (testbed.metrics, benchmark rules 4.1.0+):
+	// the same assertion extract_metrics stores as requirement + limit_absent.
+	if valueClass == "metric-with-no-value" {
+		valueClass = "requirement"
+	}
 	rangeType := strings.ToLower(strings.TrimSpace(asString(row["value_range_type"])))
 	numeric := statementNumericRangeTypes[rangeType]
 	tags := statementTags(row["reasoning_tags"])
