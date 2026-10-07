@@ -16,11 +16,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+/*
 const pipelineRuleSelectCols = `
     r.id, r.name, r.priority, r.match_input_doc_type, r.match_source_language, r.match_knowledge_store_binding,
     r.pipeline_id, p.name, r.active, r.create_time, r.modify_time
 FROM kb.pipeline_rules r
 JOIN kb.pipelines p ON p.id = r.pipeline_id`
+*/
 
 func newPipelineRuleContext(t *testing.T, method, target string, body string) (echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()

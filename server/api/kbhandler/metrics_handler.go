@@ -1616,11 +1616,13 @@ func artifactWebIndexRowBelongsToRecord(row string, recordIDPrefix string) bool 
 	return strings.HasPrefix(firstField[0], recordIDPrefix)
 }
 
+/*
 func removeSemanticProjectionTreeRecord(treeRootDir string, recordID int64) error {
 	stats, err := removeArtifactWebTreeRecord(treeRootDir, recordID)
 	_ = stats
 	return err
 }
+*/
 
 func pruneMetadataOnlyArtifactWebDirs(root string) error {
 	root = filepath.Clean(strings.TrimSpace(root))

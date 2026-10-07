@@ -154,12 +154,12 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 			logger.Info("generating metric wiki prose", "env", a.envKey, "model_name", cfg.ModelName, "thinking_type", cfg.ThinkingType)
 		}
 		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-			PromptName: llmclients.EnsurePromptName("metric_wiki_generation_prompt", "generate_metric_wiki", "MID-CWB-GENERATE-METRIC-WIKI", cfg.ModelName),
+			PromptName: llmclients.EnsurePromptName("metric_wiki_generation_prompt", "generate_metric_wiki", "MID-20261007-01", cfg.ModelName),
 			PromptText: prompt,
 			ModelName:  cfg.ModelName,
 			InputText:  inputText,
 			CallReason: "generate_metric_wiki",
-			CallLoc:    "MID-CWB-GENERATE-METRIC-WIKI",
+			CallLoc:    "MID-20261007-01",
 		})
 		if err != nil {
 			lastErr = err

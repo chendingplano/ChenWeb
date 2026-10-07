@@ -27,7 +27,7 @@
 - [x] 4.2 Create `StatementKindBadge.svelte` (group label, kind as `title`, text selectable)
 - [x] 4.3 Place the badge in `metric-wiki-view.svelte`, `artifact-category-panel.svelte`, `metric-ontology-explorer/metric-search-pane.svelte`, and add a statement-kind attribute in `metric-detail-groups.ts`
 - [x] 4.4 `bun run check` passes (no missing keys, no new hard-coded text)
-- [ ] 4.5 Check the four views in the running app in English and Chinese with record 416 (requirement rows show 要求/Requirement)
+- [x] 4.5 Check the four views in the running app in English and Chinese with record 416 (requirement rows show 要求/Requirement). Done 2026-10-07 with Playwright: metric wiki, Explorer record list + global search, and metric detail groups verified in both languages; the global-search result block was missing the badge and was fixed. Category panel: API verified (classifier fields returned for `medical_device/packaging_standards/labeling_requirements`), the panel itself not opened in the browser (no record-416 metrics have category paths; reaching a category needs canvas navigation)
 
 ## 5. Docs and wrap-up
 

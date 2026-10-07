@@ -317,6 +317,7 @@
 									<span class="tag"
 										>{msg.metric_search_pane_record({ input_record_id: r.input_record_id })}</span
 									>
+									{#if r.value_class}<StatementKindBadge row={r} />{/if}
 									{#each metricSearchResultChips(r) as c (`${r.id}-${c}`)}<span class="tag quiet"
 											>{c}</span
 										>{/each}

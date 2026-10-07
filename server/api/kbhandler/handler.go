@@ -483,6 +483,7 @@ func formatOptionalTime(v *time.Time) string {
 	return v.Format(time.RFC3339)
 }
 
+/*
 func sampleInputIDs(records []inputRecord, limit int) []int64 {
 	if limit <= 0 || len(records) == 0 {
 		return []int64{}
@@ -496,6 +497,7 @@ func sampleInputIDs(records []inputRecord, limit int) []int64 {
 	}
 	return out
 }
+*/
 
 func queryTotalCount(db *sql.DB, inputTable, whereSQL string, args []any) (int64, error) {
 	base := fmt.Sprintf("SELECT COUNT(1) FROM %s i", inputTable)

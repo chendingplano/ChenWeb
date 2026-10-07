@@ -49,6 +49,7 @@ type pipelineRuleDetailResponse struct {
 	Record pipelineRuleRecord `json:"record"`
 }
 
+/*
 const pipelineRuleSelectColumns = `
     r.id, r.name, r.priority, r.match_input_doc_type, r.match_source_language, r.match_knowledge_store_binding,
     r.pipeline_id, p.name, r.active, r.create_time, r.modify_time
@@ -88,6 +89,7 @@ func fetchPipelineRuleByID(db *sql.DB, id int64) (pipelineRuleRecord, error) {
 	row := db.QueryRow(query, id)
 	return scanPipelineRuleRecord(row.Scan)
 }
+*/
 
 func fetchPipelineRuleCompatBindingByID(db *sql.DB, id int64) (pipelineRuleRecord, error) {
 	const query = `
