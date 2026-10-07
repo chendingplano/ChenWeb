@@ -29,6 +29,7 @@
 	import DecisionPlaygroundView from '$lib/components/home3/decision-playground-view.svelte';
 	import ChadSessionsView from '$lib/components/home3/chad-sessions-view.svelte';
 	import MetricReviewView from '$lib/components/home3/metric-review-view.svelte';
+	import MetricScoreView from '$lib/components/home3/metric-score-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
@@ -337,6 +338,8 @@
 			<ChadSessionsView {darkMode} harness="pi" />
 		{:else if activeMenu?.childId === 'sysadmin-llm-decision-models-playground'}
 			<DecisionPlaygroundView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
+			<MetricScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}

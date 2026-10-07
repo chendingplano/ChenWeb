@@ -277,7 +277,8 @@
 										label: m.nav_sysadmin_llm_metrics(),
 										children: [
 											{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
-											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() }
+											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() },
+											{ id: 'sysadmin-llm-metrics-benchmark', label: m.nav_sysadmin_llm_metrics_benchmark() }
 										]
 									}
 								]
