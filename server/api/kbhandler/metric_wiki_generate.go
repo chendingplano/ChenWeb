@@ -137,6 +137,11 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 		}
 		sawModel = true
 
+		// Only an explicit no-reasoning policy overrides the model's thinking config.
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
+			cfg.ThinkingType = "disabled"
+		}
+
 		client, err := defaultNewExtractMetricsClient(modelRef, cfg, logger)
 		if err != nil {
 			lastErr = err
@@ -146,7 +151,7 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 			continue
 		}
 		if logger != nil {
-			logger.Info("generating metric wiki prose", "env", a.envKey, "model_name", cfg.ModelName)
+			logger.Info("generating metric wiki prose", "env", a.envKey, "model_name", cfg.ModelName, "thinking_type", cfg.ThinkingType)
 		}
 		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 			PromptName: llmclients.EnsurePromptName("metric_wiki_generation_prompt", "generate_metric_wiki", "MID-CWB-GENERATE-METRIC-WIKI", cfg.ModelName),

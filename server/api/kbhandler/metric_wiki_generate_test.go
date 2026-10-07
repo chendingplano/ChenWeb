@@ -1,9 +1,82 @@
 package kbhandler
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRunMetricWikiProseReasoningPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name, policy, want string
+		unset, fallback    bool
+	}{
+		{name: "unset", unset: true, want: "enabled"},
+		{name: "empty", want: "enabled"},
+		{name: "no reasoning", policy: "no-reasoning", want: "disabled"},
+		{name: "normalized", policy: " NO-REASONING ", want: "disabled"},
+		{name: "model configured", policy: "reasoning", want: "enabled"},
+		{name: "fallback", policy: "no-reasoning", want: "disabled", fallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MODEL_DEFAULT_REASONING_POLICY", tc.policy)
+			if tc.unset {
+				if err := os.Unsetenv("MODEL_DEFAULT_REASONING_POLICY"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Thinking struct {
+						Type string `json:"type"`
+					} `json:"thinking"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if body.Thinking.Type != tc.want {
+					t.Errorf("request thinking.type = %q, want %q", body.Thinking.Type, tc.want)
+				}
+				calls++
+				content := `{"lead":"A metric wiki lead"}`
+				if tc.fallback && calls == 1 {
+					content = `{}` // Unusable prose triggers the fallback model.
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
+				})
+			}))
+			defer server.Close()
+			modelsPath := filepath.Join(t.TempDir(), ".models.toml")
+			config := fmt.Sprintf("[wiki-primary]\nmodel_name = %q\napi_key = 'test-key'\nbase_url = %q\ntimeout_sec = 10\nthinking_type = 'enabled'\n[wiki-fallback]\nmodel_name = %q\napi_key = 'test-key'\nbase_url = %q\ntimeout_sec = 10\nthinking_type = 'enabled'\n", "wiki-primary", server.URL, "wiki-fallback", server.URL)
+			if err := os.WriteFile(modelsPath, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MODEL_DEF_FILE", modelsPath)
+			t.Setenv("WIKIPAGE_CREATION_MODEL_NAME", "wiki-primary")
+			t.Setenv("WIKIPAGE_CREATION_FALLBACK", "wiki-fallback")
+			prose, model, err := runMetricWikiProse(context.Background(), nil, "Test prompt", "Test facts")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantModel, wantCalls := "wiki-primary", 1
+			if tc.fallback {
+				wantModel, wantCalls = "wiki-fallback", 2
+			}
+			if prose.Lead == "" || model != wantModel || calls != wantCalls {
+				t.Fatalf("lead=%q model=%q calls=%d; want model=%q calls=%d", prose.Lead, model, calls, wantModel, wantCalls)
+			}
+		})
+	}
+}
 
 func wikiStrPtr(s string) *string { return &s }
 
