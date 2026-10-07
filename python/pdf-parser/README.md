@@ -260,7 +260,9 @@ PYTHONPATH=. .venv/bin/pytest tests/ -v
 
 After a successful parse, PyMuPDF extracts physical table row/cell borders into
 `<pdf-stem>.pdf-table-geometry.json` beside the source PDF. Geometry failure is
-logged without discarding parsed text. The Go line converter maps those boxes to
+logged without discarding parsed text. On conversion reruns, the Go converter also
+extracts physical geometry when it is missing or stale, using the same Python
+module and environment (see the converter README for deployment overrides). It maps those boxes to
 canonical table/row/cell IDs in `<line-stem>.table-geometry.json`; the PDF viewer
 retrieves that companion through the input's table-geometry API.
 

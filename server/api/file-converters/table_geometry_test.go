@@ -16,6 +16,7 @@ import (
 type geometryPublisher struct {
 	t     *testing.T
 	calls int
+	empty bool
 }
 
 func (p *geometryPublisher) Publish(_ context.Context, _ string, payload []byte) error {
@@ -32,7 +33,7 @@ func (p *geometryPublisher) Publish(_ context.Context, _ string, payload []byte)
 	if err = json.Unmarshal(raw, &geometry); err != nil {
 		p.t.Fatal(err)
 	}
-	if len(geometry.Tables) != 1 || geometry.Tables[0].Line != 1 || len(geometry.Tables[0].Rows) != 2 {
+	if (p.empty && len(geometry.Tables) != 0) || (!p.empty && (len(geometry.Tables) != 1 || geometry.Tables[0].Line != 1 || len(geometry.Tables[0].Rows) != 2)) {
 		p.t.Fatalf("geometry=%+v", geometry)
 	}
 	p.calls++
@@ -40,6 +41,12 @@ func (p *geometryPublisher) Publish(_ context.Context, _ string, payload []byte)
 }
 
 func TestConversionBuildsGeometryBeforePublishing(t *testing.T) {
+	for _, state := range []string{"current", "missing", "stale", "malformed", "empty"} {
+		t.Run(state, func(t *testing.T) { testConversionBuildsGeometryBeforePublishing(t, state) })
+	}
+}
+
+func testConversionBuildsGeometryBeforePublishing(t *testing.T, state string) {
 	t.Setenv("DOC_PROCESSOR_MODE", "auto")
 	dir := t.TempDir()
 	pdf := filepath.Join(dir, "doc.pdf")
@@ -57,13 +64,35 @@ func TestConversionBuildsGeometryBeforePublishing(t *testing.T) {
 			{Coords: []float64{100, 100, 900, 120}, Cells: []documentgeometry.PhysicalCell{{Text: "Type", Coords: []float64{100, 100, 200, 120}}, {Text: "Limit", Coords: []float64{200, 100, 900, 120}}}},
 			{Coords: []float64{100, 120, 900, 200}, Cells: []documentgeometry.PhysicalCell{{Text: "Machine", Coords: []float64{100, 120, 200, 200}}, {Text: "Energy 30", Coords: []float64{200, 120, 900, 200}}}},
 		}}}}
+	if state == "empty" {
+		physical.Tables = nil
+	}
 	raw, _ := json.Marshal(physical)
-	if err := os.WriteFile(documentgeometry.PhysicalPath(pdf), raw, 0600); err != nil {
-		t.Fatal(err)
+	if state != "missing" && state != "empty" {
+		initial := raw
+		if state == "malformed" {
+			initial = []byte("invalid JSON")
+		}
+		if state == "stale" {
+			outdated := physical
+			outdated.PDFHash = "old-pdf"
+			initial, _ = json.Marshal(outdated)
+		}
+		if err := os.WriteFile(documentgeometry.PhysicalPath(pdf), initial, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	store := &fakeStore{rec: InputRecord{ID: 416, Type: "pdf", FileName: pdf, UserID: "test-tenant", StatusRaw: `[{"operation":"parsed","proc_status":"success"}]`}}
 	service := NewService(store, slog.Default())
-	publisher := &geometryPublisher{t: t}
+	extractionCalls := 0
+	service.ExtractTableGeometry = func(ctx context.Context, path string) error {
+		extractionCalls++
+		if path != pdf {
+			t.Fatalf("extracting wrong PDF: %s", path)
+		}
+		return os.WriteFile(documentgeometry.PhysicalPath(path), raw, 0600)
+	}
+	publisher := &geometryPublisher{t: t, empty: state == "empty"}
 	service.Publisher = publisher
 	if err := service.HandleRequest(context.Background(), ConvertRequest{RecordID: 416}); err != nil {
 		t.Fatal(err)
@@ -77,5 +106,12 @@ func TestConversionBuildsGeometryBeforePublishing(t *testing.T) {
 	}
 	if publisher.calls != 2 {
 		t.Fatalf("rerun publishes=%d", publisher.calls)
+	}
+	wantExtractions := 1
+	if state == "current" {
+		wantExtractions = 0
+	}
+	if extractionCalls != wantExtractions {
+		t.Fatalf("extractions=%d, want=%d", extractionCalls, wantExtractions)
 	}
 }

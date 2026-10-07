@@ -80,11 +80,12 @@ type LineFileGeneratedEvent struct {
 }
 
 type Service struct {
-	Store          Store
-	Logger         *slog.Logger
-	Now            func() time.Time
-	Publisher      Publisher
-	PublishSubject string
+	Store                Store
+	Logger               *slog.Logger
+	Now                  func() time.Time
+	Publisher            Publisher
+	PublishSubject       string
+	ExtractTableGeometry func(context.Context, string) error
 }
 
 // Subscriber defines the minimal JetStream-facing contract this service needs.
@@ -220,12 +221,19 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 	}
 
 	lineFilePaths, procErr = s.convert(ctx, rec)
-	for _, linePath := range lineFilePaths {
-		geometry, err := documentgeometry.Ensure(linePath, pathutil.ResolveDataHomePath(rec.FileName))
-		if err != nil {
-			s.Logger.Warn("(20261007-643) table geometry companion unavailable", "record_id", rec.ID, "err", err)
-		} else if len(geometry.Tables) > 0 {
-			s.Logger.Info("(20261007-644) table geometry companion ready", "record_id", rec.ID, "path", documentgeometry.CompanionPath(linePath), "tables", len(geometry.Tables))
+	if len(lineFilePaths) > 0 {
+		pdfPath := pathutil.ResolveDataHomePath(rec.FileName)
+		if err := s.ensurePhysicalTableGeometry(ctx, pdfPath); err != nil {
+			s.Logger.Warn("(20261007-643) table geometry companion unavailable", "record_id", rec.ID, "pdf", pdfPath, "err", err)
+		} else {
+			for _, linePath := range lineFilePaths {
+				geometry, err := documentgeometry.Ensure(linePath, pdfPath)
+				if err != nil {
+					s.Logger.Warn("(20261007-643) table geometry companion unavailable", "record_id", rec.ID, "line_file", linePath, "err", err)
+				} else {
+					s.Logger.Info("(20261007-644) table geometry companion ready", "record_id", rec.ID, "path", documentgeometry.CompanionPath(linePath), "tables", len(geometry.Tables))
+				}
+			}
 		}
 	}
 	var operations []string
