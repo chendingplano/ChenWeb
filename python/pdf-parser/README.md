@@ -255,3 +255,21 @@ tests/               Unit tests for parser backends and service helpers
 cd ChenWeb/python/pdf-parser
 PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```
+
+## Table geometry companions
+
+After a successful parse, PyMuPDF extracts physical table row/cell borders into
+`<pdf-stem>.pdf-table-geometry.json` beside the source PDF. Geometry failure is
+logged without discarding parsed text. The Go line converter maps those boxes to
+canonical table/row/cell IDs in `<line-stem>.table-geometry.json`; the PDF viewer
+retrieves that companion through the input's table-geometry API.
+
+To backfill an existing PDF without re-running its parser:
+
+```sh
+.venv/bin/python table_geometry.py /path/to/document.pdf
+```
+
+The API builds/refreshes the canonical companion on its next request. Line/PDF/
+physical geometry hashes prevent stale geometry reuse. See the PDF Viewer capsule's
+`table-geometry-design.md` for the coordinate and reference contracts.

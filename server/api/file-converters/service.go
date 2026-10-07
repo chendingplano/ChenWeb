@@ -14,6 +14,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/documentgeometry"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
@@ -219,6 +220,14 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 	}
 
 	lineFilePaths, procErr = s.convert(ctx, rec)
+	for _, linePath := range lineFilePaths {
+		geometry, err := documentgeometry.Ensure(linePath, pathutil.ResolveDataHomePath(rec.FileName))
+		if err != nil {
+			s.Logger.Warn("(20261007-643) table geometry companion unavailable", "record_id", rec.ID, "err", err)
+		} else if len(geometry.Tables) > 0 {
+			s.Logger.Info("(20261007-644) table geometry companion ready", "record_id", rec.ID, "path", documentgeometry.CompanionPath(linePath), "tables", len(geometry.Tables))
+		}
+	}
 	var operations []string
 	convertOnly := false
 	if req.Operations != nil {
@@ -278,6 +287,9 @@ func findParserJSONs(dir, stem string) []parserJSONFile {
 			continue
 		}
 		name := entry.Name()
+		if strings.HasSuffix(strings.ToLower(name), ".table-geometry.json") || strings.HasSuffix(strings.ToLower(name), ".pdf-table-geometry.json") {
+			continue
+		}
 		if !strings.EqualFold(filepath.Ext(name), ".json") {
 			continue
 		}
@@ -633,7 +645,7 @@ func resolveInputFile(req ConvertRequest, rec InputRecord) (string, error) {
 				if entry.IsDir() {
 					continue
 				}
-				if strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+				if strings.EqualFold(filepath.Ext(entry.Name()), ".json") && !strings.HasSuffix(strings.ToLower(entry.Name()), "table-geometry.json") {
 					candidates = append(candidates, filepath.Join(baseDir, entry.Name()))
 				}
 			}

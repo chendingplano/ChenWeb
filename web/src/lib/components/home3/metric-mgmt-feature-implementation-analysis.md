@@ -108,26 +108,21 @@ This is the core mechanism that converts raw-line coordinates into visual highli
 
 ### E. Cited table rows and continuation pages (2026-10-07)
 
-`metric-mgmt-view.svelte` uses `source_table_rows` as the authority for table
-highlights. A cited table line is excluded from ordinary line-box highlighting:
-MinerU can merge a multi-page table into one HTML line whose coordinates cover
-only the first page's fragment (record 416, line 121).
+Metrics passes `source_table_rows` as `tableReferences` into `PdfViewWindow` and
+excludes those table lines from ordinary line-box highlighting. The reusable
+`SharedPdfViewer` owns reference resolution, geometry fetching, rendering and
+navigation. It uses `/api/v1/kb/inputs/:id/table-geometry`, backed by a canonical
+`.table-geometry.json` companion and PyMuPDF physical table borders.
 
-The shared PDF viewer optionally exposes cached PDF text boxes through
-`onTextPages`, normalized to 0–1000 page coordinates. `metric-pdf-table-highlights.ts`
-locates the cited rows' cells from `table_context` in those boxes across all pages.
-Unique cell text anchors each row; repeated labels are included only within that
-anchor's vertical extent on the same page. Shared rowspan values are excluded.
-The viewer draws these row rectangles and navigates to the first resolved page.
-For `416_mtc_6`, `121#r3` resolves to page 7 instead of the first row on page 6.
+`121#r3` for `416_mtc_6` resolves to the full row on page 7; `121#r3:c4` identifies
+its technical-requirements cell. Missing/ambiguous geometry or stale row hashes
+produce no guessed table box. Ordinary line and drag-preview highlights remain.
+The previous metric PDF text matcher and `onTextPages` callback were removed.
 
-Missing or ambiguous text leaves the citation unhighlighted; it never substitutes
-the first table fragment. PDFs without a usable text layer therefore need a future
-OCR/row-coordinate source to show these highlights. Metrics without row citations
-continue to use ordinary source-line boxes. No extraction or database data changes.
-
-Regression tests: `metric-pdf-table-highlights.test.ts` covers continuation pages,
-authoritative row IDs, repeated labels, normalized text, and unresolved citations.
+Reference and companion contracts, backfill and limitations are documented in
+`KnowledgeStore/Capsules/coding-capsules/pdf-viewer/table-geometry-design.md`.
+Regression tests are in `pdf-table-geometry.test.ts`, the Go documentgeometry and
+converter packages, and Python `tests/test_table_geometry.py`.
 
 ---
 

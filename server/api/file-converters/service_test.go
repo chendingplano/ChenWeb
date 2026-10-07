@@ -1781,3 +1781,16 @@ func TestHandleRequestMineruOperations(t *testing.T) {
 		}
 	})
 }
+
+func TestParserDiscoveryIgnoresTableGeometryCompanions(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"doc_mineru.json", "doc_mineru.table-geometry.json", "doc.pdf-table-geometry.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := findParserJSONs(dir, "doc")
+	if len(got) != 1 || got[0].parser != "mineru" {
+		t.Fatalf("parser files=%+v", got)
+	}
+}

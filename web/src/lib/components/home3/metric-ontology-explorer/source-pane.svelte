@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import type { TableReference } from '../pdf-table-geometry';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import { getRawLines, listKbMetrics, type RawLine } from '$lib/services/kbService';
 	import { recordIdFromMetricId, resolveMetricSpans } from './metric-source-spans';
@@ -25,6 +26,7 @@
 	let zoom = $state(0.5);
 	let spanCount = $state(0);
 	let highlightVersion = $state('');
+	let tableReferences = $state<TableReference[]>([]);
 	let linesByPage = $state<Map<number, RawLine[]>>(new Map());
 
 	// MinerU line boxes are normalised to a 1000×1000 space.
@@ -37,6 +39,7 @@
 		spanCount = 0;
 		highlightVersion = '';
 		linesByPage = new Map();
+		tableReferences = [];
 		if (!id) return;
 
 		const recordId = recordIdFromMetricId(id);
@@ -62,6 +65,7 @@
 				if (rawRes?.file_name && src) src = { ...src, title: rawRes.file_name };
 
 				const metric = (metricsRes.results ?? []).find((row) => row.metric_id === id) ?? null;
+				tableReferences = metric?.source_table_rows ?? [];
 				const spans = resolveMetricSpans(metric?.source_line_spans, lines);
 				spanCount = spans.length;
 
@@ -70,6 +74,7 @@
 				const grouped = new Map<number, RawLine[]>();
 				for (const s of spans) {
 					const ln = byKey.get(`${s.page_number}:${s.line_number}`);
+					if (tableReferences.some(ref => ref.line === s.line_number)) continue;
 					if (ln && Array.isArray(ln.coords) && ln.coords.length >= 4) {
 						const arr = grouped.get(s.page_number) ?? [];
 						arr.push(ln);
@@ -140,6 +145,7 @@
 				bind:page
 				bind:zoom
 				{highlightVersion}
+				{tableReferences}
 				renderHighlights={spanCount ? renderHighlights : undefined}
 			/>
 		{:else if err}

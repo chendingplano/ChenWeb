@@ -387,7 +387,8 @@ class TestRepoFileProcessing:
         assert calls["parse"] == 1
         assert result["status"] == "success"
 
-    def test_process_record_persists_relative_paths(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("geometry_failure", [False, True])
+    def test_process_record_persists_relative_paths(self, tmp_path, monkeypatch, geometry_failure):
         repo_root = tmp_path / "SemOS"
         repo_pdf = repo_root / "Artifacts" / "0" / "76" / "stdGk_517071.pdf"
         repo_pdf.parent.mkdir(parents=True)
@@ -413,6 +414,13 @@ class TestRepoFileProcessing:
         monkeypatch.setattr(pdf_parser_module, "find_duplicate_processed_record", lambda *args: None)
         monkeypatch.setattr(pdf_parser_module, "record_parse_active", lambda *args: args[2])
         monkeypatch.setattr(pdf_parser_module, "record_parsed_success", fake_record_parsed_success)
+
+        geometry_calls = []
+        def fake_geometry(path):
+            geometry_calls.append(path)
+            if geometry_failure:
+                raise RuntimeError('geometry unavailable')
+        monkeypatch.setattr(pdf_parser_module, "write_table_geometry", fake_geometry)
 
         old_home = os.environ.get("DATA_HOME_DIR")
         os.environ["DATA_HOME_DIR"] = str(repo_root)
@@ -441,6 +449,8 @@ class TestRepoFileProcessing:
             else:
                 os.environ["DATA_HOME_DIR"] = old_home
 
+        assert result["status"] == "success"
+        assert geometry_calls == [str(repo_pdf)]
         assert persisted["file_name"] == "Artifacts/0/76/stdGk_517071.pdf"
         assert persisted["result_filename"] == "Artifacts/0/76/stdGk_517071_opendata.json"
         assert persisted["backup_filename"] == ""

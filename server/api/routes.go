@@ -708,6 +708,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/inputs/check-md5", kbhandler.CheckMD5s)
 	apiGroup.DELETE("/kb/inputs/:id", kbhandler.DeleteInput)
 	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
+	apiGroup.GET("/kb/inputs/:id/table-geometry", kbhandler.GetTableGeometry)
 	apiGroup.POST("/kb/inputs/:id/stop", kbhandler.StopPipeline)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)

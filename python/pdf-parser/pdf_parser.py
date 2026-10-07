@@ -56,6 +56,7 @@ from shared import (
     resolve_repo_path,
     resolve_backup_path,
 )
+from table_geometry import write_table_geometry
 from parser_base import ParserBackend
 from parser_docling import DoclingParser
 from parser_opendata import OpenDataParser
@@ -691,6 +692,13 @@ def _process_record(
         result_path = os.path.join(record_dir, f"{pdf_stem}_{parser_name}.json")
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result_output, f, indent=2, ensure_ascii=False)
+
+        # Geometry is a companion artifact; failure must not discard parsed text.
+        try:
+            write_table_geometry(repo_pdf_path)
+        except Exception as geometry_exc:
+            log.warning('(20261007-642) record id=%s: table geometry extraction failed: %s',
+                        rec_id, geometry_exc)
 
         ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
         raw_status = record_parsed_success(

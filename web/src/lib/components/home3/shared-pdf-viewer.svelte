@@ -3,7 +3,7 @@
 	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import type { PdfTextBox } from './metric-pdf-table-highlights';
+	import { resolveTableReferences, type TableReference, type TableGeometry } from './pdf-table-geometry';
 
 	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
@@ -29,8 +29,7 @@
 
 	type PdfPageProxy = {
 		rotate?: number;
-		getTextContent: () => Promise<{ items: Array<{ str?: string; transform?: number[]; width?: number; height?: number }> }>;
-		getViewport: (params: { scale: number; rotation?: number }) => PdfPageViewport & { convertToViewportRectangle: (rect: number[]) => number[] };
+		getViewport: (params: { scale: number; rotation?: number }) => PdfPageViewport;
 		render: (params: {
 			canvasContext: CanvasRenderingContext2D;
 			viewport: PdfPageViewport;
@@ -52,7 +51,7 @@
 		highlightVersion = 0,
 		repaintVersion = 0,
 		renderHighlights,
-		onTextPages,
+		tableReferences = [],
 		floatingOverlay,
 		loadingLabel = m.shared_pdf_viewer_rendering_page(),
 		respectPageRotation = true,
@@ -70,7 +69,7 @@
 		highlightVersion?: number | string;
 		repaintVersion?: number | string;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
-		onTextPages?: (inputId: number, pages: ReadonlyMap<number, PdfTextBox[]>) => void;
+		tableReferences?: TableReference[];
 		floatingOverlay?: Snippet;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
@@ -97,11 +96,52 @@
 
 	const viewerId = `pdfv-${Math.random().toString(36).slice(2)}`;
 
+	let tableGeometry = $state<TableGeometry | null>(null);
+	let tableHighlights = $derived(resolveTableReferences(tableReferences, tableGeometry, respectPageRotation));
+	let tablePaintSeq = 0;
+	let tableNavigationPending = false;
+
+	$effect(() => {
+		const id = inputId;
+		const references = tableReferences;
+		// Revalidate on selection/retrieval, even when the same record is open.
+		const version = highlightVersion;
+		tableGeometry = null;
+		if (!id || references.length === 0) return;
+		const controller = new AbortController();
+		let cancelled = false;
+		fetch(`/api/v1/kb/inputs/${id}/table-geometry`, {
+			credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+		}).then(async response => {
+			if (!response.ok) throw new Error(`table geometry HTTP ${response.status}`);
+			const geometry = await response.json() as TableGeometry;
+			if (!cancelled && inputId === id && highlightVersion === version) tableGeometry = geometry;
+		}).catch(error => {
+			if (!cancelled) console.warn('PDF table geometry unavailable', error);
+		});
+		return () => { cancelled = true; controller.abort(); };
+	});
+
+	$effect(() => {
+		const highlights = tableHighlights;
+		const seq = ++tablePaintSeq;
+		tableNavigationPending = highlights.length > 0;
+		void tick().then(() => {
+			if (seq !== tablePaintSeq) return;
+			const first = highlights.find(box => box.page <= loadedPageCount());
+			if (first) { page = first.page; tableNavigationPending = false; }
+			paintHighlights();
+			if (first) scrollToFirstHighlight(first.page, 'auto');
+		});
+	});
+
+
 	let pdfLib: PdfJsLib | null = null;
 	let pdfWorker: PdfWorker | null = null;
 	let pdfDoc: PdfDocumentProxy | null = null;
 	let pdfLoadedInputId = 0;
 	let pdfRenderSeq = 0;
+	let pdfLoadSeq = 0;
 	let pdfLoading = $state(false);
 	let pdfError = $state('');
 	let pdfRenderedPages = $state<number[]>([]);
@@ -305,11 +345,12 @@
 		pdfWorker = new pdfLib.PDFWorker({ name: 'shared-pdf-viewer-worker' });
 	}
 
-	const pdfTextByPage = new Map<number, PdfTextBox[]>();
-
 	async function ensurePdfDoc() {
 		if (!inputId || !fileUrl) return;
 		if (pdfDoc && pdfLoadedInputId === inputId) return;
+		const requestedId = inputId;
+		const requestedUrl = fileUrl;
+		const seq = ++pdfLoadSeq;
 
 		for (const task of pdfActiveRenders.values()) task.cancel?.();
 		pdfActiveRenders.clear();
@@ -319,20 +360,21 @@
 		pdfLoadedInputId = 0;
 		pdfError = '';
 		pdfViewportByPage.clear();
-		pdfTextByPage.clear();
 
 		await ensurePdfLib();
 		if (!pdfLib || !pdfWorker) return;
 
 		const task = pdfLib.getDocument({
-			url: fileUrl,
+			url: requestedUrl,
 			withCredentials: true,
 			cMapUrl: '/pdfjs-cmaps/',
 			cMapPacked: true,
 			worker: pdfWorker
 		});
-		pdfDoc = (await task.promise) as PdfDocumentProxy;
-		pdfLoadedInputId = inputId;
+		const loaded = (await task.promise) as PdfDocumentProxy;
+		if (seq !== pdfLoadSeq || requestedId !== inputId) return;
+		pdfDoc = loaded;
+		pdfLoadedInputId = requestedId;
 		numPages = Math.max(1, pdfDoc.numPages || 1);
 		pdfRenderedPages = Array.from({ length: numPages }, (_, i) => i + 1);
 		page = clampPage(page);
@@ -353,6 +395,15 @@
 		if (!overlay || !viewport) return;
 		overlay.innerHTML = '';
 		renderHighlights?.(pageNo, viewport, overlay);
+		for (const box of tableHighlights) {
+			if (box.page !== pageNo) continue;
+			const [x1, y1, x2, y2] = box.coords;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight pdf-table-highlight';
+			mark.dataset.sourceTable = `${box.line}#${box.target}`;
+			mark.style.cssText = `position:absolute;left:${x1 * viewport.width / 1000}px;top:${y1 * viewport.height / 1000}px;width:${(x2 - x1) * viewport.width / 1000}px;height:${(y2 - y1) * viewport.height / 1000}px;background:rgba(129,140,248,.22);border:1px solid rgba(129,140,248,.8);box-sizing:border-box;pointer-events:none;`;
+			overlay.appendChild(mark);
+		}
 	}
 
 	function updateFloatingOverlayAnchor() {
@@ -407,6 +458,9 @@
 		const stageWidth = Math.floor((pdfCanvasHostEl ?? pdfStageEl).clientWidth);
 		if (stageWidth <= 0) return;
 
+		const host = pdfCanvasHostEl;
+		const preserveTableScroll = tableReferences.length > 0 && pdfViewportByPage.size > 0 && !tableNavigationPending;
+		const scrollFraction = host && host.scrollHeight > 0 ? host.scrollTop / host.scrollHeight : 0;
 		const seq = ++pdfRenderSeq;
 		pdfLastRenderWidth = stageWidth;
 		pdfLoading = true;
@@ -433,20 +487,7 @@
 				const pageProxy = await pdfDoc.getPage(pageNo);
 				const rotation = respectPageRotation ? (pageProxy.rotate ?? 0) : 0;
 				const viewport = pageProxy.getViewport({ scale: targetScale, rotation });
-				if (onTextPages && !pdfTextByPage.has(pageNo)) {
-					const text = await pageProxy.getTextContent();
-					if (seq !== pdfRenderSeq) return;
-					const base = pageProxy.getViewport({ scale: 1, rotation });
-					pdfTextByPage.set(pageNo, text.items.flatMap(item => {
-						if (!item.str || !item.transform || !item.width || !item.height) return [];
-						const [x, y] = item.transform.slice(4);
-						const [x1, y1, x2, y2] = base.convertToViewportRectangle([x, y, x + item.width, y + item.height]);
-						return [{ text: item.str, coords: [
-							Math.min(x1, x2) / base.width * 1000, Math.min(y1, y2) / base.height * 1000,
-							Math.max(x1, x2) / base.width * 1000, Math.max(y1, y2) / base.height * 1000
-						] }];
-					}));
-				}
+
 				const ctx = canvas.getContext('2d');
 				if (!ctx) continue;
 
@@ -473,11 +514,17 @@
 			}
 
 			if (seq !== pdfRenderSeq) return;
-			onTextPages?.(pdfLoadedInputId, pdfTextByPage);
 			await tick();
 			if (seq !== pdfRenderSeq) return;
 			paintHighlights();
-			if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
+			const navigatingTable = tableNavigationPending && tableHighlights[0]?.page <= numPages;
+			if (navigatingTable) {
+				page = tableHighlights[0].page;
+				tableNavigationPending = false;
+			}
+			if (preserveTableScroll && !navigatingTable && host) {
+				host.scrollTop = scrollFraction * host.scrollHeight;
+			} else if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
 				scrollToPage(clampPage(page), 'auto');
 			}
 		} catch (err) {

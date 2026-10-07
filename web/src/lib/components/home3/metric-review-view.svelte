@@ -14,6 +14,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import LanguagesIcon from '@lucide/svelte/icons/languages';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import type { TableReference } from './pdf-table-geometry';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import { getRawLines, listKbMetrics, type KbMetricRecord, type RawLine } from '$lib/services/kbService';
 	import {
@@ -60,6 +61,7 @@
 	let storedMetrics = $state<KbMetricRecord[]>([]);
 	let pdfPage = $state(1);
 	let highlightedLines = $state<number[]>([]);
+	let tableReferences = $state<TableReference[]>([]);
 	let selectedFindingKey = $state<string | null>(null);
 	let highlightVersion = $state(0);
 	let pdfError = $state('');
@@ -87,7 +89,8 @@
 		if (pane === 'menu') menuWidth = Math.max(170, Math.min(layoutEl.clientWidth - 560, menuWidth + delta));
 		else reportWidth = Math.max(300, Math.min(layoutEl.clientWidth - menuWidth - 280, reportWidth + delta));
 	}
-	function showSource(key: string, spans: string[]) {
+	function showSource(key: string, spans: string[], refs: TableReference[] = []) {
+		tableReferences = refs;
 		selectedFindingKey = key;
 		highlightedLines = reviewLineNumbers(spans);
 		const first = rawLines.find((line) => highlightedLines.includes(line.line_number));
@@ -100,8 +103,13 @@
 			return snap?.source_line_spans ?? (snap?.lines ? snap.lines.split(',') : []);
 		});
 	}
+	function tableRefsForMetricIds(ids: string[]): TableReference[] {
+		return storedMetrics.filter(metric => metric.metric_id && ids.includes(metric.metric_id))
+			.flatMap(metric => metric.source_table_rows ?? []);
+	}
 	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
 		for (const line of rawLines) {
+			if (tableReferences.some(ref => ref.line === line.line_number)) continue;
 			if (line.page_number !== pageNo || !highlightedLines.includes(line.line_number) || !Array.isArray(line.coords) || line.coords.length < 4) continue;
 			const [x1, y1, x2, y2] = line.coords;
 			const mark = document.createElement('div');
@@ -195,6 +203,7 @@
 		rawLines = [];
 		pdfPage = 1;
 		highlightedLines = [];
+		tableReferences = [];
 		selectedFindingKey = null;
 		pdfError = '';
 		getRawLines(rec.id).then((res) => {
@@ -634,7 +643,7 @@
 								<p class="text-sm" style="color:{textMuted};">{m.mrv_none_missed()}</p>
 							{/if}
 							{#each sortBySeverity(report.missed_metrics) as mm, i (i)}
-				<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `missed:${i}`} class="rounded-lg p-3 space-y-1 cursor-pointer" style="background:{selectedFindingKey === `missed:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `missed:${i}` ? accent : borderColor};" onclick={() => showSource(`missed:${i}`, mm.source_line_spans ?? mm.lines.split(','))} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showSource(`missed:${i}`, mm.source_line_spans ?? mm.lines.split(',')); } }}>
+				<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `missed:${i}`} class="rounded-lg p-3 space-y-1 cursor-pointer" style="background:{selectedFindingKey === `missed:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `missed:${i}` ? accent : borderColor};" onclick={() => showSource(`missed:${i}`, mm.source_line_spans ?? mm.lines.split(','), mm.source_table_rows ?? [])} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showSource(`missed:${i}`, mm.source_line_spans ?? mm.lines.split(','), mm.source_table_rows ?? []); } }}>
 									<div class="flex flex-wrap items-center gap-2">
 										{@render severityBadge(mm.severity)}
 										<span class="font-medium" style="color:{textPrimary};">{mm.name}</span>
@@ -663,7 +672,7 @@
 										{CATEGORY_LABEL[g.category]}
 									</div>
 									{#each g.entries as e, i (i)}
-						<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `non:${g.category}:${i}`} class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="background:{selectedFindingKey === `non:${g.category}:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `non:${g.category}:${i}` ? accent : borderColor};" onclick={() => showSource(`non:${g.category}:${i}`, sourceForMetricIds(e.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(`non:${g.category}:${i}`, sourceForMetricIds(e.metric_ids)); } }}>
+						<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `non:${g.category}:${i}`} class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="background:{selectedFindingKey === `non:${g.category}:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `non:${g.category}:${i}` ? accent : borderColor};" onclick={() => showSource(`non:${g.category}:${i}`, sourceForMetricIds(e.metric_ids), tableRefsForMetricIds(e.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(`non:${g.category}:${i}`, sourceForMetricIds(e.metric_ids), tableRefsForMetricIds(e.metric_ids)); } }}>
 											<div class="flex flex-wrap items-center gap-2">
 												{@render metricChips(e.metric_ids)}
 												{#if e.duplicate_of}
@@ -687,7 +696,7 @@
 								<p class="text-sm" style="color:{textMuted};">{m.mrv_none()}</p>
 							{/if}
 							{#each sortBySeverity(report.attribute_issues) as a, i (i)}
-				<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `attribute:${i}`} class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="background:{selectedFindingKey === `attribute:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `attribute:${i}` ? accent : borderColor};" onclick={() => showSource(`attribute:${i}`, sourceForMetricIds(a.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(`attribute:${i}`, sourceForMetricIds(a.metric_ids)); } }}>
+				<div role="button" tabindex="0" aria-pressed={selectedFindingKey === `attribute:${i}`} class="rounded-lg p-3 space-y-1.5 cursor-pointer" style="background:{selectedFindingKey === `attribute:${i}` ? surface2 : 'transparent'}; border:1px solid {selectedFindingKey === `attribute:${i}` ? accent : borderColor};" onclick={() => showSource(`attribute:${i}`, sourceForMetricIds(a.metric_ids), tableRefsForMetricIds(a.metric_ids))} onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showSource(`attribute:${i}`, sourceForMetricIds(a.metric_ids), tableRefsForMetricIds(a.metric_ids)); } }}>
 									<div class="flex flex-wrap items-center gap-2">
 										{@render severityBadge(a.severity)}
 										<code class="text-xs rounded px-1.5 py-0.5" style="background:{surface2}; color:{accent};"
@@ -726,7 +735,7 @@
 		<div class="rounded-xl flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor};">
 			{#if selected}
 				{#if pdfError}<p class="p-4 text-sm" style="color:{danger};">{pdfError}</p>{/if}
-				<PdfViewWindow inputId={selected.id} fileUrl={`/api/v1/kb/inputs/${selected.id}/file`} bind:page={pdfPage} bind:zoom={pdfZoom} bind:numPages={pdfPages} {darkMode} showSidebar={false} enableSelectionDialog={false} {highlightVersion} renderHighlights={renderSourceHighlights} />
+				<PdfViewWindow inputId={selected.id} fileUrl={`/api/v1/kb/inputs/${selected.id}/file`} bind:page={pdfPage} bind:zoom={pdfZoom} bind:numPages={pdfPages} {darkMode} showSidebar={false} enableSelectionDialog={false} {highlightVersion} {tableReferences} renderHighlights={renderSourceHighlights} />
 			{:else}
 				<div class="h-full flex items-center justify-center text-sm" style="color:{textMuted};">{m.mrv_pdf_hint()}</div>
 			{/if}
