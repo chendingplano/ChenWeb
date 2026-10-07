@@ -206,3 +206,15 @@ These structures are the backbone of span -> coordinate -> highlight transformat
 8. Overlay boxes are drawn on referenced lines
 
 This is the implemented realization of the feature described in `metric-mgmt-page.md`.
+
+## Header visibility (2026-10-07)
+
+The Metrics and Gold Metrics views start with their header expanded. **Hide header**
+collapses the title, subtitle, and record summary, giving the body more vertical space.
+While collapsed, **Show header** appears in the breadcrumb toolbar immediately before
+the context panel toggle (**Close panel** / **Open panel**). Restoring the header keeps
+the current record, filters, selected metric, and document view intact. Navigation to
+another page resets header visibility. Both controls have English and Chinese labels.
+
+`content-panel.svelte` owns the visibility state and binds it to the optional
+`headerVisible` prop on `metric-mgmt-view.svelte`. No database or API changes are needed.

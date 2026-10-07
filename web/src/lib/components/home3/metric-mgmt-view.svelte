@@ -38,6 +38,7 @@
 	import ListIcon from '@lucide/svelte/icons/list';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
@@ -66,7 +67,8 @@
 	let {
 		darkMode = true,
 		onFocusModeChange,
-		source = 'kb'
+		source = 'kb',
+		headerVisible = $bindable(true)
 	}: {
 		darkMode: boolean;
 		onFocusModeChange?: (focused: boolean) => void;
@@ -74,6 +76,7 @@
 		// only by the extract-metrics-benchmark skill, so Add Metric and the
 		// kb.metrics-only Global Metric Search are hidden.
 		source?: KbMetricSource;
+		headerVisible?: boolean;
 	} = $props();
 	const metricsEditable = $derived(source === 'kb');
 
@@ -1404,7 +1407,7 @@
 />
 
 <div
-	class="metric-mgmt"
+	class="metric-mgmt select-text"
 	style="
 		--page-bg:{pageBg};
 		--doc-frame-bg:{docFrameBg};
@@ -1429,7 +1432,7 @@
 		--font-sans:{fontSans};
 	"
 >
-	<header class="header">
+	<header id="metrics-header" class="header" hidden={!headerVisible}>
 		<div class="header-left">
 			<div class="eyebrow">{i18n.metric_mgmt_knowledge_system_vol_iii()}</div>
 			<h1 class="display">{i18n.metric_mgmt_metrics()};<span class="amp">&amp;</span>&{i18n.metric_mgmt_provenance()}</h1>
@@ -1443,6 +1446,16 @@
 			<span class="meta-label">{i18n.metric_mgmt_metrics_2()}</span><span class="meta-val"
 				>{metrics.length.toString().padStart(3, '0')}</span
 			>
+			<button
+				type="button"
+				class="header-fold-toggle"
+				onclick={() => (headerVisible = false)}
+				aria-expanded={headerVisible}
+				aria-controls="metrics-header"
+			>
+				<ChevronUpIcon class="toolbar-icon" />
+				{i18n.metric_mgmt_hide_header()}
+			</button>
 		</div>
 	</header>
 
@@ -2705,6 +2718,24 @@
 		border-bottom: 1px solid var(--ink-line);
 		position: relative;
 		gap: 24px;
+	}
+	.header[hidden] {
+		display: none;
+	}
+	.header-fold-toggle {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 4px 8px;
+		border: 1px solid var(--ink-line);
+		border-radius: 4px;
+		background: var(--brass-faint);
+		color: var(--brass);
+		font-family: var(--font-sans);
+		font-size: 12px;
+		cursor: pointer;
 	}
 	.header::after {
 		content: '';

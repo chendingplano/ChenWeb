@@ -1040,6 +1040,8 @@
 	"llm_usage_event_dialog_llm_usage_event": "LLM Usage Event — {id}",
 	"content_panel_close_context_panel": "Close context panel",
 	"content_panel_open_context_panel": "Open context panel",
+	"metric_mgmt_show_header": "Show header",
+	"metric_mgmt_hide_header": "Hide header",
 	"content_panel_close_panel": "Close panel",
 	"content_panel_open_panel": "Open panel",
 	"content_panel_select_a_section_from_the": "Select a section from the navigation.",

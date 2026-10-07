@@ -71,6 +71,7 @@
 	import Chatter01 from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import BotIcon from '@lucide/svelte/icons/bot';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
@@ -167,6 +168,15 @@
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 	let isDashboard = $derived(sectionId === 'dashboard' || !activeMenu);
+	let metricsHeaderVisible = $state(true);
+	const isMetricsView = $derived(
+		activeMenu?.childId === 'kb-metrics' || activeMenu?.childId === 'sysadmin-llm-metrics-gold'
+	);
+	$effect(() => {
+		// Reset when navigating to a different page, without persisting the folded state.
+		activeMenu?.childId;
+		metricsHeaderVisible = true;
+	});
 
 	// Product Review: starting a review swaps the embedded intake view for the
 	// embedded results view (same nav item, no navigation away from the
@@ -220,20 +230,35 @@
 					<span style="color:{textPrimary}; font-weight:500;">{activeMenu.childTitle}</span>
 				{/if}
 			</nav>
-			<!-- Pages with their own multi-pane layout use the shelf's space. -->
-			{#if activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics'}
-				<button
-					onclick={onToggleShelf}
-					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
-					style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
-					aria-label={shelfOpen
-						? m.content_panel_close_context_panel()
-						: m.content_panel_open_context_panel()}
-				>
-					<PanelRightIcon class="h-3.5 w-3.5" />
-					{shelfOpen ? m.content_panel_close_panel() : m.content_panel_open_panel()}
-				</button>
-			{/if}
+			<div class="flex items-center gap-2">
+				{#if isMetricsView && !metricsHeaderVisible}
+					<button
+						type="button"
+						onclick={() => (metricsHeaderVisible = true)}
+						class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
+						style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
+						aria-expanded={metricsHeaderVisible}
+						aria-controls="metrics-header"
+					>
+						<ChevronDownIcon class="h-3.5 w-3.5" />
+						{m.metric_mgmt_show_header()}
+					</button>
+				{/if}
+				<!-- Pages with their own multi-pane layout use the shelf's space. -->
+				{#if activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics'}
+					<button
+						onclick={onToggleShelf}
+						class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
+						style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
+						aria-label={shelfOpen
+							? m.content_panel_close_context_panel()
+							: m.content_panel_open_context_panel()}
+					>
+						<PanelRightIcon class="h-3.5 w-3.5" />
+						{shelfOpen ? m.content_panel_close_panel() : m.content_panel_open_panel()}
+					</button>
+				{/if}
+			</div>
 		</div>
 	{/if}
 
@@ -256,9 +281,9 @@
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}
-			<MetricMgmtView {darkMode} {onFocusModeChange} />
+			<MetricMgmtView {darkMode} {onFocusModeChange} bind:headerVisible={metricsHeaderVisible} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-gold'}
-			<MetricMgmtView {darkMode} {onFocusModeChange} source="testbed" />
+			<MetricMgmtView {darkMode} {onFocusModeChange} bind:headerVisible={metricsHeaderVisible} source="testbed" />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}

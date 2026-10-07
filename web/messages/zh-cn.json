@@ -1040,6 +1040,8 @@
 	"llm_usage_event_dialog_llm_usage_event": "LLM 使用事件 — {id}",
 	"content_panel_close_context_panel": "关闭上下文面板",
 	"content_panel_open_context_panel": "打开上下文面板",
+	"metric_mgmt_show_header": "显示页眉",
+	"metric_mgmt_hide_header": "收起页眉",
 	"content_panel_close_panel": "关闭面板",
 	"content_panel_open_panel": "打开面板",
 	"content_panel_select_a_section_from_the": "从导航中选择一个部分。",
