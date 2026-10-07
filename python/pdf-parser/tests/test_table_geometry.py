@@ -2,7 +2,6 @@ import hashlib
 import json
 
 import fitz
-import pytest
 
 from table_geometry import extract_table_geometry, write_table_geometry
 
@@ -31,8 +30,8 @@ def test_extracts_rows_cells_and_rowspan_bands(tmp_path):
     assert result['pdf_sha256'] == hashlib.sha256(pdf.read_bytes()).hexdigest()
     assert [t['page'] for t in result['tables']] == [1, 2]
     rows = result['tables'][0]['rows']
-    assert rows[1]['coords'] == pytest.approx([40/300*1000, 175, 800, 250])
-    assert rows[2]['coords'] == pytest.approx([40/300*1000, 250, 800, 325])
+    assert rows[1]['coords'] == [133, 175, 800, 250]
+    assert rows[2]['coords'] == [133, 250, 800, 325]
     assert rows[2]['cells'][0]['text'] == 'shared'
     assert rows[2]['cells'][0]['coords'] == rows[1]['cells'][0]['coords']
     assert rows[2]['cells'][1]['text'] == 'row0b'
@@ -45,7 +44,7 @@ def test_companion_is_atomic_json_and_uses_displayed_page_rotation(tmp_path):
     assert output == tmp_path / 'rotated.pdf-table-geometry.json'
     result = json.loads(output.read_text())
     assert len(result['tables']) == 2
-    assert result['tables'][0]['rows'][0]['coords'] == pytest.approx([825, 40/300*1000, 900, 800])
+    assert result['tables'][0]['rows'][0]['coords'] == [825, 133, 900, 800]
     assert not list(tmp_path.glob('*.tmp'))
 
 
@@ -57,8 +56,7 @@ def test_cropbox_coordinates_are_relative_to_displayed_page(tmp_path):
             page.set_cropbox(fitz.Rect(20, 20, 280, 370))
         doc.saveIncr()
     result = extract_table_geometry(pdf)
-    assert result['tables'][0]['rows'][0]['coords'] == pytest.approx(
-        [20/260*1000, 20/350*1000, 220/260*1000, 50/350*1000])
+    assert result['tables'][0]['rows'][0]['coords'] == [77, 57, 846, 143]
 
 
 def test_colspan_columns_share_the_same_physical_cell(tmp_path):
@@ -77,3 +75,16 @@ def test_colspan_columns_share_the_same_physical_cell(tmp_path):
     cells = extract_table_geometry(pdf)['tables'][0]['rows'][0]['cells']
     assert cells[0]['text'] == cells[1]['text'] == 'Title'
     assert cells[0]['coords'] == cells[1]['coords']
+
+
+def test_future_physical_companion_contains_only_integer_coordinates(tmp_path):
+    pdf = tmp_path / 'integers.pdf'
+    make_pdf(pdf)
+    result = json.loads(write_table_geometry(pdf).read_text())
+    for table in result['tables']:
+        boxes = [table['coords']]
+        for row in table['rows']:
+            boxes.append(row['coords'])
+            boxes.extend(cell['coords'] for cell in row['cells'] if cell['coords'])
+        assert all(type(value) is int for box in boxes for value in box)
+    assert result['tables'][0]['coords'] == [133, 100, 800, 325]

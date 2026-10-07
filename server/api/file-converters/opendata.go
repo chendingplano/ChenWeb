@@ -417,10 +417,7 @@ func formatOpenDataLines(items []extractedOpenDataLine) []string {
 		if fontSize == "" {
 			fontSize = defaultLineFontSize
 		}
-		coordinate := strings.TrimSpace(item.BBox)
-		if coordinate == "" {
-			coordinate = "[]"
-		}
+		coordinate := integerLineBBox(item.BBox)
 		lines = append(lines, strings.Join([]string{
 			strconv.Itoa(lineNum),
 			page,
@@ -433,6 +430,23 @@ func formatOpenDataLines(items []extractedOpenDataLine) []string {
 		lineNum++
 	}
 	return lines
+}
+
+// integerLineBBox rounds only serialized coordinates, preserving calculation precision.
+func integerLineBBox(raw string) string {
+	var values []float64
+	if err := json.Unmarshal([]byte(raw), &values); err != nil || len(values) != 4 {
+		return "[]"
+	}
+	parts := make([]string, len(values))
+	for i, value := range values {
+		parts[i] = strconv.FormatFloat(math.Round(value), 'f', 0, 64)
+	}
+	separator := ","
+	if strings.Contains(raw, ", ") {
+		separator = ", "
+	}
+	return "[" + strings.Join(parts, separator) + "]"
 }
 
 func escapeLineContent(content string) string {

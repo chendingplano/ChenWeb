@@ -276,10 +276,10 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 					}
 					mapped[r.ID] = dest
 				}
-				dest.Boxes = append(dest.Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: pr.Coords})
+				dest.Boxes = append(dest.Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(pr.Coords)})
 				for col, cell := range pr.Cells {
 					if validBox(cell.Coords) {
-						dest.Cells[col].Boxes = append(dest.Cells[col].Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: cell.Coords})
+						dest.Cells[col].Boxes = append(dest.Cells[col].Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(cell.Coords)})
 					}
 				}
 			}
@@ -293,6 +293,15 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 		out.Tables = append(out.Tables, table)
 	}
 	return out, nil
+}
+
+// Keep physical inputs precise and round only newly produced canonical boxes.
+func integerCoords(coords []float64) []float64 {
+	rounded := make([]float64, len(coords))
+	for i, value := range coords {
+		rounded[i] = math.Round(value)
+	}
+	return rounded
 }
 
 func CompanionPath(linePath string) string {

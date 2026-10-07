@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -31,10 +32,10 @@ def extract_table_geometry(pdf_path):
 
             def coords(box):
                 rect = fitz.Rect(box) * matrix
-                return [(rect.x0-display.x0)/display.width*1000,
+                return [math.floor(value + 0.5) for value in [(rect.x0-display.x0)/display.width*1000,
                         (rect.y0-display.y0)/display.height*1000,
                         (rect.x1-display.x0)/display.width*1000,
-                        (rect.y1-display.y0)/display.height*1000]
+                        (rect.y1-display.y0)/display.height*1000]]
 
             for table in page.find_tables().tables:
                 texts = table.extract()

@@ -225,3 +225,65 @@ func TestAmbiguousContinuationTablesOmitted(t *testing.T) {
 		}
 	}
 }
+
+func TestNewCanonicalCompanionRoundsRowAndCellCoordinates(t *testing.T) {
+	physical := physicalFixture()
+	physical.Tables[1].Rows[1].Coords = []float64{80.5, 120.49, 890.7, 200.2}
+	physical.Tables[1].Rows[1].Cells[1].Coords = []float64{200.5, 120.49, 890.7, 200.2}
+	got, err := Build([]byte(lineFixture), physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := got.Tables[0].Rows[2]
+	for _, box := range []Box{row.Boxes[0], row.Cells[1].Boxes[0]} {
+		raw, _ := json.Marshal(box.Coords)
+		var ints []int
+		if err := json.Unmarshal(raw, &ints); err != nil {
+			t.Fatalf("noninteger geometry: %s", raw)
+		}
+		if ints[0] != int(box.Coords[0]) || ints[1] != 120 || ints[2] != 891 || ints[3] != 200 {
+			t.Fatalf("incorrect rounding: %v", ints)
+		}
+	}
+	if row.Boxes[0].Coords[0] != 81 || row.Cells[1].Boxes[0].Coords[0] != 201 {
+		t.Fatal("half coordinates must round up")
+	}
+	if physical.Tables[1].Rows[1].Coords[0] != 80.5 {
+		t.Fatal("modified physical input")
+	}
+}
+
+func TestEnsureLeavesExistingDecimalCompanionUntouched(t *testing.T) {
+	dir := t.TempDir()
+	line, pdf := filepath.Join(dir, "sample.txt"), filepath.Join(dir, "sample.pdf")
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(line, []byte(lineFixture))
+	write(pdf, []byte("PDF"))
+	physical := physicalFixture()
+	physical.PDFHash = hash([]byte("PDF"))
+	raw, _ := json.Marshal(physical)
+	write(PhysicalPath(pdf), raw)
+	existing, err := Ensure(line, pdf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing.Tables[0].Rows[0].Boxes[0].Coords[0] = 80.25
+	before, _ := json.Marshal(existing)
+	write(CompanionPath(line), before)
+	got, err := Ensure(line, pdf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(CompanionPath(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) || got.Tables[0].Rows[0].Boxes[0].Coords[0] != 80.25 {
+		t.Fatal("rewrote existing companion")
+	}
+}

@@ -389,11 +389,11 @@ func TestConvertOpenDataFile_MergesSplitTablesAcrossPages(t *testing.T) {
 	if strings.Contains(text, "|---|---|---|") {
 		t.Fatalf("did not expect markdown separator rows after merge: %s", text)
 	}
-	if !strings.Contains(text, "1\t7\ttable-row\tunknown-font\t12\t[63.12,73.8,548.86,105.96]\t|A|B|C|") {
+	if !strings.Contains(text, "1\t7\ttable-row\tunknown-font\t12\t[63,74,549,106]\t|A|B|C|") {
 		t.Fatalf("missing merged header row: %s", text)
 	}
-	if !strings.Contains(text, "2\t8\ttable-row\tunknown-font\t12\t[63.12,585.19,548.86,743.74]\t|r1c1|r1c2|r1c3|") ||
-		!strings.Contains(text, "3\t8\ttable-row\tunknown-font\t12\t[63.12,585.19,548.86,743.74]\t|r2c1|r2c2|r2c3|") {
+	if !strings.Contains(text, "2\t8\ttable-row\tunknown-font\t12\t[63,585,549,744]\t|r1c1|r1c2|r1c3|") ||
+		!strings.Contains(text, "3\t8\ttable-row\tunknown-font\t12\t[63,585,549,744]\t|r2c1|r2c2|r2c3|") {
 		t.Fatalf("missing merged data rows: %s", text)
 	}
 }

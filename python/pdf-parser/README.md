@@ -273,3 +273,5 @@ To backfill an existing PDF without re-running its parser:
 The API builds/refreshes the canonical companion on its next request. Line/PDF/
 physical geometry hashes prevent stale geometry reuse. See the PDF Viewer capsule's
 `table-geometry-design.md` for the coordinate and reference contracts.
+
+New PDF table geometry companions store coordinates as integers, rounded to the nearest integer. The Go line converter and canonical geometry builder apply the same output rule. Existing artifacts are not migrated.
