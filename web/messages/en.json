@@ -6574,5 +6574,6 @@
 	"msc_range_type_incorrect": "Range type incorrect",
 	"msc_no_matching_pairs": "No matched metrics satisfy this filter.",
 	"msc_pdf_panel": "Source PDF",
-	"msc_pdf_empty": "Select a document or open a benchmark run to view its PDF."
+	"msc_pdf_empty": "Select a document or open a benchmark run to view its PDF.",
+	"msc_resize_panels": "Resize result and PDF panels"
 }

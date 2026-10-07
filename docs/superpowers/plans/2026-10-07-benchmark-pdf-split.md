@@ -33,6 +33,8 @@
 ### Task 2: Add independently scrolling panels and localized content
 
 - [ ] Wrap the current benchmark result detail in the left panel and add an adjacent right panel containing `PdfViewWindow` for the active input ID.
+- [ ] Track the selected entry key and apply a visible selected state to the matching result button, including entries without resolvable source lines.
+- [ ] Add an accessible divider between the panels; support pointer dragging and keyboard width adjustment with bounded panel ratios.
 - [ ] Keep PDF visible when a run has no score or metric rows; show a localized empty state only when no input ID is selected.
 - [ ] Constrain both panels to independent scroll containers; stack them on narrow viewports.
 - [ ] Add every new visible string in English and Chinese through Paraglide.

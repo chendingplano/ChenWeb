@@ -3,7 +3,8 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { getRawLines, type RawLine } from '$lib/services/kbService';
-	import PdfViewWindow, { type PdfPageViewport } from './pdf-view-window.svelte';
+	import PdfViewWindow from './pdf-view-window.svelte';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import { searchInputs, type InputRecordSummary } from './metric-review-client.js';
 	import {
 		scoreModels,
@@ -45,6 +46,10 @@
 	let highlightVersion = $state(0);
 	let rawLinesReady = $state(false);
 	let pendingSourceEntry = $state<Array<{ id: string; prediction: boolean }> | null>(null);
+	let selectedEntryKey = $state('');
+	let splitPanelsEl = $state<HTMLDivElement | null>(null);
+	let leftPanelRatio = $state(0.5);
+	let resizingPanels = $state(false);
 	let rawLineSequence = 0;
 	let previousInputId: number | null | undefined;
 	let previousRunId: number | null | undefined;
@@ -54,6 +59,7 @@
 		score: m.msc_score_download,
 		report: m.msc_report_download
 	};
+	const json = (value: unknown) => JSON.stringify(value, null, 2);
 	const failureLabels: Record<string, () => string> = {
 		kind: m.msc_kind_incorrect,
 		unit: m.msc_unit_incorrect,
@@ -104,7 +110,6 @@
 	let historyInFlight = 0,
 		detailInFlight = 0;
 	const lang = getLocale();
-	const json = (value: unknown) => JSON.stringify(value, null, 2);
 	const pct = (value: number | null | undefined) =>
 		value == null
 			? m.msc_na()
@@ -280,7 +285,8 @@
 		const record = rows?.find((item) => item.metric_id === id);
 		return parseSourceLines(record?.source_line_spans);
 	}
-	function selectSourceEntry(ids: Array<{ id: string; prediction: boolean }>) {
+	function selectSourceEntry(entryKey: string, ids: Array<{ id: string; prediction: boolean }>) {
+		selectedEntryKey = entryKey;
 		pendingSourceEntry = ids;
 		resolveSourceEntry(ids);
 	}
@@ -330,6 +336,7 @@
 			pdfPage = 1;
 			sourceLines = [];
 			pendingSourceEntry = null;
+			selectedEntryKey = '';
 			rawLinesReady = false;
 			rawLines = [];
 			highlightVersion++;
@@ -356,9 +363,40 @@
 			previousRunId = runId;
 			sourceLines = [];
 			pendingSourceEntry = null;
+			selectedEntryKey = '';
 			highlightVersion++;
 		}
 	});
+	function startPanelResize(event: PointerEvent) {
+		if (window.matchMedia('(max-width: 700px)').matches) return;
+		event.preventDefault();
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		resizingPanels = true;
+	}
+	function movePanelResize(event: PointerEvent) {
+		if (!resizingPanels || !splitPanelsEl) return;
+		const bounds = splitPanelsEl.getBoundingClientRect();
+		if (bounds.width <= 0) return;
+		leftPanelRatio = Math.min(0.75, Math.max(0.25, (event.clientX - bounds.left) / bounds.width));
+	}
+	function endPanelResize() {
+		resizingPanels = false;
+	}
+	function resizePanelsWithKeyboard(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+			event.preventDefault();
+			leftPanelRatio = Math.min(
+				0.75,
+				Math.max(0.25, leftPanelRatio + (event.key === 'ArrowLeft' ? -0.05 : 0.05))
+			);
+		} else if (event.key === 'Home') {
+			event.preventDefault();
+			leftPanelRatio = 0.25;
+		} else if (event.key === 'End') {
+			event.preventDefault();
+			leftPanelRatio = 0.75;
+		}
+	}
 	onMount(() => {
 		void history();
 		void scoreModels()
@@ -520,7 +558,11 @@
 			>
 		</div>
 	</section>
-	<div class="split-panels">
+	<div
+		class="split-panels"
+		bind:this={splitPanelsEl}
+		style={`--left-panel-fr: ${leftPanelRatio}fr; --right-panel-fr: ${1 - leftPanelRatio}fr;`}
+	>
 		<div class="result-panel">
 	{#if detail}
 		<section class="card results">
@@ -618,7 +660,19 @@
 				</label>
 				<details open class="matched-metrics">
 					<summary>{m.msc_pairs({ count: filteredPairs.length })}</summary
-					>{#each filteredPairs as pair}<button class="result-entry" onclick={() => selectSourceEntry([{ id: pair.gold, prediction: false }, { id: pair.pred, prediction: true }])}>
+					>{#each filteredPairs as pair, index}
+						{@const entryKey = JSON.stringify(['pair', index, pair.gold, pair.pred])}
+						<button
+							type="button"
+							class="result-entry"
+							class:selected-entry={selectedEntryKey === entryKey}
+							aria-pressed={selectedEntryKey === entryKey}
+							onclick={() =>
+								selectSourceEntry(entryKey, [
+									{ id: pair.gold, prediction: false },
+									{ id: pair.pred, prediction: true }
+								])}
+						>
 							<strong>{rowName(pair.gold)}</strong>
 							<span class="entry-line">{rowName(pair.pred, true)}</span>
 							<span class="entry-line">{pair.note}</span>
@@ -637,14 +691,30 @@
 				</details>
 				<details open>
 					<summary>{m.msc_missed({ count: detail.score.missed.length })}</summary
-					>{#each detail.score.missed as missed}<button class="result-entry" onclick={() => selectSourceEntry([{ id: missed.gold, prediction: false }])}>
+					>{#each detail.score.missed as missed, index}
+						{@const entryKey = JSON.stringify(['missed', index, missed.gold])}
+						<button
+							type="button"
+							class="result-entry"
+							class:selected-entry={selectedEntryKey === entryKey}
+							aria-pressed={selectedEntryKey === entryKey}
+							onclick={() => selectSourceEntry(entryKey, [{ id: missed.gold, prediction: false }])}
+						>
 							<strong>{rowName(missed.gold)}</strong>
 							<span class="entry-line">{missed.note}</span>
 						</button>{/each}
 				</details>
 				<details open>
 					<summary>{m.msc_false_positives({ count: detail.score.false_positives.length })}</summary
-					>{#each detail.score.false_positives as fp}<button class="result-entry" onclick={() => selectSourceEntry([{ id: fp.pred, prediction: true }])}>
+					>{#each detail.score.false_positives as fp, index}
+						{@const entryKey = JSON.stringify(['false-positive', index, fp.pred])}
+						<button
+							type="button"
+							class="result-entry"
+							class:selected-entry={selectedEntryKey === entryKey}
+							aria-pressed={selectedEntryKey === entryKey}
+							onclick={() => selectSourceEntry(entryKey, [{ id: fp.pred, prediction: true }])}
+						>
 							<strong>{rowName(fp.pred, true)}</strong>
 							<span class="entry-line">{m.msc_cause()}: {causes[fp.cause]?.() ?? fp.cause}</span>
 							<span class="entry-line">{fp.note}</span>
@@ -662,6 +732,22 @@
 		</section>
 	{/if}
 		</div>
+		<button
+			type="button"
+			class="panel-resizer"
+			class:resizing={resizingPanels}
+		role="slider"
+		aria-orientation="horizontal"
+			aria-label={m.msc_resize_panels()}
+			aria-valuemin="25"
+			aria-valuemax="75"
+			aria-valuenow={Math.round(leftPanelRatio * 100)}
+			onpointerdown={startPanelResize}
+			onpointermove={movePanelResize}
+			onpointerup={endPanelResize}
+			onpointercancel={endPanelResize}
+			onkeydown={resizePanelsWithKeyboard}
+		></button>
 		<aside class="pdf-panel" aria-label={m.msc_pdf_panel()}>
 			<h2>{m.msc_pdf_panel()}</h2>
 			{#if activeInputId != null}
@@ -741,8 +827,7 @@
 	}
 	.split-panels {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 20px;
+		grid-template-columns: minmax(0, var(--left-panel-fr)) 12px minmax(0, var(--right-panel-fr));
 		align-items: stretch;
 	}
 	.result-panel,
@@ -781,10 +866,45 @@
 		text-align: left;
 		white-space: normal;
 		border-color: var(--border);
+		user-select: text;
+	}
+	.result-entry.selected-entry {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+		box-shadow: inset 3px 0 var(--accent);
 	}
 	.result-entry:focus-visible {
 		outline: 3px solid var(--accent);
 		outline-offset: 2px;
+	}
+	.panel-resizer {
+		position: relative;
+		width: 12px;
+		min-width: 12px;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		cursor: col-resize;
+		touch-action: none;
+		user-select: none;
+	}
+	.panel-resizer::before {
+		position: absolute;
+		inset: 0 4px;
+		border-radius: 4px;
+		background: var(--border);
+		content: '';
+	}
+	.panel-resizer:hover::before,
+	.panel-resizer:focus-visible::before,
+	.panel-resizer.resizing::before {
+		background: var(--accent);
+	}
+	.panel-resizer:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
 	}
 	.search,
 	.controls,
@@ -803,8 +923,7 @@
 	}
 	input,
 	select,
-	button,
-	a {
+	button {
 		border: 1px solid var(--border);
 		border-radius: 7px;
 		padding: 9px 12px;
@@ -812,8 +931,7 @@
 		color: var(--text);
 		font-size: 13px;
 	}
-	button,
-	a {
+	button {
 		cursor: pointer;
 	}
 	button:disabled {
@@ -977,6 +1095,9 @@
 	@media (max-width: 700px) {
 		.split-panels {
 			grid-template-columns: minmax(0, 1fr);
+		}
+		.panel-resizer {
+			display: none;
 		}
 		.result-panel,
 		.pdf-panel {

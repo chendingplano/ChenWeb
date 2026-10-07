@@ -6574,5 +6574,6 @@
 	"msc_range_type_incorrect": "范围类型不正确",
 	"msc_no_matching_pairs": "没有符合此筛选条件的匹配指标。",
 	"msc_pdf_panel": "来源 PDF",
-	"msc_pdf_empty": "请选择文档或打开基准运行记录以查看 PDF。"
+	"msc_pdf_empty": "请选择文档或打开基准运行记录以查看 PDF。",
+	"msc_resize_panels": "调整结果面板和 PDF 面板宽度"
 }

@@ -8,6 +8,7 @@ In the Metric Score benchmark page, show the current benchmark result content be
 
 - Keep the existing benchmark result content in the left panel.
 - Add a right panel using the existing reusable `PdfViewWindow` component used by Gold Metrics.
+- Add a draggable divider between the panels so users can adjust their widths. Support keyboard resizing and provide an accessible divider label.
 - Give each panel its own vertical scrolling container so scrolling through results does not move the PDF and scrolling the PDF does not move the results.
 - Keep the PDF panel available for the active input record even when a benchmark run has no score, or the score contains no metric rows. Use the selected input record when no result run is open, and the open run's `input_record_id` when a result is open.
 - When no input record is selected, show a localized empty state in the PDF panel.
@@ -17,6 +18,7 @@ In the Metric Score benchmark page, show the current benchmark result content be
 ## Source navigation and highlighting
 
 - Make each matched pair, missed metric, and false-positive entry selectable from the left panel.
+- Visually highlight the selected result entry and expose its selected state to assistive technology. Keep the row selected even when its source lines cannot be resolved.
 - Resolve a matched pair's `gold` and `pred` IDs from `detail.input.gold` and `detail.input.predictions`; resolve a missed entry's `gold` ID from `detail.input.gold`, and a false-positive entry's `pred` ID from `detail.input.predictions`. Match IDs against each record's `metric_id`. If a referenced ID has no corresponding record, skip that record and use any other resolvable record for the entry.
 - Read `source_line_spans` from each resolved record. Accept the existing formats: individual line numbers, numeric strings, inclusive `start:end` / `start-end` / `start,end` ranges, and objects containing `line_number`, `line`, `line_no`, or `lineNo`. Expand ranges with a 200-line safety cap, then map line numbers to pages using `getRawLines(activeInputId)`; retain only line numbers present in the raw lines.
 - Reuse the shared PDF viewer and its existing `renderHighlights` and `highlightVersion` props. Raw-line `coords` are `[x1, y1, x2, y2]` bounding boxes in a 1000-by-1000 top-left-origin coordinate space. For each resolved line with at least four finite coordinate values, scale x coordinates by `viewport.width / 1000` and y coordinates by `viewport.height / 1000`, then draw the resulting rectangle with the established `.pdf-highlight` style. When selecting an entry, navigate to the page of its first resolvable source line; highlight all resolvable source lines, including those on other pages.
@@ -44,6 +46,8 @@ The viewer's existing PDF loading state and error presentation handle a missing 
 5. Missing source spans or line data do not break the benchmark view or move the PDF to the wrong page.
 6. New UI text is localized in English and Chinese and all panel content remains selectable.
 7. Changing the active input record resets the viewer to page 1 and clears highlights; changing runs for the same record clears stale highlights.
+8. Selecting an entry visibly highlights its row in the left panel while retaining PDF source highlighting.
+9. Dragging the divider changes the relative panel widths; keyboard controls can also adjust the divider.
 
 ## Scope
 
