@@ -482,11 +482,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v11.md",
+		"prompt-extract-metric-candidates-v12.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v8.md",
+		"prompt-enrich-metrics-v9.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -1516,6 +1516,7 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 	schema := map[string]any{
 		"language": "string",
 		"metrics": []map[string]any{{
+			"candidate_id":          "string",
 			"metric_name":           "string",
 			"metric_name_en":        "string",
 			"source_line_spans":     []string{"5", "12:14"},
@@ -1560,7 +1561,8 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 				"confidence":        0.0,
 			}},
 		}},
-		"uncertain_metrics": []any{},
+		"uncertain_metrics":  []any{},
+		"dropped_candidates": []map[string]any{{"candidate_id": "string", "reason": "string"}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
 	// No source-lines section here: the caller sends the full chunk (all of a candidate's
@@ -1948,6 +1950,59 @@ func backfillMetricResultCandidateIDs(metrics []map[string]any, candidates []met
 			metrics[i]["candidate_id"] = candidates[i].CandidateID
 		}
 	}
+}
+
+// unaccountedMetricCandidates returns the IDs of batch candidates that no enriched row carries
+// and the LLM did not list in dropped_candidates (enrich prompt v9+), i.e. silently lost.
+func unaccountedMetricCandidates(metrics []map[string]any, dropped []any, candidates []metricCandidate) []string {
+	seen := map[string]bool{}
+	for _, m := range metrics {
+		seen[strings.TrimSpace(asString(m["candidate_id"]))] = true
+	}
+	for _, d := range dropped {
+		if raw, ok := d.(map[string]any); ok {
+			seen[strings.TrimSpace(asString(raw["candidate_id"]))] = true
+		}
+	}
+	var missing []string
+	for _, c := range candidates {
+		if !seen[c.CandidateID] {
+			missing = append(missing, c.CandidateID)
+		}
+	}
+	return missing
+}
+
+// metricDropReasonTags are dropped_candidates reasons (enrich prompt v9+) for candidates that
+// must not become rows. The LLM sometimes emits the row anyway, tagged with the reason.
+var metricDropReasonTags = map[string]bool{
+	"applicability_scope":     true,
+	"formula_operand":         true,
+	"activity_schedule":       true,
+	"own_table_pointer":       true,
+	"obligation_no_property":  true,
+	"inspection_requirement":  true,
+	"delegated_requirement":   true,
+	"qualitative_requirement": true,
+}
+
+// dropRowsTaggedWithDropReason removes rows whose reasoning_tags carry a drop reason.
+func dropRowsTaggedWithDropReason(metrics []map[string]any) (kept, dropped []map[string]any) {
+	for _, m := range metrics {
+		drop := false
+		for _, tag := range toStringSlice(m["reasoning_tags"]) {
+			if metricDropReasonTags[strings.ToLower(strings.TrimSpace(tag))] {
+				drop = true
+				break
+			}
+		}
+		if drop {
+			dropped = append(dropped, m)
+		} else {
+			kept = append(kept, m)
+		}
+	}
+	return kept, dropped
 }
 
 func candidateSourceLineSpans(candidate metricCandidate) []string {
@@ -2727,7 +2782,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v8.md"
+		promptRef = "prompt-enrich-metrics-v9.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3509,6 +3564,25 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 			language:  lang,
 		}
 		backfillMetricResultCandidateIDs(result.metrics, batch.candidates)
+		droppedRaw, _ := payload["dropped_candidates"].([]any)
+		if missing := unaccountedMetricCandidates(result.metrics, droppedRaw, batch.candidates); len(missing) > 0 {
+			p.Logger.Warn("pass2: candidates neither enriched nor listed in dropped_candidates",
+				"record_id", recordID,
+				"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+				"candidate_ids", missing,
+			)
+		}
+		var selfDropped []map[string]any
+		result.metrics, selfDropped = dropRowsTaggedWithDropReason(result.metrics)
+		for _, m := range selfDropped {
+			p.Logger.Info("pass2: dropped row the LLM tagged with a drop reason",
+				"record_id", recordID,
+				"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+				"candidate_id", m["candidate_id"],
+				"metric_name", m["metric_name"],
+				"reasoning_tags", m["reasoning_tags"],
+			)
+		}
 		for j, m := range result.metrics {
 			spans, _ := m["source_line_spans"].([]string)
 			if len(spans) == 0 {

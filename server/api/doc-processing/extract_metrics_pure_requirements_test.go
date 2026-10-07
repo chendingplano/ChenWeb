@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -122,11 +123,11 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
-	if p.MentionPromptRef != "prompt-extract-metric-candidates-v11.md" {
-		t.Fatalf("MentionPromptRef=%q, want v11", p.MentionPromptRef)
+	if p.MentionPromptRef != "prompt-extract-metric-candidates-v12.md" {
+		t.Fatalf("MentionPromptRef=%q, want v12", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v8.md" {
-		t.Fatalf("RelationPromptRef=%q, want v8", p.RelationPromptRef)
+	if p.RelationPromptRef != "prompt-enrich-metrics-v9.md" {
+		t.Fatalf("RelationPromptRef=%q, want v9", p.RelationPromptRef)
 	}
 	// Prompts load relative to the server's working directory; from this test,
 	// check the files exist in the repo's prompts/ directory instead.
@@ -134,5 +135,40 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 		if _, err := os.Stat(filepath.Join("..", "..", "..", "prompts", ref)); err != nil {
 			t.Fatalf("default prompt %s missing: %v", ref, err)
 		}
+	}
+}
+
+func TestUnaccountedMetricCandidates(t *testing.T) {
+	candidates := []metricCandidate{{CandidateID: "6_1"}, {CandidateID: "6_2"}, {CandidateID: "6_3"}, {CandidateID: "6_4"}}
+	metrics := []map[string]any{{"candidate_id": "6_1"}, {"candidate_id": "6_1"}, {"candidate_id": ""}}
+	dropped := []any{map[string]any{"candidate_id": "6_3", "reason": "applicability_scope"}, "junk"}
+	got := unaccountedMetricCandidates(metrics, dropped, candidates)
+	if strings.Join(got, ",") != "6_2,6_4" {
+		t.Fatalf("unaccounted = %v, want [6_2 6_4]", got)
+	}
+}
+
+func TestMetricRelationBatchPromptAsksForDroppedCandidates(t *testing.T) {
+	prompt := buildMetricRelationBatchPrompt([]metricCandidate{{CandidateID: "6_2"}})
+	for _, want := range []string{`"dropped_candidates"`, `"candidate_id":"string"`, `"candidate_id":"6_2"`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("batch prompt missing %s", want)
+		}
+	}
+}
+
+func TestDropRowsTaggedWithDropReason(t *testing.T) {
+	rows := []map[string]any{
+		{"metric_name": "容积", "reasoning_tags": []string{"applicability_scope"}},
+		{"metric_name": "比能耗", "reasoning_tags": []string{"open_value"}},
+		{"metric_name": "根长", "reasoning_tags": []string{" Formula_Operand "}},
+		{"metric_name": "pH"},
+	}
+	kept, dropped := dropRowsTaggedWithDropReason(rows)
+	if len(kept) != 2 || kept[0]["metric_name"] != "比能耗" || kept[1]["metric_name"] != "pH" {
+		t.Fatalf("kept = %v", kept)
+	}
+	if len(dropped) != 2 {
+		t.Fatalf("dropped = %v", dropped)
 	}
 }
