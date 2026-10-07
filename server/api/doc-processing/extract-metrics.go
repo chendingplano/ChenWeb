@@ -482,11 +482,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v5.md",
+		"prompt-extract-metric-candidates-v11.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v6.md",
+		"prompt-enrich-metrics-v8.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2727,7 +2727,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v6.md"
+		promptRef = "prompt-enrich-metrics-v8.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3549,6 +3549,9 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		}
 	}
 	metrics = dedupeFinalMetricRows(metrics)
+	canonicalizeMetricValueRangeTypes(metrics)
+	metrics, excluded := excludePureRequirements(metrics)
+	p.logExcludedPureRequirements(ctx, recordID, excluded)
 	if pass2Err != nil {
 		return metrics, uncertain, pass2Err
 	}
@@ -3800,6 +3803,70 @@ func canonicalizeMetricValueRangeTypes(metrics []map[string]any) {
 			continue
 		}
 		metric["value_range_type"] = assertions.CanonicalMetricValueRangeType(raw)
+	}
+}
+
+// excludePureRequirements splits enriched rows into those kept as metrics and
+// pure requirements (inspection or delegated: nothing to measure), which
+// extract_metrics does not store (spec metric-pure-requirement-exclusion, ADR
+// 2026100603 DR4). Range types must already be canonical.
+func excludePureRequirements(metrics []map[string]any) (kept, excluded []map[string]any) {
+	kept = make([]map[string]any, 0, len(metrics))
+	for _, m := range metrics {
+		kind := metricStatementKind(m)
+		if !isPureRequirementKind(kind) {
+			kept = append(kept, m)
+			continue
+		}
+		excluded = append(excluded, map[string]any{
+			"kind":                kind,
+			"metric_name":         m["metric_name"],
+			"subject":             m["subject"],
+			"threshold_or_target": m["threshold_or_target"],
+			"context":             m["context"],
+			"source_line_spans":   m["source_line_spans"],
+		})
+	}
+	return kept, excluded
+}
+
+// logExcludedPureRequirements writes one extract_metrics log entry (activity
+// exclude_pure_requirements) listing every row excluded by
+// excludePureRequirements, so no requirement disappears without a record.
+func (p *MetricsProcessor) logExcludedPureRequirements(ctx context.Context, recordID int64, excluded []map[string]any) {
+	if len(excluded) == 0 {
+		return
+	}
+	byKind := map[string]int{}
+	for _, row := range excluded {
+		byKind[asString(row["kind"])]++
+	}
+	p.Logger.Info("excluded pure requirements from metrics",
+		"record_id", recordID,
+		"num_excluded", len(excluded),
+		"by_kind", byKind,
+	)
+	artifactBytes, _ := json.Marshal(map[string]any{"excluded": excluded})
+	artifactStr := string(artifactBytes)
+	extraBytes, _ := json.Marshal(map[string]any{"num_excluded": len(excluded), "by_kind": byKind})
+	extraStr := string(extraBytes)
+	activityName := "exclude_pure_requirements"
+	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
+		DocProcName:   p.Name(),
+		ModelNames:    compactNonEmptyStrings([]string{p.RelationModelName}),
+		PromptName:    p.RelationPromptRef,
+		RecordID:      int64Ptr(recordID),
+		ActivityName:  &activityName,
+		ArtifactJSON:  &artifactStr,
+		ExtraInfoJSON: &extraStr,
+	}
+	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26100701"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("exclude_pure_requirements log skipped: doc processor stopped by user request", "record_id", recordID)
+		} else {
+			p.Logger.Warn("failed to write exclude_pure_requirements log", "record_id", recordID, "error", err)
+		}
 	}
 }
 

@@ -2,6 +2,9 @@
 // (ADR 2026100603 DR3). Many rows extracted as "metrics" are requirements with
 // nothing to measure; customer-facing views label them by this kind. Computed
 // at read time from existing fields; nothing is stored.
+// The same rules run on the server (server/api/doc-processing/metric_statement_kind.go,
+// which drops pure requirements at extraction) and in the benchmark helper
+// (extract-metrics-benchmark benchmark_io.py); change all three together.
 
 export type StatementKind =
 	| 'requirement_with_criterion'
