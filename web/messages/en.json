@@ -6559,5 +6559,18 @@
 	"msc_cause_not_in_gold": "Not in gold",
 	"msc_cause_invalid": "Invalid",
 	"msc_comparison_guidance": "Compare scores using the same gold version, model, and run; changes to gold or extraction snapshots can change results.",
-	"msc_scorer_provenance": "Scorer version and snapshot hashes"
+	"msc_scorer_provenance": "Scorer version and snapshot hashes",
+	"msc_view": "View",
+	"msc_download": "Download",
+	"msc_close_evidence": "Close preview",
+	"msc_filter": "Filter matched metrics",
+	"msc_view_all": "View all",
+	"msc_view_full": "View 100%",
+	"msc_view_partial": "View <100%",
+	"msc_kind_incorrect": "Statement kind incorrect",
+	"msc_unit_incorrect": "Unit incorrect",
+	"msc_lines_incorrect": "Source lines incorrect",
+	"msc_value_incorrect": "Value incorrect",
+	"msc_range_type_incorrect": "Range type incorrect",
+	"msc_no_matching_pairs": "No matched metrics satisfy this filter."
 }

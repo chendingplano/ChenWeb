@@ -6559,5 +6559,18 @@
 	"msc_cause_not_in_gold": "黄金基准未收录",
 	"msc_cause_invalid": "无效",
 	"msc_comparison_guidance": "比较评分时请使用相同的黄金基准版本、模型和运行记录；黄金基准或提取快照的变化可能影响结果。",
-	"msc_scorer_provenance": "评分器版本与快照哈希"
+	"msc_scorer_provenance": "评分器版本与快照哈希",
+	"msc_view": "查看",
+	"msc_download": "下载",
+	"msc_close_evidence": "关闭预览",
+	"msc_filter": "筛选匹配指标",
+	"msc_view_all": "查看全部",
+	"msc_view_full": "查看 100%",
+	"msc_view_partial": "查看 <100%",
+	"msc_kind_incorrect": "陈述类型不正确",
+	"msc_unit_incorrect": "单位不正确",
+	"msc_lines_incorrect": "来源行不正确",
+	"msc_value_incorrect": "数值不正确",
+	"msc_range_type_incorrect": "范围类型不正确",
+	"msc_no_matching_pairs": "没有符合此筛选条件的匹配指标。"
 }

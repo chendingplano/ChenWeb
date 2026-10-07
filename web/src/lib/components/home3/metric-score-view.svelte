@@ -34,6 +34,56 @@
 		offset = $state(0),
 		filter = $state('all'),
 		detail = $state<ScoreRun | null>(null);
+	let pairFilter = $state('all');
+	let evidenceKind = $state('');
+	const evidenceLabels: Record<string, () => string> = {
+		input: m.msc_input_download,
+		matches: m.msc_matches_download,
+		score: m.msc_score_download,
+		report: m.msc_report_download
+	};
+	const failureLabels: Record<string, () => string> = {
+		kind: m.msc_kind_incorrect,
+		unit: m.msc_unit_incorrect,
+		lines: m.msc_lines_incorrect,
+		value: m.msc_value_incorrect,
+		range_type: m.msc_range_type_incorrect
+	};
+	const filteredPairs = $derived(
+		(detail?.score?.pairs ?? []).filter(
+			(pair) =>
+				pairFilter === 'all' ||
+				(pairFilter === 'full'
+					? pair.credit === 1
+					: pair.credit < 1 && (pairFilter === 'partial' || pair.checks[pairFilter] === false))
+		)
+	);
+	const evidenceText = $derived(
+		evidenceKind === 'report'
+			? (detail?.report ?? '')
+			: json(detail?.[evidenceKind as 'input' | 'matches' | 'score'])
+	);
+	async function evidenceAction(event: Event, kind: string) {
+		const menu = event.currentTarget as HTMLSelectElement;
+		const action = menu.value;
+		menu.value = '';
+		if (action === 'view') evidenceKind = kind;
+		if (action === 'download' && detail) {
+			const id = detail.id;
+			try {
+				const response = await fetch(scoreArtifact(id, kind), { credentials: 'same-origin' });
+				if (!response.ok) throw new Error();
+				const url = URL.createObjectURL(await response.blob());
+				const link = document.createElement('a');
+				link.href = url;
+				link.download = `benchmark-${id}-${kind}.${kind === 'report' ? 'md' : 'json'}`;
+				link.click();
+				setTimeout(() => URL.revokeObjectURL(url), 1000);
+			} catch (e) {
+				error = errorText(e);
+			}
+		}
+	}
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let alive = true,
 		historySequence = 0,
@@ -129,7 +179,11 @@
 		if (quiet && (detailInFlight > 0 || starting)) return;
 		detailInFlight++;
 		const seq = ++detailSequence;
-		if (!quiet) error = '';
+		if (!quiet) {
+			error = '';
+			pairFilter = 'all';
+			evidenceKind = '';
+		}
 		try {
 			const result = await scoreDetail(id);
 			if (alive && seq === detailSequence) detail = result;
@@ -145,6 +199,8 @@
 		error = '';
 		try {
 			detailSequence++;
+			pairFilter = 'all';
+			evidenceKind = '';
 			detail = await startScore(
 				selected.id,
 				model,
@@ -396,21 +452,42 @@
 					</dl>
 				</details>
 				<h3>{m.msc_evidence()}</h3>
-				<div class="actions">
-					<a href={scoreArtifact(detail.id, 'input')} download>{m.msc_input_download()}</a
-					>{#if detail.matches}<a href={scoreArtifact(detail.id, 'matches')} download
-							>{m.msc_matches_download()}</a
-						>{/if}{#if detail.score}<a href={scoreArtifact(detail.id, 'score')} download
-							>{m.msc_score_download()}</a
-						>{/if}{#if detail.report}<a href={scoreArtifact(detail.id, 'report')} download
-							>{m.msc_report_download()}</a
-						>{/if}
+				<div class="actions evidence-actions">
+					{#each Object.entries(evidenceLabels) as [kind, label]}
+						{#if detail[kind as 'input' | 'matches' | 'score' | 'report']}
+							<select aria-label={label()} onchange={(event) => evidenceAction(event, kind)}>
+								<option value="">{label()}</option>
+								<option value="view">{m.msc_view()}</option>
+								<option value="download">{m.msc_download()}</option>
+							</select>
+						{/if}
+					{/each}
 				</div>
+				{#if evidenceKind}
+					<div class="evidence-view">
+						<div class="section-head">
+							<h3>{evidenceLabels[evidenceKind]()}</h3>
+							<button onclick={() => (evidenceKind = '')}>{m.msc_close_evidence()}</button>
+						</div>
+						<pre>{evidenceText}</pre>
+					</div>
+				{/if}
 			{/if}
 			{#if detail.score}
-				<details open>
-					<summary>{m.msc_pairs({ count: detail.score.pairs.length })}</summary
-					>{#each detail.score.pairs as pair}<article>
+				<label class="pair-filter">
+					{m.msc_filter()}
+					<select bind:value={pairFilter}>
+						<option value="all">{m.msc_view_all()}</option>
+						<option value="full">{m.msc_view_full()}</option>
+						<option value="partial">{m.msc_view_partial()}</option>
+						{#each Object.entries(failureLabels) as [field, label]}
+							<option value={field}>{label()}</option>
+						{/each}
+					</select>
+				</label>
+				<details open class="matched-metrics">
+					<summary>{m.msc_pairs({ count: filteredPairs.length })}</summary
+					>{#each filteredPairs as pair}<article>
 							<strong>{rowName(pair.gold)}</strong>
 							<p>{rowName(pair.pred, true)}</p>
 							<p>{pair.note}</p>
@@ -425,6 +502,7 @@
 									>{/each}<span>{m.msc_credit()}: {pct(pair.credit)}</span>
 							</div>
 						</article>{/each}
+					{#if !filteredPairs.length}<p class="muted">{m.msc_no_matching_pairs()}</p>{/if}
 				</details>
 				<details open>
 					<summary>{m.msc_missed({ count: detail.score.missed.length })}</summary
@@ -591,6 +669,14 @@
 	}
 	.actions {
 		flex-wrap: wrap;
+	}
+	.pair-filter {
+		margin: 16px 0;
+		max-width: 300px;
+	}
+	.evidence-view pre {
+		max-height: 480px;
+		overflow: auto;
 	}
 	.table-wrap {
 		overflow: auto;

@@ -21,6 +21,12 @@ async def run():
    page=await ctx.new_page();errors=[];requests=[];running=False;polls=0
    page.on('pageerror',lambda e:errors.append(str(e)))
    done=fixture();done['lang']=locale
+   # Exercise each failure reason, multiple failures, and unchecked fields at full credit.
+   for field in ['kind','unit','lines','range_type']:
+    checks=dict(value=True,range_type=True,kind=True,unit=True,lines=True);checks[field]=False
+    done['score']['pairs'].append({'gold':'g-'+field,'pred':'p-'+field,'checks':checks,'credit':.8})
+   done['score']['pairs'].append({'gold':'g-multi','pred':'p-multi','checks':{'kind':False,'unit':False},'credit':.65})
+   done['score']['pairs'].append({'gold':'g-full','pred':'p-full','checks':{'value':True,'range_type':True,'kind':True,'unit':True,'lines':None},'credit':1})
    gold=[{'skill_version':'3.0.0','model_name':'gold-a','benchmark_run_id':'20261007_120000','rows':1},{'skill_version':'4.0.0','model_name':'gold-b','benchmark_run_id':'20261007_120000','rows':1}]
    async def handle(route):
     nonlocal running,polls
@@ -69,12 +75,43 @@ async def run():
    await view.locator('.section-head select').select_option('selected')
    await asyncio.sleep(.25)
    assert any(q.get('record_id')==['416'] for _,path,q,_ in requests if path.endswith('/metric-scores'))
-   assert await view.locator('a[download]').count()==4
-   for kind in ['input','matches','score','report']:
-    assert await view.locator(f'a[download][href$="/artifacts/{kind}"]').count()==1
+   results=view.locator('.results');pairs=results.locator('.matched-metrics article')
+   match_filter=results.locator('.pair-filter select')
+   assert await pairs.count()==7
+   for choice,count in [('full',1),('partial',6),('kind',2),('unit',2),('lines',1),('value',1),('range_type',1),('all',7)]:
+    await match_filter.select_option(choice)
+    assert await pairs.count()==count,(choice,await pairs.count())
+   for kind,key in [('input','msc_input_download'),('matches','msc_matches_download'),('score','msc_score_download'),('report','msc_report_download')]:
+    menu=results.get_by_role('combobox',name=labels[key],exact=True)
+    await menu.select_option('view')
+    preview=results.locator('.evidence-view pre');await preview.wait_for()
+    data=done[kind]
+    if kind=='report':assert await preview.inner_text()==data
+    else:assert json.loads(await preview.inner_text())==data
+    assert await menu.input_value()==''
+    async with page.expect_download() as download_info:
+     await menu.select_option('download')
+    download=await download_info.value
+    assert download.suggested_filename==f'benchmark-91-{kind}.'+('md' if kind=='report' else 'json')
+    assert await download.failure() is None
+    assert pathlib.Path(await download.path()).read_text()=='{"fixture":true}'
+    assert any(path.endswith('/artifacts/'+kind) for _,path,_,_ in requests)
+   await results.get_by_role('button',name=labels['msc_close_evidence'],exact=True).click()
+   assert await results.locator('.evidence-view').count()==0
+   await match_filter.select_option('unit')
+   await view.get_by_role('button',name=labels['msc_open'],exact=True).click()
+   assert await match_filter.input_value()=='all'
+   assert await pairs.count()==7
+   # A full-credit-only result gives an explicit empty state for a failed-field filter.
+   done['score']['pairs']=[done['score']['pairs'][-1]]
+   await view.get_by_role('button',name=labels['msc_open'],exact=True).click()
+   await match_filter.select_option('lines')
+   await results.get_by_text(labels['msc_no_matching_pairs'],exact=True).wait_for()
+   assert await pairs.count()==0
+   await match_filter.select_option('all')
    await page.screenshot(path=str(SCREENSHOTS/f'benchmark-{locale}.png'),full_page=True)
    assert not errors,errors
-   print(f'{locale}: navigation, search, composite gold, launch, slow polling, details, pagination/filter, evidence links, text selection passed')
+   print(f'{locale}: navigation, search, composite gold, launch, slow polling, details, pagination/filter, evidence previews/downloads, all credit/reason filters, empty state/reset, text selection passed')
    await ctx.close()
   await browser.close()
 asyncio.run(run())
