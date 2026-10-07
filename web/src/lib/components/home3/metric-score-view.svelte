@@ -2,6 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
+	import { getRawLines, type RawLine } from '$lib/services/kbService';
+	import PdfViewWindow, { type PdfPageViewport } from './pdf-view-window.svelte';
 	import { searchInputs, type InputRecordSummary } from './metric-review-client.js';
 	import {
 		scoreModels,
@@ -36,6 +38,16 @@
 		detail = $state<ScoreRun | null>(null);
 	let pairFilter = $state('all');
 	let evidenceKind = $state('');
+	let activeInputId = $derived(detail?.input_record_id ?? selected?.id ?? null);
+	let rawLines = $state<RawLine[]>([]);
+	let sourceLines = $state<RawLine[]>([]);
+	let pdfPage = $state(1);
+	let highlightVersion = $state(0);
+	let rawLinesReady = $state(false);
+	let pendingSourceEntry = $state<Array<{ id: string; prediction: boolean }> | null>(null);
+	let rawLineSequence = 0;
+	let previousInputId: number | null | undefined;
+	let previousRunId: number | null | undefined;
 	const evidenceLabels: Record<string, () => string> = {
 		input: m.msc_input_download,
 		matches: m.msc_matches_download,
@@ -230,6 +242,123 @@
 					.join(' · ')
 			: id;
 	}
+	function parseSourceLines(value: unknown): number[] {
+		const found: number[] = [];
+		const add = (candidate: unknown) => {
+			if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0) {
+				found.push(candidate);
+				return;
+			}
+			if (typeof candidate !== 'string') return;
+			const text = candidate.trim();
+			const range = text.match(/^(\d+)\s*[:,-]\s*(\d+)$/);
+			if (range) {
+				const start = Number(range[1]);
+				const end = Number(range[2]);
+				if (start > 0 && end >= start) {
+					for (let line = start; line <= Math.min(end, start + 199); line++) found.push(line);
+				}
+				return;
+			}
+			if (/^\d+$/.test(text) && Number(text) > 0) found.push(Number(text));
+		};
+		const visit = (item: unknown) => {
+			if (Array.isArray(item)) {
+				for (const nested of item) visit(nested);
+			} else if (item && typeof item === 'object') {
+				const record = item as Record<string, unknown>;
+				for (const key of ['line_number', 'line', 'line_no', 'lineNo']) {
+					if (record[key] !== undefined) add(record[key]);
+				}
+			} else add(item);
+		};
+		visit(value);
+		return [...new Set(found)].sort((a, b) => a - b);
+	}
+	function recordSourceLines(id: string, prediction: boolean): number[] {
+		const rows = prediction ? detail?.input?.predictions : detail?.input?.gold;
+		const record = rows?.find((item) => item.metric_id === id);
+		return parseSourceLines(record?.source_line_spans);
+	}
+	function selectSourceEntry(ids: Array<{ id: string; prediction: boolean }>) {
+		pendingSourceEntry = ids;
+		resolveSourceEntry(ids);
+	}
+	function resolveSourceEntry(ids: Array<{ id: string; prediction: boolean }>) {
+		sourceLines = [];
+		highlightVersion++;
+		if (!rawLinesReady) return;
+		const numbers = [...new Set(ids.flatMap(({ id, prediction }) => recordSourceLines(id, prediction)))].sort(
+			(a, b) => a - b
+		);
+		if (!numbers.length) return;
+		const byNumber = new Map(rawLines.map((line) => [line.line_number, line]));
+		const resolved = numbers.flatMap((number) => {
+			const line = byNumber.get(number);
+			return line ? [line] : [];
+		});
+		if (!resolved.length) return;
+		sourceLines = resolved;
+		pdfPage = resolved[0].page_number;
+		highlightVersion++;
+	}
+	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		for (const line of sourceLines) {
+			if (line.page_number !== pageNo || !Array.isArray(line.coords) || line.coords.length < 4) continue;
+			const coords = line.coords.slice(0, 4);
+			if (!coords.every(Number.isFinite)) continue;
+			const [x1, y1, x2, y2] = coords;
+			const left = Math.min(x1, x2) * viewport.width / 1000;
+			const top = Math.min(y1, y2) * viewport.height / 1000;
+			const width = Math.abs(x2 - x1) * viewport.width / 1000;
+			const height = Math.abs(y2 - y1) * viewport.height / 1000;
+			if (width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${left}px`;
+			mark.style.top = `${top}px`;
+			mark.style.width = `${width}px`;
+			mark.style.height = `${height}px`;
+			overlay.appendChild(mark);
+		}
+	}
+	$effect(() => {
+		const inputId = activeInputId;
+		const runId = detail?.id ?? null;
+		if (inputId !== previousInputId) {
+			previousInputId = inputId;
+			pdfPage = 1;
+			sourceLines = [];
+			pendingSourceEntry = null;
+			rawLinesReady = false;
+			rawLines = [];
+			highlightVersion++;
+			const sequence = ++rawLineSequence;
+			if (inputId != null) {
+				void getRawLines(inputId).then((result) => {
+					if (alive && sequence === rawLineSequence && inputId === activeInputId) {
+						rawLines = result.lines ?? [];
+						rawLinesReady = true;
+						if (pendingSourceEntry) resolveSourceEntry(pendingSourceEntry);
+					}
+				}).catch(() => {
+					if (alive && sequence === rawLineSequence && inputId === activeInputId) {
+						rawLines = [];
+						rawLinesReady = true;
+						pendingSourceEntry = null;
+						sourceLines = [];
+						highlightVersion++;
+					}
+				});
+			}
+		}
+		if (runId !== previousRunId) {
+			previousRunId = runId;
+			sourceLines = [];
+			pendingSourceEntry = null;
+			highlightVersion++;
+		}
+	});
 	onMount(() => {
 		void history();
 		void scoreModels()
@@ -391,6 +520,8 @@
 			>
 		</div>
 	</section>
+	<div class="split-panels">
+		<div class="result-panel">
 	{#if detail}
 		<section class="card results">
 			<div class="section-head">
@@ -487,11 +618,11 @@
 				</label>
 				<details open class="matched-metrics">
 					<summary>{m.msc_pairs({ count: filteredPairs.length })}</summary
-					>{#each filteredPairs as pair}<article>
+					>{#each filteredPairs as pair}<button class="result-entry" onclick={() => selectSourceEntry([{ id: pair.gold, prediction: false }, { id: pair.pred, prediction: true }])}>
 							<strong>{rowName(pair.gold)}</strong>
-							<p>{rowName(pair.pred, true)}</p>
-							<p>{pair.note}</p>
-							<div class="checks">
+							<span class="entry-line">{rowName(pair.pred, true)}</span>
+							<span class="entry-line">{pair.note}</span>
+							<span class="checks">
 								{#each Object.entries(pair.checks) as [field, correct]}<span
 										class:failed={correct === false}
 										>{fields[field]?.() ?? field}: {correct == null
@@ -500,24 +631,24 @@
 												? m.msc_pass()
 												: m.msc_fail()}</span
 									>{/each}<span>{m.msc_credit()}: {pct(pair.credit)}</span>
-							</div>
-						</article>{/each}
+							</span>
+						</button>{/each}
 					{#if !filteredPairs.length}<p class="muted">{m.msc_no_matching_pairs()}</p>{/if}
 				</details>
 				<details open>
 					<summary>{m.msc_missed({ count: detail.score.missed.length })}</summary
-					>{#each detail.score.missed as missed}<article>
+					>{#each detail.score.missed as missed}<button class="result-entry" onclick={() => selectSourceEntry([{ id: missed.gold, prediction: false }])}>
 							<strong>{rowName(missed.gold)}</strong>
-							<p>{missed.note}</p>
-						</article>{/each}
+							<span class="entry-line">{missed.note}</span>
+						</button>{/each}
 				</details>
 				<details open>
 					<summary>{m.msc_false_positives({ count: detail.score.false_positives.length })}</summary
-					>{#each detail.score.false_positives as fp}<article>
+					>{#each detail.score.false_positives as fp}<button class="result-entry" onclick={() => selectSourceEntry([{ id: fp.pred, prediction: true }])}>
 							<strong>{rowName(fp.pred, true)}</strong>
-							<p>{m.msc_cause()}: {causes[fp.cause]?.() ?? fp.cause}</p>
-							<p>{fp.note}</p>
-						</article>{/each}
+							<span class="entry-line">{m.msc_cause()}: {causes[fp.cause]?.() ?? fp.cause}</span>
+							<span class="entry-line">{fp.note}</span>
+						</button>{/each}
 				</details>
 				{#if detail.score.overrides.length}<details>
 						<summary>{m.msc_overrides({ count: detail.score.overrides.length })}</summary>
@@ -530,6 +661,22 @@
 				</details>{/if}
 		</section>
 	{/if}
+		</div>
+		<aside class="pdf-panel" aria-label={m.msc_pdf_panel()}>
+			<h2>{m.msc_pdf_panel()}</h2>
+			{#if activeInputId != null}
+				<PdfViewWindow
+					inputId={activeInputId}
+					fileUrl={`/api/v1/kb/inputs/${activeInputId}/file`}
+					bind:page={pdfPage}
+					highlightVersion={highlightVersion}
+					renderHighlights={renderSourceHighlights}
+					enableSelectionDialog={false}
+					darkMode={darkMode}
+				/>
+			{:else}<p class="muted pdf-empty">{m.msc_pdf_empty()}</p>{/if}
+		</aside>
+	</div>
 </div>
 
 <style>
@@ -591,6 +738,53 @@
 		border-radius: 12px;
 		background: var(--card);
 		margin-bottom: 20px;
+	}
+	.split-panels {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 20px;
+		align-items: stretch;
+	}
+	.result-panel,
+	.pdf-panel {
+		min-width: 0;
+		height: min(75vh, 900px);
+		min-height: 480px;
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		background: var(--card);
+		padding: 16px;
+		box-sizing: border-box;
+	}
+	.result-panel {
+		overflow: auto;
+	}
+	.pdf-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		overflow: hidden;
+	}
+	.pdf-panel h2 {
+		margin: 0;
+		flex: 0 0 auto;
+	}
+	.pdf-empty {
+		margin: auto;
+		text-align: center;
+	}
+	.result-entry {
+		display: block;
+		width: 100%;
+		padding: 12px;
+		margin: 8px 0;
+		text-align: left;
+		white-space: normal;
+		border-color: var(--border);
+	}
+	.result-entry:focus-visible {
+		outline: 3px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.search,
 	.controls,
@@ -734,10 +928,9 @@
 		font-weight: 600;
 		font-size: 14px;
 	}
-	article {
-		padding: 14px 0;
-		border-bottom: 1px solid var(--border);
-		font-size: 13px;
+	.entry-line {
+		display: block;
+		margin: 7px 0;
 	}
 	.checks {
 		display: flex;
@@ -782,6 +975,14 @@
 		line-height: 1.6;
 	}
 	@media (max-width: 700px) {
+		.split-panels {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.result-panel,
+		.pdf-panel {
+			height: 60vh;
+			min-height: 360px;
+		}
 		.benchmark {
 			padding: 12px;
 		}

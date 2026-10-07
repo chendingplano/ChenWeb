@@ -6572,5 +6572,7 @@
 	"msc_lines_incorrect": "Source lines incorrect",
 	"msc_value_incorrect": "Value incorrect",
 	"msc_range_type_incorrect": "Range type incorrect",
-	"msc_no_matching_pairs": "No matched metrics satisfy this filter."
+	"msc_no_matching_pairs": "No matched metrics satisfy this filter.",
+	"msc_pdf_panel": "Source PDF",
+	"msc_pdf_empty": "Select a document or open a benchmark run to view its PDF."
 }
