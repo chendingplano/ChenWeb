@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import SharedPdfViewer from './shared-pdf-viewer.svelte';
+	import type { PdfTextBox } from './metric-pdf-table-highlights';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import {
 		clampPdfSidebarWidth,
@@ -21,6 +22,7 @@
 		numPages = $bindable(0),
 		highlightVersion = 0,
 		renderHighlights,
+		onTextPages,
 		loadingLabel = m.pdf_view_window_rendering_page(),
 		respectPageRotation = true,
 		sidebarMinWidth = 140,
@@ -49,6 +51,7 @@
 		numPages?: number;
 		highlightVersion?: number | string;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
+		onTextPages?: (inputId: number, pages: ReadonlyMap<number, PdfTextBox[]>) => void;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
 		sidebarMinWidth?: number;
@@ -345,6 +348,7 @@
 			bind:numPages
 			highlightVersion={effectiveHighlightVersion}
 			repaintVersion={useBuiltinDialog ? builtinRepaintVersion : undefined}
+			{onTextPages}
 			renderHighlights={effectiveRenderHighlights}
 			{floatingOverlay}
 			{loadingLabel}

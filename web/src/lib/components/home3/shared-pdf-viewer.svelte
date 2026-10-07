@@ -3,6 +3,7 @@
 	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
+	import type { PdfTextBox } from './metric-pdf-table-highlights';
 
 	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
@@ -28,7 +29,8 @@
 
 	type PdfPageProxy = {
 		rotate?: number;
-		getViewport: (params: { scale: number; rotation?: number }) => PdfPageViewport;
+		getTextContent: () => Promise<{ items: Array<{ str?: string; transform?: number[]; width?: number; height?: number }> }>;
+		getViewport: (params: { scale: number; rotation?: number }) => PdfPageViewport & { convertToViewportRectangle: (rect: number[]) => number[] };
 		render: (params: {
 			canvasContext: CanvasRenderingContext2D;
 			viewport: PdfPageViewport;
@@ -50,6 +52,7 @@
 		highlightVersion = 0,
 		repaintVersion = 0,
 		renderHighlights,
+		onTextPages,
 		floatingOverlay,
 		loadingLabel = m.shared_pdf_viewer_rendering_page(),
 		respectPageRotation = true,
@@ -67,6 +70,7 @@
 		highlightVersion?: number | string;
 		repaintVersion?: number | string;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
+		onTextPages?: (inputId: number, pages: ReadonlyMap<number, PdfTextBox[]>) => void;
 		floatingOverlay?: Snippet;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
@@ -301,6 +305,8 @@
 		pdfWorker = new pdfLib.PDFWorker({ name: 'shared-pdf-viewer-worker' });
 	}
 
+	const pdfTextByPage = new Map<number, PdfTextBox[]>();
+
 	async function ensurePdfDoc() {
 		if (!inputId || !fileUrl) return;
 		if (pdfDoc && pdfLoadedInputId === inputId) return;
@@ -313,6 +319,7 @@
 		pdfLoadedInputId = 0;
 		pdfError = '';
 		pdfViewportByPage.clear();
+		pdfTextByPage.clear();
 
 		await ensurePdfLib();
 		if (!pdfLib || !pdfWorker) return;
@@ -426,6 +433,20 @@
 				const pageProxy = await pdfDoc.getPage(pageNo);
 				const rotation = respectPageRotation ? (pageProxy.rotate ?? 0) : 0;
 				const viewport = pageProxy.getViewport({ scale: targetScale, rotation });
+				if (onTextPages && !pdfTextByPage.has(pageNo)) {
+					const text = await pageProxy.getTextContent();
+					if (seq !== pdfRenderSeq) return;
+					const base = pageProxy.getViewport({ scale: 1, rotation });
+					pdfTextByPage.set(pageNo, text.items.flatMap(item => {
+						if (!item.str || !item.transform || !item.width || !item.height) return [];
+						const [x, y] = item.transform.slice(4);
+						const [x1, y1, x2, y2] = base.convertToViewportRectangle([x, y, x + item.width, y + item.height]);
+						return [{ text: item.str, coords: [
+							Math.min(x1, x2) / base.width * 1000, Math.min(y1, y2) / base.height * 1000,
+							Math.max(x1, x2) / base.width * 1000, Math.max(y1, y2) / base.height * 1000
+						] }];
+					}));
+				}
 				const ctx = canvas.getContext('2d');
 				if (!ctx) continue;
 
@@ -452,6 +473,7 @@
 			}
 
 			if (seq !== pdfRenderSeq) return;
+			onTextPages?.(pdfLoadedInputId, pdfTextByPage);
 			await tick();
 			if (seq !== pdfRenderSeq) return;
 			paintHighlights();

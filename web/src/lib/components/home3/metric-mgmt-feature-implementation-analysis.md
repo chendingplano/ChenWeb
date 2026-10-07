@@ -106,6 +106,29 @@ Resolution path:
 
 This is the core mechanism that converts raw-line coordinates into visual highlights.
 
+### E. Cited table rows and continuation pages (2026-10-07)
+
+`metric-mgmt-view.svelte` uses `source_table_rows` as the authority for table
+highlights. A cited table line is excluded from ordinary line-box highlighting:
+MinerU can merge a multi-page table into one HTML line whose coordinates cover
+only the first page's fragment (record 416, line 121).
+
+The shared PDF viewer optionally exposes cached PDF text boxes through
+`onTextPages`, normalized to 0–1000 page coordinates. `metric-pdf-table-highlights.ts`
+locates the cited rows' cells from `table_context` in those boxes across all pages.
+Unique cell text anchors each row; repeated labels are included only within that
+anchor's vertical extent on the same page. Shared rowspan values are excluded.
+The viewer draws these row rectangles and navigates to the first resolved page.
+For `416_mtc_6`, `121#r3` resolves to page 7 instead of the first row on page 6.
+
+Missing or ambiguous text leaves the citation unhighlighted; it never substitutes
+the first table fragment. PDFs without a usable text layer therefore need a future
+OCR/row-coordinate source to show these highlights. Metrics without row citations
+continue to use ordinary source-line boxes. No extraction or database data changes.
+
+Regression tests: `metric-pdf-table-highlights.test.ts` covers continuation pages,
+authoritative row IDs, repeated labels, normalized text, and unresolved citations.
+
 ---
 
 ## 4) PDF Rendering Model Used

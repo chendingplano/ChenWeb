@@ -21,6 +21,7 @@
 	} from '$lib/services/kbService';
 	import { searchKbMetrics, type KbMetricSearchResult } from '$lib/services/kbMetricSearch';
 	import { clipTableCell, splitTableContextRows } from './metric-table-context';
+	import { metricTableHighlights, type PdfTextBox } from './metric-pdf-table-highlights';
 	import {
 		buildMetricGroupAttrs,
 		normalizeMetricSpans,
@@ -176,6 +177,18 @@
 	let lastSelectedMetricDebug = $state('none');
 
 	let rawLines = $state<RawLine[]>([]);
+	let pdfTextPages = $state<ReadonlyMap<number, PdfTextBox[]>>(new Map());
+
+	function receivePdfTextPages(inputId: number, pages: ReadonlyMap<number, PdfTextBox[]>) {
+		if (inputId !== currentInput?.id) return;
+		if (pages.size === pdfTextPages.size && [...pages].every(([page, boxes]) => pdfTextPages.get(page) === boxes)) return;
+		pdfTextPages = new Map(pages);
+	}
+
+	$effect(() => {
+		const first = tableHighlights[0];
+		if (first) docPage = first.page;
+	});
 	let rawLoading = $state(false);
 	let rawError = $state('');
 	// Document viewer state
@@ -483,6 +496,7 @@
 		if (spans.length === 0) return map;
 		for (const span of spans) {
 			const ln = rawLineByKey.get(`${span.page_number}:${span.line_number}`);
+			if (metric?.source_table_rows?.some(ref => ref.line === span.line_number)) continue;
 			if (ln && Array.isArray(ln.coords) && ln.coords.length >= 4) {
 				const arr = map.get(span.page_number) ?? [];
 				arr.push(ln);
@@ -496,6 +510,8 @@
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
 	});
+
+	let tableHighlights = $derived(metricTableHighlights(selectedMetric, pdfTextPages));
 
 	// ---------- Keyword filter + metric name nav ----------
 	let allKeywords = $derived.by(() => {
@@ -829,6 +845,18 @@
 			mark.title = `line ${rect.lineNumber}`;
 			overlay.appendChild(mark);
 		}
+		for (const rect of tableHighlights) {
+			if (rect.page !== pageNo) continue;
+			const [x1, y1, x2, y2] = rect.coords;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${x1 * viewport.width / 1000}px`;
+			mark.style.top = `${Math.max(0, y1 * viewport.height / 1000 - 2)}px`;
+			mark.style.width = `${(x2 - x1) * viewport.width / 1000}px`;
+			mark.style.height = `${(y2 - y1) * viewport.height / 1000 + 4}px`;
+			mark.dataset.sourceRow = `${rect.line}#${rect.row}`;
+			overlay.appendChild(mark);
+		}
 		// Draw drag preview lines during active drag
 		if (pdfDragPreviewLines.length > 0) {
 			for (const ln of rawLines) {
@@ -1012,6 +1040,7 @@
 		setMetricFocusNotified(false);
 		highlightSelectionVersion = 0;
 		rawLines = [];
+		pdfTextPages = new Map();
 		rawError = '';
 		rawLoading = false;
 		// Only clear currentInput if we're loading a different record.
@@ -1146,7 +1175,7 @@
 		if (!first) return;
 
 		// Move display to the selected page without forcing iframe remount/reload.
-		docPage = first.page_number > 0 ? first.page_number : 1;
+		docPage = metricTableHighlights(m, pdfTextPages)[0]?.page ?? (first.page_number > 0 ? first.page_number : 1);
 
 		// If user is on the lines panel, scroll the highlighted line into view.
 		if (showLines) {
@@ -1911,8 +1940,9 @@
 							bind:page={docPage}
 							bind:zoom={pdfZoom}
 							bind:numPages={pdfNumPages}
-							highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
+							highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}:${tableHighlights.map(r => `${r.page}:${r.line}:${r.row}`).join(',')}`}
 							renderHighlights={renderMetricHighlights}
+							onTextPages={receivePdfTextPages}
 							bind:showingLines={showLines}
 							{darkMode}
 							onselect={handleDragSelect}
