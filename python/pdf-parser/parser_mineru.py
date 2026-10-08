@@ -599,7 +599,10 @@ def _list_item_text_matches(list_item_text: Any, sub_block: dict[str, Any]) -> b
             if isinstance(span, dict):
                 parts.append(str(span.get("content", "")))
     sub_text = "".join(parts)
-    a = re.sub(r"\s+", "", str(list_item_text))[:20]
+    # content_list wraps inline equations in `$...$`, while middle.json stores
+    # equation spans without those delimiters. Strip the wrappers before the
+    # leading-text guard so otherwise matching math-bearing lists can pair.
+    a = re.sub(r"\s+", "", str(list_item_text).replace("$", ""))[:20]
     b = re.sub(r"\s+", "", sub_text)[:20]
     return bool(a) and a == b
 
