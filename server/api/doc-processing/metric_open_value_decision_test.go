@@ -46,6 +46,7 @@ func TestJudgeOpenValueRows(t *testing.T) {
 		"不确定":         decisionAnswer("activity_schedule", 0.89),
 		"比能耗":         decisionAnswer("object_quantity", 1.0),
 		"主体工艺":        decisionAnswer("not_a_quantity", 0.95),
+		"工艺不确定":       decisionAnswer("not_a_quantity", 0.6),
 		"失败":          {"error": "response has no logprobs"},
 		"设备配备数量":      inferredQuantityAnswer(0.0, 0.38),
 		"表头尺寸":        inferredQuantityAnswer(0.02, 0.01),
@@ -57,18 +58,19 @@ func TestJudgeOpenValueRows(t *testing.T) {
 	testParam := map[string]any{"metric_name": "浸提时间", "value_class": "requirement", "value_range_type": "limit_absent",
 		"reasoning_tags": []any{"test_condition"}}
 	rows := []map[string]any{numeric, testParam, openValueRow("餐厨垃圾收运时间和频次"), openValueRow("边界"), openValueRow("不确定"),
-		openValueRow("比能耗"), openValueRow("主体工艺"), openValueRow("失败"), openValueRow("设备配备数量"), openValueRow("表头尺寸")}
+		openValueRow("比能耗"), openValueRow("主体工艺"), openValueRow("工艺不确定"), openValueRow("失败"), openValueRow("设备配备数量"), openValueRow("表头尺寸")}
 
 	kept, dropped := p.judgeOpenValueRows(context.Background(), 416, rows)
 
 	// Only requirement_value_open rows are judged; numeric and test-parameter rows never are.
-	if len(judge.asked) != 8 {
-		t.Fatalf("asked %v, want only the 8 open-value rows", judge.asked)
+	if len(judge.asked) != 9 {
+		t.Fatalf("asked %v, want only the 9 open-value rows", judge.asked)
 	}
 	// Two activity schedules at p >= 0.9, and one quantity the clause never names in a provision clause.
 	wantDropped := []struct{ name, reason, code string }{
 		{"餐厨垃圾收运时间和频次", "activity_schedule", openValueReasonScheduleDropped},
 		{"边界", "activity_schedule", openValueReasonScheduleDropped},
+		{"主体工艺", "not_a_quantity", "not_a_quantity_confident"},
 		{"设备配备数量", "no_named_quantity", openValueReasonNoNamedDropped},
 	}
 	if len(dropped) != len(wantDropped) {
@@ -86,11 +88,11 @@ func TestJudgeOpenValueRows(t *testing.T) {
 	}
 	// Every judged kept row says it was examined, that it was kept, and why.
 	wantReason := map[string]string{
-		"不确定":  openValueReasonScheduleBelow,
-		"表头尺寸": openValueReasonNoNamedVetoed,
-		"比能耗":  openValueReasonObjectQuantity,
-		"主体工艺": openValueReasonNotAQuantity,
-		"失败":   openValueReasonError,
+		"不确定":   openValueReasonScheduleBelow,
+		"表头尺寸":  openValueReasonNoNamedVetoed,
+		"比能耗":   openValueReasonObjectQuantity,
+		"工艺不确定": "not_a_quantity_below_threshold",
+		"失败":    openValueReasonError,
 	}
 	for _, m := range kept {
 		name := asString(m["metric_name"])

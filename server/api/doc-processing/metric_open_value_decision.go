@@ -26,6 +26,7 @@ import (
 const (
 	openValuePolicyName      = "metric_open_value_kind"
 	openValueChoiceSchedule  = "activity_schedule"
+	openValueChoiceNotQty    = "not_a_quantity"
 	openValueNoNamedReason   = "no_named_quantity"
 	openValueDefaultDropMinP = 0.9
 	// openValueDefaultProvisionMinP: the provision_only answer vetoes a no_named_quantity drop
@@ -38,7 +39,7 @@ const (
 // recorded with every decision so a reader can see what the model chose.
 var openValueOptions = map[string]string{
 	openValueChoiceSchedule: "when, how often or how an activity is carried out; parties agree, set or announce it",
-	"not_a_quantity":        "a method, process, practice, feature, record or identity, not a quantity",
+	openValueChoiceNotQty:   "a method, process, practice, feature, record or identity, not a quantity",
 	"object_quantity":       "a quantity of a thing, product, material, equipment, sample or test",
 }
 
@@ -49,7 +50,6 @@ const (
 	openValueReasonNoNamedDropped  = "no_named_quantity_confident"
 	openValueReasonNoNamedVetoed   = "no_named_quantity_vetoed"
 	openValueReasonObjectQuantity  = "object_quantity"
-	openValueReasonNotAQuantity    = "not_a_quantity_not_droppable"
 	openValueReasonError           = "decision_error"
 	openValueReasonNotConfigured   = "decision_model_not_configured"
 )
@@ -144,14 +144,16 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 // statement_kind, choice_meaning and judged_at. The decision is stored with the row
 // (kb.metrics_dropped.decision or kb.metrics.ext_info.open_value_decision), so every judged row
 // says why it was kept. It returns the drop reason, or "" to keep the row:
-//   - activity_schedule: question kind answers activity_schedule with p >= minP;
+//   - activity_schedule or not_a_quantity: question kind answers it with p >= minP
+//     (not_a_quantity, e.g. 主体工艺, gold X13; its earlier misfires were all on qualitative rows,
+//     which are never judged);
 //   - no_named_quantity: question named (does the clause name the row's quantity?) answers yes
 //     with p <= 1-minP, and question provision_only (does the clause only require providing
 //     something?) does not veto it: p >= provisionMinP. named alone misreads quantities whose
 //     context is a table heading, provision_only alone misses provision clauses; together they
 //     separated every row of the 2026-10-08 evaluation.
 //
-// not_a_quantity never drops, and a failed or missing decision always keeps the row.
+// A failed or missing decision always keeps the row.
 func annotateOpenValueDecision(decision map[string]any, minP, provisionMinP float64, notConfigured bool, now time.Time) (dropReason string) {
 	choice := asString(decision["choice"])
 	probs, _ := decision["probabilities"].(map[string]float64)
@@ -165,9 +167,9 @@ func annotateOpenValueDecision(decision map[string]any, minP, provisionMinP floa
 		reason, text = openValueReasonNotConfigured, "kept: no decision model is configured (METRIC_DECISION_MODEL)"
 	case asString(decision["error"]) != "":
 		reason, text = openValueReasonError, "kept: the decision call failed, and a failed decision never drops a row"
-	case choice == openValueChoiceSchedule && p >= minP:
-		dropReason = openValueChoiceSchedule
-		reason, text = openValueReasonScheduleDropped, fmt.Sprintf("dropped: judged activity_schedule with p=%.2f >= %.2f", p, minP)
+	case (choice == openValueChoiceSchedule || choice == openValueChoiceNotQty) && p >= minP:
+		dropReason = choice
+		reason, text = choice+"_confident", fmt.Sprintf("dropped: judged %s with p=%.2f >= %.2f", choice, p, minP)
 	case noNamed && pProvision >= provisionMinP:
 		dropReason = openValueNoNamedReason
 		reason, text = openValueReasonNoNamedDropped, fmt.Sprintf(
@@ -177,10 +179,8 @@ func annotateOpenValueDecision(decision map[string]any, minP, provisionMinP floa
 		reason, text = openValueReasonNoNamedVetoed, fmt.Sprintf(
 			"kept: P(named)=%.2f is low, but the clause is not a provision clause (P(provision_only)=%.2f < %.2f)",
 			pNamed, pProvision, provisionMinP)
-	case choice == openValueChoiceSchedule:
-		reason, text = openValueReasonScheduleBelow, fmt.Sprintf("kept: judged activity_schedule but p=%.2f < %.2f", p, minP)
-	case choice == "not_a_quantity":
-		reason, text = openValueReasonNotAQuantity, fmt.Sprintf("kept: judged not_a_quantity (p=%.2f), which is recorded but never dropped", p)
+	case choice == openValueChoiceSchedule || choice == openValueChoiceNotQty:
+		reason, text = choice+"_below_threshold", fmt.Sprintf("kept: judged %s but p=%.2f < %.2f", choice, p, minP)
 	default:
 		reason, text = openValueReasonObjectQuantity, fmt.Sprintf("kept: judged %s (p=%.2f), a named quantity of an object", choice, p)
 	}

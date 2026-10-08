@@ -34,16 +34,16 @@ created from `prompts/prompt-metric-open-value-policy-v2.md`. No word list SHALL
 - **WHEN** a run judges a row and no policy `metric_open_value_kind` exists
 - **THEN** the policy SHALL be created with version 1 from the prompt file and used for the call
 
-### Requirement: Only a confident activity schedule or an unnamed provision is dropped
+### Requirement: Only a confident activity schedule, non-quantity or unnamed provision is dropped
 A judged row SHALL be set aside (`drop_stage = decision_model`) only when either:
-- `kind` answers `activity_schedule` with probability at least `METRIC_DECISION_DROP_MIN_P`
-  (default `0.9`): `drop_reason = activity_schedule`; or
+- `kind` answers `activity_schedule` or `not_a_quantity` with probability at least
+  `METRIC_DECISION_DROP_MIN_P` (default `0.9`): `drop_reason` = that choice; or
 - `named` answers yes with probability at most `1 - METRIC_DECISION_DROP_MIN_P` and
   `provision_only` answers yes with probability at least `METRIC_DECISION_PROVISION_MIN_P`
   (default `0.1`): `drop_reason = no_named_quantity`.
 
-Every other judged row SHALL be kept, including rows answered `not_a_quantity`, and rows whose
-`named` answer is low but whose `provision_only` answer is below the veto threshold.
+Every other judged row SHALL be kept, including rows whose `named` answer is low but whose
+`provision_only` answer is below the veto threshold.
 
 #### Scenario: Provision clause with an inferred quantity is dropped
 - **WHEN** the row "收集、运输设备配备数量" from "应根据垃圾的类别、数量、作业时间等要求，配备相应的收集、运输设备和作业人员" gets P(named) = 0.00 and P(provision_only) = 0.68
@@ -65,9 +65,13 @@ Every other judged row SHALL be kept, including rows answered `not_a_quantity`, 
 - **WHEN** a row is answered `activity_schedule` with p = 0.57
 - **THEN** it SHALL be saved to `kb.metrics`
 
-#### Scenario: not_a_quantity is kept
-- **WHEN** a row is answered `not_a_quantity` with p = 0.95
-- **THEN** it SHALL be saved to `kb.metrics`
+#### Scenario: A process named as a parameter is dropped
+- **WHEN** the row "主体工艺" from "设备应明确主体工艺、比能耗、发酵周期等运行技术参数" is answered `not_a_quantity` with p = 1.0
+- **THEN** it SHALL be set aside with `drop_reason = not_a_quantity`
+
+#### Scenario: Uncertain non-quantity is kept
+- **WHEN** a row is answered `not_a_quantity` with p = 0.6
+- **THEN** it SHALL be saved to `kb.metrics` with `reason = not_a_quantity_below_threshold`
 
 ### Requirement: Every decision is recorded
 For each judged row, `extract_metrics` SHALL record `{model, profile, policy_id, policy_version,
@@ -75,9 +79,9 @@ questions, choice, choice_meaning, probabilities, named, provision_only, examine
 reason_text, threshold, provision_min_p, statement_kind, judged_at}` (plus `error` when the call failed): in `kb.metrics_dropped.decision`
 when the row is dropped, and in `kb.metrics.ext_info.open_value_decision` when it is kept.
 `outcome` SHALL be `kept` or `dropped`; `reason` SHALL be one of
-`activity_schedule_confident`, `no_named_quantity_confident`, `object_quantity`,
-`no_named_quantity_vetoed`, `not_a_quantity_not_droppable`, `activity_schedule_below_threshold`,
-`decision_error`, `decision_model_not_configured`;
+`activity_schedule_confident`, `not_a_quantity_confident`, `no_named_quantity_confident`,
+`object_quantity`, `no_named_quantity_vetoed`, `activity_schedule_below_threshold`,
+`not_a_quantity_below_threshold`, `decision_error`, `decision_model_not_configured`;
 `examined` SHALL be false only when no decision model is configured. Each call SHALL be captured as an LLM
 usage event with `PromptName = metric_open_value_kind`, `CallReason = extract_metrics` and the
 record id.
