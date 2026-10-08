@@ -38,9 +38,9 @@
 ## 6. Pages
 
 - [x] 6.1 Before starting: confirm the uncommitted edits to `metric-score-view.svelte` and `metric_score_runner.go` are committed. User decision 2026-10-08: build now, commit the page files after the other work is committed (`metric-score-view.svelte` and `metric_score_runner.go` ended up unchanged by this change)
-- [x] 6.2 Knowledge System → Metrics (`metric-mgmt-view.svelte`): "Show dropped" toggle, off by default; dropped rows marked with stage, reason and decision probability; keep `select-text`. Built, NOT committed yet (with `kbService.ts`): waits for the other uncommitted work in the message files
+- [x] 6.2 Knowledge System → Metrics (`metric-mgmt-view.svelte`): "Show dropped" toggle, off by default; dropped rows marked with stage, reason and decision probability; keep `select-text`. Built; committed with `kbService.ts` in jj `mtsr` ("extract metrics optimization", 2026-10-08) together with the other session's work
 - [x] 6.3 Benchmark: dropped rows shown and marked, not counted. Done without editing `metric-score-view.svelte`: the page shows `report.md`, whose "Dropped rows" section (score_io.py) lists them and flags any on the lines of a missed gold row
-- [x] 6.4 Paraglide keys in `web/messages/en.json` and `zh-cn.json`; `bun run check` passes (0 errors, i18n ok). NOT committed yet, same reason as 6.2
+- [x] 6.4 Paraglide keys in `web/messages/en.json` and `zh-cn.json`; `bun run check` passes (0 errors, i18n ok). Committed in `mtsr`, as 6.2
 
 ## 7. Verify live
 
