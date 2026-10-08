@@ -491,6 +491,11 @@
 				{#each documents as document (document.id)}<button
 						class:chosen={selected?.id === document.id}
 						onclick={() => choose(document)}
+						><span class="document-id-row"
+							><span>{m.msc_record({ id: document.id })}</span><span
+								title={document.create_time || ''}
+								>{date(document.create_time)}</span
+							></span
 						><span class="document-field" title={document.title || ''}
 							>{document.title || '—'}</span
 						><span class="document-field" title={document.doc_no || ''}
@@ -1015,6 +1020,20 @@
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
+	}
+	.document-id-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 8px;
+		width: 100%;
+		color: var(--muted);
+		font-size: 11px;
+	}
+	.document-id-row span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.document-field {
 		display: block;

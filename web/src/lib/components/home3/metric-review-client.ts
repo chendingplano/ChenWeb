@@ -10,6 +10,7 @@ export type NonMetricCategory = 'not_metric' | 'duplicate' | 'formula_input';
 
 export type InputRecordSummary = {
 	id: number;
+	create_time?: string;
 	title?: string;
 	doc_no?: string;
 	file_name?: string;
