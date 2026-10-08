@@ -133,11 +133,11 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
-	if p.MentionPromptRef != "prompt-extract-metric-candidates-v12.md" {
-		t.Fatalf("MentionPromptRef=%q, want v12", p.MentionPromptRef)
+	if p.MentionPromptRef != "prompt-extract-metric-candidates-v13.md" {
+		t.Fatalf("MentionPromptRef=%q, want v13", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v9.md" {
-		t.Fatalf("RelationPromptRef=%q, want v9", p.RelationPromptRef)
+	if p.RelationPromptRef != "prompt-enrich-metrics-v10.md" {
+		t.Fatalf("RelationPromptRef=%q, want v10", p.RelationPromptRef)
 	}
 	// Prompts load relative to the server's working directory; from this test,
 	// check the files exist in the repo's prompts/ directory instead.
