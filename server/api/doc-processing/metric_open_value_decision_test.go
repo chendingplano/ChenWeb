@@ -28,7 +28,15 @@ func openValueRow(name string) map[string]any {
 func decisionAnswer(choice string, p float64) map[string]any {
 	probs := map[string]float64{"activity_schedule": 0, "not_a_quantity": 0, "object_quantity": 0}
 	probs[choice] = p
-	return map[string]any{"choice": choice, "probabilities": probs, "policy_id": int64(3), "policy_version": 1}
+	return map[string]any{"choice": choice, "probabilities": probs, "policy_id": int64(3), "policy_version": 1,
+		"named": 1.0, "provision_only": 0.0}
+}
+
+// inferredQuantityAnswer is object_quantity with the given named / provision_only answers.
+func inferredQuantityAnswer(named, provision float64) map[string]any {
+	a := decisionAnswer("object_quantity", 1.0)
+	a["named"], a["provision_only"] = named, provision
+	return a
 }
 
 func TestJudgeOpenValueRows(t *testing.T) {
@@ -39,6 +47,8 @@ func TestJudgeOpenValueRows(t *testing.T) {
 		"比能耗":         decisionAnswer("object_quantity", 1.0),
 		"主体工艺":        decisionAnswer("not_a_quantity", 0.95),
 		"失败":          {"error": "response has no logprobs"},
+		"设备配备数量":      inferredQuantityAnswer(0.0, 0.38),
+		"表头尺寸":        inferredQuantityAnswer(0.02, 0.01),
 	}}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
 	p.OpenValueJudge = judge
@@ -47,31 +57,37 @@ func TestJudgeOpenValueRows(t *testing.T) {
 	testParam := map[string]any{"metric_name": "浸提时间", "value_class": "requirement", "value_range_type": "limit_absent",
 		"reasoning_tags": []any{"test_condition"}}
 	rows := []map[string]any{numeric, testParam, openValueRow("餐厨垃圾收运时间和频次"), openValueRow("边界"), openValueRow("不确定"),
-		openValueRow("比能耗"), openValueRow("主体工艺"), openValueRow("失败")}
+		openValueRow("比能耗"), openValueRow("主体工艺"), openValueRow("失败"), openValueRow("设备配备数量"), openValueRow("表头尺寸")}
 
 	kept, dropped := p.judgeOpenValueRows(context.Background(), 416, rows)
 
 	// Only requirement_value_open rows are judged; numeric and test-parameter rows never are.
-	if len(judge.asked) != 6 {
-		t.Fatalf("asked %v, want only the 6 open-value rows", judge.asked)
+	if len(judge.asked) != 8 {
+		t.Fatalf("asked %v, want only the 8 open-value rows", judge.asked)
 	}
-	if len(dropped) != 2 || dropped[0].Row["metric_name"] != "餐厨垃圾收运时间和频次" || dropped[1].Row["metric_name"] != "边界" {
-		t.Fatalf("dropped = %v, want the two activity schedules with p >= 0.9", dropped)
+	// Two activity schedules at p >= 0.9, and one quantity the clause never names in a provision clause.
+	wantDropped := []struct{ name, reason, code string }{
+		{"餐厨垃圾收运时间和频次", "activity_schedule", openValueReasonScheduleDropped},
+		{"边界", "activity_schedule", openValueReasonScheduleDropped},
+		{"设备配备数量", "no_named_quantity", openValueReasonNoNamedDropped},
 	}
-	for _, d := range dropped {
-		if d.Stage != metricDropStageDecision || d.Reason != openValueChoiceSchedule || d.Decision["policy_id"] != int64(3) {
-			t.Fatalf("dropped row = %+v", d)
+	if len(dropped) != len(wantDropped) {
+		t.Fatalf("dropped = %v, want %v", dropped, wantDropped)
+	}
+	for i, d := range dropped {
+		w := wantDropped[i]
+		if d.Row["metric_name"] != w.name || d.Stage != metricDropStageDecision || d.Reason != w.reason ||
+			d.Decision["outcome"] != "dropped" || d.Decision["reason"] != w.code || d.Decision["policy_id"] != int64(3) {
+			t.Fatalf("dropped[%d] = %+v", i, d)
 		}
 	}
-	if len(kept) != 6 {
-		t.Fatalf("kept %d rows, want 6", len(kept))
-	}
-	if dropped[0].Decision["outcome"] != "dropped" || dropped[0].Decision["reason"] != openValueReasonDropped {
-		t.Fatalf("dropped decision = %v", dropped[0].Decision)
+	if len(kept) != 7 {
+		t.Fatalf("kept %d rows, want 7", len(kept))
 	}
 	// Every judged kept row says it was examined, that it was kept, and why.
 	wantReason := map[string]string{
-		"不确定":  openValueReasonBelowThreshold,
+		"不确定":  openValueReasonScheduleBelow,
+		"表头尺寸": openValueReasonNoNamedVetoed,
 		"比能耗":  openValueReasonObjectQuantity,
 		"主体工艺": openValueReasonNotAQuantity,
 		"失败":   openValueReasonError,

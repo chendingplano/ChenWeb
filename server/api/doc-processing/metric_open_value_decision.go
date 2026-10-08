@@ -26,8 +26,12 @@ import (
 const (
 	openValuePolicyName      = "metric_open_value_kind"
 	openValueChoiceSchedule  = "activity_schedule"
+	openValueNoNamedReason   = "no_named_quantity"
 	openValueDefaultDropMinP = 0.9
-	openValueJudgeParallel   = 8
+	// openValueDefaultProvisionMinP: the provision_only answer vetoes a no_named_quantity drop
+	// below this probability (2026-10-08 evaluation: real metrics <= 0.06, provision rows >= 0.14).
+	openValueDefaultProvisionMinP = 0.1
+	openValueJudgeParallel        = 8
 )
 
 // openValueOptions are the choice question's options and what each means; the meaning is also
@@ -40,12 +44,14 @@ var openValueOptions = map[string]string{
 
 // Why a judged row was kept or dropped (ext_info.open_value_decision.reason).
 const (
-	openValueReasonDropped        = "activity_schedule_confident"
-	openValueReasonObjectQuantity = "object_quantity"
-	openValueReasonNotAQuantity   = "not_a_quantity_not_droppable"
-	openValueReasonBelowThreshold = "activity_schedule_below_threshold"
-	openValueReasonError          = "decision_error"
-	openValueReasonNotConfigured  = "decision_model_not_configured"
+	openValueReasonScheduleDropped = "activity_schedule_confident"
+	openValueReasonScheduleBelow   = "activity_schedule_below_threshold"
+	openValueReasonNoNamedDropped  = "no_named_quantity_confident"
+	openValueReasonNoNamedVetoed   = "no_named_quantity_vetoed"
+	openValueReasonObjectQuantity  = "object_quantity"
+	openValueReasonNotAQuantity    = "not_a_quantity_not_droppable"
+	openValueReasonError           = "decision_error"
+	openValueReasonNotConfigured   = "decision_model_not_configured"
 )
 
 // openValueJudge returns one decision record per row, aligned with rows. A record holds
@@ -104,10 +110,13 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 			p.Logger.Warn("open-value decision failed; row kept",
 				"record_id", recordID, "candidate_id", m["candidate_id"], "metric_name", m["metric_name"], "error", errMsg)
 		}
-		drop := annotateOpenValueDecision(decision, minP, notConfigured, now())
-		if drop {
+		provisionMinP := p.OpenValueProvisionMinP
+		if provisionMinP <= 0 {
+			provisionMinP = openValueDefaultProvisionMinP
+		}
+		if dropReason := annotateOpenValueDecision(decision, minP, provisionMinP, notConfigured, now()); dropReason != "" {
 			dropped = append(dropped, droppedMetricRow{Row: m, Stage: metricDropStageDecision,
-				Reason: openValueChoiceSchedule, Kind: statementKindRequirementValueOpen, Decision: decision})
+				Reason: dropReason, Kind: statementKindRequirementValueOpen, Decision: decision})
 			droppedRows[fmt.Sprintf("%p", m)] = true
 			continue
 		}
@@ -130,15 +139,26 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 	return kept, dropped
 }
 
-// annotateOpenValueDecision decides whether a judged row is set aside (choice activity_schedule
-// with probability >= minP, and no error) and records the verdict in the decision itself:
-// examined, outcome (kept|dropped), reason (a code), reason_text, threshold, statement_kind,
-// choice_meaning and judged_at. The decision is stored with the row (kb.metrics_dropped.decision
-// or kb.metrics.ext_info.open_value_decision), so every judged row says why it was kept.
-func annotateOpenValueDecision(decision map[string]any, minP float64, notConfigured bool, now time.Time) (drop bool) {
+// annotateOpenValueDecision decides whether a judged row is set aside and records the verdict in
+// the decision itself: examined, outcome (kept|dropped), reason (a code), reason_text, thresholds,
+// statement_kind, choice_meaning and judged_at. The decision is stored with the row
+// (kb.metrics_dropped.decision or kb.metrics.ext_info.open_value_decision), so every judged row
+// says why it was kept. It returns the drop reason, or "" to keep the row:
+//   - activity_schedule: question kind answers activity_schedule with p >= minP;
+//   - no_named_quantity: question named (does the clause name the row's quantity?) answers yes
+//     with p <= 1-minP, and question provision_only (does the clause only require providing
+//     something?) does not veto it: p >= provisionMinP. named alone misreads quantities whose
+//     context is a table heading, provision_only alone misses provision clauses; together they
+//     separated every row of the 2026-10-08 evaluation.
+//
+// not_a_quantity never drops, and a failed or missing decision always keeps the row.
+func annotateOpenValueDecision(decision map[string]any, minP, provisionMinP float64, notConfigured bool, now time.Time) (dropReason string) {
 	choice := asString(decision["choice"])
 	probs, _ := decision["probabilities"].(map[string]float64)
 	p := probs[choice]
+	pNamed, hasNamed := decision["named"].(float64)
+	pProvision, _ := decision["provision_only"].(float64)
+	noNamed := hasNamed && pNamed <= 1-minP
 	var reason, text string
 	switch {
 	case notConfigured:
@@ -146,26 +166,36 @@ func annotateOpenValueDecision(decision map[string]any, minP float64, notConfigu
 	case asString(decision["error"]) != "":
 		reason, text = openValueReasonError, "kept: the decision call failed, and a failed decision never drops a row"
 	case choice == openValueChoiceSchedule && p >= minP:
-		drop = true
-		reason, text = openValueReasonDropped, fmt.Sprintf("dropped: judged activity_schedule with p=%.2f >= %.2f", p, minP)
+		dropReason = openValueChoiceSchedule
+		reason, text = openValueReasonScheduleDropped, fmt.Sprintf("dropped: judged activity_schedule with p=%.2f >= %.2f", p, minP)
+	case noNamed && pProvision >= provisionMinP:
+		dropReason = openValueNoNamedReason
+		reason, text = openValueReasonNoNamedDropped, fmt.Sprintf(
+			"dropped: the clause names no quantity of what it requires (P(named)=%.2f <= %.2f) and only requires providing something (P(provision_only)=%.2f >= %.2f)",
+			pNamed, 1-minP, pProvision, provisionMinP)
+	case noNamed:
+		reason, text = openValueReasonNoNamedVetoed, fmt.Sprintf(
+			"kept: P(named)=%.2f is low, but the clause is not a provision clause (P(provision_only)=%.2f < %.2f)",
+			pNamed, pProvision, provisionMinP)
 	case choice == openValueChoiceSchedule:
-		reason, text = openValueReasonBelowThreshold, fmt.Sprintf("kept: judged activity_schedule but p=%.2f < %.2f", p, minP)
+		reason, text = openValueReasonScheduleBelow, fmt.Sprintf("kept: judged activity_schedule but p=%.2f < %.2f", p, minP)
 	case choice == "not_a_quantity":
 		reason, text = openValueReasonNotAQuantity, fmt.Sprintf("kept: judged not_a_quantity (p=%.2f), which is recorded but never dropped", p)
 	default:
-		reason, text = openValueReasonObjectQuantity, fmt.Sprintf("kept: judged %s (p=%.2f), a quantity of an object", choice, p)
+		reason, text = openValueReasonObjectQuantity, fmt.Sprintf("kept: judged %s (p=%.2f), a named quantity of an object", choice, p)
 	}
 	decision["examined"] = !notConfigured
-	decision["outcome"] = map[bool]string{true: "dropped", false: "kept"}[drop]
+	decision["outcome"] = map[bool]string{true: "dropped", false: "kept"}[dropReason != ""]
 	decision["reason"] = reason
 	decision["reason_text"] = text
 	decision["threshold"] = minP
+	decision["provision_min_p"] = provisionMinP
 	decision["statement_kind"] = statementKindRequirementValueOpen
 	decision["judged_at"] = now.UTC().Format(time.RFC3339)
 	if meaning, ok := openValueOptions[choice]; ok {
 		decision["choice_meaning"] = meaning
 	}
-	return drop
+	return dropReason
 }
 
 // decisionModelJudge asks the configured decision model (jev_emulated or jev_compatible) one
@@ -177,6 +207,10 @@ type decisionModelJudge struct {
 	policies     *decisionpolicy.Store
 	policySeed   string // prompt file text used when the policy does not exist yet
 	policySeedID string // prompt file name, for the version note
+	namedQ       string // question named: instructions (prompt file)
+	namedRef     string
+	provisionQ   string // question provision_only: instructions (prompt file)
+	provisionRef string
 	logger       ApiTypes.JimoLogger
 }
 
@@ -214,11 +248,23 @@ func newOpenValueJudgeFromEnv(logger ApiTypes.JimoLogger) (openValueJudge, error
 	if ApiTypes.SharedDBHandle == nil {
 		return nil, errors.New("(MID_26100816) shared database is not available for the decision policy store")
 	}
-	seed, seedRef, _, err := loadProductPromptFromEnvKeys([]string{"METRIC_OPEN_VALUE_POLICY_PROMPT"}, "prompt-metric-open-value-policy-v1.md")
+	seed, seedRef, _, err := loadProductPromptFromEnvKeys([]string{"METRIC_OPEN_VALUE_POLICY_PROMPT"}, "prompt-metric-open-value-policy-v2.md")
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26100817) load open-value policy prompt: %w", err)
 	}
+	namedQ, namedRef, _, err := loadProductPromptFromEnvKeys([]string{"METRIC_OPEN_VALUE_Q_NAMED_PROMPT"}, "prompt-metric-open-value-q-named-v1.md")
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26100819) load open-value named question: %w", err)
+	}
+	provisionQ, provisionRef, _, err := loadProductPromptFromEnvKeys([]string{"METRIC_OPEN_VALUE_Q_PROVISION_PROMPT"}, "prompt-metric-open-value-q-provision-v1.md")
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26100820) load open-value provision question: %w", err)
+	}
 	return &decisionModelJudge{
+		namedQ:       strings.TrimSpace(namedQ),
+		namedRef:     namedRef,
+		provisionQ:   strings.TrimSpace(provisionQ),
+		provisionRef: provisionRef,
 		client:       client,
 		modelName:    strings.TrimSpace(def.ModelName),
 		profile:      ref,
@@ -231,10 +277,19 @@ func newOpenValueJudgeFromEnv(logger ApiTypes.JimoLogger) (openValueJudge, error
 
 // openValueDropMinPFromEnv reads METRIC_DECISION_DROP_MIN_P; invalid or unset → default.
 func openValueDropMinPFromEnv() float64 {
-	if v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv("METRIC_DECISION_DROP_MIN_P")), 64); err == nil && v > 0 && v <= 1 {
+	return probabilityFromEnv("METRIC_DECISION_DROP_MIN_P", openValueDefaultDropMinP)
+}
+
+// openValueProvisionMinPFromEnv reads METRIC_DECISION_PROVISION_MIN_P; invalid or unset → default.
+func openValueProvisionMinPFromEnv() float64 {
+	return probabilityFromEnv("METRIC_DECISION_PROVISION_MIN_P", openValueDefaultProvisionMinP)
+}
+
+func probabilityFromEnv(key string, def float64) float64 {
+	if v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(key)), 64); err == nil && v > 0 && v <= 1 {
 		return v
 	}
-	return openValueDefaultDropMinP
+	return def
 }
 
 // currentPolicy returns the current policy version, creating version 1 from the prompt file
@@ -268,11 +323,15 @@ func (j *decisionModelJudge) JudgeOpenValueRows(ctx context.Context, recordID in
 		}
 		return out
 	}
-	question := llmclients.JevQuestions{"kind": {
-		Type:         "choice",
-		Instructions: "Under `policy`, what does the open value of `row` belong to?",
-		Criteria:     openValueOptions,
-	}}
+	question := llmclients.JevQuestions{
+		"kind": {
+			Type:         "choice",
+			Instructions: "Under `policy`, what does the open value of `row` belong to?",
+			Criteria:     openValueOptions,
+		},
+		"named":          {Type: "noul", Instructions: j.namedQ},
+		"provision_only": {Type: "noul", Instructions: j.provisionQ},
+	}
 	sem := make(chan struct{}, openValueJudgeParallel)
 	var wg sync.WaitGroup
 	for i, row := range rows {
@@ -284,6 +343,7 @@ func (j *decisionModelJudge) JudgeOpenValueRows(ctx context.Context, recordID in
 			decision := map[string]any{
 				"model": j.modelName, "profile": j.profile,
 				"policy_id": policy.PolicyID, "policy_version": policy.Version,
+				"questions": map[string]any{"named": j.namedRef, "provision_only": j.provisionRef},
 			}
 			state, _ := json.Marshal(map[string]any{"policy": policy.Content, "row": map[string]any{
 				"metric_name":         row["metric_name"],
@@ -309,6 +369,12 @@ func (j *decisionModelJudge) JudgeOpenValueRows(ctx context.Context, recordID in
 				if answers, err = llmclients.ParseJevAnswers(resp.Content); err == nil {
 					decision["choice"] = answers["kind"].Choice
 					decision["probabilities"] = answers["kind"].Probabilities
+					if a := answers["named"].Noul; a != nil {
+						decision["named"] = *a
+					}
+					if a := answers["provision_only"].Noul; a != nil {
+						decision["provision_only"] = *a
+					}
 				}
 			}
 			if err != nil {

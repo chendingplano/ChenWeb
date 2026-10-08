@@ -90,6 +90,8 @@ type MetricsProcessor struct {
 	OpenValueJudge    openValueJudge
 	OpenValueJudgeErr error
 	OpenValueDropMinP float64
+	// OpenValueProvisionMinP: below it, provision_only vetoes a no_named_quantity drop.
+	OpenValueProvisionMinP float64
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID  int64
@@ -602,6 +604,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		logger.Warn("configure open-value decision model failed; open-value rows will be kept", "err", p.OpenValueJudgeErr)
 	}
 	p.OpenValueDropMinP = openValueDropMinPFromEnv()
+	p.OpenValueProvisionMinP = openValueProvisionMinPFromEnv()
 	p.forceDisableThinking()
 	applyStructureModelConfigToExtractor(extractor, p.RelationModelCfg)
 	return p

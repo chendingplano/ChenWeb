@@ -21,20 +21,37 @@ row. Rows of any other kind SHALL be kept or dropped without a decision call.
 Each call SHALL use the `jev_emulated` or `jev_compatible` client for the `.models.toml` profile
 named by `METRIC_DECISION_MODEL`, and the current version of decision policy
 `metric_open_value_kind`. The state SHALL be a JSON object with `policy` (the policy text) and
-`row` (`metric_name`, `subject`, `threshold_or_target`, `desc`, `context`). The call SHALL ask one
-`choice` question with the options `object_quantity`, `activity_schedule` and `not_a_quantity`.
-When the policy does not exist, it SHALL be created from
-`prompts/prompt-metric-open-value-policy-v1.md`. No word list SHALL decide the drop.
+`row` (`metric_name`, `subject`, `threshold_or_target`, `desc`, `context`). The call SHALL ask
+three questions: `kind`, a `choice` with the options `object_quantity`, `activity_schedule` and
+`not_a_quantity`; `named`, a `noul` asking whether the source clause itself names the row's
+quantity; and `provision_only`, a `noul` asking whether the clause only requires providing
+something without naming any quantity of it. The `named` and `provision_only` instructions SHALL
+be loaded from prompt files (`prompt-metric-open-value-q-named-v1.md`,
+`prompt-metric-open-value-q-provision-v1.md`). When the policy does not exist, it SHALL be
+created from `prompts/prompt-metric-open-value-policy-v2.md`. No word list SHALL decide the drop.
 
 #### Scenario: Policy missing on first run
 - **WHEN** a run judges a row and no policy `metric_open_value_kind` exists
 - **THEN** the policy SHALL be created with version 1 from the prompt file and used for the call
 
-### Requirement: Only a confident activity schedule is dropped
-A judged row SHALL be set aside (`drop_stage = decision_model`, `drop_reason =
-activity_schedule`) only when the answer's choice is `activity_schedule` and its probability is
-at least `METRIC_DECISION_DROP_MIN_P` (default `0.9`). Every other judged row SHALL be kept,
-including rows answered `not_a_quantity`.
+### Requirement: Only a confident activity schedule or an unnamed provision is dropped
+A judged row SHALL be set aside (`drop_stage = decision_model`) only when either:
+- `kind` answers `activity_schedule` with probability at least `METRIC_DECISION_DROP_MIN_P`
+  (default `0.9`): `drop_reason = activity_schedule`; or
+- `named` answers yes with probability at most `1 - METRIC_DECISION_DROP_MIN_P` and
+  `provision_only` answers yes with probability at least `METRIC_DECISION_PROVISION_MIN_P`
+  (default `0.1`): `drop_reason = no_named_quantity`.
+
+Every other judged row SHALL be kept, including rows answered `not_a_quantity`, and rows whose
+`named` answer is low but whose `provision_only` answer is below the veto threshold.
+
+#### Scenario: Provision clause with an inferred quantity is dropped
+- **WHEN** the row "收集、运输设备配备数量" from "应根据垃圾的类别、数量、作业时间等要求，配备相应的收集、运输设备和作业人员" gets P(named) = 0.00 and P(provision_only) = 0.68
+- **THEN** it SHALL be set aside with `drop_reason = no_named_quantity`
+
+#### Scenario: Unnamed in a table heading but not a provision is kept
+- **WHEN** a row gets P(named) = 0.02 and P(provision_only) = 0.01
+- **THEN** it SHALL be saved to `kb.metrics` with `reason = no_named_quantity_vetoed`
 
 #### Scenario: Agreed collection schedule is dropped
 - **WHEN** the row "餐厨垃圾收运时间和频次, 由收运单位与集中供餐单位约定" is answered `activity_schedule` with p = 1.0
@@ -54,12 +71,13 @@ including rows answered `not_a_quantity`.
 
 ### Requirement: Every decision is recorded
 For each judged row, `extract_metrics` SHALL record `{model, profile, policy_id, policy_version,
-choice, choice_meaning, probabilities, examined, outcome, reason, reason_text, threshold,
-statement_kind, judged_at}` (plus `error` when the call failed): in `kb.metrics_dropped.decision`
+questions, choice, choice_meaning, probabilities, named, provision_only, examined, outcome, reason,
+reason_text, threshold, provision_min_p, statement_kind, judged_at}` (plus `error` when the call failed): in `kb.metrics_dropped.decision`
 when the row is dropped, and in `kb.metrics.ext_info.open_value_decision` when it is kept.
 `outcome` SHALL be `kept` or `dropped`; `reason` SHALL be one of
-`activity_schedule_confident`, `object_quantity`, `not_a_quantity_not_droppable`,
-`activity_schedule_below_threshold`, `decision_error`, `decision_model_not_configured`;
+`activity_schedule_confident`, `no_named_quantity_confident`, `object_quantity`,
+`no_named_quantity_vetoed`, `not_a_quantity_not_droppable`, `activity_schedule_below_threshold`,
+`decision_error`, `decision_model_not_configured`;
 `examined` SHALL be false only when no decision model is configured. Each call SHALL be captured as an LLM
 usage event with `PromptName = metric_open_value_kind`, `CallReason = extract_metrics` and the
 record id.
