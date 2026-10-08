@@ -81,3 +81,34 @@ func TestFinalizeChunkBatch_SetsAsideTaggedRowsOnce(t *testing.T) {
 		t.Fatalf("dropped row = %s/%s/%s", d.DropID, d.Stage, d.Reason)
 	}
 }
+
+func TestExcludeRowsWithoutValue(t *testing.T) {
+	rows := []map[string]any{
+		{"metric_name": "总砷", "metric_value": "15", "value_range_type": "upper_bound"},
+		{"metric_name": "比能耗", "metric_value": "", "value_range_type": "limit_absent", "value_class": "requirement"},
+		{"metric_name": "量热计压力", "value_class": "definition", "formula_or_definition": "量热容器的二次流体侧压力"},
+		{"metric_name": "名义风机功率", "value_class": "definition", "reasoning_tags": []any{"test_condition"},
+			"formula_or_definition": "P_fan^(st) = P_fan × 1013.25 / P_atm"},
+		{"metric_name": "测试时间", "value_class": "requirement", "formula_or_definition": "τ ≥ (200 × Δt_i × C) / P"},
+		{"metric_name": "占位", "metric_value": " — "},
+		{"metric_name": "污垢热阻", "metric_value": "0"},
+	}
+	kept, excluded := excludeRowsWithoutValue(rows)
+	var keptNames, droppedNames []string
+	for _, m := range kept {
+		keptNames = append(keptNames, asString(m["metric_name"]))
+	}
+	for _, d := range excluded {
+		droppedNames = append(droppedNames, asString(d.Row["metric_name"]))
+		if d.Stage != metricDropStageNoValue || d.Reason != metricDropStageNoValue {
+			t.Fatalf("dropped row stage/reason = %s/%s", d.Stage, d.Reason)
+		}
+	}
+	if want := []string{"总砷", "污垢热阻"}; !equalStrings(keptNames, want) {
+		t.Fatalf("kept = %v, want %v", keptNames, want)
+	}
+	// A formula without a value is a definition, not a metric.
+	if want := []string{"比能耗", "量热计压力", "名义风机功率", "测试时间", "占位"}; !equalStrings(droppedNames, want) {
+		t.Fatalf("dropped = %v, want %v", droppedNames, want)
+	}
+}

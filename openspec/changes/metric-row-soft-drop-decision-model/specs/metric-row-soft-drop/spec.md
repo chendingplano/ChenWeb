@@ -3,8 +3,8 @@
 ### Requirement: Dropped rows are stored, not discarded
 Every row that `extract_metrics` sets aside SHALL be saved to `kb.metrics_dropped` and SHALL NOT
 be saved to `kb.metrics`. This covers rows set aside for a drop-reason tag (`drop_stage =
-llm_tag`), for a pure-requirement statement kind (`statement_kind`), and by the open-value
-decision (`decision_model`). Each saved row SHALL carry `input_record_id`, `drop_id`,
+llm_tag`), for a pure-requirement statement kind (`statement_kind`), for stating no value
+(`no_value`), and by the open-value decision (`decision_model`). Each saved row SHALL carry `input_record_id`, `drop_id`,
 `candidate_id`, `drop_stage`, `drop_reason`, `event_id` and the full enriched row as
 `row_data`. This applies to the sequential and chunk-batch save paths.
 
@@ -20,6 +20,24 @@ decision (`decision_model`). Each saved row SHALL carry `input_record_id`, `drop
 #### Scenario: Duplicate tagged rows from overlapping chunks
 - **WHEN** two batches return the same tagged row (same dedup key)
 - **THEN** `kb.metrics_dropped` SHALL hold one row for it
+
+### Requirement: A metric states a value
+After the pure-requirement stage, `extract_metrics` SHALL set aside every row whose
+`metric_value` is empty or a placeholder (`-`, `—`, `–`, `/`, `n/a`, `na`, `none`, `无`), with
+`drop_stage = no_value` and `drop_reason = no_value`, whatever its `value_class`, tags or
+`formula_or_definition`. The check SHALL run on Pass 2 rows, so the full row is kept.
+
+#### Scenario: Value left open
+- **WHEN** enrichment returns "比能耗" with `value_range_type = limit_absent` and no `metric_value`
+- **THEN** it SHALL be set aside with `drop_reason = no_value` and not reach the decision model
+
+#### Scenario: Formula without a value
+- **WHEN** enrichment returns "标准排热量" with `formula_or_definition` "标准排热量 = (主测法 + 校核方法) / 2" and no `metric_value`
+- **THEN** it SHALL be set aside with `drop_reason = no_value`
+
+#### Scenario: Zero is a value
+- **WHEN** enrichment returns a row with `metric_value = "0"`
+- **THEN** it SHALL be kept
 
 ### Requirement: Dropped rows have their own ids
 A dropped row SHALL get `drop_id = <record_id>_drp_<seqno>`, with `seqno` starting at 1 per

@@ -181,6 +181,7 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 			"metrics": []any{
 				map[string]any{
 					"metric_name":         "Latency",
+					"metric_value":        "200",
 					"source_line_spans":   []any{float64(2)},
 					"subject":             "service latency",
 					"desc":                "max latency",
@@ -321,6 +322,7 @@ func TestMetricsProcessor_HandleEventHarvestsDefinitionCandidates(t *testing.T) 
 			"metrics": []any{
 				map[string]any{
 					"metric_name":           "Air flow rate",
+					"metric_value":          "500",
 					"source_line_spans":     []any{float64(2)},
 					"formula_or_definition": "The volume of air delivered per unit time.",
 				},
@@ -411,6 +413,7 @@ func TestMetricsProcessor_ExtractsFromLineFileViaChunksArtifact(t *testing.T) {
 			"metrics": []any{
 				map[string]any{
 					"metric_name":         "Latency",
+					"metric_value":        "200",
 					"source_line_spans":   []any{float64(2)},
 					"subject":             "service latency",
 					"desc":                "max latency",
@@ -812,7 +815,7 @@ func TestEnrichMetricCandidatesKeepsSuccessfulBatchesWhenOneFails(t *testing.T) 
 	ext := &metricsSeqErrExtractor{
 		outs: []map[string]any{
 			{"language": "en", "metrics": []any{map[string]any{
-				"metric_name": "Throughput", "source_line_spans": []any{float64(10)},
+				"metric_name": "Throughput", "metric_value": "10", "source_line_spans": []any{float64(10)},
 			}}},
 			nil,
 		},
@@ -897,7 +900,7 @@ func TestFinalizeChunkBatch_MergeMode_NewMetricUpserted(t *testing.T) {
 	}
 	extractor := &fakeJSONExtractor{outs: []map[string]any{
 		{"metrics": []any{map[string]any{
-			"metric_name": "Throughput", "source_line_spans": []any{float64(50)},
+			"metric_name": "Throughput", "metric_value": "50", "source_line_spans": []any{float64(50)},
 		}}, "uncertain_metrics": []any{}},
 	}}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, metricsStore, extractor, nil)
@@ -1242,6 +1245,7 @@ var pass2EnrichOut = map[string]any{
 	"metrics": []any{
 		map[string]any{
 			"metric_name":       "Metric",
+			"metric_value":      "1",
 			"source_line_spans": []any{float64(1)},
 		},
 	},
@@ -1845,6 +1849,7 @@ func TestMetricsProcessor_Pass1DeterministicOrder(t *testing.T) {
 			"metrics": []any{
 				map[string]any{
 					"metric_name":       fmt.Sprintf("Metric%d", lineNum),
+					"metric_value":      "1",
 					"source_line_spans": []any{float64(lineNum)},
 				},
 			},

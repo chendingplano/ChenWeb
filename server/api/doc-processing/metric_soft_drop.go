@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Drop stages, in pipeline order (design D2).
 const (
 	metricDropStageLLMTag        = "llm_tag"
 	metricDropStageStatementKind = "statement_kind"
+	metricDropStageNoValue       = "no_value"
 	metricDropStageDecision      = "decision_model"
 )
 
@@ -154,4 +156,30 @@ func (p *MetricsProcessor) logDroppedMetricRows(ctx context.Context, recordID in
 			p.Logger.Warn("failed to write drop_metric_rows log", "record_id", recordID, "error", err)
 		}
 	}
+}
+
+// metricValuePlaceholders are metric_value strings that state no value.
+var metricValuePlaceholders = map[string]bool{"-": true, "—": true, "–": true, "/": true, "n/a": true, "na": true, "none": true, "无": true}
+
+// metricHasValue reports whether a row states a value: a non-empty metric_value that is not a
+// placeholder.
+func metricHasValue(m map[string]any) bool {
+	v := strings.ToLower(strings.TrimSpace(asString(m["metric_value"])))
+	return v != "" && !metricValuePlaceholders[v]
+}
+
+// excludeRowsWithoutValue sets aside every row that states no value (drop_stage and reason
+// no_value): a metric has at least a value; a named quantity without one is at most a
+// definition, and so is a formula that states no value (753_mtc_6: 标准排热量 = (主测法 + 校核方法) / 2). It runs after the pure-requirement filter and before the open-value decision, so
+// requirement_value_open rows (value left open) are set aside here.
+func excludeRowsWithoutValue(metrics []map[string]any) (kept []map[string]any, excluded []droppedMetricRow) {
+	kept = make([]map[string]any, 0, len(metrics))
+	for _, m := range metrics {
+		if metricHasValue(m) {
+			kept = append(kept, m)
+			continue
+		}
+		excluded = append(excluded, newDroppedMetricRow(m, metricDropStageNoValue, metricDropStageNoValue))
+	}
+	return kept, excluded
 }

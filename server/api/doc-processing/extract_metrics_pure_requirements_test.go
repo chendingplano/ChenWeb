@@ -74,9 +74,10 @@ func TestFinalizeChunkBatch_WipeModeExcludesPureRequirements(t *testing.T) {
 	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
 		t.Fatalf("FinalizeChunkBatch: %v", err)
 	}
+	// 比能耗 (value left open) has no value, so it is set aside too: a metric has a value.
 	saved := metricsStore.lastSave.Metrics
-	if len(saved) != 3 {
-		t.Fatalf("saved %d rows, want 3 (pure requirements excluded): %v", len(saved), saved)
+	if len(saved) != 2 {
+		t.Fatalf("saved %d rows, want 2 (pure requirements and the value-less row excluded): %v", len(saved), saved)
 	}
 	for i, m := range saved {
 		if kind := metricStatementKind(m); isPureRequirementKind(kind) {
@@ -86,13 +87,14 @@ func TestFinalizeChunkBatch_WipeModeExcludesPureRequirements(t *testing.T) {
 			t.Fatalf("metric_id=%v, want %s (contiguous after exclusion)", m["metric_id"], want)
 		}
 	}
-	// Soft drop: the two pure requirements are kept in kb.metrics_dropped.
-	if len(metricsStore.dropped) != 2 {
-		t.Fatalf("dropped %d rows, want 2: %v", len(metricsStore.dropped), metricsStore.dropped)
+	// Soft drop: the two pure requirements and the value-less row are kept in kb.metrics_dropped.
+	wantStages := []string{metricDropStageStatementKind, metricDropStageStatementKind, metricDropStageNoValue}
+	if len(metricsStore.dropped) != len(wantStages) {
+		t.Fatalf("dropped %d rows, want %d: %v", len(metricsStore.dropped), len(wantStages), metricsStore.dropped)
 	}
 	for i, d := range metricsStore.dropped {
-		if want := fmt.Sprintf("416_drp_%d", i+1); d.DropID != want || d.Stage != metricDropStageStatementKind {
-			t.Fatalf("dropped[%d] = %s/%s, want %s/statement_kind", i, d.DropID, d.Stage, want)
+		if want := fmt.Sprintf("416_drp_%d", i+1); d.DropID != want || d.Stage != wantStages[i] {
+			t.Fatalf("dropped[%d] = %s/%s, want %s/%s", i, d.DropID, d.Stage, want, wantStages[i])
 		}
 	}
 }
@@ -133,11 +135,11 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
-	if p.MentionPromptRef != "prompt-extract-metric-candidates-v13.md" {
-		t.Fatalf("MentionPromptRef=%q, want v13", p.MentionPromptRef)
+	if p.MentionPromptRef != "prompt-extract-metric-candidates-v14.md" {
+		t.Fatalf("MentionPromptRef=%q, want v14", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v10.md" {
-		t.Fatalf("RelationPromptRef=%q, want v10", p.RelationPromptRef)
+	if p.RelationPromptRef != "prompt-enrich-metrics-v11.md" {
+		t.Fatalf("RelationPromptRef=%q, want v11", p.RelationPromptRef)
 	}
 	// Prompts load relative to the server's working directory; from this test,
 	// check the files exist in the repo's prompts/ directory instead.

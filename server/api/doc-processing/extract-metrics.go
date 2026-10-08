@@ -489,11 +489,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v13.md",
+		"prompt-extract-metric-candidates-v14.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v10.md",
+		"prompt-enrich-metrics-v11.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -1995,6 +1995,7 @@ var metricDropReasonTags = map[string]bool{
 	"formula_operand":         true,
 	"procedure_count":         true,
 	"no_named_quantity":       true,
+	"term_definition":         true,
 	"activity_schedule":       true,
 	"own_table_pointer":       true,
 	"obligation_no_property":  true,
@@ -2802,7 +2803,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v10.md"
+		promptRef = "prompt-enrich-metrics-v11.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3662,6 +3663,8 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	}
 	metrics, excluded := excludePureRequirements(metrics)
 	dropped = append(dropped, excluded...)
+	metrics, valueless := excludeRowsWithoutValue(metrics)
+	dropped = append(dropped, valueless...)
 	if !isCtxStopped(ctx) {
 		var judgedOut []droppedMetricRow
 		metrics, judgedOut = p.judgeOpenValueRows(ctx, recordID, metrics)

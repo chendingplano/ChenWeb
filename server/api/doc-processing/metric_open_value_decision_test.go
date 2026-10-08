@@ -134,7 +134,7 @@ func TestJudgeOpenValueRowsWithoutModelKeepsEverything(t *testing.T) {
 	}
 }
 
-func TestFinalizeChunkBatch_SetsAsideJudgedActivitySchedule(t *testing.T) {
+func TestFinalizeChunkBatch_ValuelessRowsNeverReachDecisionModel(t *testing.T) {
 	extractor := &fakeJSONExtractor{outs: []map[string]any{{"metrics": []any{
 		map[string]any{"metric_name": "餐厨垃圾收运时间和频次", "value_class": "requirement", "value_range_type": "limit_absent",
 			"threshold_or_target": "由收运单位与集中供餐单位约定", "source_line_spans": []any{"2"}},
@@ -143,10 +143,11 @@ func TestFinalizeChunkBatch_SetsAsideJudgedActivitySchedule(t *testing.T) {
 	}, "uncertain_metrics": []any{}}}}
 	metricsStore := &fakeMetricsStore{}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 416}}, metricsStore, extractor, nil)
-	p.OpenValueJudge = &fakeOpenValueJudge{answers: map[string]map[string]any{
+	judge := &fakeOpenValueJudge{answers: map[string]map[string]any{
 		"餐厨垃圾收运时间和频次": decisionAnswer("activity_schedule", 1.0),
 		"比能耗":         decisionAnswer("object_quantity", 1.0),
 	}}
+	p.OpenValueJudge = judge
 	p.OpenValueDropMinP = 0.9
 	p.batchRecordID = 416
 	p.batchForceClear = true
@@ -156,12 +157,20 @@ func TestFinalizeChunkBatch_SetsAsideJudgedActivitySchedule(t *testing.T) {
 	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
 		t.Fatalf("FinalizeChunkBatch: %v", err)
 	}
-	saved := metricsStore.lastSave.Metrics
-	if len(saved) != 1 || saved[0]["metric_name"] != "比能耗" || saved[0]["metric_id"] != "416_mtc_1" {
-		t.Fatalf("saved = %v", saved)
+	// Both rows leave the value open, so the no_value check sets them aside before the
+	// open-value decision: the decision model is not asked.
+	if saved := metricsStore.lastSave.Metrics; len(saved) != 0 {
+		t.Fatalf("saved = %v, want none", saved)
 	}
-	if len(metricsStore.dropped) != 1 || metricsStore.dropped[0].Stage != metricDropStageDecision ||
-		metricsStore.dropped[0].DropID != "416_drp_1" {
-		t.Fatalf("dropped = %+v", metricsStore.dropped)
+	if len(judge.asked) != 0 {
+		t.Fatalf("decision model asked %v, want nothing", judge.asked)
+	}
+	if len(metricsStore.dropped) != 2 {
+		t.Fatalf("dropped = %+v, want 2", metricsStore.dropped)
+	}
+	for _, d := range metricsStore.dropped {
+		if d.Stage != metricDropStageNoValue {
+			t.Fatalf("dropped %s at stage %s, want no_value", d.Row["metric_name"], d.Stage)
+		}
 	}
 }

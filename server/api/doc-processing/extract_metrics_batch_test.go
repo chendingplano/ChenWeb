@@ -60,6 +60,7 @@ func TestMetricsProcessor_BatchProcessChunkAccumulatesAndSaves(t *testing.T) {
 				"metrics": []any{
 					map[string]any{
 						"metric_name":       "Throughput",
+						"metric_value":      "10",
 						"source_line_spans": []any{float64(10)},
 					},
 				},
@@ -71,6 +72,7 @@ func TestMetricsProcessor_BatchProcessChunkAccumulatesAndSaves(t *testing.T) {
 				"metrics": []any{
 					map[string]any{
 						"metric_name":       "Latency",
+						"metric_value":      "20",
 						"source_line_spans": []any{float64(20)},
 					},
 				},
