@@ -1,0 +1,78 @@
+## ADDED Requirements
+
+### Requirement: Only open-value requirements are judged
+After pure requirements are set aside, `extract_metrics` SHALL send to the decision model every
+row whose statement kind (spec `metric-statement-kind`) is `requirement_value_open`, and no other
+row. Rows of any other kind SHALL be kept or dropped without a decision call.
+
+#### Scenario: Numeric criterion skips the decision model
+- **WHEN** a row has `value_class = requirement` and `value_range_type = exact`
+- **THEN** no decision call SHALL be made for it
+
+#### Scenario: Test parameter skips the decision model
+- **WHEN** a row carries the tag `test_condition` and `value_range_type = limit_absent`
+- **THEN** no decision call SHALL be made for it
+
+#### Scenario: Open-value requirement is judged
+- **WHEN** a row has `value_class = requirement` and `value_range_type = limit_absent`
+- **THEN** one decision call SHALL be made for it, whether or not it has a unit
+
+### Requirement: The decision question and policy
+Each call SHALL use the `jev_emulated` or `jev_compatible` client for the `.models.toml` profile
+named by `METRIC_DECISION_MODEL`, and the current version of decision policy
+`metric_open_value_kind`. The state SHALL be a JSON object with `policy` (the policy text) and
+`row` (`metric_name`, `subject`, `threshold_or_target`, `desc`, `context`). The call SHALL ask one
+`choice` question with the options `object_quantity`, `activity_schedule` and `not_a_quantity`.
+When the policy does not exist, it SHALL be created from
+`prompts/prompt-metric-open-value-policy-v1.md`. No word list SHALL decide the drop.
+
+#### Scenario: Policy missing on first run
+- **WHEN** a run judges a row and no policy `metric_open_value_kind` exists
+- **THEN** the policy SHALL be created with version 1 from the prompt file and used for the call
+
+### Requirement: Only a confident activity schedule is dropped
+A judged row SHALL be set aside (`drop_stage = decision_model`, `drop_reason =
+activity_schedule`) only when the answer's choice is `activity_schedule` and its probability is
+at least `METRIC_DECISION_DROP_MIN_P` (default `0.9`). Every other judged row SHALL be kept,
+including rows answered `not_a_quantity`.
+
+#### Scenario: Agreed collection schedule is dropped
+- **WHEN** the row "餐厨垃圾收运时间和频次, 由收运单位与集中供餐单位约定" is answered `activity_schedule` with p = 1.0
+- **THEN** it SHALL be set aside with `drop_stage = decision_model`
+
+#### Scenario: Value to be declared is kept
+- **WHEN** the row "比能耗, 由设备明确" is answered `object_quantity`
+- **THEN** it SHALL be saved to `kb.metrics`
+
+#### Scenario: Uncertain schedule is kept
+- **WHEN** a row is answered `activity_schedule` with p = 0.57
+- **THEN** it SHALL be saved to `kb.metrics`
+
+#### Scenario: not_a_quantity is kept
+- **WHEN** a row is answered `not_a_quantity` with p = 0.95
+- **THEN** it SHALL be saved to `kb.metrics`
+
+### Requirement: Every decision is recorded
+For each judged row, `extract_metrics` SHALL record `{model, profile, policy_id, policy_version,
+choice, probabilities}`: in `kb.metrics_dropped.decision` when the row is dropped, and in
+`kb.metrics.ext_info.open_value_decision` when it is kept. Each call SHALL be captured as an LLM
+usage event with `PromptName = metric_open_value_kind`, `CallReason = extract_metrics` and the
+record id.
+
+#### Scenario: Kept row carries its decision
+- **WHEN** a judged row is kept
+- **THEN** its `ext_info.open_value_decision` SHALL hold the policy id and version, the choice and the probabilities
+
+### Requirement: Decision failures never drop and never fail the run
+A decision failure SHALL NOT drop a row or fail the run. If `METRIC_DECISION_MODEL` is unset,
+the policy cannot be loaded or created, or a call fails, the row SHALL be kept, its `ext_info.open_value_decision` SHALL record the error, a warning SHALL be
+logged with the record and candidate ids, and the run SHALL continue.
+
+#### Scenario: Model returns no logprobs
+- **WHEN** the decision call fails with "response has no logprobs"
+- **THEN** the row SHALL be saved to `kb.metrics` with the error in `ext_info.open_value_decision`
+- **AND** the run SHALL finish successfully
+
+#### Scenario: Decision model not configured
+- **WHEN** `METRIC_DECISION_MODEL` is unset
+- **THEN** no decision call SHALL be made and every open-value row SHALL be kept

@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -44,16 +45,16 @@ func TestExcludePureRequirements(t *testing.T) {
 	if len(excluded) != 2 {
 		t.Fatalf("excluded=%v, want 2 rows", excluded)
 	}
-	if excluded[0]["kind"] != statementKindInspectionRequirement || excluded[1]["kind"] != statementKindDelegatedRequirement {
-		t.Fatalf("excluded kinds=%v,%v", excluded[0]["kind"], excluded[1]["kind"])
+	if excluded[0].Kind != statementKindInspectionRequirement || excluded[1].Kind != statementKindDelegatedRequirement {
+		t.Fatalf("excluded kinds=%v,%v", excluded[0].Kind, excluded[1].Kind)
 	}
-	if excluded[0]["threshold_or_target"] != "垃圾桶应加盖" {
-		t.Fatalf("excluded row must carry its clause text, got %v", excluded[0])
-	}
-	for _, key := range []string{"metric_name", "subject", "threshold_or_target", "context", "source_line_spans"} {
-		if _, ok := excluded[0][key]; !ok {
-			t.Fatalf("excluded row missing %q: %v", key, excluded[0])
+	for _, e := range excluded {
+		if e.Stage != metricDropStageStatementKind || e.Reason != e.Kind {
+			t.Fatalf("excluded row stage/reason=%s/%s, want statement_kind/<kind>", e.Stage, e.Reason)
 		}
+	}
+	if excluded[0].Row["threshold_or_target"] != "垃圾桶应加盖" {
+		t.Fatalf("excluded row must keep the whole enriched row, got %v", excluded[0].Row)
 	}
 }
 
@@ -85,9 +86,18 @@ func TestFinalizeChunkBatch_WipeModeExcludesPureRequirements(t *testing.T) {
 			t.Fatalf("metric_id=%v, want %s (contiguous after exclusion)", m["metric_id"], want)
 		}
 	}
+	// Soft drop: the two pure requirements are kept in kb.metrics_dropped.
+	if len(metricsStore.dropped) != 2 {
+		t.Fatalf("dropped %d rows, want 2: %v", len(metricsStore.dropped), metricsStore.dropped)
+	}
+	for i, d := range metricsStore.dropped {
+		if want := fmt.Sprintf("416_drp_%d", i+1); d.DropID != want || d.Stage != metricDropStageStatementKind {
+			t.Fatalf("dropped[%d] = %s/%s, want %s/statement_kind", i, d.DropID, d.Stage, want)
+		}
+	}
 }
 
-func TestLogExcludedPureRequirementsWritesOneEntry(t *testing.T) {
+func TestLogDroppedMetricRowsWritesOneEntry(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -99,12 +109,12 @@ func TestLogExcludedPureRequirementsWritesOneEntry(t *testing.T) {
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
 	p.ProcLogger = DocProcLogger{DB: db}
 	_, excluded := excludePureRequirements(normalizeMetricList(pureRequirementTestRows()))
-	p.logExcludedPureRequirements(context.Background(), 416, excluded)
+	p.saveDroppedMetricRows(context.Background(), 416, excluded)
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Nothing excluded: no entry. sqlmock fails any unexpected Exec, and the
+	// Nothing dropped: no entry. sqlmock fails any unexpected Exec, and the
 	// helper must not even try.
 	db2, mock2, err := sqlmock.New()
 	if err != nil {
@@ -112,7 +122,7 @@ func TestLogExcludedPureRequirementsWritesOneEntry(t *testing.T) {
 	}
 	defer db2.Close()
 	p.ProcLogger = DocProcLogger{DB: db2}
-	p.logExcludedPureRequirements(context.Background(), 416, nil)
+	p.saveDroppedMetricRows(context.Background(), 416, nil)
 	if err := mock2.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -173,32 +183,16 @@ func TestDropRowsTaggedWithDropReason(t *testing.T) {
 	}
 }
 
-func TestDropRowsDropsUntaggedAgreedActivitySchedule(t *testing.T) {
-	rows := []map[string]any{
-		// 416_mtc_3 as stored 2026-10-08: untagged, requirement + limit_absent.
-		{"metric_name": "餐厨垃圾收运时间和频次", "metric_name_en": "Kitchen waste collection time and frequency",
-			"value_class": "requirement", "value_range_type": "limit_absent",
-			"threshold_or_target": "由收运单位与集中供餐单位约定", "reasoning_tags": []any{}},
-		{"metric_name": "Inspection schedule", "value_class": "requirement", "value_range_type": "limit_absent",
-			"desc_en": "The inspection schedule shall be announced in advance"},
-		// A4: a property of an object agreed between parties.
-		{"metric_name": "抗压强度", "value_class": "requirement", "value_range_type": "limit_absent",
-			"threshold_or_target": "由供需双方商定"},
-		// A4: a value to be declared, not agreed.
-		{"metric_name": "发酵周期", "value_class": "requirement", "value_range_type": "limit_absent",
-			"threshold_or_target": "设备应明确发酵周期"},
-		// A1: an activity frequency with a stated value.
-		{"metric_name": "易腐垃圾收运频次", "value_class": "requirement", "value_range_type": "exact",
-			"metric_value": "每日", "threshold_or_target": "每日定时收运"},
-		// A6: a test time agreed but with a unit stays.
-		{"metric_name": "浸提时间", "value_class": "requirement", "value_range_type": "limit_absent",
-			"unit": "h", "threshold_or_target": "由双方约定"},
-	}
+func TestDropRowsKeepsUntaggedRowsForTheDecisionModel(t *testing.T) {
+	// 416_mtc_3 as stored 2026-10-08: untagged, requirement + limit_absent. No word list
+	// drops it here; the open-value decision judges it (spec metric-open-value-decision).
+	rows := []map[string]any{{"metric_name": "餐厨垃圾收运时间和频次", "value_class": "requirement",
+		"value_range_type": "limit_absent", "threshold_or_target": "由收运单位与集中供餐单位约定", "reasoning_tags": []any{}}}
 	kept, dropped := dropRowsTaggedWithDropReason(rows)
-	if len(dropped) != 2 || dropped[0]["metric_name"] != "餐厨垃圾收运时间和频次" || dropped[1]["metric_name"] != "Inspection schedule" {
-		t.Fatalf("dropped = %v", dropped)
+	if len(kept) != 1 || len(dropped) != 0 {
+		t.Fatalf("kept=%v dropped=%v", kept, dropped)
 	}
-	if len(kept) != 4 {
-		t.Fatalf("kept = %v", kept)
+	if got := metricDropReasonTag(map[string]any{"reasoning_tags": []string{"x", " Activity_Schedule "}}); got != "activity_schedule" {
+		t.Fatalf("metricDropReasonTag = %q", got)
 	}
 }

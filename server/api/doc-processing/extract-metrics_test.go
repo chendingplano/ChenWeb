@@ -69,6 +69,15 @@ type fakeMetricsStore struct {
 	upsertErr         error
 	upsertCalled      int
 	lastUpsert        SaveMetricsRequest
+	dropped           []droppedMetricRow
+}
+
+func (f *fakeMetricsStore) SaveDroppedMetrics(_ context.Context, recordID int64, _ string, rows []droppedMetricRow) error {
+	for i := range rows {
+		rows[i].DropID = fmt.Sprintf("%d_drp_%d", recordID, len(f.dropped)+1)
+		f.dropped = append(f.dropped, rows[i])
+	}
+	return nil
 }
 
 func (f *fakeMetricsStore) MetricsExist(_ context.Context, _ int64) (bool, error) {
@@ -816,7 +825,7 @@ func TestEnrichMetricCandidatesKeepsSuccessfulBatchesWhenOneFails(t *testing.T) 
 	}
 	chunks := metricsBlocksToChunks([]Block{makeMetricsBlock(0, 1), makeMetricsBlock(1, 2)})
 
-	metrics, _, err := p.enrichMetricCandidates(context.Background(), 416, candidates, chunks, "")
+	metrics, _, _, err := p.enrichMetricCandidates(context.Background(), 416, candidates, chunks, "")
 	if err == nil || !strings.Contains(err.Error(), "second enrichment timed out") {
 		t.Fatalf("enrichMetricCandidates error=%v, want the batch failure alongside partial results", err)
 	}

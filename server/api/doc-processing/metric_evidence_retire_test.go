@@ -23,6 +23,9 @@ func TestDeleteMetricsByInputRecordIDRetiresEvidenceFirst(t *testing.T) {
 	mock.ExpectExec(`DELETE FROM kb.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(416)).
 		WillReturnResult(sqlmock.NewResult(0, 45))
+	mock.ExpectExec(`DELETE FROM kb.metrics_dropped WHERE input_record_id = \$1`).
+		WithArgs(int64(416)).
+		WillReturnResult(sqlmock.NewResult(0, 3))
 
 	n, err := (MetricsSQLStore{DB: db}).DeleteMetricsByInputRecordID(context.Background(), 416)
 	if err != nil {

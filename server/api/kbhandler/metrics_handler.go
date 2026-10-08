@@ -77,6 +77,13 @@ type metricRecord struct {
 	// TableContext is built at read time from SourceTableRows: header + matched rows
 	// + one neighbor data row either side. Never stored.
 	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
+	// Dropped rows (openspec change metric-row-soft-drop-decision-model) come from
+	// kb.metrics_dropped and are returned only with include_dropped=true. For them
+	// MetricID is the drop_id and ID is the negated kb.metrics_dropped.id.
+	Dropped      bool            `json:"dropped,omitempty"`
+	DropStage    *string         `json:"drop_stage,omitempty"`
+	DropReason   *string         `json:"drop_reason,omitempty"`
+	DropDecision json.RawMessage `json:"drop_decision,omitempty"`
 }
 
 type listMetricsResponse struct {
@@ -326,6 +333,17 @@ ORDER BY m.id ASC
 			Status:   false,
 			ErrorMsg: "failed to iterate kb metrics (CWB_KB_M_022)",
 		})
+	}
+	if source != "testbed" && c.QueryParam("include_dropped") == "true" {
+		dropped, err := listDroppedMetrics(c.Request().Context(), db, inputID)
+		if err != nil {
+			logger.Error("query kb.metrics_dropped failed", "input_record_id", inputID, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status:   false,
+				ErrorMsg: "failed to retrieve dropped metrics (CWB_KB_M_024)",
+			})
+		}
+		out = append(out, dropped...)
 	}
 	attachMetricTableContexts(c.Request().Context(), db, inputID, out, logger)
 	sort.SliceStable(out, func(i, j int) bool {

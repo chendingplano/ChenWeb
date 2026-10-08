@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/decisionmodel"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/chendingplano/shared/go/api/decisionpolicy"
@@ -44,54 +45,6 @@ type playgroundRunRequest struct {
 	Policy        string               `json:"policy"`
 	Text          string               `json:"text"`
 	Questions     []playgroundQuestion `json:"questions"`
-}
-
-// playgroundProvider maps a .models.toml entry to the decision provider used
-// to run it: real Jev for decision-model entries, the logprob emulation for
-// ordinary chat models.
-func playgroundProvider(cfg ApiTypes.LLMModelDef) (llmclients.ProviderID, bool) {
-	switch strings.TrimSpace(cfg.ModelType) {
-	case "decision-model":
-		return llmclients.ProviderJevCompatible, true
-	case "llm":
-		return llmclients.ProviderJevEmulated, true
-	default:
-		return "", false
-	}
-}
-
-// playgroundProviderConfig builds the client config for a model entry.
-func playgroundProviderConfig(key string, cfg ApiTypes.LLMModelDef) (llmclients.ProviderConfig, error) {
-	provider, ok := playgroundProvider(cfg)
-	if !ok {
-		return llmclients.ProviderConfig{}, fmt.Errorf("model %q (type %q) cannot run decisions", key, cfg.ModelType)
-	}
-	pc := llmclients.ProviderConfig{
-		ID:          provider,
-		BaseURL:     strings.TrimSpace(cfg.BaseURL),
-		APIKey:      strings.TrimSpace(cfg.APIKey),
-		ProfileName: key,
-	}
-	if provider == llmclients.ProviderJevEmulated {
-		pc.Extra = map[string]string{}
-		base := strings.ToLower(pc.BaseURL)
-		// DashScope returns at most 5 alternatives per token.
-		if strings.Contains(base, "dashscope") {
-			pc.Extra["top_logprobs"] = "5"
-		}
-		// DeepSeek V4 thinks by default, which uses up the single output
-		// token and returns no logprobs. Its logprobs are also taken after
-		// temperature: at 0 every non-chosen option is -9999, so use 1 to get
-		// the model's real distribution (the sampled token itself is unused).
-		if strings.Contains(base, "deepseek") {
-			pc.Extra["thinking"] = "disabled"
-			pc.Extra["temperature"] = "1"
-		}
-		if cfg.OmitTemperature {
-			pc.Extra["temperature"] = "omit"
-		}
-	}
-	return pc, nil
 }
 
 // playgroundJevQuestions validates the questions and converts them to the
@@ -186,7 +139,7 @@ func GetDecisionPlaygroundOptions(c echo.Context) error {
 	}
 	out := make([]playgroundModel, 0, len(models))
 	for key, cfg := range models {
-		if provider, ok := playgroundProvider(cfg); ok {
+		if provider, ok := decisionmodel.Provider(cfg); ok {
 			out = append(out, playgroundModel{Key: key, ModelName: cfg.ModelName, ModelType: cfg.ModelType, Provider: string(provider)})
 		}
 	}
@@ -341,7 +294,7 @@ type playgroundRun struct {
 	policyEdited                  bool
 	policy, text                  string
 	questions                     []playgroundQuestion // as entered, IDs filled in
-	answers                       string // Response.Content, empty on failure
+	answers                       string               // Response.Content, empty on failure
 	raw                           json.RawMessage
 	errMsg                        string
 	usage                         *llmclients.Usage
@@ -445,7 +398,7 @@ func RunDecisionPlayground(c echo.Context) error {
 		return reject(http.StatusBadRequest, fmt.Sprintf("model %q not found in .models.toml", key))
 	}
 	run.modelName = strings.TrimSpace(cfg.ModelName)
-	pc, err := playgroundProviderConfig(key, cfg)
+	pc, err := decisionmodel.ProviderConfig(key, cfg)
 	if err != nil {
 		return reject(http.StatusBadRequest, err.Error())
 	}

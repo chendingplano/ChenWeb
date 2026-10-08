@@ -86,6 +86,10 @@ type MetricsProcessor struct {
 	ChunkDir                         string
 	MetricEnrichGroupSize            int
 	MaxTasks                         int
+	// Open-value decision (spec metric-open-value-decision). Nil judge: rows are kept.
+	OpenValueJudge    openValueJudge
+	OpenValueJudgeErr error
+	OpenValueDropMinP float64
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID  int64
@@ -409,6 +413,7 @@ type metricExtractionResult struct {
 	Language         string
 	Candidates       int
 	Metrics          []map[string]any
+	Dropped          []droppedMetricRow
 	UncertainMetrics []map[string]any
 	ModelName        string
 	FallbackCount    int
@@ -592,6 +597,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 			Options: ObjectReconcileOptionsFromEnv(),
 		}
 	}
+	p.OpenValueJudge, p.OpenValueJudgeErr = newOpenValueJudgeFromEnv(logger)
+	if p.OpenValueJudgeErr != nil {
+		logger.Warn("configure open-value decision model failed; open-value rows will be kept", "err", p.OpenValueJudgeErr)
+	}
+	p.OpenValueDropMinP = openValueDropMinPFromEnv()
 	p.forceDisableThinking()
 	applyStructureModelConfigToExtractor(extractor, p.RelationModelCfg)
 	return p
@@ -738,6 +748,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	p.logFinalMetricsSaved(ctx, evt.RecordID, detectedLanguage,
 		[]string{firstNonEmptyTrimmed(result.ModelName, p.ModelName)}, p.RelationPromptRef,
 		allMetrics, start, p.Now())
+	p.saveDroppedMetricRows(ctx, evt.RecordID, result.Dropped)
 
 	if err := p.persistMetricObjects(ctx, evt.RecordID, allMetrics); err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
@@ -1263,7 +1274,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	)
 
 	// ── Pass 2: concurrent enrichment batches (delegated to enrichMetricCandidates) ──
-	metrics, uncertainMetrics, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, chunks, docCtx)
+	metrics, uncertainMetrics, dropped, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, chunks, docCtx)
 	if enrichErr != nil {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
@@ -1289,6 +1300,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		Language:         detectedLanguage,
 		Candidates:       len(candidates),
 		Metrics:          metrics,
+		Dropped:          dropped,
 		UncertainMetrics: uncertainMetrics,
 		ModelName:        firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
 		FallbackCount:    fallbackCount,
@@ -1986,21 +1998,10 @@ var metricDropReasonTags = map[string]bool{
 	"qualitative_requirement": true,
 }
 
-// dropRowsTaggedWithDropReason removes rows whose reasoning_tags carry a drop reason, and
-// rows that are an agreed or announced activity schedule even when the LLM left them untagged
-// (isAgreedActivitySchedule).
+// dropRowsTaggedWithDropReason splits off rows whose reasoning_tags carry a drop reason.
 func dropRowsTaggedWithDropReason(metrics []map[string]any) (kept, dropped []map[string]any) {
 	for _, m := range metrics {
-		drop := isAgreedActivitySchedule(m)
-		for _, tag := range toStringSlice(m["reasoning_tags"]) {
-			if drop {
-				break
-			}
-			if metricDropReasonTags[strings.ToLower(strings.TrimSpace(tag))] {
-				drop = true
-			}
-		}
-		if drop {
+		if metricDropReasonTag(m) != "" {
 			dropped = append(dropped, m)
 		} else {
 			kept = append(kept, m)
@@ -2009,45 +2010,14 @@ func dropRowsTaggedWithDropReason(metrics []map[string]any) (kept, dropped []map
 	return kept, dropped
 }
 
-var (
-	// activityScheduleNameWords name when or how often something happens.
-	activityScheduleNameWords = []string{"时间", "频次", "频率", "次数", "时段", "time", "frequency", "schedule"}
-	// activityScheduleOpenWords say the value is agreed or announced instead of stated.
-	activityScheduleOpenWords = []string{"约定", "商定", "协商", "协定", "公告", "公示", "agree", "negotiat", "announce"}
-)
-
-// isAgreedActivitySchedule reports whether a row is a duty to agree or announce when or how
-// often an activity happens, with no value ("收运单位应与集中供餐单位约定餐厨垃圾收运的时间和频次").
-// Gold rule X2 and the enrich prompt's activity_schedule drop reason exclude these; the LLM
-// sometimes emits them as requirement + limit_absent instead (416_mtc_3, 2026-10-08). A
-// property agreed for an object ("抗压强度由供需双方商定", A4) is kept: its name is not a time or
-// frequency.
-func isAgreedActivitySchedule(m map[string]any) bool {
-	valueClass := strings.ToLower(strings.TrimSpace(asString(m["value_class"])))
-	if valueClass != "requirement" && valueClass != "target" {
-		return false
-	}
-	if statementNumericRangeTypes[strings.ToLower(strings.TrimSpace(asString(m["value_range_type"])))] {
-		return false
-	}
-	if strings.TrimSpace(asString(m["metric_value"])) != "" || strings.TrimSpace(asString(m["unit"])) != "" {
-		return false
-	}
-	name := strings.ToLower(asString(m["metric_name"]) + " " + asString(m["metric_name_en"]))
-	if !containsAny(name, activityScheduleNameWords) {
-		return false
-	}
-	open := strings.ToLower(asString(m["threshold_or_target"]) + " " + asString(m["desc"]) + " " + asString(m["desc_en"]))
-	return containsAny(open, activityScheduleOpenWords)
-}
-
-func containsAny(s string, words []string) bool {
-	for _, w := range words {
-		if strings.Contains(s, w) {
-			return true
+// metricDropReasonTag returns the row's first drop-reason tag, or "".
+func metricDropReasonTag(m map[string]any) string {
+	for _, tag := range toStringSlice(m["reasoning_tags"]) {
+		if t := strings.ToLower(strings.TrimSpace(tag)); metricDropReasonTags[t] {
+			return t
 		}
 	}
-	return false
+	return ""
 }
 
 func candidateSourceLineSpans(candidate metricCandidate) []string {
@@ -2968,6 +2938,11 @@ func (s MetricsSQLStore) DeleteMetricsByInputRecordID(ctx context.Context, input
 	if err != nil {
 		return 0, err
 	}
+	// Dropped rows are re-created by the re-extraction; drop ids restart at 1
+	// (spec metric-row-soft-drop).
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM kb.metrics_dropped WHERE input_record_id = $1`, inputRecordID); err != nil {
+		return 0, fmt.Errorf("(MID_26100807) delete dropped metrics for record_id=%d: %w", inputRecordID, err)
+	}
 	return res.RowsAffected()
 }
 
@@ -3149,7 +3124,8 @@ VALUES (
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
-		extInfo, _ := json.Marshal(buildMetricExtInfo(req.Language, nil, extInfoSeed))
+		rowExt, _ := metric["ext_info"].(map[string]any)
+		extInfo, _ := json.Marshal(buildMetricExtInfo(req.Language, rowExt, extInfoSeed))
 
 		var (
 			metricNameEn  any
@@ -3533,10 +3509,11 @@ func refreshMetricArtifactFile(ctx context.Context, db *sql.DB, artifactDir stri
 // candidates and returns the deduplicated enriched metric rows plus any
 // uncertain metrics identified by the LLM. It is called from both
 // extractMetricsFromChunksWithLLM (DRY) and FinalizeChunkBatch.
-func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, chunks []Chunk, docCtx string) ([]map[string]any, []map[string]any, error) {
+func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, chunks []Chunk, docCtx string) ([]map[string]any, []map[string]any, []droppedMetricRow, error) {
 	type pass2Result struct {
 		metrics   []map[string]any
 		uncertain []map[string]any
+		tagged    []map[string]any // rows carrying a drop-reason tag
 		language  string
 	}
 
@@ -3617,10 +3594,9 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 				"candidate_ids", missing,
 			)
 		}
-		var selfDropped []map[string]any
-		result.metrics, selfDropped = dropRowsTaggedWithDropReason(result.metrics)
-		for _, m := range selfDropped {
-			p.Logger.Info("pass2: dropped row with a drop-reason tag or an agreed activity schedule",
+		result.metrics, result.tagged = dropRowsTaggedWithDropReason(result.metrics)
+		for _, m := range result.tagged {
+			p.Logger.Info("pass2: set aside row the LLM tagged with a drop reason",
 				"record_id", recordID,
 				"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
 				"candidate_id", m["candidate_id"],
@@ -3653,28 +3629,43 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 
 	if pass2Err != nil {
 		if isCtxStopped(ctx) {
-			return nil, nil, ErrPipelineStopped
+			return nil, nil, nil, ErrPipelineStopped
 		}
 	}
 
 	metrics := make([]map[string]any, 0, len(candidates))
 	uncertain := make([]map[string]any, 0)
+	var tagged []map[string]any
 	detectedLanguage := "unknown"
 	for _, r := range pass2Results {
 		metrics = append(metrics, r.metrics...)
 		uncertain = append(uncertain, r.uncertain...)
+		tagged = append(tagged, r.tagged...)
 		if r.language != "" && detectedLanguage == "unknown" {
 			detectedLanguage = r.language
 		}
 	}
 	metrics = dedupeFinalMetricRows(metrics)
 	canonicalizeMetricValueRangeTypes(metrics)
-	metrics, excluded := excludePureRequirements(metrics)
-	p.logExcludedPureRequirements(ctx, recordID, excluded)
-	if pass2Err != nil {
-		return metrics, uncertain, pass2Err
+
+	// Set-aside rows, in stage order (spec metric-row-soft-drop, design D2).
+	var dropped []droppedMetricRow
+	tagged = dedupeFinalMetricRows(tagged)
+	canonicalizeMetricValueRangeTypes(tagged)
+	for _, m := range tagged {
+		dropped = append(dropped, newDroppedMetricRow(m, metricDropStageLLMTag, metricDropReasonTag(m)))
 	}
-	return metrics, uncertain, nil
+	metrics, excluded := excludePureRequirements(metrics)
+	dropped = append(dropped, excluded...)
+	if !isCtxStopped(ctx) {
+		var judgedOut []droppedMetricRow
+		metrics, judgedOut = p.judgeOpenValueRows(ctx, recordID, metrics)
+		dropped = append(dropped, judgedOut...)
+	}
+	if pass2Err != nil {
+		return metrics, uncertain, dropped, pass2Err
+	}
+	return metrics, uncertain, dropped, nil
 }
 
 func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
@@ -3808,7 +3799,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if isCtxStopped(ctx) {
 		return ErrPipelineStopped
 	}
-	metrics, _, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchChunks, p.batchDocCtx)
+	metrics, _, dropped, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchChunks, p.batchDocCtx)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			return ErrPipelineStopped
@@ -3853,6 +3844,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		p.logFinalMetricsSaved(ctx, p.batchRecordID, firstNonEmptyTrimmed(p.batchLang, "unknown"),
 			[]string{firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName)}, p.RelationPromptRef,
 			metrics, p.batchStart, p.Now())
+		p.saveDroppedMetricRows(ctx, p.batchRecordID, dropped)
 		if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
 			p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 		}
@@ -3906,6 +3898,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	p.logFinalMetricsSaved(ctx, p.batchRecordID, firstNonEmptyTrimmed(p.batchLang, "unknown"),
 		[]string{firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName)}, p.RelationPromptRef,
 		dirty, p.batchStart, p.Now())
+	p.saveDroppedMetricRows(ctx, p.batchRecordID, dropped)
 	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, dirty); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 	}
@@ -3927,9 +3920,10 @@ func canonicalizeMetricValueRangeTypes(metrics []map[string]any) {
 
 // excludePureRequirements splits enriched rows into those kept as metrics and
 // pure requirements (inspection or delegated: nothing to measure), which
-// extract_metrics does not store (spec metric-pure-requirement-exclusion, ADR
-// 2026100603 DR4). Range types must already be canonical.
-func excludePureRequirements(metrics []map[string]any) (kept, excluded []map[string]any) {
+// extract_metrics sets aside (spec metric-row-soft-drop, which supersedes the
+// discard of spec metric-pure-requirement-exclusion). Range types must already be
+// canonical.
+func excludePureRequirements(metrics []map[string]any) (kept []map[string]any, excluded []droppedMetricRow) {
 	kept = make([]map[string]any, 0, len(metrics))
 	for _, m := range metrics {
 		kind := metricStatementKind(m)
@@ -3937,56 +3931,9 @@ func excludePureRequirements(metrics []map[string]any) (kept, excluded []map[str
 			kept = append(kept, m)
 			continue
 		}
-		excluded = append(excluded, map[string]any{
-			"kind":                kind,
-			"metric_name":         m["metric_name"],
-			"subject":             m["subject"],
-			"threshold_or_target": m["threshold_or_target"],
-			"context":             m["context"],
-			"source_line_spans":   m["source_line_spans"],
-		})
+		excluded = append(excluded, droppedMetricRow{Row: m, Stage: metricDropStageStatementKind, Reason: kind, Kind: kind})
 	}
 	return kept, excluded
-}
-
-// logExcludedPureRequirements writes one extract_metrics log entry (activity
-// exclude_pure_requirements) listing every row excluded by
-// excludePureRequirements, so no requirement disappears without a record.
-func (p *MetricsProcessor) logExcludedPureRequirements(ctx context.Context, recordID int64, excluded []map[string]any) {
-	if len(excluded) == 0 {
-		return
-	}
-	byKind := map[string]int{}
-	for _, row := range excluded {
-		byKind[asString(row["kind"])]++
-	}
-	p.Logger.Info("excluded pure requirements from metrics",
-		"record_id", recordID,
-		"num_excluded", len(excluded),
-		"by_kind", byKind,
-	)
-	artifactBytes, _ := json.Marshal(map[string]any{"excluded": excluded})
-	artifactStr := string(artifactBytes)
-	extraBytes, _ := json.Marshal(map[string]any{"num_excluded": len(excluded), "by_kind": byKind})
-	extraStr := string(extraBytes)
-	activityName := "exclude_pure_requirements"
-	rec := DocProcLogRecord{
-		CallReason:    p.Name(),
-		DocProcName:   p.Name(),
-		ModelNames:    compactNonEmptyStrings([]string{p.RelationModelName}),
-		PromptName:    p.RelationPromptRef,
-		RecordID:      int64Ptr(recordID),
-		ActivityName:  &activityName,
-		ArtifactJSON:  &artifactStr,
-		ExtraInfoJSON: &extraStr,
-	}
-	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26100701"); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			p.Logger.Info("exclude_pure_requirements log skipped: doc processor stopped by user request", "record_id", recordID)
-		} else {
-			p.Logger.Warn("failed to write exclude_pure_requirements log", "record_id", recordID, "error", err)
-		}
-	}
 }
 
 // persistCurrentMetricObjects rebuilds the complete metric-object snapshot
@@ -4089,18 +4036,18 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 	seqno := newMetricSeqnoCounter(existing)
 	merged := mergeMetrics(existing, candidates, seqno, p.batchRecordID)
 	/*
-	for _, decision := range merged.Decisions {
-		p.Logger.Info("metrics merge decision", "record_id", p.batchRecordID,
-			"metric_name", decision.MetricName,
-			"candidate_metric_id", decision.CandidateMetricID,
-			"decision", decision.Decision,
-			"reason", decision.Reason,
-			"overlapping_existing_ids", decision.OverlappingMetricIDs,
-			"static_match_ids", decision.StaticMatchIDs,
-			"candidate_fields", decision.CandidateFields,
-			"static_comparisons", decision.Comparisons,
-		)
-	}
+		for _, decision := range merged.Decisions {
+			p.Logger.Info("metrics merge decision", "record_id", p.batchRecordID,
+				"metric_name", decision.MetricName,
+				"candidate_metric_id", decision.CandidateMetricID,
+				"decision", decision.Decision,
+				"reason", decision.Reason,
+				"overlapping_existing_ids", decision.OverlappingMetricIDs,
+				"static_match_ids", decision.StaticMatchIDs,
+				"candidate_fields", decision.CandidateFields,
+				"static_comparisons", decision.Comparisons,
+			)
+		}
 	*/
 	p.Logger.Info("metrics merge classification summary", "record_id", p.batchRecordID,
 		"existing_count", len(existing),

@@ -32,20 +32,22 @@ save paths, with `force_clear` true or false.
 - **THEN** the saved rows SHALL be numbered `<record>_mtc_1` … `<record>_mtc_N` with no gaps
 
 ### Requirement: Excluded rows are recorded
-When a run excludes at least one row, `extract_metrics` SHALL write one `kb.doc_proc_logs` entry
-for the record. The entry SHALL have `doc_proc_name = extract_metrics` and
-`activity_name = exclude_pure_requirements`. Its `extra_info` SHALL contain `num_excluded` and
-a count per excluded kind. Its artifact SHALL list every excluded row with `kind`,
-`metric_name`, `subject`, `threshold_or_target`, `context` and `source_line_spans`. A run that
-excludes nothing SHALL NOT write this entry.
+Every excluded row SHALL be saved to `kb.metrics_dropped` with `drop_stage = statement_kind` and
+its kind as `drop_reason` (amended 2026-10-08 by change `metric-row-soft-drop-decision-model`,
+spec `metric-row-soft-drop`). When a run sets aside at least one row, `extract_metrics` SHALL write
+one `kb.doc_proc_logs` entry with `doc_proc_name = extract_metrics` and
+`activity_name = drop_metric_rows`, listing every set-aside row with its `kind`, `metric_name`,
+`subject`, `threshold_or_target`, `context` and `source_line_spans`. A run that sets aside
+nothing SHALL NOT write this entry. The `exclude_pure_requirements` entry is no longer written.
 
-#### Scenario: Log lists every excluded row
+#### Scenario: Excluded rows are stored and logged
 - **WHEN** a run excludes two inspection requirements and one delegated requirement
-- **THEN** one log entry SHALL exist with `num_excluded = 3` and three rows in its artifact
+- **THEN** three rows with `drop_stage = statement_kind` SHALL be saved to `kb.metrics_dropped`
+- **AND** one `drop_metric_rows` entry SHALL list them
 
 #### Scenario: Nothing excluded
-- **WHEN** a run excludes no rows
-- **THEN** no `exclude_pure_requirements` entry SHALL be written
+- **WHEN** a run sets aside no rows
+- **THEN** no `drop_metric_rows` entry SHALL be written
 
 ### Requirement: Default metric prompts do not request pure requirements
 The default `EXTRACT_METRIC_CANDIDATES_PROMPT` SHALL be `prompt-extract-metric-candidates-v11.md`
