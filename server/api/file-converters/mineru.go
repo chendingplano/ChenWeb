@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+const maxConsecutiveLatexDots = 5
+
+var repeatedLatexDots = regexp.MustCompile(`(?:\\dots)(?:\s+\\dots)+`)
 
 type mineruDocument struct {
 	Pages []mineruPage `json:"pages"`
@@ -156,7 +161,7 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 
 			case "equation":
 				bbox := mineruBBoxStr(item.BBox)
-				if content := strings.TrimSpace(item.Text); content != "" {
+				if content := capRepeatedLatexDots(strings.TrimSpace(item.Text)); content != "" {
 					items = append(items, extractedOpenDataLine{
 						Page:    pageStr,
 						Type:    "equation",
@@ -247,6 +252,18 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 		items = append(items, coverFooters...)
 	}
 	return items
+}
+
+// capRepeatedLatexDots limits an OCR equation's dotted leader to a small
+// number of LaTeX dots. MinerU can expand a short printed leader into thousands
+// of repeated `\dots` tokens; preserving more than five adds no useful content.
+func capRepeatedLatexDots(content string) string {
+	return repeatedLatexDots.ReplaceAllStringFunc(content, func(run string) string {
+		if strings.Count(run, `\dots`) <= maxConsecutiveLatexDots {
+			return run
+		}
+		return strings.TrimSpace(strings.Repeat(`\dots `, maxConsecutiveLatexDots))
+	})
 }
 
 func mineruBBoxStr(raw json.RawMessage) string {
