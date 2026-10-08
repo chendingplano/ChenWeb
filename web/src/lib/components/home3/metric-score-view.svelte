@@ -481,12 +481,16 @@
 			>
 		</form>
 		{#if documents.length}<div class="documents">
-				{#each documents as document}<button
+				{#each documents as document (document.id)}<button
 						class:chosen={selected?.id === document.id}
 						onclick={() => choose(document)}
-						>{document.title || document.file_name || m.msc_record({ id: document.id })}<small
-							>{m.msc_record({ id: document.id })}</small
-						></button
+						><span class="document-field" title={document.title || ''}
+							>{document.title || '—'}</span
+						><span class="document-field" title={document.doc_no || ''}
+							>{document.doc_no || '—'}</span
+						><span class="document-field" title={document.file_name || ''}
+							>{document.file_name || '—'}</span
+					></button
 					>{/each}
 			</div>{:else if searched}<p class="muted">{m.msc_no_documents()}</p>{/if}
 		{#if selected}<p>
@@ -992,15 +996,25 @@
 		max-width: 100%;
 	}
 	.documents {
-		display: flex;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
 		gap: 8px;
 		max-height: 180px;
 		overflow: auto;
-		flex-wrap: wrap;
 	}
 	.documents button {
+		min-width: 0;
 		text-align: left;
-		max-width: 350px;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.document-field {
+		display: block;
+		width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.chosen {
 		background: color-mix(in srgb, var(--accent) 22%, var(--surface));
