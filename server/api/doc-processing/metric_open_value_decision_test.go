@@ -66,23 +66,36 @@ func TestJudgeOpenValueRows(t *testing.T) {
 	if len(kept) != 6 {
 		t.Fatalf("kept %d rows, want 6", len(kept))
 	}
+	if dropped[0].Decision["outcome"] != "dropped" || dropped[0].Decision["reason"] != openValueReasonDropped {
+		t.Fatalf("dropped decision = %v", dropped[0].Decision)
+	}
+	// Every judged kept row says it was examined, that it was kept, and why.
+	wantReason := map[string]string{
+		"不确定":  openValueReasonBelowThreshold,
+		"比能耗":  openValueReasonObjectQuantity,
+		"主体工艺": openValueReasonNotAQuantity,
+		"失败":   openValueReasonError,
+	}
 	for _, m := range kept {
 		name := asString(m["metric_name"])
 		ext, _ := m["ext_info"].(map[string]any)
 		decision, judged := ext["open_value_decision"].(map[string]any)
-		switch name {
-		case "总砷", "浸提时间":
+		if name == "总砷" || name == "浸提时间" {
 			if judged {
 				t.Fatalf("%s must not carry a decision", name)
 			}
-		case "失败":
-			if !judged || decision["error"] != "response has no logprobs" {
-				t.Fatalf("failed row must be kept with its error, got %v", ext)
-			}
-		default:
-			if !judged || decision["choice"] == nil {
-				t.Fatalf("%s must carry its decision, got %v", name, ext)
-			}
+			continue
+		}
+		if !judged || decision["examined"] != true || decision["outcome"] != "kept" ||
+			decision["reason"] != wantReason[name] || asString(decision["reason_text"]) == "" ||
+			decision["threshold"] != 0.9 || decision["judged_at"] == nil {
+			t.Fatalf("%s decision = %v", name, decision)
+		}
+		if name == "失败" && decision["error"] != "response has no logprobs" {
+			t.Fatalf("failed row must keep its error, got %v", decision)
+		}
+		if name == "比能耗" && decision["choice_meaning"] != openValueOptions["object_quantity"] {
+			t.Fatalf("choice_meaning = %v", decision["choice_meaning"])
 		}
 	}
 }
@@ -97,7 +110,8 @@ func TestJudgeOpenValueRowsWithoutModelKeepsEverything(t *testing.T) {
 		t.Fatalf("kept=%v dropped=%v", kept, dropped)
 	}
 	decision := kept[0]["ext_info"].(map[string]any)["open_value_decision"].(map[string]any)
-	if decision["error"] != "decision model not configured" {
+	if decision["error"] != "decision model not configured" || decision["examined"] != false ||
+		decision["reason"] != openValueReasonNotConfigured || decision["outcome"] != "kept" {
 		t.Fatalf("decision = %v", decision)
 	}
 }

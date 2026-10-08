@@ -54,14 +54,24 @@ including rows answered `not_a_quantity`.
 
 ### Requirement: Every decision is recorded
 For each judged row, `extract_metrics` SHALL record `{model, profile, policy_id, policy_version,
-choice, probabilities}`: in `kb.metrics_dropped.decision` when the row is dropped, and in
-`kb.metrics.ext_info.open_value_decision` when it is kept. Each call SHALL be captured as an LLM
+choice, choice_meaning, probabilities, examined, outcome, reason, reason_text, threshold,
+statement_kind, judged_at}` (plus `error` when the call failed): in `kb.metrics_dropped.decision`
+when the row is dropped, and in `kb.metrics.ext_info.open_value_decision` when it is kept.
+`outcome` SHALL be `kept` or `dropped`; `reason` SHALL be one of
+`activity_schedule_confident`, `object_quantity`, `not_a_quantity_not_droppable`,
+`activity_schedule_below_threshold`, `decision_error`, `decision_model_not_configured`;
+`examined` SHALL be false only when no decision model is configured. Each call SHALL be captured as an LLM
 usage event with `PromptName = metric_open_value_kind`, `CallReason = extract_metrics` and the
 record id.
 
 #### Scenario: Kept row carries its decision
 - **WHEN** a judged row is kept
 - **THEN** its `ext_info.open_value_decision` SHALL hold the policy id and version, the choice and the probabilities
+- **AND** `outcome = kept` with the `reason` and `reason_text` saying why it was kept
+
+#### Scenario: Object quantity is recorded as examined and kept
+- **WHEN** a judged row is answered `object_quantity` with p = 1.0
+- **THEN** its `ext_info.open_value_decision` SHALL hold `examined = true`, `outcome = kept` and `reason = object_quantity`
 
 ### Requirement: Decision failures never drop and never fail the run
 A decision failure SHALL NOT drop a row or fail the run. If `METRIC_DECISION_MODEL` is unset,

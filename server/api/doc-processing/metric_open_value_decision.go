@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/decisionmodel"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -27,6 +28,24 @@ const (
 	openValueChoiceSchedule  = "activity_schedule"
 	openValueDefaultDropMinP = 0.9
 	openValueJudgeParallel   = 8
+)
+
+// openValueOptions are the choice question's options and what each means; the meaning is also
+// recorded with every decision so a reader can see what the model chose.
+var openValueOptions = map[string]string{
+	openValueChoiceSchedule: "when, how often or how an activity is carried out; parties agree, set or announce it",
+	"not_a_quantity":        "a method, process, practice, feature, record or identity, not a quantity",
+	"object_quantity":       "a quantity of a thing, product, material, equipment, sample or test",
+}
+
+// Why a judged row was kept or dropped (ext_info.open_value_decision.reason).
+const (
+	openValueReasonDropped        = "activity_schedule_confident"
+	openValueReasonObjectQuantity = "object_quantity"
+	openValueReasonNotAQuantity   = "not_a_quantity_not_droppable"
+	openValueReasonBelowThreshold = "activity_schedule_below_threshold"
+	openValueReasonError          = "decision_error"
+	openValueReasonNotConfigured  = "decision_model_not_configured"
 )
 
 // openValueJudge returns one decision record per row, aligned with rows. A record holds
@@ -50,7 +69,8 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 		return metrics, nil
 	}
 	var decisions []map[string]any
-	if p.OpenValueJudge == nil {
+	notConfigured := p.OpenValueJudge == nil
+	if notConfigured {
 		p.Logger.Warn("open-value decision skipped: METRIC_DECISION_MODEL not configured",
 			"record_id", recordID, "rows", len(judged), "error", p.OpenValueJudgeErr)
 		reason := "decision model not configured"
@@ -67,6 +87,10 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 	if minP <= 0 {
 		minP = openValueDefaultDropMinP
 	}
+	now := time.Now
+	if p.Now != nil {
+		now = p.Now
+	}
 	droppedRows := map[string]bool{}
 	for i, m := range judged {
 		var decision map[string]any
@@ -80,7 +104,8 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 			p.Logger.Warn("open-value decision failed; row kept",
 				"record_id", recordID, "candidate_id", m["candidate_id"], "metric_name", m["metric_name"], "error", errMsg)
 		}
-		if openValueDecisionDrops(decision, minP) {
+		drop := annotateOpenValueDecision(decision, minP, notConfigured, now())
+		if drop {
 			dropped = append(dropped, droppedMetricRow{Row: m, Stage: metricDropStageDecision,
 				Reason: openValueChoiceSchedule, Kind: statementKindRequirementValueOpen, Decision: decision})
 			droppedRows[fmt.Sprintf("%p", m)] = true
@@ -105,14 +130,42 @@ func (p *MetricsProcessor) judgeOpenValueRows(ctx context.Context, recordID int6
 	return kept, dropped
 }
 
-// openValueDecisionDrops reports whether a decision sets the row aside: choice
-// activity_schedule with probability >= minP, and no error.
-func openValueDecisionDrops(decision map[string]any, minP float64) bool {
-	if asString(decision["error"]) != "" || asString(decision["choice"]) != openValueChoiceSchedule {
-		return false
-	}
+// annotateOpenValueDecision decides whether a judged row is set aside (choice activity_schedule
+// with probability >= minP, and no error) and records the verdict in the decision itself:
+// examined, outcome (kept|dropped), reason (a code), reason_text, threshold, statement_kind,
+// choice_meaning and judged_at. The decision is stored with the row (kb.metrics_dropped.decision
+// or kb.metrics.ext_info.open_value_decision), so every judged row says why it was kept.
+func annotateOpenValueDecision(decision map[string]any, minP float64, notConfigured bool, now time.Time) (drop bool) {
+	choice := asString(decision["choice"])
 	probs, _ := decision["probabilities"].(map[string]float64)
-	return probs[openValueChoiceSchedule] >= minP
+	p := probs[choice]
+	var reason, text string
+	switch {
+	case notConfigured:
+		reason, text = openValueReasonNotConfigured, "kept: no decision model is configured (METRIC_DECISION_MODEL)"
+	case asString(decision["error"]) != "":
+		reason, text = openValueReasonError, "kept: the decision call failed, and a failed decision never drops a row"
+	case choice == openValueChoiceSchedule && p >= minP:
+		drop = true
+		reason, text = openValueReasonDropped, fmt.Sprintf("dropped: judged activity_schedule with p=%.2f >= %.2f", p, minP)
+	case choice == openValueChoiceSchedule:
+		reason, text = openValueReasonBelowThreshold, fmt.Sprintf("kept: judged activity_schedule but p=%.2f < %.2f", p, minP)
+	case choice == "not_a_quantity":
+		reason, text = openValueReasonNotAQuantity, fmt.Sprintf("kept: judged not_a_quantity (p=%.2f), which is recorded but never dropped", p)
+	default:
+		reason, text = openValueReasonObjectQuantity, fmt.Sprintf("kept: judged %s (p=%.2f), a quantity of an object", choice, p)
+	}
+	decision["examined"] = !notConfigured
+	decision["outcome"] = map[bool]string{true: "dropped", false: "kept"}[drop]
+	decision["reason"] = reason
+	decision["reason_text"] = text
+	decision["threshold"] = minP
+	decision["statement_kind"] = statementKindRequirementValueOpen
+	decision["judged_at"] = now.UTC().Format(time.RFC3339)
+	if meaning, ok := openValueOptions[choice]; ok {
+		decision["choice_meaning"] = meaning
+	}
+	return drop
 }
 
 // decisionModelJudge asks the configured decision model (jev_emulated or jev_compatible) one
@@ -218,11 +271,7 @@ func (j *decisionModelJudge) JudgeOpenValueRows(ctx context.Context, recordID in
 	question := llmclients.JevQuestions{"kind": {
 		Type:         "choice",
 		Instructions: "Under `policy`, what does the open value of `row` belong to?",
-		Criteria: map[string]string{
-			openValueChoiceSchedule: "when, how often or how an activity is carried out; parties agree, set or announce it",
-			"not_a_quantity":        "a method, process, practice, feature, record or identity, not a quantity",
-			"object_quantity":       "a quantity of a thing, product, material, equipment, sample or test",
-		},
+		Criteria:     openValueOptions,
 	}}
 	sem := make(chan struct{}, openValueJudgeParallel)
 	var wg sync.WaitGroup
