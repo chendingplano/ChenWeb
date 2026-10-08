@@ -358,7 +358,7 @@ func (j *decisionModelJudge) JudgeOpenValueRows(ctx context.Context, recordID in
 				RecordID:     recordID,
 				RunID:        llmRunIDFromContext(ctx),
 				PromptName:   openValuePolicyName,
-				CallReason:   "extract_metrics",
+				CallReason:   "extract_metrics_decision",
 				CallLoc:      "MID-26100818",
 				Metadata:     map[string]any{"policy_id": policy.PolicyID, "policy_version": policy.Version, "candidate_id": row["candidate_id"]},
 				Messages:     []llmclients.Message{{Role: llmclients.RoleUser, Content: string(state)}},

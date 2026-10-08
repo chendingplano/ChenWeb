@@ -42,6 +42,7 @@
 	let {
 		darkMode    = true,
 		activeMenu  = null,
+		selectedMetrics = null,
 		width       = 280,
 		open        = true,
 		onDragStart,
@@ -49,6 +50,7 @@
 	}: {
 		darkMode:    boolean;
 		activeMenu:  ActiveSelection | null;
+		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
 		width:       number;
 		open:        boolean;
 		onDragStart: (e: MouseEvent) => void;
@@ -214,6 +216,31 @@
 	}
 
 	const fontMono = "'Fira Code', 'Cascadia Code', monospace";
+	const metricDetailFields = [
+		[['metric_id'], () => msg.context_shelf_metric_id()],
+		[['metric_name', 'name'], () => msg.context_shelf_metric_name()],
+		[['metric_name_en'], () => msg.context_shelf_metric_name_en()],
+		[['metric_subject'], () => msg.context_shelf_metric_subject()],
+		[['metric_subject_en'], () => msg.context_shelf_metric_subject_en()],
+		[['metric_desc'], () => msg.context_shelf_metric_description()],
+		[['metric_desc_en'], () => msg.context_shelf_metric_description_en()],
+		[['metric_context'], () => msg.context_shelf_metric_context()],
+		[['metric_context_en'], () => msg.context_shelf_metric_context_en()],
+		[['formula_or_definition', 'definition'], () => msg.context_shelf_metric_definition()],
+		[['formula_or_definition_en', 'definition_en'], () => msg.context_shelf_metric_definition_en()],
+		[['metric_value', 'value'], () => msg.context_shelf_metric_value()],
+		[['metric_unit', 'unit'], () => msg.context_shelf_metric_unit()],
+		[['metric_unit_en'], () => msg.context_shelf_metric_unit_en()],
+		[['value_range_type', 'range_type'], () => msg.context_shelf_metric_range_type()],
+		[['value_class'], () => msg.context_shelf_metric_value_class()],
+		[['kind', 'statement_kind'], () => msg.context_shelf_metric_kind()],
+		[['source_line_spans', 'source_lines'], () => msg.context_shelf_metric_source_lines()]
+	] as const;
+	function metricFieldValue(metric: Record<string, unknown>, keys: readonly string[]): string {
+		const value = keys.map((key) => metric[key]).find((candidate) => candidate != null && candidate !== '');
+		if (value == null) return '—';
+		return typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value));
+	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -234,7 +261,8 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
-				{#if findingShelf.active}{msg.context_shelf_finding()}
+				{#if selectedMetrics}{msg.context_shelf_metric_details()}
+				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
 				{:else if sectionId === 'dashboard'}{msg.context_shelf_system_status()}
 				{:else if sectionId === 'agents'}{msg.context_shelf_agent_insights()}
@@ -258,7 +286,37 @@
 			</button>
 		</div>
 
-		{#if findingShelf.active}
+		{#if selectedMetrics}
+			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
+				<div class="grid grid-cols-2 gap-x-3">
+					{#each [
+						{ label: msg.context_shelf_production_metric(), metric: selectedMetrics.production },
+						{ label: msg.context_shelf_gold_metric(), metric: selectedMetrics.gold }
+					] as column (column.label)}
+						<div class="min-w-0 border-b pb-2" style="border-color:{borderColor};">
+							<h3 class="text-xs font-semibold" style="color:{accent};">{column.label}</h3>
+							<div class="mt-1 break-words text-xs font-semibold" style="color:{textPrimary};">
+								{column.metric ? String(column.metric.metric_name ?? column.metric.name ?? column.metric.metric_id ?? '—') : '—'}
+							</div>
+						</div>
+					{/each}
+					{#each metricDetailFields as [keys, label]}
+						{@const productionValue = selectedMetrics.production ? metricFieldValue(selectedMetrics.production, keys) : '—'}
+						{@const goldValue = selectedMetrics.gold ? metricFieldValue(selectedMetrics.gold, keys) : '—'}
+						{@const differs = keys[0] !== 'metric_id' && productionValue !== goldValue}
+						<div
+							class="col-span-2 grid grid-cols-2 gap-x-3 rounded-md px-2 py-1.5"
+							style="background:{differs ? 'rgba(251,191,36,0.12)' : 'transparent'}; border-bottom:1px solid {differs ? 'rgba(251,191,36,0.35)' : borderColor};"
+						>
+							<div class="col-span-2 text-[9px] font-semibold uppercase" style="color:{textMuted};">{label()}</div>
+							<div class="min-w-0 break-words text-xs whitespace-pre-wrap" style="color:{textPrimary};">{productionValue}</div>
+							<div class="min-w-0 break-words text-xs whitespace-pre-wrap" style="color:{textPrimary};">{goldValue}</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+
+		{:else if findingShelf.active}
 			<div class="finding-shelf-body">
 				<FindingDetailsPanel
 					finding={findingShelf.finding}

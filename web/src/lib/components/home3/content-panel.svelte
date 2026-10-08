@@ -101,6 +101,7 @@
 		railOffset = 56,
 		siteConfig,
 		onToggleShelf,
+		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
 		onFocusModeChange = (_focused: boolean) => {}
 	}: {
@@ -112,6 +113,7 @@
 		railOffset?: number;
 		siteConfig: SiteConfig;
 		onToggleShelf: () => void;
+		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
@@ -200,6 +202,7 @@
 			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
 			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
+			activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
@@ -339,7 +342,7 @@
 		{:else if activeMenu?.childId === 'sysadmin-llm-decision-models-playground'}
 			<DecisionPlaygroundView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
-			<MetricScoreView {darkMode} />
+			<MetricScoreView {darkMode} {onSelectMetrics} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}

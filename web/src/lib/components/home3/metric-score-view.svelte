@@ -19,7 +19,13 @@
 		type GoldRun,
 		type ScoreSummary
 	} from './metric-score-client.js';
-	let { darkMode = true }: { darkMode: boolean } = $props();
+	let {
+		darkMode = true,
+		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {}
+	}: {
+		darkMode: boolean;
+		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
+	} = $props();
 	let query = $state(''),
 		searching = $state(false),
 		searched = $state(false),
@@ -124,6 +130,22 @@
 		unit: m.msc_field_unit,
 		lines: m.msc_field_lines
 	};
+	const comparedFields: Record<string, string[]> = {
+		value: ['metric_value', 'value'],
+		range_type: ['value_range_type', 'range_type'],
+		kind: ['value_class', 'statement_kind', 'kind'],
+		unit: ['metric_unit', 'unit'],
+		lines: ['source_line_spans', 'source_lines', 'lines']
+	};
+	function comparedValue(id: string, prediction: boolean, field: string) {
+		const row = (prediction ? detail?.input?.predictions : detail?.input?.gold)?.find(
+			(row) => row.metric_id === id
+		);
+		const keys = comparedFields[field] ?? [];
+		const value = keys.map((key) => row?.[key]).find((candidate) => candidate != null && candidate !== '');
+		if (value == null) return '—';
+		return typeof value === 'string' ? value : JSON.stringify(value);
+	}
 	const causes: Record<string, () => string> = {
 		gold_excluded: m.msc_cause_gold_excluded,
 		duplicate: m.msc_cause_duplicate,
@@ -287,6 +309,11 @@
 	}
 	function selectSourceEntry(entryKey: string, ids: Array<{ id: string; prediction: boolean }>) {
 		selectedEntryKey = entryKey;
+		const productionId = ids.find((item) => item.prediction)?.id;
+		const goldId = ids.find((item) => !item.prediction)?.id;
+		const production = detail?.input?.predictions.find((item) => item.metric_id === productionId) ?? null;
+		const goldMetric = detail?.input?.gold.find((item) => item.metric_id === goldId) ?? null;
+		onSelectMetrics(production || goldMetric ? { production, gold: goldMetric } : null);
 		pendingSourceEntry = ids;
 		resolveSourceEntry(ids);
 	}
@@ -570,8 +597,9 @@
 				<h2>{m.msc_results({ id: detail.id })} · {status(detail.status)}</h2>
 				<button
 					onclick={() => {
-						detailSequence++;
+							detailSequence++;
 						detail = null;
+						onSelectMetrics(null);
 					}}>{m.msc_close()}</button
 				>
 			</div>
@@ -678,13 +706,16 @@
 							<span class="entry-line">{pair.note}</span>
 							<span class="checks">
 								{#each Object.entries(pair.checks) as [field, correct]}<span
-										class:failed={correct === false}
-										>{fields[field]?.() ?? field}: {correct == null
-											? m.msc_na()
-											: correct
-												? m.msc_pass()
-												: m.msc_fail()}</span
-									>{/each}<span>{m.msc_credit()}: {pct(pair.credit)}</span>
+									class:failed={correct === false}
+									>{fields[field]?.() ?? field}: {correct == null
+										? m.msc_na()
+										: correct
+											? m.msc_pass()
+											: m.msc_fail()}</span
+								>{#if correct === false}<span class="check-values"
+										>{m.msc_expected()}: {comparedValue(pair.gold, false, field)} · {m.msc_actual()}:
+										{comparedValue(pair.pred, true, field)}</span
+									>{/if}{/each}<span>{m.msc_credit()}: {pct(pair.credit)}</span>
 							</span>
 						</button>{/each}
 					{#if !filteredPairs.length}<p class="muted">{m.msc_no_matching_pairs()}</p>{/if}
@@ -972,8 +1003,8 @@
 		max-width: 350px;
 	}
 	.chosen {
-		background: var(--surface);
-		outline: 1px solid var(--accent);
+		background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+		border-color: var(--accent);
 	}
 	.section-head {
 		justify-content: space-between;
@@ -1056,6 +1087,11 @@
 		gap: 12px;
 		color: var(--muted);
 		font-size: 12px;
+	}
+	.check-values {
+		flex-basis: 100%;
+		color: var(--muted);
+		white-space: normal;
 	}
 	.error,
 	.failed {

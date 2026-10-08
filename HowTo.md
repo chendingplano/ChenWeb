@@ -4997,6 +4997,8 @@ Peak hours: 9:00 - 12:00 and 14:00-18:00 UTC on weekdays,
 |-------|-------|--------|
 | Qwen 3.8 Max | 
 
+# Anthropic Pricing
+
 # Tmux Commands
 Prefix is the default Ctrl-b:
 

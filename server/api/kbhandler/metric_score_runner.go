@@ -297,10 +297,13 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 	if err != nil {
 		return e, err
 	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
+		client.ThinkingType = "disabled"
+	}
 	logger.Info("calling LLM for metric benchmark matching", "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText))
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		UserID: userID, PromptName: metricScorePrompt, PromptText: string(prompt), ModelName: cfg.ModelName,
-		InputText: inputText, RecordID: req.RecordID, CallReason: "score_extract_metrics", CallLoc: "20261007-421",
+		InputText: inputText, RecordID: req.RecordID, CallReason: "score_extract_metrics", CallLoc: "MID-20261007-04",
 	})
 	if err != nil {
 		if ctx.Err() != nil {

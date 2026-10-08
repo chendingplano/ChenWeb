@@ -256,14 +256,60 @@
 		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	}
 
+	function findJsonEnd(text: string, start: number): number | null {
+		const stack: string[] = [];
+		let inString = false;
+		let escaped = false;
+		for (let i = start; i < text.length; i++) {
+			const char = text[i];
+			if (inString) {
+				if (escaped) escaped = false;
+				else if (char === '\\') escaped = true;
+				else if (char === '"') inString = false;
+				continue;
+			}
+			if (char === '"') inString = true;
+			else if (char === '{' || char === '[') stack.push(char);
+			else if (char === '}' || char === ']') {
+				const opening = stack.pop();
+				if ((char === '}' && opening !== '{') || (char === ']' && opening !== '[')) return null;
+				if (stack.length === 0) return i + 1;
+			}
+		}
+		return null;
+	}
+
+	function renderStringWithJson(value: string, depth: number): string {
+		const parts: string[] = [];
+		let textStart = 0;
+		let i = 0;
+		while (i < value.length) {
+			if (value[i] !== '{' && value[i] !== '[') { i++; continue; }
+			const end = findJsonEnd(value, i);
+			if (end === null) { i++; continue; }
+			try {
+				const parsed: unknown = JSON.parse(value.slice(i, end));
+				const prose = value.slice(textStart, i);
+				if (prose) parts.push(`<div style="color:${textSecondary}; font-family:monospace; font-size:12px; white-space:pre-wrap; line-height:1.5;">${escHtml(prose)}</div>`);
+				parts.push(`<div style="display:block; width:100%; min-width:0;">${renderJsonHtml(parsed, depth)}</div>`);
+				textStart = end;
+				i = end;
+			} catch { i++; }
+		}
+		if (textStart === 0) return `<span style="color:${textSecondary}; font-family:monospace; font-size:12px; word-break:break-word; white-space:pre-wrap; line-height:1.5;">${escHtml(value)}</span>`;
+		const trailingText = value.slice(textStart);
+		if (trailingText) parts.push(`<div style="color:${textSecondary}; font-family:monospace; font-size:12px; white-space:pre-wrap; line-height:1.5;">${escHtml(trailingText)}</div>`);
+		return `<div style="display:block; width:100%; min-width:0;">${parts.join('')}</div>`;
+	}
+
 	function renderJsonHtml(value: unknown, depth: number): string {
-		const indent = depth * 8;
+		const indent = depth * 4;
 
 		if (value === null) return `<span style="color:${textMuted}; font-family:monospace; font-size:12px;">null</span>`;
 		if (typeof value === 'boolean') return `<span style="color:${accent}; font-family:monospace; font-size:12px;">${value}</span>`;
 		if (typeof value === 'number') return `<span style="color:${accent}; font-family:monospace; font-size:12px;">${value}</span>`;
 		if (typeof value === 'string') {
-			return `<span style="color:${textSecondary}; font-family:monospace; font-size:12px; word-break:break-word; white-space:pre-wrap; line-height:1.5;">${escHtml(value)}</span>`;
+			return renderStringWithJson(value, depth);
 		}
 
 		if (Array.isArray(value)) {
@@ -271,12 +317,12 @@
 			return value.map((item, i) => {
 				const isComplex = item !== null && typeof item === 'object';
 				if (isComplex) {
-					return `<div style="padding-left:${indent + 8}px; margin-top:4px;">
+					return `<div style="display:block; min-width:0; padding-left:${indent + 4}px; margin-top:4px;">
 						<div style="color:${textMuted}; font-size:11px; font-family:monospace; margin-bottom:2px;">[${i}]</div>
 						${renderJsonHtml(item, depth + 1)}
 					</div>`;
 				}
-				return `<div style="display:flex; gap:8px; padding-left:${indent + 8}px; padding-top:1px; padding-bottom:1px; align-items:flex-start;">
+				return `<div style="display:flex; min-width:0; gap:8px; padding-left:${indent + 4}px; padding-top:1px; padding-bottom:1px; align-items:flex-start;">
 					<span style="color:${textMuted}; font-size:11px; font-family:monospace; flex-shrink:0;">[${i}]</span>
 					${renderJsonHtml(item, depth + 1)}
 				</div>`;
@@ -293,14 +339,16 @@
 				}
 				const isComplex = renderedValue !== null && typeof renderedValue === 'object';
 				if (isComplex) {
-					return `<div style="padding-left:${indent}px; margin-top:5px;">
+					return `<div style="display:block; min-width:0; width:100%; padding-left:${indent}px; margin-top:5px;">
 						<div style="color:${textMuted}; font-size:12px; font-family:monospace; font-weight:500; margin-bottom:2px;">${escHtml(k)}</div>
 						${renderJsonHtml(renderedValue, depth + 1)}
 					</div>`;
 				}
-				return `<div style="display:flex; align-items:flex-start; gap:10px; padding-left:${indent}px; padding-top:2px; padding-bottom:2px;">
-					<span style="color:${textMuted}; font-family:monospace; font-size:12px; min-width:130px; flex-shrink:0;">${escHtml(k)}</span>
+				return `<div style="display:flex; min-width:0; width:100%; align-items:flex-start; gap:10px; padding-left:${indent}px; padding-top:2px; padding-bottom:2px;">
+					<span style="color:${textMuted}; font-family:monospace; font-size:12px; flex:0 0 110px;">${escHtml(k)}</span>
+					<div style="min-width:0; flex:1;">
 					${renderJsonHtml(renderedValue, depth)}
+					</div>
 				</div>`;
 			}).join('');
 		}

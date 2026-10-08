@@ -79,6 +79,8 @@
 		headerVisible?: boolean;
 	} = $props();
 	const metricsEditable = $derived(source === 'kb');
+	// Rows extract_metrics set aside (kb.metrics_dropped); shown only on request.
+	let showDropped = $state(false);
 
 	// Gold-metrics filters (source 'testbed'): which skill version and model's
 	// benchmark run to show. The version defaults to the newest; no model is
@@ -1001,6 +1003,13 @@
 		return { x1: x1 + ux * d1, y1: y1 + uy * d1, x2: x2 - ux * d2, y2: y2 - uy * d2 };
 	}
 
+	function droppedTitle(m: KbMetricRecord): string {
+		const p = m.drop_decision?.probabilities?.[m.drop_reason ?? ''];
+		return p === undefined
+			? i18n.metric_mgmt_dropped_title({ stage: m.drop_stage ?? '' })
+			: i18n.metric_mgmt_dropped_title_decision({ stage: m.drop_stage ?? '', probability: p.toFixed(2) });
+	}
+
 	async function loadMetricsForRecord(id: number) {
 		// A record selection must reset every panel-level filter, otherwise a
 		// stale confidence filter keeps hiding this record's metrics. The global
@@ -1034,7 +1043,12 @@
 			const [metricRes, inputRes, rawRes] = await Promise.all([
 				goldModelMissing
 					? Promise.resolve({ results: [] as KbMetricRecord[] })
-					: listKbMetrics(id, source, { skillVersion: goldSkillVersion, modelName: goldModelName }),
+					: listKbMetrics(
+							id,
+							source,
+							{ skillVersion: goldSkillVersion, modelName: goldModelName },
+							{ includeDropped: source === 'kb' && showDropped }
+						),
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
 			]);
@@ -1368,7 +1382,7 @@
 				record_id: currentInput.id,
 				metrics: extractedMetricsPreview
 			});
-			const refreshed = await listKbMetrics(currentInput.id, source);
+			const refreshed = await listKbMetrics(currentInput.id, source, {}, { includeDropped: source === 'kb' && showDropped });
 			metrics = refreshed.results ?? [];
 			closeAddMetricDialog();
 		} catch (err) {
@@ -1555,6 +1569,18 @@
 			</div>
 
 			<div class="metric-local-filters">
+				{#if source === 'kb'}
+					<label class="show-dropped" title={i18n.metric_mgmt_show_dropped_title()}>
+						<input
+							type="checkbox"
+							bind:checked={showDropped}
+							onchange={() => {
+								if (currentInput) void loadMetricsForRecord(currentInput.id);
+							}}
+						/>
+						{i18n.metric_mgmt_show_dropped()}
+					</label>
+				{/if}
 				<select
 					class="toolbar-select"
 					value={metricNameDropdownValue}
@@ -1753,6 +1779,7 @@
 							type="button"
 							class="metric-card"
 							class:selected={selectedMetricId === m.id}
+							class:dropped={m.dropped}
 							onclick={(event) => onMetricCardClick(event, m)}
 						>
 							<div class="card-rule" aria-hidden="true"></div>
@@ -1775,6 +1802,11 @@
 									</span>
 									{#if m.metric_unit}<span class="chip chip-mono">{m.metric_unit}</span>{/if}
 									{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
+									{#if m.dropped}
+										<span class="chip chip-dropped" title={droppedTitle(m)}>
+											{i18n.metric_mgmt_dropped_chip({ reason: m.drop_reason ?? '' })}
+										</span>
+									{/if}
 								</div>
 							</div>
 						</button>
@@ -3183,6 +3215,22 @@
 	}
 	.chip-quiet {
 		color: var(--text-muted);
+	}
+	.metric-card.dropped {
+		opacity: 0.65;
+		border-style: dashed;
+	}
+	.chip-dropped {
+		color: var(--crimson);
+		border-color: var(--crimson);
+	}
+	.show-dropped {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 12px;
+		color: var(--text-muted);
+		white-space: nowrap;
 	}
 
 	/* ---------- RIGHT ---------- */

@@ -10,10 +10,12 @@ Make JSON returned as a chat message's `content` value readable in the LLM Usage
 ## Behavior
 
 - Keep the existing recursive name–value rendering for the outer response JSON.
-- When rendering a chat message object (an object with a string-valued `role` property), parse its string-valued `content` as JSON if valid and render the parsed value recursively.
-- Keep malformed JSON content as a literal string. Leave all other string values unchanged.
+- In any string field, render valid embedded JSON objects and arrays recursively while retaining surrounding text.
+- Also parse a string-valued chat message `content` as JSON when the whole value is JSON.
+- Keep malformed JSON content as a literal string.
 - Continue escaping text through the existing HTML renderer.
 - Use a smaller indentation step for nested objects and arrays.
+- Render each name–value row on its own line and let value columns use the dialog width.
 - Allow the body dialog to be resized while keeping it within the viewport.
 
 ## Implementation
@@ -27,5 +29,5 @@ Check formatting/type errors with the project's existing frontend check if avail
 ## Non-goals
 
 - Changing the body API or stored payloads.
-- Parsing JSON-looking strings outside `content` fields.
+- Parsing JSON scalar values embedded in prose.
 - Adding expand/collapse, copy, or edit controls.

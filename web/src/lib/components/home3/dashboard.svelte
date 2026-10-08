@@ -76,7 +76,13 @@
 	let railExpanded = $state(false);
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
+	let selectedMetrics = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
+	$effect(() => {
+		if (activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark') {
+			selectedMetrics = null;
+		}
+	});
 	// Product Review and Review Metrics use the shelf's space for their own panes — hide it while
 	// it's the active content, without touching the stored shelfOpen toggle so
 	// other pages keep whatever open/closed state the user last left them in.
@@ -294,6 +300,7 @@
 			{autoShrinkExpand}
 			{docReviewKey}
 			{siteConfig}
+			onSelectMetrics={(metrics) => (selectedMetrics = metrics)}
 			railOffset={currentRailOffset}
 			onToggleShelf={() => {
 				shelfOpen = !shelfOpen;
@@ -331,6 +338,7 @@
 			<ContextShelf
 				{darkMode}
 				{activeMenu}
+				{selectedMetrics}
 				width={shelfWidth}
 				open={shelfOpen}
 				onDragStart={startShelfDrag}
