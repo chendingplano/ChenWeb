@@ -997,7 +997,7 @@
 	}
 	.documents {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
 		gap: 8px;
 		max-height: 180px;
 		overflow: auto;
