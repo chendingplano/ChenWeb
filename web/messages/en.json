@@ -6503,6 +6503,8 @@
 	"msc_search_placeholder": "Search by title or record ID",
 	"msc_search": "Search",
 	"msc_searching": "Searching…",
+	"msc_all": "All",
+	"msc_with_gold_metrics": "With gold metrics",
 	"msc_no_documents": "No documents found.",
 	"msc_model": "Scoring model",
 	"msc_choose_model": "Choose a model",

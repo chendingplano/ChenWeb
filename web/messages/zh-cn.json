@@ -6503,6 +6503,8 @@
 	"msc_search_placeholder": "按标题或记录 ID 搜索",
 	"msc_search": "搜索",
 	"msc_searching": "搜索中…",
+	"msc_all": "全部",
+	"msc_with_gold_metrics": "包含黄金指标",
 	"msc_no_documents": "未找到文档。",
 	"msc_model": "评分模型",
 	"msc_choose_model": "选择模型",

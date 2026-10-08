@@ -27,6 +27,7 @@
 		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 	} = $props();
 	let query = $state(''),
+		searchScope = $state('all'),
 		searching = $state(false),
 		searched = $state(false),
 		starting = $state(false),
@@ -168,7 +169,7 @@
 		searching = true;
 		error = '';
 		try {
-			const found = await searchInputs(query);
+			const found = await searchInputs(query, searchScope === 'gold');
 			if (alive) {
 				documents = found;
 				searched = true;
@@ -476,8 +477,14 @@
 				placeholder={m.msc_search_placeholder()}
 				aria-label={m.msc_document()}
 			/>
-			<button type="submit" disabled={searching}
-				>{searching ? m.msc_searching() : m.msc_search()}</button
+			<select
+				aria-label={m.msc_search()}
+				bind:value={searchScope}
+				disabled={searching}
+				onchange={() => void search()}
+				><option value="all">{m.msc_all()}</option><option value="gold"
+					>{m.msc_with_gold_metrics()}</option
+				></select
 			>
 		</form>
 		{#if documents.length}<div class="documents">
