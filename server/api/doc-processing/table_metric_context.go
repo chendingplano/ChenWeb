@@ -342,12 +342,16 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 }
 
 func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]TableRow, string) {
-	// 1. Stored refs whose hashes all still match the grid.
+	// 1. Stored refs whose hashes all still match the grid. A hash found under another
+	// ID follows the row (row IDs move when the header detection changes).
 	if len(cited.Rows) > 0 && len(cited.RowHash) > 0 {
 		var rows []TableRow
 		for _, id := range cited.Rows {
 			r, ok := g.Row(id)
 			if !ok || cited.RowHash[id] != r.Hash {
+				r, ok = g.dataRowByHash(cited.RowHash[id])
+			}
+			if !ok {
 				rows = nil
 				break
 			}

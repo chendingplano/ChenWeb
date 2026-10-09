@@ -36,7 +36,7 @@ A row is addressed as (line number, logical row ID). The physical line stays one
 New file `server/api/doc-processing/table_grid.go`: `ParseTableGrid(html string) (*TableGrid, error)` using `golang.org/x/net/html` (already an indirect dependency; becomes direct).
 
 - `rowspan`/`colspan` are expanded: a spanned cell's text is copied into every grid position it covers. Every row then has the full column count and reads on its own.
-- **Header rows.** Rows containing `<th>` are header rows. If there are none, row 0 is a header row. Any immediately following row is also a header row while the header rows contain a `colspan > 1` cell (multi-level headers). Header rows are `h0, h1…`; data rows are `r1, r2…` in document order.
+- **Header rows.** Rows containing `<th>` are header rows. If there are none, row 0 is a header row. Any immediately following row is also a header row while the last header row contains a `colspan > 1` cell, or a header cell's `rowspan` reaches it (multi-level headers, unit rows), up to 3 header rows. A stored row reference whose hash is found under another ID follows the row, so a change in header detection does not misdirect stored refs. Header rows are `h0, h1…`; data rows are `r1, r2…` in document order.
 - **Column labels.** Each column's label joins its header cells top-down with `/`, skipping repeats (e.g. `性能指标/温度`).
 - **Row hash.** `row_hash` is the first 12 hex digits of SHA-1 over the row's NFKC-normalized cell texts joined with `\x1f`. A stored reference whose hash no longer matches is treated as stale (D5).
 - Parse failures return an error. Callers fall back to today's behaviour: raw HTML in input, LLM text for context.

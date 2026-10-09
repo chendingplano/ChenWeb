@@ -19,12 +19,16 @@ The system SHALL parse the HTML content of a `table` line into a grid where ever
 The system SHALL give header rows the IDs `h0, h1, …` and data rows the IDs `r1, r2, …` in document order, and SHALL compute a row hash from the normalized cell text of each row.
 
 #### Scenario: Header detection without th tags
-- **WHEN** a table has no `<th>` cells and its first row has no `colspan > 1` cell
+- **WHEN** a table has no `<th>` cells and its first row has no `colspan > 1` or `rowspan > 1` cell
 - **THEN** the first row is `h0` and the next row is `r1`
 
 #### Scenario: Multi-level header
 - **WHEN** a table's first row contains a `colspan > 1` cell
 - **THEN** the first two rows are header rows `h0` and `h1`, and each column label joins its header cells top-down with `/`
+
+#### Scenario: Rowspan header cell
+- **WHEN** a header row has a `rowspan="2"` cell (record 753 表2: `标准工况条件 | tAl | Δt1 | Δtsub` over a unit row `°C | K | K`)
+- **THEN** the row it reaches is also a header row, so the unit row is `h1` and the first condition row `SC1` is `r1`
 
 #### Scenario: IDs are deterministic
 - **WHEN** the same table HTML is parsed twice

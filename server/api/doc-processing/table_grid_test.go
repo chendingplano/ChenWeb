@@ -64,6 +64,29 @@ func TestParseTableGrid_MultiLevelHeader(t *testing.T) {
 	}
 }
 
+// Record 753 表2: the rowspan="2" header cell makes the unit row part of the header,
+// so SC1 is r1, not the unit row.
+func TestParseTableGrid_RowspanHeader(t *testing.T) {
+	h := `<table><tr><td rowspan="2">标准工况条件</td><td>tAl</td><td>Δt1</td><td>Δtsub</td></tr>` +
+		`<tr><td>°C</td><td>K</td><td>K</td></tr>` +
+		`<tr><td>SC1</td><td>25</td><td>15</td><td>≤3</td></tr>` +
+		`<tr><td>SC2</td><td>25</td><td>10</td><td>≤3</td></tr>` +
+		`<tr><td>SC3</td><td>35</td><td>15</td><td>≤3</td></tr></table>`
+	g, err := ParseTableGrid(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Headers) != 2 || len(g.Rows) != 3 {
+		t.Fatalf("headers = %d, rows = %d, want 2 and 3", len(g.Headers), len(g.Rows))
+	}
+	if r, _ := g.Row("r1"); r.Cells[0] != "SC1" {
+		t.Fatalf("r1 = %v, want SC1 row", r.Cells)
+	}
+	if g.Columns[1] != "tAl/°C" {
+		t.Fatalf("columns = %v", g.Columns)
+	}
+}
+
 func TestParseTableGrid_THHeaders(t *testing.T) {
 	g, err := ParseTableGrid(`<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>`)
 	if err != nil {

@@ -86,6 +86,25 @@ func TestBuildTableMetricContext_StoredRefsWinWhenHashMatches(t *testing.T) {
 	}
 }
 
+func TestBuildTableMetricContext_StoredRefFollowsHashWhenRowIDMoved(t *testing.T) {
+	// Before rowspan headers were recognised, record 753 表2's SC1 row was r2. Its
+	// hash still names the SC1 row, which is now r1; the ID r2 now names SC2.
+	table := `<table><tr><td rowspan="2">标准工况条件</td><td>tAl</td><td>Δt1</td><td>Δtsub</td></tr>` +
+		`<tr><td>°C</td><td>K</td><td>K</td></tr>` +
+		`<tr><td>SC1</td><td>25</td><td>15</td><td>≤3</td></tr>` +
+		`<tr><td>SC2</td><td>25</td><td>10</td><td>≤3</td></tr></table>`
+	idx := newTableLineIndex([]Line{{LineNo: 176, PageNo: 12, LineType: "table", Content: table}})
+	m := map[string]any{
+		"metric_name":       "空气进口温度 tAl", // not in any cell; value 25 ties SC1/SC2
+		"metric_value":      "25",
+		"source_line_spans": []any{"176"},
+		"source_table_rows": []TableRowRef{{Line: 176, Rows: []string{"r2"}, RowHash: map[string]string{"r2": tableRowHash([]string{"SC1", "25", "15", "≤3"})}}},
+	}
+	if res := buildTableMetricContext(idx, m); res.Outcome != tableRowsFromStoredRefs || strings.Join(res.Refs[0].Rows, ",") != "r1" {
+		t.Fatalf("got outcome=%q refs=%+v, want stored_refs [r1]", res.Outcome, res.Refs)
+	}
+}
+
 func TestBuildTableMetricContext_UnmatchedLargeTableKeepsLLMContext(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("<table><tr><td>项目</td><td>值</td></tr>")

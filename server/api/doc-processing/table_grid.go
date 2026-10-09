@@ -55,6 +55,7 @@ type rawTableRow struct {
 	spans      []int
 	hasTH      bool
 	hasColspan bool
+	maxRowspan int
 }
 
 // ParseTableGrid parses the HTML content of a table line into a TableGrid.
@@ -126,6 +127,9 @@ func ParseTableGrid(content string) (*TableGrid, error) {
 			if cs > 1 {
 				row.hasColspan = true
 			}
+			if rs > row.maxRowspan {
+				row.maxRowspan = rs
+			}
 			for i := 0; i < cs; i++ {
 				if rs > 1 {
 					pending[col] = &carry{text: text, left: rs - 1}
@@ -157,7 +161,17 @@ func ParseTableGrid(content string) (*TableGrid, error) {
 	if headerCount == 0 {
 		headerCount = 1
 	}
-	for headerCount < len(raws)-1 && headerCount < maxTableHeaderRows && raws[headerCount-1].hasColspan {
+	// A header row with colspan is followed by its sub-headers, and a header cell with
+	// rowspan covers the rows below it (a unit row under "项目 | tA | Δt").
+	spansPastHeader := func() bool {
+		for i := 0; i < headerCount; i++ {
+			if i+raws[i].maxRowspan > headerCount {
+				return true
+			}
+		}
+		return false
+	}
+	for headerCount < len(raws)-1 && headerCount < maxTableHeaderRows && (raws[headerCount-1].hasColspan || spansPastHeader()) {
 		headerCount++
 	}
 	if headerCount > len(raws) {
@@ -198,6 +212,16 @@ func (g *TableGrid) Row(id string) (TableRow, bool) {
 			if r.ID == id {
 				return r, true
 			}
+		}
+	}
+	return TableRow{}, false
+}
+
+// dataRowByHash returns the first data row with the given hash.
+func (g *TableGrid) dataRowByHash(hash string) (TableRow, bool) {
+	for _, r := range g.Rows {
+		if hash != "" && r.Hash == hash {
+			return r, true
 		}
 	}
 	return TableRow{}, false
