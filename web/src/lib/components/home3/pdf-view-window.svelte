@@ -42,7 +42,10 @@
 		toolbar,
 		linesView,
 		sidebar,
-		floatingOverlay
+		floatingOverlay,
+		floatingOverlays,
+		floatingOverlayPages = [],
+		showAllFloatingOverlays = false
 	}: {
 		inputId: number | null;
 		fileUrl: string;
@@ -82,6 +85,9 @@
 		linesView?: Snippet;
 		sidebar?: Snippet;
 		floatingOverlay?: Snippet;
+		floatingOverlays?: Snippet<[number]>;
+		floatingOverlayPages?: number[];
+		showAllFloatingOverlays?: boolean;
 	} = $props();
 
 	// ---- Built-in selection dialog state (used when enableSelectionDialog=true and no external onselect) ----
@@ -351,6 +357,9 @@
 			{tableReferences}
 			renderHighlights={effectiveRenderHighlights}
 			{floatingOverlay}
+			{floatingOverlays}
+			{floatingOverlayPages}
+			{showAllFloatingOverlays}
 			{loadingLabel}
 			{respectPageRotation}
 			onselect={effectiveOnSelect}

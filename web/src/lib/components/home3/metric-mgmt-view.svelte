@@ -78,9 +78,9 @@
 		source?: KbMetricSource;
 		headerVisible?: boolean;
 	} = $props();
-	const metricsEditable = $derived(source === 'kb');
-	// Rows extract_metrics set aside (kb.metrics_dropped); shown only on request.
-	let showDropped = $state(false);
+	let metricView = $state<'gold' | 'dropped'>('gold');
+	let showAllMetricInfoBoxes = $state(false);
+	const metricsEditable = $derived(source === 'kb' && metricView === 'gold');
 
 	// Gold-metrics filters (source 'testbed'): which skill version and model's
 	// benchmark run to show. The version defaults to the newest; no model is
@@ -93,7 +93,9 @@
 	const goldModelNames = $derived(
 		goldOptions.filter((o) => o.skill_version === goldSkillVersion).map((o) => o.model_name)
 	);
-	const goldModelMissing = $derived(source === 'testbed' && goldModelName === '');
+	const goldModelMissing = $derived(
+		source === 'testbed' && metricView === 'gold' && goldModelName === ''
+	);
 
 	async function loadGoldOptions() {
 		goldOptionsError = '';
@@ -123,8 +125,14 @@
 		if (currentInput) void loadMetricsForRecord(currentInput.id);
 	}
 
+	function handleMetricViewChange(event: Event) {
+		metricView = (event.currentTarget as HTMLSelectElement).value as 'gold' | 'dropped';
+		if (currentInput) void loadMetricsForRecord(currentInput.id);
+	}
+
 	// ---------- Aesthetic tokens: "archival reading room" ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
+	let filterControlBg = $derived(darkMode ? '#303A4B' : '#FFFFFF');
 	let docFrameBg = $derived(darkMode ? '#0A0D14' : '#E4DED0');
 	let tableHeadBg = $derived(darkMode ? '#181D27' : '#EBE4D3');
 	let dialogSectionBg = $derived(darkMode ? '#171C26' : '#F7F2E6');
@@ -149,6 +157,8 @@
 	// ---------- State ----------
 	let recordBrowserFolded = $state(false);
 	let keywordFilter = $state('');
+	let descriptionFilter = $state('');
+	let metricNameFilter = $state('');
 	let confidenceFilter = $state('');
 	type MetricOrderBy = 'source' | 'id_asc' | 'id_desc' | 'name_asc' | 'name_desc';
 	let metricOrderBy = $state<MetricOrderBy>('source');
@@ -170,7 +180,6 @@
 	let globalPicks = $state<KbMetricSearchResult[]>([]);
 	let metricIdQuery = $state('');
 	let metricIdError = $state('');
-	let metricNameDropdownValue = $state<number | ''>('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
@@ -178,7 +187,6 @@
 	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
-	let lastSelectedMetricDebug = $state('none');
 
 	let rawLines = $state<RawLine[]>([]);
 	let rawLoading = $state(false);
@@ -502,6 +510,9 @@
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
 	});
+	let visibleMetrics = $derived(
+		metrics.filter((metric) => (metricView === 'dropped' ? metric.dropped : !metric.dropped))
+	);
 
 
 	// ---------- Keyword filter + metric name nav ----------
@@ -702,7 +713,11 @@
 	});
 
 	let filteredMetrics = $derived.by(() => {
-		let result = metrics;
+		let result = visibleMetrics;
+		const nameFilter = metricNameFilter.trim().toLowerCase();
+		if (nameFilter) {
+			result = result.filter((m) => metricNameOf(m).toLowerCase().includes(nameFilter));
+		}
 		const kw = keywordFilter.trim().toLowerCase();
 		if (kw) {
 			result = result.filter(
@@ -711,6 +726,14 @@
 					(m.metric_keywords_en ?? []).some((k) => k.toLowerCase().includes(kw)) ||
 					(m.metric_name ?? '').toLowerCase().includes(kw) ||
 					(m.metric_subject ?? '').toLowerCase().includes(kw)
+			);
+		}
+		const description = descriptionFilter.trim().toLowerCase();
+		if (description) {
+			result = result.filter(
+				(m) =>
+					(m.metric_desc ?? '').toLowerCase().includes(description) ||
+					(m.metric_desc_en ?? '').toLowerCase().includes(description)
 			);
 		}
 		const cf = confidenceFilter.trim();
@@ -750,6 +773,25 @@
 		});
 	});
 
+	let metricCardsByPage = $derived.by(() => {
+		const byPage = new Map<number, KbMetricRecord[]>();
+		for (const metric of filteredMetrics) {
+			const firstPageSpan = normalizeMetricSpans(metric, lineNumToPage).find(
+				(span) => span.page_number > 0
+			);
+			if (!firstPageSpan) continue;
+			const cards = byPage.get(firstPageSpan.page_number) ?? [];
+			cards.push(metric);
+			byPage.set(firstPageSpan.page_number, cards);
+		}
+		for (const cards of byPage.values()) {
+			cards.sort(
+				(a, b) => firstMetricSourceLine(a) - firstMetricSourceLine(b) || a.id - b.id
+			);
+		}
+		return byPage;
+	});
+
 	let metricSearchActive = $derived(
 		searchQuery.trim().length > 0 || hasKbMetricSearchFilters(searchFilters)
 	);
@@ -780,11 +822,6 @@
 		} else if (!fm.some((m) => m.id === selectedMetricId)) {
 			selectedMetricId = fm[0].id;
 		}
-	});
-
-	// Keep metric name dropdown in sync with selected metric.
-	$effect(() => {
-		metricNameDropdownValue = selectedMetricId ?? '';
 	});
 
 	function metricSourceRecordId(metric: KbMetricRecord | null): number | null {
@@ -966,12 +1003,6 @@
 		if (nextMetric) void selectMetric(nextMetric);
 	}
 
-	function handleMetricNameDropdown(e: Event) {
-		const id = Number((e.target as HTMLSelectElement).value);
-		const m = metrics.find((x) => x.id === id);
-		if (m) void selectMetric(m);
-	}
-
 	// Accepts the business metric_id (e.g. "28_mtc_213") or the numeric row id.
 	function findMetricById(raw: string): KbMetricRecord | undefined {
 		const q = raw.trim().toLowerCase();
@@ -1015,7 +1046,9 @@
 		// stale confidence filter keeps hiding this record's metrics. The global
 		// search dialog state and globalPicks are deliberately kept: clicking a
 		// picked metric from another record loads that record through here.
+		metricNameFilter = '';
 		keywordFilter = '';
+		descriptionFilter = '';
 		confidenceFilter = '';
 		metricIdQuery = '';
 		metricIdError = '';
@@ -1045,9 +1078,9 @@
 					? Promise.resolve({ results: [] as KbMetricRecord[] })
 					: listKbMetrics(
 							id,
-							source,
+							metricView === 'dropped' ? 'kb' : source,
 							{ skillVersion: goldSkillVersion, modelName: goldModelName },
-							{ includeDropped: source === 'kb' && showDropped }
+							{ includeDropped: metricView === 'dropped' }
 						),
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
@@ -1157,7 +1190,6 @@
 	}
 
 	async function selectMetric(m: KbMetricRecord) {
-		lastSelectedMetricDebug = `${m.id} @ ${new Date().toLocaleTimeString()}`;
 		selectedMetricId = m.id;
 		highlightSelectionVersion += 1;
 		enterFocusMode();
@@ -1382,7 +1414,12 @@
 				record_id: currentInput.id,
 				metrics: extractedMetricsPreview
 			});
-			const refreshed = await listKbMetrics(currentInput.id, source, {}, { includeDropped: source === 'kb' && showDropped });
+			const refreshed = await listKbMetrics(
+				currentInput.id,
+				metricView === 'dropped' ? 'kb' : source,
+				{},
+				{ includeDropped: metricView === 'dropped' }
+			);
 			metrics = refreshed.results ?? [];
 			closeAddMetricDialog();
 		} catch (err) {
@@ -1420,10 +1457,59 @@
 	}}
 />
 
+{#snippet metricInfoCard(metric: KbMetricRecord)}
+	<div class="metric-floating-card">
+		<div class="metric-floating-kicker">
+			<span class="metric-floating-id">#{metric.id}</span>
+			{#if metric.confidence != null}
+				<span class="metric-floating-confidence">{Math.round(Number(metric.confidence) * 100)}%</span>
+			{/if}
+			{#if metric.metric_id}
+				<span class="metric-floating-metric-id">{metric.metric_id}</span>
+			{/if}
+		</div>
+		<div class="metric-floating-name">
+			{metric.metric_name || metric.metric_subject || i18n.metric_mgmt_metric({ id: metric.id })}
+		</div>
+		{#if metric.metric_desc}<div class="metric-floating-desc">{metric.metric_desc}</div>{/if}
+		{#each metric.table_context ?? [] as win (win.line)}
+			{@const parts = splitTableContextRows(win)}
+			<div class="metric-floating-table-wrap">
+				{#if win.caption}<div class="metric-floating-table-caption">{win.caption}</div>{/if}
+				<table class="metric-floating-table">
+					<thead>
+						{#each parts.head as row (row.id)}
+							<tr>{#each row.cells as cell, ci (ci)}<th>{cell}</th>{/each}</tr>
+						{/each}
+					</thead>
+					<tbody>
+						{#each parts.body as row (row.id)}
+							<tr class:matched={row.matched}>
+								{#if row.full_width}
+									<td colspan={win.columns.length} title={row.cells[0]}>{clipTableCell(row.cells[0])}</td>
+								{:else}
+									{#each row.cells as cell, ci (ci)}<td title={cell}>{clipTableCell(cell)}</td>{/each}
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/each}
+		<div class="metric-floating-meta">
+			{#if metric.metric_value}<span>{metric.metric_value}</span>{/if}
+			{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
+			{#if metric.location_type}<span>{metric.location_type}</span>{/if}
+			<span>{i18n.metric_mgmt_span_2({ metric: spanCount(metric), plural: spanCount(metric) === 1 ? '' : 's' })}</span>
+		</div>
+	</div>
+{/snippet}
+
 <div
 	class="metric-mgmt select-text"
 	style="
 		--page-bg:{pageBg};
+		--filter-control-bg:{filterControlBg};
 		--doc-frame-bg:{docFrameBg};
 		--table-head-bg:{tableHeadBg};
 		--dialog-section-bg:{dialogSectionBg};
@@ -1560,38 +1646,28 @@
 					{#if globalPicks.length > 0}
 						{i18n.metric_mgmt_global_pick({ globalPicksCount: globalPicks.length, plural: globalPicks.length === 1 ? '' : 's' })}
 					{:else}
-						{i18n.metric_mgmt_found({ metricsCount: metrics.length })}
+						{i18n.metric_mgmt_found({ metricsCount: visibleMetrics.length })}
 					{/if}
 				</div>
 			</div>
-			<div class="debug-badge" aria-live="polite">
-				{i18n.metric_mgmt_debug_last_selected_metric({ lastSelectedMetricDebug })}
-			</div>
-
 			<div class="metric-local-filters">
-				{#if source === 'kb'}
-					<label class="show-dropped" title={i18n.metric_mgmt_show_dropped_title()}>
-						<input
-							type="checkbox"
-							bind:checked={showDropped}
-							onchange={() => {
-								if (currentInput) void loadMetricsForRecord(currentInput.id);
-							}}
-						/>
-						{i18n.metric_mgmt_show_dropped()}
-					</label>
-				{/if}
-				<select
-					class="toolbar-select"
-					value={metricNameDropdownValue}
-					onchange={handleMetricNameDropdown}
-					title={i18n.metric_mgmt_jump_to_metric_by_name()}
-				>
-					<option value="">{i18n.metric_mgmt_metric_by_name()}</option>
-					{#each metrics as m (m.id)}
-						<option value={m.id}>{metricNameOf(m)}</option>
-					{/each}
-				</select>
+				<div class="toolbar-kw-wrap">
+					<input
+						class="toolbar-kw-input"
+						type="text"
+						placeholder={i18n.metric_mgmt_metric_by_name()}
+						bind:value={metricNameFilter}
+					/>
+					{#if metricNameFilter}
+						<button
+							type="button"
+							class="toolbar-kw-clear"
+							onclick={() => (metricNameFilter = '')}
+							title={i18n.metric_mgmt_clear_metric_name_filter()}
+							aria-label={i18n.metric_mgmt_clear_metric_name_filter()}>×</button
+						>
+					{/if}
+				</div>
 				<div class="toolbar-kw-wrap">
 					<input
 						class="toolbar-kw-input"
@@ -1653,6 +1729,23 @@
 					<input
 						class="toolbar-kw-input"
 						type="text"
+						placeholder={i18n.metric_mgmt_filter_by_description()}
+						bind:value={descriptionFilter}
+					/>
+					{#if descriptionFilter}
+						<button
+							type="button"
+							class="toolbar-kw-clear"
+							onclick={() => (descriptionFilter = '')}
+							title={i18n.metric_mgmt_clear_description_filter()}
+							aria-label={i18n.metric_mgmt_clear_description_filter()}>×</button
+						>
+					{/if}
+				</div>
+				<div class="toolbar-kw-wrap">
+					<input
+						class="toolbar-kw-input"
+						type="text"
 						list="confidence-options"
 						placeholder={i18n.metric_mgmt_confidence()}
 						title={i18n.metric_mgmt_filter_by_confidence_threshold_select()}
@@ -1688,6 +1781,17 @@
 					<option value="name_asc">{i18n.metric_mgmt_order_by_metric_name_asc()}</option>
 					<option value="name_desc">{i18n.metric_mgmt_order_by_metric_name_desc()}</option>
 				</select>
+				<label class="view-filter">
+					<span class="view-filter-label">{i18n.metric_mgmt_view()}</span>
+					<select class="toolbar-select" value={metricView} onchange={handleMetricViewChange}>
+						<option value="gold">{i18n.metric_mgmt_view_gold_metrics()}</option>
+						<option value="dropped">{i18n.metric_mgmt_view_dropped_metrics()}</option>
+					</select>
+				</label>
+				<label class="view-filter-checkbox">
+					<input type="checkbox" bind:checked={showAllMetricInfoBoxes} />
+					<span>{i18n.metric_mgmt_show_all_info_boxes()}</span>
+				</label>
 			</div>
 
 			{#if metricsEditable}
@@ -1759,7 +1863,10 @@
 							{i18n.metric_mgmt_select_a_record_from_kb()}
 						</div>
 					</div>
-				{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
+				{:else if
+					!loading &&
+					filteredMetrics.length === 0 &&
+					(metricNameFilter || keywordFilter || descriptionFilter || confidenceFilter)}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
 						<div class="empty-title">{i18n.metric_mgmt_no_matches()}</div>
@@ -1768,6 +1875,8 @@
 								{i18n.metric_mgmt_no_metrics_match_keyword_and({ keywordFilter, confidenceFilter })}
 							{:else if keywordFilter}
 								{i18n.metric_mgmt_no_metrics_match_the_keyword({ keywordFilter })}
+							{:else if descriptionFilter}
+								{i18n.metric_mgmt_no_metrics_match_the_description({ descriptionFilter })}
 							{:else}
 								{i18n.metric_mgmt_no_metrics_match_confidence({ confidenceFilter })}
 							{/if}
@@ -1958,6 +2067,8 @@
 							bind:page={docPage}
 							bind:zoom={pdfZoom}
 							bind:numPages={pdfNumPages}
+							floatingOverlayPages={showAllMetricInfoBoxes ? [...metricCardsByPage.keys()] : []}
+							showAllFloatingOverlays={showAllMetricInfoBoxes}
 							highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
 							renderHighlights={renderMetricHighlights}
 							tableReferences={selectedMetric?.source_table_rows ?? []}
@@ -2015,66 +2126,12 @@
 								</button>
 							{/snippet}
 							{#snippet floatingOverlay()}
-								{#if selectedMetric}
-									{@const metric = selectedMetric}
-									<div class="metric-floating-card">
-										<div class="metric-floating-kicker">
-											<span class="metric-floating-id">#{metric.id}</span>
-											{#if metric.confidence != null}
-												<span class="metric-floating-confidence"
-													>{Math.round(Number(metric.confidence) * 100)}%</span
-												>
-											{/if}
-											{#if metric.metric_id}
-												<span class="metric-floating-metric-id">{metric.metric_id}</span>
-											{/if}
-										</div>
-										<div class="metric-floating-name">
-											{metric.metric_name || metric.metric_subject || i18n.metric_mgmt_metric({ id: metric.id })}
-										</div>
-										{#if metric.metric_desc}
-											<div class="metric-floating-desc">{metric.metric_desc}</div>
-										{/if}
-										{#each metric.table_context ?? [] as win (win.line)}
-											{@const parts = splitTableContextRows(win)}
-											<div class="metric-floating-table-wrap">
-												{#if win.caption}
-													<div class="metric-floating-table-caption">{win.caption}</div>
-												{/if}
-												<table class="metric-floating-table">
-													<thead>
-														{#each parts.head as row (row.id)}
-															<tr>
-																{#each row.cells as cell, ci (ci)}<th>{cell}</th>{/each}
-															</tr>
-														{/each}
-													</thead>
-													<tbody>
-														{#each parts.body as row (row.id)}
-															<tr class:matched={row.matched}>
-																{#if row.full_width}
-																	<td colspan={win.columns.length} title={row.cells[0]}
-																		>{clipTableCell(row.cells[0])}</td
-																	>
-																{:else}
-																	{#each row.cells as cell, ci (ci)}
-																		<td title={cell}>{clipTableCell(cell)}</td>
-																	{/each}
-																{/if}
-															</tr>
-														{/each}
-													</tbody>
-												</table>
-											</div>
-										{/each}
-										<div class="metric-floating-meta">
-											{#if metric.metric_value}<span>{metric.metric_value}</span>{/if}
-											{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
-											{#if metric.location_type}<span>{metric.location_type}</span>{/if}
-											<span>{i18n.metric_mgmt_span_2({ metric: spanCount(metric), plural: spanCount(metric) === 1 ? '' : 's' })}</span>
-										</div>
-									</div>
-								{/if}
+								{#if selectedMetric}{@render metricInfoCard(selectedMetric)}{/if}
+							{/snippet}
+							{#snippet floatingOverlays(pageNo: number)}
+								{#each metricCardsByPage.get(pageNo) ?? [] as metric (metric.id)}
+									{@render metricInfoCard(metric)}
+								{/each}
 							{/snippet}
 							{#snippet linesView()}
 								<div class="lines-panel">
@@ -2960,17 +3017,6 @@
 		color: var(--text-muted);
 		text-transform: uppercase;
 	}
-	.debug-badge {
-		margin: 0 24px 10px;
-		padding: 6px 8px;
-		font-family: var(--font-mono);
-		font-size: 10px;
-		color: var(--teal);
-		background: rgba(93, 175, 168, 0.08);
-		border: 1px dashed rgba(93, 175, 168, 0.4);
-		word-break: break-word;
-	}
-
 	.metric-local-filters {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
@@ -2986,6 +3032,28 @@
 	.metric-local-filters .toolbar-kw-input {
 		width: 100%;
 		max-width: none;
+	}
+	.metric-local-filters .toolbar-kw-input,
+	.metric-local-filters .toolbar-select {
+		background: var(--filter-control-bg);
+	}
+	.view-filter {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		min-width: 0;
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+	.view-filter .toolbar-select {
+		max-width: none;
+	}
+	.view-filter-checkbox {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11px;
+		color: var(--text-muted);
 	}
 
 	.metrics-list {
@@ -3104,7 +3172,7 @@
 		all: unset;
 		cursor: pointer;
 		display: flex;
-		background: var(--panel-bg-alt);
+		background: var(--filter-control-bg);
 		border: 1px solid var(--ink-line-soft);
 		position: relative;
 		transition:
@@ -3117,7 +3185,7 @@
 	}
 	.metric-card.selected {
 		border-color: var(--crimson);
-		background: var(--panel-bg);
+		background: var(--crimson-faint);
 	}
 	.card-rule {
 		width: 4px;
@@ -3224,15 +3292,6 @@
 		color: var(--crimson);
 		border-color: var(--crimson);
 	}
-	.show-dropped {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		font-size: 12px;
-		color: var(--text-muted);
-		white-space: nowrap;
-	}
-
 	/* ---------- RIGHT ---------- */
 	.right {
 		display: flex;

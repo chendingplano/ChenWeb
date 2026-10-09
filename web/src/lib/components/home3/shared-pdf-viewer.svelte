@@ -53,6 +53,9 @@
 		renderHighlights,
 		tableReferences = [],
 		floatingOverlay,
+		floatingOverlays,
+		floatingOverlayPages = [],
+		showAllFloatingOverlays = false,
 		loadingLabel = m.shared_pdf_viewer_rendering_page(),
 		respectPageRotation = true,
 		onselect,
@@ -71,6 +74,9 @@
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
 		tableReferences?: TableReference[];
 		floatingOverlay?: Snippet;
+		floatingOverlays?: Snippet<[number]>;
+		floatingOverlayPages?: number[];
+		showAllFloatingOverlays?: boolean;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
 		onselect?: (
@@ -159,6 +165,17 @@
 	let floatingOverlayTop = $state(8);
 	let floatingOverlayWidth = $state(320);
 	let floatingOverlayEl = $state<HTMLDivElement | null>(null);
+	let floatingOverlayManuallyMoved = $state(false);
+	let floatingOverlayDrag = $state<{
+		pointerId: number;
+		offsetX: number;
+		offsetY: number;
+	} | null>(null);
+
+	$effect(() => {
+		highlightVersion;
+		floatingOverlayManuallyMoved = false;
+	});
 
 	// ---------- Drag-select state ----------
 	let dragSelecting = $state(false);
@@ -411,6 +428,7 @@
 			floatingOverlayPage = null;
 			return;
 		}
+		if (floatingOverlayManuallyMoved) return;
 		for (const pageNo of pdfRenderedPages) {
 			const overlay = document.getElementById(
 				`${viewerId}-overlay-${pageNo}`
@@ -420,11 +438,52 @@
 			if (!overlay || !viewport || !firstHighlight) continue;
 			const maxLeft = Math.max(8, viewport.width - floatingOverlayWidth - 8);
 			floatingOverlayPage = pageNo;
-			floatingOverlayLeft = Math.min(Math.max(8, firstHighlight.offsetLeft), maxLeft);
-			floatingOverlayTop = Math.max(12, firstHighlight.offsetTop - 12);
+			floatingOverlayLeft = maxLeft;
+			const cardHeight = floatingOverlayEl?.offsetHeight ?? 0;
+			floatingOverlayTop = Math.max(8, firstHighlight.offsetTop - cardHeight - 12);
 			return;
 		}
 		floatingOverlayPage = null;
+	}
+
+	function startFloatingOverlayDrag(event: PointerEvent) {
+		if (event.button !== 0) return;
+		event.stopPropagation();
+		const card = event.currentTarget as HTMLDivElement;
+		const pageShell = card.closest('.pdf-canvas-shell') as HTMLElement | null;
+		if (!pageShell) return;
+		const shellRect = pageShell.getBoundingClientRect();
+		floatingOverlayDrag = {
+			pointerId: event.pointerId,
+			offsetX: event.clientX - shellRect.left - floatingOverlayLeft,
+			offsetY: event.clientY - shellRect.top - floatingOverlayTop
+		};
+		floatingOverlayManuallyMoved = true;
+		card.setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+
+	function moveFloatingOverlay(event: PointerEvent) {
+		if (!floatingOverlayDrag || event.pointerId !== floatingOverlayDrag.pointerId) return;
+		const card = event.currentTarget as HTMLDivElement;
+		const pageShell = card.closest('.pdf-canvas-shell') as HTMLElement | null;
+		if (!pageShell) return;
+		const shellRect = pageShell.getBoundingClientRect();
+		const maxLeft = Math.max(8, pageShell.clientWidth - card.offsetWidth - 8);
+		const maxTop = Math.max(8, pageShell.clientHeight - card.offsetHeight - 8);
+		floatingOverlayLeft = Math.min(
+			maxLeft,
+			Math.max(8, event.clientX - shellRect.left - floatingOverlayDrag.offsetX)
+		);
+		floatingOverlayTop = Math.min(
+			maxTop,
+			Math.max(8, event.clientY - shellRect.top - floatingOverlayDrag.offsetY)
+		);
+	}
+
+	function stopFloatingOverlayDrag(event: PointerEvent) {
+		if (!floatingOverlayDrag || event.pointerId !== floatingOverlayDrag.pointerId) return;
+		floatingOverlayDrag = null;
 	}
 
 	function scrollToFirstHighlight(pageNo: number, behavior: ScrollBehavior = 'auto') {
@@ -762,12 +821,26 @@
 							<div class="pdf-canvas-shell">
 								<canvas class="pdf-canvas" id={`${viewerId}-canvas-${pageNo}`}></canvas>
 								<div class="pdf-overlay" id={`${viewerId}-overlay-${pageNo}`}></div>
-								{#if floatingOverlay && floatingOverlayPage === pageNo}
+								{#if showAllFloatingOverlays && floatingOverlays}
+									{#if floatingOverlayPages.includes(pageNo)}
+										<div class="pdf-floating-overlay-stack">
+											{@render floatingOverlays(pageNo)}
+										</div>
+									{/if}
+								{:else if floatingOverlay && floatingOverlayPage === pageNo}
 									<div
 										class="pdf-floating-overlay-anchor"
 										style={`left:${floatingOverlayLeft}px; top:${floatingOverlayTop}px;`}
 									>
-										<div class="pdf-floating-overlay-card" bind:this={floatingOverlayEl}>
+										<div
+											class="pdf-floating-overlay-card"
+											class:dragging={floatingOverlayDrag !== null}
+											bind:this={floatingOverlayEl}
+											onpointerdown={startFloatingOverlayDrag}
+											onpointermove={moveFloatingOverlay}
+											onpointerup={stopFloatingOverlayDrag}
+											onpointercancel={stopFloatingOverlayDrag}
+										>
 											{@render floatingOverlay()}
 										</div>
 									</div>
@@ -961,11 +1034,31 @@
 		top: 0;
 		z-index: 3;
 		pointer-events: none;
-		transform: translateY(calc(-100% - 12px));
+	}
+	.pdf-floating-overlay-stack {
+		position: absolute;
+		right: 8px;
+		top: 8px;
+		z-index: 3;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		width: min(320px, calc(100% - 16px));
+		max-height: calc(100% - 16px);
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		pointer-events: auto;
 	}
 	.pdf-floating-overlay-card {
 		pointer-events: auto;
+		cursor: grab;
+		touch-action: none;
+		user-select: none;
+		-webkit-user-select: none;
 		max-width: min(420px, calc(100vw - 48px));
+	}
+	.pdf-floating-overlay-card.dragging {
+		cursor: grabbing;
 	}
 	.pdf-drag-indicator {
 		position: fixed;
