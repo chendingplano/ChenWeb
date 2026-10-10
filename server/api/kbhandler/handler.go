@@ -109,9 +109,10 @@ type listInputsFilters struct {
 
 	// HasGoldMetrics keeps only inputs with rows in testbed.metrics, narrowed by
 	// GoldSkillVersion and GoldModelName when they are non-empty.
-	HasGoldMetrics   bool
-	GoldSkillVersion string
-	GoldModelName    string
+	GoldBenchmarkEntries bool
+	HasGoldMetrics       bool
+	GoldSkillVersion     string
+	GoldModelName        string
 }
 
 // ListInputs handles GET /api/v1/kb/inputs.
@@ -188,6 +189,7 @@ func ListInputs(c echo.Context) error {
 		NoDocProcessors:      strings.EqualFold(strings.TrimSpace(c.QueryParam("no_doc_processors")), "true"),
 		PipelineFilter:       c.QueryParam("pipeline_filter"),
 		ExcludeDocType:       c.QueryParam("exclude_doc_type"),
+		GoldBenchmarkEntries: strings.EqualFold(strings.TrimSpace(c.QueryParam("gold_benchmark_entries")), "true"),
 		HasGoldMetrics:       strings.EqualFold(strings.TrimSpace(c.QueryParam("has_gold_metrics")), "true"),
 		GoldSkillVersion:     c.QueryParam("gold_skill_version"),
 		GoldModelName:        c.QueryParam("gold_model_name"),
@@ -288,7 +290,13 @@ func ListInputs(c echo.Context) error {
 		})
 	}
 
-	total, err := queryTotalCount(db, inputTable, whereSQL, args)
+	listTable := inputTable
+	benchmarkEntries := filters.HasGoldMetrics && filters.GoldBenchmarkEntries
+	if benchmarkEntries {
+		listTable = goldBenchmarkInputTable(inputTable)
+	}
+
+	total, err := queryTotalCount(db, listTable, whereSQL, args)
 	if err != nil {
 		logger.Error("count kb input failed", "table", inputTable, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -315,7 +323,7 @@ func ListInputs(c echo.Context) error {
 		})
 	}
 
-	results, err := queryInputs(db, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL, args, pageSize, offset, c.QueryParam("order_by"), c.QueryParam("order_dir"))
+	results, err := queryInputs(db, listTable, nameColumnExpr, parserNameColumnExpr, whereSQL, args, pageSize, offset, c.QueryParam("order_by"), c.QueryParam("order_dir"), benchmarkEntries)
 	if err != nil {
 		logger.Error("query kb input failed", "table", inputTable, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -324,7 +332,7 @@ func ListInputs(c echo.Context) error {
 		})
 	}
 
-	if filters.HasGoldMetrics {
+	if filters.HasGoldMetrics && !benchmarkEntries {
 		if err := attachGoldMetricRuns(db, results, filters); err != nil {
 			logger.Error("query benchmark runs for kb inputs failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -559,7 +567,11 @@ func resolveOrderClause(orderBy, orderDir, parserNameColumnExpr string) string {
 	return fmt.Sprintf("ORDER BY %s %s NULLS LAST, i.id %s", expr, dir, dir)
 }
 
-func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int, orderBy, orderDir string) ([]inputRecord, error) {
+func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int, orderBy, orderDir string, entries bool) ([]inputRecord, error) {
+	extraColumns := ""
+	if entries {
+		extraColumns = ", i.benchmark_skill_version, i.benchmark_model_name"
+	}
 	query := fmt.Sprintf(`
 SELECT
     i.id,
@@ -586,15 +598,18 @@ SELECT
     i.private_info,
     i.doc_metadata::text,
     i.notes,
-    i.error_msg
+    i.error_msg%s
 FROM %s i
-`, nameColumnExpr, parserNameColumnExpr, inputTable)
+`, nameColumnExpr, parserNameColumnExpr, extraColumns, inputTable)
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
 	}
 	limitPos := len(args) + 1
 	offsetPos := len(args) + 2
 	orderClause := resolveOrderClause(orderBy, orderDir, parserNameColumnExpr)
+	if entries {
+		orderClause += ", i.benchmark_skill_version ASC, i.benchmark_model_name ASC"
+	}
 	query += fmt.Sprintf(" %s LIMIT $%d OFFSET $%d", orderClause, limitPos, offsetPos)
 	args = append(args, limit, offset)
 
@@ -618,7 +633,8 @@ FROM %s i
 			processingModeNullable sql.NullString
 		)
 
-		if err := rows.Scan(
+		var run goldMetricRun
+		destinations := []any{
 			&record.ID,
 			&record.Name,
 			&record.ParserName,
@@ -644,8 +660,15 @@ FROM %s i
 			&docMetadataNullable,
 			&record.Notes,
 			&record.ErrorMsg,
-		); err != nil {
+		}
+		if entries {
+			destinations = append(destinations, &run.SkillVersion, &run.ModelName)
+		}
+		if err := rows.Scan(destinations...); err != nil {
 			return nil, err
+		}
+		if entries {
+			record.GoldMetricRuns = []goldMetricRun{run}
 		}
 
 		if publishDate.Valid {
@@ -934,7 +957,14 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	if filters.FailedProcessorsOnly {
 		whereParts = append(whereParts, "i.has_failed_proc")
 	}
-	if filters.HasGoldMetrics {
+	if filters.HasGoldMetrics && filters.GoldBenchmarkEntries {
+		if v := strings.TrimSpace(filters.GoldSkillVersion); v != "" {
+			whereParts = append(whereParts, fmt.Sprintf("i.benchmark_skill_version = %s", nextArg(v)))
+		}
+		if v := strings.TrimSpace(filters.GoldModelName); v != "" {
+			whereParts = append(whereParts, fmt.Sprintf("i.benchmark_model_name = %s", nextArg(v)))
+		}
+	} else if filters.HasGoldMetrics {
 		goldParts := []string{"t.input_record_id = i.id"}
 		if v := strings.TrimSpace(filters.GoldSkillVersion); v != "" {
 			goldParts = append(goldParts, fmt.Sprintf("t.skill_version = %s", nextArg(v)))

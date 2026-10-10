@@ -12,6 +12,7 @@
 		type KbInputRecord,
 		type ListKbInputsParams
 	} from '$lib/services/kbService';
+	import { kbInputRecordKey } from './metric-benchmark-record';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import {
@@ -56,6 +57,7 @@
 		pageSize = KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE,
 		scopeToActiveStore = false,
 		selectedRecordId = null,
+		selectedRecordKey = null,
 		autoSelectFirstRecord = true,
 		defaultListWidth = KB_INPUT_RECORD_BROWSER_DEFAULT_LIST_WIDTH,
 		renderMode = 'compact',
@@ -77,6 +79,7 @@
 		pageSize?: number;
 		scopeToActiveStore?: boolean;
 		selectedRecordId?: number | null;
+		selectedRecordKey?: string | null;
 		autoSelectFirstRecord?: boolean;
 		defaultListWidth?: number;
 		renderMode?: 'compact' | 'cards';
@@ -122,6 +125,7 @@
 	let listWidth = $state(clampKbInputRecordBrowserListWidth(defaultListWidth));
 	let selectedRecordIdInternal = $state<number | null>(selectedRecordId);
 	let lastEmittedRecordId = $state<number | null>(null);
+	let lastEmittedRecordKey: string | null = null;
 	let justEmitted = $state(false);
 	let resizing = $state(false);
 	let settingsHydrated = $state(false);
@@ -262,11 +266,14 @@
 		selectedRecordIdInternal = record?.id ?? null;
 		if (!record) {
 			lastEmittedRecordId = null;
+			lastEmittedRecordKey = null;
 			justEmitted = false;
 			return;
 		}
-		if (!force && lastEmittedRecordId === record.id) return;
+		const key = kbInputRecordKey(record);
+		if (!force && lastEmittedRecordKey === key) return;
 		lastEmittedRecordId = record.id;
+		lastEmittedRecordKey = key;
 		justEmitted = true;
 		onSelect(record);
 	}
@@ -328,7 +335,8 @@
 				selectedRecordId: preferredRecordId,
 				autoSelectFirstRecord
 			});
-			const nextRecord = results.find((record) => record.id === nextRecordId) ?? null;
+			const nextRecord = results.find((record) => record.id === nextRecordId && kbInputRecordKey(record) === selectedRecordKey)
+				?? results.find((record) => record.id === nextRecordId) ?? null;
 			emitSelectedRecord(nextRecord, nextRecordId !== preferredRecordId);
 			void scrollSelectedIntoView();
 		} catch (error) {
@@ -573,12 +581,12 @@
 					<div class="empty-copy">{emptySubtitle}</div>
 				</div>
 			{:else if renderMode === 'cards'}
-				{#each results as record (record.id)}
+				{#each results as record (kbInputRecordKey(record))}
 					{@const display = mapRecord(record)}
 					<button
 						type="button"
 						class="record-card"
-						class:selected={selectedRecordIdInternal === record.id}
+						class:selected={kbInputRecordKey(record) === (selectedRecordKey ?? String(selectedRecordIdInternal))}
 						onclick={() => chooseRecord(record)}
 					>
 						<div class="record-head">
@@ -597,12 +605,12 @@
 					</button>
 				{/each}
 			{:else}
-				{#each results as record, idx (record.id)}
+				{#each results as record, idx (kbInputRecordKey(record))}
 					{@const display = mapRecord(record)}
 					<button
 						type="button"
 						class="record-browser-card"
-						class:selected={selectedRecordIdInternal === record.id}
+						class:selected={kbInputRecordKey(record) === (selectedRecordKey ?? String(selectedRecordIdInternal))}
 						onclick={() => chooseRecord(record)}
 					>
 						<div class="card-rule" aria-hidden="true"></div>

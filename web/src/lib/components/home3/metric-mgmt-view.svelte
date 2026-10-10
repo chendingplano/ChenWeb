@@ -20,6 +20,7 @@
 		type SourceLineSpan
 	} from '$lib/services/kbService';
 	import { searchKbMetrics, type KbMetricSearchResult } from '$lib/services/kbMetricSearch';
+	import { kbInputRecordKey, metricBenchmarkSelection } from './metric-benchmark-record';
 	import { clipTableCell, splitTableContextRows } from './metric-table-context';
 	import {
 		buildMetricGroupAttrs,
@@ -94,9 +95,6 @@
 	let goldOptionsError = $state('');
 	const goldModelNames = $derived(
 		goldOptions.filter((o) => o.skill_version === goldSkillVersion).map((o) => o.model_name)
-	);
-	const goldModelMissing = $derived(
-		source === 'testbed' && metricView === 'gold' && goldModelName === ''
 	);
 
 	async function loadGoldOptions() {
@@ -183,6 +181,9 @@
 	let metricIdQuery = $state('');
 	let metricIdError = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
+	const goldModelMissing = $derived(
+		source === 'testbed' && metricView === 'gold' && metricBenchmarkSelection(currentInput, goldSkillVersion, goldModelName).modelName === ''
+	);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
 	let metricFocusNotified = $state(false);
@@ -980,7 +981,7 @@
 	});
 
 	function handleUserRecordSelect(record: KbInputRecord) {
-		if (currentInput?.id === record.id) return;
+		if (currentInput && kbInputRecordKey(currentInput) === kbInputRecordKey(record)) return;
 		// Picking a record from the browser returns the sidebar to that
 		// record's metrics.
 		globalPicks = [];
@@ -1060,6 +1061,8 @@
 
 	async function loadMetricsForRecord(id: number) {
 		const requestVersion = ++metricLoadVersion;
+		const benchmarkRuns = currentInput?.id === id ? currentInput.gold_metric_runs : undefined;
+		const benchmarkSelection = metricBenchmarkSelection(currentInput?.id === id ? currentInput : null, goldSkillVersion, goldModelName);
 		// A record selection must reset every panel-level filter, otherwise a
 		// stale confidence filter keeps hiding this record's metrics. The global
 		// search dialog state and globalPicks are deliberately kept: clicking a
@@ -1097,7 +1100,7 @@
 					: listKbMetrics(
 							id,
 							metricView === 'dropped' ? 'kb' : source,
-							{ skillVersion: goldSkillVersion, modelName: goldModelName },
+							benchmarkSelection,
 							{ includeDropped: metricView === 'dropped' }
 						),
 				getKbInput(id).catch(() => null),
@@ -1105,7 +1108,7 @@
 			]);
 			if (requestVersion !== metricLoadVersion) return;
 			metrics = metricRes.results ?? [];
-			currentInput = inputRes?.record ?? null;
+			currentInput = inputRes?.record ? { ...inputRes.record, gold_metric_runs: benchmarkRuns } : null;
 			rawLines = rawRes?.lines ?? [];
 			rawError = rawRes ? '' : i18n.metric_mgmt_failed_to_load_raw_lines();
 		} catch (err) {
@@ -1613,6 +1616,7 @@
 					emptySubtitle={i18n.metric_mgmt_use_search_or_retrieve_to()}
 					autoSelectFirstRecord={false}
 					selectedRecordId={currentInput?.id ?? null}
+					selectedRecordKey={currentInput ? kbInputRecordKey(currentInput) : null}
 					listPausedMessage={source === 'testbed' && !goldVersionSelected && goldModelName === ''
 						? i18n.metric_mgmt_select_model()
 						: ''}
@@ -1622,7 +1626,7 @@
 						errorMsg = error.message;
 					}}
 					listParams={source === 'testbed'
-						? { hasGoldMetrics: true, goldSkillVersion: goldSkillVersion, goldModelName: goldModelName }
+						? { hasGoldMetrics: true, goldBenchmarkEntries: true, goldSkillVersion: goldSkillVersion, goldModelName: goldModelName }
 						: undefined}
 				>
 					{#snippet extraControls()}

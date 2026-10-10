@@ -206,3 +206,14 @@ func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsF
 	}
 	return rows.Err()
 }
+
+// goldBenchmarkInputTable lists one row per input/version/model. DISTINCT keeps
+// metric rows and repeated runs for the same pair from duplicating list entries.
+// inputTable comes from resolveInputTable, never from a client-supplied name.
+func goldBenchmarkInputTable(inputTable string) string {
+	return fmt.Sprintf(`(SELECT input.*, benchmark.skill_version AS benchmark_skill_version,
+		benchmark.model_name AS benchmark_model_name
+		FROM %s input JOIN (
+			SELECT DISTINCT input_record_id, skill_version, model_name FROM testbed.metrics
+		) benchmark ON benchmark.input_record_id = input.id)`, inputTable)
+}
