@@ -9,6 +9,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 const droppedMetricsQuery = `
@@ -119,6 +121,11 @@ func droppedMetricRecord(id, recordID int64, dropID, stage, reason string, decis
 		Dropped:             true,
 		DropStage:           &stage,
 		DropReason:          &reason,
+	}
+	// Expose the same row-reference shape as gold metrics, including older
+	// extraction rows that stored citations such as "116#r2".
+	if refs := docprocessing.ParseTableRowRefs(string(raw("source_table_rows"))); len(refs) > 0 {
+		r.SourceTableRows, _ = json.Marshal(refs)
 	}
 	var conf float64
 	if v := raw("confidence"); v != nil && json.Unmarshal(v, &conf) == nil {

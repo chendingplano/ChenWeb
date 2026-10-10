@@ -2,8 +2,40 @@ package kbhandler
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
+
+func TestDroppedMetricRecordPreservesTableRowReferences(t *testing.T) {
+	for _, refs := range []string{
+		`[{"line":116,"rows":["r2","r3"],"row_hash":{"r2":"abc","r3":"def"}}]`,
+		`["116#r2","116#r3"]`,
+	} {
+		t.Run(refs, func(t *testing.T) {
+			r, err := droppedMetricRecord(7, 753, "753_drp_87", "no_value", "no_value", nil,
+				[]byte(`{"metric_name":"水的质量流量","source_line_spans":["116"],"source_table_rows":`+refs+`}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				SourceTableRows []docprocessing.TableRowRef `json:"source_table_rows"`
+			}
+			if err := json.Unmarshal(body, &response); err != nil {
+				t.Fatal(err)
+			}
+			want := docprocessing.ParseTableRowRefs(refs)
+			if !reflect.DeepEqual(response.SourceTableRows, want) {
+				t.Fatalf("API table row references = %+v, want %+v", response.SourceTableRows, want)
+			}
+		})
+	}
+}
 
 func TestDroppedMetricRecordMapsRowData(t *testing.T) {
 	rowData := []byte(`{"candidate_id":"6_2","metric_name":"餐厨垃圾收运时间和频次","subject":"集中供餐单位餐厨垃圾",

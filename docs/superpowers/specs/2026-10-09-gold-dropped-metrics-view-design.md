@@ -9,6 +9,7 @@ Let users switch between retained gold metrics and metrics recorded in `kb.metri
 - Replace the standalone “Show dropped” checkbox with a View selector beneath Order by.
 - The selector has “View gold metrics” (default) and “View dropped metrics”. These modes are mutually exclusive.
 - “View gold metrics” lists regular metrics only. “View dropped metrics” lists dropped rows only, using the existing include-dropped API response and its `dropped` marker.
+- Dropped metrics preserve `source_table_rows` from their saved extraction data, normalized to the same row-reference objects as gold metrics. Selecting a table metric highlights its cited rows and builds its table context through the existing shared path; metrics without row references retain the whole-table fallback.
 - Add an independent “Show all metrics info boxes” checkbox, unchecked by default. When enabled, PDF info cards are rendered for all metrics in the active view, subject to the current metric filters, rather than only for the selected metric.
 - When the checkbox is off, preserve the existing selected-metric PDF card behavior.
 - Controls and labels use Paraglide messages in English and Chinese.
