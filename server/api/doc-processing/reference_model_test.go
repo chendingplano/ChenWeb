@@ -1,8 +1,12 @@
 package docprocessing
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 func TestParseRefIdentifiers(t *testing.T) {
@@ -153,5 +157,29 @@ func TestRefMentionKeyStable(t *testing.T) {
 	b.MetricName = "蛔虫卵死亡率"
 	if refMentionKey(a) == refMentionKey(b) {
 		t.Fatal("different quantities must differ")
+	}
+}
+
+func TestNewReferencesProcessor_NoReasoningPolicy(t *testing.T) {
+	modelsPath := filepath.Join(t.TempDir(), ".models.toml")
+	body := "[deepseek-flash-chen]\nhost = \"cloud\"\nmodel_name = \"deepseek-v4-flash\"\napi_key = \"sk-test\"\nbase_url = \"https://api.deepseek.com\"\nthinking_type = \"enabled\"\n"
+	if err := os.WriteFile(modelsPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MODEL_DEF_FILE", modelsPath)
+	t.Setenv("EXTRACT_REFERENCES_MODEL_NAME", "deepseek-flash-chen")
+
+	t.Setenv("MODEL_DEFAULT_REASONING_POLICY", "")
+	kept := &llmclients.OpenAIJSONClient{}
+	NewReferencesProcessor(nil, nil, kept, nil)
+	if kept.ThinkingType != "enabled" {
+		t.Fatalf("without the policy the model's thinking config is kept, got %q", kept.ThinkingType)
+	}
+
+	t.Setenv("MODEL_DEFAULT_REASONING_POLICY", "no-reasoning")
+	off := &llmclients.OpenAIJSONClient{}
+	NewReferencesProcessor(nil, nil, off, nil)
+	if off.ThinkingType != "disabled" {
+		t.Fatalf("no-reasoning policy must disable thinking, got %q", off.ThinkingType)
 	}
 }

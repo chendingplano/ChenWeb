@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,10 @@ func NewReferencesProcessor(inputStore DocMetadataStore, db *sql.DB, e LLMJSONEx
 		[]string{"EXTRACT_REFERENCES_PROMPT"}, "prompt-extract-references-v1.md")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_REFERENCES_MODEL_NAME"}, "MODEL_DEF_FILE")
+	// Only an explicit no-reasoning policy overrides the model's thinking config.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
+		modelCfg = forceDisableThinking(modelCfg)
+	}
 	applyStructureModelConfigToExtractor(e, modelCfg)
 	return &ReferencesProcessor{InputStore: inputStore, DB: db, Extractor: e, Logger: logger,
 		ModelRef: modelRef, ModelCfgPath: modelCfgPath, ModelErr: modelErr, ModelName: modelCfg.ModelName,
