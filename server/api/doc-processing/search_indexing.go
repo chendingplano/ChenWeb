@@ -467,7 +467,7 @@ LEFT JOIN LATERAL (
     ORDER BY a.modify_time DESC, a.id DESC
     LIMIT 1
 ) sa ON true
-WHERE m.input_record_id = $1
+WHERE m.ref_mention_id IS NULL AND m.input_record_id = $1
 ORDER BY m.id`
 	rows, err := db.QueryContext(ctx, q, recordID)
 	if err != nil {

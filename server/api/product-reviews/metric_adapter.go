@@ -25,7 +25,7 @@ const metricSelect = `
 	       COALESCE(m.subject_concept_id, ''),
 	       COALESCE(sa.source_line_spans, '[]'::jsonb)
 	FROM kb.search_artifacts_metric sa
-	JOIN kb.metrics m ON m.id = sa.source_row_id`
+	JOIN kb.metrics m ON m.id = sa.source_row_id AND m.ref_mention_id IS NULL`
 
 func scanArtifacts(rows *sql.Rows, artifactType string) ([]Artifact, error) {
 	defer func() { _ = rows.Close() }()
@@ -115,7 +115,7 @@ const metricDetailSelect = `
 	       COALESCE(m.value_data_type, ''),
 	       COALESCE(m.value_range_type, '')
 	FROM kb.search_artifacts_metric sa
-	JOIN kb.metrics m ON m.id = sa.source_row_id
+	JOIN kb.metrics m ON m.id = sa.source_row_id AND m.ref_mention_id IS NULL
 	WHERE sa.artifact_id = $1`
 
 // FetchMetricDetail loads the kb.metrics row behind a `metric` artifact id,

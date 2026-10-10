@@ -33,7 +33,7 @@ SELECT DISTINCT a.instance_of_term_id
 FROM kb.semantic_assertions a
 JOIN kb.semantic_decision_candidates dc
      ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
-JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id
+JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id AND m.ref_mention_id IS NULL
 WHERE m.input_record_id = $1
   AND COALESCE(a.instance_of_term_id, '') <> ''`, recordID)
 	if err != nil {

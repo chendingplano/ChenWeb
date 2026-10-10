@@ -136,6 +136,20 @@ func expectInputRelatedColumnCheck(mock sqlmock.Sqlmock, spec inputRelatedDelete
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
 }
 
+// expectInputReferenceCleanup expects the reference layer's deletion contract (deleteInputReferenceRows).
+func expectInputReferenceCleanup(mock sqlmock.Sqlmock, id int64) {
+	expectInputRelatedColumnCheck(mock, inputRelatedDeleteSpec{Table: "kb.ref_mentions", Column: "input_record_id"}, true)
+	for _, stmt := range []string{
+		`DELETE FROM kb.metrics WHERE ref_input_record_id`,
+		`UPDATE kb.reference_artifact_links SET status = 'stale'`,
+		`UPDATE kb.ref_mentions SET target_input_id = NULL`,
+		`DELETE FROM kb.ref_mentions WHERE input_record_id`,
+		`DELETE FROM kb.ref_resource_identifiers WHERE kind = 'kb_input'`,
+	} {
+		mock.ExpectExec(regexp.QuoteMeta(stmt)).WithArgs(id).WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+}
+
 func expectDocProcRunLogCleanup(mock sqlmock.Sqlmock, exists bool) {
 	for _, spec := range []inputRelatedDeleteSpec{
 		{Table: "kb.doc_proc_logs", Column: "run_id"},
@@ -314,7 +328,8 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
-    m.source_table_rows, m.provision_id
+    m.source_table_rows, m.provision_id,
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -340,6 +355,7 @@ WHERE m.id = $1
 		"document_title", "document_doc_no", "object_name",
 		"table_name_or_section", "reasoning_tags", "created_at",
 		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error", "source_table_rows", "provision_id",
+		"ref_mention_id", "ref_input_record_id", "ref_metric_id",
 	}).AddRow(
 		int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
@@ -348,7 +364,7 @@ WHERE m.id = $1
 		"Definition", "Threshold", "monthly", 0.82, true, "Dynamic BP Spec", "T/JXAS 010—2021", "Adult patient",
 		"Table 2", `["named_metric"]`,
 		"2026-05-07T13:00:00+00:00",
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(11)).WillReturnRows(rows)
 
@@ -443,7 +459,8 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
-    m.source_table_rows, m.provision_id
+    m.source_table_rows, m.provision_id,
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -470,6 +487,7 @@ ORDER BY m.id ASC
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"document_title", "document_doc_no", "object_name", "table_name_or_section", "reasoning_tags", "created_at",
 		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error", "source_table_rows", "provision_id",
+		"ref_mention_id", "ref_input_record_id", "ref_metric_id",
 	}
 	addRow := func(rows *sqlmock.Rows, id int64, name string, spans string) *sqlmock.Rows {
 		return rows.AddRow(
@@ -477,7 +495,7 @@ ORDER BY m.id ASC
 			name, name, spans, "subject", "subject", "desc", "desc", "context", "context",
 			`[]`, `[]`, "model", "paragraph", "mmHg", "mmHg", "", "number", "exact", "class", "class",
 			"", "", "", 0.95, true, "title", "doc-no", "object", "section", `[]`, "2026-07-12T10:00:00+00:00",
-			nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil,
 		)
 	}
 	rows := sqlmock.NewRows(cols)
@@ -546,6 +564,7 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"file_name", "backup_filename", "result_filename"}).AddRow(retainedFile, "", ""))
 
 	expectDocProcRunLogCleanup(mock, true)
+	expectInputReferenceCleanup(mock, 430)
 	for _, spec := range inputRelatedDeleteSpecs {
 		expectInputRelatedColumnCheck(mock, spec, true)
 		stmt := "DELETE FROM " + spec.Table + " WHERE " + spec.Column + " = $1"
@@ -697,6 +716,7 @@ func TestDeleteInputSkipsMissingRelatedCleanupTargets(t *testing.T) {
 
 	mock.ExpectBegin()
 	expectDocProcRunLogCleanup(mock, false)
+	expectInputRelatedColumnCheck(mock, inputRelatedDeleteSpec{Table: "kb.ref_mentions", Column: "input_record_id"}, false)
 	for _, spec := range inputRelatedDeleteSpecs {
 		expectInputRelatedColumnCheck(mock, spec, false)
 	}

@@ -331,7 +331,7 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb;").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.metrics WHERE input_record_id").
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.metrics WHERE ref_mention_id IS NULL AND input_record_id").
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	mock.ExpectExec("INSERT INTO kb.metrics").
@@ -445,7 +445,7 @@ func TestSaveExtractedMetricsPersistsRangeValueMinMaxCondition(t *testing.T) {
 
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb;").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.metrics WHERE input_record_id").
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.metrics WHERE ref_mention_id IS NULL AND input_record_id").
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	mock.ExpectExec("INSERT INTO kb.metrics").

@@ -693,7 +693,7 @@ SELECT id, COALESCE(metric_id, ''), COALESCE(metric_name, ''), COALESCE(metric_s
        COALESCE(measurement_frequency, ''), COALESCE(location_type, ''), COALESCE(table_name_or_section, ''),
        COALESCE(metric_categories, ''), COALESCE(source_line_spans, '[]'::jsonb)
 FROM kb.metrics
-WHERE input_record_id = $1
+WHERE ref_mention_id IS NULL AND input_record_id = $1
 ORDER BY id`
 	rows, err := r.db.QueryContext(ctx, q, recordID)
 	if err != nil {
@@ -755,7 +755,7 @@ SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, '')
        COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
-WHERE m.metric_id = ANY($1)`
+WHERE m.ref_mention_id IS NULL AND m.metric_id = ANY($1)`
 	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids))
 	if err != nil {
 		return nil, err
@@ -799,7 +799,7 @@ SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, '')
        COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
-WHERE m.input_record_id <> $1
+WHERE m.ref_mention_id IS NULL AND m.input_record_id <> $1
   AND COALESCE(NULLIF(m.metric_categories, '')::jsonb, '[]'::jsonb) ?| $2
 ORDER BY m.id
 LIMIT $3`
@@ -896,7 +896,7 @@ func (r *metricsReviewer) loadMatchedMetricTableRows(ctx context.Context, matche
 	rows, err := r.db.QueryContext(ctx, `
 SELECT metric_id, source_table_rows::text
 FROM kb.metrics
-WHERE metric_id = ANY($1) AND source_table_rows IS NOT NULL`, pq.Array(ids))
+WHERE ref_mention_id IS NULL AND metric_id = ANY($1) AND source_table_rows IS NOT NULL`, pq.Array(ids))
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Warn("metrics review: table row refs unavailable", "error", err)

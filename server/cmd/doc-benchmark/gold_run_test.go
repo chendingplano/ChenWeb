@@ -161,7 +161,7 @@ func TestFetchProcessorResultsReturnsNonemptyRows(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM kb.metrics WHERE input_record_id = $1 ORDER BY id`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NULL ORDER BY id`)).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "metric_id", "payload"}).AddRow(1, "m-1", []byte(`{"x":1}`)))
 

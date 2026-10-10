@@ -89,10 +89,12 @@ func GetMetricOntologyAnalysis(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	where := ""
+	// Resolved reference rows (ref_mention_id set) carry another document's value: excluded from
+	// every aggregate here (openspec change extract-references-processor).
+	where := " WHERE m.ref_mention_id IS NULL "
 	args := make([]any, 0, 1)
 	if storeID != nil {
-		where = " WHERE i.ks_store_id = $1 "
+		where = " WHERE m.ref_mention_id IS NULL AND i.ks_store_id = $1 "
 		args = append(args, *storeID)
 	}
 
@@ -197,7 +199,7 @@ SELECT COALESCE(NULLIF(l.label, ''), t.term_id), t.module_id,
        CASE WHEN COUNT(m.id) FILTER (WHERE m.value_range_type_error IS NOT NULL) > 0 THEN 'Warning' ELSE 'Current' END
 FROM (SELECT DISTINCT ON (term_id) * FROM kb.ontology_terms WHERE term_kind = 'metric_definition' ORDER BY term_id, version DESC) t
 LEFT JOIN LATERAL (SELECT label FROM kb.ontology_term_labels WHERE term_id = t.term_id AND version = t.version AND label_role = 'prefLabel' ORDER BY CASE WHEN lang = 'en' THEN 0 ELSE 1 END LIMIT 1) l ON true
-LEFT JOIN kb.metrics m ON m.metric_definition_term_id = t.term_id
+LEFT JOIN kb.metrics m ON m.metric_definition_term_id = t.term_id AND m.ref_mention_id IS NULL
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 GROUP BY t.term_id, t.module_id, l.label
 ORDER BY COUNT(m.id) DESC, 1

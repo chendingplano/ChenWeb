@@ -79,7 +79,7 @@ SELECT
     m.value_range_type_error
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
-WHERE %s
+WHERE m.ref_mention_id IS NULL AND %s
 ORDER BY m.created_at DESC
 LIMIT 500
 `, strings.Join(conds, " AND "))

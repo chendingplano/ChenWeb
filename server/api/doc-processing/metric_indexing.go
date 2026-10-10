@@ -173,7 +173,7 @@ func loadIndexedMetricsForRecord(ctx context.Context, db *sql.DB, recordID int64
 		        COALESCE(metric_categories, ''),
 		        COALESCE(search_document, '')
 		 FROM kb.metrics
-		 WHERE input_record_id = $1
+		 WHERE ref_mention_id IS NULL AND input_record_id = $1
 		 ORDER BY id`, recordID)
 	if err != nil {
 		return nil, err

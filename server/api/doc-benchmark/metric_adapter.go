@@ -10,7 +10,7 @@ import (
 
 const MetricRowsQuery = `SELECT to_jsonb(m) AS row
 FROM kb.metrics AS m
-WHERE m.input_record_id = $1
+WHERE m.ref_mention_id IS NULL AND m.input_record_id = $1
 ORDER BY m.metric_id COLLATE "C" ASC NULLS LAST, m.id ASC`
 
 var metricCoreFields = []string{"metric_id", "metric_name", "metric_subject", "metric_value", "metric_unit", "is_explicit_metric", "source_line_spans"}

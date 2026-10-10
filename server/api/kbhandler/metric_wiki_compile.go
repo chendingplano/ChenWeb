@@ -75,7 +75,7 @@ SELECT
     m.provision_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
-WHERE m.metric_id = $1
+WHERE m.ref_mention_id IS NULL AND m.metric_id = $1
 `
 	load := func(id string) (metricRecord, error) {
 		var (

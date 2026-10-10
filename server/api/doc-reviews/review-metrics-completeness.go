@@ -750,7 +750,7 @@ SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, '')
        COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
-WHERE m.metric_id = ANY($1)`
+WHERE m.ref_mention_id IS NULL AND m.metric_id = ANY($1)`
 	mRows, err := r.db.QueryContext(ctx, metricQ, pq.Array(allIDs))
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26070309) load resolved metrics: %w", err)

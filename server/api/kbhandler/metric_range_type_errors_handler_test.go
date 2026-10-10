@@ -79,7 +79,7 @@ SELECT
     m.value_range_type_error
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
-WHERE m.value_range_type_error IS NOT NULL
+WHERE m.ref_mention_id IS NULL AND m.value_range_type_error IS NOT NULL
 ORDER BY m.created_at DESC
 LIMIT 500
 `)
@@ -117,7 +117,7 @@ func TestListMetricRangeTypeErrorsWithFilters(t *testing.T) {
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
 	query := regexp.QuoteMeta(`
-WHERE m.value_range_type_error IS NOT NULL AND m.input_record_id = $1 AND m.created_at >= $2::timestamptz AND m.created_at <= $3::timestamptz AND lower(regexp_replace(trim(m.value_range_type), '[- ]', '_', 'g')) = $4
+WHERE m.ref_mention_id IS NULL AND m.value_range_type_error IS NOT NULL AND m.input_record_id = $1 AND m.created_at >= $2::timestamptz AND m.created_at <= $3::timestamptz AND lower(regexp_replace(trim(m.value_range_type), '[- ]', '_', 'g')) = $4
 ORDER BY m.created_at DESC
 LIMIT 500
 `)

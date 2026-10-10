@@ -87,7 +87,7 @@ SELECT COALESCE(metric_name, ''), COALESCE(metric_name_en, ''),
        COALESCE(model_name, ''), COALESCE(is_explicit_metric, false),
        confidence, COALESCE(location_type, ''), created_at
 FROM kb.metrics
-WHERE input_record_id = $1 AND metric_id = $2`, recordID, metricID).Scan(
+WHERE ref_mention_id IS NULL AND input_record_id = $1 AND metric_id = $2`, recordID, metricID).Scan(
 		&g.Metric.MetricName, &g.Metric.MetricNameEn,
 		&keywordConceptID, &metricDefinitionTermID,
 		&modelName, &isExplicit, &confidence, &locationType, &createTime)

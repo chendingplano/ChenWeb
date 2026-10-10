@@ -293,7 +293,7 @@ func (t toolDB) searchMetricsTool() ReviewTool {
 				SELECT metric_id, metric_name, metric_name_en, metric_value, metric_unit,
 				       threshold_or_target, metric_desc, source_line_spans, confidence
 				FROM kb.metrics
-				WHERE input_record_id = $1
+				WHERE ref_mention_id IS NULL AND input_record_id = $1
 				  AND (search_document ILIKE '%' || $2 || '%'
 				       OR metric_name ILIKE '%' || $2 || '%'
 				       OR COALESCE(metric_name_en,'') ILIKE '%' || $2 || '%')
@@ -327,7 +327,7 @@ func (t toolDB) getMetricTool() ReviewTool {
 				       formula_or_definition, threshold_or_target, measurement_frequency,
 				       source_line_spans, confidence
 				FROM kb.metrics
-				WHERE input_record_id = $1 AND metric_id = $2
+				WHERE ref_mention_id IS NULL AND input_record_id = $1 AND metric_id = $2
 				LIMIT 1`
 			rows, err := t.db.QueryContext(ctx, sqlText, recordID, id)
 			if err != nil {
@@ -671,7 +671,7 @@ LIMIT 1`
 func (t toolDB) lookupArtifactSpans(ctx context.Context, recordID int64, artifactID string) ([]string, string, error) {
 	const q = `
 SELECT 'metric', COALESCE(source_line_spans, '[]'::jsonb)::text
-FROM kb.metrics WHERE input_record_id = $1 AND metric_id = $2
+FROM kb.metrics WHERE ref_mention_id IS NULL AND input_record_id = $1 AND metric_id = $2
 UNION ALL
 SELECT 'provision', COALESCE(source_line_spans, '[]'::jsonb)::text
 FROM kb.provisions WHERE input_record_id = $1 AND prov_id = $2

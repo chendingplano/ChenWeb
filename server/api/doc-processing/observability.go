@@ -182,7 +182,8 @@ func processorRequiresLLM(processorName string) bool {
 		"generate_scene_blocks",
 		"extract_structured_knowledge",
 		"extract_entity_relation",
-		"extract_inventory_items":
+		"extract_inventory_items",
+		"extract_references":
 		return true
 	default:
 		return false

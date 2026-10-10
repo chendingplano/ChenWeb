@@ -110,7 +110,7 @@ func (MetricAdapter) DependencyAxes() []string {
 const MetricArtifactSourceSQL = `
 SELECT m.metric_id AS artifact_id, m.input_record_id AS input_record_id
 FROM kb.metrics m
-WHERE m.metric_id IS NOT NULL AND btrim(m.metric_id) <> ''`
+WHERE m.ref_mention_id IS NULL AND m.metric_id IS NOT NULL AND btrim(m.metric_id) <> ''`
 
 // ShadowComparison is what a shadow-mode run reports: what the lossless writer
 // WOULD have produced versus what the existing path actually produced.
@@ -203,7 +203,7 @@ WITH norm AS (
          END AS raw_key,
          nullif(btrim(coalesce(m.threshold_or_target, '')), '') AS literal
   FROM kb.metrics m
-  WHERE m.input_record_id = $1 AND m.metric_id IS NOT NULL AND btrim(m.metric_id) <> ''
+  WHERE m.ref_mention_id IS NULL AND m.input_record_id = $1 AND m.metric_id IS NOT NULL AND btrim(m.metric_id) <> ''
 )
 SELECT n.metric_id,
 	   n.metric_definition_term_id,

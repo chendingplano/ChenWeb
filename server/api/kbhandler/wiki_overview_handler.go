@@ -99,7 +99,7 @@ func WikiOverview(c echo.Context) error {
 		ContentSegments:     countRows(db, logger, "SELECT COUNT(*) FROM kb.chunks"),
 		Topics:              countRows(db, logger, "SELECT COUNT(*) FROM kb.topics"),
 		SemanticProjections: countRows(db, logger, "SELECT COUNT(*) FROM kb.semantic_projections"),
-		Metrics:             countRows(db, logger, "SELECT COUNT(*) FROM kb.metrics"),
+		Metrics:             countRows(db, logger, "SELECT COUNT(*) FROM kb.metrics WHERE ref_mention_id IS NULL"),
 		Provisions:          countRows(db, logger, "SELECT COUNT(*) FROM kb.provisions"),
 		PartsComponents:     countRows(db, logger, "SELECT COUNT(*) FROM kb.inventory_items"),
 		Scenes:              countRows(db, logger, "SELECT COUNT(*) FROM kb.scene_objects"),

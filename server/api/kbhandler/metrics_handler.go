@@ -74,6 +74,12 @@ type metricRecord struct {
 	// ProvisionID is kb.metrics.provision_id: the provision clause this row is a
 	// criterion of (ADR 2026100603 DR2). Always serialized; null until linked.
 	ProvisionID *int64 `json:"provision_id"`
+	// Ref* are set only on a resolved reference row <rec>_rfm_<n>: a metric another document
+	// defines, which this document requires through a reference (openspec change
+	// extract-references-processor). RefMetricID is the original metric in RefInputRecordID.
+	RefMentionID     *int64  `json:"ref_mention_id,omitempty"`
+	RefInputRecordID *int64  `json:"ref_input_record_id,omitempty"`
+	RefMetricID      *string `json:"ref_metric_id,omitempty"`
 	// TableContext is built at read time from SourceTableRows: header + matched rows
 	// + one neighbor data row either side. Never stored.
 	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
@@ -183,7 +189,8 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     NULL::text AS keyword_concept_id, NULL::text AS metric_definition_term_id, NULL::text AS value_range_type_error,
-    m.source_table_rows, NULL::bigint AS provision_id
+    m.source_table_rows, NULL::bigint AS provision_id,
+    NULL::bigint AS ref_mention_id, NULL::bigint AS ref_input_record_id, NULL::text AS ref_metric_id
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
@@ -239,7 +246,8 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
-    m.source_table_rows, m.provision_id
+    m.source_table_rows, m.provision_id,
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -318,6 +326,7 @@ ORDER BY m.id ASC
 			&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 			&tableRowsBytes, &r.ProvisionID,
+			&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -438,7 +447,8 @@ SELECT
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
-    m.source_table_rows, m.provision_id
+    m.source_table_rows, m.provision_id,
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -475,6 +485,7 @@ WHERE m.id = $1
 		&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 		&tableRowsBytes, &r.ProvisionID,
+		&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
 	)
 	if err != nil {
 		return metricRecord{}, err
@@ -1520,6 +1531,9 @@ func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
 	if err := deleteDocProcLogsForInputRuns(tx, id); err != nil {
 		return err
 	}
+	if err := deleteInputReferenceRows(tx, id); err != nil {
+		return err
+	}
 	for _, spec := range inputRelatedDeleteSpecs {
 		exists, err := inputRelatedColumnExists(tx, spec.Table, spec.Column)
 		if err != nil {
@@ -1532,6 +1546,33 @@ func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
 		stmt := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", spec.Table, spec.Column)
 		if _, err := tx.Exec(stmt, id); err != nil {
 			return fmt.Errorf("delete %s where %s: %w", spec.Table, spec.Column, err)
+		}
+	}
+	return nil
+}
+
+// deleteInputReferenceRows applies the reference layer's deletion contract (openspec change
+// extract-references-processor): the record's own mentions go (their links and resolved rows
+// follow by cascade), its attachment to a catalog resource goes, and other records' references
+// into it lose their holding: resolved copies of its metrics are removed, links become stale and
+// the mentions wait for a target again.
+func deleteInputReferenceRows(tx *sql.Tx, id int64) error {
+	exists, err := inputRelatedColumnExists(tx, "kb.ref_mentions", "input_record_id")
+	if err != nil || !exists {
+		return err
+	}
+	stmts := []string{
+		`DELETE FROM kb.metrics WHERE ref_input_record_id = $1`,
+		`UPDATE kb.reference_artifact_links SET status = 'stale', updated_at = NOW() WHERE target_input_id = $1 AND citing_input_id <> $1`,
+		`UPDATE kb.ref_mentions SET target_input_id = NULL, r2_state = 'not_held',
+		        metric_state = CASE WHEN metric_state IS NULL THEN NULL ELSE 'pending_target' END
+		  WHERE target_input_id = $1 AND input_record_id <> $1`,
+		`DELETE FROM kb.ref_mentions WHERE input_record_id = $1`,
+		`DELETE FROM kb.ref_resource_identifiers WHERE kind = 'kb_input' AND value = $1::text`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt, id); err != nil {
+			return fmt.Errorf("delete reference rows for input %d: %w", id, err)
 		}
 	}
 	return nil

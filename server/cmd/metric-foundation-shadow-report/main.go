@@ -142,7 +142,7 @@ func metricBearingInputRecordIDs(ctx context.Context, db *sql.DB) ([]int64, erro
 	rows, err := db.QueryContext(ctx, `
 SELECT DISTINCT input_record_id
 FROM kb.metrics
-WHERE input_record_id IS NOT NULL
+WHERE ref_mention_id IS NULL AND input_record_id IS NOT NULL
 ORDER BY input_record_id`)
 	if err != nil {
 		return nil, err

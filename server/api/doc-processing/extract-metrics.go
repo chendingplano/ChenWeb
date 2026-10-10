@@ -2914,7 +2914,7 @@ func (s MetricsSQLStore) MetricsExist(ctx context.Context, inputRecordID int64) 
 	if err := s.ensureMetricsTable(ctx); err != nil {
 		return false, err
 	}
-	const q = `SELECT 1 FROM kb.metrics WHERE input_record_id = $1 LIMIT 1`
+	const q = `SELECT 1 FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NULL LIMIT 1`
 	var one int
 	err := s.DB.QueryRowContext(ctx, q, inputRecordID).Scan(&one)
 	if err == sql.ErrNoRows {
@@ -2940,7 +2940,9 @@ func (s MetricsSQLStore) DeleteMetricsByInputRecordID(ctx context.Context, input
 		loggerutil.CreateDefaultLogger("MID_26100602").Info("retired metric evidence before metric delete",
 			"record_id", inputRecordID, "retired_evidence", retired)
 	}
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM kb.metrics WHERE input_record_id = $1`, inputRecordID)
+	// Resolved reference rows (ref_mention_id set) belong to the reference resolver, not to this
+	// extraction (openspec change extract-references-processor): never delete them here.
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NULL`, inputRecordID)
 	if err != nil {
 		return 0, err
 	}
@@ -2969,7 +2971,7 @@ SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_sub
 	       keyword_concept_id, metric_definition_term_id, subject_concept_id, ext_info,
 	       source_table_rows
 FROM kb.metrics
-WHERE input_record_id = $1`
+WHERE input_record_id = $1 AND ref_mention_id IS NULL`
 	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
 	if err != nil {
 		return nil, err
@@ -3406,7 +3408,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 		       kb.connected_artifacts(input_record_id, 'metric', id),
 		       COALESCE(source_table_rows::text, '')
 		FROM kb.metrics
-		WHERE input_record_id = $1
+		WHERE input_record_id = $1 AND ref_mention_id IS NULL
 		ORDER BY id`, recordID)
 	if err != nil {
 		return nil, err
@@ -3800,6 +3802,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
 			p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
 				"deleted_rows", deleted, "new_count", 0)
+			p.resolveIncomingReferences(ctx, p.batchRecordID)
 		}
 		p.Logger.Info("%s batch: no candidates", p.Name(), "record_id", p.batchRecordID)
 		return nil
@@ -3859,6 +3862,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		if err := p.harvestMetricDefinitionCandidates(ctx, p.batchRecordID, metrics); err != nil {
 			return err
 		}
+		p.resolveIncomingReferences(ctx, p.batchRecordID)
 		return nil
 	}
 	if identityResolver, ok := p.Store.(MetricIdentityResolver); ok {
@@ -3913,7 +3917,27 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if err := p.harvestMetricDefinitionCandidates(ctx, p.batchRecordID, dirty); err != nil {
 		return err
 	}
+	p.resolveIncomingReferences(ctx, p.batchRecordID)
 	return nil
+}
+
+// resolveIncomingReferences is step 6 of the reference layer (openspec change
+// extract-references-processor): after this record's metrics are saved, other records' metric
+// references to it are resolved again against them. A failure is logged and never fails
+// extract_metrics; the next event on either side resolves again.
+func (p *MetricsProcessor) resolveIncomingReferences(ctx context.Context, recordID int64) {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return
+	}
+	sum, err := ResolveIncoming(ctx, db, "metric", recordID, p.Logger)
+	if err != nil {
+		p.Logger.Warn("metric reference resolution (step 6) failed", "record_id", recordID, "error", err)
+		return
+	}
+	if len(sum) > 0 {
+		p.Logger.Info("metric references resolved (step 6)", "record_id", recordID, "outcome", sum)
+	}
 }
 
 func canonicalizeMetricValueRangeTypes(metrics []map[string]any) {

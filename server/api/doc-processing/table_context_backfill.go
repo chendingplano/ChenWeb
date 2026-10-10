@@ -57,10 +57,10 @@ func RunTableContextBackfill(ctx context.Context, db *sql.DB, recordID int64, dr
 }
 
 func tableBackfillRecordIDs(ctx context.Context, db *sql.DB, recordID int64) ([]int64, error) {
-	q := `SELECT DISTINCT input_record_id FROM kb.metrics ORDER BY 1`
+	q := `SELECT DISTINCT input_record_id FROM kb.metrics WHERE ref_mention_id IS NULL ORDER BY 1`
 	args := []any{}
 	if recordID > 0 {
-		q = `SELECT DISTINCT input_record_id FROM kb.metrics WHERE input_record_id = $1 ORDER BY 1`
+		q = `SELECT DISTINCT input_record_id FROM kb.metrics WHERE ref_mention_id IS NULL AND input_record_id = $1 ORDER BY 1`
 		args = append(args, recordID)
 	}
 	rows, err := db.QueryContext(ctx, q, args...)
@@ -95,7 +95,7 @@ SELECT id, COALESCE(metric_id, ''), COALESCE(metric_name, ''), COALESCE(metric_v
        COALESCE(source_line_spans::text, '[]'), COALESCE(metric_context, ''),
        COALESCE(source_table_rows::text, ''), COALESCE(search_document, '')
 FROM kb.metrics
-WHERE input_record_id = $1
+WHERE ref_mention_id IS NULL AND input_record_id = $1
 ORDER BY id`, recordID)
 	if err != nil {
 		return fmt.Errorf("load metrics: %w", err)

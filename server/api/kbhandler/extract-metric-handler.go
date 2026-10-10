@@ -561,7 +561,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 	}
 
 	var existingCount int64
-	if err := db.QueryRow(`SELECT COUNT(*) FROM kb.metrics WHERE input_record_id = $1`, inputRecordID).Scan(&existingCount); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM kb.metrics WHERE ref_mention_id IS NULL AND input_record_id = $1`, inputRecordID).Scan(&existingCount); err != nil {
 		existingCount = 0
 	}
 

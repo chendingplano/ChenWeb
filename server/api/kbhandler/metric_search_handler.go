@@ -204,7 +204,7 @@ func SearchMetrics(c echo.Context) error {
 
 func countMetricSearchResults(db *sql.DB, queryText string, filters metricSearchFilters, cfg metricSearchConfig) (int64, error) {
 	whereSQL, args := buildMetricSearchWhereClause(queryText, filters, cfg)
-	sqlText := fmt.Sprintf(`SELECT COUNT(*) FROM kb.metrics m WHERE %s`, whereSQL)
+	sqlText := fmt.Sprintf(`SELECT COUNT(*) FROM kb.metrics m WHERE m.ref_mention_id IS NULL AND %s`, whereSQL)
 	var total int64
 	err := db.QueryRow(sqlText, args...).Scan(&total)
 	return total, err
@@ -304,7 +304,7 @@ ranked AS (
     FROM kb.metrics m
     LEFT JOIN kb.inputs i ON i.id = m.input_record_id
     CROSS JOIN query_input
-    WHERE %s
+    WHERE m.ref_mention_id IS NULL AND %s
 ),
 scored AS (
     SELECT * FROM ranked

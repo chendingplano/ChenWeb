@@ -628,7 +628,7 @@ func (g *DocReviewReportGenerator) loadRelatedMetricSpans(ctx context.Context, r
 	err := g.DB.QueryRowContext(ctx, `
 		SELECT COALESCE(source_line_spans, '[]'::jsonb)
 		FROM kb.metrics
-		WHERE input_record_id = $1 AND metric_id = $2
+		WHERE ref_mention_id IS NULL AND input_record_id = $1 AND metric_id = $2
 		LIMIT 1`, recordID, metricID).Scan(&raw)
 	if err != nil {
 		return nil, err

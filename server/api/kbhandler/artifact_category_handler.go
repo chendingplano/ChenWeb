@@ -261,7 +261,7 @@ SELECT m.metric_id, m.input_record_id,
        m.metric_value,
        m.formula_or_definition
 FROM kb.metrics m
-WHERE m.metric_id IN (%s)
+WHERE m.ref_mention_id IS NULL AND m.metric_id IN (%s)
 ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 
 	rows, err := db.Query(query, args...)

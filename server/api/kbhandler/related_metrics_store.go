@@ -49,7 +49,7 @@ type relatedMetricsStore struct {
 func (s relatedMetricsStore) metricExists(ctx context.Context, metricID string) (bool, error) {
 	var ok bool
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM kb.metrics WHERE metric_id = $1)`, metricID).Scan(&ok)
+		`SELECT EXISTS (SELECT 1 FROM kb.metrics WHERE ref_mention_id IS NULL AND metric_id = $1)`, metricID).Scan(&ok)
 	return ok, err
 }
 
@@ -96,7 +96,7 @@ SELECT m.metric_id,
 FROM kb.semantic_assertions a
 JOIN kb.semantic_decision_candidates dc
      ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
-JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id
+JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id AND m.ref_mention_id IS NULL
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE a.instance_of_term_id = $1
   AND m.metric_id <> $2
@@ -163,7 +163,7 @@ FROM (
         FROM kb.semantic_assertions a
         JOIN kb.semantic_decision_candidates dc
              ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
-        JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id
+        JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id AND m.ref_mention_id IS NULL
         LEFT JOIN kb.inputs i ON i.id = m.input_record_id
         WHERE a.instance_of_term_id = ANY($1)
           AND a.instance_of_term_id <> $2

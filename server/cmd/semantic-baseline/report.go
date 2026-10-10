@@ -175,11 +175,11 @@ func collectCorpus(ctx context.Context, db *sql.DB) (CorpusCounts, error) {
 	const stmt = `
 SELECT
   (SELECT count(*) FROM kb.inputs),
-  (SELECT count(DISTINCT input_record_id) FROM kb.metrics),
-  (SELECT count(*) FROM kb.metrics),
-  (SELECT count(*) FROM kb.metrics WHERE value_range_type IS NOT NULL AND btrim(value_range_type) <> ''),
-  (SELECT count(*) FROM kb.metrics WHERE value_range_type IS NULL OR btrim(value_range_type) = ''),
-  (SELECT count(*) FROM kb.metrics WHERE value_range_type_error IS NOT NULL AND btrim(value_range_type_error) <> ''),
+  (SELECT count(DISTINCT input_record_id) FROM kb.metrics WHERE ref_mention_id IS NULL),
+  (SELECT count(*) FROM kb.metrics WHERE ref_mention_id IS NULL),
+  (SELECT count(*) FROM kb.metrics WHERE ref_mention_id IS NULL AND value_range_type IS NOT NULL AND btrim(value_range_type) <> ''),
+  (SELECT count(*) FROM kb.metrics WHERE ref_mention_id IS NULL AND (value_range_type IS NULL OR btrim(value_range_type) = '')),
+  (SELECT count(*) FROM kb.metrics WHERE ref_mention_id IS NULL AND value_range_type_error IS NOT NULL AND btrim(value_range_type_error) <> ''),
   (SELECT count(*) FROM kb.semantic_decision_candidates WHERE source_artifact_type = 'metric'),
   (SELECT count(*) FROM kb.semantic_assertions),
   (SELECT count(*) FROM kb.assertion_evidence WHERE deleted = false),
@@ -209,7 +209,7 @@ SELECT count(*) FROM (
 
 	const unreachableStmt = `
 SELECT count(*) FROM kb.metrics m
-WHERE NOT EXISTS (
+WHERE m.ref_mention_id IS NULL AND NOT EXISTS (
   SELECT 1 FROM kb.assertion_evidence e
   WHERE e.deleted = false AND e.artifact_type = 'metric'
     AND e.evidence_role = 'supports'
@@ -246,6 +246,7 @@ SELECT m.input_record_id,
             AND e.artifact_id = m.metric_id AND e.input_record_id = m.input_record_id))
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+WHERE m.ref_mention_id IS NULL
 GROUP BY m.input_record_id, i.file_name
 ORDER BY m.input_record_id`
 	rows, err := db.QueryContext(ctx, stmt)
@@ -276,6 +277,7 @@ WITH norm AS (
               ELSE replace(replace(lower(btrim(m.value_range_type)), '-', '_'), ' ', '_')
          END AS raw_key
   FROM kb.metrics m
+  WHERE m.ref_mention_id IS NULL
 )
 SELECT CASE
          WHEN n.raw_key IS NULL THEN 'absent'

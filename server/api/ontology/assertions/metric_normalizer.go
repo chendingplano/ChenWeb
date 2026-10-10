@@ -104,7 +104,7 @@ SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.form
 FROM kb.metrics m
 LEFT JOIN kb.artifact_objects ao
   ON ao.artifact_type = 'metric' AND ao.artifact_id = m.metric_id AND ao.input_record_id = m.input_record_id
-WHERE m.input_record_id = $1`
+WHERE m.ref_mention_id IS NULL AND m.input_record_id = $1`
 	rows, err := db.QueryContext(ctx, stmt, inputRecordID)
 	if err != nil {
 		return report, err

@@ -22,7 +22,7 @@ func TestMetricAdapterUsesOrderedRowsAndReconcilesStableFields(t *testing.T) {
 	}
 	const expectedMetricQuery = `SELECT to_jsonb(m) AS row
 FROM kb.metrics AS m
-WHERE m.input_record_id = $1
+WHERE m.ref_mention_id IS NULL AND m.input_record_id = $1
 ORDER BY m.metric_id COLLATE "C" ASC NULLS LAST, m.id ASC`
 	mock.ExpectQuery(regexp.QuoteMeta(expectedMetricQuery)).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"row"}).
 		AddRow([]byte(`{"metric_id":"a","metric_name":"A","metric_subject":"S","metric_value":"1","metric_unit":"kg","is_explicit_metric":true,"source_line_spans":[1],"db_index":0}`)).
@@ -64,7 +64,7 @@ func TestMetricAdapterMissingOrDisagreementIsInvalidOutput(t *testing.T) {
 			if tc.write {
 				_ = os.WriteFile(file, []byte(tc.contents), 0o600)
 			}
-			mock.ExpectQuery(`SELECT to_jsonb\(m\) AS row\s+FROM kb\.metrics AS m\s+WHERE m\.input_record_id = \$1\s+ORDER BY m\.metric_id COLLATE "C" ASC NULLS LAST, m\.id ASC`).WillReturnRows(sqlmock.NewRows([]string{"row"}).AddRow([]byte(`{"metric_id":"a"}`)))
+			mock.ExpectQuery(`SELECT to_jsonb\(m\) AS row\s+FROM kb\.metrics AS m\s+WHERE m\.ref_mention_id IS NULL AND m\.input_record_id = \$1\s+ORDER BY m\.metric_id COLLATE "C" ASC NULLS LAST, m\.id ASC`).WillReturnRows(sqlmock.NewRows([]string{"row"}).AddRow([]byte(`{"metric_id":"a"}`)))
 			a := MetricAdapter{DB: db, ArtifactPath: func(int64) string { return file }}
 			v, err := a.Capture(context.Background(), 1)
 			if tc.write && err == nil {

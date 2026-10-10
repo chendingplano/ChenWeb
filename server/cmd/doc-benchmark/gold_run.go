@@ -326,6 +326,10 @@ func fetchProcessorResults(ctx context.Context, db *sql.DB, processor string, re
 		return nil, nil
 	}
 	query := fmt.Sprintf(`SELECT * FROM %s WHERE %s = $1 ORDER BY id`, spec.table, spec.fkCol)
+	if spec.table == "kb.metrics" {
+		// Resolved reference rows carry another document's value and are never scored.
+		query = `SELECT * FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NULL ORDER BY id`
+	}
 	rows, err := db.QueryContext(ctx, query, recordID)
 	if err != nil {
 		return nil, fmt.Errorf("query %s: %w", spec.table, err)

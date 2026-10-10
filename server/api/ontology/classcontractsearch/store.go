@@ -169,7 +169,7 @@ SELECT DISTINCT COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, ''), COA
 FROM kb.semantic_assertions a
 JOIN kb.semantic_decision_candidates dc
      ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
-JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id
+JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id AND m.ref_mention_id IS NULL
 WHERE a.instance_of_term_id = $1
 LIMIT $2`, classTermID, instanceSampleRows)
 	if err != nil {
@@ -194,7 +194,7 @@ SELECT COUNT(DISTINCT m.metric_id)
 FROM kb.semantic_assertions a
 JOIN kb.semantic_decision_candidates dc
      ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
-JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id
+JOIN kb.metrics m ON m.metric_id = dc.source_artifact_id AND m.ref_mention_id IS NULL
 WHERE a.instance_of_term_id = $1`, classTermID).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count instances for %s: %w", classTermID, err)

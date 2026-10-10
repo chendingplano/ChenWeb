@@ -421,6 +421,9 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "extract_inventory_items", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"inventory_items"}},
 	{Name: "extract_metrics", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metrics"}},
 	{Name: "extract_provisions", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"provisions"}},
+	// extract_references is the lower reference layer (openspec change extract-references-processor):
+	// it reads only chunks; artifact extractors resolve its references, never the other way round.
+	{Name: "extract_references", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"references"}},
 	// extract_products reads Chunks (resolveProductChunkBlocks, adapted to
 	// []Block via chunksToBlocks) as of 2026-09-12 -- previously re-blocked
 	// the raw line file directly (Blocks, not Chunks), which is why this

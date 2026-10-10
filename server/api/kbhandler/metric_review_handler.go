@@ -369,7 +369,7 @@ func StartMetricReview(c echo.Context) error {
 	}
 
 	var metricsCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM kb.metrics WHERE input_record_id = $1`, recordID).Scan(&metricsCount); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM kb.metrics WHERE ref_mention_id IS NULL AND input_record_id = $1`, recordID).Scan(&metricsCount); err != nil {
 		logger.Error("count metrics failed", "record_id", recordID, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to count metrics (CWB_KB_MRV_230)"})
 	}
@@ -672,7 +672,7 @@ SELECT COALESCE(metric_id, 'id:' || id::text), source_line_spans,
        COALESCE(measurement_frequency, ''), COALESCE(formula_or_definition, ''),
        to_char(created_at, 'YYYY-MM-DD')
 FROM kb.metrics
-WHERE input_record_id = $1
+WHERE ref_mention_id IS NULL AND input_record_id = $1
 ORDER BY id`, recordID)
 	if err != nil {
 		return nil, err
