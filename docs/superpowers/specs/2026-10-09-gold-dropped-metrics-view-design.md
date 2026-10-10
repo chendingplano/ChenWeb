@@ -12,6 +12,7 @@ Let users switch between retained gold metrics and metrics recorded in `kb.metri
 - Dropped metrics preserve `source_table_rows` from their saved extraction data, normalized to the same row-reference objects as gold metrics. Selecting a table metric highlights its cited rows and builds its table context through the existing shared path; metrics without row references retain the whole-table fallback.
 - Add an independent “Show all metrics info boxes” checkbox, unchecked by default. When enabled, PDF info cards are rendered for all metrics in the active view, subject to the current metric filters, rather than only for the selected metric.
 - When the checkbox is off, preserve the existing selected-metric PDF card behavior.
+- The Metrics sidebar filter block (name, ID, keyword, description, confidence, Order by, View, and all-info-box controls) sits inside a “Filters” disclosure, folded by default on page load. Opening or folding it preserves all control values and their effects on the current view. The disclosure supports mouse and keyboard interaction.
 - Controls and labels use Paraglide messages in English and Chinese.
 
 ## Implementation shape

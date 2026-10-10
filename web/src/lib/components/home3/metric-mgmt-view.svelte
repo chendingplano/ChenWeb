@@ -1650,149 +1650,155 @@
 					{/if}
 				</div>
 			</div>
-			<div class="metric-local-filters">
-				<div class="toolbar-kw-wrap">
-					<input
-						class="toolbar-kw-input"
-						type="text"
-						placeholder={i18n.metric_mgmt_metric_by_name()}
-						bind:value={metricNameFilter}
-					/>
-					{#if metricNameFilter}
-						<button
-							type="button"
-							class="toolbar-kw-clear"
-							onclick={() => (metricNameFilter = '')}
-							title={i18n.metric_mgmt_clear_metric_name_filter()}
-							aria-label={i18n.metric_mgmt_clear_metric_name_filter()}>×</button
-						>
-					{/if}
-				</div>
-				<div class="toolbar-kw-wrap">
-					<input
-						class="toolbar-kw-input"
-						type="text"
-						list="metric-ids-datalist"
-						placeholder={i18n.metric_mgmt_search_by_metric_id()}
-						title={i18n.metric_mgmt_jump_to_a_metric_of()}
-						bind:value={metricIdQuery}
-						oninput={() => jumpToMetricId(false)}
-						onkeydown={(e) => {
-							if (e.key === 'Enter') jumpToMetricId(true);
-						}}
-					/>
-					<datalist id="metric-ids-datalist">
-						{#each metrics as m (m.id)}
-							{#if m.metric_id}<option value={m.metric_id}>{metricNameOf(m)}</option>{/if}
-						{/each}
-					</datalist>
-					{#if metricIdQuery}
-						<button
-							type="button"
-							class="toolbar-kw-clear"
-							onclick={() => {
-								metricIdQuery = '';
-								metricIdError = '';
+			<details class="metric-filter-disclosure">
+				<summary class="metric-filter-toggle">
+					<ChevronRightIcon class="metric-filter-chevron" />
+					<span>{i18n.metric_mgmt_filters()}</span>
+				</summary>
+				<div class="metric-local-filters">
+					<div class="toolbar-kw-wrap">
+						<input
+							class="toolbar-kw-input"
+							type="text"
+							placeholder={i18n.metric_mgmt_metric_by_name()}
+							bind:value={metricNameFilter}
+						/>
+						{#if metricNameFilter}
+							<button
+								type="button"
+								class="toolbar-kw-clear"
+								onclick={() => (metricNameFilter = '')}
+								title={i18n.metric_mgmt_clear_metric_name_filter()}
+								aria-label={i18n.metric_mgmt_clear_metric_name_filter()}>×</button
+							>
+						{/if}
+					</div>
+					<div class="toolbar-kw-wrap">
+						<input
+							class="toolbar-kw-input"
+							type="text"
+							list="metric-ids-datalist"
+							placeholder={i18n.metric_mgmt_search_by_metric_id()}
+							title={i18n.metric_mgmt_jump_to_a_metric_of()}
+							bind:value={metricIdQuery}
+							oninput={() => jumpToMetricId(false)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') jumpToMetricId(true);
 							}}
-							title={i18n.metric_mgmt_clear_metric_id()}
-							aria-label={i18n.metric_mgmt_clear_metric_id()}>×</button
-						>
+						/>
+						<datalist id="metric-ids-datalist">
+							{#each metrics as m (m.id)}
+								{#if m.metric_id}<option value={m.metric_id}>{metricNameOf(m)}</option>{/if}
+							{/each}
+						</datalist>
+						{#if metricIdQuery}
+							<button
+								type="button"
+								class="toolbar-kw-clear"
+								onclick={() => {
+									metricIdQuery = '';
+									metricIdError = '';
+								}}
+								title={i18n.metric_mgmt_clear_metric_id()}
+								aria-label={i18n.metric_mgmt_clear_metric_id()}>×</button
+							>
+						{/if}
+					</div>
+					{#if metricIdError}
+						<div class="metric-id-error" role="status">{metricIdError}</div>
 					{/if}
-				</div>
-				{#if metricIdError}
-					<div class="metric-id-error" role="status">{metricIdError}</div>
-				{/if}
-				<div class="toolbar-kw-wrap">
-					<input
-						class="toolbar-kw-input"
-						type="text"
-						list="metric-keywords-datalist-focus"
-						placeholder={i18n.metric_mgmt_filter_by_keyword()}
-						bind:value={keywordFilter}
-					/>
-					<datalist id="metric-keywords-datalist-focus">
-						{#each allKeywords as kw (kw)}
-							<option value={kw}></option>
-						{/each}
-					</datalist>
-					{#if keywordFilter}
-						<button
-							type="button"
-							class="toolbar-kw-clear"
-							onclick={() => (keywordFilter = '')}
-							title={i18n.metric_mgmt_clear_keyword_filter()}
-							aria-label={i18n.metric_mgmt_clear_keyword_filter()}>×</button
-						>
-					{/if}
-				</div>
-				<div class="toolbar-kw-wrap">
-					<input
-						class="toolbar-kw-input"
-						type="text"
-						placeholder={i18n.metric_mgmt_filter_by_description()}
-						bind:value={descriptionFilter}
-					/>
-					{#if descriptionFilter}
-						<button
-							type="button"
-							class="toolbar-kw-clear"
-							onclick={() => (descriptionFilter = '')}
-							title={i18n.metric_mgmt_clear_description_filter()}
-							aria-label={i18n.metric_mgmt_clear_description_filter()}>×</button
-						>
-					{/if}
-				</div>
-				<div class="toolbar-kw-wrap">
-					<input
-						class="toolbar-kw-input"
-						type="text"
-						list="confidence-options"
-						placeholder={i18n.metric_mgmt_confidence()}
-						title={i18n.metric_mgmt_filter_by_confidence_threshold_select()}
-						bind:value={confidenceFilter}
-					/>
-					<datalist id="confidence-options">
-						<option value="0.90"></option>
-						<option value="0.80"></option>
-						<option value="0.70"></option>
-						<option value="0.60"></option>
-						<option value="0.50"></option>
-						<option value="<0.50"></option>
-					</datalist>
-					{#if confidenceFilter}
-						<button
-							type="button"
-							class="toolbar-kw-clear"
-							onclick={() => (confidenceFilter = '')}
-							title={i18n.metric_mgmt_clear_confidence_filter()}
-							aria-label={i18n.metric_mgmt_clear_confidence_filter()}>×</button
-						>
-					{/if}
-				</div>
-				<select
-					class="toolbar-select"
-					bind:value={metricOrderBy}
-					title={i18n.metric_mgmt_order_the_metric_list()}
-					aria-label={i18n.metric_mgmt_order_by()}
-				>
-					<option value="source">{i18n.metric_mgmt_order_by_source_order()}</option>
-					<option value="id_asc">{i18n.metric_mgmt_order_by_metric_id_asc()}</option>
-					<option value="id_desc">{i18n.metric_mgmt_order_by_metric_id_desc()}</option>
-					<option value="name_asc">{i18n.metric_mgmt_order_by_metric_name_asc()}</option>
-					<option value="name_desc">{i18n.metric_mgmt_order_by_metric_name_desc()}</option>
-				</select>
-				<label class="view-filter">
-					<span class="view-filter-label">{i18n.metric_mgmt_view()}</span>
-					<select class="toolbar-select" value={metricView} onchange={handleMetricViewChange}>
-						<option value="gold">{i18n.metric_mgmt_view_gold_metrics()}</option>
-						<option value="dropped">{i18n.metric_mgmt_view_dropped_metrics()}</option>
+					<div class="toolbar-kw-wrap">
+						<input
+							class="toolbar-kw-input"
+							type="text"
+							list="metric-keywords-datalist-focus"
+							placeholder={i18n.metric_mgmt_filter_by_keyword()}
+							bind:value={keywordFilter}
+						/>
+						<datalist id="metric-keywords-datalist-focus">
+							{#each allKeywords as kw (kw)}
+								<option value={kw}></option>
+							{/each}
+						</datalist>
+						{#if keywordFilter}
+							<button
+								type="button"
+								class="toolbar-kw-clear"
+								onclick={() => (keywordFilter = '')}
+								title={i18n.metric_mgmt_clear_keyword_filter()}
+								aria-label={i18n.metric_mgmt_clear_keyword_filter()}>×</button
+							>
+						{/if}
+					</div>
+					<div class="toolbar-kw-wrap">
+						<input
+							class="toolbar-kw-input"
+							type="text"
+							placeholder={i18n.metric_mgmt_filter_by_description()}
+							bind:value={descriptionFilter}
+						/>
+						{#if descriptionFilter}
+							<button
+								type="button"
+								class="toolbar-kw-clear"
+								onclick={() => (descriptionFilter = '')}
+								title={i18n.metric_mgmt_clear_description_filter()}
+								aria-label={i18n.metric_mgmt_clear_description_filter()}>×</button
+							>
+						{/if}
+					</div>
+					<div class="toolbar-kw-wrap">
+						<input
+							class="toolbar-kw-input"
+							type="text"
+							list="confidence-options"
+							placeholder={i18n.metric_mgmt_confidence()}
+							title={i18n.metric_mgmt_filter_by_confidence_threshold_select()}
+							bind:value={confidenceFilter}
+						/>
+						<datalist id="confidence-options">
+							<option value="0.90"></option>
+							<option value="0.80"></option>
+							<option value="0.70"></option>
+							<option value="0.60"></option>
+							<option value="0.50"></option>
+							<option value="<0.50"></option>
+						</datalist>
+						{#if confidenceFilter}
+							<button
+								type="button"
+								class="toolbar-kw-clear"
+								onclick={() => (confidenceFilter = '')}
+								title={i18n.metric_mgmt_clear_confidence_filter()}
+								aria-label={i18n.metric_mgmt_clear_confidence_filter()}>×</button
+							>
+						{/if}
+					</div>
+					<select
+						class="toolbar-select"
+						bind:value={metricOrderBy}
+						title={i18n.metric_mgmt_order_the_metric_list()}
+						aria-label={i18n.metric_mgmt_order_by()}
+					>
+						<option value="source">{i18n.metric_mgmt_order_by_source_order()}</option>
+						<option value="id_asc">{i18n.metric_mgmt_order_by_metric_id_asc()}</option>
+						<option value="id_desc">{i18n.metric_mgmt_order_by_metric_id_desc()}</option>
+						<option value="name_asc">{i18n.metric_mgmt_order_by_metric_name_asc()}</option>
+						<option value="name_desc">{i18n.metric_mgmt_order_by_metric_name_desc()}</option>
 					</select>
-				</label>
-				<label class="view-filter-checkbox">
-					<input type="checkbox" bind:checked={showAllMetricInfoBoxes} />
-					<span>{i18n.metric_mgmt_show_all_info_boxes()}</span>
-				</label>
-			</div>
+					<label class="view-filter">
+						<span class="view-filter-label">{i18n.metric_mgmt_view()}</span>
+						<select class="toolbar-select" value={metricView} onchange={handleMetricViewChange}>
+							<option value="gold">{i18n.metric_mgmt_view_gold_metrics()}</option>
+							<option value="dropped">{i18n.metric_mgmt_view_dropped_metrics()}</option>
+						</select>
+					</label>
+					<label class="view-filter-checkbox">
+						<input type="checkbox" bind:checked={showAllMetricInfoBoxes} />
+						<span>{i18n.metric_mgmt_show_all_info_boxes()}</span>
+					</label>
+				</div>
+			</details>
 
 			{#if metricsEditable}
 			<div class="global-search-launch">
@@ -3017,14 +3023,41 @@
 		color: var(--text-muted);
 		text-transform: uppercase;
 	}
+	.metric-filter-disclosure {
+		margin: 0 16px 14px;
+		border: 1px solid var(--ink-line-soft);
+		background: color-mix(in srgb, var(--panel-bg-alt) 74%, transparent);
+	}
+	.metric-filter-toggle {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 12px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-secondary);
+		cursor: pointer;
+		list-style: none;
+	}
+	.metric-filter-toggle::-webkit-details-marker {
+		display: none;
+	}
+	.metric-filter-toggle:focus-visible {
+		outline: 2px solid var(--brass);
+		outline-offset: -2px;
+	}
+	.metric-filter-toggle :global(.metric-filter-chevron) {
+		width: 14px;
+		height: 14px;
+	}
+	.metric-filter-disclosure[open] .metric-filter-toggle :global(.metric-filter-chevron) {
+		transform: rotate(90deg);
+	}
 	.metric-local-filters {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 		gap: 8px;
-		margin: 0 16px 14px;
-		padding: 12px;
-		border: 1px solid var(--ink-line-soft);
-		background: color-mix(in srgb, var(--panel-bg-alt) 74%, transparent);
+		padding: 0 12px 12px;
 	}
 
 	.metric-local-filters .toolbar-select,

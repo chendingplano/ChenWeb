@@ -6608,6 +6608,7 @@
 	"metric_mgmt_view": "视图",
 	"metric_mgmt_view_gold_metrics": "查看金标准指标",
 	"metric_mgmt_view_dropped_metrics": "查看已剔除指标",
+	"metric_mgmt_filters": "筛选",
 	"metric_mgmt_show_all_info_boxes": "显示所有指标信息框",
 	"metric_mgmt_dropped_chip": "已剔除：{reason}",
 	"metric_mgmt_dropped_title": "由 extract_metrics 在 {stage} 阶段剔除，未作为指标保存",

@@ -6608,6 +6608,7 @@
 	"metric_mgmt_view": "View",
 	"metric_mgmt_view_gold_metrics": "View gold metrics",
 	"metric_mgmt_view_dropped_metrics": "View dropped metrics",
+	"metric_mgmt_filters": "Filters",
 	"metric_mgmt_show_all_info_boxes": "Show all metrics info boxes",
 	"metric_mgmt_dropped_chip": "Dropped: {reason}",
 	"metric_mgmt_dropped_title": "Set aside by extract_metrics at stage {stage}; not a stored metric",
