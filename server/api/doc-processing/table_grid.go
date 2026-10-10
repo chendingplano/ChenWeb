@@ -44,6 +44,14 @@ func (r TableRow) FullWidthText() (string, bool) {
 	return "", false
 }
 
+// TableGridVersion identifies how ParseTableGrid assigns row IDs and hashes. Bump it
+// whenever a change can move a row ID or change a hash: caches keyed on row IDs (the
+// PDF table geometry companion) are rebuilt when it changes.
+//
+//	1: header = <th> rows, else row 0, extended by colspan
+//	2: a header cell's rowspan also extends the header (2026-10-09)
+const TableGridVersion = 2
+
 // maxTableHeaderRows bounds the multi-level header heuristic so a table whose
 // data rows use colspan is not swallowed into its header.
 const maxTableHeaderRows = 3

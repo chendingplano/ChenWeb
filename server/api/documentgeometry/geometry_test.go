@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 const lineFixture = "121\t6\ttable\tfont\t12\t[80,721,890,843]\t<table><tr><td>Type</td><td>Limit</td></tr><tr><td>Machine</td><td>Energy 30</td></tr><tr><td>Biogas</td><td>Volume 50</td></tr></table>\n"
@@ -136,6 +138,16 @@ func TestEnsureInvalidatesPDFLineAndPhysicalGeometryChanges(t *testing.T) {
 	rebuilt, err := Ensure(line, pdf)
 	if err != nil || rebuilt.Algorithm != Algorithm || len(rebuilt.Tables) == 0 {
 		t.Fatalf("algorithm change did not invalidate cached geometry: %v, %v", rebuilt, err)
+	}
+	// Row IDs come from ParseTableGrid: a cache built before its numbering changed
+	// (record 753 表2, rowspan header) must not keep serving the old IDs.
+	rebuilt.TableGridVersion = docprocessing.TableGridVersion - 1
+	rebuilt.Tables = nil
+	oldCache, _ = json.Marshal(rebuilt)
+	mustWrite(CompanionPath(line), oldCache)
+	rebuilt, err = Ensure(line, pdf)
+	if err != nil || rebuilt.TableGridVersion != docprocessing.TableGridVersion || len(rebuilt.Tables) == 0 {
+		t.Fatalf("table grid version change did not invalidate cached geometry: %v, %v", rebuilt, err)
 	}
 	mustWrite(line, []byte(strings.Replace(lineFixture, "121\t", "122\t", 1)))
 	changed, err := Ensure(line, pdf)

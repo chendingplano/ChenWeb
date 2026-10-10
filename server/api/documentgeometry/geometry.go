@@ -41,13 +41,15 @@ type Table struct {
 	Rows []Row `json:"rows"`
 }
 type Document struct {
-	PhysicalHash    string  `json:"physical_sha256"`
-	Version         int     `json:"version"`
-	Algorithm       string  `json:"algorithm"`
-	CoordinateSpace string  `json:"coordinate_space"`
-	LineHash        string  `json:"line_sha256"`
-	PDFHash         string  `json:"pdf_sha256"`
-	Tables          []Table `json:"tables"`
+	PhysicalHash string `json:"physical_sha256"`
+	Version      int    `json:"version"`
+	Algorithm    string `json:"algorithm"`
+	// TableGridVersion is docprocessing.TableGridVersion when the row IDs were built.
+	TableGridVersion int     `json:"table_grid_version"`
+	CoordinateSpace  string  `json:"coordinate_space"`
+	LineHash         string  `json:"line_sha256"`
+	PDFHash          string  `json:"pdf_sha256"`
+	Tables           []Table `json:"tables"`
 }
 type PhysicalCell struct {
 	Text   string    `json:"text"`
@@ -125,7 +127,7 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &Document{PhysicalHash: hash(physicalBytes), Version: Version, Algorithm: Algorithm, CoordinateSpace: "page-normalized-1000", LineHash: hash(lineData), PDFHash: physical.PDFHash, Tables: []Table{}}
+	out := &Document{PhysicalHash: hash(physicalBytes), Version: Version, Algorithm: Algorithm, TableGridVersion: docprocessing.TableGridVersion, CoordinateSpace: "page-normalized-1000", LineHash: hash(lineData), PDFHash: physical.PDFHash, Tables: []Table{}}
 	if physical.Version != Version || physical.Extractor != "pymupdf-tables-v1" {
 		return nil, fmt.Errorf("unsupported physical table geometry version/extractor")
 	}
@@ -318,7 +320,7 @@ func Ensure(linePath, pdfPath string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	empty := &Document{Version: Version, Algorithm: Algorithm, CoordinateSpace: "page-normalized-1000", LineHash: hash(lineData), Tables: []Table{}}
+	empty := &Document{Version: Version, Algorithm: Algorithm, TableGridVersion: docprocessing.TableGridVersion, CoordinateSpace: "page-normalized-1000", LineHash: hash(lineData), Tables: []Table{}}
 	if strings.TrimSpace(pdfPath) == "" {
 		return empty, nil
 	}
@@ -349,7 +351,7 @@ func Ensure(linePath, pdfPath string) (*Document, error) {
 	path := CompanionPath(linePath)
 	if saved, e := os.ReadFile(path); e == nil {
 		var current Document
-		if json.Unmarshal(saved, &current) == nil && current.Version == Version && current.Algorithm == Algorithm && current.LineHash == empty.LineHash && current.PDFHash == empty.PDFHash && current.PhysicalHash == empty.PhysicalHash {
+		if json.Unmarshal(saved, &current) == nil && current.Version == Version && current.Algorithm == Algorithm && current.TableGridVersion == docprocessing.TableGridVersion && current.LineHash == empty.LineHash && current.PDFHash == empty.PDFHash && current.PhysicalHash == empty.PhysicalHash {
 			return &current, nil
 		}
 	}
