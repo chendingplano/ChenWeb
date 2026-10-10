@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, type Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { goto } from '$app/navigation';
@@ -20,6 +20,7 @@
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
+	import ContextShelf from '$lib/components/home3/context-shelf.svelte';
 	import MetricWikiView from '$lib/components/home3/metric-wiki-view.svelte';
 	import ArtifactWikiPage from '$lib/components/home3/artifact-wiki-page.svelte';
 	import ProvisionMgmtView from '$lib/components/home3/provision-mgmt-view.svelte';
@@ -51,6 +52,7 @@
 	import NetworkIcon from '@lucide/svelte/icons/network';
 	import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
+	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import MetricOntologyAnalysisView from '$lib/components/home3/metric-ontology-analysis-view.svelte';
@@ -367,6 +369,29 @@
 	let activeSection = $state<KbSectionId>(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
+	let metricDetails = $state<Snippet | null>(null);
+	let metricShelfOpen = $state(false);
+	let metricShelfWidth = $state(480);
+	let metricShelfDrag: { x: number; width: number } | null = null;
+
+	function handleMetricDetailsChange(details: Snippet | null) {
+		metricDetails = details;
+		metricShelfOpen = details != null;
+	}
+
+	function startMetricShelfDrag(e: MouseEvent) {
+		e.preventDefault();
+		metricShelfDrag = { x: e.clientX, width: metricShelfWidth };
+	}
+
+	function resizeMetricShelf(e: MouseEvent) {
+		if (!metricShelfDrag) return;
+		metricShelfWidth = Math.max(220, Math.min(680, metricShelfDrag.width + metricShelfDrag.x - e.clientX));
+	}
+
+	$effect(() => {
+		if (activeSection !== 'kb-metrics') handleMetricDetailsChange(null);
+	});
 	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 	let searchArtifactType = $derived(
 		parseKbSearchArtifactType(page.url.searchParams.get('scope'))
@@ -492,7 +517,9 @@
 
 </script>
 
-<div class="kb-page flex overflow-hidden" style="background:{pageBg}; color:{textPrimary};">
+<svelte:window onmousemove={resizeMetricShelf} onmouseup={() => (metricShelfDrag = null)} />
+
+<div class="kb-page flex overflow-hidden select-text" style="background:{pageBg}; color:{textPrimary};">
 	<aside
 		class="kb-menu flex flex-col overflow-hidden"
 		class:menu-collapsed={menuCollapsed}
@@ -757,6 +784,20 @@
 	{/if}
 
 	<main class="flex min-w-0 flex-1 flex-col overflow-hidden" style="background:{contentBg};">
+		{#if activeSection === 'kb-metrics' && metricDetails}
+			<div class="flex flex-shrink-0 justify-end p-2" style="border-bottom:1px solid {borderColor};">
+				<button
+					type="button"
+					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs"
+					style="background:{accentTint}; color:{accent};"
+					onclick={() => (metricShelfOpen = !metricShelfOpen)}
+					aria-label={metricShelfOpen ? m.content_panel_close_context_panel() : m.content_panel_open_context_panel()}
+				>
+					<PanelRightIcon class="h-3.5 w-3.5" />
+					{metricShelfOpen ? m.content_panel_close_panel() : m.content_panel_open_panel()}
+				</button>
+			</div>
+		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
 			{#if needsActiveStore && !knowledgeStoreState.activeStore}
 				<div
@@ -809,7 +850,11 @@
 			{:else if activeSection === 'kb-input-details'}
 				<InputsMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metrics'}
-				<MetricMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+				<MetricMgmtView
+					{darkMode}
+					onFocusModeChange={handleExtractionFocusMode}
+					onMetricDetailsChange={handleMetricDetailsChange}
+				/>
 			{:else if activeSection === 'kb-metric-wiki'}
 				{#if metricWikiId}
 					<MetricWikiView {darkMode} metricId={metricWikiId} />
@@ -913,6 +958,17 @@
 			{/if}
 		</div>
 	</main>
+	{#if activeSection === 'kb-metrics' && metricDetails && metricShelfOpen}
+		<ContextShelf
+			{darkMode}
+			{metricDetails}
+			activeMenu={null}
+			width={metricShelfWidth}
+			open={metricShelfOpen}
+			onDragStart={startMetricShelfDrag}
+			onClose={() => (metricShelfOpen = false)}
+		/>
+	{/if}
 </div>
 
 <style>
