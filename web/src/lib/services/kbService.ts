@@ -272,6 +272,37 @@ export type ListKbMetricsResponse = {
 	run_id?: string;
 };
 
+export type KbReferenceMention = {
+	id: number;
+	ref_id: string;
+	section?: string;
+	evidence?: string;
+	cited_raw?: string;
+	target_type: string;
+	target_subtype: string;
+	target_title?: string;
+	target_version?: string;
+	target_content: string;
+	normativity: string;
+	list_kind?: string;
+	list_mismatch?: string;
+	r1_state?: string;
+	r2_state?: string;
+	target_input_id?: number | null;
+	target_input_title?: string;
+	metric_state?: string;
+	resource_title?: string;
+	identity_key?: string;
+	identifiers: string[];
+};
+
+export async function listKbReferences(inputRecordId: number): Promise<{ status: boolean; results: KbReferenceMention[] }> {
+	return fetchOrThrow(
+		`${BASE}/references?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to list references'
+	);
+}
+
 export type GetKbMetricResponse = {
 	status: boolean;
 	record: KbMetricRecord;

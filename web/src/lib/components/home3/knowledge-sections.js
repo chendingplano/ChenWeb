@@ -1,10 +1,5 @@
 export const KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS = [
 	{
-		id: 'kb-references',
-		label: 'References',
-		description: 'Reference extraction workspace'
-	},
-	{
 		id: 'kb-formulas',
 		label: 'Formulas',
 		description: 'Formula extraction workspace'

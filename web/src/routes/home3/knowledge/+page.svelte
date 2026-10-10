@@ -20,6 +20,7 @@
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
+	import ReferencesMgmtView from '$lib/components/home3/references-mgmt-view.svelte';
 	import ContextShelf from '$lib/components/home3/context-shelf.svelte';
 	import MetricWikiView from '$lib/components/home3/metric-wiki-view.svelte';
 	import ArtifactWikiPage from '$lib/components/home3/artifact-wiki-page.svelte';
@@ -175,6 +176,11 @@
 					id: 'kb-metrics',
 					label: m.home3_knowledge_metrics(),
 					description: m.home3_knowledge_manage_extracted_metrics()
+				},
+				{
+					id: 'kb-references',
+					label: m.references_mgmt_title(),
+					description: m.references_mgmt_menu_description()
 				},
 				{
 					id: 'kb-products',
@@ -855,6 +861,8 @@
 					onFocusModeChange={handleExtractionFocusMode}
 					onMetricDetailsChange={handleMetricDetailsChange}
 				/>
+			{:else if activeSection === 'kb-references'}
+				<ReferencesMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metric-wiki'}
 				{#if metricWikiId}
 					<MetricWikiView {darkMode} metricId={metricWikiId} />
