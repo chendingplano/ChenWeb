@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m as i18n } from '$lib/paraglide/messages.js';
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, type Snippet } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
 		listKbMetrics,
@@ -68,11 +68,13 @@
 	let {
 		darkMode = true,
 		onFocusModeChange,
+		onMetricDetailsChange,
 		source = 'kb',
 		headerVisible = $bindable(true)
 	}: {
 		darkMode: boolean;
 		onFocusModeChange?: (focused: boolean) => void;
+		onMetricDetailsChange?: (details: Snippet | null) => void;
 		// 'testbed' shows gold metrics (testbed.metrics) read-only: they are written
 		// only by the extract-metrics-benchmark skill, so Add Metric and the
 		// kb.metrics-only Global Metric Search are hidden.
@@ -218,7 +220,12 @@
 	let docPage = $state<number>(1);
 	let addMetricBusy = $derived(addMetricBusyAction !== null);
 
+	$effect(() => {
+		if (selectedMetricId == null) onMetricDetailsChange?.(null);
+	});
+
 	onDestroy(() => {
+		onMetricDetailsChange?.(null);
 		setMetricFocusNotified(false);
 	});
 
@@ -300,21 +307,6 @@
 			persistFocusPdfWidth(focusPdfWidth - 24);
 		}
 	}
-	// ---------- Group info panel width (draggable) ----------
-	const GIP_WIDTH_KEY = 'metrics:info-panel-width';
-	const GIP_WIDTH_MIN = 320;
-	const GIP_WIDTH_MAX = 920;
-	const GIP_WIDTH_DEFAULT = 460;
-	let gipWidth = $state<number | null>(null);
-	let gipResizing = $state(false);
-
-	$effect(() => {
-		if (!browser) return;
-		const saved = Number(localStorage.getItem(GIP_WIDTH_KEY));
-		if (Number.isFinite(saved) && saved >= GIP_WIDTH_MIN && saved <= GIP_WIDTH_MAX) {
-			gipWidth = saved;
-		}
-	});
 
 	function setMetricFocusNotified(focused: boolean) {
 		if (metricFocusNotified === focused) return;
@@ -322,50 +314,8 @@
 		onFocusModeChange?.(focused);
 	}
 
-	function persistGipWidth(next: number) {
-		const clamped = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, Math.round(next)));
-		gipWidth = clamped;
-		if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(clamped));
-	}
-
-	function startGipResize(event: PointerEvent) {
-		event.preventDefault();
-		const startX = event.clientX;
-		const startWidth = gipWidth ?? GIP_WIDTH_DEFAULT;
-		gipResizing = true;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		const move = (e: PointerEvent) => {
-			const delta = e.clientX - startX;
-			persistGipWidth(startWidth + delta);
-		};
-		const up = () => {
-			gipResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			window.removeEventListener('pointermove', move);
-			window.removeEventListener('pointerup', up);
-			window.removeEventListener('pointercancel', up);
-		};
-		window.addEventListener('pointermove', move);
-		window.addEventListener('pointerup', up, { once: true });
-		window.addEventListener('pointercancel', up, { once: true });
-	}
-
-	function onGipResizerKeydown(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft') {
-			event.preventDefault();
-			persistGipWidth((gipWidth ?? GIP_WIDTH_DEFAULT) - 16);
-		} else if (event.key === 'ArrowRight') {
-			event.preventDefault();
-			persistGipWidth((gipWidth ?? GIP_WIDTH_DEFAULT) + 16);
-		}
-	}
-
 	// ---------- Metrics list (sidebar) width (draggable) ----------
-	// This is the panel to the LEFT of the metric info panel; it has its own
-	// resize handle and must not be confused with gipWidth above, which sizes
-	// the metric info panel itself.
+	// The metric list has its own resize handle beside the document viewer.
 	const METRICS_SIDEBAR_WIDTH_KEY = 'metrics:sidebar-width';
 	const METRICS_SIDEBAR_WIDTH_MIN = 280;
 	const METRICS_SIDEBAR_WIDTH_MAX = 640;
@@ -1217,6 +1167,7 @@
 
 	async function selectMetric(m: KbMetricRecord) {
 		selectedMetricId = m.id;
+		onMetricDetailsChange?.(metricDetails as unknown as Snippet);
 		highlightSelectionVersion += 1;
 		enterFocusMode();
 		const first = normalizeMetricSpans(m, lineNumToPage)[0];
@@ -1532,6 +1483,107 @@
 			{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
 			{#if metric.location_type}<span>{metric.location_type}</span>{/if}
 			<span>{i18n.metric_mgmt_span_2({ metric: spanCount(metric), plural: spanCount(metric) === 1 ? '' : 's' })}</span>
+		</div>
+	</div>
+{/snippet}
+
+{#snippet metricDetails()}
+	<div class="metric-shelf-details select-text" style="--page-bg:{pageBg}; --panel-bg:{panelBg}; --panel-bg-alt:{panelBgAlt}; --ink-line:{inkLine}; --ink-line-soft:{inkLineSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --brass:{brass}; --crimson:{crimson}; --font-serif:{fontSerif}; --font-mono:{fontMono}; --font-sans:{fontSans};">
+		<div class="canvas-toolbar">
+			<button type="button" class="toolbar-back" onclick={goBack} title={i18n.metric_mgmt_close_metric_info()}>
+				<ArrowLeftIcon class="toolbar-icon" />
+				<span>{i18n.metric_mgmt_close()}</span>
+			</button>
+			<div class="toolbar-nav">
+				<button
+					type="button"
+					class="toolbar-nav-btn"
+					disabled={!prevMetric}
+					onclick={goToPrevMetric}
+					title={i18n.metric_mgmt_previous_metric()}><ChevronLeftIcon class="toolbar-icon" /></button
+				>
+				<span class="toolbar-nav-pos">
+					{selectedMetricInFilteredIndex >= 0
+						? `${selectedMetricInFilteredIndex + 1} / ${filteredMetrics.length}`
+						: `— / ${filteredMetrics.length}`}
+				</span>
+				<button
+					type="button"
+					class="toolbar-nav-btn"
+					disabled={!nextMetric}
+					onclick={goToNextMetric}
+					title={i18n.metric_mgmt_next_metric()}><ChevronRightIcon class="toolbar-icon" /></button
+				>
+			</div>
+		</div>
+		<div class="metric-canvas" bind:clientWidth={canvasW} bind:clientHeight={canvasH}>
+			{#if metricsMap}
+				{@const map = metricsMap}
+				<div class="attr-view">
+					<div class="attr-view-header">
+						<div class="attr-view-name">{map.metricLabel}</div>
+						{#if map.metricSubLabel}
+							<div class="attr-view-subname">{map.metricSubLabel}</div>
+						{/if}
+					</div>
+					{#each map.groups as g (g.key)}
+						{@const GIcon = g.icon}
+						<section class="attr-group" class:attr-group-empty={!g.hasValue}>
+							<div class="attr-group-head">
+								<span class="attr-group-ic"><GIcon class="h-4 w-4" /></span>
+								<span class="attr-group-label">{g.label}</span>
+								<span class="attr-group-count">{g.filledCount}/{g.count}</span>
+							</div>
+							<div class="attr-group-body">
+								{#each g.attrs as a (a.key)}
+									<div
+										class="gip-row"
+										class:gip-row-col={a.kind !== 'text'}
+										class:gip-row-empty={!a.hasValue}
+									>
+										<span class="gip-label">{a.label}</span>
+										{#if !a.hasValue}
+											<span class="gip-empty">—</span>
+										{:else if a.kind === 'text'}
+											<span class="gip-val">{a.value}</span>
+										{:else if a.kind === 'chips'}
+											<div class="gip-chips">
+												{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip"
+														>{item}</span
+													>{/each}
+											</div>
+										{:else}
+											<div class="gip-line-cards">
+												{#each a.entries as entry, i (`${a.key}-${i}`)}
+													<div class="gip-line-card">
+														<div class="gip-line-head">
+															<span class="gip-line-loc">{entry.head}</span>
+															{#if entry.lineType}
+																<span class="gip-line-type">{entry.lineType}</span>
+															{/if}
+														</div>
+														{#if entry.content}
+															<div class="gip-line-body">{entry.content}</div>
+														{/if}
+													</div>
+												{/each}
+											</div>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						</section>
+					{/each}
+				</div>
+			{:else}
+				<div class="canvas-empty">
+					<div class="canvas-empty-mark">◎</div>
+					<div class="canvas-empty-title">{i18n.metric_mgmt_select_a_metric()}</div>
+					<div class="canvas-empty-sub">
+						{i18n.metric_mgmt_click_a_metric_from_the()}
+					</div>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/snippet}
@@ -1971,126 +2023,15 @@
 		</aside>
 
 		<!-- ============ RIGHT PANEL ============ -->
-		<section class="right" class:info-split={selectedMetricId != null}>
+		<section class="right">
 			{#if selectedMetricId != null}
 				<button
 					type="button"
-					class="gip-resize-handle gip-resize-left"
+					class="gip-resize-handle sidebar-resize-handle"
 					class:active={sidebarResizing}
 					aria-label={i18n.metric_mgmt_resize_the_metrics_list_panel()}
 					onpointerdown={startSidebarResize}
 					onkeydown={onSidebarResizerKeydown}
-				>
-					<span class="gip-resize-grip" aria-hidden="true"></span>
-				</button>
-				<div
-					class="metric-canvas-wrap metric-info-panel"
-					style:flex-basis={`${gipWidth ?? GIP_WIDTH_DEFAULT}px`}
-				>
-					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title={i18n.metric_mgmt_close_metric_info()}>
-							<ArrowLeftIcon class="toolbar-icon" />
-							<span>{i18n.metric_mgmt_close()}</span>
-						</button>
-						<div class="toolbar-nav">
-							<button
-								type="button"
-								class="toolbar-nav-btn"
-								disabled={!prevMetric}
-								onclick={goToPrevMetric}
-								title={i18n.metric_mgmt_previous_metric()}><ChevronLeftIcon class="toolbar-icon" /></button
-							>
-							<span class="toolbar-nav-pos">
-								{selectedMetricInFilteredIndex >= 0
-									? `${selectedMetricInFilteredIndex + 1} / ${filteredMetrics.length}`
-									: `— / ${filteredMetrics.length}`}
-							</span>
-							<button
-								type="button"
-								class="toolbar-nav-btn"
-								disabled={!nextMetric}
-								onclick={goToNextMetric}
-								title={i18n.metric_mgmt_next_metric()}><ChevronRightIcon class="toolbar-icon" /></button
-							>
-						</div>
-					</div>
-					<div class="metric-canvas" bind:clientWidth={canvasW} bind:clientHeight={canvasH}>
-						{#if metricsMap}
-							{@const map = metricsMap}
-							<div class="attr-view">
-								<div class="attr-view-header">
-									<div class="attr-view-name">{map.metricLabel}</div>
-									{#if map.metricSubLabel}
-										<div class="attr-view-subname">{map.metricSubLabel}</div>
-									{/if}
-								</div>
-								{#each map.groups as g (g.key)}
-									{@const GIcon = g.icon}
-									<section class="attr-group" class:attr-group-empty={!g.hasValue}>
-										<div class="attr-group-head">
-											<span class="attr-group-ic"><GIcon class="h-4 w-4" /></span>
-											<span class="attr-group-label">{g.label}</span>
-											<span class="attr-group-count">{g.filledCount}/{g.count}</span>
-										</div>
-										<div class="attr-group-body">
-											{#each g.attrs as a (a.key)}
-												<div
-													class="gip-row"
-													class:gip-row-col={a.kind !== 'text'}
-													class:gip-row-empty={!a.hasValue}
-												>
-													<span class="gip-label">{a.label}</span>
-													{#if !a.hasValue}
-														<span class="gip-empty">—</span>
-													{:else if a.kind === 'text'}
-														<span class="gip-val">{a.value}</span>
-													{:else if a.kind === 'chips'}
-														<div class="gip-chips">
-															{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip"
-																	>{item}</span
-																>{/each}
-														</div>
-													{:else}
-														<div class="gip-line-cards">
-															{#each a.entries as entry, i (`${a.key}-${i}`)}
-																<div class="gip-line-card">
-																	<div class="gip-line-head">
-																		<span class="gip-line-loc">{entry.head}</span>
-																		{#if entry.lineType}
-																			<span class="gip-line-type">{entry.lineType}</span>
-																		{/if}
-																	</div>
-																	{#if entry.content}
-																		<div class="gip-line-body">{entry.content}</div>
-																	{/if}
-																</div>
-															{/each}
-														</div>
-													{/if}
-												</div>
-											{/each}
-										</div>
-									</section>
-								{/each}
-							</div>
-						{:else}
-							<div class="canvas-empty">
-								<div class="canvas-empty-mark">◎</div>
-								<div class="canvas-empty-title">{i18n.metric_mgmt_select_a_metric()}</div>
-								<div class="canvas-empty-sub">
-									{i18n.metric_mgmt_click_a_metric_from_the()}
-								</div>
-							</div>
-						{/if}
-					</div>
-				</div>
-				<button
-					type="button"
-					class="gip-resize-handle gip-resize-right"
-					class:active={gipResizing}
-					aria-label={i18n.metric_mgmt_resize_the_metric_info_panel()}
-					onpointerdown={startGipResize}
-					onkeydown={onGipResizerKeydown}
 				>
 					<span class="gip-resize-grip" aria-hidden="true"></span>
 				</button>
@@ -3367,6 +3308,7 @@
 	}
 	/* ---------- RIGHT ---------- */
 	.right {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		height: 100%;
@@ -4474,26 +4416,21 @@
 	}
 
 	/* ---- CANVAS (metric attribute map) ---- */
-	.right.info-split {
-		flex-direction: row;
-	}
-	.metric-canvas-wrap {
-		flex: 1 1 0;
+	.metric-shelf-details {
+		flex: 1;
 		min-width: 0;
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
-		border-right: 1px solid var(--ink-line);
-		overflow: hidden;
+		font-family: var(--font-sans);
+		color: var(--text-primary);
 	}
-	.metric-info-panel {
-		flex: 0 0 460px;
-		max-width: min(920px, 70vw);
-		background: var(--page-bg);
-		border-left: 1px solid var(--ink-line);
-		box-shadow:
-			inset 1px 0 0 rgba(212, 162, 76, 0.08),
-			inset -1px 0 0 rgba(212, 162, 76, 0.08);
+	.right .sidebar-resize-handle {
+		position: absolute;
+		left: -7px;
+		top: 0;
+		bottom: 0;
+		width: 14px;
 	}
 	.canvas-toolbar {
 		display: flex;

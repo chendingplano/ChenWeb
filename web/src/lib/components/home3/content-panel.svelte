@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
@@ -101,6 +102,7 @@
 		railOffset = 56,
 		siteConfig,
 		onToggleShelf,
+		onMetricDetailsChange,
 		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
 		onFocusModeChange = (_focused: boolean) => {}
@@ -113,6 +115,7 @@
 		railOffset?: number;
 		siteConfig: SiteConfig;
 		onToggleShelf: () => void;
+		onMetricDetailsChange?: (details: Snippet | null) => void;
 		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 		onFocusModeChange?: (focused: boolean) => void;
@@ -285,9 +288,9 @@
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}
-			<MetricMgmtView {darkMode} {onFocusModeChange} bind:headerVisible={metricsHeaderVisible} />
+			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-gold'}
-			<MetricMgmtView {darkMode} {onFocusModeChange} bind:headerVisible={metricsHeaderVisible} source="testbed" />
+			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} source="testbed" />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}

@@ -35,3 +35,7 @@ Run the ChenWeb web checks and inspect the diff. Verify default mode, switching 
 - Record-ID retrieval and search selections honor the benchmark filters. Changing the benchmark selection clears the current document and its detail panels; older asynchronous responses cannot restore an obsolete selection.
 
 Validation: run `go test ./server/api/kbhandler` (including separate-entry responses and counts for version-only and version/model filters), `bun test ./src/lib/components/home3/metric-benchmark-record.test.ts`, and `bun run check` for Svelte and bilingual message checks. Existing specifications for benchmark scoring document cards describe a different page and remain unchanged.
+
+## Metric details in the Context Info panel
+
+Clicking a metric opens the dashboard’s right Context Info panel and renders the complete metric details there, replacing its generic context content. The central area contains the metric list and document viewer, giving the document the space formerly occupied by the internal detail panel. Existing previous/next navigation, close, attribute groups, and PDF highlighting/page navigation continue to use the page’s selected metric state. Clicking a metric again reopens a closed context panel. Changing documents or benchmark filters clears details; leaving the page releases its context content. The context panel’s existing drag handles control its width. Detail text supports selection and both interface languages.

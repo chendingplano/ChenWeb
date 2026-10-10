@@ -2,7 +2,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, type Snippet } from 'svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import SiteHeader from '../../../routes/semos/components/SiteHeader.svelte';
@@ -76,9 +76,11 @@
 	let railExpanded = $state(false);
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
+	let metricDetails = $state<Snippet | null>(null);
 	let selectedMetrics = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
 	$effect(() => {
+		if (activeMenu?.childId !== 'kb-metrics' && activeMenu?.childId !== 'sysadmin-llm-metrics-gold') metricDetails = null;
 		if (activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark') {
 			selectedMetrics = null;
 		}
@@ -301,6 +303,10 @@
 			{docReviewKey}
 			{siteConfig}
 			onSelectMetrics={(metrics) => (selectedMetrics = metrics)}
+			onMetricDetailsChange={(details) => {
+				metricDetails = details;
+				if (details) shelfOpen = true;
+			}}
 			railOffset={currentRailOffset}
 			onToggleShelf={() => {
 				shelfOpen = !shelfOpen;
@@ -339,6 +345,7 @@
 				{darkMode}
 				{activeMenu}
 				{selectedMetrics}
+				{metricDetails}
 				width={shelfWidth}
 				open={shelfOpen}
 				onDragStart={startShelfDrag}

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m as msg } from '$lib/paraglide/messages.js';
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import BotIcon         from '@lucide/svelte/icons/bot';
 	import ZapIcon         from '@lucide/svelte/icons/zap';
 	import ActivityIcon    from '@lucide/svelte/icons/activity';
@@ -43,6 +43,7 @@
 		darkMode    = true,
 		activeMenu  = null,
 		selectedMetrics = null,
+		metricDetails = null,
 		width       = 280,
 		open        = true,
 		onDragStart,
@@ -50,6 +51,7 @@
 	}: {
 		darkMode:    boolean;
 		activeMenu:  ActiveSelection | null;
+		metricDetails?: Snippet | null;
 		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
 		width:       number;
 		open:        boolean;
@@ -245,7 +247,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <aside
-	class="flex-shrink-0 flex flex-col overflow-y-auto relative"
+	class="flex-shrink-0 flex flex-col overflow-y-auto relative select-text"
 	style="width:{width}px; background:{surface}; border-left:1px solid {borderColor}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
 	<!-- Resize handle (left edge) -->
@@ -257,11 +259,11 @@
 		onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
 	></div>
 
-	<div class="p-4 space-y-4" style="padding-left:12px;">
+	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null}>
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
-				{#if selectedMetrics}{msg.context_shelf_metric_details()}
+				{#if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
 				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
 				{:else if sectionId === 'dashboard'}{msg.context_shelf_system_status()}
@@ -286,7 +288,9 @@
 			</button>
 		</div>
 
-		{#if selectedMetrics}
+		{#if metricDetails}
+			{@render metricDetails?.()}
+		{:else if selectedMetrics}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="grid grid-cols-2 gap-x-3">
 					{#each [
@@ -696,3 +700,13 @@
 		{/if}
 	</div>
 </aside>
+
+<style>
+	.metric-details-shelf {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+	}
+</style>
