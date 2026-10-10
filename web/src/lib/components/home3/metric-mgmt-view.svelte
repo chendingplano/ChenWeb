@@ -3026,7 +3026,7 @@
 	.metric-filter-disclosure {
 		margin: 0 16px 14px;
 		border: 1px solid var(--ink-line-soft);
-		background: color-mix(in srgb, var(--panel-bg-alt) 74%, transparent);
+		background: var(--filter-control-bg);
 	}
 	.metric-filter-toggle {
 		display: flex;
