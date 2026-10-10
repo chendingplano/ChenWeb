@@ -689,24 +689,6 @@
 	});
 
 	$effect(() => {
-		if (!pdfStageEl) return;
-		const ro = new ResizeObserver(() => {
-			const width = Math.floor(pdfStageEl?.clientWidth ?? 0);
-			if (width <= 0 || width === pdfLastRenderWidth) return;
-			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
-			pdfResizeRaf = requestAnimationFrame(() => {
-				void renderPdfPages();
-			});
-		});
-		ro.observe(pdfStageEl);
-		return () => {
-			ro.disconnect();
-			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
-			pdfResizeRaf = 0;
-		};
-	});
-
-	$effect(() => {
 		if (!pdfCanvasHostEl) return;
 		const ro = new ResizeObserver(() => {
 			const w = Math.floor(pdfCanvasHostEl?.clientWidth ?? 0);
@@ -717,7 +699,11 @@
 			});
 		});
 		ro.observe(pdfCanvasHostEl);
-		return () => ro.disconnect();
+		return () => {
+			ro.disconnect();
+			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
+			pdfResizeRaf = 0;
+		};
 	});
 
 	$effect(() => {

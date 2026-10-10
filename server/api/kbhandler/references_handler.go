@@ -53,7 +53,7 @@ SELECT m.id, m.ref_id, COALESCE(m.section,''), COALESCE(m.evidence,''), COALESCE
        m.target_type, m.target_subtype, COALESCE(m.target_title,''), COALESCE(m.target_version,''),
        m.target_content, m.normativity, COALESCE(m.list_kind,''), COALESCE(m.list_mismatch,''),
        COALESCE(m.r1_state,''), COALESCE(m.r2_state,''), m.target_input_id,
-       COALESCE(NULLIF(BTRIM(i.doc_metadata->>'title'),''), i.title, i.name, ''),
+       COALESCE(NULLIF(BTRIM(i.doc_metadata->>'title'),''), i.title, i.staging_filename, ''),
        COALESCE(m.metric_state,''), COALESCE(r.title,''), COALESCE(r.identity_key,''),
 		COALESCE((SELECT jsonb_agg(ri.kind || ': ' || ri.value ORDER BY ri.kind, ri.value)::text
 		          FROM kb.ref_resource_identifiers ri WHERE ri.resource_id = r.id), '[]')
