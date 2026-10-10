@@ -6647,5 +6647,7 @@
 	"references_mgmt_resource_identity": "资源标识",
 	"references_mgmt_identifiers": "标识符",
 	"references_mgmt_source_excerpt": "原文摘录",
-	"references_mgmt_select_reference": "选择一条引用以查看详情。"
+	"references_mgmt_select_reference": "选择一条引用以查看详情。",
+	"references_mgmt_resize_reference_list": "调整参考文献列表面板宽度",
+	"references_mgmt_resize_details_panel": "调整参考文献详情面板宽度"
 }

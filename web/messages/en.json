@@ -6647,5 +6647,7 @@
 	"references_mgmt_resource_identity": "Resource identity",
 	"references_mgmt_identifiers": "Identifiers",
 	"references_mgmt_source_excerpt": "Source excerpt",
-	"references_mgmt_select_reference": "Select a reference to view its details."
+	"references_mgmt_select_reference": "Select a reference to view its details.",
+	"references_mgmt_resize_reference_list": "Resize reference list panel",
+	"references_mgmt_resize_details_panel": "Resize reference details panel"
 }

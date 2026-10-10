@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { m } from '$lib/paraglide/messages.js';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
@@ -13,6 +14,16 @@
 	let pageNo = $state(1);
 	let zoom = $state(0.7);
 	let numPages = $state(0);
+	const REFERENCE_LIST_WIDTH_KEY = 'references:list-width';
+	const REFERENCE_DETAILS_WIDTH_KEY = 'references:details-width';
+	const LIST_WIDTH_MIN = 280;
+	const LIST_WIDTH_MAX = 640;
+	const DETAILS_WIDTH_MIN = 280;
+	const DETAILS_WIDTH_MAX = 640;
+	let referenceListWidth = $state(360);
+	let referenceDetailsWidth = $state(360);
+	let resizing = $state<'list' | 'details' | null>(null);
+	let widthsHydrated = $state(false);
 	let palette = $derived(darkMode ? {
 		bg: '#0E1116', panel: '#161A22', panelAlt: '#1C212C', line: '#2A3140',
 		text: '#EDE7D3', secondary: '#B5AE94', muted: '#7C7560', accent: '#D4A24C'
@@ -20,6 +31,65 @@
 		bg: '#F5F1E8', panel: '#FBF8F0', panelAlt: '#F0EADB', line: '#D7CFB8',
 		text: '#1A1410', secondary: '#5C5345', muted: '#8F8472', accent: '#B8801E'
 	});
+
+	$effect(() => {
+		if (!browser || widthsHydrated) return;
+		const listWidth = Number(localStorage.getItem(REFERENCE_LIST_WIDTH_KEY));
+		const detailsWidth = Number(localStorage.getItem(REFERENCE_DETAILS_WIDTH_KEY));
+		if (Number.isFinite(listWidth) && listWidth >= LIST_WIDTH_MIN && listWidth <= LIST_WIDTH_MAX) {
+			referenceListWidth = listWidth;
+		}
+		if (Number.isFinite(detailsWidth) && detailsWidth >= DETAILS_WIDTH_MIN && detailsWidth <= DETAILS_WIDTH_MAX) {
+			referenceDetailsWidth = detailsWidth;
+		}
+		widthsHydrated = true;
+	});
+
+	let workspaceStyle = $derived(
+		`grid-template-columns:minmax(240px,22%) ${referenceListWidth}px 14px minmax(320px,1fr) 14px ${referenceDetailsWidth}px`
+	);
+
+	function persistPanelWidth(panel: 'list' | 'details', width: number) {
+		if (panel === 'list') {
+			referenceListWidth = Math.max(LIST_WIDTH_MIN, Math.min(LIST_WIDTH_MAX, Math.round(width)));
+			if (browser) localStorage.setItem(REFERENCE_LIST_WIDTH_KEY, String(referenceListWidth));
+		} else {
+			referenceDetailsWidth = Math.max(DETAILS_WIDTH_MIN, Math.min(DETAILS_WIDTH_MAX, Math.round(width)));
+			if (browser) localStorage.setItem(REFERENCE_DETAILS_WIDTH_KEY, String(referenceDetailsWidth));
+		}
+	}
+
+	function startResize(event: PointerEvent, panel: 'list' | 'details') {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = panel === 'list' ? referenceListWidth : referenceDetailsWidth;
+		resizing = panel;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => {
+			const delta = e.clientX - startX;
+			persistPanelWidth(panel, panel === 'list' ? startWidth + delta : startWidth - delta);
+		};
+		const end = () => {
+			resizing = null;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', end);
+			window.removeEventListener('pointercancel', end);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', end, { once: true });
+		window.addEventListener('pointercancel', end, { once: true });
+	}
+
+	function resizeWithKeyboard(event: KeyboardEvent, panel: 'list' | 'details') {
+		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+		event.preventDefault();
+		const current = panel === 'list' ? referenceListWidth : referenceDetailsWidth;
+		const direction = event.key === 'ArrowRight' ? 1 : -1;
+		persistPanelWidth(panel, current + direction * (panel === 'list' ? 16 : -16));
+	}
 
 	async function selectRecord(value: KbInputRecord) {
 		record = value;
@@ -56,7 +126,7 @@
 		<div><div class="eyebrow">{m.references_mgmt_knowledge_system_vol_iii()}</div><h1>{m.references_mgmt_title()}</h1><p>{m.references_mgmt_subtitle()}</p></div>
 		<div class="stats"><small>{m.references_mgmt_record()}</small><strong>{record?.id ?? '—'}</strong><small>{m.references_mgmt_references()}</small><strong>{String(mentions.length).padStart(3, '0')}</strong></div>
 	</header>
-	<div class="workspace">
+	<div class="workspace" style={workspaceStyle}>
 		<aside class="records">
 			<KbInputRecordBrowser {darkMode} instanceKey="references-record-browser" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)} />
 		</aside>
@@ -79,29 +149,35 @@
 				</div>
 			{/if}
 		</section>
+		<button type="button" class="resize-handle" class:active={resizing === 'list'} aria-label={m.references_mgmt_resize_reference_list()} onpointerdown={(event) => startResize(event, 'list')} onkeydown={(event) => resizeWithKeyboard(event, 'list')}>
+			<span class="resize-grip" aria-hidden="true"></span>
+		</button>
 		<section class="document" aria-label={m.references_mgmt_source_document()}>
 			{#if record}
-				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages sidebarTitle={m.references_mgmt_reference_details()} sidebarSettingsKey="references-pdf-sidebar">
-					{#snippet sidebar()}
-						{#if selected}
-							<div class="detail"><div class="detail-label">{m.references_mgmt_selected_reference()}</div><h2>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</h2>
-								<dl>
-									<dt>{m.references_mgmt_type()}</dt><dd>{selected.target_type} / {selected.target_subtype}</dd>
-									<dt>{m.references_mgmt_content()}</dt><dd>{selected.target_content}</dd>
-									<dt>{m.references_mgmt_normativity()}</dt><dd>{selected.normativity}{selected.list_kind ? ` · ${selected.list_kind}` : ''}</dd>
-									<dt>{m.references_mgmt_holding_resolution()}</dt><dd>{selected.r2_state || m.references_mgmt_unresolved()}{selected.target_input_title ? ` · ${selected.target_input_title}` : ''}</dd>
-									<dt>{m.references_mgmt_resource_identity()}</dt><dd>{selected.identity_key || '—'}</dd>
-									<dt>{m.references_mgmt_identifiers()}</dt><dd>{selected.identifiers?.join(', ') || '—'}</dd>
-									<dt>{m.references_mgmt_source_excerpt()}</dt><dd>{selected.evidence || selected.cited_raw || '—'}</dd>
-								</dl>
-							</div>
-						{:else}<p class="notice">{m.references_mgmt_select_reference()}</p>{/if}
-					{/snippet}
-				</PdfViewWindow>
+				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" />
 			{:else}
 				<div class="empty-document">{m.references_mgmt_select_document()}</div>
 			{/if}
 		</section>
+		<button type="button" class="resize-handle" class:active={resizing === 'details'} aria-label={m.references_mgmt_resize_details_panel()} onpointerdown={(event) => startResize(event, 'details')} onkeydown={(event) => resizeWithKeyboard(event, 'details')}>
+			<span class="resize-grip" aria-hidden="true"></span>
+		</button>
+		<aside class="details-panel" aria-label={m.references_mgmt_reference_details()}>
+			<div class="details-heading">{m.references_mgmt_reference_details()}</div>
+			{#if selected}
+				<div class="detail"><div class="detail-label">{m.references_mgmt_selected_reference()}</div><h2>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</h2>
+					<dl>
+						<dt>{m.references_mgmt_type()}</dt><dd>{selected.target_type} / {selected.target_subtype}</dd>
+						<dt>{m.references_mgmt_content()}</dt><dd>{selected.target_content}</dd>
+						<dt>{m.references_mgmt_normativity()}</dt><dd>{selected.normativity}{selected.list_kind ? ` · ${selected.list_kind}` : ''}</dd>
+						<dt>{m.references_mgmt_holding_resolution()}</dt><dd>{selected.r2_state || m.references_mgmt_unresolved()}{selected.target_input_title ? ` · ${selected.target_input_title}` : ''}</dd>
+						<dt>{m.references_mgmt_resource_identity()}</dt><dd>{selected.identity_key || '—'}</dd>
+						<dt>{m.references_mgmt_identifiers()}</dt><dd>{selected.identifiers?.join(', ') || '—'}</dd>
+						<dt>{m.references_mgmt_source_excerpt()}</dt><dd>{selected.evidence || selected.cited_raw || '—'}</dd>
+					</dl>
+				</div>
+			{:else}<p class="notice">{m.references_mgmt_select_reference()}</p>{/if}
+		</aside>
 	</div>
 </div>
 
@@ -113,18 +189,22 @@
 	.heading p{margin:0;color:var(--ref-secondary);font:italic 13px Georgia,serif}
 	.stats{display:grid;grid-template-columns:auto auto;gap:5px 18px;text-align:right;padding:12px 16px;background:var(--ref-panel);border:1px solid var(--ref-line)}
 	.stats strong{font:600 14px 'JetBrains Mono',monospace}
-	.workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(265px,23%) minmax(280px,25%) minmax(400px,1fr);overflow:hidden}
-	.records,.mention-column,.document{min-width:0;min-height:0;border-right:1px solid var(--ref-line);background:var(--ref-panel)}
-	.records{position:relative;overflow:auto}.mention-column{display:flex;flex-direction:column;background:var(--ref-bg)}.document{overflow:hidden;border-right:0;background:var(--ref-bg)}
+	.workspace{flex:1;min-height:0;min-width:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden}
+	.records,.mention-column,.document,.details-panel{min-width:0;min-height:0;border-right:1px solid var(--ref-line);background:var(--ref-panel)}
+	.records{position:relative;overflow:hidden}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0}
 	.column-head{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--ref-line);color:var(--ref-text)}
 	.column-head span{font:10px 'JetBrains Mono',monospace;color:var(--ref-accent);text-transform:uppercase;letter-spacing:.1em}
-	.mention-list{min-height:0;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
-	.mention-card{width:100%;text-align:left;padding:12px;background:var(--ref-panel);border:1px solid var(--ref-line);border-left:3px solid transparent;color:var(--ref-text);cursor:pointer}
+	.mention-list{min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--ref-line) transparent}
+	.mention-list::-webkit-scrollbar,.details-panel::-webkit-scrollbar{width:8px}.mention-list::-webkit-scrollbar-thumb,.details-panel::-webkit-scrollbar-thumb{background:var(--ref-line)}
+	.mention-card{width:100%;min-width:0;overflow:hidden;text-align:left;padding:12px;background:var(--ref-panel);border:1px solid var(--ref-line);border-left:3px solid transparent;color:var(--ref-text);cursor:pointer}
 	.mention-card:hover,.mention-card.active{border-left-color:var(--ref-accent);background:var(--ref-alt)}
-	.card-meta{display:flex;justify-content:space-between;gap:8px;font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase}
-	.mention-card strong{display:block;margin:9px 0 5px;font-size:14px}.mention-card p{margin:0;color:var(--ref-secondary);font-size:12px;line-height:1.5;display:-webkit-box;line-clamp:3;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+	.card-meta{display:flex;justify-content:space-between;gap:8px;font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase}.card-meta span{min-width:0;overflow-wrap:anywhere}
+	.mention-card strong{display:block;margin:9px 0 5px;font-size:14px;overflow-wrap:anywhere}.mention-card p{margin:0;color:var(--ref-secondary);font-size:12px;line-height:1.5;overflow-wrap:anywhere;display:-webkit-box;line-clamp:3;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 	.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}.chips span{padding:3px 6px;border:1px solid var(--ref-line);color:var(--ref-accent);font:9px 'JetBrains Mono',monospace}
 	.notice,.empty-document{padding:24px;color:var(--ref-muted);font-size:13px}.error{color:#c8553d}.empty-document{height:100%;display:grid;place-items:center}
+	.details-heading{height:58px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--ref-line);font-weight:600;color:var(--ref-text)}
 	.detail{padding:16px;color:var(--ref-text)}.detail h2{font:600 19px Georgia,serif;margin:10px 0 16px;overflow-wrap:anywhere}.detail dl{display:grid;grid-template-columns:115px minmax(0,1fr);gap:9px 10px;margin:0}.detail dt{font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase;letter-spacing:.08em}.detail dd{margin:0;font-size:12px;overflow-wrap:anywhere;line-height:1.45}
-	@media(max-width:1000px){.workspace{grid-template-columns:240px minmax(250px,1fr)}.document{grid-column:1/-1;min-height:400px}.heading{min-height:110px}}
+	.resize-handle{width:14px;position:relative;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none;z-index:2}.resize-handle::before{content:'';position:absolute;top:0;bottom:0;left:6px;width:2px;background:var(--ref-line);opacity:.65}.resize-handle:hover::before,.resize-handle.active::before,.resize-handle:focus-visible::before{background:var(--ref-accent);opacity:1}.resize-grip{position:absolute;top:50%;left:50%;width:7px;height:48px;transform:translate(-50%,-50%);border-radius:999px;background:radial-gradient(circle,var(--ref-muted) 22%,transparent 24%) center 6px/5px 10px repeat-y,var(--ref-panel);border:1px solid var(--ref-line)}
+	@media(max-width:1250px){.workspace{grid-template-columns:minmax(220px,20%) minmax(260px,1fr) 14px minmax(300px,1.2fr) 14px minmax(260px,0.9fr)}}
+	@media(max-width:1000px){.workspace{grid-template-columns:minmax(200px,28%) minmax(240px,1fr) 14px minmax(300px,1.2fr) 14px minmax(240px,.9fr)}.heading{min-height:110px}}
 </style>
