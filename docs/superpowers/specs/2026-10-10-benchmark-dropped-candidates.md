@@ -6,6 +6,13 @@ to be shown in the production Metrics page.
 
 ## Storage and saving
 
+Migration `20261010000004_keep_only_run_id_in_testbed_metrics.sql` makes
+`testbed.metrics.run_id` the single stored run ID column and removes the duplicate
+`benchmark_run_id`. Renaming the original stored column preserves values and its
+constraints. The helper writes `run_id` from the unchanged payload field
+`benchmark_run_id`; the run audit table and scoring API/artifacts retain that name.
+Scoring readers join the differently named columns using the full run identity.
+
 Project Goose migration `20261010000003_create_testbed_metrics_dropped.sql` creates
 `testbed.metrics_dropped` and backfills excluded and duplicate candidates from
 `testbed.metric_benchmark_runs.candidates`. Each row retains the complete candidate

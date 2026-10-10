@@ -118,9 +118,9 @@ func ListMetricScoreGoldRuns(c echo.Context) error {
 		return metricScoreHTTPError(c, http.StatusBadRequest, "INVALID_REQUEST")
 	}
 	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), `
-SELECT skill_version, model_name, benchmark_run_id, count(*)
+SELECT skill_version, model_name, run_id, count(*)
 FROM testbed.metrics WHERE input_record_id=$1 AND skill_name='extract-metrics-benchmark'
-GROUP BY skill_version, model_name, benchmark_run_id ORDER BY skill_version DESC, benchmark_run_id DESC`, recordID)
+GROUP BY skill_version, model_name, run_id ORDER BY skill_version DESC, run_id DESC`, recordID)
 	if err != nil {
 		return metricScoreHTTPError(c, http.StatusInternalServerError, "DATABASE_ERROR")
 	}

@@ -32,7 +32,7 @@ type goldMetricOptionsResponse struct {
 const goldMetricOptionsQuery = `
 SELECT skill_version, model_name,
        COUNT(DISTINCT input_record_id) AS record_count,
-       COUNT(DISTINCT benchmark_run_id) AS run_count
+       COUNT(DISTINCT run_id) AS run_count
 FROM testbed.metrics
 GROUP BY skill_version, model_name
 `
