@@ -69,6 +69,7 @@ Schema (goose migration):
 | `decision` | `JSONB` | decision-model details (D4); null for other stages |
 | `row_data` | `JSONB NOT NULL` | the full enriched row as it would have been saved |
 | `event_id` | `TEXT` | same as live rows |
+| `run_id` | `BIGINT` → `kb.doc_process_runs(id)` | indexed; the pipeline run that set the row aside (added 2026-10-10, migration `20261010000001`); null outside a pipeline run |
 | `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | |
 
 `row_data` is JSONB, not a copy of `kb.metrics` columns, so the two tables cannot drift when

@@ -8,7 +8,7 @@ import (
 )
 
 // Drop ids continue after the record's highest existing one (merge mode), and each row is
-// saved with its stage, reason, decision and full row (spec metric-row-soft-drop).
+// saved with its stage, reason, decision, full row and run id (spec metric-row-soft-drop).
 func TestSaveDroppedMetricsNumbersAfterExistingDropIDs(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -21,11 +21,11 @@ func TestSaveDroppedMetricsNumbersAfterExistingDropIDs(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(4))
 	mock.ExpectExec(`INSERT INTO kb.metrics_dropped`).
 		WithArgs(int64(416), "416_drp_5", "7_1", metricDropStageStatementKind, statementKindInspectionRequirement,
-			nil, sqlmock.AnyArg(), "evt-1").
+			nil, sqlmock.AnyArg(), "evt-1", int64(198)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO kb.metrics_dropped`).
 		WithArgs(int64(416), "416_drp_6", "", metricDropStageDecision, openValueChoiceSchedule,
-			`{"choice":"activity_schedule"}`, sqlmock.AnyArg(), "evt-1").
+			`{"choice":"activity_schedule"}`, sqlmock.AnyArg(), "evt-1", int64(198)).
 		WillReturnResult(sqlmock.NewResult(2, 1))
 	mock.ExpectCommit()
 
@@ -34,7 +34,7 @@ func TestSaveDroppedMetricsNumbersAfterExistingDropIDs(t *testing.T) {
 		{Row: map[string]any{"metric_name": "餐厨垃圾收运时间和频次"}, Stage: metricDropStageDecision, Reason: openValueChoiceSchedule,
 			Decision: map[string]any{"choice": "activity_schedule"}},
 	}
-	if err := (MetricsSQLStore{DB: db}).SaveDroppedMetrics(context.Background(), 416, "evt-1", rows); err != nil {
+	if err := (MetricsSQLStore{DB: db}).SaveDroppedMetrics(withRunID(context.Background(), 198), 416, "evt-1", rows); err != nil {
 		t.Fatalf("SaveDroppedMetrics: %v", err)
 	}
 	if rows[0].DropID != "416_drp_5" || rows[1].DropID != "416_drp_6" {

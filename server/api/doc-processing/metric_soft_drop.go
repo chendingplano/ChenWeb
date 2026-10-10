@@ -66,6 +66,11 @@ SELECT COALESCE(MAX(split_part(drop_id, '_drp_', 2)::int), 0)
 FROM kb.metrics_dropped WHERE input_record_id = $1`, inputRecordID).Scan(&maxSeq); err != nil {
 		return fmt.Errorf("(MID_26100802) read max drop id for record_id=%d: %w", inputRecordID, err)
 	}
+	// run_id is the kb.doc_process_runs row of this pipeline run; NULL outside a run.
+	var runID any
+	if id, ok := runIDFromContext(ctx); ok && id > 0 {
+		runID = id
+	}
 	for i := range rows {
 		rows[i].DropID = fmt.Sprintf("%d_drp_%d", inputRecordID, maxSeq+i+1)
 		rowJSON, err := json.Marshal(rows[i].Row)
@@ -79,10 +84,10 @@ FROM kb.metrics_dropped WHERE input_record_id = $1`, inputRecordID).Scan(&maxSeq
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO kb.metrics_dropped
-	(input_record_id, drop_id, candidate_id, drop_stage, drop_reason, decision, row_data, event_id)
-VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6::jsonb, $7::jsonb, NULLIF($8, ''))`,
+	(input_record_id, drop_id, candidate_id, drop_stage, drop_reason, decision, row_data, event_id, run_id)
+VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6::jsonb, $7::jsonb, NULLIF($8, ''), $9)`,
 			inputRecordID, rows[i].DropID, asString(rows[i].Row["candidate_id"]), rows[i].Stage,
-			rows[i].Reason, decision, string(rowJSON), eventID); err != nil {
+			rows[i].Reason, decision, string(rowJSON), eventID, runID); err != nil {
 			return fmt.Errorf("(MID_26100804) insert dropped row %s: %w", rows[i].DropID, err)
 		}
 	}
