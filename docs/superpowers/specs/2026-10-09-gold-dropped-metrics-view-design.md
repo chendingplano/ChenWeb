@@ -22,3 +22,15 @@ Keep view state and list filtering in `metric-mgmt-view.svelte`. Extend the shar
 ## Validation
 
 Run the ChenWeb web checks and inspect the diff. Verify default mode, switching between modes, checkbox behavior, translations, and that existing single-card viewer consumers keep their behavior.
+
+## Metric Benchmark record selection
+
+- The testbed page header is “Metric Benchmark” (“指标基准” in Chinese).
+- Initial load defaults to the newest skill version but shows no input records and displays “Select a model” until a model is chosen.
+- Selecting a model lists `kb.inputs` with benchmark metrics for the selected skill version and model.
+- Manually changing the skill version clears the model and the selected document, then lists all inputs benchmarked at that version across models. The model selector shows “All models”; selecting a model narrows this list. Gold metrics still require a model selection.
+- Each document card shows every distinct matching skill version/model pair. Documents remain unique and pagination counts documents, not benchmark runs.
+- The existing `GET /api/v1/kb/inputs?has_gold_metrics=true` response includes an optional `gold_metric_runs` array per record, containing `skill_version` and `model_name`. These pairs honor the same version/model filters as the input list and are fetched only for the authorized page of documents.
+- Record-ID retrieval and search selections honor the benchmark filters. Changing the benchmark selection clears the current document and its detail panels; older asynchronous responses cannot restore an obsolete selection.
+
+Validation: run `go test ./server/api/kbhandler` (including version-only and version/model metadata cases) and `bun run check` for Svelte and bilingual message checks. Existing specifications for benchmark scoring document cards describe a different page and remain unchanged.

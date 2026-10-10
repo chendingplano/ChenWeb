@@ -2,6 +2,7 @@ package kbhandler
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -163,4 +164,45 @@ func ListGoldMetricOptions(c echo.Context) error {
 		SkillVersions: versions,
 		Options:       options,
 	})
+}
+
+// attachGoldMetricRuns annotates only the authorized, paginated input list with
+// its matching benchmark version/model pairs, without duplicating documents.
+func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsFilters) error {
+	if len(records) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(records)+2)
+	placeholders := make([]string, 0, len(records))
+	indices := make(map[int64]int, len(records))
+	for i, record := range records {
+		args = append(args, record.ID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		indices[record.ID] = i
+	}
+	where := "input_record_id IN (" + strings.Join(placeholders, ", ") + ")"
+	for _, filter := range []struct{ column, value string }{
+		{"skill_version", filters.GoldSkillVersion}, {"model_name", filters.GoldModelName},
+	} {
+		if value := strings.TrimSpace(filter.value); value != "" {
+			args = append(args, value)
+			where += fmt.Sprintf(" AND %s = $%d", filter.column, len(args))
+		}
+	}
+	rows, err := db.Query("SELECT DISTINCT input_record_id, skill_version, model_name FROM testbed.metrics WHERE "+where+" ORDER BY input_record_id, skill_version, model_name", args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var run goldMetricRun
+		if err := rows.Scan(&id, &run.SkillVersion, &run.ModelName); err != nil {
+			return err
+		}
+		if i, ok := indices[id]; ok {
+			records[i].GoldMetricRuns = append(records[i].GoldMetricRuns, run)
+		}
+	}
+	return rows.Err()
 }

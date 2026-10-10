@@ -43,6 +43,7 @@
 		status?: string;
 		description?: string;
 		badges?: string[];
+		benchmarkRuns?: string[];
 	};
 
 	let {
@@ -64,7 +65,8 @@
 		onError = () => {},
 		onFiltersChange = () => {},
 		extraControls,
-		listParams
+		listParams,
+		listPausedMessage = ''
 	}: {
 		darkMode?: boolean;
 		instanceKey: string;
@@ -87,6 +89,7 @@
 		extraControls?: Snippet;
 		// Host-specific list filters merged into every list request; a change reloads page 1.
 		listParams?: Partial<ListKbInputsParams>;
+		listPausedMessage?: string;
 	} = $props();
 
 	// Fallbacks only. The host view supplies the real tokens (--panel-bg, --ink-line,
@@ -178,7 +181,7 @@
 
 	// Reload when the host's listParams change. The first run only records the
 	// key: the initial-load effect above already fetched with these params.
-	let listParamsKey = $derived(JSON.stringify(listParams ?? {}));
+	let listParamsKey = $derived(JSON.stringify([listParams ?? {}, listPausedMessage]));
 	let lastListParamsKey: string | null = null;
 	$effect(() => {
 		const key = listParamsKey;
@@ -188,7 +191,15 @@
 			return;
 		}
 		lastListParamsKey = key;
-		untrack(() => void loadRecords(1, selectedRecordIdInternal));
+		untrack(() => {
+			if (listParams?.hasGoldMetrics) {
+				emitSelectedRecord(null);
+				results = [];
+				pinnedMode = false;
+				recordIdInput = '';
+			}
+			void loadRecords(1, selectedRecordIdInternal);
+		});
 	});
 
 	function saveSettings(next: Partial<{ listWidth: number; pageSize: number; highlightColor: string }>) {
@@ -277,7 +288,20 @@
 		list.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'smooth' });
 	}
 
+	let listRequestVersion = 0;
 	async function loadRecords(page = listPage, preferredRecordId = selectedRecordIdInternal) {
+		const requestVersion = ++listRequestVersion;
+		if (listPausedMessage) {
+			results = [];
+			listTotal = 0;
+			listPage = 1;
+			listJumpInput = '1';
+			loading = false;
+			loadError = '';
+			emitSelectedRecord(null);
+			onResultsChange({ results, total: 0, page: 1 });
+			return;
+		}
 		loading = true;
 		loadError = '';
 		try {
@@ -289,8 +313,10 @@
 					scopeToActiveStore,
 					filters
 				}),
-				...listParams
+				...listParams,
+				...(listParams?.hasGoldMetrics && recordIdInput.trim() ? { recordId: recordIdInput.trim() } : {})
 			});
+			if (requestVersion !== listRequestVersion) return;
 			results = response.results ?? [];
 			listTotal = Math.max(0, response.total ?? 0);
 			listPage = Math.max(1, response.page ?? page);
@@ -306,6 +332,7 @@
 			emitSelectedRecord(nextRecord, nextRecordId !== preferredRecordId);
 			void scrollSelectedIntoView();
 		} catch (error) {
+			if (requestVersion !== listRequestVersion) return;
 			results = [];
 			listTotal = 0;
 			listPage = 1;
@@ -316,11 +343,16 @@
 			lastEmittedRecordId = null;
 			onError(error instanceof Error ? error : new Error(loadError));
 		} finally {
-			loading = false;
+			if (requestVersion === listRequestVersion) loading = false;
 		}
 	}
 
 	async function retrieveRecord() {
+		if (listPausedMessage || listParams?.hasGoldMetrics) {
+			const id = Number(recordIdInput.trim());
+			await loadRecords(1, Number.isInteger(id) && id > 0 ? id : null);
+			return;
+		}
 		const recordId = Number(recordIdInput.trim());
 		loadError = '';
 		if (recordIdInput.trim() === '') {
@@ -439,6 +471,12 @@
 		onSelect={async (records, nextFilters) => {
 			recordIdInput = '';
 			applyFilters(nextFilters);
+			if (listPausedMessage || listParams?.hasGoldMetrics) {
+				pinnedMode = false;
+				if (records.length === 1) recordIdInput = String(records[0].id);
+				await loadRecords(1, records.length === 1 ? records[0].id : null);
+				return;
+			}
 			if (records.length === 1) {
 				// Pin the picked record and emit it directly. Re-querying page 1
 				// here (loadRecords) silently drops the selection whenever the
@@ -525,7 +563,9 @@
 		</div>
 
 		<div class="result-list" bind:this={resultListEl}>
-			{#if loading}
+			{#if listPausedMessage}
+				<div class="empty-state">{listPausedMessage}</div>
+			{:else if loading}
 				<div class="empty-state">{m.kb_input_record_browser_loading_records()}</div>
 			{:else if results.length === 0}
 				<div class="empty-state">
@@ -576,6 +616,9 @@
 							</div>
 							<div class="card-name">{display.title}</div>
 							<div class="card-desc">{display.meta?.[0] ? m.kb_input_record_browser_doc_no({ meta: display.meta[0] }) : m.kb_input_record_browser_doc_no_2()}</div>
+							{#each display.benchmarkRuns ?? [] as run}
+								<div class="card-desc">{run}</div>
+							{/each}
 							<div class="card-foot">
 								<span class="chip chip-quiet">{display.description || formatMaybeDate(record.create_time)}</span>
 							</div>

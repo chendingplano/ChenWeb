@@ -15,6 +15,7 @@ const BASE = '/api/v1/kb';
 export type ParseState = 'all' | 'pending' | 'parsing' | 'parsed_success' | 'parsed_failed';
 
 export type KbInputRecord = {
+	gold_metric_runs?: Array<{ skill_version: string; model_name: string }>;
 	id: number;
 	name?: string;
 	parser_name?: string;

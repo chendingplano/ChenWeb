@@ -84,11 +84,13 @@
 
 	// Gold-metrics filters (source 'testbed'): which skill version and model's
 	// benchmark run to show. The version defaults to the newest; no model is
-	// picked by default, and the user is prompted to choose one.
+	// picked by default, and the list waits for a model. Manually choosing a
+	// version enables browsing documents across all models for that version.
 	let goldSkillVersions = $state<string[]>([]);
 	let goldOptions = $state<GoldMetricOption[]>([]);
 	let goldSkillVersion = $state('');
 	let goldModelName = $state('');
+	let goldVersionSelected = $state(false);
 	let goldOptionsError = $state('');
 	const goldModelNames = $derived(
 		goldOptions.filter((o) => o.skill_version === goldSkillVersion).map((o) => o.model_name)
@@ -115,14 +117,14 @@
 
 	function handleGoldSkillVersionChange(event: Event) {
 		goldSkillVersion = (event.currentTarget as HTMLSelectElement).value;
-		// A model with no run under the new version would show nothing; make the user pick again.
-		if (!goldModelNames.includes(goldModelName)) goldModelName = '';
-		if (currentInput) void loadMetricsForRecord(currentInput.id);
+		goldModelName = '';
+		goldVersionSelected = true;
+		clearBenchmarkRecord();
 	}
 
 	function handleGoldModelChange(event: Event) {
 		goldModelName = (event.currentTarget as HTMLSelectElement).value;
-		if (currentInput) void loadMetricsForRecord(currentInput.id);
+		clearBenchmarkRecord();
 	}
 
 	function handleMetricViewChange(event: Event) {
@@ -1041,7 +1043,23 @@
 			: i18n.metric_mgmt_dropped_title_decision({ stage: m.drop_stage ?? '', probability: p.toFixed(2) });
 	}
 
+	let metricLoadVersion = 0;
+	function clearBenchmarkRecord() {
+		metricLoadVersion++;
+		currentInput = null;
+		metrics = [];
+		rawLines = [];
+		selectedMetricId = null;
+		globalPicks = [];
+		loading = false;
+		rawLoading = false;
+		errorMsg = '';
+		rawError = '';
+		setMetricFocusNotified(false);
+	}
+
 	async function loadMetricsForRecord(id: number) {
+		const requestVersion = ++metricLoadVersion;
 		// A record selection must reset every panel-level filter, otherwise a
 		// stale confidence filter keeps hiding this record's metrics. The global
 		// search dialog state and globalPicks are deliberately kept: clicking a
@@ -1085,15 +1103,19 @@
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
 			]);
+			if (requestVersion !== metricLoadVersion) return;
 			metrics = metricRes.results ?? [];
 			currentInput = inputRes?.record ?? null;
 			rawLines = rawRes?.lines ?? [];
 			rawError = rawRes ? '' : i18n.metric_mgmt_failed_to_load_raw_lines();
 		} catch (err) {
+			if (requestVersion !== metricLoadVersion) return;
 			errorMsg = err instanceof Error ? err.message : i18n.metric_mgmt_failed_to_retrieve_metrics();
 		} finally {
-			rawLoading = false;
-			loading = false;
+			if (requestVersion === metricLoadVersion) {
+				rawLoading = false;
+				loading = false;
+			}
 		}
 	}
 
@@ -1236,7 +1258,12 @@
 			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
 			status: record.type?.trim() || '—',
 			description: formatMaybeDate(record.create_time),
-			badges: [record.type?.trim() || '—']
+			badges: [record.type?.trim() || '—'],
+			benchmarkRuns: source === 'testbed'
+				? (record.gold_metric_runs ?? []).map((run) => i18n.metric_mgmt_benchmark_run({
+					version: run.skill_version, model: run.model_name
+				}))
+				: []
 		};
 	}
 
@@ -1535,7 +1562,13 @@
 	<header id="metrics-header" class="header" hidden={!headerVisible}>
 		<div class="header-left">
 			<div class="eyebrow">{i18n.metric_mgmt_knowledge_system_vol_iii()}</div>
-			<h1 class="display">{i18n.metric_mgmt_metrics()};<span class="amp">&amp;</span>&{i18n.metric_mgmt_provenance()}</h1>
+			<h1 class="display">
+				{#if source === 'testbed'}
+					{i18n.metric_mgmt_benchmark_title()}
+				{:else}
+					{i18n.metric_mgmt_metrics()};<span class="amp">&amp;</span>&{i18n.metric_mgmt_provenance()}
+				{/if}
+			</h1>
 			<div class="subtitle">
 				{i18n.metric_mgmt_a_reading_room_for_extracted()}
 			</div>
@@ -1580,6 +1613,9 @@
 					emptySubtitle={i18n.metric_mgmt_use_search_or_retrieve_to()}
 					autoSelectFirstRecord={false}
 					selectedRecordId={currentInput?.id ?? null}
+					listPausedMessage={source === 'testbed' && !goldVersionSelected && goldModelName === ''
+						? i18n.metric_mgmt_select_model()
+						: ''}
 					mapRecord={mapBrowserRecord}
 					onSelect={handleUserRecordSelect}
 					onError={(error) => {
@@ -1604,11 +1640,11 @@
 									<span class="gold-filter-label">{i18n.metric_mgmt_gold_model_name()}</span>
 									<select
 										class="toolbar-select"
-										class:gold-filter-required={goldModelName === ''}
+										class:gold-filter-required={goldModelName === '' && !goldVersionSelected}
 										value={goldModelName}
 										onchange={handleGoldModelChange}
 									>
-										<option value="" disabled>{i18n.metric_mgmt_gold_select_model_option()}</option>
+										<option value="" disabled={!goldVersionSelected}>{goldVersionSelected ? i18n.metric_mgmt_all_models() : i18n.metric_mgmt_gold_select_model_option()}</option>
 										{#each goldModelNames as name (name)}
 											<option value={name}>{name}</option>
 										{/each}
@@ -1616,7 +1652,7 @@
 								</label>
 								{#if goldOptionsError}
 									<div class="gold-filter-hint error">{goldOptionsError}</div>
-								{:else if goldModelName === ''}
+								{:else if goldModelName === '' && !goldVersionSelected}
 									<div class="gold-filter-hint">{i18n.metric_mgmt_gold_select_model_prompt()}</div>
 								{/if}
 							</div>

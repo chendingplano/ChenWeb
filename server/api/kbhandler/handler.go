@@ -26,7 +26,13 @@ const (
 	kbInputTablePlural   = "kb.inputs"
 )
 
+type goldMetricRun struct {
+	SkillVersion string `json:"skill_version"`
+	ModelName    string `json:"model_name"`
+}
+
 type inputRecord struct {
+	GoldMetricRuns    []goldMetricRun            `json:"gold_metric_runs,omitempty"`
 	ID                int64                      `json:"id"`
 	Name              *string                    `json:"name,omitempty"`
 	ParserName        *string                    `json:"parser_name,omitempty"`
@@ -316,6 +322,16 @@ func ListInputs(c echo.Context) error {
 			Status:   false,
 			ErrorMsg: "failed to retrieve kb inputs (CWB_KB_022)",
 		})
+	}
+
+	if filters.HasGoldMetrics {
+		if err := attachGoldMetricRuns(db, results, filters); err != nil {
+			logger.Error("query benchmark runs for kb inputs failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status:   false,
+				ErrorMsg: "failed to retrieve benchmark runs (CWB_KB_025)",
+			})
+		}
 	}
 
 	if results == nil {
