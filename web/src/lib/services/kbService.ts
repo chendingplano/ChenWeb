@@ -255,17 +255,21 @@ export type KbMetricRecord = {
 	/** kb.metrics.provision_id (ADR 2026100603 DR2); null until linked. */
 	provision_id?: number | null;
 	table_context?: TableContextWindow[];
-	/** Set on rows from kb.metrics_dropped (only with includeDropped); metric_id is then the drop_id. */
+	/** Set on production drops or benchmark candidates (only with includeDropped). */
 	dropped?: boolean;
+	run_id?: string;
+	skill_name?: string;
+	skill_version?: string;
 	drop_stage?: 'llm_tag' | 'statement_kind' | 'decision_model' | string;
 	drop_reason?: string;
-	drop_decision?: { choice?: string; probabilities?: Record<string, number>; error?: string } | null;
+	drop_decision?: { choice?: string; probabilities?: Record<string, number>; error?: string; decision?: string; rule_id?: string; reason?: string } | null;
 };
 
 export type ListKbMetricsResponse = {
 	status: boolean;
 	results: KbMetricRecord[];
 	total: number;
+	run_id?: string;
 };
 
 export type GetKbMetricResponse = {
@@ -301,7 +305,7 @@ export async function listKbMetrics(
 ): Promise<ListKbMetricsResponse> {
 	const params = new URLSearchParams({ input_record_id: String(inputRecordId) });
 	if (source !== 'kb') params.set('source', source);
-	if (source === 'kb' && opts.includeDropped) params.set('include_dropped', 'true');
+	if (opts.includeDropped) params.set('include_dropped', 'true');
 	if (source === 'testbed') {
 		if (gold.skillVersion) params.set('skill_version', gold.skillVersion);
 		if (gold.modelName) params.set('model_name', gold.modelName);

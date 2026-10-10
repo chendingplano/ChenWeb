@@ -5563,6 +5563,7 @@
 	"metric_mgmt_provenance": "来源",
 	"metric_mgmt_a_reading_room_for_extracted": "提取出的指标的阅览室 — 定位、核对、回到来源。",
 	"metric_mgmt_record": "记录",
+	"metric_mgmt_run_id": "运行 ID",
 	"metric_mgmt_type": "类型",
 	"metric_mgmt_metrics_2": "指标",
 	"metric_mgmt_fold_record_list": "收起记录列表",

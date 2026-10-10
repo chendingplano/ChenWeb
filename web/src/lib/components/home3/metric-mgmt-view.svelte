@@ -130,7 +130,16 @@
 
 	function handleMetricViewChange(event: Event) {
 		metricView = (event.currentTarget as HTMLSelectElement).value as 'gold' | 'dropped';
-		if (currentInput) void loadMetricsForRecord(currentInput.id);
+		metricNameFilter = '';
+		keywordFilter = '';
+		descriptionFilter = '';
+		confidenceFilter = '';
+		metricIdQuery = '';
+		metricIdError = '';
+		// Benchmark loads contain both sets from one run; switching views keeps that run.
+		selectedMetricId = null;
+		setMetricFocusNotified(false);
+		if (source !== 'testbed' && currentInput) void loadMetricsForRecord(currentInput.id);
 	}
 
 	// ---------- Aesthetic tokens: "archival reading room" ----------
@@ -185,7 +194,7 @@
 	let metricIdError = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	const goldModelMissing = $derived(
-		source === 'testbed' && metricView === 'gold' && metricBenchmarkSelection(currentInput, goldSkillVersion, goldModelName).modelName === ''
+		source === 'testbed' && metricBenchmarkSelection(currentInput, goldSkillVersion, goldModelName).modelName === ''
 	);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
@@ -472,7 +481,7 @@
 	// ---------- Keyword filter + metric name nav ----------
 	let allKeywords = $derived.by(() => {
 		const set = new Set<string>();
-		for (const m of metrics) {
+		for (const m of visibleMetrics) {
 			for (const kw of m.metric_keywords ?? []) set.add(kw);
 			for (const kw of m.metric_keywords_en ?? []) set.add(kw);
 		}
@@ -961,7 +970,7 @@
 	function findMetricById(raw: string): KbMetricRecord | undefined {
 		const q = raw.trim().toLowerCase();
 		if (!q) return undefined;
-		return metrics.find(
+		return visibleMetrics.find(
 			(m) => (m.metric_id ?? '').trim().toLowerCase() === q || String(m.id) === q
 		);
 	}
@@ -1050,9 +1059,9 @@
 					? Promise.resolve({ results: [] as KbMetricRecord[] })
 					: listKbMetrics(
 							id,
-							metricView === 'dropped' ? 'kb' : source,
+							source,
 							benchmarkSelection,
-							{ includeDropped: metricView === 'dropped' }
+							{ includeDropped: source === 'testbed' || metricView === 'dropped' }
 						),
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
@@ -1398,9 +1407,9 @@
 			});
 			const refreshed = await listKbMetrics(
 				currentInput.id,
-				metricView === 'dropped' ? 'kb' : source,
+				source,
 				{},
-				{ includeDropped: metricView === 'dropped' }
+				{ includeDropped: source === 'testbed' || metricView === 'dropped' }
 			);
 			metrics = refreshed.results ?? [];
 			closeAddMetricDialog();
@@ -1633,7 +1642,7 @@
 			<span class="meta-label">{i18n.metric_mgmt_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
 			<span class="meta-label">{i18n.metric_mgmt_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
 			<span class="meta-label">{i18n.metric_mgmt_metrics_2()}</span><span class="meta-val"
-				>{metrics.length.toString().padStart(3, '0')}</span
+				>{visibleMetrics.length.toString().padStart(3, '0')}</span
 			>
 			<button
 				type="button"
@@ -1779,7 +1788,7 @@
 							}}
 						/>
 						<datalist id="metric-ids-datalist">
-							{#each metrics as m (m.id)}
+							{#each visibleMetrics as m (m.id)}
 								{#if m.metric_id}<option value={m.metric_id}>{metricNameOf(m)}</option>{/if}
 							{/each}
 						</datalist>
@@ -1953,7 +1962,7 @@
 						<div class="empty-title">{i18n.metric_mgmt_gold_select_model_title()}</div>
 						<div class="empty-sub">{i18n.metric_mgmt_gold_select_model_prompt()}</div>
 					</div>
-				{:else if !loading && metrics.length === 0}
+				{:else if !loading && visibleMetrics.length === 0}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
 						<div class="empty-title">{i18n.metric_mgmt_no_metrics_yet()}</div>

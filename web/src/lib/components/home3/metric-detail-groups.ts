@@ -166,6 +166,7 @@ export function buildMetricGroupAttrs(
 	const metadata: AttrDef[] = [
 		textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
 		textAttr('input_record_id', 'Document ID', HashIcon, String(m.input_record_id), true),
+		...(m.run_id ? [textAttr('run_id', msg.metric_mgmt_run_id(), HashIcon, m.run_id, true)] : []),
 		textAttr(
 			'confidence',
 			'Confidence',

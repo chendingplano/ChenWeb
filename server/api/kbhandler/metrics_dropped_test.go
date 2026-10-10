@@ -70,3 +70,24 @@ func TestDroppedMetricRecordMapsRowData(t *testing.T) {
 		t.Fatalf("statement_kind drop: %+v, %v", r, err)
 	}
 }
+
+func TestBenchmarkDroppedMetricRecordPreservesCandidateFields(t *testing.T) {
+	data := []byte(`{"candidate_id":"c7","decision":"excluded","rule_id":"X18","reason":"No value in the source",
+		"metric_name":"Mass flow","metric_subject":"Water","metric_unit":"kg/s","metric_desc":"Definition only",
+		"source_line_spans":["116"],"source_table_rows":[{"line":116,"rows":["r2"]}]}`)
+	r, err := benchmarkDroppedMetricRecord(7, 753, "c7", "X18", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Dropped || *r.MetricID != "c7" || *r.MetricName != "Mass flow" || *r.MetricSubject != "Water" || *r.MetricUnit != "kg/s" || *r.MetricDesc != "Definition only" {
+		t.Fatalf("lost candidate fields: %+v", r)
+	}
+	if *r.DropStage != "benchmark_rule" || *r.DropReason != "X18" || string(r.DropDecision) != string(data) || len(r.SourceTableRows) == 0 {
+		t.Fatalf("lost candidate audit or table references: %+v", r)
+	}
+	legacy := []byte(`{"candidate_id":"c8","decision":"excluded","reason":"Heading","evidence_quote":"Scope","source_line_spans":["1"]}`)
+	r, err = benchmarkDroppedMetricRecord(8, 753, "c8", "excluded", legacy)
+	if err != nil || *r.MetricName != "Scope" || *r.MetricDesc != "Heading" || r.MetricValue != nil {
+		t.Fatalf("legacy candidate fallback: %+v, %v", r, err)
+	}
+}

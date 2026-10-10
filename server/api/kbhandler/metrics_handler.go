@@ -77,10 +77,13 @@ type metricRecord struct {
 	// TableContext is built at read time from SourceTableRows: header + matched rows
 	// + one neighbor data row either side. Never stored.
 	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
-	// Dropped rows (openspec change metric-row-soft-drop-decision-model) come from
-	// kb.metrics_dropped and are returned only with include_dropped=true. For them
-	// MetricID is the drop_id and ID is the negated kb.metrics_dropped.id.
+	// Dropped rows come from kb.metrics_dropped or testbed.metrics_dropped and are
+	// returned only with include_dropped=true. MetricID is the production drop_id
+	// or benchmark candidate_id; ID is the negated ID within the selected table.
 	Dropped      bool            `json:"dropped,omitempty"`
+	RunID        string          `json:"run_id,omitempty"`
+	SkillName    string          `json:"skill_name,omitempty"`
+	SkillVersion string          `json:"skill_version,omitempty"`
 	DropStage    *string         `json:"drop_stage,omitempty"`
 	DropReason   *string         `json:"drop_reason,omitempty"`
 	DropDecision json.RawMessage `json:"drop_decision,omitempty"`
@@ -90,6 +93,7 @@ type listMetricsResponse struct {
 	Status  bool           `json:"status"`
 	Results []metricRecord `json:"results"`
 	Total   int            `json:"total"`
+	RunID   string         `json:"run_id,omitempty"`
 }
 
 type metricDetailResponse struct {
@@ -144,11 +148,25 @@ func firstMetricSourceLine(spans json.RawMessage) int {
 	return int(^uint(0) >> 1)
 }
 
-// testbedMetricsQuery reads the latest benchmark run of testbed.metrics (gold
-// metrics, see the extract-metrics-benchmark skill) for one skill version ($2) and,
-// when $3 is non-empty, one model, in the same column order as the kb.metrics query
-// in ListMetrics; columns testbed lacks are NULL. A run is identified by
-// (skill_name, skill_version, model_name, benchmark_run_id), not the run ID alone.
+// Resolve once, then read both accepted and dropped rows using this full identity.
+// A new benchmark saved between the two reads cannot mix runs in the response.
+const selectBenchmarkRunQuery = `
+SELECT skill_name, skill_version, model_name, benchmark_run_id
+FROM testbed.metric_benchmark_runs
+WHERE input_record_id = $1 AND skill_version = $2 AND ($3 = '' OR model_name = $3)
+ORDER BY created_at DESC, benchmark_run_id DESC, skill_name ASC, model_name ASC
+LIMIT 1`
+
+type benchmarkRunKey struct {
+	SkillName, SkillVersion, ModelName, RunID string
+}
+
+func (run benchmarkRunKey) queryArgs(inputID int64) []any {
+	return []any{inputID, run.SkillName, run.SkillVersion, run.ModelName, run.RunID}
+}
+
+// testbedMetricsQuery reads an explicitly resolved run, in the same column order
+// as the kb.metrics query in ListMetrics; columns testbed lacks are NULL.
 const testbedMetricsQuery = `
 SELECT
     m.id, m.input_record_id, m.metric_id, NULL::text AS event_id, COALESCE(i.staging_filename, '') AS input_filename,
@@ -168,14 +186,7 @@ SELECT
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
-  AND (m.skill_name, m.skill_version, m.model_name, m.benchmark_run_id) = (
-    SELECT t.skill_name, t.skill_version, t.model_name, t.benchmark_run_id FROM testbed.metrics t
-    WHERE t.input_record_id = $1
-      AND t.skill_version = $2
-      AND ($3 = '' OR t.model_name = $3)
-    ORDER BY t.created_at DESC, t.id DESC
-    LIMIT 1
-  )
+  AND (m.skill_name, m.skill_version, m.model_name, m.run_id) = ($2, $3, $4, $5)
 ORDER BY m.id ASC
 `
 
@@ -245,6 +256,7 @@ WHERE m.input_record_id = $1
 ORDER BY m.id ASC
 `
 	args := []any{inputID}
+	var benchmarkRun benchmarkRunKey
 	if source == "testbed" {
 		skillVersion := strings.TrimSpace(c.QueryParam("skill_version"))
 		modelName := strings.TrimSpace(c.QueryParam("model_name"))
@@ -259,8 +271,17 @@ ORDER BY m.id ASC
 			}
 		}
 		logger.Info("list gold metrics", "input_record_id", inputID, "skill_version", skillVersion, "model_name", modelName)
+		err = db.QueryRowContext(c.Request().Context(), selectBenchmarkRunQuery, inputID, skillVersion, modelName).
+			Scan(&benchmarkRun.SkillName, &benchmarkRun.SkillVersion, &benchmarkRun.ModelName, &benchmarkRun.RunID)
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusOK, listMetricsResponse{Status: true, Results: []metricRecord{}})
+		}
+		if err != nil {
+			logger.Error("resolve benchmark run failed", "input_record_id", inputID, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to resolve benchmark run (CWB_KB_M_025)"})
+		}
 		query = testbedMetricsQuery
-		args = append(args, skillVersion, modelName)
+		args = benchmarkRun.queryArgs(inputID)
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -325,6 +346,9 @@ ORDER BY m.id ASC
 			v := isExplicit.Bool
 			r.IsExplicitMetric = &v
 		}
+		if source == "testbed" {
+			r.RunID, r.SkillName, r.SkillVersion = benchmarkRun.RunID, benchmarkRun.SkillName, benchmarkRun.SkillVersion
+		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -334,10 +358,15 @@ ORDER BY m.id ASC
 			ErrorMsg: "failed to iterate kb metrics (CWB_KB_M_022)",
 		})
 	}
-	if source != "testbed" && c.QueryParam("include_dropped") == "true" {
-		dropped, err := listDroppedMetrics(c.Request().Context(), db, inputID)
+	if c.QueryParam("include_dropped") == "true" {
+		var dropped []metricRecord
+		if source == "testbed" {
+			dropped, err = listBenchmarkDroppedMetrics(c.Request().Context(), db, inputID, benchmarkRun)
+		} else {
+			dropped, err = listDroppedMetrics(c.Request().Context(), db, inputID)
+		}
 		if err != nil {
-			logger.Error("query kb.metrics_dropped failed", "input_record_id", inputID, "err", err)
+			logger.Error("query dropped metrics failed", "source", source, "input_record_id", inputID, "run_id", benchmarkRun.RunID, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
 				Status:   false,
 				ErrorMsg: "failed to retrieve dropped metrics (CWB_KB_M_024)",
@@ -359,6 +388,7 @@ ORDER BY m.id ASC
 		Status:  true,
 		Results: out,
 		Total:   len(out),
+		RunID:   benchmarkRun.RunID,
 	})
 }
 
