@@ -84,20 +84,20 @@
 	const metricsEditable = $derived(source === 'kb' && metricView === 'gold');
 
 	// Gold-metrics filters (source 'testbed'): which skill version and model's
-	// benchmark run to show. The version defaults to the newest; no model is
-	// picked by default, and the list waits for a model. Manually choosing a
-	// version enables browsing documents across all models for that version.
+	// benchmark run to show. Default to the newest version across all models;
+	// selecting a model narrows the benchmark list.
 	let goldSkillVersions = $state<string[]>([]);
 	let goldOptions = $state<GoldMetricOption[]>([]);
 	let goldSkillVersion = $state('');
 	let goldModelName = $state('');
-	let goldVersionSelected = $state(false);
+	let goldOptionsLoading = $state(true);
 	let goldOptionsError = $state('');
 	const goldModelNames = $derived(
 		goldOptions.filter((o) => o.skill_version === goldSkillVersion).map((o) => o.model_name)
 	);
 
 	async function loadGoldOptions() {
+		goldOptionsLoading = true;
 		goldOptionsError = '';
 		try {
 			const res = await listGoldMetricOptions();
@@ -106,6 +106,8 @@
 			if (!goldSkillVersions.includes(goldSkillVersion)) goldSkillVersion = goldSkillVersions[0] ?? '';
 		} catch (err) {
 			goldOptionsError = err instanceof Error ? err.message : i18n.metric_mgmt_gold_options_failed();
+		} finally {
+			goldOptionsLoading = false;
 		}
 	}
 
@@ -116,7 +118,6 @@
 	function handleGoldSkillVersionChange(event: Event) {
 		goldSkillVersion = (event.currentTarget as HTMLSelectElement).value;
 		goldModelName = '';
-		goldVersionSelected = true;
 		clearBenchmarkRecord();
 	}
 
@@ -1617,8 +1618,10 @@
 					autoSelectFirstRecord={false}
 					selectedRecordId={currentInput?.id ?? null}
 					selectedRecordKey={currentInput ? kbInputRecordKey(currentInput) : null}
-					listPausedMessage={source === 'testbed' && !goldVersionSelected && goldModelName === ''
-						? i18n.metric_mgmt_select_model()
+					listPausedMessage={source === 'testbed' && (goldOptionsLoading || !goldSkillVersion)
+						? goldOptionsError || (goldOptionsLoading
+							? i18n.kb_input_record_browser_loading_records()
+							: i18n.metric_mgmt_no_records_yet())
 						: ''}
 					mapRecord={mapBrowserRecord}
 					onSelect={handleUserRecordSelect}
@@ -1644,11 +1647,10 @@
 									<span class="gold-filter-label">{i18n.metric_mgmt_gold_model_name()}</span>
 									<select
 										class="toolbar-select"
-										class:gold-filter-required={goldModelName === '' && !goldVersionSelected}
 										value={goldModelName}
 										onchange={handleGoldModelChange}
 									>
-										<option value="" disabled={!goldVersionSelected}>{goldVersionSelected ? i18n.metric_mgmt_all_models() : i18n.metric_mgmt_gold_select_model_option()}</option>
+										<option value="">{i18n.metric_mgmt_all_models()}</option>
 										{#each goldModelNames as name (name)}
 											<option value={name}>{name}</option>
 										{/each}
@@ -1656,8 +1658,6 @@
 								</label>
 								{#if goldOptionsError}
 									<div class="gold-filter-hint error">{goldOptionsError}</div>
-								{:else if goldModelName === '' && !goldVersionSelected}
-									<div class="gold-filter-hint">{i18n.metric_mgmt_gold_select_model_prompt()}</div>
 								{/if}
 							</div>
 						{/if}
@@ -4570,9 +4570,6 @@
 	.gold-filter .toolbar-select {
 		max-width: none;
 		width: 100%;
-	}
-	.gold-filter-required {
-		border-color: var(--brass);
 	}
 	.gold-filter-hint {
 		grid-column: 1 / -1;

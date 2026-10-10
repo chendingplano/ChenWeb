@@ -26,7 +26,7 @@ Run the ChenWeb web checks and inspect the diff. Verify default mode, switching 
 ## Metric Benchmark record selection
 
 - The testbed page header is “Metric Benchmark” (“指标基准” in Chinese).
-- Initial load defaults to the newest skill version but shows no input records and displays “Select a model” until a model is chosen.
+- Initial load defaults to the newest skill version and “All models”, then immediately lists all benchmark entries for that version. Wait for the version options to finish loading before fetching the list, so an initial unscoped request cannot show entries from other versions. No model selection is required to browse benchmarks.
 - Selecting a model lists `kb.inputs` with benchmark metrics for the selected skill version and model.
 - Manually changing the skill version clears the model and the selected document, then lists all inputs benchmarked at that version across models. The model selector shows “All models”; selecting a model narrows this list. Selecting a benchmark entry supplies the model required to load its gold metrics.
 - The benchmark record list contains one entry per input document, skill version, and model. Two models benchmarking the same document at the same version appear as two separately selectable cards. Each card shows its own skill version/model pair; counts and pagination count benchmark entries. Repeated metric rows or runs with the same document/version/model pair do not create extra cards.
