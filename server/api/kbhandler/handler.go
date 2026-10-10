@@ -27,6 +27,7 @@ const (
 )
 
 type goldMetricRun struct {
+	RunID        string `json:"run_id"`
 	SkillVersion string `json:"skill_version"`
 	ModelName    string `json:"model_name"`
 }
@@ -570,7 +571,7 @@ func resolveOrderClause(orderBy, orderDir, parserNameColumnExpr string) string {
 func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int, orderBy, orderDir string, entries bool) ([]inputRecord, error) {
 	extraColumns := ""
 	if entries {
-		extraColumns = ", i.benchmark_skill_version, i.benchmark_model_name"
+		extraColumns = ", i.benchmark_skill_version, i.benchmark_model_name, i.benchmark_run_id"
 	}
 	query := fmt.Sprintf(`
 SELECT
@@ -608,7 +609,7 @@ FROM %s i
 	offsetPos := len(args) + 2
 	orderClause := resolveOrderClause(orderBy, orderDir, parserNameColumnExpr)
 	if entries {
-		orderClause += ", i.benchmark_skill_version ASC, i.benchmark_model_name ASC"
+		orderClause += ", i.benchmark_skill_version ASC, i.benchmark_model_name ASC, i.benchmark_run_id ASC"
 	}
 	query += fmt.Sprintf(" %s LIMIT $%d OFFSET $%d", orderClause, limitPos, offsetPos)
 	args = append(args, limit, offset)
@@ -662,7 +663,7 @@ FROM %s i
 			&record.ErrorMsg,
 		}
 		if entries {
-			destinations = append(destinations, &run.SkillVersion, &run.ModelName)
+			destinations = append(destinations, &run.SkillVersion, &run.ModelName, &run.RunID)
 		}
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, err

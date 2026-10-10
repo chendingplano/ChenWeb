@@ -28,8 +28,9 @@ runs. Zero gold rows still persist the audit and any discarded candidates.
 ## API and page
 
 `GET /api/v1/kb/metrics?source=testbed&include_dropped=true` applies the existing
-version/model filters, resolves the latest run once, and queries both tables using
-that exact composite identity. Rows and the response expose `run_id`; benchmark
+version/model filters and an optional `run_id` filter, resolves the selected run
+(or the latest run when omitted) once, and queries both tables using that exact
+composite identity. Rows and the response expose `run_id`; benchmark
 rows also expose skill provenance. Empty gold runs can return their drops. No
 matching run returns an empty response; failures do not fall back to production
 drops. Existing document/version/model options still require gold metric rows.
@@ -46,7 +47,7 @@ The skill procedure, storage contract and changelog document persistence and
 read-back of dropped candidates. PostgreSQL tests cover migration rollback/backfill,
 atomic saves, duplicate-save rejection, zero-gold runs and identical timestamps
 across models. API tests verify full-key selection and candidate rendering; client
-tests verify that requesting drops keeps the benchmark source/version/model.
+tests verify that requesting drops keeps the benchmark source/run/version/model.
 Frontend checks enforce English/Chinese labels and selectable text.
 
 Verified: the benchmark helper's 37 tests (including disposable PostgreSQL), the

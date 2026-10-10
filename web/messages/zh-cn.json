@@ -6612,7 +6612,7 @@
 	"metric_mgmt_benchmark_title": "指标基准",
 	"metric_mgmt_select_model": "请选择模型",
 	"metric_mgmt_all_models": "所有模型",
-	"metric_mgmt_benchmark_run": "技能版本：{version} · 模型：{model}",
+	"metric_mgmt_benchmark_run": "技能版本：{version} · 模型：{model} · 运行 ID：{run}",
 	"metric_mgmt_filters": "筛选",
 	"metric_mgmt_show_all_info_boxes": "显示所有指标信息框",
 	"metric_mgmt_dropped_chip": "已剔除：{reason}",

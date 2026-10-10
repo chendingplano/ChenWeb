@@ -32,6 +32,7 @@ func TestListMetricsTestbedFiltersBySkillVersionAndModel(t *testing.T) {
 	}{
 		{"explicit", map[string]string{"skill_version": "1.1.0", "model_name": "gpt-6.1-sol"}, false, "1.1.0", "gpt-6.1-sol"},
 		{"defaults to newest version, any model", nil, true, "1.10.0", ""},
+		{"selected earlier run", map[string]string{"skill_version": "6.0.0", "model_name": "gold-model", "run_id": "20261010_055329", "include_dropped": "true"}, false, "6.0.0", "gold-model"},
 		{"benchmark drops", map[string]string{"skill_version": "6.0.0", "model_name": "gold-model", "include_dropped": "true"}, false, "6.0.0", "gold-model"},
 	}
 	for _, tc := range cases {
@@ -50,7 +51,7 @@ func TestListMetricsTestbedFiltersBySkillVersionAndModel(t *testing.T) {
 					WillReturnRows(sqlmock.NewRows([]string{"skill_version"}).AddRow("1.2.0").AddRow("1.10.0").AddRow("1.0.0"))
 			}
 			mock.ExpectQuery(regexp.QuoteMeta(selectBenchmarkRunQuery)).
-				WithArgs(int64(244), tc.wantVersion, tc.wantModel).
+				WithArgs(int64(244), tc.wantVersion, tc.wantModel, tc.query["run_id"]).
 				WillReturnRows(sqlmock.NewRows([]string{"skill_name", "skill_version", "model_name", "run_id"}).
 					AddRow("extract-metrics-benchmark", tc.wantVersion, "selected-model", "20261010_055329"))
 			goldRows := sqlmock.NewRows([]string{"id"})

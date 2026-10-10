@@ -167,7 +167,7 @@ func ListGoldMetricOptions(c echo.Context) error {
 }
 
 // attachGoldMetricRuns annotates only the authorized, paginated input list with
-// its matching benchmark version/model pairs, without duplicating documents.
+// its matching benchmark run/version/model identities, without duplicating documents.
 func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsFilters) error {
 	if len(records) == 0 {
 		return nil
@@ -189,7 +189,7 @@ func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsF
 			where += fmt.Sprintf(" AND %s = $%d", filter.column, len(args))
 		}
 	}
-	rows, err := db.Query("SELECT DISTINCT input_record_id, skill_version, model_name FROM testbed.metrics WHERE "+where+" ORDER BY input_record_id, skill_version, model_name", args...)
+	rows, err := db.Query("SELECT DISTINCT input_record_id, skill_version, model_name, run_id FROM testbed.metrics WHERE "+where+" ORDER BY input_record_id, skill_version, model_name, run_id", args...)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsF
 	for rows.Next() {
 		var id int64
 		var run goldMetricRun
-		if err := rows.Scan(&id, &run.SkillVersion, &run.ModelName); err != nil {
+		if err := rows.Scan(&id, &run.SkillVersion, &run.ModelName, &run.RunID); err != nil {
 			return err
 		}
 		if i, ok := indices[id]; ok {
@@ -207,13 +207,13 @@ func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsF
 	return rows.Err()
 }
 
-// goldBenchmarkInputTable lists one row per input/version/model. DISTINCT keeps
-// metric rows and repeated runs for the same pair from duplicating list entries.
+// goldBenchmarkInputTable lists one row per input/run/version/model. DISTINCT
+// collapses metric rows within a run while preserving repeated benchmarks.
 // inputTable comes from resolveInputTable, never from a client-supplied name.
 func goldBenchmarkInputTable(inputTable string) string {
 	return fmt.Sprintf(`(SELECT input.*, benchmark.skill_version AS benchmark_skill_version,
-		benchmark.model_name AS benchmark_model_name
+		benchmark.model_name AS benchmark_model_name, benchmark.run_id AS benchmark_run_id
 		FROM %s input JOIN (
-			SELECT DISTINCT input_record_id, skill_version, model_name FROM testbed.metrics
+			SELECT DISTINCT input_record_id, skill_version, model_name, run_id FROM testbed.metrics
 		) benchmark ON benchmark.input_record_id = input.id)`, inputTable)
 }

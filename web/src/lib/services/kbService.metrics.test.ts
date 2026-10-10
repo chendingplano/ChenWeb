@@ -11,9 +11,10 @@ test('benchmark request keeps its source, version and model when loading drops',
 	}) as typeof fetch;
 	try {
 		const result = await listKbMetrics(753, 'testbed',
-			{ skillVersion: '6.0.0', modelName: 'claude-opus-5-5' }, { includeDropped: true });
+			{ skillVersion: '6.0.0', modelName: 'claude-opus-5-5', runId: '20261010_055329' }, { includeDropped: true });
 		const params = new URL(requested, 'http://localhost').searchParams;
 		expect(params.get('source')).toBe('testbed');
+		expect(params.get('run_id')).toBe('20261010_055329');
 		expect(params.get('include_dropped')).toBe('true');
 		expect(params.get('skill_version')).toBe('6.0.0');
 		expect(params.get('model_name')).toBe('claude-opus-5-5');

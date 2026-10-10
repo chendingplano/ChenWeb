@@ -1225,7 +1225,7 @@
 			badges: [record.type?.trim() || '—'],
 			benchmarkRuns: source === 'testbed'
 				? (record.gold_metric_runs ?? []).map((run) => i18n.metric_mgmt_benchmark_run({
-					version: run.skill_version, model: run.model_name
+					version: run.skill_version, model: run.model_name, run: run.run_id
 				}))
 				: []
 		};

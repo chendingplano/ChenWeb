@@ -6612,7 +6612,7 @@
 	"metric_mgmt_benchmark_title": "Metric Benchmark",
 	"metric_mgmt_select_model": "Select a model",
 	"metric_mgmt_all_models": "All models",
-	"metric_mgmt_benchmark_run": "Skill version: {version} · Model: {model}",
+	"metric_mgmt_benchmark_run": "Skill version: {version} · Model: {model} · Run ID: {run}",
 	"metric_mgmt_filters": "Filters",
 	"metric_mgmt_show_all_info_boxes": "Show all metrics info boxes",
 	"metric_mgmt_dropped_chip": "Dropped: {reason}",

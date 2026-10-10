@@ -15,7 +15,7 @@ const BASE = '/api/v1/kb';
 export type ParseState = 'all' | 'pending' | 'parsing' | 'parsed_success' | 'parsed_failed';
 
 export type KbInputRecord = {
-	gold_metric_runs?: Array<{ skill_version: string; model_name: string }>;
+	gold_metric_runs?: Array<{ skill_version: string; model_name: string; run_id: string }>;
 	id: number;
 	name?: string;
 	parser_name?: string;
@@ -294,8 +294,8 @@ async function fetchOrThrow<T>(url: string, fallback: string): Promise<T> {
 export type KbMetricSource = 'kb' | 'testbed';
 
 // Gold-metrics filters (source 'testbed' only). An empty skillVersion means the
-// newest version; an empty modelName means any model.
-export type GoldMetricFilters = { skillVersion?: string; modelName?: string };
+// newest version; an empty modelName means any model. Omit runId to load the latest run.
+export type GoldMetricFilters = { skillVersion?: string; modelName?: string; runId?: string };
 
 export async function listKbMetrics(
 	inputRecordId: number,
@@ -309,6 +309,7 @@ export async function listKbMetrics(
 	if (source === 'testbed') {
 		if (gold.skillVersion) params.set('skill_version', gold.skillVersion);
 		if (gold.modelName) params.set('model_name', gold.modelName);
+		if (gold.runId) params.set('run_id', gold.runId);
 	}
 	return fetchOrThrow<ListKbMetricsResponse>(
 		`${BASE}/metrics?${params.toString()}`,

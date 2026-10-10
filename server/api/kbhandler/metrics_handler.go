@@ -154,6 +154,7 @@ const selectBenchmarkRunQuery = `
 SELECT skill_name, skill_version, model_name, benchmark_run_id
 FROM testbed.metric_benchmark_runs
 WHERE input_record_id = $1 AND skill_version = $2 AND ($3 = '' OR model_name = $3)
+  AND ($4 = '' OR benchmark_run_id = $4)
 ORDER BY created_at DESC, benchmark_run_id DESC, skill_name ASC, model_name ASC
 LIMIT 1`
 
@@ -260,6 +261,7 @@ ORDER BY m.id ASC
 	if source == "testbed" {
 		skillVersion := strings.TrimSpace(c.QueryParam("skill_version"))
 		modelName := strings.TrimSpace(c.QueryParam("model_name"))
+		runID := strings.TrimSpace(c.QueryParam("run_id"))
 		if skillVersion == "" {
 			skillVersion, err = newestGoldSkillVersion(db)
 			if err != nil {
@@ -270,8 +272,8 @@ ORDER BY m.id ASC
 				})
 			}
 		}
-		logger.Info("list gold metrics", "input_record_id", inputID, "skill_version", skillVersion, "model_name", modelName)
-		err = db.QueryRowContext(c.Request().Context(), selectBenchmarkRunQuery, inputID, skillVersion, modelName).
+		logger.Info("list gold metrics", "input_record_id", inputID, "skill_version", skillVersion, "model_name", modelName, "run_id", runID)
+		err = db.QueryRowContext(c.Request().Context(), selectBenchmarkRunQuery, inputID, skillVersion, modelName, runID).
 			Scan(&benchmarkRun.SkillName, &benchmarkRun.SkillVersion, &benchmarkRun.ModelName, &benchmarkRun.RunID)
 		if err == sql.ErrNoRows {
 			return c.JSON(http.StatusOK, listMetricsResponse{Status: true, Results: []metricRecord{}})
