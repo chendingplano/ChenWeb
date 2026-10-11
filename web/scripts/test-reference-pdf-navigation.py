@@ -66,6 +66,11 @@ with sync_playwright() as p:
    return a.top>=b.top && a.bottom<=b.bottom;
   }''',arg=pg)
   box=mark.bounding_box();host=page.locator('.pdf-canvas-host').bounding_box()
+  document=view.locator('.document').bounding_box()
+  assert host and document and host['height']<=document['height'],(host,document)
+  assert box and document and box['y']>=document['y'] and box['y']+box['height']<=document['y']+document['height'],(box,document)
+  assert page.locator('.pdf-canvas-host').evaluate('el=>el.scrollHeight>el.clientHeight')
+  if pg>=4: assert page.locator('.pdf-canvas-host').evaluate('el=>el.scrollTop>0')
   assert box and host and box['y']>=host['y'] and box['y']+box['height']<=host['y']+host['height'],(box,host)
   selections=[json.loads(log.split('select-reference ',1)[1]) for log in diagnostics if 'select-reference ' in log]
   assert selections[-1]['refId']==refs[index]['ref_id']
