@@ -151,11 +151,15 @@
 		try {
 			const [response, lines] = await Promise.all([
 				listKbReferences(value.id),
-				getRawLines(value.id).catch(() => null)
+				getRawLines(value.id).catch((error) => {
+					throw new Error(m.references_mgmt_source_lines_load_failed({
+						error: error instanceof Error ? error.message : String(error)
+					}));
+				})
 			]);
 			if (request !== selectionRequest) return;
 			mentions = response.results ?? [];
-			rawLines = lines?.lines ?? [];
+			rawLines = lines.lines ?? [];
 			if (mentions[0]) selectReference(mentions[0]);
 		} catch (e) {
 			if (request !== selectionRequest) return;

@@ -6655,5 +6655,6 @@
 	"references_mgmt_filter_by_normativity": "Filter by normativity",
 	"references_mgmt_filter_by_resolution": "Filter by resolution",
 	"references_mgmt_all_normativities": "All normativities",
-	"references_mgmt_all_resolutions": "All resolutions"
+	"references_mgmt_all_resolutions": "All resolutions",
+	"references_mgmt_source_lines_load_failed": "Unable to load the source lines needed for PDF navigation and highlighting: {error}"
 }
