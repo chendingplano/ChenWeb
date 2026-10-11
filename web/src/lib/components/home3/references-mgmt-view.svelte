@@ -34,10 +34,10 @@
 	let widthsHydrated = $state(false);
 	let palette = $derived(darkMode ? {
 		bg: '#0E1116', panel: '#161A22', panelAlt: '#1C212C', line: '#2A3140',
-		text: '#EDE7D3', secondary: '#B5AE94', muted: '#7C7560', accent: '#D4A24C'
+		text: '#EDE7D3', secondary: '#B5AE94', muted: '#7C7560', accent: '#D4A24C', lineSoft: '#1F2530', crimson: '#C8553D', crimsonFaint: 'rgba(200,85,61,.18)', teal: '#5DAFA8'
 	} : {
 		bg: '#F5F1E8', panel: '#FBF8F0', panelAlt: '#F0EADB', line: '#D7CFB8',
-		text: '#1A1410', secondary: '#5C5345', muted: '#8F8472', accent: '#B8801E'
+		text: '#1A1410', secondary: '#5C5345', muted: '#8F8472', accent: '#B8801E', lineSoft: '#E5DEC8', crimson: '#A23E26', crimsonFaint: 'rgba(162,62,38,.12)', teal: '#2D7B73'
 	});
 
 	$effect(() => {
@@ -209,7 +209,7 @@
 	}
 </script>
 
-<div class="references-page select-text" style={`--ref-bg:${palette.bg};--ref-panel:${palette.panel};--ref-alt:${palette.panelAlt};--ref-card:${filterControlBg};--ref-line:${palette.line};--ref-text:${palette.text};--ref-secondary:${palette.secondary};--ref-muted:${palette.muted};--ref-accent:${palette.accent}`}>
+<div class="references-page select-text" style={`--ref-bg:${palette.bg};--ref-panel:${palette.panel};--ref-alt:${palette.panelAlt};--ref-card:${filterControlBg};--ref-line:${palette.line};--ref-text:${palette.text};--ref-secondary:${palette.secondary};--ref-muted:${palette.muted};--ref-accent:${palette.accent};--ref-line-soft:${palette.lineSoft};--ref-crimson:${palette.crimson};--ref-crimson-faint:${palette.crimsonFaint};--ref-teal:${palette.teal}`}>
 	<header class="heading">
 		<div><div class="eyebrow">{m.references_mgmt_knowledge_system_vol_iii()}</div><h1>{m.references_mgmt_title()}</h1><p>{m.references_mgmt_subtitle()}</p></div>
 		<div class="stats"><small>{m.references_mgmt_record()}</small><strong>{record?.id ?? '—'}</strong><small>{m.references_mgmt_references()}</small><strong>{String(mentions.length).padStart(3, '0')}</strong></div>
@@ -242,11 +242,14 @@
 			{:else}
 				<div class="mention-list">
 					{#each visibleMentions as mention, i (mention.id)}
-						<button class="mention-card" class:active={selected?.id === mention.id} onclick={() => selectReference(mention)}>
-							<div class="card-meta"><span>№ {String(i + 1).padStart(3, '0')} · {mention.ref_id}</span><span>{mention.normativity}</span></div>
-							<strong>{mention.target_title || mention.cited_raw || mention.resource_title || m.references_mgmt_untitled_reference()}</strong>
-							<p>{mention.evidence || mention.cited_raw || m.references_mgmt_no_excerpt()}</p>
-							<div class="chips"><span>{mention.target_type} · {mention.target_content}</span>{#if mention.r2_state}<span>{mention.r2_state}</span>{/if}{#if mention.metric_state}<span>{mention.metric_state}</span>{/if}</div>
+						<button type="button" class="mention-card" class:active={selected?.id === mention.id} aria-pressed={selected?.id === mention.id} onclick={() => selectReference(mention)}>
+							<div class="card-rule" aria-hidden="true"></div>
+							<div class="card-body">
+								<div class="card-row-top"><span class="card-index">№ {String(i + 1).padStart(3, '0')} <span class="card-reference-id">· {mention.ref_id}</span></span><span class="card-normativity">{mention.normativity}</span></div>
+								<div class="card-name">{mention.target_title || mention.cited_raw || mention.resource_title || m.references_mgmt_untitled_reference()}</div>
+								<div class="card-desc">{mention.evidence || mention.cited_raw || m.references_mgmt_no_excerpt()}</div>
+								<div class="card-foot"><span class="chip"><span class="chip-dot" aria-hidden="true"></span>{mention.target_type} · {mention.target_content}</span>{#if mention.r2_state}<span class="chip chip-mono">{mention.r2_state}</span>{/if}{#if mention.metric_state}<span class="chip chip-quiet">{mention.metric_state}</span>{/if}</div>
+							</div>
 						</button>
 					{/each}
 				</div>
@@ -301,14 +304,22 @@
 	.reference-filters summary{height:34px;display:flex;align-items:center;gap:8px;padding:0 10px;cursor:pointer;list-style:none;font:10px 'JetBrains Mono',monospace;color:var(--ref-secondary)}
 	.reference-filters summary::-webkit-details-marker{display:none}.reference-filters[open] summary :global(svg){transform:rotate(90deg)}
 	.filter-controls{display:grid;gap:6px;padding:0 10px 10px}.filter-controls input,.filter-controls select{width:100%;min-width:0;height:30px;padding:0 8px;background:var(--ref-panel);border:1px solid var(--ref-line);color:var(--ref-secondary);font:10px 'JetBrains Mono',monospace}
-	.mention-list{min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--ref-line) transparent}
+	.mention-list{flex:1;min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 16px 24px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--ref-line) transparent}
 	.mention-list::-webkit-scrollbar,.details-panel::-webkit-scrollbar{width:8px}.mention-list::-webkit-scrollbar-thumb,.details-panel::-webkit-scrollbar-thumb{background:var(--ref-line)}
-	.mention-card{width:100%;min-width:0;overflow:hidden;text-align:left;padding:12px;background:var(--ref-card);border:1px solid var(--ref-line);border-left:3px solid transparent;color:var(--ref-text);cursor:pointer}
-	.mention-card:hover{background:var(--ref-alt)}.mention-card.active{border-left-color:var(--ref-accent);background:rgba(200,85,61,.18)}
+	/* Cards keep their content height while the list scrolls. */
+	.mention-card{all:unset;box-sizing:border-box;flex-shrink:0;min-width:0;display:flex;position:relative;text-align:left;background:var(--ref-card);border:1px solid var(--ref-line-soft);color:var(--ref-text);cursor:pointer;transition:border-color 150ms,background 150ms}
+	.mention-card:hover{border-color:var(--ref-accent);background:var(--ref-panel)}.mention-card.active{border-color:var(--ref-crimson);background:var(--ref-crimson-faint)}
+	.mention-card:focus-visible{outline:2px solid var(--ref-accent);outline-offset:2px}
+	.card-rule{width:4px;flex-shrink:0;background:var(--ref-line);transition:background 150ms}.mention-card:hover .card-rule{background:var(--ref-accent)}.mention-card.active .card-rule{background:var(--ref-crimson)}
+	.card-body{padding:12px 14px 12px 12px;flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+	.card-row-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;overflow-wrap:anywhere}
+	.card-index{min-width:0;font:10px 'JetBrains Mono',monospace;letter-spacing:.1em;color:var(--ref-muted);text-transform:uppercase}.card-reference-id{text-transform:none;letter-spacing:.02em}
+	.card-normativity{font:600 11px 'JetBrains Mono',monospace;color:var(--ref-teal)}
+	.card-name{font:500 17px/1.2 'Cormorant Garamond','Playfair Display',Georgia,serif;color:var(--ref-text);overflow-wrap:anywhere}.mention-card.active .card-name{color:var(--ref-crimson)}
+	.card-desc{font-size:12px;line-height:1.45;color:var(--ref-secondary);overflow-wrap:anywhere;display:-webkit-box;line-clamp:2;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+	.card-foot{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}.chip{display:inline-flex;align-items:center;gap:5px;font:10px 'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border:1px solid var(--ref-line);color:var(--ref-secondary);overflow-wrap:anywhere;min-width:0}
+	.chip-dot{width:4px;height:4px;flex-shrink:0;background:var(--ref-accent);border-radius:50%}.chip-mono{color:var(--ref-accent);border-color:var(--ref-accent)}.chip-quiet{color:var(--ref-muted)}
 	:global(.pdf-highlight){position:absolute;background:rgba(200,85,61,.18);border:1px solid rgba(200,85,61,.9);box-shadow:inset 0 0 0 1px rgba(255,210,179,.22)}
-	.card-meta{display:flex;justify-content:space-between;gap:8px;font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase}.card-meta span{min-width:0;overflow-wrap:anywhere}
-	.mention-card strong{display:block;margin:9px 0 5px;font-size:14px;overflow-wrap:anywhere}.mention-card p{margin:0;color:var(--ref-secondary);font-size:12px;line-height:1.5;overflow-wrap:anywhere;display:-webkit-box;line-clamp:3;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-	.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}.chips span{padding:3px 6px;border:1px solid var(--ref-line);color:var(--ref-accent);font:9px 'JetBrains Mono',monospace}
 	.notice,.empty-document{padding:24px;color:var(--ref-muted);font-size:13px}.error{color:#c8553d}.empty-document{height:100%;display:grid;place-items:center}
 	.details-heading{height:58px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--ref-line);font-weight:600;color:var(--ref-text)}
 	.detail{padding:16px;color:var(--ref-text)}.detail h2{font:600 19px Georgia,serif;margin:10px 0 16px;overflow-wrap:anywhere}.detail dl{display:grid;grid-template-columns:115px minmax(0,1fr);gap:9px 10px;margin:0}.detail dt{font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase;letter-spacing:.08em}.detail dd{margin:0;font-size:12px;overflow-wrap:anywhere;line-height:1.45}
