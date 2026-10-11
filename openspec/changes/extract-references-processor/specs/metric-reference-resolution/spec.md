@@ -37,7 +37,7 @@ For each resolved target metric, the resolver SHALL insert a row into the refere
 `kb.metrics`:
 - `metric_id` `<rec>_rfm_<n>`;
 - value columns copied from the target metric;
-- name, subject, context, section and line spans from the referencing text;
+- name, subject, context, section, line spans and `source_table_rows` from the referencing text;
 - `ref_mention_id`, `ref_input_record_id`, `ref_metric_id` and `ref_metric_key` set.
 
 A dropped target row SHALL be linked but SHALL NOT produce a `kb.metrics` row.

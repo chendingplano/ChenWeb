@@ -42,7 +42,8 @@ Current state:
   `EXTRACT_REFERENCES_MODEL_NAME` via `loadModelConfigFromEnvKeys`). It returns `{references:[…],
   document_identifier}`.
 - `FinalizeChunkBatch` does everything that needs the whole document, in one pass:
-  1. de-duplicate overlapping chunk results by (line span, raw text);
+  1. validate table row citations and render their evidence using the metrics table helpers, then
+     de-duplicate overlapping chunk results by source location (including logical table rows) and cited identity;
   2. parse identifiers in code;
   3. derive normativity, list links and mismatches;
   4. replace the record's mentions (Withdraw first, then delete and insert in a transaction);
@@ -59,7 +60,7 @@ Current state:
 - labels: `target_type`, `target_subtype`, `mechanism`, `relationships`, `target_scope`,
   `target_locator`, `target_content`, `ref_form`, `list_kind`, `in_requirement`;
 - the named quantity (`metric_name(_en)`, `metric_subject(_en)`, `condition`);
-- `cited_raw`, `target_title`, `target_version`, `source_line_spans`, `evidence`, `confidence`.
+- `cited_raw`, `target_title`, `target_version`, `source_line_spans`, `source_table_rows`, `evidence`, `confidence`.
 
 Code then:
 - validates every enum against the governed lists in `reference_vocabulary.go`, mapping an unknown
@@ -237,3 +238,14 @@ They are stored now so later human decisions can reattach.
 ## Open Questions
 
 - Whether `extract_references` joins `default_processors` (cost vs coverage). Left to the user.
+
+**D15. Table provenance shares the metrics representation.** `kb.ref_mentions.source_table_rows`
+is nullable JSONB with the same `{line, rows, row_hash}` entries as `kb.metrics.source_table_rows`.
+At finalize, the processor builds a table index from its own chunk lines; it reads no other
+extractor's output. It validates explicit row IDs and computes hashes from the grid before using
+metrics' context builder. Explicit valid rows take precedence and are all preserved, including
+headers. Without explicit rows, the existing evidence/small-table fallback applies. Captions and
+column-labelled rows become evidence, with prose evidence retained when the source also spans
+prose. Row locations participate in deduplication and mention keys, preventing two occurrences
+on one table line from collapsing. The references API exposes provenance; the metric resolver
+copies the citing mention's rows into resolved metrics rather than using the target's rows.

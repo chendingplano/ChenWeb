@@ -124,6 +124,13 @@ func (p *ReferencesProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("(MID_26101122) %s load record %d: %w", p.Name(), recordID, err)
 	}
+	var lines []Line
+	for _, chunk := range p.batchChunks {
+		for _, marked := range chunk.Lines {
+			lines = append(lines, marked.Line)
+		}
+	}
+	applyReferenceTableRows(lines, p.mentions, p.Logger, recordID)
 	ms := assembleRefMentions(recordID, p.mentions)
 	store := ReferenceSQLStore{DB: p.DB}
 	if err := store.ReplaceRecordReferences(ctx, recordID, eventIDFromContext(ctx), ms); err != nil {
@@ -227,6 +234,7 @@ func parseRefMentions(payload map[string]any) []RefMention {
 			Condition:       strings.TrimSpace(asString(r["condition"])),
 			Section:         strings.TrimSpace(asString(r["section"])),
 			SourceLineSpans: refSpans(r["source_line_spans"]),
+			SourceTableRows: tableRowRefsFromValue(r["source_table_rows"]),
 			Evidence:        strings.TrimSpace(asString(r["evidence"])),
 			Confidence:      refFloat(r["confidence"]),
 		}
@@ -255,9 +263,10 @@ func assembleRefMentions(recordID int64, raw []RefMention) []RefMention {
 		if key, _, _, ok := refIdentityKey(m.Identifiers, ""); ok {
 			what = key
 		}
-		k := strings.Join([]string{m.RefForm, m.SourceLineSpans[0], what, m.TargetContent, refNormKey(m.MetricName)}, "|")
+		location := m.SourceLineSpans[0] + refTableRowLocation(m.SourceTableRows)
+		k := strings.Join([]string{m.RefForm, location, what, m.TargetContent, refNormKey(m.MetricName)}, "|")
 		if m.RefForm == refFormListed {
-			k = m.RefForm + "|" + m.SourceLineSpans[0]
+			k = m.RefForm + "|" + location
 		}
 		if seen[k] {
 			continue

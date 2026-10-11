@@ -178,18 +178,18 @@ INSERT INTO kb.ref_mentions (
   target_subtype, target_subtype_label, target_title, target_version, relationships, target_scope,
   target_locator, target_content, metric_name, metric_name_en, metric_subject, metric_subject_en,
   condition, internal, confidence, resource_id, version_id, r1_state, target_input_id, r3_state,
-  mention_key, ext_info)
+  mention_key, ext_info, source_table_rows)
 VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),$7,NULLIF($8,''),$9,$10,NULLIF($11,''),$12,
   NULLIF($13,''),$14,$15,$16,NULLIF($17,''),NULLIF($18,''),NULLIF($19,''),$20,$21,NULLIF($22,''),$23,
   NULLIF($24,''),NULLIF($25,''),NULLIF($26,''),NULLIF($27,''),NULLIF($28,''),$29,$30,
-  NULLIF($31,0),NULLIF($32,0),NULLIF($33,''),NULLIF($34,0),NULLIF($35,''),$36,$37)
+  NULLIF($31,0),NULLIF($32,0),NULLIF($33,''),NULLIF($34,0),NULLIF($35,''),$36,$37,$38::jsonb)
 RETURNING id`,
 		m.InputRecordID, m.RefID, eventID, m.Section, spans, m.Evidence, m.RefForm, m.ListKind,
 		m.Normativity, m.InRequirement, m.ListMismatch, m.Mechanism, m.CitedRaw, ids, m.TargetType,
 		m.TargetSubtype, m.TargetSubtypeLabel, m.TargetTitle, m.TargetVersion, pq.Array(m.Relationships), m.TargetScope,
 		m.TargetLocator, m.TargetContent, m.MetricName, m.MetricNameEn, m.MetricSubject, m.MetricSubjectEn,
 		m.Condition, m.Internal, m.Confidence, m.ResourceID, m.VersionID, m.R1State, m.TargetInputID, m.R3State,
-		m.MentionKey, ext).Scan(&m.ID)
+		m.MentionKey, ext, sourceTableRowsSQLValue(m.SourceTableRows)).Scan(&m.ID)
 }
 
 // AttachOwnDocument attaches the processed record to its own resource and version (design D5)

@@ -17,7 +17,7 @@ coordinator.
 
 ### Requirement: Every reference is stored with the reference model's labels
 For each reference found, the processor SHALL store one row in `kb.ref_mentions` with:
-- source location (`section`, `source_line_spans`, `evidence`);
+- source location (`section`, `source_line_spans`, `source_table_rows`, `evidence`);
 - `cited_raw` and the parsed `identifiers`;
 - `target_type` and `target_subtype` (+ `target_subtype_label`);
 - `mechanism`, `relationships`, `target_scope`, `target_locator`, `target_content`;
@@ -111,7 +111,7 @@ record's previous mentions, then replace all of the record's `kb.ref_mentions` r
 - **THEN** the record has only the second run's mentions, and no links or resolved rows from the first run remain
 
 ### Requirement: Overlapping chunks do not duplicate references
-A list line SHALL yield one listed reference, and an in-text occurrence SHALL be identified by what
+A list line (or logical table row for a table-based list) SHALL yield one listed reference, and an in-text occurrence SHALL be identified by what
 it cites (its identity key when it has one), so the same occurrence seen by two overlapping chunks
 is stored once.
 
@@ -127,3 +127,29 @@ be flagged.
 #### Scenario: Manufacturer's instructions in a requirement
 - **WHEN** a clause says "shall be installed according to the manufacturer's instructions" in a document with a normative references list
 - **THEN** the reference has no `list_mismatch`
+
+### Requirement: Table references retain logical row provenance
+For references extracted from tables, the processor SHALL request `source_table_rows` as logical
+row citations (`116#r1`), validate them against the source table grid, and store normalized JSONB
+`[{"line":116,"rows":["r1"],"row_hash":{"r1":"<system hash>"}}]` in
+`kb.ref_mentions.source_table_rows`, using the same shape and grid hashes as `extract_metrics`.
+The system SHALL compute hashes itself and SHALL exclude nonexistent rows and rows outside the
+mention's source line spans. Evidence SHALL include the caption and the selected rows rendered
+with column labels. Mixed prose/table references SHALL retain prose evidence alongside the rows.
+When no valid explicit rows exist, row selection SHALL use metrics' evidence matching and small
+table fallback; unmatched references SHALL retain their original evidence and have no stored rows.
+Prose references SHALL have no table provenance. The references list API SHALL return stored
+`source_table_rows`, and resolved metric rows SHALL carry the referencing mention's rows.
+Deduplication and stable mention keys SHALL distinguish different row locations on the same line.
+
+#### Scenario: Different occurrences in one table
+- **WHEN** rows `116#r1` and `116#r2` both cite ISO 9001 and overlapping chunks repeat row `r1`
+- **THEN** two mentions are stored with distinct mention keys and their respective row provenance
+
+#### Scenario: Citation uses multiple rows
+- **WHEN** a reference cites `116#h0`, `116#r1` and `116#r2`, plus a nonexistent `116#r99`
+- **THEN** all three valid rows are retained with system hashes and rendered evidence, and `r99` is excluded
+
+#### Scenario: Resolved metric preserves the source table
+- **WHEN** a table-based criterion reference resolves to a metric of another document
+- **THEN** the resolved metric row stores `source_table_rows` from the referencing document's mention

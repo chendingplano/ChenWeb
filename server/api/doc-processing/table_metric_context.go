@@ -14,7 +14,7 @@ import (
 )
 
 // TableRowRef records which logical rows of a table line an artifact came from
-// (kb.metrics.source_table_rows). Row IDs are TableGrid IDs ("r1", "h0"); RowHash is
+// (kb.metrics.source_table_rows and kb.ref_mentions.source_table_rows). Row IDs are TableGrid IDs ("r1", "h0"); RowHash is
 // always computed by the system from the grid, never taken from the LLM, so a stale
 // reference (the table was reparsed and the row changed) can be detected.
 type TableRowRef struct {
@@ -153,8 +153,8 @@ func parseTableRowRefs(raw string) []TableRowRef {
 	return tableRowRefsFromValue(v)
 }
 
-// sourceTableRowsSQLValue is the bind value for kb.metrics.source_table_rows:
-// NULL when the metric has no row references.
+// sourceTableRowsSQLValue is the bind value for artifact source_table_rows:
+// NULL when the artifact has no row references.
 func sourceTableRowsSQLValue(value any) any {
 	refs := tableRowRefsFromValue(value)
 	if len(refs) == 0 {

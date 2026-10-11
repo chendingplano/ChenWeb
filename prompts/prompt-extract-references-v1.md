@@ -15,6 +15,15 @@ The input is a JSON array of lines. Each line has `line_number`, `line_type` (he
 table, list-item, …) and `content`. Use `line_number` values for `source_line_spans`. A context
 line before the array may give the document title.
 
+Tables are rendered as numbered logical rows, for example `116#h0: Name | Standard`
+and `116#r1: Fan | ISO 9001`. Inspect every row, including header rows that cite a resource.
+For a reference in a table, return its exact row citations in `source_table_rows`, e.g.
+`["116#r1"]`. Include every row needed to support that occurrence, including a relevant header
+when necessary. Keep `source_line_spans` as plain line numbers (`["116"]`); row IDs belong in
+`source_table_rows`. Copy the relevant row text into `evidence`, with enough column context to
+understand it. Do not combine separate occurrences in different rows just because they share a
+table line or cite the same target. For prose references return `source_table_rows: []`.
+
 ## One reference = one occurrence
 
 - Emit one reference for every occurrence, including repeated citations of the same target in
@@ -88,6 +97,7 @@ For each reference return:
   in the document's language and in English.
 - `section`: the heading of the section the reference is in.
 - `source_line_spans` (required): line numbers, e.g. `["120"]` or `["120-122"]`.
+- `source_table_rows`: table row citations such as `["116#r1", "116#r2"]`; `[]` for prose.
 - `evidence` (required): the sentence or list entry that contains the reference, copied from the
   text.
 - `confidence`: 0 to 1.
@@ -149,6 +159,7 @@ Otherwise return an empty string.
       "condition": "",
       "section": "",
       "source_line_spans": [""],
+      "source_table_rows": [],
       "evidence": "",
       "confidence": 0.0
     }

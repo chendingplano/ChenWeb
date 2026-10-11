@@ -192,7 +192,7 @@ SELECT m.id, m.input_record_id, m.ref_id, COALESCE(m.section, ''), COALESCE(m.so
        COALESCE(m.evidence, ''), m.target_content, m.target_scope, COALESCE(m.target_locator, ''),
        COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, ''), COALESCE(m.metric_subject, ''),
        COALESCE(m.metric_subject_en, ''), COALESCE(m.condition, ''), COALESCE(m.cited_raw, ''),
-       COALESCE(m.r2_state, ''), COALESCE(m.target_input_id, 0), m.mention_key, m.internal
+       COALESCE(m.r2_state, ''), COALESCE(m.target_input_id, 0), m.mention_key, m.internal, COALESCE(m.source_table_rows, '[]'::jsonb)::text
 FROM kb.ref_mentions m WHERE `+where+` ORDER BY m.id`, arg)
 	if err != nil {
 		return nil, err
@@ -202,12 +202,14 @@ FROM kb.ref_mentions m WHERE `+where+` ORDER BY m.id`, arg)
 	for rows.Next() {
 		var m RefMention
 		var spans []byte
+		var tableRows string
 		if err := rows.Scan(&m.ID, &m.InputRecordID, &m.RefID, &m.Section, &spans, &m.Evidence, &m.TargetContent,
 			&m.TargetScope, &m.TargetLocator, &m.MetricName, &m.MetricNameEn, &m.MetricSubject, &m.MetricSubjectEn,
-			&m.Condition, &m.CitedRaw, &m.R2State, &m.TargetInputID, &m.MentionKey, &m.Internal); err != nil {
+			&m.Condition, &m.CitedRaw, &m.R2State, &m.TargetInputID, &m.MentionKey, &m.Internal, &tableRows); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(spans, &m.SourceLineSpans)
+		m.SourceTableRows = parseTableRowRefs(tableRows)
 		out = append(out, m)
 	}
 	return out, rows.Err()

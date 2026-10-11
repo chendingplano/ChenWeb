@@ -74,6 +74,7 @@ type RefMention struct {
 	RefID              string
 	Section            string
 	SourceLineSpans    []string
+	SourceTableRows    []TableRowRef
 	Evidence           string
 	RefForm            string
 	ListKind           string
@@ -194,6 +195,7 @@ func refMentionKey(m RefMention) string {
 	if len(m.SourceLineSpans) > 0 {
 		firstLine = m.SourceLineSpans[0]
 	}
+	firstLine += refTableRowLocation(m.SourceTableRows)
 	return refFingerprint(fmt.Sprint(m.InputRecordID), refNormKey(m.Section), firstLine, refNormKey(m.CitedRaw),
 		refNormKey(m.MetricName), refNormKey(m.TargetLocator))
 }

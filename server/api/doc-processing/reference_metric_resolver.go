@@ -271,7 +271,7 @@ INSERT INTO kb.metrics (
   formula_or_definition, threshold_or_target, measurement_frequency, confidence, is_explicit_metric, reasoning_tags,
   ext_info, table_name_or_section, metric_value, value_data_type, value_range_type, value_class, value_class_en,
   category_paths, category_paths_en, metric_categories, metric_categories_en, value_min, value_max, condition,
-  keyword_concept_id, metric_definition_term_id, ref_mention_id, ref_input_record_id, ref_metric_id, ref_metric_key)
+  keyword_concept_id, metric_definition_term_id, ref_mention_id, ref_input_record_id, ref_metric_id, ref_metric_key, source_table_rows)
 SELECT $1, $2, COALESCE(NULLIF($3, ''), t.metric_name), COALESCE(NULLIF($4, ''), t.metric_name_en),
   COALESCE(NULLIF($5, ''), t.metric_subject), COALESCE(NULLIF($6, ''), t.metric_subject_en), t.metric_desc, t.metric_desc_en,
   NULLIF($7, ''), $8::jsonb, t.location_type, t.metric_keywords, t.metric_keywords_en, t.metric_unit, t.metric_unit_en,
@@ -279,10 +279,10 @@ SELECT $1, $2, COALESCE(NULLIF($3, ''), t.metric_name), COALESCE(NULLIF($4, ''),
   $9::jsonb, NULLIF($10, ''), t.metric_value, t.value_data_type, t.value_range_type, t.value_class, t.value_class_en,
   t.category_paths, t.category_paths_en, t.metric_categories, t.metric_categories_en, t.value_min, t.value_max,
   COALESCE(NULLIF($11, ''), t.condition), t.keyword_concept_id, t.metric_definition_term_id,
-  $12, t.input_record_id, t.metric_id, $13
+  $12, t.input_record_id, t.metric_id, $13, $15::jsonb
 FROM kb.metrics t WHERE t.id = $14`,
 		m.InputRecordID, rowID, m.MetricName, m.MetricNameEn, m.MetricSubject, m.MetricSubjectEn,
-		m.Evidence, string(spans), string(ext), m.Section, m.Condition, m.ID, c.ArtifactKey, c.RowID)
+		m.Evidence, string(spans), string(ext), m.Section, m.Condition, m.ID, c.ArtifactKey, c.RowID, sourceTableRowsSQLValue(m.SourceTableRows))
 	return err
 }
 

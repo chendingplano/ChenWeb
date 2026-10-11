@@ -12,28 +12,29 @@ import (
 )
 
 type referenceMention struct {
-	ID               int64    `json:"id"`
-	RefID            string   `json:"ref_id"`
-	Section          string   `json:"section,omitempty"`
-	SourceLineSpans  []string `json:"source_line_spans"`
-	Evidence         string   `json:"evidence,omitempty"`
-	CitedRaw         string   `json:"cited_raw,omitempty"`
-	TargetType       string   `json:"target_type"`
-	TargetSubtype    string   `json:"target_subtype"`
-	TargetTitle      string   `json:"target_title,omitempty"`
-	TargetVersion    string   `json:"target_version,omitempty"`
-	TargetContent    string   `json:"target_content"`
-	Normativity      string   `json:"normativity"`
-	ListKind         string   `json:"list_kind,omitempty"`
-	ListMismatch     string   `json:"list_mismatch,omitempty"`
-	R1State          string   `json:"r1_state,omitempty"`
-	R2State          string   `json:"r2_state,omitempty"`
-	TargetInputID    *int64   `json:"target_input_id,omitempty"`
-	TargetInputTitle string   `json:"target_input_title,omitempty"`
-	MetricState      string   `json:"metric_state,omitempty"`
-	ResourceTitle    string   `json:"resource_title,omitempty"`
-	IdentityKey      string   `json:"identity_key,omitempty"`
-	Identifiers      []string `json:"identifiers"`
+	ID               int64           `json:"id"`
+	RefID            string          `json:"ref_id"`
+	Section          string          `json:"section,omitempty"`
+	SourceLineSpans  []string        `json:"source_line_spans"`
+	SourceTableRows  json.RawMessage `json:"source_table_rows,omitempty"`
+	Evidence         string          `json:"evidence,omitempty"`
+	CitedRaw         string          `json:"cited_raw,omitempty"`
+	TargetType       string          `json:"target_type"`
+	TargetSubtype    string          `json:"target_subtype"`
+	TargetTitle      string          `json:"target_title,omitempty"`
+	TargetVersion    string          `json:"target_version,omitempty"`
+	TargetContent    string          `json:"target_content"`
+	Normativity      string          `json:"normativity"`
+	ListKind         string          `json:"list_kind,omitempty"`
+	ListMismatch     string          `json:"list_mismatch,omitempty"`
+	R1State          string          `json:"r1_state,omitempty"`
+	R2State          string          `json:"r2_state,omitempty"`
+	TargetInputID    *int64          `json:"target_input_id,omitempty"`
+	TargetInputTitle string          `json:"target_input_title,omitempty"`
+	MetricState      string          `json:"metric_state,omitempty"`
+	ResourceTitle    string          `json:"resource_title,omitempty"`
+	IdentityKey      string          `json:"identity_key,omitempty"`
+	Identifiers      []string        `json:"identifiers"`
 }
 
 type listReferencesResponse struct {
@@ -51,7 +52,7 @@ func ListReferences(c echo.Context) error {
 	}
 	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), `
 SELECT m.id, m.ref_id, COALESCE(m.section,''), COALESCE(m.source_line_spans, '[]'::jsonb)::text,
-       COALESCE(m.evidence,''), COALESCE(m.cited_raw,''),
+       COALESCE(m.evidence,''), COALESCE(m.cited_raw,''), m.source_table_rows,
        m.target_type, m.target_subtype, COALESCE(m.target_title,''), COALESCE(m.target_version,''),
        m.target_content, m.normativity, COALESCE(m.list_kind,''), COALESCE(m.list_mismatch,''),
        COALESCE(m.r1_state,''), COALESCE(m.r2_state,''), m.target_input_id,
@@ -74,7 +75,7 @@ ORDER BY m.id`, id)
 		var m referenceMention
 		var sourceLineSpansJSON string
 		var identifiersJSON string
-		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &sourceLineSpansJSON, &m.Evidence, &m.CitedRaw, &m.TargetType, &m.TargetSubtype,
+		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &sourceLineSpansJSON, &m.Evidence, &m.CitedRaw, &m.SourceTableRows, &m.TargetType, &m.TargetSubtype,
 			&m.TargetTitle, &m.TargetVersion, &m.TargetContent, &m.Normativity, &m.ListKind, &m.ListMismatch,
 			&m.R1State, &m.R2State, &m.TargetInputID, &m.TargetInputTitle, &m.MetricState, &m.ResourceTitle,
 			&m.IdentityKey, &identifiersJSON); err != nil {
