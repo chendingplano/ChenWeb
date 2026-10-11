@@ -61,6 +61,7 @@
 		autoSelectFirstRecord = true,
 		defaultListWidth = KB_INPUT_RECORD_BROWSER_DEFAULT_LIST_WIDTH,
 		renderMode = 'compact',
+		fitPanel = false,
 		mapRecord = defaultMapRecord,
 		onSelect = () => {},
 		onResultsChange = () => {},
@@ -83,6 +84,8 @@
 		autoSelectFirstRecord?: boolean;
 		defaultListWidth?: number;
 		renderMode?: 'compact' | 'cards';
+		// Use the host panel width instead of the browser's saved width and resizer.
+		fitPanel?: boolean;
 		mapRecord?: (record: KbInputRecord) => BrowserRecordCard;
 		onSelect?: (record: KbInputRecord) => void;
 		onResultsChange?: (payload: { results: KbInputRecord[]; total: number; page: number }) => void;
@@ -469,7 +472,7 @@
 
 <div
 	class="browser-shell"
-	style={`--rb-panel: var(--panel-bg, ${panelBg}); --rb-panel-alt: var(--panel-bg-alt, ${panelAlt}); --rb-line: var(--ink-line, ${border}); --rb-line-soft: var(--ink-line-soft, ${borderSoft}); --rb-text: var(--text-primary, ${textMain}); --rb-muted: var(--text-secondary, ${textMuted}); --rb-accent: var(--brass, ${accent}); --rb-danger-line:${dangerLine}; --rb-danger-bg:${dangerBg}; --rb-danger-text:${dangerText}; --highlight:${highlightColor}; width:${listWidth}px;`}
+	style={`--rb-panel: var(--panel-bg, ${panelBg}); --rb-panel-alt: var(--panel-bg-alt, ${panelAlt}); --rb-line: var(--ink-line, ${border}); --rb-line-soft: var(--ink-line-soft, ${borderSoft}); --rb-text: var(--text-primary, ${textMain}); --rb-muted: var(--text-secondary, ${textMuted}); --rb-accent: var(--brass, ${accent}); --rb-danger-line:${dangerLine}; --rb-danger-bg:${dangerBg}; --rb-danger-text:${dangerText}; --highlight:${highlightColor}; width:${fitPanel ? '100%' : `${listWidth}px`};`}
 >
 	<KbInputSearchDialog
 		bind:open={searchOpen}
@@ -671,16 +674,18 @@
 		{/if}
 	</div>
 
-	<button
-		type="button"
-		class="browser-resizer"
-		class:active={resizing}
-		aria-label={m.kb_input_record_browser_resize_record_browser()}
-		onpointerdown={startResize}
-		onkeydown={onResizerKeydown}
-	>
-		<span class="browser-resizer-grip" aria-hidden="true"></span>
-	</button>
+	{#if !fitPanel}
+		<button
+			type="button"
+			class="browser-resizer"
+			class:active={resizing}
+			aria-label={m.kb_input_record_browser_resize_record_browser()}
+			onpointerdown={startResize}
+			onkeydown={onResizerKeydown}
+		>
+			<span class="browser-resizer-grip" aria-hidden="true"></span>
+		</button>
+	{/if}
 
 	{#if settingsOpen}
 		<div class="settings-popover">
@@ -699,19 +704,21 @@
 					onchange={() => void loadRecords(1, selectedRecordIdInternal)}
 				/>
 			</label>
-			<label class="field settings-field">
-				<span class="field-label">{m.kb_input_record_browser_list_width_px({ listWidth })}</span>
-				<input
-					type="range"
-					min={KB_INPUT_RECORD_BROWSER_MIN_LIST_WIDTH}
-					max={KB_INPUT_RECORD_BROWSER_MAX_LIST_WIDTH}
-					step="4"
-					value={listWidth}
-					oninput={(event) => {
-						saveSettings({ listWidth: Number((event.currentTarget as HTMLInputElement).value) });
-					}}
-				/>
-			</label>
+			{#if !fitPanel}
+				<label class="field settings-field">
+					<span class="field-label">{m.kb_input_record_browser_list_width_px({ listWidth })}</span>
+					<input
+						type="range"
+						min={KB_INPUT_RECORD_BROWSER_MIN_LIST_WIDTH}
+						max={KB_INPUT_RECORD_BROWSER_MAX_LIST_WIDTH}
+						step="4"
+						value={listWidth}
+						oninput={(event) => {
+							saveSettings({ listWidth: Number((event.currentTarget as HTMLInputElement).value) });
+						}}
+					/>
+				</label>
+			{/if}
 			<div class="field settings-field">
 				<span class="field-label">{m.kb_input_record_browser_highlight_color()}</span>
 				<div class="color-presets">

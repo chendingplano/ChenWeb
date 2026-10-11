@@ -184,7 +184,9 @@
 	}
 
 	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
-		const pageLines = selectedSourceLines.filter((line) => line.page_number === page);
+		const pageLines = selectedSourceLines.filter((line) =>
+			line.page_number === page && !selected?.source_table_rows?.some((ref) => ref.line === line.line_number)
+		);
 		if (pageLines.length === 0) return;
 		const lines = pageLines.filter((line) => Array.isArray(line.coords) && line.coords.length >= 4);
 		for (let i = 0; i < lines.length; i += 1) {
@@ -229,7 +231,7 @@
 	</header>
 	<div class="workspace" style={workspaceStyle}>
 		<aside class="records">
-			<KbInputRecordBrowser {darkMode} instanceKey="references-record-browser" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)} />
+			<KbInputRecordBrowser {darkMode} fitPanel instanceKey="references-record-browser" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)} />
 		</aside>
 		<section class="mention-column" aria-label={m.references_mgmt_references()}>
 			<div class="column-head"><strong>{m.references_mgmt_references()}</strong><span>{visibleMentions.length} {m.references_mgmt_found()}</span></div>
@@ -277,7 +279,7 @@
 		</button>
 		<section class="document" aria-label={m.references_mgmt_source_document()}>
 			{#if record}
-				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" {highlightVersion} renderHighlights={renderReferenceHighlights} />
+				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" {highlightVersion} renderHighlights={renderReferenceHighlights} tableReferences={selected?.source_table_rows ?? []} />
 			{:else}
 				<div class="empty-document">{m.references_mgmt_select_document()}</div>
 			{/if}
