@@ -75,13 +75,15 @@ ORDER BY m.id`, id)
 		var m referenceMention
 		var sourceLineSpansJSON string
 		var identifiersJSON string
-		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &sourceLineSpansJSON, &m.Evidence, &m.CitedRaw, &m.SourceTableRows, &m.TargetType, &m.TargetSubtype,
+		var sourceTableRowsJSON []byte // []byte accepts SQL NULL; json.RawMessage does not.
+		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &sourceLineSpansJSON, &m.Evidence, &m.CitedRaw, &sourceTableRowsJSON, &m.TargetType, &m.TargetSubtype,
 			&m.TargetTitle, &m.TargetVersion, &m.TargetContent, &m.Normativity, &m.ListKind, &m.ListMismatch,
 			&m.R1State, &m.R2State, &m.TargetInputID, &m.TargetInputTitle, &m.MetricState, &m.ResourceTitle,
 			&m.IdentityKey, &identifiersJSON); err != nil {
 			rc.GetLogger().Error("scan references failed", "input_record_id", id, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read references"})
 		}
+		m.SourceTableRows = sourceTableRowsJSON
 		if err := json.Unmarshal([]byte(sourceLineSpansJSON), &m.SourceLineSpans); err != nil {
 			rc.GetLogger().Error("decode reference source lines failed", "input_record_id", id, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read reference source lines"})
