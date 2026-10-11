@@ -1,4 +1,4 @@
-"""References PDF navigation smoke test; requires a running web server and Playwright."""
+"""References PDF and Prev/Next navigation smoke test; requires a running web server and Playwright."""
 import argparse,json,pathlib
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
@@ -72,15 +72,28 @@ with sync_playwright() as p:
   assert page.locator('.pdf-canvas-host').evaluate('el=>el.scrollHeight>el.clientHeight')
   if pg>=4: assert page.locator('.pdf-canvas-host').evaluate('el=>el.scrollTop>0')
   assert box and host and box['y']>=host['y'] and box['y']+box['height']<=host['y']+host['height'],(box,host)
-  selections=[json.loads(log.split('select-reference ',1)[1]) for log in diagnostics if 'select-reference ' in log]
-  assert selections[-1]['refId']==refs[index]['ref_id']
-  assert selections[-1]['targetPage']==pg
-  paints=[json.loads(log.split('paint-highlights ',1)[1]) for log in diagnostics if 'paint-highlights ' in log]
-  matching=[log for log in paints if log['refId']==refs[index]['ref_id'] and log['page']==pg]
-  assert matching and matching[-1]['paintedLines'] and not matching[-1]['skippedLines']
- assert any('viewer-page ' in log for log in diagnostics)
- assert any('source-loaded ' in log for log in diagnostics)
- assert any('source-load-failed' in log for log in diagnostics)
+ prev=view.get_by_role('button',name=labels['references_mgmt_prev'],exact=True)
+ next_button=view.get_by_role('button',name=labels['references_mgmt_next'],exact=True)
+ assert abs(prev.bounding_box()['y']-next_button.bounding_box()['y'])<1
+ for direction,index in [('prev',0),('next',1),('next',2),('next',3),('prev',2),('next',3)]:
+  (prev if direction=='prev' else next_button).click()
+  assert view.locator('.mention-card.active').count()==1
+  assert view.locator('.mention-card').nth(index).get_attribute('aria-pressed')=='true'
+  expected_lines=[line['line_number'] for line in lines if str(line['line_number']) in refs[index]['source_line_spans'] or (index==1 and line['line_number'] in [80,81])]
+  page.wait_for_function('(expected)=>JSON.stringify([...document.querySelectorAll(".document .pdf-highlight")].map(el=>Number(el.title.split(" ")[1])))===JSON.stringify(expected)',arg=expected_lines)
+  if index==0: assert prev.is_disabled()
+  if index==len(refs)-1: assert next_button.is_disabled()
+ view.locator('.reference-filters summary').click()
+ text_filter=view.get_by_role('textbox',name=labels['references_mgmt_filter_by_text'],exact=True)
+ text_filter.fill('Second reference')
+ assert view.locator('.mention-card').count()==1
+ assert prev.is_disabled() and next_button.is_enabled()
+ next_button.click()
+ assert view.locator('.mention-card.active').count()==1
+ assert prev.is_disabled() and next_button.is_disabled()
+ text_filter.fill('no matching reference')
+ assert prev.is_disabled() and next_button.is_disabled()
+ assert not diagnostics,diagnostics
  assert not errors,errors
- print(f'PASS ({args.locale}): cross-page, same-page and multi-page reference highlighting; source-load failure and retry.')
+ print(f'PASS ({args.locale}): PDF highlighting, Prev/Next boundaries and filters, source-load failure and retry; no reference debug logs.')
  b.close()

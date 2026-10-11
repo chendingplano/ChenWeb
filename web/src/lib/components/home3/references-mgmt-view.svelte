@@ -94,24 +94,6 @@
 		return lines.sort((a, b) => a.page_number - b.page_number || a.line_number - b.line_number);
 	});
 
-	// Snapshot diagnostic values so DevTools shows the data from this event,
-	// rather than the current contents of a reactive object expanded later.
-	function logPdfDiagnostic(event: string, data: Record<string, unknown>) {
-		console.info(`[References PDF 20261011-731] ${event} ${JSON.stringify(data)}`);
-	}
-
-	$effect(() => {
-		if (!browser || !selected) return;
-		logPdfDiagnostic('viewer-page', {
-			inputId: record?.id,
-			refId: selected.ref_id,
-			page: pageNo,
-			numPages,
-			targetPage: selectedSourceLines[0]?.page_number ?? null,
-			lines: selectedSourceLines.map((line) => ({ page: line.page_number, line: line.line_number }))
-		});
-	});
-
 	function persistPanelWidth(panel: 'list' | 'details', width: number) {
 		if (panel === 'list') {
 			referenceListWidth = Math.max(LIST_WIDTH_MIN, Math.min(LIST_WIDTH_MAX, Math.round(width)));
@@ -178,16 +160,9 @@
 			if (request !== selectionRequest) return;
 			mentions = response.results ?? [];
 			rawLines = lines.lines ?? [];
-			logPdfDiagnostic('source-loaded', {
-				inputId: value.id,
-				references: mentions.length,
-				rawLines: rawLines.length,
-				pages: lines.pages
-			});
 			if (mentions[0]) selectReference(mentions[0]);
 		} catch (e) {
 			if (request !== selectionRequest) return;
-			console.error('[References PDF 20261011-731] source-load-failed', { inputId: value.id, error: e });
 			error = e instanceof Error ? e.message : m.references_mgmt_load_failed();
 		} finally {
 			if (request === selectionRequest) loading = false;
@@ -198,31 +173,20 @@
 		selected = mention;
 		highlightVersion += 1;
 		const firstLine = selectedSourceLines[0];
-		const previousPage = pageNo;
 		if (firstLine) pageNo = firstLine.page_number;
-		logPdfDiagnostic('select-reference', {
-			inputId: record?.id,
-			refId: mention.ref_id,
-			sourceLineSpans: mention.source_line_spans ?? [],
-			previousPage,
-			targetPage: firstLine?.page_number ?? null,
-			page: pageNo,
-			rawLineCount: rawLines.length,
-			highlightVersion,
-			lines: selectedSourceLines.map((line) => ({
-				page: line.page_number, line: line.line_number, coords: line.coords, content: line.content
-			}))
-		});
-		if (!firstLine) console.warn('[References PDF 20261011-731] no source lines resolved', {
-			inputId: record?.id, refId: mention.ref_id, sourceLineSpans: mention.source_line_spans
-		});
+	}
+
+	let selectedVisibleIndex = $derived(visibleMentions.findIndex((mention) => mention.id === selected?.id));
+
+	function stepReference(direction: -1 | 1) {
+		const mention = visibleMentions[selectedVisibleIndex + direction];
+		if (mention) selectReference(mention);
 	}
 
 	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
 		const pageLines = selectedSourceLines.filter((line) => line.page_number === page);
 		if (pageLines.length === 0) return;
 		const lines = pageLines.filter((line) => Array.isArray(line.coords) && line.coords.length >= 4);
-		const paintedLines: number[] = [];
 		for (let i = 0; i < lines.length; i += 1) {
 			const line = lines[i];
 			const next = lines[i + 1];
@@ -242,19 +206,7 @@
 			mark.style.height = `${height}px`;
 			mark.title = `line ${line.line_number}`;
 			overlay.appendChild(mark);
-			paintedLines.push(line.line_number);
 		}
-		logPdfDiagnostic('paint-highlights', {
-			inputId: record?.id,
-			refId: selected?.ref_id,
-			page,
-			viewerPage: pageNo,
-			highlightVersion,
-			viewport: { width: viewport.width, height: viewport.height },
-			lines: pageLines.map((line) => ({ line: line.line_number, coords: line.coords, content: line.content })),
-			paintedLines,
-			skippedLines: pageLines.filter((line) => !paintedLines.includes(line.line_number)).map((line) => line.line_number)
-		});
 	}
 
 	function mapRecord(input: KbInputRecord) {
@@ -295,6 +247,10 @@
 					</select>
 				</div>
 			</details>
+			<div class="reference-navigation">
+				<button type="button" disabled={loading || !!error || selectedVisibleIndex <= 0} onclick={() => stepReference(-1)}>{m.references_mgmt_prev()}</button>
+				<button type="button" disabled={loading || !!error || visibleMentions.length === 0 || selectedVisibleIndex >= visibleMentions.length - 1} onclick={() => stepReference(1)}>{m.references_mgmt_next()}</button>
+			</div>
 			{#if loading}<p class="notice">{m.references_mgmt_loading()}</p>
 			{:else if error}<p class="notice error">{error}</p>
 			{:else if !record}<p class="notice">{m.references_mgmt_select_document()}</p>
@@ -361,6 +317,9 @@
 	.records{position:relative;overflow:hidden}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0}
 	.column-head{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--ref-line);color:var(--ref-text)}
 	.column-head span{font:10px 'JetBrains Mono',monospace;color:var(--ref-accent);text-transform:uppercase;letter-spacing:.1em}
+	.reference-navigation{flex:none;display:flex;gap:8px;margin:0 8px 12px}
+	.reference-navigation button{flex:1;height:32px;border:1px solid var(--ref-line);background:var(--ref-card);color:var(--ref-text);font:11px 'JetBrains Mono',monospace;cursor:pointer}
+	.reference-navigation button:hover:not(:disabled){border-color:var(--ref-accent);background:var(--ref-alt)}.reference-navigation button:disabled{opacity:.4;cursor:default}.reference-navigation button:focus-visible{outline:2px solid var(--ref-accent);outline-offset:2px}
 	.reference-filters{flex:none;margin:0 8px 8px;background:var(--ref-card);color:var(--ref-text)}
 	.reference-filters summary{height:34px;display:flex;align-items:center;gap:8px;padding:0 10px;cursor:pointer;list-style:none;font:10px 'JetBrains Mono',monospace;color:var(--ref-secondary)}
 	.reference-filters summary::-webkit-details-marker{display:none}.reference-filters[open] summary :global(svg){transform:rotate(90deg)}
