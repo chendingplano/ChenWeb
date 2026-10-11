@@ -13,8 +13,23 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// goldMetricOption is one (skill version, model) combination present in
-// testbed.metrics, with how many documents and benchmark runs it covers.
+// goldRunTables maps a gold_kind query value to the testbed table holding its
+// benchmark rows; each has input_record_id, skill_version, model_name and run_id.
+// Only these constants are spliced into SQL. An empty kind means metrics.
+var goldRunTables = map[string]string{
+	"":           "testbed.metrics",
+	"metrics":    "testbed.metrics",
+	"references": "testbed.reference_benchmark_runs",
+}
+
+// goldRunTable returns the table for kind, or false for an unknown kind.
+func goldRunTable(kind string) (string, bool) {
+	table, ok := goldRunTables[strings.TrimSpace(kind)]
+	return table, ok
+}
+
+// goldMetricOption is one (skill version, model) combination present in a gold
+// benchmark table, with how many documents and benchmark runs it covers.
 type goldMetricOption struct {
 	SkillVersion string `json:"skill_version"`
 	ModelName    string `json:"model_name"`
@@ -24,16 +39,16 @@ type goldMetricOption struct {
 
 type goldMetricOptionsResponse struct {
 	Status bool `json:"status"`
-	// SkillVersions is newest first; the Gold Metrics view defaults to the first.
+	// SkillVersions is newest first; the gold views default to the first.
 	SkillVersions []string           `json:"skill_versions"`
 	Options       []goldMetricOption `json:"options"`
 }
 
-const goldMetricOptionsQuery = `
+const goldOptionsQuery = `
 SELECT skill_version, model_name,
        COUNT(DISTINCT input_record_id) AS record_count,
        COUNT(DISTINCT run_id) AS run_count
-FROM testbed.metrics
+FROM %s
 GROUP BY skill_version, model_name
 `
 
@@ -111,13 +126,25 @@ func newestGoldSkillVersion(db *sql.DB) (string, error) {
 // ListGoldMetricOptions handles GET /api/v1/kb/metrics/gold-options: the skill
 // versions and models available for the Gold Metrics view's filters.
 func ListGoldMetricOptions(c echo.Context) error {
-	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_040")
+	return listGoldOptions(c, "CWB_KB_M_040", goldRunTables["metrics"])
+}
+
+// ListGoldReferenceOptions handles GET /api/v1/kb/references/gold-options: the
+// skill versions and models available for the Reference Benchmark view's filters.
+func ListGoldReferenceOptions(c echo.Context) error {
+	return listGoldOptions(c, "CWB_KB_REF_010", goldRunTables["references"])
+}
+
+// listGoldOptions lists the (skill version, model) combinations in table, which
+// must come from goldRunTables.
+func listGoldOptions(c echo.Context, loc, table string) error {
+	rc := EchoFactory.NewFromEcho(c, loc)
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	rows, err := ApiTypes.ProjectDBHandle.Query(goldMetricOptionsQuery)
+	rows, err := ApiTypes.ProjectDBHandle.Query(fmt.Sprintf(goldOptionsQuery, table))
 	if err != nil {
-		logger.Error("query gold metric options failed", "err", err)
+		logger.Error("query gold options failed", "table", table, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
 			ErrorMsg: "failed to list gold metric options (CWB_KB_M_030)",
@@ -157,7 +184,7 @@ func ListGoldMetricOptions(c echo.Context) error {
 		}
 		return options[i].ModelName < options[j].ModelName
 	})
-	logger.Info("listed gold metric options", "versions", len(versions), "options", len(options))
+	logger.Info("listed gold options", "table", table, "versions", len(versions), "options", len(options))
 
 	return c.JSON(http.StatusOK, goldMetricOptionsResponse{
 		Status:        true,
@@ -189,7 +216,7 @@ func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsF
 			where += fmt.Sprintf(" AND %s = $%d", filter.column, len(args))
 		}
 	}
-	rows, err := db.Query("SELECT DISTINCT input_record_id, skill_version, model_name, run_id FROM testbed.metrics WHERE "+where+" ORDER BY input_record_id, skill_version, model_name, run_id", args...)
+	rows, err := db.Query("SELECT DISTINCT input_record_id, skill_version, model_name, run_id FROM "+goldRunTables[strings.TrimSpace(filters.GoldKind)]+" WHERE "+where+" ORDER BY input_record_id, skill_version, model_name, run_id", args...)
 	if err != nil {
 		return err
 	}
@@ -209,11 +236,12 @@ func attachGoldMetricRuns(db *sql.DB, records []inputRecord, filters listInputsF
 
 // goldBenchmarkInputTable lists one row per input/run/version/model. DISTINCT
 // collapses metric rows within a run while preserving repeated benchmarks.
-// inputTable comes from resolveInputTable, never from a client-supplied name.
-func goldBenchmarkInputTable(inputTable string) string {
+// inputTable comes from resolveInputTable and goldTable from goldRunTables,
+// never from a client-supplied name.
+func goldBenchmarkInputTable(inputTable, goldTable string) string {
 	return fmt.Sprintf(`(SELECT input.*, benchmark.skill_version AS benchmark_skill_version,
 		benchmark.model_name AS benchmark_model_name, benchmark.run_id AS benchmark_run_id
 		FROM %s input JOIN (
-			SELECT DISTINCT input_record_id, skill_version, model_name, run_id FROM testbed.metrics
-		) benchmark ON benchmark.input_record_id = input.id)`, inputTable)
+			SELECT DISTINCT input_record_id, skill_version, model_name, run_id FROM %s
+		) benchmark ON benchmark.input_record_id = input.id)`, inputTable, goldTable)
 }

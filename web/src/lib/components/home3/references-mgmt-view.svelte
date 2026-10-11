@@ -3,14 +3,27 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
-	import { getRawLines, listKbReferences, type KbReferenceMention, type KbInputRecord, type RawLine } from '$lib/services/kbService';
+	import { getRawLines, listKbReferences, type KbDroppedReference, type KbMetricSource, type KbReferenceMention, type KbInputRecord, type RawLine } from '$lib/services/kbService';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
+	import { GoldRunFilter, goldRunBadges } from './gold-run-filter.svelte';
+	import GoldRunFilters from './gold-run-filters.svelte';
+	import { kbInputRecordKey } from './metric-benchmark-record';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
-	let { darkMode = true }: { darkMode?: boolean } = $props();
+	// 'testbed' is the Reference Benchmark: read-only gold references (testbed.ref_mentions)
+	// written by the extract-references-benchmark skill, one record-list entry per run,
+	// plus each run's dropped candidates. Gold rows have no holding resolution.
+	let { darkMode = true, source = 'kb' }: { darkMode?: boolean; source?: KbMetricSource } = $props();
+	const gold = new GoldRunFilter('references');
+	$effect(() => {
+		if (source === 'testbed') void gold.load();
+	});
 	let record = $state<KbInputRecord | null>(null);
 	let mentions = $state<KbReferenceMention[]>([]);
 	let selected = $state<KbReferenceMention | null>(null);
+	let referenceView = $state<'gold' | 'dropped'>('gold');
+	let dropped = $state<KbDroppedReference[]>([]);
+	let selectedDropped = $state<KbDroppedReference | null>(null);
 	let loading = $state(false);
 	let error = $state('');
 	let rawLines = $state<RawLine[]>([]);
@@ -75,6 +88,11 @@
 			return matchesText && matchesNormativity && matchesResolution;
 		});
 	});
+	let visibleDropped = $derived.by(() => {
+		const query = referenceFilter.trim().toLocaleLowerCase();
+		return dropped.filter((item) => !query || [item.candidate_id, item.cited_raw, item.reason, item.drop_reason]
+			.some((value) => value?.toLocaleLowerCase().includes(query)));
+	});
 	let lineNumToPage = $derived.by(() => {
 		const map = new Map<number, number>();
 		for (const line of rawLines) if (!map.has(line.line_number)) map.set(line.line_number, line.page_number);
@@ -83,7 +101,8 @@
 	let selectedSourceLines = $derived.by(() => {
 		const lines: RawLine[] = [];
 		const seen = new Set<string>();
-		for (const span of selected?.source_line_spans ?? []) {
+		const spans = referenceView === 'dropped' ? selectedDropped?.source_line_spans : selected?.source_line_spans;
+		for (const span of spans ?? []) {
 			const match = span.trim().match(/^(\d+)\s*(?:[:,\-]\s*(\d+))?$/);
 			if (!match) continue;
 			const start = Number(match[1]);
@@ -159,6 +178,8 @@
 		record = value;
 		selected = null;
 		mentions = [];
+		selectedDropped = null;
+		dropped = [];
 		rawLines = [];
 		referenceFilter = '';
 		normativityFilter = '';
@@ -167,8 +188,11 @@
 		loading = true;
 		error = '';
 		try {
+			// Benchmark entries carry exactly one run; the gold rows are that run's.
+			const run = source === 'testbed' ? value.gold_metric_runs?.[0] : undefined;
+			if (source === 'testbed' && !run) throw new Error(m.references_mgmt_load_failed());
 			const [response, lines] = await Promise.all([
-				listKbReferences(value.id),
+				listKbReferences(value.id, run),
 				getRawLines(value.id).catch((error) => {
 					throw new Error(m.references_mgmt_source_lines_load_failed({
 						error: error instanceof Error ? error.message : String(error)
@@ -177,8 +201,11 @@
 			]);
 			if (request !== selectionRequest) return;
 			mentions = response.results ?? [];
+			dropped = response.dropped ?? [];
 			rawLines = lines.lines ?? [];
-			if (mentions[0]) selectReference(mentions[0]);
+			if (referenceView === 'dropped') {
+				if (dropped[0]) selectDropped(dropped[0]);
+			} else if (mentions[0]) selectReference(mentions[0]);
 		} catch (e) {
 			if (request !== selectionRequest) return;
 			error = e instanceof Error ? e.message : m.references_mgmt_load_failed();
@@ -194,11 +221,52 @@
 		if (firstLine) pageNo = firstLine.page_number;
 	}
 
-	let selectedVisibleIndex = $derived(visibleMentions.findIndex((mention) => mention.id === selected?.id));
+	function selectDropped(item: KbDroppedReference) {
+		selectedDropped = item;
+		highlightVersion += 1;
+		const firstLine = selectedSourceLines[0];
+		if (firstLine) pageNo = firstLine.page_number;
+	}
+
+	function clearRecord() {
+		selectionRequest++;
+		record = null;
+		selected = null;
+		mentions = [];
+		selectedDropped = null;
+		dropped = [];
+		rawLines = [];
+		loading = false;
+		error = '';
+	}
+
+	function changeReferenceView(view: 'gold' | 'dropped') {
+		referenceView = view;
+		referenceFilter = '';
+		normativityFilter = '';
+		selected = null;
+		selectedDropped = null;
+		if (view === 'dropped' && dropped[0]) selectDropped(dropped[0]);
+		else if (view === 'gold' && mentions[0]) selectReference(mentions[0]);
+	}
+
+	let selectedVisibleIndex = $derived(referenceView === 'dropped'
+		? visibleDropped.findIndex((item) => item.id === selectedDropped?.id)
+		: visibleMentions.findIndex((mention) => mention.id === selected?.id));
+	let visibleCount = $derived(referenceView === 'dropped' ? visibleDropped.length : visibleMentions.length);
 
 	function stepReference(direction: -1 | 1) {
+		if (referenceView === 'dropped') {
+			const item = visibleDropped[selectedVisibleIndex + direction];
+			if (item) selectDropped(item);
+			return;
+		}
 		const mention = visibleMentions[selectedVisibleIndex + direction];
 		if (mention) selectReference(mention);
+	}
+
+	function yesNo(value: boolean | undefined) {
+		return value === undefined ? '—' : value ? m.references_mgmt_yes() : m.references_mgmt_no();
 	}
 
 	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
@@ -237,46 +305,78 @@
 			meta: [input.doc_no || '', input.type || ''].filter(Boolean),
 			status: input.type || '',
 			description: m.references_mgmt_select_document_to_review(),
-			badges: [input.type || '']
+			badges: [input.type || ''],
+			benchmarkRuns: source === 'testbed' ? goldRunBadges(input) : []
 		};
 	}
 </script>
 
 <div class="references-page select-text" style={`--ref-bg:${palette.bg};--ref-panel:${palette.panel};--ref-alt:${palette.panelAlt};--ref-card:${filterControlBg};--ref-line:${palette.line};--ref-text:${palette.text};--ref-secondary:${palette.secondary};--ref-muted:${palette.muted};--ref-accent:${palette.accent};--ref-line-soft:${palette.lineSoft};--ref-crimson:${palette.crimson};--ref-crimson-faint:${palette.crimsonFaint};--ref-teal:${palette.teal}`}>
 	<header class="heading">
-		<div><div class="eyebrow">{m.references_mgmt_knowledge_system_vol_iii()}</div><h1>{m.references_mgmt_title()}</h1><p>{m.references_mgmt_subtitle()}</p></div>
-		<div class="stats"><small>{m.references_mgmt_record()}</small><strong>{record?.id ?? '—'}</strong><small>{m.references_mgmt_references()}</small><strong>{String(mentions.length).padStart(3, '0')}</strong></div>
+		<div><div class="eyebrow">{m.references_mgmt_knowledge_system_vol_iii()}</div><h1>{source === 'testbed' ? m.references_mgmt_benchmark_title() : m.references_mgmt_title()}</h1><p>{source === 'testbed' ? m.references_mgmt_benchmark_subtitle() : m.references_mgmt_subtitle()}</p></div>
+		<div class="stats"><small>{m.references_mgmt_record()}</small><strong>{record?.id ?? '—'}</strong><small>{m.references_mgmt_references()}</small><strong>{String(mentions.length).padStart(3, '0')}</strong>{#if source === 'testbed'}<small>{m.references_mgmt_dropped()}</small><strong>{String(dropped.length).padStart(3, '0')}</strong>{/if}</div>
 	</header>
 	<div class="workspace" style={workspaceStyle}>
 		<aside class="records">
-			<KbInputRecordBrowser {darkMode} fitPanel instanceKey="references-record-browser" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)} />
+			<KbInputRecordBrowser {darkMode} fitPanel instanceKey={source === 'testbed' ? 'gold-references-record-browser' : 'references-record-browser'} title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} selectedRecordKey={record ? kbInputRecordKey(record) : null} listPausedMessage={source === 'testbed' ? gold.pausedMessage : ''} listParams={source === 'testbed' ? gold.listParams : undefined} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)}>
+				{#snippet extraControls()}
+					{#if source === 'testbed'}<GoldRunFilters filter={gold} onChange={clearRecord} />{/if}
+				{/snippet}
+			</KbInputRecordBrowser>
 		</aside>
 		<button type="button" class="resize-handle" class:active={resizing === 'records'} aria-label={m.references_mgmt_resize_records_panel()} onpointerdown={(event) => startResize(event, 'records')} onkeydown={(event) => resizeWithKeyboard(event, 'records')}>
 			<span class="resize-grip" aria-hidden="true"></span>
 		</button>
 		<section class="mention-column" aria-label={m.references_mgmt_references()}>
-			<div class="column-head"><strong>{m.references_mgmt_references()}</strong><span>{visibleMentions.length} {m.references_mgmt_found()}</span></div>
+			<div class="column-head"><strong>{referenceView === 'dropped' ? m.references_mgmt_view_dropped() : m.references_mgmt_references()}</strong><span>{visibleCount} {m.references_mgmt_found()}</span></div>
 			<details class="reference-filters">
 				<summary><ChevronRightIcon size={14} />{m.references_mgmt_filters()}</summary>
 				<div class="filter-controls">
+					{#if source === 'testbed'}
+						<select aria-label={m.references_mgmt_view()} value={referenceView} onchange={(event) => changeReferenceView(event.currentTarget.value as 'gold' | 'dropped')}>
+							<option value="gold">{m.references_mgmt_view_gold()}</option>
+							<option value="dropped">{m.references_mgmt_view_dropped()}</option>
+						</select>
+					{/if}
 					<input aria-label={m.references_mgmt_filter_by_text()} placeholder={m.references_mgmt_filter_by_text()} bind:value={referenceFilter} />
-					<select aria-label={m.references_mgmt_filter_by_normativity()} bind:value={normativityFilter}>
-						<option value="">{m.references_mgmt_all_normativities()}</option>
-						{#each [...new Set(mentions.map((item) => item.normativity).filter(Boolean))] as value}<option value={value}>{value}</option>{/each}
-					</select>
-					<select aria-label={m.references_mgmt_filter_by_resolution()} bind:value={resolutionFilter}>
-						<option value="">{m.references_mgmt_all_resolutions()}</option>
-						{#each [...new Set(mentions.map((item) => item.r2_state).filter(Boolean))] as value}<option value={value}>{value}</option>{/each}
-					</select>
+					{#if referenceView === 'gold'}
+						<select aria-label={m.references_mgmt_filter_by_normativity()} bind:value={normativityFilter}>
+							<option value="">{m.references_mgmt_all_normativities()}</option>
+							{#each [...new Set(mentions.map((item) => item.normativity).filter(Boolean))] as value}<option value={value}>{value}</option>{/each}
+						</select>
+					{/if}
+					{#if source !== 'testbed'}
+						<select aria-label={m.references_mgmt_filter_by_resolution()} bind:value={resolutionFilter}>
+							<option value="">{m.references_mgmt_all_resolutions()}</option>
+							{#each [...new Set(mentions.map((item) => item.r2_state).filter(Boolean))] as value}<option value={value}>{value}</option>{/each}
+						</select>
+					{/if}
 				</div>
 			</details>
 			<div class="reference-navigation">
 				<button type="button" disabled={loading || !!error || selectedVisibleIndex <= 0} onclick={() => stepReference(-1)}>{m.references_mgmt_prev()}</button>
-				<button type="button" disabled={loading || !!error || visibleMentions.length === 0 || selectedVisibleIndex >= visibleMentions.length - 1} onclick={() => stepReference(1)}>{m.references_mgmt_next()}</button>
+				<button type="button" disabled={loading || !!error || visibleCount === 0 || selectedVisibleIndex >= visibleCount - 1} onclick={() => stepReference(1)}>{m.references_mgmt_next()}</button>
 			</div>
 			{#if loading}<p class="notice">{m.references_mgmt_loading()}</p>
 			{:else if error}<p class="notice error">{error}</p>
 			{:else if !record}<p class="notice">{m.references_mgmt_select_document()}</p>
+			{:else if referenceView === 'dropped'}
+				{#if visibleDropped.length === 0}<p class="notice">{m.references_mgmt_no_dropped_for_run()}</p>
+				{:else}
+					<div class="mention-list">
+						{#each visibleDropped as item, i (item.id)}
+							<button type="button" class="mention-card" class:active={selectedDropped?.id === item.id} aria-pressed={selectedDropped?.id === item.id} onclick={() => selectDropped(item)}>
+								<div class="card-rule" aria-hidden="true"></div>
+								<div class="card-body">
+									<div class="card-row-top"><span class="card-index">№ {String(i + 1).padStart(3, '0')} <span class="card-reference-id">· {item.candidate_id}</span></span><span class="card-normativity">{item.drop_reason}</span></div>
+									<div class="card-name">{item.cited_raw || m.references_mgmt_untitled_reference()}</div>
+									<div class="card-desc">{item.reason || m.references_mgmt_no_excerpt()}</div>
+									<div class="card-foot"><span class="chip"><span class="chip-dot" aria-hidden="true"></span>{item.decision}</span>{#each item.ref_ids as refId}<span class="chip chip-quiet">{refId}</span>{/each}</div>
+								</div>
+							</button>
+						{/each}
+					</div>
+				{/if}
 			{:else if mentions.length === 0}<p class="notice">{m.references_mgmt_no_references_for_document()}</p>
 			{:else if visibleMentions.length === 0}<p class="notice">{m.references_mgmt_no_references_for_document()}</p>
 			{:else}
@@ -308,7 +408,7 @@
 								<div class="reference-info-content" onpointerdown={(event) => event.stopPropagation()} onselectstart={(event) => event.stopPropagation()}>
 									<strong>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</strong>
 									{#if selected.evidence}<p>{selected.evidence}</p>{/if}
-									<div class="reference-info-tags"><span>{selected.target_type} · {selected.target_content}</span><span>{selected.normativity}</span><span>{selected.r2_state || m.references_mgmt_unresolved()}</span></div>
+									<div class="reference-info-tags"><span>{selected.target_type} · {selected.target_content}</span><span>{selected.normativity}</span>{#if source !== 'testbed'}<span>{selected.r2_state || m.references_mgmt_unresolved()}</span>{/if}</div>
 								</div>
 							</div>
 						{/if}
@@ -323,14 +423,33 @@
 		</button>
 		<aside class="details-panel" aria-label={m.references_mgmt_reference_details()}>
 			<div class="details-heading">{m.references_mgmt_reference_details()}</div>
-			{#if selected}
+			{#if referenceView === 'dropped'}
+				{#if selectedDropped}
+					<div class="detail"><div class="detail-label">{m.references_mgmt_dropped_details()}</div><h2>{selectedDropped.cited_raw || m.references_mgmt_untitled_reference()}</h2>
+						<dl>
+							<dt>{m.references_mgmt_decision()}</dt><dd>{selectedDropped.decision}</dd>
+							<dt>{m.references_mgmt_rule()}</dt><dd>{selectedDropped.drop_reason}</dd>
+							<dt>{m.references_mgmt_reason()}</dt><dd>{selectedDropped.reason || '—'}</dd>
+							<dt>{m.references_mgmt_merged_into()}</dt><dd>{selectedDropped.ref_ids.join(', ') || '—'}</dd>
+						</dl>
+					</div>
+				{:else}<p class="notice">{m.references_mgmt_select_dropped()}</p>{/if}
+			{:else if selected}
 				<div class="detail"><div class="detail-label">{m.references_mgmt_selected_reference()}</div><h2>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</h2>
 					<dl>
 						<dt>{m.references_mgmt_type()}</dt><dd>{selected.target_type} / {selected.target_subtype}</dd>
 						<dt>{m.references_mgmt_content()}</dt><dd>{selected.target_content}</dd>
 						<dt>{m.references_mgmt_normativity()}</dt><dd>{selected.normativity}{selected.list_kind ? ` · ${selected.list_kind}` : ''}</dd>
-						<dt>{m.references_mgmt_holding_resolution()}</dt><dd>{selected.r2_state || m.references_mgmt_unresolved()}{selected.target_input_title ? ` · ${selected.target_input_title}` : ''}</dd>
-						<dt>{m.references_mgmt_resource_identity()}</dt><dd>{selected.identity_key || '—'}</dd>
+						{#if source === 'testbed'}
+							<dt>{m.references_mgmt_ref_form()}</dt><dd>{selected.ref_form || '—'}</dd>
+							<dt>{m.references_mgmt_mechanism()}</dt><dd>{selected.mechanism || '—'}</dd>
+							<dt>{m.references_mgmt_in_requirement()}</dt><dd>{yesNo(selected.in_requirement)}</dd>
+							<dt>{m.references_mgmt_internal()}</dt><dd>{yesNo(selected.internal)}</dd>
+							<dt>{m.references_mgmt_confidence()}</dt><dd>{selected.confidence ?? '—'}</dd>
+						{:else}
+							<dt>{m.references_mgmt_holding_resolution()}</dt><dd>{selected.r2_state || m.references_mgmt_unresolved()}{selected.target_input_title ? ` · ${selected.target_input_title}` : ''}</dd>
+							<dt>{m.references_mgmt_resource_identity()}</dt><dd>{selected.identity_key || '—'}</dd>
+						{/if}
 						<dt>{m.references_mgmt_identifiers()}</dt><dd>{selected.identifiers?.join(', ') || '—'}</dd>
 						<dt>{m.references_mgmt_source_excerpt()}</dt><dd>{selected.evidence || selected.cited_raw || '—'}</dd>
 					</dl>
@@ -353,7 +472,7 @@
 	.records :global(.retrieve-btn){grid-column:1 / -1;white-space:nowrap}
 	.records :global(.reset-btn),.records :global(.settings-btn){min-width:0;min-height:40px;padding:.6rem .5rem;font-size:12px;white-space:nowrap}
 	.records,.mention-column,.document,.details-panel{min-width:0;min-height:0;border-right:1px solid var(--ref-line);background:var(--ref-panel)}
-	.records{position:relative;overflow:hidden}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0}
+	.records{position:relative;overflow:hidden;--panel-bg:var(--ref-card);--ink-line:var(--ref-line);--text-primary:var(--ref-text);--text-muted:var(--ref-muted);--brass:var(--ref-accent);--font-mono:'JetBrains Mono',monospace}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0}
 	.column-head{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--ref-line);color:var(--ref-text)}
 	.column-head span{font:10px 'JetBrains Mono',monospace;color:var(--ref-accent);text-transform:uppercase;letter-spacing:.1em}
 	.reference-navigation{flex:none;display:flex;gap:8px;margin:0 8px 12px}

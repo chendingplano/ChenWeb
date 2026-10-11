@@ -85,9 +85,10 @@ export type ListKbInputsParams = {
 	modifyEndTime?: string;
 	orderBy?: string;
 	orderDir?: 'asc' | 'desc';
-	// Keep only inputs that have gold metrics (testbed.metrics), optionally for
-	// one skill version and/or model.
+	// Keep only inputs that have gold benchmark rows, optionally for one skill
+	// version and/or model. goldKind picks the gold set; omitted means metrics.
 	hasGoldMetrics?: boolean;
+	goldKind?: GoldKind;
 	goldBenchmarkEntries?: boolean;
 	goldSkillVersion?: string;
 	goldModelName?: string;
@@ -126,6 +127,7 @@ function buildQuery(params: ListKbInputsParams): string {
 	if (params.orderBy?.trim()) query.set('order_by', params.orderBy.trim());
 	if (params.orderDir?.trim()) query.set('order_dir', params.orderDir.trim());
 	if (params.hasGoldMetrics) query.set('has_gold_metrics', 'true');
+	if (params.goldKind) query.set('gold_kind', params.goldKind);
 	if (params.goldBenchmarkEntries) query.set('gold_benchmark_entries', 'true');
 	if (params.goldSkillVersion?.trim()) query.set('gold_skill_version', params.goldSkillVersion.trim());
 	if (params.goldModelName?.trim()) query.set('gold_model_name', params.goldModelName.trim());
@@ -296,13 +298,42 @@ export type KbReferenceMention = {
 	resource_title?: string;
 	identity_key?: string;
 	identifiers: string[];
+	// Gold references only (testbed.ref_mentions).
+	ref_form?: string;
+	mechanism?: string;
+	in_requirement?: boolean;
+	internal?: boolean;
+	confidence?: number;
 };
 
-export async function listKbReferences(inputRecordId: number): Promise<{ status: boolean; results: KbReferenceMention[] }> {
-	return fetchOrThrow(
-		`${BASE}/references?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
-		'Failed to list references'
-	);
+// A candidate a gold reference run excluded or merged (testbed.ref_mentions_dropped).
+export type KbDroppedReference = {
+	id: number;
+	candidate_id: string;
+	decision: string;
+	drop_reason: string;
+	reason?: string;
+	cited_raw?: string;
+	source_line_spans: string[];
+	ref_ids: string[];
+};
+
+export type GoldRun = { skill_version: string; model_name: string; run_id: string };
+
+// Without goldRun: production references (kb.ref_mentions). With goldRun: that
+// benchmark run's gold references plus its dropped candidates.
+export async function listKbReferences(
+	inputRecordId: number,
+	goldRun?: GoldRun
+): Promise<{ status: boolean; results: KbReferenceMention[]; dropped?: KbDroppedReference[] }> {
+	const query = new URLSearchParams({ input_record_id: String(inputRecordId) });
+	if (goldRun) {
+		query.set('source', 'testbed');
+		query.set('skill_version', goldRun.skill_version);
+		query.set('model_name', goldRun.model_name);
+		query.set('run_id', goldRun.run_id);
+	}
+	return fetchOrThrow(`${BASE}/references?${query}`, 'Failed to list references');
 }
 
 export type GetKbMetricResponse = {
@@ -364,11 +395,15 @@ export type GoldMetricOptionsResponse = {
 	options: GoldMetricOption[];
 };
 
-// Skill versions and models present in testbed.metrics, for the Gold Metrics filters.
-export async function listGoldMetricOptions(): Promise<GoldMetricOptionsResponse> {
+// Which gold benchmark set a gold view reads: testbed.metrics or the
+// testbed reference tables.
+export type GoldKind = 'metrics' | 'references';
+
+// Skill versions and models present in a gold set, for the gold views' filters.
+export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptionsResponse> {
 	return fetchOrThrow<GoldMetricOptionsResponse>(
-		`${BASE}/metrics/gold-options`,
-		'Failed to list gold metric options'
+		`${BASE}/${kind}/gold-options`,
+		kind === 'metrics' ? 'Failed to list gold metric options' : 'Failed to list gold reference options'
 	);
 }
 

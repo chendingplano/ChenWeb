@@ -7,6 +7,7 @@
 	import SiteFooter from '../../../routes/semos/components/SiteFooter.svelte';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
+	import ReferencesMgmtView from '$lib/components/home3/references-mgmt-view.svelte';
 	import DocGenView from '$lib/components/home3/doc-gen-view.svelte';
 	import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
 	import ProductReviewIntakeView from '$lib/components/home3/product-review-intake-view.svelte';
@@ -206,6 +207,7 @@
 			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark' &&
+			activeMenu?.childId !== 'sysadmin-llm-references-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
@@ -346,6 +348,8 @@
 			<DecisionPlaygroundView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
 			<MetricScoreView {darkMode} {onSelectMetrics} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}
+			<ReferencesMgmtView {darkMode} source="testbed" />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}

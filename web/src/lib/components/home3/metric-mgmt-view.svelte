@@ -4,7 +4,6 @@
 	import { browser } from '$app/environment';
 	import {
 		listKbMetrics,
-		listGoldMetricOptions,
 		getKbInput,
 		getRawLines,
 		extractKbMetrics,
@@ -14,13 +13,14 @@
 		type KbInputRecord,
 		type KbMetricRecord,
 		type KbMetricSource,
-		type GoldMetricOption,
 		type ExtractedKbMetric,
 		type RawLine,
 		type SourceLineSpan
 	} from '$lib/services/kbService';
 	import { searchKbMetrics, type KbMetricSearchResult } from '$lib/services/kbMetricSearch';
 	import { kbInputRecordKey, metricBenchmarkSelection } from './metric-benchmark-record';
+	import { GoldRunFilter, goldRunBadges } from './gold-run-filter.svelte';
+	import GoldRunFilters from './gold-run-filters.svelte';
 	import { clipTableCell, splitTableContextRows } from './metric-table-context';
 	import {
 		buildMetricGroupAttrs,
@@ -88,45 +88,11 @@
 	// Gold-metrics filters (source 'testbed'): which skill version and model's
 	// benchmark run to show. Default to the newest version across all models;
 	// selecting a model narrows the benchmark list.
-	let goldSkillVersions = $state<string[]>([]);
-	let goldOptions = $state<GoldMetricOption[]>([]);
-	let goldSkillVersion = $state('');
-	let goldModelName = $state('');
-	let goldOptionsLoading = $state(true);
-	let goldOptionsError = $state('');
-	const goldModelNames = $derived(
-		goldOptions.filter((o) => o.skill_version === goldSkillVersion).map((o) => o.model_name)
-	);
-
-	async function loadGoldOptions() {
-		goldOptionsLoading = true;
-		goldOptionsError = '';
-		try {
-			const res = await listGoldMetricOptions();
-			goldSkillVersions = res.skill_versions ?? [];
-			goldOptions = res.options ?? [];
-			if (!goldSkillVersions.includes(goldSkillVersion)) goldSkillVersion = goldSkillVersions[0] ?? '';
-		} catch (err) {
-			goldOptionsError = err instanceof Error ? err.message : i18n.metric_mgmt_gold_options_failed();
-		} finally {
-			goldOptionsLoading = false;
-		}
-	}
+	const gold = new GoldRunFilter('metrics');
 
 	$effect(() => {
-		if (source === 'testbed') void loadGoldOptions();
+		if (source === 'testbed') void gold.load();
 	});
-
-	function handleGoldSkillVersionChange(event: Event) {
-		goldSkillVersion = (event.currentTarget as HTMLSelectElement).value;
-		goldModelName = '';
-		clearBenchmarkRecord();
-	}
-
-	function handleGoldModelChange(event: Event) {
-		goldModelName = (event.currentTarget as HTMLSelectElement).value;
-		clearBenchmarkRecord();
-	}
 
 	function handleMetricViewChange(event: Event) {
 		metricView = (event.currentTarget as HTMLSelectElement).value as 'gold' | 'dropped';
@@ -194,7 +160,7 @@
 	let metricIdError = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	const goldModelMissing = $derived(
-		source === 'testbed' && metricBenchmarkSelection(currentInput, goldSkillVersion, goldModelName).modelName === ''
+		source === 'testbed' && metricBenchmarkSelection(currentInput, gold.skillVersion, gold.modelName).modelName === ''
 	);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
@@ -1022,7 +988,7 @@
 	async function loadMetricsForRecord(id: number) {
 		const requestVersion = ++metricLoadVersion;
 		const benchmarkRuns = currentInput?.id === id ? currentInput.gold_metric_runs : undefined;
-		const benchmarkSelection = metricBenchmarkSelection(currentInput?.id === id ? currentInput : null, goldSkillVersion, goldModelName);
+		const benchmarkSelection = metricBenchmarkSelection(currentInput?.id === id ? currentInput : null, gold.skillVersion, gold.modelName);
 		// A record selection must reset every panel-level filter, otherwise a
 		// stale confidence filter keeps hiding this record's metrics. The global
 		// search dialog state and globalPicks are deliberately kept: clicking a
@@ -1223,11 +1189,7 @@
 			status: record.type?.trim() || '—',
 			description: formatMaybeDate(record.create_time),
 			badges: [record.type?.trim() || '—'],
-			benchmarkRuns: source === 'testbed'
-				? (record.gold_metric_runs ?? []).map((run) => i18n.metric_mgmt_benchmark_run({
-					version: run.skill_version, model: run.model_name, run: run.run_id
-				}))
-				: []
+			benchmarkRuns: source === 'testbed' ? goldRunBadges(record) : []
 		};
 	}
 
@@ -1679,48 +1641,17 @@
 					autoSelectFirstRecord={false}
 					selectedRecordId={currentInput?.id ?? null}
 					selectedRecordKey={currentInput ? kbInputRecordKey(currentInput) : null}
-					listPausedMessage={source === 'testbed' && (goldOptionsLoading || !goldSkillVersion)
-						? goldOptionsError || (goldOptionsLoading
-							? i18n.kb_input_record_browser_loading_records()
-							: i18n.metric_mgmt_no_records_yet())
-						: ''}
+					listPausedMessage={source === 'testbed' ? gold.pausedMessage : ''}
 					mapRecord={mapBrowserRecord}
 					onSelect={handleUserRecordSelect}
 					onError={(error) => {
 						errorMsg = error.message;
 					}}
-					listParams={source === 'testbed'
-						? { hasGoldMetrics: true, goldBenchmarkEntries: true, goldSkillVersion: goldSkillVersion, goldModelName: goldModelName }
-						: undefined}
+					listParams={source === 'testbed' ? gold.listParams : undefined}
 				>
 					{#snippet extraControls()}
 						{#if source === 'testbed'}
-							<div class="gold-filters">
-								<label class="gold-filter">
-									<span class="gold-filter-label">{i18n.metric_mgmt_gold_skill_version()}</span>
-									<select class="toolbar-select" value={goldSkillVersion} onchange={handleGoldSkillVersionChange}>
-										{#each goldSkillVersions as v, idx (v)}
-											<option value={v}>{idx === 0 ? i18n.metric_mgmt_gold_version_newest({ version: v }) : v}</option>
-										{/each}
-									</select>
-								</label>
-								<label class="gold-filter">
-									<span class="gold-filter-label">{i18n.metric_mgmt_gold_model_name()}</span>
-									<select
-										class="toolbar-select"
-										value={goldModelName}
-										onchange={handleGoldModelChange}
-									>
-										<option value="">{i18n.metric_mgmt_all_models()}</option>
-										{#each goldModelNames as name (name)}
-											<option value={name}>{name}</option>
-										{/each}
-									</select>
-								</label>
-								{#if goldOptionsError}
-									<div class="gold-filter-hint error">{goldOptionsError}</div>
-								{/if}
-							</div>
+							<GoldRunFilters filter={gold} onChange={clearBenchmarkRecord} />
 						{/if}
 					{/snippet}
 				</KbInputRecordBrowser>
@@ -4493,34 +4424,6 @@
 	.toolbar-select:focus {
 		outline: none;
 		border-color: var(--brass);
-	}
-	.gold-filters {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 0.5rem 0.75rem;
-		margin-top: 0.75rem;
-	}
-	.gold-filter {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		min-width: 0;
-	}
-	.gold-filter-label {
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-	}
-	.gold-filter .toolbar-select {
-		max-width: none;
-		width: 100%;
-	}
-	.gold-filter-hint {
-		grid-column: 1 / -1;
-		font-size: 12px;
-		color: var(--brass);
 	}
 	.toolbar-kw-wrap {
 		position: relative;

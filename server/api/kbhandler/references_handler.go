@@ -35,20 +35,32 @@ type referenceMention struct {
 	ResourceTitle    string          `json:"resource_title,omitempty"`
 	IdentityKey      string          `json:"identity_key,omitempty"`
 	Identifiers      []string        `json:"identifiers"`
+	// Gold-only fields (source=testbed); production rows leave them empty.
+	RefForm       string   `json:"ref_form,omitempty"`
+	Mechanism     string   `json:"mechanism,omitempty"`
+	InRequirement *bool    `json:"in_requirement,omitempty"`
+	Internal      *bool    `json:"internal,omitempty"`
+	Confidence    *float64 `json:"confidence,omitempty"`
 }
 
 type listReferencesResponse struct {
 	Status  bool               `json:"status"`
 	Results []referenceMention `json:"results"`
+	// Dropped holds a gold run's excluded/duplicate candidates (source=testbed only).
+	Dropped []droppedReference `json:"dropped,omitempty"`
 }
 
-// ListReferences returns the references extracted from one input record.
+// ListReferences returns the references extracted from one input record, or
+// with source=testbed the gold references of one benchmark run.
 func ListReferences(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_REF_001")
 	defer rc.Close()
 	id, err := strconv.ParseInt(strings.TrimSpace(c.QueryParam("input_record_id")), 10, 64)
 	if err != nil || id <= 0 {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "valid input_record_id is required"})
+	}
+	if strings.TrimSpace(c.QueryParam("source")) == "testbed" {
+		return listGoldReferences(c, rc.GetLogger(), id)
 	}
 	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), `
 SELECT m.id, m.ref_id, COALESCE(m.section,''), COALESCE(m.source_line_spans, '[]'::jsonb)::text,

@@ -275,6 +275,13 @@
 										]
 									},
 									{
+										id: 'sysadmin-llm-references',
+										label: m.nav_sysadmin_llm_references(),
+										children: [
+											{ id: 'sysadmin-llm-references-benchmark', label: m.nav_sysadmin_llm_references_benchmark() }
+										]
+									},
+									{
 										id: 'sysadmin-llm-decision-models',
 										label: m.nav_sysadmin_llm_decision_models(),
 										children: [

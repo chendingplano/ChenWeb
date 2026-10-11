@@ -108,8 +108,10 @@ type listInputsFilters struct {
 	ModifyTimeStart      *time.Time
 	ModifyTimeEnd        *time.Time
 
-	// HasGoldMetrics keeps only inputs with rows in testbed.metrics, narrowed by
-	// GoldSkillVersion and GoldModelName when they are non-empty.
+	// HasGoldMetrics keeps only inputs with gold benchmark rows, narrowed by
+	// GoldSkillVersion and GoldModelName when they are non-empty. GoldKind picks
+	// the gold table (see goldRunTables): metrics (default) or references.
+	GoldKind             string
 	GoldBenchmarkEntries bool
 	HasGoldMetrics       bool
 	GoldSkillVersion     string
@@ -190,6 +192,7 @@ func ListInputs(c echo.Context) error {
 		NoDocProcessors:      strings.EqualFold(strings.TrimSpace(c.QueryParam("no_doc_processors")), "true"),
 		PipelineFilter:       c.QueryParam("pipeline_filter"),
 		ExcludeDocType:       c.QueryParam("exclude_doc_type"),
+		GoldKind:             c.QueryParam("gold_kind"),
 		GoldBenchmarkEntries: strings.EqualFold(strings.TrimSpace(c.QueryParam("gold_benchmark_entries")), "true"),
 		HasGoldMetrics:       strings.EqualFold(strings.TrimSpace(c.QueryParam("has_gold_metrics")), "true"),
 		GoldSkillVersion:     c.QueryParam("gold_skill_version"),
@@ -223,6 +226,13 @@ func ListInputs(c echo.Context) error {
 			"modify_end_time", formatOptionalTime(filters.ModifyTimeEnd),
 		)
 	*/
+
+	if _, ok := goldRunTable(filters.GoldKind); !ok {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("invalid gold_kind: %q (CWB_KB_034)", strings.TrimSpace(filters.GoldKind)),
+		})
+	}
 
 	if !isValidParseState(filters.ParseState) {
 		return c.JSON(http.StatusBadRequest, errorResponse{
@@ -294,7 +304,8 @@ func ListInputs(c echo.Context) error {
 	listTable := inputTable
 	benchmarkEntries := filters.HasGoldMetrics && filters.GoldBenchmarkEntries
 	if benchmarkEntries {
-		listTable = goldBenchmarkInputTable(inputTable)
+		goldTable, _ := goldRunTable(filters.GoldKind)
+		listTable = goldBenchmarkInputTable(inputTable, goldTable)
 	}
 
 	total, err := queryTotalCount(db, listTable, whereSQL, args)
@@ -973,8 +984,12 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 		if v := strings.TrimSpace(filters.GoldModelName); v != "" {
 			goldParts = append(goldParts, fmt.Sprintf("t.model_name = %s", nextArg(v)))
 		}
+		goldTable, ok := goldRunTable(filters.GoldKind)
+		if !ok {
+			return "", nil, fmt.Errorf("invalid gold_kind: %q", filters.GoldKind)
+		}
 		whereParts = append(whereParts, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM testbed.metrics t WHERE %s)", strings.Join(goldParts, " AND ")))
+			"EXISTS (SELECT 1 FROM %s t WHERE %s)", goldTable, strings.Join(goldParts, " AND ")))
 	}
 	if filters.NoDocProcessors {
 		aliasList := getAllProcessorAliases()

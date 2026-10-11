@@ -104,7 +104,7 @@ func TestListInputsSeparateBenchmarkEntries(t *testing.T) {
 				where += " AND i.benchmark_model_name = $2"
 				models = []string{model, model}
 			}
-			countQuery := "SELECT COUNT(1) FROM " + goldBenchmarkInputTable("kb.inputs") + " i WHERE " + where
+			countQuery := "SELECT COUNT(1) FROM " + goldBenchmarkInputTable("kb.inputs", "testbed.metrics") + " i WHERE " + where
 			count := mock.ExpectQuery(regexp.QuoteMeta(countQuery))
 			if model == "" {
 				count.WithArgs("6.0.0")
@@ -121,7 +121,7 @@ func TestListInputsSeparateBenchmarkEntries(t *testing.T) {
 			for i, name := range models {
 				rows.AddRow(int64(753), "Input 753", "mineru", "pdf", "admin-1", nil, "Document", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "[]", time.Now(), time.Now(), nil, nil, nil, nil, nil, "6.0.0", name, fmt.Sprintf("run-%d", i))
 			}
-			data := mock.ExpectQuery("SELECT.*i.benchmark_skill_version, i.benchmark_model_name, i.benchmark_run_id.*" + regexp.QuoteMeta("FROM "+goldBenchmarkInputTable("kb.inputs")+" i WHERE "+where) + ".*" + regexp.QuoteMeta("i.benchmark_skill_version ASC, i.benchmark_model_name ASC, i.benchmark_run_id ASC") + ".*LIMIT")
+			data := mock.ExpectQuery("SELECT.*i.benchmark_skill_version, i.benchmark_model_name, i.benchmark_run_id.*" + regexp.QuoteMeta("FROM "+goldBenchmarkInputTable("kb.inputs", "testbed.metrics")+" i WHERE "+where) + ".*" + regexp.QuoteMeta("i.benchmark_skill_version ASC, i.benchmark_model_name ASC, i.benchmark_run_id ASC") + ".*LIMIT")
 			if model == "" {
 				data.WithArgs("6.0.0", 50, 0)
 			} else {
