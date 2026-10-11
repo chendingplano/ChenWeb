@@ -262,14 +262,7 @@
 					id: 'sysadmin-llm',
 					label: m.nav_sysadmin_llm(),
 					children: [
-						{ id: 'sysadmin-llm-accounts', label: m.nav_sysadmin_llm_accounts() },
-						{ id: 'sysadmin-llm-embedding', label: m.nav_sysadmin_llm_embedding() },
-						{ id: 'sysadmin-llm-model-profiles', label: m.nav_sysadmin_llm_model_profiles() },
-						{ id: 'sysadmin-llm-models', label: m.nav_sysadmin_llm_models() },
-						{ id: 'sysadmin-llm-chat-sessions', label: m.nav_sysadmin_llm_chat_sessions() },
-						{ id: 'sysadmin-llm-pi-sessions', label: m.nav_sysadmin_llm_pi_sessions() },
-						// /development groups Review Metrics with Gold Metrics (testbed.metrics,
-						// a development tool) under Metrics; other pages keep Review Metrics here.
+						// Keep the development metric and decision tools above account management.
 						...(pageKey === 'development'
 							? [
 									{
@@ -280,16 +273,26 @@
 											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() },
 											{ id: 'sysadmin-llm-metrics-benchmark', label: m.nav_sysadmin_llm_metrics_benchmark() }
 										]
+									},
+									{
+										id: 'sysadmin-llm-decision-models',
+										label: m.nav_sysadmin_llm_decision_models(),
+										children: [
+											{ id: 'sysadmin-llm-decision-models-playground', label: m.nav_sysadmin_llm_decision_models_playground() }
+										]
 									}
 								]
-							: [{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() }]),
-						{
-							id: 'sysadmin-llm-decision-models',
-							label: m.nav_sysadmin_llm_decision_models(),
-							children: [
-								{ id: 'sysadmin-llm-decision-models-playground', label: m.nav_sysadmin_llm_decision_models_playground() }
-							]
-						}
+							: []),
+						{ id: 'sysadmin-llm-accounts', label: m.nav_sysadmin_llm_accounts() },
+						{ id: 'sysadmin-llm-embedding', label: m.nav_sysadmin_llm_embedding() },
+						{ id: 'sysadmin-llm-model-profiles', label: m.nav_sysadmin_llm_model_profiles() },
+						{ id: 'sysadmin-llm-models', label: m.nav_sysadmin_llm_models() },
+						{ id: 'sysadmin-llm-chat-sessions', label: m.nav_sysadmin_llm_chat_sessions() },
+						{ id: 'sysadmin-llm-pi-sessions', label: m.nav_sysadmin_llm_pi_sessions() },
+						// Other pages keep Review Metrics here under LLM.
+						...(pageKey === 'development'
+							? []
+							: [{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() }])
 					]
 				},
 				{
@@ -829,7 +832,7 @@
 								<button
 									onclick={() => selectItem(item, gc)}
 									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
-									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:13px;"
+									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:{child.id === 'sysadmin-llm-metrics' ? '11px' : '13px'};"
 								>
 									<span class="h-1 w-1 flex-shrink-0 rounded-full" style="background:currentColor;opacity:.5;"></span>
 									{gc.label}
