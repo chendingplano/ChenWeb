@@ -94,6 +94,24 @@
 		return lines.sort((a, b) => a.page_number - b.page_number || a.line_number - b.line_number);
 	});
 
+	// Snapshot diagnostic values so DevTools shows the data from this event,
+	// rather than the current contents of a reactive object expanded later.
+	function logPdfDiagnostic(event: string, data: Record<string, unknown>) {
+		console.info(`[References PDF 20261011-731] ${event} ${JSON.stringify(data)}`);
+	}
+
+	$effect(() => {
+		if (!browser || !selected) return;
+		logPdfDiagnostic('viewer-page', {
+			inputId: record?.id,
+			refId: selected.ref_id,
+			page: pageNo,
+			numPages,
+			targetPage: selectedSourceLines[0]?.page_number ?? null,
+			lines: selectedSourceLines.map((line) => ({ page: line.page_number, line: line.line_number }))
+		});
+	});
+
 	function persistPanelWidth(panel: 'list' | 'details', width: number) {
 		if (panel === 'list') {
 			referenceListWidth = Math.max(LIST_WIDTH_MIN, Math.min(LIST_WIDTH_MAX, Math.round(width)));
@@ -160,9 +178,16 @@
 			if (request !== selectionRequest) return;
 			mentions = response.results ?? [];
 			rawLines = lines.lines ?? [];
+			logPdfDiagnostic('source-loaded', {
+				inputId: value.id,
+				references: mentions.length,
+				rawLines: rawLines.length,
+				pages: lines.pages
+			});
 			if (mentions[0]) selectReference(mentions[0]);
 		} catch (e) {
 			if (request !== selectionRequest) return;
+			console.error('[References PDF 20261011-731] source-load-failed', { inputId: value.id, error: e });
 			error = e instanceof Error ? e.message : m.references_mgmt_load_failed();
 		} finally {
 			if (request === selectionRequest) loading = false;
@@ -173,11 +198,31 @@
 		selected = mention;
 		highlightVersion += 1;
 		const firstLine = selectedSourceLines[0];
+		const previousPage = pageNo;
 		if (firstLine) pageNo = firstLine.page_number;
+		logPdfDiagnostic('select-reference', {
+			inputId: record?.id,
+			refId: mention.ref_id,
+			sourceLineSpans: mention.source_line_spans ?? [],
+			previousPage,
+			targetPage: firstLine?.page_number ?? null,
+			page: pageNo,
+			rawLineCount: rawLines.length,
+			highlightVersion,
+			lines: selectedSourceLines.map((line) => ({
+				page: line.page_number, line: line.line_number, coords: line.coords, content: line.content
+			}))
+		});
+		if (!firstLine) console.warn('[References PDF 20261011-731] no source lines resolved', {
+			inputId: record?.id, refId: mention.ref_id, sourceLineSpans: mention.source_line_spans
+		});
 	}
 
 	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
-		const lines = selectedSourceLines.filter((line) => line.page_number === page && Array.isArray(line.coords) && line.coords.length >= 4);
+		const pageLines = selectedSourceLines.filter((line) => line.page_number === page);
+		if (pageLines.length === 0) return;
+		const lines = pageLines.filter((line) => Array.isArray(line.coords) && line.coords.length >= 4);
+		const paintedLines: number[] = [];
 		for (let i = 0; i < lines.length; i += 1) {
 			const line = lines[i];
 			const next = lines[i + 1];
@@ -197,7 +242,19 @@
 			mark.style.height = `${height}px`;
 			mark.title = `line ${line.line_number}`;
 			overlay.appendChild(mark);
+			paintedLines.push(line.line_number);
 		}
+		logPdfDiagnostic('paint-highlights', {
+			inputId: record?.id,
+			refId: selected?.ref_id,
+			page,
+			viewerPage: pageNo,
+			highlightVersion,
+			viewport: { width: viewport.width, height: viewport.height },
+			lines: pageLines.map((line) => ({ line: line.line_number, coords: line.coords, content: line.content })),
+			paintedLines,
+			skippedLines: pageLines.filter((line) => !paintedLines.includes(line.line_number)).map((line) => line.line_number)
+		});
 	}
 
 	function mapRecord(input: KbInputRecord) {

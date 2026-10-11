@@ -25,6 +25,8 @@ lines=[{'line_number':n,'page_number':pg,'coords':[100,y,600,y+25],'content':f'S
 source_failed = True
 with sync_playwright() as p:
  b=p.chromium.launch(headless=True);ctx=b.new_context(viewport={'width':1900,'height':1000});ctx.add_cookies([{'name':'PARAGLIDE_LOCALE','value':args.locale,'url':BASE}]);page=ctx.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+ diagnostics=[]
+ page.on('console',lambda msg:diagnostics.append(msg.text) if '[References PDF 20261011-731]' in msg.text else None)
  def handle(route):
   path=urlparse(route.request.url).path
   if not path.startswith('/api/v1/kb/'):
@@ -65,6 +67,15 @@ with sync_playwright() as p:
   }''',arg=pg)
   box=mark.bounding_box();host=page.locator('.pdf-canvas-host').bounding_box()
   assert box and host and box['y']>=host['y'] and box['y']+box['height']<=host['y']+host['height'],(box,host)
+  selections=[json.loads(log.split('select-reference ',1)[1]) for log in diagnostics if 'select-reference ' in log]
+  assert selections[-1]['refId']==refs[index]['ref_id']
+  assert selections[-1]['targetPage']==pg
+  paints=[json.loads(log.split('paint-highlights ',1)[1]) for log in diagnostics if 'paint-highlights ' in log]
+  matching=[log for log in paints if log['refId']==refs[index]['ref_id'] and log['page']==pg]
+  assert matching and matching[-1]['paintedLines'] and not matching[-1]['skippedLines']
+ assert any('viewer-page ' in log for log in diagnostics)
+ assert any('source-loaded ' in log for log in diagnostics)
+ assert any('source-load-failed' in log for log in diagnostics)
  assert not errors,errors
  print(f'PASS ({args.locale}): cross-page, same-page and multi-page reference highlighting; source-load failure and retry.')
  b.close()
