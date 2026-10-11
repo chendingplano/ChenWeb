@@ -6649,5 +6649,11 @@
 	"references_mgmt_source_excerpt": "原文摘录",
 	"references_mgmt_select_reference": "选择一条引用以查看详情。",
 	"references_mgmt_resize_reference_list": "调整参考文献列表面板宽度",
-	"references_mgmt_resize_details_panel": "调整参考文献详情面板宽度"
+	"references_mgmt_resize_details_panel": "调整参考文献详情面板宽度",
+	"references_mgmt_filters": "筛选",
+	"references_mgmt_filter_by_text": "按引用文本筛选…",
+	"references_mgmt_filter_by_normativity": "按规范性筛选",
+	"references_mgmt_filter_by_resolution": "按解析状态筛选",
+	"references_mgmt_all_normativities": "全部规范性",
+	"references_mgmt_all_resolutions": "全部解析状态"
 }

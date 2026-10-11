@@ -3,7 +3,9 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
-	import { listKbReferences, type KbReferenceMention, type KbInputRecord } from '$lib/services/kbService';
+	import { getRawLines, listKbReferences, type KbReferenceMention, type KbInputRecord, type RawLine } from '$lib/services/kbService';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 	let record = $state<KbInputRecord | null>(null);
@@ -11,6 +13,12 @@
 	let selected = $state<KbReferenceMention | null>(null);
 	let loading = $state(false);
 	let error = $state('');
+	let rawLines = $state<RawLine[]>([]);
+	let referenceFilter = $state('');
+	let normativityFilter = $state('');
+	let resolutionFilter = $state('');
+	let highlightVersion = $state(0);
+	let selectionRequest = 0;
 	let pageNo = $state(1);
 	let zoom = $state(0.7);
 	let numPages = $state(0);
@@ -48,6 +56,43 @@
 	let workspaceStyle = $derived(
 		`grid-template-columns:minmax(240px,22%) ${referenceListWidth}px 14px minmax(320px,1fr) 14px ${referenceDetailsWidth}px`
 	);
+	let filterControlBg = $derived(darkMode ? '#303A4B' : '#FFFFFF');
+	let visibleMentions = $derived.by(() => {
+		const query = referenceFilter.trim().toLocaleLowerCase();
+		return mentions.filter((mention) => {
+			const matchesText = !query || [mention.target_title, mention.cited_raw, mention.resource_title, mention.evidence, mention.identity_key]
+				.some((value) => value?.toLocaleLowerCase().includes(query));
+			const matchesNormativity = !normativityFilter || mention.normativity === normativityFilter;
+			const matchesResolution = !resolutionFilter || mention.r2_state === resolutionFilter;
+			return matchesText && matchesNormativity && matchesResolution;
+		});
+	});
+	let lineNumToPage = $derived.by(() => {
+		const map = new Map<number, number>();
+		for (const line of rawLines) if (!map.has(line.line_number)) map.set(line.line_number, line.page_number);
+		return map;
+	});
+	let selectedSourceLines = $derived.by(() => {
+		const lines: RawLine[] = [];
+		const seen = new Set<string>();
+		for (const span of selected?.source_line_spans ?? []) {
+			const match = span.trim().match(/^(\d+)\s*(?:[:,\-]\s*(\d+))?$/);
+			if (!match) continue;
+			const start = Number(match[1]);
+			const end = match[2] ? Math.min(Number(match[2]), start + 200) : start;
+			for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
+				const pageNumber = lineNumToPage.get(lineNumber);
+				if (!pageNumber) continue;
+				const key = `${pageNumber}:${lineNumber}`;
+				const line = rawLines.find((item) => item.page_number === pageNumber && item.line_number === lineNumber);
+				if (line && !seen.has(key)) {
+					seen.add(key);
+					lines.push(line);
+				}
+			}
+		}
+		return lines.sort((a, b) => a.page_number - b.page_number || a.line_number - b.line_number);
+	});
 
 	function persistPanelWidth(panel: 'list' | 'details', width: number) {
 		if (panel === 'list') {
@@ -92,19 +137,62 @@
 	}
 
 	async function selectRecord(value: KbInputRecord) {
+		const request = ++selectionRequest;
 		record = value;
 		selected = null;
 		mentions = [];
+		rawLines = [];
+		referenceFilter = '';
+		normativityFilter = '';
+		resolutionFilter = '';
+		pageNo = 1;
 		loading = true;
 		error = '';
 		try {
-			const response = await listKbReferences(value.id);
+			const [response, lines] = await Promise.all([
+				listKbReferences(value.id),
+				getRawLines(value.id).catch(() => null)
+			]);
+			if (request !== selectionRequest) return;
 			mentions = response.results ?? [];
-			selected = mentions[0] ?? null;
+			rawLines = lines?.lines ?? [];
+			if (mentions[0]) selectReference(mentions[0]);
 		} catch (e) {
+			if (request !== selectionRequest) return;
 			error = e instanceof Error ? e.message : m.references_mgmt_load_failed();
 		} finally {
-			loading = false;
+			if (request === selectionRequest) loading = false;
+		}
+	}
+
+	function selectReference(mention: KbReferenceMention) {
+		selected = mention;
+		highlightVersion += 1;
+		const firstLine = selectedSourceLines[0];
+		if (firstLine) pageNo = firstLine.page_number;
+	}
+
+	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		const lines = selectedSourceLines.filter((line) => line.page_number === page && Array.isArray(line.coords) && line.coords.length >= 4);
+		for (let i = 0; i < lines.length; i += 1) {
+			const line = lines[i];
+			const next = lines[i + 1];
+			const left = Math.min(line.coords[0], line.coords[2]) * viewport.width / 1000;
+			const top = Math.max(0, Math.min(line.coords[1], line.coords[3]) * viewport.height / 1000 - 2);
+			const nextTop = next && next.line_number === line.line_number + 1
+				? Math.min(next.coords[1], next.coords[3]) * viewport.height / 1000 - 2
+				: Math.max(line.coords[1], line.coords[3]) * viewport.height / 1000;
+			const width = Math.abs(line.coords[2] - line.coords[0]) * viewport.width / 1000 + 20;
+			const height = Math.max(0, nextTop - top);
+			if (width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${left}px`;
+			mark.style.top = `${top}px`;
+			mark.style.width = `${width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = `line ${line.line_number}`;
+			overlay.appendChild(mark);
 		}
 	}
 
@@ -121,7 +209,7 @@
 	}
 </script>
 
-<div class="references-page select-text" style={`--ref-bg:${palette.bg};--ref-panel:${palette.panel};--ref-alt:${palette.panelAlt};--ref-line:${palette.line};--ref-text:${palette.text};--ref-secondary:${palette.secondary};--ref-muted:${palette.muted};--ref-accent:${palette.accent}`}>
+<div class="references-page select-text" style={`--ref-bg:${palette.bg};--ref-panel:${palette.panel};--ref-alt:${palette.panelAlt};--ref-card:${filterControlBg};--ref-line:${palette.line};--ref-text:${palette.text};--ref-secondary:${palette.secondary};--ref-muted:${palette.muted};--ref-accent:${palette.accent}`}>
 	<header class="heading">
 		<div><div class="eyebrow">{m.references_mgmt_knowledge_system_vol_iii()}</div><h1>{m.references_mgmt_title()}</h1><p>{m.references_mgmt_subtitle()}</p></div>
 		<div class="stats"><small>{m.references_mgmt_record()}</small><strong>{record?.id ?? '—'}</strong><small>{m.references_mgmt_references()}</small><strong>{String(mentions.length).padStart(3, '0')}</strong></div>
@@ -131,15 +219,30 @@
 			<KbInputRecordBrowser {darkMode} instanceKey="references-record-browser" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)} />
 		</aside>
 		<section class="mention-column" aria-label={m.references_mgmt_references()}>
-			<div class="column-head"><strong>{m.references_mgmt_references()}</strong><span>{mentions.length} {m.references_mgmt_found()}</span></div>
+			<div class="column-head"><strong>{m.references_mgmt_references()}</strong><span>{visibleMentions.length} {m.references_mgmt_found()}</span></div>
+			<details class="reference-filters">
+				<summary><ChevronRightIcon size={14} />{m.references_mgmt_filters()}</summary>
+				<div class="filter-controls">
+					<input aria-label={m.references_mgmt_filter_by_text()} placeholder={m.references_mgmt_filter_by_text()} bind:value={referenceFilter} />
+					<select aria-label={m.references_mgmt_filter_by_normativity()} bind:value={normativityFilter}>
+						<option value="">{m.references_mgmt_all_normativities()}</option>
+						{#each [...new Set(mentions.map((item) => item.normativity).filter(Boolean))] as value}<option value={value}>{value}</option>{/each}
+					</select>
+					<select aria-label={m.references_mgmt_filter_by_resolution()} bind:value={resolutionFilter}>
+						<option value="">{m.references_mgmt_all_resolutions()}</option>
+						{#each [...new Set(mentions.map((item) => item.r2_state).filter(Boolean))] as value}<option value={value}>{value}</option>{/each}
+					</select>
+				</div>
+			</details>
 			{#if loading}<p class="notice">{m.references_mgmt_loading()}</p>
 			{:else if error}<p class="notice error">{error}</p>
 			{:else if !record}<p class="notice">{m.references_mgmt_select_document()}</p>
 			{:else if mentions.length === 0}<p class="notice">{m.references_mgmt_no_references_for_document()}</p>
+			{:else if visibleMentions.length === 0}<p class="notice">{m.references_mgmt_no_references_for_document()}</p>
 			{:else}
 				<div class="mention-list">
-					{#each mentions as mention, i (mention.id)}
-						<button class="mention-card" class:active={selected?.id === mention.id} onclick={() => (selected = mention)}>
+					{#each visibleMentions as mention, i (mention.id)}
+						<button class="mention-card" class:active={selected?.id === mention.id} onclick={() => selectReference(mention)}>
 							<div class="card-meta"><span>№ {String(i + 1).padStart(3, '0')} · {mention.ref_id}</span><span>{mention.normativity}</span></div>
 							<strong>{mention.target_title || mention.cited_raw || mention.resource_title || m.references_mgmt_untitled_reference()}</strong>
 							<p>{mention.evidence || mention.cited_raw || m.references_mgmt_no_excerpt()}</p>
@@ -154,7 +257,7 @@
 		</button>
 		<section class="document" aria-label={m.references_mgmt_source_document()}>
 			{#if record}
-				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" />
+				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" {highlightVersion} renderHighlights={renderReferenceHighlights} />
 			{:else}
 				<div class="empty-document">{m.references_mgmt_select_document()}</div>
 			{/if}
@@ -194,10 +297,15 @@
 	.records{position:relative;overflow:hidden}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0}
 	.column-head{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--ref-line);color:var(--ref-text)}
 	.column-head span{font:10px 'JetBrains Mono',monospace;color:var(--ref-accent);text-transform:uppercase;letter-spacing:.1em}
+	.reference-filters{flex:none;margin:0 8px 8px;background:var(--ref-card);color:var(--ref-text)}
+	.reference-filters summary{height:34px;display:flex;align-items:center;gap:8px;padding:0 10px;cursor:pointer;list-style:none;font:10px 'JetBrains Mono',monospace;color:var(--ref-secondary)}
+	.reference-filters summary::-webkit-details-marker{display:none}.reference-filters[open] summary :global(svg){transform:rotate(90deg)}
+	.filter-controls{display:grid;gap:6px;padding:0 10px 10px}.filter-controls input,.filter-controls select{width:100%;min-width:0;height:30px;padding:0 8px;background:var(--ref-panel);border:1px solid var(--ref-line);color:var(--ref-secondary);font:10px 'JetBrains Mono',monospace}
 	.mention-list{min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--ref-line) transparent}
 	.mention-list::-webkit-scrollbar,.details-panel::-webkit-scrollbar{width:8px}.mention-list::-webkit-scrollbar-thumb,.details-panel::-webkit-scrollbar-thumb{background:var(--ref-line)}
-	.mention-card{width:100%;min-width:0;overflow:hidden;text-align:left;padding:12px;background:var(--ref-panel);border:1px solid var(--ref-line);border-left:3px solid transparent;color:var(--ref-text);cursor:pointer}
-	.mention-card:hover,.mention-card.active{border-left-color:var(--ref-accent);background:var(--ref-alt)}
+	.mention-card{width:100%;min-width:0;overflow:hidden;text-align:left;padding:12px;background:var(--ref-card);border:1px solid var(--ref-line);border-left:3px solid transparent;color:var(--ref-text);cursor:pointer}
+	.mention-card:hover{background:var(--ref-alt)}.mention-card.active{border-left-color:var(--ref-accent);background:rgba(200,85,61,.18)}
+	:global(.pdf-highlight){position:absolute;background:rgba(200,85,61,.18);border:1px solid rgba(200,85,61,.9);box-shadow:inset 0 0 0 1px rgba(255,210,179,.22)}
 	.card-meta{display:flex;justify-content:space-between;gap:8px;font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase}.card-meta span{min-width:0;overflow-wrap:anywhere}
 	.mention-card strong{display:block;margin:9px 0 5px;font-size:14px;overflow-wrap:anywhere}.mention-card p{margin:0;color:var(--ref-secondary);font-size:12px;line-height:1.5;overflow-wrap:anywhere;display:-webkit-box;line-clamp:3;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 	.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}.chips span{padding:3px 6px;border:1px solid var(--ref-line);color:var(--ref-accent);font:9px 'JetBrains Mono',monospace}

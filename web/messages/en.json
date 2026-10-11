@@ -6649,5 +6649,11 @@
 	"references_mgmt_source_excerpt": "Source excerpt",
 	"references_mgmt_select_reference": "Select a reference to view its details.",
 	"references_mgmt_resize_reference_list": "Resize reference list panel",
-	"references_mgmt_resize_details_panel": "Resize reference details panel"
+	"references_mgmt_resize_details_panel": "Resize reference details panel",
+	"references_mgmt_filters": "Filters",
+	"references_mgmt_filter_by_text": "Filter by reference text…",
+	"references_mgmt_filter_by_normativity": "Filter by normativity",
+	"references_mgmt_filter_by_resolution": "Filter by resolution",
+	"references_mgmt_all_normativities": "All normativities",
+	"references_mgmt_all_resolutions": "All resolutions"
 }

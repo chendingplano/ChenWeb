@@ -276,6 +276,7 @@ export type KbReferenceMention = {
 	id: number;
 	ref_id: string;
 	section?: string;
+	source_line_spans?: string[];
 	evidence?: string;
 	cited_raw?: string;
 	target_type: string;

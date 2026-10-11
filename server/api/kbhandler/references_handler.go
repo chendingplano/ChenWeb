@@ -15,6 +15,7 @@ type referenceMention struct {
 	ID               int64    `json:"id"`
 	RefID            string   `json:"ref_id"`
 	Section          string   `json:"section,omitempty"`
+	SourceLineSpans  []string `json:"source_line_spans"`
 	Evidence         string   `json:"evidence,omitempty"`
 	CitedRaw         string   `json:"cited_raw,omitempty"`
 	TargetType       string   `json:"target_type"`
@@ -49,7 +50,8 @@ func ListReferences(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "valid input_record_id is required"})
 	}
 	rows, err := ApiTypes.ProjectDBHandle.QueryContext(c.Request().Context(), `
-SELECT m.id, m.ref_id, COALESCE(m.section,''), COALESCE(m.evidence,''), COALESCE(m.cited_raw,''),
+SELECT m.id, m.ref_id, COALESCE(m.section,''), COALESCE(m.source_line_spans, '[]'::jsonb)::text,
+       COALESCE(m.evidence,''), COALESCE(m.cited_raw,''),
        m.target_type, m.target_subtype, COALESCE(m.target_title,''), COALESCE(m.target_version,''),
        m.target_content, m.normativity, COALESCE(m.list_kind,''), COALESCE(m.list_mismatch,''),
        COALESCE(m.r1_state,''), COALESCE(m.r2_state,''), m.target_input_id,
@@ -70,13 +72,18 @@ ORDER BY m.id`, id)
 	results := make([]referenceMention, 0)
 	for rows.Next() {
 		var m referenceMention
+		var sourceLineSpansJSON string
 		var identifiersJSON string
-		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &m.Evidence, &m.CitedRaw, &m.TargetType, &m.TargetSubtype,
+		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &sourceLineSpansJSON, &m.Evidence, &m.CitedRaw, &m.TargetType, &m.TargetSubtype,
 			&m.TargetTitle, &m.TargetVersion, &m.TargetContent, &m.Normativity, &m.ListKind, &m.ListMismatch,
 			&m.R1State, &m.R2State, &m.TargetInputID, &m.TargetInputTitle, &m.MetricState, &m.ResourceTitle,
 			&m.IdentityKey, &identifiersJSON); err != nil {
 			rc.GetLogger().Error("scan references failed", "input_record_id", id, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read references"})
+		}
+		if err := json.Unmarshal([]byte(sourceLineSpansJSON), &m.SourceLineSpans); err != nil {
+			rc.GetLogger().Error("decode reference source lines failed", "input_record_id", id, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read reference source lines"})
 		}
 		if err := json.Unmarshal([]byte(identifiersJSON), &m.Identifiers); err != nil {
 			rc.GetLogger().Error("decode reference identifiers failed", "input_record_id", id, "err", err)
