@@ -6658,5 +6658,7 @@
 	"references_mgmt_all_resolutions": "全部解析状态",
 	"references_mgmt_source_lines_load_failed": "无法加载 PDF 页面跳转和内容高亮所需的原文行：{error}",
 	"references_mgmt_prev": "上一条",
-	"references_mgmt_next": "下一条"
+	"references_mgmt_next": "下一条",
+	"references_mgmt_resize_records_panel": "调整记录列表与引用列表面板宽度",
+	"references_mgmt_reference_info": "引用信息"
 }

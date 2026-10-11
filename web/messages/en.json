@@ -6658,5 +6658,7 @@
 	"references_mgmt_all_resolutions": "All resolutions",
 	"references_mgmt_source_lines_load_failed": "Unable to load the source lines needed for PDF navigation and highlighting: {error}",
 	"references_mgmt_prev": "Prev",
-	"references_mgmt_next": "Next"
+	"references_mgmt_next": "Next",
+	"references_mgmt_resize_records_panel": "Resize record and reference list panels",
+	"references_mgmt_reference_info": "Reference Info"
 }

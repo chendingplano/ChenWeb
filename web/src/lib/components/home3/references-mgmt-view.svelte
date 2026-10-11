@@ -22,6 +22,10 @@
 	let pageNo = $state(1);
 	let zoom = $state(0.7);
 	let numPages = $state(0);
+	const RECORD_LIST_WIDTH_KEY = 'references:records-width';
+	const RECORD_WIDTH_MIN = 220;
+	const RECORD_WIDTH_MAX = 640;
+	let recordListWidth = $state(320);
 	const REFERENCE_LIST_WIDTH_KEY = 'references:list-width';
 	const REFERENCE_DETAILS_WIDTH_KEY = 'references:details-width';
 	const LIST_WIDTH_MIN = 280;
@@ -30,7 +34,7 @@
 	const DETAILS_WIDTH_MAX = 640;
 	let referenceListWidth = $state(360);
 	let referenceDetailsWidth = $state(360);
-	let resizing = $state<'list' | 'details' | null>(null);
+	let resizing = $state<'records' | 'list' | 'details' | null>(null);
 	let widthsHydrated = $state(false);
 	let palette = $derived(darkMode ? {
 		bg: '#0E1116', panel: '#161A22', panelAlt: '#1C212C', line: '#2A3140',
@@ -42,6 +46,10 @@
 
 	$effect(() => {
 		if (!browser || widthsHydrated) return;
+		const recordsWidth = Number(localStorage.getItem(RECORD_LIST_WIDTH_KEY));
+		if (Number.isFinite(recordsWidth) && recordsWidth >= RECORD_WIDTH_MIN && recordsWidth <= RECORD_WIDTH_MAX) {
+			recordListWidth = recordsWidth;
+		}
 		const listWidth = Number(localStorage.getItem(REFERENCE_LIST_WIDTH_KEY));
 		const detailsWidth = Number(localStorage.getItem(REFERENCE_DETAILS_WIDTH_KEY));
 		if (Number.isFinite(listWidth) && listWidth >= LIST_WIDTH_MIN && listWidth <= LIST_WIDTH_MAX) {
@@ -54,7 +62,7 @@
 	});
 
 	let workspaceStyle = $derived(
-		`grid-template-columns:minmax(240px,22%) ${referenceListWidth}px 14px minmax(320px,1fr) 14px ${referenceDetailsWidth}px`
+		`grid-template-columns:${recordListWidth}px 14px ${referenceListWidth}px 14px minmax(320px,1fr) 14px ${referenceDetailsWidth}px`
 	);
 	let filterControlBg = $derived(darkMode ? '#303A4B' : '#FFFFFF');
 	let visibleMentions = $derived.by(() => {
@@ -94,8 +102,18 @@
 		return lines.sort((a, b) => a.page_number - b.page_number || a.line_number - b.line_number);
 	});
 
-	function persistPanelWidth(panel: 'list' | 'details', width: number) {
-		if (panel === 'list') {
+	function persistPanelWidth(panel: 'records' | 'list' | 'details', width: number) {
+		if (panel === 'records') {
+			// Move this divider within the two lists, preserving their combined width.
+			const combined = recordListWidth + referenceListWidth;
+			recordListWidth = Math.max(RECORD_WIDTH_MIN, combined - LIST_WIDTH_MAX,
+				Math.min(RECORD_WIDTH_MAX, combined - LIST_WIDTH_MIN, Math.round(width)));
+			referenceListWidth = combined - recordListWidth;
+			if (browser) {
+				localStorage.setItem(RECORD_LIST_WIDTH_KEY, String(recordListWidth));
+				localStorage.setItem(REFERENCE_LIST_WIDTH_KEY, String(referenceListWidth));
+			}
+		} else if (panel === 'list') {
 			referenceListWidth = Math.max(LIST_WIDTH_MIN, Math.min(LIST_WIDTH_MAX, Math.round(width)));
 			if (browser) localStorage.setItem(REFERENCE_LIST_WIDTH_KEY, String(referenceListWidth));
 		} else {
@@ -104,16 +122,16 @@
 		}
 	}
 
-	function startResize(event: PointerEvent, panel: 'list' | 'details') {
+	function startResize(event: PointerEvent, panel: 'records' | 'list' | 'details') {
 		event.preventDefault();
 		const startX = event.clientX;
-		const startWidth = panel === 'list' ? referenceListWidth : referenceDetailsWidth;
+		const startWidth = panel === 'records' ? recordListWidth : panel === 'list' ? referenceListWidth : referenceDetailsWidth;
 		resizing = panel;
 		document.body.style.cursor = 'col-resize';
 		document.body.style.userSelect = 'none';
 		const move = (e: PointerEvent) => {
 			const delta = e.clientX - startX;
-			persistPanelWidth(panel, panel === 'list' ? startWidth + delta : startWidth - delta);
+			persistPanelWidth(panel, panel === 'details' ? startWidth - delta : startWidth + delta);
 		};
 		const end = () => {
 			resizing = null;
@@ -128,12 +146,12 @@
 		window.addEventListener('pointercancel', end, { once: true });
 	}
 
-	function resizeWithKeyboard(event: KeyboardEvent, panel: 'list' | 'details') {
+	function resizeWithKeyboard(event: KeyboardEvent, panel: 'records' | 'list' | 'details') {
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		event.preventDefault();
-		const current = panel === 'list' ? referenceListWidth : referenceDetailsWidth;
+		const current = panel === 'records' ? recordListWidth : panel === 'list' ? referenceListWidth : referenceDetailsWidth;
 		const direction = event.key === 'ArrowRight' ? 1 : -1;
-		persistPanelWidth(panel, current + direction * (panel === 'list' ? 16 : -16));
+		persistPanelWidth(panel, current + direction * (panel === 'details' ? -16 : 16));
 	}
 
 	async function selectRecord(value: KbInputRecord) {
@@ -233,6 +251,9 @@
 		<aside class="records">
 			<KbInputRecordBrowser {darkMode} fitPanel instanceKey="references-record-browser" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} mapRecord={mapRecord} onSelect={selectRecord} onError={(e) => (error = e.message)} />
 		</aside>
+		<button type="button" class="resize-handle" class:active={resizing === 'records'} aria-label={m.references_mgmt_resize_records_panel()} onpointerdown={(event) => startResize(event, 'records')} onkeydown={(event) => resizeWithKeyboard(event, 'records')}>
+			<span class="resize-grip" aria-hidden="true"></span>
+		</button>
 		<section class="mention-column" aria-label={m.references_mgmt_references()}>
 			<div class="column-head"><strong>{m.references_mgmt_references()}</strong><span>{visibleMentions.length} {m.references_mgmt_found()}</span></div>
 			<details class="reference-filters">
@@ -279,7 +300,20 @@
 		</button>
 		<section class="document" aria-label={m.references_mgmt_source_document()}>
 			{#if record}
-				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" {highlightVersion} renderHighlights={renderReferenceHighlights} tableReferences={selected?.source_table_rows ?? []} />
+				<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} bind:page={pageNo} bind:zoom bind:numPages showSidebar={false} sidebarSettingsKey="references-pdf" {highlightVersion} renderHighlights={renderReferenceHighlights} tableReferences={selected?.source_table_rows ?? []}>
+					{#snippet floatingOverlay()}
+						{#if selected}
+							<div class="reference-info select-text">
+								<div class="reference-info-heading">{m.references_mgmt_reference_info()} <span>{selected.ref_id}</span></div>
+								<div class="reference-info-content" onpointerdown={(event) => event.stopPropagation()} onselectstart={(event) => event.stopPropagation()}>
+									<strong>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</strong>
+									{#if selected.evidence}<p>{selected.evidence}</p>{/if}
+									<div class="reference-info-tags"><span>{selected.target_type} · {selected.target_content}</span><span>{selected.normativity}</span><span>{selected.r2_state || m.references_mgmt_unresolved()}</span></div>
+								</div>
+							</div>
+						{/if}
+					{/snippet}
+				</PdfViewWindow>
 			{:else}
 				<div class="empty-document">{m.references_mgmt_select_document()}</div>
 			{/if}
@@ -345,7 +379,14 @@
 	.notice,.empty-document{padding:24px;color:var(--ref-muted);font-size:13px}.error{color:#c8553d}.empty-document{height:100%;display:grid;place-items:center}
 	.details-heading{height:58px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--ref-line);font-weight:600;color:var(--ref-text)}
 	.detail{padding:16px;color:var(--ref-text)}.detail h2{font:600 19px Georgia,serif;margin:10px 0 16px;overflow-wrap:anywhere}.detail dl{display:grid;grid-template-columns:115px minmax(0,1fr);gap:9px 10px;margin:0}.detail dt{font:9px 'JetBrains Mono',monospace;color:var(--ref-muted);text-transform:uppercase;letter-spacing:.08em}.detail dd{margin:0;font-size:12px;overflow-wrap:anywhere;line-height:1.45}
+	.document :global(.pdf-floating-overlay-anchor){max-width:calc(100% - 16px)}
+	.reference-info{width:300px;max-width:100%;border:1px solid #414957;border-radius:12px;background:linear-gradient(145deg,#252B35,#191D24);color:#EDE7D3;box-shadow:0 12px 28px rgba(0,0,0,.35);overflow:hidden;user-select:text}
+	.reference-info-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;padding:10px 12px 0;font:10px 'JetBrains Mono',monospace;color:#D4A24C}
+	.reference-info-heading span{color:#B5AE94;border:1px solid #414957;border-radius:999px;padding:2px 6px}
+	.reference-info-content{padding:8px 12px 12px;cursor:text;user-select:text}.reference-info-content strong{display:block;font:600 15px/1.4 Georgia,serif;overflow-wrap:anywhere}
+	.reference-info-content p{margin:7px 0;font-size:11px;line-height:1.5;color:#B5AE94;white-space:pre-line;display:-webkit-box;line-clamp:4;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+	.reference-info-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;font:9px 'JetBrains Mono',monospace;color:#B5AE94}.reference-info-tags span{padding:3px 6px;border:1px solid #414957;border-radius:999px}
 	.resize-handle{width:14px;position:relative;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none;z-index:2}.resize-handle::before{content:'';position:absolute;top:0;bottom:0;left:6px;width:2px;background:var(--ref-line);opacity:.65}.resize-handle:hover::before,.resize-handle.active::before,.resize-handle:focus-visible::before{background:var(--ref-accent);opacity:1}.resize-grip{position:absolute;top:50%;left:50%;width:7px;height:48px;transform:translate(-50%,-50%);border-radius:999px;background:radial-gradient(circle,var(--ref-muted) 22%,transparent 24%) center 6px/5px 10px repeat-y,var(--ref-panel);border:1px solid var(--ref-line)}
-	@media(max-width:1250px){.workspace{grid-template-columns:minmax(220px,20%) minmax(260px,1fr) 14px minmax(300px,1.2fr) 14px minmax(260px,0.9fr)}}
-	@media(max-width:1000px){.workspace{grid-template-columns:minmax(200px,28%) minmax(240px,1fr) 14px minmax(300px,1.2fr) 14px minmax(240px,.9fr)}.heading{min-height:110px}}
+	@media(max-width:1250px){.workspace{grid-template-columns:minmax(220px,20%) 14px minmax(260px,1fr) 14px minmax(300px,1.2fr) 14px minmax(260px,0.9fr)}}
+	@media(max-width:1000px){.workspace{grid-template-columns:minmax(200px,28%) 14px minmax(240px,1fr) 14px minmax(300px,1.2fr) 14px minmax(240px,.9fr)}.heading{min-height:110px}}
 </style>
