@@ -27,6 +27,7 @@ var ErrMissingParsedSuccess = errors.New("kb.inputs record missing parsed succes
 var ErrResultFileNotFound = errors.New("kb.inputs result file not found")
 var ErrUnsupportedParserName = errors.New("unsupported parser_name")
 var ErrParserNotImplemented = errors.New("parser converter is not implemented")
+var ErrMissingUserID = errors.New("kb.inputs.user_id is unset")
 
 type ConvertRequest struct {
 	RecordID       int64  `json:"record_id"`
@@ -572,7 +573,7 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 	userID = strings.TrimSpace(userID)
 	if userID == "" || userID == "-" {
 		raiseMissingUserIDAlarm(ctx, recordID, s.Logger)
-		return fmt.Errorf("(MID_26092303) record_id=%d: kb.inputs.user_id is unset; refusing to auto-trigger doc processing", recordID)
+		return fmt.Errorf("(MID_26092303) record_id=%d: %w; refusing to auto-trigger doc processing", recordID, ErrMissingUserID)
 	}
 
 	subject := strings.TrimSpace(s.PublishSubject)

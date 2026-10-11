@@ -28,7 +28,9 @@ func shouldAckOnHandlerError(err error) bool {
 		errors.Is(err, ErrNotFound) ||
 		errors.Is(err, ErrResultFileNotFound) ||
 		errors.Is(err, ErrUnsupportedParserName) ||
-		errors.Is(err, ErrParserNotImplemented)
+		errors.Is(err, ErrParserNotImplemented) ||
+		// Redelivery cannot supply a user_id; the alarm is already raised.
+		errors.Is(err, ErrMissingUserID)
 }
 
 func envEnabled(keys ...string) bool {

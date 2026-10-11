@@ -81,6 +81,11 @@ func TestShouldAckOnHandlerError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "missing user id",
+			err:  errors.Join(ErrMissingUserID, errors.New("record_id=1")),
+			want: true,
+		},
+		{
 			name: "transient error",
 			err:  errors.New("db timeout"),
 			want: false,
