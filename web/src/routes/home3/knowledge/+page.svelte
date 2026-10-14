@@ -424,7 +424,14 @@
 					item.id === initialSection || item.children?.some((child) => child.id === initialSection)
 			);
 		if (found) {
-			activeSection = initialSection;
+			if (initialSection === 'kb-doc-wiki') {
+				// The Knowledge Wiki menu entry is a collapsible parent. Treat a
+				// direct link to it like selecting the parent in the navigation.
+				activeSection = 'kb-input-details';
+				documentWikiOpen = true;
+			} else {
+				activeSection = initialSection;
+			}
 		}
 	});
 

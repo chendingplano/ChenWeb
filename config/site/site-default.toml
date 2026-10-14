@@ -111,7 +111,7 @@ icon = "database"
 
 [[workspace.apps]]
 key = "chat"
-name = "Chat with Your Knowledge Base"
+name = "Development"
 description = "Grounded Q&A over your documents."
 href = "/home3"
 icon = "message-circle"
@@ -120,7 +120,7 @@ icon = "message-circle"
 key = "search"
 name = "Search Your Knowledge Base"
 description = "Hybrid keyword + semantic search."
-href = "/home3/knowledge"
+href = "/home3/knowledge?section=kb-doc-wiki"
 icon = "search"
 
 [[workspace.apps]]

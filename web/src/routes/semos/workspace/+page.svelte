@@ -407,6 +407,8 @@
 			{#each visibleApps as app, i (app.key)}
 				<a
 					href={app.href}
+					target="_blank"
+					rel="noopener noreferrer"
 					class="group relative grid grid-cols-[3.25rem_1fr_auto] items-baseline gap-y-2.5 border-b border-white/12 px-2 py-8 transition-colors duration-200 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#b08d57]/60 sm:px-8 sm:py-10 sm:odd:border-r"
 				>
 					<span
