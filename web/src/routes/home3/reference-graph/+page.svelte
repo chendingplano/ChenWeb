@@ -9,6 +9,7 @@
 	import { TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
+	import { buildDocumentHierarchy, flattenHierarchy, buildNavigator, type ViewMode } from './graph-data';
 	import {
 		listKbMetrics,
 		listKbReferences,
@@ -19,9 +20,6 @@
 
 	use([GraphChart, TreeChart, TooltipComponent, CanvasRenderer]);
 
-	type GraphNode = { id: string; name: string; category: number; symbolSize: number };
-	type GraphLink = { source: string; target: string; name: string; value: number; lineStyle: { curveness: number } };
-	type ViewMode = 'graph' | 'left-right' | 'top-bottom' | 'bottom-top' | 'right-left';
 
 	const LEFT_WIDTH_KEY = 'reference-graph:left-width';
 	const MIDDLE_WIDTH_KEY = 'reference-graph:middle-width';
@@ -51,18 +49,12 @@
 	let chartWrap = $state<HTMLDivElement | undefined>(undefined);
 
 	const palette = $derived(darkMode
-		? { background: '#161a22', text: '#ede7d3', muted: '#9b947e', border: '#2a3140', node: '#303a4b', root: '#d4a24c', edge: '#9b947e', thumb: '#b6b6b6', track: '#f1f1f1' }
-		: { background: '#fbf8f0', text: '#1a1711', muted: '#726b5e', border: '#d8cfbb', node: '#f0eadb', root: '#a87518', edge: '#817767', thumb: '#a5a5a5', track: '#f1f1f1' });
+		? { background: '#161a22', text: '#ede7d3', muted: '#9b947e', border: '#2a3140', node: '#303a4b', root: '#d4a24c', edge: '#9b947e', thumb: '#2a3140' }
+		: { background: '#fbf8f0', text: '#1a1711', muted: '#726b5e', border: '#d8cfbb', node: '#f0eadb', root: '#a87518', edge: '#817767', thumb: '#d7cfb8' });
 	const gridStyle = $derived(`--left-panel-width:${leftWidth}px;--middle-panel-width:${middleWidth}px`);
 
 	function recordTitle(value: KbInputRecord) {
 		return value.title || value.name || value.file_name || m.reference_graph_document({ id: value.id });
-	}
-
-	function referenceNodeId(reference: KbReferenceMention) {
-		return reference.target_input_id != null
-			? `input:${reference.target_input_id}`
-			: `reference:${reference.identity_key || reference.ref_id || reference.id}`;
 	}
 
 	function referenceTitle(reference: KbReferenceMention) {
@@ -94,35 +86,16 @@
 		}
 	}
 
+	const hierarchy = $derived(record ? buildDocumentHierarchy(
+		{ id: record.id, name: recordTitle(record) },
+		metrics.map((metric) => ({ id: metric.id, name: metric.metric_name || metric.metric_name_en || m.reference_graph_untitled_metric(), value: metric.metric_value })),
+		references.map((reference) => ({ id: reference.id, name: referenceTitle(reference), value: reference.ref_id })),
+		{ metrics: m.home3_knowledge_metrics(), references: m.reference_graph_references() }
+	) : null);
+	const graphData = $derived(hierarchy ? flattenHierarchy(hierarchy) : { nodes: [], links: [] });
+
 	const graphOption = $derived.by<EChartsOption>(() => {
-		const current = record;
-		if (!current) return {};
-		const rootId = `input:${current.id}`;
-		const nodes = new Map<string, GraphNode>([[rootId, {
-			id: rootId,
-			name: recordTitle(current),
-			category: 0,
-			symbolSize: 48
-		}]]);
-		const links: GraphLink[] = [];
-		for (const [index, reference] of references.entries()) {
-			const targetId = referenceNodeId(reference);
-			if (!nodes.has(targetId)) {
-				nodes.set(targetId, {
-					id: targetId,
-					name: referenceTitle(reference),
-					category: 1,
-					symbolSize: 30
-				});
-			}
-			links.push({
-				source: rootId,
-				target: targetId,
-				name: reference.ref_id,
-				value: index + 1,
-				lineStyle: { curveness: 0.08 + (index % 5) * 0.025 }
-			});
-		}
+		if (!hierarchy) return {};
 		return {
 			backgroundColor: 'transparent',
 			animationDuration: 0,
@@ -142,16 +115,17 @@
 				layout: 'force',
 				roam: true,
 				draggable: false,
-				data: [...nodes.values()].map((node) => ({
+				data: graphData.nodes.map((node) => ({
 					...node,
-					itemStyle: { color: node.category === 0 ? palette.root : palette.node },
+					symbolSize: node.depth === 0 ? 48 : node.depth === 1 ? 38 : 24,
+					itemStyle: { color: node.depth < 2 ? palette.root : palette.node },
 					label: { color: palette.text }
 				})),
-				links: links.map((link) => ({
+				links: graphData.links.map((link) => ({
 					...link,
-					lineStyle: { color: palette.edge, opacity: 0.72, ...link.lineStyle },
+					lineStyle: { color: palette.edge, opacity: 0.72 },
 				})),
-				force: { repulsion: 4200, gravity: 0.02, edgeLength: 240, layoutAnimation: false },
+				force: { repulsion: 800, gravity: 0.1, edgeLength: 100, layoutAnimation: false },
 				label: { show: true, position: 'right', formatter: '{b}', fontSize: 11, color: palette.text, width: 180, overflow: 'truncate' },
 				edgeLabel: { show: false },
 				lineStyle: { color: palette.edge, curveness: 0.12 },
@@ -162,7 +136,7 @@
 	});
 
 	const treeOption = $derived.by<EChartsOption>(() => {
-		if (!record) return {};
+		if (!hierarchy) return {};
 		const orient = viewMode === 'left-right' ? 'LR'
 			: viewMode === 'right-left' ? 'RL'
 			: viewMode === 'top-bottom' ? 'TB' : 'BT';
@@ -184,12 +158,11 @@
 				id: 'reference-graph-series',
 				type: 'tree',
 				data: [{
-					name: recordTitle(record),
+					...hierarchy,
 					itemStyle: { color: palette.root },
-					children: references.map((reference) => ({
-						name: referenceTitle(reference),
-						value: reference.ref_id,
-						itemStyle: { color: palette.node }
+					children: hierarchy.children.map((group) => ({
+						...group,
+						itemStyle: { color: palette.root }
 					}))
 				}],
 				layout: 'orthogonal',
@@ -197,6 +170,7 @@
 				roam: true,
 				symbol: 'circle',
 				symbolSize: 9,
+				itemStyle: { color: palette.node },
 				expandAndCollapse: false,
 				initialTreeDepth: -1,
 				lineStyle: { color: palette.edge, width: 1.2, curveness: 0.25 },
@@ -213,32 +187,12 @@
 	});
 
 	const chartOption = $derived(viewMode === 'graph' ? graphOption : treeOption);
-	const navigatorNodes = $derived.by(() => {
-		const seen = new Map<string, string>();
-		for (const reference of references) {
-			const id = referenceNodeId(reference);
-			if (!seen.has(id)) seen.set(id, referenceTitle(reference));
-		}
-		const targets = [...seen.entries()];
-		if (viewMode === 'graph') {
-			return [
-				{ id: 'root', x: 100, y: 65, root: true },
-				...targets.map(([id], index) => {
-					const angle = (Math.PI * 2 * index) / Math.max(targets.length, 1) - Math.PI / 2;
-					return { id, x: 100 + Math.cos(angle) * 42, y: 65 + Math.sin(angle) * 42, root: false };
-				})
-			];
-		}
-		const vertical = viewMode === 'top-bottom' || viewMode === 'bottom-top';
-		const reversed = viewMode === 'right-left' || viewMode === 'bottom-top';
-		return [
-			{ id: 'root', x: vertical ? 100 : reversed ? 175 : 25, y: vertical ? (reversed ? 112 : 18) : 65, root: true },
-			...targets.map(([id], index) => {
-				const spread = targets.length <= 1 ? 0 : index / (targets.length - 1);
-				return { id, x: vertical ? 20 + spread * 160 : reversed ? 55 : 145, y: vertical ? (reversed ? 32 : 98) : 20 + spread * 90, root: false };
-			})
-		];
-	});
+	const navigatorNodes = $derived(hierarchy ? buildNavigator(hierarchy, viewMode) : []);
+	const navigatorEdges = $derived(navigatorNodes.filter((node) => node.parentId).map((node) => ({
+		id: node.id,
+		source: navigatorNodes.find((parent) => parent.id === node.parentId)!,
+		target: node
+	})));
 
 	const navigatorViewport = $derived.by(() => {
 		const width = Math.max(32, 116 / navigator.zoom);
@@ -377,7 +331,7 @@
 
 <svelte:head><title>{m.reference_graph_title()}</title></svelte:head>
 
-<main class="reference-graph-page select-text" style={`--rg-bg:${palette.background};--rg-panel:${palette.background};--rg-line:${palette.border};--rg-text:${palette.text};--rg-muted:${palette.muted};--rg-thumb:${palette.thumb};--rg-track:${palette.track};${gridStyle}`}>
+<main class="reference-graph-page select-text" style={`--rg-bg:${palette.background};--rg-panel:${palette.background};--rg-line:${palette.border};--rg-text:${palette.text};--rg-muted:${palette.muted};--rg-thumb:${palette.thumb};${gridStyle}`}>
 	<aside class="records"><KbInputRecordBrowser {darkMode} fitPanel instanceKey="reference-graph-records" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} onSelect={selectRecord} onError={(cause) => (error = cause.message)} /></aside>
 	<button class="resizer" class:active={resizing === 'left'} type="button" aria-label={m.reference_graph_resize_left()} onpointerdown={(event) => startResize('left', event)} onkeydown={(event) => resizeWithKeyboard(event, 'left')}><span></span></button>
 	<section class="middle">
@@ -407,15 +361,14 @@
 	</section>
 	<button class="resizer" class:active={resizing === 'middle'} type="button" aria-label={m.reference_graph_resize_middle()} onpointerdown={(event) => startResize('middle', event)} onkeydown={(event) => resizeWithKeyboard(event, 'middle')}><span></span></button>
 	<section class="graph-panel" aria-label={m.reference_graph_title()}>
-		<header><div><span class="eyebrow">{m.reference_graph_eyebrow()}</span><h1>{m.reference_graph_title()}</h1></div><div class="graph-controls"><span class="count">{references.length} {m.reference_graph_edges()}</span><label class="view-mode-label" for="reference-graph-view-mode">{m.reference_graph_view_mode()}</label><select id="reference-graph-view-mode" value={viewMode} onchange={(event) => changeViewMode(event.currentTarget.value)}><option value="graph">{m.reference_graph_graph_mode()}</option><option value="left-right">{m.reference_graph_left_right_tree()}</option><option value="top-bottom">{m.reference_graph_top_bottom_tree()}</option><option value="bottom-top">{m.reference_graph_bottom_top_tree()}</option><option value="right-left">{m.reference_graph_right_left_tree()}</option></select></div></header>
+		<header><div><span class="eyebrow">{m.reference_graph_eyebrow()}</span><h1>{m.reference_graph_title()}</h1></div><div class="graph-controls"><span class="count">{graphData.links.length} {m.reference_graph_edges()}</span><label class="view-mode-label" for="reference-graph-view-mode">{m.reference_graph_view_mode()}</label><select id="reference-graph-view-mode" value={viewMode} onchange={(event) => changeViewMode(event.currentTarget.value)}><option value="graph">{m.reference_graph_graph_mode()}</option><option value="left-right">{m.reference_graph_left_right_tree()}</option><option value="top-bottom">{m.reference_graph_top_bottom_tree()}</option><option value="bottom-top">{m.reference_graph_bottom_top_tree()}</option><option value="right-left">{m.reference_graph_right_left_tree()}</option></select></div></header>
 		{#if loading}<div class="graph-empty">{m.reference_graph_loading()}</div>
 		{:else if error}<div class="graph-empty error">{error}</div>
 		{:else if !record}<div class="graph-empty">{m.reference_graph_select_document()}</div>
-		{:else if references.length === 0}<div class="graph-empty">{m.reference_graph_no_references()}</div>
 		{:else}<div class="chart-wrap" bind:this={chartWrap}>{#key `${record?.id}:${viewMode}`}<Chart bind:chart={chartApi} {init} options={chartOption} style="width:100%;height:100%;" />{/key}
 			<button class="mini-map" type="button" aria-label={m.reference_graph_minimap()} onpointerdown={startNavigatorMove} onkeydown={(event) => { const step = event.shiftKey ? 80 : 30; if (event.key === 'ArrowLeft') dispatchNavigatorPan(step, 0); else if (event.key === 'ArrowRight') dispatchNavigatorPan(-step, 0); else if (event.key === 'ArrowUp') dispatchNavigatorPan(0, step); else if (event.key === 'ArrowDown') dispatchNavigatorPan(0, -step); }}>
 				<svg viewBox="0 0 200 130" aria-hidden="true"><rect class="mini-backdrop" width="200" height="130" rx="6" />
-					{#each navigatorNodes.filter((node) => !node.root) as node (node.id)}<line class="mini-edge" x1={navigatorNodes[0].x} y1={navigatorNodes[0].y} x2={node.x} y2={node.y} />{/each}
+					{#each navigatorEdges as edge (edge.id)}<line class="mini-edge" x1={edge.source.x} y1={edge.source.y} x2={edge.target.x} y2={edge.target.y} />{/each}
 					{#each navigatorNodes as node (node.id)}<circle class:mini-root={node.root} class="mini-node" cx={node.x} cy={node.y} r={node.root ? 4 : 2.5} />{/each}
 					<rect class="mini-viewport" x={navigatorViewport.x} y={navigatorViewport.y} width={navigatorViewport.width} height={navigatorViewport.height} rx="3" />
 				</svg>
@@ -425,7 +378,7 @@
 </main>
 
 <style>
-	.reference-graph-page{display:grid;grid-template-columns:var(--left-panel-width) 8px var(--middle-panel-width) 8px minmax(320px,1fr);height:100dvh;min-height:0;overflow:hidden;background:var(--rg-bg);color:var(--rg-text);font:14px/1.45 system-ui,sans-serif;user-select:text}.records,.middle,.graph-panel{min-width:0;min-height:0;background:var(--rg-panel)}.records{overflow:hidden;border-right:1px solid var(--rg-line)}.middle{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--rg-line)}.tabs{display:flex;gap:4px;padding:8px;border-bottom:1px solid var(--rg-line)}.tabs button{flex:1;padding:10px 8px;border:0;border-radius:6px;background:transparent;color:var(--rg-muted);font:inherit;cursor:pointer}.tabs button.active{background:#303a4b;color:var(--rg-text)}.tabs span{margin-left:5px;font-size:11px;color:#d4a24c}.entry-list{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.entry{display:block;width:100%;padding:11px;text-align:left;border:1px solid transparent;border-radius:6px;background:#252d3a;color:var(--rg-text);font:inherit}.reference-entry{cursor:pointer}.reference-entry:hover,.reference-entry.chosen{border-color:#b08d57}.entry strong{display:block;font-size:13px}.entry p{margin:5px 0;color:var(--rg-muted);font-size:11px}.entry small{color:#b08d57;font-size:10px}.empty{padding:18px;color:var(--rg-muted);font-size:13px}.empty.error,.graph-empty.error{color:#e98d78}.graph-panel{display:flex;flex-direction:column;overflow:hidden}.graph-panel header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--rg-line)}.eyebrow{color:#b08d57;font-size:9px;letter-spacing:.15em;text-transform:uppercase}.graph-panel h1{margin:4px 0 0;font-family:Georgia,serif;font-size:22px;font-weight:500}.count{color:var(--rg-muted);font-size:10px}.graph-empty{display:grid;flex:1;place-items:center;color:var(--rg-muted);font-size:12px}.chart-wrap{flex:1;min-height:0;overflow:hidden}.resizer{position:relative;width:8px;height:100%;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none}.resizer span{position:absolute;top:0;bottom:0;left:3px;width:2px;background:var(--rg-line)}.resizer:hover span,.resizer.active span,.resizer:focus-visible span{left:2px;width:4px;background:#b08d57}.resizer:focus-visible{outline:2px solid #b08d57;outline-offset:-2px}.resizer{user-select:none}.entry-list,.records,.chart-wrap{scrollbar-width:thin;scrollbar-color:var(--rg-thumb) var(--rg-track)}.entry-list::-webkit-scrollbar,.records::-webkit-scrollbar,.chart-wrap::-webkit-scrollbar,.records :global(*)::-webkit-scrollbar{width:12px;height:12px}.entry-list::-webkit-scrollbar-track,.records::-webkit-scrollbar-track,.chart-wrap::-webkit-scrollbar-track,.records :global(*)::-webkit-scrollbar-track{background:var(--rg-track)}.entry-list::-webkit-scrollbar-thumb,.records::-webkit-scrollbar-thumb,.chart-wrap::-webkit-scrollbar-thumb,.records :global(*)::-webkit-scrollbar-thumb{background:var(--rg-thumb);border:3px solid var(--rg-track);border-radius:10px}.entry-list::-webkit-scrollbar-thumb:hover,.records::-webkit-scrollbar-thumb:hover,.chart-wrap::-webkit-scrollbar-thumb:hover,.records :global(*)::-webkit-scrollbar-thumb:hover{background:#929292}
+	.reference-graph-page{display:grid;grid-template-columns:var(--left-panel-width) 8px var(--middle-panel-width) 8px minmax(320px,1fr);height:100dvh;min-height:0;overflow:hidden;background:var(--rg-bg);color:var(--rg-text);font:14px/1.45 system-ui,sans-serif;user-select:text}.records,.middle,.graph-panel{min-width:0;min-height:0;background:var(--rg-panel)}.records{overflow:hidden;border-right:1px solid var(--rg-line)}.middle{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--rg-line)}.tabs{display:flex;gap:4px;padding:8px;border-bottom:1px solid var(--rg-line)}.tabs button{flex:1;padding:10px 8px;border:0;border-radius:6px;background:transparent;color:var(--rg-muted);font:inherit;cursor:pointer}.tabs button.active{background:#303a4b;color:var(--rg-text)}.tabs span{margin-left:5px;font-size:11px;color:#d4a24c}.entry-list{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.entry{display:block;width:100%;padding:11px;text-align:left;border:1px solid transparent;border-radius:6px;background:#252d3a;color:var(--rg-text);font:inherit}.reference-entry{cursor:pointer}.reference-entry:hover,.reference-entry.chosen{border-color:#b08d57}.entry strong{display:block;font-size:13px}.entry p{margin:5px 0;color:var(--rg-muted);font-size:11px}.entry small{color:#b08d57;font-size:10px}.empty{padding:18px;color:var(--rg-muted);font-size:13px}.empty.error,.graph-empty.error{color:#e98d78}.graph-panel{display:flex;flex-direction:column;overflow:hidden}.graph-panel header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--rg-line)}.eyebrow{color:#b08d57;font-size:9px;letter-spacing:.15em;text-transform:uppercase}.graph-panel h1{margin:4px 0 0;font-family:Georgia,serif;font-size:22px;font-weight:500}.count{color:var(--rg-muted);font-size:10px}.graph-empty{display:grid;flex:1;place-items:center;color:var(--rg-muted);font-size:12px}.chart-wrap{flex:1;min-height:0;overflow:hidden}.resizer{position:relative;width:8px;height:100%;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none}.resizer span{position:absolute;top:0;bottom:0;left:3px;width:2px;background:var(--rg-line)}.resizer:hover span,.resizer.active span,.resizer:focus-visible span{left:2px;width:4px;background:#b08d57}.resizer:focus-visible{outline:2px solid #b08d57;outline-offset:-2px}.resizer{user-select:none}.entry-list{scrollbar-width:thin;scrollbar-color:var(--rg-thumb) transparent}.entry-list::-webkit-scrollbar{width:8px;height:8px}.entry-list::-webkit-scrollbar-thumb{background:var(--rg-thumb)}.entry-list::-webkit-scrollbar-track{background:transparent}
 	.graph-controls{display:flex;align-items:center;gap:8px}.view-mode-label{color:var(--rg-muted);font-size:10px}.graph-controls select{max-width:170px;padding:6px 26px 6px 8px;border:1px solid var(--rg-line);border-radius:5px;background:var(--rg-panel);color:var(--rg-text);font:inherit;font-size:11px}.chart-wrap{position:relative}.mini-map{position:absolute;right:18px;bottom:18px;width:200px;height:130px;padding:0;overflow:hidden;border:1px solid var(--rg-line);border-radius:7px;background:transparent;color:inherit;font:inherit;box-shadow:0 6px 24px #0008;cursor:grab;touch-action:none;user-select:none}.mini-map:active{cursor:grabbing}.mini-map:focus-visible{outline:2px solid #b08d57}.mini-map svg{display:block;width:100%;height:100%;pointer-events:auto}.mini-backdrop,.mini-edge,.mini-node{pointer-events:none}.mini-backdrop{fill:#11151cdd}.mini-edge{stroke:#8b806c;stroke-opacity:.45;stroke-width:.7}.mini-node{fill:#687287}.mini-root{fill:#d4a24c}.mini-viewport{fill:#d4a24c1a;stroke:#d4a24c;stroke-width:1.5;pointer-events:all;cursor:move}
 	@media(max-width:900px){.reference-graph-page{grid-template-columns:minmax(180px,min(var(--left-panel-width),32vw)) 8px minmax(220px,min(var(--middle-panel-width),38vw)) 8px minmax(180px,1fr)}.graph-panel header{padding:14px}.count{display:none}}
 </style>
