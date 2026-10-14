@@ -200,8 +200,9 @@
 				expandAndCollapse: false,
 				initialTreeDepth: -1,
 				lineStyle: { color: palette.edge, width: 1.2, curveness: 0.25 },
-				label: { position: rootLabelPosition, verticalAlign: 'middle', align: rootLabelPosition === 'left' ? 'right' : 'left', color: palette.text, width: 190, overflow: 'truncate', fontSize: 11 },
-				leaves: { label: { position: leafLabelPosition, verticalAlign: 'middle', align: leafLabelPosition === 'left' ? 'right' : 'left', color: palette.text, width: 220, overflow: 'truncate', fontSize: 10 } },
+				// Match the ECharts vertical tree: parent labels extend above, leaves below.
+				label: { position: rootLabelPosition, rotate: horizontalTree ? 0 : -90, verticalAlign: 'middle', align: rootLabelPosition === 'left' || rootLabelPosition === 'top' ? 'right' : 'left', color: palette.text, width: 190, overflow: 'truncate', fontSize: 11 },
+				leaves: { label: { position: leafLabelPosition, rotate: horizontalTree ? 0 : -90, verticalAlign: 'middle', align: leafLabelPosition === 'left' || leafLabelPosition === 'top' ? 'right' : 'left', color: palette.text, width: 220, overflow: 'truncate', fontSize: 10 } },
 				left: horizontalTree ? '40%' : '6%',
 				right: horizontalTree ? '40%' : '6%',
 				top: horizontalTree ? 20 : '40%',
