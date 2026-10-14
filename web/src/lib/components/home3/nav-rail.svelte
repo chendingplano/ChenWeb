@@ -278,6 +278,7 @@
 										id: 'sysadmin-llm-references',
 										label: m.nav_sysadmin_llm_references(),
 										children: [
+											{ id: 'sysadmin-llm-references-gold', label: m.nav_sysadmin_llm_references_gold() },
 											{ id: 'sysadmin-llm-references-benchmark', label: m.nav_sysadmin_llm_references_benchmark() }
 										]
 									},

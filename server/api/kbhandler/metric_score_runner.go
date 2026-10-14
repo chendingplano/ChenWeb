@@ -36,7 +36,13 @@ func metricScoreErrorCode(err error) string {
 }
 
 func metricScoreScriptPath() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("METRIC_BENCHMARK_SCORER_PATH")); configured != "" {
+	return scoreSkillScriptPath("METRIC_BENCHMARK_SCORER_PATH", "score-extract-metrics")
+}
+
+// scoreSkillScriptPath finds a scoring skill's score_io.py: the env override, else the first
+// .agents/skills/<skill> found walking up from the working directory.
+func scoreSkillScriptPath(envVar, skill string) (string, error) {
+	if configured := strings.TrimSpace(os.Getenv(envVar)); configured != "" {
 		path, err := filepath.Abs(configured)
 		if err == nil {
 			_, err = os.Stat(path)
@@ -51,7 +57,7 @@ func metricScoreScriptPath() (string, error) {
 		return "", metricScoreFailure{"SCORER_UNAVAILABLE"}
 	}
 	for {
-		path := filepath.Join(dir, ".agents", "skills", "score-extract-metrics", "scripts", "score_io.py")
+		path := filepath.Join(dir, ".agents", "skills", skill, "scripts", "score_io.py")
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
@@ -168,9 +174,13 @@ func metricScoreDigest(b []byte) string { sum := sha256.Sum256(b); return hex.En
 // Freeze both scorer and shared gold helper. The saved implementation can reproduce this run
 // even if the installed skills change while matching is in progress or after completion.
 func freezeMetricScoreTools(root, script string) (string, map[string]string, error) {
-	helper := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(script))), "extract-metrics-benchmark", "scripts", "benchmark_io.py")
+	return freezeScoreTools(root, script, "score-extract-metrics", "extract-metrics-benchmark")
+}
+
+func freezeScoreTools(root, script, scoreSkill, goldSkill string) (string, map[string]string, error) {
+	helper := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(script))), goldSkill, "scripts", "benchmark_io.py")
 	hashes := map[string]string{}
-	for name, source := range map[string]string{"score-extract-metrics/scripts/score_io.py": script, "extract-metrics-benchmark/scripts/benchmark_io.py": helper} {
+	for name, source := range map[string]string{scoreSkill + "/scripts/score_io.py": script, goldSkill + "/scripts/benchmark_io.py": helper} {
 		raw, err := os.ReadFile(source)
 		if err != nil {
 			return "", nil, metricScoreFailure{"SCORER_UNAVAILABLE"}
@@ -184,12 +194,28 @@ func freezeMetricScoreTools(root, script string) (string, map[string]string, err
 		}
 		hashes[name] = metricScoreDigest(raw)
 	}
-	return filepath.Join(root, "skills", "score-extract-metrics", "scripts", "score_io.py"), hashes, nil
+	return filepath.Join(root, "skills", scoreSkill, "scripts", "score_io.py"), hashes, nil
 }
 
-func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, id int64, req metricScoreRequest, userID string) (e metricScoreEvidence, err error) {
+// scoreKind names what differs between the metric and reference benchmarks; the scoring flow
+// (export, LLM matching, score) is shared.
+type scoreKind struct {
+	scriptEnv, scoreSkill, goldSkill string
+	runsDir, prompt                  string
+	callReason, callLoc              string
+	matchBasis                       string // what matching falls back to when the source is unreadable
+}
+
+var metricScoreKind = scoreKind{"METRIC_BENCHMARK_SCORER_PATH", "score-extract-metrics", "extract-metrics-benchmark",
+	"metric-score-runs", metricScorePrompt, "score_extract_metrics", "MID-20261007-04", "metric"}
+
+func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, id int64, req metricScoreRequest, userID string) (metricScoreEvidence, error) {
+	return executeScore(ctx, db, logger, metricScoreKind, id, req, userID)
+}
+
+func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, kind scoreKind, id int64, req metricScoreRequest, userID string) (e metricScoreEvidence, err error) {
 	e.Model = req.Model
-	script, err := metricScoreScriptPath()
+	script, err := scoreSkillScriptPath(kind.scriptEnv, kind.scoreSkill)
 	if err != nil {
 		return e, err
 	}
@@ -206,11 +232,11 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 	if poolDatabase != poolConfig.ProjectDBName || poolUser != poolConfig.UserName {
 		return e, metricScoreFailure{"DATABASE_MISMATCH"}
 	}
-	root := filepath.Join(dataHome, "metric-score-runs", strconv.FormatInt(id, 10))
+	root := filepath.Join(dataHome, kind.runsDir, strconv.FormatInt(id, 10))
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return e, err
 	}
-	frozen, hashes, err := freezeMetricScoreTools(root, script)
+	frozen, hashes, err := freezeScoreTools(root, script, kind.scoreSkill, kind.goldSkill)
 	if err != nil {
 		return e, err
 	}
@@ -231,12 +257,12 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 	if err = json.Unmarshal(e.Input, &input); err != nil {
 		return e, err
 	}
-	prompt, err := os.ReadFile(filepath.Join("prompts", metricScorePrompt))
+	prompt, err := os.ReadFile(filepath.Join("prompts", kind.prompt))
 	if err != nil {
 		return e, metricScoreFailure{"PROMPT_UNAVAILABLE"}
 	}
-	hashes[metricScorePrompt] = metricScoreDigest(prompt)
-	if err = os.WriteFile(filepath.Join(root, metricScorePrompt), prompt, 0600); err != nil {
+	hashes[kind.prompt] = metricScoreDigest(prompt)
+	if err = os.WriteFile(filepath.Join(root, kind.prompt), prompt, 0600); err != nil {
 		return e, err
 	}
 	cfg, client, err := newMetricReviewLLMClient(logger, req.Model)
@@ -273,10 +299,10 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 		} else {
 			source["lines_comparable"] = false
 			warnings, _ := input["warnings"].([]any)
-			input["warnings"] = append(warnings, "Source could not be read for matching; line checks disabled, matching uses metric content")
+			input["warnings"] = append(warnings, "Source could not be read for matching; line checks disabled, matching uses "+kind.matchBasis+" content")
 		}
 	}
-	input["provenance"] = map[string]any{"implementation_sha256": hashes, "prompt_name": metricScorePrompt, "model_profile": req.Model, "scorer_model": cfg.ModelName, "lang": req.Lang}
+	input["provenance"] = map[string]any{"implementation_sha256": hashes, "prompt_name": kind.prompt, "model_profile": req.Model, "scorer_model": cfg.ModelName, "lang": req.Lang}
 	e.Input, err = json.MarshalIndent(input, "", "  ")
 	if err != nil {
 		return e, err
@@ -300,10 +326,10 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		client.ThinkingType = "disabled"
 	}
-	logger.Info("calling LLM for metric benchmark matching", "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText))
+	logger.Info("calling LLM for benchmark matching", "scorer", kind.scoreSkill, "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText))
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		UserID: userID, PromptName: metricScorePrompt, PromptText: string(prompt), ModelName: cfg.ModelName,
-		InputText: inputText, RecordID: req.RecordID, CallReason: "score_extract_metrics", CallLoc: "MID-20261007-04",
+		UserID: userID, PromptName: kind.prompt, PromptText: string(prompt), ModelName: cfg.ModelName,
+		InputText: inputText, RecordID: req.RecordID, CallReason: kind.callReason, CallLoc: kind.callLoc,
 	})
 	if err != nil {
 		if ctx.Err() != nil {

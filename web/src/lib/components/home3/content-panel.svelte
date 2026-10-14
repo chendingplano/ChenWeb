@@ -32,6 +32,7 @@
 	import ChadSessionsView from '$lib/components/home3/chad-sessions-view.svelte';
 	import MetricReviewView from '$lib/components/home3/metric-review-view.svelte';
 	import MetricScoreView from '$lib/components/home3/metric-score-view.svelte';
+	import ReferenceScoreView from '$lib/components/home3/reference-score-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
@@ -207,6 +208,7 @@
 			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark' &&
+			activeMenu?.childId !== 'sysadmin-llm-references-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-references-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
@@ -348,8 +350,10 @@
 			<DecisionPlaygroundView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
 			<MetricScoreView {darkMode} {onSelectMetrics} />
-		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}
+		{:else if activeMenu?.childId === 'sysadmin-llm-references-gold'}
 			<ReferencesMgmtView {darkMode} source="testbed" />
+		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}
+			<ReferenceScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}
