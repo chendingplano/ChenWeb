@@ -65,6 +65,25 @@ cd ChenWeb/python/pdf-parser
 PYTHONPATH=. .venv/bin/python pdf_parser.py
 ```
 
+### One-off WeVisDoc-4B run on a PDF (Apple silicon)
+
+The standalone runner renders each PDF page to a temporary 200-DPI PNG, then
+passes the pages to WeVisDoc-4B through the MLX-VLM environment in
+`ThirdParty/mlx-vlm/.venv`. It loads the model once per PDF and writes
+`<pdf-name>.wevisdoc.md` beside the input file. Per-page inference times are
+printed to stderr. The first run downloads the Hugging Face checkpoint; later
+runs use the local cache.
+
+```sh
+cd ChenWeb/python/pdf-parser
+.venv/bin/python wevisdoc_mlx_pdf.py /path/to/input.pdf
+```
+
+Use `--output` to choose another Markdown path, `--dpi` to change rendering
+resolution, or `--max-tokens` to allow longer output for dense pages. The
+default generation limit is 5,000 tokens per page. The prompt is stored at
+`ChenWeb/prompts/prompt-wevisdoc-page-to-markdown-v1.md`.
+
 The service does **not** keep the Mac awake. If a long batch must run while you are
 away, keep the Mac awake from the workspace root (macOS only):
 
