@@ -19,7 +19,7 @@ const compiled = transpileModule(`function buildOption(hierarchy, viewMode, pale
 const buildOption = new Function(`${compiled}; return buildOption;`)();
 
 for (const mode of ['top-bottom', 'bottom-top', 'left-right', 'right-left']) {
-	test(`${mode} labels rotate and anchor away from the tree`, () => {
+	test(`${mode} labels retain their orientation and mouse wheel zooms over blank canvas`, () => {
 		const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 1200, height: 900 });
 		try {
 			chart.setOption(buildOption(
@@ -28,6 +28,24 @@ for (const mode of ['top-bottom', 'bottom-top', 'left-right', 'right-left']) {
 				mode, { text: '#333', root: '#a87518', node: '#ddd', edge: '#aaa' }
 			));
 			const series = (chart as any).getModel().getSeriesByIndex(0);
+			const configureBody = source.match(/function configureTreeRoam\(\) \{([\s\S]*?)\n\t\}/)?.[1];
+			if (configureBody) {
+				const compiled = transpileModule(`function configure() {${configureBody}}`, {
+					compilerOptions: { target: ScriptTarget.ESNext }
+				}).outputText;
+				new Function('chartApi', `${compiled}; configure();`)(chart);
+			}
+			const wheel = (x: number, y: number, wheelDelta: number) => chart.getZr().trigger('mousewheel', {
+				offsetX: x, offsetY: y, wheelDelta,
+				event: { preventDefault() {}, stopPropagation() {} }
+			});
+			// Blank canvas space must zoom too, independent of tree orientation.
+			wheel(60, 60, 1);
+			expect(series.get('zoom')).toBeCloseTo(1.1);
+			wheel(60, 60, -1);
+			expect(series.get('zoom')).toBeCloseTo(1);
+			wheel(-10, 60, 1);
+			expect(series.get('zoom')).toBeCloseTo(1);
 			const data = series.getData();
 			const vertical = mode === 'top-bottom' || mode === 'bottom-top';
 			const rootSymbol = data.getItemGraphicEl(1).getSymbolPath();

@@ -264,6 +264,17 @@
 		navigator = { x: 0, y: 0, zoom: 1 };
 	}
 
+	function configureTreeRoam() {
+		if (!chartApi) return;
+		const series = (chartApi as any).getModel().getSeriesByIndex(0);
+		if (series?.subType !== 'tree') return;
+		const view = (chartApi as any).getViewOfSeriesModel(series);
+		// ECharts restricts tree roaming to the drawing bounds, which are narrow
+		// for horizontal trees. Accept gestures anywhere inside this chart.
+		view._controller.setPointerChecker((_event: unknown, x: number, y: number) =>
+			x >= 0 && y >= 0 && x <= chartApi!.getWidth() && y <= chartApi!.getHeight());
+	}
+
 	function syncGraphPositions() {
 		if (!chartApi || viewMode !== 'graph') return;
 		// Read the force layout after rendering, including on chart recreation.
@@ -284,11 +295,14 @@
 		api.on('graphRoam', handleChartRoam);
 		api.on('treeRoam', handleChartRoam);
 		api.on('rendered', syncGraphPositions);
+		api.on('rendered', configureTreeRoam);
+		configureTreeRoam();
 		syncGraphPositions();
 		return () => {
 			api.off('graphRoam', handleChartRoam);
 			api.off('treeRoam', handleChartRoam);
 			api.off('rendered', syncGraphPositions);
+			api.off('rendered', configureTreeRoam);
 		};
 	});
 
