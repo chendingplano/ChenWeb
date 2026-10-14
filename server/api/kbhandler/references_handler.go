@@ -30,6 +30,7 @@ type referenceMention struct {
 	R1State          string          `json:"r1_state,omitempty"`
 	R2State          string          `json:"r2_state,omitempty"`
 	TargetInputID    *int64          `json:"target_input_id,omitempty"`
+	TargetLocations  json.RawMessage `json:"target_locations,omitempty"`
 	TargetInputTitle string          `json:"target_input_title,omitempty"`
 	MetricState      string          `json:"metric_state,omitempty"`
 	ResourceTitle    string          `json:"resource_title,omitempty"`
@@ -71,7 +72,17 @@ SELECT m.id, m.ref_id, COALESCE(m.section,''), COALESCE(m.source_line_spans, '[]
        COALESCE(NULLIF(BTRIM(i.doc_metadata->>'title'),''), i.title, i.staging_filename, ''),
        COALESCE(m.metric_state,''), COALESCE(r.title,''), COALESCE(r.identity_key,''),
 		COALESCE((SELECT jsonb_agg(ri.kind || ': ' || ri.value ORDER BY ri.kind, ri.value)::text
-		          FROM kb.ref_resource_identifiers ri WHERE ri.resource_id = r.id), '[]')
+		          FROM kb.ref_resource_identifiers ri WHERE ri.resource_id = r.id), '[]'),
+       COALESCE((SELECT jsonb_agg(jsonb_build_object(
+           'source_line_spans', COALESCE(t.source_line_spans, d.row_data->'source_line_spans', '[]'::jsonb),
+           'source_table_rows', COALESCE(t.source_table_rows, d.row_data->'source_table_rows', '[]'::jsonb)) ORDER BY l.rank, l.id)
+         FROM kb.reference_artifact_links l
+         LEFT JOIN kb.metrics t ON l.target_artifact_table = 'metrics'
+           AND t.metric_id = l.target_artifact_id AND t.input_record_id = l.target_input_id
+         LEFT JOIN kb.metrics_dropped d ON l.target_artifact_table = 'metrics_dropped'
+           AND d.drop_id = l.target_artifact_id AND d.input_record_id = l.target_input_id
+         WHERE l.ref_mention_id = m.id AND l.target_input_id = m.target_input_id
+           AND l.status IN ('resolved', 'confirmed') AND (t.id IS NOT NULL OR d.id IS NOT NULL)), '[]'::jsonb)::text AS target_locations
 FROM kb.ref_mentions m
 LEFT JOIN kb.ref_resources r ON r.id = m.resource_id
 LEFT JOIN kb.inputs i ON i.id = m.target_input_id
@@ -87,15 +98,17 @@ ORDER BY m.id`, id)
 		var m referenceMention
 		var sourceLineSpansJSON string
 		var identifiersJSON string
+		var targetLocationsJSON []byte
 		var sourceTableRowsJSON []byte // []byte accepts SQL NULL; json.RawMessage does not.
 		if err := rows.Scan(&m.ID, &m.RefID, &m.Section, &sourceLineSpansJSON, &m.Evidence, &m.CitedRaw, &sourceTableRowsJSON, &m.TargetType, &m.TargetSubtype,
 			&m.TargetTitle, &m.TargetVersion, &m.TargetContent, &m.Normativity, &m.ListKind, &m.ListMismatch,
 			&m.R1State, &m.R2State, &m.TargetInputID, &m.TargetInputTitle, &m.MetricState, &m.ResourceTitle,
-			&m.IdentityKey, &identifiersJSON); err != nil {
+			&m.IdentityKey, &identifiersJSON, &targetLocationsJSON); err != nil {
 			rc.GetLogger().Error("scan references failed", "input_record_id", id, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read references"})
 		}
 		m.SourceTableRows = sourceTableRowsJSON
+		m.TargetLocations = targetLocationsJSON
 		if err := json.Unmarshal([]byte(sourceLineSpansJSON), &m.SourceLineSpans); err != nil {
 			rc.GetLogger().Error("decode reference source lines failed", "input_record_id", id, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read reference source lines"})

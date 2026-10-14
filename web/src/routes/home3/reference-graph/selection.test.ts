@@ -21,6 +21,7 @@ for (const mode of ['graph', 'LR', 'RL', 'TB', 'BT']) {
 			references, { metrics: 'Metrics', references: 'References' });
 		const selection = new Function('record', 'references', `
 			let selectedReferenceId = null;
+			let selectionVersion = 0;
 			${compiled}
 			return { click: handleChartClick, selected: () => selectedReferenceId };
 		`)({ id: 416 }, references);

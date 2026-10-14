@@ -6743,5 +6743,6 @@
 	"reference_graph_originating_document": "来源文档",
 	"reference_graph_target_document": "目标文档",
 	"reference_graph_select_target": "请选择引用节点以查看目标文档。",
-	"reference_graph_no_target_document": "此引用尚未关联目标文档。"
+	"reference_graph_no_target_document": "此引用尚未关联目标文档。",
+	"reference_graph_locations_unavailable": "无法加载 PDF 内容位置，暂时无法显示高亮。"
 }

@@ -9,7 +9,7 @@
 	import { TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
-	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import ReferencePdfViewer from './reference-pdf-viewer.svelte';
 	import { buildDocumentHierarchy, flattenHierarchy, buildNavigator, type ViewMode } from './graph-data';
 	import {
 		listKbMetrics,
@@ -27,8 +27,8 @@
 	const LEFT_MIN = 260;
 	const LEFT_MAX = 760;
 	const RIGHT_MIN = 300;
-	const RIGHT_MAX = 820;
-	const GRAPH_MIN = 320;
+	const RIGHT_MAX = 1220;
+	const GRAPH_MIN = 0;
 	const DIVIDER_WIDTH = 8;
 
 	let darkMode = $derived(theme.isDark);
@@ -36,6 +36,7 @@
 	let metrics = $state<KbMetricRecord[]>([]);
 	let references = $state<KbReferenceMention[]>([]);
 	let selectedReferenceId = $state<number | null>(null);
+	let selectionVersion = $state(0);
 	let viewMode = $state<ViewMode>('graph');
 	let loading = $state(false);
 	let error = $state('');
@@ -89,13 +90,19 @@
 
 	const selectedReference = $derived(references.find((reference) => reference.id === selectedReferenceId) ?? null);
 
+	const targetSpans = $derived(selectedReference?.target_locations?.flatMap(location => location.source_line_spans ?? []) ?? []);
+	const targetTables = $derived(selectedReference?.target_locations?.flatMap(location => location.source_table_rows ?? []) ?? []);
+
 	function handleChartClick(event: ECElementEvent) {
 		if (event.dataType === 'edge') return;
 		const prefix = `input:${record?.id}:references:`;
 		const node = event.data as { id?: string } | null;
 		if (!node?.id?.startsWith(prefix)) return;
 		const id = Number(node.id.slice(prefix.length));
-		if (references.some((reference) => reference.id === id)) selectedReferenceId = id;
+		if (references.some((reference) => reference.id === id)) {
+			selectedReferenceId = id;
+			selectionVersion += 1;
+		}
 	}
 
 	const hierarchy = $derived(record ? buildDocumentHierarchy(
@@ -400,7 +407,7 @@
 			<header class="pdf-heading"><h2>{m.reference_graph_originating_document()}</h2>{#if record}<p title={recordTitle(record)}>{recordTitle(record)}</p>{/if}</header>
 			<div class="pdf-body">
 				{#if record}
-					{#key record.id}<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} showSidebar={false} enableSelectionDialog={false} sidebarSettingsKey="reference-graph-source-pdf" />{/key}
+					{#key record.id}<ReferencePdfViewer {darkMode} inputId={record.id} spans={selectedReference?.source_line_spans ?? []} tables={selectedReference?.source_table_rows ?? []} {selectionVersion} settingsKey="reference-graph-source-pdf" />{/key}
 				{:else}<p class="pdf-empty">{m.reference_graph_select_document()}</p>{/if}
 			</div>
 		</section>
@@ -408,7 +415,7 @@
 			<header class="pdf-heading"><h2>{m.reference_graph_target_document()}</h2>{#if selectedReference}<p title={referenceTitle(selectedReference)}>{referenceTitle(selectedReference)}</p>{/if}</header>
 			<div class="pdf-body">
 				{#if selectedReference?.target_input_id}
-					{#key selectedReference.target_input_id}<PdfViewWindow {darkMode} inputId={selectedReference.target_input_id} fileUrl={`/api/v1/kb/inputs/${selectedReference.target_input_id}/file`} showSidebar={false} enableSelectionDialog={false} sidebarSettingsKey="reference-graph-target-pdf" />{/key}
+					{#key selectedReference.target_input_id}<ReferencePdfViewer {darkMode} inputId={selectedReference.target_input_id} spans={targetSpans} tables={targetTables} documentTitle={selectedReference.target_input_title || selectedReference.target_title || selectedReference.resource_title || ''} {selectionVersion} settingsKey="reference-graph-target-pdf" />{/key}
 				{:else}<p class="pdf-empty">{selectedReference ? m.reference_graph_no_target_document() : m.reference_graph_select_target()}</p>{/if}
 			</div>
 		</section>
@@ -416,8 +423,8 @@
 </main>
 
 <style>
-	.reference-graph-page{display:grid;grid-template-columns:min(var(--left-panel-width),25vw) 8px minmax(320px,1fr) 8px min(var(--right-panel-width),42vw);height:100dvh;min-height:0;overflow:hidden;background:var(--rg-bg);color:var(--rg-text);font:14px/1.45 system-ui,sans-serif;user-select:text}.records,.pdf-panel,.graph-panel{min-width:0;min-height:0;background:var(--rg-panel)}.records{overflow:hidden;border-right:1px solid var(--rg-line)}.graph-empty.error{color:#e98d78}.graph-panel{display:flex;flex-direction:column;overflow:hidden}.graph-panel header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--rg-line)}.eyebrow{color:#b08d57;font-size:9px;letter-spacing:.15em;text-transform:uppercase}.graph-panel h1{margin:4px 0 0;font-family:Georgia,serif;font-size:22px;font-weight:500}.count{color:var(--rg-muted);font-size:10px}.graph-empty{display:grid;flex:1;place-items:center;color:var(--rg-muted);font-size:12px}.chart-wrap{flex:1;min-height:0;overflow:hidden}.resizer{position:relative;width:8px;height:100%;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none}.resizer span{position:absolute;top:0;bottom:0;left:3px;width:2px;background:var(--rg-line)}.resizer:hover span,.resizer.active span,.resizer:focus-visible span{left:2px;width:4px;background:#b08d57}.resizer:focus-visible{outline:2px solid #b08d57;outline-offset:-2px}.resizer{user-select:none}
+	.reference-graph-page{display:grid;grid-template-columns:min(var(--left-panel-width),25vw) 8px minmax(0,1fr) 8px min(var(--right-panel-width),calc(100vw - min(var(--left-panel-width),25vw) - 16px));height:100dvh;min-height:0;overflow:hidden;background:var(--rg-bg);color:var(--rg-text);font:14px/1.45 system-ui,sans-serif;user-select:text}.records,.pdf-panel,.graph-panel{min-width:0;min-height:0;background:var(--rg-panel)}.records{overflow:hidden;border-right:1px solid var(--rg-line)}.graph-empty.error{color:#e98d78}.graph-panel{display:flex;flex-direction:column;overflow:hidden}.graph-panel header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--rg-line)}.eyebrow{color:#b08d57;font-size:9px;letter-spacing:.15em;text-transform:uppercase}.graph-panel h1{margin:4px 0 0;font-family:Georgia,serif;font-size:22px;font-weight:500}.count{color:var(--rg-muted);font-size:10px}.graph-empty{display:grid;flex:1;place-items:center;color:var(--rg-muted);font-size:12px}.chart-wrap{flex:1;min-height:0;overflow:hidden}.resizer{position:relative;width:8px;height:100%;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none}.resizer span{position:absolute;top:0;bottom:0;left:3px;width:2px;background:var(--rg-line)}.resizer:hover span,.resizer.active span,.resizer:focus-visible span{left:2px;width:4px;background:#b08d57}.resizer:focus-visible{outline:2px solid #b08d57;outline-offset:-2px}.resizer{user-select:none}
 	.graph-controls{display:flex;align-items:center;gap:8px}.view-mode-label{color:var(--rg-muted);font-size:10px}.graph-controls select{max-width:170px;padding:6px 26px 6px 8px;border:1px solid var(--rg-line);border-radius:5px;background:var(--rg-panel);color:var(--rg-text);font:inherit;font-size:11px}.chart-wrap{position:relative}.mini-map{position:absolute;right:18px;bottom:18px;width:200px;height:130px;padding:0;overflow:hidden;border:1px solid var(--rg-line);border-radius:7px;background:transparent;color:inherit;font:inherit;box-shadow:0 6px 24px #0008;cursor:grab;touch-action:none;user-select:none}.mini-map:active{cursor:grabbing}.mini-map:focus-visible{outline:2px solid #b08d57}.mini-map svg{display:block;width:100%;height:100%;pointer-events:auto}.mini-backdrop,.mini-edge,.mini-node{pointer-events:none}.mini-backdrop{fill:#11151cdd}.mini-edge{stroke:#8b806c;stroke-opacity:.45;stroke-width:.7}.mini-node{fill:#687287}.mini-root{fill:#d4a24c}.mini-viewport{fill:#d4a24c1a;stroke:#d4a24c;stroke-width:1.5;pointer-events:all;cursor:move}
 	.pdf-panel{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);overflow:hidden;border-left:1px solid var(--rg-line)}.pdf-document{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}.pdf-document+.pdf-document{border-top:1px solid var(--rg-line)}.pdf-heading{padding:10px 14px;border-bottom:1px solid var(--rg-line)}.pdf-heading h2{margin:0;font-size:12px;font-weight:600}.pdf-heading p{margin:4px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--rg-muted)}.pdf-body{flex:1;min-height:0;overflow:hidden}.pdf-empty{display:grid;place-items:center;height:100%;margin:0;padding:20px;text-align:center;color:var(--rg-muted);font-size:12px}
-	@media(max-width:900px){.reference-graph-page{grid-template-columns:180px 8px minmax(240px,1fr) 8px minmax(280px,min(var(--right-panel-width),40vw));overflow-x:auto}.graph-panel header{padding:14px;flex-wrap:wrap;gap:8px}.count{display:none}}
+	@media(max-width:900px){.reference-graph-page{grid-template-columns:180px 8px minmax(0,1fr) 8px minmax(280px,var(--right-panel-width));overflow-x:auto}.graph-panel header{padding:14px;flex-wrap:wrap;gap:8px}.count{display:none}}
 </style>

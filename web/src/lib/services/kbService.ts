@@ -294,6 +294,7 @@ export type KbReferenceMention = {
 	r2_state?: string;
 	target_input_id?: number | null;
 	target_input_title?: string;
+	target_locations?: { source_line_spans: unknown[]; source_table_rows?: { line: number; rows: string[]; row_hash?: Record<string, string> }[] | null }[];
 	metric_state?: string;
 	resource_title?: string;
 	identity_key?: string;
