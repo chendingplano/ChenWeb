@@ -4,11 +4,12 @@
 	import { theme } from '$lib/stores/theme.svelte';
 	import { Chart } from 'svelte-echarts';
 	import type { EChartsOption } from 'echarts';
-	import { init, use } from 'echarts/core';
+	import { init, use, type ECElementEvent } from 'echarts/core';
 	import { GraphChart, TreeChart } from 'echarts/charts';
 	import { TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { buildDocumentHierarchy, flattenHierarchy, buildNavigator, type ViewMode } from './graph-data';
 	import {
 		listKbMetrics,
@@ -22,11 +23,11 @@
 
 
 	const LEFT_WIDTH_KEY = 'reference-graph:left-width';
-	const MIDDLE_WIDTH_KEY = 'reference-graph:middle-width';
+	const RIGHT_WIDTH_KEY = 'reference-graph:right-width';
 	const LEFT_MIN = 260;
 	const LEFT_MAX = 760;
-	const MIDDLE_MIN = 300;
-	const MIDDLE_MAX = 820;
+	const RIGHT_MIN = 300;
+	const RIGHT_MAX = 820;
 	const GRAPH_MIN = 320;
 	const DIVIDER_WIDTH = 8;
 
@@ -35,13 +36,12 @@
 	let metrics = $state<KbMetricRecord[]>([]);
 	let references = $state<KbReferenceMention[]>([]);
 	let selectedReferenceId = $state<number | null>(null);
-	let tab = $state<'metrics' | 'references'>('metrics');
 	let viewMode = $state<ViewMode>('graph');
 	let loading = $state(false);
 	let error = $state('');
-	let leftWidth = $state(400);
-	let middleWidth = $state(500);
-	let resizing = $state<'left' | 'middle' | null>(null);
+	let leftWidth = $state(300);
+	let rightWidth = $state(500);
+	let resizing = $state<'left' | 'right' | null>(null);
 	let chartApi = $state<ReturnType<typeof init> | undefined>(undefined);
 	let graphPositions = $state<Record<string, [number, number]>>({});
 	let navigator = $state({ x: 0, y: 0, zoom: 1 });
@@ -52,7 +52,7 @@
 	const palette = $derived(darkMode
 		? { background: '#161a22', text: '#ede7d3', muted: '#9b947e', border: '#2a3140', node: '#303a4b', root: '#d4a24c', edge: '#9b947e', thumb: '#2a3140' }
 		: { background: '#fbf8f0', text: '#1a1711', muted: '#726b5e', border: '#d8cfbb', node: '#f0eadb', root: '#a87518', edge: '#817767', thumb: '#d7cfb8' });
-	const gridStyle = $derived(`--left-panel-width:${leftWidth}px;--middle-panel-width:${middleWidth}px`);
+	const gridStyle = $derived(`--left-panel-width:${leftWidth}px;--right-panel-width:${rightWidth}px`);
 
 	function recordTitle(value: KbInputRecord) {
 		return value.title || value.name || value.file_name || m.reference_graph_document({ id: value.id });
@@ -85,6 +85,17 @@
 		} finally {
 			if (request === requestId) loading = false;
 		}
+	}
+
+	const selectedReference = $derived(references.find((reference) => reference.id === selectedReferenceId) ?? null);
+
+	function handleChartClick(event: ECElementEvent) {
+		if (event.dataType === 'edge') return;
+		const prefix = `input:${record?.id}:references:`;
+		const node = event.data as { id?: string } | null;
+		if (!node?.id?.startsWith(prefix)) return;
+		const id = Number(node.id.slice(prefix.length));
+		if (references.some((reference) => reference.id === id)) selectedReferenceId = id;
 	}
 
 	const hierarchy = $derived(record ? buildDocumentHierarchy(
@@ -265,8 +276,8 @@
 	}
 
 	function configureTreeRoam() {
-		if (!chartApi) return;
-		const series = (chartApi as any).getModel().getSeriesByIndex(0);
+		if (!chartApi || chartApi.isDisposed()) return;
+		const series = (chartApi as any).getModel()?.getSeriesByIndex(0);
 		if (series?.subType !== 'tree') return;
 		const view = (chartApi as any).getViewOfSeriesModel(series);
 		// ECharts restricts tree roaming to the drawing bounds, which are narrow
@@ -276,9 +287,9 @@
 	}
 
 	function syncGraphPositions() {
-		if (!chartApi || viewMode !== 'graph') return;
+		if (!chartApi || chartApi.isDisposed() || viewMode !== 'graph') return;
 		// Read the force layout after rendering, including on chart recreation.
-		const series = (chartApi as any).getModel().getSeriesByIndex(0);
+		const series = (chartApi as any).getModel()?.getSeriesByIndex(0);
 		if (series?.subType !== 'graph') return;
 		const data = series.getData();
 		const positions: Record<string, [number, number]> = {};
@@ -292,6 +303,7 @@
 	$effect(() => {
 		const api = chartApi;
 		if (!api) return;
+		api.on('click', handleChartClick);
 		api.on('graphRoam', handleChartRoam);
 		api.on('treeRoam', handleChartRoam);
 		api.on('rendered', syncGraphPositions);
@@ -299,6 +311,7 @@
 		configureTreeRoam();
 		syncGraphPositions();
 		return () => {
+			api.off('click', handleChartClick);
 			api.off('graphRoam', handleChartRoam);
 			api.off('treeRoam', handleChartRoam);
 			api.off('rendered', syncGraphPositions);
@@ -310,22 +323,22 @@
 		return Math.max(min, Math.min(max, Math.round(value)));
 	}
 
-	function startResize(panel: 'left' | 'middle', event: PointerEvent) {
+	function startResize(panel: 'left' | 'right', event: PointerEvent) {
 		event.preventDefault();
 		const startX = event.clientX;
 		const initialLeft = leftWidth;
-		const initialMiddle = middleWidth;
+		const initialRight = rightWidth;
 		resizing = panel;
 		document.body.style.cursor = 'col-resize';
 		document.body.style.userSelect = 'none';
 		const move = (next: PointerEvent) => {
 			const available = window.innerWidth - GRAPH_MIN - DIVIDER_WIDTH * 2;
 			if (panel === 'left') {
-				const maxLeft = Math.min(LEFT_MAX, available - middleWidth - MIDDLE_MIN);
+				const maxLeft = Math.min(LEFT_MAX, available - rightWidth);
 				leftWidth = clampWidth(initialLeft + next.clientX - startX, LEFT_MIN, maxLeft);
 			} else {
-				const maxMiddle = Math.min(MIDDLE_MAX, available - leftWidth - LEFT_MIN);
-				middleWidth = clampWidth(initialMiddle + next.clientX - startX, MIDDLE_MIN, maxMiddle);
+				const maxRight = Math.min(RIGHT_MAX, available - leftWidth);
+				rightWidth = clampWidth(initialRight - next.clientX + startX, RIGHT_MIN, maxRight);
 			}
 		};
 		const end = () => {
@@ -333,7 +346,7 @@
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
 			localStorage.setItem(LEFT_WIDTH_KEY, String(leftWidth));
-			localStorage.setItem(MIDDLE_WIDTH_KEY, String(middleWidth));
+			localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth));
 			window.removeEventListener('pointermove', move);
 			window.removeEventListener('pointerup', end);
 			window.removeEventListener('pointercancel', end);
@@ -343,21 +356,21 @@
 		window.addEventListener('pointercancel', end, { once: true });
 	}
 
-	function resizeWithKeyboard(event: KeyboardEvent, panel: 'left' | 'middle') {
+	function resizeWithKeyboard(event: KeyboardEvent, panel: 'left' | 'right') {
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		event.preventDefault();
 		const delta = event.key === 'ArrowRight' ? 16 : -16;
-		if (panel === 'left') leftWidth = clampWidth(leftWidth + delta, LEFT_MIN, Math.min(LEFT_MAX, window.innerWidth - middleWidth - GRAPH_MIN - DIVIDER_WIDTH * 2));
-		else middleWidth = clampWidth(middleWidth + delta, MIDDLE_MIN, Math.min(MIDDLE_MAX, window.innerWidth - leftWidth - GRAPH_MIN - DIVIDER_WIDTH * 2));
+		if (panel === 'left') leftWidth = clampWidth(leftWidth + delta, LEFT_MIN, Math.min(LEFT_MAX, window.innerWidth - rightWidth - GRAPH_MIN - DIVIDER_WIDTH * 2));
+		else rightWidth = clampWidth(rightWidth - delta, RIGHT_MIN, Math.min(RIGHT_MAX, window.innerWidth - leftWidth - GRAPH_MIN - DIVIDER_WIDTH * 2));
 		localStorage.setItem(LEFT_WIDTH_KEY, String(leftWidth));
-		localStorage.setItem(MIDDLE_WIDTH_KEY, String(middleWidth));
+		localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth));
 	}
 
 	onMount(() => {
 		const savedLeft = Number(localStorage.getItem(LEFT_WIDTH_KEY));
-		const savedMiddle = Number(localStorage.getItem(MIDDLE_WIDTH_KEY));
+		const savedRight = Number(localStorage.getItem(RIGHT_WIDTH_KEY));
 		if (Number.isFinite(savedLeft) && savedLeft >= LEFT_MIN && savedLeft <= LEFT_MAX) leftWidth = savedLeft;
-		if (Number.isFinite(savedMiddle) && savedMiddle >= MIDDLE_MIN && savedMiddle <= MIDDLE_MAX) middleWidth = savedMiddle;
+		if (Number.isFinite(savedRight) && savedRight >= RIGHT_MIN && savedRight <= RIGHT_MAX) rightWidth = savedRight;
 	});
 </script>
 
@@ -366,32 +379,6 @@
 <main class="reference-graph-page select-text" style={`--rg-bg:${palette.background};--rg-panel:${palette.background};--rg-line:${palette.border};--rg-text:${palette.text};--rg-muted:${palette.muted};--rg-thumb:${palette.thumb};${gridStyle}`}>
 	<aside class="records"><KbInputRecordBrowser {darkMode} fitPanel instanceKey="reference-graph-records" title={m.references_mgmt_kb_inputs()} subtitle={m.references_mgmt_search_and_select()} emptyTitle={m.references_mgmt_no_records()} emptySubtitle={m.references_mgmt_use_search_to_browse()} autoSelectFirstRecord={false} selectedRecordId={record?.id ?? null} onSelect={selectRecord} onError={(cause) => (error = cause.message)} /></aside>
 	<button class="resizer" class:active={resizing === 'left'} type="button" aria-label={m.reference_graph_resize_left()} onpointerdown={(event) => startResize('left', event)} onkeydown={(event) => resizeWithKeyboard(event, 'left')}><span></span></button>
-	<section class="middle">
-		<nav class="tabs" aria-label={m.reference_graph_lists()}>
-			<button class:active={tab === 'metrics'} aria-pressed={tab === 'metrics'} onclick={() => (tab = 'metrics')}>{m.home3_knowledge_metrics()} <span>{metrics.length}</span></button>
-			<button class:active={tab === 'references'} aria-pressed={tab === 'references'} onclick={() => (tab = 'references')}>{m.reference_graph_references()} <span>{references.length}</span></button>
-		</nav>
-		{#if loading}<p class="empty">{m.reference_graph_loading()}</p>
-		{:else if error}<p class="empty error">{error}</p>
-		{:else if !record}<p class="empty">{m.reference_graph_select_document()}</p>
-		{:else if tab === 'metrics'}
-			<div class="entry-list">
-				{#each metrics as metric (metric.id)}
-					<article class="entry"><strong>{metric.metric_name || metric.metric_name_en || m.reference_graph_untitled_metric()}</strong>{#if metric.metric_desc || metric.metric_context || metric.metric_subject}<p>{metric.metric_desc || metric.metric_context || metric.metric_subject}</p>{/if}<small>{metric.metric_id || ''}{metric.metric_value ? ` · ${metric.metric_value}` : ''}</small></article>
-				{:else}<p class="empty">{m.reference_graph_no_metrics()}</p>{/each}
-			</div>
-		{:else}
-			<div class="entry-list">
-				{#each references as reference (reference.id)}
-					<button class="entry reference-entry" class:chosen={selectedReferenceId === reference.id} aria-pressed={selectedReferenceId === reference.id} onclick={() => (selectedReferenceId = reference.id)}>
-						<strong>{referenceTitle(reference)}</strong>{#if reference.evidence || reference.cited_raw}<p>{reference.evidence || reference.cited_raw}</p>{/if}
-						<small>{reference.ref_id} · {reference.target_type}{reference.target_input_id ? ` · ${m.reference_graph_document({ id: reference.target_input_id })}` : ''}</small>
-					</button>
-				{:else}<p class="empty">{m.reference_graph_no_references()}</p>{/each}
-			</div>
-		{/if}
-	</section>
-	<button class="resizer" class:active={resizing === 'middle'} type="button" aria-label={m.reference_graph_resize_middle()} onpointerdown={(event) => startResize('middle', event)} onkeydown={(event) => resizeWithKeyboard(event, 'middle')}><span></span></button>
 	<section class="graph-panel" aria-label={m.reference_graph_title()}>
 		<header><div><span class="eyebrow">{m.reference_graph_eyebrow()}</span><h1>{m.reference_graph_title()}</h1></div><div class="graph-controls"><span class="count">{graphData.links.length} {m.reference_graph_edges()}</span><label class="view-mode-label" for="reference-graph-view-mode">{m.reference_graph_view_mode()}</label><select id="reference-graph-view-mode" value={viewMode} onchange={(event) => changeViewMode(event.currentTarget.value)}><option value="graph">{m.reference_graph_graph_mode()}</option><option value="left-right">{m.reference_graph_left_right_tree()}</option><option value="top-bottom">{m.reference_graph_top_bottom_tree()}</option><option value="bottom-top">{m.reference_graph_bottom_top_tree()}</option><option value="right-left">{m.reference_graph_right_left_tree()}</option></select></div></header>
 		{#if loading}<div class="graph-empty">{m.reference_graph_loading()}</div>
@@ -407,10 +394,30 @@
 			</button>
 		</div>{/if}
 	</section>
+	<button class="resizer" class:active={resizing === 'right'} type="button" aria-label={m.reference_graph_resize_pdf()} onpointerdown={(event) => startResize('right', event)} onkeydown={(event) => resizeWithKeyboard(event, 'right')}><span></span></button>
+	<aside class="pdf-panel" aria-label={m.reference_graph_documents()}>
+		<section class="pdf-document" aria-label={m.reference_graph_originating_document()}>
+			<header class="pdf-heading"><h2>{m.reference_graph_originating_document()}</h2>{#if record}<p title={recordTitle(record)}>{recordTitle(record)}</p>{/if}</header>
+			<div class="pdf-body">
+				{#if record}
+					{#key record.id}<PdfViewWindow {darkMode} inputId={record.id} fileUrl={`/api/v1/kb/inputs/${record.id}/file`} showSidebar={false} enableSelectionDialog={false} sidebarSettingsKey="reference-graph-source-pdf" />{/key}
+				{:else}<p class="pdf-empty">{m.reference_graph_select_document()}</p>{/if}
+			</div>
+		</section>
+		<section class="pdf-document" aria-label={m.reference_graph_target_document()}>
+			<header class="pdf-heading"><h2>{m.reference_graph_target_document()}</h2>{#if selectedReference}<p title={referenceTitle(selectedReference)}>{referenceTitle(selectedReference)}</p>{/if}</header>
+			<div class="pdf-body">
+				{#if selectedReference?.target_input_id}
+					{#key selectedReference.target_input_id}<PdfViewWindow {darkMode} inputId={selectedReference.target_input_id} fileUrl={`/api/v1/kb/inputs/${selectedReference.target_input_id}/file`} showSidebar={false} enableSelectionDialog={false} sidebarSettingsKey="reference-graph-target-pdf" />{/key}
+				{:else}<p class="pdf-empty">{selectedReference ? m.reference_graph_no_target_document() : m.reference_graph_select_target()}</p>{/if}
+			</div>
+		</section>
+	</aside>
 </main>
 
 <style>
-	.reference-graph-page{display:grid;grid-template-columns:var(--left-panel-width) 8px var(--middle-panel-width) 8px minmax(320px,1fr);height:100dvh;min-height:0;overflow:hidden;background:var(--rg-bg);color:var(--rg-text);font:14px/1.45 system-ui,sans-serif;user-select:text}.records,.middle,.graph-panel{min-width:0;min-height:0;background:var(--rg-panel)}.records{overflow:hidden;border-right:1px solid var(--rg-line)}.middle{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--rg-line)}.tabs{display:flex;gap:4px;padding:8px;border-bottom:1px solid var(--rg-line)}.tabs button{flex:1;padding:10px 8px;border:0;border-radius:6px;background:transparent;color:var(--rg-muted);font:inherit;cursor:pointer}.tabs button.active{background:#303a4b;color:var(--rg-text)}.tabs span{margin-left:5px;font-size:11px;color:#d4a24c}.entry-list{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.entry{display:block;width:100%;padding:11px;text-align:left;border:1px solid transparent;border-radius:6px;background:#252d3a;color:var(--rg-text);font:inherit}.reference-entry{cursor:pointer}.reference-entry:hover,.reference-entry.chosen{border-color:#b08d57}.entry strong{display:block;font-size:13px}.entry p{margin:5px 0;color:var(--rg-muted);font-size:11px}.entry small{color:#b08d57;font-size:10px}.empty{padding:18px;color:var(--rg-muted);font-size:13px}.empty.error,.graph-empty.error{color:#e98d78}.graph-panel{display:flex;flex-direction:column;overflow:hidden}.graph-panel header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--rg-line)}.eyebrow{color:#b08d57;font-size:9px;letter-spacing:.15em;text-transform:uppercase}.graph-panel h1{margin:4px 0 0;font-family:Georgia,serif;font-size:22px;font-weight:500}.count{color:var(--rg-muted);font-size:10px}.graph-empty{display:grid;flex:1;place-items:center;color:var(--rg-muted);font-size:12px}.chart-wrap{flex:1;min-height:0;overflow:hidden}.resizer{position:relative;width:8px;height:100%;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none}.resizer span{position:absolute;top:0;bottom:0;left:3px;width:2px;background:var(--rg-line)}.resizer:hover span,.resizer.active span,.resizer:focus-visible span{left:2px;width:4px;background:#b08d57}.resizer:focus-visible{outline:2px solid #b08d57;outline-offset:-2px}.resizer{user-select:none}.entry-list{scrollbar-width:thin;scrollbar-color:var(--rg-thumb) transparent}.entry-list::-webkit-scrollbar{width:8px;height:8px}.entry-list::-webkit-scrollbar-thumb{background:var(--rg-thumb)}.entry-list::-webkit-scrollbar-track{background:transparent}
+	.reference-graph-page{display:grid;grid-template-columns:min(var(--left-panel-width),25vw) 8px minmax(320px,1fr) 8px min(var(--right-panel-width),42vw);height:100dvh;min-height:0;overflow:hidden;background:var(--rg-bg);color:var(--rg-text);font:14px/1.45 system-ui,sans-serif;user-select:text}.records,.pdf-panel,.graph-panel{min-width:0;min-height:0;background:var(--rg-panel)}.records{overflow:hidden;border-right:1px solid var(--rg-line)}.graph-empty.error{color:#e98d78}.graph-panel{display:flex;flex-direction:column;overflow:hidden}.graph-panel header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--rg-line)}.eyebrow{color:#b08d57;font-size:9px;letter-spacing:.15em;text-transform:uppercase}.graph-panel h1{margin:4px 0 0;font-family:Georgia,serif;font-size:22px;font-weight:500}.count{color:var(--rg-muted);font-size:10px}.graph-empty{display:grid;flex:1;place-items:center;color:var(--rg-muted);font-size:12px}.chart-wrap{flex:1;min-height:0;overflow:hidden}.resizer{position:relative;width:8px;height:100%;padding:0;border:0;background:transparent;cursor:col-resize;touch-action:none}.resizer span{position:absolute;top:0;bottom:0;left:3px;width:2px;background:var(--rg-line)}.resizer:hover span,.resizer.active span,.resizer:focus-visible span{left:2px;width:4px;background:#b08d57}.resizer:focus-visible{outline:2px solid #b08d57;outline-offset:-2px}.resizer{user-select:none}
 	.graph-controls{display:flex;align-items:center;gap:8px}.view-mode-label{color:var(--rg-muted);font-size:10px}.graph-controls select{max-width:170px;padding:6px 26px 6px 8px;border:1px solid var(--rg-line);border-radius:5px;background:var(--rg-panel);color:var(--rg-text);font:inherit;font-size:11px}.chart-wrap{position:relative}.mini-map{position:absolute;right:18px;bottom:18px;width:200px;height:130px;padding:0;overflow:hidden;border:1px solid var(--rg-line);border-radius:7px;background:transparent;color:inherit;font:inherit;box-shadow:0 6px 24px #0008;cursor:grab;touch-action:none;user-select:none}.mini-map:active{cursor:grabbing}.mini-map:focus-visible{outline:2px solid #b08d57}.mini-map svg{display:block;width:100%;height:100%;pointer-events:auto}.mini-backdrop,.mini-edge,.mini-node{pointer-events:none}.mini-backdrop{fill:#11151cdd}.mini-edge{stroke:#8b806c;stroke-opacity:.45;stroke-width:.7}.mini-node{fill:#687287}.mini-root{fill:#d4a24c}.mini-viewport{fill:#d4a24c1a;stroke:#d4a24c;stroke-width:1.5;pointer-events:all;cursor:move}
-	@media(max-width:900px){.reference-graph-page{grid-template-columns:minmax(180px,min(var(--left-panel-width),32vw)) 8px minmax(220px,min(var(--middle-panel-width),38vw)) 8px minmax(180px,1fr)}.graph-panel header{padding:14px}.count{display:none}}
+	.pdf-panel{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);overflow:hidden;border-left:1px solid var(--rg-line)}.pdf-document{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}.pdf-document+.pdf-document{border-top:1px solid var(--rg-line)}.pdf-heading{padding:10px 14px;border-bottom:1px solid var(--rg-line)}.pdf-heading h2{margin:0;font-size:12px;font-weight:600}.pdf-heading p{margin:4px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--rg-muted)}.pdf-body{flex:1;min-height:0;overflow:hidden}.pdf-empty{display:grid;place-items:center;height:100%;margin:0;padding:20px;text-align:center;color:var(--rg-muted);font-size:12px}
+	@media(max-width:900px){.reference-graph-page{grid-template-columns:180px 8px minmax(240px,1fr) 8px minmax(280px,min(var(--right-panel-width),40vw));overflow-x:auto}.graph-panel header{padding:14px;flex-wrap:wrap;gap:8px}.count{display:none}}
 </style>

@@ -6737,5 +6737,11 @@
 	"references_mgmt_internal": "Internal",
 	"references_mgmt_confidence": "Confidence",
 	"references_mgmt_yes": "Yes",
-	"references_mgmt_no": "No"
+	"references_mgmt_no": "No",
+	"reference_graph_resize_pdf": "Resize PDF panel",
+	"reference_graph_documents": "Documents",
+	"reference_graph_originating_document": "Originating document",
+	"reference_graph_target_document": "Target document",
+	"reference_graph_select_target": "Select a reference node to view its target document.",
+	"reference_graph_no_target_document": "This reference has no linked target document."
 }

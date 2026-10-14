@@ -6737,5 +6737,11 @@
 	"references_mgmt_internal": "内部引用",
 	"references_mgmt_confidence": "置信度",
 	"references_mgmt_yes": "是",
-	"references_mgmt_no": "否"
+	"references_mgmt_no": "否",
+	"reference_graph_resize_pdf": "调整 PDF 面板宽度",
+	"reference_graph_documents": "文档",
+	"reference_graph_originating_document": "来源文档",
+	"reference_graph_target_document": "目标文档",
+	"reference_graph_select_target": "请选择引用节点以查看目标文档。",
+	"reference_graph_no_target_document": "此引用尚未关联目标文档。"
 }
