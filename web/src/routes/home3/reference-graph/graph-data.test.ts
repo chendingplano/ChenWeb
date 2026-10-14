@@ -29,6 +29,25 @@ for (const [metricRecords, referenceRecords] of [[metrics, []], [[], references]
 	});
 }
 
+test('returning from tree to graph uses the rendered graph positions in the minimap', () => {
+	const root = buildDocumentHierarchy(document, metrics, references, labels);
+	const positions = Object.fromEntries(flattenHierarchy(root).nodes.map((node, index) =>
+		[node.id, [index * 30, (index % 3) * 40] as [number, number]]));
+	const graph = buildNavigator(root, 'graph', positions);
+	const tree = buildNavigator(root, 'top-bottom', positions);
+	expect(buildNavigator(root, 'graph', positions)).toEqual(graph);
+	expect(graph).not.toEqual(tree);
+	const scale = (graph[1].x - graph[0].x) / 30;
+	expect(graph[1].y - graph[0].y).toBeCloseTo(40 * scale);
+	expect(graph[3].y).toBeCloseTo(graph[0].y);
+	for (const node of graph) {
+		expect(node.x).toBeGreaterThanOrEqual(12);
+		expect(node.x).toBeLessThanOrEqual(188);
+		expect(node.y).toBeGreaterThanOrEqual(12);
+		expect(node.y).toBeLessThanOrEqual(118);
+	}
+});
+
 for (const mode of ['graph', 'top-bottom', 'bottom-top', 'left-right', 'right-left'] as const) {
 	test(`${mode} minimap includes both groups and connects leaves to their parent`, () => {
 		const root = buildDocumentHierarchy(document, metrics, references, labels);

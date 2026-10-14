@@ -37,7 +37,25 @@ export function flattenHierarchy(root: HierarchyNode) {
 	return { nodes, links };
 }
 
-export function buildNavigator(root: HierarchyNode, mode: ViewMode) {
+export function buildNavigator(root: HierarchyNode, mode: ViewMode, positions?: Record<string, [number, number]>) {
+	if (mode === 'graph' && positions) {
+		const { nodes, links } = flattenHierarchy(root);
+		const placed = nodes.filter((node) => positions[node.id]?.every(Number.isFinite));
+		if (!placed.length) return [];
+		const xs = placed.map((node) => positions[node.id][0]);
+		const ys = placed.map((node) => positions[node.id][1]);
+		const minX = Math.min(...xs), maxX = Math.max(...xs);
+		const minY = Math.min(...ys), maxY = Math.max(...ys);
+		// Preserve the canvas layout's aspect ratio inside the minimap padding.
+		const scale = Math.min(176 / Math.max(maxX - minX, 1), 106 / Math.max(maxY - minY, 1));
+		return placed.map((node) => ({
+			id: node.id,
+			parentId: links.find((link) => link.target === node.id)?.source ?? '',
+			x: 100 + (positions[node.id][0] - (minX + maxX) / 2) * scale,
+			y: 65 + (positions[node.id][1] - (minY + maxY) / 2) * scale,
+			root: node.depth === 0
+		}));
+	}
 	const nodes = [{ id: root.id, parentId: '', x: 100, y: 65, root: true }];
 	const vertical = mode === 'graph' || mode === 'top-bottom' || mode === 'bottom-top';
 	const reversed = mode === 'right-left' || mode === 'bottom-top';

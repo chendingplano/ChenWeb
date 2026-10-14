@@ -43,6 +43,7 @@
 	let middleWidth = $state(500);
 	let resizing = $state<'left' | 'middle' | null>(null);
 	let chartApi = $state<ReturnType<typeof init> | undefined>(undefined);
+	let graphPositions = $state<Record<string, [number, number]>>({});
 	let navigator = $state({ x: 0, y: 0, zoom: 1 });
 	let navigatorPointer: { x: number; y: number } | null = null;
 	let requestId = 0;
@@ -187,7 +188,7 @@
 	});
 
 	const chartOption = $derived(viewMode === 'graph' ? graphOption : treeOption);
-	const navigatorNodes = $derived(hierarchy ? buildNavigator(hierarchy, viewMode) : []);
+	const navigatorNodes = $derived(hierarchy ? buildNavigator(hierarchy, viewMode, graphPositions) : []);
 	const navigatorEdges = $derived(navigatorNodes.filter((node) => node.parentId).map((node) => ({
 		id: node.id,
 		source: navigatorNodes.find((parent) => parent.id === node.parentId)!,
@@ -263,14 +264,31 @@
 		navigator = { x: 0, y: 0, zoom: 1 };
 	}
 
+	function syncGraphPositions() {
+		if (!chartApi || viewMode !== 'graph') return;
+		// Read the force layout after rendering, including on chart recreation.
+		const series = (chartApi as any).getModel().getSeriesByIndex(0);
+		if (series?.subType !== 'graph') return;
+		const data = series.getData();
+		const positions: Record<string, [number, number]> = {};
+		for (let index = 0; index < data.count(); index++) {
+			const point = data.getItemLayout(index);
+			if (point?.every(Number.isFinite)) positions[data.getId(index)] = [point[0], point[1]];
+		}
+		graphPositions = positions;
+	}
+
 	$effect(() => {
 		const api = chartApi;
 		if (!api) return;
 		api.on('graphRoam', handleChartRoam);
 		api.on('treeRoam', handleChartRoam);
+		api.on('rendered', syncGraphPositions);
+		syncGraphPositions();
 		return () => {
 			api.off('graphRoam', handleChartRoam);
 			api.off('treeRoam', handleChartRoam);
+			api.off('rendered', syncGraphPositions);
 		};
 	});
 
