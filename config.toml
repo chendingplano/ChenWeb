@@ -134,9 +134,3 @@ topic_types = ["封面/cover", "事实/fact", "范围/scope", "条款/compliance
 # supported_languages = ["en", "zh-cn", "ja", "ko"]
 supported_languages = ["en", "zh-cn"]
 default_language = ["zh-cn"]
-
-# Hide workspace apps that are not ready for use.
-[workspace-content]
-workflows = false
-agents = false
-cdm_editor = false
