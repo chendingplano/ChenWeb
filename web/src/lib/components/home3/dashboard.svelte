@@ -77,6 +77,7 @@
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
 	let metricDetails = $state<Snippet | null>(null);
+	let selectedReferences = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let selectedMetrics = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
 	$effect(() => {
@@ -84,6 +85,7 @@
 		if (activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark') {
 			selectedMetrics = null;
 		}
+		if (activeMenu?.childId !== 'sysadmin-llm-references-benchmark') selectedReferences = null;
 	});
 	// Product Review and Review Metrics use the shelf's space for their own panes — hide it while
 	// it's the active content, without touching the stored shelfOpen toggle so
@@ -303,6 +305,7 @@
 			{docReviewKey}
 			{siteConfig}
 			onSelectMetrics={(metrics) => (selectedMetrics = metrics)}
+			onSelectReferences={(references) => (selectedReferences = references)}
 			onMetricDetailsChange={(details) => {
 				metricDetails = details;
 				if (details) shelfOpen = true;
@@ -345,6 +348,7 @@
 				{darkMode}
 				{activeMenu}
 				{selectedMetrics}
+				{selectedReferences}
 				{metricDetails}
 				width={shelfWidth}
 				open={shelfOpen}

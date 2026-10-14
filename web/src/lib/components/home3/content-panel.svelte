@@ -105,6 +105,7 @@
 		siteConfig,
 		onToggleShelf,
 		onMetricDetailsChange,
+		onSelectReferences = (_references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
 		onFocusModeChange = (_focused: boolean) => {}
@@ -118,6 +119,7 @@
 		siteConfig: SiteConfig;
 		onToggleShelf: () => void;
 		onMetricDetailsChange?: (details: Snippet | null) => void;
+		onSelectReferences?: (references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 		onFocusModeChange?: (focused: boolean) => void;
@@ -353,7 +355,7 @@
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-gold'}
 			<ReferencesMgmtView {darkMode} source="testbed" />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}
-			<ReferenceScoreView {darkMode} />
+			<ReferenceScoreView {darkMode} {onSelectReferences} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}

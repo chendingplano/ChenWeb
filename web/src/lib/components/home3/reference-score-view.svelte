@@ -19,7 +19,13 @@
 		type ReferenceScoreSummary,
 		type GoldRun
 	} from './reference-score-client.js';
-	let { darkMode = true }: { darkMode: boolean } = $props();
+	let {
+		darkMode = true,
+		onSelectReferences = (_references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {}
+	}: {
+		darkMode: boolean;
+		onSelectReferences?: (references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
+	} = $props();
 	let query = $state(''),
 		searchScope = $state('all'),
 		searching = $state(false),
@@ -325,6 +331,9 @@
 	}
 	function selectSourceEntry(entryKey: string, ids: Array<{ id: string; prediction: boolean }>) {
 		selectedEntryKey = entryKey;
+		const production = detail?.input?.predictions.find((item) => item.ref_id === ids.find((i) => i.prediction)?.id) ?? null;
+		const goldReference = detail?.input?.gold.find((item) => item.ref_id === ids.find((i) => !i.prediction)?.id) ?? null;
+		onSelectReferences(production || goldReference ? { production, gold: goldReference } : null);
 		pendingSourceEntry = ids;
 		resolveSourceEntry(ids);
 	}
@@ -625,6 +634,7 @@
 					onclick={() => {
 							detailSequence++;
 						detail = null;
+						onSelectReferences(null);
 					}}>{m.msc_close()}</button
 				>
 			</div>

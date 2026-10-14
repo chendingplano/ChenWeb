@@ -43,6 +43,7 @@
 		darkMode    = true,
 		activeMenu  = null,
 		selectedMetrics = null,
+		selectedReferences = null,
 		metricDetails = null,
 		width       = 280,
 		open        = true,
@@ -53,6 +54,7 @@
 		activeMenu:  ActiveSelection | null;
 		metricDetails?: Snippet | null;
 		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
+		selectedReferences?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
 		width:       number;
 		open:        boolean;
 		onDragStart: (e: MouseEvent) => void;
@@ -238,6 +240,43 @@
 		[['kind', 'statement_kind'], () => msg.context_shelf_metric_kind()],
 		[['source_line_spans', 'source_lines'], () => msg.context_shelf_metric_source_lines()]
 	] as const;
+	const referenceDetailFields = [
+		[['ref_id'], () => msg.rsc_detail_ref_id()],
+		[['cited_raw'], () => msg.rsc_detail_cited_raw()],
+		[['group'], () => msg.rsc_detail_group()],
+		[['ref_form'], () => msg.rsc_field_ref_form()],
+		[['target_content'], () => msg.rsc_field_target_content()],
+		[['target_type'], () => msg.rsc_field_target_type()],
+		[['target_subtype'], () => msg.rsc_field_target_subtype()],
+		[['target_subtype_label'], () => msg.rsc_detail_target_subtype_label()],
+		[['target_title'], () => msg.rsc_detail_target_title()],
+		[['target_version'], () => msg.rsc_detail_target_version()],
+		[['target_locator'], () => msg.rsc_detail_target_locator()],
+		[['target_scope'], () => msg.rsc_field_target_scope()],
+		[['mechanism'], () => msg.rsc_field_mechanism()],
+		[['relationships'], () => msg.rsc_field_relationships()],
+		[['identifiers'], () => msg.rsc_field_identifiers()],
+		[['normativity'], () => msg.rsc_field_normativity()],
+		[['in_requirement'], () => msg.rsc_field_in_requirement()],
+		[['list_mismatch'], () => msg.rsc_field_list_mismatch()],
+		[['metric_name'], () => msg.rsc_field_quantity()],
+		[['metric_name_en'], () => msg.rsc_detail_metric_name_en()],
+		[['metric_subject'], () => msg.rsc_detail_metric_subject()],
+		[['condition'], () => msg.rsc_detail_condition()],
+		[['section'], () => msg.rsc_detail_section()],
+		[['source_line_spans'], () => msg.context_shelf_metric_source_lines()],
+		[['evidence'], () => msg.rsc_detail_evidence()]
+	] as const;
+	// One comparison grid serves metrics and references: two columns, rows that differ highlighted.
+	let compare = $derived(
+		selectedReferences
+			? { pair: selectedReferences, fields: referenceDetailFields, idKey: 'ref_id', nameKeys: ['cited_raw', 'ref_id'],
+				labels: [msg.rsc_extracted_reference(), msg.rsc_gold_reference()] }
+			: selectedMetrics
+				? { pair: selectedMetrics, fields: metricDetailFields, idKey: 'metric_id', nameKeys: ['metric_name', 'name', 'metric_id'],
+					labels: [msg.context_shelf_production_metric(), msg.context_shelf_gold_metric()] }
+				: null
+	);
 	function metricFieldValue(metric: Record<string, unknown>, keys: readonly string[]): string {
 		const value = keys.map((key) => metric[key]).find((candidate) => candidate != null && candidate !== '');
 		if (value == null) return '—';
@@ -263,7 +302,8 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
-				{#if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
+				{#if selectedReferences}{msg.rsc_reference_details()}
+				{:else if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
 				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
 				{:else if sectionId === 'dashboard'}{msg.context_shelf_system_status()}
@@ -290,24 +330,24 @@
 
 		{#if metricDetails}
 			{@render metricDetails?.()}
-		{:else if selectedMetrics}
+		{:else if compare}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="grid grid-cols-2 gap-x-3">
 					{#each [
-						{ label: msg.context_shelf_production_metric(), metric: selectedMetrics.production },
-						{ label: msg.context_shelf_gold_metric(), metric: selectedMetrics.gold }
+						{ label: compare.labels[0], metric: compare.pair.production },
+						{ label: compare.labels[1], metric: compare.pair.gold }
 					] as column (column.label)}
 						<div class="min-w-0 border-b pb-2" style="border-color:{borderColor};">
 							<h3 class="text-xs font-semibold" style="color:{accent};">{column.label}</h3>
 							<div class="mt-1 break-words text-xs font-semibold" style="color:{textPrimary};">
-								{column.metric ? String(column.metric.metric_name ?? column.metric.name ?? column.metric.metric_id ?? '—') : '—'}
+								{column.metric ? String(compare.nameKeys.map((key) => column.metric?.[key]).find((v) => v != null && v !== '') ?? '—') : '—'}
 							</div>
 						</div>
 					{/each}
-					{#each metricDetailFields as [keys, label]}
-						{@const productionValue = selectedMetrics.production ? metricFieldValue(selectedMetrics.production, keys) : '—'}
-						{@const goldValue = selectedMetrics.gold ? metricFieldValue(selectedMetrics.gold, keys) : '—'}
-						{@const differs = keys[0] !== 'metric_id' && productionValue !== goldValue}
+					{#each compare.fields as [keys, label]}
+						{@const productionValue = compare.pair.production ? metricFieldValue(compare.pair.production, keys) : '—'}
+						{@const goldValue = compare.pair.gold ? metricFieldValue(compare.pair.gold, keys) : '—'}
+						{@const differs = keys[0] !== compare.idKey && productionValue !== goldValue}
 						<div
 							class="col-span-2 grid grid-cols-2 gap-x-3 rounded-md px-2 py-1.5"
 							style="background:{differs ? 'rgba(251,191,36,0.12)' : 'transparent'}; border-bottom:1px solid {differs ? 'rgba(251,191,36,0.35)' : borderColor};"
