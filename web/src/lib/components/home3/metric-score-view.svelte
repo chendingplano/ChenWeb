@@ -2,8 +2,9 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
-	import { getRawLines, type RawLine } from '$lib/services/kbService';
+	import { getRawLines, listKbMetrics, type RawLine } from '$lib/services/kbService';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import type { TableReference } from './pdf-table-geometry';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import { searchInputs, type InputRecordSummary } from './metric-review-client.js';
 	import {
@@ -49,6 +50,10 @@
 	let activeInputId = $derived(detail?.input_record_id ?? selected?.id ?? null);
 	let rawLines = $state<RawLine[]>([]);
 	let sourceLines = $state<RawLine[]>([]);
+	let tableReferences = $state<TableReference[]>([]);
+	// source_table_rows are not in the scorer export; read them from the metric tables, keyed by metric_id.
+	let tableRowsById = $state(new Map<string, TableReference[]>());
+	let tableRowsKey = '';
 	let pdfPage = $state(1);
 	let highlightVersion = $state(0);
 	let rawLinesReady = $state(false);
@@ -329,9 +334,11 @@
 	}
 	function resolveSourceEntry(ids: Array<{ id: string; prediction: boolean }>) {
 		sourceLines = [];
+		tableReferences = [];
 		highlightVersion++;
 		if (!rawLinesReady) return;
-		const numbers = [...new Set(ids.flatMap(({ id, prediction }) => recordSourceLines(id, prediction)))].sort(
+		const refs = ids.flatMap(({ id }) => tableRowsById.get(id) ?? []);
+		const numbers = [...new Set([...ids.flatMap(({ id, prediction }) => recordSourceLines(id, prediction)), ...refs.map((ref) => ref.line)])].sort(
 			(a, b) => a - b
 		);
 		if (!numbers.length) return;
@@ -342,11 +349,14 @@
 		});
 		if (!resolved.length) return;
 		sourceLines = resolved;
+		tableReferences = refs;
 		pdfPage = resolved[0].page_number;
 		highlightVersion++;
 	}
 	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
 		for (const line of sourceLines) {
+			// Table lines are highlighted row by row by the PDF viewer.
+			if (tableReferences.some((ref) => ref.line === line.line_number)) continue;
 			if (line.page_number !== pageNo || !Array.isArray(line.coords) || line.coords.length < 4) continue;
 			const coords = line.coords.slice(0, 4);
 			if (!coords.every(Number.isFinite)) continue;
@@ -396,8 +406,31 @@
 				});
 			}
 		}
+		const goldRun = detail?.input?.gold_run;
+		const tableKey = `${inputId}|${runId}`;
+		if (inputId != null && runId != null && goldRun && tableKey !== tableRowsKey) {
+			tableRowsKey = tableKey;
+			tableRowsById = new Map();
+			void Promise.all([
+				listKbMetrics(inputId),
+				listKbMetrics(inputId, 'testbed', {
+					skillVersion: String(goldRun.skill_version ?? ''),
+					modelName: String(goldRun.model_name ?? ''),
+					runId: String(goldRun.benchmark_run_id ?? '')
+				})
+			]).then((results) => {
+				if (!alive || tableKey !== tableRowsKey) return;
+				const byId = new Map<string, TableReference[]>();
+				for (const res of results)
+					for (const row of res.results ?? [])
+						if (row.metric_id && row.source_table_rows?.length) byId.set(row.metric_id, row.source_table_rows);
+				tableRowsById = byId;
+				if (pendingSourceEntry) resolveSourceEntry(pendingSourceEntry);
+			}).catch(() => { /* highlight falls back to whole lines */ });
+		}
 		if (runId !== previousRunId) {
 			previousRunId = runId;
+			tableReferences = [];
 			sourceLines = [];
 			pendingSourceEntry = null;
 			selectedEntryKey = '';
@@ -812,6 +845,7 @@
 					fileUrl={`/api/v1/kb/inputs/${activeInputId}/file`}
 					bind:page={pdfPage}
 					highlightVersion={highlightVersion}
+					{tableReferences}
 					renderHighlights={renderSourceHighlights}
 					enableSelectionDialog={false}
 					darkMode={darkMode}
