@@ -21,5 +21,7 @@
 # site-config-driven (ADR 2026071701).
 
 [labels]
+reference_graph = "Reference Graph"
 
 [descriptions]
+reference_graph = "Explore document references as a knowledge graph."

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { getRawLines, type RawLine } from '$lib/services/kbService';
@@ -215,6 +215,11 @@
 			if (seq === historySequence) loading = false;
 		}
 	}
+	// The results panel sits below the history table, so bring it into view when a run is opened.
+	async function showResults() {
+		await tick();
+		splitPanelsEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
 	async function open(id: number, quiet = false) {
 		if (quiet && (detailInFlight > 0 || starting)) return;
 		detailInFlight++;
@@ -226,7 +231,10 @@
 		}
 		try {
 			const result = await scoreDetail(id);
-			if (alive && seq === detailSequence) detail = result;
+			if (alive && seq === detailSequence) {
+				detail = result;
+				if (!quiet) void showResults();
+			}
 		} catch (e) {
 			if (alive && seq === detailSequence) error = errorText(e);
 		} finally {
@@ -247,6 +255,7 @@
 				lang,
 				goldChoice ? gold.find((g) => goldRunKey(g) === goldChoice) : undefined
 			);
+			void showResults();
 			offset = 0;
 			await history();
 		} catch (e) {

@@ -135,6 +135,13 @@ href = "/home3/inputs"
 icon = "file-check"
 
 [[workspace.apps]]
+key = "reference_graph"
+name = "Reference Graph"
+description = "Explore document references as a knowledge graph."
+href = "/home3/reference-graph"
+icon = "network"
+
+[[workspace.apps]]
 key = "workflows"
 name = "Workflows"
 description = "Automate multi-step document processing."

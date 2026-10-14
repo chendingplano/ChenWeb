@@ -77,6 +77,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import BotIcon from '@lucide/svelte/icons/bot';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
@@ -247,17 +248,17 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 				{/if}
 			</nav>
 			<div class="flex items-center gap-2">
-				{#if isMetricsView && !metricsHeaderVisible}
+				{#if isMetricsView}
 					<button
 						type="button"
-						onclick={() => (metricsHeaderVisible = true)}
+						onclick={() => (metricsHeaderVisible = !metricsHeaderVisible)}
 						class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150"
 						style="background:{accentTint}; color:{accent}; font-size:12px; border:none;"
 						aria-expanded={metricsHeaderVisible}
 						aria-controls="metrics-header"
 					>
-						<ChevronDownIcon class="h-3.5 w-3.5" />
-						{m.metric_mgmt_show_header()}
+						{#if metricsHeaderVisible}<ChevronUpIcon class="h-3.5 w-3.5" />{:else}<ChevronDownIcon class="h-3.5 w-3.5" />{/if}
+						{metricsHeaderVisible ? m.metric_mgmt_hide_header() : m.metric_mgmt_show_header()}
 					</button>
 				{/if}
 				<!-- Pages with their own multi-pane layout use the shelf's space. -->

@@ -9,22 +9,29 @@ import {
 
 // Skill-version and model filters shared by the gold benchmark views (Gold
 // Metrics, Reference Benchmark). It loads the (version, model) options of one
-// gold set, defaults to the newest version across all models, and gives the
+// gold set, defaults to the newest version (or All, when allowed) across all models, and gives the
 // record browser the params that list one entry per benchmark run.
 export class GoldRunFilter {
 	readonly kind: GoldKind;
+	// When set, an empty skillVersion means "All" versions and is the default.
+	readonly allowAllVersions: boolean;
 	versions = $state<string[]>([]);
 	options = $state<GoldMetricOption[]>([]);
 	skillVersion = $state('');
 	modelName = $state('');
 	loading = $state(true);
 	error = $state('');
-	modelNames = $derived(
-		this.options.filter((o) => o.skill_version === this.skillVersion).map((o) => o.model_name)
-	);
+	modelNames = $derived([
+		...new Set(
+			this.options
+				.filter((o) => !this.skillVersion || o.skill_version === this.skillVersion)
+				.map((o) => o.model_name)
+		)
+	]);
 
-	constructor(kind: GoldKind) {
+	constructor(kind: GoldKind, opts: { allowAllVersions?: boolean } = {}) {
 		this.kind = kind;
+		this.allowAllVersions = opts.allowAllVersions ?? false;
 	}
 
 	async load() {
@@ -34,7 +41,9 @@ export class GoldRunFilter {
 			const res = await listGoldOptions(this.kind);
 			this.versions = res.skill_versions ?? [];
 			this.options = res.options ?? [];
-			if (!this.versions.includes(this.skillVersion)) this.skillVersion = this.versions[0] ?? '';
+			if (!this.versions.includes(this.skillVersion)) {
+				this.skillVersion = this.allowAllVersions ? '' : (this.versions[0] ?? '');
+			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : m.gold_run_filters_options_failed();
 		} finally {
@@ -64,7 +73,7 @@ export class GoldRunFilter {
 
 	// Shown instead of the record list until the options are loaded.
 	get pausedMessage(): string {
-		if (!this.loading && this.skillVersion) return '';
+		if (!this.loading && (this.skillVersion || this.allowAllVersions)) return '';
 		return this.error || (this.loading ? m.kb_input_record_browser_loading_records() : m.metric_mgmt_no_records_yet());
 	}
 }

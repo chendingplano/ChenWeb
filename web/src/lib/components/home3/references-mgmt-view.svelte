@@ -14,7 +14,7 @@
 	// written by the extract-references-benchmark skill, one record-list entry per run,
 	// plus each run's dropped candidates. Gold rows have no holding resolution.
 	let { darkMode = true, source = 'kb', onReferenceDetailsChange }: { darkMode?: boolean; source?: KbMetricSource; onReferenceDetailsChange?: (details: KbReferenceDetails | null) => void } = $props();
-	const gold = new GoldRunFilter('references');
+	const gold = new GoldRunFilter('references', { allowAllVersions: true });
 	$effect(() => {
 		if (source === 'testbed') void gold.load();
 	});

@@ -19,8 +19,9 @@
 				onChange?.();
 			}}
 		>
+			{#if filter.allowAllVersions}<option value="">{m.gold_run_filters_all_versions()}</option>{/if}
 			{#each filter.versions as v, idx (v)}
-				<option value={v}>{idx === 0 ? m.gold_run_filters_version_newest({ version: v }) : v}</option>
+				<option value={v}>{idx === 0 && !filter.allowAllVersions ? m.gold_run_filters_version_newest({ version: v }) : v}</option>
 			{/each}
 		</select>
 	</label>

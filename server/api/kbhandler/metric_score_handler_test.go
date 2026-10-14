@@ -80,6 +80,51 @@ func TestMetricScoreInputIncludesSourceAndLocale(t *testing.T) {
 	}
 }
 
+func TestMetricScoreInputLimitCountsCharactersNotBytes(t *testing.T) {
+	// 300000 CJK characters are 900000 bytes but only half the character limit.
+	lines := []rawLine{{LineNumber: 1, LineType: "paragraph", Content: strings.Repeat("检", metricReviewMaxInputChars/2)}}
+	if _, err := buildMetricScoreInput(json.RawMessage(`{}`), lines, "zh-cn"); err != nil {
+		t.Fatalf("CJK input under the character limit rejected: %v", err)
+	}
+}
+
+func TestDropEmptyPairsAlsoMissed(t *testing.T) {
+	payload := map[string]any{
+		"pairs": []any{
+			map[string]any{"gold": "g1", "pred": "p1", "note": ""},
+			map[string]any{"gold": "g2", "pred": "", "note": ""},
+			map[string]any{"gold": "g3", "pred": "", "note": ""},
+			map[string]any{"gold": "g4", "pred": nil, "note": ""},
+		},
+		"missed": []any{map[string]any{"gold": "g2", "note": "not extracted"}, map[string]any{"gold": "g4", "note": "not extracted"}},
+	}
+	dropEmptyPairsAlsoMissed(payload)
+	pairs := payload["pairs"].([]any)
+	// g2 is already missed, so its empty pair goes; g3 is not, so it stays for the scorer to reject.
+	if len(pairs) != 2 || pairs[0].(map[string]any)["gold"] != "g1" || pairs[1].(map[string]any)["gold"] != "g3" {
+		t.Fatalf("unexpected pairs: %v", pairs)
+	}
+}
+
+func TestEnforceOneToOnePairs(t *testing.T) {
+	payload := map[string]any{
+		"pairs": []any{
+			map[string]any{"gold": "g1", "pred": "p1", "note": "ok"},
+			map[string]any{"gold": "g2", "pred": "p1", "note": "same value, paired to earlier gold"},
+			map[string]any{"gold": "g3", "pred": "p2", "note": ""},
+		},
+		"missed": []any{map[string]any{"gold": "g9", "note": "not extracted"}},
+	}
+	enforceOneToOnePairs(payload)
+	pairs, missed := payload["pairs"].([]any), payload["missed"].([]any)
+	if len(pairs) != 2 || pairs[0].(map[string]any)["gold"] != "g1" || pairs[1].(map[string]any)["gold"] != "g3" {
+		t.Fatalf("unexpected pairs: %v", pairs)
+	}
+	if len(missed) != 2 || missed[1].(map[string]any)["gold"] != "g2" || !strings.Contains(missed[1].(map[string]any)["note"].(string), "p1") {
+		t.Fatalf("unexpected missed: %v", missed)
+	}
+}
+
 func TestMetricScoreSubprocessNoGold(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "score_io.py")
 	if err := os.WriteFile(script, []byte("import sys\nprint('SECRET',file=sys.stderr)\nsys.exit(3)\n"), 0600); err != nil {

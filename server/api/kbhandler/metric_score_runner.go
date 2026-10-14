@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -163,10 +164,67 @@ func buildMetricScoreInput(snapshot json.RawMessage, lines []rawLine, lang strin
 	for _, line := range lines {
 		fmt.Fprintf(&text, "L%d\t%s\t%s\n", line.LineNumber, line.LineType, line.Content)
 	}
-	if text.Len() > metricReviewMaxInputChars {
+	if utf8.RuneCountInString(text.String()) > metricReviewMaxInputChars {
 		return "", metricScoreFailure{"INPUT_TOO_LARGE"}
 	}
 	return text.String(), nil
+}
+
+// emptyMetricScorePred reports whether the model left a pair's pred blank: "", null or missing.
+func emptyMetricScorePred(v any) bool {
+	s, isString := v.(string)
+	return v == nil || (isString && strings.TrimSpace(s) == "")
+}
+
+// dropEmptyPairsAlsoMissed removes pairs the model wrote with an empty pred for a gold row it
+// also listed in missed. The scorer rejects a gold row accounted for twice; this duplicate
+// carries no information, so it is safe to drop. Any other inconsistency is left for the
+// scorer to refuse.
+func dropEmptyPairsAlsoMissed(payload map[string]any) {
+	missed := map[any]bool{}
+	missedRows, _ := payload["missed"].([]any)
+	for _, row := range missedRows {
+		if m, ok := row.(map[string]any); ok {
+			missed[m["gold"]] = true
+		}
+	}
+	pairs, _ := payload["pairs"].([]any)
+	kept := make([]any, 0, len(pairs))
+	for _, row := range pairs {
+		if m, ok := row.(map[string]any); ok && emptyMetricScorePred(m["pred"]) && missed[m["gold"]] {
+			continue
+		}
+		kept = append(kept, row)
+	}
+	if _, ok := payload["pairs"]; ok {
+		payload["pairs"] = kept
+	}
+}
+
+// enforceOneToOnePairs keeps the first pair for each predicted row and moves the later gold rows
+// to missed. The model sometimes reuses one prediction for several gold rows with the same value;
+// the scorer requires one-to-one pairs, and the prompt's tie-break is "pair the earlier assertion,
+// mark the others missed", which is what this applies.
+func enforceOneToOnePairs(payload map[string]any) {
+	pairs, ok := payload["pairs"].([]any)
+	if !ok {
+		return
+	}
+	missed, _ := payload["missed"].([]any)
+	used := map[any]bool{}
+	kept := make([]any, 0, len(pairs))
+	for _, row := range pairs {
+		m, ok := row.(map[string]any)
+		if !ok || emptyMetricScorePred(m["pred"]) || !used[m["pred"]] {
+			if ok {
+				used[m["pred"]] = true
+			}
+			kept = append(kept, row)
+			continue
+		}
+		missed = append(missed, map[string]any{"gold": m["gold"], "note": fmt.Sprintf("prediction %v already paired to an earlier gold row; %v", m["pred"], m["note"])})
+	}
+	payload["pairs"], payload["missed"] = kept, missed
 }
 
 func metricScoreDigest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
@@ -281,7 +339,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 		// Keep exactly the canonical source bytes used for the matcher and their digest.
 		raw, readErr := os.ReadFile(sourcePath)
 		if readErr == nil {
-			if len(raw) > metricReviewMaxInputChars {
+			if utf8.RuneCount(raw) > metricReviewMaxInputChars {
 				return e, metricScoreFailure{"INPUT_TOO_LARGE"}
 			}
 			if hash := metricScoreDigest(raw); hash != source["current_sha256"] {
@@ -337,6 +395,8 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 		}
 		return e, metricScoreFailure{"LLM_FAILED"}
 	}
+	dropEmptyPairsAlsoMissed(payload)
+	enforceOneToOnePairs(payload)
 	e.Matches, err = json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return e, err

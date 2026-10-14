@@ -39,7 +39,6 @@
 	import ListIcon from '@lucide/svelte/icons/list';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
-	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
@@ -159,6 +158,9 @@
 	let metricIdQuery = $state('');
 	let metricIdError = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
+	let selectedBenchmark = $derived(
+		metricBenchmarkSelection(currentInput, gold.skillVersion, gold.modelName)
+	);
 	const goldModelMissing = $derived(
 		source === 'testbed' && metricBenchmarkSelection(currentInput, gold.skillVersion, gold.modelName).modelName === ''
 	);
@@ -1586,9 +1588,9 @@
 		--font-sans:{fontSans};
 	"
 >
-	<header id="metrics-header" class="header" hidden={!headerVisible}>
+	<header id="metrics-header" class="header" class:benchmark-header={source === 'testbed'} hidden={!headerVisible}>
 		<div class="header-left">
-			<div class="eyebrow">{i18n.metric_mgmt_knowledge_system_vol_iii()}</div>
+			{#if source !== 'testbed'}<div class="eyebrow">{i18n.metric_mgmt_knowledge_system_vol_iii()}</div>{/if}
 			<h1 class="display">
 				{#if source === 'testbed'}
 					{i18n.metric_mgmt_benchmark_title()}
@@ -1596,26 +1598,21 @@
 					{i18n.metric_mgmt_metrics()};<span class="amp">&amp;</span>&{i18n.metric_mgmt_provenance()}
 				{/if}
 			</h1>
-			<div class="subtitle">
-				{i18n.metric_mgmt_a_reading_room_for_extracted()}
-			</div>
+			{#if source !== 'testbed'}
+				<div class="subtitle">{i18n.metric_mgmt_a_reading_room_for_extracted()}</div>
+			{/if}
 		</div>
 		<div class="header-right">
 			<span class="meta-label">{i18n.metric_mgmt_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
-			<span class="meta-label">{i18n.metric_mgmt_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
+			{#if source === 'testbed'}
+				<span class="meta-label">{i18n.metric_mgmt_version_label()}</span><span class="meta-val">{gold.skillVersion || '—'}</span>
+				<span class="meta-label">{i18n.metric_mgmt_model_label()}</span><span class="meta-val">{selectedBenchmark.modelName || '—'}</span>
+			{:else}
+				<span class="meta-label">{i18n.metric_mgmt_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
+			{/if}
 			<span class="meta-label">{i18n.metric_mgmt_metrics_2()}</span><span class="meta-val"
 				>{visibleMetrics.length.toString().padStart(3, '0')}</span
 			>
-			<button
-				type="button"
-				class="header-fold-toggle"
-				onclick={() => (headerVisible = false)}
-				aria-expanded={headerVisible}
-				aria-controls="metrics-header"
-			>
-				<ChevronUpIcon class="toolbar-icon" />
-				{i18n.metric_mgmt_hide_header()}
-			</button>
 		</div>
 	</header>
 
@@ -1831,6 +1828,10 @@
 					</label>
 				</div>
 			</details>
+			<div class="metric-sidebar-nav">
+				<button type="button" onclick={goToPrevMetric} disabled={!prevMetric}>{i18n.metric_mgmt_prev()}</button>
+				<button type="button" onclick={goToNextMetric} disabled={!nextMetric}>{i18n.metric_mgmt_next()}</button>
+			</div>
 
 			{#if metricsEditable}
 			<div class="global-search-launch">
@@ -2806,6 +2807,32 @@
 		border: 1px solid var(--ink-line);
 		background: var(--panel-bg-alt);
 	}
+	.benchmark-header {
+		align-items: center;
+		gap: 20px;
+		padding: 12px 24px;
+	}
+	.benchmark-header .header-left {
+		flex: 0 0 auto;
+	}
+	.benchmark-header .display {
+		font-size: 28px;
+		margin: 0;
+		white-space: nowrap;
+	}
+	.benchmark-header .header-right {
+		flex: 1;
+		display: flex;
+		justify-content: flex-end;
+		align-items: baseline;
+		gap: 4px 10px;
+		padding: 8px 12px;
+		white-space: nowrap;
+	}
+	.benchmark-header .meta-val {
+		min-width: 0;
+		margin-right: 8px;
+	}
 	.meta-label {
 		font-family: var(--font-mono);
 		font-size: 10px;
@@ -2948,6 +2975,29 @@
 		margin: 0 16px 14px;
 		border: 1px solid var(--ink-line-soft);
 		background: var(--filter-control-bg);
+	}
+	.metric-sidebar-nav {
+		display: flex;
+		gap: 8px;
+		margin: -6px 16px 14px;
+	}
+	.metric-sidebar-nav button {
+		flex: 1;
+		padding: 7px 10px;
+		border: 1px solid var(--ink-line-soft);
+		background: var(--filter-control-bg);
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.metric-sidebar-nav button:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.metric-sidebar-nav button:not(:disabled):hover {
+		border-color: var(--brass);
+		color: var(--text-primary);
 	}
 	.metric-filter-toggle {
 		display: flex;
