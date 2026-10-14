@@ -318,6 +318,10 @@ export type KbDroppedReference = {
 	ref_ids: string[];
 };
 
+export type KbReferenceDetails =
+	| { kind: 'reference'; item: KbReferenceMention }
+	| { kind: 'dropped'; item: KbDroppedReference };
+
 export type GoldRun = { skill_version: string; model_name: string; run_id: string };
 
 // Without goldRun: production references (kb.ref_mentions). With goldRun: that

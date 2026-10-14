@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+import type { Snippet } from 'svelte';
+import type { KbReferenceDetails } from '$lib/services/kbService';
 	import { m } from '$lib/paraglide/messages.js';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
@@ -105,6 +106,7 @@
 		siteConfig,
 		onToggleShelf,
 		onMetricDetailsChange,
+		onReferenceDetailsChange = (_details: KbReferenceDetails | null) => {},
 		onSelectReferences = (_references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
@@ -119,6 +121,7 @@
 		siteConfig: SiteConfig;
 		onToggleShelf: () => void;
 		onMetricDetailsChange?: (details: Snippet | null) => void;
+		onReferenceDetailsChange?: (details: KbReferenceDetails | null) => void;
 		onSelectReferences?: (references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
@@ -353,7 +356,7 @@
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
 			<MetricScoreView {darkMode} {onSelectMetrics} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-gold'}
-			<ReferencesMgmtView {darkMode} source="testbed" />
+			<ReferencesMgmtView {darkMode} source="testbed" {onReferenceDetailsChange} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}
 			<ReferenceScoreView {darkMode} {onSelectReferences} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}

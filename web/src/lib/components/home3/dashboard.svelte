@@ -5,6 +5,7 @@
 	import { onMount, type Snippet } from 'svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
+	import type { KbReferenceDetails } from '$lib/services/kbService';
 	import SiteHeader from '../../../routes/semos/components/SiteHeader.svelte';
 	import NavRail from '$lib/components/home3/nav-rail.svelte';
 	import ContentPanel from '$lib/components/home3/content-panel.svelte';
@@ -77,6 +78,7 @@
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
 	let metricDetails = $state<Snippet | null>(null);
+	let referenceDetails = $state<KbReferenceDetails | null>(null);
 	let selectedReferences = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let selectedMetrics = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
@@ -86,6 +88,7 @@
 			selectedMetrics = null;
 		}
 		if (activeMenu?.childId !== 'sysadmin-llm-references-benchmark') selectedReferences = null;
+		if (activeMenu?.childId !== 'sysadmin-llm-references-gold') referenceDetails = null;
 	});
 	// Product Review and Review Metrics use the shelf's space for their own panes — hide it while
 	// it's the active content, without touching the stored shelfOpen toggle so
@@ -304,6 +307,10 @@
 			{autoShrinkExpand}
 			{docReviewKey}
 			{siteConfig}
+			onReferenceDetailsChange={(details) => {
+				referenceDetails = details;
+				if (details) shelfOpen = true;
+			}}
 			onSelectMetrics={(metrics) => (selectedMetrics = metrics)}
 			onSelectReferences={(references) => (selectedReferences = references)}
 			onMetricDetailsChange={(details) => {
@@ -350,6 +357,7 @@
 				{selectedMetrics}
 				{selectedReferences}
 				{metricDetails}
+				{referenceDetails}
 				width={shelfWidth}
 				open={shelfOpen}
 				onDragStart={startShelfDrag}

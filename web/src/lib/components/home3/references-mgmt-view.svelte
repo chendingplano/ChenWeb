@@ -3,7 +3,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
-	import { getRawLines, listKbReferences, type KbDroppedReference, type KbMetricSource, type KbReferenceMention, type KbInputRecord, type RawLine } from '$lib/services/kbService';
+	import { getRawLines, listKbReferences, type KbDroppedReference, type KbMetricSource, type KbReferenceMention, type KbInputRecord, type KbReferenceDetails, type RawLine } from '$lib/services/kbService';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import { GoldRunFilter, goldRunBadges } from './gold-run-filter.svelte';
 	import GoldRunFilters from './gold-run-filters.svelte';
@@ -13,7 +13,7 @@
 	// 'testbed' is the Reference Benchmark: read-only gold references (testbed.ref_mentions)
 	// written by the extract-references-benchmark skill, one record-list entry per run,
 	// plus each run's dropped candidates. Gold rows have no holding resolution.
-	let { darkMode = true, source = 'kb' }: { darkMode?: boolean; source?: KbMetricSource } = $props();
+	let { darkMode = true, source = 'kb', onReferenceDetailsChange }: { darkMode?: boolean; source?: KbMetricSource; onReferenceDetailsChange?: (details: KbReferenceDetails | null) => void } = $props();
 	const gold = new GoldRunFilter('references');
 	$effect(() => {
 		if (source === 'testbed') void gold.load();
@@ -75,7 +75,9 @@
 	});
 
 	let workspaceStyle = $derived(
-		`grid-template-columns:${recordListWidth}px 14px ${referenceListWidth}px 14px minmax(320px,1fr) 14px ${referenceDetailsWidth}px`
+			source === 'testbed'
+			? `grid-template-columns:${recordListWidth}px 14px ${referenceListWidth}px 14px minmax(320px,1fr)`
+			: `grid-template-columns:${recordListWidth}px 14px ${referenceListWidth}px 14px minmax(320px,1fr) 14px ${referenceDetailsWidth}px`
 	);
 	let filterControlBg = $derived(darkMode ? '#303A4B' : '#FFFFFF');
 	let visibleMentions = $derived.by(() => {
@@ -181,6 +183,7 @@
 		selectedDropped = null;
 		dropped = [];
 		rawLines = [];
+		if (source === 'testbed') onReferenceDetailsChange?.(null);
 		referenceFilter = '';
 		normativityFilter = '';
 		resolutionFilter = '';
@@ -216,6 +219,7 @@
 
 	function selectReference(mention: KbReferenceMention) {
 		selected = mention;
+		if (source === 'testbed') onReferenceDetailsChange?.({ kind: 'reference', item: mention });
 		highlightVersion += 1;
 		const firstLine = selectedSourceLines[0];
 		if (firstLine) pageNo = firstLine.page_number;
@@ -223,6 +227,7 @@
 
 	function selectDropped(item: KbDroppedReference) {
 		selectedDropped = item;
+		if (source === 'testbed') onReferenceDetailsChange?.({ kind: 'dropped', item });
 		highlightVersion += 1;
 		const firstLine = selectedSourceLines[0];
 		if (firstLine) pageNo = firstLine.page_number;
@@ -238,6 +243,7 @@
 		rawLines = [];
 		loading = false;
 		error = '';
+		if (source === 'testbed') onReferenceDetailsChange?.(null);
 	}
 
 	function changeReferenceView(view: 'gold' | 'dropped') {
@@ -246,6 +252,7 @@
 		normativityFilter = '';
 		selected = null;
 		selectedDropped = null;
+		if (source === 'testbed') onReferenceDetailsChange?.(null);
 		if (view === 'dropped' && dropped[0]) selectDropped(dropped[0]);
 		else if (view === 'gold' && mentions[0]) selectReference(mentions[0]);
 	}
@@ -418,13 +425,14 @@
 				<div class="empty-document">{m.references_mgmt_select_document()}</div>
 			{/if}
 		</section>
-		<button type="button" class="resize-handle" class:active={resizing === 'details'} aria-label={m.references_mgmt_resize_details_panel()} onpointerdown={(event) => startResize(event, 'details')} onkeydown={(event) => resizeWithKeyboard(event, 'details')}>
-			<span class="resize-grip" aria-hidden="true"></span>
-		</button>
-		<aside class="details-panel" aria-label={m.references_mgmt_reference_details()}>
-			<div class="details-heading">{m.references_mgmt_reference_details()}</div>
-			{#if referenceView === 'dropped'}
-				{#if selectedDropped}
+		{#if source !== 'testbed'}
+			<button type="button" class="resize-handle" class:active={resizing === 'details'} aria-label={m.references_mgmt_resize_details_panel()} onpointerdown={(event) => startResize(event, 'details')} onkeydown={(event) => resizeWithKeyboard(event, 'details')}>
+				<span class="resize-grip" aria-hidden="true"></span>
+			</button>
+			<aside class="details-panel" aria-label={m.references_mgmt_reference_details()}>
+				<div class="details-heading">{m.references_mgmt_reference_details()}</div>
+				{#if referenceView === 'dropped'}
+					{#if selectedDropped}
 					<div class="detail"><div class="detail-label">{m.references_mgmt_dropped_details()}</div><h2>{selectedDropped.cited_raw || m.references_mgmt_untitled_reference()}</h2>
 						<dl>
 							<dt>{m.references_mgmt_decision()}</dt><dd>{selectedDropped.decision}</dd>
@@ -434,28 +442,21 @@
 						</dl>
 					</div>
 				{:else}<p class="notice">{m.references_mgmt_select_dropped()}</p>{/if}
-			{:else if selected}
+				{:else if selected}
 				<div class="detail"><div class="detail-label">{m.references_mgmt_selected_reference()}</div><h2>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</h2>
 					<dl>
 						<dt>{m.references_mgmt_type()}</dt><dd>{selected.target_type} / {selected.target_subtype}</dd>
 						<dt>{m.references_mgmt_content()}</dt><dd>{selected.target_content}</dd>
 						<dt>{m.references_mgmt_normativity()}</dt><dd>{selected.normativity}{selected.list_kind ? ` · ${selected.list_kind}` : ''}</dd>
-						{#if source === 'testbed'}
-							<dt>{m.references_mgmt_ref_form()}</dt><dd>{selected.ref_form || '—'}</dd>
-							<dt>{m.references_mgmt_mechanism()}</dt><dd>{selected.mechanism || '—'}</dd>
-							<dt>{m.references_mgmt_in_requirement()}</dt><dd>{yesNo(selected.in_requirement)}</dd>
-							<dt>{m.references_mgmt_internal()}</dt><dd>{yesNo(selected.internal)}</dd>
-							<dt>{m.references_mgmt_confidence()}</dt><dd>{selected.confidence ?? '—'}</dd>
-						{:else}
-							<dt>{m.references_mgmt_holding_resolution()}</dt><dd>{selected.r2_state || m.references_mgmt_unresolved()}{selected.target_input_title ? ` · ${selected.target_input_title}` : ''}</dd>
-							<dt>{m.references_mgmt_resource_identity()}</dt><dd>{selected.identity_key || '—'}</dd>
-						{/if}
+						<dt>{m.references_mgmt_holding_resolution()}</dt><dd>{selected.r2_state || m.references_mgmt_unresolved()}{selected.target_input_title ? ` · ${selected.target_input_title}` : ''}</dd>
+						<dt>{m.references_mgmt_resource_identity()}</dt><dd>{selected.identity_key || '—'}</dd>
 						<dt>{m.references_mgmt_identifiers()}</dt><dd>{selected.identifiers?.join(', ') || '—'}</dd>
 						<dt>{m.references_mgmt_source_excerpt()}</dt><dd>{selected.evidence || selected.cited_raw || '—'}</dd>
 					</dl>
 				</div>
-			{:else}<p class="notice">{m.references_mgmt_select_reference()}</p>{/if}
-		</aside>
+				{:else}<p class="notice">{m.references_mgmt_select_reference()}</p>{/if}
+			</aside>
+		{/if}
 	</div>
 </div>
 

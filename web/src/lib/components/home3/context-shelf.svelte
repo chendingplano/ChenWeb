@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m as msg } from '$lib/paraglide/messages.js';
+	import type { KbReferenceDetails } from '$lib/services/kbService';
 	import { untrack, type Snippet } from 'svelte';
 	import BotIcon         from '@lucide/svelte/icons/bot';
 	import ZapIcon         from '@lucide/svelte/icons/zap';
@@ -45,6 +46,7 @@
 		selectedMetrics = null,
 		selectedReferences = null,
 		metricDetails = null,
+		referenceDetails = null,
 		width       = 280,
 		open        = true,
 		onDragStart,
@@ -53,6 +55,7 @@
 		darkMode:    boolean;
 		activeMenu:  ActiveSelection | null;
 		metricDetails?: Snippet | null;
+		referenceDetails?: KbReferenceDetails | null;
 		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
 		selectedReferences?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
 		width:       number;
@@ -302,7 +305,8 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
-				{#if selectedReferences}{msg.rsc_reference_details()}
+				{#if referenceDetails}{msg.rsc_reference_details()}
+				{:else if selectedReferences}{msg.rsc_reference_details()}
 				{:else if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
 				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
@@ -328,7 +332,37 @@
 			</button>
 		</div>
 
-		{#if metricDetails}
+		{#if referenceDetails?.kind === 'dropped'}
+			{@const item = referenceDetails.item}
+			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
+				<div class="text-[9px] font-semibold uppercase tracking-widest" style="color:{accent};">{msg.references_mgmt_dropped_details()}</div>
+				<h2 class="mt-2 break-words text-sm font-semibold" style="color:{textPrimary};">{item.cited_raw || msg.references_mgmt_untitled_reference()}</h2>
+				<dl class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+					<dt style="color:{textMuted};">{msg.references_mgmt_decision()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.decision}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_rule()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.drop_reason}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_reason()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.reason || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_merged_into()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.ref_ids.join(', ') || '—'}</dd>
+				</dl>
+			</div>
+		{:else if referenceDetails?.kind === 'reference'}
+			{@const item = referenceDetails.item}
+			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
+				<div class="text-[9px] font-semibold uppercase tracking-widest" style="color:{accent};">{msg.references_mgmt_selected_reference()}</div>
+				<h2 class="mt-2 break-words text-sm font-semibold" style="color:{textPrimary};">{item.target_title || item.cited_raw || item.resource_title || msg.references_mgmt_untitled_reference()}</h2>
+				<dl class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+					<dt style="color:{textMuted};">{msg.references_mgmt_type()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.target_type} / {item.target_subtype}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_content()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.target_content}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_normativity()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.normativity}{item.list_kind ? ` · ${item.list_kind}` : ''}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_ref_form()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.ref_form || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_mechanism()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.mechanism || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_in_requirement()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.in_requirement === undefined ? '—' : item.in_requirement ? msg.references_mgmt_yes() : msg.references_mgmt_no()}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_internal()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.internal === undefined ? '—' : item.internal ? msg.references_mgmt_yes() : msg.references_mgmt_no()}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_confidence()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.confidence ?? '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_identifiers()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.identifiers.join(', ') || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_source_excerpt()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{item.evidence || item.cited_raw || '—'}</dd>
+				</dl>
+			</div>
+		{:else if metricDetails}
 			{@render metricDetails?.()}
 		{:else if compare}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
