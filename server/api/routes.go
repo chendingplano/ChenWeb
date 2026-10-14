@@ -44,6 +44,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/llmadminhandler"
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
+	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
@@ -81,6 +82,9 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Other route registrations (such as Auth) can be done afterwards.
 	logger := loggerutil.CreateDefaultLogger("CWB_0206153400")
 	logger.Info("Register API routes")
+	if err := llmusage.InstallDefaultSink(); err != nil {
+		return fmt.Errorf("install LLM usage capture sink: %w", err)
+	}
 
 	is_dev := os.Getenv("APP_ENV") != "production"
 	useEmbedFrontend := os.Getenv("USE_EMBED_FRONTEND") == "true"

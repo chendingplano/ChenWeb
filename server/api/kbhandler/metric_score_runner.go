@@ -329,7 +329,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	logger.Info("calling LLM for benchmark matching", "scorer", kind.scoreSkill, "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText))
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		UserID: userID, PromptName: kind.prompt, PromptText: string(prompt), ModelName: cfg.ModelName,
-		InputText: inputText, RecordID: req.RecordID, CallReason: kind.callReason, CallLoc: kind.callLoc,
+		InputText: inputText, RecordID: req.RecordID, RunID: id, CallReason: kind.callReason, CallLoc: kind.callLoc,
 	})
 	if err != nil {
 		if ctx.Err() != nil {
