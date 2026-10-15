@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 import parser_mineru
@@ -322,3 +324,31 @@ class TestCommand:
         cmd = self._parser("ocr")._command("a.pdf")
         assert cmd[-1] == "-o"
         assert cmd[cmd.index("--ocr-mode") + 1] == "ocr"
+
+
+class TestTableRepair:
+    def _parser(self):
+        parser = parser_mineru.MineruParser()
+        parser._python = "/mineru/python"
+        return parser
+
+    def test_runs_repair_script_with_mineru_python_and_returns_report(self, monkeypatch):
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout='llama noise\n{"tables": [{"status": "repaired"}]}\n', stderr="")
+
+        monkeypatch.setattr(parser_mineru.subprocess, "run", fake_run)
+        report = self._parser()._repair_truncated_tables("/s/content.json", "/s")
+        assert seen["cmd"][0] == "/mineru/python"
+        assert seen["cmd"][1].endswith("mineru_table_repair.py")
+        assert seen["cmd"][2:] == ["/s/content.json", "/s"]
+        assert report == [{"status": "repaired"}]
+
+    def test_repair_failure_keeps_mineru_output(self, monkeypatch):
+        monkeypatch.setattr(
+            parser_mineru.subprocess, "run",
+            lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom"),
+        )
+        assert self._parser()._repair_truncated_tables("/s/content.json", "/s") == []

@@ -199,6 +199,33 @@ it replaces the original (`engine` becomes `mineru-basic-ocr`). If OCR fails or
 is still garbled, the original parse is kept and the event logged. Set
 `PDF_OCR_FALLBACK=false` to disable.
 
+#### Truncated table repair
+
+MinerU recognises each table image in one VLM request. With the llama.cpp
+engine the request has an 8192-token slot, the context length in the model's
+GGUF file, and the image tokens take part of it (about 2.8k for a full-page
+table). A large table stops partway: record 371's Table E.1 (50 rows x 36
+columns per page) kept only rows 1–26 of each page. MinerU accepts the partial
+output, logs `The output was truncated due to length limit`, and closes the
+table HTML cleanly, so nothing downstream can tell rows are missing.
+
+When that warning appears in MinerU's output, `mineru_table_repair.py` runs
+under MinerU's Python before the result is promoted. It re-recognises each
+table whose HTML is at least 4000 characters. A table that stops at the length
+limit is split at the horizontal ruling line nearest the middle of its body,
+the header is repeated on top of each half, and any half that is still too long
+is split again. The rows are then joined under one header. Each table's outcome
+(`repaired`, `complete` or `unrepaired`) is logged.
+
+Limits:
+- Splitting needs horizontal ruling lines. A table without them is logged as
+  `unrepaired` and keeps MinerU's truncated output.
+- Only the local llama.cpp engine is handled. With a VLM `server_url` or another
+  engine, the repair is skipped and logged.
+- Raising the context length is not a fix. With the GGUF's context patched to
+  32768 the model finishes the table, but past about 10k tokens it silently
+  merges and skips rows.
+
 ### Docling-specific
 
 Docling does not currently require service-specific environment variables in this wrapper.
@@ -259,6 +286,8 @@ parser_docling.py    Docling backend
 parser_paddle.py     PaddleOCR backend
 parser_opendata.py   opendataloader-pdf backend
 parser_mineru.py     MinerU backend
+mineru_v4_adapter.py MinerU result -> page-wrapped content list (MinerU's Python)
+mineru_table_repair.py Re-recognises truncated MinerU tables in bands (MinerU's Python)
 tests/               Unit tests for parser backends and service helpers
 ```
 

@@ -16,6 +16,7 @@ import tempfile
 import zipfile
 from typing import Any, Callable
 
+from mineru_table_repair import TRUNCATION_MARKER
 from parser_base import ParserBackend
 
 log = logging.getLogger(__name__)
@@ -224,6 +225,28 @@ class MineruParser(ParserBackend):
             cmd += ["--ocr-mode", self._ocr_mode]
         return cmd + ["-o"]
 
+    def _repair_truncated_tables(self, content_list_path: str, images_root: str) -> list[dict]:
+        """Re-recognise tables MinerU cut off at its VLM output limit (see
+        mineru_table_repair.py). Returns the per-table report; on failure MinerU's
+        output is kept as is."""
+        script = os.path.join(os.path.dirname(__file__), "mineru_table_repair.py")
+        proc = subprocess.run(
+            [self._python, script, content_list_path, images_root],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            log.error("table repair failed (rc=%d); truncated tables are kept: %s",
+                      proc.returncode, proc.stderr[-2000:])
+            return []
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        if result.get("skipped"):
+            log.warning("table repair skipped: %s", result["skipped"])
+        tables = result.get("tables", [])
+        for entry in tables:
+            level = logging.ERROR if entry.get("status") == "unrepaired" else logging.INFO
+            log.log(level, "table repair: %s", json.dumps(entry, ensure_ascii=False))
+        return tables
+
     def parse(
         self,
         pdf_path: str,
@@ -272,6 +295,7 @@ class MineruParser(ParserBackend):
             proc: subprocess.Popen | None = None
             heartbeat_thread: threading.Thread | None = None
             tail: list[str] = []
+            truncated_outputs = 0
             try:
                 proc = subprocess.Popen(
                     cmd + [result_zip],
@@ -307,6 +331,8 @@ class MineruParser(ParserBackend):
                     if not line:
                         continue
                     log.info("[mineru] %s", line)
+                    if TRUNCATION_MARKER in line:
+                        truncated_outputs += 1
                     tail.append(line)
                     if len(tail) > 50:
                         tail.pop(0)
@@ -386,6 +412,14 @@ class MineruParser(ParserBackend):
                                 item["img_path"] = "images/" + "/".join(clean)
                 with open(staged_content_path, "w", encoding="utf-8") as f:
                     json.dump(normalized, f, ensure_ascii=False)
+                if truncated_outputs:
+                    log.warning("MinerU truncated %d VLM outputs; re-recognising large tables in bands",
+                                truncated_outputs)
+                    if self._repair_truncated_tables(staged_content_path, temp_dir):
+                        with open(staged_content_path, "r", encoding="utf-8") as f:
+                            pages = json.load(f)["pages"]
+                    if _stop_exc:
+                        raise _stop_exc[0]
                 total_pages = len(pages)
                 on_progress(max(total_pages, 1), max(total_pages, 1))
                 _promote_result_pair(
