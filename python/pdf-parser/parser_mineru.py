@@ -7,7 +7,6 @@ to ChenWeb's persisted page-wrapped content-list shape.
 import json
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -23,14 +22,14 @@ log = logging.getLogger(__name__)
 
 # Matches "X/Y" in tqdm output like "Processing pages: 60%|██| 3/5 [00:06<00:04]"
 _PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
-LINUX_PHASE_NAMES = (
-    "Layout Predict", "MFR Predict", "Table-ocr det", "Table-ocr rec ch",
-    "Table-wireless Predict", "Table-wired Predict", "OCR-det ch",
-    "OCR-rec Predict", "Processing pages",
+MINERU_V4_PHASE_NAMES = (
+    "Layout Predict", "MFR Predict", "Table-wireless Predict", "OCR-det",
+    "OCR-det Predict", "OCR-rec", "OCR-rec Predict", "Processing pages",
 )
-MAC_PHASE_NAMES = ("Layout Preparation", "Extract Preparation", "Post Processing", "Processing pages")
 _PHASE_PROGRESS_RE = re.compile(
-    r'(' + '|'.join(re.escape(name) for name in (*LINUX_PHASE_NAMES, *MAC_PHASE_NAMES, "Predict")) + r'):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)'
+    r'('
+    + '|'.join(re.escape(name) for name in sorted(MINERU_V4_PHASE_NAMES, key=len, reverse=True))
+    + r'):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)'
 )
 
 
@@ -45,14 +44,13 @@ def _processing_pages(line: str) -> tuple[int, int] | None:
 
 
 class PhaseTracker:
-    """Turn host-specific MinerU tqdm updates into ordered phase snapshots."""
+    """Turn MinerU 4 tqdm updates into ordered phase snapshots."""
 
     def __init__(self, system: str | None = None) -> None:
-        self.mac = (system or platform.system()) == "Darwin"
-        self.names = MAC_PHASE_NAMES if self.mac else LINUX_PHASE_NAMES
+        """The legacy system argument is ignored; MinerU 4 labels are shared."""
+        self.names = MINERU_V4_PHASE_NAMES
         self.phases = [dict(name=name, progress=0, status="pending") for name in self.names]
         self.started: dict[str, float] = {}
-        self.predict_phase = 0
 
     def update(self, line: str) -> tuple[list[dict], bool] | None:
         match = _PHASE_PROGRESS_RE.search(line)
@@ -60,18 +58,6 @@ class PhaseTracker:
             return None
         name, done, total = match.group(1), int(match.group(2)), int(match.group(3))
         if total <= 0:
-            return None
-        if self.mac:
-            if name in MAC_PHASE_NAMES[:2]:
-                self.predict_phase = MAC_PHASE_NAMES.index(name)
-                # The preparation counter finishes before its costly Predict pass.
-                # Keep the combined phase active until Predict reaches 100%.
-                done = 0
-            elif name == "Predict":
-                name = MAC_PHASE_NAMES[self.predict_phase]
-            elif name not in MAC_PHASE_NAMES:
-                return None
-        elif name not in LINUX_PHASE_NAMES:
             return None
         phase = self.phases[self.names.index(name)]
         now = time.monotonic()
