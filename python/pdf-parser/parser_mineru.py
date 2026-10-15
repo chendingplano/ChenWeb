@@ -4,7 +4,6 @@ Invokes MinerU Kit from ~/Workspace/ThirdParty/mineru and adapts its ZIP result
 to ChenWeb's persisted page-wrapped content-list shape.
 """
 
-import glob
 import json
 import logging
 import os
@@ -141,11 +140,24 @@ class MineruParser(ParserBackend):
                 "Install via ~/Workspace/ThirdParty/mineru (`mise run install`) "
                 "or set MINERU_CLI."
             )
-        self._python = os.path.join(os.path.dirname(self._cli), "python")
-        if not os.path.isfile(self._python):
-            self._python = shutil.which("python3") or shutil.which("python") or ""
-        if not self._python:
-            raise RuntimeError("MinerU 4 Python executable not found beside MINERU_CLI")
+        configured_python = _env("MINERU_PYTHON")
+        if configured_python:
+            self._python = os.path.abspath(os.path.expanduser(configured_python))
+            if not os.path.isfile(self._python) or not os.access(self._python, os.X_OK):
+                raise RuntimeError(f"MINERU_PYTHON is not an executable file: {self._python}")
+        else:
+            cli_path = os.path.realpath(self._cli)
+            cli_dir = os.path.dirname(cli_path)
+            self._python = next(
+                (path for path in (os.path.join(cli_dir, "python"), os.path.join(cli_dir, "python3"))
+                 if os.path.isfile(path) and os.access(path, os.X_OK)),
+                "",
+            )
+            if not self._python:
+                raise RuntimeError(
+                    "Cannot find the MinerU virtualenv Python beside MINERU_CLI. "
+                    "Set MINERU_PYTHON to the Python executable from the MinerU 4 environment."
+                )
 
         self._initialized = True
         log.info(
@@ -351,32 +363,7 @@ class MineruParser(ParserBackend):
         }
 
 
-def _find_content_list(output_dir: str, pdf_stem: str) -> str:
-    """Return the content_list.json this run produced.
-
-    MinerU nests output under <output_dir>/<pdf_stem>/<backend>_<method>/, e.g.
-    hybrid_auto/, hybrid_ocr/, ocr/. When several coexist (e.g. the OCR-fallback
-    re-parse, or leftovers from a backend/method change), we must select the one
-    written by the current run — the most recently modified — rather than the
-    alphabetically first, which would silently return a stale, possibly garbled
-    parse. Raises FileNotFoundError if none is found.
-    """
-    candidates = glob.glob(
-        os.path.join(output_dir, pdf_stem, "*", f"{pdf_stem}_content_list.json")
-    )
-    if not candidates:
-        candidates = glob.glob(
-            os.path.join(output_dir, "**", "*_content_list.json"),
-            recursive=True,
-        )
-    if not candidates:
-        raise FileNotFoundError(
-            f"mineru: no *_content_list.json found under {output_dir}"
-        )
-    return max(candidates, key=os.path.getmtime)
-
-
-def make_ocr_parser(lang: str = "ch") -> "MineruParser":
+def make_ocr_parser() -> "MineruParser":
     """Build a MinerU parser using the basic tier with OCR forced."""
     parser = MineruParser()
     parser.init()
