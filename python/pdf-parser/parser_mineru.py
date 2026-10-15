@@ -195,6 +195,8 @@ class MineruParser(ParserBackend):
         pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
         content_list_path = os.path.join(output_dir, f"{pdf_stem}_content_list.json")
         images_dst_dir = os.path.join(output_dir, "images")
+        if os.path.isfile(content_list_path):
+            os.remove(content_list_path)
         if os.path.isdir(images_dst_dir):
             shutil.rmtree(images_dst_dir)
         cmd: list[str] = [
