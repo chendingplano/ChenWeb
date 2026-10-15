@@ -85,7 +85,8 @@ def convert(middle_path: Path, output_path: Path) -> None:
     fields = {
         "type", "text", "text_level", "bbox", "list_items", "list_item_bboxes",
         "table_body", "table_caption", "table_footnote", "image_caption",
-        "image_footnote", "img_path",
+        "image_footnote", "img_path", "content", "chart_caption", "chart_footnote",
+        "code_body", "code_caption", "code_footnote",
     }
     for source in content_list:
         if not isinstance(source, dict):
@@ -102,7 +103,18 @@ def convert(middle_path: Path, output_path: Path) -> None:
             item = {"type": "text", "text": text}
             if "bbox" in source:
                 item["bbox"] = source["bbox"]
-        elif kind in {"chart", "code", "index", "page_footnote"}:
+        elif kind == "code":
+            code_body = _text(source.get("code_body", ""))
+            if not code_body:
+                continue
+            item = {
+                "type": "code",
+                "code_body": code_body,
+                **{key: source[key] for key in ("code_caption", "code_footnote") if key in source},
+            }
+            if "bbox" in source:
+                item["bbox"] = source["bbox"]
+        elif kind in {"index", "page_footnote"}:
             text = _text(source.get("text", source.get("content", source.get("list_items", []))))
             if text:
                 item = {"type": "text", "text": text}

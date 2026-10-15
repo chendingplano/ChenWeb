@@ -157,6 +157,7 @@ error.
 | Variable | Default | Description |
 |---|---|---|
 | `MINERU_CLI` | auto-detected via `PATH`, then `~/Workspace/ThirdParty/mineru/.venv/bin/mineru-kit` | Absolute path to the MinerU Kit CLI. Set this to override auto-detection or use an installation outside the default workspace. |
+| `MINERU_PYTHON` | `python` beside the resolved MinerU CLI | Override the Python executable used by the result adapter. Set this to the Python executable from the MinerU 4 virtualenv when the CLI and interpreter are not in the same `bin` directory. |
 | `MINERU_CONFIG` | `~/.mineru/config.yaml` | MinerU 4 YAML configuration path. The ThirdParty `mise run install` setup creates it from `mineru.template.yaml` if absent. |
 
 Normal parsing uses the `standard` tier and explicitly processes all pages. MinerU

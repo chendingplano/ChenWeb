@@ -29,6 +29,8 @@ import signal
 import sys
 import time
 import asyncio
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -235,6 +237,49 @@ def _get_ocr_mineru(cache: dict[str, ParserBackend]) -> ParserBackend:
         backend = make_ocr_parser()
         cache[key] = backend
     return backend
+
+
+def _publish_ocr_artifacts(ocr_result: dict, retry_dir: str, record_dir: str) -> None:
+    """Atomically replace the normal parse's content list and images with an accepted OCR result."""
+    content_src = ocr_result.get("content_list_path", "")
+    images_src = ocr_result.get("images_dir", "")
+    if not content_src or not os.path.isfile(content_src):
+        raise FileNotFoundError("OCR retry did not produce its normalized content list")
+    if not images_src:
+        images_src = os.path.join(retry_dir, "images")
+    if not os.path.isdir(images_src):
+        os.makedirs(images_src, exist_ok=True)
+    if not os.path.isdir(images_src):
+        raise FileNotFoundError("OCR retry did not produce its images directory")
+
+    content_dst = os.path.join(record_dir, os.path.basename(content_src))
+    images_dst = os.path.join(record_dir, "images")
+    backup_dir = os.path.join(retry_dir, "previous")
+    os.makedirs(backup_dir, exist_ok=True)
+    backups: list[tuple[str, str]] = []
+    published: list[str] = []
+    try:
+        for destination in (content_dst, images_dst):
+            if os.path.exists(destination):
+                backup = os.path.join(backup_dir, os.path.basename(destination))
+                os.replace(destination, backup)
+                backups.append((backup, destination))
+        for source, destination in ((content_src, content_dst), (images_src, images_dst)):
+            os.replace(source, destination)
+            published.append(destination)
+    except Exception:
+        for destination in reversed(published):
+            if os.path.isdir(destination):
+                shutil.rmtree(destination)
+            elif os.path.exists(destination):
+                os.remove(destination)
+        for backup, destination in reversed(backups):
+            if os.path.exists(backup):
+                os.replace(backup, destination)
+        raise
+
+    ocr_result["content_list_path"] = content_dst
+    ocr_result["images_dir"] = images_dst
 
 
 def _forced_parser() -> str:
@@ -647,11 +692,12 @@ def _process_record(
                 "(CJK passthrough) — re-parsing with MinerU basic OCR",
                 rec_id,
             )
+            ocr_stage_dir = tempfile.mkdtemp(prefix=".mineru-ocr-", dir=record_dir)
             try:
                 ocr_backend = _get_ocr_mineru(backend_cache)
                 if isinstance(ocr_backend, MineruParser):
                     ocr_backend.on_phase_progress = _phase_progress
-                ocr_result = ocr_backend.parse(repo_pdf_path, record_dir, throttled)
+                ocr_result = ocr_backend.parse(repo_pdf_path, ocr_stage_dir, throttled)
                 _stop_if_requested()
                 if _looks_font_garbled(ocr_result, _ocr_fallback_min_run()):
                     log.warning(
@@ -660,6 +706,7 @@ def _process_record(
                         rec_id,
                     )
                 else:
+                    _publish_ocr_artifacts(ocr_result, ocr_stage_dir, record_dir)
                     ocr_result["engine"] = "mineru-basic-ocr"
                     result = ocr_result
                     log.info(
@@ -672,6 +719,8 @@ def _process_record(
                     "— keeping original parse",
                     rec_id, ocr_exc,
                 )
+            finally:
+                shutil.rmtree(ocr_stage_dir, ignore_errors=True)
 
         total_pages = result.get("total_pages", 0)
         _stop_if_requested()
