@@ -4785,6 +4785,7 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 * Start cc-switch: cd ThirdParty/cc-switch; 
 * Start Caddy: ch ChenWeb; sh start_caddy.sh
 * Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
+* Start bge: cd ThirdParty/llama.cpp; mise run serve-bge-m3 
 * Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
 
 # Operations

@@ -2635,6 +2635,7 @@ func (p *MetricsProcessor) extractMetricPayload(
 	promptText string,
 	modelName string,
 	cfg structureModelConfig,
+	promptName string,
 	callReason string,
 	loc string,
 	documentFirst bool) (map[string]any, error) {
@@ -2643,7 +2644,7 @@ func (p *MetricsProcessor) extractMetricPayload(
 	if callLoc == "" {
 		callLoc = "MID-CWB-EXTRACT-METRICS"
 	}
-	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef), promptText, modelName, inputText, callReason, callLoc)
+	in := newLLMJSONInput(ctx, promptName, promptText, modelName, inputText, callReason, callLoc)
 	// Both passes use document-first (default from newLLMJSONInput): inputText goes first
 	// as the stable/cacheable prefix, promptText (task instructions) goes last. For both
 	// passes inputText is now canonicalChunkInputText(chunk, docCtx) — the same bytes
@@ -2718,7 +2719,7 @@ func firstPromptLine(promptText string) string {
 */
 
 func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText, taskPrompt string) (map[string]any, string, error) {
-	payload, err := p.extractMetricPayload(ctx, inputText, taskPrompt, p.MentionModelName, p.MentionModelCfg, "extract_metric_candidates", "MID-26052901", true)
+	payload, err := p.extractMetricPayload(ctx, inputText, taskPrompt, p.MentionModelName, p.MentionModelCfg, p.MentionPromptRef, "extract_metric_candidates", "MID-26052901", true)
 	if err == nil {
 		return payload, strings.TrimSpace(p.MentionModelName), nil
 	}
@@ -2747,7 +2748,7 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 		)
 	}
 
-	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, taskPrompt, fallbackModelName, p.FallbackMentionModelCfg, "extract_metric_candidates", "MID-26052902", true)
+	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, taskPrompt, fallbackModelName, p.FallbackMentionModelCfg, p.MentionPromptRef, "extract_metric_candidates", "MID-26052902", true)
 	if fallbackErr != nil {
 		if isEmptyMetricExtractionError(fallbackErr) {
 			p.Logger.Info("fallback metric candidate extraction returned empty JSON; treating as empty result",
@@ -3575,7 +3576,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
 		taskText := p.RelationPromptText + "\n\n" + buildMetricRelationBatchPrompt(batch.candidates)
 		payload, err := p.extractMetricPayload(concCtx, inputText,
-			taskText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903", true)
+			taskText, p.RelationModelName, p.RelationModelCfg, p.RelationPromptRef, "enrich_metrics", "MID-26052903", true)
 		p.logEnrichMetricsChunk(ctx, recordID, enrichCallID, batch.chunkIdx, len(batches),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now(), "")

@@ -299,3 +299,19 @@ func TestEnsureLeavesExistingDecimalCompanionUntouched(t *testing.T) {
 		t.Fatal("rewrote existing companion")
 	}
 }
+
+func TestGarbledIdentifierCellsMatchOnReadableText(t *testing.T) {
+	line := "145\t10\ttable\tunknown-font\t12\t[115,571,895,916]\t<table><tr><td>内部标识符</td><td>中文名称</td></tr><tr><td>1010010</td><td>姓名受检者正式登记</td></tr><tr><td>1010021</td><td>身份证件类型</td></tr></table>\n"
+	physical := PhysicalDocument{Version: 1, Extractor: "pymupdf-tables-v1", PDFHash: "pdf", Tables: []PhysicalTable{{Page: 10, Coords: []float64{115, 571, 895, 916}, Rows: []PhysicalRow{
+		{Coords: []float64{115, 571, 895, 600}, Cells: []PhysicalCell{{Text: "内部 标识符", Coords: []float64{115, 571, 300, 600}}, {Text: "中文名称", Coords: []float64{300, 571, 895, 600}}}},
+		{Coords: []float64{115, 600, 895, 650}, Cells: []PhysicalCell{{Text: "!+!++!+", Coords: []float64{115, 600, 300, 650}}, {Text: "姓名受检者正式登记", Coords: []float64{300, 600, 895, 650}}}},
+		{Coords: []float64{115, 650, 895, 700}, Cells: []PhysicalCell{{Text: "!+!++\"!", Coords: []float64{115, 650, 300, 700}}, {Text: "身 份 证 件 类型", Coords: []float64{300, 650, 895, 700}}}},
+	}}}}
+	got, err := Build([]byte(line), physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tables) != 1 || len(got.Tables[0].Rows) != 3 || got.Tables[0].Rows[1].ID != "r1" || got.Tables[0].Rows[2].ID != "r2" {
+		t.Fatalf("rows=%+v", got.Tables)
+	}
+}

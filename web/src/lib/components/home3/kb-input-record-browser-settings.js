@@ -3,7 +3,7 @@
  * @typedef {{ getItem?: (key: string) => string | null, setItem?: (key: string, value: string) => void }} StorageLike
  */
 
-export const KB_INPUT_RECORD_BROWSER_MIN_LIST_WIDTH = 280;
+export const KB_INPUT_RECORD_BROWSER_MIN_LIST_WIDTH = 380;
 export const KB_INPUT_RECORD_BROWSER_MAX_LIST_WIDTH = 760;
 export const KB_INPUT_RECORD_BROWSER_DEFAULT_LIST_WIDTH = 420;
 

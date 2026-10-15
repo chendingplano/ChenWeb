@@ -427,7 +427,6 @@
 		if (spans.length === 0) return map;
 		for (const span of spans) {
 			const ln = rawLineByKey.get(`${span.page_number}:${span.line_number}`);
-			if (metric?.source_table_rows?.some(ref => ref.line === span.line_number)) continue;
 			if (ln && Array.isArray(ln.coords) && ln.coords.length >= 4) {
 				const arr = map.get(span.page_number) ?? [];
 				arr.push(ln);
@@ -767,11 +766,13 @@
 	function renderMetricHighlights(
 		pageNo: number,
 		viewport: PdfPageViewport,
-		overlay: HTMLDivElement
+		overlay: HTMLDivElement,
+		resolvedTableLines: ReadonlySet<number>
 	) {
 		const HIGHLIGHT_EXPAND_TOP_PX = 2;
 		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
-		const lines = selectedLinesByPage.get(pageNo) ?? [];
+		// Table lines are highlighted row by row by the PDF viewer; whole line only when no row was located.
+		const lines = (selectedLinesByPage.get(pageNo) ?? []).filter((ln) => !resolvedTableLines.has(ln.line_number));
 		const rects = lines.flatMap((ln) => {
 			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
 			const vx1 = (ln.coords[0] * viewport.width) / 1000,

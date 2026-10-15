@@ -276,9 +276,9 @@
 		return value === undefined ? '—' : value ? m.references_mgmt_yes() : m.references_mgmt_no();
 	}
 
-	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+	function renderReferenceHighlights(page: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) {
 		const pageLines = selectedSourceLines.filter((line) =>
-			line.page_number === page && !selected?.source_table_rows?.some((ref) => ref.line === line.line_number)
+			line.page_number === page && !resolvedTableLines.has(line.line_number)
 		);
 		if (pageLines.length === 0) return;
 		const lines = pageLines.filter((line) => Array.isArray(line.coords) && line.coords.length >= 4);

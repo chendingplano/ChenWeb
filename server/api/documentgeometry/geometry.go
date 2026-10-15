@@ -19,7 +19,7 @@ import (
 )
 
 const Version = 1
-const Algorithm = "canonical-table-geometry-v2"
+const Algorithm = "canonical-table-geometry-v3"
 
 type Box struct {
 	Rotation int       `json:"rotation,omitempty"`
@@ -116,6 +116,49 @@ func score(row docprocessing.TableRow, physical PhysicalRow) int {
 	return total
 }
 
+func han(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Han, r) {
+			return r
+		}
+		return -1
+	}, norm.NFKC.String(s))
+}
+
+// scoreReadable is the fallback for PDFs whose embedded font garbles digits and
+// symbols in the text layer (identifiers read as "!+!++!+"). Cells with Chinese
+// text must still agree, but only on their Chinese characters; garbled cells with
+// none are ignored. At least four matched Chinese characters are required, so
+// tables without readable text never match this way.
+func scoreReadable(row docprocessing.TableRow, physical PhysicalRow) int {
+	if len(row.Cells) != len(physical.Cells) {
+		return 0
+	}
+	total := 0
+	for i, c := range physical.Cells {
+		b := han(c.Text)
+		if b == "" {
+			continue
+		}
+		a := han(row.Cells[i])
+		if a != b && !(len([]rune(b)) >= 8 && strings.Contains(a, b)) {
+			return 0
+		}
+		total += len([]rune(b))
+	}
+	if total < 4 {
+		return 0
+	}
+	return total
+}
+
+func matchScore(row docprocessing.TableRow, physical PhysicalRow) int {
+	if s := score(row, physical); s > 0 {
+		return s
+	}
+	return scoreReadable(row, physical)
+}
+
 type canonicalTable struct {
 	line, page, anchor int
 	coords             []float64
@@ -165,7 +208,7 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 			recognizable := false
 			for _, r := range append(append([]docprocessing.TableRow{}, grid.Headers...), grid.Rows...) {
 				for _, pr := range t.Rows {
-					if score(r, pr) > 0 {
+					if matchScore(r, pr) > 0 {
 						recognizable = true
 					}
 				}
@@ -211,14 +254,14 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 			}
 			associated := false
 			for _, h := range c.grid.Headers {
-				if score(h, t.Rows[0]) > 0 {
+				if matchScore(h, t.Rows[0]) > 0 {
 					associated = true
 				}
 			}
 			if !associated {
 				for _, r := range c.grid.Rows {
 					for _, pr := range t.Rows {
-						if score(r, pr) >= 20 {
+						if matchScore(r, pr) >= 20 {
 							associated = true
 						}
 					}
@@ -238,7 +281,7 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 			for _, pr := range t.Rows {
 				best, ties, winner := 0, 0, -1
 				for i, r := range rows {
-					s := score(r, pr)
+					s := matchScore(r, pr)
 					if s > best {
 						best = s
 						ties = 1

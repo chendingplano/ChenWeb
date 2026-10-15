@@ -28,7 +28,7 @@
 		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 	} = $props();
 	let query = $state(''),
-		searchScope = $state('all'),
+		searchScope = $state('gold'),
 		searching = $state(false),
 		searched = $state(false),
 		starting = $state(false),
@@ -353,10 +353,10 @@
 		pdfPage = resolved[0].page_number;
 		highlightVersion++;
 	}
-	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) {
 		for (const line of sourceLines) {
-			// Table lines are highlighted row by row by the PDF viewer.
-			if (tableReferences.some((ref) => ref.line === line.line_number)) continue;
+			// Table lines are highlighted row by row by the PDF viewer; whole line only when no row was located.
+			if (resolvedTableLines.has(line.line_number)) continue;
 			if (line.page_number !== pageNo || !Array.isArray(line.coords) || line.coords.length < 4) continue;
 			const coords = line.coords.slice(0, 4);
 			if (!coords.every(Number.isFinite)) continue;
@@ -468,6 +468,7 @@
 		}
 	}
 	onMount(() => {
+		void search();
 		void history();
 		void scoreModels()
 			.then((result) => {

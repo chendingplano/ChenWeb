@@ -53,7 +53,7 @@
 		zoom?: number;
 		numPages?: number;
 		highlightVersion?: number | string;
-		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
+		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
 		tableReferences?: TableReference[];
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
@@ -181,9 +181,10 @@
 	function renderBuiltinHighlights(
 		pageNo: number,
 		viewport: PdfPageViewport,
-		overlay: HTMLDivElement
+		overlay: HTMLDivElement,
+		resolvedTableLines: ReadonlySet<number>
 	) {
-		renderHighlights?.(pageNo, viewport, overlay);
+		renderHighlights?.(pageNo, viewport, overlay, resolvedTableLines);
 		if (builtinDragPreviewLines.length === 0) return;
 		for (const ln of builtinRawLines) {
 			if (ln.page_number !== pageNo) continue;

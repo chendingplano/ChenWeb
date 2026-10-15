@@ -71,7 +71,7 @@
 		numPages?: number;
 		highlightVersion?: number | string;
 		repaintVersion?: number | string;
-		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
+		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
 		tableReferences?: TableReference[];
 		floatingOverlay?: Snippet;
 		floatingOverlays?: Snippet<[number]>;
@@ -104,6 +104,8 @@
 
 	let tableGeometry = $state<TableGeometry | null>(null);
 	let tableHighlights = $derived(resolveTableReferences(tableReferences, tableGeometry, respectPageRotation));
+	// Lines whose cited table rows were located; callers draw the whole line for the rest.
+	let resolvedTableLines = $derived(new Set(tableHighlights.map(box => box.line)));
 	let tablePaintSeq = 0;
 	let tableNavigationPending = false;
 
@@ -411,7 +413,7 @@
 		const viewport = pdfViewportByPage.get(pageNo);
 		if (!overlay || !viewport) return;
 		overlay.innerHTML = '';
-		renderHighlights?.(pageNo, viewport, overlay);
+		renderHighlights?.(pageNo, viewport, overlay, resolvedTableLines);
 		for (const box of tableHighlights) {
 			if (box.page !== pageNo) continue;
 			const [x1, y1, x2, y2] = box.coords;

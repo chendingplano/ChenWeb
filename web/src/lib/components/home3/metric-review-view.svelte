@@ -107,9 +107,9 @@
 		return storedMetrics.filter(metric => metric.metric_id && ids.includes(metric.metric_id))
 			.flatMap(metric => metric.source_table_rows ?? []);
 	}
-	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) {
 		for (const line of rawLines) {
-			if (tableReferences.some(ref => ref.line === line.line_number)) continue;
+			if (resolvedTableLines.has(line.line_number)) continue;
 			if (line.page_number !== pageNo || !highlightedLines.includes(line.line_number) || !Array.isArray(line.coords) || line.coords.length < 4) continue;
 			const [x1, y1, x2, y2] = line.coords;
 			const mark = document.createElement('div');

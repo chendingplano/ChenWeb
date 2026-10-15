@@ -34,9 +34,10 @@ func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailabl
 	}
 
 	p := NewMetricsProcessor(nil, nil, extractor, nil)
-	p.PromptRef = "prompt-extract-metrics-v1.md"
+	p.MentionPromptRef = "prompt-extract-metrics-v1.md"
+	p.RelationPromptRef = "prompt-enrich-metrics-v11.md"
 
-	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, "extract_metric_candidates", "MID-26052908", true)
+	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, p.MentionPromptRef, "extract_metric_candidates", "MID-26052908", true)
 	if err != nil {
 		t.Fatalf("extractMetricPayload: %v", err)
 	}
@@ -46,8 +47,18 @@ func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailabl
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
-	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_metrics_extraction" {
-		t.Fatalf("contractNames=%v, want [chenweb_metrics_extraction]", extractor.contractNames)
+	if got := extractor.promptNames[0]; got != p.MentionPromptRef {
+		t.Fatalf("extraction PromptName=%q, want %q", got, p.MentionPromptRef)
+	}
+	_, err = p.extractMetricPayload(context.Background(), "input text", "enrichment prompt", "metrics-model", structureModelConfig{}, p.RelationPromptRef, "enrich_metrics", "MID-26052903", true)
+	if err != nil {
+		t.Fatalf("extractMetricPayload enrichment: %v", err)
+	}
+	if got := extractor.promptNames[1]; got != p.RelationPromptRef {
+		t.Fatalf("enrichment PromptName=%q, want %q", got, p.RelationPromptRef)
+	}
+	if len(extractor.contractNames) != 2 || extractor.contractNames[0] != "chenweb_metrics_extraction" || extractor.contractNames[1] != "chenweb_metrics_extraction" {
+		t.Fatalf("contractNames=%v, want two chenweb_metrics_extraction entries", extractor.contractNames)
 	}
 	metrics, ok := payload["metrics"].([]any)
 	if !ok || len(metrics) != 1 {

@@ -815,18 +815,19 @@
 	.action-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.6rem; margin-top: 1rem; }
 	.retrieve-btn {
 		width: 100%;
+		height: 40px;
 		border: 1px solid var(--rb-accent);
 		border-radius: 14px;
 		background: var(--rb-accent);
 		color: var(--rb-panel);
-		padding: 0.95rem 1rem;
+		padding: 0 1rem;
 		font-size: 1rem;
 		font-weight: 700;
 		cursor: pointer;
 	}
 	.retrieve-btn:disabled { opacity: 0.7; cursor: default; }
 	.retrieve-arrow { margin-right: 0.45rem; }
-	.reset-btn, .settings-btn { padding: 0 0.9rem; }
+	.reset-btn, .settings-btn { height: 40px; padding: 0 0.9rem; }
 	.control-copy { margin-top: 0.85rem; font-size: 0.82rem; line-height: 1.5; color: var(--rb-muted); }
 	.error {
 		margin-top: 0.85rem;
