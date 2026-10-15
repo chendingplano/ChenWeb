@@ -69,6 +69,19 @@ def _add_list_item_boxes(items: list[dict[str, Any]], middle: dict[str, Any]) ->
             item["list_item_bboxes"] = boxes
 
 
+def _text_items(value: Any, bbox: Any) -> list[dict[str, Any]]:
+    values = value if isinstance(value, list) else [value]
+    items: list[dict[str, Any]] = []
+    for value in values:
+        text = _text(value).strip()
+        if text:
+            item = {"type": "text", "text": text}
+            if bbox is not None:
+                item["bbox"] = bbox
+            items.append(item)
+    return items
+
+
 def convert(middle_path: Path, output_path: Path) -> None:
     raw = middle_path.read_text(encoding="utf-8")
     result = ParseResult.from_json(raw)
@@ -104,16 +117,26 @@ def convert(middle_path: Path, output_path: Path) -> None:
             if "bbox" in source:
                 item["bbox"] = source["bbox"]
         elif kind == "code":
-            code_body = _text(source.get("code_body", ""))
-            if not code_body:
-                continue
-            item = {
-                "type": "code",
-                "code_body": code_body,
-                **{key: source[key] for key in ("code_caption", "code_footnote") if key in source},
-            }
-            if "bbox" in source:
-                item["bbox"] = source["bbox"]
+            text_items = _text_items(source.get("code_body", ""), source.get("bbox"))
+            for key in ("code_caption", "code_footnote"):
+                text_items.extend(_text_items(source.get(key, []), source.get("bbox")))
+            pages_map[page_idx].extend(text_items)
+            continue
+        elif kind == "chart":
+            text_items = _text_items(source.get("content", ""), source.get("bbox"))
+            for key in ("chart_caption", "chart_footnote"):
+                text_items.extend(_text_items(source.get(key, []), source.get("bbox")))
+            pages_map[page_idx].extend(text_items)
+            if source.get("img_path"):
+                image_item = {"type": "image", "img_path": source["img_path"]}
+                if "bbox" in source:
+                    image_item["bbox"] = source["bbox"]
+                pages_map[page_idx].append(image_item)
+            continue
+        elif kind == "image" and source.get("content"):
+            pages_map[page_idx].append(item)
+            pages_map[page_idx].extend(_text_items(source["content"], source.get("bbox")))
+            continue
         elif kind in {"index", "page_footnote"}:
             text = _text(source.get("text", source.get("content", source.get("list_items", []))))
             if text:
