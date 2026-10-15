@@ -50,7 +50,9 @@ func (r TableRow) FullWidthText() (string, bool) {
 //
 //	1: header = <th> rows, else row 0, extended by colspan
 //	2: a header cell's rowspan also extends the header (2026-10-09)
-const TableGridVersion = 2
+//	3: a colspan header row extends the header only when the next row is a sub-header
+//	   row, i.e. blank under the row's plain cells (2026-10-15, record 371 Table 1)
+const TableGridVersion = 3
 
 // maxTableHeaderRows bounds the multi-level header heuristic so a table whose
 // data rows use colspan is not swallowed into its header.
@@ -64,6 +66,7 @@ type rawTableRow struct {
 	hasTH      bool
 	hasColspan bool
 	maxRowspan int
+	plainCols  []int // columns of cells with neither colspan nor rowspan
 }
 
 // ParseTableGrid parses the HTML content of a table line into a TableGrid.
@@ -138,6 +141,9 @@ func ParseTableGrid(content string) (*TableGrid, error) {
 			if rs > row.maxRowspan {
 				row.maxRowspan = rs
 			}
+			if cs == 1 && rs == 1 {
+				row.plainCols = append(row.plainCols, col)
+			}
 			for i := 0; i < cs; i++ {
 				if rs > 1 {
 					pending[col] = &carry{text: text, left: rs - 1}
@@ -179,7 +185,22 @@ func ParseTableGrid(content string) (*TableGrid, error) {
 		}
 		return false
 	}
-	for headerCount < len(raws)-1 && headerCount < maxTableHeaderRows && (raws[headerCount-1].hasColspan || spansPastHeader()) {
+	// A colspan header row (性能指标 over 温度/湿度) is followed by its sub-header row,
+	// which is blank under the row's plain cells (a rowspan cell is carried down, never
+	// blank). A colspan cell that only widens one label (测试器材 over two columns)
+	// with every other header cell plain is followed by data, not by sub-headers.
+	followedBySubheader := func(i int) bool {
+		if !raws[i].hasColspan || i+1 >= len(raws) {
+			return false
+		}
+		for _, c := range raws[i].plainCols {
+			if c < len(raws[i+1].cells) && raws[i+1].cells[c] != "" {
+				return false
+			}
+		}
+		return true
+	}
+	for headerCount < len(raws)-1 && headerCount < maxTableHeaderRows && (followedBySubheader(headerCount-1) || spansPastHeader()) {
 		headerCount++
 	}
 	if headerCount > len(raws) {

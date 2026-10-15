@@ -173,3 +173,39 @@ func TestStripTableRowRefs(t *testing.T) {
 		t.Errorf("parseMetricLineSpan(116#r1) = %d,%d,%v", s, e, ok)
 	}
 }
+
+// Record 371 表1: "测试器材" spans two columns, but every other header cell is plain and the
+// next row is data, so the header is one row. Before TableGridVersion 3 the colspan alone
+// pulled the first two data rows (立定跳远 幼儿 / 儿童青少年) into the header, so
+// table metric context found no row for them.
+func TestParseTableGrid_ColspanLabelIsNotMultiLevelHeader(t *testing.T) {
+	h := `<table><tr><td colspan="2">测试器材</td><td>适用人群</td><td>有效量程</td></tr>` +
+		`<tr><td rowspan="2">身体素质器材</td><td>立定跳远测试仪</td><td>幼儿</td><td>0 mm~1 700 mm</td></tr>` +
+		`<tr><td>纵跳测试仪</td><td>成年人</td><td>0 mm~1 500 mm</td></tr>` +
+		`<tr><td>身体机能器材</td><td>握力测试仪</td><td>成年人</td><td>50 N~999 N</td></tr></table>`
+	g, err := ParseTableGrid(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Headers) != 1 || len(g.Rows) != 3 {
+		t.Fatalf("headers = %d, rows = %d, want 1 and 3", len(g.Headers), len(g.Rows))
+	}
+	if r, _ := g.Row("r1"); r.Cells[1] != "立定跳远测试仪" {
+		t.Fatalf("r1 = %v, want the 立定跳远 row", r.Cells)
+	}
+}
+
+// A colspan group header whose row has plain cells still has a sub-header row when the
+// next row is blank under those plain cells.
+func TestParseTableGrid_ColspanGroupWithBlankPlainCells(t *testing.T) {
+	h := `<table><tr><td>项目</td><td colspan="2">性能指标</td></tr>` +
+		`<tr><td></td><td>温度</td><td>湿度</td></tr>` +
+		`<tr><td>A</td><td>20</td><td>50</td></tr></table>`
+	g, err := ParseTableGrid(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Headers) != 2 || len(g.Rows) != 1 || g.Rows[0].Cells[2] != "50" {
+		t.Fatalf("headers = %d, rows = %+v", len(g.Headers), g.Rows)
+	}
+}
