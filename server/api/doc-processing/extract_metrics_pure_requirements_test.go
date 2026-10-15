@@ -135,11 +135,11 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
-	if p.MentionPromptRef != "prompt-extract-metric-candidates-v14.md" {
-		t.Fatalf("MentionPromptRef=%q, want v14", p.MentionPromptRef)
+	if p.MentionPromptRef != "prompt-extract-metric-candidates-v15.md" {
+		t.Fatalf("MentionPromptRef=%q, want v15", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v11.md" {
-		t.Fatalf("RelationPromptRef=%q, want v11", p.RelationPromptRef)
+	if p.RelationPromptRef != "prompt-enrich-metrics-v12.md" {
+		t.Fatalf("RelationPromptRef=%q, want v12", p.RelationPromptRef)
 	}
 	// Prompts load relative to the server's working directory; from this test,
 	// check the files exist in the repo's prompts/ directory instead.
@@ -182,6 +182,19 @@ func TestDropRowsTaggedWithDropReason(t *testing.T) {
 	}
 	if len(dropped) != 2 {
 		t.Fatalf("dropped = %v", dropped)
+	}
+}
+
+func TestDropRowsTaggedDocumentIdentifier(t *testing.T) {
+	// 376_mtc_33..41 as stored 2026-10-15: 表3 data-element group ranges (1000000～1999999)
+	// are the document's own numbering, not quantities (enrich v12, gold X14).
+	rows := []map[string]any{
+		{"metric_name": "数据元内部标识符起止标记", "metric_value": "1000000～1999999", "reasoning_tags": []any{"document_identifier"}},
+		{"metric_name": "身高数据格式", "metric_value": "n4..5,1", "reasoning_tags": []any{"data_format"}},
+	}
+	kept, dropped := dropRowsTaggedWithDropReason(rows)
+	if len(kept) != 1 || kept[0]["metric_name"] != "身高数据格式" || len(dropped) != 1 {
+		t.Fatalf("kept=%v dropped=%v", kept, dropped)
 	}
 }
 

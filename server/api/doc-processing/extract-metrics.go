@@ -489,11 +489,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v14.md",
+		"prompt-extract-metric-candidates-v15.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v11.md",
+		"prompt-enrich-metrics-v12.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -1996,6 +1996,7 @@ var metricDropReasonTags = map[string]bool{
 	"procedure_count":         true,
 	"no_named_quantity":       true,
 	"term_definition":         true,
+	"document_identifier":     true,
 	"activity_schedule":       true,
 	"own_table_pointer":       true,
 	"obligation_no_property":  true,
@@ -2804,7 +2805,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v11.md"
+		promptRef = "prompt-enrich-metrics-v12.md"
 	}
 
 	paths := make([]string, 0, 8)
