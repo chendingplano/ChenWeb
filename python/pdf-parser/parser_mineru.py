@@ -1,17 +1,7 @@
 """MinerU PDF parser backend.
 
-Invokes the `mineru` CLI (from ~/Workspace/ThirdParty/mineru) as a subprocess.
-MinerU writes a directory tree under the output dir:
-
-    <output_dir>/<pdf_stem>/<backend>_auto/
-        <pdf_stem>_content_list.json   ← canonical structured output
-        <pdf_stem>.md
-        <pdf_stem>_middle.json
-        <pdf_stem>_model.json
-        <pdf_stem>_layout.pdf
-        images/...
-
-We locate `*_content_list.json` after the run and return its entries as pages.
+Invokes MinerU Kit from ~/Workspace/ThirdParty/mineru and adapts its ZIP result
+to ChenWeb's persisted page-wrapped content-list shape.
 """
 
 import glob
@@ -24,6 +14,8 @@ import shutil
 import subprocess
 import threading
 import time
+import tempfile
+import zipfile
 from typing import Any, Callable
 
 from parser_base import ParserBackend
@@ -99,7 +91,7 @@ class PhaseTracker:
         return [dict(item) for item in self.phases], complete or progress == 0
 
 _DEFAULT_MINERU_CLI_PATHS = [
-    os.path.expanduser("~/Workspace/ThirdParty/mineru/.venv/bin/mineru"),
+    os.path.expanduser("~/Workspace/ThirdParty/mineru/.venv/bin/mineru-kit"),
 ]
 
 
@@ -123,8 +115,9 @@ class MineruParser(ParserBackend):
 
     def __init__(self) -> None:
         self._cli: str = ""
-        self._backend: str = ""
-        self._extra_args: list[str] = []
+        self._python: str = ""
+        self._tier = "standard"
+        self._ocr_mode = "auto"
         self._initialized: bool = False
         self.on_phase_progress: Callable[[list[dict], bool], None] | None = None
 
@@ -136,7 +129,7 @@ class MineruParser(ParserBackend):
         if cli and os.path.isfile(cli):
             self._cli = cli
         else:
-            self._cli = shutil.which("mineru") or ""
+            self._cli = shutil.which("mineru-kit") or ""
             if not self._cli:
                 for candidate in _DEFAULT_MINERU_CLI_PATHS:
                     if os.path.isfile(candidate):
@@ -144,20 +137,20 @@ class MineruParser(ParserBackend):
                         break
         if not self._cli:
             raise RuntimeError(
-                "MineruParser requires the `mineru` CLI on PATH. "
+                "MineruParser requires the `mineru-kit` CLI on PATH. "
                 "Install via ~/Workspace/ThirdParty/mineru (`mise run install`) "
                 "or set MINERU_CLI."
             )
-        self._backend = _env("MINERU_BACKEND")
-
-        extra = _env("MINERU_EXTRA_ARGS")
-        if extra:
-            self._extra_args = extra.split()
+        self._python = os.path.join(os.path.dirname(self._cli), "python")
+        if not os.path.isfile(self._python):
+            self._python = shutil.which("python3") or shutil.which("python") or ""
+        if not self._python:
+            raise RuntimeError("MinerU 4 Python executable not found beside MINERU_CLI")
 
         self._initialized = True
         log.info(
-            "MineruParser initialized: cli=%s backend=%s",
-            self._cli, self._backend or "(default)",
+            "MineruParser initialized: cli=%s python=%s tier=%s",
+            self._cli, self._python, self._tier,
         )
 
     def parse(
@@ -172,24 +165,20 @@ class MineruParser(ParserBackend):
         total_pages_hint = pdf_page_count
         on_progress(0, total_pages_hint)
 
-        # Clear any prior mineru output for this PDF. MinerU nests per-run output
-        # under <output_dir>/<pdf_stem>/<backend>_<method>/; across re-parses (and
-        # the OCR-fallback's second pass) these accumulate, wasting disk and — before
-        # the mtime-based selection below — risking returning a stale run's content.
-        # The source PDF lives at <output_dir>/<pdf_stem>.pdf (a file), not this dir,
-        # so removing the directory never touches the input.
+        os.makedirs(output_dir, exist_ok=True)
         pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
-        nested_output = os.path.join(output_dir, pdf_stem)
-        if os.path.isdir(nested_output):
-            shutil.rmtree(nested_output, ignore_errors=True)
+        content_list_path = os.path.join(output_dir, f"{pdf_stem}_content_list.json")
+        images_dst_dir = os.path.join(output_dir, "images")
+        if os.path.isdir(images_dst_dir):
+            shutil.rmtree(images_dst_dir)
+        cmd: list[str] = [
+            self._cli, "parse", pdf_path, "--pages", "all", "--tier", self._tier,
+            "--format", "zip", "-o",
+        ]
+        if self._ocr_mode != "auto":
+            cmd += ["--ocr-mode", self._ocr_mode]
 
-        cmd: list[str] = [self._cli, "-p", pdf_path, "-o", output_dir]
-        if self._backend:
-            cmd += ["-b", self._backend]
-        if self._extra_args:
-            cmd += self._extra_args
-
-        log.info("running mineru: %s", " ".join(cmd))
+        log.info("running MinerU Kit: %s", " ".join(cmd + ["<result.zip>"]))
 
         # MinerU is a long-running subprocess. tqdm uses \r (not \n) for
         # progress updates, so line-by-line reading can block for minutes
@@ -212,8 +201,11 @@ class MineruParser(ParserBackend):
         # Stream output line-by-line so the stdout/stderr pipe can never fill
         # and deadlock a long-running mineru subprocess. Keep last N lines for
         # the error message on non-zero exit.
+        temp_dir_context = tempfile.TemporaryDirectory(prefix="mineru-")
+        temp_dir = temp_dir_context.__enter__()
+        result_zip = os.path.join(temp_dir, "result.zip")
         proc = subprocess.Popen(
-            cmd,
+            cmd + [result_zip],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -292,67 +284,61 @@ class MineruParser(ParserBackend):
                 f"mineru exited {rc}: " + "\n".join(tail[-20:])
             )
 
-        content_list_path = _find_content_list(output_dir, pdf_stem)
-        with open(content_list_path, "r", encoding="utf-8") as f:
-            content_list = json.load(f)
-
-        middle_json_path = content_list_path.replace("_content_list.json", "_middle.json")
-        equation_image_count = 0
-        list_item_bbox_count = 0
-        if os.path.isfile(middle_json_path) and isinstance(content_list, list):
-            try:
-                with open(middle_json_path, "r", encoding="utf-8") as f:
-                    middle_json = json.load(f)
-            except Exception as exc:
-                log.warning("mineru: failed to load middle.json: %s", exc)
-                middle_json = None
-            if middle_json is not None:
-                try:
-                    equation_image_count = annotate_equation_image_paths(content_list, middle_json)
-                except Exception as exc:
-                    log.warning("mineru: failed to annotate equation image paths: %s", exc)
-                try:
-                    list_item_bbox_count = annotate_list_item_bboxes(content_list, middle_json)
-                except Exception as exc:
-                    log.warning("mineru: failed to annotate list item bboxes: %s", exc)
-
-        # Copy images from MinerU's nested output dir to output_dir/images/ so
-        # that img_path values ("images/foo.png") in the content list resolve
-        # correctly relative to the aggregated result JSON at output_dir/.
-        images_src_dir = os.path.join(os.path.dirname(content_list_path), "images")
-        images_dst_dir = os.path.join(output_dir, "images")
-        image_count = 0
-        if os.path.isdir(images_src_dir):
-            os.makedirs(images_dst_dir, exist_ok=True)
-            for img_file in os.listdir(images_src_dir):
-                src = os.path.join(images_src_dir, img_file)
-                if os.path.isfile(src):
-                    shutil.copy2(src, os.path.join(images_dst_dir, img_file))
+        try:
+            with zipfile.ZipFile(result_zip) as archive:
+                middle_members = [info for info in archive.infolist() if os.path.basename(info.filename) == "middle_json.json"]
+                if len(middle_members) != 1:
+                    raise RuntimeError(f"MinerU ZIP must contain one middle_json.json (found {len(middle_members)})")
+                middle_json_path = os.path.join(temp_dir, "middle_json.json")
+                with archive.open(middle_members[0]) as source, open(middle_json_path, "wb") as target:
+                    shutil.copyfileobj(source, target)
+                os.makedirs(images_dst_dir, exist_ok=True)
+                image_count = 0
+                for info in archive.infolist():
+                    parts = info.filename.replace("\\", "/").split("/")
+                    if "images" not in parts or info.is_dir():
+                        continue
+                    image_index = parts.index("images")
+                    relative = parts[image_index + 1:]
+                    if not relative or any(part in {"", ".", ".."} for part in relative):
+                        continue
+                    target_path = os.path.join(images_dst_dir, *relative)
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with archive.open(info) as source, open(target_path, "wb") as target:
+                        shutil.copyfileobj(source, target)
                     image_count += 1
-            log.info("mineru: copied %d image(s) to %s", image_count, images_dst_dir)
+            adapter = os.path.join(os.path.dirname(__file__), "mineru_v4_adapter.py")
+            subprocess.run([self._python, adapter, middle_json_path, content_list_path], check=True, capture_output=True, text=True)
+        except (OSError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
+            detail = getattr(exc, "stderr", "")
+            raise RuntimeError(f"MinerU output adaptation failed: {exc} {detail}") from exc
+        finally:
+            temp_dir_context.__exit__(None, None, None)
 
-        # Group content items by page_idx so downstream consumers see pages.
-        pages_map: dict[int, list[Any]] = {}
-        for item in content_list if isinstance(content_list, list) else []:
-            if not isinstance(item, dict):
-                continue
-            page_idx = int(item.get("page_idx", 0))
-            pages_map.setdefault(page_idx, []).append(item)
-
-        if pages_map:
-            total_pages = max(pages_map.keys()) + 1
-            pages = [
-                {"page_number": i + 1, "items": pages_map.get(i, [])}
-                for i in range(total_pages)
-            ]
-        else:
-            total_pages = 0
-            pages = []
+        with open(content_list_path, "r", encoding="utf-8") as f:
+            normalized = json.load(f)
+        pages = normalized.get("pages")
+        if not isinstance(pages, list):
+            raise ValueError("MinerU adapter output is missing pages")
+        for page in pages:
+            for item in page.get("items", []):
+                image_path = item.get("img_path")
+                if image_path:
+                    clean = str(image_path).replace("\\", "/").split("/")
+                    if "images" in clean:
+                        clean = clean[clean.index("images") + 1:]
+                    else:
+                        clean = clean[-1:]
+                    if clean and all(part not in {"", ".", ".."} for part in clean):
+                        item["img_path"] = "images/" + "/".join(clean)
+        with open(content_list_path, "w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=False)
+        total_pages = len(pages)
 
         on_progress(max(total_pages, 1), max(total_pages, 1))
         log.info(
-            "mineru finished: pages=%d images=%d equation_images=%d list_items_bboxed=%d content_list=%s",
-            total_pages, image_count, equation_image_count, list_item_bbox_count, content_list_path,
+            "mineru finished: pages=%d images=%d content_list=%s",
+            total_pages, image_count, content_list_path,
         )
 
         return {
@@ -391,19 +377,11 @@ def _find_content_list(output_dir: str, pdf_stem: str) -> str:
 
 
 def make_ocr_parser(lang: str = "ch") -> "MineruParser":
-    """Build a MineruParser pinned to the `pipeline` backend with forced OCR.
-
-    Used as a fallback when the normal (text-layer) extraction yields
-    font-encoding garble — e.g. GB/T standard PDFs whose Latin glyphs live in a
-    font without a usable ToUnicode CMap, so text extraction maps them into the
-    CJK block. The `pipeline` backend OCRs rendered pixels and sidesteps the
-    broken encoding; `hybrid`/`vlm` backends reuse the text layer and would
-    reproduce the garble, so they are deliberately not used here.
-    """
+    """Build a MinerU parser using the basic tier with OCR forced."""
     parser = MineruParser()
     parser.init()
-    parser._backend = "pipeline"
-    parser._extra_args = ["-m", "ocr", "-l", lang]
+    parser._tier = "basic"
+    parser._ocr_mode = "ocr"
     return parser
 
 
