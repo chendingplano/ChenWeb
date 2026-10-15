@@ -1,14 +1,14 @@
 from parser_mineru import PhaseTracker, _processing_pages, annotate_equation_image_paths, annotate_list_item_bboxes
 
 
-def test_phase_tracker_reports_all_nine_phases_and_elapsed_time(monkeypatch):
+def test_phase_tracker_reports_v4_phases_and_elapsed_time(monkeypatch):
     ticks = iter([10.0, 16.245, 17.0])
     monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
     tracker = PhaseTracker(system="Linux")
 
     started, force = tracker.update("Sep 28 02:30:14 Layout Predict:   0%|          | 0/16 [00:00<?, ?it/s]")
     assert force is True
-    assert len(started) == 9
+    assert len(started) == 8
     assert started[0] == {"name": "Layout Predict", "progress": 0, "status": "active"}
     assert all(phase["status"] == "pending" for phase in started[1:])
 
@@ -25,33 +25,23 @@ def test_phase_tracker_reports_all_nine_phases_and_elapsed_time(monkeypatch):
     assert tracker.update("unrelated log line") is None
 
 
-def test_mac_phase_tracker_maps_each_predict_to_its_preparation(monkeypatch):
-    ticks = iter([1.0, 2.0, 104.25, 105.0, 106.0, 344.5, 345.0, 345.1, 346.0, 346.5])
+def test_mac_phase_tracker_uses_mineru_v4_labels(monkeypatch):
+    ticks = iter([1.0, 2.0, 3.0])
     monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
     tracker = PhaseTracker(system="Darwin")
     assert [phase["name"] for phase in tracker.phases] == [
-        "Layout Preparation", "Extract Preparation", "Post Processing", "Processing pages"
+        "Layout Predict", "MFR Predict", "Table-wireless Predict", "OCR-det",
+        "OCR-det Predict", "OCR-rec", "OCR-rec Predict", "Processing pages",
     ]
-    layout, force = tracker.update("Layout Preparation: 100%|████| 16/16 [00:00<00:00]")
+    ocr, force = tracker.update("OCR-det: 50%|█████     | 1/2 [00:00<00:00]")
+    assert force is False
+    assert ocr[3]["status"] == "active" and ocr[3]["progress"] == 50
+    completed, force = tracker.update("OCR-det Predict: 100%|████| 2/2 [00:02<00:00]")
     assert force is True
-    assert layout[0]["status"] == "active" and layout[0]["progress"] == 0
-    tracker.update("Predict:   0%|          | 0/16 [00:00<?, ?it/s]")
-    layout, force = tracker.update("Predict: 100%|████| 16/16 [01:43<00:00]")
+    assert completed[4]["status"] == "complete"
+    pages, force = tracker.update("Processing pages: 100%|████| 3/3 [00:03<00:00]")
     assert force is True
-    assert layout[0]["elapsed_seconds"] == 103.25
-    extract, force = tracker.update("Extract Preparation: 100%|████| 16/16 [00:00<00:00]")
-    assert extract[1]["status"] == "active" and force is True
-    tracker.update("Predict:   0%|          | 0/303 [00:00<?, ?it/s]")
-    extract, force = tracker.update("Predict: 100%|████| 303/303 [03:58<00:00]")
-    assert extract[1]["status"] == "complete" and extract[1]["elapsed_seconds"] == 239.5
-    tracker.update("Post Processing:   0%|          | 0/16 [00:00<?, ?it/s]")
-    post, _ = tracker.update("Post Processing: 100%|████| 16/16 [00:00<00:00]")
-    assert post[2]["status"] == "complete"
-    tracker.update("Processing pages:   0%|          | 0/16 [00:00<?, ?it/s]")
-    pages, _ = tracker.update("Processing pages: 100%|████| 16/16 [00:00<00:00]")
-    assert pages[3]["status"] == "complete"
-    assert all(phase["progress"] == 100 for phase in pages)
-
+    assert pages[7]["status"] == "complete"
 
 def test_only_processing_pages_counter_is_a_page_count():
     assert _processing_pages("Predict: 100%|████| 303/303 [03:58<00:00]") is None
