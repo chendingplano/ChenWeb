@@ -123,6 +123,39 @@ def _terminate_and_wait(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
+def _promote_result_pair(
+    content_src: str,
+    images_src: str,
+    content_dst: str,
+    images_dst: str,
+    staging_dir: str,
+) -> None:
+    """Replace a previously successful JSON/assets pair, rolling back on failure."""
+    backup_dir = os.path.join(staging_dir, "previous")
+    os.makedirs(backup_dir, exist_ok=True)
+    backups: list[tuple[str, str]] = []
+    promoted: list[str] = []
+    try:
+        for destination in (content_dst, images_dst):
+            if os.path.exists(destination):
+                backup = os.path.join(backup_dir, os.path.basename(destination))
+                os.replace(destination, backup)
+                backups.append((backup, destination))
+        for source, destination in ((content_src, content_dst), (images_src, images_dst)):
+            os.replace(source, destination)
+            promoted.append(destination)
+    except Exception:
+        for destination in reversed(promoted):
+            if os.path.isdir(destination):
+                shutil.rmtree(destination)
+            elif os.path.exists(destination):
+                os.remove(destination)
+        for backup, destination in reversed(backups):
+            if os.path.exists(backup):
+                os.replace(backup, destination)
+        raise
+
+
 class MineruParser(ParserBackend):
     name = "mineru"
 
@@ -195,10 +228,6 @@ class MineruParser(ParserBackend):
         pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
         content_list_path = os.path.join(output_dir, f"{pdf_stem}_content_list.json")
         images_dst_dir = os.path.join(output_dir, "images")
-        if os.path.isfile(content_list_path):
-            os.remove(content_list_path)
-        if os.path.isdir(images_dst_dir):
-            shutil.rmtree(images_dst_dir)
         cmd: list[str] = [
             self._cli, "parse", pdf_path, "--pages", "all", "--tier", self._tier,
             "--format", "zip", "-o",
@@ -229,7 +258,9 @@ class MineruParser(ParserBackend):
         # Stream output line-by-line so the stdout/stderr pipe can never fill
         # and deadlock a long-running mineru subprocess. Keep last N lines for
         # the error message on non-zero exit.
-        with tempfile.TemporaryDirectory(prefix="mineru-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix=".mineru-run-", dir=output_dir) as temp_dir:
+            staged_content_path = os.path.join(temp_dir, os.path.basename(content_list_path))
+            staged_images_dir = os.path.join(temp_dir, "images")
             result_zip = os.path.join(temp_dir, "result.zip")
             proc: subprocess.Popen | None = None
             heartbeat_thread: threading.Thread | None = None
@@ -307,7 +338,7 @@ class MineruParser(ParserBackend):
                         middle_json_path = os.path.join(temp_dir, "middle_json.json")
                         with archive.open(middle_members[0]) as source, open(middle_json_path, "wb") as target:
                             shutil.copyfileobj(source, target)
-                        os.makedirs(images_dst_dir, exist_ok=True)
+                        os.makedirs(staged_images_dir, exist_ok=True)
                         image_count = 0
                         for info in archive.infolist():
                             parts = info.filename.replace("\\", "/").split("/")
@@ -317,19 +348,46 @@ class MineruParser(ParserBackend):
                             relative = parts[image_index + 1:]
                             if not relative or any(part in {"", ".", ".."} for part in relative):
                                 continue
-                            target_path = os.path.join(images_dst_dir, *relative)
+                            target_path = os.path.join(staged_images_dir, *relative)
                             os.makedirs(os.path.dirname(target_path), exist_ok=True)
                             with archive.open(info) as source, open(target_path, "wb") as target:
                                 shutil.copyfileobj(source, target)
                             image_count += 1
                     adapter = os.path.join(os.path.dirname(__file__), "mineru_v4_adapter.py")
                     subprocess.run(
-                        [self._python, adapter, middle_json_path, content_list_path],
+                        [self._python, adapter, middle_json_path, staged_content_path],
                         check=True, capture_output=True, text=True,
                     )
                 except (OSError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
                     detail = getattr(exc, "stderr", "")
                     raise RuntimeError(f"MinerU output adaptation failed: {exc} {detail}") from exc
+                with open(staged_content_path, "r", encoding="utf-8") as f:
+                    normalized = json.load(f)
+                pages = normalized.get("pages")
+                if not isinstance(pages, list):
+                    raise ValueError("MinerU adapter output is missing pages")
+                for page in pages:
+                    for item in page.get("items", []):
+                        image_path = item.get("img_path")
+                        if image_path:
+                            clean = str(image_path).replace("\\", "/").split("/")
+                            if "images" in clean:
+                                clean = clean[clean.index("images") + 1:]
+                            else:
+                                clean = clean[-1:]
+                            if clean and all(part not in {"", ".", ".."} for part in clean):
+                                item["img_path"] = "images/" + "/".join(clean)
+                with open(staged_content_path, "w", encoding="utf-8") as f:
+                    json.dump(normalized, f, ensure_ascii=False)
+                total_pages = len(pages)
+                on_progress(max(total_pages, 1), max(total_pages, 1))
+                _promote_result_pair(
+                    staged_content_path,
+                    staged_images_dir,
+                    content_list_path,
+                    images_dst_dir,
+                    temp_dir,
+                )
             except BaseException:
                 if proc is not None:
                     _terminate_and_wait(proc)
@@ -341,27 +399,6 @@ class MineruParser(ParserBackend):
                 if proc is not None and proc.stdout is not None:
                     proc.stdout.close()
 
-        with open(content_list_path, "r", encoding="utf-8") as f:
-            normalized = json.load(f)
-        pages = normalized.get("pages")
-        if not isinstance(pages, list):
-            raise ValueError("MinerU adapter output is missing pages")
-        for page in pages:
-            for item in page.get("items", []):
-                image_path = item.get("img_path")
-                if image_path:
-                    clean = str(image_path).replace("\\", "/").split("/")
-                    if "images" in clean:
-                        clean = clean[clean.index("images") + 1:]
-                    else:
-                        clean = clean[-1:]
-                    if clean and all(part not in {"", ".", ".."} for part in clean):
-                        item["img_path"] = "images/" + "/".join(clean)
-        with open(content_list_path, "w", encoding="utf-8") as f:
-            json.dump(normalized, f, ensure_ascii=False)
-        total_pages = len(pages)
-
-        on_progress(max(total_pages, 1), max(total_pages, 1))
         log.info(
             "mineru finished: pages=%d images=%d content_list=%s",
             total_pages, image_count, content_list_path,
