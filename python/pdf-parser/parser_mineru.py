@@ -109,6 +109,20 @@ def _get_pdf_page_count(pdf_path: str) -> int:
     return 0
 
 
+def _terminate_and_wait(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 class MineruParser(ParserBackend):
     name = "mineru"
 
@@ -213,119 +227,117 @@ class MineruParser(ParserBackend):
         # Stream output line-by-line so the stdout/stderr pipe can never fill
         # and deadlock a long-running mineru subprocess. Keep last N lines for
         # the error message on non-zero exit.
-        temp_dir_context = tempfile.TemporaryDirectory(prefix="mineru-")
-        temp_dir = temp_dir_context.__enter__()
-        result_zip = os.path.join(temp_dir, "result.zip")
-        proc = subprocess.Popen(
-            cmd + [result_zip],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        with tempfile.TemporaryDirectory(prefix="mineru-") as temp_dir:
+            result_zip = os.path.join(temp_dir, "result.zip")
+            proc: subprocess.Popen | None = None
+            heartbeat_thread: threading.Thread | None = None
+            tail: list[str] = []
+            try:
+                proc = subprocess.Popen(
+                    cmd + [result_zip],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
 
-        def _heartbeat() -> None:
-            while not _stop_heartbeat.wait(timeout=15.0):
-                if _progress_lock.acquire(blocking=False):
-                    try:
-                        on_progress(_state["pages_done"], _state["total"])
-                    except Exception as exc:
-                        _stop_exc.append(exc)
-                        # Kill the subprocess so the main thread's stdout read
-                        # loop unblocks on EOF instead of running to completion.
-                        proc.terminate()
-                    finally:
-                        _progress_lock.release()
+                def _heartbeat() -> None:
+                    while not _stop_heartbeat.wait(timeout=15.0):
+                        if _progress_lock.acquire(blocking=False):
+                            try:
+                                on_progress(_state["pages_done"], _state["total"])
+                            except Exception as exc:
+                                _stop_exc.append(exc)
+                                try:
+                                    proc.terminate()
+                                except OSError:
+                                    pass
+                            finally:
+                                _progress_lock.release()
 
-        heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
-        heartbeat_thread.start()
+                heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
+                heartbeat_thread.start()
 
-        tail: list[str] = []
-        assert proc.stdout is not None
-        try:
-            for raw_line in proc.stdout:
-                # tqdm uses \r to overwrite the current line; take the last
-                # non-empty segment so log output is clean.
-                segments = [s for s in raw_line.rstrip('\n').split('\r') if s.strip()]
-                line = segments[-1] if segments else raw_line.rstrip()
-                if not line:
-                    continue
-                log.info("[mineru] %s", line)
-                tail.append(line)
-                if len(tail) > 50:
-                    tail.pop(0)
+                assert proc.stdout is not None
+                for raw_line in proc.stdout:
+                    # tqdm uses \r to overwrite the current line; take the last
+                    # non-empty segment so log output is clean.
+                    segments = [s for s in raw_line.rstrip('\n').split('\r') if s.strip()]
+                    line = segments[-1] if segments else raw_line.rstrip()
+                    if not line:
+                        continue
+                    log.info("[mineru] %s", line)
+                    tail.append(line)
+                    if len(tail) > 50:
+                        tail.pop(0)
 
-                # Only Processing pages counts pages. Other phase totals can
-                # be much larger (e.g. 303 extraction items for a 16-page PDF).
-                for seg in segments or [line]:
-                    phase_update = phase_tracker.update(seg)
-                    if phase_update and self.on_phase_progress:
-                        try:
+                    # Only Processing pages counts pages. Other phase totals can
+                    # be much larger (e.g. 303 extraction items for a 16-page PDF).
+                    for seg in segments or [line]:
+                        phase_update = phase_tracker.update(seg)
+                        if phase_update and self.on_phase_progress:
                             with _progress_lock:
                                 self.on_phase_progress(*phase_update)
-                        except BaseException:
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=10)
-                            except subprocess.TimeoutExpired:
-                                proc.kill()
-                                proc.wait()
-                            raise
-                    page_progress = _processing_pages(seg)
-                    if page_progress:
-                        x, y = page_progress
-                        _state["pages_done"] = x
-                        if y > _state["total"]:
-                            _state["total"] = y
-                        break
-        finally:
-            _stop_heartbeat.set()
-            heartbeat_thread.join(timeout=5)
+                        page_progress = _processing_pages(seg)
+                        if page_progress:
+                            x, y = page_progress
+                            _state["pages_done"] = x
+                            if y > _state["total"]:
+                                _state["total"] = y
+                            break
 
-        if _stop_exc:
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            raise _stop_exc[0]
+                if _stop_exc:
+                    raise _stop_exc[0]
+                rc = proc.wait()
+                if rc != 0:
+                    raise RuntimeError(f"mineru exited {rc}: " + "\n".join(tail[-20:]))
 
-        rc = proc.wait()
-        if rc != 0:
-            raise RuntimeError(
-                f"mineru exited {rc}: " + "\n".join(tail[-20:])
-            )
-
-        try:
-            with zipfile.ZipFile(result_zip) as archive:
-                middle_members = [info for info in archive.infolist() if os.path.basename(info.filename) == "middle_json.json"]
-                if len(middle_members) != 1:
-                    raise RuntimeError(f"MinerU ZIP must contain one middle_json.json (found {len(middle_members)})")
-                middle_json_path = os.path.join(temp_dir, "middle_json.json")
-                with archive.open(middle_members[0]) as source, open(middle_json_path, "wb") as target:
-                    shutil.copyfileobj(source, target)
-                os.makedirs(images_dst_dir, exist_ok=True)
-                image_count = 0
-                for info in archive.infolist():
-                    parts = info.filename.replace("\\", "/").split("/")
-                    if "images" not in parts or info.is_dir():
-                        continue
-                    image_index = parts.index("images")
-                    relative = parts[image_index + 1:]
-                    if not relative or any(part in {"", ".", ".."} for part in relative):
-                        continue
-                    target_path = os.path.join(images_dst_dir, *relative)
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    with archive.open(info) as source, open(target_path, "wb") as target:
-                        shutil.copyfileobj(source, target)
-                    image_count += 1
-            adapter = os.path.join(os.path.dirname(__file__), "mineru_v4_adapter.py")
-            subprocess.run([self._python, adapter, middle_json_path, content_list_path], check=True, capture_output=True, text=True)
-        except (OSError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
-            detail = getattr(exc, "stderr", "")
-            raise RuntimeError(f"MinerU output adaptation failed: {exc} {detail}") from exc
-        finally:
-            temp_dir_context.__exit__(None, None, None)
+                try:
+                    with zipfile.ZipFile(result_zip) as archive:
+                        middle_members = [
+                            info for info in archive.infolist()
+                            if os.path.basename(info.filename) == "middle_json.json"
+                        ]
+                        if len(middle_members) != 1:
+                            raise RuntimeError(
+                                f"MinerU ZIP must contain one middle_json.json (found {len(middle_members)})"
+                            )
+                        middle_json_path = os.path.join(temp_dir, "middle_json.json")
+                        with archive.open(middle_members[0]) as source, open(middle_json_path, "wb") as target:
+                            shutil.copyfileobj(source, target)
+                        os.makedirs(images_dst_dir, exist_ok=True)
+                        image_count = 0
+                        for info in archive.infolist():
+                            parts = info.filename.replace("\\", "/").split("/")
+                            if "images" not in parts or info.is_dir():
+                                continue
+                            image_index = parts.index("images")
+                            relative = parts[image_index + 1:]
+                            if not relative or any(part in {"", ".", ".."} for part in relative):
+                                continue
+                            target_path = os.path.join(images_dst_dir, *relative)
+                            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                            with archive.open(info) as source, open(target_path, "wb") as target:
+                                shutil.copyfileobj(source, target)
+                            image_count += 1
+                    adapter = os.path.join(os.path.dirname(__file__), "mineru_v4_adapter.py")
+                    subprocess.run(
+                        [self._python, adapter, middle_json_path, content_list_path],
+                        check=True, capture_output=True, text=True,
+                    )
+                except (OSError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
+                    detail = getattr(exc, "stderr", "")
+                    raise RuntimeError(f"MinerU output adaptation failed: {exc} {detail}") from exc
+            except BaseException:
+                if proc is not None:
+                    _terminate_and_wait(proc)
+                raise
+            finally:
+                _stop_heartbeat.set()
+                if heartbeat_thread is not None and heartbeat_thread.ident is not None:
+                    heartbeat_thread.join(timeout=5)
+                if proc is not None and proc.stdout is not None:
+                    proc.stdout.close()
 
         with open(content_list_path, "r", encoding="utf-8") as f:
             normalized = json.load(f)

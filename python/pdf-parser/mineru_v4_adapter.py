@@ -59,12 +59,12 @@ def _add_list_item_boxes(items: list[dict[str, Any]], middle: dict[str, Any]) ->
         boxes: list[list[float]] = []
         for entry in item["list_items"]:
             text = str(entry).strip()
-            match = next((bbox for leaf, bbox in candidates if leaf == text), None)
-            if match is None:
+            match_index = next((index for index, (leaf, _) in enumerate(candidates) if leaf == text), None)
+            if match_index is None:
                 boxes = []
                 break
+            _, match = candidates.pop(match_index)
             boxes.append(match)
-            candidates = [(leaf, bbox) for leaf, bbox in candidates if bbox != match]
         if len(boxes) == len(item["list_items"]):
             item["list_item_bboxes"] = boxes
 
