@@ -75,6 +75,22 @@ class PhaseTracker:
             phase["elapsed_seconds"] = round(now - self.started[name], 2)
         return [dict(item) for item in self.phases], complete or progress == 0
 
+_OCR_MODES = ("auto", "txt", "ocr")
+
+
+def _configured_ocr_mode() -> str:
+    """MINERU_OCR_MODE (auto|txt|ocr, default auto): how MinerU reads page text.
+
+    `auto` trusts the PDF text layer where there is one. A text layer whose glyphs
+    are stored out of reading order makes MinerU interleave the characters of
+    neighbouring table cells (record 371: 身形体态器材 for 身体形态器材), so
+    set `ocr` to read pixels instead."""
+    mode = _env("MINERU_OCR_MODE", "auto").lower()
+    if mode not in _OCR_MODES:
+        raise RuntimeError(f"MINERU_OCR_MODE must be one of {', '.join(_OCR_MODES)}; got {mode!r}")
+    return mode
+
+
 _DEFAULT_MINERU_CLI_PATHS = [
     os.path.expanduser("~/Workspace/ThirdParty/mineru/.venv/bin/mineru-kit"),
 ]
@@ -192,10 +208,11 @@ class MineruParser(ParserBackend):
                     "Set MINERU_PYTHON to the Python executable from the MinerU 4 environment."
                 )
 
+        self._ocr_mode = _configured_ocr_mode()
         self._initialized = True
         log.info(
-            "MineruParser initialized: cli=%s python=%s tier=%s",
-            self._cli, self._python, self._tier,
+            "MineruParser initialized: cli=%s python=%s tier=%s ocr_mode=%s",
+            self._cli, self._python, self._tier, self._ocr_mode,
         )
 
     def parse(

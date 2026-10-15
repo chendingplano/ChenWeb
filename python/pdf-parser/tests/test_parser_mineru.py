@@ -1,3 +1,6 @@
+import pytest
+
+import parser_mineru
 from parser_mineru import PhaseTracker, _processing_pages, annotate_equation_image_paths, annotate_list_item_bboxes
 
 
@@ -287,3 +290,18 @@ class TestFindContentList:
 
         with pytest.raises(FileNotFoundError):
             _find_content_list(str(tmp_path), "missing")
+
+
+class TestOcrMode:
+    def test_defaults_to_auto(self, monkeypatch):
+        monkeypatch.delenv("MINERU_OCR_MODE", raising=False)
+        assert parser_mineru._configured_ocr_mode() == "auto"
+
+    def test_reads_env_case_insensitively(self, monkeypatch):
+        monkeypatch.setenv("MINERU_OCR_MODE", " OCR ")
+        assert parser_mineru._configured_ocr_mode() == "ocr"
+
+    def test_rejects_unknown_mode(self, monkeypatch):
+        monkeypatch.setenv("MINERU_OCR_MODE", "fast")
+        with pytest.raises(RuntimeError, match="MINERU_OCR_MODE"):
+            parser_mineru._configured_ocr_mode()
