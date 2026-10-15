@@ -315,3 +315,53 @@ func TestGarbledIdentifierCellsMatchOnReadableText(t *testing.T) {
 		t.Fatalf("rows=%+v", got.Tables)
 	}
 }
+
+// Rows that differ only in garbled digits tie on their Chinese text; table order decides them.
+func TestReadableTiesResolvedByRowOrder(t *testing.T) {
+	line := "145\t10\ttable\tunknown-font\t12\t[115,571,895,916]\t<table><tr><td>内部标识符</td><td>中文名称</td><td>说明</td></tr>" +
+		"<tr><td>3070030</td><td>超敏C反应蛋白</td><td>受检者血清中超敏C反应蛋白浓度的检测值</td></tr>" +
+		"<tr><td>3071010</td><td>癌抗原125</td><td>受检者血清中癌抗原125浓度的检测值</td></tr>" +
+		"<tr><td>3071020</td><td>癌抗原153</td><td>受检者血清中癌抗原153浓度的检测值</td></tr>" +
+		"<tr><td>3071030</td><td>糖链抗原199</td><td>受检者血清中糖链抗原199浓度的检测值</td></tr></table>\n"
+	row := func(y float64, cells ...string) PhysicalRow {
+		r := PhysicalRow{Coords: []float64{115, y, 895, y + 20}}
+		for _, c := range cells {
+			r.Cells = append(r.Cells, PhysicalCell{Text: c})
+		}
+		return r
+	}
+	physical := PhysicalDocument{Version: 1, Extractor: "pymupdf-tables-v1", PDFHash: "pdf", Tables: []PhysicalTable{{Page: 10, Coords: []float64{115, 571, 895, 916}, Rows: []PhysicalRow{
+		row(571, "内部 标识符", "中文名称", "说明"),
+		row(600, "#+)+#+", "超敏 反应蛋白", "受检者血清中超敏 反应蛋白浓度的检测值"),
+		row(620, "#+(!+!+", "癌抗原 !\"%", "受检者血清中癌抗原 浓度的检测值"),
+		row(640, "#+(!+\"+", "癌抗原 !%#", "受检者血清中癌抗原 浓度的检测值"),
+		row(660, "#+(!+#+", "糖链抗原 !**", "受检者血清中糖链抗原 浓度的检测值"),
+	}}}}
+	got, err := Build([]byte(line), physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tops := map[string]float64{}
+	for _, r := range got.Tables[0].Rows {
+		tops[r.ID] = r.Boxes[0].Coords[1]
+	}
+	if tops["r2"] != 620 || tops["r3"] != 640 || tops["r1"] != 600 || tops["r4"] != 660 {
+		t.Fatalf("row tops=%v", tops)
+	}
+}
+
+// A glyph the PDF font maps to the private use area (啰 read as U+E3FE) stands for one character.
+func TestPrivateUseGlyphMatchesOneChineseCharacter(t *testing.T) {
+	line := "145\t10\ttable\tunknown-font\t12\t[115,571,895,916]\t<table><tr><td>内部标识符</td><td>中文名称</td></tr><tr><td>2070023</td><td>肺部啰音标志</td></tr></table>\n"
+	physical := PhysicalDocument{Version: 1, Extractor: "pymupdf-tables-v1", PDFHash: "pdf", Tables: []PhysicalTable{{Page: 10, Coords: []float64{115, 571, 895, 916}, Rows: []PhysicalRow{
+		{Coords: []float64{115, 571, 895, 600}, Cells: []PhysicalCell{{Text: "内部 标识符"}, {Text: "中文名称"}}},
+		{Coords: []float64{115, 600, 895, 650}, Cells: []PhysicalCell{{Text: "\"+(++\"#"}, {Text: "肺 部  音 标志"}}},
+	}}}}
+	got, err := Build([]byte(line), physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tables[0].Rows) != 2 || got.Tables[0].Rows[1].ID != "r1" {
+		t.Fatalf("rows=%+v", got.Tables[0].Rows)
+	}
+}

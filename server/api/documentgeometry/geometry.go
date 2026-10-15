@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ import (
 )
 
 const Version = 1
-const Algorithm = "canonical-table-geometry-v3"
+const Algorithm = "canonical-table-geometry-v4"
 
 type Box struct {
 	Rotation int       `json:"rotation,omitempty"`
@@ -116,13 +117,27 @@ func score(row docprocessing.TableRow, physical PhysicalRow) int {
 	return total
 }
 
-func han(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Han, r) {
-			return r
+// han keeps Chinese characters and, for PDF text, private-use glyphs: a font may
+// map a rare character to the private use area (啰 read as U+E3FE).
+func han(s string) []rune {
+	var out []rune
+	for _, r := range norm.NFKC.String(s) {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Co, r) {
+			out = append(out, r)
 		}
-		return -1
-	}, norm.NFKC.String(s))
+	}
+	return out
+}
+
+// sameHan compares canonical text a with PDF text b at offset, a private-use glyph
+// of b standing for any one character.
+func sameHan(a, b []rune, offset int) bool {
+	for i, r := range b {
+		if r != a[offset+i] && !unicode.Is(unicode.Co, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // scoreReadable is the fallback for PDFs whose embedded font garbles digits and
@@ -137,14 +152,22 @@ func scoreReadable(row docprocessing.TableRow, physical PhysicalRow) int {
 	total := 0
 	for i, c := range physical.Cells {
 		b := han(c.Text)
-		if b == "" {
+		if len(b) == 0 {
 			continue
 		}
 		a := han(row.Cells[i])
-		if a != b && !(len([]rune(b)) >= 8 && strings.Contains(a, b)) {
+		matched := len(a) == len(b) && sameHan(a, b, 0)
+		for offset := 0; !matched && len(b) >= 8 && offset+len(b) <= len(a); offset++ {
+			matched = sameHan(a, b, offset)
+		}
+		if !matched {
 			return 0
 		}
-		total += len([]rune(b))
+		for _, r := range b {
+			if !unicode.Is(unicode.Co, r) {
+				total++
+			}
+		}
 	}
 	if total < 4 {
 		return 0
@@ -157,6 +180,75 @@ func matchScore(row docprocessing.TableRow, physical PhysicalRow) int {
 		return s
 	}
 	return scoreReadable(row, physical)
+}
+
+// physicalMatch is a PDF row and the canonical rows that share its best score.
+type physicalMatch struct {
+	table      PhysicalTable
+	row        PhysicalRow
+	candidates []int
+}
+
+// assignInOrder returns the canonical row index of each match, or -1. A unique
+// best match wins. Tied data rows (Chinese text identical once garbled digits are
+// dropped: 癌抗原125/癌抗原153) are decided by table order: a run of tied rows
+// between two uniquely matched rows takes, in order, the candidates lying between
+// those two rows, when there are exactly as many as the run is long.
+func assignInOrder(found []physicalMatch, headers int) []int {
+	winners := make([]int, len(found))
+	var data []int // matches of data rows, in document order
+	for k, m := range found {
+		winners[k] = -1
+		if len(m.candidates) == 1 {
+			winners[k] = m.candidates[0]
+		}
+		if m.candidates[len(m.candidates)-1] >= headers {
+			data = append(data, k)
+		}
+	}
+	for start := 0; start < len(data); start++ {
+		if winners[data[start]] >= 0 {
+			continue
+		}
+		end := start
+		for end+1 < len(data) && winners[data[end+1]] < 0 {
+			end++
+		}
+		lo, hi := headers-1, math.MaxInt
+		if start > 0 {
+			lo = winners[data[start-1]]
+		}
+		if end+1 < len(data) {
+			hi = winners[data[end+1]]
+		}
+		between := map[int]bool{}
+		for _, k := range data[start : end+1] {
+			for _, i := range found[k].candidates {
+				if i > lo && i < hi {
+					between[i] = true
+				}
+			}
+		}
+		if len(between) == end-start+1 {
+			order := make([]int, 0, len(between))
+			for i := range between {
+				order = append(order, i)
+			}
+			sort.Ints(order)
+			run := data[start : end+1]
+			ok := true
+			for n, k := range run {
+				ok = ok && slices.Contains(found[k].candidates, order[n])
+			}
+			for n, k := range run {
+				if ok {
+					winners[k] = order[n]
+				}
+			}
+		}
+		start = end
+	}
+	return winners
 }
 
 type canonicalTable struct {
@@ -277,55 +369,62 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 		for page := c.page + 1; len(continuations[page]) == 1; page++ {
 			selected = append(selected, continuations[page][0])
 		}
+		var found []physicalMatch
 		for _, t := range selected {
 			for _, pr := range t.Rows {
-				best, ties, winner := 0, 0, -1
+				best, m := 0, physicalMatch{table: t, row: pr}
 				for i, r := range rows {
 					s := matchScore(r, pr)
 					if s > best {
 						best = s
-						ties = 1
-						winner = i
+						m.candidates = []int{i}
 					} else if s > 0 && s == best {
-						ties++
+						m.candidates = append(m.candidates, i)
 					}
 				}
-				if winner < 0 || ties != 1 || !validBox(pr.Coords) {
+				if len(m.candidates) > 0 && validBox(pr.Coords) {
+					found = append(found, m)
+				}
+			}
+		}
+		winners := assignInOrder(found, len(c.grid.Headers))
+		for k, m := range found {
+			t, pr, winner := m.table, m.row, winners[k]
+			if winner < 0 {
+				continue
+			}
+			r := rows[winner]
+			if ambiguous[r.ID] {
+				continue
+			}
+			if !strings.HasPrefix(r.ID, "h") {
+				var parts []string
+				for _, cell := range pr.Cells {
+					parts = append(parts, normalized(cell.Text))
+				}
+				key := strings.Join(parts, "\x1f")
+				if seenText[r.ID] == nil {
+					seenText[r.ID] = map[string]bool{}
+				}
+				if seenText[r.ID][key] {
+					delete(mapped, r.ID)
+					ambiguous[r.ID] = true
 					continue
 				}
-				r := rows[winner]
-				if ambiguous[r.ID] {
-					continue
+				seenText[r.ID][key] = true
+			}
+			dest := mapped[r.ID]
+			if dest == nil {
+				dest = &Row{ID: r.ID, Hash: r.Hash, Boxes: []Box{}, Cells: make([]Cell, len(r.Cells))}
+				for col := range r.Cells {
+					dest.Cells[col] = Cell{ID: fmt.Sprintf("%s:c%d", r.ID, col+1), Boxes: []Box{}}
 				}
-				if !strings.HasPrefix(r.ID, "h") {
-					var parts []string
-					for _, cell := range pr.Cells {
-						parts = append(parts, normalized(cell.Text))
-					}
-					key := strings.Join(parts, "\x1f")
-					if seenText[r.ID] == nil {
-						seenText[r.ID] = map[string]bool{}
-					}
-					if seenText[r.ID][key] {
-						delete(mapped, r.ID)
-						ambiguous[r.ID] = true
-						continue
-					}
-					seenText[r.ID][key] = true
-				}
-				dest := mapped[r.ID]
-				if dest == nil {
-					dest = &Row{ID: r.ID, Hash: r.Hash, Boxes: []Box{}, Cells: make([]Cell, len(r.Cells))}
-					for col := range r.Cells {
-						dest.Cells[col] = Cell{ID: fmt.Sprintf("%s:c%d", r.ID, col+1), Boxes: []Box{}}
-					}
-					mapped[r.ID] = dest
-				}
-				dest.Boxes = append(dest.Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(pr.Coords)})
-				for col, cell := range pr.Cells {
-					if validBox(cell.Coords) {
-						dest.Cells[col].Boxes = append(dest.Cells[col].Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(cell.Coords)})
-					}
+				mapped[r.ID] = dest
+			}
+			dest.Boxes = append(dest.Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(pr.Coords)})
+			for col, cell := range pr.Cells {
+				if validBox(cell.Coords) {
+					dest.Cells[col].Boxes = append(dest.Cells[col].Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(cell.Coords)})
 				}
 			}
 		}

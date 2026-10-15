@@ -4,7 +4,7 @@ import { resolveTableReferences, type TableGeometry } from './pdf-table-geometry
 
 const geometry: TableGeometry = {
 	version: 1,
-	algorithm: 'canonical-table-geometry-v3',
+	algorithm: 'canonical-table-geometry-v4',
 	coordinate_space: 'page-normalized-1000',
 	tables: [
 		{
