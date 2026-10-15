@@ -171,7 +171,7 @@ def _default_parser() -> str:
 # reliable signature is a *run* of consecutive code points in this narrow
 # block — real Chinese text never strings several of these rare ideographs
 # together, but every Latin letter maps into it, so garbled words produce long
-# runs. When detected, we re-parse once with pipeline OCR (reads pixels).
+# runs. When detected, we re-parse once with MinerU 4's basic OCR tier.
 
 _PASSTHROUGH_LO = 0x72AA  # 'a' in the observed font's CJK passthrough
 _PASSTHROUGH_HI = 0x72D6  # 'z' (range covers the full a-z mapping)
@@ -179,10 +179,6 @@ _PASSTHROUGH_HI = 0x72D6  # 'z' (range covers the full a-z mapping)
 
 def _ocr_fallback_enabled() -> bool:
     return _env("PDF_OCR_FALLBACK", "true").lower() not in {"0", "false", "no", "off"}
-
-
-def _ocr_fallback_lang() -> str:
-    return _env("MINERU_OCR_LANG", "ch")
 
 
 def _ocr_fallback_min_run() -> int:
@@ -222,11 +218,11 @@ def _looks_font_garbled(result: dict, min_run: int = 4) -> bool:
 
 
 def _mineru_is_ocr(backend: ParserBackend) -> bool:
-    """True when this mineru backend is already pinned to pipeline OCR, so the
+    """True when this MinerU backend is already pinned to forced OCR, so the
     guard does not re-run (or recurse) on an OCR result."""
     return (
-        getattr(backend, "_backend", "") == "pipeline"
-        and "ocr" in getattr(backend, "_extra_args", [])
+        getattr(backend, "_tier", "") == "basic"
+        and getattr(backend, "_ocr_mode", "") == "ocr"
     )
 
 
@@ -236,7 +232,7 @@ def _get_ocr_mineru(cache: dict[str, ParserBackend]) -> ParserBackend:
     if backend is None:
         from parser_mineru import make_ocr_parser
 
-        backend = make_ocr_parser(_ocr_fallback_lang())
+        backend = make_ocr_parser()
         cache[key] = backend
     return backend
 
@@ -639,7 +635,7 @@ def _process_record(
 
         # Font-encoding garble guard: if a mineru text-layer parse produced the
         # CJK-passthrough signature (Latin mapped into the CJK block), re-parse
-        # once with pipeline OCR, which reads pixels and recovers the Latin.
+        # once with MinerU 4's forced OCR mode, which reads pixels and recovers the Latin.
         if (
             parser_name == "mineru"
             and _ocr_fallback_enabled()
@@ -648,7 +644,7 @@ def _process_record(
         ):
             log.warning(
                 "(MID_2026062301) record id=%s: font-encoding garble detected "
-                "(CJK passthrough) — re-parsing with pipeline OCR",
+                "(CJK passthrough) — re-parsing with MinerU basic OCR",
                 rec_id,
             )
             try:
@@ -664,7 +660,7 @@ def _process_record(
                         rec_id,
                     )
                 else:
-                    ocr_result["engine"] = "mineru-pipeline-ocr"
+                    ocr_result["engine"] = "mineru-basic-ocr"
                     result = ocr_result
                     log.info(
                         "(MID_2026062302) record id=%s: OCR fallback recovered text",

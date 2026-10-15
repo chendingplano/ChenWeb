@@ -8,7 +8,7 @@ A unified Python service that polls the `kb.inputs` PostgreSQL table for unproce
 |---|---|---|
 | `opendata` (default) | [opendataloader-pdf](https://github.com/opendataloader-project/opendataloader-pdf) | Invokes the Java CLI JAR as a subprocess |
 | `paddleocr` | [PaddleOCR-VL](https://github.com/PaddlePaddle/PaddleOCR) | Python API with optional Apple Metal GPU (MPS) acceleration |
-| `mineru` | [MinerU](https://github.com/opendatalab/mineru) | Invokes the `mineru` CLI as a subprocess; reads `*_content_list.json` and groups items by `page_idx` |
+| `mineru` | [MinerU](https://github.com/opendatalab/mineru) 4.0.9 | Invokes `mineru-kit parse` for a ZIP result and adapts it to ChenWeb's stable page-wrapped JSON |
 | `docling` | [Docling](https://github.com/docling-project/docling) | Uses the Python `docling` package and writes `<pdf_stem>.docling.json` into the record output directory |
 
 ## Setup
@@ -24,11 +24,13 @@ uv sync
 # No extra Python package is needed here, but you still need Java 11+ and
 # opendataloader-pdf-cli.jar available (see prerequisites below).
 
-# MinerU backend:
-# Install the external MinerU project/CLI separately, for example:
+# MinerU 4.0.9 backend:
+# Install the external MinerU project/CLI separately:
 #   cd ~/Workspace/ThirdParty/mineru
 #   mise run install
-# Then point this service at the CLI with MINERU_CLI if needed.
+# This installs mineru-kit in ThirdParty/mineru/.venv and creates the default
+# ~/.mineru/config.yaml from the checked-in template when no config exists.
+# Set MINERU_CLI only when the CLI is installed elsewhere.
 
 # To enable Docling:
 uv pip install -e ".[docling]"
@@ -46,7 +48,7 @@ uv pip install -e ".[docling,paddle]"
 - **PostgreSQL** with the `kb.inputs` table
 - **Java 11+** on PATH (for the opendata backend)
 - **opendataloader-pdf JAR** at `~/Workspace/ThirdParty/opendataloader-pdf/` or set `OPENDATA_JAR_PATH`
-- **MinerU CLI** installed separately if you want to use `parser_name='mineru'`
+- **MinerU 4.0.9 CLI** installed separately if you want to use `parser_name='mineru'`
 - **Docling package** installed if you want to use `parser_name='docling'`
 
 ## Running
@@ -119,8 +121,7 @@ These tasks live in `Workspace/mise.toml`; no ChenWeb module starts or stops
 | `PDF_BATCH_SIZE` | `25` | Records fetched per poll cycle |
 | `PDF_DEFAULT_PARSER` | `opendata` | Parser when `parser_name` is not set |
 | `PDF_PIPELINE_MODE` | `poll` | `poll` (legacy DB polling) or `jetstream` (consume stage events) |
-| `PDF_OCR_FALLBACK` | `true` | Auto-detect font-encoding garble in `mineru` output and re-parse with pipeline OCR. See [Font-encoding garble OCR fallback](#font-encoding-garble-ocr-fallback). |
-| `MINERU_OCR_LANG` | `ch` | OCR language passed (`-l`) to the OCR-fallback re-parse |
+| `PDF_OCR_FALLBACK` | `true` | Auto-detect font-encoding garble in MinerU output and re-parse with MinerU 4 basic OCR. See [Font-encoding garble OCR fallback](#font-encoding-garble-ocr-fallback). |
 | `PDF_OCR_FALLBACK_MIN_RUN` | `4` | Min run of consecutive CJK-passthrough chars that triggers the fallback |
 
 ### JetStream Pipeline
@@ -155,25 +156,26 @@ error.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MINERU_CLI` | auto-detected via `PATH`, then `~/Workspace/ThirdParty/mineru/.venv/bin/mineru` | Absolute path to the `mineru` executable. Set this when you want to override auto-detection or when MinerU is installed outside the default workspace location. |
-| `MINERU_BACKEND` | `hybrid-auto-engine` (CLI default) | Passed as `-b` to the CLI. See the backend table below. |
-| `MINERU_EXTRA_ARGS` | | Extra whitespace-separated CLI args appended verbatim (e.g. `-l en`, `-m ocr`, `-u http://127.0.0.1:30000`). |
+| `MINERU_CLI` | auto-detected via `PATH`, then `~/Workspace/ThirdParty/mineru/.venv/bin/mineru-kit` | Absolute path to the MinerU Kit CLI. Set this to override auto-detection or use an installation outside the default workspace. |
+| `MINERU_CONFIG` | `~/.mineru/config.yaml` | MinerU 4 YAML configuration path. The ThirdParty `mise run install` setup creates it from `mineru.template.yaml` if absent. |
 
-Device selection is **not** a flag on the MinerU 3.x CLI — it is controlled by MinerU's own environment variable `MINERU_DEVICE_MODE` (read by MinerU internally):
+Normal parsing uses the `standard` tier and explicitly processes all pages. MinerU
+selects the available local runtime/device from its configuration. The garble
+fallback reruns the complete document with the `basic` tier and OCR forced. MinerU
+4 removed the old backend, method, and language flags; the legacy
+`MINERU_BACKEND`, `MINERU_EXTRA_ARGS`, and `MINERU_DEVICE_MODE` options are not used.
 
-| Variable | Value | Description |
-|---|---|---|
-| `MINERU_DEVICE_MODE` | `mps` / `cuda` / `cpu` | Compute device for local backends. On Apple Silicon (M1–M4) use `mps`. Already set to `mps` in `ThirdParty/mineru/mise.toml`. |
+Each parse produces a MinerU ZIP result internally. The parser adapts its
+MiddleJson V2 through MinerU 4's Content List V1 renderer and writes ChenWeb's
+existing `<pdf-stem>_content_list.json` shape:
 
-#### MinerU backends (`MINERU_BACKEND` / `-b`)
+```json
+{"pages": [{"page_number": 1, "items": [{"type": "text", "text": "..."}]}]}
+```
 
-| Value | Compute | Accuracy | When to use |
-|---|---|---|---|
-| `pipeline` | Local, classical OCR + layout models | Good, fastest | General docs, max throughput, lowest memory |
-| `vlm-auto-engine` | Local VLM (in-process) | High | Best single-box accuracy with GPU/MPS and enough RAM |
-| `hybrid-auto-engine` **(default)** | Local, mixes pipeline + VLM | Highest | MinerU's recommended default — "next-gen" solution |
-| `vlm-http-client` | Remote VLM over HTTP | High | Requires a separate `mineru-openai-server` (set `-u` via `MINERU_EXTRA_ARGS`) |
-| `hybrid-http-client` | Remote VLM + small local work | High | Same as above, with local pipeline assist |
+Page numbers are one-based, and image references point to files under the
+adjacent `images/` directory. The Go converter and stored-result contract stay
+unchanged.
 
 #### Font-encoding garble OCR fallback
 
@@ -182,23 +184,18 @@ a usable `ToUnicode` CMap. Text-layer extraction then maps those glyphs into the
 CJK Unified Ideographs block instead of ASCII, so e.g. *"intended application"*
 comes out as `犻狀狋犲狀犱犲犱犪狆狆犾犻犮犪狋犻狅狀`. The corruption is **silent**:
 the bytes are valid CJK (not `U+FFFD`), so nothing downstream flags it, and the
-default `hybrid`/`vlm` backends reproduce it because they reuse the text layer.
+standard tier can reproduce it when it reuses the text layer.
 
-After every `mineru` parse the service scans the result for this signature — a
+After every MinerU parse the service scans the result for this signature — a
 **run** of `PDF_OCR_FALLBACK_MIN_RUN` (default 4) consecutive code points in the
 passthrough block `U+72AA–U+72D6`. A run, not a count: isolated in-block
 characters (legitimate rare ideographs such as `状` U+72B6) do not trip it, but
 garbled Latin words always do. On a hit, the document is re-parsed **once** with
-the `pipeline` backend forced into OCR (`-m ocr -l <MINERU_OCR_LANG>`), which
-reads rendered pixels and recovers the Latin; the OCR result is verified clean
-before it replaces the original (`engine` becomes `mineru-pipeline-ocr`). If OCR
-fails or is still garbled, the original parse is kept and the event logged. Set
+`mineru-kit parse` using `--pages all --tier basic --ocr-mode ocr`. This reads
+rendered pixels and recovers the Latin; the OCR result is verified clean before
+it replaces the original (`engine` becomes `mineru-basic-ocr`). If OCR fails or
+is still garbled, the original parse is kept and the event logged. Set
 `PDF_OCR_FALLBACK=false` to disable.
-
-> Note: MinerU nests per-run output under `<output_dir>/<pdf_stem>/<backend>_<method>/`
-> (e.g. `hybrid_auto/`, `ocr/`). The wrapper clears this directory before each run
-> and selects the content list by newest mtime, so a stale leftover dir can never
-> be returned in place of the current run's output.
 
 ### Docling-specific
 
@@ -232,7 +229,7 @@ Docling writes a UTF-8 JSON export to:
    - `poll` mode: poll `kb.inputs` for unprocessed rows
    - `jetstream` mode: consume events from `PDF_STAGE_EVENT_SUBJECT`
 2. **Dispatch** to the appropriate backend based on `parser_name` (or `PDF_DEFAULT_PARSER`)
-   - For `mineru`, after parsing, auto-detect font-encoding garble and re-parse with pipeline OCR if needed (see [Font-encoding garble OCR fallback](#font-encoding-garble-ocr-fallback))
+   - For `mineru`, after parsing, auto-detect font-encoding garble and re-parse with forced basic-tier OCR if needed (see [Font-encoding garble OCR fallback](#font-encoding-garble-ocr-fallback))
 3. **Track progress** by updating the `"parsing"` status entry (throttled to one DB write per 3 seconds)
 4. **On completion**, replace the `"parsing"` entry with a `"parsed"` entry (success or failure)
 5. **Write results** to `{PDF_REPO_DIR}/pdf_parser/{record_id}/`
