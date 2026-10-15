@@ -26,19 +26,22 @@ compatible with the new result reader.
 Update the source checkout under `ThirdParty/mineru` to the official 4.0.9 release
 and install it in the existing ThirdParty-managed virtual environment, retaining
 the workspace path and setup entrypoint. Use the stateless
-`mineru-kit parse <pdf> --tier standard --format zip -o <zip>` command for
+`mineru-kit parse <pdf> --pages all --tier standard --format zip -o <zip>` command for
 complete-document conversion. For the existing forced-OCR fallback, use
-`mineru-kit parse <pdf> --tier basic --ocr-mode ocr --format zip -o <zip>`.
-`mineru-kit parse` processes all PDF pages by default; keep that behavior explicit
-if the release CLI supports a page-range flag. The old `-l`/`--language` option is
+`mineru-kit parse <pdf> --pages all --tier basic --ocr-mode ocr --format zip -o <zip>`.
+The `--pages all` flag explicitly retains all-page parsing. The old
+`-l`/`--language` option is
 not supported by the current 4.x CLI, so do not pass the configured legacy OCR
 language argument. Parse the ZIP result and adapt its `middle_json.json` and
 materialized `images/` assets into ChenWeb's existing consolidated JSON shape.
 Keep the current image-copy behavior and progress/heartbeat reporting.
 
 The adapter belongs in the Python parser. It should use MinerU 4's documented
-`RenderFormat.CONTENT_LIST` renderer as the normalization step, then group its
-flat content-list entries into ChenWeb's existing page wrapper. The mapping is:
+`RenderFormat.CONTENT_LIST` renderer as the normalization step: extract
+`middle_json.json` from the ZIP, load its MiddleJson V2 object, pass that object
+to MinerU 4's `render(middle_json, RenderFormat.CONTENT_LIST)`, then group the
+renderer’s flat content-list entries into ChenWeb's existing page wrapper. The
+mapping is:
 
 | MinerU 4 Content List V1 entry | ChenWeb consolidated item |
 | --- | --- |
