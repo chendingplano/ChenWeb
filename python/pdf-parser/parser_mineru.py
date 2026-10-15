@@ -215,6 +215,15 @@ class MineruParser(ParserBackend):
             self._cli, self._python, self._tier, self._ocr_mode,
         )
 
+    def _command(self, pdf_path: str) -> list[str]:
+        """mineru-kit command up to `-o`; the caller appends the output path, so `-o`
+        stays last and every option must come before it."""
+        cmd = [self._cli, "parse", pdf_path, "--pages", "all", "--tier", self._tier,
+               "--format", "zip"]
+        if self._ocr_mode != "auto":
+            cmd += ["--ocr-mode", self._ocr_mode]
+        return cmd + ["-o"]
+
     def parse(
         self,
         pdf_path: str,
@@ -231,12 +240,7 @@ class MineruParser(ParserBackend):
         pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
         content_list_path = os.path.join(output_dir, f"{pdf_stem}_content_list.json")
         images_dst_dir = os.path.join(output_dir, "images")
-        cmd: list[str] = [
-            self._cli, "parse", pdf_path, "--pages", "all", "--tier", self._tier,
-            "--format", "zip", "-o",
-        ]
-        if self._ocr_mode != "auto":
-            cmd += ["--ocr-mode", self._ocr_mode]
+        cmd = self._command(pdf_path)
 
         log.info("running MinerU Kit: %s", " ".join(cmd + ["<result.zip>"]))
 

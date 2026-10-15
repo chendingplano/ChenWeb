@@ -305,3 +305,20 @@ class TestOcrMode:
         monkeypatch.setenv("MINERU_OCR_MODE", "fast")
         with pytest.raises(RuntimeError, match="MINERU_OCR_MODE"):
             parser_mineru._configured_ocr_mode()
+
+
+class TestCommand:
+    def _parser(self, ocr_mode):
+        parser = parser_mineru.MineruParser()
+        parser._cli = "mineru-kit"
+        parser._ocr_mode = ocr_mode
+        return parser
+
+    def test_output_flag_is_last_in_auto_mode(self):
+        cmd = self._parser("auto")._command("a.pdf")
+        assert cmd[-1] == "-o" and "--ocr-mode" not in cmd
+
+    def test_ocr_mode_comes_before_output_flag(self):
+        cmd = self._parser("ocr")._command("a.pdf")
+        assert cmd[-1] == "-o"
+        assert cmd[cmd.index("--ocr-mode") + 1] == "ocr"
