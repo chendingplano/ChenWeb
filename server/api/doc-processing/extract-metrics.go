@@ -517,7 +517,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v18.md",
+		"prompt-enrich-metrics-v19.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2849,7 +2849,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v18.md"
+		promptRef = "prompt-enrich-metrics-v19.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3695,6 +3695,11 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 				"metric_name", m["metric_name"],
 				"reasoning_tags", m["reasoning_tags"],
 			)
+		}
+		result.metrics = p.recoverMultiValueMetricRows(concCtx, recordID, enrichCallID,
+			batch.chunkIdx, len(batches), inputText, batch.candidates, result.metrics)
+		if isCtxStopped(concCtx) {
+			return pass2Result{}, ErrPipelineStopped
 		}
 		for j, m := range result.metrics {
 			spans, _ := m["source_line_spans"].([]string)

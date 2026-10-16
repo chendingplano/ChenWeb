@@ -53,11 +53,30 @@ a plain interval (`a~b`, `a～b`, `a-b`) or `a±b`. Other values SHALL leave the
 
 ### Requirement: Rows holding several values are reported
 
-The system SHALL keep unchanged a row whose `metric_value` still holds more than one number joined
-by a list separator (、 ； ; ，; not `/`, which is part of units such as 次/min) or by sex labels (男…女). The run SHALL write one
+The system SHALL retry affected candidates once, in smaller evidence-preserving batches, when a
+kept Pass 2 row's `metric_value` holds more than one number joined by a list separator
+(、 ； ; ，; not `/`, which is part of units such as 次/min) or by sex labels (男…女).
+The retry SHALL use the original evidence and return separate rows with their own units, properties
+and conditions. A replacement SHALL contain multiple rows for the requested candidate, each with
+a name, value and source lines, without combined values or drop tags. Unrequested candidates SHALL
+be ignored. Retry source lines SHALL be contained in the original candidate or original row
+evidence. Every numeric token from the combined rows SHALL survive, with its sign and
+multiplicity, in the distinct replacement values; equivalent rewrites that cannot pass this
+conservative check SHALL retain the original rows. Non-combined original siblings SHALL be
+preserved for final deduplication.
+An errored, missing or invalid replacement SHALL leave the original rows unchanged.
+For any rows still holding combined values after recovery, the run SHALL write one
 `kb.doc_proc_logs` warning that lists such rows.
 
 #### Scenario: Merged cell values
 - **WHEN** a row has `metric_value` `男300 mm、女250 mm`
+- **AND** the corrective enrichment fails to return valid separate rows
 - **THEN** the row is stored unchanged, and the run's log lists its metric name and value under
   `multi_value_rows`
+
+#### Scenario: Percentage positions and a point count
+- **WHEN** a row has `metric_value` `20%、80%及中间区段任意2~3个`
+- **AND** corrective enrichment returns valid separate rows
+- **THEN** the combined row is replaced with percentage-position rows `20` and `80` (unit `%`)
+  and an intermediate-point count `2~3` (unit `个`, type `range`, endpoints 2 and 3)
+- **AND** each row keeps the original candidate identity and supporting clause's source lines

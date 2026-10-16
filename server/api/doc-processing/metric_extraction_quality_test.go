@@ -31,6 +31,21 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 		want  []wantMetric
 	}{
 		{
+			name: "timing percentage positions and intermediate point counts",
+			lines: []Line{
+				{LineNo: 286, Content: "6.5.20.1 采用误差不大于表1中计时类项目规定误差1/10的标准时间间隔发生装置，分别在量程的20%、80%及其中间区段的任意2个～3个数值上的计时起点和终点，发出测试器材计时开始和结束的模拟触发信号，每一个规定间隔时间的测定次数不应少于3次。"},
+				{LineNo: 287, Content: "6.5.20.2 采用误差不大于表1中计时类项目规定误差1/10的标准时间计量装置，分别在量程的20%、80%及其中间区段的任意2个～3个数值上的计时起点和终点，发出测试器材计时开始和结束的模拟触发信号，该触发信号同时接入标准时间计量装置，每一个规定间隔时间的测定次数不应少于3次。"},
+			},
+			want: []wantMetric{
+				{286, "20", "%", "exact", statementKindTestParameter, ""},
+				{286, "80", "%", "exact", statementKindTestParameter, ""},
+				{286, "2~3", "个", "range", statementKindTestParameter, ""},
+				{287, "20", "%", "exact", statementKindTestParameter, ""},
+				{287, "80", "%", "exact", statementKindTestParameter, ""},
+				{287, "2~3", "个", "range", statementKindTestParameter, ""},
+			},
+		},
+		{
 			name: "embedded apparatus settings in separate methods",
 			lines: []Line{
 				{LineNo: 263, Content: "6.5.13.1 将握力测试仪的手柄固定，向上施加拉力，加载装置宽度为80 mm，采用准确度为0.1%的标准测力计，分别测量最大、最小和中间3个力值，每个力值的测量次数不应少于3次。"},
@@ -157,6 +172,16 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				}
 			}
 			for _, m := range r.Metrics {
+				if strings.HasPrefix(tc.name, "timing percentage") {
+					if metricValueHoldsSeveralValues(asString(m["metric_value"])) {
+						t.Errorf("combined timing values survived: %v", m)
+					}
+					if compactMetricValue(asString(m["metric_value"])) == "2~3" &&
+						(!strings.Contains(asString(m["metric_name"])+asString(m["condition"]), "中间") ||
+							toOptionalFloat(m["value_min"]) != float64(2) || toOptionalFloat(m["value_max"]) != float64(3)) {
+						t.Errorf("point count lost intermediate-region identity or endpoints: %v", m)
+					}
+				}
 				if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"366"}}) && compactMetricValue(asString(m["metric_value"])) == "25" {
 					t.Error("adjustment trigger incorrectly emitted as a separate metric")
 				}

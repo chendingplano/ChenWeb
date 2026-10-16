@@ -69,15 +69,23 @@ remain significant. Changes:
    Asymmetric `+a/−b` is untouched. Non-range numeric rows have NULL endpoints.
 4. A `range` row without both endpoints gets them from a plain `a~b` / `a-b` / `a～b` value.
    `a±b` gives `a−b` and `a+b`.
-5. A value that still holds more than one number joined by `、 ； ; ，` or 男…女 (not `/`, which is part of units such as 次/min) is not changed.
-   One `kb.doc_proc_logs` warning per run lists those rows (`multi_value_rows`), to measure the
-   prompt fix.
+5. Before final normalization, kept Pass 2 rows holding several values joined by `、 ； ; ，`
+   or 男…女 (not `/`, which is part of units such as 次/min) trigger one corrective enrichment
+   per affected candidate evidence group. The retry receives the original candidate evidence and
+   `multi_value_rows_to_split`; mixed units and conditions need model judgement. Accept only
+   multiple named, valued, evidence-bearing rows without combined values or drop tags, scoped to
+   requested candidates. Require cited lines to stay within original evidence and every signed
+   numeric token to survive in distinct replacement values, including repeated tokens across
+   multiple combined rows. This conservative guard can reject equivalent rewrites; the original
+   remains available for review. Keep non-combined siblings for final deduplication. Failed or invalid
+   retries preserve originals. One `kb.doc_proc_logs` warning lists remaining combined rows
+   (`multi_value_rows`); corrective requests/responses use the existing enrichment activity logs.
 
 The rules are notation-only and work the same in any domain. Anything needing judgement stays in
 the prompt.
 
 **D4. New prompt versions, never edits.** Current defaults are
-`prompt-extract-metric-candidates-v20.md`, `prompt-enrich-metrics-v17.md` and
+`prompt-extract-metric-candidates-v21.md`, `prompt-enrich-metrics-v19.md` and
 `prompt-merge-resolve-metrics-v2.md`. The initial condition work used v16/v13; the record-371
 scoring follow-up (v18/v15) adds normal-line numeric coverage, candidate population binding, apparatus
 condition inheritance, explicit role classification and centred-tolerance rules. v19/v16 make a
@@ -93,6 +101,8 @@ that repeat a value (6.5.13.1 标准测力计 / 6.5.13.2 标准砝码, 80 mm in 
 the condition of each other; only the plan name and the inspection level stay in the condition.
 (3) Enrich's `inferred_count` drop covers only counts the source never writes as a number, so
 "取3处" is a row. Older files stay so old runs can be reproduced.
+Enrich v19 separates percentage check-point positions from intermediate-point counts and defines
+the corrective enrichment pass, addressing run 223's two combined rows on lines 286 and 287.
 
 **D5. `dataset_record` is a drop reason** like `procedure_count`. It goes into
 `metricDropReasonTags`, so a row the model keeps but tags this way is set aside (stage `llm_tag`)

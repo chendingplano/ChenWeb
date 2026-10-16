@@ -61,3 +61,12 @@
 - [x] 9.5 Compare condition qualifiers independently of order/repetition while preserving labels, values and distinct populations/methods
 - [x] 9.6 Update defaults and local mise pins; add an opt-in real-model quality regression with isolated output (no database metric writes)
 - [x] 9.7 Verify live prompt cases and update the conditions devdoc with results: six cases pass (27 returned rows, 16 expected assertions plus trigger exclusion); normal processor/handler suites pass (1,729 checks, four skips), go vet, doc-processor build and strict OpenSpec validation pass. Full-document re-extraction/rescoring was not performed.
+
+## 10. Combined timing test values (run 223, 2026-10-16)
+
+- [x] 10.1 Reproduce the two combined percentage-position/point-count values from record 371, lines 286/287; add failing regression tests before the fix
+- [x] 10.2 Enrich v19 separates mixed units/properties and defines corrective enrichment; update both code defaults and the local mise pin
+- [x] 10.3 Retry affected candidate evidence groups once, retaining unrelated and non-combined sibling rows; validate distinct replacement rows, source containment, signed numeric preservation and completeness before replacing originals
+- [x] 10.4 Preserve originals and the existing warning on failed/invalid retries; test omitted counts, duplicates, unrelated evidence, changed signs and incomplete multiple-row replacements
+- [x] 10.5 Verify the complete doc-processing suite, go vet for processors/handlers and strict OpenSpec validation; the live two-clause check returns all six expected assertions among ten metrics without database metric writes. Two scoring-handler tests also fail on the unmodified baseline (expected score 75, actual 90); leave those outside this fix
+- [x] 10.6 Update the conditions devdoc and contract. Existing stored rows and full-document scores are not changed; re-extraction applies the new behavior
