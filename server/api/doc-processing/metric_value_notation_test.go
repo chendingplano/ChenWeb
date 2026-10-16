@@ -149,3 +149,35 @@ func TestDatasetRecordTagIsSetAside(t *testing.T) {
 		t.Fatalf("kept=%v dropped=%v", kept, dropped)
 	}
 }
+
+func TestDropConditionPropertyRepeats(t *testing.T) {
+	cases := []struct {
+		name, metricName, subject, cond, condEn string
+		wantCond, wantEn                        string
+	}{
+		{name: "property repeated as body site", metricName: "座板高度分度值", subject: "坐高测试仪(计)",
+			cond: "适用人群：幼儿；测量部位：座板高度", condEn: "Population: young children; Site: seat height",
+			wantCond: "适用人群：幼儿", wantEn: "Population: young children"},
+		{name: "measured item repeated", metricName: "体脂率测试仪体重允许误差", subject: "体脂率测试仪",
+			cond: "适用人群：成年人；测量项目：体重；称量≤50 kg", condEn: "Population: adults; Item: body mass",
+			wantCond: "适用人群：成年人；称量≤50 kg", wantEn: "Population: adults; Item: body mass"},
+		{name: "real qualifier kept", metricName: "台阶高度", subject: "台阶试验测试仪(计)",
+			cond: "适用人群：成年人；性别：男", condEn: "Population: adults; Sex: male",
+			wantCond: "适用人群：成年人；性别：男", wantEn: "Population: adults; Sex: male"},
+		{name: "variant in subject is not a property repeat", metricName: "数值测量次数", subject: "游标式皮褶厚度仪(计)",
+			cond: "器材类型：游标式", wantCond: "器材类型：游标式"},
+		{name: "apparatus kept on its own error row", metricName: "电子秒表误差", subject: "跳绳测试仪",
+			cond: "试验装置：电子秒表", wantCond: "试验装置：电子秒表"},
+		{name: "every qualifier repeats the property", metricName: "座板深度允许误差", subject: "坐高测试仪(计)",
+			cond: "测量部位：座板深度", condEn: "Site: seat depth", wantCond: "", wantEn: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := map[string]any{"metric_name": c.metricName, "subject": c.subject, "condition": c.cond, "condition_en": c.condEn}
+			dropConditionPropertyRepeats([]map[string]any{m})
+			if m["condition"] != c.wantCond || asString(m["condition_en"]) != c.wantEn {
+				t.Fatalf("got %q / %q, want %q / %q", m["condition"], m["condition_en"], c.wantCond, c.wantEn)
+			}
+		})
+	}
+}

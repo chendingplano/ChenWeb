@@ -24,6 +24,65 @@ func metricConditionKey(m map[string]any) string {
 	return strings.ReplaceAll(c, ";", "；")
 }
 
+// metricConditionLabelRe matches the `<kind>：` label of one condition qualifier.
+var metricConditionLabelRe = regexp.MustCompile(`^[^：:]{1,12}[：:]`)
+
+// metricConditionCompact folds width and drops whitespace, for containment checks.
+func metricConditionCompact(s string) string {
+	return strings.Join(strings.Fields(width.Fold.String(s)), "")
+}
+
+// dropConditionPropertyRepeats removes condition qualifiers that only repeat the row's property:
+// "测量部位：座板高度" on 座板高度分度值, "测量项目：体重" on 体脂率测试仪体重分度值 (371). The property is
+// already in metric_name, so the qualifier adds nothing, and because condition is part of the
+// metric's identity it would keep the row from merging with the same metric stated elsewhere.
+// condition_en loses the same qualifier when both have the same number of qualifiers. A test
+// apparatus or method qualifier is kept even when the name repeats it: on the apparatus's own
+// error row (电子秒表误差, 试验装置：电子秒表) it still says which clause's setting this is.
+func dropConditionPropertyRepeats(metrics []map[string]any) {
+	for _, m := range metrics {
+		cond := strings.TrimSpace(asString(m["condition"]))
+		name := metricConditionCompact(asString(m["metric_name"]))
+		if cond == "" || name == "" {
+			continue
+		}
+		parts := strings.Split(strings.ReplaceAll(cond, ";", "；"), "；")
+		enParts := strings.Split(asString(m["condition_en"]), ";")
+		keep, keepEn := make([]string, 0, len(parts)), make([]string, 0, len(enParts))
+		for i, q := range parts {
+			label := metricConditionLabelRe.FindString(strings.TrimSpace(q))
+			v := metricConditionCompact(strings.TrimPrefix(strings.TrimSpace(q), label))
+			if v != "" && strings.Contains(name, v) && !metricConditionApparatusLabel(label) {
+				continue
+			}
+			if strings.TrimSpace(q) != "" {
+				keep = append(keep, strings.TrimSpace(q))
+			}
+			if len(enParts) == len(parts) && strings.TrimSpace(enParts[i]) != "" {
+				keepEn = append(keepEn, strings.TrimSpace(enParts[i]))
+			}
+		}
+		if len(keep) == len(parts) {
+			continue
+		}
+		m["condition"] = strings.Join(keep, "；")
+		if len(enParts) == len(parts) {
+			m["condition_en"] = strings.Join(keepEn, "; ")
+		}
+	}
+}
+
+// metricConditionApparatusLabel reports whether a qualifier label names a test apparatus or method.
+func metricConditionApparatusLabel(label string) bool {
+	l := strings.ToLower(width.Fold.String(label))
+	for _, k := range []string{"试验装置", "试验方法", "试验方式", "apparatus", "method"} {
+		if strings.Contains(l, k) {
+			return true
+		}
+	}
+	return false
+}
+
 // metricConditionsEqual reports whether two rows have the same normalized condition. An empty
 // condition differs from a non-empty one.
 func metricConditionsEqual(a, b map[string]any) bool {
@@ -185,6 +244,7 @@ func metricRowUnit(m map[string]any) string {
 // normalizeMetricValueNotation applies design D3 to rows whose range types are already
 // canonical: unit and comparator out of metric_value, ±x as upper_bound, range endpoints.
 func normalizeMetricValueNotation(metrics []map[string]any) {
+	dropConditionPropertyRepeats(metrics)
 	for _, m := range metrics {
 		value := strings.TrimSpace(asString(m["metric_value"]))
 		if value == "" {

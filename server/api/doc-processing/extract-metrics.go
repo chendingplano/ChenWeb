@@ -491,11 +491,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v16.md",
+		"prompt-extract-metric-candidates-v17.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v13.md",
+		"prompt-enrich-metrics-v14.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2822,7 +2822,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v13.md"
+		promptRef = "prompt-enrich-metrics-v14.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3711,6 +3711,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 			detectedLanguage = r.language
 		}
 	}
+	dropConditionPropertyRepeats(metrics)
 	metrics = dedupeFinalMetricRows(metrics)
 	canonicalizeMetricValueRangeTypes(metrics)
 	normalizeMetricValueNotation(metrics)
@@ -3718,6 +3719,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 
 	// Set-aside rows, in stage order (spec metric-row-soft-drop, design D2).
 	var dropped []droppedMetricRow
+	dropConditionPropertyRepeats(tagged)
 	tagged = dedupeFinalMetricRows(tagged)
 	canonicalizeMetricValueRangeTypes(tagged)
 	normalizeMetricValueNotation(tagged)
