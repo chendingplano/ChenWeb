@@ -41,6 +41,7 @@ type metricWikiInfobox struct {
 	ThresholdOrTarget string   `json:"threshold_or_target,omitempty"`
 	MeasurementFreq   string   `json:"measurement_frequency,omitempty"`
 	Subject           string   `json:"subject,omitempty"`
+	Condition         string   `json:"condition,omitempty"`
 	Confidence        *float64 `json:"confidence,omitempty"`
 }
 
@@ -201,6 +202,15 @@ func parseMetricWikiProse(payload map[string]any) metricWikiProse {
 	}
 }
 
+// metricWikiCondition picks the condition in the page language: the English rendering for an
+// English page when there is one, otherwise the source-language condition.
+func metricWikiCondition(m metricRecord, lang string) string {
+	if lang == "en" {
+		return firstNonEmpty(ptrStr(m.ConditionEn), ptrStr(m.Condition))
+	}
+	return firstNonEmpty(ptrStr(m.Condition), ptrStr(m.ConditionEn))
+}
+
 // assembleMetricWikiPage merges grounded fields with LLM prose.
 func assembleMetricWikiPage(mctx metricWikiContext, prose metricWikiProse, modelName, lang string) metricWikiPage {
 	m := mctx.Metric
@@ -220,6 +230,7 @@ func assembleMetricWikiPage(mctx metricWikiContext, prose metricWikiProse, model
 			ThresholdOrTarget: ptrStr(m.ThresholdOrTarget),
 			MeasurementFreq:   ptrStr(m.MeasurementFreq),
 			Subject:           firstNonEmpty(ptrStr(m.MetricSubject), ptrStr(m.MetricSubjectEn)),
+			Condition:         metricWikiCondition(m, lang),
 			Confidence:        m.Confidence,
 		},
 		InThisCorpus: metricWikiCorpus{

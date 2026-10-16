@@ -43,3 +43,11 @@
 
 - [x] 7.1 KnowledgeStore devdoc for extract_metrics conditions (what changed, how condition is defined, identity rule)
 - [x] 7.2 Note in `extract-metrics-structured-output` that the doc-processor write path is completed by this change
+
+## 8. Gold condition_en and pages (follow-up request, 2026-10-16)
+
+- [x] 8.1 Migration `20261016000002_add_testbed_metrics_condition_en.sql`; `extract-metrics-benchmark` validates/saves `condition_en` (required from rules 6.4.0 for a non-English condition)
+- [x] 8.2 Metrics API (`metrics_handler.go`: list, gold list, single fetch; `metrics_dropped.go`) returns `condition` / `condition_en`; PATCH accepts them
+- [x] 8.3 Metric detail panel (Metrics workspace, Product Review "Full Details") and the production-vs-gold comparison shelf show Condition and Condition (English); Paraglide keys in both message files
+- [x] 8.4 Metric wiki infobox shows the condition in the page language (new or refreshed pages; cached pages keep their old infobox)
+- [x] 8.5 In-app scorer prompt v2 (`prompt-score-extract-metrics-v2.md`): condition pairing and condition overrides, matching the skill; scorer tests expect scoring-version-2 scores

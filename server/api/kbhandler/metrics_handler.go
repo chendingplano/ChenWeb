@@ -80,6 +80,10 @@ type metricRecord struct {
 	RefMentionID     *int64  `json:"ref_mention_id,omitempty"`
 	RefInputRecordID *int64  `json:"ref_input_record_id,omitempty"`
 	RefMetricID      *string `json:"ref_metric_id,omitempty"`
+	// Condition / ConditionEn: when, where, for whom or how the value holds
+	// (openspec change extract-metrics-conditions).
+	Condition   *string `json:"condition,omitempty"`
+	ConditionEn *string `json:"condition_en,omitempty"`
 	// TableContext is built at read time from SourceTableRows: header + matched rows
 	// + one neighbor data row either side. Never stored.
 	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
@@ -190,7 +194,8 @@ SELECT
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     NULL::text AS keyword_concept_id, NULL::text AS metric_definition_term_id, NULL::text AS value_range_type_error,
     m.source_table_rows, NULL::bigint AS provision_id,
-    NULL::bigint AS ref_mention_id, NULL::bigint AS ref_input_record_id, NULL::text AS ref_metric_id
+    NULL::bigint AS ref_mention_id, NULL::bigint AS ref_input_record_id, NULL::text AS ref_metric_id,
+    m.condition, m.condition_en
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
@@ -247,7 +252,8 @@ SELECT
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
-    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
+    m.condition, m.condition_en
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -327,6 +333,7 @@ ORDER BY m.id ASC
 			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 			&tableRowsBytes, &r.ProvisionID,
 			&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
+			&r.Condition, &r.ConditionEn,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -448,7 +455,8 @@ SELECT
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
-    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
+    m.condition, m.condition_en
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -486,6 +494,7 @@ WHERE m.id = $1
 		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 		&tableRowsBytes, &r.ProvisionID,
 		&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
+		&r.Condition, &r.ConditionEn,
 	)
 	if err != nil {
 		return metricRecord{}, err
@@ -1049,7 +1058,8 @@ func UpdateMetric(c echo.Context) error {
 			"metric_desc", "metric_desc_en", "metric_context", "metric_context_en",
 			"model_name", "location_type", "metric_unit", "metric_unit_en",
 			"metric_value", "value_data_type", "value_range_type", "value_class", "value_class_en",
-			"formula_or_definition", "threshold_or_target", "measurement_frequency", "table_name_or_section":
+			"formula_or_definition", "threshold_or_target", "measurement_frequency", "table_name_or_section",
+			"condition", "condition_en":
 			value, err := decodeStringValue(raw, false)
 			if err != nil {
 				return c.JSON(http.StatusBadRequest, errorResponse{

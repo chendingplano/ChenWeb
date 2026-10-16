@@ -170,7 +170,7 @@ func TestMetricScoreScorerParityAndInvalidMatches(t *testing.T) {
 	if err = json.Unmarshal(score, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Score != 70 || result.Scorer != "model-exact-id" {
+	if result.Score != 75 || result.Scorer != "model-exact-id" {
 		t.Fatalf("scorer result %s", score)
 	}
 	for _, invalid := range []string{
@@ -348,7 +348,7 @@ else:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !called || evidence.Model != "scorer-exact-model" || !strings.Contains(evidence.Report, "Score: 70 / 100") {
+	if !called || evidence.Model != "scorer-exact-model" || !strings.Contains(evidence.Report, "Score: 75 / 100") {
 		t.Fatalf("unexpected result model=%s report=%s", evidence.Model, evidence.Report)
 	}
 	var saved map[string]any

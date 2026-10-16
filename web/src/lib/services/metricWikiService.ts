@@ -16,6 +16,7 @@ export type MetricWikiInfobox = {
 	threshold_or_target?: string;
 	measurement_frequency?: string;
 	subject?: string;
+	condition?: string;
 	confidence?: number;
 };
 

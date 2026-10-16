@@ -17,6 +17,7 @@ export type MetricWikiCopy = {
 	thresholdOrTarget: string;
 	measurementFrequency: string;
 	subject: string;
+	condition: string;
 	confidence: string;
 	noStructuredValues: string;
 	buildingTitle: string;
@@ -53,6 +54,7 @@ const EN_COPY: MetricWikiCopy = {
 	thresholdOrTarget: 'Threshold / target',
 	measurementFrequency: 'Measurement frequency',
 	subject: 'Subject',
+	condition: 'Condition',
 	confidence: 'Confidence',
 	noStructuredValues: 'No structured values recorded.',
 	buildingTitle: 'Building this page…',
@@ -89,6 +91,7 @@ const ZH_CN_COPY: MetricWikiCopy = {
 	thresholdOrTarget: '阈值 / 目标',
 	measurementFrequency: '测量频率',
 	subject: '主题',
+	condition: '条件',
 	confidence: '置信度',
 	noStructuredValues: '暂无结构化字段。',
 	buildingTitle: '正在构建页面…',

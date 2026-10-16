@@ -108,6 +108,7 @@
 		add(copy.thresholdOrTarget, infobox.threshold_or_target);
 		add(copy.measurementFrequency, infobox.measurement_frequency);
 		add(copy.subject, infobox.subject);
+		add(copy.condition, infobox.condition);
 		const confidence = num(infobox.confidence);
 		if (confidence !== null) add(copy.confidence, confidence);
 		return rows;

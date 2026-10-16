@@ -329,7 +329,8 @@ SELECT
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
-    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
+    m.condition, m.condition_en
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -355,7 +356,7 @@ WHERE m.id = $1
 		"document_title", "document_doc_no", "object_name",
 		"table_name_or_section", "reasoning_tags", "created_at",
 		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error", "source_table_rows", "provision_id",
-		"ref_mention_id", "ref_input_record_id", "ref_metric_id",
+		"ref_mention_id", "ref_input_record_id", "ref_metric_id", "condition", "condition_en",
 	}).AddRow(
 		int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
@@ -364,7 +365,7 @@ WHERE m.id = $1
 		"Definition", "Threshold", "monthly", 0.82, true, "Dynamic BP Spec", "T/JXAS 010—2021", "Adult patient",
 		"Table 2", `["named_metric"]`,
 		"2026-05-07T13:00:00+00:00",
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, "适用人群：成年人", "Population: adults",
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(11)).WillReturnRows(rows)
 
@@ -402,6 +403,10 @@ WHERE m.id = $1
 	}
 	if payload.Record.DocumentDocNo == nil || *payload.Record.DocumentDocNo != "T/JXAS 010—2021" {
 		t.Fatalf("expected document doc_no, got %+v", payload.Record.DocumentDocNo)
+	}
+	if payload.Record.Condition == nil || *payload.Record.Condition != "适用人群：成年人" ||
+		payload.Record.ConditionEn == nil || *payload.Record.ConditionEn != "Population: adults" {
+		t.Fatalf("expected condition and condition_en, got %+v / %+v", payload.Record.Condition, payload.Record.ConditionEn)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -460,7 +465,8 @@ SELECT
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
-    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id
+    m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
+    m.condition, m.condition_en
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -487,7 +493,7 @@ ORDER BY m.id ASC
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"document_title", "document_doc_no", "object_name", "table_name_or_section", "reasoning_tags", "created_at",
 		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error", "source_table_rows", "provision_id",
-		"ref_mention_id", "ref_input_record_id", "ref_metric_id",
+		"ref_mention_id", "ref_input_record_id", "ref_metric_id", "condition", "condition_en",
 	}
 	addRow := func(rows *sqlmock.Rows, id int64, name string, spans string) *sqlmock.Rows {
 		return rows.AddRow(
@@ -495,7 +501,7 @@ ORDER BY m.id ASC
 			name, name, spans, "subject", "subject", "desc", "desc", "context", "context",
 			`[]`, `[]`, "model", "paragraph", "mmHg", "mmHg", "", "number", "exact", "class", "class",
 			"", "", "", 0.95, true, "title", "doc-no", "object", "section", `[]`, "2026-07-12T10:00:00+00:00",
-			nil, nil, nil, nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		)
 	}
 	rows := sqlmock.NewRows(cols)

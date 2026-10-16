@@ -241,6 +241,10 @@ export type KbMetricRecord = {
 	value_class_en?: string;
 	formula_or_definition?: string;
 	threshold_or_target?: string;
+	/** When, where, for whom or how the value holds (kb.metrics / testbed.metrics.condition). */
+	condition?: string | null;
+	/** English rendering of condition for non-English documents. */
+	condition_en?: string | null;
 	measurement_frequency?: string;
 	confidence?: number;
 	is_explicit_metric?: boolean;

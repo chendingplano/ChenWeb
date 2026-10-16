@@ -236,6 +236,14 @@ export function buildMetricGroupAttrs(
 		textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
 		textAttr('metric_artifact_id', 'Metric ID', HashIcon, fmt(m.metric_id), has(m.metric_id)),
 		textAttr('subject', 'Subject', TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
+		textAttr('condition', msg.metric_mgmt_condition(), MapPinIcon, fmt(m.condition), has(m.condition)),
+		textAttr(
+			'condition_en',
+			msg.metric_mgmt_condition_en(),
+			MapPinIcon,
+			fmt(m.condition_en),
+			has(m.condition_en)
+		),
 		textAttr('object_name', 'Object', FileIcon, fmt(m.object_name), has(m.object_name)),
 		textAttr(
 			'frequency',

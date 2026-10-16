@@ -229,6 +229,8 @@
 		[['metric_name_en'], () => msg.context_shelf_metric_name_en()],
 		[['metric_subject'], () => msg.context_shelf_metric_subject()],
 		[['metric_subject_en'], () => msg.context_shelf_metric_subject_en()],
+		[['condition'], () => msg.context_shelf_metric_condition()],
+		[['condition_en'], () => msg.context_shelf_metric_condition_en()],
 		[['metric_desc'], () => msg.context_shelf_metric_description()],
 		[['metric_desc_en'], () => msg.context_shelf_metric_description_en()],
 		[['metric_context'], () => msg.context_shelf_metric_context()],
