@@ -30,6 +30,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 			"value_range_type":    m["value_range_type"],
 			"value_class":         m["value_class"],
 			"threshold_or_target": m["threshold_or_target"],
+			"condition":           m["condition"],
 			"metric_categories":   m["metric_categories"],
 			"source_line_spans":   m["source_line_spans"],
 		})

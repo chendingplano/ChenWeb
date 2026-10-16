@@ -1515,6 +1515,10 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			sqlmock.AnyArg(),
 			nil,
 			nil, // source_table_rows: no table row references
+			"在 1 m 距离处",
+			"at a distance of 1 m",
+			nil, // value_min: not a range
+			nil, // value_max
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -1553,6 +1557,8 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 				"reasoning_tags":        []string{"named_metric"},
 				"metric_categories":     []string{"performance"},
 				"metric_categories_en":  []string{"performance_en"},
+				"condition":             "在 1 m 距离处",
+				"condition_en":          "at a distance of 1 m",
 			},
 		},
 	})
@@ -1588,13 +1594,17 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-			sqlmock.AnyArg()).
+			sqlmock.AnyArg(),
+			"适用人群：幼儿", nil, float64(600), float64(1600)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
 		InputRecordID: 173,
+		Language:      "en",
 		Metrics: []map[string]any{
-			{"metric_id": "173_mtc_1", "metric_name": "Latency", "source_line_spans": []any{float64(2)}},
+			{"metric_id": "173_mtc_1", "metric_name": "Latency", "source_line_spans": []any{float64(2)},
+				"condition": "适用人群：幼儿", "condition_en": "ignored for English documents",
+				"value_min": float64(600), "value_max": float64(1600)},
 		},
 	})
 	if err != nil {
@@ -1648,7 +1658,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
 		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en",
 		"keyword_concept_id", "metric_definition_term_id", "subject_concept_id", "ext_info",
-		"source_table_rows",
+		"source_table_rows", "condition", "condition_en", "value_min", "value_max",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1659,6 +1669,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		`["performance"]`, `["performance"]`, `[{"category_path":[{"name":"System Safety"},{"name":"Alarm Thresholds"}]}]`, `[{"category_path":[{"name":"System Safety"}]}]`,
 		"kwc:latency", "mdt:latency", "kwc:api", `{"language":"zh","schema_version":"2"}`,
 		`[{"line":116,"rows":["r1"],"row_hash":{"r1":"3fa1c09b7e22"}}]`,
+		"适用人群：幼儿", "Population: preschool children", nil, nil,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).
@@ -1680,6 +1691,12 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 	}
 	if row["metric_name"] != "Latency" {
 		t.Fatalf("metric_name=%#v", row["metric_name"])
+	}
+	if row["condition"] != "适用人群：幼儿" || row["condition_en"] != "Population: preschool children" {
+		t.Fatalf("condition=%#v condition_en=%#v", row["condition"], row["condition_en"])
+	}
+	if row["value_min"] != nil || row["value_max"] != nil {
+		t.Fatalf("value_min=%#v value_max=%#v, want nil for NULL columns", row["value_min"], row["value_max"])
 	}
 	kwEn, ok := row["metric_keywords_en"].([]any)
 	if !ok || len(kwEn) != 1 || kwEn[0] != "latency" {

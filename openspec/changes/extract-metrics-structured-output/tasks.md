@@ -43,3 +43,10 @@
 - [x] 7.1 Update ADR `2026072901` §8.2 `extract_metrics` status annotation: structured output now consumed; `value_min`/`value_max`/`condition` added; QUDT resolution closed
 - [x] 7.2 Update P3 log `2026080103` §12 addendum: mark §8 item 10 (structured output) and §8 item 13 (unit-term resolution) closed
 - [x] 7.3 Update review devdoc `2026080106` "Separately" note: `extract_metrics` decision made and implemented (link to this change)
+
+## Follow-up (2026-10-16)
+
+Task 4.2 wired `value_min`/`value_max`/`condition` into the `kbhandler` import path only. The
+doc-processor path (`server/api/doc-processing/extract-metrics.go`), which writes every current
+`kb.metrics` row, still dropped all three (0 of 2,383 rows had a condition). Change
+`extract-metrics-conditions` completes that path and adds `condition_en`.

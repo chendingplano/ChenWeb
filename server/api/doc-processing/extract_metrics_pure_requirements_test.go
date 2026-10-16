@@ -131,19 +131,22 @@ func TestLogDroppedMetricRowsWritesOneEntry(t *testing.T) {
 }
 
 func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
-	for _, key := range []string{"EXTRACT_METRIC_CANDIDATES_PROMPT", "ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"} {
+	for _, key := range []string{"EXTRACT_METRIC_CANDIDATES_PROMPT", "ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME", "METRIC_MERGE_RESOLVE_PROMPT"} {
 		t.Setenv(key, "")
 	}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
-	if p.MentionPromptRef != "prompt-extract-metric-candidates-v15.md" {
-		t.Fatalf("MentionPromptRef=%q, want v15", p.MentionPromptRef)
+	if p.MentionPromptRef != "prompt-extract-metric-candidates-v16.md" {
+		t.Fatalf("MentionPromptRef=%q, want v16", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v12.md" {
-		t.Fatalf("RelationPromptRef=%q, want v12", p.RelationPromptRef)
+	if p.RelationPromptRef != "prompt-enrich-metrics-v13.md" {
+		t.Fatalf("RelationPromptRef=%q, want v13", p.RelationPromptRef)
+	}
+	if p.MergeResolvePromptRef != "prompt-merge-resolve-metrics-v2.md" {
+		t.Fatalf("MergeResolvePromptRef=%q, want v2", p.MergeResolvePromptRef)
 	}
 	// Prompts load relative to the server's working directory; from this test,
 	// check the files exist in the repo's prompts/ directory instead.
-	for _, ref := range []string{p.MentionPromptRef, p.RelationPromptRef} {
+	for _, ref := range []string{p.MentionPromptRef, p.RelationPromptRef, p.MergeResolvePromptRef} {
 		if _, err := os.Stat(filepath.Join("..", "..", "..", "prompts", ref)); err != nil {
 			t.Fatalf("default prompt %s missing: %v", ref, err)
 		}
@@ -162,7 +165,8 @@ func TestUnaccountedMetricCandidates(t *testing.T) {
 
 func TestMetricRelationBatchPromptAsksForDroppedCandidates(t *testing.T) {
 	prompt := buildMetricRelationBatchPrompt([]metricCandidate{{CandidateID: "6_2"}})
-	for _, want := range []string{`"dropped_candidates"`, `"candidate_id":"string"`, `"candidate_id":"6_2"`} {
+	for _, want := range []string{`"dropped_candidates"`, `"candidate_id":"string"`, `"candidate_id":"6_2"`,
+		`"condition":"string"`, `"condition_en":"string"`, `"value_min":0`, `"value_max":0`, `"condition_hint":""`} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("batch prompt missing %s", want)
 		}
