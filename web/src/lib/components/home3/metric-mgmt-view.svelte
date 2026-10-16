@@ -1145,6 +1145,18 @@
 
 	async function selectMetric(m: KbMetricRecord) {
 		selectedMetricId = m.id;
+		await tick();
+		const list = document.querySelector('.metric-sidebar .metrics-list') as HTMLElement | null;
+		const card = list?.querySelector('.metric-card.selected') as HTMLElement | null;
+		if (list && card) {
+			const listRect = list.getBoundingClientRect();
+			const cardRect = card.getBoundingClientRect();
+			const cardTop = cardRect.top - listRect.top + list.scrollTop;
+			list.scrollTo({
+				top: Math.max(0, cardTop - list.clientHeight / 2 + cardRect.height / 2),
+				behavior: 'smooth'
+			});
+		}
 		onMetricDetailsChange?.(metricDetails as unknown as Snippet);
 		highlightSelectionVersion += 1;
 		enterFocusMode();
@@ -1414,7 +1426,7 @@
 />
 
 {#snippet metricInfoCard(metric: KbMetricRecord)}
-	<div class="metric-floating-card">
+	<div class="metric-floating-card" class:light={!darkMode}>
 		<div class="metric-floating-kicker">
 			<span class="metric-floating-id">#{metric.id}</span>
 			{#if metric.confidence != null}
@@ -3189,8 +3201,8 @@
 		background: var(--panel-bg);
 	}
 	.metric-card.selected {
-		border-color: var(--crimson);
-		background: var(--crimson-faint);
+		border-color: #3b82f6;
+		background: #3b82f6;
 	}
 	.card-rule {
 		width: 4px;
@@ -3202,7 +3214,7 @@
 		background: var(--brass);
 	}
 	.metric-card.selected .card-rule {
-		background: var(--crimson);
+		background: #1d4ed8;
 	}
 	.card-body {
 		padding: 12px 14px 12px 12px;
@@ -3245,7 +3257,15 @@
 		color: var(--text-primary);
 	}
 	.metric-card.selected .card-name {
-		color: var(--crimson);
+		color: #fff;
+	}
+	.metric-card.selected .card-index,
+	.metric-card.selected .card-conf,
+	.metric-card.selected .card-desc,
+	.metric-card.selected .card-foot { color: #fff; }
+	.metric-card.selected .chip {
+		color: #fff;
+		border-color: rgba(255, 255, 255, 0.45);
 	}
 	.card-desc {
 		font-size: 12px;
@@ -3861,6 +3881,12 @@
 		color: var(--text-primary);
 		backdrop-filter: blur(10px);
 	}
+	.metric-floating-card.light {
+		border-color: var(--ink-line);
+		background: var(--panel-bg);
+		box-shadow: 0 18px 40px rgba(26, 20, 16, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+		color: var(--text-primary);
+	}
 	.metric-floating-kicker,
 	.metric-floating-meta {
 		display: flex;
@@ -3891,6 +3917,7 @@
 		line-height: 1.2;
 		color: var(--paper);
 	}
+	.metric-floating-card.light .metric-floating-name { color: var(--text-primary); }
 	.metric-floating-desc {
 		font-size: 12px;
 		line-height: 1.5;
@@ -3929,6 +3956,7 @@
 		color: var(--paper);
 		background: rgba(22, 163, 74, 0.16);
 	}
+	.metric-floating-card.light .metric-floating-table tr.matched td { color: var(--text-primary); }
 	.doc-foot-hint {
 		font-size: 12px;
 		line-height: 1.5;

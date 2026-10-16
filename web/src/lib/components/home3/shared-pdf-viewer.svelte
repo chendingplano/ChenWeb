@@ -442,7 +442,7 @@
 			floatingOverlayPage = pageNo;
 			floatingOverlayLeft = maxLeft;
 			const cardHeight = floatingOverlayEl?.offsetHeight ?? 0;
-			floatingOverlayTop = Math.max(8, firstHighlight.offsetTop - cardHeight - 12);
+			floatingOverlayTop = firstHighlight.offsetTop - cardHeight - 12;
 			return;
 		}
 		floatingOverlayPage = null;
@@ -471,16 +471,8 @@
 		const pageShell = card.closest('.pdf-canvas-shell') as HTMLElement | null;
 		if (!pageShell) return;
 		const shellRect = pageShell.getBoundingClientRect();
-		const maxLeft = Math.max(8, pageShell.clientWidth - card.offsetWidth - 8);
-		const maxTop = Math.max(8, pageShell.clientHeight - card.offsetHeight - 8);
-		floatingOverlayLeft = Math.min(
-			maxLeft,
-			Math.max(8, event.clientX - shellRect.left - floatingOverlayDrag.offsetX)
-		);
-		floatingOverlayTop = Math.min(
-			maxTop,
-			Math.max(8, event.clientY - shellRect.top - floatingOverlayDrag.offsetY)
-		);
+		floatingOverlayLeft = event.clientX - shellRect.left - floatingOverlayDrag.offsetX;
+		floatingOverlayTop = event.clientY - shellRect.top - floatingOverlayDrag.offsetY;
 	}
 
 	function stopFloatingOverlayDrag(event: PointerEvent) {
@@ -499,17 +491,22 @@
 		const hostRect = host.getBoundingClientRect();
 		const highlightRect = firstHighlight.getBoundingClientRect();
 
-		// Position of highlight's top edge relative to host's scroll origin
-		const relativeTop = highlightRect.top - hostRect.top + host.scrollTop;
-		const relativeBottom = relativeTop + highlightRect.height;
+		const margin = Math.min(64, host.clientHeight * 0.12);
+		const visibleTop = hostRect.top + margin;
+		const visibleBottom = hostRect.bottom - margin;
+		let targetScrollTop = host.scrollTop;
 
-		// Already fully visible within the host's visible area — no scroll needed
-		const visTop = host.scrollTop;
-		const visBottom = visTop + host.clientHeight;
-		if (relativeTop >= visTop && relativeBottom <= visBottom) return true;
+		if (highlightRect.height > visibleBottom - visibleTop) {
+			const relativeTop = highlightRect.top - hostRect.top + host.scrollTop;
+			targetScrollTop = relativeTop - host.clientHeight / 2 + highlightRect.height / 2;
+		} else if (highlightRect.top < visibleTop) {
+			targetScrollTop -= visibleTop - highlightRect.top;
+		} else if (highlightRect.bottom > visibleBottom) {
+			targetScrollTop += highlightRect.bottom - visibleBottom;
+		} else {
+			return true;
+		}
 
-		// Center the highlight within the host's visible area
-		const targetScrollTop = relativeTop - host.clientHeight / 2 + highlightRect.height / 2;
 		host.scrollTo({ top: Math.max(0, targetScrollTop), behavior });
 		return true;
 	}

@@ -631,7 +631,7 @@
 								<div class="card-desc">{run}</div>
 							{/each}
 							<div class="card-foot">
-								<span class="chip chip-quiet">{display.description || formatMaybeDate(record.create_time)}</span>
+								<span>{display.description || formatMaybeDate(record.create_time)}</span>
 							</div>
 						</div>
 					</button>
@@ -908,10 +908,15 @@
 	.record-browser-card.selected,
 	.record-card.selected {
 		border-color: var(--highlight);
-		background: var(--rb-panel);
+		background: var(--highlight);
 	}
 	.card-rule { background: var(--rb-line); transition: background 150ms; }
-	.record-browser-card.selected .card-rule { background: var(--highlight); }
+	.record-browser-card.selected .card-rule { background: var(--rb-panel); }
+	.record-browser-card.selected .card-index,
+	.record-browser-card.selected .card-conf,
+	.record-browser-card.selected .card-name,
+	.record-browser-card.selected .card-desc,
+	.record-browser-card.selected .card-foot { color: #fff; }
 	.card-body { padding: 0.95rem 1rem 1rem; }
 	.card-row-top, .record-head {
 		display: flex;
