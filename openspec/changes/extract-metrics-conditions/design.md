@@ -77,7 +77,7 @@ The rules are notation-only and work the same in any domain. Anything needing ju
 the prompt.
 
 **D4. New prompt versions, never edits.** Current defaults are
-`prompt-extract-metric-candidates-v19.md`, `prompt-enrich-metrics-v16.md` and
+`prompt-extract-metric-candidates-v20.md`, `prompt-enrich-metrics-v17.md` and
 `prompt-merge-resolve-metrics-v2.md`. The initial condition work used v16/v13; the record-371
 scoring follow-up (v18/v15) adds normal-line numeric coverage, candidate population binding, apparatus
 condition inheritance, explicit role classification and centred-tolerance rules. v19/v16 make a
@@ -85,8 +85,14 @@ number that only qualifies another value of its clause (a paired load, an appara
 restated setting) that value's condition instead of a row, keep repeatability limits ("不应大于允许误差的
 绝对值" → 1 倍), and keep a one-cell table candidate to its own cell. In code, `groupCandidatesByChunk` no longer cuts an
 enrich batch between candidates quoting the same evidence: record 371's Table 1 走平衡木 row split
-across two batches, and the batch holding only 计时 re-emitted 分度值/允许误差 (mtc_315/316). Older files
-stay so old runs can be reproduced.
+across two batches, and the batch holding only 计时 re-emitted 分度值/允许误差 (mtc_315/316). v20/v17
+fix the three gold rows the v18/v15 run (log run 221, score 95) still missed. (1) The
+same-setting restatement rule covers one clause and one method only. Sibling method clauses
+that repeat a value (6.5.13.1 标准测力计 / 6.5.13.2 标准砝码, 80 mm in both) give one row per method.
+(2) The parameters of a sampling plan (AQL, sample size) are candidates and rows of their own, not
+the condition of each other; only the plan name and the inspection level stay in the condition.
+(3) Enrich's `inferred_count` drop covers only counts the source never writes as a number, so
+"取3处" is a row. Older files stay so old runs can be reproduced.
 
 **D5. `dataset_record` is a drop reason** like `procedure_count`. It goes into
 `metricDropReasonTags`, so a row the model keeps but tags this way is set aside (stage `llm_tag`)

@@ -513,11 +513,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v19.md",
+		"prompt-extract-metric-candidates-v20.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v16.md",
+		"prompt-enrich-metrics-v17.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2844,7 +2844,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v16.md"
+		promptRef = "prompt-enrich-metrics-v17.md"
 	}
 
 	paths := make([]string, 0, 8)
