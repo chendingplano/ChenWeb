@@ -50,8 +50,8 @@ one centre with tolerance (`a±b`). Never put two values in one row. Split inste
 
 - one property with different values for different conditions (sex, size class, population,
   mass band, body site, test method, …) → one row per value, each with its own `condition`
-  (e.g. "男300 mm、女250 mm" → 300 with condition 男 and 250 with condition 女; "≤50 kg:±0.1 kg；
-  >50 kg:±0.2 kg" → two rows, conditions "称量≤50 kg" and "称量>50 kg")
+  (e.g. "男300 mm、女250 mm" → 300 with condition `性别：男` and 250 with condition `性别：女`; "≤50 kg:±0.1 kg；
+  >50 kg:±0.2 kg" → two rows, conditions `称量：≤50 kg` and `称量：>50 kg`)
 - a list of settings or check points (e.g. "在 10 mm、30 mm、50 mm 处检验", "200、400、600 mL/s")
   → one row per listed value
 - mixed units in a selection rule are different properties. For example, "量程的20%、80%及其中间
@@ -194,6 +194,10 @@ value?
   `not_a_metric:condition_of:<the 弯曲变形 candidate>`
 - the grade, class or model of an apparatus: "采用 5 等量块进行检验" → `试验装置：5 等量块` is the
   apparatus qualifier of the clause's test-setting rows; no 量块等级 row
+- a flow rate, speed or level that only fixes the point at which another quantity is delivered or
+  measured: "分别在 200 mL/s、400 mL/s 和 600 mL/s 的流量点上进行测量…其通气量应分别为 1200 mL、3000 mL
+  和 6800 mL" → the volumes are rows with `condition` `流量点：200 mL/s` and so on; each 流量点 candidate is
+  dropped as `not_a_metric:condition_of:<the volume candidate>`
 - the same setting stated again in the same clause: 6.4.2.1 places the product on "一个与水平面成 10°
   倾斜平面" and, for another situation, "以最不利的方向将其倾斜 10°" → one tilt row; the restatement is
   `duplicate_of:<the first tilt candidate>`
@@ -415,6 +419,12 @@ applied: `inspection_requirement`, `delegated_requirement`, `own_table_pointer`,
 `duplicate_of:<candidate_id>`, or
 `not_a_metric:<why>`. Never drop a candidate silently.
 
+`duplicate_of:<candidate_id>` needs the SAME property of the SAME quantity with the same value: the
+same setting stated twice. Different quantities that happen to share a number are not duplicates
+(平台长度允许误差 ±5 mm, 平台宽度允许误差 ±5 mm and 平台高度允许误差 ±5 mm are three rows), and a
+tolerance, resolution or count is never a duplicate of the dimension, range or setting it belongs to
+(平衡木长度允许误差 ±5 mm is not `duplicate_of` 平衡木高度 300 mm). When unsure, keep the row.
+
 ## Value Classification (Required)
 
 Every metric must be classified using two fields with a fixed, closed vocabulary. Do not
@@ -456,6 +466,11 @@ The same holds for a limit tied to another table of the same document: "耐久�
 `condition` `试验阶段：耐久性试验后`. Never drop it as `value_is_relative_to_table1` or any other
 "relative" reason: a limit stated relative to another limit has a value (see above). Use only the
 drop reasons listed in this prompt; do not invent new ones.
+
+This applies only when the clause fixes the ratio: "绝对值" (1 倍), "1/10", "1.25 倍". A clause that
+only points at the whole table ("应满足表1中的允许误差范围", "示值误差应符合表1的规定") states no ratio:
+it is a pointer to the table's own rows, dropped as `own_table_pointer`; do not turn it into a
+"1 倍" row.
 - `range` — a closed interval with both a lower and upper value stated, including a centre with tolerance `a±b` (`20±5`, value kept as written)
 - `qualitative` — the source describes the property in words, without a number (e.g. an observed "colour: dark brown"). Never use it for a requirement: a requirement with no number and no open value is a pure requirement, which you do not emit (see above)
 - `limit_absent` — the source names the quantity but sets no number for it: it states that no fixed numeric limit is set, or leaves the value to be declared, agreed, sized by another factor or determined by a separate process (e.g. "由预期用途确定", "应标明额定功率", "to be determined by design input"). See "Keep Metrics Whose Value Is Left Open". Never use it for a value that a cited document or a table of this document supplies
@@ -467,9 +482,36 @@ drop reasons listed in this prompt; do not invent new ones.
 not `1次`. The unit goes in `unit`, the comparator in `value_range_type`, and the source wording in
 `threshold_or_target`. A strict comparator (>, <, 大于, 小于) adds the tag `strict_bound`.
 
+A sign is kept only when the source writes it. "误差不大于 0.01 s", "精度不低于 10 mm" → `metric_value`
+`0.01` / `10`, `upper_bound`, no `±`; "允许误差 ±5 mm" → `±5`. Never add `±` to a plain "不大于" limit.
+
 Never use `min`, `minimum`, `max`, `maximum`, or `threshold` — those are not valid values
 for this field. Map them to `lower_bound`, `upper_bound`, `exact`, `range`, `qualitative`,
 or `limit_absent` instead.
+
+### Minimum for what a product must withstand or complete
+
+An amount the product must endure, withstand or complete is a minimum, so `lower_bound`, even when
+the source writes a bare number: a test frequency or duration in an endurance table (表2 耐久性试验频次
+"100 000次", "600 h" → "不少于"), "直接承载件应承受最大载荷的 4 倍", "倾斜 10° 时不应翻倒". An upper limit
+stays `upper_bound`: errors, accuracy, deviations.
+
+### Units and condition labels
+
+- A table column that gives the test or inspection method (试验方法, 检验方法, 检测方法) and names a
+  method or a standard ("按 GB/T 22754—2008 中 5.3 的规定进行检验", "采用目测和手感检查", "使用分度值为
+  1 g 的衡器进行称量") is a qualifier of every value in that row: `condition` `试验方法：GB/T 22754—2008
+  中 5.3`. Do not leave it out because the value is in another column.
+- A person-group split in a row (男300 mm、女250 mm) is written with its kind: `性别：男`, `性别：女`, next to
+  the population already stated.
+
+- `unit` is the symbol, not the spelled-out name: `Ω` for a table captioned "单位为欧", `kPa` for
+  "千帕", `mm` for "毫米". Keep a unit the source gives as a symbol as written.
+- A plain count has the unit of the thing counted, not the activity: "10个循环" → `10` with unit `个`
+  and the cycle in the property name (每组循环数); "3处" → `处`; "4支" → `支`.
+- Every `condition` part is `<kind>：<value>` with the full-width colon, also for a comparison:
+  `称量：>50 kg`, not `称量>50 kg`. A table row's qualifier that distinguishes it from a sibling row
+  (性别：女, 底座形状：圆形) is kept, with the kind name the sibling rows use.
 
 ### `is_explicit_metric` (required, boolean)
 

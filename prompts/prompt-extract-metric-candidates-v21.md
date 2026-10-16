@@ -139,6 +139,10 @@ arrangement goes with the other value?
   1 kHz 下阻抗不大于 …", "at 25 °C the resistance shall be …"
 - the grade, class or model of an apparatus: "采用 5 等量块进行检验" → `condition_hint` "试验装置：5 等量块"
   on the clause's candidates; no 量块等级 candidate
+- a flow rate, speed or level that only fixes the point at which another quantity is delivered or
+  measured: "气体流量标准装置分别在 200 mL/s、400 mL/s 和 600 mL/s 的流量点上进行测量，其通气量应分别为
+  1200 mL、3000 mL 和 6800 mL" → candidates for the volumes 1200/3000/6800 mL with `condition_hint`
+  "流量点：200 mL/s" and so on; no 流量点 candidates
 - the same setting stated again in the same clause for another situation: 6.4.2.1 "放在一个与水平面成
   10° 倾斜平面上 … 如果…接触，则…以最不利的方向将其倾斜 10°。…不应有翻倒现象" → ONE candidate for the 10°
   tilt; the second "倾斜 10°" is the same setting, not a second candidate
@@ -216,14 +220,13 @@ whole cell:
 - "阻抗测量:四肢:150 Ω~600 Ω 躯干:10 Ω~75 Ω | 0.1 Ω | 四肢:±3% 躯干:±1 Ω" → 分度值 for 四肢 and
   for 躯干 (the body site goes in `condition_hint`), and one 允许误差 per site with its own value
 
-The same holds for a count or setting a clause gives to several directions, sides or alternatives
-together: "在长度和宽度方向取3处" → one candidate for the length direction and one for the width
-direction (3 处 each); "边长或直径为65mm±5mm" for a cube or a ball → one candidate for the cube's
-边长 and one for the ball's 直径 (the shape goes in `condition_hint`). Do not split when the source
-gives one quantity a single value and merely lists synonyms. A resolution or error that the source
-states separately per population or per sex (幼儿 vs 成年人) keeps the split it already has; do not
-split one value further by a sex or population that only selects among values of another property
-(台阶高度 男300 mm、女250 mm | ±5 mm → the height values split, the ±5 mm stays one candidate).
+A count or setting that one clause gives to several directions or alternatives together stays ONE
+candidate: "在长度和宽度方向取3处" → one 测量处数 (3 处), and "边长或直径为65mm±5mm" → one 边长或直径
+(65±5 mm). Only a resolution or permitted-error cell that serves several listed quantities (above) is
+split. A resolution or error that the source states separately per population or per sex (幼儿 vs
+成年人) keeps the split it already has; do not split one value further by a sex or population that
+only selects among values of another property (台阶高度 男300 mm、女250 mm | ±5 mm → the height
+values split, the ±5 mm stays one candidate).
 
 Audit coverage by table ROW, not by the distinct numbers found. If an adult row and a student
 row both state 节拍120次/min | 分度值1次 | 允许误差±1次/min, extract all three candidates for EACH
