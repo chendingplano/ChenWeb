@@ -827,8 +827,8 @@
 										{#each gc.children as ggc (ggc.id)}
 											<button
 												onclick={() => selectItem(item, ggc)}
-												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors duration-150"
-												style="color:{activeMenu?.childId === ggc.id ? accent : textMuted};background:{activeMenu?.childId === ggc.id ? accentTint : 'transparent'};"
+												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
+												style="color:{activeMenu?.childId === ggc.id ? accent : textMuted};background:{activeMenu?.childId === ggc.id ? accentTint : 'transparent'};font-size:12px;"
 											>
 												<span class="h-1 w-1 rounded-full" style="background:currentColor;opacity:.5;"></span>
 												{ggc.label}
