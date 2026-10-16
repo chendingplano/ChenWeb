@@ -687,9 +687,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 
-	if evt.Force {
-		_, _ = p.Store.DeleteMetricsByInputRecordID(ctx, evt.RecordID)
-	} else {
+	if !evt.Force {
 		exists, err := p.Store.MetricsExist(ctx, evt.RecordID)
 		if err != nil {
 			p.Logger.Error("check metrics exist failed", "record_id", evt.RecordID, "error", err)
@@ -761,6 +759,13 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	normalizeMetricValueNotation(allMetrics)
 	p.applyTableMetricContextsForRecord(rec, evt.RecordID, allMetrics)
 
+	// Preserve the previous extraction until the replacement has passed coverage checks.
+	if evt.Force {
+		if _, err := p.Store.DeleteMetricsByInputRecordID(ctx, evt.RecordID); err != nil {
+			p.persistMetricsStatus(ctx, rec, start, err)
+			return fmt.Errorf("(MID_26101602) delete previous metrics: %w", err)
+		}
+	}
 	inserted, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
 		InputRecordID: evt.RecordID,
 		EventID:       eventIDFromContext(ctx),
@@ -1307,7 +1312,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
 		}
-		if len(metrics) == 0 {
+		if len(metrics) == 0 || errors.Is(enrichErr, errMetricCandidateCoverage) {
 			return metricExtractionResult{}, enrichErr
 		}
 		p.Logger.Warn("enrich metric batch failed; retaining successful batch results",
@@ -3599,10 +3604,11 @@ func refreshMetricArtifactFile(ctx context.Context, db *sql.DB, artifactDir stri
 // extractMetricsFromChunksWithLLM (DRY) and FinalizeChunkBatch.
 func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, chunks []Chunk, docCtx string) ([]map[string]any, []map[string]any, []droppedMetricRow, error) {
 	type pass2Result struct {
-		metrics   []map[string]any
-		uncertain []map[string]any
-		tagged    []map[string]any // rows carrying a drop-reason tag
-		language  string
+		metrics     []map[string]any
+		uncertain   []map[string]any
+		tagged      []map[string]any // rows carrying a drop-reason tag
+		language    string
+		coverageErr error
 	}
 
 	maxTasks := p.MaxTasks
@@ -3665,23 +3671,21 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 			}
 			return pass2Result{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w, batch:%d", err, i)
 		}
+		payload, coverageErr := p.recoverMetricCandidateCoverage(concCtx, recordID, enrichCallID,
+			batch.chunkIdx, len(batches), inputText, batch.candidates, payload)
+		if isCtxStopped(concCtx) {
+			return pass2Result{}, ErrPipelineStopped
+		}
 		lang := strings.TrimSpace(asString(payload["language"]))
 		metricsRaw, _ := payload["metrics"].([]any)
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 		result := pass2Result{
-			metrics:   normalizeMetricList(metricsRaw),
-			uncertain: normalizeMetricList(uncertainRaw),
-			language:  lang,
+			metrics:     normalizeMetricList(metricsRaw),
+			uncertain:   normalizeMetricList(uncertainRaw),
+			language:    lang,
+			coverageErr: coverageErr,
 		}
 		backfillMetricResultCandidateIDs(result.metrics, batch.candidates)
-		droppedRaw, _ := payload["dropped_candidates"].([]any)
-		if missing := unaccountedMetricCandidates(result.metrics, droppedRaw, batch.candidates); len(missing) > 0 {
-			p.Logger.Warn("pass2: candidates neither enriched nor listed in dropped_candidates",
-				"record_id", recordID,
-				"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
-				"candidate_ids", missing,
-			)
-		}
 		result.metrics, result.tagged = dropRowsTaggedWithDropReason(result.metrics)
 		for _, m := range result.tagged {
 			p.Logger.Info("pass2: set aside row the LLM tagged with a drop reason",
@@ -3726,6 +3730,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	var tagged []map[string]any
 	detectedLanguage := "unknown"
 	for _, r := range pass2Results {
+		pass2Err = errors.Join(pass2Err, r.coverageErr)
 		metrics = append(metrics, r.metrics...)
 		uncertain = append(uncertain, r.uncertain...)
 		tagged = append(tagged, r.tagged...)
@@ -3900,7 +3905,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		if errors.Is(err, ErrPipelineStopped) {
 			return ErrPipelineStopped
 		}
-		if len(metrics) == 0 {
+		if len(metrics) == 0 || errors.Is(err, errMetricCandidateCoverage) {
 			return fmt.Errorf("(MID_26062752) %s enrich metrics: %w", p.Name(), err)
 		}
 		p.Logger.Warn("enrich metric batch failed; retaining successful batch results",

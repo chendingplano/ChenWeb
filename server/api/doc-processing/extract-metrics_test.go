@@ -547,9 +547,10 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 				"uncertain_metrics": []any{},
 			},
 			{
-				"language":          "en",
-				"metrics":           []any{},
-				"uncertain_metrics": []any{},
+				"language":           "en",
+				"metrics":            []any{},
+				"uncertain_metrics":  []any{},
+				"dropped_candidates": []any{map[string]any{"candidate_id": "2_1", "reason": "duplicate_of:1_1"}},
 			},
 		},
 	}
