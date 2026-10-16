@@ -479,10 +479,32 @@ func groupCandidatesByChunk(candidates []metricCandidate, maxGroupSize int) []ca
 		for j < len(candidates) && candidates[j].ChunkIndex == chunkIdx && j-i < maxGroupSize {
 			j++
 		}
+		// Never cut between candidates quoting the same evidence (e.g. the cells of one table
+		// row): an enrich call that sees only one of them re-emits its siblings' values, and
+		// final dedupe cannot merge them when the names differ (计时分度值 vs 分度值).
+		for j < len(candidates) && candidates[j].ChunkIndex == chunkIdx &&
+			candidateEvidenceKey(candidates[j]) != "" &&
+			candidateEvidenceKey(candidates[j]) == candidateEvidenceKey(candidates[j-1]) {
+			j++
+		}
 		batches = append(batches, candidateBatch{chunkIdx: chunkIdx, candidates: candidates[i:j]})
 		i = j
 	}
 	return batches
+}
+
+// candidateEvidenceKey identifies a candidate's evidence: its first mention's source lines and
+// normalized quote. Empty when the candidate has no quote.
+func candidateEvidenceKey(c metricCandidate) string {
+	if len(c.SupportingMentions) == 0 {
+		return ""
+	}
+	m := c.SupportingMentions[0]
+	quote := normalizedMetricCandidateKey(asString(m["evidence_quote"]))
+	if quote == "" {
+		return ""
+	}
+	return strings.Join(normalizeSourceLineSpans(m["source_line_spans"]), ",") + "|" + quote
 }
 
 func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *MetricsProcessor {
@@ -491,11 +513,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v18.md",
+		"prompt-extract-metric-candidates-v19.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v15.md",
+		"prompt-enrich-metrics-v16.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2822,7 +2844,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v15.md"
+		promptRef = "prompt-enrich-metrics-v16.md"
 	}
 
 	paths := make([]string, 0, 8)

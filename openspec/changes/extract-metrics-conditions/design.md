@@ -77,10 +77,15 @@ The rules are notation-only and work the same in any domain. Anything needing ju
 the prompt.
 
 **D4. New prompt versions, never edits.** Current defaults are
-`prompt-extract-metric-candidates-v18.md`, `prompt-enrich-metrics-v15.md` and
+`prompt-extract-metric-candidates-v19.md`, `prompt-enrich-metrics-v16.md` and
 `prompt-merge-resolve-metrics-v2.md`. The initial condition work used v16/v13; the record-371
-scoring follow-up adds normal-line numeric coverage, candidate population binding, apparatus
-condition inheritance, explicit role classification and centred-tolerance rules. Older files
+scoring follow-up (v18/v15) adds normal-line numeric coverage, candidate population binding, apparatus
+condition inheritance, explicit role classification and centred-tolerance rules. v19/v16 make a
+number that only qualifies another value of its clause (a paired load, an apparatus grade, a
+restated setting) that value's condition instead of a row, keep repeatability limits ("不应大于允许误差的
+绝对值" → 1 倍), and keep a one-cell table candidate to its own cell. In code, `groupCandidatesByChunk` no longer cuts an
+enrich batch between candidates quoting the same evidence: record 371's Table 1 走平衡木 row split
+across two batches, and the batch holding only 计时 re-emitted 分度值/允许误差 (mtc_315/316). Older files
 stay so old runs can be reproduced.
 
 **D5. `dataset_record` is a drop reason** like `procedure_count`. It goes into
