@@ -39,6 +39,13 @@ when the source states none. `condition_en` SHALL be empty for English documents
 Two rows that differ only in their normalised condition SHALL be treated as different metrics by
 the in-run dedupe, by `metricsIdentical` (including its resolved-concept shortcut), by
 `metricStaticMatch`, and by the merge-resolve LLM step.
+Qualifier order and repetition SHALL NOT change normalized condition identity. Qualifier labels
+and values SHALL remain part of identity; normalization SHALL NOT equate different labels or
+different populations, apparatus or methods.
+
+#### Scenario: Qualifiers reordered
+- **WHEN** two otherwise equal rows have `适用人群：成年人；性别：男` and `性别：男；适用人群：成年人`
+- **THEN** deterministic condition comparison treats them as equal
 
 #### Scenario: In-run dedupe keeps both conditions
 - **WHEN** one run produces 分度值 1 N for 握力测试仪(计) on line 116 twice, with conditions 幼儿 and

@@ -4,7 +4,9 @@
 
 The system SHALL store a row whose `metric_value` is exactly `±x` as `upper_bound` when, after
 range-type canonicalisation, its `value_range_type` is `exact` or `range`. The value keeps
-its ± sign. Values of the form `a±b` and asymmetric tolerances SHALL NOT be changed.
+its ± sign. A numeric row of the form `a±b` SHALL be `range`, retaining that value and deriving
+endpoints `a-b` and `a+b` if its original comparator was `exact`, `lower_bound` or `upper_bound`.
+Asymmetric tolerances SHALL NOT be changed.
 
 #### Scenario: Tolerance stored as exact
 - **WHEN** a row has `metric_value` `±2` and `value_range_type` `exact`
@@ -13,6 +15,14 @@ its ± sign. Values of the form `a±b` and asymmetric tolerances SHALL NOT be ch
 #### Scenario: Interval with tolerance is unchanged
 - **WHEN** a row has `metric_value` `20±5` and `value_range_type` `range`
 - **THEN** `value_range_type` stays `range`, and `value_min` 15 / `value_max` 25 are filled
+
+#### Scenario: Centre with tolerance misclassified as an upper bound
+- **WHEN** a row has `metric_value` `65±5` and `value_range_type` `upper_bound`
+- **THEN** it becomes `range` with endpoints 60 and 70
+
+#### Scenario: Non-range endpoints
+- **WHEN** a numeric row has a comparator other than `range`
+- **THEN** its `value_min` and `value_max` are NULL, even if the model supplied them
 
 ### Requirement: metric_value holds no unit or comparator
 

@@ -17,6 +17,9 @@ func TestNormalizeMetricValueNotation(t *testing.T) {
 		{name: "tolerance stored as range", value: "±1.5", unit: "%", rangeType: "range", wantValue: "±1.5", wantRange: "upper_bound"},
 		{name: "tolerance with unit inside", value: "±0.5%", unit: "%", rangeType: "exact", wantValue: "±0.5", wantRange: "upper_bound"},
 		{name: "centre with tolerance stays range", value: "20±5", unit: "℃", rangeType: "range", wantValue: "20±5", wantRange: "range", wantMin: float64(15), wantMax: float64(25)},
+		{name: "sandbag size is a range not an upper bound", value: "65±5", unit: "mm", rangeType: "upper_bound", wantValue: "65±5", wantRange: "range", wantMin: float64(60), wantMax: float64(70)},
+		{name: "sandbag mass is a range not an upper bound", value: "250±15", unit: "g", rangeType: "upper_bound", wantValue: "250±15", wantRange: "range", wantMin: float64(235), wantMax: float64(265)},
+		{name: "centre tolerance overrides exact", value: "-20+/-5", unit: "℃", rangeType: "exact", wantValue: "-20+/-5", wantRange: "range", wantMin: float64(-25), wantMax: float64(-15)},
 		{name: "unit repeated in a range", value: "5 s~25 s", unit: "s", rangeType: "range", wantValue: "5~25", wantRange: "range", wantMin: float64(5), wantMax: float64(25)},
 		{name: "full-width tilde and spaced thousands", value: "600 mm～1 600 mm", unit: "mm", rangeType: "range", wantValue: "600~1600", wantRange: "range", wantMin: float64(600), wantMax: float64(1600)},
 		{name: "negative lower endpoint", value: "-100 mm~300 mm", unit: "mm", rangeType: "range", wantValue: "-100~300", wantRange: "range", wantMin: float64(-100), wantMax: float64(300)},
@@ -44,6 +47,30 @@ func TestNormalizeMetricValueNotation(t *testing.T) {
 				t.Fatalf("strict_bound tag=%v, want %v", got, c.wantStrict)
 			}
 		})
+	}
+}
+
+func TestNormalizeMetricValueNotationClearsNonRangeEndpoints(t *testing.T) {
+	m := map[string]any{"metric_value": "3", "value_range_type": "exact", "value_min": float64(3), "value_max": float64(3)}
+	normalizeMetricValueNotation([]map[string]any{m})
+	if m["value_min"] != nil || m["value_max"] != nil {
+		t.Fatalf("non-range endpoints must be NULL, got %#v %#v", m["value_min"], m["value_max"])
+	}
+}
+
+func TestMetricConditionIdentityIgnoresQualifierOrder(t *testing.T) {
+	a := map[string]any{"condition": "适用人群：成年人；性别：男"}
+	b := map[string]any{"condition": " 性别: 男 ; 适用人群: 成年人；性别：男；"}
+	if !metricConditionsEqual(a, b) {
+		t.Fatal("reordered or repeated qualifiers must not create a different assertion")
+	}
+	b["condition"] = "性别：女；适用人群：成年人"
+	if metricConditionsEqual(a, b) {
+		t.Fatal("different qualifier values must stay distinct")
+	}
+	b["condition"] = "试验方法：男；适用人群：成年人"
+	if metricConditionsEqual(a, b) {
+		t.Fatal("different qualifier labels must stay distinct")
 	}
 }
 

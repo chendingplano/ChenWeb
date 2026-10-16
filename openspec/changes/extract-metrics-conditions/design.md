@@ -42,7 +42,9 @@ The gold already uses this format.
   domains.
 
 **D2. Condition is identity everywhere, compared after normalization.** Equality uses the existing
-`normalizedMetricCandidateKey` normalisation (whitespace, case, full/half width). Changes:
+`metricConditionKey` normalisation (whitespace, case, full/half width). Qualifiers form an
+unordered set: order and repeated qualifiers do not affect equality, but both label and value
+remain significant. Changes:
 - Condition joins the `dedupeFinalMetricRows` key.
 - `metricsIdentical` requires equal condition, including on the resolved-concept shortcut.
 - `metricStaticMatch` treats condition as a discriminator that must agree even when empty on one
@@ -62,7 +64,9 @@ The gold already uses this format.
 2. Strip one leading comparator (`≥ ≤ > < ⩾ ⩽ 不小于 …`) from a single-number value. The comparator
    is already in `value_range_type`; a strict one adds tag `strict_bound` if missing.
 3. A value that is exactly `±x` with `value_range_type` `exact` or `range` becomes `upper_bound`.
-   `a±b` and asymmetric `+a/−b` are untouched.
+   A numeric `a±b` row becomes `range` if the model called it `exact`, `lower_bound` or
+   `upper_bound`; derived endpoints replace endpoints attached to that incorrect comparator.
+   Asymmetric `+a/−b` is untouched. Non-range numeric rows have NULL endpoints.
 4. A `range` row without both endpoints gets them from a plain `a~b` / `a-b` / `a～b` value.
    `a±b` gives `a−b` and `a+b`.
 5. A value that still holds more than one number joined by `、 ； ; ，` or 男…女 (not `/`, which is part of units such as 次/min) is not changed.
@@ -72,10 +76,12 @@ The gold already uses this format.
 The rules are notation-only and work the same in any domain. Anything needing judgement stays in
 the prompt.
 
-**D4. New prompt versions, never edits.** `prompt-extract-metric-candidates-v16.md`,
-`prompt-enrich-metrics-v13.md` and `prompt-merge-resolve-metrics-v2.md` are copies of the current
-defaults plus the new sections. The code defaults in `NewMetricsProcessor` move to them. Older
-files stay so old runs can be reproduced.
+**D4. New prompt versions, never edits.** Current defaults are
+`prompt-extract-metric-candidates-v18.md`, `prompt-enrich-metrics-v15.md` and
+`prompt-merge-resolve-metrics-v2.md`. The initial condition work used v16/v13; the record-371
+scoring follow-up adds normal-line numeric coverage, candidate population binding, apparatus
+condition inheritance, explicit role classification and centred-tolerance rules. Older files
+stay so old runs can be reproduced.
 
 **D5. `dataset_record` is a drop reason** like `procedure_count`. It goes into
 `metricDropReasonTags`, so a row the model keeps but tags this way is set aside (stage `llm_tag`)

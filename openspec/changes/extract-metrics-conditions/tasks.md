@@ -51,3 +51,13 @@
 - [x] 8.3 Metric detail panel (Metrics workspace, Product Review "Full Details") and the production-vs-gold comparison shelf show Condition and Condition (English); Paraglide keys in both message files
 - [x] 8.4 Metric wiki infobox shows the condition in the page language (new or refreshed pages; cached pages keep their old infobox)
 - [x] 8.5 In-app scorer prompt v2 (`prompt-score-extract-metrics-v2.md`): condition pairing and condition overrides, matching the skill; scorer tests expect scoring-version-2 scores
+
+## 9. Record 371 scoring follow-up (2026-10-16)
+
+- [x] 9.1 Trace misses to saved candidate/enrichment logs for run 220; preserve the existing gold run and scoring rules
+- [x] 9.2 Candidates v18: normal-line numeric coverage (including apparatus dimensions/accuracy), per-population table coverage, apparatus capabilities, adjustment-trigger exclusion
+- [x] 9.3 Enrich v15: preserve candidate population, independent settings, qualified property names, exact counts versus minima, product criteria versus test setup, bare ±x versus a±b
+- [x] 9.4 Repair numeric a±b rows to ranges and derive endpoints; clear endpoints on non-range values; regressions reproduce the original failures before the fix
+- [x] 9.5 Compare condition qualifiers independently of order/repetition while preserving labels, values and distinct populations/methods
+- [x] 9.6 Update defaults and local mise pins; add an opt-in real-model quality regression with isolated output (no database metric writes)
+- [x] 9.7 Verify live prompt cases and update the conditions devdoc with results: six cases pass (27 returned rows, 16 expected assertions plus trigger exclusion); normal processor/handler suites pass (1,729 checks, four skips), go vet, doc-processor build and strict OpenSpec validation pass. Full-document re-extraction/rescoring was not performed.

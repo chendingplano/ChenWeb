@@ -17,6 +17,34 @@ property. Every filled cell of a table row whose columns give different properti
   允许误差
 - **THEN** three rows are returned: 座板高度 335 mm, 座板高度分度值 1 mm and 座板高度允许误差 ±5 mm
 
+### Requirement: Numeric settings are independently accounted for
+
+Candidate extraction SHALL audit every normal clause for explicit numeric quantities, including
+dimensions and accuracy embedded in apparatus descriptions. A quantity present only in another
+candidate's condition SHALL NOT count as extracted. Enrichment SHALL preserve each candidate's
+supported source-row population and SHALL NOT substitute a neighbouring row's population.
+
+#### Scenario: Apparatus settings embedded in a dense clause
+- **WHEN** a clause specifies loading width 80 mm, dynamometer accuracy 0.1%, three test points,
+  and at least three readings per point
+- **THEN** the prompts request four independently extracted metrics, with the apparatus inherited
+  as a condition on each
+
+#### Scenario: Identical errors for different populations
+- **WHEN** adult and student table rows both specify beat error ±1 count/min
+- **THEN** enrichment requests both assertions with their own populations
+
+### Requirement: Adjustment actions do not create acceptance limits
+
+Both prompts SHALL distinguish an independently stated acceptable range from an instruction to
+adjust or repair equipment when a reading crosses an action trigger.
+
+#### Scenario: Pressure adjustment trigger
+- **WHEN** a clause specifies a permitted pointer reading 15–25 mm and instructs adjustment if
+  it exceeds 25 mm
+- **THEN** the acceptable range is a metric and the adjustment instruction does not create a
+  second upper-bound metric
+
 ### Requirement: Data sets are not metrics
 
 Both prompts SHALL instruct the model that a table of records, samples, example cases or

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,11 +18,14 @@ import (
 // the document, so the rules hold for every domain and language.
 
 // metricConditionKey normalizes a row's condition for identity comparisons: full-width forms
-// folded, case and whitespace ignored.
+// folded, case and whitespace ignored. Qualifier order and repetition do not change identity;
+// labels stay in the key so unrelated qualifiers with the same value do not become equal.
 func metricConditionKey(m map[string]any) string {
 	c := width.Fold.String(strings.TrimSpace(asString(m["condition"])))
 	c = strings.ToLower(strings.Join(strings.Fields(c), ""))
-	return strings.ReplaceAll(c, ";", "；")
+	parts := compactNonEmptyStrings(strings.Split(strings.ReplaceAll(c, ";", "；"), "；"))
+	slices.Sort(parts)
+	return strings.Join(parts, "；")
 }
 
 // metricConditionLabelRe matches the `<kind>：` label of one condition qualifier.
@@ -269,10 +273,19 @@ func normalizeMetricValueNotation(metrics []map[string]any) {
 			rangeType = "upper_bound"
 			m["value_min"], m["value_max"] = nil, nil
 		}
+		// A centre with a deviation states both endpoints, unlike a bare ±x error limit.
+		// Repair a numeric comparator supplied by the model before deriving the endpoints.
+		if metricCentreRe.MatchString(compact) && (rangeType == "exact" || rangeType == "lower_bound" || rangeType == "upper_bound") {
+			rangeType = "range"
+			m["value_min"], m["value_max"] = nil, nil
+		}
 		if rangeType == "range" && (toOptionalFloat(m["value_min"]) == nil || toOptionalFloat(m["value_max"]) == nil) {
 			if lo, hi, ok := metricRangeEndpoints(compact); ok {
 				m["value_min"], m["value_max"] = lo, hi
 			}
+		}
+		if rangeType != "range" {
+			m["value_min"], m["value_max"] = nil, nil
 		}
 		m["metric_value"] = value
 		if rangeType != "" {
