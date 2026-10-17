@@ -267,8 +267,9 @@ func (g *TableGrid) DataRowIndex(id string) int {
 }
 
 // RenderNumbered renders the grid as one text line per row:
-// "<line>#<row id>: cell | cell | …". This is the form sent to LLMs in place of the
-// raw HTML (see canonicalChunkInputText); it is fully determined by the HTML.
+// "<line>#<row id>: cell | cell | …". Data rows under multi-level headers use
+// "full header: cell" pairs to preserve alignment across empty cells. This is the
+// form sent to LLMs instead of raw HTML (see canonicalChunkInputText).
 func (g *TableGrid) RenderNumbered(lineNo int) string {
 	var b strings.Builder
 	write := func(r TableRow) {
@@ -281,6 +282,18 @@ func (g *TableGrid) RenderNumbered(lineNo int) string {
 		b.WriteString(": ")
 		if text, ok := r.FullWidthText(); ok {
 			b.WriteString(text)
+		} else if strings.HasPrefix(r.ID, "r") && len(g.Headers) > 1 {
+			// Bind each value to its full header. Positional rows with blank cells
+			// let an LLM shift bands under repeated numeric headers (record 364).
+			// Keep the complete text here; stored-context length caps do not apply.
+			var pairs []string
+			for i, cell := range r.Cells {
+				if cell == "" || (i < len(r.Spans) && r.Spans[i] == 0) {
+					continue
+				}
+				pairs = append(pairs, g.Columns[i]+": "+cell)
+			}
+			b.WriteString(strings.Join(pairs, " | "))
 		} else {
 			b.WriteString(strings.Join(r.Cells, " | "))
 		}

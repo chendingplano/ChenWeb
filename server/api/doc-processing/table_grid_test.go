@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+// Record 364, line 118: the empty first score cell must not shift the
+// association between a heart-rate band and its score.
+func TestRenderNumbered_SparseScoreColumns(t *testing.T) {
+	g, err := ParseTableGrid(`<table><tr><td rowspan="2">项目</td><td colspan="7">评分</td></tr><tr><td>3</td><td>2</td><td>1</td><td>0</td><td>1</td><td>2</td><td>3</td></tr><tr><td>心率(次/min)</td><td></td><td>≤40</td><td>41~50</td><td>51~100</td><td>101~110</td><td>111~129</td><td>≥130</td></tr></table>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "118#r1: 项目: 心率(次/min) | 评分/2: ≤40 | 评分/1: 41~50 | 评分/0: 51~100 | 评分/1: 101~110 | 评分/2: 111~129 | 评分/3: ≥130"
+	if !strings.Contains(g.RenderNumbered(118), want) {
+		t.Fatalf("score columns lost their bands:\n%s", g.RenderNumbered(118))
+	}
+}
+
+// The same score in two bands is two assertions, even on the same source row.
+func TestDedupeFinalMetricRows_ScoreBands(t *testing.T) {
+	var rows []map[string]any
+	for _, band := range []string{"≤40次/min", "41~50次/min", "51~100次/min", "101~110次/min", "111~129次/min", "≥130次/min"} {
+		rows = append(rows, map[string]any{
+			"metric_name": "心率评分", "subject": "MEWS评分", "unit": "分",
+			"metric_value": "2", "source_line_spans": []string{"118"},
+			"condition": "心率：" + band,
+		})
+	}
+	dropConditionPropertyRepeats(rows)
+	if got := len(dedupeFinalMetricRows(append(rows, rows[0]))); got != 6 {
+		t.Fatalf("got %d rows, want six distinct bands and no duplicate", got)
+	}
+}
+
 // record416Table1 is record 416 (农村生活垃圾分类处理规范) line 116, verbatim MinerU output.
 const record416Table1 = `<table><tr><td>序号</td><td>垃圾类型</td><td>处理模式</td><td>技术要求</td><td>适用范围</td></tr><tr><td>1</td><td>易腐垃圾</td><td>机器成肥</td><td>采用机械成肥设备，经破碎预处理、好氧堆肥发酵和除杂，处理易腐垃圾。设备应明确主体工艺、比能耗、发酵周期等运行技术参数以及菌种来源要求，堆肥发酵过程符合CJJ 52无害化要求。</td><td>人口密度高，有机肥需求量较大的农村地区。</td></tr><tr><td rowspan="2">1</td><td rowspan="2">易腐垃圾</td><td>太阳能辅助堆肥</td><td>利用太阳能辅助堆肥方式处理易腐垃圾,应符合CJJ 52的要求。堆肥设施(阳光房)应根据垃圾日处理量合理设置单室体积,具备密封性、保温性,配备污水收集或废水和恶臭污染物达标排放处理系统。</td><td>人口密度不高,日人均生活垃圾量也相对稳定的农村地区。</td></tr><tr><td>厌氧产沼发酵</td><td>利用微生物厌氧发酵技术将易腐垃圾转化为清洁燃料沼气进行资源化利用的处理方式。设施选址应符合沼气工程安全防护要求,容积在50立方米以下的农村户用沼气池应符合NY/T 90的要求,农村沼气集中供气工程应符合NY/T 2371的要求。沼渣和沼液应有合理消纳途径。</td><td>人口密度较高、易腐垃圾量相对较大、易腐垃圾纯度高、有沼渣沼液消纳利用途径和一定沼气池使用经验的农村地区。</td></tr><tr><td rowspan="2">2</td><td rowspan="2">其他垃圾</td><td>卫生填埋</td><td>处理技术应符合GB 50869的要求,污染控制应符合GB 16889的要求。</td><td>所属区域建有生活垃圾卫生填埋场的建制村。</td></tr><tr><td>焚烧处理</td><td>处理技术应符合CJJ 90的要求,垃圾焚烧炉焚烧尾气应达标排放,飞灰、炉渣得到有效处置,污染控制应符合GB 18485的要求。</td><td>所属区域建有生活垃圾焚烧厂的建制村。</td></tr></table>`
 
