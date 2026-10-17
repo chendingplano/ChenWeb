@@ -2,10 +2,67 @@ package docprocessing
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+// Record 364: numeral-bearing workflow labels are not quantitative properties.
+// If enrichment leaks excluded candidates as tagged rows, preserve their audit
+// records while preventing them from reaching the live metric store.
+func TestFinalizeChunkBatch_CategoryLabelsAndScopeAreSetAside(t *testing.T) {
+	var raw []any
+	for i, value := range []string{"1~4", "1", "2", "3", "1", "2", "3", "4"} {
+		reason := "categorical_label"
+		if i < 4 {
+			reason = "applicability_scope"
+		}
+		raw = append(raw, map[string]any{
+			"metric_name": fmt.Sprintf("转诊需求级别%d", i), "metric_value": value, "unit": "级",
+			"value_class": "requirement", "value_range_type": "exact",
+			"source_line_spans": []string{"2"}, "reasoning_tags": []string{reason},
+		})
+	}
+	// Quantitative readings and requirements remain metrics even when a grade,
+	// class or model selects their applicability. MEWS is a defined numeric scale.
+	for _, row := range []map[string]any{
+		{"metric_name": "MEWS心率评分", "metric_value": "2", "unit": "分", "condition": "心率：≤40次/min"},
+		{"metric_name": "呼吸频率", "metric_value": "30", "unit": "次/min", "value_range_type": "lower_bound"},
+		{"metric_name": "模型电阻阻值", "metric_value": "150", "unit": "Ω", "condition": "模型：模型1"},
+		{"metric_name": "允许误差", "metric_value": "0.1", "unit": "%", "condition": "等级：2级"},
+	} {
+		row["source_line_spans"] = []string{"2"}
+		row["value_class"] = "requirement"
+		if row["value_range_type"] == nil {
+			row["value_range_type"] = "exact"
+		}
+		raw = append(raw, row)
+	}
+	store := &fakeMetricsStore{}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 364}}, store,
+		&fakeJSONExtractor{outs: []map[string]any{{"metrics": raw}}}, nil)
+	p.OpenValueJudge = nil
+	p.batchRecordID, p.batchForceClear = 364, true
+	p.ObjectStore = &fakeArtifactObjectsStore{}
+	p.batchChunks = metricsBlocksToChunks([]Block{makeMetricsBlock(0, 2)})
+	p.batchMentions = []metricCandidateMention{{MetricNameHint: "转诊需求级别", SourceLineSpans: []string{"2"}, HasNormalEvidence: true}}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.lastSave.Metrics) != 4 || len(store.dropped) != 8 {
+		t.Fatalf("live=%d dropped=%d, want 4 quantitative rows and 8 auditable exclusions", len(store.lastSave.Metrics), len(store.dropped))
+	}
+	for i, d := range store.dropped {
+		wantReason := "categorical_label"
+		if i < 4 {
+			wantReason = "applicability_scope"
+		}
+		if d.Stage != metricDropStageLLMTag || d.Reason != wantReason || d.Row["metric_value"] == "" {
+			t.Fatalf("drop[%d] lost its stage, reason or numeric source value: %+v", i, d)
+		}
+	}
+}
 
 // Drop ids continue after the record's highest existing one (merge mode), and each row is
 // saved with its stage, reason, decision, full row and run id (spec metric-row-soft-drop).
